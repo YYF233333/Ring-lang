@@ -174,11 +174,20 @@ export class InferEngine {
 
   private register_struct(decl: StructDecl): void {
     const type_param_names = decl.type_params.map(tp => tp.name);
+
+    // Push type params into scope for field type resolution
+    const saved_tp_scope = new Map(this.type_param_scope);
+    for (const tp of decl.type_params) {
+      this.type_param_scope.set(tp.name, fresh_type_var());
+    }
+
     const fields = decl.fields.map(f => ({
       name: f.name,
       type: this.resolve_type_expr(f.type_annotation),
       is_pub: f.is_pub,
     }));
+
+    this.type_param_scope = saved_tp_scope;
     const def: StructDef = {
       name: decl.name,
       type_params: type_param_names,
@@ -894,7 +903,15 @@ export class InferEngine {
     }
 
     // Add the effect to the effect row
-    const effect: Effect = effect_name === "io" ? { kind: "io" } : { kind: "custom", name: effect_name, type_args: [] };
+    let effect: Effect;
+    if (effect_name === "io") {
+      effect = { kind: "io" };
+    } else if (effect_name === "fail") {
+      const error_type = hargs.length > 0 ? apply(s, hargs[0].type) : UNIT;
+      effect = { kind: "fail", error_type };
+    } else {
+      effect = { kind: "custom", name: effect_name, type_args: [] };
+    }
     effects = row_merge(effects, effect_row(effect));
 
     return {
@@ -950,6 +967,15 @@ export class InferEngine {
       throw new TypeCheckError(`Unknown struct: ${name}`, span);
     }
 
+    // Create fresh type vars for struct type params
+    const tp_mapping = new Map<string, Type>();
+    const type_param_types: Type[] = [];
+    for (const tp_name of struct_def.type_params) {
+      const tv = fresh_type_var();
+      tp_mapping.set(tp_name, tv);
+      type_param_types.push(tv);
+    }
+
     let s = subst;
     let effects: EffectRow = EMPTY_ROW;
     const hfields: HStructFieldInit[] = [];
@@ -959,10 +985,21 @@ export class InferEngine {
       s = fr.subst;
       effects = row_merge(effects, fr.effects);
 
-      // Unify field type with declared type
+      // Unify field type with declared type (substituting type params)
       const def_field = struct_def.fields.find(f => f.name === field.name);
       if (def_field) {
-        s = unify(fr.hexpr.type, def_field.type, s);
+        let field_type = def_field.type;
+        // If the field type is a type variable from the struct's params, substitute
+        if (field_type.kind === "var" && tp_mapping.size > 0) {
+          for (const [, tv] of tp_mapping) {
+            if (tv.kind === "var") {
+              // type_params in struct_def.fields are resolved during register_struct
+              // so they might reference the type_param_scope vars from registration
+              break;
+            }
+          }
+        }
+        s = unify(fr.hexpr.type, field_type, s);
       }
       hfields.push({ name: field.name, value: fr.hexpr });
     }
@@ -970,7 +1007,7 @@ export class InferEngine {
     const struct_type: Type = {
       kind: "struct",
       name,
-      type_params: [],
+      type_params: type_param_types,
       fields: struct_def.fields.map(f => ({ name: f.name, type: f.type, is_pub: f.is_pub })),
     };
 

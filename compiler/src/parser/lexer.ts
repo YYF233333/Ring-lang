@@ -192,31 +192,28 @@ export class Lexer {
 
   private lex_string(start: Position): Token {
     this.advance(); // consume opening "
-    return this.lex_string_body(start, true);
+    return this.lex_string_body(start, "new");
   }
 
   private lex_string_continuation(): Token {
     const start = this.current_position();
     // We already consumed the closing } of the interpolation
-    return this.lex_string_body(start, false);
+    return this.lex_string_body(start, "continuation");
   }
 
-  private lex_string_body(start: Position, is_start: boolean): Token {
+  private lex_string_body(start: Position, mode: "new" | "continuation"): Token {
     let value = "";
     while (this.pos < this.source.length) {
       const ch = this.peek();
       if (ch === '"') {
         this.advance(); // consume closing "
         const end = this.current_position();
-        if (is_start) {
-          // Simple string or end of interpolation
-          if (this.interp_brace_depth.length > 0) {
-            this.interp_brace_depth.pop();
-            return this.make_token(TokenKind.StringInterpEnd, value, start, end);
-          }
+        if (mode === "new") {
+          // A freshly opened string — always returns StringLit or StringInterpStart
+          // (Never pops interp depth — we're a nested string inside interpolation)
           return this.make_token(TokenKind.StringLit, value, start, end);
         } else {
-          // Continuation after interpolation — this is the end
+          // Continuation after interpolation — this closes the outer interp string
           this.interp_brace_depth.pop();
           return this.make_token(TokenKind.StringInterpEnd, value, start, end);
         }
@@ -226,7 +223,7 @@ export class Lexer {
         this.advance(); // consume $
         this.advance(); // consume {
         const end = this.current_position();
-        if (is_start) {
+        if (mode === "new") {
           this.interp_brace_depth.push(0); // push new brace depth tracker
           return this.make_token(TokenKind.StringInterpStart, value, start, end);
         } else {

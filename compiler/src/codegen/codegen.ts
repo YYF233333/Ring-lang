@@ -33,6 +33,7 @@ class CodeGenerator {
   private lines: string[] = [];
   private indent_level = 0;
   private impl_methods: Set<string> = new Set();
+  private struct_field_order: Map<string, string[]> = new Map();
 
   private indent(): string {
     return "  ".repeat(this.indent_level);
@@ -59,9 +60,11 @@ class CodeGenerator {
   // ============================================================
 
   generate(program: HProgram): string {
-    // Collect impl method signatures for UFCS dispatch
+    // Collect struct field orders and impl method signatures
     for (const decl of program.decls) {
-      if (decl.kind === "impl_decl") {
+      if (decl.kind === "struct_decl") {
+        this.struct_field_order.set(decl.name, decl.fields.map(f => f.name));
+      } else if (decl.kind === "impl_decl") {
         for (const method of decl.methods) {
           this.impl_methods.add(`${decl.target_type}.${method.name}`);
         }
@@ -286,6 +289,15 @@ class CodeGenerator {
   }
 
   private gen_struct_lit(expr: HExpr & { kind: "struct_lit" }): string {
+    const declared_order = this.struct_field_order.get(expr.name);
+    if (declared_order) {
+      const field_map = new Map(expr.fields.map(f => [f.name, f.value]));
+      const args = declared_order.map(name => {
+        const val = field_map.get(name);
+        return val ? this.gen_expr(val) : "undefined";
+      }).join(", ");
+      return `new ${expr.name}(${args})`;
+    }
     const args = expr.fields.map(f => this.gen_expr(f.value)).join(", ");
     return `new ${expr.name}(${args})`;
   }
