@@ -294,4 +294,56 @@ describe("Type Checker", () => {
       assert.equal(main_fn.return_type.kind, "int");
     });
   });
+
+  describe("trait declarations", () => {
+    it("type-checks a simple trait + impl", () => {
+      const source = `
+        trait Greetable {
+          fn greet(self) -> Str
+        }
+        struct User { name: Str }
+        impl Greetable for User {
+          fn greet(self) -> Str { self.name }
+        }
+        fn main() -> Str {
+          let u = User { name: "yufeng" }
+          u.greet()
+        }
+      `;
+      const fn_decl = check_fn(source);
+      assert.equal(fn_decl.return_type.kind, "str");
+    });
+
+    it("type-checks generic function with trait bound", () => {
+      const source = `
+        trait ToStr {
+          fn to_str(self) -> Str
+        }
+        struct Num { val: Int }
+        impl ToStr for Num {
+          fn to_str(self) -> Str { "num" }
+        }
+        fn show<T: ToStr>(x: T) -> Str {
+          x.to_str()
+        }
+        fn main() -> Str {
+          show(Num { val: 42 })
+        }
+      `;
+      const fn_decl = check_fn(source);
+      assert.equal(fn_decl.return_type.kind, "str");
+    });
+
+    it("rejects missing trait impl method", () => {
+      const source = `
+        trait Greetable {
+          fn greet(self) -> Str
+        }
+        struct User { name: Str }
+        impl Greetable for User {
+        }
+      `;
+      assert.throws(() => check_source(source), /[Mm]issing.*method.*greet/);
+    });
+  });
 });

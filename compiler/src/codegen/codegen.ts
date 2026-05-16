@@ -3,7 +3,7 @@
 import {
   HProgram, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl,
   HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock, HMatchArm,
-  variant_js_name,
+  variant_js_name, trait_dict_name,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
 import { assertNever } from "../errors.js";
@@ -115,9 +115,11 @@ class CodeGenerator {
 
   private emit_fn_decl(decl: HFnDecl, prefix?: string): void {
     const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : safe_ident(decl.name);
-    const params = decl.params.map(p => safe_ident(p.name)).join(", ");
+    const param_names = decl.params.map(p => safe_ident(p.name));
+    const dict_params = (decl.trait_bounds ?? []).map(b => `__${b.trait_name}`);
+    const all_params = [...param_names, ...dict_params].join(", ");
     const star = this.has_non_fail_effects(decl.effects) ? "*" : "";
-    this.emit(`function${star} ${name}(${params}) {`);
+    this.emit(`function${star} ${name}(${all_params}) {`);
     this.push_indent();
     this.emit_block_body(decl.body);
     this.pop_indent();
@@ -162,6 +164,18 @@ class CodeGenerator {
     for (const method of decl.methods) {
       this.emit_fn_decl(method, decl.target_type);
     }
+    if (decl.trait_name) {
+      this.emit_trait_dictionary(decl);
+    }
+  }
+
+  private emit_trait_dictionary(decl: HImplDecl): void {
+    const dict_name = trait_dict_name(decl.target_type, decl.trait_name!);
+    const entries = decl.methods.map(m => {
+      const fn_name = `${safe_ident(decl.target_type)}_${safe_ident(m.name)}`;
+      return `${safe_ident(m.name)}: ${fn_name}`;
+    });
+    this.emit(`const ${dict_name} = { ${entries.join(", ")} };`);
   }
 
   private emit_effect_decl(_decl: HEffectDecl): void {
@@ -275,6 +289,15 @@ class CodeGenerator {
   }
 
   private gen_call(expr: HExpr & { kind: "call" }): string {
+    // Task 8b: Trait method dispatch via dictionary
+    if (expr.dict_dispatch) {
+      const { dict_param, method: meth } = expr.dict_dispatch;
+      const receiver_arg = expr.callee.kind === "field_access" ? this.gen_expr(expr.callee.receiver) : this.gen_expr(expr.args[0]);
+      const other_args = expr.args.map(a => this.gen_expr(a));
+      const all = [receiver_arg, ...other_args].join(", ");
+      return `${dict_param}.${safe_ident(meth)}(${all})`;
+    }
+
     // Detect UFCS method call: call(field_access(receiver, method), args)
     if (expr.callee.kind === "field_access") {
       const recv_type = expr.callee.receiver.type;
@@ -290,10 +313,14 @@ class CodeGenerator {
         return `${prefix}${safe_ident(type_name)}_${safe_ident(method)}(${all_args})`;
       }
     }
+
+    // Task 8c: Pass dictionary args at call sites
     const callee = this.gen_expr(expr.callee);
     const args = expr.args.map(a => this.gen_expr(a)).join(", ");
+    const dict_args = (expr.resolved_dicts ?? []).join(", ");
+    const all_args = [args, dict_args].filter(s => s.length > 0).join(", ");
     const prefix = this.needs_yield_star(expr.callee.type) ? "yield* " : "";
-    return `${prefix}${callee}(${args})`;
+    return `${prefix}${callee}(${all_args})`;
   }
 
   private gen_struct_lit(expr: HExpr & { kind: "struct_lit" }): string {

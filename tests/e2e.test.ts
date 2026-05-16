@@ -30,6 +30,7 @@ const cases: TestCase[] = [
   { file: "effect_handle_fail.ring", expected: "42\n" },
   { file: "effect_handle_io.ring", expected: "got: mock-data\n" },
   { file: "effect_resume.ring", expected: "processed: mock-data\n" },
+  { file: "trait_basic.ring", expected: "hello-trait\n" },
 ];
 
 describe("e2e: ring run", () => {

@@ -41,6 +41,30 @@ export interface EffectDef {
 }
 
 // ============================================================
+// Trait definitions
+// ============================================================
+
+export interface TraitMethodDef {
+  name: string;
+  type: FnType;
+  has_default: boolean;
+}
+
+export interface TraitDef {
+  name: string;
+  type_params: string[];
+  type_param_vars: number[];
+  methods: TraitMethodDef[];
+}
+
+export interface ImplEntry {
+  trait_name: string;
+  target_type_name: string;
+  type_params: string[];
+  method_names: string[];
+}
+
+// ============================================================
 // Scope
 // ============================================================
 
@@ -60,6 +84,9 @@ export class TypeEnv {
   public effects: Map<string, EffectDef> = new Map();
   public impl_methods: Map<string, Map<string, TypeScheme>> = new Map();
   public variant_to_enum: Map<string, string> = new Map();
+  public traits: Map<string, TraitDef> = new Map();
+  public trait_impls: ImplEntry[] = [];
+  public fn_bounds: Map<string, { type_param: string; trait_name: string }[]> = new Map();
 
   constructor() {
     this.scopes.push({ variables: new Map() });

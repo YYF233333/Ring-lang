@@ -2,7 +2,7 @@
 // Two-pass: register all top-level decls, then infer all bodies.
 
 import {
-  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl,
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
   Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr,
   BinOp, UnaryOp,
   Span,
@@ -14,11 +14,11 @@ import {
   EMPTY_ROW, effect_row, row_merge, type_to_string,
 } from "../types/index.js";
 import {
-  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl,
+  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit,
-  variant_js_name,
+  variant_js_name, trait_dict_name,
 } from "../hir/index.js";
-import { TypeEnv, StructDef, EnumDef, EffectDef, substitute_type } from "./env.js";
+import { TypeEnv, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
 import { Substitution, empty_subst, unify, apply, apply_to_effect_row } from "./unify.js";
 import { check_exhaustive } from "./exhaustive.js";
 
@@ -52,6 +52,7 @@ export class InferEngine {
   private subst: Substitution;
   private type_param_scope: Map<string, Type> = new Map();
   private current_fn_return_type: Type | null = null;
+  private current_fn_bounds: { type_param_var_id: number; trait_name: string }[] = [];
 
   constructor() {
     this.env = new TypeEnv();
@@ -171,7 +172,7 @@ export class InferEngine {
       case "test_decl":
         break;
       case "trait_decl":
-        // Trait declarations are parsed but not yet type-checked (Phase 2)
+        this.register_trait(decl);
         break;
       default:
         assertNever(decl, "register_decl");
@@ -281,6 +282,34 @@ export class InferEngine {
     this.env.effects.set(decl.name, def);
   }
 
+  private register_trait(decl: TraitDecl): void {
+    const saved_tp_scope = new Map(this.type_param_scope);
+    const type_param_names = decl.type_params.map(tp => tp.name);
+    const type_param_vars: number[] = [];
+    for (const tp of decl.type_params) {
+      const tv = this.env.fresh_var();
+      type_param_vars.push(tv.id);
+      this.type_param_scope.set(tp.name, tv);
+    }
+
+    const self_var = this.env.fresh_var();
+    const methods: TraitMethodDef[] = [];
+    for (const method of decl.methods) {
+      const param_types = method.params.map(p => {
+        if (p.name === "self") return self_var;
+        return p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var();
+      });
+      const ret_type = method.return_type ? this.resolve_type_expr(method.return_type) : this.env.fresh_var();
+      const fn_type: FnType = {
+        kind: "fn", params: param_types, return_type: ret_type, effects: EMPTY_ROW,
+      };
+      methods.push({ name: method.name, type: fn_type, has_default: !method.is_abstract });
+    }
+
+    this.type_param_scope = saved_tp_scope;
+    this.env.traits.set(decl.name, { name: decl.name, type_params: type_param_names, type_param_vars, methods });
+  }
+
   private register_impl(decl: ImplDecl): void {
     // Register methods for later lookup
     let methods = this.env.impl_methods.get(decl.target_type);
@@ -300,6 +329,29 @@ export class InferEngine {
         effects: EMPTY_ROW,
       };
       methods.set(method.name, { type: fn_type, type_vars: [] });
+    }
+
+    // Task 6b: Validate trait impl completeness
+    if (decl.trait_name) {
+      const trait_def = this.env.traits.get(decl.trait_name);
+      if (!trait_def) {
+        throw new TypeCheckError(`Unknown trait: ${decl.trait_name}`, decl.span);
+      }
+      const impl_method_names = new Set(decl.methods.map(m => m.name));
+      for (const tm of trait_def.methods) {
+        if (!tm.has_default && !impl_method_names.has(tm.name)) {
+          throw new TypeCheckError(
+            `Missing method '${tm.name}' in impl ${decl.trait_name} for ${decl.target_type}`,
+            decl.span,
+          );
+        }
+      }
+      this.env.trait_impls.push({
+        trait_name: decl.trait_name,
+        target_type_name: decl.target_type,
+        type_params: decl.type_params.map(tp => tp.name),
+        method_names: decl.methods.map(m => m.name),
+      });
     }
   }
 
@@ -322,6 +374,17 @@ export class InferEngine {
       return_type: ret_type,
       effects: EMPTY_ROW,
     };
+
+    // Task 6c: Store fn_bounds for generic functions with trait constraints
+    const fn_bounds_list: { type_param: string; trait_name: string }[] = [];
+    for (const tp of decl.type_params) {
+      for (const b of tp.bounds) {
+        fn_bounds_list.push({ type_param: tp.name, trait_name: b.trait_name });
+      }
+    }
+    if (fn_bounds_list.length > 0) {
+      this.env.fn_bounds.set(decl.name, fn_bounds_list);
+    }
 
     this.type_param_scope = saved_tp_scope;
 
@@ -351,8 +414,7 @@ export class InferEngine {
       case "test_decl":
         return this.check_test_decl(decl);
       case "trait_decl":
-        // Trait declarations are parsed but not yet lowered to HIR (Phase 2)
-        return null;
+        return this.check_trait_decl(decl);
       default:
         return assertNever(decl, "check_decl");
     }
@@ -414,6 +476,26 @@ export class InferEngine {
     };
   }
 
+  private check_trait_decl(decl: TraitDecl): HTraitDecl {
+    const trait_def = this.env.traits.get(decl.name)!;
+    return {
+      kind: "trait_decl",
+      name: decl.name,
+      type_params: decl.type_params,
+      methods: trait_def.methods.map(m => ({
+        name: m.name,
+        params: m.type.params.map((t, i) => ({
+          name: decl.methods.find(dm => dm.name === m.name)?.params[i]?.name ?? `p${i}`,
+          type: t,
+        })),
+        return_type: m.type.return_type,
+        has_default: m.has_default,
+      })),
+      is_pub: decl.is_pub,
+      span: decl.span,
+    };
+  }
+
   private check_fn_decl(decl: FnDecl): HFnDecl {
     const saved_subst = this.subst;
     this.subst = empty_subst();
@@ -425,6 +507,18 @@ export class InferEngine {
       const tv = this.env.fresh_var();
       this.type_param_scope.set(tp.name, tv);
       this.env.bind_mono(tp.name, tv);
+    }
+
+    // Build current_fn_bounds for trait method dispatch on type params
+    const saved_fn_bounds = this.current_fn_bounds;
+    this.current_fn_bounds = [];
+    for (const tp of decl.type_params) {
+      const tv = this.type_param_scope.get(tp.name);
+      if (tv && tv.kind === "var") {
+        for (const bound of tp.bounds) {
+          this.current_fn_bounds.push({ type_param_var_id: tv.id, trait_name: bound.trait_name });
+        }
+      }
     }
 
     // Bind parameters
@@ -460,6 +554,7 @@ export class InferEngine {
     const effects = apply_to_effect_row(this.subst, body_result.effects);
 
     this.type_param_scope = saved_tp_scope;
+    this.current_fn_bounds = saved_fn_bounds;
     this.subst = saved_subst;
 
     const trait_bounds: { type_param: string; trait_name: string }[] = [];
@@ -818,8 +913,28 @@ export class InferEngine {
 
     const result_type = apply(s, ret_var);
 
+    // Task 8d: Resolve dictionaries at call sites for generic functions with trait bounds
+    const resolved_dicts: string[] = [];
+    if (callee.kind === "ident") {
+      const bounds_list = this.env.fn_bounds.get(callee.name);
+      if (bounds_list) {
+        for (const bound of bounds_list) {
+          for (const harg of hargs) {
+            const arg_type = apply(s, harg.type);
+            if ((arg_type.kind === "struct" || arg_type.kind === "enum") &&
+                this.env.trait_impls.some(
+                  impl => impl.target_type_name === arg_type.name && impl.trait_name === bound.trait_name
+                )) {
+              resolved_dicts.push(trait_dict_name(arg_type.name, bound.trait_name));
+              break;
+            }
+          }
+        }
+      }
+    }
+
     return {
-      hexpr: { kind: "call", callee: callee_r.hexpr, args: hargs, type_args: [], resolved_dicts: [], type: result_type, effects, span },
+      hexpr: { kind: "call", callee: callee_r.hexpr, args: hargs, type_args: [], resolved_dicts, type: result_type, effects, span },
       subst: s,
       effects,
     };
@@ -861,6 +976,42 @@ export class InferEngine {
       }
     }
 
+    // Task 6e: Check trait impls for the receiver type
+    if (!method_type && (recv_type.kind === "struct" || recv_type.kind === "enum")) {
+      const type_name = recv_type.name;
+      for (const impl_entry of this.env.trait_impls) {
+        if (impl_entry.target_type_name === type_name) {
+          const trait_def = this.env.traits.get(impl_entry.trait_name);
+          if (trait_def) {
+            const tm = trait_def.methods.find(m => m.name === method);
+            if (tm) {
+              method_type = this.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars });
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Task 6f: Handle trait method calls on generic type params
+    let dict_dispatch: { dict_param: string; method: string } | undefined;
+    const resolved_recv = apply(s, recv_r.hexpr.type);
+    if (!method_type && resolved_recv.kind === "var") {
+      for (const fb of this.current_fn_bounds) {
+        if (fb.type_param_var_id === resolved_recv.id) {
+          const trait_def = this.env.traits.get(fb.trait_name);
+          if (trait_def) {
+            const tm = trait_def.methods.find(m => m.name === method);
+            if (tm) {
+              method_type = this.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars });
+              dict_dispatch = { dict_param: `__${fb.trait_name}`, method };
+              break;
+            }
+          }
+        }
+      }
+    }
+
     // Infer arguments
     const hargs: HExpr[] = [];
     for (const arg of args) {
@@ -895,6 +1046,7 @@ export class InferEngine {
         args: hargs,
         type_args: [],
         resolved_dicts: [],
+        dict_dispatch,
         type: result_type,
         effects,
         span,
