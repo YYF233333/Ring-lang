@@ -559,10 +559,23 @@ class CodeGenerator {
   }
 
   private gen_try_catch(expr: HExpr & { kind: "try_catch" }): string {
+    const body_has_fail = expr.body.effects.effects.some(e => e.kind === "fail");
     const body = this.gen_expr(expr.body);
-    const binding = expr.error_binding ?? "__e";
     const handler = this.gen_expr(expr.handler);
-    return `(function() { try { return ${body}; } catch (${binding}) { return ${handler}; } })()`;
+
+    if (!body_has_fail) {
+      // Body doesn't produce fail effect — or/catch is a no-op
+      return body;
+    }
+
+    if (expr.error_binding) {
+      // catch expression: expose error to handler
+      const binding = expr.error_binding;
+      return `(function() { const __ev_fail = { raise: (${binding}) => { throw new __EffectAbort("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail") { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
+    } else {
+      // or expression: handler doesn't use error value
+      return `(function() { const __ev_fail = { raise: (__err) => { throw new __EffectAbort("fail", undefined); } }; try { return ${body}; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail") return ${handler}; throw __e; } })()`;
+    }
   }
 
   private gen_handle(expr: HExpr & { kind: "handle_expr" }): string {

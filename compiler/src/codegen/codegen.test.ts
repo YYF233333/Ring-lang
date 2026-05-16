@@ -268,10 +268,11 @@ describe("codegen", () => {
   });
 
   describe("try_catch expressions", () => {
-    it("generates try/catch IIFE", () => {
+    it("generates evidence-based try/catch IIFE for catch expr", () => {
+      const fail_effect: Effect = { kind: "fail", error_type: STR };
       const expr: HExpr = {
         kind: "try_catch",
-        body: ident("x"),
+        body: { kind: "ident", name: "x", type: INT, effects: effect_row(fail_effect), span: S },
         error_binding: "e",
         handler: int_lit(0),
         type: INT,
@@ -291,9 +292,11 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("try { return x; }"));
-      assert.ok(js.includes("catch (e)"));
-      assert.ok(js.includes("return 0;"));
+      assert.ok(js.includes("__ev_fail"), "Should create __ev_fail evidence, got: " + js);
+      assert.ok(js.includes("try { return x; }"), "Should have try with body, got: " + js);
+      assert.ok(js.includes("__EffectAbort"), "Should use __EffectAbort, got: " + js);
+      assert.ok(js.includes("const e = __e.value"), "Should extract error value for catch binding, got: " + js);
+      assert.ok(js.includes("return 0;"), "Should return handler value, got: " + js);
     });
   });
 
@@ -737,6 +740,78 @@ describe("codegen", () => {
       const js = generate(program([decl]));
       assert.ok(js.includes('pure_fn("x")'), "Should not forward evidence to pure function, got: " + js);
       assert.ok(!js.includes('pure_fn("x", __ev_'), "Should not have evidence args");
+    });
+  });
+
+  describe("try_catch (or/catch) with evidence", () => {
+    it("returns body directly when body is pure", () => {
+      const try_catch_expr: HExpr = {
+        kind: "try_catch",
+        body: int_lit(42),
+        handler: int_lit(0),
+        type: INT,
+        effects: EMPTY_ROW,
+        span: S,
+      };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "f",
+        type_params: [],
+        params: [],
+        return_type: INT,
+        effects: EMPTY_ROW,
+        body: block([], try_catch_expr),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      // Pure body — or/catch is optimized away
+      assert.ok(!js.includes("try"), "Pure body should not have try/catch, got: " + js);
+      assert.ok(js.includes("42"), "Should just return body value");
+    });
+
+    it("generates __ev_fail + __EffectAbort when body has fail effect", () => {
+      const fail_effect: Effect = { kind: "fail", error_type: STR };
+      const callee_type: import("../types/index.js").FnType = {
+        kind: "fn",
+        params: [],
+        return_type: INT,
+        effects: effect_row(fail_effect),
+      };
+      const try_catch_expr: HExpr = {
+        kind: "try_catch",
+        body: {
+          kind: "call",
+          callee: { kind: "ident", name: "risky", type: callee_type, effects: EMPTY_ROW, span: S },
+          args: [],
+          type_args: [],
+          resolved_dicts: [],
+          type: INT,
+          effects: effect_row(fail_effect),
+          span: S,
+        },
+        handler: int_lit(0),
+        type: INT,
+        effects: EMPTY_ROW,
+        span: S,
+      };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "f",
+        type_params: [],
+        params: [],
+        return_type: INT,
+        effects: EMPTY_ROW,
+        body: block([], try_catch_expr),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("__ev_fail"), "Should create __ev_fail evidence, got: " + js);
+      assert.ok(js.includes("__EffectAbort"), "Should use __EffectAbort, got: " + js);
+      assert.ok(js.includes("try"), "Should have try/catch");
     });
   });
 });
