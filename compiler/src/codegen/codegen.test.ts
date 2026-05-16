@@ -670,4 +670,73 @@ describe("codegen", () => {
       assert.ok(!js.includes("yield"), "should not contain yield");
     });
   });
+
+  describe("evidence forwarding at call sites", () => {
+    it("forwards evidence when calling a function with effects", () => {
+      const io_effect: Effect = { kind: "io" };
+      const callee_type: import("../types/index.js").FnType = {
+        kind: "fn",
+        params: [STR],
+        return_type: STR,
+        effects: effect_row(io_effect),
+      };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "main_test",
+        type_params: [],
+        params: [],
+        return_type: STR,
+        effects: effect_row(io_effect),
+        body: block([], {
+          kind: "call",
+          callee: { kind: "ident", name: "helper", type: callee_type, effects: EMPTY_ROW, span: S },
+          args: [str_lit("x")],
+          type_args: [],
+          resolved_dicts: [],
+          type: STR,
+          effects: effect_row(io_effect),
+          span: S,
+        }),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes('helper("x", __ev_io)'), "Should forward __ev_io to helper, got: " + js);
+    });
+
+    it("does not forward evidence for pure callees", () => {
+      const io_effect: Effect = { kind: "io" };
+      const callee_type: import("../types/index.js").FnType = {
+        kind: "fn",
+        params: [STR],
+        return_type: STR,
+        effects: EMPTY_ROW,
+      };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "main_test",
+        type_params: [],
+        params: [],
+        return_type: STR,
+        effects: effect_row(io_effect),
+        body: block([], {
+          kind: "call",
+          callee: { kind: "ident", name: "pure_fn", type: callee_type, effects: EMPTY_ROW, span: S },
+          args: [str_lit("x")],
+          type_args: [],
+          resolved_dicts: [],
+          type: STR,
+          effects: EMPTY_ROW,
+          span: S,
+        }),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes('pure_fn("x")'), "Should not forward evidence to pure function, got: " + js);
+      assert.ok(!js.includes('pure_fn("x", __ev_'), "Should not have evidence args");
+    });
+  });
 });

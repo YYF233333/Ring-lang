@@ -328,8 +328,11 @@ class CodeGenerator {
     }
   }
 
-  private needs_yield_star(callee_type: any): boolean {
-    return callee_type?.kind === "fn" && this.has_non_fail_effects(callee_type.effects);
+  private get_callee_evidence_args(callee_type: { kind: string; effects?: { effects: { kind: string; name?: string }[] } }): string {
+    if (callee_type.kind !== "fn") return "";
+    const effects = (callee_type as { effects?: { effects: { kind: string; name?: string }[] } }).effects;
+    if (!effects || effects.effects.length === 0) return "";
+    return this.get_evidence_params(effects).join(", ");
   }
 
   private gen_call(expr: HExpr & { kind: "call" }): string {
@@ -358,18 +361,19 @@ class CodeGenerator {
         const receiver = this.gen_expr(expr.callee.receiver);
         const args = expr.args.map(a => this.gen_expr(a)).join(", ");
         const all_args = args ? `${receiver}, ${args}` : receiver;
-        const prefix = this.needs_yield_star(expr.callee.type) ? "yield* " : "";
-        return `${prefix}${fn_name}(${all_args})`;
+        const ev_args = this.get_callee_evidence_args(expr.callee.type);
+        const all_with_ev = [all_args, ev_args].filter(s => s.length > 0).join(", ");
+        return `${fn_name}(${all_with_ev})`;
       }
     }
 
-    // Task 8c: Pass dictionary args at call sites
+    // Task 8c: Pass dictionary args + evidence args at call sites
     const callee = this.gen_expr(expr.callee);
     const args = expr.args.map(a => this.gen_expr(a)).join(", ");
     const dict_args = (expr.resolved_dicts ?? []).join(", ");
-    const all_args = [args, dict_args].filter(s => s.length > 0).join(", ");
-    const prefix = this.needs_yield_star(expr.callee.type) ? "yield* " : "";
-    return `${prefix}${callee}(${all_args})`;
+    const ev_args = this.get_callee_evidence_args(expr.callee.type);
+    const all_args = [args, dict_args, ev_args].filter(s => s.length > 0).join(", ");
+    return `${callee}(${all_args})`;
   }
 
   private gen_struct_lit(expr: HExpr & { kind: "struct_lit" }): string {
