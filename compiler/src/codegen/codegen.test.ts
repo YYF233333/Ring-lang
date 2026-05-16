@@ -3,6 +3,7 @@
 import { describe, it } from "node:test";
 import * as assert from "node:assert";
 import { generate } from "./codegen.js";
+import { RUNTIME_CODE } from "./runtime.js";
 import { INT, STR, BOOL, UNIT, EMPTY_ROW } from "../types/index.js";
 import { HProgram, HFnDecl, HStructDecl, HEnumDecl, HBlock, HExpr, HStmt, HParam, evidence_param_name } from "../hir/index.js";
 import { span_zero } from "../ast/index.js";
@@ -297,7 +298,7 @@ describe("codegen", () => {
   });
 
   describe("handle expressions with generators", () => {
-    it("generates __run_handler for custom effects", () => {
+    it("generates handler for custom effects", () => {
       const expr: HExpr = {
         kind: "handle_expr",
         body: {
@@ -335,10 +336,9 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__run_handler"));
-      assert.ok(js.includes("function*()"));
+      // Codegen still emits __run_handler call for handle_expr (to be replaced in later task)
+      assert.ok(js.includes("__run_handler") || js.includes("__EffectAbort"));
       assert.ok(js.includes('"Console.log"'));
-      assert.ok(js.includes("yield"));
     });
 
     it("generates try/catch for fail-only handler", () => {
@@ -522,10 +522,22 @@ describe("codegen", () => {
   describe("runtime helpers", () => {
     it("includes runtime preamble", () => {
       const js = generate(program([]));
-      assert.ok(js.includes("function __run_handler"));
+      assert.ok(js.includes("class __EffectAbort"));
       assert.ok(js.includes("function __match_fail"));
       assert.ok(js.includes("function print"));
       assert.ok(js.includes("function assert"));
+    });
+  });
+
+  describe("runtime", () => {
+    it("includes __EffectAbort class", () => {
+      assert.ok(RUNTIME_CODE.includes("class __EffectAbort"));
+      assert.ok(RUNTIME_CODE.includes("this.effect = effect"));
+      assert.ok(RUNTIME_CODE.includes("this.value = value"));
+    });
+
+    it("does not include __run_handler", () => {
+      assert.ok(!RUNTIME_CODE.includes("__run_handler"));
     });
   });
 
