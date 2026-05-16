@@ -112,10 +112,6 @@ class CodeGenerator {
     }
   }
 
-  private has_non_fail_effects(effects: { effects: { kind: string }[] }): boolean {
-    return effects.effects.some(e => e.kind !== "fail");
-  }
-
   private emit_fn_decl(decl: HFnDecl, prefix?: string): void {
     const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : safe_ident(decl.name);
     const param_names = decl.params.map(p => safe_ident(p.name));
@@ -493,19 +489,11 @@ class CodeGenerator {
   }
 
   private gen_block_expr(block: HBlock): string {
-    // If block has no stmts and just a tail, emit tail directly
     if (block.stmts.length === 0 && block.tail) {
       return this.gen_expr(block.tail);
     }
-
-    // If block has non-fail effects, use generator IIFE with yield* delegation
-    const needs_generator = this.has_non_fail_effects(block.effects);
     const parts: string[] = [];
-    if (needs_generator) {
-      parts.push("yield* (function*() {");
-    } else {
-      parts.push("(function() {");
-    }
+    parts.push("(function() {");
     for (const stmt of block.stmts) {
       parts.push("  " + this.gen_stmt_inline(stmt));
     }
