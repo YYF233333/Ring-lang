@@ -52,7 +52,7 @@ export class InferEngine {
   private subst: Substitution;
   private type_param_scope: Map<string, Type> = new Map();
   private current_fn_return_type: Type | null = null;
-  private current_fn_bounds: { type_param_var_id: number; trait_name: string }[] = [];
+  private current_fn_bounds: { type_param_var_id: number; trait_name: string; type_param_name: string }[] = [];
 
   constructor() {
     this.env = new TypeEnv();
@@ -379,6 +379,9 @@ export class InferEngine {
     const fn_bounds_list: { type_param: string; trait_name: string }[] = [];
     for (const tp of decl.type_params) {
       for (const b of tp.bounds) {
+        if (!this.env.traits.has(b.trait_name)) {
+          throw new TypeCheckError(`Unknown trait: ${b.trait_name}`, tp.span);
+        }
         fn_bounds_list.push({ type_param: tp.name, trait_name: b.trait_name });
       }
     }
@@ -478,19 +481,47 @@ export class InferEngine {
 
   private check_trait_decl(decl: TraitDecl): HTraitDecl {
     const trait_def = this.env.traits.get(decl.name)!;
+    const self_var = trait_def.methods.length > 0 && trait_def.methods[0].type.params.length > 0
+      ? trait_def.methods[0].type.params[0]
+      : this.env.fresh_var();
+
+    const hmethods = trait_def.methods.map(m => {
+      const ast_method = decl.methods.find(dm => dm.name === m.name);
+      const params = m.type.params.map((t, i) => ({
+        name: ast_method?.params[i]?.name ?? `p${i}`,
+        type: t,
+      }));
+      let body: HBlock | undefined;
+      if (m.has_default && ast_method && ast_method.body.stmts.length + (ast_method.body.tail ? 1 : 0) > 0) {
+        const saved_subst = this.subst;
+        const saved_fn_bounds = this.current_fn_bounds;
+        this.subst = empty_subst();
+        this.env.push_scope();
+        this.current_fn_bounds = [];
+        if (self_var.kind === "var") {
+          this.current_fn_bounds.push({
+            type_param_var_id: self_var.id,
+            trait_name: decl.name,
+            type_param_name: "self",
+          });
+        }
+        for (const p of params) {
+          this.env.bind_mono(p.name, p.type);
+        }
+        const body_result = this.infer_block(ast_method.body);
+        this.subst = body_result.subst;
+        this.env.pop_scope();
+        body = body_result.hexpr as HBlock;
+        this.current_fn_bounds = saved_fn_bounds;
+        this.subst = saved_subst;
+      }
+      return { name: m.name, params, return_type: m.type.return_type, has_default: m.has_default, body };
+    });
     return {
       kind: "trait_decl",
       name: decl.name,
       type_params: decl.type_params,
-      methods: trait_def.methods.map(m => ({
-        name: m.name,
-        params: m.type.params.map((t, i) => ({
-          name: decl.methods.find(dm => dm.name === m.name)?.params[i]?.name ?? `p${i}`,
-          type: t,
-        })),
-        return_type: m.type.return_type,
-        has_default: m.has_default,
-      })),
+      methods: hmethods,
       is_pub: decl.is_pub,
       span: decl.span,
     };
@@ -516,7 +547,7 @@ export class InferEngine {
       const tv = this.type_param_scope.get(tp.name);
       if (tv && tv.kind === "var") {
         for (const bound of tp.bounds) {
-          this.current_fn_bounds.push({ type_param_var_id: tv.id, trait_name: bound.trait_name });
+          this.current_fn_bounds.push({ type_param_var_id: tv.id, trait_name: bound.trait_name, type_param_name: tp.name });
         }
       }
     }
@@ -880,6 +911,40 @@ export class InferEngine {
     };
   }
 
+  private recover_type_param_vars(
+    bounds_list: { type_param: string; trait_name: string }[],
+    scheme: { type: Type; type_vars: number[] } | undefined,
+    callee_type: Type,
+  ): Map<string, Type> {
+    const result = new Map<string, Type>();
+    if (!scheme || scheme.type.kind !== "fn" || callee_type.kind !== "fn") return result;
+
+    const unique_type_params: string[] = [];
+    const seen = new Set<string>();
+    for (const b of bounds_list) {
+      if (!seen.has(b.type_param)) {
+        unique_type_params.push(b.type_param);
+        seen.add(b.type_param);
+      }
+    }
+
+    const var_to_tp_index = new Map<number, number>();
+    for (let i = 0; i < scheme.type_vars.length && i < unique_type_params.length; i++) {
+      var_to_tp_index.set(scheme.type_vars[i], i);
+    }
+
+    for (let i = 0; i < scheme.type.params.length && i < callee_type.params.length; i++) {
+      const orig = scheme.type.params[i];
+      if (orig.kind === "var") {
+        const tp_idx = var_to_tp_index.get(orig.id);
+        if (tp_idx !== undefined) {
+          result.set(unique_type_params[tp_idx], callee_type.params[i]);
+        }
+      }
+    }
+    return result;
+  }
+
   private infer_call(callee: Expr, args: Expr[], span: Span, subst: Substitution): InferResult {
     const callee_r = this.infer_expr(callee, subst);
     let s = callee_r.subst;
@@ -917,36 +982,37 @@ export class InferEngine {
     if (callee.kind === "ident") {
       const bounds_list = this.env.fn_bounds.get(callee.name);
       if (bounds_list) {
+        const scheme = this.env.lookup(callee.name);
+        const type_param_to_fresh = this.recover_type_param_vars(
+          bounds_list, scheme, callee_r.hexpr.type
+        );
+
         for (const bound of bounds_list) {
           let found = false;
-          // Check if any arg is a concrete type with this trait impl
-          for (const harg of hargs) {
-            const arg_type = apply(s, harg.type);
-            if ((arg_type.kind === "struct" || arg_type.kind === "enum") &&
+          const fresh_var = type_param_to_fresh.get(bound.type_param);
+          if (fresh_var) {
+            const concrete = apply(s, fresh_var);
+            if ((concrete.kind === "struct" || concrete.kind === "enum") &&
                 this.env.trait_impls.some(
-                  impl => impl.target_type_name === arg_type.name && impl.trait_name === bound.trait_name
+                  impl => impl.target_type_name === concrete.name && impl.trait_name === bound.trait_name
                 )) {
-              resolved_dicts.push(trait_dict_name(arg_type.name, bound.trait_name));
+              resolved_dicts.push(trait_dict_name(concrete.name, bound.trait_name));
               found = true;
-              break;
-            }
-          }
-          // If no concrete type found, check if we're inside a generic function
-          // that has the same trait bound — forward the dictionary parameter
-          if (!found) {
-            for (const harg of hargs) {
-              const arg_type = apply(s, harg.type);
-              if (arg_type.kind === "var") {
-                const matching_bound = this.current_fn_bounds.find(
-                  fb => fb.type_param_var_id === arg_type.id && fb.trait_name === bound.trait_name
-                );
-                if (matching_bound) {
-                  resolved_dicts.push(`__${bound.trait_name}`);
-                  found = true;
-                  break;
-                }
+            } else if (concrete.kind === "var") {
+              const matching_bound = this.current_fn_bounds.find(
+                fb => fb.type_param_var_id === concrete.id && fb.trait_name === bound.trait_name
+              );
+              if (matching_bound) {
+                resolved_dicts.push(`__${matching_bound.type_param_name}_${matching_bound.trait_name}`);
+                found = true;
               }
             }
+          }
+          if (!found) {
+            throw new TypeCheckError(
+              `Type does not satisfy trait bound '${bound.trait_name}' required by '${callee.name}'`,
+              span,
+            );
           }
         }
       }
@@ -1029,7 +1095,7 @@ export class InferEngine {
             const tm = trait_def.methods.find(m => m.name === method);
             if (tm) {
               method_type = this.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars });
-              dict_dispatch = { dict_param: `__${fb.trait_name}`, method };
+              dict_dispatch = { dict_param: `__${fb.type_param_name}_${fb.trait_name}`, method };
               break;
             }
           }

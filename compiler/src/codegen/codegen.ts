@@ -33,8 +33,9 @@ function safe_ident(name: string): string {
 class CodeGenerator {
   private lines: string[] = [];
   private indent_level = 0;
-  private impl_methods: Set<string> = new Set();
+  private impl_methods: Map<string, string | undefined> = new Map();
   private struct_field_order: Map<string, string[]> = new Map();
+  private trait_decls: Map<string, HTraitDecl> = new Map();
 
   private indent(): string {
     return "  ".repeat(this.indent_level);
@@ -67,8 +68,10 @@ class CodeGenerator {
         this.struct_field_order.set(decl.name, decl.fields.map(f => f.name));
       } else if (decl.kind === "impl_decl") {
         for (const method of decl.methods) {
-          this.impl_methods.add(`${decl.target_type}.${method.name}`);
+          this.impl_methods.set(`${decl.target_type}.${method.name}`, decl.trait_name);
         }
+      } else if (decl.kind === "trait_decl") {
+        this.trait_decls.set(decl.name, decl);
       }
     }
 
@@ -116,7 +119,7 @@ class CodeGenerator {
   private emit_fn_decl(decl: HFnDecl, prefix?: string): void {
     const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : safe_ident(decl.name);
     const param_names = decl.params.map(p => safe_ident(p.name));
-    const dict_params = (decl.trait_bounds ?? []).map(b => `__${b.trait_name}`);
+    const dict_params = (decl.trait_bounds ?? []).map(b => `__${b.type_param}_${b.trait_name}`);
     const all_params = [...param_names, ...dict_params].join(", ");
     const star = this.has_non_fail_effects(decl.effects) ? "*" : "";
     this.emit(`function${star} ${name}(${all_params}) {`);
@@ -161,8 +164,11 @@ class CodeGenerator {
   }
 
   private emit_impl_decl(decl: HImplDecl): void {
+    const prefix = decl.trait_name
+      ? `${decl.target_type}_${decl.trait_name}`
+      : decl.target_type;
     for (const method of decl.methods) {
-      this.emit_fn_decl(method, decl.target_type);
+      this.emit_fn_decl(method, prefix);
     }
     if (decl.trait_name) {
       this.emit_trait_dictionary(decl);
@@ -171,10 +177,21 @@ class CodeGenerator {
 
   private emit_trait_dictionary(decl: HImplDecl): void {
     const dict_name = trait_dict_name(decl.target_type, decl.trait_name!);
+    const impl_method_names = new Set(decl.methods.map(m => m.name));
     const entries = decl.methods.map(m => {
-      const fn_name = `${safe_ident(decl.target_type)}_${safe_ident(m.name)}`;
+      const fn_name = `${safe_ident(decl.target_type)}_${safe_ident(decl.trait_name!)}_${safe_ident(m.name)}`;
       return `${safe_ident(m.name)}: ${fn_name}`;
     });
+    const trait_decl = this.trait_decls.get(decl.trait_name!);
+    if (trait_decl) {
+      for (const tm of trait_decl.methods) {
+        if (tm.has_default && !impl_method_names.has(tm.name)) {
+          const default_fn = `__${safe_ident(decl.trait_name!)}_${safe_ident(tm.name)}`;
+          const param_names = tm.params.map(p => safe_ident(p.name));
+          entries.push(`${safe_ident(tm.name)}: function(${param_names.join(", ")}) { return ${default_fn}(${dict_name}, ${param_names.join(", ")}); }`);
+        }
+      }
+    }
     this.emit(`const ${dict_name} = { ${entries.join(", ")} };`);
   }
 
@@ -183,8 +200,19 @@ class CodeGenerator {
     // The operations are translated at call sites.
   }
 
-  private emit_trait_decl(_decl: HTraitDecl): void {
-    // Trait declarations don't produce runtime code.
+  private emit_trait_decl(decl: HTraitDecl): void {
+    for (const method of decl.methods) {
+      if (method.has_default && method.body) {
+        const fn_name = `__${safe_ident(decl.name)}_${safe_ident(method.name)}`;
+        const param_names = method.params.map(p => safe_ident(p.name));
+        const all_params = [`__self_${safe_ident(decl.name)}`, ...param_names].join(", ");
+        this.emit(`function ${fn_name}(${all_params}) {`);
+        this.push_indent();
+        this.emit_block_body(method.body);
+        this.pop_indent();
+        this.emit("}");
+      }
+    }
   }
 
   private emit_test_decl(decl: HTestDecl): void {
@@ -305,12 +333,17 @@ class CodeGenerator {
       const type_name = recv_type.kind === "struct" ? recv_type.name
         : recv_type.kind === "enum" ? recv_type.name
         : null;
-      if (type_name && this.impl_methods.has(`${type_name}.${method}`)) {
+      const impl_key = type_name ? `${type_name}.${method}` : null;
+      if (type_name && impl_key && this.impl_methods.has(impl_key)) {
+        const trait_name = this.impl_methods.get(impl_key);
+        const fn_name = trait_name
+          ? `${safe_ident(type_name)}_${safe_ident(trait_name)}_${safe_ident(method)}`
+          : `${safe_ident(type_name)}_${safe_ident(method)}`;
         const receiver = this.gen_expr(expr.callee.receiver);
         const args = expr.args.map(a => this.gen_expr(a)).join(", ");
         const all_args = args ? `${receiver}, ${args}` : receiver;
         const prefix = this.needs_yield_star(expr.callee.type) ? "yield* " : "";
-        return `${prefix}${safe_ident(type_name)}_${safe_ident(method)}(${all_args})`;
+        return `${prefix}${fn_name}(${all_args})`;
       }
     }
 
