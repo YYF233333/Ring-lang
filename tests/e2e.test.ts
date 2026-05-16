@@ -36,6 +36,9 @@ const cases: TestCase[] = [
   { file: "effect_evidence.ring", expected: "mock-data\n" },
   { file: "effect_multi_handler.ring", expected: "file-content\n" },
   { file: "effect_propagate.ring", expected: "propagated\n" },
+  { file: "effect_cell.ring", expected: "2\n" },
+  { file: "effect_cell_closure.ring", expected: "3\n" },
+  { file: "effect_resume_side.ring", expected: "reading: input.txt\nmock-result\n" },
 ];
 
 describe("e2e: ring run", () => {
