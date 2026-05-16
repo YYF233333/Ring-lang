@@ -103,10 +103,15 @@ class CodeGenerator {
     }
   }
 
+  private has_non_fail_effects(effects: { effects: { kind: string }[] }): boolean {
+    return effects.effects.some(e => e.kind !== "fail");
+  }
+
   private emit_fn_decl(decl: HFnDecl, prefix?: string): void {
     const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : safe_ident(decl.name);
     const params = decl.params.map(p => safe_ident(p.name)).join(", ");
-    this.emit(`function ${name}(${params}) {`);
+    const star = this.has_non_fail_effects(decl.effects) ? "*" : "";
+    this.emit(`function${star} ${name}(${params}) {`);
     this.push_indent();
     this.emit_block_body(decl.body);
     this.pop_indent();
@@ -254,6 +259,10 @@ class CodeGenerator {
     }
   }
 
+  private needs_yield_star(callee_type: any): boolean {
+    return callee_type?.kind === "fn" && this.has_non_fail_effects(callee_type.effects);
+  }
+
   private gen_call(expr: HExpr & { kind: "call" }): string {
     // Detect UFCS method call: call(field_access(receiver, method), args)
     if (expr.callee.kind === "field_access") {
@@ -266,12 +275,14 @@ class CodeGenerator {
         const receiver = this.gen_expr(expr.callee.receiver);
         const args = expr.args.map(a => this.gen_expr(a)).join(", ");
         const all_args = args ? `${receiver}, ${args}` : receiver;
-        return `${safe_ident(type_name)}_${safe_ident(method)}(${all_args})`;
+        const prefix = this.needs_yield_star(expr.callee.type) ? "yield* " : "";
+        return `${prefix}${safe_ident(type_name)}_${safe_ident(method)}(${all_args})`;
       }
     }
     const callee = this.gen_expr(expr.callee);
     const args = expr.args.map(a => this.gen_expr(a)).join(", ");
-    return `${callee}(${args})`;
+    const prefix = this.needs_yield_star(expr.callee.type) ? "yield* " : "";
+    return `${prefix}${callee}(${args})`;
   }
 
   private gen_struct_lit(expr: HExpr & { kind: "struct_lit" }): string {
@@ -387,9 +398,14 @@ class CodeGenerator {
       return this.gen_expr(block.tail);
     }
 
-    // Otherwise emit as IIFE
+    // If block has non-fail effects, use generator IIFE with yield* delegation
+    const needs_generator = this.has_non_fail_effects(block.effects);
     const parts: string[] = [];
-    parts.push("(function() {");
+    if (needs_generator) {
+      parts.push("yield* (function*() {");
+    } else {
+      parts.push("(function() {");
+    }
     for (const stmt of block.stmts) {
       parts.push("  " + this.gen_stmt_inline(stmt));
     }
@@ -482,7 +498,6 @@ class CodeGenerator {
     }
 
     // General effect handling via generators
-    const body = this.gen_expr(expr.body);
     const handler_entries = expr.handlers.map(h => {
       const key = `"${h.effect_name}.${h.op_name}"`;
       const params = h.params.map(p => p.name);
@@ -490,13 +505,28 @@ class CodeGenerator {
       const handler_body = this.gen_expr(h.body);
       return `${key}: function(args, ${resume}) { ${params.map((p, i) => `const ${p} = args[${i}];`).join(" ")} return ${handler_body}; }`;
     });
-    return `__run_handler((function*() { return ${body}; })(), { ${handler_entries.join(", ")} })`;
+    const gen_body = this.gen_generator_body(expr.body);
+    return `__run_handler((function*() { ${gen_body} })(), { ${handler_entries.join(", ")} })`;
   }
 
   private gen_lambda(expr: HExpr & { kind: "lambda" }): string {
     const params = expr.params.map(p => safe_ident(p.name)).join(", ");
     const body = this.gen_expr(expr.body);
     return `(function(${params}) { return ${body}; })`;
+  }
+
+  private gen_generator_body(expr: HExpr): string {
+    if (expr.kind === "block") {
+      const parts: string[] = [];
+      for (const stmt of expr.stmts) {
+        parts.push(this.gen_stmt_inline(stmt));
+      }
+      if (expr.tail) {
+        parts.push(`return ${this.gen_expr(expr.tail)};`);
+      }
+      return parts.join(" ");
+    }
+    return `return ${this.gen_expr(expr)};`;
   }
 
   private gen_effect_op(expr: HExpr & { kind: "effect_op" }): string {

@@ -126,10 +126,23 @@ export class InferEngine {
     const hdecls: HDecl[] = [];
     for (const decl of program.decls) {
       const hd = this.check_decl(decl);
-      if (hd) hdecls.push(hd);
+      if (hd) {
+        hdecls.push(hd);
+        // Update env with inferred effects so later functions see them
+        if (hd.kind === "fn_decl" && hd.effects.effects.length > 0) {
+          this.update_fn_effects(hd.name, hd.effects);
+        }
+      }
     }
 
     return { decls: hdecls };
+  }
+
+  private update_fn_effects(name: string, effects: EffectRow): void {
+    const scheme = this.env.lookup(name);
+    if (scheme && scheme.type.kind === "fn") {
+      scheme.type = { ...scheme.type, effects } as FnType;
+    }
   }
 
   // ============================================================
@@ -825,9 +838,13 @@ export class InferEngine {
 
     let result_type: Type;
     if (method_type && method_type.kind === "fn") {
-      // Unify args with method params (skip self)
-      for (let i = 0; i < hargs.length && i < method_type.params.length; i++) {
-        s = unify(hargs[i].type, method_type.params[i], s);
+      // Unify receiver with self param (first param)
+      if (method_type.params.length > 0) {
+        s = unify(recv_r.hexpr.type, method_type.params[0], s);
+      }
+      // Unify call args with remaining params (skip self at index 0)
+      for (let i = 0; i < hargs.length && i + 1 < method_type.params.length; i++) {
+        s = unify(hargs[i].type, method_type.params[i + 1], s);
       }
       result_type = apply(s, method_type.return_type);
       effects = row_merge(effects, method_type.effects);
