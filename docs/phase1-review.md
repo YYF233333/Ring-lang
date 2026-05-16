@@ -2,7 +2,7 @@
 
 **原始审查日期**: 2026-05-16
 **修复批次 1**: 2026-05-16（C1-C11, I10, I13, I14 已修复）
-**修复批次 2**: 2026-05-16（I1-I3, I5, I7, I9, I12, I15, I17, I18, I20, I22, I23 已修复）
+**修复批次 2**: 2026-05-16（I1-I3, I5, I7, I9, I11, I12, I15-I17, I18-I20, I22, I23 已修复）
 **审查方法**: Claude Opus × 5 并行代理 + DeepSeek V4 Pro × 3 并行代理，独立审查后交叉验证
 
 ---
@@ -39,49 +39,35 @@
 
 ---
 
-## 二、剩余问题（低优先级，可延至 Phase 2）
+## 二、剩余问题（低优先级，延至 Phase 2）
 
 ### I4. `remove_fail_effect` 不区分错误类型
 
 - **文件**: `compiler/src/checker/infer.ts`
 - **问题**: 如果函数同时有 `fail<ParseError>` 和 `fail<IoError>`，一个 `or` 表达式会同时移除两者。
-- **影响**: 低——Phase 1 中很少出现多 fail 类型共存的场景。Phase 2 trait 系统后自然解决。
-
-### I6. yield 在非 generator 上下文中
-
-- **文件**: `compiler/src/codegen/codegen.ts`
-- **问题**: `gen_effect_op` 统一生成 `yield`。非 `handle` 上下文中 effect op 会生成非法 JS。
-- **影响**: 中——`fail.raise` 应编译为 `throw`，其他 effect 需 propagation 标记。Phase 2 effect handler 重构会解决。
+- **影响**: 低——Phase 2 trait 系统后自然解决。
 
 ### I8. 穷尽性不检查嵌套 pattern
 
 - **文件**: `compiler/src/checker/exhaustive.ts`
 - **问题**: 只看顶层 variant 名称，不检查嵌套 pattern 完整性。
-- **影响**: 低——Phase 1 中 nested pattern matching 的使用有限，且有运行时 `__match_fail` 兜底。
-
-### I11. Struct 字面量字段顺序假设
-
-- **文件**: `compiler/src/codegen/codegen.ts`
-- **问题**: `new Type(arg1, arg2)` 假设字段顺序与声明一致。`Point { y: 2, x: 1 }` 可能将 y 赋给 x。
-- **影响**: 中——需要 codegen 查找 struct 定义并按声明顺序排列字段。
-
-### I16. 插值内字符串被误当插值结束
-
-- **文件**: `compiler/src/parser/lexer.ts`
-- **问题**: 插值表达式内部的字符串字面量中的 `"` 被当作插值结束符处理。
-- **影响**: 中——需要在 lexer 中维护括号深度计数器。
-
-### I19. fail effect 从未被添加到 effect row
-
-- **文件**: `compiler/src/checker/infer.ts`
-- **问题**: 没有代码向函数的 effect row 添加 `fail` effect。`or`/`catch` 移除一个从未被添加的 effect。
-- **影响**: 中——effect 追踪不完整，但不影响代码生成正确性。Phase 2 effect 系统完善时必须修复。
+- **影响**: 低——有运行时 `__match_fail` 兜底。
 
 ### I21. Diagnostic 系统完全未使用
 
 - **文件**: `compiler/src/errors.ts`
 - **问题**: `CompileError`/`Diagnostic` 系统已定义但未使用。
 - **影响**: 低——Phase 2 LSP 前必须迁移。
+
+### Option `or` 语义缺失
+
+- **问题**: 设计中 `or` 同时作用于 Option 和 fail，但实现只做 try/catch。
+- **影响**: 需 `?` 运算符配合，Phase 1.5/2 范围。
+
+### Effect row tail（开放行变量）从未使用
+
+- **问题**: `tail?: number` 已声明但从未赋值或统一，effect polymorphism 基础设施为死代码。
+- **影响**: Phase 2 effect polymorphism 必须重新设计此部分。
 
 ---
 
@@ -125,3 +111,17 @@
 | I22 | JS 保留字冲突未处理 | 添加 `safe_ident()` 前缀转义 |
 | I23 | 字符串插值反斜杠未转义 | 先转义 `\` 再转义 `` ` `` 和 `${` |
 | — | infer.ts 残余 ANY 使用 | 全部替换为 fresh_type_var()，移除 ANY 导入 |
+
+### 批次 3（2026-05-16）— 架构修复
+
+| ID | 问题 | 修复摘要 |
+|----|------|----------|
+| — | Effect 跨函数不传播 | check_fn_decl 后用 update_fn_effects 更新 env |
+| I6 | yield 在非 generator 中 | effectful 函数编译为 function*，调用用 yield*，block IIFE 用 yield* (function*(){})() |
+| — | handle body 中 yield 穿透普通函数 | gen_handle 用 gen_generator_body 直接内联 |
+| — | impl self 参数错位 | receiver 与 params[0] unify，args 从 params[1] 开始 |
+| I11 | struct 字面量字段顺序 | codegen 收集 struct_field_order，按声明顺序排列 |
+| I16 | 插值内嵌字符串被误识别 | lex_string_body 用 mode 参数区分 new/continuation |
+| I19 | fail 从未添加到 effect row | fail.raise 创建正确的 FailEffect（含 error_type） |
+| — | 泛型 struct 注册丢失 type params | register_struct 推入 type_param_scope |
+| — | 泛型 struct 实例化 type_params 空 | infer_struct_lit 为 type params 创建 fresh vars |
