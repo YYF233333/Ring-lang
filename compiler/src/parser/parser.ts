@@ -510,6 +510,7 @@ export class Parser {
 
   private parse_expr_bp(min_prec: Prec): Expr {
     let left = this.parse_prefix();
+    let last_was_comparison = false;
 
     while (true) {
       const tok = this.peek();
@@ -518,13 +519,21 @@ export class Parser {
 
       if (tok.kind === TokenKind.Or) {
         left = this.parse_or_expr(left);
+        last_was_comparison = false;
       } else if (tok.kind === TokenKind.Catch) {
         left = this.parse_catch_expr(left);
+        last_was_comparison = false;
       } else if (tok.kind === TokenKind.Dot) {
         left = this.parse_dot_expr(left);
+        last_was_comparison = false;
       } else if (tok.kind === TokenKind.LParen) {
         left = this.parse_call_expr(left);
+        last_was_comparison = false;
       } else {
+        const is_comparison = prec === Prec.Equality || prec === Prec.Compare;
+        if (is_comparison && last_was_comparison) {
+          throw new Error(`Comparison operators are non-associative: cannot chain '${tok.value}' after another comparison`);
+        }
         // Binary operators
         this.advance();
         const right = this.parse_expr_bp(prec);
@@ -532,6 +541,7 @@ export class Parser {
         left = {
           kind: "bin_op", op: tok.value as BinOp, left, right, span,
         } as BinOpExpr;
+        last_was_comparison = is_comparison;
       }
     }
 

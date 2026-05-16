@@ -32,6 +32,7 @@ function safe_ident(name: string): string {
 class CodeGenerator {
   private lines: string[] = [];
   private indent_level = 0;
+  private impl_methods: Set<string> = new Set();
 
   private indent(): string {
     return "  ".repeat(this.indent_level);
@@ -58,6 +59,15 @@ class CodeGenerator {
   // ============================================================
 
   generate(program: HProgram): string {
+    // Collect impl method signatures for UFCS dispatch
+    for (const decl of program.decls) {
+      if (decl.kind === "impl_decl") {
+        for (const method of decl.methods) {
+          this.impl_methods.add(`${decl.target_type}.${method.name}`);
+        }
+      }
+    }
+
     // Emit runtime preamble
     this.emit_raw(RUNTIME_CODE);
 
@@ -245,6 +255,20 @@ class CodeGenerator {
   }
 
   private gen_call(expr: HExpr & { kind: "call" }): string {
+    // Detect UFCS method call: call(field_access(receiver, method), args)
+    if (expr.callee.kind === "field_access") {
+      const recv_type = expr.callee.receiver.type;
+      const method = expr.callee.field;
+      const type_name = recv_type.kind === "struct" ? recv_type.name
+        : recv_type.kind === "enum" ? recv_type.name
+        : null;
+      if (type_name && this.impl_methods.has(`${type_name}.${method}`)) {
+        const receiver = this.gen_expr(expr.callee.receiver);
+        const args = expr.args.map(a => this.gen_expr(a)).join(", ");
+        const all_args = args ? `${receiver}, ${args}` : receiver;
+        return `${safe_ident(type_name)}_${safe_ident(method)}(${all_args})`;
+      }
+    }
     const callee = this.gen_expr(expr.callee);
     const args = expr.args.map(a => this.gen_expr(a)).join(", ");
     return `${callee}(${args})`;
