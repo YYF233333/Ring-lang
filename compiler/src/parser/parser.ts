@@ -1,0 +1,1091 @@
+// Ring-lang Parser — recursive descent + Pratt parsing for expressions
+import {
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl,
+  Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt,
+  Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
+  BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
+  StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
+  OrExpr, CatchExpr, HandleExpr, LambdaExpr,
+  BinOp, UnaryOp,
+  TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr,
+  Pattern, WildcardPattern, BindingPattern, ConstructorPattern, LiteralPattern,
+  MatchArm, EffectHandler, Param, TypeParam,
+  StructField, EnumVariant, EffectOp, StructFieldInit,
+  Span, Position,
+} from "../ast/index.js";
+import { Token, TokenKind, Lexer } from "./lexer.js";
+
+// ============================================================
+// Operator Precedence (lower number = lower precedence = binds less tightly)
+// ============================================================
+
+const enum Prec {
+  None = 0,
+  Or = 1,         // or
+  Catch = 2,      // catch
+  LogicOr = 3,    // ||
+  LogicAnd = 4,   // &&
+  Equality = 5,   // == !=
+  Compare = 6,    // < > <= >=
+  AddSub = 7,     // + -
+  MulDiv = 8,     // * / %
+  Unary = 9,      // - !
+  Postfix = 10,   // . () []
+}
+
+function infix_precedence(kind: TokenKind): Prec {
+  switch (kind) {
+    case TokenKind.Or: return Prec.Or;
+    case TokenKind.Catch: return Prec.Catch;
+    case TokenKind.PipePipe: return Prec.LogicOr;
+    case TokenKind.AmpAmp: return Prec.LogicAnd;
+    case TokenKind.EqEq:
+    case TokenKind.BangEq: return Prec.Equality;
+    case TokenKind.Lt:
+    case TokenKind.Gt:
+    case TokenKind.LtEq:
+    case TokenKind.GtEq: return Prec.Compare;
+    case TokenKind.Plus:
+    case TokenKind.Minus: return Prec.AddSub;
+    case TokenKind.Star:
+    case TokenKind.Slash:
+    case TokenKind.Percent: return Prec.MulDiv;
+    case TokenKind.Dot:
+    case TokenKind.LParen: return Prec.Postfix;
+    default: return Prec.None;
+  }
+}
+
+// ============================================================
+// Parser
+// ============================================================
+
+export class Parser {
+  private tokens: Token[];
+  private pos: number = 0;
+  private file: string;
+
+  constructor(tokens: Token[], file: string = "<stdin>") {
+    this.tokens = tokens;
+    this.file = file;
+  }
+
+  static parse(source: string, file: string = "<stdin>"): Program {
+    const lexer = new Lexer(source, file);
+    const tokens = lexer.tokenize();
+    const parser = new Parser(tokens, file);
+    return parser.parse_program();
+  }
+
+  // ============================================================
+  // Program
+  // ============================================================
+
+  parse_program(): Program {
+    const start = this.current_span_start();
+    const decls: Decl[] = [];
+    while (!this.at_end()) {
+      decls.push(this.parse_decl());
+    }
+    const end = this.current_span_start();
+    return { decls, span: this.make_span(start, end) };
+  }
+
+  // ============================================================
+  // Declarations
+  // ============================================================
+
+  private parse_decl(): Decl {
+    const is_pub = this.try_consume(TokenKind.Pub);
+    const tok = this.peek();
+
+    switch (tok.kind) {
+      case TokenKind.Fn: return this.parse_fn_decl(is_pub);
+      case TokenKind.Struct: return this.parse_struct_decl(is_pub);
+      case TokenKind.Enum: return this.parse_enum_decl(is_pub);
+      case TokenKind.Impl: return this.parse_impl_decl();
+      case TokenKind.Effect: return this.parse_effect_decl(is_pub);
+      case TokenKind.Test: return this.parse_test_decl();
+      default:
+        throw this.error(`Expected declaration, got '${tok.value}' (${tok.kind})`);
+    }
+  }
+
+  private parse_fn_decl(is_pub: boolean): FnDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Fn);
+    const name = this.expect(TokenKind.Ident).value;
+    const type_params = this.parse_type_params();
+    this.expect(TokenKind.LParen);
+    const params = this.parse_params();
+    this.expect(TokenKind.RParen);
+    const return_type = this.try_consume(TokenKind.Arrow) ? this.parse_type_expr() : undefined;
+    const body = this.parse_block_expr();
+    const end = this.current_span_start();
+    return {
+      kind: "fn_decl", name, type_params, params, return_type, body, is_pub,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_struct_decl(is_pub: boolean): StructDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Struct);
+    const name = this.expect(TokenKind.Ident).value;
+    const type_params = this.parse_type_params();
+    this.expect(TokenKind.LBrace);
+    const fields: StructField[] = [];
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      const field_start = this.current_span_start();
+      const field_pub = this.try_consume(TokenKind.Pub);
+      const field_name = this.expect(TokenKind.Ident).value;
+      this.expect(TokenKind.Colon);
+      const type_annotation = this.parse_type_expr();
+      // Check for where clause on this field (refinement)
+      if (this.check(TokenKind.Where)) {
+        // Skip where clause (store as-is for now, just consume tokens until comma or })
+        this.advance(); // consume 'where'
+        // Consume tokens until comma or closing brace (simplified: stop at , or })
+        let depth = 0;
+        while (!this.at_end()) {
+          if (depth === 0 && (this.check(TokenKind.Comma) || this.check(TokenKind.RBrace))) break;
+          if (this.check(TokenKind.LParen) || this.check(TokenKind.LBrace) || this.check(TokenKind.LBracket)) depth++;
+          if (this.check(TokenKind.RParen) || this.check(TokenKind.RBrace) || this.check(TokenKind.RBracket)) depth--;
+          if (depth < 0) break;
+          this.advance();
+        }
+      }
+      const field_end = this.current_span_start();
+      fields.push({
+        name: field_name, type_annotation, is_pub: field_pub,
+        span: this.make_span(field_start, field_end),
+      });
+      this.try_consume(TokenKind.Comma);
+    }
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "struct_decl", name, type_params, fields, is_pub,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_enum_decl(is_pub: boolean): EnumDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Enum);
+    const name = this.expect(TokenKind.Ident).value;
+    const type_params = this.parse_type_params();
+    this.expect(TokenKind.LBrace);
+    const variants: EnumVariant[] = [];
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      const v_start = this.current_span_start();
+      const v_name = this.expect(TokenKind.Ident).value;
+      let fields: TypeExpr[] = [];
+      if (this.try_consume(TokenKind.LParen)) {
+        if (!this.check(TokenKind.RParen)) {
+          fields.push(this.parse_type_expr());
+          while (this.try_consume(TokenKind.Comma)) {
+            if (this.check(TokenKind.RParen)) break;
+            fields.push(this.parse_type_expr());
+          }
+        }
+        this.expect(TokenKind.RParen);
+      }
+      const v_end = this.current_span_start();
+      variants.push({ name: v_name, fields, span: this.make_span(v_start, v_end) });
+      this.try_consume(TokenKind.Comma);
+    }
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "enum_decl", name, type_params, variants, is_pub,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_impl_decl(): ImplDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Impl);
+    const type_params = this.parse_type_params();
+    const first_name = this.expect(TokenKind.Ident).value;
+
+    // Check for trait impl: impl Trait for Type
+    let target_type: string;
+    let trait_name: string | undefined;
+    if (this.check(TokenKind.For)) {
+      this.advance(); // consume 'for'
+      trait_name = first_name;
+      target_type = this.expect(TokenKind.Ident).value;
+    } else {
+      target_type = first_name;
+    }
+
+    this.expect(TokenKind.LBrace);
+    const methods: FnDecl[] = [];
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      const m_pub = this.try_consume(TokenKind.Pub);
+      methods.push(this.parse_fn_decl(m_pub));
+    }
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "impl_decl", target_type, type_params, trait_name, methods,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_effect_decl(is_pub: boolean): EffectDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Effect);
+    const name = this.expect(TokenKind.Ident).value;
+    const type_params = this.parse_type_params();
+    this.expect(TokenKind.LBrace);
+    const ops: EffectOp[] = [];
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      const op_start = this.current_span_start();
+      this.expect(TokenKind.Fn);
+      const op_name = this.expect(TokenKind.Ident).value;
+      this.expect(TokenKind.LParen);
+      const params = this.parse_params();
+      this.expect(TokenKind.RParen);
+      this.expect(TokenKind.Arrow);
+      const return_type = this.parse_type_expr();
+      const op_end = this.current_span_start();
+      ops.push({ name: op_name, params, return_type, span: this.make_span(op_start, op_end) });
+      this.try_consume(TokenKind.Comma);
+      this.try_consume(TokenKind.Semi);
+    }
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "effect_decl", name, type_params, ops, is_pub,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_test_decl(): TestDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Test);
+    const desc_tok = this.expect(TokenKind.StringLit);
+    const description = desc_tok.value;
+    const body = this.parse_block_expr();
+    const end = this.current_span_start();
+    return {
+      kind: "test_decl", description, body,
+      span: this.make_span(start, end),
+    };
+  }
+
+  // ============================================================
+  // Type Expressions
+  // ============================================================
+
+  private parse_type_expr(): TypeExpr {
+    const start = this.current_span_start();
+
+    // fn(...) -> ReturnType
+    if (this.check(TokenKind.Fn)) {
+      this.advance();
+      this.expect(TokenKind.LParen);
+      const params: TypeExpr[] = [];
+      if (!this.check(TokenKind.RParen)) {
+        params.push(this.parse_type_expr());
+        while (this.try_consume(TokenKind.Comma)) {
+          if (this.check(TokenKind.RParen)) break;
+          params.push(this.parse_type_expr());
+        }
+      }
+      this.expect(TokenKind.RParen);
+      this.expect(TokenKind.Arrow);
+      const return_type = this.parse_type_expr();
+      const end = this.current_span_start();
+      const result: FnTypeExpr = {
+        kind: "fn_type", params, return_type,
+        span: this.make_span(start, end),
+      };
+      return result;
+    }
+
+    // Named type
+    const name = this.expect(TokenKind.Ident).value;
+    let type_args: TypeExpr[] = [];
+
+    // Check for generic args: Name<T, U>
+    if (this.check(TokenKind.Lt)) {
+      // Attempt to parse type arguments (backtrack if not valid)
+      const save = this.pos;
+      this.advance(); // consume <
+      try {
+        type_args.push(this.parse_type_expr());
+        while (this.try_consume(TokenKind.Comma)) {
+          type_args.push(this.parse_type_expr());
+        }
+        if (!this.check(TokenKind.Gt)) {
+          // Not a valid type argument list, backtrack
+          this.pos = save;
+          type_args = [];
+        } else {
+          this.advance(); // consume >
+        }
+      } catch {
+        this.pos = save;
+        type_args = [];
+      }
+    }
+
+    const end = this.current_span_start();
+    let result: TypeExpr = {
+      kind: "named", name, type_args,
+      span: this.make_span(start, end),
+    } as NamedTypeExpr;
+
+    // Check for ? (Option type)
+    if (this.try_consume(TokenKind.Question)) {
+      const opt_end = this.current_span_start();
+      result = {
+        kind: "option", inner: result,
+        span: this.make_span(start, opt_end),
+      } as OptionTypeExpr;
+    }
+
+    return result;
+  }
+
+  // ============================================================
+  // Type Params: <T, U: Constraint>
+  // ============================================================
+
+  private parse_type_params(): TypeParam[] {
+    if (!this.check(TokenKind.Lt)) return [];
+    this.advance(); // consume <
+    const params: TypeParam[] = [];
+    while (!this.check(TokenKind.Gt) && !this.at_end()) {
+      const tp_start = this.current_span_start();
+      const name = this.expect(TokenKind.Ident).value;
+      let constraint: TypeExpr | undefined;
+      if (this.try_consume(TokenKind.Colon)) {
+        constraint = this.parse_type_expr();
+      }
+      const tp_end = this.current_span_start();
+      params.push({ name, constraint, span: this.make_span(tp_start, tp_end) });
+      this.try_consume(TokenKind.Comma);
+    }
+    this.expect(TokenKind.Gt);
+    return params;
+  }
+
+  // ============================================================
+  // Parameters
+  // ============================================================
+
+  private parse_params(): Param[] {
+    const params: Param[] = [];
+    if (this.check(TokenKind.RParen)) return params;
+    params.push(this.parse_param());
+    while (this.try_consume(TokenKind.Comma)) {
+      if (this.check(TokenKind.RParen)) break;
+      params.push(this.parse_param());
+    }
+    return params;
+  }
+
+  private parse_param(): Param {
+    const start = this.current_span_start();
+    const name = this.expect(TokenKind.Ident).value;
+    let type_annotation: TypeExpr | undefined;
+    if (this.try_consume(TokenKind.Colon)) {
+      type_annotation = this.parse_type_expr();
+    }
+    const end = this.current_span_start();
+    return { name, type_annotation, span: this.make_span(start, end) };
+  }
+
+  // ============================================================
+  // Statements
+  // ============================================================
+
+  private parse_stmt(): Stmt {
+    const start = this.current_span_start();
+
+    if (this.check(TokenKind.Let)) {
+      return this.parse_let_stmt();
+    }
+    if (this.check(TokenKind.Var)) {
+      return this.parse_var_stmt();
+    }
+    if (this.check(TokenKind.Return)) {
+      return this.parse_return_stmt();
+    }
+
+    // Expression statement (may turn into assignment)
+    const expr = this.parse_expr();
+
+    // Check for assignment: target = value or target += value or target -= value
+    if (this.check(TokenKind.Eq) || this.check(TokenKind.PlusEq) || this.check(TokenKind.MinusEq)) {
+      const op_tok = this.advance();
+      const value_expr = this.parse_expr();
+      this.try_consume(TokenKind.Semi);
+      const end = this.current_span_start();
+
+      let value: Expr = value_expr;
+      // Desugar += and -=
+      if (op_tok.kind === TokenKind.PlusEq) {
+        value = { kind: "bin_op", op: "+", left: expr, right: value_expr, span: value_expr.span };
+      } else if (op_tok.kind === TokenKind.MinusEq) {
+        value = { kind: "bin_op", op: "-", left: expr, right: value_expr, span: value_expr.span };
+      }
+
+      return {
+        kind: "assign_stmt", target: expr, value,
+        span: this.make_span(start, end),
+      } as AssignStmt;
+    }
+
+    this.try_consume(TokenKind.Semi);
+    const end = this.current_span_start();
+    return {
+      kind: "expr_stmt", expr,
+      span: this.make_span(start, end),
+    } as ExprStmt;
+  }
+
+  private parse_let_stmt(): LetStmt {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Let);
+    const name = this.expect(TokenKind.Ident).value;
+    let type_annotation: TypeExpr | undefined;
+    if (this.try_consume(TokenKind.Colon)) {
+      type_annotation = this.parse_type_expr();
+    }
+    this.expect(TokenKind.Eq);
+    const init = this.parse_expr();
+    this.try_consume(TokenKind.Semi);
+    const end = this.current_span_start();
+    return {
+      kind: "let_stmt", name, type_annotation, init,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_var_stmt(): VarStmt {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Var);
+    const name = this.expect(TokenKind.Ident).value;
+    let type_annotation: TypeExpr | undefined;
+    if (this.try_consume(TokenKind.Colon)) {
+      type_annotation = this.parse_type_expr();
+    }
+    this.expect(TokenKind.Eq);
+    const init = this.parse_expr();
+    this.try_consume(TokenKind.Semi);
+    const end = this.current_span_start();
+    return {
+      kind: "var_stmt", name, type_annotation, init,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_return_stmt(): ReturnStmt {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Return);
+    let value: Expr | undefined;
+    if (!this.check(TokenKind.Semi) && !this.check(TokenKind.RBrace) && !this.at_end()) {
+      value = this.parse_expr();
+    }
+    this.try_consume(TokenKind.Semi);
+    const end = this.current_span_start();
+    return {
+      kind: "return_stmt", value,
+      span: this.make_span(start, end),
+    };
+  }
+
+  // ============================================================
+  // Expressions — Pratt Parsing
+  // ============================================================
+
+  private parse_expr(): Expr {
+    return this.parse_expr_bp(Prec.None);
+  }
+
+  private parse_expr_bp(min_prec: Prec): Expr {
+    let left = this.parse_prefix();
+
+    while (true) {
+      const tok = this.peek();
+      const prec = infix_precedence(tok.kind);
+      if (prec <= min_prec) break;
+
+      if (tok.kind === TokenKind.Or) {
+        left = this.parse_or_expr(left);
+      } else if (tok.kind === TokenKind.Catch) {
+        left = this.parse_catch_expr(left);
+      } else if (tok.kind === TokenKind.Dot) {
+        left = this.parse_dot_expr(left);
+      } else if (tok.kind === TokenKind.LParen) {
+        left = this.parse_call_expr(left);
+      } else {
+        // Binary operators
+        this.advance();
+        const right = this.parse_expr_bp(prec);
+        const span = this.make_span(left.span.start, right.span.end);
+        left = {
+          kind: "bin_op", op: tok.value as BinOp, left, right, span,
+        } as BinOpExpr;
+      }
+    }
+
+    return left;
+  }
+
+  private parse_prefix(): Expr {
+    const tok = this.peek();
+    const start = this.current_span_start();
+
+    // Unary operators
+    if (tok.kind === TokenKind.Minus || tok.kind === TokenKind.Bang) {
+      this.advance();
+      const operand = this.parse_expr_bp(Prec.Unary);
+      const end = this.current_span_start();
+      return {
+        kind: "unary_op", op: tok.value as UnaryOp, operand,
+        span: this.make_span(start, end),
+      } as UnaryOpExpr;
+    }
+
+    // Literals
+    if (tok.kind === TokenKind.IntLit) {
+      this.advance();
+      return { kind: "int_lit", value: parseInt(tok.value, 10), span: tok.span } as IntLitExpr;
+    }
+    if (tok.kind === TokenKind.FloatLit) {
+      this.advance();
+      return { kind: "float_lit", value: parseFloat(tok.value), span: tok.span } as FloatLitExpr;
+    }
+    if (tok.kind === TokenKind.StringLit) {
+      this.advance();
+      return { kind: "str_lit", value: tok.value, span: tok.span } as StrLitExpr;
+    }
+    if (tok.kind === TokenKind.RawStringLit) {
+      this.advance();
+      return { kind: "str_lit", value: tok.value, span: tok.span } as StrLitExpr;
+    }
+    if (tok.kind === TokenKind.True) {
+      this.advance();
+      return { kind: "bool_lit", value: true, span: tok.span } as BoolLitExpr;
+    }
+    if (tok.kind === TokenKind.False) {
+      this.advance();
+      return { kind: "bool_lit", value: false, span: tok.span } as BoolLitExpr;
+    }
+
+    // String interpolation
+    if (tok.kind === TokenKind.StringInterpStart) {
+      return this.parse_string_interp();
+    }
+
+    // Block expression
+    if (tok.kind === TokenKind.LBrace) {
+      return this.parse_block_expr();
+    }
+
+    // If expression
+    if (tok.kind === TokenKind.If) {
+      return this.parse_if_expr();
+    }
+
+    // Match expression
+    if (tok.kind === TokenKind.Match) {
+      return this.parse_match_expr();
+    }
+
+    // Handle expression
+    if (tok.kind === TokenKind.Handle) {
+      return this.parse_handle_expr();
+    }
+
+    // Lambda: fn(params) -> Type { body }
+    if (tok.kind === TokenKind.Fn) {
+      return this.parse_lambda_expr();
+    }
+
+    // For expression (parsed as a statement-like expression for now)
+    if (tok.kind === TokenKind.For) {
+      return this.parse_for_expr();
+    }
+
+    // Parenthesized expression
+    if (tok.kind === TokenKind.LParen) {
+      this.advance();
+      const expr = this.parse_expr();
+      this.expect(TokenKind.RParen);
+      return expr;
+    }
+
+    // Identifier (may lead to struct literal)
+    if (tok.kind === TokenKind.Ident) {
+      this.advance();
+      const name = tok.value;
+
+      // Check for struct literal: Name { field: value }
+      // Heuristic: starts with uppercase letter and followed by {
+      if (this.is_uppercase(name[0]) && this.check(TokenKind.LBrace)) {
+        return this.parse_struct_literal(name, start);
+      }
+
+      return { kind: "ident", name, span: tok.span } as IdentExpr;
+    }
+
+    throw this.error(`Unexpected token '${tok.value}' (${tok.kind}) in expression`);
+  }
+
+  // ============================================================
+  // Postfix: dot (field access / method call)
+  // ============================================================
+
+  private parse_dot_expr(left: Expr): Expr {
+    this.advance(); // consume '.'
+    const name_tok = this.expect(TokenKind.Ident);
+    const name = name_tok.value;
+
+    // Check if it's a method call: expr.method(args)
+    if (this.check(TokenKind.LParen)) {
+      this.advance(); // consume '('
+      const args = this.parse_arg_list();
+      this.expect(TokenKind.RParen);
+      const end = this.current_span_start();
+      return {
+        kind: "method_call", receiver: left, method: name, args, type_args: [],
+        span: this.make_span(left.span.start, end),
+      } as MethodCallExpr;
+    }
+
+    // Field access
+    const end = this.current_span_start();
+    return {
+      kind: "field_access", receiver: left, field: name,
+      span: this.make_span(left.span.start, end),
+    } as FieldAccessExpr;
+  }
+
+  // ============================================================
+  // Call expression: expr(args)
+  // ============================================================
+
+  private parse_call_expr(left: Expr): Expr {
+    this.advance(); // consume '('
+    const args = this.parse_arg_list();
+    this.expect(TokenKind.RParen);
+    const end = this.current_span_start();
+    return {
+      kind: "call", callee: left, args, type_args: [],
+      span: this.make_span(left.span.start, end),
+    } as CallExpr;
+  }
+
+  private parse_arg_list(): Expr[] {
+    const args: Expr[] = [];
+    if (this.check(TokenKind.RParen)) return args;
+    args.push(this.parse_expr());
+    while (this.try_consume(TokenKind.Comma)) {
+      if (this.check(TokenKind.RParen)) break;
+      args.push(this.parse_expr());
+    }
+    return args;
+  }
+
+  // ============================================================
+  // Or expression: expr or default
+  // ============================================================
+
+  private parse_or_expr(left: Expr): OrExpr {
+    this.advance(); // consume 'or'
+    const default_value = this.parse_expr_bp(Prec.Or);
+    const span = this.make_span(left.span.start, default_value.span.end);
+    return { kind: "or_expr", expr: left, default_value, span };
+  }
+
+  // ============================================================
+  // Catch expression: expr catch fn(e) { handler }
+  // ============================================================
+
+  private parse_catch_expr(left: Expr): CatchExpr {
+    this.advance(); // consume 'catch'
+    // Expect: fn(error_binding) { handler }
+    this.expect(TokenKind.Fn);
+    this.expect(TokenKind.LParen);
+    const error_binding = this.expect(TokenKind.Ident).value;
+    this.expect(TokenKind.RParen);
+    const handler = this.parse_block_expr();
+    const span = this.make_span(left.span.start, handler.span.end);
+    return { kind: "catch_expr", expr: left, error_binding, handler, span };
+  }
+
+  // ============================================================
+  // String interpolation
+  // ============================================================
+
+  private parse_string_interp(): StringInterpExpr {
+    const start_tok = this.advance(); // consume StringInterpStart
+    const parts: (string | Expr)[] = [];
+
+    if (start_tok.value.length > 0) {
+      parts.push(start_tok.value);
+    }
+
+    // Parse expression inside ${}
+    parts.push(this.parse_expr());
+
+    // Continue with middle/end tokens
+    while (true) {
+      const tok = this.peek();
+      if (tok.kind === TokenKind.StringInterpMiddle) {
+        this.advance();
+        if (tok.value.length > 0) {
+          parts.push(tok.value);
+        }
+        parts.push(this.parse_expr());
+      } else if (tok.kind === TokenKind.StringInterpEnd) {
+        this.advance();
+        if (tok.value.length > 0) {
+          parts.push(tok.value);
+        }
+        break;
+      } else {
+        // Unexpected - treat as end
+        break;
+      }
+    }
+
+    const end = this.current_span_start();
+    return {
+      kind: "string_interp", parts,
+      span: this.make_span(start_tok.span.start, end),
+    };
+  }
+
+  // ============================================================
+  // Block expression
+  // ============================================================
+
+  private parse_block_expr(): BlockExpr {
+    const start = this.current_span_start();
+    this.expect(TokenKind.LBrace);
+    const stmts: Stmt[] = [];
+    let tail: Expr | undefined;
+
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      // Check if this is the last expression (tail) without semicolons
+      const save_pos = this.pos;
+      const stmt = this.parse_stmt();
+
+      if (this.check(TokenKind.RBrace)) {
+        // This was the last thing in the block
+        // If it's an expression statement without a trailing semi, it's a tail expr
+        if (stmt.kind === "expr_stmt") {
+          tail = (stmt as ExprStmt).expr;
+        } else {
+          stmts.push(stmt);
+        }
+      } else {
+        stmts.push(stmt);
+      }
+    }
+
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "block", stmts, tail,
+      span: this.make_span(start, end),
+    };
+  }
+
+  // ============================================================
+  // If expression
+  // ============================================================
+
+  private parse_if_expr(): IfExpr {
+    const start = this.current_span_start();
+    this.expect(TokenKind.If);
+    const condition = this.parse_expr();
+    const then_branch = this.parse_block_expr();
+    let else_branch: BlockExpr | IfExpr | undefined;
+    if (this.try_consume(TokenKind.Else)) {
+      if (this.check(TokenKind.If)) {
+        else_branch = this.parse_if_expr();
+      } else {
+        else_branch = this.parse_block_expr();
+      }
+    }
+    const end = this.current_span_start();
+    return {
+      kind: "if_expr", condition, then_branch, else_branch,
+      span: this.make_span(start, end),
+    };
+  }
+
+  // ============================================================
+  // Match expression
+  // ============================================================
+
+  private parse_match_expr(): MatchExpr {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Match);
+    const scrutinee = this.parse_expr();
+    this.expect(TokenKind.LBrace);
+    const arms: MatchArm[] = [];
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      arms.push(this.parse_match_arm());
+      this.try_consume(TokenKind.Comma);
+    }
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "match_expr", scrutinee, arms,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_match_arm(): MatchArm {
+    const start = this.current_span_start();
+    const pattern = this.parse_pattern();
+    let guard: Expr | undefined;
+    if (this.check(TokenKind.If)) {
+      this.advance();
+      guard = this.parse_expr();
+    }
+    this.expect(TokenKind.FatArrow);
+    const body = this.parse_expr();
+    const end = this.current_span_start();
+    return { pattern, guard, body, span: this.make_span(start, end) };
+  }
+
+  // ============================================================
+  // Patterns
+  // ============================================================
+
+  private parse_pattern(): Pattern {
+    const tok = this.peek();
+    const start = this.current_span_start();
+
+    // Wildcard
+    if (tok.kind === TokenKind.Ident && tok.value === "_") {
+      this.advance();
+      return { kind: "wildcard", span: tok.span } as WildcardPattern;
+    }
+
+    // Literal patterns
+    if (tok.kind === TokenKind.IntLit) {
+      this.advance();
+      return { kind: "literal", value: parseInt(tok.value, 10), span: tok.span } as LiteralPattern;
+    }
+    if (tok.kind === TokenKind.FloatLit) {
+      this.advance();
+      return { kind: "literal", value: parseFloat(tok.value), span: tok.span } as LiteralPattern;
+    }
+    if (tok.kind === TokenKind.StringLit) {
+      this.advance();
+      return { kind: "literal", value: tok.value, span: tok.span } as LiteralPattern;
+    }
+    if (tok.kind === TokenKind.True) {
+      this.advance();
+      return { kind: "literal", value: true, span: tok.span } as LiteralPattern;
+    }
+    if (tok.kind === TokenKind.False) {
+      this.advance();
+      return { kind: "literal", value: false, span: tok.span } as LiteralPattern;
+    }
+
+    // Constructor pattern or binding pattern
+    if (tok.kind === TokenKind.Ident) {
+      this.advance();
+      const name = tok.value;
+
+      // Constructor pattern: Name(pat, pat, ...)
+      if (this.check(TokenKind.LParen)) {
+        this.advance(); // consume '('
+        const fields: Pattern[] = [];
+        if (!this.check(TokenKind.RParen)) {
+          fields.push(this.parse_pattern());
+          while (this.try_consume(TokenKind.Comma)) {
+            if (this.check(TokenKind.RParen)) break;
+            fields.push(this.parse_pattern());
+          }
+        }
+        this.expect(TokenKind.RParen);
+        const end = this.current_span_start();
+        return {
+          kind: "constructor", name, fields,
+          span: this.make_span(start, end),
+        } as ConstructorPattern;
+      }
+
+      // Binding pattern
+      return { kind: "binding", name, span: tok.span } as BindingPattern;
+    }
+
+    throw this.error(`Unexpected token '${tok.value}' in pattern`);
+  }
+
+  // ============================================================
+  // Handle expression
+  // ============================================================
+
+  private parse_handle_expr(): HandleExpr {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Handle);
+    const body = this.parse_block_expr();
+    this.expect(TokenKind.With);
+    this.expect(TokenKind.LBrace);
+    const handlers: EffectHandler[] = [];
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      handlers.push(this.parse_effect_handler());
+      this.try_consume(TokenKind.Comma);
+    }
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "handle_expr", body, handlers,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_effect_handler(): EffectHandler {
+    const start = this.current_span_start();
+    // effect.op(params) => body
+    const effect_name = this.expect(TokenKind.Ident).value;
+    this.expect(TokenKind.Dot);
+    const op_name = this.expect(TokenKind.Ident).value;
+    this.expect(TokenKind.LParen);
+    const params = this.parse_params();
+    this.expect(TokenKind.RParen);
+    // Optional resume name: not yet in syntax, could be added later
+    this.expect(TokenKind.FatArrow);
+    const body = this.parse_expr();
+    const end = this.current_span_start();
+    return {
+      effect_name, op_name, params, body,
+      span: this.make_span(start, end),
+    };
+  }
+
+  // ============================================================
+  // Lambda expression
+  // ============================================================
+
+  private parse_lambda_expr(): LambdaExpr {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Fn);
+    this.expect(TokenKind.LParen);
+    const params = this.parse_params();
+    this.expect(TokenKind.RParen);
+    const return_type = this.try_consume(TokenKind.Arrow) ? this.parse_type_expr() : undefined;
+    const body = this.parse_block_expr() as Expr;
+    const end = this.current_span_start();
+    return {
+      kind: "lambda", params, return_type, body,
+      span: this.make_span(start, end),
+    };
+  }
+
+  // ============================================================
+  // For expression (simplified — treated as block expr wrapper)
+  // ============================================================
+
+  private parse_for_expr(): Expr {
+    const start = this.current_span_start();
+    this.expect(TokenKind.For);
+    // for name in expr { body }
+    const _binding = this.expect(TokenKind.Ident).value;
+    this.expect(TokenKind.In);
+    const _iter = this.parse_expr();
+    const body = this.parse_block_expr();
+    // For now, represent as a block (will be properly typed later)
+    return body;
+  }
+
+  // ============================================================
+  // Struct literal
+  // ============================================================
+
+  private parse_struct_literal(name: string, start: Position): StructLitExpr {
+    this.expect(TokenKind.LBrace);
+    const fields: StructFieldInit[] = [];
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      const f_start = this.current_span_start();
+      const f_name = this.expect(TokenKind.Ident).value;
+      this.expect(TokenKind.Colon);
+      const f_value = this.parse_expr();
+      const f_end = this.current_span_start();
+      fields.push({ name: f_name, value: f_value, span: this.make_span(f_start, f_end) });
+      this.try_consume(TokenKind.Comma);
+    }
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "struct_lit", name, type_args: [], fields,
+      span: this.make_span(start, end),
+    };
+  }
+
+  // ============================================================
+  // Token helpers
+  // ============================================================
+
+  private peek(): Token {
+    if (this.pos >= this.tokens.length) {
+      const last = this.tokens[this.tokens.length - 1];
+      return last; // should be EOF
+    }
+    return this.tokens[this.pos];
+  }
+
+  private advance(): Token {
+    const tok = this.tokens[this.pos];
+    this.pos++;
+    return tok;
+  }
+
+  private check(kind: TokenKind): boolean {
+    return this.peek().kind === kind;
+  }
+
+  private try_consume(kind: TokenKind): boolean {
+    if (this.check(kind)) {
+      this.advance();
+      return true;
+    }
+    return false;
+  }
+
+  private expect(kind: TokenKind): Token {
+    const tok = this.peek();
+    if (tok.kind !== kind) {
+      throw this.error(`Expected '${kind}', got '${tok.value}' (${tok.kind})`);
+    }
+    return this.advance();
+  }
+
+  private at_end(): boolean {
+    return this.peek().kind === TokenKind.Eof;
+  }
+
+  private current_span_start(): Position {
+    const tok = this.peek();
+    return tok.span.start;
+  }
+
+  private make_span(start: Position, end: Position): Span {
+    return { file: this.file, start, end };
+  }
+
+  private is_uppercase(ch: string): boolean {
+    return ch >= "A" && ch <= "Z";
+  }
+
+  private error(msg: string): Error {
+    const tok = this.peek();
+    const loc = `${this.file}:${tok.span.start.line}:${tok.span.start.column}`;
+    return new Error(`Parse error at ${loc}: ${msg}`);
+  }
+}
