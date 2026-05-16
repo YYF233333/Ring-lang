@@ -67,7 +67,7 @@ Trait 泛型约束：
 fn sort<T: Ord>(list: List<T>) -> List<T> { ... }
 
 fn serialize_sorted<T: Ord + Serialize>(list: List<T>) -> Bytes {
-    list |> sort() |> map(to_bytes) |> concat()
+    list.sort().map(to_bytes).concat()
 }
 
 trait Collection {
@@ -97,10 +97,10 @@ struct Portfolio {
 }
 
 let x = 42
-divide(1.0, x)      -- 编译器证明 42 != 0 ✓
+divide(1.0, x)      // 编译器证明 42 != 0 ✓
 
 let y = read_input()
-divide(1.0, y)      -- 编译器插入运行时检查，失败触发 fail effect
+divide(1.0, y)      // 编译器插入运行时检查，失败触发 fail effect
 ```
 
 ### 1.3 Dependent Types Lite
@@ -136,8 +136,8 @@ fn greet(person: {name: Str, ..rest}) -> Str {
 struct User    { name: Str, age: Int, email: Str }
 struct Company { name: Str, industry: Str }
 
-greet(User { ... })       -- ✓
-greet(Company { ... })    -- ✓
+greet(User { ... })       // ✓
+greet(Company { ... })    // ✓
 
 fn with_timestamp(r: {..rest}) -> {timestamp: Int, ..rest} {
     { ...r, timestamp: now() }
@@ -149,25 +149,25 @@ fn with_timestamp(r: {..rest}) -> {timestamp: Int, ..rest} {
 `Option<T>` 作为数据类型存在（struct 字段需要它），但与 fail effect 通过 `?` 和 `try` 双向桥接。用户不需要关心底层区分——`or` 两边都吃。
 
 ```
--- Option 是数据类型，T? 是 Option<T> 的糖
+// Option 是数据类型，T? 是 Option<T> 的糖
 enum Option<T> { some(T), none }
 
 struct User {
     name:     Str,
-    nickname: Str?,               -- 数据层面的"有或没有"
+    nickname: Str?,               // 数据层面的"有或没有"
 }
 
--- ? 后缀：Option → fail effect（提升）
+// ? 后缀：Option → fail effect（提升）
 fn get_nickname(user: User) -> Str {
-    user.nickname?                -- none → raise(Unit)，自动冒泡
+    user.nickname?                // none → raise(Unit)，自动冒泡
 }
 
--- try 块：fail effect → Option（捕获）
+// try 块：fail effect → Option（捕获）
 let maybe_user: User? = try { find_user(42) }
 
--- or 同时作用于 Option 值和 fail effect
-let nick = user.nickname or "匿名"         -- Option 层面
-let user = find_user(42) or default_user()  -- fail effect 层面
+// or 同时作用于 Option 值和 fail effect
+let nick = user.nickname or "匿名"         // Option 层面
+let user = find_user(42) or default_user()  // fail effect 层面
 ```
 
 设计原则：**Option 是数据，fail 是计算。`?` 从数据进入计算，`try` 从计算回到数据。`or` 是统一的兜底语法。**
@@ -177,17 +177,17 @@ let user = find_user(42) or default_user()  -- fail effect 层面
 默认不可变值捕获。共享可变状态通过 `Cell<T>` 显式标记：
 
 ```
--- 不可变捕获（默认，安全）
+// 不可变捕获（默认，安全）
 let x = 10
-let f = fn() { x + 1 }          -- 捕获 x 的副本
+let f = fn() { x + 1 }          // 捕获 x 的副本
 
--- 共享可变状态用 Cell
+// 共享可变状态用 Cell
 let counter = Cell(0)
 let inc = fn() { counter.update(fn(n) { n + 1 }) }
 let get = fn() { counter.get() }
 
 inc(); inc(); inc()
-get()  -- 3
+get()  // 3
 ```
 
 Cell 的操作带 `mut` effect，自动被推断和追踪：
@@ -199,8 +199,8 @@ impl Cell<T> {
     fn update(self, f: fn(T) -> T) -> Unit with {mut}
 }
 
--- 用了 Cell 的代码自动带 mut effect
--- IDE 幽灵标注会显示
+// 用了 Cell 的代码自动带 mut effect
+// IDE 幽灵标注会显示
 ```
 
 闭包本身无特殊规则——它就是捕获值的函数。可变性在 Cell 上，不在闭包上。GC 兜底意味着不需要 borrow checker，Cell.update 接受函数而非暴露引用，不会有 RefCell 式的运行时 panic。
@@ -240,7 +240,7 @@ effect mut<S> {
 你不写 effect 标注，编译器全推断：
 
 ```
--- 你写的：
+// 你写的：
 fn load_portfolio(path: Str) -> Portfolio {
     let raw = io.read(path)
     let data = json.parse(raw)
@@ -248,9 +248,9 @@ fn load_portfolio(path: Str) -> Portfolio {
     Portfolio { weights, assets: data.assets }
 }
 
--- 编译器推断的完整签名（IDE hover 可见）：
--- fn load_portfolio(path: Str) -> Portfolio
---     with {io, fail<ParseError | ValidationError>}
+// 编译器推断的完整签名（IDE hover 可见）：
+// fn load_portfolio(path: Str) -> Portfolio
+//     with {io, fail<ParseError | ValidationError>}
 ```
 
 ### 2.3 错误处理 4 层甜度
@@ -259,11 +259,11 @@ fn load_portfolio(path: Str) -> Portfolio {
 
 ```
 fn load_portfolio(path: Str) -> Portfolio {
-    let raw = io.read(path)       -- io + fail 自动冒泡
-    let data = json.parse(raw)    -- fail 自动冒泡
-    validate(data)                 -- fail 自动冒泡
+    let raw = io.read(path)       // io + fail 自动冒泡
+    let data = json.parse(raw)    // fail 自动冒泡
+    validate(data)                 // fail 自动冒泡
 }
--- 不需要 ? 或 try，effect 天然向上传播
+// 不需要 ? 或 try，effect 天然向上传播
 ```
 
 **层级 1：兜底——`or` 表达式**
@@ -338,23 +338,23 @@ fn retry<T, E>(times: Int, action: fn() -> T with {fail<E>}) -> T with {fail<E>}
 冒泡点是人的需求，不是编译器的需求。由 IDE 层解决：
 
 ```
--- IDE 模式 A：行尾幽灵文字
+// IDE 模式 A：行尾幽灵文字
 let raw = io.read(path)           ░ io, fail<IoError> ░
 let data = json.parse(raw)        ░ fail<ParseError> ░
 
--- IDE 模式 B：底色高亮
--- 纯表达式 = 无底色
--- fail 效果 = 淡黄底色
--- io 效果 = 淡蓝底色
--- async 效果 = 淡紫底色
+// IDE 模式 B：底色高亮
+// 纯表达式 = 无底色
+// fail 效果 = 淡黄底色
+// io 效果 = 淡蓝底色
+// async 效果 = 淡紫底色
 ```
 
 Formatter 可选将 effect 标注固化为源码注释：
 
 ```
--- --: 前缀注释，formatter 自动维护
-let raw = io.read(path)           --: io, fail<IoError>
-let data = json.parse(raw)        --: fail<ParseError>
+//: 前缀注释，formatter 自动维护
+let raw = io.read(path)           //: io, fail<IoError>
+let data = json.parse(raw)        //: fail<ParseError>
 ```
 
 ---
@@ -365,17 +365,17 @@ let data = json.parse(raw)        --: fail<ParseError>
 
 ```
 -- 局部推断
-let x = 42                        -- Int
-let names = ["a", "b", "c"]      -- List<Str>
+let x = 42                        // Int
+let names = ["a", "b", "c"]      // List<Str>
 
--- 双向推断
+// 双向推断
 let f: fn(Int) -> Bool = fn(x) { x > 0 }
 
--- 全局约束求解 + row poly
+// 全局约束求解 + row poly
 fn process(items) {
-    items |> filter(fn(x) { x.age > 18 }) |> map(fn(x) { x.name })
+    items.filter(fn(x) { x.age > 18 }).map(fn(x) { x.name })
 }
--- 推断: items: List<{age: Int, name: Str, ..rest}>
+// 推断: items: List<{age: Int, name: Str, ..rest}>
 ```
 
 ### 3.2 标注等级由 Formatter 维护
@@ -399,12 +399,12 @@ materialize_as = "comment"      # comment | annotation | none
 工作流：你手写 level 0 代码，`lang fmt` 按配置等级自动插入/更新标注。改了逻辑，标注自动跟着变。
 
 ```
--- 你写的（level 0）：
+// 你写的（level 0）：
 fn process(items) {
     items.filter(fn(x) { x.age > 18 }).map(fn(x) { x.name })
 }
 
--- lang fmt 后（level 2）：
+// lang fmt 后（level 2）：
 fn process(items: List<User>) -> List<Str> {
     items.filter(fn(x) { x.age > 18 }).map(fn(x) { x.name })
 }
@@ -435,8 +435,8 @@ impl Tree<T> {
     fn map<U>(self, f: fn(T) -> U) -> Tree<U> { ... }
 }
 
-my_list.map(fn(x) { x + 1 })   -- 解析到 List.map
-my_tree.map(fn(x) { x + 1 })   -- 解析到 Tree.map
+my_list.map(fn(x) { x + 1 })   // 解析到 List.map
+my_tree.map(fn(x) { x + 1 })   // 解析到 Tree.map
 ```
 
 解析优先级：impl 块 > trait 实现 > 作用域内自由函数（UFCS 兜底）。
@@ -452,15 +452,13 @@ Functor.map(my_tree, f)
 
 ```
 fn double(x: Int) -> Int { x * 2 }
-42.double()                      -- 无 Int.double impl，退到 UFCS
+42.double()                      // 无 Int.double impl，退到 UFCS
 ```
 
-管道运算符保留作为等价的函数在前风格：
+链式调用是唯一的方法调用风格——一种事只有一种写法：
 
 ```
--- 等价写法，你选
 users.filter(pred).map(f).sort()
-users |> filter(pred) |> map(f) |> sort()
 ```
 
 ### 4.2 impl 的定位
@@ -489,7 +487,7 @@ struct User { name: Str, age: Int }
 impl Describable for User {
     fn name(self) -> Str { self.name }
     fn kind(self) -> Str { "用户" }
-    -- describe 自动获得
+    // describe 自动获得
 }
 ```
 
@@ -513,7 +511,7 @@ impl Serializable for User {
     fn to_json(self) -> Str { ... }
 }
 
--- User 现在有 .describe() + .log() + .to_json()
+// User 现在有 .describe() + .log() + .to_json()
 ```
 
 ### 5.3 委托（替代继承的复用机制）
@@ -530,11 +528,11 @@ impl Admin {
 
 impl Describable for Admin {
     fn kind(self) -> Str { "管理员" }
-    -- name 和 describe 仍委托到 base
+    // name 和 describe 仍委托到 base
 }
 
-admin.describe()    -- "管理员: yufeng"
-admin.log("login")  -- 转发到 User 的 Loggable 实现
+admin.describe()    // "管理员: yufeng"
+admin.log("login")  // 转发到 User 的 Loggable 实现
 ```
 
 ### 5.4 Row Poly + Trait 交叉
@@ -551,7 +549,7 @@ fn greet_and_log<T: Loggable>(entity: {name: Str, ..} & T) -> Str {
 ```
 fn process_all(items: List<dyn Describable>) {
     for item in items {
-        print(item.describe())     -- 动态分发
+        print(item.describe())     // 动态分发
     }
 }
 
@@ -679,7 +677,7 @@ handle {
     let r = fetch_portfolio_data()
     process(r)
 } with {
-    async => runtime.multi_thread,   -- 或 runtime.single（WASM）
+    async => runtime.multi_thread,   // 或 runtime.single（WASM）
 }
 ```
 
@@ -792,10 +790,11 @@ extern "npm:express" {
 **语法借用——最大化知识迁移：**
 - `fn`/`let`/`var`/`struct`/`enum`/`match`/`trait`/`impl` 全部来自 Rust
 - `"${x}"` 字符串插值来自 JS/Kotlin
+- `//` 行注释来自 C/JS/Rust（最大化 LLM 已有知识迁移）
 - `or` 来自 Python
 - 不发明新关键字，除非语义确实是新的（如 `handle...with`）
 
-**一种事只有一种写法：** TS 里定义数据结构有 interface/type/class/literal 四种写法，LLM 每次选不同的导致大型代码库风格混乱。本语言只有 `struct`，错误只有 `raise`，异步只有 `spawn/await`。LLM 的输出天然一致。
+**一种事只有一种写法：** TS 里定义数据结构有 interface/type/class/literal 四种写法，LLM 每次选不同的导致大型代码库风格混乱。本语言只有 `struct`，错误只有 `raise`，异步只有 `spawn/await`，方法调用只有 `.method()` 链式风格（无管道运算符）。LLM 的输出天然一致。
 
 **模块签名 = LLM 的完美上下文压缩：** LLM 上下文窗口有限。TS 要读完实现才知道函数会抛什么异常；本语言的模块签名包含完整契约（类型+效果），一行顶 TS 几十行，LLM 用更少 token 获得更多 API 信息。
 
@@ -930,8 +929,8 @@ function greet(person) { return "hello, " + person.name; }
 -- 如果类型是 List<Item>（未 refined）
 -- 检查提升到循环入口，一次性验证
 for item in items {
-    assert_refine(item)    -- 只在入口一次
-    compute(item)           -- 内部不再检查
+    assert_refine(item)    // 只在入口一次
+    compute(item)           // 内部不再检查
 }
 ```
 
