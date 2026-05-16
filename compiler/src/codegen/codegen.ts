@@ -84,12 +84,18 @@ class CodeGenerator {
       this.emit_raw("");
     }
 
-    // Auto-call main() if present
-    const has_main = program.decls.some(
+    // Auto-call main() if present, with top-level evidence if needed
+    const main_decl = program.decls.find(
       d => d.kind === "fn_decl" && d.name === "main"
-    );
-    if (has_main) {
-      this.emit("main();");
+    ) as HFnDecl | undefined;
+    if (main_decl) {
+      const ev_params = this.get_evidence_params(main_decl.effects);
+      if (ev_params.length > 0) {
+        this.emit_toplevel_evidence(main_decl.effects);
+        this.emit(`main(${ev_params.join(", ")});`);
+      } else {
+        this.emit("main();");
+      }
     }
 
     return this.lines.join("\n");
@@ -139,6 +145,32 @@ class CodeGenerator {
     }
     effect_names.sort();
     return effect_names.map(n => evidence_param_name(n));
+  }
+
+  private emit_toplevel_evidence(effects: { effects: { kind: string; name?: string }[] }): void {
+    const effect_names: string[] = [];
+    for (const e of effects.effects) {
+      let name: string;
+      if (e.kind === "io") name = "io";
+      else if (e.kind === "fail") name = "fail";
+      else if (e.kind === "mut") name = "mut";
+      else name = (e as { name?: string }).name ?? "unknown";
+      if (!effect_names.includes(name)) {
+        effect_names.push(name);
+      }
+    }
+    effect_names.sort();
+
+    for (const name of effect_names) {
+      const ev_name = evidence_param_name(name);
+      if (name === "io") {
+        this.emit(`const ${ev_name} = { read: (p) => require("fs").readFileSync(p, "utf-8"), write: (p, d) => require("fs").writeFileSync(p, d, "utf-8") };`);
+      } else if (name === "fail") {
+        this.emit(`const ${ev_name} = { raise: (error) => { throw error; } };`);
+      } else {
+        this.emit(`const ${ev_name} = {};`);
+      }
+    }
   }
 
   private emit_struct_decl(decl: HStructDecl): void {

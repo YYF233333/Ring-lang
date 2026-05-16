@@ -814,4 +814,45 @@ describe("codegen", () => {
       assert.ok(js.includes("try"), "Should have try/catch");
     });
   });
+
+  describe("top-level evidence injection", () => {
+    it("provides __ev_io and __ev_fail when main has effects", () => {
+      const io_effect: Effect = { kind: "io" };
+      const fail_effect: Effect = { kind: "fail", error_type: STR };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "main",
+        type_params: [],
+        params: [],
+        return_type: UNIT,
+        effects: effect_row(io_effect, fail_effect),
+        body: block([]),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("main(__ev_fail, __ev_io)"), "Should call main with evidence, got: " + js);
+      assert.ok(js.includes("const __ev_io = {"), "Should define top-level __ev_io");
+      assert.ok(js.includes("const __ev_fail = {"), "Should define top-level __ev_fail");
+    });
+
+    it("calls main() without evidence when pure", () => {
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "main",
+        type_params: [],
+        params: [],
+        return_type: UNIT,
+        effects: EMPTY_ROW,
+        body: block([]),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("main();"), "Should call main() with no args, got: " + js);
+      assert.ok(!js.includes("const __ev_"), "Should not define evidence for pure main");
+    });
+  });
 });
