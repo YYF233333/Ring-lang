@@ -549,6 +549,46 @@ describe("codegen", () => {
     });
   });
 
+  describe("evidence params in function signatures", () => {
+    it("adds __ev_ params for functions with effects", () => {
+      const io_effect: Effect = { kind: "io" };
+      const fail_effect: Effect = { kind: "fail", error_type: STR };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "load",
+        type_params: [],
+        params: [{ name: "path", type: STR }],
+        return_type: STR,
+        effects: effect_row(io_effect, fail_effect),
+        body: block([], str_lit("data")),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("function load(path, __ev_fail, __ev_io)"), "Expected evidence params sorted alphabetically, got: " + js);
+      assert.ok(!js.includes("function*"), "Should not be a generator");
+    });
+
+    it("does not add evidence params for pure functions", () => {
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "pure",
+        type_params: [],
+        params: [{ name: "x", type: INT }],
+        return_type: INT,
+        effects: EMPTY_ROW,
+        body: block([], ident("x")),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("function pure(x)"), "Got: " + js);
+      assert.ok(!js.includes("__ev_"), "Pure function should have no evidence params");
+    });
+  });
+
   describe("effect_op codegen", () => {
     it("generates evidence method call for io.read", () => {
       const io_effect: Effect = { kind: "io" };

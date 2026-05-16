@@ -120,13 +120,29 @@ class CodeGenerator {
     const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : safe_ident(decl.name);
     const param_names = decl.params.map(p => safe_ident(p.name));
     const dict_params = (decl.trait_bounds ?? []).map(b => `__${b.type_param}_${b.trait_name}`);
-    const all_params = [...param_names, ...dict_params].join(", ");
-    const star = this.has_non_fail_effects(decl.effects) ? "*" : "";
-    this.emit(`function${star} ${name}(${all_params}) {`);
+    const ev_params = this.get_evidence_params(decl.effects);
+    const all_params = [...param_names, ...dict_params, ...ev_params].join(", ");
+    this.emit(`function ${name}(${all_params}) {`);
     this.push_indent();
     this.emit_block_body(decl.body);
     this.pop_indent();
     this.emit("}");
+  }
+
+  private get_evidence_params(effects: { effects: { kind: string; name?: string }[] }): string[] {
+    const effect_names: string[] = [];
+    for (const e of effects.effects) {
+      let name: string;
+      if (e.kind === "io") name = "io";
+      else if (e.kind === "fail") name = "fail";
+      else if (e.kind === "mut") name = "mut";
+      else name = (e as { name?: string }).name ?? "unknown";
+      if (!effect_names.includes(name)) {
+        effect_names.push(name);
+      }
+    }
+    effect_names.sort();
+    return effect_names.map(n => evidence_param_name(n));
   }
 
   private emit_struct_decl(decl: HStructDecl): void {
