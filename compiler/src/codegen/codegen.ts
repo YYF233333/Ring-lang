@@ -4,8 +4,10 @@ import {
   HProgram, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl,
   HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock, HMatchArm,
   variant_js_name, trait_dict_name, evidence_param_name,
+  trait_bound_param_name, ENUM_TAG_FIELD,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
+import { Effect, EffectRow } from "../types/index.js";
 import { assertNever } from "../errors.js";
 import { RUNTIME_CODE } from "./runtime.js";
 
@@ -126,7 +128,7 @@ class CodeGenerator {
   private emit_fn_decl(decl: HFnDecl, prefix?: string): void {
     const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : safe_ident(decl.name);
     const param_names = decl.params.map(p => safe_ident(p.name));
-    const dict_params = (decl.trait_bounds ?? []).map(b => `__${b.type_param}_${b.trait_name}`);
+    const dict_params = (decl.trait_bounds ?? []).map(b => trait_bound_param_name(b.type_param, b.trait_name));
     const ev_params = this.get_evidence_params(decl.effects);
     const all_params = [...param_names, ...dict_params, ...ev_params].join(", ");
     this.emit(`function ${name}(${all_params}) {`);
@@ -136,35 +138,12 @@ class CodeGenerator {
     this.emit("}");
   }
 
-  private get_evidence_params(effects: { effects: { kind: string; name?: string }[] }): string[] {
-    const effect_names: string[] = [];
-    for (const e of effects.effects) {
-      let name: string;
-      if (e.kind === "io") name = "io";
-      else if (e.kind === "fail") name = "fail";
-      else if (e.kind === "mut") name = "mut";
-      else name = (e as { name?: string }).name ?? "unknown";
-      if (!effect_names.includes(name)) {
-        effect_names.push(name);
-      }
-    }
-    effect_names.sort();
-    return effect_names.map(n => evidence_param_name(n));
+  private get_evidence_params(effects: EffectRow): string[] {
+    return extract_effect_names(effects).map(n => evidence_param_name(n));
   }
 
-  private emit_toplevel_evidence(effects: { effects: { kind: string; name?: string }[] }): void {
-    const effect_names: string[] = [];
-    for (const e of effects.effects) {
-      let name: string;
-      if (e.kind === "io") name = "io";
-      else if (e.kind === "fail") name = "fail";
-      else if (e.kind === "mut") name = "mut";
-      else name = (e as { name?: string }).name ?? "unknown";
-      if (!effect_names.includes(name)) {
-        effect_names.push(name);
-      }
-    }
-    effect_names.sort();
+  private emit_toplevel_evidence(effects: EffectRow): void {
+    const effect_names = extract_effect_names(effects);
 
     for (const name of effect_names) {
       const ev_name = evidence_param_name(name);
@@ -198,14 +177,14 @@ class CodeGenerator {
       const js_name = variant_js_name(decl.name, variant.name);
       if (variant.fields.length === 0) {
         this.emit(
-          `const ${js_name} = Object.freeze({ _tag: "${variant.name}" });`
+          `const ${js_name} = Object.freeze({ ${ENUM_TAG_FIELD}: "${variant.name}" });`
         );
       } else {
         const params = variant.fields.map((_, i) => `_${i}`).join(", ");
         this.emit(`function ${js_name}(${params}) {`);
         this.push_indent();
         const field_assigns = variant.fields.map((_, i) => `_${i}`).join(", ");
-        this.emit(`return { _tag: "${variant.name}", ${field_assigns} };`);
+        this.emit(`return { ${ENUM_TAG_FIELD}: "${variant.name}", ${field_assigns} };`);
         this.pop_indent();
         this.emit("}");
       }
@@ -361,11 +340,9 @@ class CodeGenerator {
     }
   }
 
-  private get_callee_evidence_args(callee_type: { kind: string; effects?: { effects: { kind: string; name?: string }[] } }): string {
-    if (callee_type.kind !== "fn") return "";
-    const effects = (callee_type as { effects?: { effects: { kind: string; name?: string }[] } }).effects;
-    if (!effects || effects.effects.length === 0) return "";
-    return this.get_evidence_params(effects).join(", ");
+  private get_callee_evidence_args(callee_type: { kind: string; effects?: EffectRow }): string {
+    if (callee_type.kind !== "fn" || !callee_type.effects || callee_type.effects.effects.length === 0) return "";
+    return this.get_evidence_params(callee_type.effects).join(", ");
   }
 
   private gen_call(expr: HExpr & { kind: "call" }): string {
@@ -432,7 +409,7 @@ class CodeGenerator {
     // Determine if this is a tag-based match (enum) or value-based
     const has_constructor = expr.arms.some(a => a.pattern.kind === "constructor");
     if (has_constructor) {
-      parts.push("  switch (__m._tag) {");
+      parts.push(`  switch (__m.${ENUM_TAG_FIELD}) {`);
       for (const arm of expr.arms) {
         const arm_code = this.gen_match_arm(arm);
         parts.push(arm_code);
@@ -503,7 +480,9 @@ class CodeGenerator {
       case "literal":
         return `${target} === ${JSON.stringify(pat.value)}`;
       case "constructor":
-        return `${target}._tag === "${pat.name}"`;
+        return `${target}.${ENUM_TAG_FIELD} === "${pat.name}"`;
+      default:
+        return assertNever(pat, "gen_pattern_condition");
     }
   }
 
@@ -522,6 +501,8 @@ class CodeGenerator {
           }
           return "";
         }).join("");
+      default:
+        return assertNever(pat, "gen_pattern_bindings");
     }
   }
 
@@ -686,6 +667,29 @@ class CodeGenerator {
     const args = expr.args.map(a => this.gen_expr(a)).join(", ");
     return `${ev_name}.${expr.op_name}(${args})`;
   }
+}
+
+// ============================================================
+// Utilities
+// ============================================================
+
+function effect_name(e: Effect): string {
+  switch (e.kind) {
+    case "io": return "io";
+    case "fail": return "fail";
+    case "mut": return "mut";
+    case "custom": return e.name;
+  }
+}
+
+function extract_effect_names(effects: EffectRow): string[] {
+  const names: string[] = [];
+  for (const e of effects.effects) {
+    const n = effect_name(e);
+    if (!names.includes(n)) names.push(n);
+  }
+  names.sort();
+  return names;
 }
 
 // ============================================================

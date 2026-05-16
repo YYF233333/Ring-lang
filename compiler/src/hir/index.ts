@@ -346,3 +346,11 @@ export function trait_dict_name(type_name: string, trait_name: string): string {
 export function evidence_param_name(effect_name: string): string {
   return `__ev_${effect_name}`;
 }
+
+// JS codegen naming convention for trait bound dictionary parameters
+export function trait_bound_param_name(type_param: string, trait_name: string): string {
+  return `__${type_param}_${trait_name}`;
+}
+
+// JS codegen enum discriminator field name
+export const ENUM_TAG_FIELD = "_tag";

@@ -16,7 +16,7 @@ import {
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit,
-  variant_js_name, trait_dict_name,
+  variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
 import { TypeEnv, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
 import { Substitution, empty_subst, unify, apply, apply_to_effect_row } from "./unify.js";
@@ -1003,7 +1003,7 @@ export class InferEngine {
                 fb => fb.type_param_var_id === concrete.id && fb.trait_name === bound.trait_name
               );
               if (matching_bound) {
-                resolved_dicts.push(`__${matching_bound.type_param_name}_${matching_bound.trait_name}`);
+                resolved_dicts.push(trait_bound_param_name(matching_bound.type_param_name, matching_bound.trait_name));
                 found = true;
               }
             }
@@ -1095,7 +1095,7 @@ export class InferEngine {
             const tm = trait_def.methods.find(m => m.name === method);
             if (tm) {
               method_type = this.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars });
-              dict_dispatch = { dict_param: `__${fb.type_param_name}_${fb.trait_name}`, method };
+              dict_dispatch = { dict_param: trait_bound_param_name(fb.type_param_name, fb.trait_name), method };
               break;
             }
           }
@@ -1651,6 +1651,8 @@ export class InferEngine {
         const inner = this.resolve_type_expr(texpr.inner);
         return { kind: "option", inner };
       }
+      default:
+        return assertNever(texpr, "resolve_type_expr");
     }
   }
 

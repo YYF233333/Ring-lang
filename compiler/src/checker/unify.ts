@@ -68,18 +68,30 @@ export function apply(subst: Substitution, t: Type): Type {
 }
 
 export function apply_to_effect_row(subst: Substitution, row: EffectRow): EffectRow {
-  return {
-    effects: row.effects.map(e => {
-      if (e.kind === "fail") {
-        return { kind: "fail" as const, error_type: apply(subst, e.error_type) };
+  const effects = row.effects.map(e => {
+    if (e.kind === "fail") {
+      return { kind: "fail" as const, error_type: apply(subst, e.error_type) };
+    }
+    if (e.kind === "custom") {
+      return { kind: "custom" as const, name: e.name, type_args: e.type_args.map(a => apply(subst, a)) };
+    }
+    return e;
+  });
+
+  let tail = row.tail;
+  if (tail !== undefined) {
+    const resolved = subst.get(tail);
+    if (resolved) {
+      const chased = apply(subst, resolved);
+      if (chased.kind === "var") {
+        tail = chased.id;
+      } else {
+        tail = undefined;
       }
-      if (e.kind === "custom") {
-        return { kind: "custom" as const, name: e.name, type_args: e.type_args.map(a => apply(subst, a)) };
-      }
-      return e;
-    }),
-    tail: row.tail,
-  };
+    }
+  }
+
+  return tail !== undefined ? { effects, tail } : { effects };
 }
 
 // ============================================================
@@ -151,6 +163,45 @@ export class UnificationError extends Error {
 }
 
 /**
+ * Unify two effect rows: match effects pairwise and unify their type parameters.
+ * - fail ↔ fail: unify error_type
+ * - custom ↔ custom (same name): unify type_args
+ * - io ↔ io, mut ↔ mut: no-op (no type params)
+ * - Tails: if both open, unify tail variables
+ *
+ * Lenient: does not require exact set equality (a pure fn unifies with an effectful fn).
+ * Session 3 row polymorphism will tighten this with proper row variable solving.
+ */
+export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitution): Substitution {
+  let s = subst;
+
+  for (const ae of a.effects) {
+    if (ae.kind === "fail") {
+      for (const be of b.effects) {
+        if (be.kind === "fail") {
+          s = unify(ae.error_type, be.error_type, s);
+        }
+      }
+    } else if (ae.kind === "custom") {
+      for (const be of b.effects) {
+        if (be.kind === "custom" && be.name === ae.name) {
+          const len = Math.min(ae.type_args.length, be.type_args.length);
+          for (let i = 0; i < len; i++) {
+            s = unify(ae.type_args[i], be.type_args[i], s);
+          }
+        }
+      }
+    }
+  }
+
+  if (a.tail !== undefined && b.tail !== undefined && a.tail !== b.tail) {
+    s = unify({ kind: "var", id: a.tail }, { kind: "var", id: b.tail }, s);
+  }
+
+  return s;
+}
+
+/**
  * Unify two types, returning updated substitution.
  * Throws UnificationError on failure.
  */
@@ -202,16 +253,7 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
       s = unify(a.params[i], b.params[i], s);
     }
     s = unify(a.return_type, b.return_type, s);
-    // Unify effect rows: unify matching fail error types
-    for (const ae of a.effects.effects) {
-      if (ae.kind === "fail") {
-        for (const be of b.effects.effects) {
-          if (be.kind === "fail") {
-            s = unify(ae.error_type, be.error_type, s);
-          }
-        }
-      }
-    }
+    s = unify_effect_rows(a.effects, b.effects, s);
     return s;
   }
 
