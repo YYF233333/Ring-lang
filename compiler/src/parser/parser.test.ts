@@ -395,9 +395,11 @@ describe("Parser", () => {
       if (tail.kind !== "string_interp") return;
       assert.equal(tail.parts.length, 5);
       assert.equal(tail.parts[0], "Hello ");
-      assert.equal((tail.parts[1] as any).kind, "ident");
+      const part1 = tail.parts[1];
+      assert.ok(typeof part1 === "object" && part1.kind === "ident");
       assert.equal(tail.parts[2], ", you have ");
-      assert.equal((tail.parts[3] as any).kind, "ident");
+      const part3 = tail.parts[3];
+      assert.ok(typeof part3 === "object" && part3.kind === "ident");
       assert.equal(tail.parts[4], " items");
     });
   });
@@ -452,10 +454,6 @@ describe("Parser", () => {
       // return is a statement, so it will be in stmts (not tail, since it has a keyword)
       // Actually: return 42 is followed by }, so it becomes the last item
       // It's a return_stmt, not an expr_stmt, so it goes to stmts
-      const tail = fn_decl.body.tail;
-      // return ends up as tail because it's the last thing
-      // Actually no: parse_stmt for return creates a ReturnStmt, which is not an ExprStmt
-      // so it goes into stmts
       assert.equal(fn_decl.body.stmts.length, 1);
       assert.equal(fn_decl.body.stmts[0].kind, "return_stmt");
     });

@@ -1,6 +1,6 @@
 // Ring-lang Pattern Match Exhaustiveness Checking
 import { Pattern } from "../ast/index.js";
-import { Type, EnumType } from "../types/index.js";
+import { Type } from "../types/index.js";
 import { Substitution, apply } from "./unify.js";
 
 /**

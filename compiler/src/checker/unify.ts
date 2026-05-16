@@ -1,7 +1,6 @@
 // Ring-lang Unification Algorithm + Substitution management
 import {
-  Type, FnType, StructType, EnumType, GenericType, OptionType, TypeVar,
-  EffectRow, type_to_string,
+  Type, EffectRow, type_to_string,
 } from "../types/index.js";
 
 // ============================================================

@@ -3,9 +3,10 @@
 import {
   HProgram, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl,
   HEffectDecl, HTestDecl, HStmt, HExpr, HBlock, HMatchArm,
-  HParam, HEffectHandler,
+  variant_js_name,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
+import { assertNever } from "../errors.js";
 import { RUNTIME_CODE } from "./runtime.js";
 
 const JS_RESERVED = new Set([
@@ -103,6 +104,7 @@ class CodeGenerator {
       case "impl_decl": this.emit_impl_decl(decl); break;
       case "effect_decl": this.emit_effect_decl(decl); break;
       case "test_decl": this.emit_test_decl(decl); break;
+      default: assertNever(decl, "emit_decl");
     }
   }
 
@@ -138,15 +140,14 @@ class CodeGenerator {
 
   private emit_enum_decl(decl: HEnumDecl): void {
     for (const variant of decl.variants) {
+      const js_name = variant_js_name(decl.name, variant.name);
       if (variant.fields.length === 0) {
-        // Unit variant — constant object
         this.emit(
-          `const ${decl.name}_${variant.name} = Object.freeze({ _tag: "${variant.name}" });`
+          `const ${js_name} = Object.freeze({ _tag: "${variant.name}" });`
         );
       } else {
-        // Variant with fields — factory function
         const params = variant.fields.map((_, i) => `_${i}`).join(", ");
-        this.emit(`function ${decl.name}_${variant.name}(${params}) {`);
+        this.emit(`function ${js_name}(${params}) {`);
         this.push_indent();
         const field_assigns = variant.fields.map((_, i) => `_${i}`).join(", ");
         this.emit(`return { _tag: "${variant.name}", ${field_assigns} };`);
@@ -259,6 +260,8 @@ class CodeGenerator {
         return this.gen_lambda(expr);
       case "effect_op":
         return this.gen_effect_op(expr);
+      default:
+        return assertNever(expr, "gen_expr");
     }
   }
 
@@ -443,6 +446,8 @@ class CodeGenerator {
           return `return ${this.gen_expr(stmt.value)};`;
         }
         return "return;";
+      default:
+        return assertNever(stmt, "gen_stmt_inline");
     }
   }
 
@@ -493,20 +498,10 @@ class CodeGenerator {
 
     if (is_fail_only) {
       const body = this.gen_expr(expr.body);
-      if (expr.handlers.length === 1) {
-        const h = expr.handlers[0];
-        const catch_binding = h.params[0]?.name ?? "__err";
-        const catch_body = this.gen_expr(h.body);
-        return `(function() { try { return ${body}; } catch (${catch_binding}) { return ${catch_body}; } })()`;
-      }
-      // Multiple fail handlers — dispatch by error type
-      const catch_binding = "__err";
-      const branches = expr.handlers.map(h => {
-        const err_param = h.params[0]?.name ?? "__err";
-        const handler_body = this.gen_expr(h.body);
-        return `{ const ${err_param} = ${catch_binding}; return ${handler_body}; }`;
-      });
-      return `(function() { try { return ${body}; } catch (${catch_binding}) ${branches[0]} })()`;
+      const h = expr.handlers[expr.handlers.length - 1];
+      const catch_binding = h.params[0]?.name ?? "__err";
+      const catch_body = this.gen_expr(h.body);
+      return `(function() { try { return ${body}; } catch (${catch_binding}) { return ${catch_body}; } })()`;
     }
 
     // General effect handling via generators

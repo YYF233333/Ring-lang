@@ -83,6 +83,11 @@ export interface LlmDiagnostic {
   notes: string[];
 }
 
+// Exhaustive switch guard — causes a compile error when a new case is added but not handled.
+export function assertNever(x: never, context: string): never {
+  throw new Error(`${context}: ${(x as { kind?: string }).kind ?? x}`);
+}
+
 export function format_diagnostic_llm(d: Diagnostic): LlmDiagnostic {
   return {
     severity: d.severity,

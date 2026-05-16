@@ -4,7 +4,6 @@
 
 import { Program } from "../ast/index.js";
 import { HProgram } from "../hir/index.js";
-import { reset_type_var_counter } from "../types/index.js";
 import { InferEngine } from "./infer.js";
 
 export { TypeCheckError } from "./infer.js";
@@ -15,7 +14,6 @@ export { UnificationError } from "./unify.js";
  * Throws TypeCheckError or UnificationError on type errors.
  */
 export function check(program: Program): HProgram {
-  reset_type_var_counter();
   const engine = new InferEngine();
   return engine.check(program);
 }

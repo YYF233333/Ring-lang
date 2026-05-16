@@ -1,7 +1,6 @@
 // Ring-lang Type Environment — scope management + builtin definitions
 import {
-  Type, FnType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
-  fresh_type_var,
+  Type, TypeVar, FnType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
 } from "../types/index.js";
 
 // ============================================================
@@ -24,12 +23,14 @@ function mono(type: Type): TypeScheme {
 export interface StructDef {
   name: string;
   type_params: string[];         // type parameter names
+  type_param_vars: number[];     // type var ids used during registration (for instantiation)
   fields: { name: string; type: Type; is_pub: boolean }[];
 }
 
 export interface EnumDef {
   name: string;
   type_params: string[];
+  type_param_vars: number[];     // type var ids used during registration (for instantiation)
   variants: { name: string; fields: Type[] }[];
 }
 
@@ -52,27 +53,29 @@ export interface Scope {
 // ============================================================
 
 export class TypeEnv {
+  private next_type_var_id = 0;
   public scopes: Scope[] = [];
   public structs: Map<string, StructDef> = new Map();
   public enums: Map<string, EnumDef> = new Map();
   public effects: Map<string, EffectDef> = new Map();
-  // impl methods: target_type -> method_name -> FnType
   public impl_methods: Map<string, Map<string, TypeScheme>> = new Map();
-  // Map variant name -> enum name (for constructor resolution)
   public variant_to_enum: Map<string, string> = new Map();
 
   constructor() {
-    // Global scope
     this.scopes.push({ variables: new Map() });
     this.register_builtins();
   }
 
+  fresh_var(): TypeVar {
+    return { kind: "var", id: this.next_type_var_id++ };
+  }
+
   private register_builtins(): void {
     // print: fn<T>(T) -> ()
-    const print_var = fresh_type_var();
+    const print_var = this.fresh_var();
     this.bind("print", {
       type: { kind: "fn", params: [print_var], return_type: UNIT, effects: EMPTY_ROW } as FnType,
-      type_vars: [(print_var as any).id],
+      type_vars: [print_var.id],
     });
 
     // assert: fn(Bool) -> ()
@@ -101,7 +104,7 @@ export class TypeEnv {
     });
 
     // Built-in effect: fail with op raise(E) -> Never
-    const fail_type_var = fresh_type_var();
+    const fail_type_var = this.fresh_var();
     this.effects.set("fail", {
       name: "fail",
       type_params: ["E"],
@@ -110,13 +113,6 @@ export class TypeEnv {
       ],
     });
 
-    // Module stub: toml — Phase 2 will implement proper module system
-    const toml_parse_var = fresh_type_var();
-    this.bind("toml", mono({
-      kind: "struct", name: "Module", type_params: [], fields: [
-        { name: "parse", type: { kind: "fn", params: [STR], return_type: toml_parse_var, effects: EMPTY_ROW } as FnType, is_pub: true },
-      ],
-    }));
   }
 
   push_scope(): void {
@@ -153,14 +149,14 @@ export class TypeEnv {
     if (scheme.type_vars.length === 0) return scheme.type;
     const mapping = new Map<number, Type>();
     for (const tv of scheme.type_vars) {
-      mapping.set(tv, fresh_type_var());
+      mapping.set(tv, this.fresh_var());
     }
     return substitute_type(scheme.type, mapping);
   }
 }
 
 /** Apply a type variable mapping to a type (used during instantiation) */
-function substitute_type(t: Type, mapping: Map<number, Type>): Type {
+export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
   switch (t.kind) {
     case "int":
     case "float":

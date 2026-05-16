@@ -2,21 +2,6 @@
 // Used during type checking and inference.
 
 // ============================================================
-// Type variables (for HM inference)
-// ============================================================
-
-let next_type_var_id = 0;
-
-export function fresh_type_var(): TypeVar {
-  return { kind: "var", id: next_type_var_id++ };
-}
-
-// Reset counter (useful for tests)
-export function reset_type_var_counter(): void {
-  next_type_var_id = 0;
-}
-
-// ============================================================
 // Type
 // ============================================================
 

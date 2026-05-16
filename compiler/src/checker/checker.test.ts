@@ -2,9 +2,8 @@
 import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { Parser } from "../parser/parser.js";
-import { check, TypeCheckError, UnificationError } from "./checker.js";
+import { check } from "./checker.js";
 import { HFnDecl, HTestDecl, HProgram } from "../hir/index.js";
-import { Type } from "../types/index.js";
 
 // Helper: parse and check, return the HProgram
 function check_source(source: string): HProgram {

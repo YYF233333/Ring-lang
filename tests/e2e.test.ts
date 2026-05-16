@@ -25,6 +25,11 @@ const cases: TestCase[] = [
   { file: "hello.ring", expected: "3\n" },
   { file: "enum_match.ring", expected: "red\n" },
   { file: "string_interp.ring", expected: "Hello, World!\n" },
+  { file: "effect_or.ring", expected: "42\n" },
+  { file: "effect_catch.ring", expected: "42\n" },
+  { file: "effect_handle_fail.ring", expected: "42\n" },
+  { file: "effect_handle_io.ring", expected: "got: mock-data\n" },
+  { file: "effect_resume.ring", expected: "processed: mock-data\n" },
 ];
 
 describe("e2e: ring run", () => {

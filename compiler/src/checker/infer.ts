@@ -4,20 +4,22 @@
 import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl,
   Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr,
-  BinOp,
-  Span, span_zero,
+  BinOp, UnaryOp,
+  Span,
 } from "../ast/index.js";
+import { assertNever } from "../errors.js";
 import {
   Type, FnType, TypeVar, EffectRow, Effect,
   INT, FLOAT, STR, BOOL, UNIT, NEVER,
-  EMPTY_ROW, effect_row, row_merge, fresh_type_var, type_to_string,
+  EMPTY_ROW, effect_row, row_merge, type_to_string,
 } from "../types/index.js";
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl,
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit,
+  variant_js_name,
 } from "../hir/index.js";
-import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef } from "./env.js";
-import { Substitution, empty_subst, unify, apply, apply_to_effect_row, compose, UnificationError } from "./unify.js";
+import { TypeEnv, StructDef, EnumDef, EffectDef, substitute_type } from "./env.js";
+import { Substitution, empty_subst, unify, apply, apply_to_effect_row } from "./unify.js";
 import { check_exhaustive } from "./exhaustive.js";
 
 // ============================================================
@@ -167,8 +169,9 @@ export class InferEngine {
         this.register_fn(decl);
         break;
       case "test_decl":
-        // Nothing to register for test decls
         break;
+      default:
+        assertNever(decl, "register_decl");
     }
   }
 
@@ -177,8 +180,11 @@ export class InferEngine {
 
     // Push type params into scope for field type resolution
     const saved_tp_scope = new Map(this.type_param_scope);
+    const type_param_vars: number[] = [];
     for (const tp of decl.type_params) {
-      this.type_param_scope.set(tp.name, fresh_type_var());
+      const tv = this.env.fresh_var();
+      type_param_vars.push(tv.id);
+      this.type_param_scope.set(tp.name, tv);
     }
 
     const fields = decl.fields.map(f => ({
@@ -191,6 +197,7 @@ export class InferEngine {
     const def: StructDef = {
       name: decl.name,
       type_params: type_param_names,
+      type_param_vars,
       fields,
     };
     this.env.structs.set(decl.name, def);
@@ -204,8 +211,8 @@ export class InferEngine {
     const type_var_ids: number[] = [];
     const type_var_types: Type[] = [];
     for (const tp of decl.type_params) {
-      const tv = fresh_type_var();
-      type_var_ids.push((tv as TypeVar).id);
+      const tv = this.env.fresh_var();
+      type_var_ids.push(tv.id);
       type_var_types.push(tv);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -217,6 +224,7 @@ export class InferEngine {
     const def: EnumDef = {
       name: decl.name,
       type_params: type_param_names,
+      type_param_vars: type_var_ids,
       variants,
     };
     this.env.enums.set(decl.name, def);
@@ -259,7 +267,7 @@ export class InferEngine {
     const type_param_names = decl.type_params.map(tp => tp.name);
     const ops = decl.ops.map(op => ({
       name: op.name,
-      params: op.params.map(p => p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var()),
+      params: op.params.map(p => p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var()),
       return_type: this.resolve_type_expr(op.return_type),
     }));
     const def: EffectDef = {
@@ -279,9 +287,9 @@ export class InferEngine {
     }
     for (const method of decl.methods) {
       const param_types = method.params.map(p =>
-        p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var()
+        p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var()
       );
-      const ret_type = method.return_type ? this.resolve_type_expr(method.return_type) : fresh_type_var();
+      const ret_type = method.return_type ? this.resolve_type_expr(method.return_type) : this.env.fresh_var();
       const fn_type: FnType = {
         kind: "fn",
         params: param_types,
@@ -296,15 +304,15 @@ export class InferEngine {
     const type_vars: number[] = [];
     const saved_tp_scope = new Map(this.type_param_scope);
     for (const tp of decl.type_params) {
-      const tv = fresh_type_var();
+      const tv = this.env.fresh_var();
       type_vars.push((tv as TypeVar).id);
       this.type_param_scope.set(tp.name, tv);
     }
 
     const param_types = decl.params.map(p =>
-      p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var()
+      p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var()
     );
-    const ret_type = decl.return_type ? this.resolve_type_expr(decl.return_type) : fresh_type_var();
+    const ret_type = decl.return_type ? this.resolve_type_expr(decl.return_type) : this.env.fresh_var();
     const fn_type: FnType = {
       kind: "fn",
       params: param_types,
@@ -339,6 +347,8 @@ export class InferEngine {
         return this.check_fn_decl(decl);
       case "test_decl":
         return this.check_test_decl(decl);
+      default:
+        return assertNever(decl, "check_decl");
     }
   }
 
@@ -406,7 +416,7 @@ export class InferEngine {
     // Bind type parameters as fresh type variables
     const saved_tp_scope = new Map(this.type_param_scope);
     for (const tp of decl.type_params) {
-      const tv = fresh_type_var();
+      const tv = this.env.fresh_var();
       this.type_param_scope.set(tp.name, tv);
       this.env.bind_mono(tp.name, tv);
     }
@@ -414,14 +424,14 @@ export class InferEngine {
     // Bind parameters
     const hparams: HParam[] = [];
     for (const p of decl.params) {
-      const ptype = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var();
+      const ptype = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var();
       this.env.bind_mono(p.name, ptype);
       hparams.push({ name: p.name, type: ptype });
     }
 
     // Set expected return type for return-statement checking
     const saved_fn_return = this.current_fn_return_type;
-    const expected_ret = decl.return_type ? this.resolve_type_expr(decl.return_type) : fresh_type_var();
+    const expected_ret = decl.return_type ? this.resolve_type_expr(decl.return_type) : this.env.fresh_var();
     this.current_fn_return_type = expected_ret;
 
     // Infer body
@@ -657,6 +667,8 @@ export class InferEngine {
         return this.infer_handle(expr.body, expr.handlers, expr.span, subst);
       case "lambda":
         return this.infer_lambda(expr.params, expr.body, expr.span, subst);
+      default:
+        return assertNever(expr, "infer_expr");
     }
   }
 
@@ -671,11 +683,10 @@ export class InferEngine {
     }
     const t = this.env.instantiate(scheme);
 
-    // Resolve enum variant names to their JS codegen names (EnumName_variantName)
     let resolved_name: string | undefined;
     const enum_name = this.env.variant_to_enum.get(name);
     if (enum_name) {
-      resolved_name = `${enum_name}_${name}`;
+      resolved_name = variant_js_name(enum_name, name);
     }
 
     return {
@@ -731,7 +742,7 @@ export class InferEngine {
     };
   }
 
-  private infer_unary_op(op: string, operand: Expr, span: Span, subst: Substitution): InferResult {
+  private infer_unary_op(op: UnaryOp, operand: Expr, span: Span, subst: Substitution): InferResult {
     const r = this.infer_expr(operand, subst);
     let s = r.subst;
     let result_type: Type;
@@ -754,7 +765,7 @@ export class InferEngine {
     }
 
     return {
-      hexpr: { kind: "unary_op", op: op as any, operand: r.hexpr, type: result_type, effects: r.effects, span },
+      hexpr: { kind: "unary_op", op, operand: r.hexpr, type: result_type, effects: r.effects, span },
       subst: s,
       effects: r.effects,
     };
@@ -775,7 +786,7 @@ export class InferEngine {
       arg_types.push(ar.hexpr.type);
     }
 
-    const ret_var = fresh_type_var();
+    const ret_var = this.env.fresh_var();
     const expected_fn: FnType = {
       kind: "fn",
       params: arg_types,
@@ -859,14 +870,14 @@ export class InferEngine {
       effects = row_merge(effects, method_type.effects);
     } else {
       // Unknown method — use fresh type var
-      result_type = fresh_type_var();
+      result_type = this.env.fresh_var();
     }
 
     // Lower to HCall with receiver as first arg conceptually (UFCS)
     return {
       hexpr: {
         kind: "call",
-        callee: { kind: "field_access", receiver: recv_r.hexpr, field: method, type: method_type ?? fresh_type_var(), effects: EMPTY_ROW, span },
+        callee: { kind: "field_access", receiver: recv_r.hexpr, field: method, type: method_type ?? this.env.fresh_var(), effects: EMPTY_ROW, span },
         args: hargs,
         type_args: [],
         type: result_type,
@@ -949,7 +960,7 @@ export class InferEngine {
       }
     } else if (recv_type.kind === "var") {
       // Unresolved type variable — defer with fresh var
-      field_type = fresh_type_var();
+      field_type = this.env.fresh_var();
     } else {
       throw new TypeCheckError(`Cannot access field '${field}' on type ${type_to_string(recv_type)}`, span);
     }
@@ -967,12 +978,12 @@ export class InferEngine {
       throw new TypeCheckError(`Unknown struct: ${name}`, span);
     }
 
-    // Create fresh type vars for struct type params
-    const tp_mapping = new Map<string, Type>();
+    // Build substitution: registration-time type vars -> fresh vars for this instantiation
+    const instantiation_map = new Map<number, Type>();
     const type_param_types: Type[] = [];
-    for (const tp_name of struct_def.type_params) {
-      const tv = fresh_type_var();
-      tp_mapping.set(tp_name, tv);
+    for (let i = 0; i < struct_def.type_params.length; i++) {
+      const tv = this.env.fresh_var();
+      instantiation_map.set(struct_def.type_param_vars[i], tv);
       type_param_types.push(tv);
     }
 
@@ -985,20 +996,9 @@ export class InferEngine {
       s = fr.subst;
       effects = row_merge(effects, fr.effects);
 
-      // Unify field type with declared type (substituting type params)
       const def_field = struct_def.fields.find(f => f.name === field.name);
       if (def_field) {
-        let field_type = def_field.type;
-        // If the field type is a type variable from the struct's params, substitute
-        if (field_type.kind === "var" && tp_mapping.size > 0) {
-          for (const [, tv] of tp_mapping) {
-            if (tv.kind === "var") {
-              // type_params in struct_def.fields are resolved during register_struct
-              // so they might reference the type_param_scope vars from registration
-              break;
-            }
-          }
-        }
+        const field_type = substitute_type(def_field.type, instantiation_map);
         s = unify(fr.hexpr.type, field_type, s);
       }
       hfields.push({ name: field.name, value: fr.hexpr });
@@ -1023,7 +1023,7 @@ export class InferEngine {
     let s = scrut_r.subst;
     let effects = scrut_r.effects;
 
-    const result_type = fresh_type_var();
+    const result_type = this.env.fresh_var();
     const harms: HMatchArm[] = [];
 
     for (const arm of arms) {
@@ -1223,7 +1223,7 @@ export class InferEngine {
 
     this.env.push_scope();
     // Bind error variable — use fresh type var (fail<E> type would refine it)
-    this.env.bind_mono(error_binding, fresh_type_var());
+    this.env.bind_mono(error_binding, this.env.fresh_var());
     const handler_r = this.infer_expr(handler, s);
     s = handler_r.subst;
     this.env.pop_scope();
@@ -1273,15 +1273,15 @@ export class InferEngine {
         const p = handler.params[i];
         const pt = p.type_annotation
           ? this.resolve_type_expr(p.type_annotation)
-          : (op_def && i < op_def.params.length ? op_def.params[i] : fresh_type_var());
+          : (op_def && i < op_def.params.length ? op_def.params[i] : this.env.fresh_var());
         this.env.bind_mono(p.name, pt);
         hparams.push({ name: p.name, type: pt });
       }
 
       // Bind resume with typed signature: fn(ReturnType) -> ResultType
       if (handler.resume_name) {
-        const resume_param = op_def ? op_def.return_type : fresh_type_var();
-        const resume_ret = fresh_type_var();
+        const resume_param = op_def ? op_def.return_type : this.env.fresh_var();
+        const resume_ret = this.env.fresh_var();
         this.env.bind_mono(handler.resume_name, {
           kind: "fn", params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW,
         } as FnType);
@@ -1335,7 +1335,7 @@ export class InferEngine {
     const hparams: HParam[] = [];
     const param_types: Type[] = [];
     for (const p of params) {
-      const pt = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var();
+      const pt = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var();
       this.env.bind_mono(p.name, pt);
       hparams.push({ name: p.name, type: pt });
       param_types.push(pt);

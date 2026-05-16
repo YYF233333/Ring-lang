@@ -1,8 +1,8 @@
 // Ring-lang HIR (High-level Intermediate Representation)
 // Separate from AST: every expression carries resolved type and effects.
 
-import { Span, Pattern, MatchArm as AstMatchArm, BinOp, UnaryOp, TypeParam } from "../ast/index.js";
-import { Type, EffectRow, Effect } from "../types/index.js";
+import { Span, Pattern, BinOp, UnaryOp, TypeParam } from "../ast/index.js";
+import { Type, EffectRow } from "../types/index.js";
 
 // ============================================================
 // HIR Expressions
@@ -309,4 +309,9 @@ export interface HTestDecl {
 
 export interface HProgram {
   decls: HDecl[];
+}
+
+// JS codegen naming convention — single source of truth for enum variant identifiers
+export function variant_js_name(enum_name: string, variant_name: string): string {
+  return `${enum_name}_${variant_name}`;
 }

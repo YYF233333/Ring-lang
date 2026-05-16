@@ -619,9 +619,8 @@ export class Parser {
       return this.parse_lambda_expr();
     }
 
-    // For expression (parsed as a statement-like expression for now)
     if (tok.kind === TokenKind.For) {
-      return this.parse_for_expr();
+      throw this.error("for loops are not yet implemented");
     }
 
     // Parenthesized expression
@@ -785,8 +784,6 @@ export class Parser {
     let tail: Expr | undefined;
 
     while (!this.check(TokenKind.RBrace) && !this.at_end()) {
-      // Check if this is the last expression (tail) without semicolons
-      const save_pos = this.pos;
       const stmt = this.parse_stmt();
 
       if (this.check(TokenKind.RBrace)) {
@@ -996,14 +993,6 @@ export class Parser {
       kind: "lambda", params, return_type, body,
       span: this.make_span(start, end),
     };
-  }
-
-  // ============================================================
-  // For expression (simplified — treated as block expr wrapper)
-  // ============================================================
-
-  private parse_for_expr(): Expr {
-    throw new Error("for loops are not yet implemented (planned for Phase 2)");
   }
 
   // ============================================================
