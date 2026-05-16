@@ -341,3 +341,8 @@ export function variant_js_name(enum_name: string, variant_name: string): string
 export function trait_dict_name(type_name: string, trait_name: string): string {
   return `${type_name}_${trait_name}`;
 }
+
+// JS codegen naming convention for effect evidence parameters
+export function evidence_param_name(effect_name: string): string {
+  return `__ev_${effect_name}`;
+}

@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert";
 import { generate } from "./codegen.js";
 import { INT, STR, BOOL, UNIT, EMPTY_ROW } from "../types/index.js";
-import { HProgram, HFnDecl, HStructDecl, HEnumDecl, HBlock, HExpr, HStmt, HParam } from "../hir/index.js";
+import { HProgram, HFnDecl, HStructDecl, HEnumDecl, HBlock, HExpr, HStmt, HParam, evidence_param_name } from "../hir/index.js";
 import { span_zero } from "../ast/index.js";
 
 // Helper: zero span
@@ -526,6 +526,14 @@ describe("codegen", () => {
       assert.ok(js.includes("function __match_fail"));
       assert.ok(js.includes("function print"));
       assert.ok(js.includes("function assert"));
+    });
+  });
+
+  describe("evidence_param_name", () => {
+    it("generates __ev_ prefixed name", () => {
+      assert.strictEqual(evidence_param_name("io"), "__ev_io");
+      assert.strictEqual(evidence_param_name("fail"), "__ev_fail");
+      assert.strictEqual(evidence_param_name("custom_eff"), "__ev_custom_eff");
     });
   });
 });
