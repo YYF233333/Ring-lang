@@ -139,9 +139,11 @@ struct Company { name: Str, industry: Str }
 greet(User { ... })       // ✓
 greet(Company { ... })    // ✓
 
-fn with_timestamp(r: {..rest}) -> {timestamp: Int, ..rest} {
-    { ...r, timestamp: now() }
-}
+// 注意：spread 和 record 返回类型属于方案 B（未实现）
+// 当前实现为方案 A：row type 仅在参数类型中使用
+// fn with_timestamp(r: {..rest}) -> {timestamp: Int, ..rest} {
+//     { ...r, timestamp: now() }
+// }
 ```
 
 ### 1.5 Option 与 fail 的统一
@@ -364,7 +366,7 @@ let data = json.parse(raw)        //: fail<ParseError>
 ### 3.1 三层推断
 
 ```
--- 局部推断
+// 局部推断
 let x = 42                        // Int
 let names = ["a", "b", "c"]      // List<Str>
 
@@ -716,31 +718,41 @@ fn producer_consumer() {
 | struct | class（constructor + 字段） |
 | enum | tagged object `{ _tag: "variant", ...fields }` |
 | pattern match | switch/if 链 |
-| trait + impl | prototype 方法注入 |
+| trait + impl | dictionary passing（泛型）/ 直接调用（具体类型） |
 | let / var | const / let |
 | row poly | 直接属性访问（JS 天然鸭子类型，零翻译成本） |
 | fail 冒泡（90%场景） | 直接就是 JS 的正常调用（无额外开销） |
 | fail effect | throw / try-catch |
 | or / catch 表达式 | try-catch 包装 |
-| 完整 effect handler | generator function + runner |
+| 完整 effect handler | evidence passing + EffectAbort try/catch |
 | async effect | async/await 透传 |
 | refinement 运行时检查 | if (!pred) throw |
 
 ### 9.3 Effect handler 的 JS 编码
 
-90% 的 fail 场景特化成 try/catch（零额外成本）。完整 handler 用 generator：
+90% 的 fail 场景特化成 try/catch（零额外成本）。完整 handler 用 evidence passing：
 
 ```javascript
 // handle { load_config(path) } with { fail(e) => default_config() }
-// 特化为：
-try { load_config(path) } catch (e) { default_config() }
+// 编译为：
+try {
+  load_config(path, __ev_io, { raise: (e) => { throw new __EffectAbort(e); } });
+} catch (__e) {
+  if (__e instanceof __EffectAbort) { default_config(); }
+  else { throw __e; }
+}
 
 // 完整 effect handler（测试 mock 等复杂场景）：
-function* _effectful_gen() {
-    const raw = yield { effect: "io.read", args: [path] };
-    return json_parse(raw);
+// handle { read_config() } with { io.read(path) => "mock-data" }
+// 编译为 evidence 对象构造：
+const __ev_io = { read: (path) => { throw new __EffectAbort("mock-data"); } };
+try {
+  read_config(__ev_io);
+} catch (__e) {
+  if (__e instanceof __EffectAbort) { return __e.value; }
+  throw __e;
 }
-// runner 驱动 generator，截获 yield 的 effect
+// 函数签名自动注入 evidence 参数：read_config(__ev_io) 而非 generator yield
 ```
 
 ### 9.4 多端覆盖
