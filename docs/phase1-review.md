@@ -2,7 +2,7 @@
 
 **原始审查日期**: 2026-05-16
 **修复批次 1**: 2026-05-16（C1-C11, I10, I13, I14 已修复）
-**修复批次 2**: 2026-05-16（I1-I3, I5, I7, I9, I12, I18, I20, I22, I23 已修复）
+**修复批次 2**: 2026-05-16（I1-I3, I5, I7, I9, I12, I15, I17, I18, I20, I22, I23 已修复）
 **审查方法**: Claude Opus × 5 并行代理 + DeepSeek V4 Pro × 3 并行代理，独立审查后交叉验证
 
 ---
@@ -65,23 +65,11 @@
 - **问题**: `new Type(arg1, arg2)` 假设字段顺序与声明一致。`Point { y: 2, x: 1 }` 可能将 y 赋给 x。
 - **影响**: 中——需要 codegen 查找 struct 定义并按声明顺序排列字段。
 
-### I15. 比较运算符结合性
-
-- **文件**: `compiler/src/parser/parser.ts`
-- **问题**: `a == b == c` 被解析为 `(a == b) == c`。比较运算符应为非结合。
-- **影响**: 低——极少有人写链式比较，且结果是类型错误（Bool == Int）。
-
 ### I16. 插值内字符串被误当插值结束
 
 - **文件**: `compiler/src/parser/lexer.ts`
 - **问题**: 插值表达式内部的字符串字面量中的 `"` 被当作插值结束符处理。
 - **影响**: 中——需要在 lexer 中维护括号深度计数器。
-
-### I17. UFCS method call codegen 错误
-
-- **文件**: `compiler/src/codegen/codegen.ts`
-- **问题**: impl 方法被编译为独立函数 `TypeName_methodName`，但 method call 生成 `obj.method(args)` 而非 `TypeName_methodName(obj, args)`。
-- **影响**: 高——但 Phase 1 示例中未暴露（hello.ring 不用 method call），需要 codegen 识别 HIR 中的 UFCS 调用模式。
 
 ### I19. fail effect 从未被添加到 effect row
 
@@ -132,6 +120,8 @@
 | I12 | Effect op param name 索引错误 | 改为 `(op, op_idx)` + `params[i]` |
 | I18 | `field_access` 非 struct 静默返回 ANY | 抛 TypeCheckError（type var 用 fresh var 延迟） |
 | I20 | handle 不验证 handler 类型 | handler params/resume 从 effect def 获取类型 |
+| I15 | 比较运算符左结合 | 改为非结合，链式比较抛 parse error |
+| I17 | UFCS method call codegen 错误 | codegen 收集 impl_methods 集合，重写为 `TypeName_method(obj, args)` |
 | I22 | JS 保留字冲突未处理 | 添加 `safe_ident()` 前缀转义 |
 | I23 | 字符串插值反斜杠未转义 | 先转义 `\` 再转义 `` ` `` 和 `${` |
 | — | infer.ts 残余 ANY 使用 | 全部替换为 fresh_type_var()，移除 ANY 导入 |
