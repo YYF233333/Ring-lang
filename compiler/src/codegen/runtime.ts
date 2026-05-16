@@ -8,6 +8,11 @@ class __EffectAbort {
   }
 }
 
+function Cell(value) { return { value }; }
+function Cell_get(self, __ev_mut) { return self.value; }
+function Cell_set(self, val, __ev_mut) { self.value = val; }
+function Cell_update(self, f, __ev_mut) { self.value = f(self.value); }
+
 function __match_fail(value) {
   throw new Error("Non-exhaustive match: " + JSON.stringify(value));
 }

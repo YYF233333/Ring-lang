@@ -640,7 +640,7 @@ describe("codegen", () => {
       };
       const js = generate(program([decl]));
       assert.ok(js.includes("function pure(x)"), "Got: " + js);
-      assert.ok(!js.includes("__ev_"), "Pure function should have no evidence params");
+      assert.ok(!js.includes("function pure(x, __ev_"), "Pure function should have no evidence params");
     });
   });
 

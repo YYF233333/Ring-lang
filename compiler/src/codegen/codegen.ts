@@ -75,6 +75,11 @@ class CodeGenerator {
       }
     }
 
+    // Built-in Cell impl methods (in runtime, not in source)
+    this.impl_methods.set("Cell.get", undefined);
+    this.impl_methods.set("Cell.set", undefined);
+    this.impl_methods.set("Cell.update", undefined);
+
     // Emit runtime preamble
     this.emit_raw(RUNTIME_CODE);
 
