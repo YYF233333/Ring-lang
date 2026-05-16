@@ -574,27 +574,62 @@ class CodeGenerator {
   }
 
   private gen_handle(expr: HExpr & { kind: "handle_expr" }): string {
-    // Check if this is a simple fail-only handler
-    const is_fail_only = expr.handlers.every(h => h.effect_name === "fail");
-
-    if (is_fail_only) {
-      const body = this.gen_expr(expr.body);
-      const h = expr.handlers[expr.handlers.length - 1];
-      const catch_binding = h.params[0]?.name ?? "__err";
-      const catch_body = this.gen_expr(h.body);
-      return `(function() { try { return ${body}; } catch (${catch_binding}) { return ${catch_body}; } })()`;
+    // Group handlers by effect name
+    const by_effect = new Map<string, typeof expr.handlers>();
+    for (const h of expr.handlers) {
+      const existing = by_effect.get(h.effect_name) ?? [];
+      existing.push(h);
+      by_effect.set(h.effect_name, existing);
     }
 
-    // General effect handling via generators
-    const handler_entries = expr.handlers.map(h => {
-      const key = `"${h.effect_name}.${h.op_name}"`;
-      const params = h.params.map(p => p.name);
-      const resume = h.resume_name ?? "__resume";
-      const handler_body = this.gen_expr(h.body);
-      return `${key}: function(args, ${resume}) { ${params.map((p, i) => `const ${p} = args[${i}];`).join(" ")} return ${handler_body}; }`;
-    });
-    const gen_body = this.gen_generator_body(expr.body);
-    return `__run_handler((function*() { ${gen_body} })(), { ${handler_entries.join(", ")} })`;
+    // Build evidence objects for each handled effect
+    const ev_decls: string[] = [];
+    let has_abort = false;
+
+    for (const [effect_name, handlers] of by_effect) {
+      const entries: string[] = [];
+      for (const h of handlers) {
+        const params = h.params.map(p => safe_ident(p.name)).join(", ");
+        const body = this.gen_expr(h.body);
+        const is_abort = effect_name === "fail" && h.op_name === "raise";
+        if (is_abort) {
+          has_abort = true;
+          entries.push(`${h.op_name}: (${params}) => { throw new __EffectAbort("${effect_name}", ${body}); }`);
+        } else {
+          entries.push(`${h.op_name}: (${params}) => (${body})`);
+        }
+      }
+      const ev_name = evidence_param_name(effect_name);
+      ev_decls.push(`const ${ev_name} = { ${entries.join(", ")} };`);
+    }
+
+    // Generate body
+    const ev_param_names = [...by_effect.keys()].sort().map(n => evidence_param_name(n));
+    const ev_arg_names = ev_param_names.join(", ");
+    const body_code = this.gen_handle_body(expr.body, ev_arg_names);
+    const decls = ev_decls.join(" ");
+
+    if (has_abort) {
+      return `(function() { ${decls} try { return ${body_code}; } catch (__e) { if (__e instanceof __EffectAbort) return __e.value; throw __e; } })()`;
+    } else {
+      return `(function() { ${decls} return ${body_code}; })()`;
+    }
+  }
+
+  private gen_handle_body(expr: HExpr, ev_params: string): string {
+    if (expr.kind === "block") {
+      const parts: string[] = [];
+      parts.push(`(function(${ev_params}) {`);
+      for (const stmt of (expr as HBlock).stmts) {
+        parts.push("  " + this.gen_stmt_inline(stmt));
+      }
+      if ((expr as HBlock).tail) {
+        parts.push(`  return ${this.gen_expr((expr as HBlock).tail!)};`);
+      }
+      parts.push(`})(${ev_params})`);
+      return parts.join("\n");
+    }
+    return `(function(${ev_params}) { return ${this.gen_expr(expr)}; })(${ev_params})`;
   }
 
   private gen_lambda(expr: HExpr & { kind: "lambda" }): string {
@@ -603,19 +638,6 @@ class CodeGenerator {
     return `(function(${params}) { return ${body}; })`;
   }
 
-  private gen_generator_body(expr: HExpr): string {
-    if (expr.kind === "block") {
-      const parts: string[] = [];
-      for (const stmt of expr.stmts) {
-        parts.push(this.gen_stmt_inline(stmt));
-      }
-      if (expr.tail) {
-        parts.push(`return ${this.gen_expr(expr.tail)};`);
-      }
-      return parts.join(" ");
-    }
-    return `return ${this.gen_expr(expr)};`;
-  }
 
   private gen_effect_op(expr: HExpr & { kind: "effect_op" }): string {
     const ev_name = evidence_param_name(expr.effect_name);

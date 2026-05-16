@@ -297,8 +297,96 @@ describe("codegen", () => {
     });
   });
 
-  describe("handle expressions with generators", () => {
-    it("generates handler for custom effects", () => {
+  describe("handle_expr codegen", () => {
+    it("generates evidence + try/catch for fail handler", () => {
+      const fail_effect: Effect = { kind: "fail", error_type: STR };
+      const handle_expr: HExpr = {
+        kind: "handle_expr",
+        body: {
+          kind: "effect_op",
+          effect_name: "fail",
+          op_name: "raise",
+          args: [str_lit("err")],
+          type: INT,
+          effects: effect_row(fail_effect),
+          span: S,
+        },
+        handlers: [{
+          effect_name: "fail",
+          op_name: "raise",
+          params: [{ name: "e", type: STR }],
+          body: int_lit(42),
+        }],
+        type: INT,
+        effects: EMPTY_ROW,
+        span: S,
+      };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "f",
+        type_params: [],
+        params: [],
+        return_type: INT,
+        effects: EMPTY_ROW,
+        body: block([], handle_expr),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("__ev_fail"), "Should have __ev_fail evidence, got: " + js);
+      assert.ok(js.includes("__EffectAbort"), "Should throw __EffectAbort, got: " + js);
+      assert.ok(js.includes("try"), "Should have try/catch");
+      assert.ok(js.includes("catch"), "Should have catch");
+      assert.ok(!js.includes("__run_handler"), "No __run_handler");
+      assert.ok(!js.includes("yield"), "No yield");
+    });
+
+    it("generates evidence without try/catch for io handler", () => {
+      const io_effect: Effect = { kind: "io" };
+      const handle_expr: HExpr = {
+        kind: "handle_expr",
+        body: {
+          kind: "effect_op",
+          effect_name: "io",
+          op_name: "read",
+          args: [str_lit("file.txt")],
+          type: STR,
+          effects: effect_row(io_effect),
+          span: S,
+        },
+        handlers: [{
+          effect_name: "io",
+          op_name: "read",
+          params: [{ name: "path", type: STR }],
+          body: str_lit("mock-data"),
+        }],
+        type: STR,
+        effects: EMPTY_ROW,
+        span: S,
+      };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "f",
+        type_params: [],
+        params: [],
+        return_type: STR,
+        effects: EMPTY_ROW,
+        body: block([], handle_expr),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("__ev_io"), "Should have __ev_io");
+      assert.ok(js.includes("read"), "Should have read operation");
+      assert.ok(js.includes('"mock-data"'), "Should have mock value");
+      assert.ok(!js.includes("try"), "No try/catch for non-abort handler");
+      assert.ok(!js.includes("__run_handler"), "No __run_handler");
+      assert.ok(!js.includes("function*"), "No generator");
+    });
+
+    it("generates evidence for custom effect handler (non-abort)", () => {
       const expr: HExpr = {
         kind: "handle_expr",
         body: {
@@ -336,46 +424,10 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      // Codegen still emits __run_handler call for handle_expr (to be replaced in later task)
-      assert.ok(js.includes("__run_handler") || js.includes("__EffectAbort"));
-      assert.ok(js.includes('"Console.log"'));
-    });
-
-    it("generates try/catch for fail-only handler", () => {
-      const expr: HExpr = {
-        kind: "handle_expr",
-        body: ident("risky"),
-        handlers: [
-          {
-            effect_name: "fail",
-            op_name: "raise",
-            params: [{ name: "err", type: STR }],
-            body: str_lit("recovered"),
-          },
-        ],
-        type: STR,
-        effects: EMPTY_ROW,
-        span: S,
-      };
-      const decl: HFnDecl = {
-        kind: "fn_decl",
-        name: "safe",
-        type_params: [],
-        params: [],
-        return_type: STR,
-        effects: EMPTY_ROW,
-        body: block([], expr),
-        is_pub: false,
-        trait_bounds: [],
-        span: S,
-      };
-      const js = generate(program([decl]));
-      assert.ok(js.includes("try {"));
-      assert.ok(js.includes("catch (err)"));
-      assert.ok(js.includes('"recovered"'));
-      // Should NOT use generators for fail-only (check the function body, not the runtime preamble)
-      const fn_body = js.split("function safe()")[1] ?? "";
-      assert.ok(!fn_body.includes("__run_handler"));
+      assert.ok(js.includes("__ev_Console"), "Should have __ev_Console evidence, got: " + js);
+      assert.ok(js.includes("log:"), "Should have log operation entry");
+      assert.ok(!js.includes("__run_handler"), "No __run_handler");
+      assert.ok(!js.includes("function*"), "No generator");
     });
   });
 
