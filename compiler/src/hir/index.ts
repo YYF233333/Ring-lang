@@ -80,6 +80,8 @@ export interface HCall extends HExprBase {
   callee: HExpr;
   args: HExpr[];
   type_args: Type[];
+  resolved_dicts: string[];
+  dict_dispatch?: { dict_param: string; method: string };
 }
 
 export interface HFieldAccess extends HExprBase {
@@ -229,7 +231,8 @@ export type HDecl =
   | HEnumDecl
   | HImplDecl
   | HEffectDecl
-  | HTestDecl;
+  | HTestDecl
+  | HTraitDecl;
 
 export interface HFnDecl {
   kind: "fn_decl";
@@ -240,6 +243,7 @@ export interface HFnDecl {
   effects: EffectRow;
   body: HBlock;
   is_pub: boolean;
+  trait_bounds: { type_param: string; trait_name: string }[];
   span: Span;
 }
 
@@ -303,6 +307,23 @@ export interface HTestDecl {
   span: Span;
 }
 
+export interface HTraitMethod {
+  name: string;
+  params: HParam[];
+  return_type: Type;
+  has_default: boolean;
+  body?: HBlock;
+}
+
+export interface HTraitDecl {
+  kind: "trait_decl";
+  name: string;
+  type_params: TypeParam[];
+  methods: HTraitMethod[];
+  is_pub: boolean;
+  span: Span;
+}
+
 // ============================================================
 // Program
 // ============================================================
@@ -314,4 +335,9 @@ export interface HProgram {
 // JS codegen naming convention — single source of truth for enum variant identifiers
 export function variant_js_name(enum_name: string, variant_name: string): string {
   return `${enum_name}_${variant_name}`;
+}
+
+// JS codegen naming convention for trait dictionary objects
+export function trait_dict_name(type_name: string, trait_name: string): string {
+  return `${type_name}_${trait_name}`;
 }

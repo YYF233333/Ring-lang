@@ -115,6 +115,7 @@ describe("codegen", () => {
           span: S,
         }),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -132,6 +133,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([]),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -152,6 +154,7 @@ describe("codegen", () => {
           { kind: "let_stmt", name: "x", type: INT, init: int_lit(42), span: S },
         ], ident("x")),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -176,6 +179,7 @@ describe("codegen", () => {
           },
         ], ident("x")),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -214,6 +218,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([], match_expr),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -251,6 +256,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([], match_expr),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -280,6 +286,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([], expr),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -324,6 +331,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([], expr),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -358,6 +366,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([], expr),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -388,6 +397,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([], expr),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -415,6 +425,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([], expr),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -438,6 +449,7 @@ describe("codegen", () => {
             effects: EMPTY_ROW,
             body: block([], int_lit(0)),
             is_pub: false,
+            trait_bounds: [],
             span: S,
           },
         ],
@@ -468,6 +480,7 @@ describe("codegen", () => {
         effects: EMPTY_ROW,
         body: block([], expr),
         is_pub: false,
+        trait_bounds: [],
         span: S,
       };
       const js = generate(program([decl]));
@@ -488,6 +501,7 @@ describe("codegen", () => {
               callee: ident("assert"),
               args: [bool_lit(true)],
               type_args: [],
+              resolved_dicts: [],
               type: UNIT,
               effects: EMPTY_ROW,
               span: S,

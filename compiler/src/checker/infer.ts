@@ -462,6 +462,13 @@ export class InferEngine {
     this.type_param_scope = saved_tp_scope;
     this.subst = saved_subst;
 
+    const trait_bounds: { type_param: string; trait_name: string }[] = [];
+    for (const tp of decl.type_params) {
+      for (const bound of tp.bounds) {
+        trait_bounds.push({ type_param: tp.name, trait_name: bound.trait_name });
+      }
+    }
+
     return {
       kind: "fn_decl",
       name: decl.name,
@@ -471,6 +478,7 @@ export class InferEngine {
       effects,
       body: body_result.hexpr as HBlock,
       is_pub: decl.is_pub,
+      trait_bounds,
       span: decl.span,
     };
   }
@@ -811,7 +819,7 @@ export class InferEngine {
     const result_type = apply(s, ret_var);
 
     return {
-      hexpr: { kind: "call", callee: callee_r.hexpr, args: hargs, type_args: [], type: result_type, effects, span },
+      hexpr: { kind: "call", callee: callee_r.hexpr, args: hargs, type_args: [], resolved_dicts: [], type: result_type, effects, span },
       subst: s,
       effects,
     };
@@ -886,6 +894,7 @@ export class InferEngine {
         callee: { kind: "field_access", receiver: recv_r.hexpr, field: method, type: method_type ?? this.env.fresh_var(), effects: EMPTY_ROW, span },
         args: hargs,
         type_args: [],
+        resolved_dicts: [],
         type: result_type,
         effects,
         span,

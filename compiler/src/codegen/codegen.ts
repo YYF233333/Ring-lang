@@ -2,7 +2,7 @@
 
 import {
   HProgram, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl,
-  HEffectDecl, HTestDecl, HStmt, HExpr, HBlock, HMatchArm,
+  HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock, HMatchArm,
   variant_js_name,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
@@ -104,6 +104,7 @@ class CodeGenerator {
       case "impl_decl": this.emit_impl_decl(decl); break;
       case "effect_decl": this.emit_effect_decl(decl); break;
       case "test_decl": this.emit_test_decl(decl); break;
+      case "trait_decl": this.emit_trait_decl(decl); break;
       default: assertNever(decl, "emit_decl");
     }
   }
@@ -166,6 +167,10 @@ class CodeGenerator {
   private emit_effect_decl(_decl: HEffectDecl): void {
     // Effect declarations don't produce runtime code directly.
     // The operations are translated at call sites.
+  }
+
+  private emit_trait_decl(_decl: HTraitDecl): void {
+    // Trait declarations don't produce runtime code.
   }
 
   private emit_test_decl(decl: HTestDecl): void {
