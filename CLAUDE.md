@@ -24,11 +24,10 @@ Ring-lang/
 ├── docs/
 │   ├── design.md                    完整语言设计（15 章）
 │   ├── phase2-readiness.md          Phase 2 准备度报告 + 机械约束清单
-│   ├── specs/                       设计规格文档
-│   │   ├── 2026-05-16-phase1-compiler-design.md
-│   │   └── 2026-05-16-phase2-design.md
-│   └── plans/                       实施计划
-│       └── 2026-05-16-phase2-session1-trait-system.md
+│   ├── reviews/                     代码 review 记录
+│   └── superpowers/
+│       ├── specs/                   设计规格文档（5 篇）
+│       └── plans/                   实施计划（5 篇）
 ├── compiler/
 │   ├── src/
 │   │   ├── ast/index.ts             AST 节点类型定义
@@ -41,13 +40,13 @@ Ring-lang/
 │   │   │   └── parser.test.ts       Parser 测试（41 tests）
 │   │   ├── checker/
 │   │   │   ├── env.ts               类型环境 + 作用域 + 内置定义
-│   │   │   ├── unify.ts             HM Unification + 替换
+│   │   │   ├── unify.ts             HM Unification + Row Unification + 替换
 │   │   │   ├── infer.ts             Algorithm W 类型推断
 │   │   │   ├── exhaustive.ts        穷尽性检查
 │   │   │   ├── checker.ts           主入口：check(Program) → HProgram
 │   │   │   └── checker.test.ts      Checker 测试（29 tests）
 │   │   ├── codegen/
-│   │   │   ├── runtime.ts           JS 运行时辅助���码
+│   │   │   ├── runtime.ts           JS 运行时辅助代码
 │   │   │   ├── codegen.ts           HIR → JavaScript 生成
 │   │   │   └── codegen.test.ts      Codegen 测试（30 tests）
 │   │   └── cli.ts                   ring build/run/check 入口
@@ -89,11 +88,11 @@ Ring-lang/
 ## 编译器管线
 
 ```
-源码 (.ring) �� Lexer → Parser → AST → Checker (HM + effects) → HIR → Codegen → JavaScript
+源码 (.ring) → Lexer → Parser → AST → Checker (HM + effects) → HIR → Codegen → JavaScript
 ```
 
 - **AST**：忠实反映源码结构，所有节点带 Span 位置
-- **HIR**：独立数据结构，每个表达式��带推断的 Type + EffectRow，语法糖已展开
+- **HIR**：独立数据结构，每个表达式均带推断的 Type + EffectRow，语法糖已展开
 - **设计意图**：HIR 独立于 AST，后续优化 pass 在 HIR → Codegen 之间插入
 
 ## 开发约定
