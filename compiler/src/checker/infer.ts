@@ -170,6 +170,9 @@ export class InferEngine {
         break;
       case "test_decl":
         break;
+      case "trait_decl":
+        // Trait declarations are parsed but not yet type-checked (Phase 2)
+        break;
       default:
         assertNever(decl, "register_decl");
     }
@@ -347,6 +350,9 @@ export class InferEngine {
         return this.check_fn_decl(decl);
       case "test_decl":
         return this.check_test_decl(decl);
+      case "trait_decl":
+        // Trait declarations are parsed but not yet lowered to HIR (Phase 2)
+        return null;
       default:
         return assertNever(decl, "check_decl");
     }

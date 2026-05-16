@@ -29,6 +29,7 @@ export enum TokenKind {
   Where = "where",
   True = "true",
   False = "false",
+  Trait = "trait",
 
   // Literals
   IntLit = "int_lit",
@@ -105,6 +106,7 @@ const KEYWORDS: Record<string, TokenKind> = {
   where: TokenKind.Where,
   true: TokenKind.True,
   false: TokenKind.False,
+  trait: TokenKind.Trait,
 };
 
 export interface Token {

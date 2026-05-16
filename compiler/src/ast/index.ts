@@ -335,17 +335,34 @@ export interface ReturnStmt {
 // Declarations
 // ============================================================
 
+export interface TraitDecl {
+  kind: "trait_decl";
+  name: string;
+  type_params: TypeParam[];
+  supertraits: TypeBound[];
+  methods: FnDecl[];
+  is_pub: boolean;
+  span: Span;
+}
+
 export type Decl =
   | FnDecl
   | StructDecl
   | EnumDecl
   | ImplDecl
   | EffectDecl
-  | TestDecl;
+  | TestDecl
+  | TraitDecl;
+
+export interface TypeBound {
+  trait_name: string;
+  type_args: TypeExpr[];
+  span: Span;
+}
 
 export interface TypeParam {
   name: string;
-  constraint?: TypeExpr;
+  bounds: TypeBound[];
   span: Span;
 }
 
@@ -357,6 +374,7 @@ export interface FnDecl {
   return_type?: TypeExpr;
   body: BlockExpr;
   is_pub: boolean;
+  is_abstract?: boolean;
   span: Span;
 }
 

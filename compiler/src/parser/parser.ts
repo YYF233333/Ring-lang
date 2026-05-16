@@ -1,6 +1,6 @@
 // Ring-lang Parser — recursive descent + Pratt parsing for expressions
 import {
-  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl,
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
   Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt,
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
   BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
@@ -9,7 +9,7 @@ import {
   BinOp, UnaryOp,
   TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr,
   Pattern, WildcardPattern, BindingPattern, ConstructorPattern, LiteralPattern,
-  MatchArm, EffectHandler, Param, TypeParam,
+  MatchArm, EffectHandler, Param, TypeParam, TypeBound,
   StructField, EnumVariant, EffectOp, StructFieldInit,
   Span, Position,
 } from "../ast/index.js";
@@ -106,12 +106,13 @@ export class Parser {
       case TokenKind.Impl: return this.parse_impl_decl();
       case TokenKind.Effect: return this.parse_effect_decl(is_pub);
       case TokenKind.Test: return this.parse_test_decl();
+      case TokenKind.Trait: return this.parse_trait_decl(is_pub);
       default:
         throw this.error(`Expected declaration, got '${tok.value}' (${tok.kind})`);
     }
   }
 
-  private parse_fn_decl(is_pub: boolean): FnDecl {
+  private parse_fn_decl(is_pub: boolean, body_optional: boolean = false): FnDecl {
     const start = this.current_span_start();
     this.expect(TokenKind.Fn);
     const name = this.expect(TokenKind.Ident).value;
@@ -120,10 +121,19 @@ export class Parser {
     const params = this.parse_params();
     this.expect(TokenKind.RParen);
     const return_type = this.try_consume(TokenKind.Arrow) ? this.parse_type_expr() : undefined;
-    const body = this.parse_block_expr();
+    let body: BlockExpr;
+    let is_abstract: boolean | undefined;
+    if (body_optional && !this.check(TokenKind.LBrace)) {
+      // Abstract method: no body
+      const pos = this.current_span_start();
+      body = { kind: "block", stmts: [], tail: undefined, span: this.make_span(pos, pos) };
+      is_abstract = true;
+    } else {
+      body = this.parse_block_expr();
+    }
     const end = this.current_span_start();
     return {
-      kind: "fn_decl", name, type_params, params, return_type, body, is_pub,
+      kind: "fn_decl", name, type_params, params, return_type, body, is_pub, is_abstract,
       span: this.make_span(start, end),
     };
   }
@@ -276,6 +286,26 @@ export class Parser {
     };
   }
 
+  private parse_trait_decl(is_pub: boolean): TraitDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Trait);
+    const name = this.expect(TokenKind.Ident).value;
+    const type_params = this.parse_type_params();
+    const supertraits: TypeBound[] = [];
+    this.expect(TokenKind.LBrace);
+    const methods: FnDecl[] = [];
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      const m_pub = this.try_consume(TokenKind.Pub);
+      methods.push(this.parse_fn_decl(m_pub, true));
+    }
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "trait_decl", name, type_params, supertraits, methods, is_pub,
+      span: this.make_span(start, end),
+    };
+  }
+
   // ============================================================
   // Type Expressions
   // ============================================================
@@ -362,16 +392,47 @@ export class Parser {
     while (!this.check(TokenKind.Gt) && !this.at_end()) {
       const tp_start = this.current_span_start();
       const name = this.expect(TokenKind.Ident).value;
-      let constraint: TypeExpr | undefined;
+      const bounds: TypeBound[] = [];
       if (this.try_consume(TokenKind.Colon)) {
-        constraint = this.parse_type_expr();
+        bounds.push(this.parse_type_bound());
+        while (this.check(TokenKind.Plus)) {
+          this.advance();
+          bounds.push(this.parse_type_bound());
+        }
       }
       const tp_end = this.current_span_start();
-      params.push({ name, constraint, span: this.make_span(tp_start, tp_end) });
+      params.push({ name, bounds, span: this.make_span(tp_start, tp_end) });
       this.try_consume(TokenKind.Comma);
     }
     this.expect(TokenKind.Gt);
     return params;
+  }
+
+  private parse_type_bound(): TypeBound {
+    const start = this.current_span_start();
+    const trait_name = this.expect(TokenKind.Ident).value;
+    let type_args: TypeExpr[] = [];
+    if (this.check(TokenKind.Lt)) {
+      const save = this.pos;
+      this.advance(); // consume <
+      try {
+        type_args.push(this.parse_type_expr());
+        while (this.try_consume(TokenKind.Comma)) {
+          type_args.push(this.parse_type_expr());
+        }
+        if (!this.check(TokenKind.Gt)) {
+          this.pos = save;
+          type_args = [];
+        } else {
+          this.advance(); // consume >
+        }
+      } catch {
+        this.pos = save;
+        type_args = [];
+      }
+    }
+    const end = this.current_span_start();
+    return { trait_name, type_args, span: this.make_span(start, end) };
   }
 
   // ============================================================

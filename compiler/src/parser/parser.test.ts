@@ -10,7 +10,7 @@ import { Parser } from "./parser.js";
 
 describe("Lexer", () => {
   it("tokenizes keywords", () => {
-    const lexer = new Lexer("fn let var struct enum match impl effect handle with if else or catch test return for in pub where true false");
+    const lexer = new Lexer("fn let var struct enum match impl effect handle with if else or catch test return for in pub where true false trait");
     const tokens = lexer.tokenize();
     const kinds = tokens.map(t => t.kind).filter(k => k !== TokenKind.Eof);
     assert.deepEqual(kinds, [
@@ -18,7 +18,7 @@ describe("Lexer", () => {
       TokenKind.Match, TokenKind.Impl, TokenKind.Effect, TokenKind.Handle, TokenKind.With,
       TokenKind.If, TokenKind.Else, TokenKind.Or, TokenKind.Catch, TokenKind.Test,
       TokenKind.Return, TokenKind.For, TokenKind.In, TokenKind.Pub, TokenKind.Where,
-      TokenKind.True, TokenKind.False,
+      TokenKind.True, TokenKind.False, TokenKind.Trait,
     ]);
   });
 
@@ -456,6 +456,62 @@ describe("Parser", () => {
       // It's a return_stmt, not an expr_stmt, so it goes to stmts
       assert.equal(fn_decl.body.stmts.length, 1);
       assert.equal(fn_decl.body.stmts[0].kind, "return_stmt");
+    });
+  });
+
+  describe("trait declarations", () => {
+    it("parses a simple trait", () => {
+      const program = Parser.parse(`trait Printable {
+        fn print(self) -> Unit
+      }`);
+      assert.equal(program.decls.length, 1);
+      const decl = program.decls[0];
+      assert.equal(decl.kind, "trait_decl");
+      if (decl.kind !== "trait_decl") return;
+      assert.equal(decl.name, "Printable");
+      assert.equal(decl.methods.length, 1);
+      assert.equal(decl.methods[0].name, "print");
+      assert.equal(decl.methods[0].is_abstract, true);
+    });
+
+    it("parses trait with default method", () => {
+      const program = Parser.parse(`trait Printable {
+        fn print(self) -> Unit {
+          println("default")
+        }
+      }`);
+      assert.equal(program.decls.length, 1);
+      const decl = program.decls[0];
+      assert.equal(decl.kind, "trait_decl");
+      if (decl.kind !== "trait_decl") return;
+      assert.equal(decl.methods.length, 1);
+      assert.equal(decl.methods[0].name, "print");
+      assert.equal(decl.methods[0].is_abstract, undefined);
+    });
+
+    it("parses generic constraint with bounds", () => {
+      const program = Parser.parse("fn sort<T: Ord>(xs: T) -> T { xs }");
+      assert.equal(program.decls.length, 1);
+      const decl = program.decls[0];
+      assert.equal(decl.kind, "fn_decl");
+      if (decl.kind !== "fn_decl") return;
+      assert.equal(decl.type_params.length, 1);
+      assert.equal(decl.type_params[0].name, "T");
+      assert.equal(decl.type_params[0].bounds.length, 1);
+      assert.equal(decl.type_params[0].bounds[0].trait_name, "Ord");
+    });
+
+    it("parses multi-bound constraints", () => {
+      const program = Parser.parse("fn foo<T: A + B>(x: T) -> T { x }");
+      assert.equal(program.decls.length, 1);
+      const decl = program.decls[0];
+      assert.equal(decl.kind, "fn_decl");
+      if (decl.kind !== "fn_decl") return;
+      assert.equal(decl.type_params.length, 1);
+      assert.equal(decl.type_params[0].name, "T");
+      assert.equal(decl.type_params[0].bounds.length, 2);
+      assert.equal(decl.type_params[0].bounds[0].trait_name, "A");
+      assert.equal(decl.type_params[0].bounds[1].trait_name, "B");
     });
   });
 
