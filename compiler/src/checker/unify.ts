@@ -203,6 +203,16 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
       s = unify(a.params[i], b.params[i], s);
     }
     s = unify(a.return_type, b.return_type, s);
+    // Unify effect rows: unify matching fail error types
+    for (const ae of a.effects.effects) {
+      if (ae.kind === "fail") {
+        for (const be of b.effects.effects) {
+          if (be.kind === "fail") {
+            s = unify(ae.error_type, be.error_type, s);
+          }
+        }
+      }
+    }
     return s;
   }
 

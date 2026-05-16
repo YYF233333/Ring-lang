@@ -8,27 +8,30 @@ import { Substitution, apply } from "./unify.js";
  * Returns null if exhaustive, or the name of a missing variant/case if not.
  */
 export function check_exhaustive(
-  patterns: Pattern[],
+  arms: { pattern: Pattern; guard?: any }[],
   scrutinee_type: Type,
   subst: Substitution,
 ): string | null {
   const resolved = apply(subst, scrutinee_type);
 
-  // If any pattern is a wildcard or binding, it's automatically exhaustive
-  for (const pat of patterns) {
-    if (pat.kind === "wildcard" || pat.kind === "binding") {
+  // Unguarded wildcard or binding makes the match exhaustive
+  for (const arm of arms) {
+    if (!arm.guard && (arm.pattern.kind === "wildcard" || arm.pattern.kind === "binding")) {
       return null; // exhaustive
     }
   }
 
-  // For enum types: check that all variants are covered
+  // For enum types: check that all variants are covered (by unguarded patterns)
   if (resolved.kind === "enum") {
     const variant_names = new Set(resolved.variants.map(v => v.name));
     const covered = new Set<string>();
 
-    for (const pat of patterns) {
-      if (pat.kind === "constructor") {
-        covered.add(pat.name);
+    for (const arm of arms) {
+      if (arm.pattern.kind === "constructor") {
+        // Only count as covered if the variant actually belongs to this enum
+        if (variant_names.has(arm.pattern.name) && !arm.guard) {
+          covered.add(arm.pattern.name);
+        }
       }
     }
 
@@ -44,10 +47,10 @@ export function check_exhaustive(
   if (resolved.kind === "bool") {
     let has_true = false;
     let has_false = false;
-    for (const pat of patterns) {
-      if (pat.kind === "literal") {
-        if (pat.value === true) has_true = true;
-        if (pat.value === false) has_false = true;
+    for (const arm of arms) {
+      if (!arm.guard && arm.pattern.kind === "literal") {
+        if (arm.pattern.value === true) has_true = true;
+        if (arm.pattern.value === false) has_false = true;
       }
     }
     if (has_true && has_false) return null;
@@ -57,7 +60,6 @@ export function check_exhaustive(
 
   // For other types (Int, Str, etc.), we cannot check exhaustiveness
   // without a wildcard/binding, so report non-exhaustive
-  // unless it's a unit type (single value)
   if (resolved.kind === "unit") {
     return null;
   }

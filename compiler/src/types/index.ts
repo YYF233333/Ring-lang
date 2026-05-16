@@ -197,7 +197,12 @@ export function effects_equal(a: Effect, b: Effect): boolean {
     case "io": return true;
     case "mut": return true;
     case "fail": return types_equal(a.error_type, (b as FailEffect).error_type);
-    case "custom": return a.name === (b as CustomEffect).name;
+    case "custom": {
+      const bc = b as CustomEffect;
+      return a.name === bc.name &&
+        a.type_args.length === bc.type_args.length &&
+        a.type_args.every((arg, i) => types_equal(arg, bc.type_args[i]));
+    }
   }
 }
 
@@ -221,8 +226,10 @@ export function types_equal(a: Type, b: Type): boolean {
     case "fn": {
       const bf = b as FnType;
       if (a.params.length !== bf.params.length) return false;
+      if (a.effects.effects.length !== bf.effects.effects.length) return false;
       return a.params.every((p, i) => types_equal(p, bf.params[i])) &&
-        types_equal(a.return_type, bf.return_type);
+        types_equal(a.return_type, bf.return_type) &&
+        a.effects.effects.every((e, i) => effects_equal(e, bf.effects.effects[i]));
     }
     case "struct": {
       const bs = b as StructType;

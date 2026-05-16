@@ -9,7 +9,7 @@ import {
 } from "../ast/index.js";
 import {
   Type, FnType, TypeVar, EffectRow, Effect,
-  INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY,
+  INT, FLOAT, STR, BOOL, UNIT, NEVER,
   EMPTY_ROW, effect_row, row_merge, fresh_type_var, type_to_string,
 } from "../types/index.js";
 import {
@@ -237,7 +237,7 @@ export class InferEngine {
     const type_param_names = decl.type_params.map(tp => tp.name);
     const ops = decl.ops.map(op => ({
       name: op.name,
-      params: op.params.map(p => p.type_annotation ? this.resolve_type_expr(p.type_annotation) : ANY),
+      params: op.params.map(p => p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var()),
       return_type: this.resolve_type_expr(op.return_type),
     }));
     const def: EffectDef = {
@@ -350,9 +350,9 @@ export class InferEngine {
       kind: "effect_decl",
       name: decl.name,
       type_params: decl.type_params,
-      ops: def.ops.map(op => ({
+      ops: def.ops.map((op, op_idx) => ({
         name: op.name,
-        params: op.params.map((t, i) => ({ name: decl.ops[i]?.params[0]?.name ?? `p${i}`, type: t })),
+        params: op.params.map((t, i) => ({ name: decl.ops[op_idx]?.params[i]?.name ?? `p${i}`, type: t })),
         return_type: op.return_type,
       })),
       is_pub: decl.is_pub,
@@ -840,7 +840,7 @@ export class InferEngine {
     return {
       hexpr: {
         kind: "call",
-        callee: { kind: "field_access", receiver: recv_r.hexpr, field: method, type: method_type ?? ANY, effects: EMPTY_ROW, span },
+        callee: { kind: "field_access", receiver: recv_r.hexpr, field: method, type: method_type ?? fresh_type_var(), effects: EMPTY_ROW, span },
         args: hargs,
         type_args: [],
         type: result_type,
@@ -900,7 +900,7 @@ export class InferEngine {
     const s = recv_r.subst;
     const recv_type = apply(s, recv_r.hexpr.type);
 
-    let field_type: Type = ANY;
+    let field_type: Type;
     if (recv_type.kind === "struct") {
       const struct_def = this.env.structs.get(recv_type.name);
       if (struct_def) {
@@ -910,7 +910,14 @@ export class InferEngine {
         } else {
           throw new TypeCheckError(`Struct ${recv_type.name} has no field ${field}`, span);
         }
+      } else {
+        throw new TypeCheckError(`Unknown struct: ${recv_type.name}`, span);
       }
+    } else if (recv_type.kind === "var") {
+      // Unresolved type variable — defer with fresh var
+      field_type = fresh_type_var();
+    } else {
+      throw new TypeCheckError(`Cannot access field '${field}' on type ${type_to_string(recv_type)}`, span);
     }
 
     return {
@@ -1001,8 +1008,7 @@ export class InferEngine {
 
     // Check exhaustiveness
     const scrut_type_resolved = apply(s, scrut_r.hexpr.type);
-    const patterns = arms.map(a => a.pattern);
-    const missing = check_exhaustive(patterns, scrut_type_resolved, s);
+    const missing = check_exhaustive(arms, scrut_type_resolved, s);
     if (missing !== null) {
       throw new TypeCheckError(
         `Non-exhaustive match: missing pattern for ${missing}`,
@@ -1162,8 +1168,8 @@ export class InferEngine {
     let s = expr_r.subst;
 
     this.env.push_scope();
-    // Bind error to Any type (or the fail type if we have it)
-    this.env.bind_mono(error_binding, ANY);
+    // Bind error variable — use fresh type var (fail<E> type would refine it)
+    this.env.bind_mono(error_binding, fresh_type_var());
     const handler_r = this.infer_expr(handler, s);
     s = handler_r.subst;
     this.env.pop_scope();
@@ -1203,18 +1209,27 @@ export class InferEngine {
     for (const handler of handlers) {
       this.env.push_scope();
 
-      // Bind handler params
+      // Look up effect op definition for proper typing
+      const effect_def = this.env.effects.get(handler.effect_name);
+      const op_def = effect_def?.ops.find(o => o.name === handler.op_name);
+
+      // Bind handler params from effect op definition
       const hparams: HParam[] = [];
-      for (const p of handler.params) {
-        const pt = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : ANY;
+      for (let i = 0; i < handler.params.length; i++) {
+        const p = handler.params[i];
+        const pt = p.type_annotation
+          ? this.resolve_type_expr(p.type_annotation)
+          : (op_def && i < op_def.params.length ? op_def.params[i] : fresh_type_var());
         this.env.bind_mono(p.name, pt);
         hparams.push({ name: p.name, type: pt });
       }
 
-      // Bind resume if present
+      // Bind resume with typed signature: fn(ReturnType) -> ResultType
       if (handler.resume_name) {
+        const resume_param = op_def ? op_def.return_type : fresh_type_var();
+        const resume_ret = fresh_type_var();
         this.env.bind_mono(handler.resume_name, {
-          kind: "fn", params: [ANY], return_type: ANY, effects: EMPTY_ROW,
+          kind: "fn", params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW,
         } as FnType);
       }
 

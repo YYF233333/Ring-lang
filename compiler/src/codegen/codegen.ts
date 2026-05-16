@@ -8,6 +8,23 @@ import {
 import { Pattern } from "../ast/index.js";
 import { RUNTIME_CODE } from "./runtime.js";
 
+const JS_RESERVED = new Set([
+  "abstract", "arguments", "await", "boolean", "break", "byte", "case", "catch",
+  "char", "class", "const", "continue", "debugger", "default", "delete", "do",
+  "double", "else", "enum", "eval", "export", "extends", "false", "final",
+  "finally", "float", "for", "function", "goto", "if", "implements", "import",
+  "in", "instanceof", "int", "interface", "let", "long", "native", "new",
+  "null", "package", "private", "protected", "public", "return", "short",
+  "static", "super", "switch", "synchronized", "this", "throw", "throws",
+  "transient", "true", "try", "typeof", "undefined", "var", "void",
+  "volatile", "while", "with", "yield",
+]);
+
+function safe_ident(name: string): string {
+  if (JS_RESERVED.has(name)) return `_${name}`;
+  return name;
+}
+
 // ============================================================
 // CodeGenerator class
 // ============================================================
@@ -77,8 +94,8 @@ class CodeGenerator {
   }
 
   private emit_fn_decl(decl: HFnDecl, prefix?: string): void {
-    const name = prefix ? `${prefix}_${decl.name}` : decl.name;
-    const params = decl.params.map(p => p.name).join(", ");
+    const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : safe_ident(decl.name);
+    const params = decl.params.map(p => safe_ident(p.name)).join(", ");
     this.emit(`function ${name}(${params}) {`);
     this.push_indent();
     this.emit_block_body(decl.body);
@@ -161,10 +178,10 @@ class CodeGenerator {
   private emit_stmt(stmt: HStmt): void {
     switch (stmt.kind) {
       case "let_stmt":
-        this.emit(`const ${stmt.name} = ${this.gen_expr(stmt.init)};`);
+        this.emit(`const ${safe_ident(stmt.name)} = ${this.gen_expr(stmt.init)};`);
         break;
       case "var_stmt":
-        this.emit(`let ${stmt.name} = ${this.gen_expr(stmt.init)};`);
+        this.emit(`let ${safe_ident(stmt.name)} = ${this.gen_expr(stmt.init)};`);
         break;
       case "assign_stmt":
         this.emit(`${this.gen_expr(stmt.target)} = ${this.gen_expr(stmt.value)};`);
@@ -197,7 +214,7 @@ class CodeGenerator {
       case "bool_lit":
         return expr.value ? "true" : "false";
       case "ident":
-        return expr.resolved_name ?? expr.name;
+        return safe_ident(expr.resolved_name ?? expr.name);
       case "bin_op":
         return `(${this.gen_expr(expr.left)} ${expr.op} ${this.gen_expr(expr.right)})`;
       case "unary_op":
@@ -282,13 +299,16 @@ class CodeGenerator {
       case "constructor": {
         const bindings = pat.fields.map((f, i) => {
           if (f.kind === "binding") {
-            return `const ${f.name} = __m._${i}; `;
+            return `const ${safe_ident(f.name)} = __m._${i}; `;
           }
           return "";
         }).join("");
-        const guard = arm.guard ? `if (!(${this.gen_expr(arm.guard)})) break; ` : "";
+        if (arm.guard) {
+          const body = this.gen_expr(arm.body);
+          return `    case "${pat.name}": { ${bindings}if (${this.gen_expr(arm.guard)}) { return ${body}; } break; }`;
+        }
         const body = this.gen_expr(arm.body);
-        return `    case "${pat.name}": { ${bindings}${guard}return ${body}; }`;
+        return `    case "${pat.name}": { ${bindings}return ${body}; }`;
       }
       case "wildcard": {
         const body = this.gen_expr(arm.body);
@@ -296,7 +316,7 @@ class CodeGenerator {
       }
       case "binding": {
         const body = this.gen_expr(arm.body);
-        return `    default: { const ${pat.name} = __m; return ${body}; }`;
+        return `    default: { const ${safe_ident(pat.name)} = __m; return ${body}; }`;
       }
       case "literal": {
         // Literal in a tag-switch doesn't make sense, but handle gracefully
@@ -401,8 +421,7 @@ class CodeGenerator {
   private gen_string_interp(expr: HExpr & { kind: "string_interp" }): string {
     const parts = expr.parts.map(p => {
       if (typeof p === "string") {
-        // Escape backticks and ${} in literal parts
-        return p.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+        return p.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
       }
       return `\${${this.gen_expr(p)}}`;
     });
@@ -451,7 +470,7 @@ class CodeGenerator {
   }
 
   private gen_lambda(expr: HExpr & { kind: "lambda" }): string {
-    const params = expr.params.map(p => p.name).join(", ");
+    const params = expr.params.map(p => safe_ident(p.name)).join(", ");
     const body = this.gen_expr(expr.body);
     return `(function(${params}) { return ${body}; })`;
   }

@@ -1,7 +1,8 @@
 # Phase 1 审查报告 — 剩余问题
 
 **原始审查日期**: 2026-05-16
-**修复批次**: 2026-05-16（C1-C11, I10, I13, I14 已修复）
+**修复批次 1**: 2026-05-16（C1-C11, I10, I13, I14 已修复）
+**修复批次 2**: 2026-05-16（I1-I3, I5, I7, I9, I12, I18, I20, I22, I23 已修复）
 **审查方法**: Claude Opus × 5 并行代理 + DeepSeek V4 Pro × 3 并行代理，独立审查后交叉验证
 
 ---
@@ -38,145 +39,67 @@
 
 ---
 
-## 二、剩余 Important 问题
-
-### I1. FnType unify 跳过 effects
-
-- **文件**: `compiler/src/checker/unify.ts:197-207`
-- **问题**: 函数类型统一只统一参数和返回类型，不统一 effect row。`fn() -> Int / io` 和 `fn() -> Int` 可以被统一。
-- **修复方向**: 在 FnType 分支中增加 `unify_effects(a.effects, b.effects, s)`。
-
-### I2. `types_equal` 忽略 FnType effects
-
-- **文件**: `compiler/src/types/index.ts:221-226`
-- **问题**: `FnType` 的相等性检查只比较 `params` 和 `return_type`，忽略 `effects`。
-
-### I3. `effects_equal` 忽略 CustomEffect type_args
-
-- **文件**: `compiler/src/types/index.ts:201`
-- **问题**: 只比较名称不比较类型参数。`custom_effect<Int>` 和 `custom_effect<Str>` 被视为相同。
+## 二、剩余问题（低优先级，可延至 Phase 2）
 
 ### I4. `remove_fail_effect` 不区分错误类型
 
-- **文件**: `compiler/src/checker/infer.ts:1188-1193`
+- **文件**: `compiler/src/checker/infer.ts`
 - **问题**: 如果函数同时有 `fail<ParseError>` 和 `fail<IoError>`，一个 `or` 表达式会同时移除两者。
-
-### I5. Match guard fallthrough → match_fail
-
-- **文件**: `compiler/src/codegen/codegen.ts:289`
-- **问题**: constructor match 的 guard 失败时用 `break` 跳出整个 switch，直接到 `__match_fail`，而非 fall through 到同一 `_tag` 的下一个 arm。
+- **影响**: 低——Phase 1 中很少出现多 fail 类型共存的场景。Phase 2 trait 系统后自然解决。
 
 ### I6. yield 在非 generator 上下文中
 
-- **文件**: `compiler/src/codegen/codegen.ts:454-457`
-- **问题**: `gen_effect_op` 统一生成 `yield`。如果 effect op 出现在非 `handle` 上下文中，生成的代码在普通函数中使用 `yield`，JS 语法错误。
-- **修复方向**: fail.raise 特化为 throw；其他 effect op 需要 propagate 标记来决定 yield vs 调用。
-
-### I7. 穷尽性不验证 variant 属于目标 enum
-
-- **文件**: `compiler/src/checker/exhaustive.ts:29-33`
-- **问题**: `covered.add(pat.name)` 无条件添加，不验证 variant 是否属于 scrutinee 类型。
+- **文件**: `compiler/src/codegen/codegen.ts`
+- **问题**: `gen_effect_op` 统一生成 `yield`。非 `handle` 上下文中 effect op 会生成非法 JS。
+- **影响**: 中——`fail.raise` 应编译为 `throw`，其他 effect 需 propagation 标记。Phase 2 effect handler 重构会解决。
 
 ### I8. 穷尽性不检查嵌套 pattern
 
-- **文件**: `compiler/src/checker/exhaustive.ts:25-41`
-- **问题**: 只看顶层 variant 名称，不检查嵌套 pattern。
-
-### I9. 穷尽性视 guard pattern 为完整覆盖
-
 - **文件**: `compiler/src/checker/exhaustive.ts`
-- **问题**: 带 guard 的 pattern 不能保证完整覆盖，但被当作完整覆盖。
+- **问题**: 只看顶层 variant 名称，不检查嵌套 pattern 完整性。
+- **影响**: 低——Phase 1 中 nested pattern matching 的使用有限，且有运行时 `__match_fail` 兜底。
 
 ### I11. Struct 字面量字段顺序假设
 
-- **文件**: `compiler/src/codegen/codegen.ts:236-239`
+- **文件**: `compiler/src/codegen/codegen.ts`
 - **问题**: `new Type(arg1, arg2)` 假设字段顺序与声明一致。`Point { y: 2, x: 1 }` 可能将 y 赋给 x。
-
-### I12. Effect op param name 索引错误
-
-- **文件**: `compiler/src/checker/infer.ts:260-264`
-- **问题**: `decl.ops[i]?.params[0]?.name` — 外层 `map` 的 `i` 是参数索引，`decl.ops[i]` 取的是第 i 个 operation。
+- **影响**: 中——需要 codegen 查找 struct 定义并按声明顺序排列字段。
 
 ### I15. 比较运算符结合性
 
-- **文件**: `compiler/src/parser/parser.ts:511-538`
+- **文件**: `compiler/src/parser/parser.ts`
 - **问题**: `a == b == c` 被解析为 `(a == b) == c`。比较运算符应为非结合。
+- **影响**: 低——极少有人写链式比较，且结果是类型错误（Bool == Int）。
 
 ### I16. 插值内字符串被误当插值结束
 
-- **文件**: `compiler/src/parser/lexer.ts:213-216`
-- **问题**: 插值表达式内部的字符串字面量 `"${prefix + "suffix"}"` 中的 `"` 被当作插值结束符处理。
+- **文件**: `compiler/src/parser/lexer.ts`
+- **问题**: 插值表达式内部的字符串字面量中的 `"` 被当作插值结束符处理。
+- **影响**: 中——需要在 lexer 中维护括号深度计数器。
 
 ### I17. UFCS method call codegen 错误
 
-- **文件**: `compiler/src/codegen/codegen.ts:230-234`
-- **问题**: method call 在 HIR 中生成 `obj.field(args)`，但 impl 方法被编译为独立函数 `TypeName_methodName`，调用应是 `TypeName_methodName(obj, args)`。
-
-### I18. `field_access` 非 struct 静默返回 ANY
-
-- **文件**: `compiler/src/checker/infer.ts:784-796`
-- **问题**: 对枚举类型或未解析类型变量的 field access 不报错，静默退化到 ANY。
+- **文件**: `compiler/src/codegen/codegen.ts`
+- **问题**: impl 方法被编译为独立函数 `TypeName_methodName`，但 method call 生成 `obj.method(args)` 而非 `TypeName_methodName(obj, args)`。
+- **影响**: 高——但 Phase 1 示例中未暴露（hello.ring 不用 method call），需要 codegen 识别 HIR 中的 UFCS 调用模式。
 
 ### I19. fail effect 从未被添加到 effect row
 
-- **文件**: `compiler/src/checker/infer.ts`（全局）
+- **文件**: `compiler/src/checker/infer.ts`
 - **问题**: 没有代码向函数的 effect row 添加 `fail` effect。`or`/`catch` 移除一个从未被添加的 effect。
-
-### I20. handle 不验证 handler 类型
-
-- **文件**: `compiler/src/checker/infer.ts:1077-1143`
-- **问题**: Handler 参数绑定为 ANY，resume 回调为 `fn(Any) -> Any`，handler body 与 handle body 类型不统一。
+- **影响**: 中——effect 追踪不完整，但不影响代码生成正确性。Phase 2 effect 系统完善时必须修复。
 
 ### I21. Diagnostic 系统完全未使用
 
-- **文件**: `compiler/src/errors.ts`（整个文件）
-- **问题**: `CompileError`/`Diagnostic` 系统已定义，但未被使用。迁移作为 Phase 2 前置工作。
-
-### I22. JS 保留字冲突未处理
-
-- **文件**: `compiler/src/codegen/codegen.ts`（全局）
-- **问题**: Ring-lang 标识符直接输出为 JS 标识符。`class`、`default`、`switch` 等会导致语法错误。
-
-### I23. 字符串插值反斜杠未转义
-
-- **文件**: `compiler/src/codegen/codegen.ts:401-409`
-- **问题**: 字符串插值中只转义了反引号和 `${`，未转义反斜杠 `\`。
+- **文件**: `compiler/src/errors.ts`
+- **问题**: `CompileError`/`Diagnostic` 系统已定义但未使用。
+- **影响**: 低——Phase 2 LSP 前必须迁移。
 
 ---
 
-## 三、建议修复顺序（剩余项）
+## 三、已修复问题记录
 
-### 第一批：类型系统完善
-
-1. **I1/I2/I3** — types_equal/unify 补全 effects 比较
-2. **I4** — remove_fail_effect 按错误类型区分
-3. **I7/I8/I9** — 穷尽性检查完善
-4. **I12** — effect op param name 索引
-5. **I18/I19/I20** — field access、fail 追踪、handle 验证
-
-### 第二批：Codegen 正确性
-
-6. **I5** — match guard fallthrough
-7. **I6** — fail.raise 特化为 throw
-8. **I17** — UFCS method call codegen
-9. **I11** — struct 字面量字段排序
-10. **I22** — JS 保留字检查
-11. **I23** — 字符串插值反斜杠转义
-
-### 第三批：Parser 健壮性
-
-12. **I15** — 比较运算符非结合
-13. **I16** — 插值内字符串处理
-
-### 第四批：基础设施
-
-14. **I21** — 迁移到 Diagnostic 系统（Phase 2 前置）
-
----
-
-## 四、已修复问题记录
-
-以下问题已在 2026-05-16 修复并通过 89 个测试验证：
+### 批次 1（2026-05-16）
 
 | ID | 问题 | 修复摘要 |
 |----|------|----------|
@@ -194,4 +117,21 @@
 | I10 | `infer_block` subst 初始化不一致 | 接受 initial_subst 参数 |
 | I13 | 单 `&`/`|` 返回 Eof token | 改为抛词法错误 |
 | I14 | 未终止字符串静默返回 | 改为抛错误 |
-| — | `Any` 类型用户可用 | 从 resolve_named_type 移除；print 改为泛型；toml stub 移除 ANY |
+| — | `Any` 类型用户可用 | 从 resolve_named_type 移除；print 改为泛型；infer.ts 完全移除 ANY |
+
+### 批次 2（2026-05-16）
+
+| ID | 问题 | 修复摘要 |
+|----|------|----------|
+| I1 | FnType unify 跳过 effects | 在 FnType 统一中增加 fail error_type 的 unify |
+| I2 | `types_equal` 忽略 FnType effects | 增加 effects 数组比较 |
+| I3 | `effects_equal` 忽略 CustomEffect type_args | 增加 type_args 逐项比较 |
+| I5 | Match guard fallthrough → match_fail | guard 失败改为 `if (guard) { return; } break;` |
+| I7 | 穷尽性不验证 variant 属于目标 enum | 用 `variant_names.has()` 验证 |
+| I9 | 穷尽性视 guard pattern 为完整覆盖 | 带 guard 的 pattern 不计入 covered |
+| I12 | Effect op param name 索引错误 | 改为 `(op, op_idx)` + `params[i]` |
+| I18 | `field_access` 非 struct 静默返回 ANY | 抛 TypeCheckError（type var 用 fresh var 延迟） |
+| I20 | handle 不验证 handler 类型 | handler params/resume 从 effect def 获取类型 |
+| I22 | JS 保留字冲突未处理 | 添加 `safe_ident()` 前缀转义 |
+| I23 | 字符串插值反斜杠未转义 | 先转义 `\` 再转义 `` ` `` 和 `${` |
+| — | infer.ts 残余 ANY 使用 | 全部替换为 fresh_type_var()，移除 ANY 导入 |
