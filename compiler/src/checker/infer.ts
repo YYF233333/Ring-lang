@@ -1,0 +1,1238 @@
+// Ring-lang Type Inference Engine (Algorithm W variant)
+// Two-pass: register all top-level decls, then infer all bodies.
+
+import {
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl,
+  Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr,
+  BinOp,
+  Span, span_zero,
+} from "../ast/index.js";
+import {
+  Type, FnType, EffectRow, Effect,
+  INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY,
+  EMPTY_ROW, effect_row, row_merge, fresh_type_var, type_to_string,
+} from "../types/index.js";
+import {
+  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl,
+  HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit,
+} from "../hir/index.js";
+import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef } from "./env.js";
+import { Substitution, empty_subst, unify, apply, apply_to_effect_row, compose, UnificationError } from "./unify.js";
+import { check_exhaustive } from "./exhaustive.js";
+
+// ============================================================
+// Error helpers
+// ============================================================
+
+export class TypeCheckError extends Error {
+  constructor(message: string, public span?: Span) {
+    super(message);
+    this.name = "TypeCheckError";
+  }
+}
+
+// ============================================================
+// Inference result for expressions
+// ============================================================
+
+interface InferResult {
+  hexpr: HExpr;
+  subst: Substitution;
+  effects: EffectRow;
+}
+
+// ============================================================
+// InferEngine
+// ============================================================
+
+export class InferEngine {
+  public env: TypeEnv;
+  private subst: Substitution;
+
+  constructor() {
+    this.env = new TypeEnv();
+    this.subst = empty_subst();
+  }
+
+  // ============================================================
+  // Public entry point
+  // ============================================================
+
+  check(program: Program): HProgram {
+    // Pass 1: register all top-level declarations
+    for (const decl of program.decls) {
+      this.register_decl(decl);
+    }
+
+    // Pass 2: type-check all declaration bodies
+    const hdecls: HDecl[] = [];
+    for (const decl of program.decls) {
+      const hd = this.check_decl(decl);
+      if (hd) hdecls.push(hd);
+    }
+
+    return { decls: hdecls };
+  }
+
+  // ============================================================
+  // Pass 1: Register declarations
+  // ============================================================
+
+  private register_decl(decl: Decl): void {
+    switch (decl.kind) {
+      case "struct_decl":
+        this.register_struct(decl);
+        break;
+      case "enum_decl":
+        this.register_enum(decl);
+        break;
+      case "effect_decl":
+        this.register_effect(decl);
+        break;
+      case "impl_decl":
+        this.register_impl(decl);
+        break;
+      case "fn_decl":
+        this.register_fn(decl);
+        break;
+      case "test_decl":
+        // Nothing to register for test decls
+        break;
+    }
+  }
+
+  private register_struct(decl: StructDecl): void {
+    const type_param_names = decl.type_params.map(tp => tp.name);
+    const fields = decl.fields.map(f => ({
+      name: f.name,
+      type: this.resolve_type_expr(f.type_annotation),
+      is_pub: f.is_pub,
+    }));
+    const def: StructDef = {
+      name: decl.name,
+      type_params: type_param_names,
+      fields,
+    };
+    this.env.structs.set(decl.name, def);
+  }
+
+  private register_enum(decl: EnumDecl): void {
+    const type_param_names = decl.type_params.map(tp => tp.name);
+    const variants = decl.variants.map(v => ({
+      name: v.name,
+      fields: v.fields.map(f => this.resolve_type_expr(f)),
+    }));
+    const def: EnumDef = {
+      name: decl.name,
+      type_params: type_param_names,
+      variants,
+    };
+    this.env.enums.set(decl.name, def);
+
+    // Register variant constructors as functions
+    const enum_type: Type = {
+      kind: "enum",
+      name: decl.name,
+      type_params: [],
+      variants: variants,
+    };
+
+    for (const variant of variants) {
+      this.env.variant_to_enum.set(variant.name, decl.name);
+      if (variant.fields.length === 0) {
+        // Nullary constructor — just the enum type
+        this.env.bind_mono(variant.name, enum_type);
+      } else {
+        // Constructor function
+        const fn_type: FnType = {
+          kind: "fn",
+          params: variant.fields,
+          return_type: enum_type,
+          effects: EMPTY_ROW,
+        };
+        this.env.bind_mono(variant.name, fn_type);
+      }
+    }
+  }
+
+  private register_effect(decl: EffectDecl): void {
+    const type_param_names = decl.type_params.map(tp => tp.name);
+    const ops = decl.ops.map(op => ({
+      name: op.name,
+      params: op.params.map(p => p.type_annotation ? this.resolve_type_expr(p.type_annotation) : ANY),
+      return_type: this.resolve_type_expr(op.return_type),
+    }));
+    const def: EffectDef = {
+      name: decl.name,
+      type_params: type_param_names,
+      ops,
+    };
+    this.env.effects.set(decl.name, def);
+  }
+
+  private register_impl(decl: ImplDecl): void {
+    // Register methods for later lookup
+    let methods = this.env.impl_methods.get(decl.target_type);
+    if (!methods) {
+      methods = new Map();
+      this.env.impl_methods.set(decl.target_type, methods);
+    }
+    for (const method of decl.methods) {
+      const param_types = method.params.map(p =>
+        p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var()
+      );
+      const ret_type = method.return_type ? this.resolve_type_expr(method.return_type) : fresh_type_var();
+      const fn_type: FnType = {
+        kind: "fn",
+        params: param_types,
+        return_type: ret_type,
+        effects: EMPTY_ROW,
+      };
+      methods.set(method.name, { type: fn_type, type_vars: [] });
+    }
+  }
+
+  private register_fn(decl: FnDecl): void {
+    const param_types = decl.params.map(p =>
+      p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var()
+    );
+    const ret_type = decl.return_type ? this.resolve_type_expr(decl.return_type) : fresh_type_var();
+    const fn_type: FnType = {
+      kind: "fn",
+      params: param_types,
+      return_type: ret_type,
+      effects: EMPTY_ROW,
+    };
+    this.env.bind_mono(decl.name, fn_type);
+  }
+
+  // ============================================================
+  // Pass 2: Check declarations
+  // ============================================================
+
+  private check_decl(decl: Decl): HDecl | null {
+    switch (decl.kind) {
+      case "struct_decl":
+        return this.check_struct_decl(decl);
+      case "enum_decl":
+        return this.check_enum_decl(decl);
+      case "effect_decl":
+        return this.check_effect_decl(decl);
+      case "impl_decl":
+        return this.check_impl_decl(decl);
+      case "fn_decl":
+        return this.check_fn_decl(decl);
+      case "test_decl":
+        return this.check_test_decl(decl);
+    }
+  }
+
+  private check_struct_decl(decl: StructDecl): HStructDecl {
+    const def = this.env.structs.get(decl.name)!;
+    return {
+      kind: "struct_decl",
+      name: decl.name,
+      type_params: decl.type_params,
+      fields: def.fields.map(f => ({ name: f.name, type: f.type, is_pub: f.is_pub })),
+      is_pub: decl.is_pub,
+      span: decl.span,
+    };
+  }
+
+  private check_enum_decl(decl: EnumDecl): HEnumDecl {
+    const def = this.env.enums.get(decl.name)!;
+    return {
+      kind: "enum_decl",
+      name: decl.name,
+      type_params: decl.type_params,
+      variants: def.variants.map(v => ({ name: v.name, fields: v.fields })),
+      is_pub: decl.is_pub,
+      span: decl.span,
+    };
+  }
+
+  private check_effect_decl(decl: EffectDecl): HEffectDecl {
+    const def = this.env.effects.get(decl.name)!;
+    return {
+      kind: "effect_decl",
+      name: decl.name,
+      type_params: decl.type_params,
+      ops: def.ops.map(op => ({
+        name: op.name,
+        params: op.params.map((t, i) => ({ name: decl.ops[i]?.params[0]?.name ?? `p${i}`, type: t })),
+        return_type: op.return_type,
+      })),
+      is_pub: decl.is_pub,
+      span: decl.span,
+    };
+  }
+
+  private check_impl_decl(decl: ImplDecl): HImplDecl {
+    const methods: HFnDecl[] = [];
+    for (const method of decl.methods) {
+      const hfn = this.check_fn_decl(method);
+      methods.push(hfn);
+    }
+    return {
+      kind: "impl_decl",
+      target_type: decl.target_type,
+      type_params: decl.type_params,
+      trait_name: decl.trait_name,
+      methods,
+      span: decl.span,
+    };
+  }
+
+  private check_fn_decl(decl: FnDecl): HFnDecl {
+    this.env.push_scope();
+
+    // Bind parameters
+    const hparams: HParam[] = [];
+    for (const p of decl.params) {
+      const ptype = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var();
+      this.env.bind_mono(p.name, ptype);
+      hparams.push({ name: p.name, type: ptype });
+    }
+
+    // Infer body
+    const body_result = this.infer_block(decl.body);
+    this.subst = body_result.subst;
+
+    // Determine return type
+    let ret_type: Type;
+    if (decl.return_type) {
+      const declared_ret = this.resolve_type_expr(decl.return_type);
+      this.subst = unify(body_result.hexpr.type, declared_ret, this.subst);
+      ret_type = apply(this.subst, declared_ret);
+    } else {
+      ret_type = apply(this.subst, body_result.hexpr.type);
+    }
+
+    this.env.pop_scope();
+
+    // Apply final substitution to params
+    const final_params = hparams.map(p => ({
+      name: p.name,
+      type: apply(this.subst, p.type),
+    }));
+
+    const effects = apply_to_effect_row(this.subst, body_result.effects);
+
+    return {
+      kind: "fn_decl",
+      name: decl.name,
+      type_params: decl.type_params,
+      params: final_params,
+      return_type: ret_type,
+      effects,
+      body: body_result.hexpr as HBlock,
+      is_pub: decl.is_pub,
+      span: decl.span,
+    };
+  }
+
+  private check_test_decl(decl: TestDecl): HTestDecl {
+    this.env.push_scope();
+    const body_result = this.infer_block(decl.body);
+    this.subst = body_result.subst;
+    this.env.pop_scope();
+    return {
+      kind: "test_decl",
+      description: decl.description,
+      body: body_result.hexpr as HBlock,
+      span: decl.span,
+    };
+  }
+
+  // ============================================================
+  // Infer Block
+  // ============================================================
+
+  private infer_block(block: BlockExpr): InferResult {
+    let subst = this.subst;
+    let effects: EffectRow = EMPTY_ROW;
+    const hstmts: HStmt[] = [];
+
+    for (const stmt of block.stmts) {
+      const sr = this.infer_stmt(stmt, subst);
+      subst = sr.subst;
+      effects = row_merge(effects, sr.effects);
+      hstmts.push(sr.hstmt);
+    }
+
+    let tail_hexpr: HExpr | undefined;
+    let block_type: Type = UNIT;
+
+    if (block.tail) {
+      const tr = this.infer_expr(block.tail, subst);
+      subst = tr.subst;
+      effects = row_merge(effects, tr.effects);
+      tail_hexpr = tr.hexpr;
+      block_type = tr.hexpr.type;
+    }
+
+    const hblock: HBlock = {
+      kind: "block",
+      stmts: hstmts,
+      tail: tail_hexpr,
+      type: block_type,
+      effects,
+      span: block.span,
+    };
+
+    return { hexpr: hblock, subst, effects };
+  }
+
+  // ============================================================
+  // Infer Statements
+  // ============================================================
+
+  private infer_stmt(stmt: Stmt, subst: Substitution): { hstmt: HStmt; subst: Substitution; effects: EffectRow } {
+    switch (stmt.kind) {
+      case "let_stmt": {
+        const init_r = this.infer_expr(stmt.init, subst);
+        let s = init_r.subst;
+        let var_type = init_r.hexpr.type;
+        if (stmt.type_annotation) {
+          const annotated = this.resolve_type_expr(stmt.type_annotation);
+          s = unify(var_type, annotated, s);
+          var_type = apply(s, annotated);
+        }
+        this.env.bind_mono(stmt.name, apply(s, var_type));
+        return {
+          hstmt: { kind: "let_stmt", name: stmt.name, type: apply(s, var_type), init: init_r.hexpr, span: stmt.span },
+          subst: s,
+          effects: init_r.effects,
+        };
+      }
+      case "var_stmt": {
+        const init_r = this.infer_expr(stmt.init, subst);
+        let s = init_r.subst;
+        let var_type = init_r.hexpr.type;
+        if (stmt.type_annotation) {
+          const annotated = this.resolve_type_expr(stmt.type_annotation);
+          s = unify(var_type, annotated, s);
+          var_type = apply(s, annotated);
+        }
+        this.env.bind_mono(stmt.name, apply(s, var_type));
+        return {
+          hstmt: { kind: "var_stmt", name: stmt.name, type: apply(s, var_type), init: init_r.hexpr, span: stmt.span },
+          subst: s,
+          effects: init_r.effects,
+        };
+      }
+      case "assign_stmt": {
+        const target_r = this.infer_expr(stmt.target, subst);
+        const value_r = this.infer_expr(stmt.value, target_r.subst);
+        const s = unify(target_r.hexpr.type, value_r.hexpr.type, value_r.subst);
+        return {
+          hstmt: { kind: "assign_stmt", target: target_r.hexpr, value: value_r.hexpr, span: stmt.span },
+          subst: s,
+          effects: row_merge(target_r.effects, value_r.effects),
+        };
+      }
+      case "expr_stmt": {
+        const r = this.infer_expr(stmt.expr, subst);
+        return {
+          hstmt: { kind: "expr_stmt", expr: r.hexpr, span: stmt.span },
+          subst: r.subst,
+          effects: r.effects,
+        };
+      }
+      case "return_stmt": {
+        if (stmt.value) {
+          const r = this.infer_expr(stmt.value, subst);
+          return {
+            hstmt: { kind: "return_stmt", value: r.hexpr, span: stmt.span },
+            subst: r.subst,
+            effects: r.effects,
+          };
+        }
+        return {
+          hstmt: { kind: "return_stmt", span: stmt.span },
+          subst,
+          effects: EMPTY_ROW,
+        };
+      }
+    }
+  }
+
+  // ============================================================
+  // Infer Expressions
+  // ============================================================
+
+  private infer_expr(expr: Expr, subst: Substitution): InferResult {
+    switch (expr.kind) {
+      case "int_lit":
+        return {
+          hexpr: { kind: "int_lit", value: expr.value, type: INT, effects: EMPTY_ROW, span: expr.span },
+          subst,
+          effects: EMPTY_ROW,
+        };
+      case "float_lit":
+        return {
+          hexpr: { kind: "float_lit", value: expr.value, type: FLOAT, effects: EMPTY_ROW, span: expr.span },
+          subst,
+          effects: EMPTY_ROW,
+        };
+      case "str_lit":
+        return {
+          hexpr: { kind: "str_lit", value: expr.value, type: STR, effects: EMPTY_ROW, span: expr.span },
+          subst,
+          effects: EMPTY_ROW,
+        };
+      case "bool_lit":
+        return {
+          hexpr: { kind: "bool_lit", value: expr.value, type: BOOL, effects: EMPTY_ROW, span: expr.span },
+          subst,
+          effects: EMPTY_ROW,
+        };
+      case "ident":
+        return this.infer_ident(expr.name, expr.span, subst);
+      case "bin_op":
+        return this.infer_bin_op(expr.op, expr.left, expr.right, expr.span, subst);
+      case "unary_op":
+        return this.infer_unary_op(expr.op, expr.operand, expr.span, subst);
+      case "call":
+        return this.infer_call(expr.callee, expr.args, expr.span, subst);
+      case "method_call":
+        return this.infer_method_call(expr.receiver, expr.method, expr.args, expr.span, subst);
+      case "field_access":
+        return this.infer_field_access(expr.receiver, expr.field, expr.span, subst);
+      case "struct_lit":
+        return this.infer_struct_lit(expr.name, expr.fields, expr.span, subst);
+      case "match_expr":
+        return this.infer_match(expr.scrutinee, expr.arms, expr.span, subst);
+      case "block":
+        return this.infer_block(expr);
+      case "if_expr":
+        return this.infer_if(expr.condition, expr.then_branch, expr.else_branch, expr.span, subst);
+      case "string_interp":
+        return this.infer_string_interp(expr.parts, expr.span, subst);
+      case "or_expr":
+        return this.infer_or(expr.expr, expr.default_value, expr.span, subst);
+      case "catch_expr":
+        return this.infer_catch(expr.expr, expr.error_binding, expr.handler, expr.span, subst);
+      case "handle_expr":
+        return this.infer_handle(expr.body, expr.handlers, expr.span, subst);
+      case "lambda":
+        return this.infer_lambda(expr.params, expr.body, expr.span, subst);
+    }
+  }
+
+  // ============================================================
+  // Expression-specific inference
+  // ============================================================
+
+  private infer_ident(name: string, span: Span, subst: Substitution): InferResult {
+    const scheme = this.env.lookup(name);
+    if (!scheme) {
+      throw new TypeCheckError(`Undefined variable: ${name}`, span);
+    }
+    const t = this.env.instantiate(scheme);
+    return {
+      hexpr: { kind: "ident", name, type: t, effects: EMPTY_ROW, span },
+      subst,
+      effects: EMPTY_ROW,
+    };
+  }
+
+  private infer_bin_op(op: BinOp, left: Expr, right: Expr, span: Span, subst: Substitution): InferResult {
+    const lr = this.infer_expr(left, subst);
+    const rr = this.infer_expr(right, lr.subst);
+    let s = rr.subst;
+    let result_type: Type;
+
+    switch (op) {
+      case "+": case "-": case "*": case "/": case "%": {
+        // Both sides must be same numeric type
+        s = unify(lr.hexpr.type, rr.hexpr.type, s);
+        const resolved = apply(s, lr.hexpr.type);
+        // If it's still a var, default to Int
+        if (resolved.kind === "var") {
+          s = unify(resolved, INT, s);
+          result_type = INT;
+        } else if (resolved.kind === "int" || resolved.kind === "float") {
+          result_type = resolved;
+        } else {
+          throw new TypeCheckError(
+            `Operator ${op} requires numeric types, got ${type_to_string(resolved)}`, span
+          );
+        }
+        break;
+      }
+      case "==": case "!=": case "<": case "<=": case ">": case ">=": {
+        // Both sides must be same type
+        s = unify(lr.hexpr.type, rr.hexpr.type, s);
+        result_type = BOOL;
+        break;
+      }
+      case "&&": case "||": {
+        s = unify(lr.hexpr.type, BOOL, s);
+        s = unify(rr.hexpr.type, BOOL, s);
+        result_type = BOOL;
+        break;
+      }
+    }
+
+    const effects = row_merge(lr.effects, rr.effects);
+    return {
+      hexpr: { kind: "bin_op", op, left: lr.hexpr, right: rr.hexpr, type: result_type!, effects, span },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_unary_op(op: string, operand: Expr, span: Span, subst: Substitution): InferResult {
+    const r = this.infer_expr(operand, subst);
+    let s = r.subst;
+    let result_type: Type;
+
+    if (op === "-") {
+      // Numeric negation
+      const resolved = apply(s, r.hexpr.type);
+      if (resolved.kind === "var") {
+        s = unify(resolved, INT, s);
+        result_type = INT;
+      } else if (resolved.kind === "int" || resolved.kind === "float") {
+        result_type = resolved;
+      } else {
+        throw new TypeCheckError(`Unary - requires numeric type, got ${type_to_string(resolved)}`, span);
+      }
+    } else {
+      // Logical not
+      s = unify(r.hexpr.type, BOOL, s);
+      result_type = BOOL;
+    }
+
+    return {
+      hexpr: { kind: "unary_op", op: op as any, operand: r.hexpr, type: result_type, effects: r.effects, span },
+      subst: s,
+      effects: r.effects,
+    };
+  }
+
+  private infer_call(callee: Expr, args: Expr[], span: Span, subst: Substitution): InferResult {
+    const callee_r = this.infer_expr(callee, subst);
+    let s = callee_r.subst;
+    let effects = callee_r.effects;
+
+    const hargs: HExpr[] = [];
+    const arg_types: Type[] = [];
+    for (const arg of args) {
+      const ar = this.infer_expr(arg, s);
+      s = ar.subst;
+      effects = row_merge(effects, ar.effects);
+      hargs.push(ar.hexpr);
+      arg_types.push(ar.hexpr.type);
+    }
+
+    const ret_var = fresh_type_var();
+    const expected_fn: FnType = {
+      kind: "fn",
+      params: arg_types,
+      return_type: ret_var,
+      effects: EMPTY_ROW,
+    };
+
+    s = unify(callee_r.hexpr.type, expected_fn, s);
+    const resolved_callee_type = apply(s, callee_r.hexpr.type);
+
+    // If the callee is a function type, merge its effects
+    if (resolved_callee_type.kind === "fn") {
+      effects = row_merge(effects, resolved_callee_type.effects);
+    }
+
+    const result_type = apply(s, ret_var);
+
+    return {
+      hexpr: { kind: "call", callee: callee_r.hexpr, args: hargs, type_args: [], type: result_type, effects, span },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_method_call(receiver: Expr, method: string, args: Expr[], span: Span, subst: Substitution): InferResult {
+    // Check if receiver is an effect module (e.g., io.read, io.write)
+    if (receiver.kind === "ident") {
+      const effect_def = this.env.effects.get(receiver.name);
+      if (effect_def) {
+        return this.infer_effect_op(receiver.name, method, args, span, subst);
+      }
+    }
+
+    // Infer receiver
+    const recv_r = this.infer_expr(receiver, subst);
+    let s = recv_r.subst;
+    let effects = recv_r.effects;
+
+    // Look up method in impl
+    const recv_type = apply(s, recv_r.hexpr.type);
+    let method_type: Type | undefined;
+
+    if (recv_type.kind === "struct") {
+      const impl_methods = this.env.impl_methods.get(recv_type.name);
+      if (impl_methods) {
+        const scheme = impl_methods.get(method);
+        if (scheme) {
+          method_type = this.env.instantiate(scheme);
+        }
+      }
+    } else if (recv_type.kind === "enum") {
+      const impl_methods = this.env.impl_methods.get(recv_type.name);
+      if (impl_methods) {
+        const scheme = impl_methods.get(method);
+        if (scheme) {
+          method_type = this.env.instantiate(scheme);
+        }
+      }
+    }
+
+    // Infer arguments
+    const hargs: HExpr[] = [];
+    for (const arg of args) {
+      const ar = this.infer_expr(arg, s);
+      s = ar.subst;
+      effects = row_merge(effects, ar.effects);
+      hargs.push(ar.hexpr);
+    }
+
+    let result_type: Type;
+    if (method_type && method_type.kind === "fn") {
+      // Unify args with method params (skip self)
+      for (let i = 0; i < hargs.length && i < method_type.params.length; i++) {
+        s = unify(hargs[i].type, method_type.params[i], s);
+      }
+      result_type = apply(s, method_type.return_type);
+      effects = row_merge(effects, method_type.effects);
+    } else {
+      // Unknown method — use fresh type var
+      result_type = fresh_type_var();
+    }
+
+    // Lower to HCall with receiver as first arg conceptually (UFCS)
+    return {
+      hexpr: {
+        kind: "call",
+        callee: { kind: "field_access", receiver: recv_r.hexpr, field: method, type: method_type ?? ANY, effects: EMPTY_ROW, span },
+        args: hargs,
+        type_args: [],
+        type: result_type,
+        effects,
+        span,
+      },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_effect_op(effect_name: string, op_name: string, args: Expr[], span: Span, subst: Substitution): InferResult {
+    const effect_def = this.env.effects.get(effect_name);
+    if (!effect_def) {
+      throw new TypeCheckError(`Unknown effect: ${effect_name}`, span);
+    }
+    const op = effect_def.ops.find(o => o.name === op_name);
+    if (!op) {
+      throw new TypeCheckError(`Effect ${effect_name} has no operation ${op_name}`, span);
+    }
+
+    let s = subst;
+    let effects: EffectRow = EMPTY_ROW;
+    const hargs: HExpr[] = [];
+
+    for (let i = 0; i < args.length; i++) {
+      const ar = this.infer_expr(args[i], s);
+      s = ar.subst;
+      effects = row_merge(effects, ar.effects);
+      hargs.push(ar.hexpr);
+      if (i < op.params.length) {
+        s = unify(ar.hexpr.type, op.params[i], s);
+      }
+    }
+
+    // Add the effect to the effect row
+    const effect: Effect = effect_name === "io" ? { kind: "io" } : { kind: "custom", name: effect_name, type_args: [] };
+    effects = row_merge(effects, effect_row(effect));
+
+    return {
+      hexpr: {
+        kind: "effect_op",
+        effect_name,
+        op_name,
+        args: hargs,
+        type: op.return_type,
+        effects,
+        span,
+      },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_field_access(receiver: Expr, field: string, span: Span, subst: Substitution): InferResult {
+    const recv_r = this.infer_expr(receiver, subst);
+    const s = recv_r.subst;
+    const recv_type = apply(s, recv_r.hexpr.type);
+
+    let field_type: Type = ANY;
+    if (recv_type.kind === "struct") {
+      const struct_def = this.env.structs.get(recv_type.name);
+      if (struct_def) {
+        const f = struct_def.fields.find(f => f.name === field);
+        if (f) {
+          field_type = f.type;
+        } else {
+          throw new TypeCheckError(`Struct ${recv_type.name} has no field ${field}`, span);
+        }
+      }
+    }
+
+    return {
+      hexpr: { kind: "field_access", receiver: recv_r.hexpr, field, type: field_type, effects: recv_r.effects, span },
+      subst: s,
+      effects: recv_r.effects,
+    };
+  }
+
+  private infer_struct_lit(name: string, fields: { name: string; value: Expr; span: Span }[], span: Span, subst: Substitution): InferResult {
+    const struct_def = this.env.structs.get(name);
+    if (!struct_def) {
+      throw new TypeCheckError(`Unknown struct: ${name}`, span);
+    }
+
+    let s = subst;
+    let effects: EffectRow = EMPTY_ROW;
+    const hfields: HStructFieldInit[] = [];
+
+    for (const field of fields) {
+      const fr = this.infer_expr(field.value, s);
+      s = fr.subst;
+      effects = row_merge(effects, fr.effects);
+
+      // Unify field type with declared type
+      const def_field = struct_def.fields.find(f => f.name === field.name);
+      if (def_field) {
+        s = unify(fr.hexpr.type, def_field.type, s);
+      }
+      hfields.push({ name: field.name, value: fr.hexpr });
+    }
+
+    const struct_type: Type = {
+      kind: "struct",
+      name,
+      type_params: [],
+      fields: struct_def.fields.map(f => ({ name: f.name, type: f.type, is_pub: f.is_pub })),
+    };
+
+    return {
+      hexpr: { kind: "struct_lit", name, type_args: [], fields: hfields, type: struct_type, effects, span },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_match(scrutinee: Expr, arms: MatchArm[], span: Span, subst: Substitution): InferResult {
+    const scrut_r = this.infer_expr(scrutinee, subst);
+    let s = scrut_r.subst;
+    let effects = scrut_r.effects;
+
+    const result_type = fresh_type_var();
+    const harms: HMatchArm[] = [];
+
+    for (const arm of arms) {
+      this.env.push_scope();
+
+      // Bind pattern variables
+      this.bind_pattern(arm.pattern, scrut_r.hexpr.type, s);
+
+      // Infer guard if present
+      let guard_hexpr: HExpr | undefined;
+      if (arm.guard) {
+        const gr = this.infer_expr(arm.guard, s);
+        s = gr.subst;
+        s = unify(gr.hexpr.type, BOOL, s);
+        effects = row_merge(effects, gr.effects);
+        guard_hexpr = gr.hexpr;
+      }
+
+      // Infer body
+      const body_r = this.infer_expr(arm.body, s);
+      s = body_r.subst;
+      effects = row_merge(effects, body_r.effects);
+
+      // Unify body type with result type
+      s = unify(body_r.hexpr.type, result_type, s);
+
+      harms.push({
+        pattern: arm.pattern,
+        guard: guard_hexpr,
+        body: body_r.hexpr,
+        span: arm.span,
+      });
+
+      this.env.pop_scope();
+    }
+
+    // Check exhaustiveness
+    const scrut_type_resolved = apply(s, scrut_r.hexpr.type);
+    const patterns = arms.map(a => a.pattern);
+    const missing = check_exhaustive(patterns, scrut_type_resolved, s);
+    if (missing !== null) {
+      throw new TypeCheckError(
+        `Non-exhaustive match: missing pattern for ${missing}`,
+        span,
+      );
+    }
+
+    const final_type = apply(s, result_type);
+    return {
+      hexpr: { kind: "match_expr", scrutinee: scrut_r.hexpr, arms: harms, type: final_type, effects, span },
+      subst: s,
+      effects,
+    };
+  }
+
+  private bind_pattern(pattern: Pattern, expected_type: Type, subst: Substitution): void {
+    switch (pattern.kind) {
+      case "wildcard":
+        break;
+      case "binding":
+        this.env.bind_mono(pattern.name, apply(subst, expected_type));
+        break;
+      case "constructor": {
+        // Look up the enum variant
+        const enum_name = this.env.variant_to_enum.get(pattern.name);
+        if (enum_name) {
+          const enum_def = this.env.enums.get(enum_name);
+          if (enum_def) {
+            const variant = enum_def.variants.find(v => v.name === pattern.name);
+            if (variant) {
+              for (let i = 0; i < pattern.fields.length && i < variant.fields.length; i++) {
+                this.bind_pattern(pattern.fields[i], variant.fields[i], subst);
+              }
+            }
+          }
+        }
+        break;
+      }
+      case "literal":
+        break;
+    }
+  }
+
+  private infer_if(condition: Expr, then_branch: BlockExpr, else_branch: BlockExpr | { kind: "if_expr"; condition: Expr; then_branch: BlockExpr; else_branch?: any; span: Span } | undefined, span: Span, subst: Substitution): InferResult {
+    const cond_r = this.infer_expr(condition, subst);
+    let s = cond_r.subst;
+    s = unify(cond_r.hexpr.type, BOOL, s);
+    let effects = cond_r.effects;
+
+    const then_r = this.infer_block(then_branch);
+    s = compose(s, then_r.subst);
+    effects = row_merge(effects, then_r.effects);
+
+    let else_hexpr: HBlock | undefined;
+    let result_type: Type;
+
+    if (else_branch) {
+      if (else_branch.kind === "block") {
+        const else_r = this.infer_block(else_branch);
+        s = compose(s, else_r.subst);
+        effects = row_merge(effects, else_r.effects);
+        s = unify(then_r.hexpr.type, else_r.hexpr.type, s);
+        result_type = apply(s, then_r.hexpr.type);
+        else_hexpr = else_r.hexpr as HBlock;
+      } else {
+        // else if — treat as nested if expression
+        const else_if_r = this.infer_if(else_branch.condition, else_branch.then_branch, else_branch.else_branch, else_branch.span, s);
+        s = else_if_r.subst;
+        effects = row_merge(effects, else_if_r.effects);
+        s = unify(then_r.hexpr.type, else_if_r.hexpr.type, s);
+        result_type = apply(s, then_r.hexpr.type);
+        // Wrap in a block for HIR
+        else_hexpr = {
+          kind: "block",
+          stmts: [],
+          tail: else_if_r.hexpr,
+          type: else_if_r.hexpr.type,
+          effects: else_if_r.effects,
+          span: else_branch.span,
+        };
+      }
+    } else {
+      // No else branch — result is Unit
+      result_type = UNIT;
+    }
+
+    return {
+      hexpr: {
+        kind: "if_expr",
+        condition: cond_r.hexpr,
+        then_branch: then_r.hexpr as HBlock,
+        else_branch: else_hexpr,
+        type: result_type,
+        effects,
+        span,
+      },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_string_interp(parts: (string | Expr)[], span: Span, subst: Substitution): InferResult {
+    let s = subst;
+    let effects: EffectRow = EMPTY_ROW;
+    const hparts: (string | HExpr)[] = [];
+
+    for (const part of parts) {
+      if (typeof part === "string") {
+        hparts.push(part);
+      } else {
+        const r = this.infer_expr(part, s);
+        s = r.subst;
+        effects = row_merge(effects, r.effects);
+        hparts.push(r.hexpr);
+      }
+    }
+
+    return {
+      hexpr: { kind: "string_interp", parts: hparts, type: STR, effects, span },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_or(expr: Expr, default_value: Expr, span: Span, subst: Substitution): InferResult {
+    const expr_r = this.infer_expr(expr, subst);
+    let s = expr_r.subst;
+
+    const default_r = this.infer_expr(default_value, s);
+    s = default_r.subst;
+
+    // Unify both sides (they should have the same type)
+    s = unify(expr_r.hexpr.type, default_r.hexpr.type, s);
+
+    // Remove fail effect from the merged effects
+    let effects = row_merge(expr_r.effects, default_r.effects);
+    effects = this.remove_fail_effect(effects);
+
+    const result_type = apply(s, expr_r.hexpr.type);
+
+    return {
+      hexpr: {
+        kind: "try_catch",
+        body: expr_r.hexpr,
+        handler: default_r.hexpr,
+        type: result_type,
+        effects,
+        span,
+      },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_catch(expr: Expr, error_binding: string, handler: Expr, span: Span, subst: Substitution): InferResult {
+    const expr_r = this.infer_expr(expr, subst);
+    let s = expr_r.subst;
+
+    this.env.push_scope();
+    // Bind error to Any type (or the fail type if we have it)
+    this.env.bind_mono(error_binding, ANY);
+    const handler_r = this.infer_expr(handler, s);
+    s = handler_r.subst;
+    this.env.pop_scope();
+
+    // Unify expr type with handler type
+    s = unify(expr_r.hexpr.type, handler_r.hexpr.type, s);
+
+    // Remove fail effect
+    let effects = row_merge(expr_r.effects, handler_r.effects);
+    effects = this.remove_fail_effect(effects);
+
+    const result_type = apply(s, expr_r.hexpr.type);
+
+    return {
+      hexpr: {
+        kind: "try_catch",
+        body: expr_r.hexpr,
+        error_binding,
+        handler: handler_r.hexpr,
+        type: result_type,
+        effects,
+        span,
+      },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_handle(body: Expr, handlers: { effect_name: string; op_name: string; params: Param[]; resume_name?: string; body: Expr; span: Span }[], span: Span, subst: Substitution): InferResult {
+    const body_r = this.infer_expr(body, subst);
+    let s = body_r.subst;
+    let effects = body_r.effects;
+
+    const hhandlers: HEffectHandler[] = [];
+    const handled_effects = new Set<string>();
+
+    for (const handler of handlers) {
+      this.env.push_scope();
+
+      // Bind handler params
+      const hparams: HParam[] = [];
+      for (const p of handler.params) {
+        const pt = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : ANY;
+        this.env.bind_mono(p.name, pt);
+        hparams.push({ name: p.name, type: pt });
+      }
+
+      // Bind resume if present
+      if (handler.resume_name) {
+        this.env.bind_mono(handler.resume_name, {
+          kind: "fn", params: [ANY], return_type: ANY, effects: EMPTY_ROW,
+        } as FnType);
+      }
+
+      const handler_body_r = this.infer_expr(handler.body, s);
+      s = handler_body_r.subst;
+
+      this.env.pop_scope();
+
+      hhandlers.push({
+        effect_name: handler.effect_name,
+        op_name: handler.op_name,
+        params: hparams,
+        resume_name: handler.resume_name,
+        body: handler_body_r.hexpr,
+      });
+
+      handled_effects.add(handler.effect_name);
+    }
+
+    // Remove handled effects from effect row
+    effects = {
+      effects: effects.effects.filter(e => {
+        if (e.kind === "io" && handled_effects.has("io")) return false;
+        if (e.kind === "custom" && handled_effects.has(e.name)) return false;
+        if (e.kind === "fail" && handled_effects.has("fail")) return false;
+        if (e.kind === "mut" && handled_effects.has("mut")) return false;
+        return true;
+      }),
+      tail: effects.tail,
+    };
+
+    return {
+      hexpr: {
+        kind: "handle_expr",
+        body: body_r.hexpr,
+        handlers: hhandlers,
+        type: body_r.hexpr.type,
+        effects,
+        span,
+      },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_lambda(params: Param[], body: Expr, span: Span, subst: Substitution): InferResult {
+    this.env.push_scope();
+
+    const hparams: HParam[] = [];
+    const param_types: Type[] = [];
+    for (const p of params) {
+      const pt = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var();
+      this.env.bind_mono(p.name, pt);
+      hparams.push({ name: p.name, type: pt });
+      param_types.push(pt);
+    }
+
+    const body_r = this.infer_expr(body, subst);
+    const s = body_r.subst;
+
+    this.env.pop_scope();
+
+    const fn_type: FnType = {
+      kind: "fn",
+      params: param_types.map(t => apply(s, t)),
+      return_type: apply(s, body_r.hexpr.type),
+      effects: body_r.effects,
+    };
+
+    return {
+      hexpr: {
+        kind: "lambda",
+        params: hparams.map(p => ({ name: p.name, type: apply(s, p.type) })),
+        return_type: apply(s, body_r.hexpr.type),
+        body: body_r.hexpr,
+        type: fn_type,
+        effects: EMPTY_ROW,
+        span,
+      },
+      subst: s,
+      effects: EMPTY_ROW,
+    };
+  }
+
+  // ============================================================
+  // Helpers
+  // ============================================================
+
+  private remove_fail_effect(row: EffectRow): EffectRow {
+    return {
+      effects: row.effects.filter(e => e.kind !== "fail"),
+      tail: row.tail,
+    };
+  }
+
+  /** Resolve a syntactic TypeExpr to a semantic Type */
+  resolve_type_expr(texpr: TypeExpr): Type {
+    switch (texpr.kind) {
+      case "named":
+        return this.resolve_named_type(texpr.name, texpr.type_args);
+      case "fn_type": {
+        const params = texpr.params.map(p => this.resolve_type_expr(p));
+        const ret = this.resolve_type_expr(texpr.return_type);
+        return { kind: "fn", params, return_type: ret, effects: EMPTY_ROW };
+      }
+      case "option": {
+        const inner = this.resolve_type_expr(texpr.inner);
+        return { kind: "option", inner };
+      }
+    }
+  }
+
+  private resolve_named_type(name: string, type_args: TypeExpr[]): Type {
+    switch (name) {
+      case "Int": return INT;
+      case "Float": return FLOAT;
+      case "Str": return STR;
+      case "Bool": return BOOL;
+      case "Never": return NEVER;
+      case "Any": return ANY;
+      default: {
+        // Check if it's a known struct
+        if (this.env.structs.has(name)) {
+          const def = this.env.structs.get(name)!;
+          return {
+            kind: "struct",
+            name,
+            type_params: type_args.map(a => this.resolve_type_expr(a)),
+            fields: def.fields.map(f => ({ name: f.name, type: f.type, is_pub: f.is_pub })),
+          };
+        }
+        // Check if it's a known enum
+        if (this.env.enums.has(name)) {
+          const def = this.env.enums.get(name)!;
+          return {
+            kind: "enum",
+            name,
+            type_params: type_args.map(a => this.resolve_type_expr(a)),
+            variants: def.variants,
+          };
+        }
+        // Treat as a type variable placeholder or unknown
+        return ANY;
+      }
+    }
+  }
+}
