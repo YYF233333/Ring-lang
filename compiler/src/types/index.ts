@@ -18,7 +18,8 @@ export type Type =
   | StructType
   | EnumType
   | GenericType
-  | OptionType;
+  | OptionType
+  | RecordType;
 
 export interface IntType {
   kind: "int";
@@ -94,6 +95,17 @@ export interface GenericType {
 export interface OptionType {
   kind: "option";
   inner: Type;
+}
+
+export interface RecordField {
+  name: string;
+  type: Type;
+}
+
+export interface RecordType {
+  kind: "record";
+  fields: RecordField[];
+  tail?: number;
 }
 
 // ============================================================
@@ -236,6 +248,14 @@ export function types_equal(a: Type, b: Type): boolean {
     }
     case "option":
       return types_equal(a.inner, (b as OptionType).inner);
+    case "record": {
+      const br = b as RecordType;
+      if (a.fields.length !== br.fields.length) return false;
+      if (a.tail !== br.tail) return false;
+      return a.fields.every((f, i) =>
+        f.name === br.fields[i].name && types_equal(f.type, br.fields[i].type)
+      );
+    }
   }
 }
 
@@ -274,6 +294,13 @@ export function type_to_string(t: Type): string {
     }
     case "option":
       return `${type_to_string(t.inner)}?`;
+    case "record": {
+      const fields = t.fields.map(f => `${f.name}: ${type_to_string(f.type)}`).join(", ");
+      if (t.tail !== undefined) {
+        return fields ? `{${fields}, ..?${t.tail}}` : `{..?${t.tail}}`;
+      }
+      return `{${fields}}`;
+    }
   }
 }
 

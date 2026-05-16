@@ -39,6 +39,11 @@ const cases: TestCase[] = [
   { file: "effect_cell.ring", expected: "2\n" },
   { file: "effect_cell_closure.ring", expected: "3\n" },
   { file: "effect_resume_side.ring", expected: "reading: input.txt\nmock-result\n" },
+  { file: "row_basic.ring", expected: "alice\n" },
+  { file: "row_multi_field.ring", expected: "30\n" },
+  { file: "row_generic.ring", expected: "whiskers-rex\n" },
+  { file: "effect_row_strict.ring", expected: "3-mock-data\n" },
+  { file: "effect_row_handle.ring", expected: "42\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -96,6 +101,26 @@ describe("e2e: ring build", () => {
 
       // Clean up
       fs.unlinkSync(outPath);
+    });
+  }
+});
+
+describe("e2e: ring check (negative — should reject)", () => {
+  const negative_cases = [
+    { file: "row_reject.ring", error_pattern: "missing field" },
+  ];
+
+  for (const tc of negative_cases) {
+    test(`ring check ${tc.file} should fail`, () => {
+      const filePath = path.join(CASES_DIR, tc.file);
+      assert.ok(fs.existsSync(filePath), `Test file not found: ${filePath}`);
+
+      assert.throws(() => {
+        execSync(`node "${CLI_PATH}" check "${filePath}"`, {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      });
     });
   }
 });

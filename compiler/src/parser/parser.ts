@@ -7,7 +7,7 @@ import {
   StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
   OrExpr, CatchExpr, HandleExpr, LambdaExpr,
   BinOp, UnaryOp,
-  TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr,
+  TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr, RecordTypeExpr, RecordTypeField,
   Pattern, WildcardPattern, BindingPattern, ConstructorPattern, LiteralPattern,
   MatchArm, EffectHandler, Param, TypeParam, TypeBound,
   StructField, EnumVariant, EffectOp, StructFieldInit,
@@ -313,6 +313,11 @@ export class Parser {
   private parse_type_expr(): TypeExpr {
     const start = this.current_span_start();
 
+    // Record type: {field: Type, ..rest}
+    if (this.check(TokenKind.LBrace)) {
+      return this.parse_record_type_expr();
+    }
+
     // fn(...) -> ReturnType
     if (this.check(TokenKind.Fn)) {
       this.advance();
@@ -379,6 +384,40 @@ export class Parser {
     }
 
     return result;
+  }
+
+  private parse_record_type_expr(): RecordTypeExpr {
+    const start = this.current_span_start();
+    this.expect(TokenKind.LBrace);
+    const fields: RecordTypeField[] = [];
+    let rest: string | undefined;
+
+    while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+      if (this.check(TokenKind.DotDot)) {
+        this.advance();
+        rest = this.expect(TokenKind.Ident).value;
+        this.try_consume(TokenKind.Comma);
+        break;
+      }
+
+      const field_start = this.current_span_start();
+      const field_name = this.expect(TokenKind.Ident).value;
+      this.expect(TokenKind.Colon);
+      const field_type = this.parse_type_expr();
+      const field_end = this.current_span_start();
+      fields.push({ name: field_name, type: field_type, span: this.make_span(field_start, field_end) });
+
+      if (!this.try_consume(TokenKind.Comma)) break;
+    }
+
+    this.expect(TokenKind.RBrace);
+    const end = this.current_span_start();
+    return {
+      kind: "record_type",
+      fields,
+      rest,
+      span: this.make_span(start, end),
+    };
   }
 
   // ============================================================

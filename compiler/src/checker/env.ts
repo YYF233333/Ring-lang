@@ -271,6 +271,20 @@ export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
       };
     case "option":
       return { kind: "option", inner: substitute_type(t.inner, mapping) };
+    case "record": {
+      let tail = t.tail;
+      if (tail !== undefined && mapping.has(tail)) {
+        const replacement = mapping.get(tail)!;
+        if (replacement.kind === "var") {
+          tail = replacement.id;
+        }
+      }
+      return {
+        kind: "record",
+        fields: t.fields.map(f => ({ name: f.name, type: substitute_type(f.type, mapping) })),
+        tail,
+      };
+    }
   }
 }
 

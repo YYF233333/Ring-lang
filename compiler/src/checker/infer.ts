@@ -88,6 +88,10 @@ export class InferEngine {
       case "option":
         this.collect_free_vars(t.inner, result);
         break;
+      case "record":
+        for (const f of t.fields) this.collect_free_vars(f.type, result);
+        if (t.tail !== undefined) result.add(t.tail);
+        break;
     }
   }
 
@@ -368,6 +372,14 @@ export class InferEngine {
       p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var()
     );
     const ret_type = decl.return_type ? this.resolve_type_expr(decl.return_type) : this.env.fresh_var();
+
+    // Collect row variables introduced by record type annotations (..rest)
+    for (const [name, tv] of this.type_param_scope) {
+      if (!saved_tp_scope.has(name) && tv.kind === "var") {
+        type_vars.push(tv.id);
+      }
+    }
+
     const fn_type: FnType = {
       kind: "fn",
       params: param_types,
@@ -1216,6 +1228,15 @@ export class InferEngine {
       } else {
         throw new TypeCheckError(`Unknown struct: ${recv_type.name}`, span);
       }
+    } else if (recv_type.kind === "record") {
+      const f = recv_type.fields.find(f => f.name === field);
+      if (f) {
+        field_type = f.type;
+      } else if (recv_type.tail !== undefined) {
+        field_type = this.env.fresh_var();
+      } else {
+        throw new TypeCheckError(`Record type has no field '${field}'`, span);
+      }
     } else if (recv_type.kind === "var") {
       // Unresolved type variable — defer with fresh var
       field_type = this.env.fresh_var();
@@ -1650,6 +1671,17 @@ export class InferEngine {
       case "option": {
         const inner = this.resolve_type_expr(texpr.inner);
         return { kind: "option", inner };
+      }
+      case "record_type": {
+        const fields = texpr.fields.map(f => ({
+          name: f.name,
+          type: this.resolve_type_expr(f.type),
+        }));
+        const tail = texpr.rest ? this.env.fresh_var().id : undefined;
+        if (texpr.rest) {
+          this.type_param_scope.set(texpr.rest, { kind: "var", id: tail! });
+        }
+        return { kind: "record", fields, tail } as Type;
       }
       default:
         return assertNever(texpr, "resolve_type_expr");

@@ -28,7 +28,8 @@ export function span_zero(): Span {
 export type TypeExpr =
   | NamedTypeExpr
   | FnTypeExpr
-  | OptionTypeExpr;
+  | OptionTypeExpr
+  | RecordTypeExpr;
 
 export interface NamedTypeExpr {
   kind: "named";
@@ -47,6 +48,19 @@ export interface FnTypeExpr {
 export interface OptionTypeExpr {
   kind: "option";
   inner: TypeExpr;
+  span: Span;
+}
+
+export interface RecordTypeField {
+  name: string;
+  type: TypeExpr;
+  span: Span;
+}
+
+export interface RecordTypeExpr {
+  kind: "record_type";
+  fields: RecordTypeField[];
+  rest?: string;
   span: Span;
 }
 

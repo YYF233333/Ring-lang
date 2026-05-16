@@ -1,6 +1,8 @@
 // Ring-lang Unification Algorithm + Substitution management
 import {
-  Type, EffectRow, type_to_string,
+  Type, EffectRow, Effect, FailEffect, CustomEffect,
+  RecordType, StructType,
+  type_to_string,
 } from "../types/index.js";
 
 // ============================================================
@@ -64,6 +66,28 @@ export function apply(subst: Substitution, t: Type): Type {
       };
     case "option":
       return { kind: "option", inner: apply(subst, t.inner) };
+    case "record": {
+      const fields = t.fields.map(f => ({ name: f.name, type: apply(subst, f.type) }));
+      let tail = t.tail;
+      if (tail !== undefined) {
+        const resolved = subst.get(tail);
+        if (resolved) {
+          const chased = apply(subst, resolved);
+          if (chased.kind === "var") {
+            tail = chased.id;
+          } else if (chased.kind === "record") {
+            return {
+              kind: "record",
+              fields: [...fields, ...chased.fields.map(f => ({ name: f.name, type: apply(subst, f.type) }))],
+              tail: chased.tail,
+            };
+          } else {
+            tail = undefined;
+          }
+        }
+      }
+      return tail !== undefined ? { kind: "record", fields, tail } : { kind: "record", fields };
+    }
   }
 }
 
@@ -145,6 +169,9 @@ export function occurs_in(var_id: number, t: Type, subst: Substitution): boolean
              resolved.args.some(a => occurs_in(var_id, a, subst));
     case "option":
       return occurs_in(var_id, resolved.inner, subst);
+    case "record":
+      if (resolved.tail === var_id) return true;
+      return resolved.fields.some(f => occurs_in(var_id, f.type, subst));
   }
 }
 
@@ -163,42 +190,56 @@ export class UnificationError extends Error {
 }
 
 /**
- * Unify two effect rows: match effects pairwise and unify their type parameters.
- * - fail ↔ fail: unify error_type
- * - custom ↔ custom (same name): unify type_args
- * - io ↔ io, mut ↔ mut: no-op (no type params)
- * - Tails: if both open, unify tail variables
- *
- * Lenient: does not require exact set equality (a pure fn unifies with an effectful fn).
- * Session 3 row polymorphism will tighten this with proper row variable solving.
+ * Unify two effect rows using Koka-style row variable solving.
+ * Match effects by kind, unify type params of matching pairs.
+ * Unmatched effects are tolerated (keeps backward compat; full strictness
+ * would require callers to check for unhandled effects separately).
  */
 export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitution): Substitution {
   let s = subst;
 
-  for (const ae of a.effects) {
-    if (ae.kind === "fail") {
-      for (const be of b.effects) {
-        if (be.kind === "fail") {
-          s = unify(ae.error_type, be.error_type, s);
-        }
-      }
-    } else if (ae.kind === "custom") {
-      for (const be of b.effects) {
-        if (be.kind === "custom" && be.name === ae.name) {
-          const len = Math.min(ae.type_args.length, be.type_args.length);
-          for (let i = 0; i < len; i++) {
-            s = unify(ae.type_args[i], be.type_args[i], s);
-          }
-        }
+  const ra = apply_to_effect_row(s, a);
+  const rb = apply_to_effect_row(s, b);
+
+  const b_matched = new Set<number>();
+  for (const ae of ra.effects) {
+    for (let bi = 0; bi < rb.effects.length; bi++) {
+      if (b_matched.has(bi)) continue;
+      if (effects_match_kind(ae, rb.effects[bi])) {
+        s = unify_effect_params(ae, rb.effects[bi], s);
+        b_matched.add(bi);
+        break;
       }
     }
   }
 
-  if (a.tail !== undefined && b.tail !== undefined && a.tail !== b.tail) {
-    s = unify({ kind: "var", id: a.tail }, { kind: "var", id: b.tail }, s);
+  if (ra.tail !== undefined && rb.tail !== undefined && ra.tail !== rb.tail) {
+    s = unify({ kind: "var", id: ra.tail }, { kind: "var", id: rb.tail }, s);
   }
 
   return s;
+}
+
+function effects_match_kind(a: Effect, b: Effect): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "custom" && (b as CustomEffect).name !== a.name) return false;
+  return true;
+}
+
+function unify_effect_params(a: Effect, b: Effect, subst: Substitution): Substitution {
+  if (a.kind === "fail" && b.kind === "fail") {
+    return unify(a.error_type, (b as FailEffect).error_type, subst);
+  }
+  if (a.kind === "custom" && b.kind === "custom") {
+    let s = subst;
+    const bc = b as CustomEffect;
+    const len = Math.min(a.type_args.length, bc.type_args.length);
+    for (let i = 0; i < len; i++) {
+      s = unify(a.type_args[i], bc.type_args[i], s);
+    }
+    return s;
+  }
+  return subst;
 }
 
 /**
@@ -298,5 +339,105 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
     return s;
   }
 
+  // Record types (row unification)
+  if (a.kind === "record" && b.kind === "record") {
+    return unify_record_rows(a, b, subst);
+  }
+
+  // Struct satisfies record constraint (one-direction coercion)
+  if (a.kind === "struct" && b.kind === "record") {
+    return unify_struct_with_record(a, b, subst);
+  }
+  if (a.kind === "record" && b.kind === "struct") {
+    return unify_struct_with_record(b, a, subst);
+  }
+
   throw new UnificationError(t1, t2);
+}
+
+// ============================================================
+// Record Row Unification
+// ============================================================
+
+function unify_record_rows(a: RecordType, b: RecordType, subst: Substitution): Substitution {
+  let s = subst;
+
+  const b_names = new Set(b.fields.map(f => f.name));
+  const a_names = new Set(a.fields.map(f => f.name));
+
+  // Unify common fields
+  for (const af of a.fields) {
+    const bf = b.fields.find(f => f.name === af.name);
+    if (bf) {
+      s = unify(af.type, bf.type, s);
+    }
+  }
+
+  const a_only = a.fields.filter(f => !b_names.has(f.name));
+  const b_only = b.fields.filter(f => !a_names.has(f.name));
+
+  if (a_only.length > 0 && b.tail === undefined) {
+    const missing = a_only.map(f => f.name).join(", ");
+    throw new UnificationError(a, b, `record missing fields: ${missing}`);
+  }
+  if (b_only.length > 0 && a.tail === undefined) {
+    const missing = b_only.map(f => f.name).join(", ");
+    throw new UnificationError(a, b, `record missing fields: ${missing}`);
+  }
+
+  if (a.tail !== undefined && b_only.length > 0) {
+    const record_for_tail: Type = { kind: "record", fields: b_only };
+    if (occurs_in(a.tail, record_for_tail, s)) {
+      throw new UnificationError(a, b, "infinite type in row variable");
+    }
+    s = new Map(s);
+    s.set(a.tail, record_for_tail);
+  }
+  if (b.tail !== undefined && a_only.length > 0) {
+    const record_for_tail: Type = { kind: "record", fields: a_only };
+    if (occurs_in(b.tail, record_for_tail, s)) {
+      throw new UnificationError(a, b, "infinite type in row variable");
+    }
+    s = new Map(s);
+    s.set(b.tail, record_for_tail);
+  }
+
+  if (a.tail !== undefined && b.tail !== undefined && a_only.length === 0 && b_only.length === 0) {
+    if (a.tail !== b.tail) {
+      s = unify({ kind: "var", id: a.tail }, { kind: "var", id: b.tail }, s);
+    }
+  }
+
+  return s;
+}
+
+// ============================================================
+// Struct → Record Coercion
+// ============================================================
+
+function unify_struct_with_record(struct_t: StructType, record_t: RecordType, subst: Substitution): Substitution {
+  let s = subst;
+
+  for (const rf of record_t.fields) {
+    const sf = struct_t.fields.find(f => f.name === rf.name);
+    if (!sf) {
+      throw new UnificationError(struct_t, record_t,
+        `type '${struct_t.name}' does not satisfy {${record_t.fields.map(f => f.name).join(", ")}, ..} — missing field '${rf.name}'`);
+    }
+    s = unify(sf.type, rf.type, s);
+  }
+
+  if (record_t.tail !== undefined) {
+    const remaining = struct_t.fields.filter(sf => !record_t.fields.some(rf => rf.name === sf.name));
+    const tail_record: Type = {
+      kind: "record",
+      fields: remaining.map(f => ({ name: f.name, type: f.type })),
+    };
+    if (!occurs_in(record_t.tail, tail_record, s)) {
+      s = new Map(s);
+      s.set(record_t.tail, tail_record);
+    }
+  }
+
+  return s;
 }
