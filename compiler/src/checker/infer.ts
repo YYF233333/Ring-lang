@@ -7,7 +7,9 @@ import {
   BinOp, UnaryOp,
   Span,
 } from "../ast/index.js";
-import { assertNever } from "../errors.js";
+import { assertNever, CompileError } from "../errors.js";
+import { DiagnosticSink, DiagnosticContext, make_diagnostic } from "../diagnostics/index.js";
+import { E } from "../diagnostics/codes.js";
 import {
   Type, FnType, TypeVar, EffectRow, Effect,
   INT, FLOAT, STR, BOOL, UNIT, NEVER,
@@ -50,14 +52,22 @@ interface InferResult {
 export class InferEngine {
   public env: TypeEnv;
   private subst: Substitution;
+  private sink: DiagnosticSink;
   private type_param_scope: Map<string, Type> = new Map();
   private current_fn_return_type: Type | null = null;
   private current_fn_bounds: { type_param_var_id: number; trait_name: string; type_param_name: string }[] = [];
 
-  constructor() {
+  constructor(sink: DiagnosticSink) {
+    this.sink = sink;
     this.env = new TypeEnv();
     this.subst = empty_subst();
     init_unify_fresh_counter(this.env.current_var_id);
+  }
+
+  private type_error(code: string, message: string, span: Span, context: DiagnosticContext): never {
+    const diag = make_diagnostic(code, "error", message, span, context);
+    this.sink.report(diag);
+    throw new CompileError([diag]);
   }
 
   private free_type_vars(t: Type, subst: Substitution): Set<number> {
@@ -345,15 +355,12 @@ export class InferEngine {
     if (decl.trait_name) {
       const trait_def = this.env.traits.get(decl.trait_name);
       if (!trait_def) {
-        throw new TypeCheckError(`Unknown trait: ${decl.trait_name}`, decl.span);
+        this.type_error(E.E0501, `Unknown trait: ${decl.trait_name}`, decl.span, { kind: "trait_error", detail: `unknown trait '${decl.trait_name}'` });
       }
       const impl_method_names = new Set(decl.methods.map(m => m.name));
       for (const tm of trait_def.methods) {
         if (!tm.has_default && !impl_method_names.has(tm.name)) {
-          throw new TypeCheckError(
-            `Missing method '${tm.name}' in impl ${decl.trait_name} for ${decl.target_type}`,
-            decl.span,
-          );
+          this.type_error(E.E0502, `Missing method '${tm.name}' in impl ${decl.trait_name} for ${decl.target_type}`, decl.span, { kind: "trait_error", detail: `missing method '${tm.name}'` });
         }
       }
       this.env.trait_impls.push({
@@ -398,7 +405,7 @@ export class InferEngine {
     for (const tp of decl.type_params) {
       for (const b of tp.bounds) {
         if (!this.env.traits.has(b.trait_name)) {
-          throw new TypeCheckError(`Unknown trait: ${b.trait_name}`, tp.span);
+          this.type_error(E.E0501, `Unknown trait: ${b.trait_name}`, tp.span, { kind: "trait_error", detail: `unknown trait '${b.trait_name}'` });
         }
         fn_bounds_list.push({ type_param: tp.name, trait_name: b.trait_name });
       }
@@ -837,7 +844,7 @@ export class InferEngine {
   private infer_ident(name: string, span: Span, subst: Substitution): InferResult {
     const scheme = this.env.lookup(name);
     if (!scheme) {
-      throw new TypeCheckError(`Undefined variable: ${name}`, span);
+      this.type_error(E.E0201, `Undefined variable: ${name}`, span, { kind: "undefined_variable", name });
     }
     const t = this.env.instantiate(scheme);
 
@@ -872,9 +879,7 @@ export class InferEngine {
         } else if (resolved.kind === "int" || resolved.kind === "float") {
           result_type = resolved;
         } else {
-          throw new TypeCheckError(
-            `Operator ${op} requires numeric types, got ${type_to_string(resolved)}`, span
-          );
+          this.type_error(E.E0303, `Operator ${op} requires numeric types, got ${type_to_string(resolved)}`, span, { kind: "type_mismatch", expected: "Int or Float", actual: type_to_string(resolved) });
         }
         break;
       }
@@ -914,7 +919,7 @@ export class InferEngine {
       } else if (resolved.kind === "int" || resolved.kind === "float") {
         result_type = resolved;
       } else {
-        throw new TypeCheckError(`Unary - requires numeric type, got ${type_to_string(resolved)}`, span);
+        this.type_error(E.E0303, `Unary - requires numeric type, got ${type_to_string(resolved)}`, span, { kind: "type_mismatch", expected: "Int or Float", actual: type_to_string(resolved) });
       }
     } else {
       // Logical not
@@ -1027,10 +1032,7 @@ export class InferEngine {
             }
           }
           if (!found) {
-            throw new TypeCheckError(
-              `Type does not satisfy trait bound '${bound.trait_name}' required by '${callee.name}'`,
-              span,
-            );
+            this.type_error(E.E0503, `Type does not satisfy trait bound '${bound.trait_name}' required by '${callee.name}'`, span, { kind: "trait_error", detail: `type does not satisfy '${bound.trait_name}'` });
           }
         }
       }
@@ -1168,11 +1170,11 @@ export class InferEngine {
   private infer_effect_op(effect_name: string, op_name: string, args: Expr[], span: Span, subst: Substitution): InferResult {
     const effect_def = this.env.effects.get(effect_name);
     if (!effect_def) {
-      throw new TypeCheckError(`Unknown effect: ${effect_name}`, span);
+      this.type_error(E.E0401, `Unknown effect: ${effect_name}`, span, { kind: "effect_unhandled", effect: effect_name });
     }
     const op = effect_def.ops.find(o => o.name === op_name);
     if (!op) {
-      throw new TypeCheckError(`Effect ${effect_name} has no operation ${op_name}`, span);
+      this.type_error(E.E0402, `Effect ${effect_name} has no operation ${op_name}`, span, { kind: "other", detail: `no operation '${op_name}' on effect '${effect_name}'` });
     }
 
     let s = subst;
@@ -1235,10 +1237,10 @@ export class InferEngine {
           }
           field_type = substitute_type(f.type, instantiation_map);
         } else {
-          throw new TypeCheckError(`Struct ${recv_type.name} has no field ${field}`, span);
+          this.type_error(E.E0304, `Struct ${recv_type.name} has no field ${field}`, span, { kind: "missing_field", field, type: recv_type.name });
         }
       } else {
-        throw new TypeCheckError(`Unknown struct: ${recv_type.name}`, span);
+        this.type_error(E.E0203, `Unknown struct: ${recv_type.name}`, span, { kind: "other", detail: `unknown struct '${recv_type.name}'` });
       }
     } else if (recv_type.kind === "record") {
       const f = recv_type.fields.find(f => f.name === field);
@@ -1247,13 +1249,13 @@ export class InferEngine {
       } else if (recv_type.tail !== undefined) {
         field_type = this.env.fresh_var();
       } else {
-        throw new TypeCheckError(`Record type has no field '${field}'`, span);
+        this.type_error(E.E0304, `Record type has no field '${field}'`, span, { kind: "missing_field", field, type: "record" });
       }
     } else if (recv_type.kind === "var") {
       // Unresolved type variable — defer with fresh var
       field_type = this.env.fresh_var();
     } else {
-      throw new TypeCheckError(`Cannot access field '${field}' on type ${type_to_string(recv_type)}`, span);
+      this.type_error(E.E0304, `Cannot access field '${field}' on type ${type_to_string(recv_type)}`, span, { kind: "missing_field", field, type: type_to_string(recv_type) });
     }
 
     return {
@@ -1266,7 +1268,7 @@ export class InferEngine {
   private infer_struct_lit(name: string, fields: { name: string; value: Expr; span: Span }[], span: Span, subst: Substitution): InferResult {
     const struct_def = this.env.structs.get(name);
     if (!struct_def) {
-      throw new TypeCheckError(`Unknown struct: ${name}`, span);
+      this.type_error(E.E0203, `Unknown struct: ${name}`, span, { kind: "other", detail: `unknown struct '${name}'` });
     }
 
     // Build substitution: registration-time type vars -> fresh vars for this instantiation
@@ -1355,10 +1357,7 @@ export class InferEngine {
     const scrut_type_resolved = apply(s, scrut_r.hexpr.type);
     const missing = check_exhaustive(arms, scrut_type_resolved, s);
     if (missing !== null) {
-      throw new TypeCheckError(
-        `Non-exhaustive match: missing pattern for ${missing}`,
-        span,
-      );
+      this.type_error(E.E0601, `Non-exhaustive match: missing pattern for ${missing}`, span, { kind: "pattern_error", detail: `missing: ${missing}` });
     }
 
     const final_type = apply(s, result_type);
@@ -1685,7 +1684,7 @@ export class InferEngine {
   resolve_type_expr(texpr: TypeExpr): Type {
     switch (texpr.kind) {
       case "named":
-        return this.resolve_named_type(texpr.name, texpr.type_args);
+        return this.resolve_named_type(texpr.name, texpr.type_args, texpr.span);
       case "fn_type": {
         const params = texpr.params.map(p => this.resolve_type_expr(p));
         const ret = this.resolve_type_expr(texpr.return_type);
@@ -1711,7 +1710,7 @@ export class InferEngine {
     }
   }
 
-  private resolve_named_type(name: string, type_args: TypeExpr[]): Type {
+  private resolve_named_type(name: string, type_args: TypeExpr[], span: Span): Type {
     switch (name) {
       case "Int": return INT;
       case "Float": return FLOAT;
@@ -1743,7 +1742,7 @@ export class InferEngine {
             variants: def.variants,
           };
         }
-        throw new TypeCheckError(`Unknown type: ${name}`);
+        this.type_error(E.E0204, `Unknown type: ${name}`, span, { kind: "other", detail: `unknown type '${name}'` });
       }
     }
   }

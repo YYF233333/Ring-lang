@@ -14,6 +14,9 @@ import {
   Span, Position,
 } from "../ast/index.js";
 import { Token, TokenKind, Lexer } from "./lexer.js";
+import { DiagnosticSink, CollectingSink, make_diagnostic } from "../diagnostics/index.js";
+import { E } from "../diagnostics/codes.js";
+import { CompileError } from "../errors.js";
 
 // ============================================================
 // Operator Precedence (lower number = lower precedence = binds less tightly)
@@ -64,16 +67,20 @@ export class Parser {
   private tokens: Token[];
   private pos: number = 0;
   private file: string;
+  private sink: DiagnosticSink;
+  private error_count: number = 0;
+  private static MAX_ERRORS = 20;
 
-  constructor(tokens: Token[], file: string = "<stdin>") {
+  constructor(tokens: Token[], file: string = "<stdin>", sink?: DiagnosticSink) {
     this.tokens = tokens;
     this.file = file;
+    this.sink = sink ?? new CollectingSink();
   }
 
-  static parse(source: string, file: string = "<stdin>"): Program {
+  static parse(source: string, file: string = "<stdin>", sink?: DiagnosticSink): Program {
     const lexer = new Lexer(source, file);
     const tokens = lexer.tokenize();
-    const parser = new Parser(tokens, file);
+    const parser = new Parser(tokens, file, sink);
     return parser.parse_program();
   }
 
@@ -85,7 +92,16 @@ export class Parser {
     const start = this.current_span_start();
     const decls: Decl[] = [];
     while (!this.at_end()) {
-      decls.push(this.parse_decl());
+      try {
+        decls.push(this.parse_decl());
+      } catch (e) {
+        if (e instanceof CompileError) throw e;
+        // Recover: synchronize to next declaration boundary
+        this.synchronize();
+      }
+    }
+    if (this.sink.has_errors()) {
+      throw new CompileError([...this.sink.diagnostics()]);
     }
     const end = this.current_span_start();
     return { decls, span: this.make_span(start, end) };
@@ -108,7 +124,8 @@ export class Parser {
       case TokenKind.Test: return this.parse_test_decl();
       case TokenKind.Trait: return this.parse_trait_decl(is_pub);
       default:
-        throw this.error(`Expected declaration, got '${tok.value}' (${tok.kind})`);
+        this.report_error(E.E0101, `Expected declaration, got '${tok.value}' (${tok.kind})`, tok.span);
+        throw new Error("parse_decl_failed");
     }
   }
 
@@ -632,7 +649,7 @@ export class Parser {
       } else {
         const is_comparison = prec === Prec.Equality || prec === Prec.Compare;
         if (is_comparison && last_was_comparison) {
-          throw new Error(`Comparison operators are non-associative: cannot chain '${tok.value}' after another comparison`);
+          throw this.error(`Comparison operators are non-associative: cannot chain '${tok.value}' after another comparison`);
         }
         // Binary operators
         this.advance();
@@ -1172,9 +1189,45 @@ export class Parser {
     return ch >= "A" && ch <= "Z";
   }
 
+  private report_error(code: string, msg: string, span?: Span): void {
+    const tok = this.peek();
+    const error_span = span ?? tok.span;
+    this.sink.report(make_diagnostic(
+      code,
+      "error",
+      msg,
+      error_span,
+      { kind: "parse_error", token: tok.value },
+    ));
+    this.error_count++;
+    if (this.error_count >= Parser.MAX_ERRORS) {
+      throw new CompileError([...this.sink.diagnostics()]);
+    }
+  }
+
+  private synchronize(): void {
+    this.advance();
+    while (!this.at_end()) {
+      const tok = this.peek();
+      if (
+        tok.kind === TokenKind.Fn ||
+        tok.kind === TokenKind.Struct ||
+        tok.kind === TokenKind.Enum ||
+        tok.kind === TokenKind.Trait ||
+        tok.kind === TokenKind.Impl ||
+        tok.kind === TokenKind.Effect ||
+        tok.kind === TokenKind.Pub ||
+        tok.kind === TokenKind.Test
+      ) {
+        return;
+      }
+      this.advance();
+    }
+  }
+
   private error(msg: string): Error {
     const tok = this.peek();
-    const loc = `${this.file}:${tok.span.start.line}:${tok.span.start.column}`;
-    return new Error(`Parse error at ${loc}: ${msg}`);
+    this.report_error(E.E0103, msg, tok.span);
+    return new Error(`Parse error: ${msg}`);
   }
 }

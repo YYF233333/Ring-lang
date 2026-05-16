@@ -1,0 +1,54 @@
+export const E = {
+  // Parser errors (E01xx)
+  E0101: "E0101", // unexpected token
+  E0102: "E0102", // unterminated string
+  E0103: "E0103", // expected specific token
+  E0104: "E0104", // invalid expression
+
+  // Checker general (E02xx)
+  E0201: "E0201", // undefined variable
+  E0202: "E0202", // arity mismatch
+  E0203: "E0203", // unknown struct
+  E0204: "E0204", // unknown type
+
+  // Type errors (E03xx)
+  E0301: "E0301", // type mismatch (unification)
+  E0302: "E0302", // infinite type (occurs check)
+  E0303: "E0303", // numeric type required
+  E0304: "E0304", // field access on non-struct
+
+  // Effect errors (E04xx)
+  E0401: "E0401", // unknown effect
+  E0402: "E0402", // unknown effect operation
+  E0403: "E0403", // unhandled effect
+
+  // Trait errors (E05xx)
+  E0501: "E0501", // unknown trait
+  E0502: "E0502", // missing impl method
+  E0503: "E0503", // unsatisfied trait bound
+
+  // Pattern errors (E06xx)
+  E0601: "E0601", // non-exhaustive match
+} as const;
+
+export const ERROR_DESCRIPTIONS: Record<string, string> = {
+  [E.E0101]: "Unexpected token",
+  [E.E0102]: "Unterminated string literal",
+  [E.E0103]: "Expected token",
+  [E.E0104]: "Invalid expression",
+  [E.E0201]: "Undefined variable",
+  [E.E0202]: "Arity mismatch",
+  [E.E0203]: "Unknown struct",
+  [E.E0204]: "Unknown type",
+  [E.E0301]: "Type mismatch",
+  [E.E0302]: "Infinite type (occurs check)",
+  [E.E0303]: "Numeric type required",
+  [E.E0304]: "Invalid field access",
+  [E.E0401]: "Unknown effect",
+  [E.E0402]: "Unknown effect operation",
+  [E.E0403]: "Unhandled effect",
+  [E.E0501]: "Unknown trait",
+  [E.E0502]: "Missing trait method implementation",
+  [E.E0503]: "Unsatisfied trait bound",
+  [E.E0601]: "Non-exhaustive pattern match",
+};

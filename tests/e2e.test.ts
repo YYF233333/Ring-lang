@@ -108,6 +108,8 @@ describe("e2e: ring build", () => {
 describe("e2e: ring check (negative — should reject)", () => {
   const negative_cases = [
     { file: "row_reject.ring", error_pattern: "missing field" },
+    { file: "error_multi_parse.ring", error_pattern: "expected" },
+    { file: "error_type_context.ring", error_pattern: "unify" },
   ];
 
   for (const tc of negative_cases) {
@@ -132,4 +134,49 @@ describe("e2e: ring check (negative — should reject)", () => {
       }
     });
   }
+});
+
+describe("e2e: --error-format=llm", () => {
+  test("outputs valid JSON for parse errors", () => {
+    const filePath = path.join(CASES_DIR, "error_multi_parse.ring");
+    try {
+      execSync(`node "${CLI_PATH}" check --error-format=llm "${filePath}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      assert.fail("Expected failure");
+    } catch (err: any) {
+      const stdout = err.stdout?.toString() ?? "";
+      const parsed = JSON.parse(stdout);
+      assert.equal(parsed.version, 1);
+      assert.ok(parsed.diagnostics.length >= 1);
+      assert.ok(parsed.diagnostics[0].code.startsWith("E01"));
+    }
+  });
+
+  test("outputs valid JSON for type errors", () => {
+    const filePath = path.join(CASES_DIR, "error_type_context.ring");
+    try {
+      execSync(`node "${CLI_PATH}" check --error-format=llm "${filePath}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      assert.fail("Expected failure");
+    } catch (err: any) {
+      const stdout = err.stdout?.toString() ?? "";
+      const parsed = JSON.parse(stdout);
+      assert.equal(parsed.version, 1);
+      assert.ok(parsed.diagnostics.length >= 1);
+      assert.ok(parsed.diagnostics[0].message.toLowerCase().includes("unify"));
+    }
+  });
+
+  test("outputs nothing special for valid files", () => {
+    const filePath = path.join(CASES_DIR, "hello.ring");
+    const output = execSync(`node "${CLI_PATH}" check --error-format=llm "${filePath}"`, {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    assert.equal(output.trim(), "OK");
+  });
 });

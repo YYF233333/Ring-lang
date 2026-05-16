@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { Lexer, TokenKind } from "./lexer.js";
 import { Parser } from "./parser.js";
+import { CollectingSink } from "../diagnostics/index.js";
+import { CompileError } from "../errors.js";
 
 // ============================================================
 // Lexer tests
@@ -546,6 +548,46 @@ fn main() { 0 }
       assert.equal(program.decls[0].kind, "struct_decl");
       assert.equal(program.decls[1].kind, "enum_decl");
       assert.equal(program.decls[2].kind, "fn_decl");
+    });
+  });
+
+  describe("error recovery", () => {
+    it("reports error to sink on unexpected token", () => {
+      const sink = new CollectingSink();
+      assert.throws(() => Parser.parse("123 foo bar", "<test>", sink), CompileError);
+      assert.ok(sink.has_errors());
+      const diags = sink.diagnostics();
+      assert.ok(diags.length >= 1);
+      assert.ok(diags[0].code.startsWith("E01"));
+    });
+
+    it("collects multiple errors across declarations", () => {
+      const source = `
+fn valid() -> Int { 1 }
+xyz invalid_stuff
+fn also_valid() -> Int { 2 }
+abc more_invalid
+`;
+      const sink = new CollectingSink();
+      assert.throws(() => Parser.parse(source, "<test>", sink), CompileError);
+      const diags = sink.diagnostics();
+      assert.ok(diags.length >= 2, `Expected >= 2 diagnostics, got ${diags.length}`);
+    });
+
+    it("still parses valid declarations despite errors", () => {
+      const source = `
+fn good() -> Int { 1 }
+!!! bad
+fn also_good() -> Int { 2 }
+`;
+      const sink = new CollectingSink();
+      try {
+        const program = Parser.parse(source, "<test>", sink);
+        assert.ok(program.decls.length >= 1);
+      } catch (e) {
+        assert.ok(e instanceof CompileError);
+        assert.ok(sink.diagnostics().length >= 1);
+      }
     });
   });
 });
