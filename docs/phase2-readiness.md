@@ -1,13 +1,13 @@
 # Phase 2 准备度报告
 
-> 2026-05-16 Phase 1 清理后编写，Session 1 完成后更新
+> 2026-05-16 Phase 1 清理后编写，Session 2 完成后更新（2026-05-17）
 
-## 当前健康状态（Session 1 完成后）
+## 当前健康状态（Session 2 完成后）
 
 | 指标 | 数值 |
 |------|------|
-| 编译器单元测试 | 87 pass / 0 fail |
-| 端到端测试 | 33 pass / 0 fail |
+| 编译器单元测试 | 100 pass / 0 fail |
+| 端到端测试 | 42 pass / 0 fail（14 cases × 3 modes） |
 | `tsc --strict` | 零错误（含 noUnusedLocals, noImplicitReturns） |
 | `npm run lint` | 零错误（as any 禁令 + console.log 检测） |
 | `as any` 残留 | 0 |
@@ -66,15 +66,14 @@
 
 ## Phase 2 已知风险
 
-### 1. Effect handler codegen 语义
+### 1. Evidence Passing 边界场景（Session 2 遗留）
 
-当前 generator-based handler 在简单场景（单次 yield + mock 返回）下能工作，但以下场景未验证：
+Generator-based handler 已完全替换为 evidence passing。以下场景是已知限制：
 
-- handler 中调用 `resume` 多次（多次恢复）
-- 多层嵌套 handler（外层 handler 拦截内层未处理的 effect）
-- handler 中产生新的 effect
-
-Phase 2 实现 evidence passing 时需要重写 `gen_handle`。已有 e2e 测试（`effect_handle_io.ring`、`effect_resume.ring`）作为回归保护。
+- Lambda 带 effect 时不注入 evidence 参数（依赖闭包捕获，跨作用域调用可能 ReferenceError）
+- Trait dictionary dispatch（`dict.method()`）不转发 evidence（trait 方法本身带 effect 时失败）
+- One-shot resume 未实现（handler 无法在 resume 前后执行额外逻辑）
+- 多层嵌套 handler 的 evidence 遮蔽已通过词法作用域自然支持，但未有专门测试覆盖
 
 ### 2. where 子句只解析不验证
 
@@ -128,3 +127,47 @@ Parser 消费 `where` token 但不保存语义信息。Phase 2 引入 refinement
 - Supertrait 继承（`trait Ord: Eq`）未实现
 - `dyn Trait` 动态分发未实现
 - Dictionary 内联优化（已知具体类型时跳过 dictionary）未实现
+
+---
+
+## Session 2 完成报告：Evidence Passing Effect System
+
+> 2026-05-17
+
+### 架构变更
+
+**从 generator-based 到 evidence passing 的完整重写**：
+
+| 变更前 | 变更后 |
+|--------|--------|
+| `yield { effect, op, args }` | `__ev_io.read(args)` |
+| `function*` generator 函数 | 普通 `function` |
+| `__run_handler(gen, handlers)` 运行时 | `__EffectAbort` 类（6 行） |
+| try/catch（仅 fail）+ generator（其他 effect） | 统一 evidence passing |
+
+### Codegen 策略
+
+**Evidence Passing**：每个 effect 成为函数的隐藏参数（`__ev_{name}`）。Handler 构造 evidence 对象并通过 IIFE 传递给 body。Abort 语义操作（`fail.raise`）使用 `__EffectAbort` + try/catch 来 unwind 栈。
+
+参数顺序：`user params → trait dicts → evidence params`（evidence 按 effect name 字母序排列）。
+
+### 新增 e2e 测试
+
+| 文件 | 验证场景 |
+|------|----------|
+| `effect_evidence.ring` | 基础 evidence passing（handler mock io.read） |
+| `effect_multi_handler.ring` | 多 effect 同时 handle（io + fail） |
+| `effect_propagate.ring` | 3 层函数调用的 evidence 转发 |
+
+### 性能影响
+
+- fail effect：零开销不变（evidence 的 raise 直接 throw）
+- io/custom effect：从 10-100x（generator 帧开销）降至 1-2x（函数调用 + 间接引用）
+- 运行时精简：从 20 行 `__run_handler` 降至 6 行 `__EffectAbort`
+
+### Session 2 已知限制
+
+- Lambda + effect：gen_lambda 不注入 evidence 参数
+- Trait dict_dispatch + effect：不转发 evidence
+- One-shot resume：未实现（handler 无法 resume 后执行逻辑）
+- mut effect：类型已定义但 codegen 未特殊处理（留待下一轮）
