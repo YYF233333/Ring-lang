@@ -33,6 +33,9 @@ const cases: TestCase[] = [
   { file: "trait_basic.ring", expected: "hello-trait\n" },
   { file: "trait_chain.ring", expected: "num\n" },
   { file: "trait_multi_call.ring", expected: "24\n" },
+  { file: "effect_evidence.ring", expected: "mock-data\n" },
+  { file: "effect_multi_handler.ring", expected: "file-content\n" },
+  { file: "effect_propagate.ring", expected: "propagated\n" },
 ];
 
 describe("e2e: ring run", () => {
