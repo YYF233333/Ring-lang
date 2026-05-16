@@ -8,7 +8,7 @@ import {
   Span, span_zero,
 } from "../ast/index.js";
 import {
-  Type, FnType, EffectRow, Effect,
+  Type, FnType, TypeVar, EffectRow, Effect,
   INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY,
   EMPTY_ROW, effect_row, row_merge, fresh_type_var, type_to_string,
 } from "../types/index.js";
@@ -48,10 +48,68 @@ interface InferResult {
 export class InferEngine {
   public env: TypeEnv;
   private subst: Substitution;
+  private type_param_scope: Map<string, Type> = new Map();
+  private current_fn_return_type: Type | null = null;
 
   constructor() {
     this.env = new TypeEnv();
     this.subst = empty_subst();
+  }
+
+  private free_type_vars(t: Type, subst: Substitution): Set<number> {
+    const resolved = apply(subst, t);
+    const result = new Set<number>();
+    this.collect_free_vars(resolved, result);
+    return result;
+  }
+
+  private collect_free_vars(t: Type, result: Set<number>): void {
+    switch (t.kind) {
+      case "var": result.add(t.id); break;
+      case "fn":
+        for (const p of t.params) this.collect_free_vars(p, result);
+        this.collect_free_vars(t.return_type, result);
+        break;
+      case "struct":
+        for (const tp of t.type_params) this.collect_free_vars(tp, result);
+        for (const f of t.fields) this.collect_free_vars(f.type, result);
+        break;
+      case "enum":
+        for (const tp of t.type_params) this.collect_free_vars(tp, result);
+        for (const v of t.variants) for (const f of v.fields) this.collect_free_vars(f, result);
+        break;
+      case "generic":
+        this.collect_free_vars(t.base, result);
+        for (const a of t.args) this.collect_free_vars(a, result);
+        break;
+      case "option":
+        this.collect_free_vars(t.inner, result);
+        break;
+    }
+  }
+
+  private free_type_vars_in_env(subst: Substitution): Set<number> {
+    const result = new Set<number>();
+    for (const scope of this.env.scopes) {
+      for (const [, scheme] of scope.variables) {
+        const ftv = this.free_type_vars(scheme.type, subst);
+        for (const v of ftv) {
+          if (!scheme.type_vars.includes(v)) result.add(v);
+        }
+      }
+    }
+    return result;
+  }
+
+  private generalize(t: Type, subst: Substitution): { type: Type; type_vars: number[] } {
+    const resolved = apply(subst, t);
+    const ftv_type = this.free_type_vars(resolved, empty_subst());
+    const ftv_env = this.free_type_vars_in_env(subst);
+    const type_vars: number[] = [];
+    for (const v of ftv_type) {
+      if (!ftv_env.has(v)) type_vars.push(v);
+    }
+    return { type: resolved, type_vars };
   }
 
   // ============================================================
@@ -118,6 +176,18 @@ export class InferEngine {
 
   private register_enum(decl: EnumDecl): void {
     const type_param_names = decl.type_params.map(tp => tp.name);
+
+    // Push type params into scope for resolving field types
+    const saved_tp_scope = new Map(this.type_param_scope);
+    const type_var_ids: number[] = [];
+    const type_var_types: Type[] = [];
+    for (const tp of decl.type_params) {
+      const tv = fresh_type_var();
+      type_var_ids.push((tv as TypeVar).id);
+      type_var_types.push(tv);
+      this.type_param_scope.set(tp.name, tv);
+    }
+
     const variants = decl.variants.map(v => ({
       name: v.name,
       fields: v.fields.map(f => this.resolve_type_expr(f)),
@@ -133,26 +203,34 @@ export class InferEngine {
     const enum_type: Type = {
       kind: "enum",
       name: decl.name,
-      type_params: [],
+      type_params: type_var_types,
       variants: variants,
     };
 
     for (const variant of variants) {
       this.env.variant_to_enum.set(variant.name, decl.name);
       if (variant.fields.length === 0) {
-        // Nullary constructor — just the enum type
-        this.env.bind_mono(variant.name, enum_type);
+        if (type_var_ids.length > 0) {
+          this.env.bind(variant.name, { type: enum_type, type_vars: type_var_ids });
+        } else {
+          this.env.bind_mono(variant.name, enum_type);
+        }
       } else {
-        // Constructor function
         const fn_type: FnType = {
           kind: "fn",
           params: variant.fields,
           return_type: enum_type,
           effects: EMPTY_ROW,
         };
-        this.env.bind_mono(variant.name, fn_type);
+        if (type_var_ids.length > 0) {
+          this.env.bind(variant.name, { type: fn_type, type_vars: type_var_ids });
+        } else {
+          this.env.bind_mono(variant.name, fn_type);
+        }
       }
     }
+
+    this.type_param_scope = saved_tp_scope;
   }
 
   private register_effect(decl: EffectDecl): void {
@@ -193,6 +271,14 @@ export class InferEngine {
   }
 
   private register_fn(decl: FnDecl): void {
+    const type_vars: number[] = [];
+    const saved_tp_scope = new Map(this.type_param_scope);
+    for (const tp of decl.type_params) {
+      const tv = fresh_type_var();
+      type_vars.push((tv as TypeVar).id);
+      this.type_param_scope.set(tp.name, tv);
+    }
+
     const param_types = decl.params.map(p =>
       p.type_annotation ? this.resolve_type_expr(p.type_annotation) : fresh_type_var()
     );
@@ -203,7 +289,14 @@ export class InferEngine {
       return_type: ret_type,
       effects: EMPTY_ROW,
     };
-    this.env.bind_mono(decl.name, fn_type);
+
+    this.type_param_scope = saved_tp_scope;
+
+    if (type_vars.length > 0) {
+      this.env.bind(decl.name, { type: fn_type, type_vars });
+    } else {
+      this.env.bind_mono(decl.name, fn_type);
+    }
   }
 
   // ============================================================
@@ -284,7 +377,17 @@ export class InferEngine {
   }
 
   private check_fn_decl(decl: FnDecl): HFnDecl {
+    const saved_subst = this.subst;
+    this.subst = empty_subst();
     this.env.push_scope();
+
+    // Bind type parameters as fresh type variables
+    const saved_tp_scope = new Map(this.type_param_scope);
+    for (const tp of decl.type_params) {
+      const tv = fresh_type_var();
+      this.type_param_scope.set(tp.name, tv);
+      this.env.bind_mono(tp.name, tv);
+    }
 
     // Bind parameters
     const hparams: HParam[] = [];
@@ -294,20 +397,20 @@ export class InferEngine {
       hparams.push({ name: p.name, type: ptype });
     }
 
+    // Set expected return type for return-statement checking
+    const saved_fn_return = this.current_fn_return_type;
+    const expected_ret = decl.return_type ? this.resolve_type_expr(decl.return_type) : fresh_type_var();
+    this.current_fn_return_type = expected_ret;
+
     // Infer body
     const body_result = this.infer_block(decl.body);
     this.subst = body_result.subst;
 
     // Determine return type
-    let ret_type: Type;
-    if (decl.return_type) {
-      const declared_ret = this.resolve_type_expr(decl.return_type);
-      this.subst = unify(body_result.hexpr.type, declared_ret, this.subst);
-      ret_type = apply(this.subst, declared_ret);
-    } else {
-      ret_type = apply(this.subst, body_result.hexpr.type);
-    }
+    this.subst = unify(body_result.hexpr.type, expected_ret, this.subst);
+    const ret_type = apply(this.subst, expected_ret);
 
+    this.current_fn_return_type = saved_fn_return;
     this.env.pop_scope();
 
     // Apply final substitution to params
@@ -317,6 +420,9 @@ export class InferEngine {
     }));
 
     const effects = apply_to_effect_row(this.subst, body_result.effects);
+
+    this.type_param_scope = saved_tp_scope;
+    this.subst = saved_subst;
 
     return {
       kind: "fn_decl",
@@ -332,10 +438,13 @@ export class InferEngine {
   }
 
   private check_test_decl(decl: TestDecl): HTestDecl {
+    const saved_subst = this.subst;
+    this.subst = empty_subst();
     this.env.push_scope();
     const body_result = this.infer_block(decl.body);
     this.subst = body_result.subst;
     this.env.pop_scope();
+    this.subst = saved_subst;
     return {
       kind: "test_decl",
       description: decl.description,
@@ -348,8 +457,8 @@ export class InferEngine {
   // Infer Block
   // ============================================================
 
-  private infer_block(block: BlockExpr): InferResult {
-    let subst = this.subst;
+  private infer_block(block: BlockExpr, initial_subst?: Substitution): InferResult {
+    let subst = initial_subst ?? this.subst;
     let effects: EffectRow = EMPTY_ROW;
     const hstmts: HStmt[] = [];
 
@@ -398,9 +507,11 @@ export class InferEngine {
           s = unify(var_type, annotated, s);
           var_type = apply(s, annotated);
         }
-        this.env.bind_mono(stmt.name, apply(s, var_type));
+        const resolved = apply(s, var_type);
+        const scheme = this.generalize(resolved, s);
+        this.env.bind(stmt.name, scheme);
         return {
-          hstmt: { kind: "let_stmt", name: stmt.name, type: apply(s, var_type), init: init_r.hexpr, span: stmt.span },
+          hstmt: { kind: "let_stmt", name: stmt.name, type: resolved, init: init_r.hexpr, span: stmt.span },
           subst: s,
           effects: init_r.effects,
         };
@@ -442,11 +553,18 @@ export class InferEngine {
       case "return_stmt": {
         if (stmt.value) {
           const r = this.infer_expr(stmt.value, subst);
+          let s = r.subst;
+          if (this.current_fn_return_type) {
+            s = unify(r.hexpr.type, this.current_fn_return_type, s);
+          }
           return {
             hstmt: { kind: "return_stmt", value: r.hexpr, span: stmt.span },
-            subst: r.subst,
+            subst: s,
             effects: r.effects,
           };
+        }
+        if (this.current_fn_return_type) {
+          subst = unify(UNIT, this.current_fn_return_type, subst);
         }
         return {
           hstmt: { kind: "return_stmt", span: stmt.span },
@@ -934,8 +1052,8 @@ export class InferEngine {
     s = unify(cond_r.hexpr.type, BOOL, s);
     let effects = cond_r.effects;
 
-    const then_r = this.infer_block(then_branch);
-    s = compose(s, then_r.subst);
+    const then_r = this.infer_block(then_branch, s);
+    s = then_r.subst;
     effects = row_merge(effects, then_r.effects);
 
     let else_hexpr: HBlock | undefined;
@@ -943,8 +1061,8 @@ export class InferEngine {
 
     if (else_branch) {
       if (else_branch.kind === "block") {
-        const else_r = this.infer_block(else_branch);
-        s = compose(s, else_r.subst);
+        const else_r = this.infer_block(else_branch, s);
+        s = else_r.subst;
         effects = row_merge(effects, else_r.effects);
         s = unify(then_r.hexpr.type, else_r.hexpr.type, s);
         result_type = apply(s, then_r.hexpr.type);
@@ -1216,8 +1334,11 @@ export class InferEngine {
       case "Str": return STR;
       case "Bool": return BOOL;
       case "Never": return NEVER;
-      case "Any": return ANY;
       default: {
+        // Check if it's a type parameter in scope
+        const tp = this.type_param_scope.get(name);
+        if (tp) return tp;
+
         // Check if it's a known struct
         if (this.env.structs.has(name)) {
           const def = this.env.structs.get(name)!;
@@ -1238,8 +1359,7 @@ export class InferEngine {
             variants: def.variants,
           };
         }
-        // Treat as a type variable placeholder or unknown
-        return ANY;
+        throw new TypeCheckError(`Unknown type: ${name}`);
       }
     }
   }

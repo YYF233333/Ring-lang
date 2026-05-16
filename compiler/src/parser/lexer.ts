@@ -253,9 +253,7 @@ export class Lexer {
         this.advance();
       }
     }
-    // Unterminated string
-    const end = this.current_position();
-    return this.make_token(TokenKind.StringLit, value, start, end);
+    throw new Error(`Unterminated string literal starting at ${start.line}:${start.column}`);
   }
 
   private lex_raw_string(start: Position): Token {
@@ -388,15 +386,12 @@ export class Lexer {
         return this.make_token(TokenKind.Gt, ">", start);
       case "&":
         if (this.peek() === "&") { this.advance(); return this.make_token(TokenKind.AmpAmp, "&&", start); }
-        // Single & not supported, error
-        return this.make_token(TokenKind.Eof, "&", start);
+        throw new Error(`Unexpected character '&' at ${start.line}:${start.column} (use '&&' for logical AND)`);
       case "|":
         if (this.peek() === "|") { this.advance(); return this.make_token(TokenKind.PipePipe, "||", start); }
-        // Single | not supported
-        return this.make_token(TokenKind.Eof, "|", start);
+        throw new Error(`Unexpected character '|' at ${start.line}:${start.column} (use '||' for logical OR)`);
       default:
-        // Unknown character — skip
-        return this.make_token(TokenKind.Eof, ch, start);
+        throw new Error(`Unexpected character '${ch}' at ${start.line}:${start.column}`);
     }
   }
 

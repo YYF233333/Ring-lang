@@ -1,7 +1,7 @@
 // Ring-lang Type Environment — scope management + builtin definitions
 import {
-  Type, FnType, EffectRow, EMPTY_ROW, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY,
-  fresh_type_var, effect_row,
+  Type, FnType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
+  fresh_type_var,
 } from "../types/index.js";
 
 // ============================================================
@@ -43,7 +43,7 @@ export interface EffectDef {
 // Scope
 // ============================================================
 
-interface Scope {
+export interface Scope {
   variables: Map<string, TypeScheme>;
 }
 
@@ -52,7 +52,7 @@ interface Scope {
 // ============================================================
 
 export class TypeEnv {
-  private scopes: Scope[] = [];
+  public scopes: Scope[] = [];
   public structs: Map<string, StructDef> = new Map();
   public enums: Map<string, EnumDef> = new Map();
   public effects: Map<string, EffectDef> = new Map();
@@ -68,10 +68,12 @@ export class TypeEnv {
   }
 
   private register_builtins(): void {
-    // print: fn(Any) -> ()
-    this.bind("print", mono({
-      kind: "fn", params: [ANY], return_type: UNIT, effects: EMPTY_ROW,
-    } as FnType));
+    // print: fn<T>(T) -> ()
+    const print_var = fresh_type_var();
+    this.bind("print", {
+      type: { kind: "fn", params: [print_var], return_type: UNIT, effects: EMPTY_ROW } as FnType,
+      type_vars: [(print_var as any).id],
+    });
 
     // assert: fn(Bool) -> ()
     this.bind("assert", mono({
@@ -98,9 +100,23 @@ export class TypeEnv {
       ],
     });
 
-    // Module stub: toml with parse(Str) -> Any (with fail effect)
-    // We register toml.parse as a special binding
-    this.bind("toml", mono(ANY)); // toml module itself
+    // Built-in effect: fail with op raise(E) -> Never
+    const fail_type_var = fresh_type_var();
+    this.effects.set("fail", {
+      name: "fail",
+      type_params: ["E"],
+      ops: [
+        { name: "raise", params: [fail_type_var], return_type: NEVER },
+      ],
+    });
+
+    // Module stub: toml — Phase 2 will implement proper module system
+    const toml_parse_var = fresh_type_var();
+    this.bind("toml", mono({
+      kind: "struct", name: "Module", type_params: [], fields: [
+        { name: "parse", type: { kind: "fn", params: [STR], return_type: toml_parse_var, effects: EMPTY_ROW } as FnType, is_pub: true },
+      ],
+    }));
   }
 
   push_scope(): void {

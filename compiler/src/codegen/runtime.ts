@@ -10,9 +10,12 @@ function __run_handler(gen, handlers) {
     if (!handler) {
       throw new Error("Unhandled effect: " + key);
     }
-    const resume = (v) => gen.next(v);
+    let resumed = false;
+    const resume = (v) => { resumed = true; result = gen.next(v); };
     const handled = handler(effect.args, resume);
-    result = gen.next(handled);
+    if (!resumed) {
+      result = gen.next(handled);
+    }
   }
   return result.value;
 }
@@ -29,5 +32,13 @@ function assert(cond, msg) {
   if (!cond) {
     throw new Error("Assertion failed" + (msg ? ": " + msg : ""));
   }
+}
+
+function panic(msg) {
+  throw new Error("panic: " + msg);
+}
+
+function exit(code) {
+  process.exit(code);
 }
 `;

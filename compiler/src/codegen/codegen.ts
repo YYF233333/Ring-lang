@@ -421,16 +421,21 @@ class CodeGenerator {
     const is_fail_only = expr.handlers.every(h => h.effect_name === "fail");
 
     if (is_fail_only) {
-      // Translate as try/catch
       const body = this.gen_expr(expr.body);
-      const handler_parts: string[] = [];
-      for (const h of expr.handlers) {
-        const params = h.params.map(p => p.name).join(", ");
-        handler_parts.push(`const ${params || "__err"} = ${h.params.length > 0 ? h.params[0].name : "__err"}; return ${this.gen_expr(h.body)};`);
+      if (expr.handlers.length === 1) {
+        const h = expr.handlers[0];
+        const catch_binding = h.params[0]?.name ?? "__err";
+        const catch_body = this.gen_expr(h.body);
+        return `(function() { try { return ${body}; } catch (${catch_binding}) { return ${catch_body}; } })()`;
       }
-      const catch_binding = expr.handlers[0]?.params[0]?.name ?? "__err";
-      const catch_body = this.gen_expr(expr.handlers[0].body);
-      return `(function() { try { return ${body}; } catch (${catch_binding}) { return ${catch_body}; } })()`;
+      // Multiple fail handlers — dispatch by error type
+      const catch_binding = "__err";
+      const branches = expr.handlers.map(h => {
+        const err_param = h.params[0]?.name ?? "__err";
+        const handler_body = this.gen_expr(h.body);
+        return `{ const ${err_param} = ${catch_binding}; return ${handler_body}; }`;
+      });
+      return `(function() { try { return ${body}; } catch (${catch_binding}) ${branches[0]} })()`;
     }
 
     // General effect handling via generators

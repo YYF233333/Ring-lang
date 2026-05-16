@@ -993,15 +993,7 @@ export class Parser {
   // ============================================================
 
   private parse_for_expr(): Expr {
-    const start = this.current_span_start();
-    this.expect(TokenKind.For);
-    // for name in expr { body }
-    const _binding = this.expect(TokenKind.Ident).value;
-    this.expect(TokenKind.In);
-    const _iter = this.parse_expr();
-    const body = this.parse_block_expr();
-    // For now, represent as a block (will be properly typed later)
-    return body;
+    throw new Error("for loops are not yet implemented (planned for Phase 2)");
   }
 
   // ============================================================
