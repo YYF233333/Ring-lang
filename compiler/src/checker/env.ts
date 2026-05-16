@@ -140,6 +140,51 @@ export class TypeEnv {
       ],
     });
 
+    // Built-in: Cell<T> — shared mutable reference
+    const cell_t = this.fresh_var();
+    this.structs.set("Cell", {
+      name: "Cell",
+      type_params: ["T"],
+      type_param_vars: [cell_t.id],
+      fields: [{ name: "value", type: cell_t, is_pub: true }],
+    });
+
+    // Cell constructor: fn<T>(T) -> Cell<T>
+    const cell_ctor_t = this.fresh_var();
+    const cell_struct_type: Type = {
+      kind: "struct", name: "Cell",
+      type_params: [cell_ctor_t],
+      fields: [{ name: "value", type: cell_ctor_t, is_pub: true }],
+    };
+    this.bind("Cell", {
+      type: { kind: "fn", params: [cell_ctor_t], return_type: cell_struct_type, effects: EMPTY_ROW } as FnType,
+      type_vars: [cell_ctor_t.id],
+    });
+
+    // Cell impl methods — all carry {mut} effect
+    const mut_row: EffectRow = { effects: [{ kind: "mut" }] };
+    const cell_m_t = this.fresh_var();
+    const cell_self_type: Type = {
+      kind: "struct", name: "Cell",
+      type_params: [cell_m_t],
+      fields: [{ name: "value", type: cell_m_t, is_pub: true }],
+    };
+    const cell_methods = new Map<string, TypeScheme>();
+    cell_methods.set("get", {
+      type: { kind: "fn", params: [cell_self_type], return_type: cell_m_t, effects: mut_row } as FnType,
+      type_vars: [cell_m_t.id],
+    });
+    cell_methods.set("set", {
+      type: { kind: "fn", params: [cell_self_type, cell_m_t], return_type: UNIT, effects: mut_row } as FnType,
+      type_vars: [cell_m_t.id],
+    });
+    const update_fn_type: FnType = { kind: "fn", params: [cell_m_t], return_type: cell_m_t, effects: EMPTY_ROW };
+    cell_methods.set("update", {
+      type: { kind: "fn", params: [cell_self_type, update_fn_type], return_type: UNIT, effects: mut_row } as FnType,
+      type_vars: [cell_m_t.id],
+    });
+    this.impl_methods.set("Cell", cell_methods);
+
   }
 
   push_scope(): void {
