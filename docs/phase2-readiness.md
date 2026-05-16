@@ -1,13 +1,13 @@
 # Phase 2 准备度报告
 
-> 2026-05-16 Phase 1 清理后编写
+> 2026-05-16 Phase 1 清理后编写，Session 1 完成后更新
 
-## Phase 1 健康状态
+## 当前健康状态（Session 1 完成后）
 
 | 指标 | 数值 |
 |------|------|
-| 编译器单元测试 | 80 pass / 0 fail |
-| 端到端测试 | 24 pass / 0 fail |
+| 编译器单元测试 | 87 pass / 0 fail |
+| 端到端测试 | 33 pass / 0 fail |
 | `tsc --strict` | 零错误（含 noUnusedLocals, noImplicitReturns） |
 | `npm run lint` | 零错误（as any 禁令 + console.log 检测） |
 | `as any` 残留 | 0 |
@@ -95,3 +95,36 @@ Parser 消费 `where` token 但不保存语义信息。Phase 2 引入 refinement
 3. **跨阶段约定必须用共享函数**（放在 `hir/index.ts`），不允许裸字符串耦合
 4. **PR 合入前必须通过 `npm run lint` + `npm test`**
 5. **禁止引入 `as any` / `@ts-ignore`**（lint 机械检查）
+
+---
+
+## Session 1 完成报告：Trait 系统 + 泛型约束
+
+> 2026-05-16
+
+### 新增功能
+
+| 管线阶段 | 变更 |
+|---------|------|
+| Lexer | `trait` 关键字 |
+| AST | `TraitDecl`、`TypeBound` 节点；`TypeParam.bounds` 多约束；`FnDecl.is_abstract` |
+| Parser | `parse_trait_decl`、`parse_type_bound`、`<T: A + B>` 多约束语法 |
+| Checker | trait 注册、impl 完整性验证、trait 方法解析、`fn_bounds` 追踪、dictionary dispatch |
+| HIR | `HTraitDecl`、`trait_dict_name`、`HFnDecl.trait_bounds`、`HCall.resolved_dicts` + `dict_dispatch` |
+| Codegen | dictionary 对象生成、泛型函数 dictionary 参数注入、`__Trait.method()` dispatch |
+
+### Codegen 策略
+
+**Dictionary Passing**：每个 `impl Trait for Type` 生成一个 JS 对象（如 `const User_Greetable = { greet: User_greet }`）。泛型函数 `fn show<T: Greetable>(x: T)` 编译为 `function show(x, __Greetable)`。调用点自动传递对应 dictionary。
+
+### 自测中发现并修复的 Bug
+
+1. **泛型函数调用泛型函数时 dictionary 未转发**：`show<T: Trait>` 调用 `stringify<T: Trait>(x)` 时，`x` 是类型变量，原逻辑只匹配具体类型。修复：识别类型变量的 trait bound 并转发当前函数的 `__Trait` 参数。
+2. **同一表达式多次 trait 方法调用**：`x.size() + x.size()` 中，第一次调用 unify 改变了 substitution chain，第二次调用的 type var ID 无法匹配原始 bound。修复：`resolve_var_id` 追踪 substitution chain 到终点再比较。
+
+### Session 1 已知限制（留后续 Session）
+
+- 关联类型（`type Item`）未实现
+- Supertrait 继承（`trait Ord: Eq`）未实现
+- `dyn Trait` 动态分发未实现
+- Dictionary 内联优化（已知具体类型时跳过 dictionary）未实现
