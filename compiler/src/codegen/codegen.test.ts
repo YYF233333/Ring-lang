@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert";
 import { generate } from "./codegen.js";
 import { RUNTIME_CODE } from "./runtime.js";
-import { INT, STR, BOOL, UNIT, EMPTY_ROW } from "../types/index.js";
+import { INT, STR, BOOL, UNIT, EMPTY_ROW, effect_row, Effect } from "../types/index.js";
 import { HProgram, HFnDecl, HStructDecl, HEnumDecl, HBlock, HExpr, HStmt, HParam, evidence_param_name } from "../hir/index.js";
 import { span_zero } from "../ast/index.js";
 
@@ -546,6 +546,36 @@ describe("codegen", () => {
       assert.strictEqual(evidence_param_name("io"), "__ev_io");
       assert.strictEqual(evidence_param_name("fail"), "__ev_fail");
       assert.strictEqual(evidence_param_name("custom_eff"), "__ev_custom_eff");
+    });
+  });
+
+  describe("effect_op codegen", () => {
+    it("generates evidence method call for io.read", () => {
+      const io_effect: Effect = { kind: "io" };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "f",
+        type_params: [],
+        params: [],
+        return_type: STR,
+        effects: effect_row(io_effect),
+        body: block([], {
+          kind: "effect_op",
+          effect_name: "io",
+          op_name: "read",
+          args: [str_lit("file.txt")],
+          type: STR,
+          effects: effect_row(io_effect),
+          span: S,
+        }),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("__ev_io.read("), "should call __ev_io.read(), got: " + js);
+      assert.ok(js.includes('"file.txt"'), "should pass file.txt arg");
+      assert.ok(!js.includes("yield"), "should not contain yield");
     });
   });
 });

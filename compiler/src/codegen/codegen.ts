@@ -3,7 +3,7 @@
 import {
   HProgram, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl,
   HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock, HMatchArm,
-  variant_js_name, trait_dict_name,
+  variant_js_name, trait_dict_name, evidence_param_name,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
 import { assertNever } from "../errors.js";
@@ -602,8 +602,9 @@ class CodeGenerator {
   }
 
   private gen_effect_op(expr: HExpr & { kind: "effect_op" }): string {
+    const ev_name = evidence_param_name(expr.effect_name);
     const args = expr.args.map(a => this.gen_expr(a)).join(", ");
-    return `yield { effect: "${expr.effect_name}", op: "${expr.op_name}", args: [${args}] }`;
+    return `${ev_name}.${expr.op_name}(${args})`;
   }
 }
 
