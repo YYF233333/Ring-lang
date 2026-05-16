@@ -19,7 +19,7 @@ import {
   variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
 import { TypeEnv, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
-import { Substitution, empty_subst, unify, apply, apply_to_effect_row } from "./unify.js";
+import { Substitution, empty_subst, unify, apply, apply_to_effect_row, init_unify_fresh_counter } from "./unify.js";
 import { check_exhaustive } from "./exhaustive.js";
 
 // ============================================================
@@ -57,6 +57,7 @@ export class InferEngine {
   constructor() {
     this.env = new TypeEnv();
     this.subst = empty_subst();
+    init_unify_fresh_counter(this.env.current_var_id);
   }
 
   private free_type_vars(t: Type, subst: Substitution): Set<number> {
@@ -72,6 +73,11 @@ export class InferEngine {
       case "fn":
         for (const p of t.params) this.collect_free_vars(p, result);
         this.collect_free_vars(t.return_type, result);
+        if (t.effects.tail !== undefined) result.add(t.effects.tail);
+        for (const e of t.effects.effects) {
+          if (e.kind === "fail") this.collect_free_vars(e.error_type, result);
+          if (e.kind === "custom") for (const a of e.type_args) this.collect_free_vars(a, result);
+        }
         break;
       case "struct":
         for (const tp of t.type_params) this.collect_free_vars(tp, result);
@@ -1221,7 +1227,13 @@ export class InferEngine {
       if (struct_def) {
         const f = struct_def.fields.find(f => f.name === field);
         if (f) {
-          field_type = f.type;
+          const instantiation_map = new Map<number, Type>();
+          for (let i = 0; i < struct_def.type_param_vars.length; i++) {
+            if (i < recv_type.type_params.length) {
+              instantiation_map.set(struct_def.type_param_vars[i], recv_type.type_params[i]);
+            }
+          }
+          field_type = substitute_type(f.type, instantiation_map);
         } else {
           throw new TypeCheckError(`Struct ${recv_type.name} has no field ${field}`, span);
         }
@@ -1365,15 +1377,26 @@ export class InferEngine {
         this.env.bind_mono(pattern.name, apply(subst, expected_type));
         break;
       case "constructor": {
-        // Look up the enum variant
         const enum_name = this.env.variant_to_enum.get(pattern.name);
         if (enum_name) {
           const enum_def = this.env.enums.get(enum_name);
           if (enum_def) {
             const variant = enum_def.variants.find(v => v.name === pattern.name);
             if (variant) {
+              const resolved_expected = apply(subst, expected_type);
+              const instantiation_map = new Map<number, Type>();
+              if (resolved_expected.kind === "enum") {
+                for (let i = 0; i < enum_def.type_param_vars.length; i++) {
+                  if (i < resolved_expected.type_params.length) {
+                    instantiation_map.set(enum_def.type_param_vars[i], resolved_expected.type_params[i]);
+                  }
+                }
+              }
               for (let i = 0; i < pattern.fields.length && i < variant.fields.length; i++) {
-                this.bind_pattern(pattern.fields[i], variant.fields[i], subst);
+                const field_type = instantiation_map.size > 0
+                  ? substitute_type(variant.fields[i], instantiation_map)
+                  : variant.fields[i];
+                this.bind_pattern(pattern.fields[i], field_type, subst);
               }
             }
           }

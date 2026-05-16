@@ -165,14 +165,31 @@ Ring-lang/
 
 ## 已知限制
 
+### Effect / Codegen 限制
 - Lambda 带 effect 时不注入 evidence 参数（依赖闭包捕获，跨作用域调用可能失败）
 - Trait dictionary dispatch 不转发 evidence（trait 方法带 effect 时缺少 evidence 参数）
 - Resume 仅支持隐式模式（handler body 返回值即 resume 值，不支持 resume 后继续执行额外代码）
+
+### 类型系统限制
 - Record row types 仅在参数位置使用（无匿名 record 字面量、无 spread 运算符）
 - Row variable 不暴露于泛型类型参数语法（无 `<R: Row>`）
 - Refinement `where` 子句只解析不验证
-- 不含模块系统、async/spawn
 - Trait 系统暂不支持：关联类型、supertrait 继承、`dyn Trait` 动态分发
+- `pub` 可见性仅解析存储，checker 不强制执行访问控制
+
+### 设计文档中描述但未实现的特性
+- `Option<T>` 数据类型 + `?` postfix 操作符 + `try` block（设计文档 Section 1.5）
+- 类型化 catch：`catch ErrorType fn(e) { ... }`（设计文档 Section 2.3 Layer 2）
+- `map_fail` 错误转换语法糖（设计文档 Section 2.3 Layer 3）
+- Enum named fields：`circle(radius: Float)`（当前仅支持位置字段）
+- 控制流：`loop`、`for`、range 表达式 `0..100`（`for` 仅为保留字）
+- `delegate` 语法（设计文档 Section 5.3）
+- `mut<S>` 带类型参数的 effect（实现为无参数 `mut`）
+
+### 基础设施限制
+- 不含模块系统、async/spawn
+- 无 CI 管线（lint + test 依赖手动执行）
+- 无 LSP / `--error-format=llm` CLI flag（函数已存在但未接入）
 
 ## MVP 路线图
 

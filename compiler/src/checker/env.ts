@@ -93,6 +93,8 @@ export class TypeEnv {
     this.register_builtins();
   }
 
+  get current_var_id(): number { return this.next_type_var_id; }
+
   fresh_var(): TypeVar {
     return { kind: "var", id: this.next_type_var_id++ };
   }
@@ -289,6 +291,13 @@ export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
 }
 
 function substitute_effect_row(row: EffectRow, mapping: Map<number, Type>): EffectRow {
+  let tail = row.tail;
+  if (tail !== undefined && mapping.has(tail)) {
+    const replacement = mapping.get(tail)!;
+    if (replacement.kind === "var") {
+      tail = replacement.id;
+    }
+  }
   return {
     effects: row.effects.map(e => {
       if (e.kind === "fail") {
@@ -299,6 +308,6 @@ function substitute_effect_row(row: EffectRow, mapping: Map<number, Type>): Effe
       }
       return e;
     }),
-    tail: row.tail,
+    tail,
   };
 }

@@ -336,6 +336,7 @@ export interface AssignStmt {
 export interface ExprStmt {
   kind: "expr_stmt";
   expr: Expr;
+  has_semi: boolean;
   span: Span;
 }
 

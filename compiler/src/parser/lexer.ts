@@ -258,9 +258,15 @@ export class Lexer {
 
   private lex_raw_string(start: Position): Token {
     this.advance(); // consume 'r'
+    if (this.peek() !== '#') {
+      const end = this.current_position();
+      return this.make_token(TokenKind.Ident, "r", start, end);
+    }
     this.advance(); // consume '#'
     if (this.peek() !== '"') {
-      // Fallback: treat as identifier 'r'
+      // Not a raw string — backtrack: emit 'r' and let '#' be re-lexed next call
+      this.pos--;
+      this.column--;
       const end = this.current_position();
       return this.make_token(TokenKind.Ident, "r", start, end);
     }
@@ -277,8 +283,7 @@ export class Lexer {
       value += ch;
       this.advance();
     }
-    const end = this.current_position();
-    return this.make_token(TokenKind.RawStringLit, value, start, end);
+    throw new Error(`Unterminated raw string literal starting at ${start.line}:${start.column}`);
   }
 
   // ============================================================

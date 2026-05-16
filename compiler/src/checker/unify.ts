@@ -6,6 +6,16 @@ import {
 } from "../types/index.js";
 
 // ============================================================
+// Fresh variable generation for row unification
+// ============================================================
+
+let _unify_next_id = 100000;
+export function init_unify_fresh_counter(base: number): void {
+  _unify_next_id = base + 100000;
+}
+function fresh_row_var_id(): number { return _unify_next_id++; }
+
+// ============================================================
 // Substitution = Map<type_var_id, resolved_Type>
 // ============================================================
 
@@ -157,7 +167,12 @@ export function occurs_in(var_id: number, t: Type, subst: Substitution): boolean
       return resolved.id === var_id;
     case "fn":
       return resolved.params.some(p => occurs_in(var_id, p, subst)) ||
-             occurs_in(var_id, resolved.return_type, subst);
+             occurs_in(var_id, resolved.return_type, subst) ||
+             resolved.effects.tail === var_id ||
+             resolved.effects.effects.some(e =>
+               (e.kind === "fail" && occurs_in(var_id, e.error_type, subst)) ||
+               (e.kind === "custom" && e.type_args.some(a => occurs_in(var_id, a, subst)))
+             );
     case "struct":
       return resolved.type_params.some(p => occurs_in(var_id, p, subst)) ||
              resolved.fields.some(f => occurs_in(var_id, f.type, subst));
@@ -385,26 +400,41 @@ function unify_record_rows(a: RecordType, b: RecordType, subst: Substitution): S
     throw new UnificationError(a, b, `record missing fields: ${missing}`);
   }
 
-  if (a.tail !== undefined && b_only.length > 0) {
-    const record_for_tail: Type = { kind: "record", fields: b_only };
-    if (occurs_in(a.tail, record_for_tail, s)) {
+  if (a_only.length > 0 && b_only.length > 0 && a.tail !== undefined && b.tail !== undefined) {
+    // Both sides have surplus fields and open tails — need fresh shared tail
+    const fresh_tail = fresh_row_var_id();
+    const a_tail_record: Type = { kind: "record", fields: b_only, tail: fresh_tail };
+    const b_tail_record: Type = { kind: "record", fields: a_only, tail: fresh_tail };
+    if (occurs_in(a.tail, a_tail_record, s)) {
+      throw new UnificationError(a, b, "infinite type in row variable");
+    }
+    if (occurs_in(b.tail, b_tail_record, s)) {
       throw new UnificationError(a, b, "infinite type in row variable");
     }
     s = new Map(s);
-    s.set(a.tail, record_for_tail);
-  }
-  if (b.tail !== undefined && a_only.length > 0) {
-    const record_for_tail: Type = { kind: "record", fields: a_only };
-    if (occurs_in(b.tail, record_for_tail, s)) {
-      throw new UnificationError(a, b, "infinite type in row variable");
+    s.set(a.tail, a_tail_record);
+    s.set(b.tail, b_tail_record);
+  } else {
+    if (a.tail !== undefined && b_only.length > 0) {
+      const record_for_tail: Type = { kind: "record", fields: b_only };
+      if (occurs_in(a.tail, record_for_tail, s)) {
+        throw new UnificationError(a, b, "infinite type in row variable");
+      }
+      s = new Map(s);
+      s.set(a.tail, record_for_tail);
     }
-    s = new Map(s);
-    s.set(b.tail, record_for_tail);
-  }
-
-  if (a.tail !== undefined && b.tail !== undefined && a_only.length === 0 && b_only.length === 0) {
-    if (a.tail !== b.tail) {
-      s = unify({ kind: "var", id: a.tail }, { kind: "var", id: b.tail }, s);
+    if (b.tail !== undefined && a_only.length > 0) {
+      const record_for_tail: Type = { kind: "record", fields: a_only };
+      if (occurs_in(b.tail, record_for_tail, s)) {
+        throw new UnificationError(a, b, "infinite type in row variable");
+      }
+      s = new Map(s);
+      s.set(b.tail, record_for_tail);
+    }
+    if (a.tail !== undefined && b.tail !== undefined && a_only.length === 0 && b_only.length === 0) {
+      if (a.tail !== b.tail) {
+        s = unify({ kind: "var", id: a.tail }, { kind: "var", id: b.tail }, s);
+      }
     }
   }
 
@@ -433,10 +463,11 @@ function unify_struct_with_record(struct_t: StructType, record_t: RecordType, su
       kind: "record",
       fields: remaining.map(f => ({ name: f.name, type: f.type })),
     };
-    if (!occurs_in(record_t.tail, tail_record, s)) {
-      s = new Map(s);
-      s.set(record_t.tail, tail_record);
+    if (occurs_in(record_t.tail, tail_record, s)) {
+      throw new UnificationError(struct_t, record_t, "infinite type in row variable");
     }
+    s = new Map(s);
+    s.set(record_t.tail, tail_record);
   }
 
   return s;

@@ -111,16 +111,25 @@ describe("e2e: ring check (negative — should reject)", () => {
   ];
 
   for (const tc of negative_cases) {
-    test(`ring check ${tc.file} should fail`, () => {
+    test(`ring check ${tc.file} should fail with "${tc.error_pattern}"`, () => {
       const filePath = path.join(CASES_DIR, tc.file);
       assert.ok(fs.existsSync(filePath), `Test file not found: ${filePath}`);
 
-      assert.throws(() => {
+      try {
         execSync(`node "${CLI_PATH}" check "${filePath}"`, {
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
         });
-      });
+        assert.fail(`Expected ${tc.file} to fail type checking`);
+      } catch (err: any) {
+        const stderr = err.stderr?.toString() ?? "";
+        const stdout = err.stdout?.toString() ?? "";
+        const output = stderr + stdout + (err.message ?? "");
+        assert.ok(
+          output.toLowerCase().includes(tc.error_pattern.toLowerCase()),
+          `Expected error containing "${tc.error_pattern}", got: ${output.slice(0, 200)}`
+        );
+      }
     });
   }
 });

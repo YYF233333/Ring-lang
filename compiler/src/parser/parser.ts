@@ -541,10 +541,10 @@ export class Parser {
       } as AssignStmt;
     }
 
-    this.try_consume(TokenKind.Semi);
+    const has_semi = this.try_consume(TokenKind.Semi);
     const end = this.current_span_start();
     return {
-      kind: "expr_stmt", expr,
+      kind: "expr_stmt", expr, has_semi,
       span: this.make_span(start, end),
     } as ExprStmt;
   }
@@ -887,9 +887,7 @@ export class Parser {
       const stmt = this.parse_stmt();
 
       if (this.check(TokenKind.RBrace)) {
-        // This was the last thing in the block
-        // If it's an expression statement without a trailing semi, it's a tail expr
-        if (stmt.kind === "expr_stmt") {
+        if (stmt.kind === "expr_stmt" && !(stmt as ExprStmt).has_semi) {
           tail = (stmt as ExprStmt).expr;
         } else {
           stmts.push(stmt);

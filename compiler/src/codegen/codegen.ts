@@ -491,13 +491,13 @@ class CodeGenerator {
       case "wildcard":
         return "";
       case "binding":
-        return `const ${pat.name} = ${target}; `;
+        return `const ${safe_ident(pat.name)} = ${target}; `;
       case "literal":
         return "";
       case "constructor":
         return pat.fields.map((f, i) => {
           if (f.kind === "binding") {
-            return `const ${f.name} = ${target}._${i}; `;
+            return `const ${safe_ident(f.name)} = ${target}._${i}; `;
           }
           return "";
         }).join("");
@@ -525,9 +525,9 @@ class CodeGenerator {
   private gen_stmt_inline(stmt: HStmt): string {
     switch (stmt.kind) {
       case "let_stmt":
-        return `const ${stmt.name} = ${this.gen_expr(stmt.init)};`;
+        return `const ${safe_ident(stmt.name)} = ${this.gen_expr(stmt.init)};`;
       case "var_stmt":
-        return `let ${stmt.name} = ${this.gen_expr(stmt.init)};`;
+        return `let ${safe_ident(stmt.name)} = ${this.gen_expr(stmt.init)};`;
       case "assign_stmt":
         return `${this.gen_expr(stmt.target)} = ${this.gen_expr(stmt.value)};`;
       case "expr_stmt":
