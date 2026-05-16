@@ -913,12 +913,13 @@ export class InferEngine {
 
     const result_type = apply(s, ret_var);
 
-    // Task 8d: Resolve dictionaries at call sites for generic functions with trait bounds
     const resolved_dicts: string[] = [];
     if (callee.kind === "ident") {
       const bounds_list = this.env.fn_bounds.get(callee.name);
       if (bounds_list) {
         for (const bound of bounds_list) {
+          let found = false;
+          // Check if any arg is a concrete type with this trait impl
           for (const harg of hargs) {
             const arg_type = apply(s, harg.type);
             if ((arg_type.kind === "struct" || arg_type.kind === "enum") &&
@@ -926,7 +927,25 @@ export class InferEngine {
                   impl => impl.target_type_name === arg_type.name && impl.trait_name === bound.trait_name
                 )) {
               resolved_dicts.push(trait_dict_name(arg_type.name, bound.trait_name));
+              found = true;
               break;
+            }
+          }
+          // If no concrete type found, check if we're inside a generic function
+          // that has the same trait bound — forward the dictionary parameter
+          if (!found) {
+            for (const harg of hargs) {
+              const arg_type = apply(s, harg.type);
+              if (arg_type.kind === "var") {
+                const matching_bound = this.current_fn_bounds.find(
+                  fb => fb.type_param_var_id === arg_type.id && fb.trait_name === bound.trait_name
+                );
+                if (matching_bound) {
+                  resolved_dicts.push(`__${bound.trait_name}`);
+                  found = true;
+                  break;
+                }
+              }
             }
           }
         }
@@ -993,12 +1012,18 @@ export class InferEngine {
       }
     }
 
-    // Task 6f: Handle trait method calls on generic type params
     let dict_dispatch: { dict_param: string; method: string } | undefined;
-    const resolved_recv = apply(s, recv_r.hexpr.type);
-    if (!method_type && resolved_recv.kind === "var") {
+    // Resolve a var id to its terminal var id through the substitution chain.
+    const resolve_var_id = (id: number, sub: Substitution): number => {
+      const resolved = sub.get(id);
+      if (resolved && resolved.kind === "var") return resolve_var_id(resolved.id, sub);
+      return id;
+    };
+    const recv_raw_type = recv_r.hexpr.type;
+    const recv_var_id = recv_raw_type.kind === "var" ? resolve_var_id(recv_raw_type.id, s) : null;
+    if (!method_type && recv_var_id !== null) {
       for (const fb of this.current_fn_bounds) {
-        if (fb.type_param_var_id === resolved_recv.id) {
+        if (resolve_var_id(fb.type_param_var_id, s) === recv_var_id) {
           const trait_def = this.env.traits.get(fb.trait_name);
           if (trait_def) {
             const tm = trait_def.methods.find(m => m.name === method);
