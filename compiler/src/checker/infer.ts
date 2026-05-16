@@ -530,8 +530,16 @@ export class InferEngine {
       throw new TypeCheckError(`Undefined variable: ${name}`, span);
     }
     const t = this.env.instantiate(scheme);
+
+    // Resolve enum variant names to their JS codegen names (EnumName_variantName)
+    let resolved_name: string | undefined;
+    const enum_name = this.env.variant_to_enum.get(name);
+    if (enum_name) {
+      resolved_name = `${enum_name}_${name}`;
+    }
+
     return {
-      hexpr: { kind: "ident", name, type: t, effects: EMPTY_ROW, span },
+      hexpr: { kind: "ident", name, resolved_name, type: t, effects: EMPTY_ROW, span },
       subst,
       effects: EMPTY_ROW,
     };

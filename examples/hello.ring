@@ -1,14 +1,12 @@
--- Ring-lang: Hello World
--- 这个文件展示语言的基本语法
+// Ring-lang: Hello World
 
 struct Greeting {
     target: Str,
-    enthusiasm: Int where it > 0,
+    enthusiasm: Int,
 }
 
 fn greet(g: Greeting) -> Str {
-    let bangs = "!".repeat(g.enthusiasm)
-    "Hello, ${g.target}${bangs}"
+    "Hello, ${g.target}!"
 }
 
 fn main() {
