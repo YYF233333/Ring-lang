@@ -30,6 +30,7 @@ export enum TokenKind {
   True = "true",
   False = "false",
   Trait = "trait",
+  Try = "try",
 
   // Literals
   IntLit = "int_lit",
@@ -108,6 +109,7 @@ const KEYWORDS: Record<string, TokenKind> = {
   true: TokenKind.True,
   false: TokenKind.False,
   trait: TokenKind.Trait,
+  try: TokenKind.Try,
 };
 
 export interface Token {

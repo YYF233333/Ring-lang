@@ -11,8 +11,10 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// When compiled, __dirname is tests/dist/, so go up to repo root
-const REPO_ROOT = path.resolve(__dirname, "../..");
+// Support both compiled (tests/dist/) and direct (tests/) execution
+const REPO_ROOT = __dirname.includes("dist")
+  ? path.resolve(__dirname, "../..")
+  : path.resolve(__dirname, "..");
 const CLI_PATH = path.resolve(REPO_ROOT, "compiler/dist/cli.js");
 const CASES_DIR = path.resolve(REPO_ROOT, "tests/cases");
 
@@ -44,6 +46,11 @@ const cases: TestCase[] = [
   { file: "row_generic.ring", expected: "whiskers-rex\n" },
   { file: "effect_row_strict.ring", expected: "3-mock-data\n" },
   { file: "effect_row_handle.ring", expected: "42\n" },
+  { file: "option_basic.ring", expected: "42\n" },
+  { file: "option_unwrap.ring", expected: "43\n" },
+  { file: "option_try.ring", expected: "42\n" },
+  { file: "option_or.ring", expected: "141\n" },
+  { file: "catch_typed.ring", expected: "99\n" },
 ];
 
 describe("e2e: ring run", () => {

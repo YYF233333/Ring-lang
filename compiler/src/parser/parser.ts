@@ -5,7 +5,7 @@ import {
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
   BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
   StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
-  OrExpr, CatchExpr, HandleExpr, LambdaExpr,
+  OrExpr, CatchExpr, HandleExpr, LambdaExpr, OptionUnwrapExpr, TryBlockExpr,
   BinOp, UnaryOp,
   TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr, RecordTypeExpr, RecordTypeField,
   Pattern, WildcardPattern, BindingPattern, ConstructorPattern, LiteralPattern,
@@ -54,7 +54,8 @@ function infix_precedence(kind: TokenKind): Prec {
     case TokenKind.Slash:
     case TokenKind.Percent: return Prec.MulDiv;
     case TokenKind.Dot:
-    case TokenKind.LParen: return Prec.Postfix;
+    case TokenKind.LParen:
+    case TokenKind.Question: return Prec.Postfix;
     default: return Prec.None;
   }
 }
@@ -646,6 +647,10 @@ export class Parser {
       } else if (tok.kind === TokenKind.LParen) {
         left = this.parse_call_expr(left);
         last_was_comparison = false;
+      } else if (tok.kind === TokenKind.Question) {
+        const q_tok = this.advance();
+        left = { kind: "option_unwrap", expr: left, span: this.make_span(left.span.start, q_tok.span.end) } as OptionUnwrapExpr;
+        last_was_comparison = false;
       } else {
         const is_comparison = prec === Prec.Equality || prec === Prec.Compare;
         if (is_comparison && last_was_comparison) {
@@ -729,6 +734,13 @@ export class Parser {
     // Handle expression
     if (tok.kind === TokenKind.Handle) {
       return this.parse_handle_expr();
+    }
+
+    // Try block: try { body }
+    if (tok.kind === TokenKind.Try) {
+      this.advance();
+      const body = this.parse_block_expr();
+      return { kind: "try_block", body, span: this.make_span(start, body.span.end) } as TryBlockExpr;
     }
 
     // Lambda: fn(params) -> Type { body }
@@ -837,14 +849,17 @@ export class Parser {
 
   private parse_catch_expr(left: Expr): CatchExpr {
     this.advance(); // consume 'catch'
-    // Expect: fn(error_binding) { handler }
+    let error_type: string | undefined;
+    if (this.peek().kind === TokenKind.Ident) {
+      error_type = this.advance().value;
+    }
     this.expect(TokenKind.Fn);
     this.expect(TokenKind.LParen);
     const error_binding = this.expect(TokenKind.Ident).value;
     this.expect(TokenKind.RParen);
     const handler = this.parse_block_expr();
     const span = this.make_span(left.span.start, handler.span.end);
-    return { kind: "catch_expr", expr: left, error_binding, handler, span };
+    return { kind: "catch_expr", expr: left, error_type, error_binding, handler, span };
   }
 
   // ============================================================

@@ -11,9 +11,9 @@ import { assertNever, CompileError } from "../errors.js";
 import { DiagnosticSink, DiagnosticContext, make_diagnostic } from "../diagnostics/index.js";
 import { E } from "../diagnostics/codes.js";
 import {
-  Type, FnType, TypeVar, EffectRow, Effect,
+  Type, FnType, TypeVar, OptionType, EffectRow, Effect,
   INT, FLOAT, STR, BOOL, UNIT, NEVER,
-  EMPTY_ROW, effect_row, row_merge, type_to_string,
+  EMPTY_ROW, effect_row, row_merge, type_to_string, types_equal,
 } from "../types/index.js";
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
@@ -827,11 +827,15 @@ export class InferEngine {
       case "or_expr":
         return this.infer_or(expr.expr, expr.default_value, expr.span, subst);
       case "catch_expr":
-        return this.infer_catch(expr.expr, expr.error_binding, expr.handler, expr.span, subst);
+        return this.infer_catch(expr.expr, expr.error_type, expr.error_binding, expr.handler, expr.span, subst);
       case "handle_expr":
         return this.infer_handle(expr.body, expr.handlers, expr.span, subst);
       case "lambda":
         return this.infer_lambda(expr.params, expr.body, expr.span, subst);
+      case "option_unwrap":
+        return this.infer_option_unwrap(expr.expr, expr.span, subst);
+      case "try_block":
+        return this.infer_try_block(expr.body, expr.span, subst);
       default:
         return assertNever(expr, "infer_expr");
     }
@@ -1322,6 +1326,19 @@ export class InferEngine {
     for (const arm of arms) {
       this.env.push_scope();
 
+      // Reclassify binding patterns that match zero-field enum variants
+      if (arm.pattern.kind === "binding") {
+        const pat_name = arm.pattern.name;
+        const variant_enum = this.env.variant_to_enum.get(pat_name);
+        if (variant_enum) {
+          const enum_def = this.env.enums.get(variant_enum);
+          const variant = enum_def?.variants.find(v => v.name === pat_name);
+          if (variant && variant.fields.length === 0) {
+            arm.pattern = { kind: "constructor", name: pat_name, fields: [], span: arm.pattern.span };
+          }
+        }
+      }
+
       // Bind pattern variables
       this.bind_pattern(arm.pattern, scrut_r.hexpr.type, s);
 
@@ -1389,6 +1406,10 @@ export class InferEngine {
                   if (i < resolved_expected.type_params.length) {
                     instantiation_map.set(enum_def.type_param_vars[i], resolved_expected.type_params[i]);
                   }
+                }
+              } else if (resolved_expected.kind === "option" && enum_name === "Option") {
+                if (enum_def.type_param_vars.length === 1) {
+                  instantiation_map.set(enum_def.type_param_vars[0], resolved_expected.inner);
                 }
               }
               for (let i = 0; i < pattern.fields.length && i < variant.fields.length; i++) {
@@ -1491,50 +1512,61 @@ export class InferEngine {
   private infer_or(expr: Expr, default_value: Expr, span: Span, subst: Substitution): InferResult {
     const expr_r = this.infer_expr(expr, subst);
     let s = expr_r.subst;
+    const expr_type = apply(s, expr_r.hexpr.type);
 
+    // Option path: expr is Option<T>, default is T
+    if (expr_type.kind === "option") {
+      const default_r = this.infer_expr(default_value, s);
+      s = default_r.subst;
+      s = unify(expr_type.inner, default_r.hexpr.type, s);
+      const result_type = apply(s, expr_type.inner);
+      const effects = row_merge(expr_r.effects, default_r.effects);
+      return {
+        hexpr: { kind: "option_or", expr: expr_r.hexpr, default_value: default_r.hexpr, type: result_type, effects, span },
+        subst: s,
+        effects,
+      };
+    }
+
+    // Fail path: existing behavior
     const default_r = this.infer_expr(default_value, s);
     s = default_r.subst;
-
-    // Unify both sides (they should have the same type)
     s = unify(expr_r.hexpr.type, default_r.hexpr.type, s);
-
-    // Remove fail effect from the merged effects
     let effects = row_merge(expr_r.effects, default_r.effects);
     effects = this.remove_fail_effect(effects);
-
     const result_type = apply(s, expr_r.hexpr.type);
-
     return {
-      hexpr: {
-        kind: "try_catch",
-        body: expr_r.hexpr,
-        handler: default_r.hexpr,
-        type: result_type,
-        effects,
-        span,
-      },
+      hexpr: { kind: "try_catch", body: expr_r.hexpr, handler: default_r.hexpr, type: result_type, effects, span },
       subst: s,
       effects,
     };
   }
 
-  private infer_catch(expr: Expr, error_binding: string, handler: Expr, span: Span, subst: Substitution): InferResult {
+  private infer_catch(expr: Expr, error_type_name: string | undefined, error_binding: string, handler: Expr, span: Span, subst: Substitution): InferResult {
     const expr_r = this.infer_expr(expr, subst);
     let s = expr_r.subst;
 
     this.env.push_scope();
-    // Bind error variable — use fresh type var (fail<E> type would refine it)
-    this.env.bind_mono(error_binding, this.env.fresh_var());
+    let error_var_type: Type;
+    if (error_type_name) {
+      error_var_type = this.resolve_named_type(error_type_name, [], span);
+    } else {
+      error_var_type = this.env.fresh_var();
+    }
+    this.env.bind_mono(error_binding, error_var_type);
+
     const handler_r = this.infer_expr(handler, s);
     s = handler_r.subst;
     this.env.pop_scope();
 
-    // Unify expr type with handler type
     s = unify(expr_r.hexpr.type, handler_r.hexpr.type, s);
 
-    // Remove fail effect
     let effects = row_merge(expr_r.effects, handler_r.effects);
-    effects = this.remove_fail_effect(effects);
+    if (error_type_name) {
+      effects = this.remove_specific_fail_effect(effects, error_var_type, s);
+    } else {
+      effects = this.remove_fail_effect(effects);
+    }
 
     const result_type = apply(s, expr_r.hexpr.type);
 
@@ -1543,6 +1575,7 @@ export class InferEngine {
         kind: "try_catch",
         body: expr_r.hexpr,
         error_binding,
+        error_type: error_type_name,
         handler: handler_r.hexpr,
         type: result_type,
         effects,
@@ -1673,9 +1706,44 @@ export class InferEngine {
   // Helpers
   // ============================================================
 
+  private infer_try_block(body: Expr, span: Span, subst: Substitution): InferResult {
+    const body_r = this.infer_expr(body, subst);
+    const result_type: OptionType = { kind: "option", inner: body_r.hexpr.type };
+    const effects = this.remove_fail_effect(body_r.effects);
+    return {
+      hexpr: { kind: "try_block", body: body_r.hexpr, type: result_type, effects, span },
+      subst: body_r.subst,
+      effects,
+    };
+  }
+
+  private infer_option_unwrap(inner_expr: Expr, span: Span, subst: Substitution): InferResult {
+    const inner_r = this.infer_expr(inner_expr, subst);
+    let s = inner_r.subst;
+    const inner_type = this.env.fresh_var();
+    s = unify(inner_r.hexpr.type, { kind: "option", inner: inner_type }, s);
+    const unwrapped = apply(s, inner_type);
+    const fail_eff: Effect = { kind: "fail", error_type: UNIT };
+    const effects = row_merge(inner_r.effects, { effects: [fail_eff] });
+    return {
+      hexpr: { kind: "option_unwrap", expr: inner_r.hexpr, type: unwrapped, effects, span },
+      subst: s,
+      effects,
+    };
+  }
+
   private remove_fail_effect(row: EffectRow): EffectRow {
     return {
       effects: row.effects.filter(e => e.kind !== "fail"),
+      tail: row.tail,
+    };
+  }
+
+  private remove_specific_fail_effect(row: EffectRow, target: Type, subst: Substitution): EffectRow {
+    return {
+      effects: row.effects.filter(e =>
+        !(e.kind === "fail" && types_equal(apply(subst, e.error_type), target))
+      ),
       tail: row.tail,
     };
   }
@@ -1717,10 +1785,16 @@ export class InferEngine {
       case "Str": return STR;
       case "Bool": return BOOL;
       case "Never": return NEVER;
+      case "Unit": return UNIT;
       default: {
         // Check if it's a type parameter in scope
         const tp = this.type_param_scope.get(name);
         if (tp) return tp;
+
+        // Option<T> resolves to OptionType
+        if (name === "Option" && type_args.length === 1) {
+          return { kind: "option", inner: this.resolve_type_expr(type_args[0]) };
+        }
 
         // Check if it's a known struct
         if (this.env.structs.has(name)) {

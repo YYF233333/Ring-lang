@@ -26,7 +26,10 @@ export type HExpr =
   | HTryCatch
   | HHandleExpr
   | HLambda
-  | HEffectOp;
+  | HEffectOp
+  | HOptionUnwrap
+  | HTryBlock
+  | HOptionOr;
 
 // Base fields every HExpr carries
 interface HExprBase {
@@ -138,6 +141,7 @@ export interface HTryCatch extends HExprBase {
   kind: "try_catch";
   body: HExpr;
   error_binding?: string;
+  error_type?: string;
   handler: HExpr;
 }
 
@@ -173,6 +177,22 @@ export interface HEffectOp extends HExprBase {
   effect_name: string;
   op_name: string;
   args: HExpr[];
+}
+
+export interface HOptionUnwrap extends HExprBase {
+  kind: "option_unwrap";
+  expr: HExpr;
+}
+
+export interface HTryBlock extends HExprBase {
+  kind: "try_block";
+  body: HExpr;
+}
+
+export interface HOptionOr extends HExprBase {
+  kind: "option_or";
+  expr: HExpr;
+  default_value: HExpr;
 }
 
 // ============================================================

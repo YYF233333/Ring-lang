@@ -132,7 +132,9 @@ export type Expr =
   | OrExpr
   | CatchExpr
   | HandleExpr
-  | LambdaExpr;
+  | LambdaExpr
+  | OptionUnwrapExpr
+  | TryBlockExpr;
 
 export interface IntLitExpr {
   kind: "int_lit";
@@ -264,6 +266,7 @@ export interface OrExpr {
 export interface CatchExpr {
   kind: "catch_expr";
   expr: Expr;
+  error_type?: string;
   error_binding: string;
   handler: Expr;
   span: Span;
@@ -295,6 +298,18 @@ export interface LambdaExpr {
   kind: "lambda";
   params: Param[];
   return_type?: TypeExpr;
+  body: Expr;
+  span: Span;
+}
+
+export interface OptionUnwrapExpr {
+  kind: "option_unwrap";
+  expr: Expr;
+  span: Span;
+}
+
+export interface TryBlockExpr {
+  kind: "try_block";
   body: Expr;
   span: Span;
 }

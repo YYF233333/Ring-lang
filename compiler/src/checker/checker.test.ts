@@ -346,4 +346,11 @@ describe("Type Checker", () => {
       assert.throws(() => check_source(source), /[Mm]issing.*method.*greet/);
     });
   });
+
+  describe("Unit type annotation", () => {
+    it("accepts Unit as return type annotation", () => {
+      const fn_decl = check_fn("fn noop() -> Unit { }");
+      assert.equal(fn_decl.return_type.kind, "unit");
+    });
+  });
 });

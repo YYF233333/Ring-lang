@@ -342,6 +342,14 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
     return unify(a.inner, b.inner, subst);
   }
 
+  // OptionType ↔ EnumType "Option" equivalence
+  if (a.kind === "option" && b.kind === "enum" && b.name === "Option" && b.type_params.length === 1) {
+    return unify(a.inner, b.type_params[0], subst);
+  }
+  if (b.kind === "option" && a.kind === "enum" && a.name === "Option" && a.type_params.length === 1) {
+    return unify(a.type_params[0], b.inner, subst);
+  }
+
   // Generic types
   if (a.kind === "generic" && b.kind === "generic") {
     let s = unify(a.base, b.base, subst);

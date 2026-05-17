@@ -187,6 +187,34 @@ export class TypeEnv {
     });
     this.impl_methods.set("Cell", cell_methods);
 
+    // Built-in: Option<T> — optional value
+    const option_t = this.fresh_var();
+    this.enums.set("Option", {
+      name: "Option",
+      type_params: ["T"],
+      type_param_vars: [option_t.id],
+      variants: [
+        { name: "some", fields: [option_t] },
+        { name: "none", fields: [] },
+      ],
+    });
+    this.variant_to_enum.set("some", "Option");
+    this.variant_to_enum.set("none", "Option");
+
+    const some_t = this.fresh_var();
+    const option_some_type: Type = { kind: "option", inner: some_t };
+    this.bind("some", {
+      type: { kind: "fn", params: [some_t], return_type: option_some_type, effects: EMPTY_ROW } as FnType,
+      type_vars: [some_t.id],
+    });
+
+    const none_t = this.fresh_var();
+    const option_none_type: Type = { kind: "option", inner: none_t };
+    this.bind("none", {
+      type: option_none_type,
+      type_vars: [none_t.id],
+    });
+
   }
 
   push_scope(): void {

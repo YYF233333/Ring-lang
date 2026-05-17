@@ -85,6 +85,11 @@ class CodeGenerator {
     // Emit runtime preamble
     this.emit_raw(RUNTIME_CODE);
 
+    // Option<T> constructors
+    this.emit_raw(`function Option_some(_0) { return { _tag: "some", _0 }; }`);
+    this.emit_raw(`const Option_none = Object.freeze({ _tag: "none" });`);
+    this.emit_raw("");
+
     // Emit declarations
     for (const decl of program.decls) {
       this.emit_decl(decl);
@@ -335,6 +340,12 @@ class CodeGenerator {
         return this.gen_lambda(expr);
       case "effect_op":
         return this.gen_effect_op(expr);
+      case "option_unwrap":
+        return this.gen_option_unwrap(expr);
+      case "try_block":
+        return this.gen_try_block(expr);
+      case "option_or":
+        return this.gen_option_or(expr);
       default:
         return assertNever(expr, "gen_expr");
     }
@@ -587,11 +598,13 @@ class CodeGenerator {
     }
 
     if (expr.error_binding) {
-      // catch expression: expose error to handler
-      const binding = expr.error_binding;
+      const binding = safe_ident(expr.error_binding);
+      if (expr.error_type) {
+        const type_name = safe_ident(expr.error_type);
+        return `(function() { const __ev_fail = { raise: (${binding}) => { throw new __EffectAbort("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail" && __e.value instanceof ${type_name}) { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
+      }
       return `(function() { const __ev_fail = { raise: (${binding}) => { throw new __EffectAbort("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail") { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
     } else {
-      // or expression: handler doesn't use error value
       return `(function() { const __ev_fail = { raise: (__err) => { throw new __EffectAbort("fail", undefined); } }; try { return ${body}; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail") return ${handler}; throw __e; } })()`;
     }
   }
@@ -661,6 +674,22 @@ class CodeGenerator {
     return `(function(${params}) { return ${body}; })`;
   }
 
+
+  private gen_option_or(expr: HExpr & { kind: "option_or" }): string {
+    const inner = this.gen_expr(expr.expr);
+    const def = this.gen_expr(expr.default_value);
+    return `((v) => v._tag === "some" ? v._0 : ${def})(${inner})`;
+  }
+
+  private gen_try_block(expr: HExpr & { kind: "try_block" }): string {
+    const body = this.gen_expr(expr.body);
+    return `(function() { const __ev_fail = { raise: (__err) => { throw new __EffectAbort("fail", __err); } }; try { return { _tag: "some", _0: ${body} }; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail") return { _tag: "none" }; throw __e; } })()`;
+  }
+
+  private gen_option_unwrap(expr: HExpr & { kind: "option_unwrap" }): string {
+    const inner = this.gen_expr(expr.expr);
+    return `((v) => v._tag === "some" ? v._0 : ${evidence_param_name("fail")}.raise(undefined))(${inner})`;
+  }
 
   private gen_effect_op(expr: HExpr & { kind: "effect_op" }): string {
     const ev_name = evidence_param_name(expr.effect_name);
