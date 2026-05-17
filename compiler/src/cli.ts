@@ -82,7 +82,7 @@ function main(): void {
       console.error("");
     }
 
-    const hir = check(ast, sink);
+    const { program: hir } = check(ast, sink);
 
     // With declaration-level error recovery, check() may return partial results
     // while sink has accumulated errors. Abort before codegen if any errors exist.

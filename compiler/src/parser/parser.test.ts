@@ -111,6 +111,36 @@ describe("Lexer", () => {
 });
 
 // ============================================================
+// Lexer token edge cases (M8)
+// ============================================================
+
+describe("lexer token edge cases", () => {
+  it("handles escape chars in strings: \\n, \\t, \\\", \\\\", () => {
+    const lexer = new Lexer('"line1\\nline2\\ttab\\\\back\\"quote"');
+    const tokens = lexer.tokenize();
+    const str = tokens[0];
+    assert.equal(str.kind, TokenKind.StringLit);
+    assert.equal(str.value, 'line1\nline2\ttab\\back"quote');
+  });
+
+  it("tokenizes .. as DotDot", () => {
+    const lexer = new Lexer("1..10");
+    const tokens = lexer.tokenize();
+    const kinds = tokens.map(t => t.kind).filter(k => k !== TokenKind.Eof);
+    assert.deepEqual(kinds, [TokenKind.IntLit, TokenKind.DotDot, TokenKind.IntLit]);
+    assert.equal(tokens[1].value, "..");
+  });
+
+  it("tokenizes ? as Question", () => {
+    const lexer = new Lexer("x?");
+    const tokens = lexer.tokenize();
+    const kinds = tokens.map(t => t.kind).filter(k => k !== TokenKind.Eof);
+    assert.deepEqual(kinds, [TokenKind.Ident, TokenKind.Question]);
+    assert.equal(tokens[1].value, "?");
+  });
+});
+
+// ============================================================
 // Parser tests
 // ============================================================
 

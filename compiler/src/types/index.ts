@@ -18,7 +18,6 @@ export type Type =
   | StructType
   | EnumType
   | GenericType
-  | OptionType
   | RecordType;
 
 export interface IntType {
@@ -92,11 +91,6 @@ export interface GenericType {
   args: Type[];
 }
 
-export interface OptionType {
-  kind: "option";
-  inner: Type;
-}
-
 export interface RecordField {
   name: string;
   type: Type;
@@ -159,6 +153,32 @@ export const NEVER: NeverType = { kind: "never" };
 export const ANY: AnyType = { kind: "any" };
 
 // ============================================================
+// Option<T> helper — constructs EnumType "Option"
+// ============================================================
+
+export function make_option_type(inner: Type): EnumType {
+  return {
+    kind: "enum",
+    name: "Option",
+    type_params: [inner],
+    variants: [
+      { name: "some", fields: [inner] },
+      { name: "none", fields: [] },
+    ],
+  };
+}
+
+/** Check if a type is Option<T> (EnumType named "Option") */
+export function is_option_type(t: Type): t is EnumType {
+  return t.kind === "enum" && t.name === "Option" && t.type_params.length === 1;
+}
+
+/** Extract the inner type from an Option<T>. Assumes is_option_type(t) is true. */
+export function option_inner(t: EnumType): Type {
+  return t.type_params[0];
+}
+
+// ============================================================
 // Effect Row helpers
 // ============================================================
 
@@ -194,6 +214,10 @@ export function row_merge(a: EffectRow, b: EffectRow): RowMergeResult {
     tail = a.tail;
     tails_to_unify = [a.tail, b.tail];
   } else {
+    // When only one side has a tail, the merged row keeps it open.
+    // The open tail represents unknown additional effects; the closed side
+    // simply contributes its fixed effects to the union. Constraining the
+    // tail variable (if needed) happens later during function-type unification.
     tail = a.tail ?? b.tail;
   }
   const row: EffectRow = tail !== undefined ? { effects: merged, tail } : { effects: merged };
@@ -259,15 +283,14 @@ export function types_equal(a: Type, b: Type): boolean {
         a.args.length === bg.args.length &&
         a.args.every((arg, i) => types_equal(arg, bg.args[i]));
     }
-    case "option":
-      return types_equal(a.inner, (b as OptionType).inner);
     case "record": {
       const br = b as RecordType;
       if (a.fields.length !== br.fields.length) return false;
       if (a.tail !== br.tail) return false;
-      return a.fields.every((f, i) =>
-        f.name === br.fields[i].name && types_equal(f.type, br.fields[i].type)
-      );
+      return a.fields.every(f => {
+        const match = br.fields.find(bf => bf.name === f.name);
+        return match !== undefined && types_equal(f.type, match.type);
+      });
     }
   }
 }
@@ -297,6 +320,10 @@ export function type_to_string(t: Type): string {
       return `${t.name}<${t.type_params.map(type_to_string).join(", ")}>`;
     }
     case "enum": {
+      // Display Option<T> as T?
+      if (t.name === "Option" && t.type_params.length === 1) {
+        return `${type_to_string(t.type_params[0])}?`;
+      }
       if (t.type_params.length === 0) return t.name;
       return `${t.name}<${t.type_params.map(type_to_string).join(", ")}>`;
     }
@@ -305,8 +332,6 @@ export function type_to_string(t: Type): string {
       const args = t.args.map(type_to_string).join(", ");
       return `${base}<${args}>`;
     }
-    case "option":
-      return `${type_to_string(t.inner)}?`;
     case "record": {
       const fields = t.fields.map(f => `${f.name}: ${type_to_string(f.type)}`).join(", ");
       if (t.tail !== undefined) {

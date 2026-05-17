@@ -9,7 +9,7 @@ import { CollectingSink, Diagnostic } from "../diagnostics/index.js";
 // Helper: parse and check, return the HProgram
 function check_source(source: string): HProgram {
   const ast = Parser.parse(source);
-  return check(ast);
+  return check(ast).program;
 }
 
 // Helper: parse and check expecting errors, return diagnostics from sink

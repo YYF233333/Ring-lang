@@ -56,6 +56,10 @@ const cases: TestCase[] = [
   { file: "trait_higher_order.ring", expected: "num\n" },
   { file: "option_unwrap_none.ring", expected: "99\n6\n" },
   { file: "string_interp_nested.ring", expected: "sum: 3\nab1cd\n" },
+  { file: "assign_compound.ring", expected: "12\n" },
+  { file: "match_guard.ring", expected: "positive\nnegative\nzero\n" },
+  { file: "else_if.ring", expected: "A\nB\nC\n" },
+  { file: "trait_default.ring", expected: "Whiskers\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -123,13 +127,13 @@ describe("e2e: ring build", () => {
 
 describe("e2e: ring check (negative — should reject)", () => {
   const negative_cases = [
-    { file: "row_reject.ring", error_pattern: "missing field" },
-    { file: "error_multi_parse.ring", error_pattern: "expected" },
-    { file: "error_type_context.ring", error_pattern: "unify" },
-    { file: "error_multi_type.ring", error_pattern: "unify" },
-    { file: "error_arity.ring", error_pattern: "unify" },
-    { file: "error_undefined.ring", error_pattern: "undefined" },
-    { file: "error_operator.ring", error_pattern: "unify" },
+    { file: "row_reject.ring", error_pattern: "E0301" },
+    { file: "error_multi_parse.ring", error_pattern: "E0103" },
+    { file: "error_type_context.ring", error_pattern: "E0301" },
+    { file: "error_multi_type.ring", error_pattern: "E0301" },
+    { file: "error_arity.ring", error_pattern: "E0301" },
+    { file: "error_undefined.ring", error_pattern: "E0201" },
+    { file: "error_operator.ring", error_pattern: "E0301" },
   ];
 
   for (const tc of negative_cases) {

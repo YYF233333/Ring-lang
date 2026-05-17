@@ -283,28 +283,7 @@ class CodeGenerator {
   // ============================================================
 
   private emit_stmt(stmt: HStmt): void {
-    switch (stmt.kind) {
-      case "let_stmt":
-        this.emit(`const ${safe_ident(stmt.name)} = ${this.gen_expr(stmt.init)};`);
-        break;
-      case "var_stmt":
-        this.emit(`let ${safe_ident(stmt.name)} = ${this.gen_expr(stmt.init)};`);
-        break;
-      case "assign_stmt":
-        this.emit(`${this.gen_expr(stmt.target)} = ${this.gen_expr(stmt.value)};`);
-        break;
-      case "expr_stmt":
-        this.emit(`${this.gen_expr(stmt.expr)};`);
-        break;
-      case "return_stmt":
-        if (stmt.value) {
-          this.emit(`return ${this.gen_expr(stmt.value)};`);
-        } else {
-          this.emit("return;");
-        }
-        break;
-      default: assertNever(stmt, "emit_stmt");
-    }
+    this.emit(this.gen_stmt_inline(stmt));
   }
 
   // ============================================================
@@ -459,9 +438,12 @@ class CodeGenerator {
         const cond = this.gen_pattern_condition("__ring_m", arm.pattern);
         const bindings = this.gen_pattern_bindings("__ring_m", arm.pattern);
         const body = this.gen_expr(arm.body);
-        if (cond === "true") {
-          // Wildcard or binding — always matches
+        if (cond === "true" && !arm.guard) {
+          // Wildcard or binding without guard — always matches
           parts.push(`  ${bindings}return ${body};`);
+        } else if (arm.guard && cond === "true") {
+          // Binding with guard — need block scope for bindings before guard check
+          parts.push(`  { ${bindings}if (${this.gen_expr(arm.guard)}) { return ${body}; } }`);
         } else {
           const guard = arm.guard ? ` && ${this.gen_expr(arm.guard)}` : "";
           parts.push(`  if (${cond}${guard}) { ${bindings}return ${body}; }`);

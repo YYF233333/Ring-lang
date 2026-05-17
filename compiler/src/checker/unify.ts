@@ -77,8 +77,6 @@ export function apply(subst: Substitution, t: Type): Type {
         base: apply(subst, t.base),
         args: t.args.map(a => apply(subst, a)),
       };
-    case "option":
-      return { kind: "option", inner: apply(subst, t.inner) };
     case "record": {
       const fields = t.fields.map(f => ({ name: f.name, type: apply(subst, f.type) }));
       let tail = t.tail;
@@ -169,7 +167,8 @@ export function occurs_in(var_id: number, t: Type, subst: Substitution): boolean
     case "fn":
       return resolved.params.some(p => occurs_in(var_id, p, subst)) ||
              occurs_in(var_id, resolved.return_type, subst) ||
-             resolved.effects.tail === var_id ||
+             (resolved.effects.tail !== undefined &&
+               occurs_in(var_id, { kind: "var", id: resolved.effects.tail } as Type, subst)) ||
              resolved.effects.effects.some(e =>
                (e.kind === "fail" && occurs_in(var_id, e.error_type, subst)) ||
                (e.kind === "custom" && e.type_args.some(a => occurs_in(var_id, a, subst)))
@@ -183,10 +182,9 @@ export function occurs_in(var_id: number, t: Type, subst: Substitution): boolean
     case "generic":
       return occurs_in(var_id, resolved.base, subst) ||
              resolved.args.some(a => occurs_in(var_id, a, subst));
-    case "option":
-      return occurs_in(var_id, resolved.inner, subst);
     case "record":
-      if (resolved.tail === var_id) return true;
+      if (resolved.tail !== undefined &&
+          occurs_in(var_id, { kind: "var", id: resolved.tail } as Type, subst)) return true;
       return resolved.fields.some(f => occurs_in(var_id, f.type, subst));
   }
 }
@@ -357,19 +355,6 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
       s = unify(a.type_params[i], b.type_params[i], s);
     }
     return s;
-  }
-
-  // Option types
-  if (a.kind === "option" && b.kind === "option") {
-    return unify(a.inner, b.inner, subst);
-  }
-
-  // OptionType ↔ EnumType "Option" equivalence
-  if (a.kind === "option" && b.kind === "enum" && b.name === "Option" && b.type_params.length === 1) {
-    return unify(a.inner, b.type_params[0], subst);
-  }
-  if (b.kind === "option" && a.kind === "enum" && a.name === "Option" && a.type_params.length === 1) {
-    return unify(a.type_params[0], b.inner, subst);
   }
 
   // Generic types

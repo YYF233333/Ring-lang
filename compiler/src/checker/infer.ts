@@ -11,9 +11,10 @@ import { assertNever, CompileError } from "../errors.js";
 import { DiagnosticSink, DiagnosticContext, make_diagnostic } from "../diagnostics/index.js";
 import { E } from "../diagnostics/codes.js";
 import {
-  Type, FnType, TypeVar, OptionType, EffectRow, Effect,
+  Type, FnType, TypeVar, EffectRow, Effect,
   INT, FLOAT, STR, BOOL, UNIT, NEVER,
   EMPTY_ROW, effect_row, row_merge, type_to_string, types_equal,
+  make_option_type, is_option_type, option_inner,
 } from "../types/index.js";
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
@@ -49,6 +50,7 @@ export class InferEngine {
   private type_param_scope: Map<string, Type> = new Map();
   private current_fn_return_type: Type | null = null;
   private current_fn_bounds: { type_param_var_id: number; trait_name: string; type_param_name: string }[] = [];
+  private fn_bounds_stack: typeof this.current_fn_bounds[] = [];
 
   constructor(sink: DiagnosticSink) {
     this.sink = sink;
@@ -116,9 +118,6 @@ export class InferEngine {
       case "generic":
         this.collect_free_vars(t.base, result);
         for (const a of t.args) this.collect_free_vars(a, result);
-        break;
-      case "option":
-        this.collect_free_vars(t.inner, result);
         break;
       case "record":
         for (const f of t.fields) this.collect_free_vars(f.type, result);
@@ -547,9 +546,9 @@ export class InferEngine {
       let body: HBlock | undefined;
       if (m.has_default && ast_method && ast_method.body.stmts.length + (ast_method.body.tail ? 1 : 0) > 0) {
         const saved_subst = this.subst;
-        const saved_fn_bounds = this.current_fn_bounds;
         this.subst = empty_subst();
         this.env.push_scope();
+        this.fn_bounds_stack.push(this.current_fn_bounds);
         this.current_fn_bounds = [];
         if (self_var.kind === "var") {
           this.current_fn_bounds.push({
@@ -565,7 +564,7 @@ export class InferEngine {
         this.subst = body_result.subst;
         this.env.pop_scope();
         body = body_result.hexpr as HBlock;
-        this.current_fn_bounds = saved_fn_bounds;
+        this.current_fn_bounds = this.fn_bounds_stack.pop()!;
         this.subst = saved_subst;
       }
       return { name: m.name, params, return_type: m.type.return_type, has_default: m.has_default, body };
@@ -594,7 +593,7 @@ export class InferEngine {
     }
 
     // Build current_fn_bounds for trait method dispatch on type params
-    const saved_fn_bounds = this.current_fn_bounds;
+    this.fn_bounds_stack.push(this.current_fn_bounds);
     this.current_fn_bounds = [];
     for (const tp of decl.type_params) {
       const tv = this.type_param_scope.get(tp.name);
@@ -638,7 +637,7 @@ export class InferEngine {
     const effects = apply_to_effect_row(this.subst, body_result.effects);
 
     this.type_param_scope = saved_tp_scope;
-    this.current_fn_bounds = saved_fn_bounds;
+    this.current_fn_bounds = this.fn_bounds_stack.pop()!;
     this.subst = saved_subst;
 
     const trait_bounds: { type_param: string; trait_name: string }[] = [];
@@ -1478,10 +1477,11 @@ export class InferEngine {
                   `variant '${pattern.name}' belongs to enum '${enum_name}', not '${resolved_expected.name}'`,
                   pattern.span, { kind: "type_mismatch", expected: resolved_expected.name, actual: enum_name });
               }
-              if (resolved_expected.kind === "option" && enum_name !== "Option") {
+              // Defensive: if scrutinee is a concrete non-enum type, report error
+              if (resolved_expected.kind !== "enum" && resolved_expected.kind !== "var") {
                 this.type_error("E0301",
-                  `variant '${pattern.name}' belongs to enum '${enum_name}', not 'Option'`,
-                  pattern.span, { kind: "type_mismatch", expected: "Option", actual: enum_name });
+                  `cannot destructure type '${type_to_string(resolved_expected)}' with constructor pattern '${pattern.name}'`,
+                  pattern.span, { kind: "pattern_error", detail: "constructor pattern on non-enum type" });
               }
               const instantiation_map = new Map<number, Type>();
               if (resolved_expected.kind === "enum") {
@@ -1489,10 +1489,6 @@ export class InferEngine {
                   if (i < resolved_expected.type_params.length) {
                     instantiation_map.set(enum_def.type_param_vars[i], resolved_expected.type_params[i]);
                   }
-                }
-              } else if (resolved_expected.kind === "option" && enum_name === "Option") {
-                if (enum_def.type_param_vars.length === 1) {
-                  instantiation_map.set(enum_def.type_param_vars[0], resolved_expected.inner);
                 }
               }
               for (let i = 0; i < pattern.fields.length && i < variant.fields.length; i++) {
@@ -1598,11 +1594,12 @@ export class InferEngine {
     const expr_type = apply(s, expr_r.hexpr.type);
 
     // Option path: expr is Option<T>, default is T
-    if (expr_type.kind === "option") {
+    if (is_option_type(expr_type)) {
+      const inner = option_inner(expr_type);
       const default_r = this.infer_expr(default_value, s);
       s = default_r.subst;
-      s = this.unify_at(expr_type.inner, default_r.hexpr.type, s, span);
-      const result_type = apply(s, expr_type.inner);
+      s = this.unify_at(inner, default_r.hexpr.type, s, span);
+      const result_type = apply(s, inner);
       let effects: EffectRow;
       [effects, s] = this.merge_effects(expr_r.effects, default_r.effects, s);
       return {
@@ -1794,7 +1791,7 @@ export class InferEngine {
 
   private infer_try_block(body: Expr, span: Span, subst: Substitution): InferResult {
     const body_r = this.infer_expr(body, subst);
-    const result_type: OptionType = { kind: "option", inner: body_r.hexpr.type };
+    const result_type = make_option_type(body_r.hexpr.type);
     const effects = this.remove_fail_effect(body_r.effects);
     return {
       hexpr: { kind: "try_block", body: body_r.hexpr, type: result_type, effects, span },
@@ -1807,7 +1804,7 @@ export class InferEngine {
     const inner_r = this.infer_expr(inner_expr, subst);
     let s = inner_r.subst;
     const inner_type = this.env.fresh_var();
-    s = this.unify_at(inner_r.hexpr.type, { kind: "option", inner: inner_type }, s, span);
+    s = this.unify_at(inner_r.hexpr.type, make_option_type(inner_type), s, span);
     const unwrapped = apply(s, inner_type);
     const fail_eff: Effect = { kind: "fail", error_type: UNIT };
     let effects: EffectRow;
@@ -1847,7 +1844,7 @@ export class InferEngine {
       }
       case "option": {
         const inner = this.resolve_type_expr(texpr.inner);
-        return { kind: "option", inner };
+        return make_option_type(inner);
       }
       case "record_type": {
         const fields = texpr.fields.map(f => ({
@@ -1878,9 +1875,9 @@ export class InferEngine {
         const tp = this.type_param_scope.get(name);
         if (tp) return tp;
 
-        // Option<T> resolves to OptionType
+        // Option<T> resolves to EnumType "Option"
         if (name === "Option" && type_args.length === 1) {
-          return { kind: "option", inner: this.resolve_type_expr(type_args[0]) };
+          return make_option_type(this.resolve_type_expr(type_args[0]));
         }
 
         // Check if it's a known struct

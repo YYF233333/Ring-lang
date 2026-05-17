@@ -1,6 +1,7 @@
 // Ring-lang Type Environment — scope management + builtin definitions
 import {
   Type, TypeVar, FnType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
+  make_option_type,
 } from "../types/index.js";
 
 // ============================================================
@@ -205,14 +206,14 @@ export class TypeEnv {
     this.variant_to_enum.set("none", "Option");
 
     const some_t = this.fresh_var();
-    const option_some_type: Type = { kind: "option", inner: some_t };
+    const option_some_type: Type = make_option_type(some_t);
     this.bind("some", {
       type: { kind: "fn", params: [some_t], return_type: option_some_type, effects: EMPTY_ROW } as FnType,
       type_vars: [some_t.id],
     });
 
     const none_t = this.fresh_var();
-    const option_none_type: Type = { kind: "option", inner: none_t };
+    const option_none_type: Type = make_option_type(none_t);
     this.bind("none", {
       type: option_none_type,
       type_vars: [none_t.id],
@@ -302,8 +303,6 @@ export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
         base: substitute_type(t.base, mapping),
         args: t.args.map(a => substitute_type(a, mapping)),
       };
-    case "option":
-      return { kind: "option", inner: substitute_type(t.inner, mapping) };
     case "record": {
       let tail = t.tail;
       if (tail !== undefined && mapping.has(tail)) {

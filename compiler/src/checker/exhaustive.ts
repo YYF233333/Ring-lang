@@ -43,19 +43,6 @@ export function check_exhaustive(
     return null; // all variants covered
   }
 
-  // For Option types: check some and none
-  if (resolved.kind === "option") {
-    const covered = new Set<string>();
-    for (const arm of arms) {
-      if (arm.pattern.kind === "constructor" && !arm.guard) {
-        covered.add(arm.pattern.name);
-      }
-    }
-    if (!covered.has("some")) return "some";
-    if (!covered.has("none")) return "none";
-    return null;
-  }
-
   // For Bool: check true and false
   if (resolved.kind === "bool") {
     let has_true = false;

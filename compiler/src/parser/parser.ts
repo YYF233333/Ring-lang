@@ -330,6 +330,28 @@ export class Parser {
   // Type Expressions
   // ============================================================
 
+  private try_parse_type_args(): TypeExpr[] {
+    if (!this.check(TokenKind.Lt)) return [];
+    const save = this.pos;
+    this.advance();
+    try {
+      const args: TypeExpr[] = [];
+      args.push(this.parse_type_expr());
+      while (this.try_consume(TokenKind.Comma)) {
+        args.push(this.parse_type_expr());
+      }
+      if (!this.check(TokenKind.Gt)) {
+        this.pos = save;
+        return [];
+      }
+      this.advance();
+      return args;
+    } catch {
+      this.pos = save;
+      return [];
+    }
+  }
+
   private parse_type_expr(): TypeExpr {
     const start = this.current_span_start();
 
@@ -363,30 +385,7 @@ export class Parser {
 
     // Named type
     const name = this.expect(TokenKind.Ident).value;
-    let type_args: TypeExpr[] = [];
-
-    // Check for generic args: Name<T, U>
-    if (this.check(TokenKind.Lt)) {
-      // Attempt to parse type arguments (backtrack if not valid)
-      const save = this.pos;
-      this.advance(); // consume <
-      try {
-        type_args.push(this.parse_type_expr());
-        while (this.try_consume(TokenKind.Comma)) {
-          type_args.push(this.parse_type_expr());
-        }
-        if (!this.check(TokenKind.Gt)) {
-          // Not a valid type argument list, backtrack
-          this.pos = save;
-          type_args = [];
-        } else {
-          this.advance(); // consume >
-        }
-      } catch {
-        this.pos = save;
-        type_args = [];
-      }
-    }
+    const type_args = this.try_parse_type_args();
 
     const end = this.current_span_start();
     let result: TypeExpr = {
@@ -470,26 +469,7 @@ export class Parser {
   private parse_type_bound(): TypeBound {
     const start = this.current_span_start();
     const trait_name = this.expect(TokenKind.Ident).value;
-    let type_args: TypeExpr[] = [];
-    if (this.check(TokenKind.Lt)) {
-      const save = this.pos;
-      this.advance(); // consume <
-      try {
-        type_args.push(this.parse_type_expr());
-        while (this.try_consume(TokenKind.Comma)) {
-          type_args.push(this.parse_type_expr());
-        }
-        if (!this.check(TokenKind.Gt)) {
-          this.pos = save;
-          type_args = [];
-        } else {
-          this.advance(); // consume >
-        }
-      } catch {
-        this.pos = save;
-        type_args = [];
-      }
-    }
+    const type_args = this.try_parse_type_args();
     const end = this.current_span_start();
     return { trait_name, type_args, span: this.make_span(start, end) };
   }
@@ -528,10 +508,10 @@ export class Parser {
     const start = this.current_span_start();
 
     if (this.check(TokenKind.Let)) {
-      return this.parse_let_stmt();
+      return this.parse_binding_stmt(false);
     }
     if (this.check(TokenKind.Var)) {
-      return this.parse_var_stmt();
+      return this.parse_binding_stmt(true);
     }
     if (this.check(TokenKind.Return)) {
       return this.parse_return_stmt();
@@ -569,9 +549,9 @@ export class Parser {
     } as ExprStmt;
   }
 
-  private parse_let_stmt(): LetStmt {
+  private parse_binding_stmt(mutable: boolean): LetStmt | VarStmt {
     const start = this.current_span_start();
-    this.expect(TokenKind.Let);
+    this.expect(mutable ? TokenKind.Var : TokenKind.Let);
     const name = this.expect(TokenKind.Ident).value;
     let type_annotation: TypeExpr | undefined;
     if (this.try_consume(TokenKind.Colon)) {
@@ -581,28 +561,10 @@ export class Parser {
     const init = this.parse_expr();
     this.try_consume(TokenKind.Semi);
     const end = this.current_span_start();
-    return {
-      kind: "let_stmt", name, type_annotation, init,
-      span: this.make_span(start, end),
-    };
-  }
-
-  private parse_var_stmt(): VarStmt {
-    const start = this.current_span_start();
-    this.expect(TokenKind.Var);
-    const name = this.expect(TokenKind.Ident).value;
-    let type_annotation: TypeExpr | undefined;
-    if (this.try_consume(TokenKind.Colon)) {
-      type_annotation = this.parse_type_expr();
-    }
-    this.expect(TokenKind.Eq);
-    const init = this.parse_expr();
-    this.try_consume(TokenKind.Semi);
-    const end = this.current_span_start();
-    return {
-      kind: "var_stmt", name, type_annotation, init,
-      span: this.make_span(start, end),
-    };
+    const span = this.make_span(start, end);
+    return mutable
+      ? { kind: "var_stmt", name, type_annotation, init, span } as VarStmt
+      : { kind: "let_stmt", name, type_annotation, init, span } as LetStmt;
   }
 
   private parse_return_stmt(): ReturnStmt {
