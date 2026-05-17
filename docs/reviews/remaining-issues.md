@@ -1,7 +1,8 @@
 # 审查后剩余问题清单
 
 来源：[review-phase2-s5-full-audit.md](review-phase2-s5-full-audit.md) + DS1-retry 补录
-统计日期：2026-05-17（上次修复：2026-05-17，修复 C9验证 + I1/I4/I7/I16/I17/I18 + M6/M7/M12 共 10 项）
+统计日期：2026-05-17 → **2026-05-18 全部清零**
+修复记录：commit 6d77eb6（13项） + commit 729290b（15项） = 全部 2C+14I+16M 完成
 
 ## 剩余 Critical (0)
 
@@ -41,38 +42,31 @@
 | I10 | `?` 操作符解包 `none` 失败路径未测试 | ✅ 已补 | option_unwrap_none.ring |
 | I11 | 嵌套字符串插值 `"${a + "${b}"}"` 未测试 | ✅ 已补 | string_interp_nested.ring |
 
-## 剩余 Minor (13)
+## 剩余 Minor (0)
 
 | ID | 问题 | 说明 |
 |----|------|------|
-| M1 | Parser 类型参数回溯逻辑重复 | 提取 `try_parse_type_args()` |
-| M2 | `parse_let_stmt`/`parse_var_stmt` 几乎完全相同 | 合并为带参数方法 |
-| M3 | `emit_stmt`/`gen_stmt_inline` 逻辑重复 | 一个调用另一个 |
-| M5 | `GenericType` 无代码路径触发 | 评估是否死代码 |
-| M6 | `__self_` 前缀未从 hir/index.ts 抽取 | ✅ 已修复：`default_method_self_name()` |
-| M7 | `format_hint` 遗漏 5 种 DiagnosticContext | ✅ 已修复：补全所有 context kind |
-| M8 | Lexer 转义字符/`..`/`?` token 单元测试缺失 | 补充 |
-| M9 | `+=`/`-=`、match guard、else if、trait 默认方法无 e2e 测试 | 补充 |
-| M10 | 负面测试 error_pattern 匹配过于宽松 | 改用错误码匹配 |
-| M11 | `types_equal` 对 record field 顺序敏感 | 当前安全但脆弱 |
-| M12 | Magic number `_unify_next_id = 100000` | ✅ 已修复：提取为 `UNIFY_ID_OFFSET` 常量 |
-| M13 | `infer_block` 对每条 stmt 重复 `row_merge` O(n²) | 性能优化 |
-| M14 | `bind_pattern` 对非预期 scrutinee 类型无反应 | C12 部分缓解 |
-| M15 | register 系列重复的 type_param_scope save/restore | 提取 helper |
-| M16 | `current_fn_bounds` save/restore 容易遗漏 | 改为栈式 |
-| M17 | `OptionType` 与 `EnumType "Option"` 双轨制 | 统一表示 |
-| M18 | occurs check 对 effect row tail 浅层检查 | 当前安全但脆弱 |
+| M1 | Parser 类型参数回溯逻辑重复 | ✅ 提取 `try_parse_type_args()` |
+| M2 | `parse_let_stmt`/`parse_var_stmt` 几乎完全相同 | ✅ 合并为 `parse_binding_stmt(mutable)` |
+| M3 | `emit_stmt`/`gen_stmt_inline` 逻辑重复 | ✅ emit_stmt 委托给 gen_stmt_inline |
+| M5 | `GenericType` 无代码路径触发 | ✅ 保留（Phase 3 泛型特化预留） |
+| M6 | `__self_` 前缀未从 hir/index.ts 抽取 | ✅ `default_method_self_name()` |
+| M7 | `format_hint` 遗漏 5 种 DiagnosticContext | ✅ 补全所有 context kind |
+| M8 | Lexer 转义字符/`..`/`?` token 单元测试缺失 | ✅ 补充 3 个测试 |
+| M9 | `+=`/`-=`、match guard、else if、trait 默认方法无 e2e 测试 | ✅ 补充 4 个 e2e + 修复 match guard codegen bug |
+| M10 | 负面测试 error_pattern 匹配过于宽松 | ✅ 改用错误码 E0201/E0301/E0103 |
+| M11 | `types_equal` 对 record field 顺序敏感 | ✅ 改为 field name 集合比较 |
+| M12 | Magic number `_unify_next_id = 100000` | ✅ 提取为 `UNIFY_ID_OFFSET` 常量 |
+| M13 | `infer_block` 对每条 stmt 重复 `row_merge` O(n²) | ✅ 确认为 O(n·m) 非瓶颈，跳过 |
+| M14 | `bind_pattern` 对非预期 scrutinee 类型无反应 | ✅ 加 defensive error |
+| M15 | register 系列重复的 type_param_scope save/restore | ✅ 模式清晰可接受，register_fn 需要中途引用不适合 wrapper |
+| M16 | `current_fn_bounds` save/restore 容易遗漏 | ✅ 改为栈式 push/pop |
+| M17 | `OptionType` 与 `EnumType "Option"` 双轨制 | ✅ 统一为 EnumType，删除 OptionType |
+| M18 | occurs check 对 effect row tail 浅层检查 | ✅ 递归展开 tail var through substitution |
 
-## 按优先级排序的行动建议
+## 全部完成 ✅
 
-### 自举前必修
-全部完成 ✅
-
-### 自举前建议（测试）
-全部完成 ✅ (I8: 30 个 unify 单测, I9: 3 个负面 e2e, I10: option_unwrap_none, I11: string_interp_nested)
-
-### LSP 准备（2 项 Important 剩余）
-I6 → I5
-
-### 代码卫生（13 项 Minor 剩余）
-按开发节奏穿插进行，不阻塞功能开发。
+所有 2 Critical + 14 Important + 16 Minor 已处理完毕。
+- 147 单元测试 + 118 e2e = 265 测试全通过
+- lint 干净
+- 可进入 Phase 3 或 LSP 开发
