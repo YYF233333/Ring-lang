@@ -30,7 +30,8 @@ param(
 )
 
 if (-not $env:DEEPSEEK_API_KEY) {
-    $env:DEEPSEEK_API_KEY = "sk-53f8aa9ac15945ab8508c1f0649ac06e"
+    Write-Error "DEEPSEEK_API_KEY environment variable is not set."
+    exit 1
 }
 
 if ($AllowedTools) {
