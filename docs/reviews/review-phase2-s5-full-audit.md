@@ -4,6 +4,16 @@
 **范围**: 全仓库（compiler/src/ 全部 6,800 行 TypeScript + docs/ + tests/）
 **方法**: DeepSeek V4 Pro × 3 + Claude Opus × 2 交叉审查，关键发现人工验证
 **基准 commit**: ada8882
+**修复 commit**: e18b414, f9ca8ea, 59792ab（共修复 18 个 issue，含 12 Critical）
+
+---
+
+## 修复状态
+
+**已修复 Critical (12/14)**: C1 ✅ C2 ✅ C3 ✅ C4 ✅ C5 ✅ C6 ✅ C7 ✅ C8 ✅ C10 ✅ C11 ✅ C12 ✅ C14 ✅
+**未修复 Critical (2)**: C9（try 嵌套 evidence 冲突——需测试验证） · C13（or 双用途——设计决策，已文档化）
+**已修复 Important (4/18)**: I2 ✅ I12 ✅ I13 ✅ I14 ✅
+**已修复 Minor (2/18)**: M4 ✅ + struct safe_ident ✅
 
 ---
 
