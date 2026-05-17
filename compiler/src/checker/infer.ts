@@ -17,7 +17,7 @@ import {
 } from "../types/index.js";
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
-  HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit,
+  HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent,
   variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
 import { TypeEnv, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
@@ -60,7 +60,7 @@ export class InferEngine {
   private type_error(code: string, message: string, span: Span, context: DiagnosticContext): never {
     const diag = make_diagnostic(code, "error", message, span, context);
     this.sink.report(diag);
-    throw new CompileError([diag]);
+    throw new CompileError([]);
   }
 
   private merge_effects(a: EffectRow, b: EffectRow, s: Substitution): [EffectRow, Substitution] {
@@ -156,21 +156,32 @@ export class InferEngine {
   // ============================================================
 
   check(program: Program): HProgram {
-    // Pass 1: register all top-level declarations
+    // Pass 1: register all top-level declarations (recover per decl)
     for (const decl of program.decls) {
-      this.register_decl(decl);
+      try {
+        this.register_decl(decl);
+      } catch (e) {
+        if (e instanceof CompileError) continue;
+        throw e;
+      }
     }
 
-    // Pass 2: type-check all declaration bodies
+    // Pass 2: type-check all declaration bodies (recover at declaration boundaries)
     const hdecls: HDecl[] = [];
     for (const decl of program.decls) {
-      const hd = this.check_decl(decl);
-      if (hd) {
-        hdecls.push(hd);
-        // Update env with inferred effects so later functions see them
-        if (hd.kind === "fn_decl" && hd.effects.effects.length > 0) {
-          this.update_fn_effects(hd.name, hd.effects);
+      try {
+        const hd = this.check_decl(decl);
+        if (hd) {
+          hdecls.push(hd);
+          if (hd.kind === "fn_decl" && hd.effects.effects.length > 0) {
+            this.update_fn_effects(hd.name, hd.effects);
+          }
         }
+      } catch (e) {
+        if (e instanceof CompileError) {
+          continue;
+        }
+        throw e;
       }
     }
 
@@ -403,8 +414,9 @@ export class InferEngine {
     const ret_type = decl.return_type ? this.resolve_type_expr(decl.return_type) : this.env.fresh_var();
 
     // Collect row variables introduced by record type annotations (..rest)
+    const declared_tp_names = new Set(decl.type_params.map(tp => tp.name));
     for (const [name, tv] of this.type_param_scope) {
-      if (!saved_tp_scope.has(name) && tv.kind === "var") {
+      if (!saved_tp_scope.has(name) && !declared_tp_names.has(name) && tv.kind === "var") {
         type_vars.push(tv.id);
       }
     }
@@ -1062,6 +1074,38 @@ export class InferEngine {
       }
     }
 
+    // Resolve dict closures for args that are generic fns with trait bounds passed as values
+    for (const harg of hargs) {
+      if (harg.kind !== "ident") continue;
+      const arg_bounds = this.env.fn_bounds.get(harg.name);
+      if (!arg_bounds) continue;
+      const scheme = this.env.lookup(harg.name);
+      const type_param_to_fresh = this.recover_type_param_vars(arg_bounds, scheme, harg.type);
+      const dicts: string[] = [];
+      for (const bound of arg_bounds) {
+        const fresh_var = type_param_to_fresh.get(bound.type_param);
+        if (fresh_var) {
+          const concrete = apply(s, fresh_var);
+          if ((concrete.kind === "struct" || concrete.kind === "enum") &&
+              this.env.trait_impls.some(
+                impl => impl.target_type_name === concrete.name && impl.trait_name === bound.trait_name
+              )) {
+            dicts.push(trait_dict_name(concrete.name, bound.trait_name));
+          } else if (concrete.kind === "var") {
+            const matching_bound = this.current_fn_bounds.find(
+              fb => fb.type_param_var_id === concrete.id && fb.trait_name === bound.trait_name
+            );
+            if (matching_bound) {
+              dicts.push(trait_bound_param_name(matching_bound.type_param_name, matching_bound.trait_name));
+            }
+          }
+        }
+      }
+      if (dicts.length > 0) {
+        (harg as HIdent).dict_closure_dicts = dicts;
+      }
+    }
+
     return {
       hexpr: { kind: "call", callee: callee_r.hexpr, args: hargs, type_args: [], resolved_dicts, type: result_type, effects, span },
       subst: s,
@@ -1217,13 +1261,20 @@ export class InferEngine {
 
     // Add the effect to the effect row
     let effect: Effect;
-    if (effect_name === "io") {
-      effect = { kind: "io" };
-    } else if (effect_name === "fail") {
-      const error_type = hargs.length > 0 ? apply(s, hargs[0].type) : UNIT;
-      effect = { kind: "fail", error_type };
-    } else {
-      effect = { kind: "custom", name: effect_name, type_args: [] };
+    switch (effect_def.built_in_kind) {
+      case "io":
+        effect = { kind: "io" };
+        break;
+      case "fail": {
+        const error_type = hargs.length > 0 ? apply(s, hargs[0].type) : UNIT;
+        effect = { kind: "fail", error_type };
+        break;
+      }
+      case "mut":
+        effect = { kind: "mut" };
+        break;
+      default:
+        effect = { kind: "custom", name: effect_name, type_args: [] };
     }
     [effects, s] = this.merge_effects(effects, effect_row(effect), s);
 
@@ -1394,7 +1445,8 @@ export class InferEngine {
     const scrut_type_resolved = apply(s, scrut_r.hexpr.type);
     const missing = check_exhaustive(arms, scrut_type_resolved, s);
     if (missing !== null) {
-      this.type_error(E.E0601, `Non-exhaustive match: missing pattern for ${missing}`, span, { kind: "pattern_error", detail: `missing: ${missing}` });
+      const type_str = type_to_string(scrut_type_resolved);
+      this.type_error(E.E0601, `Non-exhaustive match on type ${type_str}: missing pattern for ${missing}`, span, { kind: "pattern_error", detail: `missing: ${missing}` });
     }
 
     const final_type = apply(s, result_type);

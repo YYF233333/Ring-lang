@@ -223,9 +223,9 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("switch (__m._tag)"));
+      assert.ok(js.includes("switch (__ring_m._tag)"));
       assert.ok(js.includes('"Circle"'));
-      assert.ok(js.includes("const r = __m._0;"));
+      assert.ok(js.includes("const r = __ring_m._0;"));
     });
 
     it("generates if-chain for literal patterns", () => {
@@ -261,7 +261,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__m === 1"));
+      assert.ok(js.includes("__ring_m === 1"));
       assert.ok(js.includes('"one"'));
       assert.ok(js.includes('"other"'));
     });
@@ -292,10 +292,10 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__ev_fail"), "Should create __ev_fail evidence, got: " + js);
+      assert.ok(js.includes("__ring_ev_fail"), "Should create __ring_ev_fail evidence, got: " + js);
       assert.ok(js.includes("try { return x; }"), "Should have try with body, got: " + js);
       assert.ok(js.includes("__EffectAbort"), "Should use __EffectAbort, got: " + js);
-      assert.ok(js.includes("const e = __e.value"), "Should extract error value for catch binding, got: " + js);
+      assert.ok(js.includes("const e = __ring_e.value"), "Should extract error value for catch binding, got: " + js);
       assert.ok(js.includes("return 0;"), "Should return handler value, got: " + js);
     });
   });
@@ -337,7 +337,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__ev_fail"), "Should have __ev_fail evidence, got: " + js);
+      assert.ok(js.includes("__ring_ev_fail"), "Should have __ring_ev_fail evidence, got: " + js);
       assert.ok(js.includes("__EffectAbort"), "Should throw __EffectAbort, got: " + js);
       assert.ok(js.includes("try"), "Should have try/catch");
       assert.ok(js.includes("catch"), "Should have catch");
@@ -381,7 +381,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__ev_io"), "Should have __ev_io");
+      assert.ok(js.includes("__ring_ev_io"), "Should have __ring_ev_io");
       assert.ok(js.includes("read"), "Should have read operation");
       assert.ok(js.includes('"mock-data"'), "Should have mock value");
       assert.ok(!js.includes("try"), "No try/catch for non-abort handler");
@@ -427,7 +427,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__ev_Console"), "Should have __ev_Console evidence, got: " + js);
+      assert.ok(js.includes("__ring_ev_Console"), "Should have __ring_ev_Console evidence, got: " + js);
       assert.ok(js.includes("log:"), "Should have log operation entry");
       assert.ok(!js.includes("__run_handler"), "No __run_handler");
       assert.ok(!js.includes("function*"), "No generator");
@@ -597,15 +597,15 @@ describe("codegen", () => {
   });
 
   describe("evidence_param_name", () => {
-    it("generates __ev_ prefixed name", () => {
-      assert.strictEqual(evidence_param_name("io"), "__ev_io");
-      assert.strictEqual(evidence_param_name("fail"), "__ev_fail");
-      assert.strictEqual(evidence_param_name("custom_eff"), "__ev_custom_eff");
+    it("generates __ring_ev_ prefixed name", () => {
+      assert.strictEqual(evidence_param_name("io"), "__ring_ev_io");
+      assert.strictEqual(evidence_param_name("fail"), "__ring_ev_fail");
+      assert.strictEqual(evidence_param_name("custom_eff"), "__ring_ev_custom_eff");
     });
   });
 
   describe("evidence params in function signatures", () => {
-    it("adds __ev_ params for functions with effects", () => {
+    it("adds __ring_ev_ params for functions with effects", () => {
       const io_effect: Effect = { kind: "io" };
       const fail_effect: Effect = { kind: "fail", error_type: STR };
       const decl: HFnDecl = {
@@ -621,7 +621,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("function load(path, __ev_fail, __ev_io)"), "Expected evidence params sorted alphabetically, got: " + js);
+      assert.ok(js.includes("function load(path, __ring_ev_fail, __ring_ev_io)"), "Expected evidence params sorted alphabetically, got: " + js);
       assert.ok(!js.includes("function*"), "Should not be a generator");
     });
 
@@ -640,7 +640,7 @@ describe("codegen", () => {
       };
       const js = generate(program([decl]));
       assert.ok(js.includes("function pure(x)"), "Got: " + js);
-      assert.ok(!js.includes("function pure(x, __ev_"), "Pure function should have no evidence params");
+      assert.ok(!js.includes("function pure(x, __ring_ev_"), "Pure function should have no evidence params");
     });
   });
 
@@ -668,7 +668,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__ev_io.read("), "should call __ev_io.read(), got: " + js);
+      assert.ok(js.includes("__ring_ev_io.read("), "should call __ring_ev_io.read(), got: " + js);
       assert.ok(js.includes('"file.txt"'), "should pass file.txt arg");
       assert.ok(!js.includes("yield"), "should not contain yield");
     });
@@ -705,7 +705,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes('helper("x", __ev_io)'), "Should forward __ev_io to helper, got: " + js);
+      assert.ok(js.includes('helper("x", __ring_ev_io)'), "Should forward __ring_ev_io to helper, got: " + js);
     });
 
     it("does not forward evidence for pure callees", () => {
@@ -739,7 +739,7 @@ describe("codegen", () => {
       };
       const js = generate(program([decl]));
       assert.ok(js.includes('pure_fn("x")'), "Should not forward evidence to pure function, got: " + js);
-      assert.ok(!js.includes('pure_fn("x", __ev_'), "Should not have evidence args");
+      assert.ok(!js.includes('pure_fn("x", __ring_ev_'), "Should not have evidence args");
     });
   });
 
@@ -771,7 +771,7 @@ describe("codegen", () => {
       assert.ok(js.includes("42"), "Should just return body value");
     });
 
-    it("generates __ev_fail + __EffectAbort when body has fail effect", () => {
+    it("generates __ring_ev_fail + __EffectAbort when body has fail effect", () => {
       const fail_effect: Effect = { kind: "fail", error_type: STR };
       const callee_type: import("../types/index.js").FnType = {
         kind: "fn",
@@ -809,14 +809,14 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__ev_fail"), "Should create __ev_fail evidence, got: " + js);
+      assert.ok(js.includes("__ring_ev_fail"), "Should create __ring_ev_fail evidence, got: " + js);
       assert.ok(js.includes("__EffectAbort"), "Should use __EffectAbort, got: " + js);
       assert.ok(js.includes("try"), "Should have try/catch");
     });
   });
 
   describe("top-level evidence injection", () => {
-    it("provides __ev_io and __ev_fail when main has effects", () => {
+    it("provides __ring_ev_io and __ring_ev_fail when main has effects", () => {
       const io_effect: Effect = { kind: "io" };
       const fail_effect: Effect = { kind: "fail", error_type: STR };
       const decl: HFnDecl = {
@@ -832,9 +832,9 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("main(__ev_fail, __ev_io)"), "Should call main with evidence, got: " + js);
-      assert.ok(js.includes("const __ev_io = {"), "Should define top-level __ev_io");
-      assert.ok(js.includes("const __ev_fail = {"), "Should define top-level __ev_fail");
+      assert.ok(js.includes("main(__ring_ev_fail, __ring_ev_io)"), "Should call main with evidence, got: " + js);
+      assert.ok(js.includes("const __ring_ev_io = {"), "Should define top-level __ring_ev_io");
+      assert.ok(js.includes("const __ring_ev_fail = {"), "Should define top-level __ring_ev_fail");
     });
 
     it("calls main() without evidence when pure", () => {
@@ -852,7 +852,7 @@ describe("codegen", () => {
       };
       const js = generate(program([decl]));
       assert.ok(js.includes("main();"), "Should call main() with no args, got: " + js);
-      assert.ok(!js.includes("const __ev_"), "Should not define evidence for pure main");
+      assert.ok(!js.includes("const __ring_ev_"), "Should not define evidence for pure main");
     });
   });
 });

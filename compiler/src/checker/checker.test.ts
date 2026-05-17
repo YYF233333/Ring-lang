@@ -4,11 +4,24 @@ import * as assert from "node:assert/strict";
 import { Parser } from "../parser/parser.js";
 import { check } from "./checker.js";
 import { HFnDecl, HTestDecl, HProgram } from "../hir/index.js";
+import { CollectingSink, Diagnostic } from "../diagnostics/index.js";
 
 // Helper: parse and check, return the HProgram
 function check_source(source: string): HProgram {
   const ast = Parser.parse(source);
   return check(ast);
+}
+
+// Helper: parse and check expecting errors, return diagnostics from sink
+function check_expecting_errors(source: string): Diagnostic[] {
+  const sink = new CollectingSink();
+  const ast = Parser.parse(source, "<test>", sink);
+  try {
+    check(ast, sink);
+  } catch {
+    // expected
+  }
+  return [...sink.diagnostics()];
 }
 
 // Helper: get the first fn decl from checked program
@@ -156,9 +169,8 @@ describe("Type Checker", () => {
           }
         }
       `;
-      assert.throws(() => check_source(source), (err: any) => {
-        return err.message.includes("Non-exhaustive") && err.message.includes("rect");
-      });
+      const diags = check_expecting_errors(source);
+      assert.ok(diags.some(d => d.message.includes("Non-exhaustive") && d.message.includes("rect")));
     });
   });
 
@@ -248,25 +260,23 @@ describe("Type Checker", () => {
   });
 
   describe("type mismatch rejection", () => {
-    it("throws on return type mismatch", () => {
+    it("reports error on return type mismatch", () => {
       const source = `
         fn add(a: Int, b: Int) -> Str {
           a + b
         }
       `;
-      assert.throws(() => check_source(source), (err: any) => {
-        return err.message.includes("unify") || err.message.includes("mismatch");
-      });
+      const diags = check_expecting_errors(source);
+      assert.ok(diags.some(d => d.message.includes("unify") || d.message.includes("mismatch")));
     });
 
-    it("throws on argument type mismatch", () => {
+    it("reports error on argument type mismatch", () => {
       const source = `
         fn add(a: Int, b: Int) -> Int { a + b }
         fn main() -> Int { add(1, true) }
       `;
-      assert.throws(() => check_source(source), (err: any) => {
-        return err.message.includes("unify") || err.message.includes("mismatch");
-      });
+      const diags = check_expecting_errors(source);
+      assert.ok(diags.some(d => d.message.includes("unify") || d.message.includes("mismatch")));
     });
   });
 
@@ -343,7 +353,8 @@ describe("Type Checker", () => {
         impl Greetable for User {
         }
       `;
-      assert.throws(() => check_source(source), /[Mm]issing.*method.*greet/);
+      const diags = check_expecting_errors(source);
+      assert.ok(diags.some(d => /[Mm]issing.*method.*greet/.test(d.message)));
     });
   });
 

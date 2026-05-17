@@ -52,6 +52,10 @@ const cases: TestCase[] = [
   { file: "option_or.ring", expected: "141\n" },
   { file: "catch_typed.ring", expected: "99\n" },
   { file: "match_wildcard.ring", expected: "yes\nno\nother\n" },
+  { file: "try_nested.ring", expected: "-1\n6\n" },
+  { file: "trait_higher_order.ring", expected: "num\n" },
+  { file: "option_unwrap_none.ring", expected: "99\n6\n" },
+  { file: "string_interp_nested.ring", expected: "sum: 3\nab1cd\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -122,6 +126,10 @@ describe("e2e: ring check (negative — should reject)", () => {
     { file: "row_reject.ring", error_pattern: "missing field" },
     { file: "error_multi_parse.ring", error_pattern: "expected" },
     { file: "error_type_context.ring", error_pattern: "unify" },
+    { file: "error_multi_type.ring", error_pattern: "unify" },
+    { file: "error_arity.ring", error_pattern: "unify" },
+    { file: "error_undefined.ring", error_pattern: "undefined" },
+    { file: "error_operator.ring", error_pattern: "unify" },
   ];
 
   for (const tc of negative_cases) {

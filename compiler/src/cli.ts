@@ -83,6 +83,13 @@ function main(): void {
     }
 
     const hir = check(ast, sink);
+
+    // With declaration-level error recovery, check() may return partial results
+    // while sink has accumulated errors. Abort before codegen if any errors exist.
+    if ([...sink.diagnostics()].some(d => d.severity === "error")) {
+      throw new CompileError([]);
+    }
+
     if (debug) {
       console.error("[DEBUG] HIR:");
       console.error(JSON.stringify(hir, null, 2).slice(0, 2000));

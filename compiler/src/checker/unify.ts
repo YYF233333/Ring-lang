@@ -9,9 +9,12 @@ import {
 // Fresh variable generation for row unification
 // ============================================================
 
-let _unify_next_id = 100000;
+// Offset from checker's type var IDs to avoid collision with unifier's fresh row vars
+const UNIFY_ID_OFFSET = 100000;
+
+let _unify_next_id = UNIFY_ID_OFFSET;
 export function init_unify_fresh_counter(base: number): void {
-  _unify_next_id = base + 100000;
+  _unify_next_id = base + UNIFY_ID_OFFSET;
 }
 function fresh_row_var_id(): number { return _unify_next_id++; }
 

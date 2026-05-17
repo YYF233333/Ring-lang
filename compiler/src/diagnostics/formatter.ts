@@ -41,7 +41,15 @@ function format_hint(d: Diagnostic): string {
       return "not found in this scope";
     case "missing_field":
       return `field '${d.context.field}' not found`;
-    default:
+    case "effect_unhandled":
+      return `effect '${d.context.effect}' must be handled`;
+    case "parse_error":
+      return d.context.expected ? `expected ${d.context.expected.join(" or ")}` : "";
+    case "pattern_error":
+      return d.context.detail;
+    case "trait_error":
+      return d.context.detail;
+    case "other":
       return "";
   }
 }

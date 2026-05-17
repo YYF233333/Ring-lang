@@ -77,5 +77,5 @@ export function check_exhaustive(
     return null;
   }
 
-  return "_"; // non-exhaustive: need a wildcard
+  return "_";
 }

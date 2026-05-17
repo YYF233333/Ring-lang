@@ -38,6 +38,7 @@ export interface EffectDef {
   name: string;
   type_params: string[];
   ops: { name: string; params: Type[]; return_type: Type }[];
+  built_in_kind?: "io" | "fail" | "mut";
 }
 
 // ============================================================
@@ -130,6 +131,7 @@ export class TypeEnv {
         { name: "read", params: [STR], return_type: STR },
         { name: "write", params: [STR, STR], return_type: UNIT },
       ],
+      built_in_kind: "io",
     });
 
     // Built-in effect: fail with op raise(E) -> Never
@@ -140,6 +142,7 @@ export class TypeEnv {
       ops: [
         { name: "raise", params: [fail_type_var], return_type: NEVER },
       ],
+      built_in_kind: "fail",
     });
 
     // Built-in: Cell<T> — shared mutable reference

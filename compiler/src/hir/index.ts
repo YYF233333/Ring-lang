@@ -63,6 +63,9 @@ export interface HIdent extends HExprBase {
   name: string;
   // Resolved: fully-qualified name or index into environment
   resolved_name?: string;
+  // When a generic fn with trait bounds is used as a value (not directly called),
+  // this lists the dictionary names + evidence params to inject via wrapper closure
+  dict_closure_dicts?: string[];
 }
 
 export interface HBinOp extends HExprBase {
@@ -364,12 +367,17 @@ export function trait_dict_name(type_name: string, trait_name: string): string {
 
 // JS codegen naming convention for effect evidence parameters
 export function evidence_param_name(effect_name: string): string {
-  return `__ev_${effect_name}`;
+  return `__ring_ev_${effect_name}`;
 }
 
 // JS codegen naming convention for trait bound dictionary parameters
 export function trait_bound_param_name(type_param: string, trait_name: string): string {
-  return `__${type_param}_${trait_name}`;
+  return `__ring_${type_param}_${trait_name}`;
+}
+
+// JS codegen naming convention for default method self parameter
+export function default_method_self_name(type_name: string): string {
+  return `__ring_self_${type_name}`;
 }
 
 // JS codegen enum discriminator field name

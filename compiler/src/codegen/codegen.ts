@@ -4,7 +4,7 @@ import {
   HProgram, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl,
   HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock, HMatchArm,
   variant_js_name, trait_dict_name, evidence_param_name,
-  trait_bound_param_name, ENUM_TAG_FIELD,
+  trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD,
   OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
 } from "../hir/index.js";
@@ -246,7 +246,7 @@ class CodeGenerator {
       if (method.has_default && method.body) {
         const fn_name = `__${safe_ident(decl.name)}_${safe_ident(method.name)}`;
         const param_names = method.params.map(p => safe_ident(p.name));
-        const all_params = [`__self_${safe_ident(decl.name)}`, ...param_names].join(", ");
+        const all_params = [default_method_self_name(safe_ident(decl.name)), ...param_names].join(", ");
         this.emit(`function ${fn_name}(${all_params}) {`);
         this.push_indent();
         this.emit_block_body(method.body);
@@ -321,8 +321,19 @@ class CodeGenerator {
         return JSON.stringify(expr.value);
       case "bool_lit":
         return expr.value ? "true" : "false";
-      case "ident":
-        return safe_ident(expr.resolved_name ?? expr.name);
+      case "ident": {
+        const name = safe_ident(expr.resolved_name ?? expr.name);
+        if (expr.dict_closure_dicts && expr.dict_closure_dicts.length > 0) {
+          const fn_type = expr.type;
+          if (fn_type.kind === "fn") {
+            const params = fn_type.params.map((_, i) => `__ring_a${i}`);
+            const dict_args = expr.dict_closure_dicts.join(", ");
+            const all_call_args = [...params, dict_args].join(", ");
+            return `((${params.join(", ")}) => ${name}(${all_call_args}))`;
+          }
+        }
+        return name;
+      }
       case "bin_op":
         return `(${this.gen_expr(expr.left)} ${expr.op} ${this.gen_expr(expr.right)})`;
       case "unary_op":
@@ -424,12 +435,12 @@ class CodeGenerator {
     const scrutinee = this.gen_expr(expr.scrutinee);
     const parts: string[] = [];
     parts.push("(function() {");
-    parts.push(`  const __m = ${scrutinee};`);
+    parts.push(`  const __ring_m = ${scrutinee};`);
 
     // Determine if this is a tag-based match (enum) or value-based
     const has_constructor = expr.arms.some(a => a.pattern.kind === "constructor");
     if (has_constructor) {
-      parts.push(`  switch (__m.${ENUM_TAG_FIELD}) {`);
+      parts.push(`  switch (__ring_m.${ENUM_TAG_FIELD}) {`);
       const has_catchall = expr.arms.some(a =>
         a.pattern.kind === "wildcard" || a.pattern.kind === "binding" || a.pattern.kind === "literal"
       );
@@ -438,15 +449,15 @@ class CodeGenerator {
         parts.push(arm_code);
       }
       if (!has_catchall) {
-        parts.push(`    default: ${RUNTIME_MATCH_FAIL}(__m);`);
+        parts.push(`    default: ${RUNTIME_MATCH_FAIL}(__ring_m);`);
       }
       parts.push("  }");
     } else {
       // Use if-chain for literal/binding/wildcard patterns
       for (let i = 0; i < expr.arms.length; i++) {
         const arm = expr.arms[i];
-        const cond = this.gen_pattern_condition("__m", arm.pattern);
-        const bindings = this.gen_pattern_bindings("__m", arm.pattern);
+        const cond = this.gen_pattern_condition("__ring_m", arm.pattern);
+        const bindings = this.gen_pattern_bindings("__ring_m", arm.pattern);
         const body = this.gen_expr(arm.body);
         if (cond === "true") {
           // Wildcard or binding — always matches
@@ -456,7 +467,7 @@ class CodeGenerator {
           parts.push(`  if (${cond}${guard}) { ${bindings}return ${body}; }`);
         }
       }
-      parts.push(`  ${RUNTIME_MATCH_FAIL}(__m);`);
+      parts.push(`  ${RUNTIME_MATCH_FAIL}(__ring_m);`);
     }
 
     parts.push("})()");
@@ -469,7 +480,7 @@ class CodeGenerator {
       case "constructor": {
         const bindings = pat.fields.map((f, i) => {
           if (f.kind === "binding") {
-            return `const ${safe_ident(f.name)} = __m._${i}; `;
+            return `const ${safe_ident(f.name)} = __ring_m._${i}; `;
           }
           return "";
         }).join("");
@@ -486,7 +497,7 @@ class CodeGenerator {
       }
       case "binding": {
         const body = this.gen_expr(arm.body);
-        return `    default: { const ${safe_ident(pat.name)} = __m; return ${body}; }`;
+        return `    default: { const ${safe_ident(pat.name)} = __ring_m; return ${body}; }`;
       }
       case "literal": {
         // Literal in a tag-switch doesn't make sense, but handle gracefully
@@ -616,11 +627,11 @@ class CodeGenerator {
       const binding = safe_ident(expr.error_binding);
       if (expr.error_type) {
         const type_name = safe_ident(expr.error_type);
-        return `(function() { const __ev_fail = { raise: (${binding}) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT} && __e.effect === "fail" && __e.value instanceof ${type_name}) { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
+        return `(function() { const ${evidence_param_name("fail")} = { raise: (${binding}) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", ${binding}); } }; try { return ${body}; } catch (__ring_e) { if (__ring_e instanceof ${RUNTIME_EFFECT_ABORT} && __ring_e.effect === "fail" && __ring_e.value instanceof ${type_name}) { const ${binding} = __ring_e.value; return ${handler}; } throw __ring_e; } })()`;
       }
-      return `(function() { const __ev_fail = { raise: (${binding}) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT} && __e.effect === "fail") { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
+      return `(function() { const ${evidence_param_name("fail")} = { raise: (${binding}) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", ${binding}); } }; try { return ${body}; } catch (__ring_e) { if (__ring_e instanceof ${RUNTIME_EFFECT_ABORT} && __ring_e.effect === "fail") { const ${binding} = __ring_e.value; return ${handler}; } throw __ring_e; } })()`;
     } else {
-      return `(function() { const __ev_fail = { raise: (__err) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", undefined); } }; try { return ${body}; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT} && __e.effect === "fail") return ${handler}; throw __e; } })()`;
+      return `(function() { const ${evidence_param_name("fail")} = { raise: (__ring_err) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", undefined); } }; try { return ${body}; } catch (__ring_e) { if (__ring_e instanceof ${RUNTIME_EFFECT_ABORT} && __ring_e.effect === "fail") return ${handler}; throw __ring_e; } })()`;
     }
   }
 
@@ -661,7 +672,7 @@ class CodeGenerator {
     const decls = ev_decls.join(" ");
 
     if (has_abort) {
-      return `(function() { ${decls} try { return ${body_code}; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT}) return __e.value; throw __e; } })()`;
+      return `(function() { ${decls} try { return ${body_code}; } catch (__ring_e) { if (__ring_e instanceof ${RUNTIME_EFFECT_ABORT}) return __ring_e.value; throw __ring_e; } })()`;
     } else {
       return `(function() { ${decls} return ${body_code}; })()`;
     }
@@ -698,7 +709,7 @@ class CodeGenerator {
 
   private gen_try_block(expr: HExpr & { kind: "try_block" }): string {
     const body = this.gen_expr(expr.body);
-    return `(function() { const __ev_fail = { raise: (__err) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", __err); } }; try { return { ${ENUM_TAG_FIELD}: "${OPTION_SOME_TAG}", ${OPTION_PAYLOAD_FIELD}: ${body} }; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT} && __e.effect === "fail") return { ${ENUM_TAG_FIELD}: "${OPTION_NONE_TAG}" }; throw __e; } })()`;
+    return `(function() { const ${evidence_param_name("fail")} = { raise: (__ring_err) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", __ring_err); } }; try { return { ${ENUM_TAG_FIELD}: "${OPTION_SOME_TAG}", ${OPTION_PAYLOAD_FIELD}: ${body} }; } catch (__ring_e) { if (__ring_e instanceof ${RUNTIME_EFFECT_ABORT} && __ring_e.effect === "fail") return { ${ENUM_TAG_FIELD}: "${OPTION_NONE_TAG}" }; throw __ring_e; } })()`;
   }
 
   private gen_option_unwrap(expr: HExpr & { kind: "option_unwrap" }): string {
