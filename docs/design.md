@@ -167,12 +167,12 @@ fn get_nickname(user: User) -> Str {
 // try 块：fail effect → Option（捕获）
 let maybe_user: User? = try { find_user(42) }
 
-// or 同时作用于 Option 值和 fail effect
-let nick = user.nickname or "匿名"         // Option 层面
-let user = find_user(42) or default_user()  // fail effect 层面
+// or 按表达式类型 dispatch：Option 或 fail，二选一
+let nick = user.nickname or "匿名"         // Option 层面：unwrap or default
+let user = find_user(42) or default_user()  // fail effect 层面：try/catch
 ```
 
-设计原则：**Option 是数据，fail 是计算。`?` 从数据进入计算，`try` 从计算回到数据。`or` 是统一的兜底语法。**
+设计原则：**Option 是数据，fail 是计算。`?` 从数据进入计算，`try` 从计算回到数据。`or` 是统一的兜底语法，按表达式类型选择 Option path 或 fail path，不混合（若表达式既是 `Option<T>` 又带 `fail`，`or` 只处理 Option，fail 需另行处理）。**
 
 ### 1.6 闭包捕获
 

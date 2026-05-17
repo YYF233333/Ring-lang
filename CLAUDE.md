@@ -203,6 +203,7 @@ Ring-lang/
 - **Lambda 不注入 evidence 参数**：依赖闭包捕获，跨作用域传递 lambda 时可能 ReferenceError
 - **Trait dictionary dispatch 不转发 evidence**：trait 方法带 effect 时缺少 evidence 参数
 - **Untyped `or`/`catch` 一刀切移除所有 fail effect**：typed catch 可选择性捕获特定类型，untyped 仍全部移除
+- **`or` 按类型 dispatch，不叠加语义**：`expr or default` 根据 `expr` 的类型选择 Option path（unwrap）或 fail path（try/catch），两者不混合。若表达式既是 `Option<T>` 又带 `fail` effect，`or` 只处理 Option 解包，fail 仍需调用方额外处理（设计决策："一种事一种写法"）
 
 ### 类型系统限制
 
