@@ -120,7 +120,7 @@ export function apply_to_effect_row(subst: Substitution, row: EffectRow): Effect
       if (chased.kind === "var") {
         tail = chased.id;
       } else {
-        tail = undefined;
+        throw new Error(`apply_to_effect_row: tail var ?${row.tail} resolved to non-var type '${chased.kind}', expected var — possible unification bug`);
       }
     }
   }
@@ -139,11 +139,9 @@ export function compose(s1: Substitution, s2: Substitution): Substitution {
   for (const [id, t] of s1) {
     result.set(id, apply(s2, t));
   }
-  // Add s2 mappings (s2 takes precedence for new bindings)
+  // Add s2 mappings (s2 takes precedence — overwrites s1 for same key)
   for (const [id, t] of s2) {
-    if (!result.has(id)) {
-      result.set(id, t);
-    }
+    result.set(id, t);
   }
   return result;
 }
@@ -216,16 +214,37 @@ export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitutio
   const ra = apply_to_effect_row(s, a);
   const rb = apply_to_effect_row(s, b);
 
+  const a_matched = new Set<number>();
   const b_matched = new Set<number>();
-  for (const ae of ra.effects) {
+  for (let ai = 0; ai < ra.effects.length; ai++) {
     for (let bi = 0; bi < rb.effects.length; bi++) {
       if (b_matched.has(bi)) continue;
-      if (effects_match_kind(ae, rb.effects[bi])) {
-        s = unify_effect_params(ae, rb.effects[bi], s);
+      if (effects_match_kind(ra.effects[ai], rb.effects[bi])) {
+        s = unify_effect_params(ra.effects[ai], rb.effects[bi], s);
+        a_matched.add(ai);
         b_matched.add(bi);
         break;
       }
     }
+  }
+
+  // Unmatched effects in a closed row → error
+  const a_unmatched = ra.effects.filter((_, i) => !a_matched.has(i));
+  const b_unmatched = rb.effects.filter((_, i) => !b_matched.has(i));
+
+  if (a_unmatched.length > 0 && rb.tail === undefined) {
+    const names = a_unmatched.map(e => e.kind === "custom" ? e.name : e.kind).join(", ");
+    throw new UnificationError(
+      { kind: "unit" }, { kind: "unit" },
+      `effect mismatch: effects [${names}] not allowed in pure context`
+    );
+  }
+  if (b_unmatched.length > 0 && ra.tail === undefined) {
+    const names = b_unmatched.map(e => e.kind === "custom" ? e.name : e.kind).join(", ");
+    throw new UnificationError(
+      { kind: "unit" }, { kind: "unit" },
+      `effect mismatch: effects [${names}] not allowed in pure context`
+    );
   }
 
   if (ra.tail !== undefined && rb.tail !== undefined && ra.tail !== rb.tail) {
@@ -469,7 +488,7 @@ function unify_struct_with_record(struct_t: StructType, record_t: RecordType, su
     const remaining = struct_t.fields.filter(sf => !record_t.fields.some(rf => rf.name === sf.name));
     const tail_record: Type = {
       kind: "record",
-      fields: remaining.map(f => ({ name: f.name, type: f.type })),
+      fields: remaining.map(f => ({ name: f.name, type: apply(s, f.type) })),
     };
     if (occurs_in(record_t.tail, tail_record, s)) {
       throw new UnificationError(struct_t, record_t, "infinite type in row variable");

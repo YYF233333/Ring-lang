@@ -28,13 +28,6 @@ import { check_exhaustive } from "./exhaustive.js";
 // Error helpers
 // ============================================================
 
-export class TypeCheckError extends Error {
-  constructor(message: string, public span?: Span) {
-    super(message);
-    this.name = "TypeCheckError";
-  }
-}
-
 // ============================================================
 // Inference result for expressions
 // ============================================================
@@ -68,6 +61,14 @@ export class InferEngine {
     const diag = make_diagnostic(code, "error", message, span, context);
     this.sink.report(diag);
     throw new CompileError([diag]);
+  }
+
+  private merge_effects(a: EffectRow, b: EffectRow, s: Substitution): [EffectRow, Substitution] {
+    const m = row_merge(a, b);
+    if (m.tails_to_unify) {
+      s = unify({ kind: "var", id: m.tails_to_unify[0] } as TypeVar, { kind: "var", id: m.tails_to_unify[1] } as TypeVar, s);
+    }
+    return [m.row, s];
   }
 
   private free_type_vars(t: Type, subst: Substitution): Set<number> {
@@ -662,7 +663,7 @@ export class InferEngine {
     for (const stmt of block.stmts) {
       const sr = this.infer_stmt(stmt, subst);
       subst = sr.subst;
-      effects = row_merge(effects, sr.effects);
+      [effects, subst] = this.merge_effects(effects, sr.effects, subst);
       hstmts.push(sr.hstmt);
     }
 
@@ -672,7 +673,7 @@ export class InferEngine {
     if (block.tail) {
       const tr = this.infer_expr(block.tail, subst);
       subst = tr.subst;
-      effects = row_merge(effects, tr.effects);
+      [effects, subst] = this.merge_effects(effects, tr.effects, subst);
       tail_hexpr = tr.hexpr;
       block_type = tr.hexpr.type;
     }
@@ -732,11 +733,13 @@ export class InferEngine {
       case "assign_stmt": {
         const target_r = this.infer_expr(stmt.target, subst);
         const value_r = this.infer_expr(stmt.value, target_r.subst);
-        const s = unify(target_r.hexpr.type, value_r.hexpr.type, value_r.subst);
+        let s = unify(target_r.hexpr.type, value_r.hexpr.type, value_r.subst);
+        let effects: EffectRow;
+        [effects, s] = this.merge_effects(target_r.effects, value_r.effects, s);
         return {
           hstmt: { kind: "assign_stmt", target: target_r.hexpr, value: value_r.hexpr, span: stmt.span },
           subst: s,
-          effects: row_merge(target_r.effects, value_r.effects),
+          effects,
         };
       }
       case "expr_stmt": {
@@ -901,7 +904,8 @@ export class InferEngine {
       }
     }
 
-    const effects = row_merge(lr.effects, rr.effects);
+    let effects: EffectRow;
+    [effects, s] = this.merge_effects(lr.effects, rr.effects, s);
     return {
       hexpr: { kind: "bin_op", op, left: lr.hexpr, right: rr.hexpr, type: result_type!, effects, span },
       subst: s,
@@ -982,17 +986,18 @@ export class InferEngine {
     for (const arg of args) {
       const ar = this.infer_expr(arg, s);
       s = ar.subst;
-      effects = row_merge(effects, ar.effects);
+      [effects, s] = this.merge_effects(effects, ar.effects, s);
       hargs.push(ar.hexpr);
       arg_types.push(ar.hexpr.type);
     }
 
     const ret_var = this.env.fresh_var();
+    const effect_tail = this.env.fresh_var() as TypeVar;
     const expected_fn: FnType = {
       kind: "fn",
       params: arg_types,
       return_type: ret_var,
-      effects: EMPTY_ROW,
+      effects: { effects: [], tail: effect_tail.id },
     };
 
     s = unify(callee_r.hexpr.type, expected_fn, s);
@@ -1000,7 +1005,7 @@ export class InferEngine {
 
     // If the callee is a function type, merge its effects
     if (resolved_callee_type.kind === "fn") {
-      effects = row_merge(effects, resolved_callee_type.effects);
+      [effects, s] = this.merge_effects(effects, resolved_callee_type.effects, s);
     }
 
     const result_type = apply(s, ret_var);
@@ -1132,7 +1137,7 @@ export class InferEngine {
     for (const arg of args) {
       const ar = this.infer_expr(arg, s);
       s = ar.subst;
-      effects = row_merge(effects, ar.effects);
+      [effects, s] = this.merge_effects(effects, ar.effects, s);
       hargs.push(ar.hexpr);
     }
 
@@ -1147,7 +1152,7 @@ export class InferEngine {
         s = unify(hargs[i].type, method_type.params[i + 1], s);
       }
       result_type = apply(s, method_type.return_type);
-      effects = row_merge(effects, method_type.effects);
+      [effects, s] = this.merge_effects(effects, method_type.effects, s);
     } else {
       // Unknown method — use fresh type var
       result_type = this.env.fresh_var();
@@ -1188,7 +1193,7 @@ export class InferEngine {
     for (let i = 0; i < args.length; i++) {
       const ar = this.infer_expr(args[i], s);
       s = ar.subst;
-      effects = row_merge(effects, ar.effects);
+      [effects, s] = this.merge_effects(effects, ar.effects, s);
       hargs.push(ar.hexpr);
       if (i < op.params.length) {
         s = unify(ar.hexpr.type, op.params[i], s);
@@ -1205,7 +1210,7 @@ export class InferEngine {
     } else {
       effect = { kind: "custom", name: effect_name, type_args: [] };
     }
-    effects = row_merge(effects, effect_row(effect));
+    [effects, s] = this.merge_effects(effects, effect_row(effect), s);
 
     return {
       hexpr: {
@@ -1291,7 +1296,7 @@ export class InferEngine {
     for (const field of fields) {
       const fr = this.infer_expr(field.value, s);
       s = fr.subst;
-      effects = row_merge(effects, fr.effects);
+      [effects, s] = this.merge_effects(effects, fr.effects, s);
 
       const def_field = struct_def.fields.find(f => f.name === field.name);
       if (def_field) {
@@ -1348,14 +1353,14 @@ export class InferEngine {
         const gr = this.infer_expr(arm.guard, s);
         s = gr.subst;
         s = unify(gr.hexpr.type, BOOL, s);
-        effects = row_merge(effects, gr.effects);
+        [effects, s] = this.merge_effects(effects, gr.effects, s);
         guard_hexpr = gr.hexpr;
       }
 
       // Infer body
       const body_r = this.infer_expr(arm.body, s);
       s = body_r.subst;
-      effects = row_merge(effects, body_r.effects);
+      [effects, s] = this.merge_effects(effects, body_r.effects, s);
 
       // Unify body type with result type
       s = unify(body_r.hexpr.type, result_type, s);
@@ -1400,6 +1405,17 @@ export class InferEngine {
             const variant = enum_def.variants.find(v => v.name === pattern.name);
             if (variant) {
               const resolved_expected = apply(subst, expected_type);
+              // Verify pattern's enum matches scrutinee type
+              if (resolved_expected.kind === "enum" && resolved_expected.name !== enum_name) {
+                this.type_error("E0301",
+                  `variant '${pattern.name}' belongs to enum '${enum_name}', not '${resolved_expected.name}'`,
+                  pattern.span, { kind: "type_mismatch", expected: resolved_expected.name, actual: enum_name });
+              }
+              if (resolved_expected.kind === "option" && enum_name !== "Option") {
+                this.type_error("E0301",
+                  `variant '${pattern.name}' belongs to enum '${enum_name}', not 'Option'`,
+                  pattern.span, { kind: "type_mismatch", expected: "Option", actual: enum_name });
+              }
               const instantiation_map = new Map<number, Type>();
               if (resolved_expected.kind === "enum") {
                 for (let i = 0; i < enum_def.type_param_vars.length; i++) {
@@ -1436,7 +1452,7 @@ export class InferEngine {
 
     const then_r = this.infer_block(then_branch, s);
     s = then_r.subst;
-    effects = row_merge(effects, then_r.effects);
+    [effects, s] = this.merge_effects(effects, then_r.effects, s);
 
     let else_hexpr: HBlock | undefined;
     let result_type: Type;
@@ -1445,7 +1461,7 @@ export class InferEngine {
       if (else_branch.kind === "block") {
         const else_r = this.infer_block(else_branch, s);
         s = else_r.subst;
-        effects = row_merge(effects, else_r.effects);
+        [effects, s] = this.merge_effects(effects, else_r.effects, s);
         s = unify(then_r.hexpr.type, else_r.hexpr.type, s);
         result_type = apply(s, then_r.hexpr.type);
         else_hexpr = else_r.hexpr as HBlock;
@@ -1453,7 +1469,7 @@ export class InferEngine {
         // else if — treat as nested if expression
         const else_if_r = this.infer_if(else_branch.condition, else_branch.then_branch, else_branch.else_branch, else_branch.span, s);
         s = else_if_r.subst;
-        effects = row_merge(effects, else_if_r.effects);
+        [effects, s] = this.merge_effects(effects, else_if_r.effects, s);
         s = unify(then_r.hexpr.type, else_if_r.hexpr.type, s);
         result_type = apply(s, then_r.hexpr.type);
         // Wrap in a block for HIR
@@ -1497,7 +1513,7 @@ export class InferEngine {
       } else {
         const r = this.infer_expr(part, s);
         s = r.subst;
-        effects = row_merge(effects, r.effects);
+        [effects, s] = this.merge_effects(effects, r.effects, s);
         hparts.push(r.hexpr);
       }
     }
@@ -1520,7 +1536,8 @@ export class InferEngine {
       s = default_r.subst;
       s = unify(expr_type.inner, default_r.hexpr.type, s);
       const result_type = apply(s, expr_type.inner);
-      const effects = row_merge(expr_r.effects, default_r.effects);
+      let effects: EffectRow;
+      [effects, s] = this.merge_effects(expr_r.effects, default_r.effects, s);
       return {
         hexpr: { kind: "option_or", expr: expr_r.hexpr, default_value: default_r.hexpr, type: result_type, effects, span },
         subst: s,
@@ -1532,7 +1549,8 @@ export class InferEngine {
     const default_r = this.infer_expr(default_value, s);
     s = default_r.subst;
     s = unify(expr_r.hexpr.type, default_r.hexpr.type, s);
-    let effects = row_merge(expr_r.effects, default_r.effects);
+    let effects: EffectRow;
+    [effects, s] = this.merge_effects(expr_r.effects, default_r.effects, s);
     effects = this.remove_fail_effect(effects);
     const result_type = apply(s, expr_r.hexpr.type);
     return {
@@ -1561,7 +1579,8 @@ export class InferEngine {
 
     s = unify(expr_r.hexpr.type, handler_r.hexpr.type, s);
 
-    let effects = row_merge(expr_r.effects, handler_r.effects);
+    let effects: EffectRow;
+    [effects, s] = this.merge_effects(expr_r.effects, handler_r.effects, s);
     if (error_type_name) {
       effects = this.remove_specific_fail_effect(effects, error_var_type, s);
     } else {
@@ -1724,7 +1743,8 @@ export class InferEngine {
     s = unify(inner_r.hexpr.type, { kind: "option", inner: inner_type }, s);
     const unwrapped = apply(s, inner_type);
     const fail_eff: Effect = { kind: "fail", error_type: UNIT };
-    const effects = row_merge(inner_r.effects, { effects: [fail_eff] });
+    let effects: EffectRow;
+    [effects, s] = this.merge_effects(inner_r.effects, { effects: [fail_eff] }, s);
     return {
       hexpr: { kind: "option_unwrap", expr: inner_r.hexpr, type: unwrapped, effects, span },
       subst: s,

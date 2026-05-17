@@ -176,16 +176,28 @@ export function row_contains(row: EffectRow, effect: Effect): boolean {
   return row.effects.some(e => effects_equal(e, effect));
 }
 
-export function row_merge(a: EffectRow, b: EffectRow): EffectRow {
+export interface RowMergeResult {
+  row: EffectRow;
+  tails_to_unify?: [number, number];
+}
+
+export function row_merge(a: EffectRow, b: EffectRow): RowMergeResult {
   const merged: Effect[] = [...a.effects];
   for (const eff of b.effects) {
     if (!merged.some(e => effects_equal(e, eff))) {
       merged.push(eff);
     }
   }
-  // If either row is open, the merged row is open
-  const tail = a.tail ?? b.tail;
-  return tail !== undefined ? { effects: merged, tail } : { effects: merged };
+  let tail: number | undefined;
+  let tails_to_unify: [number, number] | undefined;
+  if (a.tail !== undefined && b.tail !== undefined && a.tail !== b.tail) {
+    tail = a.tail;
+    tails_to_unify = [a.tail, b.tail];
+  } else {
+    tail = a.tail ?? b.tail;
+  }
+  const row: EffectRow = tail !== undefined ? { effects: merged, tail } : { effects: merged };
+  return tails_to_unify ? { row, tails_to_unify } : { row };
 }
 
 export function effects_equal(a: Effect, b: Effect): boolean {
@@ -224,6 +236,7 @@ export function types_equal(a: Type, b: Type): boolean {
       const bf = b as FnType;
       if (a.params.length !== bf.params.length) return false;
       if (a.effects.effects.length !== bf.effects.effects.length) return false;
+      if (a.effects.tail !== bf.effects.tail) return false;
       return a.params.every((p, i) => types_equal(p, bf.params[i])) &&
         types_equal(a.return_type, bf.return_type) &&
         a.effects.effects.every((e, i) => effects_equal(e, bf.effects.effects[i]));

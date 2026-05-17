@@ -51,6 +51,7 @@ const cases: TestCase[] = [
   { file: "option_try.ring", expected: "42\n" },
   { file: "option_or.ring", expected: "141\n" },
   { file: "catch_typed.ring", expected: "99\n" },
+  { file: "match_wildcard.ring", expected: "yes\nno\nother\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -62,6 +63,7 @@ describe("e2e: ring run", () => {
       const output = execSync(`node "${CLI_PATH}" run "${filePath}"`, {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000,
       });
 
       assert.strictEqual(output, tc.expected);
@@ -76,6 +78,7 @@ describe("e2e: ring check", () => {
       const output = execSync(`node "${CLI_PATH}" check "${filePath}"`, {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000,
       });
 
       assert.strictEqual(output.trim(), "OK");
@@ -95,6 +98,7 @@ describe("e2e: ring build", () => {
       execSync(`node "${CLI_PATH}" build "${filePath}"`, {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000,
       });
 
       assert.ok(fs.existsSync(outPath), `Output file not created: ${outPath}`);
@@ -103,6 +107,7 @@ describe("e2e: ring build", () => {
       const output = execSync(`node "${outPath}"`, {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000,
       });
       assert.strictEqual(output, tc.expected);
 
@@ -150,6 +155,7 @@ describe("e2e: --error-format=llm", () => {
       execSync(`node "${CLI_PATH}" check --error-format=llm "${filePath}"`, {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000,
       });
       assert.fail("Expected failure");
     } catch (err: any) {
@@ -167,6 +173,7 @@ describe("e2e: --error-format=llm", () => {
       execSync(`node "${CLI_PATH}" check --error-format=llm "${filePath}"`, {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000,
       });
       assert.fail("Expected failure");
     } catch (err: any) {

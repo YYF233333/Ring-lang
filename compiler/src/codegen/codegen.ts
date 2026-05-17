@@ -5,6 +5,8 @@ import {
   HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock, HMatchArm,
   variant_js_name, trait_dict_name, evidence_param_name,
   trait_bound_param_name, ENUM_TAG_FIELD,
+  OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
+  RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
 import { Effect, EffectRow } from "../types/index.js";
@@ -21,6 +23,11 @@ const JS_RESERVED = new Set([
   "static", "super", "switch", "synchronized", "this", "throw", "throws",
   "transient", "true", "try", "typeof", "undefined", "var", "void",
   "volatile", "while", "with", "yield",
+  // JS built-in global names — prevent user types from shadowing these
+  "Object", "Array", "Map", "Set", "String", "Number", "Boolean", "Symbol",
+  "Promise", "Error", "RegExp", "Date", "Math", "JSON", "Proxy", "Reflect",
+  "WeakMap", "WeakSet", "WeakRef", "BigInt", "ArrayBuffer", "DataView",
+  "Int8Array", "Uint8Array", "Float32Array", "Float64Array",
 ]);
 
 function safe_ident(name: string): string {
@@ -86,8 +93,8 @@ class CodeGenerator {
     this.emit_raw(RUNTIME_CODE);
 
     // Option<T> constructors
-    this.emit_raw(`function Option_some(_0) { return { _tag: "some", _0 }; }`);
-    this.emit_raw(`const Option_none = Object.freeze({ _tag: "none" });`);
+    this.emit_raw(`function Option_some(${OPTION_PAYLOAD_FIELD}) { return { ${ENUM_TAG_FIELD}: "${OPTION_SOME_TAG}", ${OPTION_PAYLOAD_FIELD} }; }`);
+    this.emit_raw(`const Option_none = Object.freeze({ ${ENUM_TAG_FIELD}: "${OPTION_NONE_TAG}" });`);
     this.emit_raw("");
 
     // Emit declarations
@@ -163,13 +170,14 @@ class CodeGenerator {
   }
 
   private emit_struct_decl(decl: HStructDecl): void {
-    const fields = decl.fields.map(f => f.name);
-    this.emit(`class ${decl.name} {`);
+    const raw_fields = decl.fields.map(f => f.name);
+    const fields = raw_fields.map(f => safe_ident(f));
+    this.emit(`class ${safe_ident(decl.name)} {`);
     this.push_indent();
     this.emit(`constructor(${fields.join(", ")}) {`);
     this.push_indent();
-    for (const f of fields) {
-      this.emit(`this.${f} = ${f};`);
+    for (let i = 0; i < raw_fields.length; i++) {
+      this.emit(`this.${raw_fields[i]} = ${fields[i]};`);
     }
     this.pop_indent();
     this.emit("}");
@@ -295,6 +303,7 @@ class CodeGenerator {
           this.emit("return;");
         }
         break;
+      default: assertNever(stmt, "emit_stmt");
     }
   }
 
@@ -421,11 +430,16 @@ class CodeGenerator {
     const has_constructor = expr.arms.some(a => a.pattern.kind === "constructor");
     if (has_constructor) {
       parts.push(`  switch (__m.${ENUM_TAG_FIELD}) {`);
+      const has_catchall = expr.arms.some(a =>
+        a.pattern.kind === "wildcard" || a.pattern.kind === "binding" || a.pattern.kind === "literal"
+      );
       for (const arm of expr.arms) {
         const arm_code = this.gen_match_arm(arm);
         parts.push(arm_code);
       }
-      parts.push("    default: __match_fail(__m);");
+      if (!has_catchall) {
+        parts.push(`    default: ${RUNTIME_MATCH_FAIL}(__m);`);
+      }
       parts.push("  }");
     } else {
       // Use if-chain for literal/binding/wildcard patterns
@@ -442,7 +456,7 @@ class CodeGenerator {
           parts.push(`  if (${cond}${guard}) { ${bindings}return ${body}; }`);
         }
       }
-      parts.push("  __match_fail(__m);");
+      parts.push(`  ${RUNTIME_MATCH_FAIL}(__m);`);
     }
 
     parts.push("})()");
@@ -479,6 +493,7 @@ class CodeGenerator {
         const body = this.gen_expr(arm.body);
         return `    /* literal ${JSON.stringify(pat.value)} */ default: return ${body};`;
       }
+      default: return assertNever(pat, "gen_match_arm");
     }
   }
 
@@ -601,11 +616,11 @@ class CodeGenerator {
       const binding = safe_ident(expr.error_binding);
       if (expr.error_type) {
         const type_name = safe_ident(expr.error_type);
-        return `(function() { const __ev_fail = { raise: (${binding}) => { throw new __EffectAbort("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail" && __e.value instanceof ${type_name}) { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
+        return `(function() { const __ev_fail = { raise: (${binding}) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT} && __e.effect === "fail" && __e.value instanceof ${type_name}) { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
       }
-      return `(function() { const __ev_fail = { raise: (${binding}) => { throw new __EffectAbort("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail") { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
+      return `(function() { const __ev_fail = { raise: (${binding}) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", ${binding}); } }; try { return ${body}; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT} && __e.effect === "fail") { const ${binding} = __e.value; return ${handler}; } throw __e; } })()`;
     } else {
-      return `(function() { const __ev_fail = { raise: (__err) => { throw new __EffectAbort("fail", undefined); } }; try { return ${body}; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail") return ${handler}; throw __e; } })()`;
+      return `(function() { const __ev_fail = { raise: (__err) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", undefined); } }; try { return ${body}; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT} && __e.effect === "fail") return ${handler}; throw __e; } })()`;
     }
   }
 
@@ -630,7 +645,7 @@ class CodeGenerator {
         const is_abort = effect_name === "fail" && h.op_name === "raise";
         if (is_abort) {
           has_abort = true;
-          entries.push(`${h.op_name}: (${params}) => { throw new __EffectAbort("${effect_name}", ${body}); }`);
+          entries.push(`${h.op_name}: (${params}) => { throw new ${RUNTIME_EFFECT_ABORT}("${effect_name}", ${body}); }`);
         } else {
           entries.push(`${h.op_name}: (${params}) => (${body})`);
         }
@@ -646,7 +661,7 @@ class CodeGenerator {
     const decls = ev_decls.join(" ");
 
     if (has_abort) {
-      return `(function() { ${decls} try { return ${body_code}; } catch (__e) { if (__e instanceof __EffectAbort) return __e.value; throw __e; } })()`;
+      return `(function() { ${decls} try { return ${body_code}; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT}) return __e.value; throw __e; } })()`;
     } else {
       return `(function() { ${decls} return ${body_code}; })()`;
     }
@@ -678,17 +693,17 @@ class CodeGenerator {
   private gen_option_or(expr: HExpr & { kind: "option_or" }): string {
     const inner = this.gen_expr(expr.expr);
     const def = this.gen_expr(expr.default_value);
-    return `((v) => v._tag === "some" ? v._0 : ${def})(${inner})`;
+    return `((v) => v.${ENUM_TAG_FIELD} === "${OPTION_SOME_TAG}" ? v.${OPTION_PAYLOAD_FIELD} : ${def})(${inner})`;
   }
 
   private gen_try_block(expr: HExpr & { kind: "try_block" }): string {
     const body = this.gen_expr(expr.body);
-    return `(function() { const __ev_fail = { raise: (__err) => { throw new __EffectAbort("fail", __err); } }; try { return { _tag: "some", _0: ${body} }; } catch (__e) { if (__e instanceof __EffectAbort && __e.effect === "fail") return { _tag: "none" }; throw __e; } })()`;
+    return `(function() { const __ev_fail = { raise: (__err) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", __err); } }; try { return { ${ENUM_TAG_FIELD}: "${OPTION_SOME_TAG}", ${OPTION_PAYLOAD_FIELD}: ${body} }; } catch (__e) { if (__e instanceof ${RUNTIME_EFFECT_ABORT} && __e.effect === "fail") return { ${ENUM_TAG_FIELD}: "${OPTION_NONE_TAG}" }; throw __e; } })()`;
   }
 
   private gen_option_unwrap(expr: HExpr & { kind: "option_unwrap" }): string {
     const inner = this.gen_expr(expr.expr);
-    return `((v) => v._tag === "some" ? v._0 : ${evidence_param_name("fail")}.raise(undefined))(${inner})`;
+    return `((v) => v.${ENUM_TAG_FIELD} === "${OPTION_SOME_TAG}" ? v.${OPTION_PAYLOAD_FIELD} : ${evidence_param_name("fail")}.raise(undefined))(${inner})`;
   }
 
   private gen_effect_op(expr: HExpr & { kind: "effect_op" }): string {
@@ -708,6 +723,7 @@ function effect_name(e: Effect): string {
     case "fail": return "fail";
     case "mut": return "mut";
     case "custom": return e.name;
+    default: return assertNever(e, "effect_name");
   }
 }
 

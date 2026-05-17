@@ -1221,7 +1221,6 @@ export class Parser {
   }
 
   private synchronize(): void {
-    this.advance();
     while (!this.at_end()) {
       const tok = this.peek();
       if (

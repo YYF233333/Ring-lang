@@ -374,3 +374,12 @@ export function trait_bound_param_name(type_param: string, trait_name: string): 
 
 // JS codegen enum discriminator field name
 export const ENUM_TAG_FIELD = "_tag";
+
+// Option<T> codegen constants
+export const OPTION_SOME_TAG = "some";
+export const OPTION_NONE_TAG = "none";
+export const OPTION_PAYLOAD_FIELD = "_0";
+
+// Runtime class/function names (shared between runtime.ts and codegen.ts)
+export const RUNTIME_EFFECT_ABORT = "__EffectAbort";
+export const RUNTIME_MATCH_FAIL = "__match_fail";

@@ -58,6 +58,38 @@ $result = ($raw | ConvertFrom-Json).result
 
 **Parallel dispatch:** DS runs as isolated processes — safe to `Start-Job` multiple calls.
 
+## Timeout Policy
+
+**NEVER set a timeout on DS PowerShell calls.** DS V4 Pro processes large codebases (1M context) and may take 10-20+ minutes for thorough audits. Setting a timeout causes premature termination and wastes the entire API call cost.
+
+- Do NOT pass `-timeout` to the PowerShell tool when invoking ds-claude.ps1
+- If you must set a timeout, use **minimum 1200000ms (20 minutes)**
+- Default PowerShell 2-minute timeout is insufficient — always override with `timeout: 1200000` or omit entirely
+
+## Liveness Check
+
+DS API calls can hang indefinitely. **Every 10 minutes**, check each running DS agent's liveness:
+
+```powershell
+# Check output file tail — if unchanged since last check, the process is likely hung
+Get-Content "<output_file>" -Tail 3
+# Check if the spawned powershell process is still alive
+Get-Process powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | Select-Object Id, StartTime, @{N='RunMin';E={[math]::Round(((Get-Date) - $_.StartTime).TotalMinutes, 1)}}
+```
+
+**Decision logic:**
+1. If output file has new content since last check → alive, keep waiting
+2. If output file unchanged AND process running > 20 min → likely hung, kill process and re-dispatch
+3. If process no longer exists but no completion notification → crashed, re-dispatch
+4. If output file has final JSON result → completed, read result
+
+**Kill a hung DS process:**
+```powershell
+Stop-Process -Id <PID> -Force
+```
+
+**IMPORTANT:** Track the dispatch timestamp for each DS agent. Set a reminder or check proactively — do not rely solely on background task notifications, as a hung API call will never produce one.
+
 ## Red Flags — You're Avoiding DS
 
 - Dispatching Explore for pure information gathering with no write need
