@@ -1,5 +1,7 @@
 // Ring-lang Lexer — hand-written tokenizer
 import { Position, Span } from "../ast/index.js";
+import { DiagnosticSink, CollectingSink, make_diagnostic } from "../diagnostics/index.js";
+import { E } from "../diagnostics/codes.js";
 
 // ============================================================
 // Token types
@@ -83,6 +85,7 @@ export enum TokenKind {
 
   // Special
   Eof = "eof",
+  Error = "error_token",
 }
 
 const KEYWORDS: Record<string, TokenKind> = {
@@ -128,12 +131,14 @@ export class Lexer {
   private pos: number = 0;
   private line: number = 1;
   private column: number = 0;
+  private sink: DiagnosticSink;
 
   // For string interpolation: brace depth tracking
   private interp_brace_depth: number[] = [];
 
-  constructor(source: string, file: string = "<stdin>") {
+  constructor(source: string, file: string = "<stdin>", sink?: DiagnosticSink) {
     this.source = source;
+    this.sink = sink ?? new CollectingSink();
     this.file = file;
   }
 
@@ -255,7 +260,10 @@ export class Lexer {
         this.advance();
       }
     }
-    throw new Error(`Unterminated string literal starting at ${start.line}:${start.column}`);
+    const end = this.current_position();
+    const span: Span = { file: this.file, start, end };
+    this.sink.report(make_diagnostic(E.E0102, "error", "Unterminated string literal", span, { kind: "parse_error", token: value }));
+    return this.make_token(TokenKind.Error, value, start, end);
   }
 
   private lex_raw_string(start: Position): Token {
@@ -285,7 +293,10 @@ export class Lexer {
       value += ch;
       this.advance();
     }
-    throw new Error(`Unterminated raw string literal starting at ${start.line}:${start.column}`);
+    const span: Span = { file: this.file, start, end: this.current_position() };
+    this.sink.report(make_diagnostic(E.E0102, "error", "Unterminated raw string literal", span, { kind: "parse_error", token: value }));
+    const end = this.current_position();
+    return this.make_token(TokenKind.Error, value, start, end);
   }
 
   // ============================================================
@@ -395,12 +406,18 @@ export class Lexer {
         return this.make_token(TokenKind.Gt, ">", start);
       case "&":
         if (this.peek() === "&") { this.advance(); return this.make_token(TokenKind.AmpAmp, "&&", start); }
-        throw new Error(`Unexpected character '&' at ${start.line}:${start.column} (use '&&' for logical AND)`);
+        { const tok = this.make_token(TokenKind.Error, "&", start);
+          this.sink.report(make_diagnostic(E.E0101, "error", "Unexpected character '&' (use '&&' for logical AND)", tok.span, { kind: "parse_error", token: "&" }));
+          return tok; }
       case "|":
         if (this.peek() === "|") { this.advance(); return this.make_token(TokenKind.PipePipe, "||", start); }
-        throw new Error(`Unexpected character '|' at ${start.line}:${start.column} (use '||' for logical OR)`);
+        { const tok = this.make_token(TokenKind.Error, "|", start);
+          this.sink.report(make_diagnostic(E.E0101, "error", "Unexpected character '|' (use '||' for logical OR)", tok.span, { kind: "parse_error", token: "|" }));
+          return tok; }
       default:
-        throw new Error(`Unexpected character '${ch}' at ${start.line}:${start.column}`);
+        { const tok = this.make_token(TokenKind.Error, ch, start);
+          this.sink.report(make_diagnostic(E.E0101, "error", `Unexpected character '${ch}'`, tok.span, { kind: "parse_error", token: ch }));
+          return tok; }
     }
   }
 

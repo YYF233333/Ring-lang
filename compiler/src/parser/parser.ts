@@ -79,9 +79,10 @@ export class Parser {
   }
 
   static parse(source: string, file: string = "<stdin>", sink?: DiagnosticSink): Program {
-    const lexer = new Lexer(source, file);
+    const shared_sink = sink ?? new CollectingSink();
+    const lexer = new Lexer(source, file, shared_sink);
     const tokens = lexer.tokenize();
-    const parser = new Parser(tokens, file, sink);
+    const parser = new Parser(tokens, file, shared_sink);
     return parser.parse_program();
   }
 
@@ -93,6 +94,7 @@ export class Parser {
     const start = this.current_span_start();
     const decls: Decl[] = [];
     while (!this.at_end()) {
+      if (this.peek().kind === TokenKind.Error) { this.advance(); continue; }
       try {
         decls.push(this.parse_decl());
       } catch (e) {
