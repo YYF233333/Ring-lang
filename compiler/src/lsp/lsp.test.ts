@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 import { span_to_range, position_to_lsp, offset_to_position } from "./utils.js";
+import { DocumentManager } from "./document-manager.js";
 
 describe("LSP utils", () => {
   describe("position_to_lsp", () => {
@@ -44,5 +45,45 @@ describe("LSP utils", () => {
       const pos = offset_to_position("hello\nworld", 5);
       assert.deepStrictEqual(pos, { line: 0, character: 5 });
     });
+  });
+});
+
+describe("DocumentManager", () => {
+  test("open document triggers compilation", () => {
+    const dm = new DocumentManager();
+    const source = `fn main() -> Int { 42 }`;
+    dm.open("file:///test.ring", 1, source);
+    const state = dm.get("file:///test.ring");
+    assert.ok(state);
+    assert.equal(state.source, source);
+    assert.ok(state.diagnostics.length === 0);
+    assert.ok(state.checkResult !== null);
+  });
+
+  test("open document with error produces diagnostics", () => {
+    const dm = new DocumentManager();
+    const source = `fn main() -> Int { x }`;
+    dm.open("file:///test.ring", 1, source);
+    const state = dm.get("file:///test.ring");
+    assert.ok(state);
+    assert.ok(state.diagnostics.length > 0);
+  });
+
+  test("update document recompiles", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int { 1 }`);
+    dm.update("file:///test.ring", 2, `fn main() -> Int { 2 }`);
+    const state = dm.get("file:///test.ring");
+    assert.ok(state);
+    assert.equal(state.source, `fn main() -> Int { 2 }`);
+    assert.equal(state.version, 2);
+  });
+
+  test("close document removes state", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int { 1 }`);
+    dm.close("file:///test.ring");
+    const state = dm.get("file:///test.ring");
+    assert.equal(state, undefined);
   });
 });
