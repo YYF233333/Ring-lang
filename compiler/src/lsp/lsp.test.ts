@@ -4,8 +4,9 @@ import { span_to_range, position_to_lsp, offset_to_position } from "./utils.js";
 import { DocumentManager } from "./document-manager.js";
 import { convert_diagnostics } from "./features/diagnostics.js";
 import { get_hover } from "./features/hover.js";
+import { get_completions } from "./features/completion.js";
 import { make_diagnostic } from "../diagnostics/index.js";
-import { DiagnosticSeverity } from "vscode-languageserver";
+import { DiagnosticSeverity, CompletionItem } from "vscode-languageserver";
 
 describe("LSP utils", () => {
   describe("position_to_lsp", () => {
@@ -174,5 +175,49 @@ describe("Hover feature", () => {
     const state = dm.get("file:///test.ring")!;
     const result = get_hover(state, { line: 0, character: 3 });
     assert.equal(result, null);
+  });
+});
+
+describe("Completion feature", () => {
+  test("completes variables in scope", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int {\n  let count = 42\n  c\n}`);
+    const state = dm.get("file:///test.ring")!;
+    const items = get_completions(state, { line: 2, character: 3 });
+    const labels = items.map((i: CompletionItem) => i.label);
+    assert.ok(labels.includes("count"));
+  });
+
+  test("completes keywords", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int {\n  l\n}`);
+    const state = dm.get("file:///test.ring")!;
+    const items = get_completions(state, { line: 1, character: 3 });
+    const labels = items.map((i: CompletionItem) => i.label);
+    assert.ok(labels.includes("let"));
+  });
+
+  test("completes struct fields after dot", () => {
+    const dm = new DocumentManager();
+    // Source must be valid (parses + type-checks) so checkResult is available.
+    // Cursor is placed right after the dot in `p.x` — the prefix on that line
+    // is "  p." which triggers dot completion.
+    const src = `struct Point { x: Int, y: Int }\nfn main() -> Int {\n  let p = Point { x: 1, y: 2 }\n  p.x\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // Line 3 (0-based), character 4 = position right after "  p." (before "x")
+    const items = get_completions(state, { line: 3, character: 4 });
+    const labels = items.map((i: CompletionItem) => i.label);
+    assert.ok(labels.includes("x"));
+    assert.ok(labels.includes("y"));
+  });
+
+  test("completes builtin functions", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int {\n  pri\n}`);
+    const state = dm.get("file:///test.ring")!;
+    const items = get_completions(state, { line: 1, character: 5 });
+    const labels = items.map((i: CompletionItem) => i.label);
+    assert.ok(labels.includes("print"));
   });
 });
