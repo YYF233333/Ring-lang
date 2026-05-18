@@ -1,0 +1,42 @@
+import { Position as RingPosition, Span } from "../ast/index.js";
+import { Position as LspPosition, Range } from "vscode-languageserver";
+import { Type, EffectRow, type_to_string, effect_row_to_string } from "../types/index.js";
+
+export function position_to_lsp(pos: RingPosition): LspPosition {
+  return { line: pos.line - 1, character: pos.column };
+}
+
+export function span_to_range(span: Span): Range {
+  return {
+    start: position_to_lsp(span.start),
+    end: position_to_lsp(span.end),
+  };
+}
+
+export function lsp_to_ring_position(pos: LspPosition, source: string): RingPosition {
+  const lines = source.split("\n");
+  let offset = 0;
+  for (let i = 0; i < pos.line && i < lines.length; i++) {
+    offset += lines[i].length + 1;
+  }
+  offset += pos.character;
+  return { line: pos.line + 1, column: pos.character, offset };
+}
+
+export function offset_to_position(source: string, offset: number): LspPosition {
+  let line = 0;
+  let last_line_start = 0;
+  for (let i = 0; i < offset && i < source.length; i++) {
+    if (source[i] === "\n") {
+      line++;
+      last_line_start = i + 1;
+    }
+  }
+  return { line, character: offset - last_line_start };
+}
+
+export function format_type_for_hover(type: Type, effects: EffectRow): string {
+  const type_str = type_to_string(type);
+  const eff_str = effect_row_to_string(effects);
+  return eff_str ? `${type_str} / ${eff_str}` : type_str;
+}
