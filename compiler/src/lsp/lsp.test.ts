@@ -346,6 +346,62 @@ describe("Code Actions", () => {
   });
 });
 
+describe("Regression: references on let/var binding name", () => {
+  test("finds references when cursor is on let binding name", () => {
+    const dm = new DocumentManager();
+    const src = `fn main() -> Int {\n  let pt = 10\n  pt + 1\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // Cursor on "pt" in "let pt = 10" — line 1 (0-based), char 6
+    const refs = get_references(state, { line: 1, character: 6 });
+    assert.ok(refs.length >= 2, `expected >=2 refs for pt, got ${refs.length}`);
+  });
+
+  test("definition works when cursor is on let binding name", () => {
+    const dm = new DocumentManager();
+    const src = `fn main() -> Int {\n  let pt = 10\n  pt + 1\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_definition(state, { line: 1, character: 6 });
+    assert.ok(result, "expected definition result for let binding");
+  });
+});
+
+describe("Regression: hover type display quality", () => {
+  test("hover shows effect in function signature", () => {
+    const dm = new DocumentManager();
+    const src = `fn read_it() -> Str { io.read("f") }`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_hover(state, { line: 0, character: 4 });
+    assert.ok(result);
+    const text = typeof result.contents === "string" ? result.contents : result.contents.toString();
+    assert.ok(text.includes("io"), `expected io in hover, got: ${text}`);
+  });
+
+  test("hover on generic function param shows T, not ?N", () => {
+    const dm = new DocumentManager();
+    const src = `trait Show { fn show(self) -> Str }\nfn display<T: Show>(x: T) -> Str { x.show() }`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // Hover on "x" in body — line 1, char 36 ("x" in "x.show()")
+    const result = get_hover(state, { line: 1, character: 36 });
+    assert.ok(result);
+    const text = typeof result.contents === "string" ? result.contents : result.contents.toString();
+    assert.ok(text.includes("T"), `expected T in hover, got: ${text}`);
+    assert.ok(!text.includes("?"), `unexpected ?N in hover: ${text}`);
+  });
+
+  test("hover does not include range (avoids over-highlight)", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int { 42 }`);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_hover(state, { line: 0, character: 4 });
+    assert.ok(result);
+    assert.equal(result.range, undefined);
+  });
+});
+
 const __lsp_test_filename = fileURLToPath(import.meta.url);
 const __lsp_test_dirname = path.dirname(__lsp_test_filename);
 const LSP_CLI_PATH = __lsp_test_dirname.includes("dist")

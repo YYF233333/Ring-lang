@@ -3,8 +3,9 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { Parser } from "../parser/parser.js";
 import { check } from "./checker.js";
-import { HFnDecl, HTestDecl, HProgram } from "../hir/index.js";
+import { HFnDecl, HImplDecl, HTestDecl, HProgram } from "../hir/index.js";
 import { CollectingSink, Diagnostic } from "../diagnostics/index.js";
+import { type_to_string, effect_row_to_string } from "../types/index.js";
 
 // Helper: parse and check, return the HProgram
 function check_source(source: string): HProgram {
@@ -362,6 +363,84 @@ describe("Type Checker", () => {
     it("accepts Unit as return type annotation", () => {
       const fn_decl = check_fn("fn noop() -> Unit { }");
       assert.equal(fn_decl.return_type.kind, "unit");
+    });
+  });
+
+  describe("zonk: type variables resolved in HIR (regression)", () => {
+    it("body expressions have concrete types, not ?N", () => {
+      const program = check_source("fn main() -> Int {\n  let x = 42\n  x + 1\n}");
+      const fn_decl = program.decls.find(d => d.kind === "fn_decl") as HFnDecl;
+      const tail = fn_decl.body.tail!;
+      assert.equal(type_to_string(tail.type), "Int");
+      assert.ok(!type_to_string(tail.type).includes("?"));
+    });
+
+    it("generic type params display as names, not ?N", () => {
+      const program = check_source(
+        "trait Show { fn show(self) -> Str }\n" +
+        "fn display<T: Show>(x: T) -> Str { x.show() }"
+      );
+      const fn_decl = program.decls.find(
+        d => d.kind === "fn_decl" && d.name === "display"
+      ) as HFnDecl;
+      assert.equal(type_to_string(fn_decl.params[0].type), "T");
+    });
+
+    it("generic body uses function param name T, not trait Self", () => {
+      const program = check_source(
+        "trait Greetable { fn greet(self) -> Str }\n" +
+        "struct User { name: Str }\n" +
+        "impl Greetable for User { fn greet(self) -> Str { self.name } }\n" +
+        "fn show<T: Greetable>(x: T) -> Str { x.greet() }"
+      );
+      const fn_decl = program.decls.find(
+        d => d.kind === "fn_decl" && d.name === "show"
+      ) as HFnDecl;
+      const tail = fn_decl.body.tail!;
+      assert.equal(tail.kind, "call");
+      if (tail.kind === "call") {
+        const callee_type = type_to_string(tail.callee.type);
+        assert.ok(callee_type.includes("T"), `expected T in callee type, got: ${callee_type}`);
+        assert.ok(!callee_type.includes("Self"), `unexpected Self in callee type: ${callee_type}`);
+      }
+    });
+
+    it("impl method self param resolved to target type", () => {
+      const program = check_source(
+        "trait Greetable { fn greet(self) -> Str }\n" +
+        "struct User { name: Str }\n" +
+        "impl Greetable for User { fn greet(self) -> Str { self.name } }"
+      );
+      const impl_decl = program.decls.find(d => d.kind === "impl_decl") as HImplDecl;
+      const greet = impl_decl.methods[0];
+      assert.equal(type_to_string(greet.params[0].type), "User");
+    });
+
+    it("effect rows preserved on function declarations", () => {
+      const program = check_source(
+        "fn read_it() -> Str { io.read(\"f\") }"
+      );
+      const fn_decl = program.decls.find(d => d.kind === "fn_decl") as HFnDecl;
+      const eff = effect_row_to_string(fn_decl.effects);
+      assert.ok(eff.includes("io"), `expected io effect, got: ${eff}`);
+    });
+
+    it("row variable tails display as names, not ?N", () => {
+      const program = check_source(
+        "fn get_name(r: {name: Str, ..rest}) -> Str { r.name }"
+      );
+      const fn_decl = program.decls.find(d => d.kind === "fn_decl") as HFnDecl;
+      const param_type = type_to_string(fn_decl.params[0].type);
+      assert.ok(param_type.includes("rest"), `expected ..rest, got: ${param_type}`);
+      assert.ok(!param_type.includes("?"), `unexpected ?N in: ${param_type}`);
+    });
+
+    it("Option return type displays as T?", () => {
+      const program = check_source(
+        "fn find(x: Int) -> Int? { if x > 0 { some(x) } else { none } }"
+      );
+      const fn_decl = program.decls.find(d => d.kind === "fn_decl") as HFnDecl;
+      assert.equal(type_to_string(fn_decl.return_type), "Int?");
     });
   });
 });
