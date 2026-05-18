@@ -414,8 +414,23 @@ class CodeGenerator {
         this.pop_indent();
         this.emit("}");
         return;
-      case "for_in_stmt":
-        throw new Error(`${stmt.kind} codegen not yet implemented`);
+      case "for_in_stmt": {
+        if (stmt.iterable.kind === "range") {
+          const start_js = this.gen_expr(stmt.iterable.start);
+          const end_js = this.gen_expr(stmt.iterable.end);
+          const binding = safe_ident(stmt.binding);
+          this.emit(`for (let ${binding} = ${start_js}; ${binding} < ${end_js}; ${binding}++) {`);
+        } else {
+          const iter = this.gen_expr(stmt.iterable);
+          const binding = safe_ident(stmt.binding);
+          this.emit(`for (const ${binding} of ${iter}) {`);
+        }
+        this.push_indent();
+        this.emit_block_in_stmt_context(stmt.body, "discard");
+        this.pop_indent();
+        this.emit("}");
+        return;
+      }
       case "break_stmt":
         this.emit("break;");
         return;
@@ -490,7 +505,7 @@ class CodeGenerator {
       case "option_or":
         return this.gen_option_or(expr);
       case "range":
-        throw new Error("range codegen not yet implemented");
+        return `{ start: ${this.gen_expr(expr.start)}, end: ${this.gen_expr(expr.end)} }`;
       default:
         return assertNever(expr, "gen_expr");
     }

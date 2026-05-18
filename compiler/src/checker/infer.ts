@@ -18,7 +18,7 @@ import {
 } from "../types/index.js";
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
-  HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt,
+  HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt, HForInStmt,
   variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
 import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
@@ -890,8 +890,47 @@ export class InferEngine {
           effects: while_effects,
         };
       }
-      case "for_in_stmt":
-        throw new Error(`${stmt.kind} not yet implemented in checker`);
+      case "for_in_stmt": {
+        const iter_r = this.infer_expr(stmt.iterable, subst);
+        let s = iter_r.subst;
+        const iter_type = apply(s, iter_r.hexpr.type);
+        let element_type: Type;
+        if (iter_type.kind === "enum" && iter_type.name === "Range" && iter_type.type_params.length > 0) {
+          element_type = iter_type.type_params[0];
+        } else {
+          this.type_error(
+            E.E0301,
+            `for..in requires an iterable type, got ${type_to_string(iter_type)}`,
+            stmt.iterable.span,
+            { kind: "other", detail: "Currently only range expressions (e.g., 0..10) are supported as iterables" }
+          );
+        }
+        this.env.push_scope();
+        this.env.bind_mono(stmt.binding, element_type);
+        const binding_scheme = this.env.lookup(stmt.binding)!;
+        this.env.record_def_span(binding_scheme.def_id!, stmt.binding_span);
+        this.loop_depth++;
+        const body_r = this.infer_block(stmt.body, s);
+        this.loop_depth--;
+        this.env.pop_scope();
+        s = body_r.subst;
+        let for_effects: EffectRow;
+        [for_effects, s] = this.merge_effects(iter_r.effects, body_r.effects, s);
+        const hfor: HForInStmt = {
+          kind: "for_in_stmt",
+          binding: stmt.binding,
+          binding_span: stmt.binding_span,
+          def_id: binding_scheme.def_id,
+          iterable: iter_r.hexpr,
+          body: body_r.hexpr as HBlock,
+          span: stmt.span,
+        };
+        return {
+          hstmt: hfor,
+          subst: s,
+          effects: for_effects,
+        };
+      }
       case "break_stmt": {
         if (this.loop_depth === 0) {
           this.type_error(E.E0206, "'break' can only be used inside a loop", stmt.span, { kind: "other", detail: "break outside loop" });
@@ -979,8 +1018,23 @@ export class InferEngine {
         return this.infer_option_unwrap(expr.expr, expr.span, subst);
       case "try_block":
         return this.infer_try_block(expr.body, expr.span, subst);
-      case "range":
-        throw new Error("range expression not yet implemented in checker");
+      case "range": {
+        const start_r = this.infer_expr(expr.start, subst);
+        let s = this.unify_at(start_r.hexpr.type, INT, start_r.subst, expr.start.span);
+        const end_r = this.infer_expr(expr.end, s);
+        s = this.unify_at(end_r.hexpr.type, INT, end_r.subst, expr.end.span);
+        let range_effects: EffectRow;
+        [range_effects, s] = this.merge_effects(start_r.effects, end_r.effects, s);
+        const range_type: Type = { kind: "enum", name: "Range", type_params: [INT], variants: [] };
+        return {
+          hexpr: {
+            kind: "range", start: start_r.hexpr, end: end_r.hexpr,
+            type: range_type, effects: range_effects, span: expr.span,
+          },
+          subst: s,
+          effects: range_effects,
+        };
+      }
       default:
         return assertNever(expr, "infer_expr");
     }

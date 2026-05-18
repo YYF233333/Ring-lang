@@ -75,6 +75,9 @@ const cases: TestCase[] = [
   { file: "return_if.ring", expected: "5\n3\npositive\nnegative\nzero\n" },
   { file: "while_basic.ring", expected: "10\n" },
   { file: "break_continue.ring", expected: "7\n" },
+  { file: "for_range.ring", expected: "10\n" },
+  { file: "for_range_nested.ring", expected: "9\n" },
+  { file: "for_range_break.ring", expected: "10\n" },
 ];
 
 describe("e2e: ring run", () => {

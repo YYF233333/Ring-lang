@@ -2,10 +2,11 @@
 import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
   Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt, BreakStmt, ContinueStmt,
+  ForInStmt,
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
   BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
   StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
-  OrExpr, CatchExpr, HandleExpr, LambdaExpr, OptionUnwrapExpr, TryBlockExpr,
+  OrExpr, CatchExpr, HandleExpr, LambdaExpr, OptionUnwrapExpr, TryBlockExpr, RangeExpr,
   BinOp, UnaryOp,
   TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr, RecordTypeExpr, RecordTypeField,
   Pattern, WildcardPattern, BindingPattern, ConstructorPattern, LiteralPattern,
@@ -30,10 +31,11 @@ const enum Prec {
   LogicAnd = 4,   // &&
   Equality = 5,   // == !=
   Compare = 6,    // < > <= >=
-  AddSub = 7,     // + -
-  MulDiv = 8,     // * / %
-  Unary = 9,      // - !
-  Postfix = 10,   // . () []
+  Range = 7,      // ..
+  AddSub = 8,     // + -
+  MulDiv = 9,     // * / %
+  Unary = 10,     // - !
+  Postfix = 11,   // . () []
 }
 
 function infix_precedence(kind: TokenKind): Prec {
@@ -48,6 +50,7 @@ function infix_precedence(kind: TokenKind): Prec {
     case TokenKind.Gt:
     case TokenKind.LtEq:
     case TokenKind.GtEq: return Prec.Compare;
+    case TokenKind.DotDot: return Prec.Range;
     case TokenKind.Plus:
     case TokenKind.Minus: return Prec.AddSub;
     case TokenKind.Star:
@@ -525,6 +528,9 @@ export class Parser {
     if (this.check(TokenKind.While)) {
       return this.parse_while_stmt();
     }
+    if (this.check(TokenKind.For)) {
+      return this.parse_for_in_stmt();
+    }
     if (this.check(TokenKind.Break)) {
       return this.parse_break_stmt();
     }
@@ -573,6 +579,26 @@ export class Parser {
     return {
       kind: "while_stmt",
       condition,
+      body,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_for_in_stmt(): ForInStmt {
+    const start = this.current_span_start();
+    this.expect(TokenKind.For);
+    const name_tok = this.expect(TokenKind.Ident);
+    const binding = name_tok.value;
+    const binding_span = name_tok.span;
+    this.expect(TokenKind.In);
+    const iterable = this.parse_expr();
+    const body = this.parse_block_expr();
+    const end = this.current_span_start();
+    return {
+      kind: "for_in_stmt",
+      binding,
+      binding_span,
+      iterable,
       body,
       span: this.make_span(start, end),
     };
@@ -661,6 +687,12 @@ export class Parser {
       } else if (tok.kind === TokenKind.Question) {
         const q_tok = this.advance();
         left = { kind: "option_unwrap", expr: left, span: this.make_span(left.span.start, q_tok.span.end) } as OptionUnwrapExpr;
+        last_was_comparison = false;
+      } else if (tok.kind === TokenKind.DotDot) {
+        this.advance();
+        const right = this.parse_expr_bp(prec);
+        const span = this.make_span(left.span.start, right.span.end);
+        left = { kind: "range", start: left, end: right, span } as RangeExpr;
         last_was_comparison = false;
       } else {
         const is_comparison = prec === Prec.Equality || prec === Prec.Compare;
@@ -757,10 +789,6 @@ export class Parser {
     // Lambda: fn(params) -> Type { body }
     if (tok.kind === TokenKind.Fn) {
       return this.parse_lambda_expr();
-    }
-
-    if (tok.kind === TokenKind.For) {
-      throw this.error("for loops are not yet implemented");
     }
 
     // Parenthesized expression
