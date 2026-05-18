@@ -6,6 +6,7 @@ import { convert_diagnostics } from "./features/diagnostics.js";
 import { get_hover } from "./features/hover.js";
 import { get_completions } from "./features/completion.js";
 import { get_definition } from "./features/definition.js";
+import { get_references } from "./features/references.js";
 import { make_diagnostic } from "../diagnostics/index.js";
 import { DiagnosticSeverity, CompletionItem } from "vscode-languageserver";
 
@@ -252,5 +253,26 @@ describe("Definition feature", () => {
     const state = dm.get("file:///test.ring")!;
     const result = get_definition(state, { line: 0, character: 20 });
     assert.equal(result, null);
+  });
+});
+
+describe("References feature", () => {
+  test("finds all references of a variable", () => {
+    const dm = new DocumentManager();
+    const src = `fn main() -> Int {\n  let x = 10\n  let y = x + 1\n  x + y\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // Click on "x" at line 3 (0-based: 2), col 10 — this is the "x" in "x + 1"
+    const refs = get_references(state, { line: 2, character: 10 });
+    // "x" appears as HIdent in: x + 1, x + y → at least 2 usage refs
+    assert.ok(refs.length >= 2);
+  });
+
+  test("returns empty for literals", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int { 42 }`);
+    const state = dm.get("file:///test.ring")!;
+    const refs = get_references(state, { line: 0, character: 20 });
+    assert.deepStrictEqual(refs, []);
   });
 });
