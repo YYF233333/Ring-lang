@@ -74,6 +74,7 @@ const cases: TestCase[] = [
   { file: "trait_alias.ring", expected: "num\n" },
   { file: "return_if.ring", expected: "5\n3\npositive\nnegative\nzero\n" },
   { file: "while_basic.ring", expected: "10\n" },
+  { file: "break_continue.ring", expected: "7\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -153,6 +154,7 @@ describe("e2e: ring check (negative — should reject)", () => {
     { file: "error_missing_field.ring", error_pattern: "E0203" },
     { file: "error_nested_match.ring", error_pattern: "E0601" },
     { file: "error_assign_immutable.ring", error_pattern: "E0205" },
+    { file: "error_break_outside.ring", error_pattern: "E0206" },
   ];
 
   for (const tc of negative_cases) {

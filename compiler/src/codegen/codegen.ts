@@ -415,9 +415,13 @@ class CodeGenerator {
         this.emit("}");
         return;
       case "for_in_stmt":
-      case "break_stmt":
-      case "continue_stmt":
         throw new Error(`${stmt.kind} codegen not yet implemented`);
+      case "break_stmt":
+        this.emit("break;");
+        return;
+      case "continue_stmt":
+        this.emit("continue;");
+        return;
       default:
         this.emit(this.gen_stmt_inline(stmt));
     }

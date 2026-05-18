@@ -891,9 +891,27 @@ export class InferEngine {
         };
       }
       case "for_in_stmt":
-      case "break_stmt":
-      case "continue_stmt":
         throw new Error(`${stmt.kind} not yet implemented in checker`);
+      case "break_stmt": {
+        if (this.loop_depth === 0) {
+          this.type_error(E.E0206, "'break' can only be used inside a loop", stmt.span, { kind: "other", detail: "break outside loop" });
+        }
+        return {
+          hstmt: { kind: "break_stmt", span: stmt.span },
+          subst,
+          effects: EMPTY_ROW,
+        };
+      }
+      case "continue_stmt": {
+        if (this.loop_depth === 0) {
+          this.type_error(E.E0206, "'continue' can only be used inside a loop", stmt.span, { kind: "other", detail: "continue outside loop" });
+        }
+        return {
+          hstmt: { kind: "continue_stmt", span: stmt.span },
+          subst,
+          effects: EMPTY_ROW,
+        };
+      }
     }
   }
 

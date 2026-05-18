@@ -1,7 +1,7 @@
 // Ring-lang Parser — recursive descent + Pratt parsing for expressions
 import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
-  Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt,
+  Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt, BreakStmt, ContinueStmt,
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
   BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
   StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
@@ -525,6 +525,12 @@ export class Parser {
     if (this.check(TokenKind.While)) {
       return this.parse_while_stmt();
     }
+    if (this.check(TokenKind.Break)) {
+      return this.parse_break_stmt();
+    }
+    if (this.check(TokenKind.Continue)) {
+      return this.parse_continue_stmt();
+    }
 
     // Expression statement (may turn into assignment)
     const expr = this.parse_expr();
@@ -570,6 +576,22 @@ export class Parser {
       body,
       span: this.make_span(start, end),
     };
+  }
+
+  private parse_break_stmt(): BreakStmt {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Break);
+    this.try_consume(TokenKind.Semi);
+    const end = this.current_span_start();
+    return { kind: "break_stmt", span: this.make_span(start, end) };
+  }
+
+  private parse_continue_stmt(): ContinueStmt {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Continue);
+    this.try_consume(TokenKind.Semi);
+    const end = this.current_span_start();
+    return { kind: "continue_stmt", span: this.make_span(start, end) };
   }
 
   private parse_binding_stmt(mutable: boolean): LetStmt | VarStmt {
