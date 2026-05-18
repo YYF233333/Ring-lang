@@ -3,6 +3,7 @@ import { HProgram } from "../hir/index.js";
 import { DiagnosticSink, CollectingSink } from "../diagnostics/index.js";
 import { InferEngine } from "./infer.js";
 import { TypeEnv } from "./env.js";
+import { zonk_program } from "./zonk.js";
 
 export { UnificationError } from "./unify.js";
 export { TypeEnv } from "./env.js";
@@ -16,5 +17,6 @@ export function check(program: Program, sink?: DiagnosticSink): CheckResult {
   const s = sink ?? new CollectingSink();
   const engine = new InferEngine(s);
   const hprogram = engine.check(program);
-  return { program: hprogram, env: engine.env };
+  const zonked = zonk_program(engine.subst, hprogram);
+  return { program: zonked, env: engine.env };
 }

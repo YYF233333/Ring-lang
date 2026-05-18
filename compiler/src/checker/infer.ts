@@ -45,7 +45,7 @@ interface InferResult {
 
 export class InferEngine {
   public env: TypeEnv;
-  private subst: Substitution;
+  public subst: Substitution;
   private sink: DiagnosticSink;
   private type_param_scope: Map<string, Type> = new Map();
   private current_fn_return_type: Type | null = null;
