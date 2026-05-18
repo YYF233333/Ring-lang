@@ -192,6 +192,14 @@ function walk_expr(expr: HExpr, pos: Position): HoverCandidate | null {
       deeper = walk_expr(expr.start, pos) ?? walk_expr(expr.end, pos);
       break;
     }
+
+    case "list_lit": {
+      for (const el of expr.elements) {
+        const r = walk_expr(el, pos);
+        if (r) { deeper = r; break; }
+      }
+      break;
+    }
   }
 
   if (deeper) return deeper;

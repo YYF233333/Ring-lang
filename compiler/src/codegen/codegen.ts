@@ -94,6 +94,18 @@ class CodeGenerator {
     this.impl_methods.set("Cell.set", undefined);
     this.impl_methods.set("Cell.update", undefined);
 
+    // Built-in Str impl methods
+    for (const m of ["len", "contains", "starts_with", "ends_with", "slice", "trim",
+                     "to_upper", "to_lower", "replace", "split", "char_at", "index_of"]) {
+      this.impl_methods.set(`Str.${m}`, undefined);
+    }
+
+    // Built-in List non-HOF impl methods (runtime functions)
+    for (const m of ["len", "get", "first", "last", "contains", "is_empty",
+                     "push", "concat", "slice", "reverse"]) {
+      this.impl_methods.set(`List.${m}`, undefined);
+    }
+
     // Emit runtime preamble
     this.emit_raw(RUNTIME_CODE);
 
@@ -354,6 +366,8 @@ class CodeGenerator {
 
   private emit_match_stmt(expr: HExpr & { kind: "match_expr" }, mode: "return" | "discard"): void {
     const scrutinee = this.gen_expr(expr.scrutinee);
+    this.emit(`__ring_match: {`);
+    this.push_indent();
     this.emit(`const __ring_m = ${scrutinee};`);
 
     for (const arm of expr.arms) {
@@ -362,6 +376,7 @@ class CodeGenerator {
       if (cond === "true" && !arm.guard) {
         if (bindings_str) this.emit(bindings_str.trim());
         this.emit_in_stmt_context(arm.body, mode);
+        this.emit("break __ring_match;");
       } else if (arm.guard) {
         this.emit(`if (${cond}) {`);
         this.push_indent();
@@ -369,6 +384,7 @@ class CodeGenerator {
         this.emit(`if (${this.gen_expr(arm.guard)}) {`);
         this.push_indent();
         this.emit_in_stmt_context(arm.body, mode);
+        this.emit("break __ring_match;");
         this.pop_indent();
         this.emit("}");
         this.pop_indent();
@@ -378,6 +394,7 @@ class CodeGenerator {
         this.push_indent();
         if (bindings_str) this.emit(bindings_str.trim());
         this.emit_in_stmt_context(arm.body, mode);
+        this.emit("break __ring_match;");
         this.pop_indent();
         this.emit("}");
       }
@@ -389,6 +406,8 @@ class CodeGenerator {
     if (!has_catchall) {
       this.emit(`${RUNTIME_MATCH_FAIL}(__ring_m);`);
     }
+    this.pop_indent();
+    this.emit(`}`);
   }
 
   // ============================================================
@@ -508,6 +527,8 @@ class CodeGenerator {
         return this.gen_option_or(expr);
       case "range":
         return `{ start: ${this.gen_expr(expr.start)}, end: ${this.gen_expr(expr.end)} }`;
+      case "list_lit":
+        return `[${expr.elements.map(e => this.gen_expr(e)).join(", ")}]`;
       default:
         return assertNever(expr, "gen_expr");
     }
@@ -528,12 +549,44 @@ class CodeGenerator {
       return `${dict_param}.${safe_ident(meth)}(${all})`;
     }
 
+    // Inline List HOF methods — bypass runtime to forward evidence via closure capture
+    if (expr.callee.kind === "field_access") {
+      const recv_type = expr.callee.receiver.type;
+      const method = expr.callee.field;
+      if (recv_type.kind === "struct" && recv_type.name === "List") {
+        const LIST_HOF_JS: Record<string, string> = {
+          map: "map", filter: "filter", flat_map: "flatMap",
+          any: "some", all: "every",
+        };
+        const js_method = LIST_HOF_JS[method];
+        if (js_method) {
+          const receiver = this.gen_expr(expr.callee.receiver);
+          const callback = this.gen_lambda_capture_evidence(expr.args[0]);
+          return `${receiver}.${js_method}(${callback})`;
+        }
+        if (method === "fold") {
+          const receiver = this.gen_expr(expr.callee.receiver);
+          const init = this.gen_expr(expr.args[0]);
+          const callback = this.gen_lambda_capture_evidence(expr.args[1]);
+          return `${receiver}.reduce(${callback}, ${init})`;
+        }
+        if (method === "find") {
+          const receiver = this.gen_expr(expr.callee.receiver);
+          const callback = this.gen_lambda_capture_evidence(expr.args[0]);
+          return `((__r) => __r !== undefined ? { _tag: "some", _0: __r } : { _tag: "none" })(${receiver}.find(${callback}))`;
+        }
+      }
+    }
+
     // Detect UFCS method call: call(field_access(receiver, method), args)
     if (expr.callee.kind === "field_access") {
       const recv_type = expr.callee.receiver.type;
       const method = expr.callee.field;
       const type_name = recv_type.kind === "struct" ? recv_type.name
         : recv_type.kind === "enum" ? recv_type.name
+        : recv_type.kind === "str" ? "Str"
+        : recv_type.kind === "int" ? "Int"
+        : recv_type.kind === "float" ? "Float"
         : null;
       const impl_key = type_name ? `${type_name}.${method}` : null;
       if (type_name && impl_key && this.impl_methods.has(impl_key)) {
@@ -803,6 +856,22 @@ class CodeGenerator {
     return `(function(${all_params}) { return ${body}; })`;
   }
 
+  private gen_lambda_capture_evidence(expr: HExpr): string {
+    if (expr.kind === "lambda") {
+      const params = expr.params.map(p => safe_ident(p.name));
+      const body = this.gen_expr(expr.body);
+      return `(function(${params.join(", ")}) { return ${body}; })`;
+    }
+    const fn_expr = this.gen_expr(expr);
+    if (expr.type.kind === "fn") {
+      const arity = expr.type.params.length;
+      const params = Array.from({ length: arity }, (_, i) => `__ring_a${i}`);
+      const ev_args = this.get_callee_evidence_args(expr.type);
+      const all_args = ev_args ? [...params, ev_args].join(", ") : params.join(", ");
+      return `(function(${params.join(", ")}) { return ${fn_expr}(${all_args}); })`;
+    }
+    return fn_expr;
+  }
 
   private gen_option_or(expr: HExpr & { kind: "option_or" }): string {
     const inner = this.gen_expr(expr.expr);

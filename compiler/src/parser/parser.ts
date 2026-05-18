@@ -6,7 +6,7 @@ import {
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
   BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
   StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
-  OrExpr, CatchExpr, HandleExpr, LambdaExpr, OptionUnwrapExpr, TryBlockExpr, RangeExpr,
+  OrExpr, CatchExpr, HandleExpr, LambdaExpr, OptionUnwrapExpr, TryBlockExpr, RangeExpr, ListLitExpr,
   BinOp, UnaryOp,
   TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr, RecordTypeExpr, RecordTypeField,
   Pattern, WildcardPattern, BindingPattern, ConstructorPattern, LiteralPattern,
@@ -789,6 +789,26 @@ export class Parser {
     // Lambda: fn(params) -> Type { body }
     if (tok.kind === TokenKind.Fn) {
       return this.parse_lambda_expr();
+    }
+
+    // List literal: [expr, expr, ...]
+    if (tok.kind === TokenKind.LBracket) {
+      this.advance();
+      const elements: Expr[] = [];
+      if (!this.check(TokenKind.RBracket)) {
+        elements.push(this.parse_expr());
+        while (this.check(TokenKind.Comma)) {
+          this.advance();
+          if (this.check(TokenKind.RBracket)) break; // trailing comma
+          elements.push(this.parse_expr());
+        }
+      }
+      const end_tok = this.expect(TokenKind.RBracket);
+      return {
+        kind: "list_lit",
+        elements,
+        span: this.make_span(start, end_tok.span.end),
+      } as ListLitExpr;
     }
 
     // Parenthesized expression

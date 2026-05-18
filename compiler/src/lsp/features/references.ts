@@ -120,6 +120,10 @@ function collect_idents_in_expr(expr: HExpr, matches: MatchFn, uri: string, out:
       collect_idents_in_expr(expr.start, matches, uri, out);
       collect_idents_in_expr(expr.end, matches, uri, out);
       return;
+
+    case "list_lit":
+      for (const el of expr.elements) collect_idents_in_expr(el, matches, uri, out);
+      return;
   }
 }
 

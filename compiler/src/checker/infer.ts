@@ -917,12 +917,14 @@ export class InferEngine {
         let element_type: Type;
         if (iter_type.kind === "enum" && iter_type.name === "Range" && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
+        } else if (iter_type.kind === "struct" && iter_type.name === "List" && iter_type.type_params.length > 0) {
+          element_type = iter_type.type_params[0];
         } else {
           this.type_error(
             E.E0301,
-            `for..in requires an iterable type, got ${type_to_string(iter_type)}`,
+            `for..in requires an iterable type (Range or List), got ${type_to_string(iter_type)}`,
             stmt.iterable.span,
-            { kind: "other", detail: "Currently only range expressions (e.g., 0..10) are supported as iterables" }
+            { kind: "other", detail: "Supported iterables: range expressions (0..10) and List<T>" }
           );
         }
         this.env.push_scope();
@@ -1042,6 +1044,8 @@ export class InferEngine {
         return this.infer_option_unwrap(expr.expr, expr.span, subst);
       case "try_block":
         return this.infer_try_block(expr.body, expr.span, subst);
+      case "list_lit":
+        return this.infer_list_literal(expr.elements, expr.span, subst);
       case "range": {
         const start_r = this.infer_expr(expr.start, subst);
         let s = this.unify_at(start_r.hexpr.type, INT, start_r.subst, expr.start.span);
@@ -1324,6 +1328,23 @@ export class InferEngine {
         const scheme = impl_methods.get(method);
         if (scheme) {
           method_type = this.env.instantiate(scheme);
+        }
+      }
+    }
+
+    // Method lookup for primitive types (Str, Int, Float)
+    if (!method_type) {
+      const prim_name = recv_type.kind === "str" ? "Str"
+        : recv_type.kind === "int" ? "Int"
+        : recv_type.kind === "float" ? "Float"
+        : null;
+      if (prim_name) {
+        const prim_methods = this.env.impl_methods.get(prim_name);
+        if (prim_methods) {
+          const scheme = prim_methods.get(method);
+          if (scheme) {
+            method_type = this.env.instantiate(scheme);
+          }
         }
       }
     }
@@ -1987,6 +2008,41 @@ export class InferEngine {
       },
       subst: s,
       effects: EMPTY_ROW,
+    };
+  }
+
+  private infer_list_literal(elements: Expr[], span: Span, subst: Substitution): InferResult {
+    if (elements.length === 0) {
+      this.type_error(
+        E.E0301,
+        "Cannot infer element type of empty list literal; provide a type annotation",
+        span,
+        { kind: "other", detail: "Empty list literal requires context to determine element type" }
+      );
+    }
+    let s = subst;
+    const helements: HExpr[] = [];
+    let elem_type: Type = this.env.fresh_var();
+    let combined_effects: EffectRow = EMPTY_ROW;
+    for (const el of elements) {
+      const r = this.infer_expr(el, s);
+      s = r.subst;
+      s = this.unify_at(apply(s, r.hexpr.type), apply(s, elem_type), s, el.span);
+      elem_type = apply(s, elem_type);
+      helements.push(r.hexpr);
+      [combined_effects, s] = this.merge_effects(combined_effects, r.effects, s);
+    }
+    const list_type: Type = { kind: "struct", name: "List", type_params: [apply(s, elem_type)], fields: [] };
+    return {
+      hexpr: {
+        kind: "list_lit",
+        elements: helements,
+        type: list_type,
+        effects: combined_effects,
+        span,
+      },
+      subst: s,
+      effects: combined_effects,
     };
   }
 

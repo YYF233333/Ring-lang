@@ -188,6 +188,22 @@ export function option_inner(t: EnumType): Type {
 }
 
 // ============================================================
+// List<T> helper — constructs StructType "List"
+// ============================================================
+
+export function make_list_type(element: Type): StructType {
+  return { kind: "struct", name: "List", type_params: [element], fields: [] };
+}
+
+export function is_list_type(t: Type): t is StructType {
+  return t.kind === "struct" && t.name === "List";
+}
+
+export function list_element(t: StructType): Type {
+  return t.type_params[0];
+}
+
+// ============================================================
 // Effect Row helpers
 // ============================================================
 

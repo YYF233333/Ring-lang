@@ -1,6 +1,6 @@
 // Ring-lang Type Environment — scope management + builtin definitions
 import {
-  Type, TypeVar, FnType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
+  Type, TypeVar, FnType, StructType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
   make_option_type,
 } from "../types/index.js";
 import { Span } from "../ast/index.js";
@@ -106,6 +106,10 @@ export class TypeEnv {
 
   fresh_var(): TypeVar {
     return { kind: "var", id: this.next_type_var_id++ };
+  }
+
+  fresh_var_id(): number {
+    return this.next_type_var_id++;
   }
 
   fresh_def_id(): number {
@@ -229,6 +233,236 @@ export class TypeEnv {
       type: option_none_type,
       type_vars: [none_t.id], bounds: [],
     });
+
+    // ================================================================
+    // Built-in: List<T> — immutable list (JS Array backing)
+    // ================================================================
+    const list_t = this.fresh_var();
+    this.structs.set("List", {
+      name: "List",
+      type_params: ["T"],
+      type_param_vars: [list_t.id],
+      fields: [],
+    });
+
+    const list_methods = new Map<string, TypeScheme>();
+    const make_list = (tv: TypeVar): StructType => ({
+      kind: "struct", name: "List", type_params: [tv], fields: [],
+    });
+
+    // --- Read methods (pure) ---
+    {
+      const t = this.fresh_var();
+      list_methods.set("len", {
+        type: { kind: "fn", params: [make_list(t)], return_type: INT, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      list_methods.set("get", {
+        type: { kind: "fn", params: [make_list(t), INT], return_type: make_option_type(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      list_methods.set("first", {
+        type: { kind: "fn", params: [make_list(t)], return_type: make_option_type(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      list_methods.set("last", {
+        type: { kind: "fn", params: [make_list(t)], return_type: make_option_type(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      list_methods.set("contains", {
+        type: { kind: "fn", params: [make_list(t), t], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      list_methods.set("is_empty", {
+        type: { kind: "fn", params: [make_list(t)], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+
+    // --- Transform methods (pure, return new List) ---
+    {
+      const t = this.fresh_var();
+      const self_type = make_list(t);
+      list_methods.set("push", {
+        type: { kind: "fn", params: [self_type, t], return_type: self_type, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const self_type = make_list(t);
+      list_methods.set("concat", {
+        type: { kind: "fn", params: [self_type, self_type], return_type: self_type, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const self_type = make_list(t);
+      list_methods.set("slice", {
+        type: { kind: "fn", params: [self_type, INT, INT], return_type: self_type, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const self_type = make_list(t);
+      list_methods.set("reverse", {
+        type: { kind: "fn", params: [self_type], return_type: self_type, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+
+    // --- Higher-order methods (effect-polymorphic) ---
+    {
+      const t = this.fresh_var();
+      const u = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: u, effects: cb_effects };
+      list_methods.set("map", {
+        type: { kind: "fn", params: [make_list(t), cb_type], return_type: make_list(u), effects: cb_effects } as FnType,
+        type_vars: [t.id, u.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: cb_effects };
+      list_methods.set("filter", {
+        type: { kind: "fn", params: [make_list(t), cb_type], return_type: make_list(t), effects: cb_effects } as FnType,
+        type_vars: [t.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const u = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: make_list(u), effects: cb_effects };
+      list_methods.set("flat_map", {
+        type: { kind: "fn", params: [make_list(t), cb_type], return_type: make_list(u), effects: cb_effects } as FnType,
+        type_vars: [t.id, u.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const u = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [u, t], return_type: u, effects: cb_effects };
+      list_methods.set("fold", {
+        type: { kind: "fn", params: [make_list(t), u, cb_type], return_type: u, effects: cb_effects } as FnType,
+        type_vars: [t.id, u.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: cb_effects };
+      list_methods.set("any", {
+        type: { kind: "fn", params: [make_list(t), cb_type], return_type: BOOL, effects: cb_effects } as FnType,
+        type_vars: [t.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: cb_effects };
+      list_methods.set("all", {
+        type: { kind: "fn", params: [make_list(t), cb_type], return_type: BOOL, effects: cb_effects } as FnType,
+        type_vars: [t.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: cb_effects };
+      list_methods.set("find", {
+        type: { kind: "fn", params: [make_list(t), cb_type], return_type: make_option_type(t), effects: cb_effects } as FnType,
+        type_vars: [t.id, e_tail], bounds: [],
+      });
+    }
+
+    this.impl_methods.set("List", list_methods);
+
+    // ================================================================
+    // Built-in: Str methods
+    // ================================================================
+    const str_methods = new Map<string, TypeScheme>();
+
+    str_methods.set("len", {
+      type: { kind: "fn", params: [STR], return_type: INT, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("contains", {
+      type: { kind: "fn", params: [STR, STR], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("starts_with", {
+      type: { kind: "fn", params: [STR, STR], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("ends_with", {
+      type: { kind: "fn", params: [STR, STR], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("slice", {
+      type: { kind: "fn", params: [STR, INT, INT], return_type: STR, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("trim", {
+      type: { kind: "fn", params: [STR], return_type: STR, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("to_upper", {
+      type: { kind: "fn", params: [STR], return_type: STR, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("to_lower", {
+      type: { kind: "fn", params: [STR], return_type: STR, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    {
+      const list_str_type: Type = { kind: "struct", name: "List", type_params: [STR], fields: [] };
+      str_methods.set("split", {
+        type: { kind: "fn", params: [STR, STR], return_type: list_str_type, effects: EMPTY_ROW } as FnType,
+        type_vars: [], bounds: [],
+      });
+    }
+    str_methods.set("replace", {
+      type: { kind: "fn", params: [STR, STR, STR], return_type: STR, effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("char_at", {
+      type: { kind: "fn", params: [STR, INT], return_type: make_option_type(STR), effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+    str_methods.set("index_of", {
+      type: { kind: "fn", params: [STR, STR], return_type: make_option_type(INT), effects: EMPTY_ROW } as FnType,
+      type_vars: [], bounds: [],
+    });
+
+    this.impl_methods.set("Str", str_methods);
 
   }
 

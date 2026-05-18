@@ -34,4 +34,28 @@ function panic(msg) {
 function exit(code) {
   process.exit(code);
 }
+
+function Str_len(self) { return self.length; }
+function Str_contains(self, s) { return self.includes(s); }
+function Str_starts_with(self, s) { return self.startsWith(s); }
+function Str_ends_with(self, s) { return self.endsWith(s); }
+function Str_slice(self, start, end) { return self.slice(start, end); }
+function Str_trim(self) { return self.trim(); }
+function Str_to_upper(self) { return self.toUpperCase(); }
+function Str_to_lower(self) { return self.toLowerCase(); }
+function Str_replace(self, old_str, new_str) { return self.replaceAll(old_str, new_str); }
+function Str_split(self, sep) { return self.split(sep); }
+function Str_char_at(self, i) { return i >= 0 && i < self.length ? { _tag: "some", _0: self[i] } : { _tag: "none" }; }
+function Str_index_of(self, s) { var i = self.indexOf(s); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
+
+function List_len(self) { return self.length; }
+function List_get(self, i) { return i >= 0 && i < self.length ? { _tag: "some", _0: self[i] } : { _tag: "none" }; }
+function List_first(self) { return self.length > 0 ? { _tag: "some", _0: self[0] } : { _tag: "none" }; }
+function List_last(self) { return self.length > 0 ? { _tag: "some", _0: self[self.length - 1] } : { _tag: "none" }; }
+function List_contains(self, x) { return self.includes(x); }
+function List_is_empty(self) { return self.length === 0; }
+function List_push(self, x) { return [...self, x]; }
+function List_concat(self, other) { return [...self, ...other]; }
+function List_slice(self, start, end) { return self.slice(start, end); }
+function List_reverse(self) { return [...self].reverse(); }
 `;

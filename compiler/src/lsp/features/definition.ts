@@ -169,6 +169,14 @@ function find_ident_in_expr(expr: HExpr, pos: Position): IdentInfo | null {
     case "range": {
       return find_ident_in_expr(expr.start, pos) ?? find_ident_in_expr(expr.end, pos);
     }
+
+    case "list_lit": {
+      for (const el of expr.elements) {
+        const r = find_ident_in_expr(el, pos);
+        if (r !== null) return r;
+      }
+      return null;
+    }
   }
 }
 
@@ -368,6 +376,10 @@ function collect_symbols_from_ast_expr(expr: Expr, table: SymbolTable): void {
     case "range":
       collect_symbols_from_ast_expr(expr.start, table);
       collect_symbols_from_ast_expr(expr.end, table);
+      return;
+
+    case "list_lit":
+      for (const el of expr.elements) collect_symbols_from_ast_expr(el, table);
       return;
   }
 }

@@ -159,6 +159,9 @@ function walk_expr_for_receiver(expr: HExpr, pos: Position): Type | null {
 
     case "range":
       return find_receiver_type(expr.start, pos) ?? find_receiver_type(expr.end, pos);
+
+    case "list_lit":
+      return expr.elements.reduce<Type | null>((acc, e) => acc ?? find_receiver_type(e, pos), null);
   }
 }
 
@@ -249,6 +252,24 @@ function fields_and_methods_for_type(type: Type, env: TypeEnv): CompletionItem[]
     }
   } else if (type.kind === "enum") {
     const methods = env.impl_methods.get(type.name);
+    if (methods) {
+      for (const [method_name, scheme] of methods) {
+        items.push({
+          label: method_name,
+          kind: CompletionItemKind.Method,
+          detail: type_to_string(scheme.type),
+        });
+      }
+    }
+  }
+
+  // Primitive type methods (Str, Int, Float)
+  const prim_name = type.kind === "str" ? "Str"
+    : type.kind === "int" ? "Int"
+    : type.kind === "float" ? "Float"
+    : null;
+  if (prim_name) {
+    const methods = env.impl_methods.get(prim_name);
     if (methods) {
       for (const [method_name, scheme] of methods) {
         items.push({

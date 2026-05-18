@@ -30,7 +30,8 @@ export type HExpr =
   | HOptionUnwrap
   | HTryBlock
   | HOptionOr
-  | HRangeExpr;
+  | HRangeExpr
+  | HListLit;
 
 // Base fields every HExpr carries
 interface HExprBase {
@@ -202,6 +203,11 @@ export interface HRangeExpr extends HExprBase {
   kind: "range";
   start: HExpr;
   end: HExpr;
+}
+
+export interface HListLit extends HExprBase {
+  kind: "list_lit";
+  elements: HExpr[];
 }
 
 // ============================================================

@@ -155,6 +155,7 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
     case "try_block":     return { ...base, kind: "try_block", body: zonk_expr(ctx, expr.body) };
     case "option_or":     return { ...base, kind: "option_or", expr: zonk_expr(ctx, expr.expr), default_value: zonk_expr(ctx, expr.default_value) };
     case "range":         return { ...base, kind: "range", start: zonk_expr(ctx, expr.start), end: zonk_expr(ctx, expr.end) };
+    case "list_lit":      return { ...base, kind: "list_lit", elements: expr.elements.map(e => zonk_expr(ctx, e)) };
   }
 }
 

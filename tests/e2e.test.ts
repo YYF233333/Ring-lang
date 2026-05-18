@@ -78,6 +78,17 @@ const cases: TestCase[] = [
   { file: "for_range.ring", expected: "10\n" },
   { file: "for_range_nested.ring", expected: "9\n" },
   { file: "for_range_break.ring", expected: "10\n" },
+  { file: "match_multi_stmt.ring", expected: "1\n2\n3\n" },
+  // Batch 2: Str methods
+  { file: "str_methods.ring", expected: "13\ntrue\ntrue\ntrue\nHello\nHello, World!\nABC\nxyz\na_b_c\n" },
+  { file: "str_split_index.ring", expected: "3\n2\nb\n" },
+  // Batch 2: List<T>
+  { file: "list_basic.ring", expected: "3\nfalse\ntrue\n20\n10\n30\n" },
+  { file: "list_transform.ring", expected: "4\n5\n2\n2\n" },
+  { file: "list_hof.ring", expected: "5\n2\n2\ntrue\ntrue\n4\n" },
+  { file: "list_fold.ring", expected: "10\n4\n" },
+  { file: "list_for_in.ring", expected: "60\n" },
+  { file: "list_hof_effect.ring", expected: "1\n2\n3\n3\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -158,6 +169,7 @@ describe("e2e: ring check (negative — should reject)", () => {
     { file: "error_nested_match.ring", error_pattern: "E0601" },
     { file: "error_assign_immutable.ring", error_pattern: "E0205" },
     { file: "error_break_outside.ring", error_pattern: "E0206" },
+    { file: "error_empty_list.ring", error_pattern: "E0301" },
   ];
 
   for (const tc of negative_cases) {

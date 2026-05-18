@@ -135,7 +135,8 @@ export type Expr =
   | LambdaExpr
   | OptionUnwrapExpr
   | TryBlockExpr
-  | RangeExpr;
+  | RangeExpr
+  | ListLitExpr;
 
 export interface IntLitExpr {
   kind: "int_lit";
@@ -319,6 +320,12 @@ export interface RangeExpr {
   kind: "range";
   start: Expr;
   end: Expr;
+  span: Span;
+}
+
+export interface ListLitExpr {
+  kind: "list_lit";
+  elements: Expr[];
   span: Span;
 }
 
