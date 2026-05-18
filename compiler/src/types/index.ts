@@ -18,7 +18,8 @@ export type Type =
   | StructType
   | EnumType
   | GenericType
-  | RecordType;
+  | RecordType
+  | EffectRowType;
 
 export interface IntType {
   kind: "int";
@@ -102,6 +103,12 @@ export interface RecordType {
   fields: RecordField[];
   tail?: number;
   tail_name?: string;
+}
+
+export interface EffectRowType {
+  kind: "effect_row";
+  effects: Effect[];
+  tail?: number;
 }
 
 // ============================================================
@@ -294,6 +301,12 @@ export function types_equal(a: Type, b: Type): boolean {
         return match !== undefined && types_equal(f.type, match.type);
       });
     }
+    case "effect_row": {
+      const ber = b as EffectRowType;
+      if (a.effects.length !== ber.effects.length) return false;
+      if (a.tail !== ber.tail) return false;
+      return a.effects.every((e, i) => effects_equal(e, ber.effects[i]));
+    }
   }
 }
 
@@ -341,6 +354,11 @@ export function type_to_string(t: Type): string {
         return fields ? `{${fields}, ..${tail_str}}` : `{..${tail_str}}`;
       }
       return `{${fields}}`;
+    }
+    case "effect_row": {
+      const effs = t.effects.map(effect_to_string).join(", ");
+      if (t.tail !== undefined) return `<${effs}, ?${t.tail}>`;
+      return `<${effs}>`;
     }
   }
 }

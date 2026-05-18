@@ -3,7 +3,7 @@ import {
   HBlock, HStmt, HExpr, HParam,
   HMatchArm, HEffectHandler, HStructFieldInit,
 } from "../hir/index.js";
-import { Type, EffectRow } from "../types/index.js";
+import { Type, Effect, EffectRow } from "../types/index.js";
 
 export interface ZonkCtx {
   subst: Substitution;
@@ -15,20 +15,42 @@ export function zonk_type(ctx: ZonkCtx, t: Type): Type {
   return label_vars(ctx.names, resolved);
 }
 
+function label_effect(names: Map<number, string>, e: Effect): Effect {
+  switch (e.kind) {
+    case "fail":
+      return { ...e, error_type: label_vars(names, e.error_type) };
+    case "custom":
+      return { ...e, type_args: e.type_args.map(a => label_vars(names, a)) };
+    default:
+      return e;
+  }
+}
+
+function label_effect_row(names: Map<number, string>, row: EffectRow): EffectRow {
+  return {
+    effects: row.effects.map(e => label_effect(names, e)),
+    tail: row.tail,
+  };
+}
+
 function label_vars(names: Map<number, string>, t: Type): Type {
   switch (t.kind) {
     case "var":
       return names.has(t.id) ? { ...t, name: names.get(t.id) } : t;
     case "fn":
-      return { ...t, params: t.params.map(p => label_vars(names, p)), return_type: label_vars(names, t.return_type) };
+      return { ...t, params: t.params.map(p => label_vars(names, p)), return_type: label_vars(names, t.return_type), effects: label_effect_row(names, t.effects) };
     case "struct":
       return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), fields: t.fields.map(f => ({ ...f, type: label_vars(names, f.type) })) };
     case "enum":
       return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => label_vars(names, f)) })) };
     case "generic":
       return { ...t, base: label_vars(names, t.base), args: t.args.map(a => label_vars(names, a)) };
-    case "record":
-      return { ...t, fields: t.fields.map(f => ({ ...f, type: label_vars(names, f.type) })) };
+    case "record": {
+      const tail_name = t.tail !== undefined && names.has(t.tail) ? names.get(t.tail) : t.tail_name;
+      return { ...t, fields: t.fields.map(f => ({ ...f, type: label_vars(names, f.type) })), tail_name };
+    }
+    case "effect_row":
+      return { ...t, effects: t.effects.map(e => label_effect(names, e)) };
     default:
       return t;
   }
@@ -73,7 +95,7 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
     case "float_lit":  return { ...base, kind: "float_lit", value: expr.value };
     case "str_lit":    return { ...base, kind: "str_lit", value: expr.value };
     case "bool_lit":   return { ...base, kind: "bool_lit", value: expr.value };
-    case "ident":      return { ...base, kind: "ident", name: expr.name, resolved_name: expr.resolved_name, dict_closure_dicts: expr.dict_closure_dicts };
+    case "ident":      return { ...base, kind: "ident", name: expr.name, resolved_name: expr.resolved_name, def_id: expr.def_id, dict_closure_dicts: expr.dict_closure_dicts };
     case "bin_op":     return { ...base, kind: "bin_op", op: expr.op, left: zonk_expr(ctx, expr.left), right: zonk_expr(ctx, expr.right) };
     case "unary_op":   return { ...base, kind: "unary_op", op: expr.op, operand: zonk_expr(ctx, expr.operand) };
     case "call":

@@ -244,6 +244,10 @@ export class Lexer {
       }
       if (ch === "\\") {
         this.advance(); // consume backslash
+        if (this.pos >= this.source.length) {
+          value += "\\";
+          break;
+        }
         const esc = this.peek();
         this.advance();
         switch (esc) {

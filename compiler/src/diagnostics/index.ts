@@ -37,6 +37,8 @@ export interface DiagnosticSink {
   report(diagnostic: Diagnostic): void;
   has_errors(): boolean;
   diagnostics(): readonly Diagnostic[];
+  save?(): number;
+  restore?(checkpoint: number): void;
 }
 
 export class CollectingSink implements DiagnosticSink {
@@ -56,6 +58,14 @@ export class CollectingSink implements DiagnosticSink {
 
   clear(): void {
     this.items = [];
+  }
+
+  save(): number {
+    return this.items.length;
+  }
+
+  restore(checkpoint: number): void {
+    this.items.length = checkpoint;
   }
 }
 

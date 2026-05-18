@@ -61,10 +61,8 @@ export interface HBoolLit extends HExprBase {
 export interface HIdent extends HExprBase {
   kind: "ident";
   name: string;
-  // Resolved: fully-qualified name or index into environment
   resolved_name?: string;
-  // When a generic fn with trait bounds is used as a value (not directly called),
-  // this lists the dictionary names + evidence params to inject via wrapper closure
+  def_id?: number;
   dict_closure_dicts?: string[];
 }
 
@@ -165,6 +163,7 @@ export interface HHandleExpr extends HExprBase {
 export interface HParam {
   name: string;
   type: Type;
+  def_id?: number;
 }
 
 export interface HLambda extends HExprBase {
@@ -212,6 +211,8 @@ export type HStmt =
 export interface HLetStmt {
   kind: "let_stmt";
   name: string;
+  name_span: Span;
+  def_id?: number;
   type: Type;
   init: HExpr;
   span: Span;
@@ -220,6 +221,8 @@ export interface HLetStmt {
 export interface HVarStmt {
   kind: "var_stmt";
   name: string;
+  name_span: Span;
+  def_id?: number;
   type: Type;
   init: HExpr;
   span: Span;
@@ -260,6 +263,7 @@ export type HDecl =
 export interface HFnDecl {
   kind: "fn_decl";
   name: string;
+  def_id?: number;
   type_params: TypeParam[];
   params: HParam[];
   return_type: Type;

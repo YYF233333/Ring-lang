@@ -152,7 +152,7 @@ describe("codegen", () => {
         return_type: INT,
         effects: EMPTY_ROW,
         body: block([
-          { kind: "let_stmt", name: "x", type: INT, init: int_lit(42), span: S },
+          { kind: "let_stmt", name: "x", name_span: S, type: INT, init: int_lit(42), span: S },
         ], ident("x")),
         is_pub: false,
         trait_bounds: [],
@@ -171,7 +171,7 @@ describe("codegen", () => {
         return_type: INT,
         effects: EMPTY_ROW,
         body: block([
-          { kind: "var_stmt", name: "x", type: INT, init: int_lit(0), span: S },
+          { kind: "var_stmt", name: "x", name_span: S, type: INT, init: int_lit(0), span: S },
           {
             kind: "assign_stmt",
             target: ident("x"),
@@ -190,7 +190,7 @@ describe("codegen", () => {
   });
 
   describe("match expressions", () => {
-    it("generates switch for enum match", () => {
+    it("generates if-chain for enum match", () => {
       const match_expr: HExpr = {
         kind: "match_expr",
         scrutinee: ident("shape"),
@@ -223,8 +223,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("switch (__ring_m._tag)"));
-      assert.ok(js.includes('"Circle"'));
+      assert.ok(js.includes('__ring_m._tag === "Circle"'));
       assert.ok(js.includes("const r = __ring_m._0;"));
     });
 
@@ -461,7 +460,7 @@ describe("codegen", () => {
   });
 
   describe("if expressions", () => {
-    it("generates ternary", () => {
+    it("generates if statement in function body", () => {
       const expr: HExpr = {
         kind: "if_expr",
         condition: bool_lit(true),
@@ -484,7 +483,37 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("(true ? 1 : 2)"));
+      assert.ok(js.includes("if (true)"), "should generate if statement");
+      assert.ok(js.includes("return 1;"), "should return then value");
+      assert.ok(js.includes("return 2;"), "should return else value");
+    });
+
+    it("generates ternary in expression position", () => {
+      const if_expr: HExpr = {
+        kind: "if_expr",
+        condition: bool_lit(true),
+        then_branch: block([], int_lit(1)),
+        else_branch: block([], int_lit(2)),
+        type: INT,
+        effects: EMPTY_ROW,
+        span: S,
+      };
+      const decl: HFnDecl = {
+        kind: "fn_decl",
+        name: "f",
+        type_params: [],
+        params: [],
+        return_type: INT,
+        effects: EMPTY_ROW,
+        body: block([
+          { kind: "let_stmt", name: "x", name_span: S, type: INT, init: if_expr, span: S },
+        ], ident("x")),
+        is_pub: false,
+        trait_bounds: [],
+        span: S,
+      };
+      const js = generate(program([decl]));
+      assert.ok(js.includes("(true ? 1 : 2)"), "should generate ternary for let init");
     });
   });
 

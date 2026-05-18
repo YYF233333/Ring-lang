@@ -328,6 +328,7 @@ export type Stmt =
 export interface LetStmt {
   kind: "let_stmt";
   name: string;
+  name_span: Span;
   type_annotation?: TypeExpr;
   init: Expr;
   span: Span;
@@ -336,6 +337,7 @@ export interface LetStmt {
 export interface VarStmt {
   kind: "var_stmt";
   name: string;
+  name_span: Span;
   type_annotation?: TypeExpr;
   init: Expr;
   span: Span;

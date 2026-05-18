@@ -1,7 +1,7 @@
 // Ring-lang Unification Algorithm + Substitution management
 import {
   Type, EffectRow, Effect, FailEffect, CustomEffect,
-  RecordType, StructType,
+  RecordType, StructType, EffectRowType,
   type_to_string,
 } from "../types/index.js";
 
@@ -103,19 +103,25 @@ export function apply(subst: Substitution, t: Type): Type {
       }
       return tail !== undefined ? { kind: "record", fields, tail, tail_name } : { kind: "record", fields };
     }
+    case "effect_row": {
+      const row = apply_to_effect_row(subst, { effects: t.effects, tail: t.tail });
+      return { kind: "effect_row", effects: row.effects, tail: row.tail };
+    }
   }
 }
 
+function apply_to_effect(subst: Substitution, e: Effect): Effect {
+  if (e.kind === "fail") {
+    return { kind: "fail", error_type: apply(subst, e.error_type) };
+  }
+  if (e.kind === "custom") {
+    return { kind: "custom", name: e.name, type_args: e.type_args.map(a => apply(subst, a)) };
+  }
+  return e;
+}
+
 export function apply_to_effect_row(subst: Substitution, row: EffectRow): EffectRow {
-  const effects = row.effects.map(e => {
-    if (e.kind === "fail") {
-      return { kind: "fail" as const, error_type: apply(subst, e.error_type) };
-    }
-    if (e.kind === "custom") {
-      return { kind: "custom" as const, name: e.name, type_args: e.type_args.map(a => apply(subst, a)) };
-    }
-    return e;
-  });
+  const effects = row.effects.map(e => apply_to_effect(subst, e));
 
   let tail = row.tail;
   if (tail !== undefined) {
@@ -124,8 +130,13 @@ export function apply_to_effect_row(subst: Substitution, row: EffectRow): Effect
       const chased = apply(subst, resolved);
       if (chased.kind === "var") {
         tail = chased.id;
+      } else if (chased.kind === "effect_row") {
+        const merged_effects = [...effects, ...chased.effects.map(e => apply_to_effect(subst, e))];
+        return chased.tail !== undefined
+          ? { effects: merged_effects, tail: chased.tail }
+          : { effects: merged_effects };
       } else {
-        throw new Error(`apply_to_effect_row: tail var ?${row.tail} resolved to non-var type '${chased.kind}', expected var — possible unification bug`);
+        tail = undefined;
       }
     }
   }
@@ -190,6 +201,13 @@ export function occurs_in(var_id: number, t: Type, subst: Substitution): boolean
       if (resolved.tail !== undefined &&
           occurs_in(var_id, { kind: "var", id: resolved.tail } as Type, subst)) return true;
       return resolved.fields.some(f => occurs_in(var_id, f.type, subst));
+    case "effect_row":
+      if (resolved.tail !== undefined &&
+          occurs_in(var_id, { kind: "var", id: resolved.tail } as Type, subst)) return true;
+      return resolved.effects.some(e =>
+        (e.kind === "fail" && occurs_in(var_id, e.error_type, subst)) ||
+        (e.kind === "custom" && e.type_args.some(a => occurs_in(var_id, a, subst)))
+      );
   }
 }
 
@@ -252,8 +270,30 @@ export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitutio
     );
   }
 
-  if (ra.tail !== undefined && rb.tail !== undefined && ra.tail !== rb.tail) {
-    s = unify({ kind: "var", id: ra.tail }, { kind: "var", id: rb.tail }, s);
+  if (ra.tail !== undefined && rb.tail !== undefined) {
+    if (ra.tail === rb.tail) {
+      // Same tail var — unmatched effects are just extra (already tolerated above)
+    } else if (a_unmatched.length === 0 && b_unmatched.length === 0) {
+      s = unify({ kind: "var", id: ra.tail }, { kind: "var", id: rb.tail }, s);
+    } else {
+      const fresh = fresh_row_var_id();
+      if (b_unmatched.length > 0) {
+        const row_for_a_tail: EffectRowType = { kind: "effect_row", effects: b_unmatched, tail: fresh };
+        const result = new Map(s);
+        result.set(ra.tail, row_for_a_tail);
+        s = result;
+      } else {
+        s = unify({ kind: "var", id: ra.tail }, { kind: "var", id: fresh }, s);
+      }
+      if (a_unmatched.length > 0) {
+        const row_for_b_tail: EffectRowType = { kind: "effect_row", effects: a_unmatched, tail: fresh };
+        const result = new Map(s);
+        result.set(rb.tail, row_for_b_tail);
+        s = result;
+      } else {
+        s = unify({ kind: "var", id: rb.tail }, { kind: "var", id: fresh }, s);
+      }
+    }
   }
 
   return s;
@@ -291,14 +331,11 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
 
   // any unifies with anything
   if (a.kind === "any" || b.kind === "any") return subst;
-  // never unifies with anything (it's the bottom type)
-  if (a.kind === "never") return subst;
-  if (b.kind === "never") return subst;
 
   // Same type variable
   if (a.kind === "var" && b.kind === "var" && a.id === b.id) return subst;
 
-  // Bind a variable
+  // Bind a variable (must come before `never` so that unify(?a, never) binds ?a)
   if (a.kind === "var") {
     if (occurs_in(a.id, b, subst)) {
       throw new UnificationError(t1, t2, "infinite type (occurs check)");
@@ -315,6 +352,9 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
     result.set(b.id, a);
     return result;
   }
+
+  // never unifies with anything (bottom type) — checked after var binding
+  if (a.kind === "never" || b.kind === "never") return subst;
 
   // Same primitive types
   if (a.kind === "int" && b.kind === "int") return subst;
@@ -376,6 +416,15 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
   // Record types (row unification)
   if (a.kind === "record" && b.kind === "record") {
     return unify_record_rows(a, b, subst);
+  }
+
+  // Effect row types
+  if (a.kind === "effect_row" && b.kind === "effect_row") {
+    return unify_effect_rows(
+      { effects: a.effects, tail: a.tail },
+      { effects: b.effects, tail: b.tail },
+      subst,
+    );
   }
 
   // Struct satisfies record constraint (one-direction coercion)

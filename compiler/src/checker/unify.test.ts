@@ -236,6 +236,33 @@ describe("unify_effect_rows — basics", () => {
   });
 });
 
+describe("unify_effect_rows — dual tail with unmatched effects (C5 regression)", () => {
+  it("preserves unmatched effects from both sides via fresh tail", () => {
+    const r1: EffectRow = { effects: [{ kind: "io" }], tail: 900 };
+    const r2: EffectRow = { effects: [{ kind: "fail", error_type: STR }], tail: 901 };
+    const s = unify_effect_rows(r1, r2, empty_subst());
+    const resolved_r1 = apply(s, { kind: "var", id: 900 } as Type);
+    assert.equal(resolved_r1.kind, "effect_row");
+    if (resolved_r1.kind === "effect_row") {
+      assert.ok(resolved_r1.effects.some(e => e.kind === "fail"), "r1 tail should include fail from r2");
+    }
+    const resolved_r2 = apply(s, { kind: "var", id: 901 } as Type);
+    assert.equal(resolved_r2.kind, "effect_row");
+    if (resolved_r2.kind === "effect_row") {
+      assert.ok(resolved_r2.effects.some(e => e.kind === "io"), "r2 tail should include io from r1");
+    }
+  });
+
+  it("unifies dual tail with no unmatched effects (simple case)", () => {
+    const r1: EffectRow = { effects: [{ kind: "io" }], tail: 910 };
+    const r2: EffectRow = { effects: [{ kind: "io" }], tail: 911 };
+    const s = unify_effect_rows(r1, r2, empty_subst());
+    const resolved = apply(s, { kind: "var", id: 910 } as Type);
+    assert.equal(resolved.kind, "var");
+    if (resolved.kind === "var") assert.equal(resolved.id, 911);
+  });
+});
+
 // ============================================================
 // 6. Apply & Compose helpers
 // ============================================================

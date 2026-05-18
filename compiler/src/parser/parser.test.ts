@@ -619,5 +619,12 @@ fn also_good() -> Int { 2 }
         assert.ok(sink.diagnostics().length >= 1);
       }
     });
+
+    it("speculative type_args parse does not leak diagnostics (C9)", () => {
+      const sink = new CollectingSink();
+      const program = Parser.parse("fn f(x: Int, y: Int) -> Bool { x < y }", "<test>", sink);
+      assert.equal(sink.diagnostics().length, 0, `expected no diagnostics, got: ${sink.diagnostics().map(d => d.message).join(", ")}`);
+      assert.equal(program.decls.length, 1);
+    });
   });
 });

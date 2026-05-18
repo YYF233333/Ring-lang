@@ -37,12 +37,17 @@ function contains_position(span: Span, pos: Position): boolean {
 // HIR traversal — find the HIdent name at cursor position
 // ============================================================
 
-function find_ident_in_expr(expr: HExpr, pos: Position): string | null {
+export interface IdentInfo {
+  name: string;
+  def_id?: number;
+}
+
+function find_ident_in_expr(expr: HExpr, pos: Position): IdentInfo | null {
   if (!contains_position(expr.span, pos)) return null;
 
   switch (expr.kind) {
     case "ident":
-      return expr.name;
+      return { name: expr.name, def_id: expr.def_id };
 
     case "int_lit":
     case "float_lit":
@@ -163,12 +168,12 @@ function find_ident_in_expr(expr: HExpr, pos: Position): string | null {
   }
 }
 
-function find_ident_in_stmt(stmt: HStmt, pos: Position): string | null {
+function find_ident_in_stmt(stmt: HStmt, pos: Position): IdentInfo | null {
   switch (stmt.kind) {
     case "let_stmt":
     case "var_stmt": {
       if (!contains_position(stmt.span, pos)) return null;
-      return find_ident_in_expr(stmt.init, pos) ?? stmt.name;
+      return find_ident_in_expr(stmt.init, pos) ?? { name: stmt.name, def_id: stmt.def_id };
     }
 
     case "assign_stmt": {
@@ -189,7 +194,7 @@ function find_ident_in_stmt(stmt: HStmt, pos: Position): string | null {
   }
 }
 
-function find_ident_in_block(block: HBlock, pos: Position): string | null {
+function find_ident_in_block(block: HBlock, pos: Position): IdentInfo | null {
   for (const stmt of block.stmts) {
     const r = find_ident_in_stmt(stmt, pos);
     if (r !== null) return r;
@@ -200,12 +205,12 @@ function find_ident_in_block(block: HBlock, pos: Position): string | null {
   return null;
 }
 
-function find_ident_in_fn(fn: HFnDecl, pos: Position): string | null {
+function find_ident_in_fn(fn: HFnDecl, pos: Position): IdentInfo | null {
   if (!contains_position(fn.span, pos)) return null;
   return find_ident_in_block(fn.body, pos);
 }
 
-function find_ident_in_impl(impl: HImplDecl, pos: Position): string | null {
+function find_ident_in_impl(impl: HImplDecl, pos: Position): IdentInfo | null {
   if (!contains_position(impl.span, pos)) return null;
   for (const method of impl.methods) {
     const r = find_ident_in_fn(method, pos);
@@ -214,9 +219,9 @@ function find_ident_in_impl(impl: HImplDecl, pos: Position): string | null {
   return null;
 }
 
-function find_ident_at_position(decls: HDecl[], pos: Position): string | null {
+export function find_ident_at_position(decls: HDecl[], pos: Position): IdentInfo | null {
   for (const decl of decls) {
-    let result: string | null = null;
+    let result: IdentInfo | null = null;
     switch (decl.kind) {
       case "fn_decl":
         result = find_ident_in_fn(decl, pos);
@@ -347,7 +352,7 @@ function collect_symbols_from_ast_stmt(stmt: Stmt, table: SymbolTable): void {
   switch (stmt.kind) {
     case "let_stmt":
     case "var_stmt":
-      table.set(stmt.name, stmt.span);
+      table.set(stmt.name, stmt.name_span);
       collect_symbols_from_ast_expr(stmt.init, table);
       return;
 
@@ -441,22 +446,25 @@ function build_symbol_table(ast: readonly Decl[]): SymbolTable {
 // ============================================================
 
 export function get_definition(state: DocumentState, position: Position): Location | null {
-  // Need both HIR (to identify what the cursor is on) and AST (for definition spans)
   if (!state.checkResult || !state.ast) return null;
 
-  const { program } = state.checkResult;
+  const { program, env } = state.checkResult;
 
-  // Step 1: find which identifier the cursor is on
-  const ident_name = find_ident_at_position(program.decls, position);
-  if (ident_name === null) return null;
+  const ident = find_ident_at_position(program.decls, position);
+  if (ident === null) return null;
 
-  // Step 2: look up the definition span in the symbol table built from AST
+  // Prefer def_id-based lookup (scope-aware) over name-based (legacy fallback)
+  if (ident.def_id !== undefined) {
+    const def_span = env.def_spans.get(ident.def_id);
+    if (def_span) {
+      return { uri: state.uri, range: span_to_range(def_span) };
+    }
+  }
+
+  // Fallback: name-based lookup for builtins and declarations without def_id
   const symbol_table = build_symbol_table(state.ast.decls);
-  const def_span = symbol_table.get(ident_name);
+  const def_span = symbol_table.get(ident.name);
   if (!def_span) return null;
 
-  return {
-    uri: state.uri,
-    range: span_to_range(def_span),
-  };
+  return { uri: state.uri, range: span_to_range(def_span) };
 }
