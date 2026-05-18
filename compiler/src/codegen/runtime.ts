@@ -58,4 +58,16 @@ function List_push(self, x) { return [...self, x]; }
 function List_concat(self, other) { return [...self, ...other]; }
 function List_slice(self, start, end) { return self.slice(start, end); }
 function List_reverse(self) { return [...self].reverse(); }
+
+function map_new() { return new Map(); }
+function map_from(entries) { return new Map(entries); }
+function _Map_len(self) { return self.size; }
+function _Map_get(self, key) { return self.has(key) ? { _tag: "some", _0: self.get(key) } : { _tag: "none" }; }
+function _Map_contains_key(self, key) { return self.has(key); }
+function _Map_is_empty(self) { return self.size === 0; }
+function _Map_keys(self) { return Array.from(self.keys()); }
+function _Map_values(self) { return Array.from(self.values()); }
+function _Map_entries(self) { return Array.from(self.entries()); }
+function _Map_insert(self, key, value) { var m = new Map(self); m.set(key, value); return m; }
+function _Map_remove(self, key) { var m = new Map(self); m.delete(key); return m; }
 `;

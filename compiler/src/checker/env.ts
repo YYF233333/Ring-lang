@@ -1,7 +1,7 @@
 // Ring-lang Type Environment — scope management + builtin definitions
 import {
-  Type, TypeVar, FnType, StructType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
-  make_option_type,
+  Type, TypeVar, FnType, StructType, TupleType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
+  make_option_type, make_list_type, make_map_type,
 } from "../types/index.js";
 import { Span } from "../ast/index.js";
 
@@ -463,6 +463,170 @@ export class TypeEnv {
     });
 
     this.impl_methods.set("Str", str_methods);
+
+    // ================================================================
+    // Built-in: Map<K,V> — immutable key-value map (JS Map backing)
+    // ================================================================
+    const map_k = this.fresh_var();
+    const map_v = this.fresh_var();
+    this.structs.set("Map", {
+      name: "Map",
+      type_params: ["K", "V"],
+      type_param_vars: [map_k.id, map_v.id],
+      fields: [],
+    });
+
+    const map_methods = new Map<string, TypeScheme>();
+    const make_map = (k: TypeVar, v: TypeVar): StructType => make_map_type(k, v);
+
+    // --- Read methods (pure) ---
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      map_methods.set("len", {
+        type: { kind: "fn", params: [make_map(k, v)], return_type: INT, effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      map_methods.set("get", {
+        type: { kind: "fn", params: [make_map(k, v), k], return_type: make_option_type(v), effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      map_methods.set("contains_key", {
+        type: { kind: "fn", params: [make_map(k, v), k], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      map_methods.set("is_empty", {
+        type: { kind: "fn", params: [make_map(k, v)], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      map_methods.set("keys", {
+        type: { kind: "fn", params: [make_map(k, v)], return_type: make_list_type(k), effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      map_methods.set("values", {
+        type: { kind: "fn", params: [make_map(k, v)], return_type: make_list_type(v), effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      const tuple_type: TupleType = { kind: "tuple", elements: [k, v] };
+      map_methods.set("entries", {
+        type: { kind: "fn", params: [make_map(k, v)], return_type: make_list_type(tuple_type), effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+
+    // --- Transform methods (pure, return new Map) ---
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      map_methods.set("insert", {
+        type: { kind: "fn", params: [make_map(k, v), k, v], return_type: make_map(k, v), effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      map_methods.set("remove", {
+        type: { kind: "fn", params: [make_map(k, v), k], return_type: make_map(k, v), effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+
+    // --- Higher-order methods (effect-polymorphic) ---
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      const u = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [v], return_type: u, effects: cb_effects };
+      map_methods.set("map_values", {
+        type: { kind: "fn", params: [make_map(k, v), cb_type], return_type: make_map(k, u), effects: cb_effects } as FnType,
+        type_vars: [k.id, v.id, u.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [k, v], return_type: BOOL, effects: cb_effects };
+      map_methods.set("filter", {
+        type: { kind: "fn", params: [make_map(k, v), cb_type], return_type: make_map(k, v), effects: cb_effects } as FnType,
+        type_vars: [k.id, v.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      const u = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [u, k, v], return_type: u, effects: cb_effects };
+      map_methods.set("fold", {
+        type: { kind: "fn", params: [make_map(k, v), u, cb_type], return_type: u, effects: cb_effects } as FnType,
+        type_vars: [k.id, v.id, u.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [k, v], return_type: BOOL, effects: cb_effects };
+      map_methods.set("any", {
+        type: { kind: "fn", params: [make_map(k, v), cb_type], return_type: BOOL, effects: cb_effects } as FnType,
+        type_vars: [k.id, v.id, e_tail], bounds: [],
+      });
+    }
+
+    this.impl_methods.set("Map", map_methods);
+
+    // ================================================================
+    // Built-in functions: map_new, map_from
+    // ================================================================
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      this.bind("map_new", {
+        type: { kind: "fn", params: [], return_type: make_map_type(k, v), effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+    {
+      const k = this.fresh_var();
+      const v = this.fresh_var();
+      const tuple_type: TupleType = { kind: "tuple", elements: [k, v] };
+      const list_of_tuples = make_list_type(tuple_type);
+      this.bind("map_from", {
+        type: { kind: "fn", params: [list_of_tuples], return_type: make_map_type(k, v), effects: EMPTY_ROW } as FnType,
+        type_vars: [k.id, v.id], bounds: [],
+      });
+    }
 
   }
 

@@ -92,6 +92,10 @@ const cases: TestCase[] = [
   // Batch 3: Tuples
   { file: "tuple_basic.ring", expected: "10\nhello\nx\n" },
   { file: "tuple_fn.ring", expected: "answer\n42\n" },
+  // Batch 3: Map<K,V>
+  { file: "map_basic.ring", expected: "3\ntrue\nfalse\n4\n3\n" },
+  { file: "map_methods.ring", expected: "b\n3\n3\ntrue\n2\n" },
+  { file: "map_hof.ring", expected: "40\n2\n60\ntrue\n" },
 ];
 
 describe("e2e: ring run", () => {

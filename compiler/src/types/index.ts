@@ -210,6 +210,18 @@ export function list_element(t: StructType): Type {
 }
 
 // ============================================================
+// Map<K,V> helper — constructs StructType "Map"
+// ============================================================
+
+export function make_map_type(key: Type, value: Type): StructType {
+  return { kind: "struct", name: "Map", type_params: [key, value], fields: [] };
+}
+
+export function is_map_type(t: Type): t is StructType {
+  return t.kind === "struct" && t.name === "Map";
+}
+
+// ============================================================
 // Effect Row helpers
 // ============================================================
 

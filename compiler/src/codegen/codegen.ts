@@ -106,6 +106,12 @@ class CodeGenerator {
       this.impl_methods.set(`List.${m}`, undefined);
     }
 
+    // Built-in Map non-HOF impl methods (runtime functions)
+    for (const m of ["len", "get", "contains_key", "is_empty", "keys", "values", "entries",
+                     "insert", "remove"]) {
+      this.impl_methods.set(`Map.${m}`, undefined);
+    }
+
     // Emit runtime preamble
     this.emit_raw(RUNTIME_CODE);
 
@@ -588,6 +594,31 @@ class CodeGenerator {
           const receiver = this.gen_expr(expr.callee.receiver);
           const callback = this.gen_lambda_capture_evidence(expr.args[0]);
           return `((__r) => __r !== undefined ? { _tag: "some", _0: __r } : { _tag: "none" })(${receiver}.find(${callback}))`;
+        }
+      }
+
+      // Inline Map HOF methods — bypass runtime to forward evidence via closure capture
+      if (recv_type.kind === "struct" && recv_type.name === "Map") {
+        if (method === "map_values") {
+          const receiver = this.gen_expr(expr.callee.receiver);
+          const callback = this.gen_lambda_capture_evidence(expr.args[0]);
+          return `((__m, __f) => { const __r = new Map(); for (const [__k, __v] of __m) __r.set(__k, __f(__v)); return __r; })(${receiver}, ${callback})`;
+        }
+        if (method === "filter") {
+          const receiver = this.gen_expr(expr.callee.receiver);
+          const callback = this.gen_lambda_capture_evidence(expr.args[0]);
+          return `((__m, __f) => { const __r = new Map(); for (const [__k, __v] of __m) if (__f(__k, __v)) __r.set(__k, __v); return __r; })(${receiver}, ${callback})`;
+        }
+        if (method === "fold") {
+          const receiver = this.gen_expr(expr.callee.receiver);
+          const init = this.gen_expr(expr.args[0]);
+          const callback = this.gen_lambda_capture_evidence(expr.args[1]);
+          return `((__m, __a, __f) => { for (const [__k, __v] of __m) __a = __f(__a, __k, __v); return __a; })(${receiver}, ${init}, ${callback})`;
+        }
+        if (method === "any") {
+          const receiver = this.gen_expr(expr.callee.receiver);
+          const callback = this.gen_lambda_capture_evidence(expr.args[0]);
+          return `((__m, __f) => { for (const [__k, __v] of __m) if (__f(__k, __v)) return true; return false; })(${receiver}, ${callback})`;
         }
       }
     }
