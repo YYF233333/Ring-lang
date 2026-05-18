@@ -305,16 +305,19 @@ export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
       };
     case "record": {
       let tail = t.tail;
+      let tail_name = t.tail_name;
       if (tail !== undefined && mapping.has(tail)) {
         const replacement = mapping.get(tail)!;
         if (replacement.kind === "var") {
           tail = replacement.id;
+          if (replacement.name) tail_name = replacement.name;
         }
       }
       return {
         kind: "record",
         fields: t.fields.map(f => ({ name: f.name, type: substitute_type(f.type, mapping) })),
         tail,
+        tail_name,
       };
     }
   }

@@ -628,11 +628,22 @@ export class InferEngine {
     this.current_fn_return_type = saved_fn_return;
     this.env.pop_scope();
 
-    // Apply final substitution to params
-    const final_params = hparams.map(p => ({
-      name: p.name,
-      type: apply(this.subst, p.type),
-    }));
+    // Apply final substitution to params and label remaining type vars with param names
+    const tp_id_to_name = new Map<number, string>();
+    for (const tp of decl.type_params) {
+      const tv = this.type_param_scope.get(tp.name);
+      if (tv && tv.kind === "var") {
+        const resolved = apply(this.subst, tv);
+        if (resolved.kind === "var") tp_id_to_name.set(resolved.id, tp.name);
+      }
+    }
+    const final_params = hparams.map(p => {
+      const t = apply(this.subst, p.type);
+      if (t.kind === "var" && !t.name && tp_id_to_name.has(t.id)) {
+        return { name: p.name, type: { ...t, name: tp_id_to_name.get(t.id) } };
+      }
+      return { name: p.name, type: t };
+    });
 
     const effects = apply_to_effect_row(this.subst, body_result.effects);
 
@@ -647,12 +658,16 @@ export class InferEngine {
       }
     }
 
+    const final_ret = (ret_type.kind === "var" && !ret_type.name && tp_id_to_name.has(ret_type.id))
+      ? { ...ret_type, name: tp_id_to_name.get(ret_type.id) }
+      : ret_type;
+
     return {
       kind: "fn_decl",
       name: decl.name,
       type_params: decl.type_params,
       params: final_params,
-      return_type: ret_type,
+      return_type: final_ret,
       effects,
       body: body_result.hexpr as HBlock,
       is_pub: decl.is_pub,

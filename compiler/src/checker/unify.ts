@@ -80,24 +80,28 @@ export function apply(subst: Substitution, t: Type): Type {
     case "record": {
       const fields = t.fields.map(f => ({ name: f.name, type: apply(subst, f.type) }));
       let tail = t.tail;
+      let tail_name = t.tail_name;
       if (tail !== undefined) {
         const resolved = subst.get(tail);
         if (resolved) {
           const chased = apply(subst, resolved);
           if (chased.kind === "var") {
             tail = chased.id;
+            if (chased.name) tail_name = chased.name;
           } else if (chased.kind === "record") {
             return {
               kind: "record",
               fields: [...fields, ...chased.fields.map(f => ({ name: f.name, type: apply(subst, f.type) }))],
               tail: chased.tail,
+              tail_name: chased.tail_name,
             };
           } else {
             tail = undefined;
+            tail_name = undefined;
           }
         }
       }
-      return tail !== undefined ? { kind: "record", fields, tail } : { kind: "record", fields };
+      return tail !== undefined ? { kind: "record", fields, tail, tail_name } : { kind: "record", fields };
     }
   }
 }
