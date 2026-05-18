@@ -575,23 +575,26 @@ export class InferEngine {
         this.env.push_scope();
         this.fn_bounds_stack.push(this.current_fn_bounds);
         this.current_fn_bounds = [];
-        if (self_var.kind === "var") {
-          this.current_fn_bounds.push({
-            type_param_var_id: self_var.id,
-            trait_name: decl.name,
-            type_param_name: "self",
-          });
+        try {
+          if (self_var.kind === "var") {
+            this.current_fn_bounds.push({
+              type_param_var_id: self_var.id,
+              trait_name: decl.name,
+              type_param_name: "self",
+            });
+          }
+          for (const p of params) {
+            this.env.bind_mono(p.name, p.type);
+          }
+          const body_result = this.infer_block(ast_method.body);
+          this.subst = body_result.subst;
+          const trait_ctx: ZonkCtx = { subst: this.subst, names: new Map() };
+          body = zonk_block(trait_ctx, body_result.hexpr as HBlock);
+        } finally {
+          this.env.pop_scope();
+          this.current_fn_bounds = this.fn_bounds_stack.pop()!;
+          this.subst = saved_subst;
         }
-        for (const p of params) {
-          this.env.bind_mono(p.name, p.type);
-        }
-        const body_result = this.infer_block(ast_method.body);
-        this.subst = body_result.subst;
-        const trait_ctx: ZonkCtx = { subst: this.subst, names: new Map() };
-        body = zonk_block(trait_ctx, body_result.hexpr as HBlock);
-        this.env.pop_scope();
-        this.current_fn_bounds = this.fn_bounds_stack.pop()!;
-        this.subst = saved_subst;
       }
       return { name: m.name, params, return_type: m.type.return_type, has_default: m.has_default, body };
     });
@@ -647,43 +650,52 @@ export class InferEngine {
     const expected_ret = decl.return_type ? this.resolve_type_expr(decl.return_type) : this.env.fresh_var();
     this.current_fn_return_type = expected_ret;
 
-    // Infer body
-    const body_result = this.infer_block(decl.body);
-    this.subst = body_result.subst;
+    // These are assigned in the try block; if the try throws, the function
+    // rethrows after finally, so these are always assigned when used below.
+    let final_params!: HParam[];
+    let final_ret!: Type;
+    let effects!: EffectRow;
+    let final_body!: HBlock;
 
-    // Determine return type
-    this.subst = this.unify_at(body_result.hexpr.type, expected_ret, this.subst, decl.span);
+    try {
+      // Infer body
+      const body_result = this.infer_block(decl.body);
+      this.subst = body_result.subst;
 
-    // Build local names: resolve each type param through subst to find terminal var ID
-    const local_names = new Map<number, string>();
-    for (const tp of decl.type_params) {
-      const tv = this.type_param_scope.get(tp.name);
-      if (tv && tv.kind === "var") {
-        const resolved = apply(this.subst, tv);
-        if (resolved.kind === "var") local_names.set(resolved.id, tp.name);
+      // Determine return type
+      this.subst = this.unify_at(body_result.hexpr.type, expected_ret, this.subst, decl.span);
+
+      // Build local names: resolve each type param through subst to find terminal var ID
+      const local_names = new Map<number, string>();
+      for (const tp of decl.type_params) {
+        const tv = this.type_param_scope.get(tp.name);
+        if (tv && tv.kind === "var") {
+          const resolved = apply(this.subst, tv);
+          if (resolved.kind === "var") local_names.set(resolved.id, tp.name);
+        }
       }
-    }
-    // Row variables from record type params (e.g., ..rest)
-    const declared_tp_names = new Set(decl.type_params.map(tp => tp.name));
-    for (const [name, tv] of this.type_param_scope) {
-      if (!saved_tp_scope.has(name) && !declared_tp_names.has(name) && tv.kind === "var") {
-        const resolved = apply(this.subst, tv);
-        if (resolved.kind === "var") local_names.set(resolved.id, name);
+      // Row variables from record type params (e.g., ..rest)
+      const declared_tp_names = new Set(decl.type_params.map(tp => tp.name));
+      for (const [name, tv] of this.type_param_scope) {
+        if (!saved_tp_scope.has(name) && !declared_tp_names.has(name) && tv.kind === "var") {
+          const resolved = apply(this.subst, tv);
+          if (resolved.kind === "var") local_names.set(resolved.id, name);
+        }
       }
+
+      // Zonk everything with local subst + names
+      const ctx: ZonkCtx = { subst: this.subst, names: local_names };
+      final_params = hparams.map(p => zonk_param(ctx, p));
+      final_ret = zonk_type(ctx, expected_ret);
+      effects = zonk_row(ctx, body_result.effects);
+      final_body = zonk_block(ctx, body_result.hexpr as HBlock);
+    } finally {
+      this.current_fn_return_type = saved_fn_return;
+      this.env.pop_scope();
+      this.type_param_scope = saved_tp_scope;
+      this.current_fn_bounds = this.fn_bounds_stack.pop()!;
+      this.subst = saved_subst;
     }
-
-    // Zonk everything with local subst + names
-    const ctx: ZonkCtx = { subst: this.subst, names: local_names };
-    const final_params = hparams.map(p => zonk_param(ctx, p));
-    const final_ret = zonk_type(ctx, expected_ret);
-    const effects = zonk_row(ctx, body_result.effects);
-    const final_body = zonk_block(ctx, body_result.hexpr as HBlock);
-
-    this.current_fn_return_type = saved_fn_return;
-    this.env.pop_scope();
-    this.type_param_scope = saved_tp_scope;
-    this.current_fn_bounds = this.fn_bounds_stack.pop()!;
-    this.subst = saved_subst;
 
     const trait_bounds: { type_param: string; trait_name: string }[] = [];
     for (const tp of decl.type_params) {
@@ -717,12 +729,16 @@ export class InferEngine {
     const saved_subst = this.subst;
     this.subst = empty_subst();
     this.env.push_scope();
-    const body_result = this.infer_block(decl.body);
-    this.subst = body_result.subst;
-    const ctx: ZonkCtx = { subst: this.subst, names: new Map() };
-    const final_body = zonk_block(ctx, body_result.hexpr as HBlock);
-    this.env.pop_scope();
-    this.subst = saved_subst;
+    let final_body!: HBlock;
+    try {
+      const body_result = this.infer_block(decl.body);
+      this.subst = body_result.subst;
+      const ctx: ZonkCtx = { subst: this.subst, names: new Map() };
+      final_body = zonk_block(ctx, body_result.hexpr as HBlock);
+    } finally {
+      this.env.pop_scope();
+      this.subst = saved_subst;
+    }
     return {
       kind: "test_decl",
       description: decl.description,
@@ -872,9 +888,13 @@ export class InferEngine {
         let s = this.unify_at(cond_r.hexpr.type, BOOL, cond_r.subst, stmt.condition.span);
         this.env.push_scope();
         this.loop_depth++;
-        const body_r = this.infer_block(stmt.body, s);
-        this.loop_depth--;
-        this.env.pop_scope();
+        let body_r!: InferResult;
+        try {
+          body_r = this.infer_block(stmt.body, s);
+        } finally {
+          this.loop_depth--;
+          this.env.pop_scope();
+        }
         s = body_r.subst;
         let while_effects: EffectRow;
         [while_effects, s] = this.merge_effects(cond_r.effects, body_r.effects, s);
@@ -910,9 +930,13 @@ export class InferEngine {
         const binding_scheme = this.env.lookup(stmt.binding)!;
         this.env.record_def_span(binding_scheme.def_id!, stmt.binding_span);
         this.loop_depth++;
-        const body_r = this.infer_block(stmt.body, s);
-        this.loop_depth--;
-        this.env.pop_scope();
+        let body_r!: InferResult;
+        try {
+          body_r = this.infer_block(stmt.body, s);
+        } finally {
+          this.loop_depth--;
+          this.env.pop_scope();
+        }
         s = body_r.subst;
         let for_effects: EffectRow;
         [for_effects, s] = this.merge_effects(iter_r.effects, body_r.effects, s);
@@ -1562,49 +1586,50 @@ export class InferEngine {
 
     for (const arm of arms) {
       this.env.push_scope();
-
-      // Reclassify binding patterns that match zero-field enum variants
-      if (arm.pattern.kind === "binding") {
-        const pat_name = arm.pattern.name;
-        const variant_enum = this.env.variant_to_enum.get(pat_name);
-        if (variant_enum) {
-          const enum_def = this.env.enums.get(variant_enum);
-          const variant = enum_def?.variants.find(v => v.name === pat_name);
-          if (variant && variant.fields.length === 0) {
-            arm.pattern = { kind: "constructor", name: pat_name, fields: [], span: arm.pattern.span };
+      try {
+        // Reclassify binding patterns that match zero-field enum variants
+        if (arm.pattern.kind === "binding") {
+          const pat_name = arm.pattern.name;
+          const variant_enum = this.env.variant_to_enum.get(pat_name);
+          if (variant_enum) {
+            const enum_def = this.env.enums.get(variant_enum);
+            const variant = enum_def?.variants.find(v => v.name === pat_name);
+            if (variant && variant.fields.length === 0) {
+              arm.pattern = { kind: "constructor", name: pat_name, fields: [], span: arm.pattern.span };
+            }
           }
         }
+
+        // Bind pattern variables
+        this.bind_pattern(arm.pattern, scrut_r.hexpr.type, s);
+
+        // Infer guard if present
+        let guard_hexpr: HExpr | undefined;
+        if (arm.guard) {
+          const gr = this.infer_expr(arm.guard, s);
+          s = gr.subst;
+          s = this.unify_at(gr.hexpr.type, BOOL, s, arm.span);
+          [effects, s] = this.merge_effects(effects, gr.effects, s);
+          guard_hexpr = gr.hexpr;
+        }
+
+        // Infer body
+        const body_r = this.infer_expr(arm.body, s);
+        s = body_r.subst;
+        [effects, s] = this.merge_effects(effects, body_r.effects, s);
+
+        // Unify body type with result type
+        s = this.unify_at(body_r.hexpr.type, result_type, s, arm.span);
+
+        harms.push({
+          pattern: arm.pattern,
+          guard: guard_hexpr,
+          body: body_r.hexpr,
+          span: arm.span,
+        });
+      } finally {
+        this.env.pop_scope();
       }
-
-      // Bind pattern variables
-      this.bind_pattern(arm.pattern, scrut_r.hexpr.type, s);
-
-      // Infer guard if present
-      let guard_hexpr: HExpr | undefined;
-      if (arm.guard) {
-        const gr = this.infer_expr(arm.guard, s);
-        s = gr.subst;
-        s = this.unify_at(gr.hexpr.type, BOOL, s, arm.span);
-        [effects, s] = this.merge_effects(effects, gr.effects, s);
-        guard_hexpr = gr.hexpr;
-      }
-
-      // Infer body
-      const body_r = this.infer_expr(arm.body, s);
-      s = body_r.subst;
-      [effects, s] = this.merge_effects(effects, body_r.effects, s);
-
-      // Unify body type with result type
-      s = this.unify_at(body_r.hexpr.type, result_type, s, arm.span);
-
-      harms.push({
-        pattern: arm.pattern,
-        guard: guard_hexpr,
-        body: body_r.hexpr,
-        span: arm.span,
-      });
-
-      this.env.pop_scope();
     }
 
     // Check exhaustiveness
@@ -1804,10 +1829,13 @@ export class InferEngine {
       error_var_type = this.env.fresh_var();
     }
     this.env.bind_mono(error_binding, error_var_type);
-
-    const handler_r = this.infer_expr(handler, s);
-    s = handler_r.subst;
-    this.env.pop_scope();
+    let handler_r!: InferResult;
+    try {
+      handler_r = this.infer_expr(handler, s);
+      s = handler_r.subst;
+    } finally {
+      this.env.pop_scope();
+    }
 
     s = this.unify_at(expr_r.hexpr.type, handler_r.hexpr.type, s, span);
 
@@ -1872,10 +1900,13 @@ export class InferEngine {
         } as FnType);
       }
 
-      const handler_body_r = this.infer_expr(handler.body, s);
-      s = handler_body_r.subst;
-
-      this.env.pop_scope();
+      let handler_body_r!: InferResult;
+      try {
+        handler_body_r = this.infer_expr(handler.body, s);
+        s = handler_body_r.subst;
+      } finally {
+        this.env.pop_scope();
+      }
 
       hhandlers.push({
         effect_name: handler.effect_name,
@@ -1929,10 +1960,13 @@ export class InferEngine {
       param_types.push(pt);
     }
 
-    const body_r = this.infer_expr(body, subst);
+    let body_r!: InferResult;
+    try {
+      body_r = this.infer_expr(body, subst);
+    } finally {
+      this.env.pop_scope();
+    }
     const s = body_r.subst;
-
-    this.env.pop_scope();
 
     const fn_type: FnType = {
       kind: "fn",

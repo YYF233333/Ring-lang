@@ -530,4 +530,16 @@ describe("Type Checker", () => {
       assert.ok(diags.some(d => d.code === "E0301"), `expected E0301, got: ${diags.map(d => d.code).join(", ")}`);
     });
   });
+
+  describe("for..in statement", () => {
+    it("type-checks for..in range with Int bounds", () => {
+      const program = check_source(`fn main() { for i in 0..10 { let x = i; } }`);
+      assert.ok(program.decls.length > 0);
+    });
+
+    it("reports E0206 for break outside loop", () => {
+      const diags = check_expecting_errors(`fn main() { break; }`);
+      assert.ok(diags.some(d => d.code === "E0206"), `expected E0206, got: ${diags.map(d => d.code).join(", ")}`);
+    });
+  });
 });

@@ -419,7 +419,9 @@ class CodeGenerator {
           const start_js = this.gen_expr(stmt.iterable.start);
           const end_js = this.gen_expr(stmt.iterable.end);
           const binding = safe_ident(stmt.binding);
-          this.emit(`for (let ${binding} = ${start_js}; ${binding} < ${end_js}; ${binding}++) {`);
+          const end_var = `__ring_end_${binding}`;
+          this.emit(`const ${end_var} = ${end_js};`);
+          this.emit(`for (let ${binding} = ${start_js}; ${binding} < ${end_var}; ${binding}++) {`);
         } else {
           const iter = this.gen_expr(stmt.iterable);
           const binding = safe_ident(stmt.binding);

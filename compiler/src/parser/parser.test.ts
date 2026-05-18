@@ -629,6 +629,57 @@ fn also_good() -> Int { 2 }
   });
 });
 
+describe("for..in statement", () => {
+  it("parses for..in range", () => {
+    const program = Parser.parse("fn main() { for i in 0..10 { print(i); } }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const body = fn_decl.body.stmts;
+    assert.equal(body[0].kind, "for_in_stmt");
+    if (body[0].kind !== "for_in_stmt") return;
+    assert.equal(body[0].binding, "i");
+    assert.equal(body[0].iterable.kind, "range");
+  });
+
+  it("parses break statement", () => {
+    const program = Parser.parse("fn main() { while true { break; } }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const while_stmt = fn_decl.body.stmts[0];
+    assert.equal(while_stmt.kind, "while_stmt");
+    if (while_stmt.kind !== "while_stmt") return;
+    assert.equal(while_stmt.body.stmts[0].kind, "break_stmt");
+  });
+
+  it("parses continue statement", () => {
+    const program = Parser.parse("fn main() { while true { continue; } }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const while_stmt = fn_decl.body.stmts[0];
+    assert.equal(while_stmt.kind, "while_stmt");
+    if (while_stmt.kind !== "while_stmt") return;
+    assert.equal(while_stmt.body.stmts[0].kind, "continue_stmt");
+  });
+
+  it("parses range expression precedence", () => {
+    const program = Parser.parse("fn main() { for i in 1 + 2..3 + 4 { print(i); } }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const for_stmt = fn_decl.body.stmts[0];
+    assert.equal(for_stmt.kind, "for_in_stmt");
+    if (for_stmt.kind !== "for_in_stmt") return;
+    const range = for_stmt.iterable;
+    assert.equal(range.kind, "range");
+    if (range.kind !== "range") return;
+    assert.equal(range.start.kind, "bin_op");
+    assert.equal(range.end.kind, "bin_op");
+  });
+});
+
 describe("while statement", () => {
   it("parses while statement", () => {
     const program = Parser.parse("fn main() { while true { print(1); } }");

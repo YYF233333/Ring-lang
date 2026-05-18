@@ -1,11 +1,11 @@
 import { CompletionItem, CompletionItemKind, Position } from "vscode-languageserver";
 import { DocumentState } from "../document-manager.js";
-import { type_to_string, Type } from "../../types/index.js";
+import { type_to_string, Type, UNIT } from "../../types/index.js";
 import { TypeEnv } from "../../checker/env.js";
 import {
   HDecl, HExpr, HStmt, HBlock, HFnDecl, HImplDecl,
 } from "../../hir/index.js";
-import { Span } from "../../ast/index.js";
+import { Span, Decl as AstDecl, Stmt as AstStmt, BlockExpr as AstBlock } from "../../ast/index.js";
 
 // ============================================================
 // Ring-lang keywords for completion
@@ -297,11 +297,68 @@ function collect_locals(program: { decls: HDecl[] }, pos: Position): Map<string,
   return locals;
 }
 
+/**
+ * AST-based fallback: collect locals from the AST when HIR is unavailable
+ * (e.g., function body failed type-checking). Types are unknown (Unit placeholder).
+ */
+function collect_locals_from_ast(ast: { decls: AstDecl[] }, pos: Position): Map<string, Type> {
+  const locals = new Map<string, Type>();
+  for (const decl of ast.decls) {
+    if (decl.kind === "fn_decl" && contains_lsp_position(decl.span, pos)) {
+      for (const p of decl.params) locals.set(p.name, UNIT);
+      collect_block_locals_from_ast(decl.body, pos, locals);
+      return locals;
+    }
+    if (decl.kind === "impl_decl") {
+      for (const method of decl.methods) {
+        if (contains_lsp_position(method.span, pos)) {
+          for (const p of method.params) locals.set(p.name, UNIT);
+          collect_block_locals_from_ast(method.body, pos, locals);
+          return locals;
+        }
+      }
+    }
+  }
+  return locals;
+}
+
+function collect_block_locals_from_ast(block: AstBlock, pos: Position, out: Map<string, Type>): void {
+  for (const stmt of block.stmts) {
+    if (!stmt_before_position_ast(stmt, pos)) break;
+    if (stmt.kind === "let_stmt" || stmt.kind === "var_stmt") {
+      out.set(stmt.name, UNIT);
+    } else if (stmt.kind === "for_in_stmt") {
+      if (contains_lsp_position(stmt.body.span, pos)) {
+        out.set(stmt.binding, UNIT);
+        collect_block_locals_from_ast(stmt.body, pos, out);
+      }
+    }
+  }
+}
+
+function stmt_before_position_ast(stmt: AstStmt, pos: Position): boolean {
+  const ring_line = pos.line + 1;
+  return stmt.span.start.line < ring_line ||
+    (stmt.span.start.line === ring_line && stmt.span.start.column <= pos.character);
+}
+
 function collect_block_locals(block: HBlock, pos: Position, out: Map<string, Type>): void {
   for (const stmt of block.stmts) {
     if (!stmt_before_position(stmt, pos)) break;
     if (stmt.kind === "let_stmt" || stmt.kind === "var_stmt") {
       out.set(stmt.name, stmt.type);
+    } else if (stmt.kind === "for_in_stmt") {
+      // The for..in binding is visible inside the loop body.
+      // If the cursor is inside the body, include the binding.
+      if (contains_lsp_position(stmt.body.span, pos)) {
+        const iter_type = stmt.iterable.type;
+        if (iter_type.kind === "enum" && iter_type.name === "Range" && iter_type.type_params.length > 0) {
+          out.set(stmt.binding, iter_type.type_params[0]);
+        } else {
+          out.set(stmt.binding, { kind: "var", id: -1 });
+        }
+        collect_block_locals(stmt.body, pos, out);
+      }
     }
   }
 }
@@ -413,7 +470,14 @@ export function get_completions(state: DocumentState, position: Position): Compl
   }
 
   // General completion: local variables + scope variables + keywords + type names
-  const locals = collect_locals(program, position);
+  let locals = collect_locals(program, position);
+
+  // Fallback: if no HIR locals found (e.g., function body failed type-checking),
+  // collect from AST to at least offer parameter names and let/var bindings.
+  if (locals.size === 0 && state.ast) {
+    locals = collect_locals_from_ast(state.ast, position);
+  }
+
   const local_items: CompletionItem[] = [];
   for (const [name, type] of locals) {
     local_items.push({
