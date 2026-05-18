@@ -1,6 +1,6 @@
 import { Hover, Position } from "vscode-languageserver";
 import { DocumentState } from "../document-manager.js";
-import { span_to_range, format_type_for_hover } from "../utils.js";
+import { format_type_for_hover } from "../utils.js";
 import { type_to_string } from "../../types/index.js";
 import {
   HDecl,
@@ -304,6 +304,5 @@ export function get_hover(state: DocumentState, position: Position): Hover | nul
   // as markdown hover text.
   return {
     contents: `\`\`\`ring\n${best.type_str}\n\`\`\``,
-    range: span_to_range(best.span),
   };
 }
