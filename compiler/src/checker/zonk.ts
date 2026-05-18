@@ -133,20 +133,19 @@ function zs(ctx: Ctx, stmt: HStmt): HStmt {
 }
 
 function zfn(ctx: Ctx, fn: HFnDecl): HFnDecl {
-  const params = fn.params.map(p => zp(ctx, p));
-  const return_type = z(ctx, fn.return_type);
-  const effects = zr(ctx, fn.effects);
   const local_names = new Map(ctx.names);
-  for (const p of params) {
+  for (const p of fn.params) {
     if (p.type.kind === "var" && p.type.name) {
-      local_names.set(p.type.id, p.type.name);
+      const resolved = apply(ctx.subst, p.type);
+      if (resolved.kind === "var") local_names.set(resolved.id, p.type.name);
     }
   }
-  if (return_type.kind === "var" && return_type.name) {
-    local_names.set(return_type.id, return_type.name);
+  if (fn.return_type.kind === "var" && fn.return_type.name) {
+    const resolved = apply(ctx.subst, fn.return_type);
+    if (resolved.kind === "var") local_names.set(resolved.id, fn.return_type.name);
   }
-  const body_ctx: Ctx = { subst: ctx.subst, names: local_names };
-  return { ...fn, params, return_type, effects, body: zb(body_ctx, fn.body) };
+  const fn_ctx: Ctx = { subst: ctx.subst, names: local_names };
+  return { ...fn, params: fn.params.map(p => zp(fn_ctx, p)), return_type: z(fn_ctx, fn.return_type), effects: zr(fn_ctx, fn.effects), body: zb(fn_ctx, fn.body) };
 }
 
 function zd(ctx: Ctx, decl: HDecl): HDecl {
