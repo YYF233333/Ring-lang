@@ -5,7 +5,7 @@ import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
   Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr,
   BinOp, UnaryOp,
-  Span,
+  Span, span_zero,
 } from "../ast/index.js";
 import { assertNever, CompileError } from "../errors.js";
 import { DiagnosticSink, DiagnosticContext, make_diagnostic } from "../diagnostics/index.js";
@@ -368,8 +368,11 @@ export class InferEngine {
       this.env.impl_methods.set(decl.target_type, methods);
     }
     for (const method of decl.methods) {
+      const self_type = this.resolve_self_type(decl.target_type);
       const param_types = method.params.map(p =>
-        p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var()
+        p.type_annotation ? this.resolve_type_expr(p.type_annotation)
+          : p.name === "self" ? self_type
+          : this.env.fresh_var()
       );
       const ret_type = method.return_type ? this.resolve_type_expr(method.return_type) : this.env.fresh_var();
       const fn_type: FnType = {
@@ -1885,6 +1888,10 @@ export class InferEngine {
       default:
         return assertNever(texpr, "resolve_type_expr");
     }
+  }
+
+  private resolve_self_type(name: string): Type {
+    return this.resolve_named_type(name, [], span_zero());
   }
 
   private resolve_named_type(name: string, type_args: TypeExpr[], span: Span): Type {
