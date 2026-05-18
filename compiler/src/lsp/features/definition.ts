@@ -168,7 +168,7 @@ function find_ident_in_stmt(stmt: HStmt, pos: Position): string | null {
     case "let_stmt":
     case "var_stmt": {
       if (!contains_position(stmt.span, pos)) return null;
-      return find_ident_in_expr(stmt.init, pos);
+      return find_ident_in_expr(stmt.init, pos) ?? stmt.name;
     }
 
     case "assign_stmt": {

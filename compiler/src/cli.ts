@@ -61,6 +61,9 @@ async function main(): Promise<void> {
   }
 
   if (command === "lsp") {
+    if (!process.argv.includes("--stdio")) {
+      process.argv.push("--stdio");
+    }
     const { start_server } = await import("./lsp/server.js");
     start_server();
     return;
