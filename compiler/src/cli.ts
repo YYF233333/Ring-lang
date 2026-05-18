@@ -43,6 +43,7 @@ Usage:
   ring build <file.ring>    Compile to .js file
   ring run <file.ring>      Compile and execute with Node.js
   ring check <file.ring>    Type-check only
+  ring lsp                 Start Language Server Protocol server
   ring help                 Show this help
 
 Options:
@@ -52,11 +53,17 @@ Options:
   process.exit(0);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const { command, file, debug, error_format } = parse_args(process.argv.slice(2));
 
   if (!command || command === "help") {
     usage();
+  }
+
+  if (command === "lsp") {
+    const { start_server } = await import("./lsp/server.js");
+    start_server();
+    return;
   }
 
   if (!file) {
@@ -168,4 +175,7 @@ function main(): void {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
