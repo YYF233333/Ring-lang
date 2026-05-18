@@ -653,11 +653,15 @@ export class InferEngine {
     }
     const final_params = hparams.map(p => {
       const t = apply(this.subst, p.type);
-      if (t.kind === "var" && !t.name && tp_id_to_name.has(t.id)) {
+      if (t.kind === "var" && tp_id_to_name.has(t.id)) {
         return { name: p.name, type: { ...t, name: tp_id_to_name.get(t.id) } };
       }
       return { name: p.name, type: t };
     });
+
+    const final_ret = (ret_type.kind === "var" && tp_id_to_name.has(ret_type.id))
+      ? { ...ret_type, name: tp_id_to_name.get(ret_type.id) }
+      : ret_type;
 
     const effects = apply_to_effect_row(this.subst, body_result.effects);
 
@@ -672,10 +676,6 @@ export class InferEngine {
         trait_bounds.push({ type_param: tp.name, trait_name: bound.trait_name });
       }
     }
-
-    const final_ret = (ret_type.kind === "var" && !ret_type.name && tp_id_to_name.has(ret_type.id))
-      ? { ...ret_type, name: tp_id_to_name.get(ret_type.id) }
-      : ret_type;
 
     return {
       kind: "fn_decl",

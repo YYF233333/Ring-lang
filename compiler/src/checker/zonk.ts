@@ -16,7 +16,7 @@ function z(ctx: Ctx, t: Type): Type {
 function label_vars(names: Map<number, string>, t: Type): Type {
   switch (t.kind) {
     case "var":
-      return (!t.name && names.has(t.id)) ? { ...t, name: names.get(t.id) } : t;
+      return names.has(t.id) ? { ...t, name: names.get(t.id) } : t;
     case "fn":
       return { ...t, params: t.params.map(p => label_vars(names, p)), return_type: label_vars(names, t.return_type) };
     case "struct":
