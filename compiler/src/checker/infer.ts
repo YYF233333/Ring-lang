@@ -342,7 +342,8 @@ export class InferEngine {
       this.type_param_scope.set(tp.name, tv);
     }
 
-    const self_var = this.env.fresh_var();
+    const self_var = this.env.fresh_var("Self");
+    this.type_var_names.set(self_var.id, "Self");
     const methods: TraitMethodDef[] = [];
     for (const method of decl.methods) {
       const param_types = method.params.map(p => {
@@ -524,9 +525,10 @@ export class InferEngine {
   }
 
   private check_impl_decl(decl: ImplDecl): HImplDecl {
+    const impl_self_type = this.resolve_self_type(decl.target_type);
     const methods: HFnDecl[] = [];
     for (const method of decl.methods) {
-      const hfn = this.check_fn_decl(method);
+      const hfn = this.check_fn_decl(method, impl_self_type);
       methods.push(hfn);
     }
     return {
@@ -588,7 +590,7 @@ export class InferEngine {
     };
   }
 
-  private check_fn_decl(decl: FnDecl): HFnDecl {
+  private check_fn_decl(decl: FnDecl, self_type?: Type): HFnDecl {
     const saved_subst = this.subst;
     this.subst = empty_subst();
     this.env.push_scope();
@@ -617,7 +619,9 @@ export class InferEngine {
     // Bind parameters
     const hparams: HParam[] = [];
     for (const p of decl.params) {
-      const ptype = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var();
+      const ptype = p.type_annotation ? this.resolve_type_expr(p.type_annotation)
+        : (p.name === "self" && self_type) ? self_type
+        : this.env.fresh_var();
       this.env.bind_mono(p.name, ptype);
       hparams.push({ name: p.name, type: ptype });
     }

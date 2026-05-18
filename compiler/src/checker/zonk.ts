@@ -10,10 +10,26 @@ type Ctx = { subst: Substitution; names: Map<number, string> };
 
 function z(ctx: Ctx, t: Type): Type {
   const resolved = apply(ctx.subst, t);
-  if (resolved.kind === "var" && !resolved.name && ctx.names.has(resolved.id)) {
-    return { ...resolved, name: ctx.names.get(resolved.id) };
+  return label_vars(ctx.names, resolved);
+}
+
+function label_vars(names: Map<number, string>, t: Type): Type {
+  switch (t.kind) {
+    case "var":
+      return (!t.name && names.has(t.id)) ? { ...t, name: names.get(t.id) } : t;
+    case "fn":
+      return { ...t, params: t.params.map(p => label_vars(names, p)), return_type: label_vars(names, t.return_type) };
+    case "struct":
+      return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), fields: t.fields.map(f => ({ ...f, type: label_vars(names, f.type) })) };
+    case "enum":
+      return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => label_vars(names, f)) })) };
+    case "generic":
+      return { ...t, base: label_vars(names, t.base), args: t.args.map(a => label_vars(names, a)) };
+    case "record":
+      return { ...t, fields: t.fields.map(f => ({ ...f, type: label_vars(names, f.type) })) };
+    default:
+      return t;
   }
-  return resolved;
 }
 
 function zr(ctx: Ctx, r: EffectRow): EffectRow {
