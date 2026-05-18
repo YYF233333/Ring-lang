@@ -3,6 +3,7 @@ import * as assert from "node:assert/strict";
 import { span_to_range, position_to_lsp, offset_to_position } from "./utils.js";
 import { DocumentManager } from "./document-manager.js";
 import { convert_diagnostics } from "./features/diagnostics.js";
+import { get_hover } from "./features/hover.js";
 import { make_diagnostic } from "../diagnostics/index.js";
 import { DiagnosticSeverity } from "vscode-languageserver";
 
@@ -145,5 +146,33 @@ describe("Diagnostics feature", () => {
     assert.ok(result[0].relatedInformation);
     assert.equal(result[0].relatedInformation!.length, 1);
     assert.equal(result[0].relatedInformation![0].message, "expected type here");
+  });
+});
+
+describe("Hover feature", () => {
+  test("hover on function name shows return type", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn add(a: Int, b: Int) -> Int { a + b }`);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_hover(state, { line: 0, character: 3 });
+    assert.ok(result);
+    assert.ok(result.contents.toString().includes("Int"));
+  });
+
+  test("hover on variable shows its type", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int {\n  let x = 42\n  x\n}`);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_hover(state, { line: 2, character: 2 });
+    assert.ok(result);
+    assert.ok(result.contents.toString().includes("Int"));
+  });
+
+  test("hover returns null when no HIR available", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn broken( {`);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_hover(state, { line: 0, character: 3 });
+    assert.equal(result, null);
   });
 });
