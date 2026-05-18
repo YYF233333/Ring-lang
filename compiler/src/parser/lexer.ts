@@ -33,6 +33,9 @@ export enum TokenKind {
   False = "false",
   Trait = "trait",
   Try = "try",
+  While = "while",
+  Break = "break",
+  Continue = "continue",
 
   // Literals
   IntLit = "int_lit",
@@ -113,6 +116,9 @@ const KEYWORDS: Record<string, TokenKind> = {
   false: TokenKind.False,
   trait: TokenKind.Trait,
   try: TokenKind.Try,
+  while: TokenKind.While,
+  break: TokenKind.Break,
+  continue: TokenKind.Continue,
 };
 
 export interface Token {

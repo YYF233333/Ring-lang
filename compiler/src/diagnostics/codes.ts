@@ -30,6 +30,10 @@ export const E = {
 
   // Pattern errors (E06xx)
   E0601: "E0601", // non-exhaustive match
+
+  // Control flow errors (E02xx continued)
+  E0205: "E0205", // assignment to immutable variable
+  E0206: "E0206", // break/continue outside loop
 } as const;
 
 export const ERROR_DESCRIPTIONS: Record<string, string> = {
@@ -53,4 +57,6 @@ export const ERROR_DESCRIPTIONS: Record<string, string> = {
   [E.E0502]: "Missing trait method implementation",
   [E.E0503]: "Unsatisfied trait bound",
   [E.E0601]: "Non-exhaustive pattern match",
+  [E.E0205]: "Assignment to immutable variable",
+  [E.E0206]: "Break/continue outside loop",
 };
