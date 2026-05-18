@@ -51,6 +51,7 @@ export class InferEngine {
   private current_fn_return_type: Type | null = null;
   private current_fn_bounds: { type_param_var_id: number; trait_name: string; type_param_name: string }[] = [];
   private fn_bounds_stack: typeof this.current_fn_bounds[] = [];
+  public type_var_names: Map<number, string> = new Map();
 
   constructor(sink: DiagnosticSink) {
     this.sink = sink;
@@ -233,6 +234,7 @@ export class InferEngine {
     const type_param_vars: number[] = [];
     for (const tp of decl.type_params) {
       const tv = this.env.fresh_var(tp.name);
+      this.type_var_names.set(tv.id, tp.name);
       type_param_vars.push(tv.id);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -262,6 +264,7 @@ export class InferEngine {
     const type_var_types: Type[] = [];
     for (const tp of decl.type_params) {
       const tv = this.env.fresh_var(tp.name);
+      this.type_var_names.set(tv.id, tp.name);
       type_var_ids.push(tv.id);
       type_var_types.push(tv);
       this.type_param_scope.set(tp.name, tv);
@@ -334,6 +337,7 @@ export class InferEngine {
     const type_param_vars: number[] = [];
     for (const tp of decl.type_params) {
       const tv = this.env.fresh_var(tp.name);
+      this.type_var_names.set(tv.id, tp.name);
       type_param_vars.push(tv.id);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -403,6 +407,7 @@ export class InferEngine {
     const saved_tp_scope = new Map(this.type_param_scope);
     for (const tp of decl.type_params) {
       const tv = this.env.fresh_var(tp.name);
+      this.type_var_names.set(tv.id, tp.name);
       type_vars.push((tv as TypeVar).id);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -565,6 +570,7 @@ export class InferEngine {
         this.env.pop_scope();
         body = body_result.hexpr as HBlock;
         this.current_fn_bounds = this.fn_bounds_stack.pop()!;
+        for (const [k, v] of this.subst) saved_subst.set(k, v);
         this.subst = saved_subst;
       }
       return { name: m.name, params, return_type: m.type.return_type, has_default: m.has_default, body };
@@ -588,6 +594,7 @@ export class InferEngine {
     const saved_tp_scope = new Map(this.type_param_scope);
     for (const tp of decl.type_params) {
       const tv = this.env.fresh_var(tp.name);
+      this.type_var_names.set(tv.id, tp.name);
       this.type_param_scope.set(tp.name, tv);
       this.env.bind_mono(tp.name, tv);
     }
@@ -649,6 +656,7 @@ export class InferEngine {
 
     this.type_param_scope = saved_tp_scope;
     this.current_fn_bounds = this.fn_bounds_stack.pop()!;
+    for (const [k, v] of this.subst) saved_subst.set(k, v);
     this.subst = saved_subst;
 
     const trait_bounds: { type_param: string; trait_name: string }[] = [];
@@ -683,6 +691,7 @@ export class InferEngine {
     const body_result = this.infer_block(decl.body);
     this.subst = body_result.subst;
     this.env.pop_scope();
+    for (const [k, v] of this.subst) saved_subst.set(k, v);
     this.subst = saved_subst;
     return {
       kind: "test_decl",

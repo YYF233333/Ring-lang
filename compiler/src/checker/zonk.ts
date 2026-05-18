@@ -6,230 +6,141 @@ import {
 } from "../hir/index.js";
 import { Type, EffectRow } from "../types/index.js";
 
-function z(subst: Substitution, t: Type): Type {
-  return apply(subst, t);
+type Ctx = { subst: Substitution; names: Map<number, string> };
+
+function z(ctx: Ctx, t: Type): Type {
+  const resolved = apply(ctx.subst, t);
+  if (resolved.kind === "var" && !resolved.name && ctx.names.has(resolved.id)) {
+    return { ...resolved, name: ctx.names.get(resolved.id) };
+  }
+  return resolved;
 }
 
-function zr(subst: Substitution, r: EffectRow): EffectRow {
-  return apply_to_effect_row(subst, r);
+function zr(ctx: Ctx, r: EffectRow): EffectRow {
+  return apply_to_effect_row(ctx.subst, r);
 }
 
-function zonk_param(subst: Substitution, p: HParam): HParam {
-  return { ...p, type: z(subst, p.type) };
+function zp(ctx: Ctx, p: HParam): HParam {
+  return { ...p, type: z(ctx, p.type) };
 }
 
-function zonk_expr(subst: Substitution, expr: HExpr): HExpr {
-  const type = z(subst, expr.type);
-  const effects = zr(subst, expr.effects);
+function ze(ctx: Ctx, expr: HExpr): HExpr {
+  const type = z(ctx, expr.type);
+  const effects = zr(ctx, expr.effects);
   const base = { type, effects, span: expr.span };
 
   switch (expr.kind) {
-    case "int_lit":
-      return { ...base, kind: "int_lit", value: expr.value };
-    case "float_lit":
-      return { ...base, kind: "float_lit", value: expr.value };
-    case "str_lit":
-      return { ...base, kind: "str_lit", value: expr.value };
-    case "bool_lit":
-      return { ...base, kind: "bool_lit", value: expr.value };
-    case "ident":
-      return { ...base, kind: "ident", name: expr.name, resolved_name: expr.resolved_name, dict_closure_dicts: expr.dict_closure_dicts };
-    case "bin_op":
-      return { ...base, kind: "bin_op", op: expr.op, left: zonk_expr(subst, expr.left), right: zonk_expr(subst, expr.right) };
-    case "unary_op":
-      return { ...base, kind: "unary_op", op: expr.op, operand: zonk_expr(subst, expr.operand) };
+    case "int_lit":    return { ...base, kind: "int_lit", value: expr.value };
+    case "float_lit":  return { ...base, kind: "float_lit", value: expr.value };
+    case "str_lit":    return { ...base, kind: "str_lit", value: expr.value };
+    case "bool_lit":   return { ...base, kind: "bool_lit", value: expr.value };
+    case "ident":      return { ...base, kind: "ident", name: expr.name, resolved_name: expr.resolved_name, dict_closure_dicts: expr.dict_closure_dicts };
+    case "bin_op":     return { ...base, kind: "bin_op", op: expr.op, left: ze(ctx, expr.left), right: ze(ctx, expr.right) };
+    case "unary_op":   return { ...base, kind: "unary_op", op: expr.op, operand: ze(ctx, expr.operand) };
     case "call":
       return {
         ...base, kind: "call",
-        callee: zonk_expr(subst, expr.callee),
-        args: expr.args.map(a => zonk_expr(subst, a)),
-        type_args: expr.type_args.map(t => z(subst, t)),
-        resolved_dicts: expr.resolved_dicts,
-        dict_dispatch: expr.dict_dispatch,
+        callee: ze(ctx, expr.callee), args: expr.args.map(a => ze(ctx, a)),
+        type_args: expr.type_args.map(t => z(ctx, t)),
+        resolved_dicts: expr.resolved_dicts, dict_dispatch: expr.dict_dispatch,
       };
-    case "field_access":
-      return { ...base, kind: "field_access", receiver: zonk_expr(subst, expr.receiver), field: expr.field };
+    case "field_access": return { ...base, kind: "field_access", receiver: ze(ctx, expr.receiver), field: expr.field };
     case "struct_lit":
       return {
         ...base, kind: "struct_lit", name: expr.name,
-        type_args: expr.type_args.map(t => z(subst, t)),
-        fields: expr.fields.map((f): HStructFieldInit => ({ name: f.name, value: zonk_expr(subst, f.value) })),
+        type_args: expr.type_args.map(t => z(ctx, t)),
+        fields: expr.fields.map((f): HStructFieldInit => ({ name: f.name, value: ze(ctx, f.value) })),
       };
     case "match_expr":
       return {
-        ...base, kind: "match_expr",
-        scrutinee: zonk_expr(subst, expr.scrutinee),
+        ...base, kind: "match_expr", scrutinee: ze(ctx, expr.scrutinee),
         arms: expr.arms.map((a): HMatchArm => ({
-          pattern: a.pattern, guard: a.guard ? zonk_expr(subst, a.guard) : undefined,
-          body: zonk_expr(subst, a.body), span: a.span,
+          pattern: a.pattern, guard: a.guard ? ze(ctx, a.guard) : undefined,
+          body: ze(ctx, a.body), span: a.span,
         })),
       };
-    case "block":
-      return { ...base, kind: "block", ...zonk_block_inner(subst, expr) };
+    case "block":   return { ...base, kind: "block", ...zbi(ctx, expr) };
     case "if_expr": {
-      const else_branch = expr.else_branch
+      const eb = expr.else_branch
         ? (expr.else_branch.kind === "block"
-          ? { ...zonk_block_base(subst, expr.else_branch), kind: "block" as const, ...zonk_block_inner(subst, expr.else_branch) }
-          : zonk_expr(subst, expr.else_branch))
+          ? { ...zbb(ctx, expr.else_branch), kind: "block" as const, ...zbi(ctx, expr.else_branch) }
+          : ze(ctx, expr.else_branch))
         : undefined;
       return {
-        ...base, kind: "if_expr",
-        condition: zonk_expr(subst, expr.condition),
-        then_branch: { ...zonk_block_base(subst, expr.then_branch), kind: "block" as const, ...zonk_block_inner(subst, expr.then_branch) },
-        else_branch: else_branch as HBlock | import("../hir/index.js").HIf | undefined,
+        ...base, kind: "if_expr", condition: ze(ctx, expr.condition),
+        then_branch: { ...zbb(ctx, expr.then_branch), kind: "block" as const, ...zbi(ctx, expr.then_branch) },
+        else_branch: eb as HBlock | import("../hir/index.js").HIf | undefined,
       };
     }
     case "string_interp":
-      return {
-        ...base, kind: "string_interp",
-        parts: expr.parts.map(p => typeof p === "string" ? p : zonk_expr(subst, p)),
-      };
+      return { ...base, kind: "string_interp", parts: expr.parts.map(p => typeof p === "string" ? p : ze(ctx, p)) };
     case "try_catch":
-      return {
-        ...base, kind: "try_catch",
-        body: zonk_expr(subst, expr.body),
-        error_binding: expr.error_binding, error_type: expr.error_type,
-        handler: zonk_expr(subst, expr.handler),
-      };
+      return { ...base, kind: "try_catch", body: ze(ctx, expr.body), error_binding: expr.error_binding, error_type: expr.error_type, handler: ze(ctx, expr.handler) };
     case "handle_expr":
       return {
-        ...base, kind: "handle_expr",
-        body: zonk_expr(subst, expr.body),
+        ...base, kind: "handle_expr", body: ze(ctx, expr.body),
         handlers: expr.handlers.map((h): HEffectHandler => ({
           effect_name: h.effect_name, op_name: h.op_name,
-          params: h.params.map(p => zonk_param(subst, p)),
-          resume_name: h.resume_name,
-          body: zonk_expr(subst, h.body),
+          params: h.params.map(p => zp(ctx, p)), resume_name: h.resume_name, body: ze(ctx, h.body),
         })),
       };
     case "lambda":
-      return {
-        ...base, kind: "lambda",
-        params: expr.params.map(p => zonk_param(subst, p)),
-        return_type: z(subst, expr.return_type),
-        body: zonk_expr(subst, expr.body),
-      };
+      return { ...base, kind: "lambda", params: expr.params.map(p => zp(ctx, p)), return_type: z(ctx, expr.return_type), body: ze(ctx, expr.body) };
     case "effect_op":
-      return {
-        ...base, kind: "effect_op",
-        effect_name: expr.effect_name, op_name: expr.op_name,
-        args: expr.args.map(a => zonk_expr(subst, a)),
-      };
-    case "option_unwrap":
-      return { ...base, kind: "option_unwrap", expr: zonk_expr(subst, expr.expr) };
-    case "try_block":
-      return { ...base, kind: "try_block", body: zonk_expr(subst, expr.body) };
-    case "option_or":
-      return {
-        ...base, kind: "option_or",
-        expr: zonk_expr(subst, expr.expr),
-        default_value: zonk_expr(subst, expr.default_value),
-      };
+      return { ...base, kind: "effect_op", effect_name: expr.effect_name, op_name: expr.op_name, args: expr.args.map(a => ze(ctx, a)) };
+    case "option_unwrap": return { ...base, kind: "option_unwrap", expr: ze(ctx, expr.expr) };
+    case "try_block":     return { ...base, kind: "try_block", body: ze(ctx, expr.body) };
+    case "option_or":     return { ...base, kind: "option_or", expr: ze(ctx, expr.expr), default_value: ze(ctx, expr.default_value) };
   }
 }
 
-function zonk_block_base(subst: Substitution, block: HBlock): { type: Type; effects: EffectRow; span: typeof block.span } {
-  return { type: z(subst, block.type), effects: zr(subst, block.effects), span: block.span };
+function zbb(ctx: Ctx, block: HBlock) {
+  return { type: z(ctx, block.type), effects: zr(ctx, block.effects), span: block.span };
 }
 
-function zonk_block_inner(subst: Substitution, block: HBlock): { stmts: HStmt[]; tail?: HExpr } {
-  return {
-    stmts: block.stmts.map(s => zonk_stmt(subst, s)),
-    tail: block.tail ? zonk_expr(subst, block.tail) : undefined,
-  };
+function zbi(ctx: Ctx, block: HBlock) {
+  return { stmts: block.stmts.map(s => zs(ctx, s)), tail: block.tail ? ze(ctx, block.tail) : undefined };
 }
 
-function zonk_block(subst: Substitution, block: HBlock): HBlock {
-  return {
-    kind: "block",
-    ...zonk_block_base(subst, block),
-    ...zonk_block_inner(subst, block),
-  };
+function zb(ctx: Ctx, block: HBlock): HBlock {
+  return { kind: "block", ...zbb(ctx, block), ...zbi(ctx, block) };
 }
 
-function zonk_stmt(subst: Substitution, stmt: HStmt): HStmt {
+function zs(ctx: Ctx, stmt: HStmt): HStmt {
   switch (stmt.kind) {
-    case "let_stmt":
-      return { ...stmt, type: z(subst, stmt.type), init: zonk_expr(subst, stmt.init) };
-    case "var_stmt":
-      return { ...stmt, type: z(subst, stmt.type), init: zonk_expr(subst, stmt.init) };
-    case "assign_stmt":
-      return { ...stmt, target: zonk_expr(subst, stmt.target), value: zonk_expr(subst, stmt.value) };
-    case "expr_stmt":
-      return { ...stmt, expr: zonk_expr(subst, stmt.expr) };
-    case "return_stmt":
-      return { ...stmt, value: stmt.value ? zonk_expr(subst, stmt.value) : undefined };
+    case "let_stmt":    return { ...stmt, type: z(ctx, stmt.type), init: ze(ctx, stmt.init) };
+    case "var_stmt":    return { ...stmt, type: z(ctx, stmt.type), init: ze(ctx, stmt.init) };
+    case "assign_stmt": return { ...stmt, target: ze(ctx, stmt.target), value: ze(ctx, stmt.value) };
+    case "expr_stmt":   return { ...stmt, expr: ze(ctx, stmt.expr) };
+    case "return_stmt": return { ...stmt, value: stmt.value ? ze(ctx, stmt.value) : undefined };
   }
 }
 
-function zonk_fn(subst: Substitution, fn: HFnDecl): HFnDecl {
-  return {
-    ...fn,
-    params: fn.params.map(p => zonk_param(subst, p)),
-    return_type: z(subst, fn.return_type),
-    effects: zr(subst, fn.effects),
-    body: zonk_block(subst, fn.body),
-  };
+function zfn(ctx: Ctx, fn: HFnDecl): HFnDecl {
+  return { ...fn, params: fn.params.map(p => zp(ctx, p)), return_type: z(ctx, fn.return_type), effects: zr(ctx, fn.effects), body: zb(ctx, fn.body) };
 }
 
-function zonk_decl(subst: Substitution, decl: HDecl): HDecl {
+function zd(ctx: Ctx, decl: HDecl): HDecl {
   switch (decl.kind) {
-    case "fn_decl":
-      return zonk_fn(subst, decl);
-    case "struct_decl": {
-      const d: HStructDecl = {
-        ...decl,
-        fields: decl.fields.map(f => ({ ...f, type: z(subst, f.type) })),
-      };
-      return d;
-    }
-    case "enum_decl": {
-      const d: HEnumDecl = {
-        ...decl,
-        variants: decl.variants.map(v => ({ ...v, fields: v.fields.map(f => z(subst, f)) })),
-      };
-      return d;
-    }
-    case "impl_decl": {
-      const d: HImplDecl = {
-        ...decl,
-        methods: decl.methods.map(m => zonk_fn(subst, m)),
-      };
-      return d;
-    }
-    case "effect_decl": {
-      const d: HEffectDecl = {
-        ...decl,
-        ops: decl.ops.map(op => ({
-          ...op,
-          params: op.params.map(p => zonk_param(subst, p)),
-          return_type: z(subst, op.return_type),
-        })),
-      };
-      return d;
-    }
-    case "test_decl": {
-      const d: HTestDecl = {
-        ...decl,
-        body: zonk_block(subst, decl.body),
-      };
-      return d;
-    }
-    case "trait_decl": {
-      const d: HTraitDecl = {
+    case "fn_decl":     return zfn(ctx, decl);
+    case "struct_decl": return { ...decl, fields: decl.fields.map(f => ({ ...f, type: z(ctx, f.type) })) } as HStructDecl;
+    case "enum_decl":   return { ...decl, variants: decl.variants.map(v => ({ ...v, fields: v.fields.map(f => z(ctx, f)) })) } as HEnumDecl;
+    case "impl_decl":   return { ...decl, methods: decl.methods.map(m => zfn(ctx, m)) } as HImplDecl;
+    case "effect_decl":
+      return { ...decl, ops: decl.ops.map(op => ({ ...op, params: op.params.map(p => zp(ctx, p)), return_type: z(ctx, op.return_type) })) } as HEffectDecl;
+    case "test_decl":   return { ...decl, body: zb(ctx, decl.body) } as HTestDecl;
+    case "trait_decl":
+      return {
         ...decl,
         methods: decl.methods.map((m): HTraitMethod => ({
-          ...m,
-          params: m.params.map(p => zonk_param(subst, p)),
-          return_type: z(subst, m.return_type),
-          body: m.body ? zonk_block(subst, m.body) : undefined,
+          ...m, params: m.params.map(p => zp(ctx, p)), return_type: z(ctx, m.return_type),
+          body: m.body ? zb(ctx, m.body) : undefined,
         })),
-      };
-      return d;
-    }
+      } as HTraitDecl;
   }
 }
 
-export function zonk_program(subst: Substitution, program: HProgram): HProgram {
-  return { decls: program.decls.map(d => zonk_decl(subst, d)) };
+export function zonk_program(subst: Substitution, names: Map<number, string>, program: HProgram): HProgram {
+  const ctx: Ctx = { subst, names };
+  return { decls: program.decls.map(d => zd(ctx, d)) };
 }

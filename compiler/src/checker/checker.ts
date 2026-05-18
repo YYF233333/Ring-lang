@@ -17,6 +17,6 @@ export function check(program: Program, sink?: DiagnosticSink): CheckResult {
   const s = sink ?? new CollectingSink();
   const engine = new InferEngine(s);
   const hprogram = engine.check(program);
-  const zonked = zonk_program(engine.subst, hprogram);
+  const zonked = zonk_program(engine.subst, engine.type_var_names, hprogram);
   return { program: zonked, env: engine.env };
 }
