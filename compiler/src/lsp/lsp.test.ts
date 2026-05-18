@@ -2,6 +2,9 @@ import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 import { span_to_range, position_to_lsp, offset_to_position } from "./utils.js";
 import { DocumentManager } from "./document-manager.js";
+import { convert_diagnostics } from "./features/diagnostics.js";
+import { make_diagnostic } from "../diagnostics/index.js";
+import { DiagnosticSeverity } from "vscode-languageserver";
 
 describe("LSP utils", () => {
   describe("position_to_lsp", () => {
@@ -85,5 +88,62 @@ describe("DocumentManager", () => {
     dm.close("file:///test.ring");
     const state = dm.get("file:///test.ring");
     assert.equal(state, undefined);
+  });
+});
+
+describe("Diagnostics feature", () => {
+  test("converts compiler diagnostic to LSP diagnostic", () => {
+    const ring_diag = make_diagnostic(
+      "E0201", "error", "Undefined variable 'x'",
+      {
+        file: "test.ring",
+        start: { line: 1, column: 4, offset: 4 },
+        end: { line: 1, column: 5, offset: 5 },
+      },
+      { kind: "undefined_variable", name: "x" },
+    );
+    const result = convert_diagnostics([ring_diag]);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].severity, DiagnosticSeverity.Error);
+    assert.equal(result[0].code, "E0201");
+    assert.equal(result[0].message, "Undefined variable 'x'");
+    assert.equal(result[0].source, "ring");
+    assert.deepStrictEqual(result[0].range, {
+      start: { line: 0, character: 4 },
+      end: { line: 0, character: 5 },
+    });
+  });
+
+  test("maps severity correctly", () => {
+    const warn = make_diagnostic(
+      "W0001", "warning", "unused variable",
+      { file: "t.ring", start: { line: 1, column: 0, offset: 0 }, end: { line: 1, column: 1, offset: 1 } },
+      { kind: "other" },
+    );
+    const hint = make_diagnostic(
+      "H0001", "hint", "consider renaming",
+      { file: "t.ring", start: { line: 1, column: 0, offset: 0 }, end: { line: 1, column: 1, offset: 1 } },
+      { kind: "other" },
+    );
+    const results = convert_diagnostics([warn, hint]);
+    assert.equal(results[0].severity, DiagnosticSeverity.Warning);
+    assert.equal(results[1].severity, DiagnosticSeverity.Hint);
+  });
+
+  test("converts notes to relatedInformation", () => {
+    const diag = make_diagnostic(
+      "E0301", "error", "Type mismatch",
+      { file: "test.ring", start: { line: 2, column: 0, offset: 10 }, end: { line: 2, column: 5, offset: 15 } },
+      { kind: "type_mismatch", expected: "Int", actual: "Str" },
+      [{ message: "expected type here", span: {
+        file: "test.ring",
+        start: { line: 1, column: 0, offset: 0 },
+        end: { line: 1, column: 3, offset: 3 },
+      }}],
+    );
+    const result = convert_diagnostics([diag]);
+    assert.ok(result[0].relatedInformation);
+    assert.equal(result[0].relatedInformation!.length, 1);
+    assert.equal(result[0].relatedInformation![0].message, "expected type here");
   });
 });
