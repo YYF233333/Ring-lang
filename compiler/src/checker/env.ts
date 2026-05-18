@@ -97,8 +97,8 @@ export class TypeEnv {
 
   get current_var_id(): number { return this.next_type_var_id; }
 
-  fresh_var(name?: string): TypeVar {
-    return { kind: "var", id: this.next_type_var_id++, name };
+  fresh_var(): TypeVar {
+    return { kind: "var", id: this.next_type_var_id++ };
   }
 
   private register_builtins(): void {

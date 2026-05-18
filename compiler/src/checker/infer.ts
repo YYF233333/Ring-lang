@@ -22,8 +22,9 @@ import {
   variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
 import { TypeEnv, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
-import { Substitution, empty_subst, unify, UnificationError, apply, apply_to_effect_row, init_unify_fresh_counter } from "./unify.js";
+import { Substitution, empty_subst, unify, UnificationError, apply, init_unify_fresh_counter } from "./unify.js";
 import { check_exhaustive } from "./exhaustive.js";
+import { ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block } from "./zonk.js";
 
 // ============================================================
 // Error helpers
@@ -51,7 +52,6 @@ export class InferEngine {
   private current_fn_return_type: Type | null = null;
   private current_fn_bounds: { type_param_var_id: number; trait_name: string; type_param_name: string }[] = [];
   private fn_bounds_stack: typeof this.current_fn_bounds[] = [];
-  public type_var_names: Map<number, string> = new Map();
 
   constructor(sink: DiagnosticSink) {
     this.sink = sink;
@@ -233,8 +233,7 @@ export class InferEngine {
     const saved_tp_scope = new Map(this.type_param_scope);
     const type_param_vars: number[] = [];
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var(tp.name);
-      this.type_var_names.set(tv.id, tp.name);
+      const tv = this.env.fresh_var();
       type_param_vars.push(tv.id);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -263,8 +262,7 @@ export class InferEngine {
     const type_var_ids: number[] = [];
     const type_var_types: Type[] = [];
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var(tp.name);
-      this.type_var_names.set(tv.id, tp.name);
+      const tv = this.env.fresh_var();
       type_var_ids.push(tv.id);
       type_var_types.push(tv);
       this.type_param_scope.set(tp.name, tv);
@@ -336,14 +334,12 @@ export class InferEngine {
     const type_param_names = decl.type_params.map(tp => tp.name);
     const type_param_vars: number[] = [];
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var(tp.name);
-      this.type_var_names.set(tv.id, tp.name);
+      const tv = this.env.fresh_var();
       type_param_vars.push(tv.id);
       this.type_param_scope.set(tp.name, tv);
     }
 
-    const self_var = this.env.fresh_var("Self");
-    this.type_var_names.set(self_var.id, "Self");
+    const self_var = this.env.fresh_var();
     const methods: TraitMethodDef[] = [];
     for (const method of decl.methods) {
       const param_types = method.params.map(p => {
@@ -410,8 +406,7 @@ export class InferEngine {
     const type_vars: number[] = [];
     const saved_tp_scope = new Map(this.type_param_scope);
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var(tp.name);
-      this.type_var_names.set(tv.id, tp.name);
+      const tv = this.env.fresh_var();
       type_vars.push((tv as TypeVar).id);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -572,10 +567,10 @@ export class InferEngine {
         }
         const body_result = this.infer_block(ast_method.body);
         this.subst = body_result.subst;
+        const trait_ctx: ZonkCtx = { subst: this.subst, names: new Map() };
+        body = zonk_block(trait_ctx, body_result.hexpr as HBlock);
         this.env.pop_scope();
-        body = body_result.hexpr as HBlock;
         this.current_fn_bounds = this.fn_bounds_stack.pop()!;
-        for (const [k, v] of this.subst) saved_subst.set(k, v);
         this.subst = saved_subst;
       }
       return { name: m.name, params, return_type: m.type.return_type, has_default: m.has_default, body };
@@ -598,8 +593,7 @@ export class InferEngine {
     // Bind type parameters as fresh type variables
     const saved_tp_scope = new Map(this.type_param_scope);
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var(tp.name);
-      this.type_var_names.set(tv.id, tp.name);
+      const tv = this.env.fresh_var();
       this.type_param_scope.set(tp.name, tv);
       this.env.bind_mono(tp.name, tv);
     }
@@ -637,37 +631,36 @@ export class InferEngine {
 
     // Determine return type
     this.subst = this.unify_at(body_result.hexpr.type, expected_ret, this.subst, decl.span);
-    const ret_type = apply(this.subst, expected_ret);
 
-    this.current_fn_return_type = saved_fn_return;
-    this.env.pop_scope();
-
-    // Apply final substitution to params and label remaining type vars with param names
-    const tp_id_to_name = new Map<number, string>();
+    // Build local names: resolve each type param through subst to find terminal var ID
+    const local_names = new Map<number, string>();
     for (const tp of decl.type_params) {
       const tv = this.type_param_scope.get(tp.name);
       if (tv && tv.kind === "var") {
         const resolved = apply(this.subst, tv);
-        if (resolved.kind === "var") tp_id_to_name.set(resolved.id, tp.name);
+        if (resolved.kind === "var") local_names.set(resolved.id, tp.name);
       }
     }
-    const final_params = hparams.map(p => {
-      const t = apply(this.subst, p.type);
-      if (t.kind === "var" && tp_id_to_name.has(t.id)) {
-        return { name: p.name, type: { ...t, name: tp_id_to_name.get(t.id) } };
+    // Row variables from record type params (e.g., ..rest)
+    const declared_tp_names = new Set(decl.type_params.map(tp => tp.name));
+    for (const [name, tv] of this.type_param_scope) {
+      if (!saved_tp_scope.has(name) && !declared_tp_names.has(name) && tv.kind === "var") {
+        const resolved = apply(this.subst, tv);
+        if (resolved.kind === "var") local_names.set(resolved.id, name);
       }
-      return { name: p.name, type: t };
-    });
+    }
 
-    const final_ret = (ret_type.kind === "var" && tp_id_to_name.has(ret_type.id))
-      ? { ...ret_type, name: tp_id_to_name.get(ret_type.id) }
-      : ret_type;
+    // Zonk everything with local subst + names
+    const ctx: ZonkCtx = { subst: this.subst, names: local_names };
+    const final_params = hparams.map(p => zonk_param(ctx, p));
+    const final_ret = zonk_type(ctx, expected_ret);
+    const effects = zonk_row(ctx, body_result.effects);
+    const final_body = zonk_block(ctx, body_result.hexpr as HBlock);
 
-    const effects = apply_to_effect_row(this.subst, body_result.effects);
-
+    this.current_fn_return_type = saved_fn_return;
+    this.env.pop_scope();
     this.type_param_scope = saved_tp_scope;
     this.current_fn_bounds = this.fn_bounds_stack.pop()!;
-    for (const [k, v] of this.subst) saved_subst.set(k, v);
     this.subst = saved_subst;
 
     const trait_bounds: { type_param: string; trait_name: string }[] = [];
@@ -684,7 +677,7 @@ export class InferEngine {
       params: final_params,
       return_type: final_ret,
       effects,
-      body: body_result.hexpr as HBlock,
+      body: final_body,
       is_pub: decl.is_pub,
       trait_bounds,
       span: decl.span,
@@ -697,13 +690,14 @@ export class InferEngine {
     this.env.push_scope();
     const body_result = this.infer_block(decl.body);
     this.subst = body_result.subst;
+    const ctx: ZonkCtx = { subst: this.subst, names: new Map() };
+    const final_body = zonk_block(ctx, body_result.hexpr as HBlock);
     this.env.pop_scope();
-    for (const [k, v] of this.subst) saved_subst.set(k, v);
     this.subst = saved_subst;
     return {
       kind: "test_decl",
       description: decl.description,
-      body: body_result.hexpr as HBlock,
+      body: final_body,
       span: decl.span,
     };
   }
@@ -1882,7 +1876,7 @@ export class InferEngine {
           name: f.name,
           type: this.resolve_type_expr(f.type),
         }));
-        const tail_var = texpr.rest ? this.env.fresh_var(texpr.rest) : undefined;
+        const tail_var = texpr.rest ? this.env.fresh_var() : undefined;
         const tail = tail_var?.id;
         if (texpr.rest && tail_var) {
           this.type_param_scope.set(texpr.rest, tail_var);
