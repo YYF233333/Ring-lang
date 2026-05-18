@@ -7,8 +7,11 @@ import { get_hover } from "./features/hover.js";
 import { get_completions } from "./features/completion.js";
 import { get_definition } from "./features/definition.js";
 import { get_references } from "./features/references.js";
+import { get_rename_edits } from "./features/rename.js";
+import { get_document_symbols } from "./features/symbols.js";
+import { get_code_actions } from "./features/code-actions.js";
 import { make_diagnostic } from "../diagnostics/index.js";
-import { DiagnosticSeverity, CompletionItem } from "vscode-languageserver";
+import { DiagnosticSeverity, CompletionItem, SymbolKind } from "vscode-languageserver";
 
 describe("LSP utils", () => {
   describe("position_to_lsp", () => {
@@ -274,5 +277,68 @@ describe("References feature", () => {
     const state = dm.get("file:///test.ring")!;
     const refs = get_references(state, { line: 0, character: 20 });
     assert.deepStrictEqual(refs, []);
+  });
+});
+
+describe("Rename feature", () => {
+  test("renames variable across usages", () => {
+    const dm = new DocumentManager();
+    const src = `fn main() -> Int {\n  let x = 10\n  x + 1\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const edit = get_rename_edits(state, { line: 2, character: 2 }, "y");
+    assert.ok(edit);
+    const changes = edit.changes!["file:///test.ring"];
+    assert.ok(changes.length >= 2);
+    assert.ok(changes.every(c => c.newText === "y"));
+  });
+
+  test("rejects rename of builtins", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int { print(1)\n  0\n}`);
+    const state = dm.get("file:///test.ring")!;
+    const edit = get_rename_edits(state, { line: 0, character: 20 }, "my_print");
+    assert.equal(edit, null);
+  });
+});
+
+describe("Document Symbols", () => {
+  test("lists top-level declarations", () => {
+    const dm = new DocumentManager();
+    const src = `struct Point { x: Int, y: Int }\nfn main() -> Int { 0 }`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const symbols = get_document_symbols(state);
+    assert.equal(symbols.length, 2);
+    const names = symbols.map(s => s.name);
+    assert.ok(names.includes("Point"));
+    assert.ok(names.includes("main"));
+  });
+
+  test("maps declaration kinds correctly", () => {
+    const dm = new DocumentManager();
+    const src = `enum Color { red, green, blue }\ntrait Show {\n  fn show(self: Self) -> Str\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const symbols = get_document_symbols(state);
+    const color = symbols.find(s => s.name === "Color");
+    const show = symbols.find(s => s.name === "Show");
+    assert.ok(color);
+    assert.ok(show);
+    assert.equal(color!.kind, SymbolKind.Enum);
+    assert.equal(show!.kind, SymbolKind.Interface);
+  });
+});
+
+describe("Code Actions", () => {
+  test("returns empty for file with no diagnostics", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int { 42 }`);
+    const state = dm.get("file:///test.ring")!;
+    const actions = get_code_actions(state, {
+      start: { line: 0, character: 0 },
+      end: { line: 0, character: 30 },
+    });
+    assert.deepStrictEqual(actions, []);
   });
 });
