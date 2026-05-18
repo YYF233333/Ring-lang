@@ -1,5 +1,8 @@
 import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { span_to_range, position_to_lsp, offset_to_position } from "./utils.js";
 import { DocumentManager } from "./document-manager.js";
 import { convert_diagnostics } from "./features/diagnostics.js";
@@ -340,5 +343,55 @@ describe("Code Actions", () => {
       end: { line: 0, character: 30 },
     });
     assert.deepStrictEqual(actions, []);
+  });
+});
+
+const __lsp_test_filename = fileURLToPath(import.meta.url);
+const __lsp_test_dirname = path.dirname(__lsp_test_filename);
+const LSP_CLI_PATH = __lsp_test_dirname.includes("dist")
+  ? path.resolve(__lsp_test_dirname, "../cli.js")
+  : path.resolve(__lsp_test_dirname, "../cli.js");
+
+describe("LSP E2E", () => {
+  test("server responds to initialize request", async () => {
+    const child = spawn("node", [LSP_CLI_PATH, "lsp", "--stdio"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const request = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        processId: process.pid,
+        capabilities: {},
+        rootUri: null,
+      },
+    });
+    const message = `Content-Length: ${Buffer.byteLength(request)}\r\n\r\n${request}`;
+
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error("LSP server did not respond within 5s"));
+      }, 5000);
+
+      let data = "";
+      child.stdout!.on("data", (chunk: Buffer) => {
+        data += chunk.toString();
+        if (data.includes('"id":1')) {
+          clearTimeout(timeout);
+          child.kill();
+          assert.ok(data.includes('"result"'));
+          assert.ok(data.includes('"capabilities"'));
+          resolve();
+        }
+      });
+
+      child.stderr!.on("data", () => {});
+      child.on("error", (err: Error) => { clearTimeout(timeout); reject(err); });
+
+      child.stdin!.write(message);
+    });
   });
 });
