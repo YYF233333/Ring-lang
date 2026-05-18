@@ -162,6 +162,8 @@ function walk_expr_for_receiver(expr: HExpr, pos: Position): Type | null {
 
     case "list_lit":
       return expr.elements.reduce<Type | null>((acc, e) => acc ?? find_receiver_type(e, pos), null);
+    case "tuple_lit":
+      return expr.elements.reduce<Type | null>((acc, e) => acc ?? find_receiver_type(e, pos), null);
   }
 }
 
@@ -186,6 +188,9 @@ function walk_stmt_for_receiver(stmt: HStmt, pos: Position): Type | null {
     case "break_stmt":
     case "continue_stmt":
       return null;
+
+    case "let_destructure":
+      return find_receiver_type(stmt.init, pos);
   }
 }
 
@@ -353,6 +358,10 @@ function collect_block_locals_from_ast(block: AstBlock, pos: Position, out: Map<
         out.set(stmt.binding, UNIT);
         collect_block_locals_from_ast(stmt.body, pos, out);
       }
+    } else if (stmt.kind === "let_destructure") {
+      for (const el of stmt.pattern.elements) {
+        if (el.kind === "binding") out.set(el.name, UNIT);
+      }
     }
   }
 }
@@ -379,6 +388,10 @@ function collect_block_locals(block: HBlock, pos: Position, out: Map<string, Typ
           out.set(stmt.binding, { kind: "var", id: -1 });
         }
         collect_block_locals(stmt.body, pos, out);
+      }
+    } else if (stmt.kind === "let_destructure") {
+      for (const b of stmt.bindings) {
+        if (b.name !== "_") out.set(b.name, b.type);
       }
     }
   }

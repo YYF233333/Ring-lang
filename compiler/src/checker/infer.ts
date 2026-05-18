@@ -19,6 +19,7 @@ import {
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt, HForInStmt,
+  HLetDestructureStmt,
   variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
 import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
@@ -977,6 +978,50 @@ export class InferEngine {
           effects: EMPTY_ROW,
         };
       }
+      case "let_destructure": {
+        const init_r = this.infer_expr(stmt.init, subst);
+        let s = init_r.subst;
+        const init_type = apply(s, init_r.hexpr.type);
+        if (init_type.kind !== "tuple") {
+          this.type_error(E.E0301, `let destructuring requires tuple type, got ${type_to_string(init_type)}`, stmt.span, { kind: "other", detail: "not a tuple" });
+        }
+        const tuple_t = init_type.kind === "tuple" ? init_type : { kind: "tuple" as const, elements: [] };
+        if (stmt.pattern.elements.length !== tuple_t.elements.length) {
+          this.type_error(E.E0301,
+            `Tuple has ${tuple_t.elements.length} elements but pattern has ${stmt.pattern.elements.length}`,
+            stmt.span,
+            { kind: "other", detail: "tuple arity mismatch" });
+        }
+        const bindings: { name: string; def_id?: number; type: Type }[] = [];
+        for (let i = 0; i < stmt.pattern.elements.length; i++) {
+          const p = stmt.pattern.elements[i];
+          const elem_type = i < tuple_t.elements.length ? tuple_t.elements[i] : UNIT;
+          if (p.kind === "binding") {
+            this.env.bind_mono(p.name, elem_type);
+            const scheme = this.env.lookup(p.name)!;
+            this.env.record_def_span(scheme.def_id!, p.span);
+            bindings.push({ name: p.name, def_id: scheme.def_id, type: elem_type });
+          } else if (p.kind === "wildcard") {
+            bindings.push({ name: "_", type: elem_type });
+          } else {
+            // Nested tuple patterns not yet supported in destructuring
+            this.type_error(E.E0301, `Only binding and wildcard patterns are supported in let destructuring`, p.span, { kind: "other", detail: "unsupported pattern kind" });
+            bindings.push({ name: "_", type: elem_type });
+          }
+        }
+        const hstmt: HLetDestructureStmt = {
+          kind: "let_destructure",
+          pattern: stmt.pattern,
+          bindings,
+          init: init_r.hexpr,
+          span: stmt.span,
+        };
+        return {
+          hstmt,
+          subst: s,
+          effects: init_r.effects,
+        };
+      }
     }
   }
 
@@ -1046,6 +1091,24 @@ export class InferEngine {
         return this.infer_try_block(expr.body, expr.span, subst);
       case "list_lit":
         return this.infer_list_literal(expr.elements, expr.span, subst);
+      case "tuple_lit": {
+        let s = subst;
+        const helements: HExpr[] = [];
+        let combined_effects: EffectRow = EMPTY_ROW;
+        for (const el of (expr as import("../ast/index.js").TupleLitExpr).elements) {
+          const r = this.infer_expr(el, s);
+          s = r.subst;
+          helements.push(r.hexpr);
+          [combined_effects, s] = this.merge_effects(combined_effects, r.effects, s);
+        }
+        const elem_types = helements.map(e => apply(s, e.type));
+        const tuple_type: Type = { kind: "tuple", elements: elem_types };
+        return {
+          hexpr: { kind: "tuple_lit", elements: helements, type: tuple_type, effects: combined_effects, span: expr.span } as import("../hir/index.js").HTupleLit,
+          subst: s,
+          effects: combined_effects,
+        };
+      }
       case "range": {
         const start_r = this.infer_expr(expr.start, subst);
         let s = this.unify_at(start_r.hexpr.type, INT, start_r.subst, expr.start.span);
@@ -1718,6 +1781,25 @@ export class InferEngine {
       }
       case "literal":
         break;
+      case "tuple": {
+        const tp = pattern as import("../ast/index.js").TuplePattern;
+        const resolved = apply(subst, expected_type);
+        if (resolved.kind !== "tuple") {
+          this.type_error(E.E0301, `Tuple pattern requires tuple type, got ${type_to_string(resolved)}`, pattern.span, { kind: "type_mismatch", expected: "tuple", actual: type_to_string(resolved) });
+          break;
+        }
+        if (tp.elements.length !== resolved.elements.length) {
+          this.type_error(E.E0301,
+            `Tuple pattern has ${tp.elements.length} elements but type has ${resolved.elements.length}`,
+            pattern.span,
+            { kind: "other", detail: "tuple arity mismatch" });
+          break;
+        }
+        for (let i = 0; i < tp.elements.length; i++) {
+          this.bind_pattern(tp.elements[i], resolved.elements[i], subst);
+        }
+        break;
+      }
     }
   }
 
@@ -2120,6 +2202,8 @@ export class InferEngine {
         }
         return { kind: "record", fields, tail, tail_name: texpr.rest } as Type;
       }
+      case "tuple_type":
+        return { kind: "tuple", elements: (texpr as import("../ast/index.js").TupleTypeExpr).elements.map(e => this.resolve_type_expr(e)) };
       default:
         return assertNever(texpr, "resolve_type_expr");
     }

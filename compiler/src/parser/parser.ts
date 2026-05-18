@@ -2,14 +2,14 @@
 import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
   Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt, BreakStmt, ContinueStmt,
-  ForInStmt,
+  ForInStmt, LetDestructureStmt,
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
   BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
   StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
-  OrExpr, CatchExpr, HandleExpr, LambdaExpr, OptionUnwrapExpr, TryBlockExpr, RangeExpr, ListLitExpr,
+  OrExpr, CatchExpr, HandleExpr, LambdaExpr, OptionUnwrapExpr, TryBlockExpr, RangeExpr, ListLitExpr, TupleLitExpr,
   BinOp, UnaryOp,
-  TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr, RecordTypeExpr, RecordTypeField,
-  Pattern, WildcardPattern, BindingPattern, ConstructorPattern, LiteralPattern,
+  TypeExpr, NamedTypeExpr, FnTypeExpr, OptionTypeExpr, RecordTypeExpr, RecordTypeField, TupleTypeExpr,
+  Pattern, WildcardPattern, BindingPattern, ConstructorPattern, LiteralPattern, TuplePattern,
   MatchArm, EffectHandler, Param, TypeParam, TypeBound,
   StructField, EnumVariant, EffectOp, StructFieldInit,
   Span, Position,
@@ -392,6 +392,32 @@ export class Parser {
       return result;
     }
 
+    // Tuple type: (Type, Type, ...)
+    if (this.check(TokenKind.LParen)) {
+      this.advance();
+      const first = this.parse_type_expr();
+      if (this.check(TokenKind.Comma)) {
+        this.advance();
+        const elements: TypeExpr[] = [first];
+        if (!this.check(TokenKind.RParen)) {
+          elements.push(this.parse_type_expr());
+          while (this.check(TokenKind.Comma)) {
+            this.advance();
+            if (this.check(TokenKind.RParen)) break;
+            elements.push(this.parse_type_expr());
+          }
+        }
+        const end_tok = this.expect(TokenKind.RParen);
+        return {
+          kind: "tuple_type",
+          elements,
+          span: this.make_span(start, end_tok.span.end),
+        } as TupleTypeExpr;
+      }
+      this.expect(TokenKind.RParen);
+      return first;
+    }
+
     // Named type
     const name = this.expect(TokenKind.Ident).value;
     const type_args = this.try_parse_type_args();
@@ -517,6 +543,24 @@ export class Parser {
     const start = this.current_span_start();
 
     if (this.check(TokenKind.Let)) {
+      // Look ahead: if next token after `let` is `(`, it's a destructuring statement
+      const saved_pos = this.pos;
+      this.advance(); // consume `let`
+      if (this.check(TokenKind.LParen)) {
+        const pattern = this.parse_pattern() as TuplePattern;
+        this.expect(TokenKind.Eq);
+        const init = this.parse_expr();
+        this.try_consume(TokenKind.Semi);
+        const end = this.current_span_start();
+        return {
+          kind: "let_destructure",
+          pattern,
+          init,
+          span: this.make_span(start, end),
+        } as LetDestructureStmt;
+      }
+      // Not a destructuring — backtrack and parse normally
+      this.pos = saved_pos;
       return this.parse_binding_stmt(false);
     }
     if (this.check(TokenKind.Var)) {
@@ -682,6 +726,11 @@ export class Parser {
         left = this.parse_dot_expr(left);
         last_was_comparison = false;
       } else if (tok.kind === TokenKind.LParen) {
+        // Only treat '(' as a function call if it's on the same line as the
+        // preceding expression.  A '(' on a new line starts a parenthesised
+        // expression, not an argument list.  This prevents `let x = 42\n("y",1)`
+        // from being parsed as the call `42("y", 1)`.
+        if (tok.span.start.line > left.span.end.line) break;
         left = this.parse_call_expr(left);
         last_was_comparison = false;
       } else if (tok.kind === TokenKind.Question) {
@@ -811,12 +860,30 @@ export class Parser {
       } as ListLitExpr;
     }
 
-    // Parenthesized expression
+    // Parenthesized expression or tuple literal
     if (tok.kind === TokenKind.LParen) {
       this.advance();
-      const expr = this.parse_expr();
+      const first = this.parse_expr();
+      if (this.check(TokenKind.Comma)) {
+        this.advance();
+        const elements: Expr[] = [first];
+        if (!this.check(TokenKind.RParen)) {
+          elements.push(this.parse_expr());
+          while (this.check(TokenKind.Comma)) {
+            this.advance();
+            if (this.check(TokenKind.RParen)) break;
+            elements.push(this.parse_expr());
+          }
+        }
+        const end_tok = this.expect(TokenKind.RParen);
+        return {
+          kind: "tuple_lit",
+          elements,
+          span: this.make_span(start, end_tok.span.end),
+        } as TupleLitExpr;
+      }
       this.expect(TokenKind.RParen);
-      return expr;
+      return first;
     }
 
     // Identifier (may lead to struct literal)
@@ -1120,6 +1187,30 @@ export class Parser {
 
       // Binding pattern
       return { kind: "binding", name, span: tok.span } as BindingPattern;
+    }
+
+    // Tuple pattern: (pat, pat, ...)
+    if (tok.kind === TokenKind.LParen) {
+      this.advance();
+      const first = this.parse_pattern();
+      if (!this.check(TokenKind.Comma)) {
+        throw this.error("Expected ',' in tuple pattern — single-element tuple patterns not supported");
+      }
+      this.advance();
+      const elements: Pattern[] = [first];
+      if (!this.check(TokenKind.RParen)) {
+        elements.push(this.parse_pattern());
+        while (this.try_consume(TokenKind.Comma)) {
+          if (this.check(TokenKind.RParen)) break;
+          elements.push(this.parse_pattern());
+        }
+      }
+      const end_tok = this.expect(TokenKind.RParen);
+      return {
+        kind: "tuple",
+        elements,
+        span: this.make_span(start, end_tok.span.end),
+      } as TuplePattern;
     }
 
     throw this.error(`Unexpected token '${tok.value}' in pattern`);

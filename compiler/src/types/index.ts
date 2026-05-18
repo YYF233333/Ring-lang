@@ -19,7 +19,8 @@ export type Type =
   | EnumType
   | GenericType
   | RecordType
-  | EffectRowType;
+  | EffectRowType
+  | TupleType;
 
 export interface IntType {
   kind: "int";
@@ -109,6 +110,11 @@ export interface EffectRowType {
   kind: "effect_row";
   effects: Effect[];
   tail?: number;
+}
+
+export interface TupleType {
+  kind: "tuple";
+  elements: Type[];
 }
 
 // ============================================================
@@ -323,6 +329,11 @@ export function types_equal(a: Type, b: Type): boolean {
       if (a.tail !== ber.tail) return false;
       return a.effects.every((e, i) => effects_equal(e, ber.effects[i]));
     }
+    case "tuple": {
+      const bt = b as TupleType;
+      return a.elements.length === bt.elements.length &&
+        a.elements.every((e, i) => types_equal(e, bt.elements[i]));
+    }
   }
 }
 
@@ -376,6 +387,8 @@ export function type_to_string(t: Type): string {
       if (t.tail !== undefined) return `<${effs}, ?${t.tail}>`;
       return `<${effs}>`;
     }
+    case "tuple":
+      return `(${t.elements.map(type_to_string).join(", ")})`;
   }
 }
 

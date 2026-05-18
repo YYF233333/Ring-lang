@@ -592,6 +592,8 @@ export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
       const row = substitute_effect_row({ effects: t.effects, tail: t.tail }, mapping);
       return { kind: "effect_row", effects: row.effects, tail: row.tail };
     }
+    case "tuple":
+      return { kind: "tuple", elements: t.elements.map(e => substitute_type(e, mapping)) };
   }
 }
 

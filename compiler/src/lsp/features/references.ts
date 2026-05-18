@@ -124,6 +124,9 @@ function collect_idents_in_expr(expr: HExpr, matches: MatchFn, uri: string, out:
     case "list_lit":
       for (const el of expr.elements) collect_idents_in_expr(el, matches, uri, out);
       return;
+    case "tuple_lit":
+      for (const el of expr.elements) collect_idents_in_expr(el, matches, uri, out);
+      return;
   }
 }
 
@@ -165,6 +168,17 @@ function collect_idents_in_stmt(stmt: HStmt, matches: MatchFn, uri: string, out:
 
     case "break_stmt":
     case "continue_stmt":
+      return;
+
+    case "let_destructure":
+      for (const b of stmt.bindings) {
+        if (b.name !== "_" && matches(b.name, b.def_id)) {
+          // For bindings in let_destructure, highlight the pattern element span
+          const el = stmt.pattern.elements.find(e => e.kind === "binding" && e.name === b.name);
+          if (el) out.push({ uri, range: span_to_range(el.span) });
+        }
+      }
+      collect_idents_in_expr(stmt.init, matches, uri, out);
       return;
   }
 }

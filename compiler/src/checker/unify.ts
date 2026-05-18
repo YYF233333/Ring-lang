@@ -107,6 +107,8 @@ export function apply(subst: Substitution, t: Type): Type {
       const row = apply_to_effect_row(subst, { effects: t.effects, tail: t.tail });
       return { kind: "effect_row", effects: row.effects, tail: row.tail };
     }
+    case "tuple":
+      return { kind: "tuple", elements: t.elements.map(e => apply(subst, e)) };
   }
 }
 
@@ -208,6 +210,8 @@ export function occurs_in(var_id: number, t: Type, subst: Substitution): boolean
         (e.kind === "fail" && occurs_in(var_id, e.error_type, subst)) ||
         (e.kind === "custom" && e.type_args.some(a => occurs_in(var_id, a, subst)))
       );
+    case "tuple":
+      return resolved.elements.some(e => occurs_in(var_id, e, subst));
   }
 }
 
@@ -425,6 +429,18 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
       { effects: b.effects, tail: b.tail },
       subst,
     );
+  }
+
+  // Tuple types
+  if (a.kind === "tuple" && b.kind === "tuple") {
+    if (a.elements.length !== b.elements.length) {
+      throw new UnificationError(t1, t2, `tuple arity mismatch: ${a.elements.length} vs ${b.elements.length}`);
+    }
+    let s = subst;
+    for (let i = 0; i < a.elements.length; i++) {
+      s = unify(a.elements[i], b.elements[i], s);
+    }
+    return s;
   }
 
   // Struct satisfies record constraint (one-direction coercion)

@@ -705,3 +705,90 @@ describe("while statement", () => {
     assert.equal(while_stmt.body.stmts.length, 1);
   });
 });
+
+describe("Tuple parsing", () => {
+  it("parses a 2-element tuple literal (1, 2)", () => {
+    const program = Parser.parse("fn main() { (1, 2) }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const tail = fn_decl.body.tail;
+    assert.ok(tail, "expected tail expression");
+    assert.equal(tail.kind, "tuple_lit");
+    if (tail.kind !== "tuple_lit") return;
+    assert.equal(tail.elements.length, 2);
+    assert.equal(tail.elements[0].kind, "int_lit");
+    assert.equal(tail.elements[1].kind, "int_lit");
+  });
+
+  it("parses a parenthesized expression (42) as int_lit, not tuple", () => {
+    const program = Parser.parse("fn main() { (42) }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const tail = fn_decl.body.tail;
+    assert.ok(tail, "expected tail expression");
+    assert.equal(tail.kind, "int_lit");
+  });
+
+  it("parses a 3-element tuple literal (1, 2, 3)", () => {
+    const program = Parser.parse("fn main() { (1, 2, 3) }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const tail = fn_decl.body.tail;
+    assert.ok(tail, "expected tail expression");
+    assert.equal(tail.kind, "tuple_lit");
+    if (tail.kind !== "tuple_lit") return;
+    assert.equal(tail.elements.length, 3);
+  });
+
+  it("parses a tuple type annotation (Int, Str)", () => {
+    const program = Parser.parse("fn f(x: (Int, Str)) { }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    assert.equal(fn_decl.params.length, 1);
+    const param_type = fn_decl.params[0].type_annotation;
+    assert.ok(param_type, "expected type annotation");
+    assert.equal(param_type.kind, "tuple_type");
+    if (param_type.kind !== "tuple_type") return;
+    assert.equal(param_type.elements.length, 2);
+    assert.equal(param_type.elements[0].kind, "named");
+    assert.equal(param_type.elements[1].kind, "named");
+    if (param_type.elements[0].kind !== "named") return;
+    if (param_type.elements[1].kind !== "named") return;
+    assert.equal(param_type.elements[0].name, "Int");
+    assert.equal(param_type.elements[1].name, "Str");
+  });
+
+  it("parses a tuple pattern in match", () => {
+    const program = Parser.parse("fn main() { match x { (a, b) => a } }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const tail = fn_decl.body.tail;
+    assert.ok(tail, "expected tail expression");
+    assert.equal(tail.kind, "match_expr");
+    if (tail.kind !== "match_expr") return;
+    assert.equal(tail.arms.length, 1);
+    const pat = tail.arms[0].pattern;
+    assert.equal(pat.kind, "tuple");
+    if (pat.kind !== "tuple") return;
+    assert.equal(pat.elements.length, 2);
+    assert.equal(pat.elements[0].kind, "binding");
+    assert.equal(pat.elements[1].kind, "binding");
+  });
+
+  it("parses trailing comma in tuple literal (1, 2,)", () => {
+    const program = Parser.parse("fn main() { (1, 2,) }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const tail = fn_decl.body.tail;
+    assert.ok(tail, "expected tail expression");
+    assert.equal(tail.kind, "tuple_lit");
+    if (tail.kind !== "tuple_lit") return;
+    assert.equal(tail.elements.length, 2);
+  });
+});

@@ -31,7 +31,8 @@ export type HExpr =
   | HTryBlock
   | HOptionOr
   | HRangeExpr
-  | HListLit;
+  | HListLit
+  | HTupleLit;
 
 // Base fields every HExpr carries
 interface HExprBase {
@@ -210,6 +211,11 @@ export interface HListLit extends HExprBase {
   elements: HExpr[];
 }
 
+export interface HTupleLit extends HExprBase {
+  kind: "tuple_lit";
+  elements: HExpr[];
+}
+
 // ============================================================
 // HIR Statements
 // ============================================================
@@ -223,7 +229,8 @@ export type HStmt =
   | HWhileStmt
   | HForInStmt
   | HBreakStmt
-  | HContinueStmt;
+  | HContinueStmt
+  | HLetDestructureStmt;
 
 export interface HLetStmt {
   kind: "let_stmt";
@@ -288,6 +295,14 @@ export interface HBreakStmt {
 
 export interface HContinueStmt {
   kind: "continue_stmt";
+  span: Span;
+}
+
+export interface HLetDestructureStmt {
+  kind: "let_destructure";
+  pattern: import("../ast/index.js").TuplePattern;
+  bindings: { name: string; def_id?: number; type: Type }[];
+  init: HExpr;
   span: Span;
 }
 

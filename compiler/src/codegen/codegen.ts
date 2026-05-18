@@ -458,6 +458,18 @@ class CodeGenerator {
       case "continue_stmt":
         this.emit("continue;");
         return;
+      case "let_destructure": {
+        const init = this.gen_expr(stmt.init);
+        const tmp = `__ring_dt`;
+        this.emit(`const ${tmp} = ${init};`);
+        for (let i = 0; i < stmt.bindings.length; i++) {
+          const b = stmt.bindings[i];
+          if (b.name !== "_") {
+            this.emit(`const ${safe_ident(b.name)} = ${tmp}[${i}];`);
+          }
+        }
+        return;
+      }
       default:
         this.emit(this.gen_stmt_inline(stmt));
     }
@@ -528,6 +540,8 @@ class CodeGenerator {
       case "range":
         return `{ start: ${this.gen_expr(expr.start)}, end: ${this.gen_expr(expr.end)} }`;
       case "list_lit":
+        return `[${expr.elements.map(e => this.gen_expr(e)).join(", ")}]`;
+      case "tuple_lit":
         return `[${expr.elements.map(e => this.gen_expr(e)).join(", ")}]`;
       default:
         return assertNever(expr, "gen_expr");
@@ -671,6 +685,14 @@ class CodeGenerator {
         if (sub_conds.length === 0) return tag_check;
         return `${tag_check} && ${sub_conds.join(" && ")}`;
       }
+      case "tuple": {
+        const len_check = `Array.isArray(${target}) && ${target}.length === ${pat.elements.length}`;
+        const sub_conds = pat.elements.map((e, i) =>
+          this.gen_pattern_condition(`${target}[${i}]`, e)
+        ).filter(c => c !== "true");
+        if (sub_conds.length === 0) return len_check;
+        return `${len_check} && ${sub_conds.join(" && ")}`;
+      }
       default:
         return assertNever(pat, "gen_pattern_condition");
     }
@@ -686,6 +708,10 @@ class CodeGenerator {
       case "constructor":
         return pat.fields.map((f, i) =>
           this.gen_pattern_bindings(`${target}._${i}`, f)
+        ).join("");
+      case "tuple":
+        return pat.elements.map((e, i) =>
+          this.gen_pattern_bindings(`${target}[${i}]`, e)
         ).join("");
       default:
         return assertNever(pat, "gen_pattern_bindings");
@@ -727,6 +753,7 @@ class CodeGenerator {
       case "for_in_stmt":
       case "break_stmt":
       case "continue_stmt":
+      case "let_destructure":
         throw new Error(`${stmt.kind} handled in emit_stmt`);
       default:
         return assertNever(stmt, "gen_stmt_inline");

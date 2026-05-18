@@ -86,6 +86,12 @@ function zonk_stmt(ctx: ZonkCtx, stmt: HStmt): HStmt {
     case "for_in_stmt": return { ...stmt, iterable: zonk_expr(ctx, stmt.iterable), body: zonk_block(ctx, stmt.body) };
     case "break_stmt":  return stmt;
     case "continue_stmt": return stmt;
+    case "let_destructure":
+      return {
+        ...stmt,
+        bindings: stmt.bindings.map(b => ({ ...b, type: zonk_type(ctx, b.type) })),
+        init: zonk_expr(ctx, stmt.init),
+      };
   }
 }
 
@@ -156,6 +162,7 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
     case "option_or":     return { ...base, kind: "option_or", expr: zonk_expr(ctx, expr.expr), default_value: zonk_expr(ctx, expr.default_value) };
     case "range":         return { ...base, kind: "range", start: zonk_expr(ctx, expr.start), end: zonk_expr(ctx, expr.end) };
     case "list_lit":      return { ...base, kind: "list_lit", elements: expr.elements.map(e => zonk_expr(ctx, e)) };
+    case "tuple_lit":     return { ...base, kind: "tuple_lit", elements: expr.elements.map(e => zonk_expr(ctx, e)) };
   }
 }
 

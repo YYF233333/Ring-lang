@@ -177,6 +177,14 @@ function find_ident_in_expr(expr: HExpr, pos: Position): IdentInfo | null {
       }
       return null;
     }
+
+    case "tuple_lit": {
+      for (const el of expr.elements) {
+        const r = find_ident_in_expr(el, pos);
+        if (r !== null) return r;
+      }
+      return null;
+    }
   }
 }
 
@@ -217,6 +225,11 @@ function find_ident_in_stmt(stmt: HStmt, pos: Position): IdentInfo | null {
     case "break_stmt":
     case "continue_stmt": {
       return null;
+    }
+
+    case "let_destructure": {
+      if (!contains_position(stmt.span, pos)) return null;
+      return find_ident_in_expr(stmt.init, pos);
     }
   }
 }
@@ -381,6 +394,9 @@ function collect_symbols_from_ast_expr(expr: Expr, table: SymbolTable): void {
     case "list_lit":
       for (const el of expr.elements) collect_symbols_from_ast_expr(el, table);
       return;
+    case "tuple_lit":
+      for (const el of expr.elements) collect_symbols_from_ast_expr(el, table);
+      return;
   }
 }
 
@@ -418,6 +434,13 @@ function collect_symbols_from_ast_stmt(stmt: Stmt, table: SymbolTable): void {
 
     case "break_stmt":
     case "continue_stmt":
+      return;
+
+    case "let_destructure":
+      for (const el of stmt.pattern.elements) {
+        if (el.kind === "binding") table.set(el.name, el.span);
+      }
+      collect_symbols_from_ast_expr(stmt.init, table);
       return;
   }
 }

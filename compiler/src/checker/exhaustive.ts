@@ -1,5 +1,5 @@
 // Ring-lang Pattern Match Exhaustiveness Checking
-import { Pattern } from "../ast/index.js";
+import { Pattern, TuplePattern } from "../ast/index.js";
 import { Type } from "../types/index.js";
 import { Substitution, apply } from "./unify.js";
 
@@ -84,6 +84,21 @@ function check_patterns(
   }
 
   if (resolved.kind === "unit") {
+    return null;
+  }
+
+  if (resolved.kind === "tuple") {
+    for (let i = 0; i < resolved.elements.length; i++) {
+      const column: Pattern[] = patterns
+        .filter((p): p is TuplePattern => p.kind === "tuple" && p.elements.length === resolved.elements.length)
+        .map(p => p.elements[i]);
+      if (column.length === 0) return "_";
+      const missing = check_patterns(column, resolved.elements[i], subst);
+      if (missing !== null) {
+        const parts = Array.from({ length: resolved.elements.length }, (_, j) => j === i ? missing : "_");
+        return `(${parts.join(", ")})`;
+      }
+    }
     return null;
   }
 

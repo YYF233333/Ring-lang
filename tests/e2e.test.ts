@@ -89,6 +89,9 @@ const cases: TestCase[] = [
   { file: "list_fold.ring", expected: "10\n4\n" },
   { file: "list_for_in.ring", expected: "60\n" },
   { file: "list_hof_effect.ring", expected: "1\n2\n3\n3\n" },
+  // Batch 3: Tuples
+  { file: "tuple_basic.ring", expected: "10\nhello\nx\n" },
+  { file: "tuple_fn.ring", expected: "answer\n42\n" },
 ];
 
 describe("e2e: ring run", () => {

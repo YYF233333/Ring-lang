@@ -200,6 +200,14 @@ function walk_expr(expr: HExpr, pos: Position): HoverCandidate | null {
       }
       break;
     }
+
+    case "tuple_lit": {
+      for (const el of expr.elements) {
+        const r = walk_expr(el, pos);
+        if (r) { deeper = r; break; }
+      }
+      break;
+    }
   }
 
   if (deeper) return deeper;
@@ -251,6 +259,11 @@ function walk_stmt(stmt: HStmt, pos: Position): HoverCandidate | null {
     case "break_stmt":
     case "continue_stmt":
       return null;
+
+    case "let_destructure": {
+      if (!contains_position(stmt.span, pos)) return null;
+      return walk_expr(stmt.init, pos);
+    }
   }
 }
 

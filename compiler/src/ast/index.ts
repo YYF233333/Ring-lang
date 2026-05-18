@@ -29,7 +29,8 @@ export type TypeExpr =
   | NamedTypeExpr
   | FnTypeExpr
   | OptionTypeExpr
-  | RecordTypeExpr;
+  | RecordTypeExpr
+  | TupleTypeExpr;
 
 export interface NamedTypeExpr {
   kind: "named";
@@ -64,6 +65,12 @@ export interface RecordTypeExpr {
   span: Span;
 }
 
+export interface TupleTypeExpr {
+  kind: "tuple_type";
+  elements: TypeExpr[];
+  span: Span;
+}
+
 // ============================================================
 // Patterns
 // ============================================================
@@ -72,7 +79,8 @@ export type Pattern =
   | WildcardPattern
   | BindingPattern
   | ConstructorPattern
-  | LiteralPattern;
+  | LiteralPattern
+  | TuplePattern;
 
 export interface WildcardPattern {
   kind: "wildcard";
@@ -95,6 +103,12 @@ export interface ConstructorPattern {
 export interface LiteralPattern {
   kind: "literal";
   value: number | string | boolean;
+  span: Span;
+}
+
+export interface TuplePattern {
+  kind: "tuple";
+  elements: Pattern[];
   span: Span;
 }
 
@@ -136,7 +150,8 @@ export type Expr =
   | OptionUnwrapExpr
   | TryBlockExpr
   | RangeExpr
-  | ListLitExpr;
+  | ListLitExpr
+  | TupleLitExpr;
 
 export interface IntLitExpr {
   kind: "int_lit";
@@ -329,6 +344,12 @@ export interface ListLitExpr {
   span: Span;
 }
 
+export interface TupleLitExpr {
+  kind: "tuple_lit";
+  elements: Expr[];
+  span: Span;
+}
+
 // ============================================================
 // Statements
 // ============================================================
@@ -342,7 +363,8 @@ export type Stmt =
   | WhileStmt
   | ForInStmt
   | BreakStmt
-  | ContinueStmt;
+  | ContinueStmt
+  | LetDestructureStmt;
 
 export interface LetStmt {
   kind: "let_stmt";
@@ -405,6 +427,13 @@ export interface BreakStmt {
 
 export interface ContinueStmt {
   kind: "continue_stmt";
+  span: Span;
+}
+
+export interface LetDestructureStmt {
+  kind: "let_destructure";
+  pattern: TuplePattern;
+  init: Expr;
   span: Span;
 }
 
