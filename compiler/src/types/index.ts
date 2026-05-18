@@ -51,6 +51,7 @@ export interface AnyType {
 export interface TypeVar {
   kind: "var";
   id: number;
+  name?: string;
 }
 
 export interface FnType {
@@ -100,6 +101,7 @@ export interface RecordType {
   kind: "record";
   fields: RecordField[];
   tail?: number;
+  tail_name?: string;
 }
 
 // ============================================================
@@ -308,7 +310,7 @@ export function type_to_string(t: Type): string {
     case "unit": return "()";
     case "never": return "Never";
     case "any": return "Any";
-    case "var": return `?${t.id}`;
+    case "var": return t.name ?? `?${t.id}`;
     case "fn": {
       const params = t.params.map(type_to_string).join(", ");
       const ret = type_to_string(t.return_type);
@@ -335,7 +337,8 @@ export function type_to_string(t: Type): string {
     case "record": {
       const fields = t.fields.map(f => `${f.name}: ${type_to_string(f.type)}`).join(", ");
       if (t.tail !== undefined) {
-        return fields ? `{${fields}, ..?${t.tail}}` : `{..?${t.tail}}`;
+        const tail_str = t.tail_name ?? `?${t.tail}`;
+        return fields ? `{${fields}, ..${tail_str}}` : `{..${tail_str}}`;
       }
       return `{${fields}}`;
     }

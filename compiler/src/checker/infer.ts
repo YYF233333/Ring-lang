@@ -232,7 +232,7 @@ export class InferEngine {
     const saved_tp_scope = new Map(this.type_param_scope);
     const type_param_vars: number[] = [];
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var();
+      const tv = this.env.fresh_var(tp.name);
       type_param_vars.push(tv.id);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -261,7 +261,7 @@ export class InferEngine {
     const type_var_ids: number[] = [];
     const type_var_types: Type[] = [];
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var();
+      const tv = this.env.fresh_var(tp.name);
       type_var_ids.push(tv.id);
       type_var_types.push(tv);
       this.type_param_scope.set(tp.name, tv);
@@ -333,7 +333,7 @@ export class InferEngine {
     const type_param_names = decl.type_params.map(tp => tp.name);
     const type_param_vars: number[] = [];
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var();
+      const tv = this.env.fresh_var(tp.name);
       type_param_vars.push(tv.id);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -402,7 +402,7 @@ export class InferEngine {
     const type_vars: number[] = [];
     const saved_tp_scope = new Map(this.type_param_scope);
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var();
+      const tv = this.env.fresh_var(tp.name);
       type_vars.push((tv as TypeVar).id);
       this.type_param_scope.set(tp.name, tv);
     }
@@ -587,7 +587,7 @@ export class InferEngine {
     // Bind type parameters as fresh type variables
     const saved_tp_scope = new Map(this.type_param_scope);
     for (const tp of decl.type_params) {
-      const tv = this.env.fresh_var();
+      const tv = this.env.fresh_var(tp.name);
       this.type_param_scope.set(tp.name, tv);
       this.env.bind_mono(tp.name, tv);
     }
@@ -1851,11 +1851,12 @@ export class InferEngine {
           name: f.name,
           type: this.resolve_type_expr(f.type),
         }));
-        const tail = texpr.rest ? this.env.fresh_var().id : undefined;
-        if (texpr.rest) {
-          this.type_param_scope.set(texpr.rest, { kind: "var", id: tail! });
+        const tail_var = texpr.rest ? this.env.fresh_var(texpr.rest) : undefined;
+        const tail = tail_var?.id;
+        if (texpr.rest && tail_var) {
+          this.type_param_scope.set(texpr.rest, tail_var);
         }
-        return { kind: "record", fields, tail } as Type;
+        return { kind: "record", fields, tail, tail_name: texpr.rest } as Type;
       }
       default:
         return assertNever(texpr, "resolve_type_expr");
