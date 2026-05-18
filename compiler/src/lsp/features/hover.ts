@@ -1,7 +1,7 @@
 import { Hover, Position } from "vscode-languageserver";
 import { DocumentState } from "../document-manager.js";
 import { format_type_for_hover } from "../utils.js";
-import { type_to_string } from "../../types/index.js";
+import { type_to_string, effect_row_to_string } from "../../types/index.js";
 import {
   HDecl,
   HExpr,
@@ -248,7 +248,10 @@ function walk_fn_decl(fn: HFnDecl, pos: Position): HoverCandidate | null {
     .map(p => `${p.name}: ${type_to_string(p.type)}`)
     .join(", ");
   const ret = type_to_string(fn.return_type);
-  const type_str = `fn ${fn.name}(${params}) -> ${ret}`;
+  const eff = effect_row_to_string(fn.effects);
+  const type_str = eff
+    ? `fn ${fn.name}(${params}) -> ${ret} / ${eff}`
+    : `fn ${fn.name}(${params}) -> ${ret}`;
   return { type_str, span: fn.span };
 }
 
