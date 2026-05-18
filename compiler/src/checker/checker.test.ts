@@ -518,4 +518,16 @@ describe("Type Checker", () => {
       assert.ok(diags.some(d => d.code === "E0305" && /no method.*bar/.test(d.message)));
     });
   });
+
+  describe("while statement", () => {
+    it("type-checks while loop with Bool condition", () => {
+      const program = check_source(`fn main() { var i = 0; while i < 5 { i += 1; } }`);
+      assert.ok(program.decls.length > 0);
+    });
+
+    it("rejects while loop with non-Bool condition", () => {
+      const diags = check_expecting_errors(`fn main() { while 42 { print(1); } }`);
+      assert.ok(diags.some(d => d.code === "E0301"), `expected E0301, got: ${diags.map(d => d.code).join(", ")}`);
+    });
+  });
 });

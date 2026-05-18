@@ -408,6 +408,12 @@ class CodeGenerator {
         }
         return;
       case "while_stmt":
+        this.emit(`while (${this.gen_expr(stmt.condition)}) {`);
+        this.push_indent();
+        this.emit_block_in_stmt_context(stmt.body, "discard");
+        this.pop_indent();
+        this.emit("}");
+        return;
       case "for_in_stmt":
       case "break_stmt":
       case "continue_stmt":

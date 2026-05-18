@@ -18,7 +18,7 @@ import {
 } from "../types/index.js";
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
-  HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent,
+  HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt,
   variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
 import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
@@ -52,6 +52,7 @@ export class InferEngine {
   private current_fn_return_type: Type | null = null;
   private current_fn_bounds: { type_param_var_id: number; trait_name: string; type_param_name: string }[] = [];
   private fn_bounds_stack: typeof this.current_fn_bounds[] = [];
+  private loop_depth: number = 0;
 
   constructor(sink: DiagnosticSink) {
     this.sink = sink;
@@ -866,7 +867,29 @@ export class InferEngine {
           effects: EMPTY_ROW,
         };
       }
-      case "while_stmt":
+      case "while_stmt": {
+        const cond_r = this.infer_expr(stmt.condition, subst);
+        let s = this.unify_at(cond_r.hexpr.type, BOOL, cond_r.subst, stmt.condition.span);
+        this.env.push_scope();
+        this.loop_depth++;
+        const body_r = this.infer_block(stmt.body, s);
+        this.loop_depth--;
+        this.env.pop_scope();
+        s = body_r.subst;
+        let while_effects: EffectRow;
+        [while_effects, s] = this.merge_effects(cond_r.effects, body_r.effects, s);
+        const hwhile: HWhileStmt = {
+          kind: "while_stmt",
+          condition: cond_r.hexpr,
+          body: body_r.hexpr as HBlock,
+          span: stmt.span,
+        };
+        return {
+          hstmt: hwhile,
+          subst: s,
+          effects: while_effects,
+        };
+      }
       case "for_in_stmt":
       case "break_stmt":
       case "continue_stmt":

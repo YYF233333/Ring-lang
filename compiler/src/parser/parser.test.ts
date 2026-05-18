@@ -628,3 +628,29 @@ fn also_good() -> Int { 2 }
     });
   });
 });
+
+describe("while statement", () => {
+  it("parses while statement", () => {
+    const program = Parser.parse("fn main() { while true { print(1); } }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const body = fn_decl.body.stmts;
+    assert.equal(body[0].kind, "while_stmt");
+    const while_stmt = body[0];
+    if (while_stmt.kind !== "while_stmt") return;
+    assert.equal(while_stmt.condition.kind, "bool_lit");
+  });
+
+  it("parses while with compound body", () => {
+    const program = Parser.parse("fn main() { var i = 0; while i < 10 { i += 1; } }");
+    const fn_decl = program.decls[0];
+    assert.equal(fn_decl.kind, "fn_decl");
+    if (fn_decl.kind !== "fn_decl") return;
+    const while_stmt = fn_decl.body.stmts[1];
+    assert.equal(while_stmt.kind, "while_stmt");
+    if (while_stmt.kind !== "while_stmt") return;
+    assert.equal(while_stmt.condition.kind, "bin_op");
+    assert.equal(while_stmt.body.stmts.length, 1);
+  });
+});

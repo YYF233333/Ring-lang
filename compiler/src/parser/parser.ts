@@ -1,7 +1,7 @@
 // Ring-lang Parser — recursive descent + Pratt parsing for expressions
 import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
-  Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt,
+  Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt,
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
   BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
   StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
@@ -522,6 +522,9 @@ export class Parser {
     if (this.check(TokenKind.Return)) {
       return this.parse_return_stmt();
     }
+    if (this.check(TokenKind.While)) {
+      return this.parse_while_stmt();
+    }
 
     // Expression statement (may turn into assignment)
     const expr = this.parse_expr();
@@ -553,6 +556,20 @@ export class Parser {
       kind: "expr_stmt", expr, has_semi,
       span: this.make_span(start, end),
     } as ExprStmt;
+  }
+
+  private parse_while_stmt(): WhileStmt {
+    const start = this.current_span_start();
+    this.expect(TokenKind.While);
+    const condition = this.parse_expr();
+    const body = this.parse_block_expr();
+    const end = this.current_span_start();
+    return {
+      kind: "while_stmt",
+      condition,
+      body,
+      span: this.make_span(start, end),
+    };
   }
 
   private parse_binding_stmt(mutable: boolean): LetStmt | VarStmt {

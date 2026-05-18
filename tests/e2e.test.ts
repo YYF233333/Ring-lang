@@ -73,6 +73,7 @@ const cases: TestCase[] = [
   { file: "match_nested.ring", expected: "positive\nnon-positive\nnothing\n" },
   { file: "trait_alias.ring", expected: "num\n" },
   { file: "return_if.ring", expected: "5\n3\npositive\nnegative\nzero\n" },
+  { file: "while_basic.ring", expected: "10\n" },
 ];
 
 describe("e2e: ring run", () => {
