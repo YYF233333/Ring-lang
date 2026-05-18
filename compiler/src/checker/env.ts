@@ -95,6 +95,7 @@ export class TypeEnv {
   public fn_bounds: Map<string, { type_param: string; trait_name: string }[]> = new Map();
   public var_bounds: Map<number, Set<string>> = new Map();
   public def_spans: Map<number, Span> = new Map();
+  public mutable_vars: Set<number> = new Set();
 
   constructor() {
     this.scopes.push({ variables: new Map() });

@@ -489,6 +489,18 @@ describe("Type Checker", () => {
     });
   });
 
+  describe("let immutability enforcement (E0205)", () => {
+    it("assign to let binding reports E0205", () => {
+      const diags = check_expecting_errors(`fn main() { let x = 1; x = 2; }`);
+      assert.ok(diags.some(d => d.code === "E0205"));
+    });
+
+    it("assign to var binding is allowed", () => {
+      const program = check_source(`fn main() { var x = 1; x = 2; }`);
+      assert.ok(program.decls.length > 0);
+    });
+  });
+
   describe("undefined method on concrete type (I4)", () => {
     it("reports E0305 for undefined method on struct", () => {
       const diags = check_expecting_errors(`

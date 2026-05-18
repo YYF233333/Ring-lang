@@ -806,6 +806,7 @@ export class InferEngine {
         this.env.bind_mono(stmt.name, apply(s, var_type));
         const var_scheme = this.env.lookup(stmt.name)!;
         this.env.record_def_span(var_scheme.def_id!, stmt.name_span);
+        this.env.mutable_vars.add(var_scheme.def_id!);
         return {
           hstmt: { kind: "var_stmt", name: stmt.name, name_span: stmt.name_span, def_id: var_scheme.def_id, type: apply(s, var_type), init: init_r.hexpr, span: stmt.span },
           subst: s,
@@ -813,6 +814,17 @@ export class InferEngine {
         };
       }
       case "assign_stmt": {
+        if (stmt.target.kind === "ident") {
+          const scheme = this.env.lookup(stmt.target.name);
+          if (scheme && scheme.def_id !== undefined && !this.env.mutable_vars.has(scheme.def_id)) {
+            this.type_error(
+              E.E0205,
+              `Cannot assign to immutable variable '${stmt.target.name}' (declared with 'let'). Use 'var' for mutable bindings.`,
+              stmt.target.span,
+              { kind: "other", detail: `'${stmt.target.name}' is declared with 'let'` },
+            );
+          }
+        }
         const target_r = this.infer_expr(stmt.target, subst);
         const value_r = this.infer_expr(stmt.value, target_r.subst);
         let s = this.unify_at(target_r.hexpr.type, value_r.hexpr.type, value_r.subst, stmt.span);
