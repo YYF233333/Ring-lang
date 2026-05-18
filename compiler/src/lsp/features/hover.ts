@@ -187,6 +187,11 @@ function walk_expr(expr: HExpr, pos: Position): HoverCandidate | null {
       deeper = walk_expr(expr.expr, pos) ?? walk_expr(expr.default_value, pos);
       break;
     }
+
+    case "range": {
+      deeper = walk_expr(expr.start, pos) ?? walk_expr(expr.end, pos);
+      break;
+    }
   }
 
   if (deeper) return deeper;
@@ -224,6 +229,20 @@ function walk_stmt(stmt: HStmt, pos: Position): HoverCandidate | null {
       if (stmt.value) return walk_expr(stmt.value, pos);
       return null;
     }
+
+    case "while_stmt": {
+      if (!contains_position(stmt.span, pos)) return null;
+      return walk_expr(stmt.condition, pos) ?? walk_block(stmt.body, pos);
+    }
+
+    case "for_in_stmt": {
+      if (!contains_position(stmt.span, pos)) return null;
+      return walk_expr(stmt.iterable, pos) ?? walk_block(stmt.body, pos);
+    }
+
+    case "break_stmt":
+    case "continue_stmt":
+      return null;
   }
 }
 

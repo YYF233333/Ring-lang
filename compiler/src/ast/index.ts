@@ -134,7 +134,8 @@ export type Expr =
   | HandleExpr
   | LambdaExpr
   | OptionUnwrapExpr
-  | TryBlockExpr;
+  | TryBlockExpr
+  | RangeExpr;
 
 export interface IntLitExpr {
   kind: "int_lit";
@@ -314,6 +315,13 @@ export interface TryBlockExpr {
   span: Span;
 }
 
+export interface RangeExpr {
+  kind: "range";
+  start: Expr;
+  end: Expr;
+  span: Span;
+}
+
 // ============================================================
 // Statements
 // ============================================================
@@ -323,7 +331,11 @@ export type Stmt =
   | VarStmt
   | AssignStmt
   | ExprStmt
-  | ReturnStmt;
+  | ReturnStmt
+  | WhileStmt
+  | ForInStmt
+  | BreakStmt
+  | ContinueStmt;
 
 export interface LetStmt {
   kind: "let_stmt";
@@ -360,6 +372,32 @@ export interface ExprStmt {
 export interface ReturnStmt {
   kind: "return_stmt";
   value?: Expr;
+  span: Span;
+}
+
+export interface WhileStmt {
+  kind: "while_stmt";
+  condition: Expr;
+  body: BlockExpr;
+  span: Span;
+}
+
+export interface ForInStmt {
+  kind: "for_in_stmt";
+  binding: string;
+  binding_span: Span;
+  iterable: Expr;
+  body: BlockExpr;
+  span: Span;
+}
+
+export interface BreakStmt {
+  kind: "break_stmt";
+  span: Span;
+}
+
+export interface ContinueStmt {
+  kind: "continue_stmt";
   span: Span;
 }
 

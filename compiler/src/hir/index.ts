@@ -29,7 +29,8 @@ export type HExpr =
   | HEffectOp
   | HOptionUnwrap
   | HTryBlock
-  | HOptionOr;
+  | HOptionOr
+  | HRangeExpr;
 
 // Base fields every HExpr carries
 interface HExprBase {
@@ -197,6 +198,12 @@ export interface HOptionOr extends HExprBase {
   default_value: HExpr;
 }
 
+export interface HRangeExpr extends HExprBase {
+  kind: "range";
+  start: HExpr;
+  end: HExpr;
+}
+
 // ============================================================
 // HIR Statements
 // ============================================================
@@ -206,7 +213,11 @@ export type HStmt =
   | HVarStmt
   | HAssignStmt
   | HExprStmt
-  | HReturnStmt;
+  | HReturnStmt
+  | HWhileStmt
+  | HForInStmt
+  | HBreakStmt
+  | HContinueStmt;
 
 export interface HLetStmt {
   kind: "let_stmt";
@@ -244,6 +255,33 @@ export interface HExprStmt {
 export interface HReturnStmt {
   kind: "return_stmt";
   value?: HExpr;
+  span: Span;
+}
+
+export interface HWhileStmt {
+  kind: "while_stmt";
+  condition: HExpr;
+  body: HBlock;
+  span: Span;
+}
+
+export interface HForInStmt {
+  kind: "for_in_stmt";
+  binding: string;
+  binding_span: Span;
+  def_id?: number;
+  iterable: HExpr;
+  body: HBlock;
+  span: Span;
+}
+
+export interface HBreakStmt {
+  kind: "break_stmt";
+  span: Span;
+}
+
+export interface HContinueStmt {
+  kind: "continue_stmt";
   span: Span;
 }
 

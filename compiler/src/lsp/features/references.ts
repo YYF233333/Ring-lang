@@ -115,6 +115,11 @@ function collect_idents_in_expr(expr: HExpr, matches: MatchFn, uri: string, out:
       collect_idents_in_expr(expr.expr, matches, uri, out);
       collect_idents_in_expr(expr.default_value, matches, uri, out);
       return;
+
+    case "range":
+      collect_idents_in_expr(expr.start, matches, uri, out);
+      collect_idents_in_expr(expr.end, matches, uri, out);
+      return;
   }
 }
 
@@ -139,6 +144,23 @@ function collect_idents_in_stmt(stmt: HStmt, matches: MatchFn, uri: string, out:
 
     case "return_stmt":
       if (stmt.value) collect_idents_in_expr(stmt.value, matches, uri, out);
+      return;
+
+    case "while_stmt":
+      collect_idents_in_expr(stmt.condition, matches, uri, out);
+      collect_idents_in_block(stmt.body, matches, uri, out);
+      return;
+
+    case "for_in_stmt":
+      if (matches(stmt.binding, stmt.def_id)) {
+        out.push({ uri, range: span_to_range(stmt.binding_span) });
+      }
+      collect_idents_in_expr(stmt.iterable, matches, uri, out);
+      collect_idents_in_block(stmt.body, matches, uri, out);
+      return;
+
+    case "break_stmt":
+    case "continue_stmt":
       return;
   }
 }

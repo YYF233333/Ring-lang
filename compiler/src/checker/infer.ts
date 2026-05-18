@@ -854,6 +854,11 @@ export class InferEngine {
           effects: EMPTY_ROW,
         };
       }
+      case "while_stmt":
+      case "for_in_stmt":
+      case "break_stmt":
+      case "continue_stmt":
+        throw new Error(`${stmt.kind} not yet implemented in checker`);
     }
   }
 
@@ -921,6 +926,8 @@ export class InferEngine {
         return this.infer_option_unwrap(expr.expr, expr.span, subst);
       case "try_block":
         return this.infer_try_block(expr.body, expr.span, subst);
+      case "range":
+        throw new Error("range expression not yet implemented in checker");
       default:
         return assertNever(expr, "infer_expr");
     }

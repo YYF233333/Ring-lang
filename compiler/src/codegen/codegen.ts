@@ -407,6 +407,11 @@ class CodeGenerator {
           this.emit("return;");
         }
         return;
+      case "while_stmt":
+      case "for_in_stmt":
+      case "break_stmt":
+      case "continue_stmt":
+        throw new Error(`${stmt.kind} codegen not yet implemented`);
       default:
         this.emit(this.gen_stmt_inline(stmt));
     }
@@ -474,6 +479,8 @@ class CodeGenerator {
         return this.gen_try_block(expr);
       case "option_or":
         return this.gen_option_or(expr);
+      case "range":
+        throw new Error("range codegen not yet implemented");
       default:
         return assertNever(expr, "gen_expr");
     }
@@ -636,6 +643,11 @@ class CodeGenerator {
           return `return ${this.gen_expr(stmt.value)};`;
         }
         return "return;";
+      case "while_stmt":
+      case "for_in_stmt":
+      case "break_stmt":
+      case "continue_stmt":
+        throw new Error(`${stmt.kind} handled in emit_stmt`);
       default:
         return assertNever(stmt, "gen_stmt_inline");
     }

@@ -82,6 +82,10 @@ function zonk_stmt(ctx: ZonkCtx, stmt: HStmt): HStmt {
     case "assign_stmt": return { ...stmt, target: zonk_expr(ctx, stmt.target), value: zonk_expr(ctx, stmt.value) };
     case "expr_stmt":   return { ...stmt, expr: zonk_expr(ctx, stmt.expr) };
     case "return_stmt": return { ...stmt, value: stmt.value ? zonk_expr(ctx, stmt.value) : undefined };
+    case "while_stmt":  return { ...stmt, condition: zonk_expr(ctx, stmt.condition), body: zonk_block(ctx, stmt.body) };
+    case "for_in_stmt": return { ...stmt, iterable: zonk_expr(ctx, stmt.iterable), body: zonk_block(ctx, stmt.body) };
+    case "break_stmt":  return stmt;
+    case "continue_stmt": return stmt;
   }
 }
 
@@ -150,6 +154,7 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
     case "option_unwrap": return { ...base, kind: "option_unwrap", expr: zonk_expr(ctx, expr.expr) };
     case "try_block":     return { ...base, kind: "try_block", body: zonk_expr(ctx, expr.body) };
     case "option_or":     return { ...base, kind: "option_or", expr: zonk_expr(ctx, expr.expr), default_value: zonk_expr(ctx, expr.default_value) };
+    case "range":         return { ...base, kind: "range", start: zonk_expr(ctx, expr.start), end: zonk_expr(ctx, expr.end) };
   }
 }
 

@@ -165,6 +165,10 @@ function find_ident_in_expr(expr: HExpr, pos: Position): IdentInfo | null {
     case "option_or": {
       return find_ident_in_expr(expr.expr, pos) ?? find_ident_in_expr(expr.default_value, pos);
     }
+
+    case "range": {
+      return find_ident_in_expr(expr.start, pos) ?? find_ident_in_expr(expr.end, pos);
+    }
   }
 }
 
@@ -189,6 +193,21 @@ function find_ident_in_stmt(stmt: HStmt, pos: Position): IdentInfo | null {
     case "return_stmt": {
       if (!contains_position(stmt.span, pos)) return null;
       if (stmt.value) return find_ident_in_expr(stmt.value, pos);
+      return null;
+    }
+
+    case "while_stmt": {
+      if (!contains_position(stmt.span, pos)) return null;
+      return find_ident_in_expr(stmt.condition, pos) ?? find_ident_in_block(stmt.body, pos);
+    }
+
+    case "for_in_stmt": {
+      if (!contains_position(stmt.span, pos)) return null;
+      return find_ident_in_expr(stmt.iterable, pos) ?? find_ident_in_block(stmt.body, pos);
+    }
+
+    case "break_stmt":
+    case "continue_stmt": {
       return null;
     }
   }
@@ -345,6 +364,11 @@ function collect_symbols_from_ast_expr(expr: Expr, table: SymbolTable): void {
     case "try_block":
       collect_symbols_from_ast_expr(expr.body, table);
       return;
+
+    case "range":
+      collect_symbols_from_ast_expr(expr.start, table);
+      collect_symbols_from_ast_expr(expr.end, table);
+      return;
   }
 }
 
@@ -367,6 +391,21 @@ function collect_symbols_from_ast_stmt(stmt: Stmt, table: SymbolTable): void {
 
     case "return_stmt":
       if (stmt.value) collect_symbols_from_ast_expr(stmt.value, table);
+      return;
+
+    case "while_stmt":
+      collect_symbols_from_ast_expr(stmt.condition, table);
+      collect_symbols_from_ast_block(stmt.body, table);
+      return;
+
+    case "for_in_stmt":
+      table.set(stmt.binding, stmt.binding_span);
+      collect_symbols_from_ast_expr(stmt.iterable, table);
+      collect_symbols_from_ast_block(stmt.body, table);
+      return;
+
+    case "break_stmt":
+    case "continue_stmt":
       return;
   }
 }

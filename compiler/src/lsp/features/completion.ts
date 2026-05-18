@@ -156,6 +156,9 @@ function walk_expr_for_receiver(expr: HExpr, pos: Position): Type | null {
 
     case "option_or":
       return find_receiver_type(expr.expr, pos) ?? find_receiver_type(expr.default_value, pos);
+
+    case "range":
+      return find_receiver_type(expr.start, pos) ?? find_receiver_type(expr.end, pos);
   }
 }
 
@@ -170,6 +173,16 @@ function walk_stmt_for_receiver(stmt: HStmt, pos: Position): Type | null {
       return find_receiver_type(stmt.expr, pos);
     case "return_stmt":
       return stmt.value ? find_receiver_type(stmt.value, pos) : null;
+
+    case "while_stmt":
+      return find_receiver_type(stmt.condition, pos) ?? walk_block_for_receiver(stmt.body, pos);
+
+    case "for_in_stmt":
+      return find_receiver_type(stmt.iterable, pos) ?? walk_block_for_receiver(stmt.body, pos);
+
+    case "break_stmt":
+    case "continue_stmt":
+      return null;
   }
 }
 
