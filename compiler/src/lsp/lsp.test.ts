@@ -5,6 +5,7 @@ import { DocumentManager } from "./document-manager.js";
 import { convert_diagnostics } from "./features/diagnostics.js";
 import { get_hover } from "./features/hover.js";
 import { get_completions } from "./features/completion.js";
+import { get_definition } from "./features/definition.js";
 import { make_diagnostic } from "../diagnostics/index.js";
 import { DiagnosticSeverity, CompletionItem } from "vscode-languageserver";
 
@@ -219,5 +220,37 @@ describe("Completion feature", () => {
     const items = get_completions(state, { line: 1, character: 5 });
     const labels = items.map((i: CompletionItem) => i.label);
     assert.ok(labels.includes("print"));
+  });
+});
+
+describe("Definition feature", () => {
+  test("jump to function definition", () => {
+    const dm = new DocumentManager();
+    const src = `fn helper() -> Int { 1 }\nfn main() -> Int { helper() }`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // "helper" in "helper()" on line 2 (0-based: 1)
+    const result = get_definition(state, { line: 1, character: 20 });
+    assert.ok(result);
+    assert.equal(result.range.start.line, 0);
+  });
+
+  test("jump to variable definition", () => {
+    const dm = new DocumentManager();
+    const src = `fn main() -> Int {\n  let x = 10\n  x + 1\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // "x" in "x + 1" on line 3 (0-based: 2)
+    const result = get_definition(state, { line: 2, character: 2 });
+    assert.ok(result);
+    assert.equal(result.range.start.line, 1);
+  });
+
+  test("returns null for unknown position", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int { 42 }`);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_definition(state, { line: 0, character: 20 });
+    assert.equal(result, null);
   });
 });
