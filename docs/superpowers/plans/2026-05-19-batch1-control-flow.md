@@ -13,12 +13,11 @@
 ## Design Decisions
 
 1. **while/for/break/continue are Stmt, not Expr** — they don't produce values (while/for return Unit implicitly). Consistent with return/let/var being statements.
-2. **Range `..` only in for..in syntax** — not a general-purpose expression. Parsed inline by for..in parser. `DotDot` token already exists in lexer.
-3. **Range precedence handled via parse_expr** — since `DotDot` has `Prec.None` in `infix_precedence`, `parse_expr()` naturally stops before `..`, letting the for..in parser consume it.
-4. **ForInStmt stores range_start/range_end** — simple for Batch 1. Refactored to support general iterables in Batch 2.
+2. **Range `..` 是通用表达式（Rust 风格）** — RangeExpr 加入 Expr/HExpr union，`..` 在 Pratt parser 中作为中缀运算符（Prec.Range 介于 Compare 和 AddSub 之间）。Range 类型为 `GenericType("Range", [INT])`。
+3. **ForInStmt.iterable 是通用 Expr** — `for x in expr { body }`，checker 检测 iterable 类型决定元素类型。Batch 1 仅支持 Range（其它类型报错），Batch 2 扩展到 List\<T\>。
+4. **for..in range 编译为 C-style for** — `for x in 0..10 { body }` → `for (let x = 0; x < 10; x++) { body }`。未来 List\<T\> 编译为 `for (const x of list)`。
 5. **Let immutability via mutable_vars Set** — TypeEnv tracks which def_ids are mutable. assign_stmt checks target is mutable.
 6. **Only ident targets checked for immutability** — field access (e.g., `point.x = 5`) deferred to later design.
-7. **for..in range compiles to C-style for loop** — `for x in 0..10 { body }` → `for (let x = 0; x < 10; x++) { body }`. Zero-cost, no iterator abstraction.
 
 ---
 
@@ -137,8 +136,7 @@ export interface ForInStmt {
   kind: "for_in_stmt";
   binding: string;
   binding_span: Span;
-  range_start: Expr;
-  range_end: Expr;
+  iterable: Expr;
   body: BlockExpr;
   span: Span;
 }
@@ -154,9 +152,26 @@ export interface ContinueStmt {
 }
 ```
 
+Also add `RangeExpr` to the `Expr` union (after `TryBlockExpr`):
+
+```typescript
+  | RangeExpr;
+```
+
+And define the interface:
+
+```typescript
+export interface RangeExpr {
+  kind: "range";
+  start: Expr;
+  end: Expr;
+  span: Span;
+}
+```
+
 Update imports at the top of the file to export the new types.
 
-- [ ] **Step 2: Add new HIR HStmt variants**
+- [ ] **Step 2: Add new HIR HStmt + HExpr variants**
 
 In `compiler/src/hir/index.ts`, expand `HStmt` (line 204-209) to:
 
@@ -171,6 +186,12 @@ export type HStmt =
   | HForInStmt
   | HBreakStmt
   | HContinueStmt;
+```
+
+Add `HRangeExpr` to the `HExpr` union:
+
+```typescript
+  | HRangeExpr;
 ```
 
 Add new interfaces after `HReturnStmt` (after line 248):
@@ -188,8 +209,7 @@ export interface HForInStmt {
   binding: string;
   binding_span: Span;
   def_id?: number;
-  range_start: HExpr;
-  range_end: HExpr;
+  iterable: HExpr;
   body: HBlock;
   span: Span;
 }
@@ -201,6 +221,15 @@ export interface HBreakStmt {
 
 export interface HContinueStmt {
   kind: "continue_stmt";
+  span: Span;
+}
+
+export interface HRangeExpr {
+  kind: "range";
+  start: HExpr;
+  end: HExpr;
+  type: Type;
+  effects: EffectRow;
   span: Span;
 }
 ```
@@ -682,12 +711,12 @@ git commit -m "feat: implement break/continue with loop-context validation (E020
 
 ---
 
-### Task 6: For..in with Range
+### Task 6: Range Expression + For..in (Rust 风格)
 
 **Files:**
-- Modify: `compiler/src/parser/parser.ts` (parse_stmt, add parse_for_in_stmt)
-- Modify: `compiler/src/checker/infer.ts` (infer_stmt — for_in_stmt case)
-- Modify: `compiler/src/codegen/codegen.ts` (emit_stmt — for_in_stmt case)
+- Modify: `compiler/src/parser/parser.ts` (Pratt parser: `..` as infix, parse_for_in_stmt)
+- Modify: `compiler/src/checker/infer.ts` (infer_expr: range, infer_stmt: for_in_stmt)
+- Modify: `compiler/src/codegen/codegen.ts` (gen_expr: range, emit_stmt: for_in_stmt)
 - Create: `tests/cases/for_range.ring`
 - Modify: `tests/e2e.test.ts`
 
@@ -706,9 +735,47 @@ fn main() {
 
 Register: `{ file: "for_range.ring", expected: "10\n" }`
 
-- [ ] **Step 2: Parse for..in statement**
+- [ ] **Step 2: Add `..` to Pratt parser as RangeExpr**
 
-In `compiler/src/parser/parser.ts`, in `parse_stmt()`, add (after the while/break/continue checks):
+In `compiler/src/parser/parser.ts`, add `Prec.Range` to the Prec enum (between Compare and AddSub):
+
+```typescript
+const enum Prec {
+  None = 0,
+  Or = 1,
+  Catch = 2,
+  LogicOr = 3,
+  LogicAnd = 4,
+  Equality = 5,
+  Compare = 6,
+  Range = 7,      // NEW: ..
+  AddSub = 8,     // was 7
+  MulDiv = 9,     // was 8
+  Unary = 10,     // was 9
+  Postfix = 11,   // was 10
+}
+```
+
+Add `DotDot` to `infix_precedence`:
+
+```typescript
+    case TokenKind.DotDot: return Prec.Range;
+```
+
+In `parse_expr_bp`, add handling for `DotDot` before the generic binary operator branch:
+
+```typescript
+      } else if (tok.kind === TokenKind.DotDot) {
+        this.advance();
+        const right = this.parse_expr_bp(prec);
+        const span = this.make_span(left.span.start, right.span.end);
+        left = { kind: "range", start: left, end: right, span } as RangeExpr;
+        last_was_comparison = false;
+```
+
+- [ ] **Step 3: Parse for..in statement**
+
+In `parse_stmt()`, add (after while/break/continue checks):
 
 ```typescript
     if (this.check(TokenKind.For)) {
@@ -716,13 +783,7 @@ In `compiler/src/parser/parser.ts`, in `parse_stmt()`, add (after the while/brea
     }
 ```
 
-Remove the error in `parse_prefix()` (line 723-725):
-```typescript
-    // DELETE these lines:
-    // if (tok.kind === TokenKind.For) {
-    //   throw this.error("for loops are not yet implemented");
-    // }
-```
+Remove the error in `parse_prefix()` (line 723-725 where `for` throws "not yet implemented").
 
 Add the method:
 
@@ -734,12 +795,7 @@ Add the method:
     const binding = name_tok.value;
     const binding_span = name_tok.span;
     this.expect(TokenKind.In);
-    const range_start = this.parse_expr();
-    if (!this.check(TokenKind.DotDot)) {
-      throw this.error("for..in currently only supports range iteration (e.g., for x in 0..10 { ... })");
-    }
-    this.advance();
-    const range_end = this.parse_expr();
+    const iterable = this.parse_expr();
     this.expect(TokenKind.LBrace);
     const body = this.parse_block();
     const end = this.current_span_start();
@@ -747,26 +803,61 @@ Add the method:
       kind: "for_in_stmt",
       binding,
       binding_span,
-      range_start,
-      range_end,
+      iterable,
       body,
       span: this.make_span(start, end),
     };
   }
 ```
 
-- [ ] **Step 3: Type-check for..in statement**
+Note: `parse_expr()` will parse `0..5` as a `RangeExpr` thanks to the Pratt parser change.
 
-In `compiler/src/checker/infer.ts`, replace the placeholder `case "for_in_stmt"`:
+- [ ] **Step 4: Type-check range expression**
+
+In `compiler/src/checker/infer.ts`, add `"range"` case to `infer_expr`:
+
+```typescript
+      case "range": {
+        const start_r = this.infer_expr(expr.start, subst);
+        let s = this.unify_at(start_r.hexpr.type, INT, start_r.subst, expr.start.span);
+        const end_r = this.infer_expr(expr.end, s);
+        s = this.unify_at(end_r.hexpr.type, INT, end_r.subst, expr.end.span);
+        let effects: EffectRow;
+        [effects, s] = this.merge_effects(start_r.effects, end_r.effects, s);
+        const range_type: Type = { kind: "generic", name: "Range", args: [INT] };
+        return {
+          hexpr: {
+            kind: "range", start: start_r.hexpr, end: end_r.hexpr,
+            type: range_type, effects, span: expr.span,
+          } as HRangeExpr,
+          subst: s,
+          effects,
+        };
+      }
+```
+
+- [ ] **Step 5: Type-check for..in statement**
+
+Replace placeholder `case "for_in_stmt"` in `infer_stmt`:
 
 ```typescript
       case "for_in_stmt": {
-        const start_r = this.infer_expr(stmt.range_start, subst);
-        let s = this.unify_at(start_r.hexpr.type, INT, start_r.subst, stmt.range_start.span);
-        const end_r = this.infer_expr(stmt.range_end, s);
-        s = this.unify_at(end_r.hexpr.type, INT, end_r.subst, stmt.range_end.span);
+        const iter_r = this.infer_expr(stmt.iterable, subst);
+        let s = iter_r.subst;
+        const iter_type = apply(s, iter_r.hexpr.type);
+        let element_type: Type;
+        if (iter_type.kind === "generic" && iter_type.name === "Range") {
+          element_type = iter_type.args[0];
+        } else {
+          this.type_error(
+            E.E0301,
+            `for..in requires an iterable type, got ${type_to_string(iter_type)}`,
+            stmt.iterable.span,
+            { notes: ["Currently only range expressions (e.g., 0..10) are supported as iterables"] }
+          );
+        }
         this.env.push_scope();
-        this.env.bind_mono(stmt.binding, INT);
+        this.env.bind_mono(stmt.binding, element_type);
         const binding_scheme = this.env.lookup(stmt.binding)!;
         this.env.record_def_span(binding_scheme.def_id!, stmt.binding_span);
         this.loop_depth++;
@@ -775,16 +866,14 @@ In `compiler/src/checker/infer.ts`, replace the placeholder `case "for_in_stmt"`
         this.env.pop_scope();
         s = body_r.subst;
         let effects: EffectRow;
-        [effects, s] = this.merge_effects(start_r.effects, end_r.effects, s);
-        [effects, s] = this.merge_effects(effects, body_r.effects, s);
+        [effects, s] = this.merge_effects(iter_r.effects, body_r.effects, s);
         return {
           hstmt: {
             kind: "for_in_stmt",
             binding: stmt.binding,
             binding_span: stmt.binding_span,
             def_id: binding_scheme.def_id,
-            range_start: start_r.hexpr,
-            range_end: end_r.hexpr,
+            iterable: iter_r.hexpr,
             body: body_r.hexpr as HBlock,
             span: stmt.span,
           },
@@ -794,16 +883,29 @@ In `compiler/src/checker/infer.ts`, replace the placeholder `case "for_in_stmt"`
       }
 ```
 
-- [ ] **Step 4: Generate JS for for..in**
+- [ ] **Step 6: Generate JS for range expression and for..in**
 
-In `compiler/src/codegen/codegen.ts`, in `emit_stmt`, add:
+In `compiler/src/codegen/codegen.ts`, add `"range"` to `gen_expr`:
+
+```typescript
+      case "range":
+        return `{ start: ${this.gen_expr(expr.start)}, end: ${this.gen_expr(expr.end)} }`;
+```
+
+In `emit_stmt`, add for..in:
 
 ```typescript
       case "for_in_stmt": {
-        const start = this.gen_expr(stmt.range_start);
-        const end = this.gen_expr(stmt.range_end);
-        const binding = safe_ident(stmt.binding);
-        this.emit(`for (let ${binding} = ${start}; ${binding} < ${end}; ${binding}++) {`);
+        if (stmt.iterable.kind === "range") {
+          const start = this.gen_expr(stmt.iterable.start);
+          const end = this.gen_expr(stmt.iterable.end);
+          const binding = safe_ident(stmt.binding);
+          this.emit(`for (let ${binding} = ${start}; ${binding} < ${end}; ${binding}++) {`);
+        } else {
+          const iter = this.gen_expr(stmt.iterable);
+          const binding = safe_ident(stmt.binding);
+          this.emit(`for (const ${binding} of ${iter}) {`);
+        }
         this.push_indent();
         this.emit_block_in_stmt_context(stmt.body, "discard");
         this.pop_indent();
@@ -812,7 +914,7 @@ In `compiler/src/codegen/codegen.ts`, in `emit_stmt`, add:
       }
 ```
 
-- [ ] **Step 5: Build and run tests**
+- [ ] **Step 7: Build and run tests**
 
 Run: `cd compiler && npm run build && npm run test:all`
 Expected: All pass including for_range.ring.
