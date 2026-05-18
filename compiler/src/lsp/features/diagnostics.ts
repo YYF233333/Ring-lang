@@ -25,12 +25,15 @@ export function convert_diagnostics(diagnostics: readonly Diagnostic[]): LspDiag
     };
 
     if (d.notes.length > 0) {
-      lsp.relatedInformation = d.notes
-        .filter(n => n.span !== undefined)
-        .map((n): DiagnosticRelatedInformation => ({
+      const valid_notes = d.notes.filter(n =>
+        n.span !== undefined && !n.span.file.startsWith("<")
+      );
+      if (valid_notes.length > 0) {
+        lsp.relatedInformation = valid_notes.map((n): DiagnosticRelatedInformation => ({
           location: Location.create(n.span!.file, span_to_range(n.span!)),
           message: n.message,
         }));
+      }
     }
 
     return lsp;

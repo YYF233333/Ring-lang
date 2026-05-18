@@ -16,6 +16,7 @@ export const E = {
   E0302: "E0302", // infinite type (occurs check)
   E0303: "E0303", // numeric type required
   E0304: "E0304", // field access on non-struct
+  E0305: "E0305", // undefined method
 
   // Effect errors (E04xx)
   E0401: "E0401", // unknown effect
@@ -44,6 +45,7 @@ export const ERROR_DESCRIPTIONS: Record<string, string> = {
   [E.E0302]: "Infinite type (occurs check)",
   [E.E0303]: "Numeric type required",
   [E.E0304]: "Invalid field access",
+  [E.E0305]: "Undefined method",
   [E.E0401]: "Unknown effect",
   [E.E0402]: "Unknown effect operation",
   [E.E0403]: "Unhandled effect",

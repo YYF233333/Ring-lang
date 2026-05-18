@@ -3,6 +3,7 @@ import {
   Type, TypeVar, FnType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
   make_option_type,
 } from "../types/index.js";
+import { Span } from "../ast/index.js";
 
 // ============================================================
 // Type Scheme (for let-polymorphism)
@@ -10,11 +11,13 @@ import {
 
 export interface TypeScheme {
   type: Type;
-  type_vars: number[]; // universally quantified type variable ids
+  type_vars: number[];
+  bounds: { type_var: number; trait_name: string }[];
+  def_id?: number;
 }
 
 function mono(type: Type): TypeScheme {
-  return { type, type_vars: [] };
+  return { type, type_vars: [], bounds: [] };
 }
 
 // ============================================================
@@ -80,6 +83,7 @@ export interface Scope {
 
 export class TypeEnv {
   private next_type_var_id = 0;
+  private next_def_id = 0;
   public scopes: Scope[] = [];
   public structs: Map<string, StructDef> = new Map();
   public enums: Map<string, EnumDef> = new Map();
@@ -89,6 +93,8 @@ export class TypeEnv {
   public traits: Map<string, TraitDef> = new Map();
   public trait_impls: ImplEntry[] = [];
   public fn_bounds: Map<string, { type_param: string; trait_name: string }[]> = new Map();
+  public var_bounds: Map<number, Set<string>> = new Map();
+  public def_spans: Map<number, Span> = new Map();
 
   constructor() {
     this.scopes.push({ variables: new Map() });
@@ -101,12 +107,16 @@ export class TypeEnv {
     return { kind: "var", id: this.next_type_var_id++ };
   }
 
+  fresh_def_id(): number {
+    return this.next_def_id++;
+  }
+
   private register_builtins(): void {
     // print: fn<T>(T) -> ()
     const print_var = this.fresh_var();
     this.bind("print", {
       type: { kind: "fn", params: [print_var], return_type: UNIT, effects: EMPTY_ROW } as FnType,
-      type_vars: [print_var.id],
+      type_vars: [print_var.id], bounds: [],
     });
 
     // assert: fn(Bool) -> ()
@@ -164,7 +174,7 @@ export class TypeEnv {
     };
     this.bind("Cell", {
       type: { kind: "fn", params: [cell_ctor_t], return_type: cell_struct_type, effects: EMPTY_ROW } as FnType,
-      type_vars: [cell_ctor_t.id],
+      type_vars: [cell_ctor_t.id], bounds: [],
     });
 
     // Cell impl methods — all carry {mut} effect
@@ -178,16 +188,16 @@ export class TypeEnv {
     const cell_methods = new Map<string, TypeScheme>();
     cell_methods.set("get", {
       type: { kind: "fn", params: [cell_self_type], return_type: cell_m_t, effects: mut_row } as FnType,
-      type_vars: [cell_m_t.id],
+      type_vars: [cell_m_t.id], bounds: [],
     });
     cell_methods.set("set", {
       type: { kind: "fn", params: [cell_self_type, cell_m_t], return_type: UNIT, effects: mut_row } as FnType,
-      type_vars: [cell_m_t.id],
+      type_vars: [cell_m_t.id], bounds: [],
     });
     const update_fn_type: FnType = { kind: "fn", params: [cell_m_t], return_type: cell_m_t, effects: EMPTY_ROW };
     cell_methods.set("update", {
       type: { kind: "fn", params: [cell_self_type, update_fn_type], return_type: UNIT, effects: mut_row } as FnType,
-      type_vars: [cell_m_t.id],
+      type_vars: [cell_m_t.id], bounds: [],
     });
     this.impl_methods.set("Cell", cell_methods);
 
@@ -209,14 +219,14 @@ export class TypeEnv {
     const option_some_type: Type = make_option_type(some_t);
     this.bind("some", {
       type: { kind: "fn", params: [some_t], return_type: option_some_type, effects: EMPTY_ROW } as FnType,
-      type_vars: [some_t.id],
+      type_vars: [some_t.id], bounds: [],
     });
 
     const none_t = this.fresh_var();
     const option_none_type: Type = make_option_type(none_t);
     this.bind("none", {
       type: option_none_type,
-      type_vars: [none_t.id],
+      type_vars: [none_t.id], bounds: [],
     });
 
   }
@@ -233,12 +243,19 @@ export class TypeEnv {
   }
 
   bind(name: string, scheme: TypeScheme): void {
+    if (scheme.def_id === undefined) {
+      scheme.def_id = this.fresh_def_id();
+    }
     const current = this.scopes[this.scopes.length - 1];
     current.variables.set(name, scheme);
   }
 
   bind_mono(name: string, type: Type): void {
     this.bind(name, mono(type));
+  }
+
+  record_def_span(def_id: number, span: Span): void {
+    this.def_spans.set(def_id, span);
   }
 
   lookup(name: string): TypeScheme | undefined {
@@ -256,6 +273,14 @@ export class TypeEnv {
     const mapping = new Map<number, Type>();
     for (const tv of scheme.type_vars) {
       mapping.set(tv, this.fresh_var());
+    }
+    for (const bound of scheme.bounds) {
+      const fresh = mapping.get(bound.type_var);
+      if (fresh && fresh.kind === "var") {
+        const existing = this.var_bounds.get(fresh.id) ?? new Set();
+        existing.add(bound.trait_name);
+        this.var_bounds.set(fresh.id, existing);
+      }
     }
     return substitute_type(scheme.type, mapping);
   }
@@ -304,6 +329,7 @@ export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
         args: t.args.map(a => substitute_type(a, mapping)),
       };
     case "record": {
+      const fields = t.fields.map(f => ({ name: f.name, type: substitute_type(f.type, mapping) }));
       let tail = t.tail;
       let tail_name = t.tail_name;
       if (tail !== undefined && mapping.has(tail)) {
@@ -311,14 +337,25 @@ export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
         if (replacement.kind === "var") {
           tail = replacement.id;
           if (replacement.name) tail_name = replacement.name;
+        } else if (replacement.kind === "record") {
+          return {
+            kind: "record",
+            fields: [...fields, ...replacement.fields.map(f => ({ name: f.name, type: substitute_type(f.type, mapping) }))],
+            tail: replacement.tail,
+            tail_name: replacement.tail_name,
+          };
+        } else {
+          tail = undefined;
+          tail_name = undefined;
         }
       }
-      return {
-        kind: "record",
-        fields: t.fields.map(f => ({ name: f.name, type: substitute_type(f.type, mapping) })),
-        tail,
-        tail_name,
-      };
+      return tail !== undefined
+        ? { kind: "record", fields, tail, tail_name }
+        : { kind: "record", fields };
+    }
+    case "effect_row": {
+      const row = substitute_effect_row({ effects: t.effects, tail: t.tail }, mapping);
+      return { kind: "effect_row", effects: row.effects, tail: row.tail };
     }
   }
 }

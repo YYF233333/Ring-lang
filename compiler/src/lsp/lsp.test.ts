@@ -228,6 +228,30 @@ describe("Completion feature", () => {
     const labels = items.map((i: CompletionItem) => i.label);
     assert.ok(labels.includes("print"));
   });
+
+  test("completes local variables inside function body (I18)", () => {
+    const dm = new DocumentManager();
+    const src = `fn compute(a: Int, b: Int) -> Int {\n  let sum = a + b\n  s\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const items = get_completions(state, { line: 2, character: 3 });
+    const labels = items.map((i: CompletionItem) => i.label);
+    assert.ok(labels.includes("sum"), `expected 'sum' in completions, got: ${labels.join(", ")}`);
+    assert.ok(labels.includes("a"), `expected param 'a' in completions`);
+    assert.ok(labels.includes("b"), `expected param 'b' in completions`);
+  });
+
+  test("completes enum variant constructors in scope (I19)", () => {
+    const dm = new DocumentManager();
+    const src = `enum Color { red(), green(), blue() }\nfn main() -> Int {\n  r\n  0\n}`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const items = get_completions(state, { line: 2, character: 3 });
+    const labels = items.map((i: CompletionItem) => i.label);
+    assert.ok(labels.includes("red"), `expected 'red' variant, got: ${labels.join(", ")}`);
+    assert.ok(labels.includes("green"), `expected 'green' variant`);
+    assert.ok(labels.includes("Color"), `expected 'Color' enum type`);
+  });
 });
 
 describe("Definition feature", () => {
@@ -303,6 +327,18 @@ describe("Rename feature", () => {
     const edit = get_rename_edits(state, { line: 0, character: 20 }, "my_print");
     assert.equal(edit, null);
   });
+
+  test("rejects rename to invalid identifier (I20)", () => {
+    const dm = new DocumentManager();
+    dm.open("file:///test.ring", 1, `fn main() -> Int { let x = 1; x }`);
+    const state = dm.get("file:///test.ring")!;
+    const edit1 = get_rename_edits(state, { line: 0, character: 24 }, "123bad");
+    assert.equal(edit1, null);
+    const edit2 = get_rename_edits(state, { line: 0, character: 24 }, "has space");
+    assert.equal(edit2, null);
+    const edit3 = get_rename_edits(state, { line: 0, character: 24 }, "valid_name");
+    assert.notEqual(edit3, null);
+  });
 });
 
 describe("Document Symbols", () => {
@@ -367,6 +403,98 @@ describe("Regression: references on let/var binding name", () => {
   });
 });
 
+describe("Regression C7: cross-scope references use def_id", () => {
+  test("references for x in foo() do not include x in bar()", () => {
+    const dm = new DocumentManager();
+    const src = [
+      "fn foo() -> Int {",
+      "  let x = 1",
+      "  x + 1",
+      "}",
+      "fn bar() -> Int {",
+      "  let x = 2",
+      "  x + 2",
+      "}",
+    ].join("\n");
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // Cursor on "x" in foo's body — line 2 (0-based), char 2
+    const refs = get_references(state, { line: 2, character: 2 });
+    assert.equal(refs.length, 2, `expected 2 refs for foo's x, got ${refs.length}`);
+    for (const ref of refs) {
+      assert.ok(ref.range.start.line < 4, `ref at line ${ref.range.start.line} leaked into bar()`);
+    }
+  });
+
+  test("definition of x in bar() points to bar's let, not foo's", () => {
+    const dm = new DocumentManager();
+    const src = [
+      "fn foo() -> Int {",
+      "  let x = 1",
+      "  x + 1",
+      "}",
+      "fn bar() -> Int {",
+      "  let x = 2",
+      "  x + 2",
+      "}",
+    ].join("\n");
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // Cursor on "x" in bar's body — line 6 (0-based), char 2
+    const def = get_definition(state, { line: 6, character: 2 });
+    assert.ok(def, "expected definition result");
+    assert.equal(def.range.start.line, 5, `expected def at line 5 (bar's let x), got ${def.range.start.line}`);
+  });
+
+  test("rename x in foo() does not affect bar()", () => {
+    const dm = new DocumentManager();
+    const src = [
+      "fn foo() -> Int {",
+      "  let x = 1",
+      "  x + 1",
+      "}",
+      "fn bar() -> Int {",
+      "  let x = 2",
+      "  x + 2",
+      "}",
+    ].join("\n");
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // Cursor on "x" in foo — line 2, char 2
+    const edits = get_rename_edits(state, { line: 2, character: 2 }, "y");
+    assert.ok(edits, "expected rename edits");
+    const changes = edits.changes!["file:///test.ring"];
+    assert.equal(changes.length, 2, `expected 2 edits for foo's x, got ${changes.length}`);
+    for (const change of changes) {
+      assert.ok(change.range.start.line < 4, `edit at line ${change.range.start.line} leaked into bar()`);
+    }
+  });
+});
+
+describe("Regression C8: references use name_span not stmt span", () => {
+  test("reference for let binding covers only identifier, not whole statement", () => {
+    const dm = new DocumentManager();
+    // "  let longName = some_complex_expression"
+    //       ^^^^^^^^^  — name_span should be just this
+    const src = [
+      "fn main() -> Int {",
+      "  let longName = 42",
+      "  longName + 1",
+      "}",
+    ].join("\n");
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    // Cursor on "longName" use — line 2, char 2
+    const refs = get_references(state, { line: 2, character: 2 });
+    assert.equal(refs.length, 2, `expected 2 refs, got ${refs.length}`);
+    // The binding-site ref should only span the identifier, not the whole "let longName = 42"
+    const binding_ref = refs.find(r => r.range.start.line === 1);
+    assert.ok(binding_ref, "expected a ref on line 1 (binding site)");
+    const width = binding_ref.range.end.character - binding_ref.range.start.character;
+    assert.equal(width, "longName".length, `expected binding ref width ${("longName").length}, got ${width}`);
+  });
+});
+
 describe("Regression: hover type display quality", () => {
   test("hover shows effect in function signature", () => {
     const dm = new DocumentManager();
@@ -390,6 +518,29 @@ describe("Regression: hover type display quality", () => {
     const text = typeof result.contents === "string" ? result.contents : result.contents.toString();
     assert.ok(text.includes("T"), `expected T in hover, got: ${text}`);
     assert.ok(!text.includes("?"), `unexpected ?N in hover: ${text}`);
+  });
+
+  test("hover on struct declaration shows fields (I17)", () => {
+    const dm = new DocumentManager();
+    const src = `struct Point { x: Int, y: Int }\nfn main() -> Int { 0 }`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_hover(state, { line: 0, character: 8 });
+    assert.ok(result, "hover should not be null on struct decl");
+    const text = typeof result.contents === "string" ? result.contents : result.contents.toString();
+    assert.ok(text.includes("struct Point"), `expected 'struct Point' in hover, got: ${text}`);
+    assert.ok(text.includes("x: Int"), `expected field info, got: ${text}`);
+  });
+
+  test("hover on enum declaration shows variants (I17)", () => {
+    const dm = new DocumentManager();
+    const src = `enum Color { red(), green(), blue() }\nfn main() -> Int { 0 }`;
+    dm.open("file:///test.ring", 1, src);
+    const state = dm.get("file:///test.ring")!;
+    const result = get_hover(state, { line: 0, character: 6 });
+    assert.ok(result, "hover should not be null on enum decl");
+    const text = typeof result.contents === "string" ? result.contents : result.contents.toString();
+    assert.ok(text.includes("enum Color"), `expected 'enum Color' in hover, got: ${text}`);
   });
 
   test("hover does not include range (avoids over-highlight)", () => {

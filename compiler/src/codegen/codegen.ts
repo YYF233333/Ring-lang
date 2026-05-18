@@ -2,14 +2,14 @@
 
 import {
   HProgram, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl,
-  HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock, HMatchArm,
+  HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock,
   variant_js_name, trait_dict_name, evidence_param_name,
   trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD,
   OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
-import { Effect, EffectRow } from "../types/index.js";
+import { Type, Effect, EffectRow } from "../types/index.js";
 import { assertNever } from "../errors.js";
 import { RUNTIME_CODE } from "./runtime.js";
 
@@ -77,7 +77,12 @@ class CodeGenerator {
         this.struct_field_order.set(decl.name, decl.fields.map(f => f.name));
       } else if (decl.kind === "impl_decl") {
         for (const method of decl.methods) {
-          this.impl_methods.set(`${decl.target_type}.${method.name}`, decl.trait_name);
+          const key = `${decl.target_type}.${method.name}`;
+          if (!decl.trait_name) {
+            this.impl_methods.set(key, undefined);
+          } else if (!this.impl_methods.has(key)) {
+            this.impl_methods.set(key, decl.trait_name);
+          }
         }
       } else if (decl.kind === "trait_decl") {
         this.trait_decls.set(decl.name, decl);
@@ -206,8 +211,8 @@ class CodeGenerator {
 
   private emit_impl_decl(decl: HImplDecl): void {
     const prefix = decl.trait_name
-      ? `${decl.target_type}_${decl.trait_name}`
-      : decl.target_type;
+      ? `${safe_ident(decl.target_type)}_${safe_ident(decl.trait_name)}`
+      : safe_ident(decl.target_type);
     for (const method of decl.methods) {
       this.emit_fn_decl(method, prefix);
     }
@@ -274,7 +279,115 @@ class CodeGenerator {
       this.emit_stmt(stmt);
     }
     if (block.tail) {
-      this.emit(`return ${this.gen_expr(block.tail)};`);
+      this.emit_in_stmt_context(block.tail, "return");
+    }
+  }
+
+  // ============================================================
+  // Statement-mode expression emission
+  // ============================================================
+
+  private emit_in_stmt_context(expr: HExpr, mode: "return" | "discard"): void {
+    switch (expr.kind) {
+      case "if_expr":
+        this.emit_if_stmt(expr, mode);
+        return;
+      case "block":
+        this.emit_block_in_stmt_context(expr, mode);
+        return;
+      case "match_expr":
+        this.emit_match_stmt(expr, mode);
+        return;
+      default:
+        if (mode === "return") {
+          this.emit(`return ${this.gen_expr(expr)};`);
+        } else {
+          this.emit(`${this.gen_expr(expr)};`);
+        }
+    }
+  }
+
+  private emit_if_stmt(expr: HExpr & { kind: "if_expr" }, mode: "return" | "discard"): void {
+    this.emit(`if (${this.gen_expr(expr.condition)}) {`);
+    this.push_indent();
+    this.emit_block_in_stmt_context(expr.then_branch, mode);
+    this.pop_indent();
+    if (!expr.else_branch) {
+      this.emit("}");
+    } else if (expr.else_branch.kind === "if_expr") {
+      this.emit_else_if(expr.else_branch, mode);
+    } else {
+      this.emit("} else {");
+      this.push_indent();
+      this.emit_block_in_stmt_context(expr.else_branch, mode);
+      this.pop_indent();
+      this.emit("}");
+    }
+  }
+
+  private emit_else_if(expr: HExpr & { kind: "if_expr" }, mode: "return" | "discard"): void {
+    this.emit(`} else if (${this.gen_expr(expr.condition)}) {`);
+    this.push_indent();
+    this.emit_block_in_stmt_context(expr.then_branch, mode);
+    this.pop_indent();
+    if (!expr.else_branch) {
+      this.emit("}");
+    } else if (expr.else_branch.kind === "if_expr") {
+      this.emit_else_if(expr.else_branch, mode);
+    } else {
+      this.emit("} else {");
+      this.push_indent();
+      this.emit_block_in_stmt_context(expr.else_branch, mode);
+      this.pop_indent();
+      this.emit("}");
+    }
+  }
+
+  private emit_block_in_stmt_context(block: HBlock, mode: "return" | "discard"): void {
+    for (const stmt of block.stmts) {
+      this.emit_stmt(stmt);
+    }
+    if (block.tail) {
+      this.emit_in_stmt_context(block.tail, mode);
+    }
+  }
+
+  private emit_match_stmt(expr: HExpr & { kind: "match_expr" }, mode: "return" | "discard"): void {
+    const scrutinee = this.gen_expr(expr.scrutinee);
+    this.emit(`const __ring_m = ${scrutinee};`);
+
+    for (const arm of expr.arms) {
+      const cond = this.gen_pattern_condition("__ring_m", arm.pattern);
+      const bindings_str = this.gen_pattern_bindings("__ring_m", arm.pattern);
+      if (cond === "true" && !arm.guard) {
+        if (bindings_str) this.emit(bindings_str.trim());
+        this.emit_in_stmt_context(arm.body, mode);
+      } else if (arm.guard) {
+        this.emit(`if (${cond}) {`);
+        this.push_indent();
+        if (bindings_str) this.emit(bindings_str.trim());
+        this.emit(`if (${this.gen_expr(arm.guard)}) {`);
+        this.push_indent();
+        this.emit_in_stmt_context(arm.body, mode);
+        this.pop_indent();
+        this.emit("}");
+        this.pop_indent();
+        this.emit("}");
+      } else {
+        this.emit(`if (${cond}) {`);
+        this.push_indent();
+        if (bindings_str) this.emit(bindings_str.trim());
+        this.emit_in_stmt_context(arm.body, mode);
+        this.pop_indent();
+        this.emit("}");
+      }
+    }
+
+    const has_catchall = expr.arms.some(a =>
+      (a.pattern.kind === "wildcard" || a.pattern.kind === "binding") && !a.guard
+    );
+    if (!has_catchall) {
+      this.emit(`${RUNTIME_MATCH_FAIL}(__ring_m);`);
     }
   }
 
@@ -283,7 +396,20 @@ class CodeGenerator {
   // ============================================================
 
   private emit_stmt(stmt: HStmt): void {
-    this.emit(this.gen_stmt_inline(stmt));
+    switch (stmt.kind) {
+      case "expr_stmt":
+        this.emit_in_stmt_context(stmt.expr, "discard");
+        return;
+      case "return_stmt":
+        if (stmt.value) {
+          this.emit_in_stmt_context(stmt.value, "return");
+        } else {
+          this.emit("return;");
+        }
+        return;
+      default:
+        this.emit(this.gen_stmt_inline(stmt));
+    }
   }
 
   // ============================================================
@@ -307,14 +433,17 @@ class CodeGenerator {
           if (fn_type.kind === "fn") {
             const params = fn_type.params.map((_, i) => `__ring_a${i}`);
             const dict_args = expr.dict_closure_dicts.join(", ");
-            const all_call_args = [...params, dict_args].join(", ");
+            const ev_args = this.get_callee_evidence_args(fn_type);
+            const all_call_args = [...params, dict_args, ...(ev_args ? [ev_args] : [])].join(", ");
             return `((${params.join(", ")}) => ${name}(${all_call_args}))`;
           }
         }
         return name;
       }
-      case "bin_op":
-        return `(${this.gen_expr(expr.left)} ${expr.op} ${this.gen_expr(expr.right)})`;
+      case "bin_op": {
+        const js_op = expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
+        return `(${this.gen_expr(expr.left)} ${js_op} ${this.gen_expr(expr.right)})`;
+      }
       case "unary_op":
         return `(${expr.op}${this.gen_expr(expr.operand)})`;
       case "call":
@@ -350,8 +479,8 @@ class CodeGenerator {
     }
   }
 
-  private get_callee_evidence_args(callee_type: { kind: string; effects?: EffectRow }): string {
-    if (callee_type.kind !== "fn" || !callee_type.effects || callee_type.effects.effects.length === 0) return "";
+  private get_callee_evidence_args(callee_type: Type): string {
+    if (callee_type.kind !== "fn" || callee_type.effects.effects.length === 0) return "";
     return this.get_evidence_params(callee_type.effects).join(", ");
   }
 
@@ -404,10 +533,10 @@ class CodeGenerator {
         const val = field_map.get(name);
         return val ? this.gen_expr(val) : "undefined";
       }).join(", ");
-      return `new ${expr.name}(${args})`;
+      return `new ${safe_ident(expr.name)}(${args})`;
     }
     const args = expr.fields.map(f => this.gen_expr(f.value)).join(", ");
-    return `new ${expr.name}(${args})`;
+    return `new ${safe_ident(expr.name)}(${args})`;
   }
 
   private gen_match(expr: HExpr & { kind: "match_expr" }): string {
@@ -416,39 +545,23 @@ class CodeGenerator {
     parts.push("(function() {");
     parts.push(`  const __ring_m = ${scrutinee};`);
 
-    // Determine if this is a tag-based match (enum) or value-based
-    const has_constructor = expr.arms.some(a => a.pattern.kind === "constructor");
-    if (has_constructor) {
-      parts.push(`  switch (__ring_m.${ENUM_TAG_FIELD}) {`);
-      const has_catchall = expr.arms.some(a =>
-        a.pattern.kind === "wildcard" || a.pattern.kind === "binding" || a.pattern.kind === "literal"
-      );
-      for (const arm of expr.arms) {
-        const arm_code = this.gen_match_arm(arm);
-        parts.push(arm_code);
+    for (const arm of expr.arms) {
+      const cond = this.gen_pattern_condition("__ring_m", arm.pattern);
+      const bindings = this.gen_pattern_bindings("__ring_m", arm.pattern);
+      const body = this.gen_expr(arm.body);
+      if (cond === "true" && !arm.guard) {
+        parts.push(`  ${bindings}return ${body};`);
+      } else if (arm.guard) {
+        parts.push(`  if (${cond}) { ${bindings}if (${this.gen_expr(arm.guard)}) { return ${body}; } }`);
+      } else {
+        parts.push(`  if (${cond}) { ${bindings}return ${body}; }`);
       }
-      if (!has_catchall) {
-        parts.push(`    default: ${RUNTIME_MATCH_FAIL}(__ring_m);`);
-      }
-      parts.push("  }");
-    } else {
-      // Use if-chain for literal/binding/wildcard patterns
-      for (let i = 0; i < expr.arms.length; i++) {
-        const arm = expr.arms[i];
-        const cond = this.gen_pattern_condition("__ring_m", arm.pattern);
-        const bindings = this.gen_pattern_bindings("__ring_m", arm.pattern);
-        const body = this.gen_expr(arm.body);
-        if (cond === "true" && !arm.guard) {
-          // Wildcard or binding without guard — always matches
-          parts.push(`  ${bindings}return ${body};`);
-        } else if (arm.guard && cond === "true") {
-          // Binding with guard — need block scope for bindings before guard check
-          parts.push(`  { ${bindings}if (${this.gen_expr(arm.guard)}) { return ${body}; } }`);
-        } else {
-          const guard = arm.guard ? ` && ${this.gen_expr(arm.guard)}` : "";
-          parts.push(`  if (${cond}${guard}) { ${bindings}return ${body}; }`);
-        }
-      }
+    }
+
+    const has_catchall = expr.arms.some(a =>
+      (a.pattern.kind === "wildcard" || a.pattern.kind === "binding") && !a.guard
+    );
+    if (!has_catchall) {
       parts.push(`  ${RUNTIME_MATCH_FAIL}(__ring_m);`);
     }
 
@@ -456,50 +569,21 @@ class CodeGenerator {
     return parts.join("\n");
   }
 
-  private gen_match_arm(arm: HMatchArm): string {
-    const pat = arm.pattern;
-    switch (pat.kind) {
-      case "constructor": {
-        const bindings = pat.fields.map((f, i) => {
-          if (f.kind === "binding") {
-            return `const ${safe_ident(f.name)} = __ring_m._${i}; `;
-          }
-          return "";
-        }).join("");
-        if (arm.guard) {
-          const body = this.gen_expr(arm.body);
-          return `    case "${pat.name}": { ${bindings}if (${this.gen_expr(arm.guard)}) { return ${body}; } break; }`;
-        }
-        const body = this.gen_expr(arm.body);
-        return `    case "${pat.name}": { ${bindings}return ${body}; }`;
-      }
-      case "wildcard": {
-        const body = this.gen_expr(arm.body);
-        return `    default: return ${body};`;
-      }
-      case "binding": {
-        const body = this.gen_expr(arm.body);
-        return `    default: { const ${safe_ident(pat.name)} = __ring_m; return ${body}; }`;
-      }
-      case "literal": {
-        // Literal in a tag-switch doesn't make sense, but handle gracefully
-        const body = this.gen_expr(arm.body);
-        return `    /* literal ${JSON.stringify(pat.value)} */ default: return ${body};`;
-      }
-      default: return assertNever(pat, "gen_match_arm");
-    }
-  }
-
   private gen_pattern_condition(target: string, pat: Pattern): string {
     switch (pat.kind) {
       case "wildcard":
-        return "true";
       case "binding":
         return "true";
       case "literal":
         return `${target} === ${JSON.stringify(pat.value)}`;
-      case "constructor":
-        return `${target}.${ENUM_TAG_FIELD} === "${pat.name}"`;
+      case "constructor": {
+        const tag_check = `${target}.${ENUM_TAG_FIELD} === "${pat.name}"`;
+        const sub_conds = pat.fields.map((f, i) =>
+          this.gen_pattern_condition(`${target}._${i}`, f)
+        ).filter(c => c !== "true");
+        if (sub_conds.length === 0) return tag_check;
+        return `${tag_check} && ${sub_conds.join(" && ")}`;
+      }
       default:
         return assertNever(pat, "gen_pattern_condition");
     }
@@ -508,18 +592,14 @@ class CodeGenerator {
   private gen_pattern_bindings(target: string, pat: Pattern): string {
     switch (pat.kind) {
       case "wildcard":
+      case "literal":
         return "";
       case "binding":
         return `const ${safe_ident(pat.name)} = ${target}; `;
-      case "literal":
-        return "";
       case "constructor":
-        return pat.fields.map((f, i) => {
-          if (f.kind === "binding") {
-            return `const ${safe_ident(f.name)} = ${target}._${i}; `;
-          }
-          return "";
-        }).join("");
+        return pat.fields.map((f, i) =>
+          this.gen_pattern_bindings(`${target}._${i}`, f)
+        ).join("");
       default:
         return assertNever(pat, "gen_pattern_bindings");
     }
@@ -677,9 +757,11 @@ class CodeGenerator {
   }
 
   private gen_lambda(expr: HExpr & { kind: "lambda" }): string {
-    const params = expr.params.map(p => safe_ident(p.name)).join(", ");
+    const params = expr.params.map(p => safe_ident(p.name));
+    const ev_params = expr.type.kind === "fn" ? this.get_evidence_params(expr.type.effects) : [];
+    const all_params = [...params, ...ev_params].join(", ");
     const body = this.gen_expr(expr.body);
-    return `(function(${params}) { return ${body}; })`;
+    return `(function(${all_params}) { return ${body}; })`;
   }
 
 

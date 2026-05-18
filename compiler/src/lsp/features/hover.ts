@@ -9,6 +9,10 @@ import {
   HBlock,
   HFnDecl,
   HImplDecl,
+  HStructDecl,
+  HEnumDecl,
+  HEffectDecl,
+  HTraitDecl,
 } from "../../hir/index.js";
 import { Span } from "../../ast/index.js";
 
@@ -264,6 +268,42 @@ function walk_impl_decl(impl: HImplDecl, pos: Position): HoverCandidate | null {
   return null;
 }
 
+function walk_struct_decl(decl: HStructDecl, pos: Position): HoverCandidate | null {
+  if (!contains_position(decl.span, pos)) return null;
+  const tparams = decl.type_params.length > 0 ? `<${decl.type_params.map(p => p.name).join(", ")}>` : "";
+  const fields = decl.fields.map(f => `${f.name}: ${type_to_string(f.type)}`).join(", ");
+  return { type_str: `struct ${decl.name}${tparams} { ${fields} }`, span: decl.span };
+}
+
+function walk_enum_decl(decl: HEnumDecl, pos: Position): HoverCandidate | null {
+  if (!contains_position(decl.span, pos)) return null;
+  const tparams = decl.type_params.length > 0 ? `<${decl.type_params.map(p => p.name).join(", ")}>` : "";
+  const variants = decl.variants.map(v =>
+    v.fields.length > 0 ? `${v.name}(${v.fields.map(f => type_to_string(f)).join(", ")})` : v.name
+  ).join(" | ");
+  return { type_str: `enum ${decl.name}${tparams} { ${variants} }`, span: decl.span };
+}
+
+function walk_effect_decl(decl: HEffectDecl, pos: Position): HoverCandidate | null {
+  if (!contains_position(decl.span, pos)) return null;
+  const tparams = decl.type_params.length > 0 ? `<${decl.type_params.map(p => p.name).join(", ")}>` : "";
+  const ops = decl.ops.map(op => {
+    const params = op.params.map(p => `${p.name}: ${type_to_string(p.type)}`).join(", ");
+    return `fn ${op.name}(${params}) -> ${type_to_string(op.return_type)}`;
+  }).join("; ");
+  return { type_str: `effect ${decl.name}${tparams} { ${ops} }`, span: decl.span };
+}
+
+function walk_trait_decl(decl: HTraitDecl, pos: Position): HoverCandidate | null {
+  if (!contains_position(decl.span, pos)) return null;
+  const tparams = decl.type_params.length > 0 ? `<${decl.type_params.map(p => p.name).join(", ")}>` : "";
+  const methods = decl.methods.map(m => {
+    const params = m.params.map(p => `${p.name}: ${type_to_string(p.type)}`).join(", ");
+    return `fn ${m.name}(${params}) -> ${type_to_string(m.return_type)}`;
+  }).join("; ");
+  return { type_str: `trait ${decl.name}${tparams} { ${methods} }`, span: decl.span };
+}
+
 function walk_decl(decl: HDecl, pos: Position): HoverCandidate | null {
   switch (decl.kind) {
     case "fn_decl":
@@ -273,11 +313,14 @@ function walk_decl(decl: HDecl, pos: Position): HoverCandidate | null {
       return walk_impl_decl(decl, pos);
 
     case "struct_decl":
+      return walk_struct_decl(decl, pos);
     case "enum_decl":
+      return walk_enum_decl(decl, pos);
     case "effect_decl":
-    case "test_decl":
+      return walk_effect_decl(decl, pos);
     case "trait_decl":
-      // For now these declaration types are not traversed for hover
+      return walk_trait_decl(decl, pos);
+    case "test_decl":
       return null;
   }
 }

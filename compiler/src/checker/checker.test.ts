@@ -443,4 +443,67 @@ describe("Type Checker", () => {
       assert.equal(type_to_string(fn_decl.return_type), "Int?");
     });
   });
+
+  describe("struct literal field validation (M2)", () => {
+    it("reports missing field in struct literal", () => {
+      const diags = check_expecting_errors(`
+        struct Point { x: Int, y: Int }
+        fn main() -> Int { let p = Point { x: 1 }; p.x }
+      `);
+      assert.ok(diags.some(d => d.code === "E0203" && /[Mm]issing.*field.*y/.test(d.message)));
+    });
+
+    it("reports unknown field in struct literal", () => {
+      const diags = check_expecting_errors(`
+        struct Point { x: Int, y: Int }
+        fn main() -> Int { let p = Point { x: 1, y: 2, z: 3 }; p.x }
+      `);
+      assert.ok(diags.some(d => d.code === "E0203" && /no field.*z/.test(d.message)));
+    });
+  });
+
+  describe("nested exhaustiveness (I1)", () => {
+    it("detects missing nested pattern some(none)", () => {
+      const diags = check_expecting_errors(`
+        fn f(x: Option<Int?>) -> Int {
+          match x {
+            some(some(v)) => v,
+            none => 0,
+          }
+        }
+      `);
+      assert.ok(diags.some(d => d.code === "E0601" && /some\(none\)/.test(d.message)));
+    });
+
+    it("accepts fully exhaustive nested match", () => {
+      const program = check_source(`
+        fn f(x: Option<Int?>) -> Int {
+          match x {
+            some(some(v)) => v,
+            some(none) => 0,
+            none => -1,
+          }
+        }
+      `);
+      assert.ok(program.decls.length > 0);
+    });
+  });
+
+  describe("undefined method on concrete type (I4)", () => {
+    it("reports E0305 for undefined method on struct", () => {
+      const diags = check_expecting_errors(`
+        struct Point { x: Int, y: Int }
+        fn main() -> Int { let p = Point { x: 1, y: 2 }; p.foo() }
+      `);
+      assert.ok(diags.some(d => d.code === "E0305" && /no method.*foo/.test(d.message)));
+    });
+
+    it("reports E0305 for undefined method on enum", () => {
+      const diags = check_expecting_errors(`
+        enum Color { red(), blue() }
+        fn main() -> Int { let c = red; c.bar() }
+      `);
+      assert.ok(diags.some(d => d.code === "E0305" && /no method.*bar/.test(d.message)));
+    });
+  });
 });

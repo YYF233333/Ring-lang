@@ -6,6 +6,7 @@ const BUILTINS = new Set(["print", "assert", "exit", "panic", "some", "none", "C
 
 export function get_rename_edits(state: DocumentState, position: Position, new_name: string): WorkspaceEdit | null {
   if (!state.checkResult) return null;
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(new_name)) return null;
   const refs = get_references(state, position);
   if (refs.length === 0) return null;
 

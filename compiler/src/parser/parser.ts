@@ -332,7 +332,9 @@ export class Parser {
 
   private try_parse_type_args(): TypeExpr[] {
     if (!this.check(TokenKind.Lt)) return [];
-    const save = this.pos;
+    const save_pos = this.pos;
+    const save_errors = this.error_count;
+    const sink_checkpoint = this.sink.save?.();
     this.advance();
     try {
       const args: TypeExpr[] = [];
@@ -341,13 +343,17 @@ export class Parser {
         args.push(this.parse_type_expr());
       }
       if (!this.check(TokenKind.Gt)) {
-        this.pos = save;
+        this.pos = save_pos;
+        this.error_count = save_errors;
+        if (sink_checkpoint !== undefined) this.sink.restore?.(sink_checkpoint);
         return [];
       }
       this.advance();
       return args;
     } catch {
-      this.pos = save;
+      this.pos = save_pos;
+      this.error_count = save_errors;
+      if (sink_checkpoint !== undefined) this.sink.restore?.(sink_checkpoint);
       return [];
     }
   }
@@ -552,7 +558,9 @@ export class Parser {
   private parse_binding_stmt(mutable: boolean): LetStmt | VarStmt {
     const start = this.current_span_start();
     this.expect(mutable ? TokenKind.Var : TokenKind.Let);
-    const name = this.expect(TokenKind.Ident).value;
+    const name_tok = this.expect(TokenKind.Ident);
+    const name = name_tok.value;
+    const name_span = name_tok.span;
     let type_annotation: TypeExpr | undefined;
     if (this.try_consume(TokenKind.Colon)) {
       type_annotation = this.parse_type_expr();
@@ -563,8 +571,8 @@ export class Parser {
     const end = this.current_span_start();
     const span = this.make_span(start, end);
     return mutable
-      ? { kind: "var_stmt", name, type_annotation, init, span } as VarStmt
-      : { kind: "let_stmt", name, type_annotation, init, span } as LetStmt;
+      ? { kind: "var_stmt", name, name_span, type_annotation, init, span } as VarStmt
+      : { kind: "let_stmt", name, name_span, type_annotation, init, span } as LetStmt;
   }
 
   private parse_return_stmt(): ReturnStmt {
@@ -814,7 +822,9 @@ export class Parser {
   private parse_catch_expr(left: Expr): CatchExpr {
     this.advance(); // consume 'catch'
     let error_type: string | undefined;
-    if (this.peek().kind === TokenKind.Ident) {
+    if (this.peek().kind === TokenKind.Ident &&
+        this.pos + 1 < this.tokens.length &&
+        this.tokens[this.pos + 1].kind === TokenKind.Fn) {
       error_type = this.advance().value;
     }
     this.expect(TokenKind.Fn);

@@ -60,6 +60,19 @@ const cases: TestCase[] = [
   { file: "match_guard.ring", expected: "positive\nnegative\nzero\n" },
   { file: "else_if.ring", expected: "A\nB\nC\n" },
   { file: "trait_default.ring", expected: "Whiskers\n" },
+  { file: "eq_strict.ring", expected: "true\ntrue\nfalse\ntrue\nfalse\n" },
+  { file: "float_basic.ring", expected: "12.56\n" },
+  { file: "bool_ops.ring", expected: "false\ntrue\nfalse\ntrue\n" },
+  { file: "unary_ops.ring", expected: "-42\n5\n" },
+  { file: "generic_basic.ring", expected: "42\nhello\n1\n" },
+  { file: "lambda_arg.ring", expected: "42\n6\n" },
+  { file: "return_early.ring", expected: "5\n3\n" },
+  { file: "struct_basic.ring", expected: "25\n" },
+  { file: "ufcs_basic.ring", expected: "1\n" },
+  { file: "match_guard_multi.ring", expected: "big circle\nsmall circle\nsquare\nrectangle\n" },
+  { file: "match_nested.ring", expected: "positive\nnon-positive\nnothing\n" },
+  { file: "trait_alias.ring", expected: "num\n" },
+  { file: "return_if.ring", expected: "5\n3\npositive\nnegative\nzero\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -134,6 +147,10 @@ describe("e2e: ring check (negative — should reject)", () => {
     { file: "error_arity.ring", error_pattern: "E0301" },
     { file: "error_undefined.ring", error_pattern: "E0201" },
     { file: "error_operator.ring", error_pattern: "E0301" },
+    { file: "error_nonexhaustive.ring", error_pattern: "E0601" },
+    { file: "error_undef_method.ring", error_pattern: "E0305" },
+    { file: "error_missing_field.ring", error_pattern: "E0203" },
+    { file: "error_nested_match.ring", error_pattern: "E0601" },
   ];
 
   for (const tc of negative_cases) {

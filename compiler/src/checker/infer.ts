@@ -21,8 +21,8 @@ import {
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent,
   variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
-import { TypeEnv, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
-import { Substitution, empty_subst, unify, UnificationError, apply, init_unify_fresh_counter } from "./unify.js";
+import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
+import { Substitution, empty_subst, unify, UnificationError, apply, apply_to_effect_row, init_unify_fresh_counter } from "./unify.js";
 import { check_exhaustive } from "./exhaustive.js";
 import { ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block } from "./zonk.js";
 
@@ -132,15 +132,20 @@ export class InferEngine {
     for (const scope of this.env.scopes) {
       for (const [, scheme] of scope.variables) {
         const ftv = this.free_type_vars(scheme.type, subst);
+        const quantified = new Set<number>();
+        for (const v of scheme.type_vars) {
+          const resolved = apply(subst, { kind: "var", id: v } as Type);
+          quantified.add(resolved.kind === "var" ? resolved.id : v);
+        }
         for (const v of ftv) {
-          if (!scheme.type_vars.includes(v)) result.add(v);
+          if (!quantified.has(v)) result.add(v);
         }
       }
     }
     return result;
   }
 
-  private generalize(t: Type, subst: Substitution): { type: Type; type_vars: number[] } {
+  private generalize(t: Type, subst: Substitution): TypeScheme {
     const resolved = apply(subst, t);
     const ftv_type = this.free_type_vars(resolved, empty_subst());
     const ftv_env = this.free_type_vars_in_env(subst);
@@ -148,7 +153,16 @@ export class InferEngine {
     for (const v of ftv_type) {
       if (!ftv_env.has(v)) type_vars.push(v);
     }
-    return { type: resolved, type_vars };
+    const bounds: { type_var: number; trait_name: string }[] = [];
+    for (const tv of type_vars) {
+      const traits = this.env.var_bounds.get(tv);
+      if (traits) {
+        for (const trait_name of traits) {
+          bounds.push({ type_var: tv, trait_name });
+        }
+      }
+    }
+    return { type: resolved, type_vars, bounds };
   }
 
   // ============================================================
@@ -292,7 +306,7 @@ export class InferEngine {
       this.env.variant_to_enum.set(variant.name, decl.name);
       if (variant.fields.length === 0) {
         if (type_var_ids.length > 0) {
-          this.env.bind(variant.name, { type: enum_type, type_vars: type_var_ids });
+          this.env.bind(variant.name, { type: enum_type, type_vars: type_var_ids, bounds: [] });
         } else {
           this.env.bind_mono(variant.name, enum_type);
         }
@@ -304,7 +318,7 @@ export class InferEngine {
           effects: EMPTY_ROW,
         };
         if (type_var_ids.length > 0) {
-          this.env.bind(variant.name, { type: fn_type, type_vars: type_var_ids });
+          this.env.bind(variant.name, { type: fn_type, type_vars: type_var_ids, bounds: [] });
         } else {
           this.env.bind_mono(variant.name, fn_type);
         }
@@ -378,7 +392,7 @@ export class InferEngine {
         return_type: ret_type,
         effects: EMPTY_ROW,
       };
-      methods.set(method.name, { type: fn_type, type_vars: [] });
+      methods.set(method.name, { type: fn_type, type_vars: [], bounds: [] });
     }
 
     // Task 6b: Validate trait impl completeness
@@ -431,14 +445,18 @@ export class InferEngine {
       effects: EMPTY_ROW,
     };
 
-    // Task 6c: Store fn_bounds for generic functions with trait constraints
     const fn_bounds_list: { type_param: string; trait_name: string }[] = [];
+    const scheme_bounds: { type_var: number; trait_name: string }[] = [];
     for (const tp of decl.type_params) {
+      const tv = this.type_param_scope.get(tp.name);
       for (const b of tp.bounds) {
         if (!this.env.traits.has(b.trait_name)) {
           this.type_error(E.E0501, `Unknown trait: ${b.trait_name}`, tp.span, { kind: "trait_error", detail: `unknown trait '${b.trait_name}'` });
         }
         fn_bounds_list.push({ type_param: tp.name, trait_name: b.trait_name });
+        if (tv && tv.kind === "var") {
+          scheme_bounds.push({ type_var: tv.id, trait_name: b.trait_name });
+        }
       }
     }
     if (fn_bounds_list.length > 0) {
@@ -448,10 +466,11 @@ export class InferEngine {
     this.type_param_scope = saved_tp_scope;
 
     if (type_vars.length > 0) {
-      this.env.bind(decl.name, { type: fn_type, type_vars });
+      this.env.bind(decl.name, { type: fn_type, type_vars, bounds: scheme_bounds });
     } else {
       this.env.bind_mono(decl.name, fn_type);
     }
+    this.env.record_def_span(this.env.lookup(decl.name)!.def_id!, decl.span);
   }
 
   // ============================================================
@@ -617,7 +636,9 @@ export class InferEngine {
         : (p.name === "self" && self_type) ? self_type
         : this.env.fresh_var();
       this.env.bind_mono(p.name, ptype);
-      hparams.push({ name: p.name, type: ptype });
+      const param_scheme = this.env.lookup(p.name)!;
+      this.env.record_def_span(param_scheme.def_id!, p.span);
+      hparams.push({ name: p.name, type: ptype, def_id: param_scheme.def_id });
     }
 
     // Set expected return type for return-statement checking
@@ -670,9 +691,16 @@ export class InferEngine {
       }
     }
 
+    const fn_scheme = this.env.lookup(decl.name);
+    const fn_def_id = fn_scheme?.def_id;
+    if (fn_def_id !== undefined) {
+      this.env.record_def_span(fn_def_id, decl.span);
+    }
+
     return {
       kind: "fn_decl",
       name: decl.name,
+      def_id: fn_def_id,
       type_params: decl.type_params,
       params: final_params,
       return_type: final_ret,
@@ -759,8 +787,9 @@ export class InferEngine {
         const resolved = apply(s, var_type);
         const scheme = this.generalize(resolved, s);
         this.env.bind(stmt.name, scheme);
+        this.env.record_def_span(scheme.def_id!, stmt.name_span);
         return {
-          hstmt: { kind: "let_stmt", name: stmt.name, type: resolved, init: init_r.hexpr, span: stmt.span },
+          hstmt: { kind: "let_stmt", name: stmt.name, name_span: stmt.name_span, def_id: scheme.def_id, type: resolved, init: init_r.hexpr, span: stmt.span },
           subst: s,
           effects: init_r.effects,
         };
@@ -775,8 +804,10 @@ export class InferEngine {
           var_type = apply(s, annotated);
         }
         this.env.bind_mono(stmt.name, apply(s, var_type));
+        const var_scheme = this.env.lookup(stmt.name)!;
+        this.env.record_def_span(var_scheme.def_id!, stmt.name_span);
         return {
-          hstmt: { kind: "var_stmt", name: stmt.name, type: apply(s, var_type), init: init_r.hexpr, span: stmt.span },
+          hstmt: { kind: "var_stmt", name: stmt.name, name_span: stmt.name_span, def_id: var_scheme.def_id, type: apply(s, var_type), init: init_r.hexpr, span: stmt.span },
           subst: s,
           effects: init_r.effects,
         };
@@ -913,7 +944,7 @@ export class InferEngine {
     }
 
     return {
-      hexpr: { kind: "ident", name, resolved_name, type: t, effects: EMPTY_ROW, span },
+      hexpr: { kind: "ident", name, resolved_name, def_id: scheme.def_id, type: t, effects: EMPTY_ROW, span },
       subst,
       effects: EMPTY_ROW,
     };
@@ -993,38 +1024,55 @@ export class InferEngine {
     };
   }
 
-  private recover_type_param_vars(
-    bounds_list: { type_param: string; trait_name: string }[],
-    scheme: { type: Type; type_vars: number[] } | undefined,
-    callee_type: Type,
-  ): Map<string, Type> {
-    const result = new Map<string, Type>();
-    if (!scheme || scheme.type.kind !== "fn" || callee_type.kind !== "fn") return result;
-
-    const unique_type_params: string[] = [];
-    const seen = new Set<string>();
-    for (const b of bounds_list) {
-      if (!seen.has(b.type_param)) {
-        unique_type_params.push(b.type_param);
-        seen.add(b.type_param);
+  private build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type): Map<number, Type> {
+    const result = new Map<number, Type>();
+    if (scheme.type.kind !== "fn" || instantiated_type.kind !== "fn") return result;
+    const scheme_fn = scheme.type as FnType;
+    const inst_fn = instantiated_type as FnType;
+    for (let i = 0; i < scheme_fn.params.length && i < inst_fn.params.length; i++) {
+      const orig = scheme_fn.params[i];
+      if (orig.kind === "var" && scheme.type_vars.includes(orig.id)) {
+        result.set(orig.id, inst_fn.params[i]);
       }
     }
-
-    const var_to_tp_index = new Map<number, number>();
-    for (let i = 0; i < scheme.type_vars.length && i < unique_type_params.length; i++) {
-      var_to_tp_index.set(scheme.type_vars[i], i);
-    }
-
-    for (let i = 0; i < scheme.type.params.length && i < callee_type.params.length; i++) {
-      const orig = scheme.type.params[i];
-      if (orig.kind === "var") {
-        const tp_idx = var_to_tp_index.get(orig.id);
-        if (tp_idx !== undefined) {
-          result.set(unique_type_params[tp_idx], callee_type.params[i]);
-        }
-      }
+    if (scheme_fn.return_type.kind === "var" && scheme.type_vars.includes(scheme_fn.return_type.id)) {
+      result.set(scheme_fn.return_type.id, inst_fn.return_type);
     }
     return result;
+  }
+
+  private resolve_dicts_from_scheme(
+    scheme: TypeScheme, callee_type: Type, s: Substitution, span: Span
+  ): string[] {
+    if (scheme.bounds.length === 0) return [];
+    const var_map = this.build_scheme_var_map(scheme, callee_type);
+    const resolved_dicts: string[] = [];
+    for (const bound of scheme.bounds) {
+      let found = false;
+      const fresh_var = var_map.get(bound.type_var);
+      if (fresh_var) {
+        const concrete = apply(s, fresh_var);
+        if ((concrete.kind === "struct" || concrete.kind === "enum") &&
+            this.env.trait_impls.some(
+              impl => impl.target_type_name === concrete.name && impl.trait_name === bound.trait_name
+            )) {
+          resolved_dicts.push(trait_dict_name(concrete.name, bound.trait_name));
+          found = true;
+        } else if (concrete.kind === "var") {
+          const matching_bound = this.current_fn_bounds.find(
+            fb => fb.type_param_var_id === concrete.id && fb.trait_name === bound.trait_name
+          );
+          if (matching_bound) {
+            resolved_dicts.push(trait_bound_param_name(matching_bound.type_param_name, matching_bound.trait_name));
+            found = true;
+          }
+        }
+      }
+      if (!found) {
+        this.type_error(E.E0503, `Type does not satisfy trait bound '${bound.trait_name}'`, span, { kind: "trait_error", detail: `type does not satisfy '${bound.trait_name}'` });
+      }
+    }
+    return resolved_dicts;
   }
 
   private infer_call(callee: Expr, args: Expr[], span: Span, subst: Substitution): InferResult {
@@ -1061,53 +1109,22 @@ export class InferEngine {
 
     const result_type = apply(s, ret_var);
 
-    const resolved_dicts: string[] = [];
+    let resolved_dicts: string[] = [];
     if (callee.kind === "ident") {
-      const bounds_list = this.env.fn_bounds.get(callee.name);
-      if (bounds_list) {
-        const scheme = this.env.lookup(callee.name);
-        const type_param_to_fresh = this.recover_type_param_vars(
-          bounds_list, scheme, callee_r.hexpr.type
-        );
-
-        for (const bound of bounds_list) {
-          let found = false;
-          const fresh_var = type_param_to_fresh.get(bound.type_param);
-          if (fresh_var) {
-            const concrete = apply(s, fresh_var);
-            if ((concrete.kind === "struct" || concrete.kind === "enum") &&
-                this.env.trait_impls.some(
-                  impl => impl.target_type_name === concrete.name && impl.trait_name === bound.trait_name
-                )) {
-              resolved_dicts.push(trait_dict_name(concrete.name, bound.trait_name));
-              found = true;
-            } else if (concrete.kind === "var") {
-              const matching_bound = this.current_fn_bounds.find(
-                fb => fb.type_param_var_id === concrete.id && fb.trait_name === bound.trait_name
-              );
-              if (matching_bound) {
-                resolved_dicts.push(trait_bound_param_name(matching_bound.type_param_name, matching_bound.trait_name));
-                found = true;
-              }
-            }
-          }
-          if (!found) {
-            this.type_error(E.E0503, `Type does not satisfy trait bound '${bound.trait_name}' required by '${callee.name}'`, span, { kind: "trait_error", detail: `type does not satisfy '${bound.trait_name}'` });
-          }
-        }
+      const scheme = this.env.lookup(callee.name);
+      if (scheme && scheme.bounds.length > 0) {
+        resolved_dicts = this.resolve_dicts_from_scheme(scheme, callee_r.hexpr.type, s, span);
       }
     }
 
-    // Resolve dict closures for args that are generic fns with trait bounds passed as values
     for (const harg of hargs) {
       if (harg.kind !== "ident") continue;
-      const arg_bounds = this.env.fn_bounds.get(harg.name);
-      if (!arg_bounds) continue;
-      const scheme = this.env.lookup(harg.name);
-      const type_param_to_fresh = this.recover_type_param_vars(arg_bounds, scheme, harg.type);
+      const arg_scheme = this.env.lookup(harg.name);
+      if (!arg_scheme || arg_scheme.bounds.length === 0) continue;
+      const var_map = this.build_scheme_var_map(arg_scheme, harg.type);
       const dicts: string[] = [];
-      for (const bound of arg_bounds) {
-        const fresh_var = type_param_to_fresh.get(bound.type_param);
+      for (const bound of arg_scheme.bounds) {
+        const fresh_var = var_map.get(bound.type_var);
         if (fresh_var) {
           const concrete = apply(s, fresh_var);
           if ((concrete.kind === "struct" || concrete.kind === "enum") &&
@@ -1182,7 +1199,7 @@ export class InferEngine {
           if (trait_def) {
             const tm = trait_def.methods.find(m => m.name === method);
             if (tm) {
-              method_type = this.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars });
+              method_type = this.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars, bounds: [] });
               break;
             }
           }
@@ -1206,7 +1223,7 @@ export class InferEngine {
           if (trait_def) {
             const tm = trait_def.methods.find(m => m.name === method);
             if (tm) {
-              method_type = this.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars });
+              method_type = this.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars, bounds: [] });
               dict_dispatch = { dict_param: trait_bound_param_name(fb.type_param_name, fb.trait_name), method };
               break;
             }
@@ -1237,7 +1254,9 @@ export class InferEngine {
       result_type = apply(s, method_type.return_type);
       [effects, s] = this.merge_effects(effects, method_type.effects, s);
     } else {
-      // Unknown method — use fresh type var
+      if (recv_type.kind !== "var") {
+        this.type_error(E.E0305, `Type '${type_to_string(recv_type)}' has no method '${method}'`, span, { kind: "other", detail: `no method '${method}' on type '${type_to_string(recv_type)}'` });
+      }
       result_type = this.env.fresh_var();
     }
 
@@ -1392,8 +1411,17 @@ export class InferEngine {
       if (def_field) {
         const field_type = substitute_type(def_field.type, instantiation_map);
         s = this.unify_at(fr.hexpr.type, field_type, s, span);
+      } else {
+        this.type_error(E.E0203, `Struct '${name}' has no field '${field.name}'`, field.span, { kind: "missing_field", field: field.name, type: name, available: struct_def.fields.map(f => f.name) });
       }
       hfields.push({ name: field.name, value: fr.hexpr });
+    }
+
+    const provided = new Set(fields.map(f => f.name));
+    for (const def_field of struct_def.fields) {
+      if (!provided.has(def_field.name)) {
+        this.type_error(E.E0203, `Missing field '${def_field.name}' in struct literal '${name}'`, span, { kind: "missing_field", field: def_field.name, type: name, available: struct_def.fields.map(f => f.name) });
+      }
     }
 
     const struct_type: Type = {
@@ -1487,6 +1515,7 @@ export class InferEngine {
         break;
       case "binding":
         this.env.bind_mono(pattern.name, apply(subst, expected_type));
+        this.env.record_def_span(this.env.lookup(pattern.name)!.def_id!, pattern.span);
         break;
       case "constructor": {
         const enum_name = this.env.variant_to_enum.get(pattern.name);
@@ -1745,16 +1774,17 @@ export class InferEngine {
       handled_effects.add(handler.effect_name);
     }
 
-    // Remove handled effects from effect row
+    // Apply substitution to resolve effect row tail, then remove handled effects
+    const resolved_effects = apply_to_effect_row(s, effects);
     effects = {
-      effects: effects.effects.filter(e => {
+      effects: resolved_effects.effects.filter(e => {
         if (e.kind === "io" && handled_effects.has("io")) return false;
         if (e.kind === "custom" && handled_effects.has(e.name)) return false;
         if (e.kind === "fail" && handled_effects.has("fail")) return false;
         if (e.kind === "mut" && handled_effects.has("mut")) return false;
         return true;
       }),
-      tail: effects.tail,
+      tail: resolved_effects.tail,
     };
 
     return {
@@ -1779,7 +1809,9 @@ export class InferEngine {
     for (const p of params) {
       const pt = p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var();
       this.env.bind_mono(p.name, pt);
-      hparams.push({ name: p.name, type: pt });
+      const lam_scheme = this.env.lookup(p.name)!;
+      this.env.record_def_span(lam_scheme.def_id!, p.span);
+      hparams.push({ name: p.name, type: pt, def_id: lam_scheme.def_id });
       param_types.push(pt);
     }
 
@@ -1831,7 +1863,7 @@ export class InferEngine {
     const inner_type = this.env.fresh_var();
     s = this.unify_at(inner_r.hexpr.type, make_option_type(inner_type), s, span);
     const unwrapped = apply(s, inner_type);
-    const fail_eff: Effect = { kind: "fail", error_type: UNIT };
+    const fail_eff: Effect = { kind: "fail", error_type: this.env.fresh_var() };
     let effects: EffectRow;
     [effects, s] = this.merge_effects(inner_r.effects, { effects: [fail_eff] }, s);
     return {
@@ -1849,9 +1881,10 @@ export class InferEngine {
   }
 
   private remove_specific_fail_effect(row: EffectRow, target: Type, subst: Substitution): EffectRow {
+    const resolved_target = apply(subst, target);
     return {
       effects: row.effects.filter(e =>
-        !(e.kind === "fail" && types_equal(apply(subst, e.error_type), target))
+        !(e.kind === "fail" && types_equal(apply(subst, e.error_type), resolved_target))
       ),
       tail: row.tail,
     };

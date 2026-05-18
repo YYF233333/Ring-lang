@@ -251,6 +251,55 @@ function fields_and_methods_for_type(type: Type, env: TypeEnv): CompletionItem[]
 }
 
 // ============================================================
+// Local variable collection — walk HIR to find bindings visible at cursor
+// ============================================================
+
+function contains_lsp_position(span: Span, pos: Position): boolean {
+  const ring_line = pos.line + 1;
+  const ring_col = pos.character;
+  if (ring_line < span.start.line || ring_line > span.end.line) return false;
+  if (ring_line === span.start.line && ring_col < span.start.column) return false;
+  if (ring_line === span.end.line && ring_col > span.end.column) return false;
+  return true;
+}
+
+function collect_locals(program: { decls: HDecl[] }, pos: Position): Map<string, Type> {
+  const locals = new Map<string, Type>();
+  for (const decl of program.decls) {
+    if (decl.kind === "fn_decl" && contains_lsp_position(decl.span, pos)) {
+      for (const p of decl.params) locals.set(p.name, p.type);
+      collect_block_locals(decl.body, pos, locals);
+      return locals;
+    }
+    if (decl.kind === "impl_decl") {
+      for (const method of decl.methods) {
+        if (contains_lsp_position(method.span, pos)) {
+          for (const p of method.params) locals.set(p.name, p.type);
+          collect_block_locals(method.body, pos, locals);
+          return locals;
+        }
+      }
+    }
+  }
+  return locals;
+}
+
+function collect_block_locals(block: HBlock, pos: Position, out: Map<string, Type>): void {
+  for (const stmt of block.stmts) {
+    if (!stmt_before_position(stmt, pos)) break;
+    if (stmt.kind === "let_stmt" || stmt.kind === "var_stmt") {
+      out.set(stmt.name, stmt.type);
+    }
+  }
+}
+
+function stmt_before_position(stmt: HStmt, pos: Position): boolean {
+  const ring_line = pos.line + 1;
+  return stmt.span.start.line < ring_line ||
+    (stmt.span.start.line === ring_line && stmt.span.start.column <= pos.character);
+}
+
+// ============================================================
 // General scope completion — variables + keywords + type names
 // ============================================================
 
@@ -313,6 +362,22 @@ export function get_completions(state: DocumentState, position: Position): Compl
   const { env, program } = state.checkResult;
   const prefix = line_prefix(state.source, position);
 
+  // Detect :: enum constructor completion: "EnumName::"
+  const double_colon_match = prefix.match(/([A-Z]\w*)\s*::\s*$/);
+  if (double_colon_match) {
+    const enum_name = double_colon_match[1];
+    const enum_def = env.enums.get(enum_name);
+    if (enum_def) {
+      return enum_def.variants.map(v => ({
+        label: v.name,
+        kind: CompletionItemKind.EnumMember,
+        detail: v.fields.length > 0
+          ? `${enum_name}::${v.name}(${v.fields.map(f => type_to_string(f)).join(", ")})`
+          : `${enum_name}::${v.name}`,
+      }));
+    }
+  }
+
   // Detect dot completion: the line prefix ends with "identifier."
   // (possibly with whitespace between identifier and dot)
   const dot_match = prefix.match(/\w[\w\d]*\s*\.\s*$/);
@@ -334,6 +399,17 @@ export function get_completions(state: DocumentState, position: Position): Compl
     }
   }
 
-  // General completion: scope variables + keywords + type names
-  return [...scope_completions(env), ...keyword_completions()];
+  // General completion: local variables + scope variables + keywords + type names
+  const locals = collect_locals(program, position);
+  const local_items: CompletionItem[] = [];
+  for (const [name, type] of locals) {
+    local_items.push({
+      label: name,
+      kind: type.kind === "fn" ? CompletionItemKind.Function : CompletionItemKind.Variable,
+      detail: type_to_string(type),
+    });
+  }
+
+  const global = scope_completions(env).filter(item => !locals.has(item.label));
+  return [...local_items, ...global, ...keyword_completions()];
 }
