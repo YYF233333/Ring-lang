@@ -604,6 +604,7 @@ Ring 的类型安全提升 → LLM 自主工作更可靠 → 更多并行 sessio
 |------|--------|------|
 | Module system | P0 | `mod`/`import`/`export`，多文件编译——自举的硬前提 |
 | Auto-derive | P0 | 所有 struct/enum 自动派生可推导 trait，opt-out 覆盖 |
+| **核心 trait（Eq/Ord/Hash）+ 运算符解糖** | P0 | `==`/`<` 等运算符解糖到 trait 方法调用，auto-derive 的首批目标，解决 C7 审计问题（JS `===` 引用比较） |
 | Map\<K,V\> + Set\<T\> | P0 | 编译器内部大量使用的数据结构 |
 | Tuple types | P0 | 多返回值、解构 |
 | `--error-format=llm` 增强 | P0 | 结构化错误 + 修复建议，加速 LLM 自动修复循环 |
@@ -619,8 +620,13 @@ Ring 的类型安全提升 → LLM 自主工作更可靠 → 更多并行 sessio
 | **自举（JS 后端）** | P0 | 11k 行 TS → Ring，LLM 辅助翻译，Ring 安全保证覆盖自身开发 |
 | **Refinement types（基础版）** | P0 | 数组越界、除零、非空——消灭 LLM 最常犯的 bug 类别 |
 | **Linear types（推断版）** | P0 | 资源安全——编译器自动推断线性度，零标注 |
+| **闭包线性推断** | P0 | 闭包捕获 linear 资源时自动标记为一次性闭包，无需 `FnOnce`——与 linear types 同期设计 |
+| **原生字符串表示设计** | P1 | 确定 UTF-8 内部编码 + 码点级 API 语义，为 Phase C 原生后端铺路，保证双后端行为一致 |
+| **内建测试框架** | P1 | `test "name" { }` 语法 + 断言原语 + test runner 集成，自举的质量保证基础设施 |
+| **标准库基础（JS 后端）** | P1 | std/io、std/fs、std/process 等自举所需模块，薄封装 Node.js API |
 | Yield effect (generator) | P1 | 流式处理 + effect system 展示窗口 |
 | Capability-based io 拆分 | P1 | 全推断，仅 `pub` 边界由 formatter 生成签名 |
+| 增量编译设计 | P2 | 模块级 content-hash 缓存策略，自举后项目规模增长的必备基础设施 |
 
 **里程碑**：Ring 编译器自举成功。LLM 代码编译通过 ≈ 95% 正确率，有效并行 session 从 3 个提升到 ~100 个。**从此以 "百人团队" 速度推进。**
 
@@ -630,17 +636,38 @@ Ring 的类型安全提升 → LLM 自主工作更可靠 → 更多并行 sessio
 
 | 特性 | 优先级 | 说明 |
 |------|--------|------|
-| LLVM IR codegen | P0 | HIR → LLVM IR |
-| Perceus RC 实现 | P0 | 替代 JS GC |
+| LLVM IR codegen | P0 | HIR → LLVM IR，含 DWARF/PDB 调试信息生成 |
+| **unsafe effect + RawPtr\<T\>** | **P0** | **受控的底层访问能力，解锁运行时自举（详见下方设计）** |
+| **panic + never type** | **P0** | **不可恢复错误（OOM、栈溢出、断言失败）→ 立即终止 + 栈回溯，`fn panic(msg: Str) -> !`** |
+| 原生字符串实现 | P0 | 落地 Phase B 设计的 UTF-8 表示，SSO 优化，保证与 JS 后端 API 语义一致 |
+| Perceus RC 实现 | P0 | 用 Ring unsafe 自举实现，替代 JS GC——unsafe 的第一个重量级用户 |
 | Monomorphization | P0 | 泛型特化，消除间接调用 |
 | Value types | P0 | 编译器按大小/结构自动决定布局，零标注 |
-| C FFI | P1 | 调用 C/C++ 库 |
+| C FFI（safe 设计） | P1 | safe FFI + 自动 marshalling，调用端无需 unsafe |
+| **结构化并发 + async effect** | P1 | **design.md 第八章落地：scope/spawn/await + channel + OS 线程，async effect handler 选择执行策略** |
+| **原生标准库** | P1 | **std/io、std/fs、std/net、std/process 的原生实现（libc/系统调用绑定），替代 JS 后端封装** |
+| **SIMD intrinsics** | P1 | **类型安全的 SSE/AVX/NEON 内建函数，LLVM auto-vectorization 之外的显式控制，游戏/科学计算/编解码性能命脉** |
+| **内存布局控制（repr/align）** | P1 | **struct 字段对齐、排列顺序、padding 的显式注解，ECS 架构、GPU buffer、网络协议序列化的硬前提** |
 | Borrowing inference | P1 | 自动推断所有权，省 refcount |
 | Region inference | P1 | Arena 分配，批量临时对象零开销 |
 | Effect-guided reuse | P2 | 利用 effect row 增强 Perceus |
 | Const evaluation | P2 | 无 effect 表达式编译期求值 |
 
-**里程碑**：benchmark 达到 0.5-0.7x C++ 性能。
+#### unsafe effect 设计要点
+
+**核心原则：unsafe 是 effect，不是语法标记。** 与 Rust 的 `unsafe {}` 块（编译器不追踪传播）不同，Ring 的 unsafe 融入 effect system，传播性在类型签名中可见。
+
+**三层架构：**
+
+1. **原语层**（编译器内建）：`RawPtr<T>` 为 linear type（不可复制、不可丢弃），配套 5 个内建操作（`alloc`/`dealloc`/`ptr_read`/`ptr_write`/`ptr_offset`），均标记 `with {unsafe}`
+2. **消化层**：`unsafe {}` 块作为 unsafe effect 的 handler，在当前作用域消化 unsafe 使其不传播到函数签名——语义等价于"我（作者）为这段代码的安全性负责"
+3. **封装层**：标准库用 unsafe 实现内部（如 `Vec.push`），对外暴露安全 API，用户代码从头到尾不接触 unsafe
+
+**比 Rust 更安全的关键：** unsafe 块内 linear type 约束仍然生效——编译器在 unsafe 代码中仍能捕获 double-free 和 use-after-free，这两类错误在 Rust unsafe 中是未定义行为。
+
+**依赖关系：** LLVM 后端（unsafe 只对原生编译有意义）+ Phase B 的 linear types（裸指针必须线性）→ unsafe effect → Perceus RC 自举。
+
+**里程碑**：benchmark 达到 0.5-0.7x C++ 性能。Perceus RC 成为首个用 Ring unsafe 自举的核心组件。
 
 ### Phase D：类型系统完善 + 表达力扩展
 
@@ -652,11 +679,13 @@ Ring 的类型安全提升 → LLM 自主工作更可靠 → 更多并行 sessio
 | Higher-Kinded Types | P1 | 通用 effect 组合子 |
 | First-class polymorphism | P1 | Quick Look 算法，高阶 handler 类型 |
 | Dependent types lite | P1 | 索引类型 `Vec<T, N>`，向台阶 3（形式化）推进 |
+| **Trait 一致性 / 孤儿规则** | P1 | **包管理器的前置条件——定义跨包 impl 冲突解决规则，防止生态碎片化** |
 | Type-safe serialization | P2 | JSON/binary，依赖 derive |
 | Formatter | P2 | 代码格式化工具 |
-| 包管理器 | P2 | 依赖管理和发布 |
+| **文档生成** | P2 | **doc comment 语法（`///`）+ API 文档生成工具，包生态的可发现性基础设施** |
+| 包管理器 | P2 | 依赖管理和发布（依赖 Trait 一致性规则） |
 
-**里程碑**：Ring 的 effect system 可表达非确定性、概率编程、事务等高阶模式。Dependent types 推进形式化验证能力。
+**里程碑**：Ring 的 effect system 可表达非确定性、概率编程、事务等高阶模式。Dependent types 推进形式化验证能力。包生态具备完整工具链（包管理 + 文档 + 格式化）。
 
 ### Phase E：JIT + 极致优化
 
@@ -680,24 +709,33 @@ Ring 的类型安全提升 → LLM 自主工作更可靠 → 更多并行 sessio
 Phase A: 自举准备         ──→  Phase B: 自举 + 安全基础  ← 飞轮启动
   Module system                  自举（JS 后端）
   Auto-derive                    Refinement types
-  Map/Set, Tuple                 Linear types
-  LLM error format               Yield, Capability
+  Eq/Ord/Hash + 运算符解糖       Linear types + 闭包线性推断
+  Map/Set, Tuple                 字符串表示设计（UTF-8）
+  LLM error format               测试框架 + 标准库（JS）
+                                 Yield, Capability
         │                              │
         │    ┌─────────────────────────┘
         │    │  从此 ~100x 并行开发能力
         │    ▼
         │  Phase C: Native 后端    Phase D: 类型系统     (并行推进)
-        │    LLVM codegen            Multi-shot
-        │    Perceus                 HKT
-        │    Monomorphization        First-class poly
-        │    Value types             Dependent types
-        │         │                       │
-        │         └───────────┬───────────┘
-        │                     ▼
-        │               Phase E: JIT
-        │                 Cranelift / LLVM ORC
-        │                 Dynamic PGO
-        │                 Effect-aware JIT 优化
+        │    LLVM codegen (+ 调试信息)   Multi-shot
+        │    unsafe effect ← 依赖 B 的 linear types
+        │    panic + never type      HKT
+        │    原生 UTF-8 字符串       First-class poly
+        │    Perceus (Ring 自举)     Dependent types
+        │    Monomorphization        Trait 一致性规则
+        │    Value types             文档生成
+        │    Safe C FFI              包管理器
+        │    结构化并发 + async         │
+        │    SIMD / repr+align          │
+        │    原生标准库                  │
+        │         │                     │
+        │         └──────────┬──────────┘
+        │                    ▼
+        │              Phase E: JIT
+        │                Cranelift / LLVM ORC
+        │                Dynamic PGO
+        │                Effect-aware JIT 优化
         ▼
   最终形态：编译通过 = 证明正确，人退出开发循环
 ```
@@ -716,6 +754,7 @@ Phase A: 自举准备         ──→  Phase B: 自举 + 安全基础  ← 飞
 |------|------|-----|-------|------|-----------------|
 | 内存安全 | 借用检查（手动） | GC | GC | Perceus | Perceus + linear |
 | 副作用追踪 | 无 | 无 | 无 | effect system | effect system + capability |
+| 底层访问 | unsafe 块（编译器不追踪） | unsafe 包（约定制） | Obj.magic | 无 | **unsafe effect（编译器追踪传播 + linear 兜底）** |
 | 泛型抽象 | 单态化 + trait | interface | functor | limited | HKT + first-class poly |
 | 并发安全 | Send/Sync | goroutine | 无 | 无 | effect-driven 自动并行 |
 | 性能控制 | 完全手动 | GC bound | GC bound | Perceus | Value types + Perceus + JIT |
