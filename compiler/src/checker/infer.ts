@@ -920,12 +920,14 @@ export class InferEngine {
           element_type = iter_type.type_params[0];
         } else if (iter_type.kind === "struct" && iter_type.name === "List" && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
+        } else if (iter_type.kind === "struct" && iter_type.name === "Set" && iter_type.type_params.length > 0) {
+          element_type = iter_type.type_params[0];
         } else {
           this.type_error(
             E.E0301,
-            `for..in requires an iterable type (Range or List), got ${type_to_string(iter_type)}`,
+            `for..in requires an iterable type (Range, List, or Set), got ${type_to_string(iter_type)}`,
             stmt.iterable.span,
-            { kind: "other", detail: "Supported iterables: range expressions (0..10) and List<T>" }
+            { kind: "other", detail: "Supported iterables: range expressions (0..10), List<T>, and Set<T>" }
           );
         }
         this.env.push_scope();

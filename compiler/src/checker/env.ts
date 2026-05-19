@@ -1,7 +1,7 @@
 // Ring-lang Type Environment — scope management + builtin definitions
 import {
   Type, TypeVar, FnType, StructType, TupleType, EffectRow, EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
-  make_option_type, make_list_type, make_map_type,
+  make_option_type, make_list_type, make_map_type, make_set_type,
 } from "../types/index.js";
 import { Span } from "../ast/index.js";
 
@@ -625,6 +625,152 @@ export class TypeEnv {
       this.bind("map_from", {
         type: { kind: "fn", params: [list_of_tuples], return_type: make_map_type(k, v), effects: EMPTY_ROW } as FnType,
         type_vars: [k.id, v.id], bounds: [],
+      });
+    }
+
+    // ================================================================
+    // Built-in: Set<T> — immutable set (JS Set backing)
+    // ================================================================
+    const set_t = this.fresh_var();
+    this.structs.set("Set", {
+      name: "Set",
+      type_params: ["T"],
+      type_param_vars: [set_t.id],
+      fields: [],
+    });
+
+    const set_methods = new Map<string, TypeScheme>();
+    const make_set = (tv: TypeVar): StructType => ({
+      kind: "struct", name: "Set", type_params: [tv], fields: [],
+    });
+
+    // --- Read methods (pure) ---
+    {
+      const t = this.fresh_var();
+      set_methods.set("len", {
+        type: { kind: "fn", params: [make_set(t)], return_type: INT, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      set_methods.set("contains", {
+        type: { kind: "fn", params: [make_set(t), t], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      set_methods.set("is_empty", {
+        type: { kind: "fn", params: [make_set(t)], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      set_methods.set("to_list", {
+        type: { kind: "fn", params: [make_set(t)], return_type: make_list_type(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+
+    // --- Transform methods (pure, return new Set) ---
+    {
+      const t = this.fresh_var();
+      set_methods.set("insert", {
+        type: { kind: "fn", params: [make_set(t), t], return_type: make_set(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      set_methods.set("remove", {
+        type: { kind: "fn", params: [make_set(t), t], return_type: make_set(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      set_methods.set("union", {
+        type: { kind: "fn", params: [make_set(t), make_set(t)], return_type: make_set(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      set_methods.set("intersect", {
+        type: { kind: "fn", params: [make_set(t), make_set(t)], return_type: make_set(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      set_methods.set("difference", {
+        type: { kind: "fn", params: [make_set(t), make_set(t)], return_type: make_set(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+
+    // --- Higher-order methods (effect-polymorphic) ---
+    {
+      const t = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: cb_effects };
+      set_methods.set("filter", {
+        type: { kind: "fn", params: [make_set(t), cb_type], return_type: make_set(t), effects: cb_effects } as FnType,
+        type_vars: [t.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const u = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [u, t], return_type: u, effects: cb_effects };
+      set_methods.set("fold", {
+        type: { kind: "fn", params: [make_set(t), u, cb_type], return_type: u, effects: cb_effects } as FnType,
+        type_vars: [t.id, u.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: cb_effects };
+      set_methods.set("any", {
+        type: { kind: "fn", params: [make_set(t), cb_type], return_type: BOOL, effects: cb_effects } as FnType,
+        type_vars: [t.id, e_tail], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      const e_tail = this.fresh_var_id();
+      const cb_effects: EffectRow = { effects: [], tail: e_tail };
+      const cb_type: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: cb_effects };
+      set_methods.set("all", {
+        type: { kind: "fn", params: [make_set(t), cb_type], return_type: BOOL, effects: cb_effects } as FnType,
+        type_vars: [t.id, e_tail], bounds: [],
+      });
+    }
+
+    this.impl_methods.set("Set", set_methods);
+
+    // ================================================================
+    // Built-in functions: set_new, set_from
+    // ================================================================
+    {
+      const t = this.fresh_var();
+      this.bind("set_new", {
+        type: { kind: "fn", params: [], return_type: make_set_type(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
+      });
+    }
+    {
+      const t = this.fresh_var();
+      this.bind("set_from", {
+        type: { kind: "fn", params: [make_list_type(t)], return_type: make_set_type(t), effects: EMPTY_ROW } as FnType,
+        type_vars: [t.id], bounds: [],
       });
     }
 

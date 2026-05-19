@@ -222,6 +222,18 @@ export function is_map_type(t: Type): t is StructType {
 }
 
 // ============================================================
+// Set<T> helper — constructs StructType "Set"
+// ============================================================
+
+export function make_set_type(element: Type): StructType {
+  return { kind: "struct", name: "Set", type_params: [element], fields: [] };
+}
+
+export function is_set_type(t: Type): t is StructType {
+  return t.kind === "struct" && t.name === "Set";
+}
+
+// ============================================================
 // Effect Row helpers
 // ============================================================
 

@@ -70,4 +70,16 @@ function _Map_values(self) { return Array.from(self.values()); }
 function _Map_entries(self) { return Array.from(self.entries()); }
 function _Map_insert(self, key, value) { var m = new Map(self); m.set(key, value); return m; }
 function _Map_remove(self, key) { var m = new Map(self); m.delete(key); return m; }
+
+function set_new() { return new Set(); }
+function set_from(items) { return new Set(items); }
+function _Set_len(self) { return self.size; }
+function _Set_contains(self, x) { return self.has(x); }
+function _Set_is_empty(self) { return self.size === 0; }
+function _Set_to_list(self) { return Array.from(self); }
+function _Set_insert(self, x) { var s = new Set(self); s.add(x); return s; }
+function _Set_remove(self, x) { var s = new Set(self); s.delete(x); return s; }
+function _Set_union(self, other) { return new Set([...self, ...other]); }
+function _Set_intersect(self, other) { return new Set([...self].filter(function(x) { return other.has(x); })); }
+function _Set_difference(self, other) { return new Set([...self].filter(function(x) { return !other.has(x); })); }
 `;

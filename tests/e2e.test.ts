@@ -96,6 +96,11 @@ const cases: TestCase[] = [
   { file: "map_basic.ring", expected: "3\ntrue\nfalse\n4\n3\n" },
   { file: "map_methods.ring", expected: "b\n3\n3\ntrue\n2\n" },
   { file: "map_hof.ring", expected: "40\n2\n60\ntrue\n" },
+  // Batch 3: Set<T>
+  { file: "set_basic.ring", expected: "3\ntrue\nfalse\n4\n3\n" },
+  { file: "set_ops.ring", expected: "4\n2\n1\n3\n" },
+  { file: "set_for_in.ring", expected: "60\n" },
+  { file: "set_hof.ring", expected: "2\n15\ntrue\ntrue\n" },
 ];
 
 describe("e2e: ring run", () => {
