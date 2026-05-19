@@ -6,5 +6,6 @@ out/
 Thumbs.db
 
 .claude/worktrees/
+.deepseek/
 
 tests/scratch/
