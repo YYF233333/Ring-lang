@@ -2,7 +2,7 @@
 // Two-pass: register all top-level decls, then infer all bodies.
 
 import {
-  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl, ExternTypeDecl,
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl, ExternTypeDecl, TypeAliasDecl,
   Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr, IfExpr,
   BinOp, UnaryOp,
   UseDecl,
@@ -18,7 +18,7 @@ import {
   make_option_type, is_option_type, option_inner,
 } from "../types/index.js";
 import {
-  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl, HExternFnDecl, HExternTypeDecl,
+  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl, HExternFnDecl, HExternTypeDecl, HTypeAliasDecl,
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt, HForInStmt,
   HLetDestructureStmt, HIfLetStmt,
   variant_js_name, trait_dict_name, trait_bound_param_name,
@@ -417,6 +417,9 @@ export class InferEngine {
       case "extern_type_decl":
         this.register_extern_type(decl);
         break;
+      case "type_alias_decl":
+        this.register_type_alias(decl);
+        break;
       default:
         assertNever(decl, "register_decl");
     }
@@ -760,6 +763,23 @@ export class InferEngine {
     this.env.structs.set(decl.name, def);
   }
 
+  private register_type_alias(decl: TypeAliasDecl): void {
+    const saved_tp_scope = new Map(this.type_param_scope);
+    const type_param_vars: number[] = [];
+    for (const tp of decl.type_params) {
+      const tv = this.env.fresh_var();
+      type_param_vars.push(tv.id);
+      this.type_param_scope.set(tp.name, tv);
+    }
+    const resolved = this.resolve_type_expr(decl.type_expr);
+    this.type_param_scope = saved_tp_scope;
+    this.env.type_aliases.set(decl.name, {
+      type_params: decl.type_params.map(tp => tp.name),
+      type_param_vars,
+      type: resolved,
+    });
+  }
+
   // ============================================================
   // Pass 2: Check declarations
   // ============================================================
@@ -784,6 +804,10 @@ export class InferEngine {
         return this.check_extern_fn_decl(decl);
       case "extern_type_decl":
         return { kind: "extern_type_decl", name: decl.name, type_params: decl.type_params, is_pub: decl.is_pub, span: decl.span } as HExternTypeDecl;
+      case "type_alias_decl": {
+        const alias = this.env.type_aliases.get(decl.name);
+        return { kind: "type_alias_decl", name: decl.name, type: alias?.type ?? UNIT, is_pub: decl.is_pub, span: decl.span } as HTypeAliasDecl;
+      }
       default:
         return assertNever(decl, "check_decl");
     }
@@ -1229,31 +1253,53 @@ export class InferEngine {
         let s = iter_r.subst;
         const iter_type = apply(s, iter_r.hexpr.type);
         let element_type: Type;
+        const is_destructure = !!stmt.destructure;
         if (iter_type.kind === "enum" && iter_type.name === BUILTIN_RANGE && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
         } else if (iter_type.kind === "struct" && iter_type.name === BUILTIN_LIST && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
         } else if (iter_type.kind === "struct" && iter_type.name === BUILTIN_SET && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
-        } else if (iter_type.kind === "struct" && iter_type.name === BUILTIN_MAP) {
-          this.type_error(
-            E.E0301,
-            `Map is not directly iterable with for..in. Use 'for entry in map.entries() { let (k, v) = entry; ... }' instead.`,
-            stmt.iterable.span,
-            { kind: "other", detail: "Map is not iterable; use .entries() to get List<(K, V)>" }
-          );
+        } else if (iter_type.kind === "struct" && iter_type.name === BUILTIN_MAP && iter_type.type_params.length >= 2) {
+          if (!is_destructure) {
+            this.type_error(
+              E.E0301,
+              `Map is not directly iterable with for..in. Use 'for (k, v) in map { ... }' instead.`,
+              stmt.iterable.span,
+              { kind: "other", detail: "Map requires destructuring: for (k, v) in map" }
+            );
+          }
+          element_type = { kind: "tuple", elements: [iter_type.type_params[0], iter_type.type_params[1]] } as Type;
         } else {
           this.type_error(
             E.E0301,
-            `for..in requires an iterable type (Range, List, or Set), got ${type_to_string(iter_type)}`,
+            `for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}`,
             stmt.iterable.span,
-            { kind: "other", detail: "Supported iterables: range expressions (0..10), List<T>, and Set<T>" }
+            { kind: "other", detail: "Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>" }
           );
         }
         this.env.push_scope();
-        this.env.bind_mono(stmt.binding, element_type);
-        const binding_scheme = this.env.lookup(stmt.binding)!;
-        this.env.record_def_span(binding_scheme.def_id!, stmt.binding_span);
+        let hdestructure: { name: string; def_id?: number }[] | undefined;
+        if (is_destructure && stmt.destructure) {
+          if (element_type.kind !== "tuple" || element_type.elements.length !== stmt.destructure.names.length) {
+            this.type_error(E.E0301, `Destructure binding expects ${stmt.destructure.names.length} elements, but iterable element type is ${type_to_string(element_type)}`, stmt.span, { kind: "other", detail: "tuple arity mismatch" });
+          }
+          hdestructure = [];
+          for (let i = 0; i < stmt.destructure.names.length; i++) {
+            const name = stmt.destructure.names[i];
+            const elem_t = element_type.kind === "tuple" && i < element_type.elements.length ? element_type.elements[i] : this.env.fresh_var();
+            this.env.bind_mono(name, elem_t);
+            const scheme = this.env.lookup(name)!;
+            this.env.record_def_span(scheme.def_id!, stmt.destructure.spans[i]);
+            hdestructure.push({ name, def_id: scheme.def_id });
+          }
+        } else {
+          this.env.bind_mono(stmt.binding, element_type);
+        }
+        const binding_scheme = this.env.lookup(stmt.binding);
+        if (binding_scheme) {
+          this.env.record_def_span(binding_scheme.def_id!, stmt.binding_span);
+        }
         this.loop_depth++;
         let body_r!: InferResult;
         try {
@@ -1269,7 +1315,8 @@ export class InferEngine {
           kind: "for_in_stmt",
           binding: stmt.binding,
           binding_span: stmt.binding_span,
-          def_id: binding_scheme.def_id,
+          def_id: binding_scheme?.def_id,
+          destructure: hdestructure,
           iterable: iter_r.hexpr,
           body: body_r.hexpr as HBlock,
           span: stmt.span,
@@ -2625,6 +2672,20 @@ export class InferEngine {
             type_params: type_args.map(a => this.resolve_type_expr(a)),
             variants: def.variants,
           };
+        }
+        // Check if it's a type alias
+        const alias = this.env.type_aliases.get(name);
+        if (alias) {
+          if (type_args.length > 0 && type_args.length !== alias.type_params.length) {
+            this.type_error(E.E0301, `Type '${name}' expects ${alias.type_params.length} type argument(s), got ${type_args.length}`, span, { kind: "type_mismatch", expected: `${alias.type_params.length} type args`, actual: `${type_args.length} type args` });
+          }
+          if (alias.type_param_vars.length === 0) return alias.type;
+          const resolved_args = type_args.map(a => this.resolve_type_expr(a));
+          const mapping = new Map<number, Type>();
+          for (let i = 0; i < alias.type_param_vars.length && i < resolved_args.length; i++) {
+            mapping.set(alias.type_param_vars[i], resolved_args[i]);
+          }
+          return substitute_type(alias.type, mapping);
         }
         this.type_error(E.E0204, `Unknown type: ${name}`, span, { kind: "other", detail: `unknown type '${name}'` });
       }

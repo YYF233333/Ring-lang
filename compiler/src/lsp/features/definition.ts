@@ -230,6 +230,9 @@ function build_symbol_table(ast: readonly Decl[]): SymbolTable {
       case "extern_type_decl":
         table.set(decl.name, decl.span);
         break;
+      case "type_alias_decl":
+        table.set(decl.name, decl.span);
+        break;
     }
   }
   return table;

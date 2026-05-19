@@ -141,6 +141,9 @@ export function extract_exports(
         }
         break;
       }
+
+      case "type_alias_decl":
+        break;
     }
   }
 

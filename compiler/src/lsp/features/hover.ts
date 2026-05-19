@@ -55,6 +55,9 @@ function find_hover_in_decl(decl: HDecl, pos: Position): HoverCandidate | null {
       const sig = tp ? `extern type ${decl.name}<${tp}>` : `extern type ${decl.name}`;
       return { type_str: sig, span: decl.span };
     }
+    case "type_alias_decl": {
+      return { type_str: `type ${decl.name} = ${type_to_string(decl.type)}`, span: decl.span };
+    }
     default:
       return null;
   }

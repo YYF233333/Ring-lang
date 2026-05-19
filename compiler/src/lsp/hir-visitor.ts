@@ -31,6 +31,7 @@ export function walk_decl(decl: HDecl, v: HirVisitor): WalkAction {
     case "extern_fn_decl":
       return;
     case "extern_type_decl":
+    case "type_alias_decl":
       return;
     default:
       return;

@@ -1,6 +1,6 @@
 // Ring-lang Parser — recursive descent + Pratt parsing for expressions
 import {
-  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl, ExternTypeDecl,
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl, ExternTypeDecl, TypeAliasDecl,
   UseDecl, UsePath, UseImport,
   Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt, BreakStmt, ContinueStmt,
   ForInStmt, LetDestructureStmt, IfLetStmt,
@@ -256,6 +256,10 @@ export class Parser {
       case TokenKind.Test: return this.parse_test_decl();
       case TokenKind.Trait: return this.parse_trait_decl(is_pub);
       case TokenKind.Extern: return this.parse_extern_decl(is_pub);
+      case TokenKind.Ident:
+        if (tok.value === "type") return this.parse_type_alias_decl(is_pub);
+        this.report_error(E.E0101, `Expected declaration, got '${tok.value}' (${tok.kind})`, tok.span);
+        throw new Error("parse_decl_failed");
       default:
         this.report_error(E.E0101, `Expected declaration, got '${tok.value}' (${tok.kind})`, tok.span);
         throw new Error("parse_decl_failed");
@@ -319,6 +323,20 @@ export class Parser {
     const end = this.current_span_start();
     return {
       kind: "extern_type_decl", name, type_params, is_pub,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_type_alias_decl(is_pub: boolean): TypeAliasDecl {
+    const start = this.current_span_start();
+    this.advance(); // consume "type" ident
+    const name = this.expect(TokenKind.Ident).value;
+    const type_params = this.parse_type_params();
+    this.expect(TokenKind.Eq);
+    const type_expr = this.parse_type_expr();
+    const end = this.current_span_start();
+    return {
+      kind: "type_alias_decl", name, type_params, type_expr, is_pub,
       span: this.make_span(start, end),
     };
   }
@@ -812,9 +830,36 @@ export class Parser {
   private parse_for_in_stmt(): ForInStmt {
     const start = this.current_span_start();
     this.expect(TokenKind.For);
-    const name_tok = this.expect(TokenKind.Ident);
-    const binding = name_tok.value;
-    const binding_span = name_tok.span;
+
+    let binding: string;
+    let binding_span: Span;
+    let destructure: { names: string[]; spans: Span[] } | undefined;
+
+    if (this.check(TokenKind.LParen)) {
+      this.advance();
+      const names: string[] = [];
+      const spans: Span[] = [];
+      const first = this.expect(TokenKind.Ident);
+      names.push(first.value);
+      spans.push(first.span);
+      while (this.try_consume(TokenKind.Comma)) {
+        if (this.check(TokenKind.RParen)) break;
+        const tok = this.expect(TokenKind.Ident);
+        names.push(tok.value);
+        spans.push(tok.span);
+      }
+      this.expect(TokenKind.RParen);
+      binding = names[0];
+      binding_span = spans[0];
+      if (names.length > 1) {
+        destructure = { names, spans };
+      }
+    } else {
+      const name_tok = this.expect(TokenKind.Ident);
+      binding = name_tok.value;
+      binding_span = name_tok.span;
+    }
+
     this.expect(TokenKind.In);
     const iterable = this.parse_expr();
     const body = this.parse_block_expr();
@@ -823,6 +868,7 @@ export class Parser {
       kind: "for_in_stmt",
       binding,
       binding_span,
+      destructure,
       iterable,
       body,
       span: this.make_span(start, end),

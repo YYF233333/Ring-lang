@@ -417,6 +417,7 @@ export interface ForInStmt {
   kind: "for_in_stmt";
   binding: string;
   binding_span: Span;
+  destructure?: { names: string[]; spans: Span[] };
   iterable: Expr;
   body: BlockExpr;
   span: Span;
@@ -493,7 +494,8 @@ export type Decl =
   | TestDecl
   | TraitDecl
   | ExternFnDecl
-  | ExternTypeDecl;
+  | ExternTypeDecl
+  | TypeAliasDecl;
 
 export interface TypeBound {
   trait_name: string;
@@ -596,6 +598,15 @@ export interface ExternTypeDecl {
   kind: "extern_type_decl";
   name: string;
   type_params: TypeParam[];
+  is_pub: boolean;
+  span: Span;
+}
+
+export interface TypeAliasDecl {
+  kind: "type_alias_decl";
+  name: string;
+  type_params: TypeParam[];
+  type_expr: TypeExpr;
   is_pub: boolean;
   span: Span;
 }

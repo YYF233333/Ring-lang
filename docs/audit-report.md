@@ -58,14 +58,8 @@
 - **需要**: 无新特性，但依赖 C1（可变 Map/Set）解决
 - **状态**: 可绕过（已有语言特性覆盖）
 
-### M2. Type aliases — `type X = Y`
-- **严重性**: MAJOR
-- **位置**: checker/unify.ts(Substitution), checker/builtins.ts(Methods), cli.ts(ErrorFormat), lsp/hir-visitor.ts(WalkAction)
-- **频率**: ~10处
-- **问题**: Ring 没有 type alias。`type Substitution = Map<number, Type>` 需要在每个使用处写全类型。
-- **绕过**: 内联类型。可行但降低可读性。
-- **需要**: `type` 关键字（纯语法糖）
-- **状态**: 未修复
+### ✅ M2. Type aliases — `type X = Y`
+- **状态**: 已修复 — `type Name<T> = TypeExpr` 语法糖，支持泛型参数，checker 注册后在类型解析时自动替换
 
 ### ✅ M3. 数字解析/格式化 — parseInt / parseFloat / toString
 - **状态**: 已修复 — 新增 `parse_int(Str) -> Option<Int>`、`parse_float(Str) -> Option<Float>` 自由函数 + `Int.to_str()`、`Float.to_str()` UFCS 方法，声明在 std/num.ring
@@ -82,14 +76,8 @@
 ### ✅ M5. Str 补充方法 — padStart / repeat / charCodeAt
 - **状态**: 已修复 — 新增 `Str.pad_start(length, fill)`、`Str.repeat(count)`、`Str.char_code_at(i)` 方法，声明在 std/str.ring
 
-### M6. for (k, v) in map — Map 解构迭代
-- **严重性**: MAJOR
-- **位置**: checker/infer.ts(10+处), codegen/codegen.ts, modules/resolver.ts, modules/exports.ts
-- **频率**: 20+处
-- **问题**: `for (const [name, def] of mod.types)` 需要 Map 迭代 + 解构绑定。Ring for..in 不支持 Map 直接迭代，且 binding 位置不支持解构。
-- **绕过**: `for entry in map.entries() { let (k, v) = entry; ... }` 可行但冗长。
-- **需要**: `for (k, v) in map { ... }` 语法糖
-- **状态**: 未修复
+### ✅ M6. for (k, v) in map — Map 解构迭代
+- **状态**: 已修复 — `for (k, v) in map { ... }` 语法糖，Map 直接可迭代（生成 JS `for (const [k, v] of map)`），也支持 List<Tuple> 的解构迭代
 
 ### M7. typeof / instanceof — 运行时类型判断
 - **严重性**: MAJOR

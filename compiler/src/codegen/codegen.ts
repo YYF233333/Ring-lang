@@ -137,6 +137,7 @@ class CodeGenerator {
         case "test_decl": break;
         case "extern_fn_decl": break;
         case "extern_type_decl": break;
+        case "type_alias_decl": break;
       }
     }
 
@@ -219,6 +220,7 @@ class CodeGenerator {
       case "trait_decl": this.emit_trait_decl(decl); break;
       case "extern_fn_decl": this.emit_extern_fn_decl(decl); break;
       case "extern_type_decl": break;
+      case "type_alias_decl": break;
       default: assertNever(decl, "emit_decl");
     }
   }
@@ -519,6 +521,10 @@ class CodeGenerator {
           this.emit(`const ${end_var} = ${end_js};`);
           const cmp = stmt.iterable.inclusive ? "<=" : "<";
           this.emit(`for (let ${binding} = ${start_js}; ${binding} ${cmp} ${end_var}; ${binding}++) {`);
+        } else if (stmt.destructure && stmt.destructure.length > 0) {
+          const iter = this.gen_expr(stmt.iterable);
+          const names = stmt.destructure.map(d => safe_ident(d.name)).join(", ");
+          this.emit(`for (const [${names}] of ${iter}) {`);
         } else {
           const iter = this.gen_expr(stmt.iterable);
           const binding = safe_ident(stmt.binding);

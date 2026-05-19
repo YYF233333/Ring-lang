@@ -285,6 +285,7 @@ export interface HForInStmt {
   binding: string;
   binding_span: Span;
   def_id?: number;
+  destructure?: { name: string; def_id?: number }[];
   iterable: HExpr;
   body: HBlock;
   span: Span;
@@ -330,7 +331,8 @@ export type HDecl =
   | HTestDecl
   | HTraitDecl
   | HExternFnDecl
-  | HExternTypeDecl;
+  | HExternTypeDecl
+  | HTypeAliasDecl;
 
 export interface HFnDecl {
   kind: "fn_decl";
@@ -439,6 +441,14 @@ export interface HExternTypeDecl {
   kind: "extern_type_decl";
   name: string;
   type_params: TypeParam[];
+  is_pub: boolean;
+  span: Span;
+}
+
+export interface HTypeAliasDecl {
+  kind: "type_alias_decl";
+  name: string;
+  type: Type;
   is_pub: boolean;
   span: Span;
 }
