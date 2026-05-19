@@ -339,20 +339,24 @@ describe("e2e: --error-format=llm", { concurrency: 3 }, () => {
 // Compiler determinism — same input must produce identical JS
 // ============================================================
 
-function build_to_js(file_path: string): string {
-  return execSync(`node "${CLI_PATH}" build "${file_path}"`, {
+function build_and_read_js(ring_path: string): string {
+  const js_path = ring_path.replace(/\.ring$/, ".js");
+  execSync(`node "${CLI_PATH}" build "${ring_path}"`, {
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
     timeout: 15000,
   });
+  const content = fs.readFileSync(js_path, "utf-8");
+  fs.unlinkSync(js_path);
+  return content;
 }
 
 describe("determinism: single-file", { concurrency: 3 }, () => {
   for (const tc of cases) {
     test(`build ${tc.file} is deterministic`, () => {
       const filePath = path.join(CASES_DIR, tc.file);
-      const js1 = build_to_js(filePath);
-      const js2 = build_to_js(filePath);
+      const js1 = build_and_read_js(filePath);
+      const js2 = build_and_read_js(filePath);
       assert.strictEqual(js1, js2);
     });
   }
@@ -362,8 +366,8 @@ describe("determinism: multi-file modules", { concurrency: 3 }, () => {
   for (const tc of module_cases) {
     test(`build modules/${tc.dir} is deterministic`, () => {
       const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
-      const js1 = build_to_js(mainFile);
-      const js2 = build_to_js(mainFile);
+      const js1 = build_and_read_js(mainFile);
+      const js2 = build_and_read_js(mainFile);
       assert.strictEqual(js1, js2);
     });
   }
