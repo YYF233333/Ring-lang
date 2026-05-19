@@ -35,6 +35,8 @@ function decl_to_symbol(decl: Decl): DocumentSymbol {
       };
     case "test_decl":
       return { name: `test "${decl.description}"`, kind: SymbolKind.Function, range: span_to_range(decl.span), selectionRange: span_to_range(decl.span) };
+    case "extern_fn_decl":
+      return { name: decl.name, kind: SymbolKind.Function, range: span_to_range(decl.span), selectionRange: span_to_range(decl.span) };
   }
 }
 

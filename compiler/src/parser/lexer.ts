@@ -38,6 +38,7 @@ export enum TokenKind {
   Continue = "continue",
   Use = "use",
   As = "as",
+  Extern = "extern",
 
   // Literals
   IntLit = "int_lit",
@@ -125,6 +126,7 @@ const KEYWORDS: Record<string, TokenKind> = {
   continue: TokenKind.Continue,
   use: TokenKind.Use,
   as: TokenKind.As,
+  extern: TokenKind.Extern,
 };
 
 export interface Token {

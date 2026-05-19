@@ -222,6 +222,9 @@ function build_symbol_table(ast: readonly Decl[]): SymbolTable {
       case "test_decl":
         collect_symbols_from_ast_block(decl.body, table);
         break;
+      case "extern_fn_decl":
+        table.set(decl.name, decl.span);
+        break;
     }
   }
   return table;

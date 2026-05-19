@@ -1,6 +1,6 @@
 // Ring-lang Parser — recursive descent + Pratt parsing for expressions
 import {
-  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl,
   UseDecl, UsePath, UseImport,
   Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt, BreakStmt, ContinueStmt,
   ForInStmt, LetDestructureStmt, IfLetStmt,
@@ -255,6 +255,7 @@ export class Parser {
       case TokenKind.Effect: return this.parse_effect_decl(is_pub);
       case TokenKind.Test: return this.parse_test_decl();
       case TokenKind.Trait: return this.parse_trait_decl(is_pub);
+      case TokenKind.Extern: return this.parse_extern_fn_decl(is_pub);
       default:
         this.report_error(E.E0101, `Expected declaration, got '${tok.value}' (${tok.kind})`, tok.span);
         throw new Error("parse_decl_failed");
@@ -283,6 +284,23 @@ export class Parser {
     const end = this.current_span_start();
     return {
       kind: "fn_decl", name, type_params, params, return_type, body, is_pub, is_abstract,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_extern_fn_decl(is_pub: boolean): ExternFnDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Extern);
+    this.expect(TokenKind.Fn);
+    const name = this.expect(TokenKind.Ident).value;
+    const type_params = this.parse_type_params();
+    this.expect(TokenKind.LParen);
+    const params = this.parse_params();
+    this.expect(TokenKind.RParen);
+    const return_type = this.try_consume(TokenKind.Arrow) ? this.parse_type_expr() : undefined;
+    const end = this.current_span_start();
+    return {
+      kind: "extern_fn_decl", name, type_params, params, return_type, is_pub,
       span: this.make_span(start, end),
     };
   }

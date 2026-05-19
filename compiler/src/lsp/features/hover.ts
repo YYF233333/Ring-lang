@@ -45,6 +45,11 @@ function find_hover_in_decl(decl: HDecl, pos: Position): HoverCandidate | null {
       return format_effect_hover(decl);
     case "trait_decl":
       return format_trait_hover(decl);
+    case "extern_fn_decl": {
+      const params = decl.params.map((p: any) => `${p.name}: ${type_to_string(p.type)}`).join(", ");
+      const ret = type_to_string(decl.return_type);
+      return { type_str: `extern fn ${decl.name}(${params}) -> ${ret}`, span: decl.span };
+    }
     default:
       return null;
   }

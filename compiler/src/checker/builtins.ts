@@ -186,10 +186,10 @@ function register_list(env: TypeEnv): void {
   poly1(env, methods, "is_empty", t => ({ params: [mk(t)], ret: BOOL }));
 
   // Transform methods
-  poly1(env, methods, "push", t => ({ params: [mk(t), t], ret: mk(t) }));
-  poly1(env, methods, "concat", t => ({ params: [mk(t), mk(t)], ret: mk(t) }));
+  poly1(env, methods, "push", t => ({ params: [mk(t), t], ret: UNIT }));
+  poly1(env, methods, "concat", t => ({ params: [mk(t), mk(t)], ret: UNIT }));
   poly1(env, methods, "slice", t => ({ params: [mk(t), INT, INT], ret: mk(t) }));
-  poly1(env, methods, "reverse", t => ({ params: [mk(t)], ret: mk(t) }));
+  poly1(env, methods, "reverse", t => ({ params: [mk(t)], ret: UNIT }));
 
   // HOF methods (effect-polymorphic)
   {
@@ -310,8 +310,8 @@ function register_map(env: TypeEnv): void {
   }
 
   // Transform methods
-  poly2(env, methods, "insert", (k, v) => ({ params: [mk(k, v), k, v], ret: mk(k, v) }));
-  poly2(env, methods, "remove", (k, v) => ({ params: [mk(k, v), k], ret: mk(k, v) }));
+  poly2(env, methods, "insert", (k, v) => ({ params: [mk(k, v), k, v], ret: UNIT }));
+  poly2(env, methods, "remove", (k, v) => ({ params: [mk(k, v), k], ret: UNIT }));
 
   // HOF methods
   {
@@ -391,8 +391,8 @@ function register_set(env: TypeEnv): void {
   poly1(env, methods, "to_list", t => ({ params: [mk(t)], ret: make_list_type(t) }));
 
   // Transform methods
-  poly1(env, methods, "insert", t => ({ params: [mk(t), t], ret: mk(t) }));
-  poly1(env, methods, "remove", t => ({ params: [mk(t), t], ret: mk(t) }));
+  poly1(env, methods, "insert", t => ({ params: [mk(t), t], ret: UNIT }));
+  poly1(env, methods, "remove", t => ({ params: [mk(t), t], ret: UNIT }));
   poly1(env, methods, "union", t => ({ params: [mk(t), mk(t)], ret: mk(t) }));
   poly1(env, methods, "intersect", t => ({ params: [mk(t), mk(t)], ret: mk(t) }));
   poly1(env, methods, "difference", t => ({ params: [mk(t), mk(t)], ret: mk(t) }));

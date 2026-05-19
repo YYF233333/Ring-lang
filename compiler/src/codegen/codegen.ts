@@ -134,6 +134,7 @@ class CodeGenerator {
         case "trait_decl": this.local_names.add(decl.name); break;
         case "effect_decl": this.local_names.add(decl.name); break;
         case "test_decl": break;
+        case "extern_fn_decl": break;
       }
     }
 
@@ -212,6 +213,7 @@ class CodeGenerator {
       case "effect_decl": this.emit_effect_decl(decl); break;
       case "test_decl": this.emit_test_decl(decl); break;
       case "trait_decl": this.emit_trait_decl(decl); break;
+      case "extern_fn_decl": this.emit_extern_fn_decl(decl); break;
       default: assertNever(decl, "emit_decl");
     }
   }
@@ -227,6 +229,13 @@ class CodeGenerator {
     this.emit_block_body(decl.body);
     this.pop_indent();
     this.emit("}");
+  }
+
+  private emit_extern_fn_decl(decl: import("../hir/index.js").HExternFnDecl): void {
+    if (this.module_prefix) {
+      const qualified = `${this.module_prefix}$${safe_ident(decl.name)}`;
+      this.emit(`const ${qualified} = ${safe_ident(decl.name)};`);
+    }
   }
 
   private get_evidence_params(effects: EffectRow): string[] {

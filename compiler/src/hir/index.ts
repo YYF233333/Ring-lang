@@ -328,7 +328,8 @@ export type HDecl =
   | HImplDecl
   | HEffectDecl
   | HTestDecl
-  | HTraitDecl;
+  | HTraitDecl
+  | HExternFnDecl;
 
 export interface HFnDecl {
   kind: "fn_decl";
@@ -417,6 +418,18 @@ export interface HTraitDecl {
   name: string;
   type_params: TypeParam[];
   methods: HTraitMethod[];
+  is_pub: boolean;
+  span: Span;
+}
+
+export interface HExternFnDecl {
+  kind: "extern_fn_decl";
+  name: string;
+  def_id?: number;
+  type_params: TypeParam[];
+  params: HParam[];
+  return_type: Type;
+  effects: EffectRow;
   is_pub: boolean;
   span: Span;
 }

@@ -113,8 +113,13 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
       const dep_exports = module_exports_map.get(dk)!;
       const dep_prefix = dep_exports.module_prefix;
       // Import all exported values (functions, enum constructors)
+      // Extern fn names map to their raw JS name (not module-prefixed)
       for (const [name] of dep_exports.values) {
-        imports_map.set(name, `${dep_prefix}$${safe_ident(name)}`);
+        if (dep_exports.extern_values.has(name)) {
+          imports_map.set(name, safe_ident(name));
+        } else {
+          imports_map.set(name, `${dep_prefix}$${safe_ident(name)}`);
+        }
       }
       // Import all exported type constructors (struct classes, enum factory functions)
       for (const [name, type_def] of dep_exports.types) {

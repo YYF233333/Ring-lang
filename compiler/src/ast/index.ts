@@ -491,7 +491,8 @@ export type Decl =
   | ImplDecl
   | EffectDecl
   | TestDecl
-  | TraitDecl;
+  | TraitDecl
+  | ExternFnDecl;
 
 export interface TypeBound {
   trait_name: string;
@@ -577,6 +578,16 @@ export interface TestDecl {
   kind: "test_decl";
   description: string;
   body: BlockExpr;
+  span: Span;
+}
+
+export interface ExternFnDecl {
+  kind: "extern_fn_decl";
+  name: string;
+  type_params: TypeParam[];
+  params: Param[];
+  return_type?: TypeExpr;
+  is_pub: boolean;
   span: Span;
 }
 

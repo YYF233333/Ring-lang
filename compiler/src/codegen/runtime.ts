@@ -54,10 +54,10 @@ function List_first(self) { return self.length > 0 ? { _tag: "some", _0: self[0]
 function List_last(self) { return self.length > 0 ? { _tag: "some", _0: self[self.length - 1] } : { _tag: "none" }; }
 function List_contains(self, x) { return self.includes(x); }
 function List_is_empty(self) { return self.length === 0; }
-function List_push(self, x) { return [...self, x]; }
-function List_concat(self, other) { return [...self, ...other]; }
+function List_push(self, x) { self.push(x); }
+function List_concat(self, other) { for (var i = 0; i < other.length; i++) self.push(other[i]); }
 function List_slice(self, start, end) { return self.slice(start, end); }
-function List_reverse(self) { return [...self].reverse(); }
+function List_reverse(self) { self.reverse(); }
 
 function map_new() { return new Map(); }
 function map_from(entries) { return new Map(entries); }
@@ -68,8 +68,8 @@ function _Map_is_empty(self) { return self.size === 0; }
 function _Map_keys(self) { return Array.from(self.keys()); }
 function _Map_values(self) { return Array.from(self.values()); }
 function _Map_entries(self) { return Array.from(self.entries()); }
-function _Map_insert(self, key, value) { var m = new Map(self); m.set(key, value); return m; }
-function _Map_remove(self, key) { var m = new Map(self); m.delete(key); return m; }
+function _Map_insert(self, key, value) { self.set(key, value); }
+function _Map_remove(self, key) { self.delete(key); }
 
 function set_new() { return new Set(); }
 function set_from(items) { return new Set(items); }
@@ -77,8 +77,8 @@ function _Set_len(self) { return self.size; }
 function _Set_contains(self, x) { return self.has(x); }
 function _Set_is_empty(self) { return self.size === 0; }
 function _Set_to_list(self) { return Array.from(self); }
-function _Set_insert(self, x) { var s = new Set(self); s.add(x); return s; }
-function _Set_remove(self, x) { var s = new Set(self); s.delete(x); return s; }
+function _Set_insert(self, x) { self.add(x); }
+function _Set_remove(self, x) { self.delete(x); }
 function _Set_union(self, other) { return new Set([...self, ...other]); }
 function _Set_intersect(self, other) { return new Set([...self].filter(function(x) { return other.has(x); })); }
 function _Set_difference(self, other) { return new Set([...self].filter(function(x) { return !other.has(x); })); }

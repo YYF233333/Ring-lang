@@ -114,6 +114,8 @@ const cases: TestCase[] = [
   { file: "nested_handler.ring", expected: "inner-inner-file-outer-outer-file\n" },
   { file: "for_in_continue.ring", expected: "35\n" },
   { file: "empty_collection.ring", expected: "0\n0\n0\nfalse\ntrue\nnone\n0\nfalse\n0\nfalse\n0\nfalse\n" },
+  // extern fn
+  { file: "extern_fn_basic.ring", expected: "42\n3.14\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -253,6 +255,7 @@ const module_cases: ModuleTestCase[] = [
   { dir: "cross_option", expected: "42\n99\n" },
   { dir: "cross_effect", expected: "5\n-1\n" },
   { dir: "cross_trait", expected: "Rex\n" },
+  { dir: "extern_fn", expected: "100\n2.5\n42\n" },
 ];
 
 const MODULES_DIR = path.resolve(REPO_ROOT, "tests/cases/modules");

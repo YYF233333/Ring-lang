@@ -28,6 +28,8 @@ export function walk_decl(decl: HDecl, v: HirVisitor): WalkAction {
       return walk_impl(decl, v);
     case "test_decl":
       return walk_block(decl.body, v);
+    case "extern_fn_decl":
+      return;
     default:
       return;
   }

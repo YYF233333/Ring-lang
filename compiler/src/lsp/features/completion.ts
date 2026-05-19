@@ -232,6 +232,7 @@ function walk_decl_for_receiver(decl: HDecl, pos: Position): Type | null {
     case "effect_decl":
     case "test_decl":
     case "trait_decl":
+    case "extern_fn_decl":
       return null;
   }
 }

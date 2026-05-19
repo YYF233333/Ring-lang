@@ -2,7 +2,7 @@
 // Two-pass: register all top-level decls, then infer all bodies.
 
 import {
-  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl,
   Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr, IfExpr,
   BinOp, UnaryOp,
   UseDecl,
@@ -18,7 +18,7 @@ import {
   make_option_type, is_option_type, option_inner,
 } from "../types/index.js";
 import {
-  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
+  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl, HExternFnDecl,
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt, HForInStmt,
   HLetDestructureStmt, HIfLetStmt,
   variant_js_name, trait_dict_name, trait_bound_param_name,
@@ -407,6 +407,9 @@ export class InferEngine {
       case "trait_decl":
         this.register_trait(decl);
         break;
+      case "extern_fn_decl":
+        this.register_extern_fn(decl);
+        break;
       default:
         assertNever(decl, "register_decl");
     }
@@ -645,6 +648,57 @@ export class InferEngine {
     this.env.record_def_span(this.env.lookup(decl.name)!.def_id!, decl.span);
   }
 
+  private register_extern_fn(decl: ExternFnDecl): void {
+    const type_vars: number[] = [];
+    const saved_tp_scope = new Map(this.type_param_scope);
+    for (const tp of decl.type_params) {
+      const tv = this.env.fresh_var();
+      type_vars.push((tv as TypeVar).id);
+      this.type_param_scope.set(tp.name, tv);
+    }
+
+    const param_types = decl.params.map(p =>
+      p.type_annotation ? this.resolve_type_expr(p.type_annotation) : this.env.fresh_var()
+    );
+    const ret_type = decl.return_type ? this.resolve_type_expr(decl.return_type) : this.env.fresh_var();
+
+    const declared_tp_names = new Set(decl.type_params.map(tp => tp.name));
+    for (const [name, tv] of this.type_param_scope) {
+      if (!saved_tp_scope.has(name) && !declared_tp_names.has(name) && tv.kind === "var") {
+        type_vars.push(tv.id);
+      }
+    }
+
+    const fn_type: FnType = {
+      kind: "fn",
+      params: param_types,
+      return_type: ret_type,
+      effects: EMPTY_ROW,
+    };
+
+    const scheme_bounds: { type_var: number; trait_name: string }[] = [];
+    for (const tp of decl.type_params) {
+      const tv = this.type_param_scope.get(tp.name);
+      for (const b of tp.bounds) {
+        if (!this.env.traits.has(b.trait_name)) {
+          this.type_error(E.E0501, `Unknown trait: ${b.trait_name}`, tp.span, { kind: "trait_error", detail: `unknown trait '${b.trait_name}'` });
+        }
+        if (tv && tv.kind === "var") {
+          scheme_bounds.push({ type_var: tv.id, trait_name: b.trait_name });
+        }
+      }
+    }
+
+    this.type_param_scope = saved_tp_scope;
+
+    if (type_vars.length > 0) {
+      this.env.bind(decl.name, { type: fn_type, type_vars, bounds: scheme_bounds });
+    } else {
+      this.env.bind_mono(decl.name, fn_type);
+    }
+    this.env.record_def_span(this.env.lookup(decl.name)!.def_id!, decl.span);
+  }
+
   // ============================================================
   // Pass 2: Check declarations
   // ============================================================
@@ -665,6 +719,8 @@ export class InferEngine {
         return this.check_test_decl(decl);
       case "trait_decl":
         return this.check_trait_decl(decl);
+      case "extern_fn_decl":
+        return this.check_extern_fn_decl(decl);
       default:
         return assertNever(decl, "check_decl");
     }
@@ -774,6 +830,27 @@ export class InferEngine {
       name: decl.name,
       type_params: decl.type_params,
       methods: hmethods,
+      is_pub: decl.is_pub,
+      span: decl.span,
+    };
+  }
+
+  private check_extern_fn_decl(decl: ExternFnDecl): HExternFnDecl {
+    const scheme = this.env.lookup(decl.name)!;
+    const fn_type = scheme.type as FnType;
+    const hparams: HParam[] = decl.params.map((p, i) => ({
+      name: p.name,
+      type: fn_type.params[i],
+      def_id: undefined,
+    }));
+    return {
+      kind: "extern_fn_decl",
+      name: decl.name,
+      def_id: scheme.def_id,
+      type_params: decl.type_params,
+      params: hparams,
+      return_type: fn_type.return_type,
+      effects: EMPTY_ROW,
       is_pub: decl.is_pub,
       span: decl.span,
     };

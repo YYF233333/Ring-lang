@@ -19,6 +19,7 @@ export interface ModuleExports {
   trait_impls: ImplEntry[];                // trait impls (for dict resolution)
   impl_methods: Map<string, Map<string, TypeScheme>>;  // type -> method name -> scheme
   struct_field_orders: Map<string, string[]>;           // struct name -> field names in order
+  extern_values: Set<string>;              // extern fn names (not module-prefixed in JS)
 }
 
 // ============================================================
@@ -38,6 +39,7 @@ export function extract_exports(
   const traits = new Map<string, TraitDef>();
   const impl_methods = new Map<string, Map<string, TypeScheme>>();
   const struct_field_orders = new Map<string, string[]>();
+  const extern_values = new Set<string>();
 
   // Track which type names are declared in this module (for filtering impls)
   const module_type_names = new Set<string>();
@@ -118,8 +120,17 @@ export function extract_exports(
       }
 
       case "test_decl":
-        // Tests are not exported
         break;
+
+      case "extern_fn_decl": {
+        extern_values.add(decl.name);
+        if (!decl.is_pub) break;
+        const scheme = env.lookup(decl.name);
+        if (scheme) {
+          values.set(decl.name, scheme);
+        }
+        break;
+      }
     }
   }
 
@@ -178,5 +189,6 @@ export function extract_exports(
     trait_impls,
     impl_methods,
     struct_field_orders,
+    extern_values,
   };
 }
