@@ -249,6 +249,7 @@ export interface StructLitExpr {
   name: string;
   type_args: TypeExpr[];
   fields: StructFieldInit[];
+  spread?: Expr;
   span: Span;
 }
 

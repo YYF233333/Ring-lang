@@ -108,6 +108,7 @@ export interface HStructLit extends HExprBase {
   name: string;
   type_args: Type[];
   fields: HStructFieldInit[];
+  spread?: HExpr;
 }
 
 export interface HNamedVariantConstruct extends HExprBase {
@@ -115,6 +116,7 @@ export interface HNamedVariantConstruct extends HExprBase {
   enum_name: string;
   variant_name: string;
   fields: HStructFieldInit[];
+  spread?: HExpr;
 }
 
 export interface HMatchArm {

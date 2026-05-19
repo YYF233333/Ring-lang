@@ -40,11 +40,11 @@
 
 ## Important — 显著增加自举复杂度
 
-### I1: 无 struct update 语法（object spread）
+### I1: ✅ 无 struct update 语法（object spread）
 - **来源**: Claude I3 + DS C5
 - **文件**: `compiler/src/checker/zonk.ts:41-58`, `compiler/src/checker/unify.ts:46-105` 等
 - **描述**: 编译器大量使用 `{ ...type, params: newParams }` 模式做浅克隆+修改。zonk、apply、unify 每次递归都用。Ring 无此语法，需手动列出所有字段重建 struct。估计 2000+ 行额外代码。
-- **建议**: 考虑添加 `MyStruct { ..existing, field: new_val }` 语法（Rust 风格 struct update）
+- **修复**: 实现 `MyStruct { ..existing, field: new_val }` 语法（JS 风格，`..base` 在开头）。支持 struct 和 enum 命名变体。全管线：Parser 解析 `..expr` → Checker 类型统一 + 跳过缺字段检查 → Codegen 生成 `new Struct(base.f1, override_f2)` / IIFE 包装复杂表达式 → Zonk/LSP 全部支持。
 
 ### I2: ✅ 无 mutable self 方法
 - **来源**: Claude C1

@@ -72,6 +72,9 @@ const cases: TestCase[] = [
   { file: "lambda_arg.ring", expected: "42\n6\n" },
   { file: "return_early.ring", expected: "5\n3\n" },
   { file: "struct_basic.ring", expected: "25\n" },
+  { file: "struct_update_test.ring", expected: "struct update: all tests passed\n" },
+  { file: "struct_update_enum_test.ring", expected: "struct update enum: all tests passed\n" },
+  { file: "struct_update_generic_test.ring", expected: "struct update generic: all tests passed\n" },
   { file: "ufcs_basic.ring", expected: "1\n" },
   { file: "match_guard_multi.ring", expected: "big circle\nsmall circle\nsquare\nrectangle\n" },
   { file: "match_nested.ring", expected: "positive\nnon-positive\nnothing\n" },
@@ -188,6 +191,8 @@ describe("e2e: ring check (negative — should reject)", { concurrency: 3 }, () 
     // Enum named fields
     { file: "enum_named_wrong_field.ring", error_pattern: "E0203" },
     { file: "enum_named_missing_field.ring", error_pattern: "E0203" },
+    // Struct update wrong type
+    { file: "negative/struct_update_wrong_type.ring", error_pattern: "E0301" },
     // Field assignment on immutable
     { file: "neg_field_assign_immutable.ring", error_pattern: "E0205" },
     { file: "neg_let_field_assign.ring", error_pattern: "E0205" },

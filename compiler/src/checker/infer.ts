@@ -829,7 +829,7 @@ export class InferEngine implements InferCtx {
       case "field_access":
         return infer_field_access(this, expr.receiver, expr.field, expr.span, subst);
       case "struct_lit":
-        return infer_struct_lit(this, expr.name, expr.fields, expr.span, subst);
+        return infer_struct_lit(this, expr.name, expr.fields, expr.spread, expr.span, subst);
       case "match_expr":
         return infer_match(this, expr.scrutinee, expr.arms, expr.span, subst);
       case "block":

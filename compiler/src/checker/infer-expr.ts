@@ -479,7 +479,7 @@ export function infer_field_access(ctx: InferCtx, receiver: Expr, field: string,
 // infer_struct_lit
 // ============================================================
 
-export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: string; value: Expr; span: Span }[], span: Span, subst: Substitution): InferResult {
+export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: string; value: Expr; span: Span }[], spread: Expr | undefined, span: Span, subst: Substitution): InferResult {
   // Check if this is a named enum variant construction
   const variant_enum = ctx.env.variant_to_enum.get(name);
   if (variant_enum) {
@@ -487,7 +487,7 @@ export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: st
     if (enum_def) {
       const variant = enum_def.variants.find(v => v.name === name);
       if (variant && variant.field_names) {
-        return infer_named_variant_construct(ctx, variant_enum, name, variant, enum_def, fields, span, subst);
+        return infer_named_variant_construct(ctx, variant_enum, name, variant, enum_def, fields, spread, span, subst);
       }
     }
   }
@@ -509,6 +509,20 @@ export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: st
   let effects: EffectRow = EMPTY_ROW;
   const hfields: HStructFieldInit[] = [];
 
+  let hspread: import("../hir/index.js").HExpr | undefined;
+  if (spread) {
+    const sr = ctx.infer_expr(spread, s);
+    s = sr.subst;
+    [effects, s] = merge_effects(ctx, effects, sr.effects, s);
+    const spread_struct_type: Type = {
+      kind: "struct", name,
+      type_params: type_param_types,
+      fields: struct_def.fields.map(f => ({ name: f.name, type: substitute_type(f.type, instantiation_map), is_pub: f.is_pub })),
+    };
+    s = unify_at(ctx, sr.hexpr.type, spread_struct_type, s, span);
+    hspread = sr.hexpr;
+  }
+
   for (const field of fields) {
     const fr = ctx.infer_expr(field.value, s);
     s = fr.subst;
@@ -524,10 +538,12 @@ export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: st
     hfields.push({ name: field.name, value: fr.hexpr });
   }
 
-  const provided = new Set(fields.map(f => f.name));
-  for (const def_field of struct_def.fields) {
-    if (!provided.has(def_field.name)) {
-      type_error(ctx, E.E0203, `Missing field '${def_field.name}' in struct literal '${name}'`, span, { kind: "missing_field", field: def_field.name, type: name, available: struct_def.fields.map(f => f.name) });
+  if (!spread) {
+    const provided = new Set(fields.map(f => f.name));
+    for (const def_field of struct_def.fields) {
+      if (!provided.has(def_field.name)) {
+        type_error(ctx, E.E0203, `Missing field '${def_field.name}' in struct literal '${name}'`, span, { kind: "missing_field", field: def_field.name, type: name, available: struct_def.fields.map(f => f.name) });
+      }
     }
   }
 
@@ -539,7 +555,7 @@ export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: st
   };
 
   return {
-    hexpr: { kind: "struct_lit", name, type_args: [], fields: hfields, type: struct_type, effects, span },
+    hexpr: { kind: "struct_lit", name, type_args: [], fields: hfields, spread: hspread, type: struct_type, effects, span },
     subst: s,
     effects,
   };
@@ -554,6 +570,7 @@ export function infer_named_variant_construct(
   variant: { name: string; fields: Type[]; field_names?: string[] },
   enum_def: import("./env.js").EnumDef,
   fields: { name: string; value: Expr; span: Span }[],
+  spread: Expr | undefined,
   span: Span, subst: Substitution,
 ): InferResult {
   const field_names = variant.field_names!;
@@ -569,6 +586,21 @@ export function infer_named_variant_construct(
   let s = subst;
   let effects: EffectRow = EMPTY_ROW;
   const hfields: HStructFieldInit[] = [];
+
+  let hspread: import("../hir/index.js").HExpr | undefined;
+  if (spread) {
+    const sr = ctx.infer_expr(spread, s);
+    s = sr.subst;
+    [effects, s] = merge_effects(ctx, effects, sr.effects, s);
+    const all_variants = enum_def.variants.map(v => ({
+      name: v.name, fields: v.fields, field_names: v.field_names,
+    }));
+    const spread_enum_type: Type = {
+      kind: "enum", name: enum_name, type_params: type_param_types, variants: all_variants,
+    };
+    s = unify_at(ctx, sr.hexpr.type, spread_enum_type, s, span);
+    hspread = sr.hexpr;
+  }
 
   for (const field of fields) {
     const fr = ctx.infer_expr(field.value, s);
@@ -586,11 +618,13 @@ export function infer_named_variant_construct(
     hfields.push({ name: field.name, value: fr.hexpr });
   }
 
-  const provided = new Set(fields.map(f => f.name));
-  for (const fn_name of field_names) {
-    if (!provided.has(fn_name)) {
-      type_error(ctx, E.E0203, `Missing field '${fn_name}' in variant '${variant_name}'`, span,
-        { kind: "missing_field", field: fn_name, type: variant_name, available: field_names });
+  if (!spread) {
+    const provided = new Set(fields.map(f => f.name));
+    for (const fn_name of field_names) {
+      if (!provided.has(fn_name)) {
+        type_error(ctx, E.E0203, `Missing field '${fn_name}' in variant '${variant_name}'`, span,
+          { kind: "missing_field", field: fn_name, type: variant_name, available: field_names });
+      }
     }
   }
 
@@ -606,7 +640,7 @@ export function infer_named_variant_construct(
   return {
     hexpr: {
       kind: "named_variant_construct", enum_name, variant_name,
-      fields: hfields, type: enum_type, effects, span,
+      fields: hfields, spread: hspread, type: enum_type, effects, span,
     },
     subst: s,
     effects,

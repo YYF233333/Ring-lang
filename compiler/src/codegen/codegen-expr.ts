@@ -232,14 +232,43 @@ function gen_struct_lit(ctx: CodegenCtx, expr: HExpr & { kind: "struct_lit" }): 
   const declared_order = ctx.struct_field_order.get(ctx.qualify(expr.name));
   if (declared_order) {
     const field_map = new Map(expr.fields.map(f => [f.name, f.value]));
+    if (expr.spread) {
+      return gen_spread_struct(ctx, expr.spread, ctx.qualify(expr.name), declared_order, field_map, true);
+    }
     const args = declared_order.map(name => {
       const val = field_map.get(name);
       return val ? gen_expr(ctx, val) : "undefined";
     }).join(", ");
     return `new ${ctx.qualify(expr.name)}(${args})`;
   }
+  if (expr.spread) {
+    const field_map = new Map(expr.fields.map(f => [f.name, f.value]));
+    const order = expr.fields.map(f => f.name);
+    return gen_spread_struct(ctx, expr.spread, ctx.qualify(expr.name), order, field_map, true);
+  }
   const args = expr.fields.map(f => gen_expr(ctx, f.value)).join(", ");
   return `new ${ctx.qualify(expr.name)}(${args})`;
+}
+
+function gen_spread_struct(
+  ctx: CodegenCtx, spread: HExpr, constructor: string,
+  field_order: string[], field_map: Map<string, HExpr>, use_new: boolean,
+): string {
+  const is_simple = spread.kind === "ident" || spread.kind === "field_access";
+  if (is_simple) {
+    const base = gen_expr(ctx, spread);
+    const args = field_order.map(name => {
+      const val = field_map.get(name);
+      return val ? gen_expr(ctx, val) : `${base}.${safe_ident(name)}`;
+    }).join(", ");
+    return use_new ? `new ${constructor}(${args})` : `${constructor}(${args})`;
+  }
+  const args = field_order.map(name => {
+    const val = field_map.get(name);
+    return val ? gen_expr(ctx, val) : `__su.${safe_ident(name)}`;
+  }).join(", ");
+  const call = use_new ? `new ${constructor}(${args})` : `${constructor}(${args})`;
+  return `((__su) => ${call})(${gen_expr(ctx, spread)})`;
 }
 
 // ============================================================
@@ -252,6 +281,9 @@ function gen_named_variant_construct(ctx: CodegenCtx, expr: HExpr & { kind: "nam
   const enum_type = expr.type as import("../types/index.js").EnumType;
   const variant = enum_type.variants.find(v => v.name === expr.variant_name);
   if (variant?.field_names) {
+    if (expr.spread) {
+      return gen_spread_struct(ctx, expr.spread, js_name, variant.field_names, field_map, false);
+    }
     const args = variant.field_names.map(n => {
       const val = field_map.get(n);
       return val ? gen_expr(ctx, val) : "undefined";

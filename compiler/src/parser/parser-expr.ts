@@ -603,6 +603,13 @@ function parse_lambda_expr(ctx: ParserCtx): LambdaExpr {
 function parse_struct_literal(ctx: ParserCtx, name: string, start: Position): StructLitExpr {
   ctx.expect(TokenKind.LBrace);
   const fields: StructFieldInit[] = [];
+  let spread: Expr | undefined;
+  // Check for ..expr spread at the beginning
+  if (ctx.check(TokenKind.DotDot)) {
+    ctx.advance();
+    spread = ctx.parse_expr();
+    ctx.try_consume(TokenKind.Comma);
+  }
   while (!ctx.check(TokenKind.RBrace) && !ctx.at_end()) {
     const f_start = ctx.current_span_start();
     const f_name = ctx.expect(TokenKind.Ident).value;
@@ -620,6 +627,7 @@ function parse_struct_literal(ctx: ParserCtx, name: string, start: Position): St
   const end = ctx.current_span_start();
   return {
     kind: "struct_lit", name, type_args: [], fields,
+    spread,
     span: ctx.make_span(start, end),
   };
 }

@@ -132,11 +132,13 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
         ...base, kind: "struct_lit", name: expr.name,
         type_args: expr.type_args.map(t => zonk_type(ctx, t)),
         fields: expr.fields.map((f): HStructFieldInit => ({ name: f.name, value: zonk_expr(ctx, f.value) })),
+        spread: expr.spread ? zonk_expr(ctx, expr.spread) : undefined,
       };
     case "named_variant_construct":
       return {
         ...base, kind: "named_variant_construct", enum_name: expr.enum_name, variant_name: expr.variant_name,
         fields: expr.fields.map((f): HStructFieldInit => ({ name: f.name, value: zonk_expr(ctx, f.value) })),
+        spread: expr.spread ? zonk_expr(ctx, expr.spread) : undefined,
       };
     case "match_expr":
       return {
