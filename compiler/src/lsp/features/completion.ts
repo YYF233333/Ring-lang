@@ -4,6 +4,7 @@ import { type_to_string, Type, UNIT } from "../../types/index.js";
 import { TypeEnv } from "../../checker/env.js";
 import {
   HDecl, HExpr, HStmt, HBlock, HFnDecl, HImplDecl,
+  BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_RANGE,
 } from "../../hir/index.js";
 import { Span, Decl as AstDecl, Stmt as AstStmt, BlockExpr as AstBlock } from "../../ast/index.js";
 
@@ -274,9 +275,9 @@ function fields_and_methods_for_type(type: Type, env: TypeEnv): CompletionItem[]
   }
 
   // Primitive type methods (Str, Int, Float)
-  const prim_name = type.kind === "str" ? "Str"
-    : type.kind === "int" ? "Int"
-    : type.kind === "float" ? "Float"
+  const prim_name = type.kind === "str" ? BUILTIN_STR
+    : type.kind === "int" ? BUILTIN_INT
+    : type.kind === "float" ? BUILTIN_FLOAT
     : null;
   if (prim_name) {
     const methods = env.impl_methods.get(prim_name);
@@ -394,7 +395,7 @@ function collect_block_locals(block: HBlock, pos: Position, out: Map<string, Typ
       // If the cursor is inside the body, include the binding.
       if (contains_lsp_position(stmt.body.span, pos)) {
         const iter_type = stmt.iterable.type;
-        if (iter_type.kind === "enum" && iter_type.name === "Range" && iter_type.type_params.length > 0) {
+        if (iter_type.kind === "enum" && iter_type.name === BUILTIN_RANGE && iter_type.type_params.length > 0) {
           out.set(stmt.binding, iter_type.type_params[0]);
         } else {
           out.set(stmt.binding, { kind: "var", id: -1 });

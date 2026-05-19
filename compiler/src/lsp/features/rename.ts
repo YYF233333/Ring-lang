@@ -1,8 +1,9 @@
 import { WorkspaceEdit, Position } from "vscode-languageserver";
 import { DocumentState } from "../document-manager.js";
 import { get_references } from "./references.js";
+import { BUILTIN_CELL } from "../../hir/index.js";
 
-const BUILTINS = new Set(["print", "assert", "exit", "panic", "some", "none", "Cell"]);
+const BUILTINS = new Set(["print", "assert", "exit", "panic", "some", "none", BUILTIN_CELL]);
 
 export function get_rename_edits(state: DocumentState, position: Position, new_name: string): WorkspaceEdit | null {
   if (!state.checkResult) return null;

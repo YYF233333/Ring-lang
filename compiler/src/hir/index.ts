@@ -457,6 +457,41 @@ export function default_method_self_name(type_name: string): string {
 // JS codegen enum discriminator field name
 export const ENUM_TAG_FIELD = "_tag";
 
+// Built-in type names — single source of truth for type comparisons and registrations
+export const BUILTIN_INT = "Int";
+export const BUILTIN_FLOAT = "Float";
+export const BUILTIN_STR = "Str";
+export const BUILTIN_BOOL = "Bool";
+export const BUILTIN_RANGE = "Range";
+export const BUILTIN_LIST = "List";
+export const BUILTIN_MAP = "Map";
+export const BUILTIN_SET = "Set";
+export const BUILTIN_OPTION = "Option";
+export const BUILTIN_CELL = "Cell";
+
+// Built-in method name registries — shared between env.ts (type checking) and codegen.ts (code gen)
+// HOF methods have special inline codegen; non-HOF methods use runtime function dispatch.
+export const CELL_METHODS = ["get", "set", "update"] as const;
+export const STR_METHODS = [
+  "len", "contains", "starts_with", "ends_with", "slice", "trim",
+  "to_upper", "to_lower", "replace", "split", "char_at", "index_of",
+] as const;
+export const LIST_NON_HOF_METHODS = [
+  "len", "get", "first", "last", "contains", "is_empty",
+  "push", "concat", "slice", "reverse",
+] as const;
+export const LIST_HOF_METHODS = ["map", "filter", "flat_map", "fold", "any", "all", "find"] as const;
+export const MAP_NON_HOF_METHODS = [
+  "len", "get", "contains_key", "is_empty", "keys", "values", "entries",
+  "insert", "remove",
+] as const;
+export const MAP_HOF_METHODS = ["map_values", "filter", "any", "fold"] as const;
+export const SET_NON_HOF_METHODS = [
+  "len", "contains", "is_empty", "to_list",
+  "insert", "remove", "union", "intersect", "difference",
+] as const;
+export const SET_HOF_METHODS = ["filter", "fold", "any", "all"] as const;
+
 // Option<T> codegen constants
 export const OPTION_SOME_TAG = "some";
 export const OPTION_NONE_TAG = "none";

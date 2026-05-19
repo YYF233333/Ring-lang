@@ -1,5 +1,6 @@
 // Ring-lang Pattern Match Exhaustiveness Checking
-import { Pattern, TuplePattern, Expr } from "../ast/index.js";
+// Uses Maranget-style pattern matrix algorithm for cross-column checking.
+import { Pattern, Expr, span_zero } from "../ast/index.js";
 import { Type } from "../types/index.js";
 import { Substitution, apply } from "./unify.js";
 
@@ -48,15 +49,15 @@ function check_patterns(
 
       const variant_def = resolved.variants.find(v => v.name === name)!;
       if (variant_def.fields.length > 0) {
-        for (let i = 0; i < variant_def.fields.length; i++) {
-          const field_type = variant_def.fields[i];
-          const column: Pattern[] = sub_patterns_for_variant.map(
-            row => row[i] ?? { kind: "wildcard" as const, span: { start: 0, end: 0 } }
-          );
-          const missing = check_patterns(column, field_type, subst);
-          if (missing !== null) {
-            return `${name}(${missing})`;
-          }
+        const wild: Pattern = { kind: "wildcard", span: span_zero() };
+        const normalized = sub_patterns_for_variant.map(row => {
+          const padded = [...row];
+          while (padded.length < variant_def.fields.length) padded.push(wild);
+          return padded;
+        });
+        const missing_fields = check_matrix(normalized, variant_def.fields, subst);
+        if (missing_fields !== null) {
+          return `${name}(${missing_fields.join(", ")})`;
         }
       }
     }
@@ -88,19 +89,136 @@ function check_patterns(
   }
 
   if (resolved.kind === "tuple") {
-    for (let i = 0; i < resolved.elements.length; i++) {
-      const column: Pattern[] = patterns
-        .filter((p): p is TuplePattern => p.kind === "tuple" && p.elements.length === resolved.elements.length)
-        .map(p => p.elements[i]);
-      if (column.length === 0) return "_";
-      const missing = check_patterns(column, resolved.elements[i], subst);
-      if (missing !== null) {
-        const parts = Array.from({ length: resolved.elements.length }, (_, j) => j === i ? missing : "_");
-        return `(${parts.join(", ")})`;
+    const matrix: Pattern[][] = [];
+    for (const p of patterns) {
+      if (p.kind === "tuple" && p.elements.length === resolved.elements.length) {
+        matrix.push(p.elements);
       }
     }
-    return null;
+    if (matrix.length === 0) {
+      return `(${resolved.elements.map(() => "_").join(", ")})`;
+    }
+    const missing = check_matrix(matrix, resolved.elements, subst);
+    return missing !== null ? `(${missing.join(", ")})` : null;
   }
 
   return "_";
+}
+
+// === Maranget-style pattern matrix exhaustiveness ===
+
+interface Ctor {
+  name: string;
+  arity: number;
+  field_types: Type[];
+  is_tuple: boolean;
+}
+
+function finite_type_ctors(type: Type): Ctor[] | null {
+  if (type.kind === "bool") {
+    return [
+      { name: "true", arity: 0, field_types: [], is_tuple: false },
+      { name: "false", arity: 0, field_types: [], is_tuple: false },
+    ];
+  }
+  if (type.kind === "enum") {
+    return type.variants.map(v => ({
+      name: v.name,
+      arity: v.fields.length,
+      field_types: v.fields,
+      is_tuple: false,
+    }));
+  }
+  if (type.kind === "unit") {
+    return [{ name: "()", arity: 0, field_types: [], is_tuple: false }];
+  }
+  if (type.kind === "tuple") {
+    return [{
+      name: "",
+      arity: type.elements.length,
+      field_types: type.elements,
+      is_tuple: true,
+    }];
+  }
+  return null;
+}
+
+const WILD: Pattern = { kind: "wildcard", span: span_zero() };
+
+function specialize_row(row: Pattern[], ctor: Ctor): Pattern[] | null {
+  const first = row[0];
+  const rest = row.slice(1);
+
+  if (first.kind === "wildcard" || first.kind === "binding") {
+    return [...Array.from({ length: ctor.arity }, () => WILD), ...rest];
+  }
+  if (first.kind === "literal") {
+    if ((first.value === true && ctor.name === "true") ||
+        (first.value === false && ctor.name === "false")) {
+      return rest;
+    }
+    return null;
+  }
+  if (first.kind === "constructor" && first.name === ctor.name) {
+    const sub = [...first.fields];
+    while (sub.length < ctor.arity) sub.push(WILD);
+    return [...sub, ...rest];
+  }
+  if (first.kind === "tuple" && ctor.is_tuple && first.elements.length === ctor.arity) {
+    return [...first.elements, ...rest];
+  }
+  return null;
+}
+
+/**
+ * Matrix-based exhaustiveness check for multi-column patterns.
+ * Returns null if exhaustive, or an array of missing pattern strings (one per column).
+ */
+function check_matrix(
+  rows: Pattern[][],
+  col_types: Type[],
+  subst: Substitution,
+): string[] | null {
+  if (col_types.length === 0) {
+    return rows.length > 0 ? null : [];
+  }
+
+  const first_type = apply(subst, col_types[0]);
+  const rest_types = col_types.slice(1);
+  const ctors = finite_type_ctors(first_type);
+
+  if (ctors !== null) {
+    for (const ctor of ctors) {
+      const specialized: Pattern[][] = [];
+      for (const row of rows) {
+        const s = specialize_row(row, ctor);
+        if (s !== null) specialized.push(s);
+      }
+      const new_types = [...ctor.field_types, ...rest_types];
+      const sub = check_matrix(specialized, new_types, subst);
+      if (sub !== null) {
+        const ctor_sub = sub.slice(0, ctor.arity);
+        const rest_sub = sub.slice(ctor.arity);
+        let ctor_str: string;
+        if (ctor.is_tuple) {
+          ctor_str = `(${ctor_sub.join(", ")})`;
+        } else if (ctor.arity === 0) {
+          ctor_str = ctor.name;
+        } else {
+          ctor_str = `${ctor.name}(${ctor_sub.join(", ")})`;
+        }
+        return [ctor_str, ...rest_sub];
+      }
+    }
+    return null;
+  } else {
+    const defaults: Pattern[][] = [];
+    for (const row of rows) {
+      if (row[0].kind === "wildcard" || row[0].kind === "binding") {
+        defaults.push(row.slice(1));
+      }
+    }
+    const sub = check_matrix(defaults, rest_types, subst);
+    return sub !== null ? ["_", ...sub] : null;
+  }
 }

@@ -1,5 +1,9 @@
 // Ring-lang internal type representations
 // Used during type checking and inference.
+import {
+  BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
+  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
+} from "../hir/index.js";
 
 // ============================================================
 // Type
@@ -174,7 +178,7 @@ export const ANY: AnyType = { kind: "any" };
 export function make_option_type(inner: Type): EnumType {
   return {
     kind: "enum",
-    name: "Option",
+    name: BUILTIN_OPTION,
     type_params: [inner],
     variants: [
       { name: "some", fields: [inner] },
@@ -185,7 +189,7 @@ export function make_option_type(inner: Type): EnumType {
 
 /** Check if a type is Option<T> (EnumType named "Option") */
 export function is_option_type(t: Type): t is EnumType {
-  return t.kind === "enum" && t.name === "Option" && t.type_params.length === 1;
+  return t.kind === "enum" && t.name === BUILTIN_OPTION && t.type_params.length === 1;
 }
 
 /** Extract the inner type from an Option<T>. Assumes is_option_type(t) is true. */
@@ -198,11 +202,11 @@ export function option_inner(t: EnumType): Type {
 // ============================================================
 
 export function make_list_type(element: Type): StructType {
-  return { kind: "struct", name: "List", type_params: [element], fields: [] };
+  return { kind: "struct", name: BUILTIN_LIST, type_params: [element], fields: [] };
 }
 
 export function is_list_type(t: Type): t is StructType {
-  return t.kind === "struct" && t.name === "List";
+  return t.kind === "struct" && t.name === BUILTIN_LIST;
 }
 
 export function list_element(t: StructType): Type {
@@ -214,11 +218,11 @@ export function list_element(t: StructType): Type {
 // ============================================================
 
 export function make_map_type(key: Type, value: Type): StructType {
-  return { kind: "struct", name: "Map", type_params: [key, value], fields: [] };
+  return { kind: "struct", name: BUILTIN_MAP, type_params: [key, value], fields: [] };
 }
 
 export function is_map_type(t: Type): t is StructType {
-  return t.kind === "struct" && t.name === "Map";
+  return t.kind === "struct" && t.name === BUILTIN_MAP;
 }
 
 // ============================================================
@@ -226,11 +230,11 @@ export function is_map_type(t: Type): t is StructType {
 // ============================================================
 
 export function make_set_type(element: Type): StructType {
-  return { kind: "struct", name: "Set", type_params: [element], fields: [] };
+  return { kind: "struct", name: BUILTIN_SET, type_params: [element], fields: [] };
 }
 
 export function is_set_type(t: Type): t is StructType {
-  return t.kind === "struct" && t.name === "Set";
+  return t.kind === "struct" && t.name === BUILTIN_SET;
 }
 
 // ============================================================
@@ -367,10 +371,10 @@ export function types_equal(a: Type, b: Type): boolean {
 
 export function type_to_string(t: Type): string {
   switch (t.kind) {
-    case "int": return "Int";
-    case "float": return "Float";
-    case "str": return "Str";
-    case "bool": return "Bool";
+    case "int": return BUILTIN_INT;
+    case "float": return BUILTIN_FLOAT;
+    case "str": return BUILTIN_STR;
+    case "bool": return BUILTIN_BOOL;
     case "unit": return "()";
     case "never": return "Never";
     case "any": return "Any";
@@ -387,7 +391,7 @@ export function type_to_string(t: Type): string {
     }
     case "enum": {
       // Display Option<T> as T?
-      if (t.name === "Option" && t.type_params.length === 1) {
+      if (t.name === BUILTIN_OPTION && t.type_params.length === 1) {
         return `${type_to_string(t.type_params[0])}?`;
       }
       if (t.type_params.length === 0) return t.name;

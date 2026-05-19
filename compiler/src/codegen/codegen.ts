@@ -7,6 +7,8 @@ import {
   trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD,
   OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
+  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_CELL,
+  CELL_METHODS, STR_METHODS, LIST_NON_HOF_METHODS, MAP_NON_HOF_METHODS, SET_NON_HOF_METHODS,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
 import { Type, Effect, EffectRow } from "../types/index.js";
@@ -96,34 +98,12 @@ class CodeGenerator {
       }
     }
 
-    // Built-in Cell impl methods (in runtime, not in source)
-    this.impl_methods.set("Cell.get", undefined);
-    this.impl_methods.set("Cell.set", undefined);
-    this.impl_methods.set("Cell.update", undefined);
-
-    // Built-in Str impl methods
-    for (const m of ["len", "contains", "starts_with", "ends_with", "slice", "trim",
-                     "to_upper", "to_lower", "replace", "split", "char_at", "index_of"]) {
-      this.impl_methods.set(`Str.${m}`, undefined);
-    }
-
-    // Built-in List non-HOF impl methods (runtime functions)
-    for (const m of ["len", "get", "first", "last", "contains", "is_empty",
-                     "push", "concat", "slice", "reverse"]) {
-      this.impl_methods.set(`List.${m}`, undefined);
-    }
-
-    // Built-in Map non-HOF impl methods (runtime functions)
-    for (const m of ["len", "get", "contains_key", "is_empty", "keys", "values", "entries",
-                     "insert", "remove"]) {
-      this.impl_methods.set(`Map.${m}`, undefined);
-    }
-
-    // Built-in Set non-HOF impl methods (runtime functions)
-    for (const m of ["len", "contains", "is_empty", "to_list",
-                     "insert", "remove", "union", "intersect", "difference"]) {
-      this.impl_methods.set(`Set.${m}`, undefined);
-    }
+    // Register built-in impl methods from shared registry (hir/index.ts)
+    for (const m of CELL_METHODS) this.impl_methods.set(`${BUILTIN_CELL}.${m}`, undefined);
+    for (const m of STR_METHODS) this.impl_methods.set(`${BUILTIN_STR}.${m}`, undefined);
+    for (const m of LIST_NON_HOF_METHODS) this.impl_methods.set(`${BUILTIN_LIST}.${m}`, undefined);
+    for (const m of MAP_NON_HOF_METHODS) this.impl_methods.set(`${BUILTIN_MAP}.${m}`, undefined);
+    for (const m of SET_NON_HOF_METHODS) this.impl_methods.set(`${BUILTIN_SET}.${m}`, undefined);
 
     // Emit runtime preamble
     this.emit_raw(RUNTIME_CODE);
@@ -612,7 +592,7 @@ class CodeGenerator {
     if (expr.callee.kind === "field_access") {
       const recv_type = expr.callee.receiver.type;
       const method = expr.callee.field;
-      if (recv_type.kind === "struct" && recv_type.name === "List") {
+      if (recv_type.kind === "struct" && recv_type.name === BUILTIN_LIST) {
         const js_method = LIST_HOF_JS[method];
         if (js_method) {
           const receiver = this.gen_expr(expr.callee.receiver);
@@ -633,7 +613,7 @@ class CodeGenerator {
       }
 
       // Inline Map HOF methods — bypass runtime to forward evidence via closure capture
-      if (recv_type.kind === "struct" && recv_type.name === "Map") {
+      if (recv_type.kind === "struct" && recv_type.name === BUILTIN_MAP) {
         if (method === "map_values") {
           const receiver = this.gen_expr(expr.callee.receiver);
           const callback = this.gen_lambda_capture_evidence(expr.args[0]);
@@ -658,7 +638,7 @@ class CodeGenerator {
       }
 
       // Inline Set HOF methods — bypass runtime to forward evidence via closure capture
-      if (recv_type.kind === "struct" && recv_type.name === "Set") {
+      if (recv_type.kind === "struct" && recv_type.name === BUILTIN_SET) {
         if (method === "filter") {
           const receiver = this.gen_expr(expr.callee.receiver);
           const callback = this.gen_lambda_capture_evidence(expr.args[0]);
@@ -689,9 +669,9 @@ class CodeGenerator {
       const method = expr.callee.field;
       const type_name = recv_type.kind === "struct" ? recv_type.name
         : recv_type.kind === "enum" ? recv_type.name
-        : recv_type.kind === "str" ? "Str"
-        : recv_type.kind === "int" ? "Int"
-        : recv_type.kind === "float" ? "Float"
+        : recv_type.kind === "str" ? BUILTIN_STR
+        : recv_type.kind === "int" ? BUILTIN_INT
+        : recv_type.kind === "float" ? BUILTIN_FLOAT
         : null;
       const impl_key = type_name ? `${type_name}.${method}` : null;
       if (type_name && impl_key && this.impl_methods.has(impl_key)) {

@@ -3,9 +3,15 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { Parser } from "../parser/parser.js";
 import { check } from "./checker.js";
-import { HFnDecl, HImplDecl, HTestDecl, HProgram } from "../hir/index.js";
+import {
+  HFnDecl, HImplDecl, HTestDecl, HProgram,
+  BUILTIN_CELL, BUILTIN_STR, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
+  CELL_METHODS, STR_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS,
+  MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS,
+} from "../hir/index.js";
 import { CollectingSink, Diagnostic } from "../diagnostics/index.js";
 import { type_to_string, effect_row_to_string } from "../types/index.js";
+import { TypeEnv } from "./env.js";
 
 // Helper: parse and check, return the HProgram
 function check_source(source: string): HProgram {
@@ -489,6 +495,45 @@ describe("Type Checker", () => {
     });
   });
 
+  describe("tuple cross-column exhaustiveness (I10)", () => {
+    it("detects missing (true, false) when only diagonal covered", () => {
+      const diags = check_expecting_errors(`
+        fn f(x: (Bool, Bool)) -> Str {
+          match x {
+            (true, true) => "tt",
+            (false, false) => "ff",
+          }
+        }
+      `);
+      assert.ok(diags.some(d => d.code === "E0601" && /true.*false/.test(d.message)));
+    });
+
+    it("accepts fully exhaustive tuple match", () => {
+      const program = check_source(`
+        fn f(x: (Bool, Bool)) -> Str {
+          match x {
+            (true, true) => "tt",
+            (true, false) => "tf",
+            (false, _) => "f*",
+          }
+        }
+      `);
+      assert.ok(program.decls.length > 0);
+    });
+
+    it("detects missing combination with Option tuple", () => {
+      const diags = check_expecting_errors(`
+        fn f(x: (Int?, Bool)) -> Int {
+          match x {
+            (some(v), true) => v,
+            (none, false) => 0,
+          }
+        }
+      `);
+      assert.ok(diags.some(d => d.code === "E0601"));
+    });
+  });
+
   describe("let immutability enforcement (E0205)", () => {
     it("assign to let binding reports E0205", () => {
       const diags = check_expecting_errors(`fn main() { let x = 1; x = 2; }`);
@@ -540,6 +585,27 @@ describe("Type Checker", () => {
     it("reports E0206 for break outside loop", () => {
       const diags = check_expecting_errors(`fn main() { break; }`);
       assert.ok(diags.some(d => d.code === "E0206"), `expected E0206, got: ${diags.map(d => d.code).join(", ")}`);
+    });
+  });
+
+  describe("builtin method registry consistency (I15)", () => {
+    it("env.ts impl_methods match shared method name lists", () => {
+      const env = new TypeEnv();
+      const expected: [string, readonly string[]][] = [
+        [BUILTIN_CELL, [...CELL_METHODS]],
+        [BUILTIN_STR, [...STR_METHODS]],
+        [BUILTIN_LIST, [...LIST_NON_HOF_METHODS, ...LIST_HOF_METHODS]],
+        [BUILTIN_MAP, [...MAP_NON_HOF_METHODS, ...MAP_HOF_METHODS]],
+        [BUILTIN_SET, [...SET_NON_HOF_METHODS, ...SET_HOF_METHODS]],
+      ];
+      for (const [type_name, method_names] of expected) {
+        const methods = env.impl_methods.get(type_name);
+        assert.ok(methods, `env.ts missing impl_methods for "${type_name}"`);
+        const registered = [...methods!.keys()].sort();
+        const shared = [...method_names].sort();
+        assert.deepStrictEqual(registered, shared,
+          `impl_methods mismatch for ${type_name}: env has [${registered}] but shared lists have [${shared}]`);
+      }
     });
   });
 });

@@ -21,6 +21,8 @@ import {
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt, HForInStmt,
   HLetDestructureStmt, HIfLetStmt,
   variant_js_name, trait_dict_name, trait_bound_param_name,
+  BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
+  BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
 } from "../hir/index.js";
 import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
 import { Substitution, empty_subst, unify, UnificationError, apply, apply_to_effect_row, init_unify_fresh_counter } from "./unify.js";
@@ -219,7 +221,8 @@ export class InferEngine {
   private update_fn_effects(name: string, effects: EffectRow): void {
     const scheme = this.env.lookup(name);
     if (scheme && scheme.type.kind === "fn") {
-      scheme.type = { ...scheme.type, effects } as FnType;
+      const new_type = { ...scheme.type, effects } as FnType;
+      this.env.rebind(name, { ...scheme, type: new_type });
     }
   }
 
@@ -928,13 +931,13 @@ export class InferEngine {
         let s = iter_r.subst;
         const iter_type = apply(s, iter_r.hexpr.type);
         let element_type: Type;
-        if (iter_type.kind === "enum" && iter_type.name === "Range" && iter_type.type_params.length > 0) {
+        if (iter_type.kind === "enum" && iter_type.name === BUILTIN_RANGE && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
-        } else if (iter_type.kind === "struct" && iter_type.name === "List" && iter_type.type_params.length > 0) {
+        } else if (iter_type.kind === "struct" && iter_type.name === BUILTIN_LIST && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
-        } else if (iter_type.kind === "struct" && iter_type.name === "Set" && iter_type.type_params.length > 0) {
+        } else if (iter_type.kind === "struct" && iter_type.name === BUILTIN_SET && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
-        } else if (iter_type.kind === "struct" && iter_type.name === "Map") {
+        } else if (iter_type.kind === "struct" && iter_type.name === BUILTIN_MAP) {
           this.type_error(
             E.E0301,
             `Map is not directly iterable with for..in. Use 'for entry in map.entries() { let (k, v) = entry; ... }' instead.`,
@@ -1179,7 +1182,7 @@ export class InferEngine {
         s = this.unify_at(end_r.hexpr.type, INT, end_r.subst, expr.end.span);
         let range_effects: EffectRow;
         [range_effects, s] = this.merge_effects(start_r.effects, end_r.effects, s);
-        const range_type: Type = { kind: "enum", name: "Range", type_params: [INT], variants: [] };
+        const range_type: Type = { kind: "enum", name: BUILTIN_RANGE, type_params: [INT], variants: [] };
         return {
           hexpr: {
             kind: "range", start: start_r.hexpr, end: end_r.hexpr, inclusive: expr.inclusive,
@@ -1460,9 +1463,9 @@ export class InferEngine {
 
     // Method lookup for primitive types (Str, Int, Float)
     if (!method_type) {
-      const prim_name = recv_type.kind === "str" ? "Str"
-        : recv_type.kind === "int" ? "Int"
-        : recv_type.kind === "float" ? "Float"
+      const prim_name = recv_type.kind === "str" ? BUILTIN_STR
+        : recv_type.kind === "int" ? BUILTIN_INT
+        : recv_type.kind === "float" ? BUILTIN_FLOAT
         : null;
       if (prim_name) {
         const prim_methods = this.env.impl_methods.get(prim_name);
@@ -2182,7 +2185,7 @@ export class InferEngine {
       helements.push(r.hexpr);
       [combined_effects, s] = this.merge_effects(combined_effects, r.effects, s);
     }
-    const list_type: Type = { kind: "struct", name: "List", type_params: [apply(s, elem_type)], fields: [] };
+    const list_type: Type = { kind: "struct", name: BUILTIN_LIST, type_params: [apply(s, elem_type)], fields: [] };
     return {
       hexpr: {
         kind: "list_lit",
@@ -2283,10 +2286,10 @@ export class InferEngine {
 
   private resolve_named_type(name: string, type_args: TypeExpr[], span: Span): Type {
     switch (name) {
-      case "Int": return INT;
-      case "Float": return FLOAT;
-      case "Str": return STR;
-      case "Bool": return BOOL;
+      case BUILTIN_INT: return INT;
+      case BUILTIN_FLOAT: return FLOAT;
+      case BUILTIN_STR: return STR;
+      case BUILTIN_BOOL: return BOOL;
       case "Never": return NEVER;
       case "Unit": return UNIT;
       default: {
@@ -2295,7 +2298,7 @@ export class InferEngine {
         if (tp) return tp;
 
         // Option<T> resolves to EnumType "Option"
-        if (name === "Option" && type_args.length === 1) {
+        if (name === BUILTIN_OPTION && type_args.length === 1) {
           return make_option_type(this.resolve_type_expr(type_args[0]));
         }
 
