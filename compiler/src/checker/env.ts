@@ -27,14 +27,14 @@ export interface StructDef {
   name: string;
   type_params: string[];         // type parameter names
   type_param_vars: number[];     // type var ids used during registration (for instantiation)
-  fields: { name: string; type: Type; is_pub: boolean; is_optional?: boolean }[];
+  fields: { name: string; type: Type; is_pub: boolean }[];
 }
 
 export interface EnumDef {
   name: string;
   type_params: string[];
   type_param_vars: number[];     // type var ids used during registration (for instantiation)
-  variants: { name: string; fields: Type[]; field_names?: string[]; optional_fields?: boolean[] }[];
+  variants: { name: string; fields: Type[]; field_names?: string[] }[];
 }
 
 export interface EffectDef {

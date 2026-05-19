@@ -57,11 +57,11 @@
 - **决策**: `?.` 违反设计哲学——`?` 已定义为 Option→fail 提升（§1.5），`?.` 给 `?` 附加第二层语义（Option map），违反"一种事一种写法"原则。且 `?.` 创建平行于 UFCS 的链式机制，与"`.method()` 是唯一链式调用方式"冲突。
 - **正确方案**: 补 Option\<T\> 方法（map/and_then/is_some/unwrap_or），走 UFCS 路线。对应设计评审 P2-2，另有 session 处理。
 
-### I4: ✅ 所有 optional field 需改为 `Option<T>`
+### I4: ❌ ~~所有 optional field 需改为 `Option<T>`~~ — 设计评审后移除
 - **来源**: Claude C7 + DS I6
 - **文件**: AST/HIR/Type 中数百个 `field?: Type` 字段
 - **描述**: TS 的 `foo?: Bar` 需全部改为 Ring 的 `foo: Option<Bar>`。机械替换但量大。构造时需显式 `some(x)` / `none`。
-- **修复**: 实现 `field?: Type` 语法糖。Parser 在字段名后检测 `?` token → AST `is_optional` 标记 → register 阶段脱糖为 `Option<Type>` → 构造时可省略（checker 自动填充 `none` HIR 节点）。struct 和 enum 命名变体均支持。
+- **决策**: `field?: Type` 违反"一种事一种写法"原则——与已有的 `field: Type?` 构成两种写法。且隐式插入 `none` 违反 Ring 倾向显式的设计。Rust 同样要求显式 `None`。自举时直接使用 `field: Type?` + 显式 `none`。
 
 ### I5: class 继承（extends Error）需重构为 enum + effect
 - **来源**: Claude C2 + DS I3

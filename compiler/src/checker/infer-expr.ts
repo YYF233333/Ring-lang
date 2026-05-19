@@ -21,7 +21,7 @@ import type {
 import {
   variant_js_name, trait_dict_name, trait_bound_param_name,
   BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR,
-  BUILTIN_LIST, BUILTIN_OPTION,
+  BUILTIN_LIST,
 } from "../hir/index.js";
 import { substitute_type } from "./env.js";
 import type { Substitution } from "./unify.js";
@@ -542,17 +542,7 @@ export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: st
     const provided = new Set(fields.map(f => f.name));
     for (const def_field of struct_def.fields) {
       if (!provided.has(def_field.name)) {
-        if (def_field.is_optional) {
-          const field_type = substitute_type(def_field.type, instantiation_map);
-          const none_expr: HExpr = {
-            kind: "ident", name: "none",
-            resolved_name: variant_js_name(BUILTIN_OPTION, "none"),
-            type: field_type, effects: EMPTY_ROW, span,
-          };
-          hfields.push({ name: def_field.name, value: none_expr });
-        } else {
-          type_error(ctx, E.E0203, `Missing field '${def_field.name}' in struct literal '${name}'`, span, { kind: "missing_field", field: def_field.name, type: name, available: struct_def.fields.map(f => f.name) });
-        }
+        type_error(ctx, E.E0203, `Missing field '${def_field.name}' in struct literal '${name}'`, span, { kind: "missing_field", field: def_field.name, type: name, available: struct_def.fields.map(f => f.name) });
       }
     }
   }
@@ -577,7 +567,7 @@ export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: st
 
 export function infer_named_variant_construct(
   ctx: InferCtx, enum_name: string, variant_name: string,
-  variant: { name: string; fields: Type[]; field_names?: string[]; optional_fields?: boolean[] },
+  variant: { name: string; fields: Type[]; field_names?: string[] },
   enum_def: import("./env.js").EnumDef,
   fields: { name: string; value: Expr; span: Span }[],
   spread: Expr | undefined,
@@ -630,22 +620,10 @@ export function infer_named_variant_construct(
 
   if (!spread) {
     const provided = new Set(fields.map(f => f.name));
-    const opt_fields = variant.optional_fields;
-    for (let i = 0; i < field_names.length; i++) {
-      const fn_name = field_names[i];
+    for (const fn_name of field_names) {
       if (!provided.has(fn_name)) {
-        if (opt_fields && opt_fields[i]) {
-          const field_type = substitute_type(variant.fields[i], instantiation_map);
-          const none_expr: HExpr = {
-            kind: "ident", name: "none",
-            resolved_name: variant_js_name(BUILTIN_OPTION, "none"),
-            type: field_type, effects: EMPTY_ROW, span,
-          };
-          hfields.push({ name: fn_name, value: none_expr });
-        } else {
-          type_error(ctx, E.E0203, `Missing field '${fn_name}' in variant '${variant_name}'`, span,
-            { kind: "missing_field", field: fn_name, type: variant_name, available: field_names });
-        }
+        type_error(ctx, E.E0203, `Missing field '${fn_name}' in variant '${variant_name}'`, span,
+          { kind: "missing_field", field: fn_name, type: variant_name, available: field_names });
       }
     }
   }

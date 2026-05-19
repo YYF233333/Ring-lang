@@ -75,8 +75,6 @@ const cases: TestCase[] = [
   { file: "struct_update_test.ring", expected: "struct update: all tests passed\n" },
   { file: "struct_update_enum_test.ring", expected: "struct update enum: all tests passed\n" },
   { file: "struct_update_generic_test.ring", expected: "struct update generic: all tests passed\n" },
-  { file: "optional_field_test.ring", expected: "optional field: all tests passed\n" },
-  { file: "optional_field_enum_test.ring", expected: "optional field enum: all tests passed\n" },
   { file: "ufcs_basic.ring", expected: "1\n" },
   { file: "match_guard_multi.ring", expected: "big circle\nsmall circle\nsquare\nrectangle\n" },
   { file: "match_nested.ring", expected: "positive\nnon-positive\nnothing\n" },
