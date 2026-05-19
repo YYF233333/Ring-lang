@@ -10,6 +10,7 @@ import { CollectingSink, make_diagnostic } from "./diagnostics/index.js";
 import { enrich } from "./diagnostics/suggestions.js";
 import { format_human, format_llm } from "./diagnostics/formatter.js";
 import { CompileError } from "./errors.js";
+import { compile_project } from "./modules/compiler.js";
 
 type ErrorFormat = "human" | "llm";
 
@@ -90,6 +91,67 @@ async function main(): Promise<void> {
       console.error("[DEBUG] AST:");
       console.error(JSON.stringify(ast, null, 2).slice(0, 2000));
       console.error("");
+    }
+
+    // Multi-file mode: if the entry file has `use` declarations, use project compilation
+    if (ast.uses.length > 0) {
+      const result = compile_project(filePath, sink);
+      if (!result.success) {
+        let diagnostics = result.diagnostics;
+        diagnostics = enrich(diagnostics);
+        if (error_format === "llm") {
+          console.log(format_llm(diagnostics, filePath));
+        } else {
+          console.error(format_human(diagnostics, source));
+        }
+        process.exit(1);
+      }
+
+      const js = result.js;
+      if (debug) {
+        console.error("[DEBUG] Generated JS (multi-file):");
+        console.error(js);
+        console.error("");
+      }
+
+      switch (command) {
+        case "check":
+          console.log("OK");
+          break;
+        case "build": {
+          const outPath = filePath.replace(/\.ring$/, ".js");
+          fs.writeFileSync(outPath, js, "utf-8");
+          console.log(`Compiled: ${outPath}`);
+          break;
+        }
+        case "run": {
+          const tmpDir = path.dirname(filePath);
+          const tmpFile = path.join(tmpDir, `.ring_tmp_${Date.now()}.js`);
+          fs.writeFileSync(tmpFile, js, "utf-8");
+          try {
+            const output = execSync(`node "${tmpFile}"`, {
+              encoding: "utf-8",
+              stdio: ["pipe", "pipe", "pipe"],
+            });
+            if (output) {
+              process.stdout.write(output);
+            }
+          } catch (execErr: unknown) {
+            const err = execErr as { stdout?: string; stderr?: string; status?: number };
+            if (err.stdout) process.stdout.write(err.stdout);
+            if (err.stderr) process.stderr.write(err.stderr);
+            process.exit(err.status ?? 1);
+          } finally {
+            try { fs.unlinkSync(tmpFile); } catch {}
+          }
+          break;
+        }
+        default: {
+          console.error(`Unknown command: ${command}`);
+          usage();
+        }
+      }
+      return;
     }
 
     const { program: hir } = check(ast, sink);

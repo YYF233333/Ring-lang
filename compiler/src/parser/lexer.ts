@@ -36,6 +36,8 @@ export enum TokenKind {
   While = "while",
   Break = "break",
   Continue = "continue",
+  Use = "use",
+  As = "as",
 
   // Literals
   IntLit = "int_lit",
@@ -77,6 +79,7 @@ export enum TokenKind {
   RBracket = "]",
   Comma = ",",
   Colon = ":",
+  ColonColon = "::",
   Dot = ".",
   DotDot = "..",
   DotDotEq = "..=",
@@ -120,6 +123,8 @@ const KEYWORDS: Record<string, TokenKind> = {
   while: TokenKind.While,
   break: TokenKind.Break,
   continue: TokenKind.Continue,
+  use: TokenKind.Use,
+  as: TokenKind.As,
 };
 
 export interface Token {
@@ -386,7 +391,9 @@ export class Lexer {
       case "[": return this.make_token(TokenKind.LBracket, "[", start);
       case "]": return this.make_token(TokenKind.RBracket, "]", start);
       case ",": return this.make_token(TokenKind.Comma, ",", start);
-      case ":": return this.make_token(TokenKind.Colon, ":", start);
+      case ":":
+        if (this.peek() === ":") { this.advance(); return this.make_token(TokenKind.ColonColon, "::", start); }
+        return this.make_token(TokenKind.Colon, ":", start);
       case ";": return this.make_token(TokenKind.Semi, ";", start);
       case "?": return this.make_token(TokenKind.Question, "?", start);
       case ".":

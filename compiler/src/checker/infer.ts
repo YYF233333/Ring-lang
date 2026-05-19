@@ -5,6 +5,7 @@ import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
   Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr, IfExpr,
   BinOp, UnaryOp,
+  UseDecl,
   Span, span_zero,
 } from "../ast/index.js";
 import { assertNever, CompileError } from "../errors.js";
@@ -28,6 +29,7 @@ import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitMethodDef, sub
 import { Substitution, empty_subst, unify, UnificationError, apply, apply_to_effect_row, init_unify_fresh_counter } from "./unify.js";
 import { check_exhaustive } from "./exhaustive.js";
 import { ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block } from "./zonk.js";
+import { ModuleExports } from "../modules/exports.js";
 
 // ============================================================
 // Error helpers
@@ -179,6 +181,159 @@ export class InferEngine {
       }
     }
     return { type: resolved, type_vars, bounds };
+  }
+
+  // ============================================================
+  // Multi-module support
+  // ============================================================
+
+  /**
+   * Inject type definitions from dependency modules into this module's type environment.
+   * Registers struct/enum/effect/trait definitions and impl entries so they are available
+   * for type checking. Called BEFORE check().
+   */
+  inject_module_exports(exports: ModuleExports[]): void {
+    for (const mod of exports) {
+      // Register struct and enum type definitions
+      for (const [name, def] of mod.types) {
+        if ("fields" in def && !("variants" in def)) {
+          // StructDef
+          this.env.structs.set(name, def as import("./env.js").StructDef);
+        } else if ("variants" in def) {
+          // EnumDef
+          const edef = def as import("./env.js").EnumDef;
+          this.env.enums.set(name, edef);
+          // Register variant -> enum mapping
+          for (const variant of edef.variants) {
+            this.env.variant_to_enum.set(variant.name, name);
+          }
+        }
+      }
+
+      // Register effect definitions
+      for (const [name, effdef] of mod.effects) {
+        this.env.effects.set(name, effdef);
+      }
+
+      // Register trait definitions
+      for (const [name, tdef] of mod.traits) {
+        this.env.traits.set(name, tdef);
+      }
+
+      // Register trait impls
+      for (const impl of mod.trait_impls) {
+        this.env.trait_impls.push(impl);
+      }
+
+      // Merge impl_methods
+      for (const [type_name, methods] of mod.impl_methods) {
+        const existing = this.env.impl_methods.get(type_name);
+        if (existing) {
+          for (const [method_name, scheme] of methods) {
+            existing.set(method_name, scheme);
+          }
+        } else {
+          this.env.impl_methods.set(type_name, new Map(methods));
+        }
+      }
+    }
+  }
+
+  /**
+   * Resolve use declarations: bind imported symbols into the current scope.
+   * Called AFTER inject_module_exports() and BEFORE check().
+   */
+  resolve_uses(uses: UseDecl[], available_modules: ModuleExports[]): void {
+    // Build module_key -> ModuleExports lookup
+    const module_map = new Map<string, ModuleExports>();
+    for (const mod of available_modules) {
+      module_map.set(mod.module_key, mod);
+    }
+
+    for (const use_decl of uses) {
+      const module_key = use_decl.path.segments.join("::");
+      const mod = module_map.get(module_key);
+
+      if (!mod) {
+        const diag = make_diagnostic(
+          E.E0702,
+          "error",
+          `Module '${module_key}' not found`,
+          use_decl.path.span,
+          { kind: "other", detail: `available modules: ${[...module_map.keys()].join(", ")}` },
+        );
+        this.sink.report(diag);
+        continue;
+      }
+
+      if (use_decl.imports.kind === "named") {
+        for (const { name, alias, span } of use_decl.imports.names) {
+          const local_name = alias ?? name;
+          let found = false;
+
+          // Check values (functions, variant constructors)
+          const val_scheme = mod.values.get(name);
+          if (val_scheme) {
+            this.env.bind(local_name, val_scheme);
+            found = true;
+          }
+
+          // Check types (struct/enum)
+          const type_def = mod.types.get(name);
+          if (type_def) {
+            found = true;
+            // For enums, also bind variant constructors
+            if ("variants" in type_def) {
+              const edef = type_def as import("./env.js").EnumDef;
+              for (const variant of edef.variants) {
+                const vscheme = mod.values.get(variant.name);
+                if (vscheme) {
+                  this.env.bind(variant.name, vscheme);
+                }
+              }
+            }
+          }
+
+          // Check effects
+          if (mod.effects.has(name)) {
+            found = true;
+          }
+
+          // Check traits
+          if (mod.traits.has(name)) {
+            found = true;
+          }
+
+          if (!found) {
+            const diag = make_diagnostic(
+              E.E0703,
+              "error",
+              `Symbol '${name}' not found in module '${module_key}'`,
+              span,
+              { kind: "other", detail: `exported symbols: ${[...mod.values.keys(), ...mod.types.keys(), ...mod.effects.keys(), ...mod.traits.keys()].join(", ")}` },
+            );
+            this.sink.report(diag);
+          }
+        }
+      } else {
+        // kind === "module": import all exported values directly
+        for (const [name, scheme] of mod.values) {
+          this.env.bind(name, scheme);
+        }
+        // Also bind enum variant constructors for all exported enum types
+        for (const [, type_def] of mod.types) {
+          if ("variants" in type_def) {
+            const edef = type_def as import("./env.js").EnumDef;
+            for (const variant of edef.variants) {
+              const vscheme = mod.values.get(variant.name);
+              if (vscheme) {
+                this.env.bind(variant.name, vscheme);
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   // ============================================================

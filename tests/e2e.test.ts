@@ -232,6 +232,83 @@ describe("e2e: ring check (negative — should reject)", () => {
   }
 });
 
+// ============================================================
+// Multi-file module tests
+// ============================================================
+
+interface ModuleTestCase {
+  dir: string;
+  expected: string;
+}
+
+const module_cases: ModuleTestCase[] = [
+  { dir: "basic_import", expected: "hello from lib\n" },
+  { dir: "import_struct", expected: "5\n" },
+  { dir: "import_enum", expected: "red\n" },
+  { dir: "multi_import", expected: "7\n12\n" },
+  { dir: "diamond_dep", expected: "11\n12\n" },
+  { dir: "pub_use", expected: "re-exported\n" },
+  { dir: "cross_module_method", expected: "75\n" },
+  { dir: "io_in_main", expected: "7\n" },
+  { dir: "cross_option", expected: "42\n99\n" },
+  { dir: "cross_effect", expected: "5\n-1\n" },
+  { dir: "cross_trait", expected: "Rex\n" },
+];
+
+const MODULES_DIR = path.resolve(REPO_ROOT, "tests/cases/modules");
+
+describe("e2e: multi-file modules (ring run)", () => {
+  for (const tc of module_cases) {
+    test(`modules/${tc.dir}`, () => {
+      const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
+      assert.ok(fs.existsSync(mainFile), `Test entry not found: ${mainFile}`);
+      const output = execSync(`node "${CLI_PATH}" run "${mainFile}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 15000,
+      });
+      assert.strictEqual(output, tc.expected);
+    });
+  }
+});
+
+describe("e2e: multi-file modules (ring check)", () => {
+  for (const tc of module_cases) {
+    test(`modules/${tc.dir} check`, () => {
+      const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
+      const output = execSync(`node "${CLI_PATH}" check "${mainFile}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 15000,
+      });
+      assert.strictEqual(output.trim(), "OK");
+    });
+  }
+});
+
+describe("e2e: multi-file modules (negative)", () => {
+  test("modules/error_not_found should fail with 'not found'", () => {
+    const mainFile = path.join(MODULES_DIR, "error_not_found", "main.ring");
+    assert.ok(fs.existsSync(mainFile), `Test entry not found: ${mainFile}`);
+    try {
+      execSync(`node "${CLI_PATH}" check "${mainFile}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 15000,
+      });
+      assert.fail("Expected compilation to fail");
+    } catch (err: any) {
+      const stderr = err.stderr?.toString() ?? "";
+      const stdout = err.stdout?.toString() ?? "";
+      const output = stderr + stdout + (err.message ?? "");
+      assert.ok(
+        output.toLowerCase().includes("not found"),
+        `Expected error containing "not found", got: ${output.slice(0, 200)}`
+      );
+    }
+  });
+});
+
 describe("e2e: --error-format=llm", () => {
   test("outputs valid JSON for parse errors", () => {
     const filePath = path.join(CASES_DIR, "error_multi_parse.ring");

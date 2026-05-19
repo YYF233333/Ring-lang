@@ -449,6 +449,28 @@ export interface IfLetStmt {
 }
 
 // ============================================================
+// Use declarations (imports)
+// ============================================================
+
+export interface UsePath {
+  segments: string[];
+  span: Span;
+}
+
+export type UseImport =
+  | { kind: "named"; names: { name: string; alias?: string; span: Span }[] }
+  | { kind: "module" };
+
+export interface UseDecl {
+  kind: "use_decl";
+  path: UsePath;
+  imports: UseImport;
+  alias?: string;
+  is_pub: boolean;
+  span: Span;
+}
+
+// ============================================================
 // Declarations
 // ============================================================
 
@@ -563,6 +585,7 @@ export interface TestDecl {
 // ============================================================
 
 export interface Program {
+  uses: UseDecl[];
   decls: Decl[];
   span: Span;
 }

@@ -792,3 +792,55 @@ describe("Tuple parsing", () => {
     assert.equal(tail.elements.length, 2);
   });
 });
+
+describe("use declarations", () => {
+  it("parse use single symbol", () => {
+    const ast = Parser.parse("use parser::Token\nfn main() {}", "test.ring");
+    assert.equal(ast.uses.length, 1);
+    assert.deepEqual(ast.uses[0].path.segments, ["parser"]);
+    assert.equal(ast.uses[0].imports.kind, "named");
+    if (ast.uses[0].imports.kind === "named") {
+      assert.equal(ast.uses[0].imports.names[0].name, "Token");
+    }
+    assert.equal(ast.uses[0].is_pub, false);
+  });
+
+  it("parse use multiple symbols", () => {
+    const ast = Parser.parse("use parser::{Token, parse}\nfn main() {}", "test.ring");
+    assert.equal(ast.uses.length, 1);
+    assert.equal(ast.uses[0].imports.kind, "named");
+    if (ast.uses[0].imports.kind === "named") {
+      assert.equal(ast.uses[0].imports.names.length, 2);
+    }
+  });
+
+  it("parse use whole module", () => {
+    const ast = Parser.parse("use parser\nfn main() {}", "test.ring");
+    assert.equal(ast.uses[0].imports.kind, "module");
+  });
+
+  it("parse use with alias", () => {
+    const ast = Parser.parse("use parser as p\nfn main() {}", "test.ring");
+    assert.equal(ast.uses[0].alias, "p");
+  });
+
+  it("parse pub use", () => {
+    const ast = Parser.parse("pub use parser::Token\nfn main() {}", "test.ring");
+    assert.equal(ast.uses[0].is_pub, true);
+  });
+
+  it("parse nested path", () => {
+    const ast = Parser.parse("use checker::env::TypeEnv\nfn main() {}", "test.ring");
+    assert.deepEqual(ast.uses[0].path.segments, ["checker", "env"]);
+    if (ast.uses[0].imports.kind === "named") {
+      assert.equal(ast.uses[0].imports.names[0].name, "TypeEnv");
+    }
+  });
+
+  it("parse use with name alias", () => {
+    const ast = Parser.parse("use parser::{Token as T}\nfn main() {}", "test.ring");
+    if (ast.uses[0].imports.kind === "named") {
+      assert.equal(ast.uses[0].imports.names[0].alias, "T");
+    }
+  });
+});

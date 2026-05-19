@@ -32,6 +32,14 @@ export const E = {
   // Control flow errors (E02xx continued)
   E0205: "E0205", // assignment to immutable variable
   E0206: "E0206", // break/continue outside loop
+
+  // Module errors (E07xx)
+  E0701: "E0701", // import non-pub symbol
+  E0702: "E0702", // module not found
+  E0703: "E0703", // symbol not found in module
+  E0704: "E0704", // circular dependency
+  E0705: "E0705", // duplicate import
+  E0706: "E0706", // use not at file top
 } as const;
 
 export const ERROR_DESCRIPTIONS: Record<string, string> = {
@@ -55,4 +63,10 @@ export const ERROR_DESCRIPTIONS: Record<string, string> = {
   [E.E0601]: "Non-exhaustive pattern match",
   [E.E0205]: "Assignment to immutable variable",
   [E.E0206]: "Break/continue outside loop",
+  [E.E0701]: "Importing non-public symbol",
+  [E.E0702]: "Module not found",
+  [E.E0703]: "Symbol not found in module",
+  [E.E0704]: "Circular dependency detected",
+  [E.E0705]: "Duplicate import",
+  [E.E0706]: "Use declaration must appear before other declarations",
 };

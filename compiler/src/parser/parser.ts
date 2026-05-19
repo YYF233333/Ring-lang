@@ -1,6 +1,7 @@
 // Ring-lang Parser — recursive descent + Pratt parsing for expressions
 import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
+  UseDecl, UsePath, UseImport,
   Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt, BreakStmt, ContinueStmt,
   ForInStmt, LetDestructureStmt, IfLetStmt,
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
@@ -96,9 +97,53 @@ export class Parser {
 
   parse_program(): Program {
     const start = this.current_span_start();
+    const uses: UseDecl[] = [];
     const decls: Decl[] = [];
+    let decls_started = false;
+
     while (!this.at_end()) {
       if (this.peek().kind === TokenKind.Error) { this.advance(); continue; }
+
+      // Check for `use` or `pub use` before regular declarations
+      if (this.check(TokenKind.Use)) {
+        if (decls_started) {
+          this.report_error(E.E0706, "Use declaration must appear before other declarations", this.peek().span);
+        }
+        try {
+          uses.push(this.parse_use_decl(false));
+        } catch (e) {
+          if (e instanceof CompileError) throw e;
+          this.synchronize();
+        }
+        continue;
+      }
+
+      if (this.check(TokenKind.Pub)) {
+        // Speculatively check if this is `pub use`
+        const save_pos = this.pos;
+        const save_errors = this.error_count;
+        const sink_checkpoint = this.sink.save?.();
+        this.advance(); // consume `pub`
+        if (this.check(TokenKind.Use)) {
+          if (decls_started) {
+            this.report_error(E.E0706, "Use declaration must appear before other declarations", this.tokens[save_pos].span);
+          }
+          try {
+            uses.push(this.parse_use_decl(true));
+          } catch (e) {
+            if (e instanceof CompileError) throw e;
+            this.synchronize();
+          }
+          continue;
+        }
+        // Not `pub use` — restore and fall through to regular decl parsing
+        this.pos = save_pos;
+        this.error_count = save_errors;
+        if (sink_checkpoint !== undefined) this.sink.restore?.(sink_checkpoint);
+      }
+
+      // Regular declaration
+      decls_started = true;
       try {
         decls.push(this.parse_decl());
       } catch (e) {
@@ -111,7 +156,87 @@ export class Parser {
       throw new CompileError([...this.sink.diagnostics()]);
     }
     const end = this.current_span_start();
-    return { decls, span: this.make_span(start, end) };
+    return { uses, decls, span: this.make_span(start, end) };
+  }
+
+  // ============================================================
+  // Use declarations
+  // ============================================================
+
+  private parse_use_decl(is_pub: boolean): UseDecl {
+    const start = this.current_span_start();
+    this.expect(TokenKind.Use);
+
+    // Parse path segments: Ident (:: Ident)*
+    // Stop before :: if next is LBrace (grouped import)
+    const segments: string[] = [];
+    const path_start = this.current_span_start();
+    segments.push(this.expect(TokenKind.Ident).value);
+
+    while (this.check(TokenKind.ColonColon)) {
+      // Peek past :: to see what follows
+      this.advance(); // consume ::
+
+      if (this.check(TokenKind.LBrace)) {
+        // `use path::{...}` — stop, parse grouped imports
+        break;
+      }
+
+      // Must be another Ident path segment
+      segments.push(this.expect(TokenKind.Ident).value);
+    }
+
+    const path_end = this.current_span_start();
+    let path: UsePath;
+    let imports: UseImport;
+    let alias: string | undefined;
+
+    if (this.check(TokenKind.LBrace)) {
+      // Grouped import: `use path::{name [as alias], ...}`
+      path = { segments, span: this.make_span(path_start, path_end) };
+      this.advance(); // consume {
+      const names: { name: string; alias?: string; span: Span }[] = [];
+      while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+        const name_start = this.current_span_start();
+        const name = this.expect(TokenKind.Ident).value;
+        let name_alias: string | undefined;
+        if (this.try_consume(TokenKind.As)) {
+          name_alias = this.expect(TokenKind.Ident).value;
+        }
+        const name_end = this.current_span_start();
+        names.push({ name, alias: name_alias, span: this.make_span(name_start, name_end) });
+        if (!this.try_consume(TokenKind.Comma)) break;
+      }
+      this.expect(TokenKind.RBrace);
+      imports = { kind: "named", names };
+    } else if (this.check(TokenKind.As)) {
+      // Module alias: `use path as alias`
+      path = { segments, span: this.make_span(path_start, path_end) };
+      this.advance(); // consume `as`
+      alias = this.expect(TokenKind.Ident).value;
+      imports = { kind: "module" };
+    } else if (segments.length > 1) {
+      // Multi-segment path: last segment is the imported name, rest is module path
+      // e.g. `use checker::env::TypeEnv` → path=["checker","env"], name="TypeEnv"
+      const name = segments.pop()!;
+      path = { segments, span: this.make_span(path_start, path_end) };
+      const name_span = this.make_span(path_start, path_end); // approximate
+      imports = { kind: "named", names: [{ name, span: name_span }] };
+    } else {
+      // Single segment, no :: — whole module import: `use parser`
+      path = { segments, span: this.make_span(path_start, path_end) };
+      imports = { kind: "module" };
+    }
+
+    const end = this.current_span_start();
+    return {
+      kind: "use_decl",
+      path,
+      imports,
+      alias,
+      is_pub,
+      span: this.make_span(start, end),
+    };
   }
 
   // ============================================================
@@ -119,16 +244,7 @@ export class Parser {
   // ============================================================
 
   private parse_decl(): Decl {
-    let pub_span: Span | undefined;
-    if (this.check(TokenKind.Pub)) {
-      pub_span = this.peek().span;
-    }
     const is_pub = this.try_consume(TokenKind.Pub);
-    if (is_pub && pub_span) {
-      this.sink.report(make_diagnostic("W0002", "warning",
-        "Visibility modifiers are not yet enforced; 'pub' is parsed but has no effect",
-        pub_span, { kind: "other", detail: "pub parsed but not enforced" }));
-    }
     const tok = this.peek();
 
     switch (tok.kind) {
@@ -1430,7 +1546,8 @@ export class Parser {
         tok.kind === TokenKind.Impl ||
         tok.kind === TokenKind.Effect ||
         tok.kind === TokenKind.Pub ||
-        tok.kind === TokenKind.Test
+        tok.kind === TokenKind.Test ||
+        tok.kind === TokenKind.Use
       ) {
         return;
       }

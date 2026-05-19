@@ -3,7 +3,7 @@
 import {
   HProgram, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl,
   HEffectDecl, HTestDecl, HTraitDecl, HStmt, HExpr, HBlock,
-  variant_js_name, trait_dict_name, evidence_param_name,
+  trait_dict_name, evidence_param_name,
   trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD,
   OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
@@ -32,9 +32,18 @@ const JS_RESERVED = new Set([
   "Int8Array", "Uint8Array", "Float32Array", "Float64Array",
 ]);
 
-function safe_ident(name: string): string {
+export function safe_ident(name: string): string {
   if (JS_RESERVED.has(name)) return `_${name}`;
   return name;
+}
+
+export interface CodegenOptions {
+  module_prefix?: string;               // e.g. "parser" — prefix for this module's declarations
+  imports_map?: Map<string, string>;     // local name → qualified JS name for imports
+  skip_preamble?: boolean;              // skip runtime code + Option constructors
+  skip_main_call?: boolean;             // skip main() auto-invocation
+  external_struct_fields?: Map<string, string[]>;     // pre-populated struct field orders from deps
+  external_impl_methods?: Map<string, string | undefined>; // pre-populated impl methods from deps
 }
 
 const LIST_HOF_JS: Record<string, string> = {
@@ -54,6 +63,34 @@ class CodeGenerator {
   private trait_decls: Map<string, HTraitDecl> = new Map();
   private dt_counter = 0;
   private loop_counter = 0;
+  private module_prefix?: string;
+  private imports_map?: Map<string, string>;
+  private skip_preamble: boolean;
+  private skip_main_call: boolean;
+  private local_names = new Set<string>();  // names declared in this module (for qualify)
+
+  constructor(options?: CodegenOptions) {
+    this.skip_preamble = options?.skip_preamble ?? false;
+    this.skip_main_call = options?.skip_main_call ?? false;
+    if (options?.module_prefix) this.module_prefix = options.module_prefix;
+    if (options?.imports_map) this.imports_map = options.imports_map;
+    if (options?.external_struct_fields) {
+      for (const [k, v] of options.external_struct_fields) this.struct_field_order.set(k, v);
+    }
+    if (options?.external_impl_methods) {
+      for (const [k, v] of options.external_impl_methods) this.impl_methods.set(k, v);
+    }
+  }
+
+  private qualify(name: string): string {
+    if (this.imports_map?.has(name)) return this.imports_map.get(name)!;
+    // Only qualify names that are locally declared in this module.
+    // Built-in names (print, assert, Option_some, etc.) pass through unqualified.
+    if (this.module_prefix && this.local_names.has(name)) {
+      return `${this.module_prefix}$${safe_ident(name)}`;
+    }
+    return safe_ident(name);
+  }
 
   private indent(): string {
     return "  ".repeat(this.indent_level);
@@ -80,13 +117,33 @@ class CodeGenerator {
   // ============================================================
 
   generate(program: HProgram): string {
+    // Collect names declared in this module (for qualify — only these get module_prefix)
+    for (const decl of program.decls) {
+      switch (decl.kind) {
+        case "fn_decl": this.local_names.add(decl.name); break;
+        case "struct_decl": this.local_names.add(decl.name); break;
+        case "enum_decl":
+          this.local_names.add(decl.name);
+          for (const v of decl.variants) {
+            this.local_names.add(v.name);
+            // Also add the resolved_name form: "EnumName_variant"
+            this.local_names.add(`${decl.name}_${v.name}`);
+          }
+          break;
+        case "impl_decl": this.local_names.add(decl.target_type); break;
+        case "trait_decl": this.local_names.add(decl.name); break;
+        case "effect_decl": this.local_names.add(decl.name); break;
+        case "test_decl": break;
+      }
+    }
+
     // Collect struct field orders and impl method signatures
     for (const decl of program.decls) {
       if (decl.kind === "struct_decl") {
-        this.struct_field_order.set(decl.name, decl.fields.map(f => f.name));
+        this.struct_field_order.set(this.qualify(decl.name), decl.fields.map(f => f.name));
       } else if (decl.kind === "impl_decl") {
         for (const method of decl.methods) {
-          const key = `${decl.target_type}.${method.name}`;
+          const key = `${this.qualify(decl.target_type)}.${method.name}`;
           if (!decl.trait_name) {
             this.impl_methods.set(key, undefined);
           } else if (!this.impl_methods.has(key)) {
@@ -99,19 +156,22 @@ class CodeGenerator {
     }
 
     // Register built-in impl methods from shared registry (hir/index.ts)
-    for (const m of CELL_METHODS) this.impl_methods.set(`${BUILTIN_CELL}.${m}`, undefined);
-    for (const m of STR_METHODS) this.impl_methods.set(`${BUILTIN_STR}.${m}`, undefined);
-    for (const m of LIST_NON_HOF_METHODS) this.impl_methods.set(`${BUILTIN_LIST}.${m}`, undefined);
-    for (const m of MAP_NON_HOF_METHODS) this.impl_methods.set(`${BUILTIN_MAP}.${m}`, undefined);
-    for (const m of SET_NON_HOF_METHODS) this.impl_methods.set(`${BUILTIN_SET}.${m}`, undefined);
+    // Keys use safe_ident to match UFCS lookup which uses qualify()
+    for (const m of CELL_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_CELL)}.${m}`, undefined);
+    for (const m of STR_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_STR)}.${m}`, undefined);
+    for (const m of LIST_NON_HOF_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_LIST)}.${m}`, undefined);
+    for (const m of MAP_NON_HOF_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_MAP)}.${m}`, undefined);
+    for (const m of SET_NON_HOF_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_SET)}.${m}`, undefined);
 
-    // Emit runtime preamble
-    this.emit_raw(RUNTIME_CODE);
+    // Emit runtime preamble (skipped for non-root modules in multi-file builds)
+    if (!this.skip_preamble) {
+      this.emit_raw(RUNTIME_CODE);
 
-    // Option<T> constructors
-    this.emit_raw(`function Option_some(${OPTION_PAYLOAD_FIELD}) { return { ${ENUM_TAG_FIELD}: "${OPTION_SOME_TAG}", ${OPTION_PAYLOAD_FIELD} }; }`);
-    this.emit_raw(`const Option_none = Object.freeze({ ${ENUM_TAG_FIELD}: "${OPTION_NONE_TAG}" });`);
-    this.emit_raw("");
+      // Option<T> constructors
+      this.emit_raw(`function Option_some(${OPTION_PAYLOAD_FIELD}) { return { ${ENUM_TAG_FIELD}: "${OPTION_SOME_TAG}", ${OPTION_PAYLOAD_FIELD} }; }`);
+      this.emit_raw(`const Option_none = Object.freeze({ ${ENUM_TAG_FIELD}: "${OPTION_NONE_TAG}" });`);
+      this.emit_raw("");
+    }
 
     // Emit declarations
     for (const decl of program.decls) {
@@ -120,16 +180,19 @@ class CodeGenerator {
     }
 
     // Auto-call main() if present, with top-level evidence if needed
-    const main_decl = program.decls.find(
-      d => d.kind === "fn_decl" && d.name === "main"
-    ) as HFnDecl | undefined;
-    if (main_decl) {
-      const ev_params = this.get_evidence_params(main_decl.effects);
-      if (ev_params.length > 0) {
-        this.emit_toplevel_evidence(main_decl.effects);
-        this.emit(`main(${ev_params.join(", ")});`);
-      } else {
-        this.emit("main();");
+    if (!this.skip_main_call) {
+      const main_decl = program.decls.find(
+        d => d.kind === "fn_decl" && d.name === "main"
+      ) as HFnDecl | undefined;
+      if (main_decl) {
+        const fn_name = this.qualify("main");
+        const ev_params = this.get_evidence_params(main_decl.effects);
+        if (ev_params.length > 0) {
+          this.emit_toplevel_evidence(main_decl.effects);
+          this.emit(`${fn_name}(${ev_params.join(", ")});`);
+        } else {
+          this.emit(`${fn_name}();`);
+        }
       }
     }
 
@@ -154,7 +217,7 @@ class CodeGenerator {
   }
 
   private emit_fn_decl(decl: HFnDecl, prefix?: string): void {
-    const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : safe_ident(decl.name);
+    const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : this.qualify(decl.name);
     const param_names = decl.params.map(p => safe_ident(p.name));
     const dict_params = (decl.trait_bounds ?? []).map(b => trait_bound_param_name(b.type_param, b.trait_name));
     const ev_params = this.get_evidence_params(decl.effects);
@@ -188,7 +251,7 @@ class CodeGenerator {
   private emit_struct_decl(decl: HStructDecl): void {
     const raw_fields = decl.fields.map(f => f.name);
     const fields = raw_fields.map(f => safe_ident(f));
-    this.emit(`class ${safe_ident(decl.name)} {`);
+    this.emit(`class ${this.qualify(decl.name)} {`);
     this.push_indent();
     this.emit(`constructor(${fields.join(", ")}) {`);
     this.push_indent();
@@ -203,7 +266,7 @@ class CodeGenerator {
 
   private emit_enum_decl(decl: HEnumDecl): void {
     for (const variant of decl.variants) {
-      const js_name = variant_js_name(decl.name, variant.name);
+      const js_name = `${this.qualify(decl.name)}_${variant.name}`;
       if (variant.fields.length === 0) {
         this.emit(
           `const ${js_name} = Object.freeze({ ${ENUM_TAG_FIELD}: "${variant.name}" });`
@@ -222,8 +285,8 @@ class CodeGenerator {
 
   private emit_impl_decl(decl: HImplDecl): void {
     const prefix = decl.trait_name
-      ? `${safe_ident(decl.target_type)}_${safe_ident(decl.trait_name)}`
-      : safe_ident(decl.target_type);
+      ? `${this.qualify(decl.target_type)}_${safe_ident(decl.trait_name)}`
+      : this.qualify(decl.target_type);
     for (const method of decl.methods) {
       this.emit_fn_decl(method, prefix);
     }
@@ -233,10 +296,10 @@ class CodeGenerator {
   }
 
   private emit_trait_dictionary(decl: HImplDecl): void {
-    const dict_name = trait_dict_name(decl.target_type, decl.trait_name!);
+    const dict_name = trait_dict_name(this.qualify(decl.target_type), decl.trait_name!);
     const impl_method_names = new Set(decl.methods.map(m => m.name));
     const entries = decl.methods.map(m => {
-      const fn_name = `${safe_ident(decl.target_type)}_${safe_ident(decl.trait_name!)}_${safe_ident(m.name)}`;
+      const fn_name = `${this.qualify(decl.target_type)}_${safe_ident(decl.trait_name!)}_${safe_ident(m.name)}`;
       return `${safe_ident(m.name)}: ${fn_name}`;
     });
     const trait_decl = this.trait_decls.get(decl.trait_name!);
@@ -515,7 +578,14 @@ class CodeGenerator {
       case "bool_lit":
         return expr.value ? "true" : "false";
       case "ident": {
-        const name = safe_ident(expr.resolved_name ?? expr.name);
+        // resolved_name is set for enum variants (e.g. "Color_red").
+        // For both resolved_name and plain name, use qualify() which handles:
+        //   1. imports_map lookup (cross-module references)
+        //   2. module_prefix for local declarations
+        //   3. safe_ident fallback for builtins
+        const name = expr.resolved_name
+          ? this.qualify(expr.resolved_name)
+          : this.qualify(expr.name);
         if (expr.dict_closure_dicts && expr.dict_closure_dicts.length > 0) {
           const fn_type = expr.type;
           if (fn_type.kind === "fn") {
@@ -673,12 +743,12 @@ class CodeGenerator {
         : recv_type.kind === "int" ? BUILTIN_INT
         : recv_type.kind === "float" ? BUILTIN_FLOAT
         : null;
-      const impl_key = type_name ? `${type_name}.${method}` : null;
+      const impl_key = type_name ? `${this.qualify(type_name)}.${method}` : null;
       if (type_name && impl_key && this.impl_methods.has(impl_key)) {
         const trait_name = this.impl_methods.get(impl_key);
         const fn_name = trait_name
-          ? `${safe_ident(type_name)}_${safe_ident(trait_name)}_${safe_ident(method)}`
-          : `${safe_ident(type_name)}_${safe_ident(method)}`;
+          ? `${this.qualify(type_name)}_${safe_ident(trait_name)}_${safe_ident(method)}`
+          : `${this.qualify(type_name)}_${safe_ident(method)}`;
         const receiver = this.gen_expr(expr.callee.receiver);
         const args = expr.args.map(a => this.gen_expr(a)).join(", ");
         const all_args = args ? `${receiver}, ${args}` : receiver;
@@ -691,24 +761,24 @@ class CodeGenerator {
     // Task 8c: Pass dictionary args + evidence args at call sites
     const callee = this.gen_expr(expr.callee);
     const args = expr.args.map(a => this.gen_expr(a)).join(", ");
-    const dict_args = (expr.resolved_dicts ?? []).join(", ");
+    const dict_args = (expr.resolved_dicts ?? []).map(d => this.qualify(d)).join(", ");
     const ev_args = this.get_callee_evidence_args(expr.callee.type);
     const all_args = [args, dict_args, ev_args].filter(s => s.length > 0).join(", ");
     return `${callee}(${all_args})`;
   }
 
   private gen_struct_lit(expr: HExpr & { kind: "struct_lit" }): string {
-    const declared_order = this.struct_field_order.get(expr.name);
+    const declared_order = this.struct_field_order.get(this.qualify(expr.name));
     if (declared_order) {
       const field_map = new Map(expr.fields.map(f => [f.name, f.value]));
       const args = declared_order.map(name => {
         const val = field_map.get(name);
         return val ? this.gen_expr(val) : "undefined";
       }).join(", ");
-      return `new ${safe_ident(expr.name)}(${args})`;
+      return `new ${this.qualify(expr.name)}(${args})`;
     }
     const args = expr.fields.map(f => this.gen_expr(f.value)).join(", ");
-    return `new ${safe_ident(expr.name)}(${args})`;
+    return `new ${this.qualify(expr.name)}(${args})`;
   }
 
   private gen_match(expr: HExpr & { kind: "match_expr" }): string {
@@ -1023,7 +1093,7 @@ function extract_effect_names(effects: EffectRow): string[] {
 // Public API
 // ============================================================
 
-export function generate(program: HProgram): string {
-  const gen = new CodeGenerator();
+export function generate(program: HProgram, options?: CodegenOptions): string {
+  const gen = new CodeGenerator(options);
   return gen.generate(program);
 }
