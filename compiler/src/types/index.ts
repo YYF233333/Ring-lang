@@ -261,10 +261,18 @@ export interface RowMergeResult {
   tails_to_unify?: [number, number];
 }
 
+function effects_same_identity(a: Effect, b: Effect): boolean {
+  if (a.kind !== b.kind) return false;
+  switch (a.kind) {
+    case "io": case "mut": case "fail": return true;
+    case "custom": return a.name === (b as CustomEffect).name;
+  }
+}
+
 export function row_merge(a: EffectRow, b: EffectRow): RowMergeResult {
   const merged: Effect[] = [...a.effects];
   for (const eff of b.effects) {
-    if (!merged.some(e => effects_equal(e, eff))) {
+    if (!merged.some(e => effects_same_identity(e, eff))) {
       merged.push(eff);
     }
   }

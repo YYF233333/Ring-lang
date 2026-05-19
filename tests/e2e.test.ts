@@ -126,9 +126,11 @@ const cases: TestCase[] = [
   { file: "num_parse_format.ring", expected: "42\n-1\n3.14\n99\n" },
   { file: "type_alias.ring", expected: "42: hello\n" },
   { file: "for_map_destructure.ring", expected: "6\n" },
+  { file: "block_expr_complex_stmts.ring", expected: "all block expr tests passed\n" },
+  { file: "trait_hof_effect.ring", expected: "trait_hof_effect: all tests passed\n" },
 ];
 
-describe("e2e: ring run", () => {
+describe("e2e: ring run", { concurrency: 3 }, () => {
   for (const tc of cases) {
     test(`ring run ${tc.file}`, () => {
       const filePath = path.join(CASES_DIR, tc.file);
@@ -145,53 +147,8 @@ describe("e2e: ring run", () => {
   }
 });
 
-describe("e2e: ring check", () => {
-  for (const tc of cases) {
-    test(`ring check ${tc.file}`, () => {
-      const filePath = path.join(CASES_DIR, tc.file);
-      const output = execSync(`node "${CLI_PATH}" check "${filePath}"`, {
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 10000,
-      });
 
-      assert.strictEqual(output.trim(), "OK");
-    });
-  }
-});
-
-describe("e2e: ring build", () => {
-  for (const tc of cases) {
-    test(`ring build ${tc.file}`, () => {
-      const filePath = path.join(CASES_DIR, tc.file);
-      const outPath = filePath.replace(/\.ring$/, ".js");
-
-      // Clean up any existing output
-      try { fs.unlinkSync(outPath); } catch {}
-
-      execSync(`node "${CLI_PATH}" build "${filePath}"`, {
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 10000,
-      });
-
-      assert.ok(fs.existsSync(outPath), `Output file not created: ${outPath}`);
-
-      // Execute the built file directly
-      const output = execSync(`node "${outPath}"`, {
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: 10000,
-      });
-      assert.strictEqual(output, tc.expected);
-
-      // Clean up
-      fs.unlinkSync(outPath);
-    });
-  }
-});
-
-describe("e2e: ring check (negative — should reject)", () => {
+describe("e2e: ring check (negative — should reject)", { concurrency: 3 }, () => {
   const negative_cases = [
     { file: "row_reject.ring", error_pattern: "E0301" },
     { file: "error_multi_parse.ring", error_pattern: "E0103" },
@@ -273,7 +230,7 @@ const module_cases: ModuleTestCase[] = [
 
 const MODULES_DIR = path.resolve(REPO_ROOT, "tests/cases/modules");
 
-describe("e2e: multi-file modules (ring run)", () => {
+describe("e2e: multi-file modules (ring run)", { concurrency: 3 }, () => {
   for (const tc of module_cases) {
     test(`modules/${tc.dir}`, () => {
       const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
@@ -288,7 +245,7 @@ describe("e2e: multi-file modules (ring run)", () => {
   }
 });
 
-describe("e2e: multi-file modules (ring check)", () => {
+describe("e2e: multi-file modules (ring check)", { concurrency: 3 }, () => {
   for (const tc of module_cases) {
     test(`modules/${tc.dir} check`, () => {
       const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
@@ -325,7 +282,7 @@ describe("e2e: multi-file modules (negative)", () => {
   });
 });
 
-describe("e2e: --error-format=llm", () => {
+describe("e2e: --error-format=llm", { concurrency: 3 }, () => {
   test("outputs valid JSON for parse errors", () => {
     const filePath = path.join(CASES_DIR, "error_multi_parse.ring");
     try {

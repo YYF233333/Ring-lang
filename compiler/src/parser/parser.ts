@@ -477,7 +477,8 @@ export class Parser implements ParserCtx {
         tok.kind === TokenKind.Effect ||
         tok.kind === TokenKind.Pub ||
         tok.kind === TokenKind.Test ||
-        tok.kind === TokenKind.Use
+        tok.kind === TokenKind.Use ||
+        tok.kind === TokenKind.Extern
       ) {
         return;
       }

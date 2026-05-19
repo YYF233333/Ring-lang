@@ -7,7 +7,7 @@ export const E = {
   // Checker general (E02xx)
   E0201: "E0201", // undefined variable
   E0202: "E0202", // arity mismatch
-  E0203: "E0203", // unknown struct
+  E0203: "E0203", // unknown struct / invalid constructor fields
   E0204: "E0204", // unknown type
 
   // Type errors (E03xx)
@@ -48,7 +48,7 @@ export const ERROR_DESCRIPTIONS: Record<string, string> = {
   [E.E0103]: "Expected token",
   [E.E0201]: "Undefined variable",
   [E.E0202]: "Arity mismatch",
-  [E.E0203]: "Unknown struct",
+  [E.E0203]: "Unknown struct or invalid constructor fields",
   [E.E0204]: "Unknown type",
   [E.E0301]: "Type mismatch",
   [E.E0302]: "Infinite type (occurs check)",

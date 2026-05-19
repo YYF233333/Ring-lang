@@ -327,10 +327,13 @@ export function resolve_named_type(ctx: InferCtx, name: string, type_args: TypeE
         if (type_args.length > 0 && type_args.length !== def.type_params.length) {
           type_error(ctx, E.E0301, `Type '${name}' expects ${def.type_params.length} type argument(s), got ${type_args.length}`, span, { kind: "type_mismatch", expected: `${def.type_params.length} type args`, actual: `${type_args.length} type args` });
         }
+        const resolved_params = type_args.length > 0
+          ? type_args.map(a => resolve_type_expr(ctx, a))
+          : def.type_params.map(() => ctx.env.fresh_var());
         return {
           kind: "struct",
           name,
-          type_params: type_args.map(a => resolve_type_expr(ctx, a)),
+          type_params: resolved_params,
           fields: def.fields.map(f => ({ name: f.name, type: f.type, is_pub: f.is_pub })),
         };
       }
@@ -340,10 +343,13 @@ export function resolve_named_type(ctx: InferCtx, name: string, type_args: TypeE
         if (type_args.length > 0 && type_args.length !== def.type_params.length) {
           type_error(ctx, E.E0301, `Type '${name}' expects ${def.type_params.length} type argument(s), got ${type_args.length}`, span, { kind: "type_mismatch", expected: `${def.type_params.length} type args`, actual: `${type_args.length} type args` });
         }
+        const resolved_params = type_args.length > 0
+          ? type_args.map(a => resolve_type_expr(ctx, a))
+          : def.type_params.map(() => ctx.env.fresh_var());
         return {
           kind: "enum",
           name,
-          type_params: type_args.map(a => resolve_type_expr(ctx, a)),
+          type_params: resolved_params,
           variants: def.variants,
         };
       }

@@ -299,16 +299,15 @@ function gen_block_expr(ctx: CodegenCtx, block: HBlock): string {
   if (block.stmts.length === 0 && block.tail) {
     return gen_expr(ctx, block.tail);
   }
-  const parts: string[] = [];
-  parts.push("(function() {");
-  for (const stmt of block.stmts) {
-    parts.push("  " + gen_stmt_inline(ctx, stmt));
-  }
-  if (block.tail) {
-    parts.push(`  return ${gen_expr(ctx, block.tail)};`);
-  }
-  parts.push("})()");
-  return parts.join("\n");
+  const saved_lines = ctx.lines;
+  const saved_indent = ctx.indent_level;
+  ctx.lines = [];
+  ctx.indent_level = 1;
+  ctx.emit_block_body(block);
+  const body_lines = ctx.lines;
+  ctx.lines = saved_lines;
+  ctx.indent_level = saved_indent;
+  return ["(function() {", ...body_lines, "})()"].join("\n");
 }
 
 // ============================================================

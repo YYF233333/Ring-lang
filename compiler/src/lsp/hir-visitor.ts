@@ -4,6 +4,7 @@ import {
   HExpr, HStmt, HBlock, HDecl, HProgram,
   HFnDecl, HImplDecl,
 } from "../hir/index.js";
+import { assertNever } from "../errors.js";
 
 export type WalkAction = "stop" | void;
 
@@ -28,13 +29,22 @@ export function walk_decl(decl: HDecl, v: HirVisitor): WalkAction {
       return walk_impl(decl, v);
     case "test_decl":
       return walk_block(decl.body, v);
-    case "extern_fn_decl":
+    case "trait_decl":
+      for (const method of decl.methods) {
+        if (method.body) {
+          if (walk_block(method.body, v) === "stop") return "stop";
+        }
+      }
       return;
+    case "struct_decl":
+    case "enum_decl":
+    case "effect_decl":
+    case "extern_fn_decl":
     case "extern_type_decl":
     case "type_alias_decl":
       return;
     default:
-      return;
+      return assertNever(decl, "walk_decl");
   }
 }
 

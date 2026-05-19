@@ -7,6 +7,7 @@ import {
 } from "../../hir/index.js";
 import { Span } from "../../ast/index.js";
 import { walk_decl } from "../hir-visitor.js";
+import { assertNever } from "../../errors.js";
 
 interface HoverCandidate {
   type_str: string;
@@ -58,8 +59,11 @@ function find_hover_in_decl(decl: HDecl, pos: Position): HoverCandidate | null {
     case "type_alias_decl": {
       return { type_str: `type ${decl.name} = ${type_to_string(decl.type)}`, span: decl.span };
     }
-    default:
+    case "impl_decl":
+    case "test_decl":
       return null;
+    default:
+      return assertNever(decl, "find_hover_in_decl");
   }
 }
 
@@ -79,9 +83,14 @@ function format_struct_hover(decl: HStructDecl): HoverCandidate {
 
 function format_enum_hover(decl: HEnumDecl): HoverCandidate {
   const tparams = decl.type_params.length > 0 ? `<${decl.type_params.map(p => p.name).join(", ")}>` : "";
-  const variants = decl.variants.map(v =>
-    v.fields.length > 0 ? `${v.name}(${v.fields.map(f => type_to_string(f)).join(", ")})` : v.name
-  ).join(" | ");
+  const variants = decl.variants.map(v => {
+    if (v.fields.length === 0) return v.name;
+    if (v.field_names && v.field_names.length > 0) {
+      const fields = v.field_names.map((n, i) => `${n}: ${type_to_string(v.fields[i])}`).join(", ");
+      return `${v.name} { ${fields} }`;
+    }
+    return `${v.name}(${v.fields.map(f => type_to_string(f)).join(", ")})`;
+  }).join(" | ");
   return { type_str: `enum ${decl.name}${tparams} { ${variants} }`, span: decl.span };
 }
 
