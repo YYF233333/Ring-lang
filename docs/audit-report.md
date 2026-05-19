@@ -15,13 +15,13 @@
 - **验证**: `tests/cases/recursive_enum_test.ring` 编译失败
 - **修复**: 在 `register_enum` 开头先注册 enum 占位类型到 `ctx.env.enums`，再解析 variant 字段，最后更新完整定义。类似于 C 编译器处理 forward declaration。
 
-### B2: 无文件 I/O / OS API
+### B2: ✅ 无文件 I/O / OS API
 - **来源**: Claude C8 + DS C2+C3
 - **文件**: `compiler/src/cli.ts:3-5`, `compiler/src/modules/resolver.ts:5-6`, `compiler/src/checker/checker.ts:1-3`
 - **描述**: 编译器需要 `fs.readFileSync`/`writeFileSync`/`existsSync`、`path.resolve`/`join`/`dirname`/`basename`、`process.argv`/`exit`/`stderr.write`。Ring 目前无法访问任何 OS API。
 - **修复**: 新增 `std/fs.ring`、`std/path.ring`、`std/process.ring`，通过 `extern fn` 包装 Node.js API。runtime.ts 注入对应 JS 全局函数。
 
-### B3: `extern fn` 无法映射 Node.js 模块函数
+### B3: ✅ `extern fn` 无法映射 Node.js 模块函数
 - **来源**: DS C2
 - **文件**: `compiler/src/codegen/codegen-decl.ts`（extern fn codegen）
 - **描述**: `extern fn read_file(path: Str) -> Str` 假设 JS 全局存在 `read_file` 函数，但实际需要 `require('fs').readFileSync(path, 'utf8')`。当前 extern fn codegen 不生成任何代码（单文件模式），只生成 `const module$name = name` 别名（多文件模式）。
