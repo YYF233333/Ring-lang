@@ -116,6 +116,9 @@ const cases: TestCase[] = [
   { file: "empty_collection.ring", expected: "0\n0\n0\nfalse\ntrue\nnone\n0\nfalse\n0\nfalse\n0\nfalse\n" },
   // extern fn
   { file: "extern_fn_basic.ring", expected: "42\n3.14\n" },
+  { file: "str_byte_at.ring", expected: "h\no\n" },
+  { file: "str_extra_methods.ring", expected: "00042\nababab\n65\n" },
+  { file: "num_parse_format.ring", expected: "42\n-1\n3.14\n99\n" },
 ];
 
 describe("e2e: ring run", () => {

@@ -18,7 +18,7 @@ export interface CheckResult {
   env: TypeEnv;
 }
 
-const STD_FILES = ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring"];
+const STD_FILES = ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring"];
 
 function find_std_dir(): string | null {
   const this_file = fileURLToPath(import.meta.url);

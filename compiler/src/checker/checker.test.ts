@@ -5,8 +5,9 @@ import { Parser } from "../parser/parser.js";
 import { check } from "./checker.js";
 import {
   HFnDecl, HImplDecl, HTestDecl, HProgram,
-  BUILTIN_CELL, BUILTIN_STR, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
-  CELL_METHODS, STR_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS,
+  BUILTIN_CELL, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
+  CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
+  LIST_NON_HOF_METHODS, LIST_HOF_METHODS,
   MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS,
 } from "../hir/index.js";
 import { CollectingSink, Diagnostic } from "../diagnostics/index.js";
@@ -594,6 +595,8 @@ describe("Type Checker", () => {
       const expected: [string, readonly string[]][] = [
         [BUILTIN_CELL, [...CELL_METHODS]],
         [BUILTIN_STR, [...STR_METHODS]],
+        [BUILTIN_INT, [...INT_METHODS]],
+        [BUILTIN_FLOAT, [...FLOAT_METHODS]],
         [BUILTIN_LIST, [...LIST_NON_HOF_METHODS, ...LIST_HOF_METHODS]],
         [BUILTIN_MAP, [...MAP_NON_HOF_METHODS, ...MAP_HOF_METHODS]],
         [BUILTIN_SET, [...SET_NON_HOF_METHODS, ...SET_HOF_METHODS]],

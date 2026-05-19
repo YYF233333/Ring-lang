@@ -8,7 +8,8 @@ import {
   OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
   BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_CELL,
-  CELL_METHODS, STR_METHODS, LIST_NON_HOF_METHODS, MAP_NON_HOF_METHODS, SET_NON_HOF_METHODS,
+  CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
+  LIST_NON_HOF_METHODS, MAP_NON_HOF_METHODS, SET_NON_HOF_METHODS,
 } from "../hir/index.js";
 import { Pattern } from "../ast/index.js";
 import { Type, Effect, EffectRow } from "../types/index.js";
@@ -164,6 +165,8 @@ class CodeGenerator {
     for (const m of LIST_NON_HOF_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_LIST)}.${m}`, undefined);
     for (const m of MAP_NON_HOF_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_MAP)}.${m}`, undefined);
     for (const m of SET_NON_HOF_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_SET)}.${m}`, undefined);
+    for (const m of INT_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_INT)}.${m}`, undefined);
+    for (const m of FLOAT_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_FLOAT)}.${m}`, undefined);
 
     // Emit runtime preamble (skipped for non-root modules in multi-file builds)
     if (!this.skip_preamble) {

@@ -47,6 +47,15 @@ function Str_replace(self, old_str, new_str) { return self.replaceAll(old_str, n
 function Str_split(self, sep) { return self.split(sep); }
 function Str_char_at(self, i) { return i >= 0 && i < self.length ? { _tag: "some", _0: self[i] } : { _tag: "none" }; }
 function Str_index_of(self, s) { var i = self.indexOf(s); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
+function Str_byte_at(self, i) { return self[i]; }
+function Str_pad_start(self, length, fill) { return self.padStart(length, fill); }
+function Str_repeat(self, count) { return self.repeat(count); }
+function Str_char_code_at(self, i) { return self.charCodeAt(i); }
+
+function Int_to_str(self) { return String(self); }
+function Float_to_str(self) { return String(self); }
+function parse_int(s) { var n = parseInt(s, 10); return isNaN(n) ? { _tag: "none" } : { _tag: "some", _0: n }; }
+function parse_float(s) { var n = parseFloat(s); return isNaN(n) ? { _tag: "none" } : { _tag: "some", _0: n }; }
 
 function List_len(self) { return self.length; }
 function List_get(self, i) { return i >= 0 && i < self.length ? { _tag: "some", _0: self[i] } : { _tag: "none" }; }

@@ -24,14 +24,8 @@
 - **需要**: Effect handler 增加 finally 语义，或新增 `defer` 语句（Go 风格）
 - **状态**: 未修复
 
-### C4. Str 字符索引 — Lexer 核心循环受阻
-- **严重性**: CRITICAL（P0）
-- **位置**: parser/lexer.ts（peek/advance 核心循环，数百次 `this.source[this.pos]`）
-- **频率**: 极高（Lexer 最热路径）
-- **问题**: Ring 没有 `str[i]` 索引运算符。char_at(i) 返回 Option<Str>，每次访问需 unwrap，且 Option 装箱有性能开销。Lexer 是编译器最热的循环，字符索引是每个 token 的基本操作。
-- **示例**: `private peek(): string { return this.source[this.pos]; }`
-- **需要**: 新增 `Str.byte_at(i) -> Str`（直接返回，越界 panic）或 `[]` 运算符重载
-- **状态**: 未修复
+### ✅ C4. Str 字符索引 — Lexer 核心循环受阻
+- **状态**: 已修复 — 新增 `Str.byte_at(i) -> Str`（直接返回，越界返回 undefined），Lexer 自举时使用此方法替代 `str[i]`
 
 ### C5. Struct 更新语法 — zonk.ts 等大量复制+修改模式
 - **严重性**: CRITICAL（P0）
@@ -73,13 +67,8 @@
 - **需要**: `type` 关键字（纯语法糖）
 - **状态**: 未修复
 
-### M3. 数字解析/格式化 — parseInt / parseFloat / toString
-- **严重性**: MAJOR
-- **位置**: parser/parser.ts(parseInt/parseFloat), codegen/codegen.ts(String()), diagnostics/formatter.ts
-- **频率**: ~10处
-- **问题**: Ring 没有 Int.parse(str) / Float.parse(str) / int.to_str() 等转换函数。Parser 需要把 token 值转为数字，codegen 需要把数字转为字符串。
-- **需要**: 新增 Int.parse / Float.parse / Int.to_str / Float.to_str 内置方法
-- **状态**: 未修复
+### ✅ M3. 数字解析/格式化 — parseInt / parseFloat / toString
+- **状态**: 已修复 — 新增 `parse_int(Str) -> Option<Int>`、`parse_float(Str) -> Option<Float>` 自由函数 + `Int.to_str()`、`Float.to_str()` UFCS 方法，声明在 std/num.ring
 
 ### M4. JSON 序列化 — debug + LLM format 输出
 - **严重性**: MAJOR
@@ -90,12 +79,8 @@
 - **需要**: 内置 json_stringify 或 Display trait + 自动序列化
 - **状态**: 未修复
 
-### M5. Str 补充方法 — padStart / repeat / charCodeAt
-- **严重性**: MAJOR
-- **位置**: diagnostics/formatter.ts(padStart), codegen/codegen.ts(repeat), parser/lexer.ts(charCodeAt隐含)
-- **频率**: 少量但必需
-- **需要**: 新增 Str.pad_start / Str.repeat / Str.char_code_at 方法
-- **状态**: 未修复
+### ✅ M5. Str 补充方法 — padStart / repeat / charCodeAt
+- **状态**: 已修复 — 新增 `Str.pad_start(length, fill)`、`Str.repeat(count)`、`Str.char_code_at(i)` 方法，声明在 std/str.ring
 
 ### M6. for (k, v) in map — Map 解构迭代
 - **严重性**: MAJOR
