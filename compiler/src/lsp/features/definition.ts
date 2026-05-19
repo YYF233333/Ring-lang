@@ -231,6 +231,13 @@ function find_ident_in_stmt(stmt: HStmt, pos: Position): IdentInfo | null {
       if (!contains_position(stmt.span, pos)) return null;
       return find_ident_in_expr(stmt.init, pos);
     }
+
+    case "if_let": {
+      if (!contains_position(stmt.span, pos)) return null;
+      return find_ident_in_expr(stmt.expr, pos)
+        ?? find_ident_in_block(stmt.then_block, pos)
+        ?? (stmt.else_block ? find_ident_in_block(stmt.else_block, pos) : null);
+    }
   }
 }
 
@@ -441,6 +448,12 @@ function collect_symbols_from_ast_stmt(stmt: Stmt, table: SymbolTable): void {
         if (el.kind === "binding") table.set(el.name, el.span);
       }
       collect_symbols_from_ast_expr(stmt.init, table);
+      return;
+
+    case "if_let":
+      collect_symbols_from_ast_expr(stmt.expr, table);
+      collect_symbols_from_ast_block(stmt.then_block, table);
+      if (stmt.else_block) collect_symbols_from_ast_block(stmt.else_block, table);
       return;
   }
 }

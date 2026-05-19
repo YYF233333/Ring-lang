@@ -2,7 +2,7 @@
 import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
   Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt, BreakStmt, ContinueStmt,
-  ForInStmt, LetDestructureStmt,
+  ForInStmt, LetDestructureStmt, IfLetStmt,
   Expr, IntLitExpr, FloatLitExpr, StrLitExpr, BoolLitExpr, IdentExpr,
   BinOpExpr, UnaryOpExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
   StructLitExpr, MatchExpr, BlockExpr, IfExpr, StringInterpExpr,
@@ -569,6 +569,16 @@ export class Parser {
     if (this.check(TokenKind.Return)) {
       return this.parse_return_stmt();
     }
+    if (this.check(TokenKind.If)) {
+      // Look ahead: if next token after `if` is `let`, parse as IfLetStmt
+      const saved_pos = this.pos;
+      this.advance(); // consume `if`
+      if (this.check(TokenKind.Let)) {
+        return this.parse_if_let_stmt(start);
+      }
+      // Not if-let — backtrack and fall through to expression statement
+      this.pos = saved_pos;
+    }
     if (this.check(TokenKind.While)) {
       return this.parse_while_stmt();
     }
@@ -662,6 +672,29 @@ export class Parser {
     this.try_consume(TokenKind.Semi);
     const end = this.current_span_start();
     return { kind: "continue_stmt", span: this.make_span(start, end) };
+  }
+
+  // parse_if_let_stmt is called AFTER `if` has already been consumed.
+  // start is the span start of the `if` token.
+  private parse_if_let_stmt(start: Position): IfLetStmt {
+    this.expect(TokenKind.Let); // consume `let`
+    const pattern = this.parse_pattern();
+    this.expect(TokenKind.Eq);
+    const expr = this.parse_expr();
+    const then_block = this.parse_block_expr();
+    let else_block: BlockExpr | null = null;
+    if (this.try_consume(TokenKind.Else)) {
+      else_block = this.parse_block_expr();
+    }
+    const end = (else_block ?? then_block).span.end;
+    return {
+      kind: "if_let",
+      pattern,
+      expr,
+      then_block,
+      else_block,
+      span: this.make_span(start, end),
+    } as IfLetStmt;
   }
 
   private parse_binding_stmt(mutable: boolean): LetStmt | VarStmt {

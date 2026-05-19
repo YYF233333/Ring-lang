@@ -191,6 +191,11 @@ function walk_stmt_for_receiver(stmt: HStmt, pos: Position): Type | null {
 
     case "let_destructure":
       return find_receiver_type(stmt.init, pos);
+
+    case "if_let":
+      return find_receiver_type(stmt.expr, pos)
+        ?? walk_block_for_receiver(stmt.then_block, pos)
+        ?? (stmt.else_block ? walk_block_for_receiver(stmt.else_block, pos) : null);
   }
 }
 
@@ -362,6 +367,13 @@ function collect_block_locals_from_ast(block: AstBlock, pos: Position, out: Map<
       for (const el of stmt.pattern.elements) {
         if (el.kind === "binding") out.set(el.name, UNIT);
       }
+    } else if (stmt.kind === "if_let") {
+      // Pattern bindings are visible only inside the then-block
+      if (contains_lsp_position(stmt.then_block.span, pos)) {
+        collect_block_locals_from_ast(stmt.then_block, pos, out);
+      } else if (stmt.else_block && contains_lsp_position(stmt.else_block.span, pos)) {
+        collect_block_locals_from_ast(stmt.else_block, pos, out);
+      }
     }
   }
 }
@@ -392,6 +404,13 @@ function collect_block_locals(block: HBlock, pos: Position, out: Map<string, Typ
     } else if (stmt.kind === "let_destructure") {
       for (const b of stmt.bindings) {
         if (b.name !== "_") out.set(b.name, b.type);
+      }
+    } else if (stmt.kind === "if_let") {
+      // Pattern bindings are visible only inside the then-block
+      if (contains_lsp_position(stmt.then_block.span, pos)) {
+        collect_block_locals(stmt.then_block, pos, out);
+      } else if (stmt.else_block && contains_lsp_position(stmt.else_block.span, pos)) {
+        collect_block_locals(stmt.else_block, pos, out);
       }
     }
   }

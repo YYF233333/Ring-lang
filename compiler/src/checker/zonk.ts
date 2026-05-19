@@ -92,6 +92,13 @@ function zonk_stmt(ctx: ZonkCtx, stmt: HStmt): HStmt {
         bindings: stmt.bindings.map(b => ({ ...b, type: zonk_type(ctx, b.type) })),
         init: zonk_expr(ctx, stmt.init),
       };
+    case "if_let":
+      return {
+        ...stmt,
+        expr: zonk_expr(ctx, stmt.expr),
+        then_block: zonk_block(ctx, stmt.then_block),
+        else_block: stmt.else_block ? zonk_block(ctx, stmt.else_block) : null,
+      };
   }
 }
 

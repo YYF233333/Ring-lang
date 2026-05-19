@@ -230,7 +230,8 @@ export type HStmt =
   | HForInStmt
   | HBreakStmt
   | HContinueStmt
-  | HLetDestructureStmt;
+  | HLetDestructureStmt
+  | HIfLetStmt;
 
 export interface HLetStmt {
   kind: "let_stmt";
@@ -303,6 +304,15 @@ export interface HLetDestructureStmt {
   pattern: import("../ast/index.js").TuplePattern;
   bindings: { name: string; def_id?: number; type: Type }[];
   init: HExpr;
+  span: Span;
+}
+
+export interface HIfLetStmt {
+  kind: "if_let";
+  pattern: import("../ast/index.js").Pattern;
+  expr: HExpr;
+  then_block: HBlock;
+  else_block: HBlock | null;
   span: Span;
 }
 

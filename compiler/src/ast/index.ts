@@ -364,7 +364,8 @@ export type Stmt =
   | ForInStmt
   | BreakStmt
   | ContinueStmt
-  | LetDestructureStmt;
+  | LetDestructureStmt
+  | IfLetStmt;
 
 export interface LetStmt {
   kind: "let_stmt";
@@ -434,6 +435,15 @@ export interface LetDestructureStmt {
   kind: "let_destructure";
   pattern: TuplePattern;
   init: Expr;
+  span: Span;
+}
+
+export interface IfLetStmt {
+  kind: "if_let";
+  pattern: Pattern;
+  expr: Expr;
+  then_block: BlockExpr;
+  else_block: BlockExpr | null;
   span: Span;
 }
 

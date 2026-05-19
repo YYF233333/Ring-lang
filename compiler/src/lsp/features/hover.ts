@@ -264,6 +264,13 @@ function walk_stmt(stmt: HStmt, pos: Position): HoverCandidate | null {
       if (!contains_position(stmt.span, pos)) return null;
       return walk_expr(stmt.init, pos);
     }
+
+    case "if_let": {
+      if (!contains_position(stmt.span, pos)) return null;
+      return walk_expr(stmt.expr, pos)
+        ?? walk_block(stmt.then_block, pos)
+        ?? (stmt.else_block ? walk_block(stmt.else_block, pos) : null);
+    }
   }
 }
 

@@ -482,6 +482,31 @@ class CodeGenerator {
         }
         return;
       }
+      case "if_let": {
+        this.emit("{");
+        this.push_indent();
+        const scrutinee = this.gen_expr(stmt.expr);
+        this.emit(`const __ring_t = ${scrutinee};`);
+        const cond = this.gen_pattern_condition("__ring_t", stmt.pattern);
+        this.emit(`if (${cond}) {`);
+        this.push_indent();
+        const bindings = this.gen_pattern_bindings("__ring_t", stmt.pattern);
+        if (bindings.trim()) this.emit(bindings.trim());
+        this.emit_block_in_stmt_context(stmt.then_block, "discard");
+        this.pop_indent();
+        if (stmt.else_block) {
+          this.emit("} else {");
+          this.push_indent();
+          this.emit_block_in_stmt_context(stmt.else_block, "discard");
+          this.pop_indent();
+          this.emit("}");
+        } else {
+          this.emit("}");
+        }
+        this.pop_indent();
+        this.emit("}");
+        return;
+      }
       default:
         this.emit(this.gen_stmt_inline(stmt));
     }
@@ -816,6 +841,7 @@ class CodeGenerator {
       case "break_stmt":
       case "continue_stmt":
       case "let_destructure":
+      case "if_let":
         throw new Error(`${stmt.kind} handled in emit_stmt`);
       default:
         return assertNever(stmt, "gen_stmt_inline");

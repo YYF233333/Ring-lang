@@ -101,6 +101,10 @@ const cases: TestCase[] = [
   { file: "set_ops.ring", expected: "4\n2\n1\n3\n" },
   { file: "set_for_in.ring", expected: "60\n" },
   { file: "set_hof.ring", expected: "2\n15\ntrue\ntrue\n" },
+  // if-let
+  { file: "if_let_basic.ring", expected: "42\nwas none\n" },
+  { file: "if_let_map.ring", expected: "one\nnot found\n" },
+  { file: "if_let_no_else.ring", expected: "4\n" },
 ];
 
 describe("e2e: ring run", () => {

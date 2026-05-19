@@ -19,7 +19,7 @@ import {
 import {
   HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl,
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt, HForInStmt,
-  HLetDestructureStmt,
+  HLetDestructureStmt, HIfLetStmt,
   variant_js_name, trait_dict_name, trait_bound_param_name,
 } from "../hir/index.js";
 import { TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitMethodDef, substitute_type } from "./env.js";
@@ -1023,6 +1023,48 @@ export class InferEngine {
           subst: s,
           effects: init_r.effects,
         };
+      }
+      case "if_let": {
+        const expr_r = this.infer_expr(stmt.expr, subst);
+        let s = expr_r.subst;
+        const expr_type = apply(s, expr_r.hexpr.type);
+
+        // Push scope for pattern bindings in then-block
+        this.env.push_scope();
+        let then_r!: { hexpr: HExpr; subst: Substitution; effects: EffectRow };
+        let combined_effects: EffectRow = expr_r.effects;
+        try {
+          // Bind pattern variables — same logic as match arm binding
+          this.bind_pattern(stmt.pattern, expr_type, s);
+          then_r = this.infer_block(stmt.then_block, s);
+          s = then_r.subst;
+          [combined_effects, s] = this.merge_effects(combined_effects, then_r.effects, s);
+        } finally {
+          this.env.pop_scope();
+        }
+
+        let else_hblock: HBlock | null = null;
+        if (stmt.else_block) {
+          this.env.push_scope();
+          try {
+            const else_r = this.infer_block(stmt.else_block, s);
+            s = else_r.subst;
+            else_hblock = else_r.hexpr as HBlock;
+            [combined_effects, s] = this.merge_effects(combined_effects, else_r.effects, s);
+          } finally {
+            this.env.pop_scope();
+          }
+        }
+
+        const hstmt: HIfLetStmt = {
+          kind: "if_let",
+          pattern: stmt.pattern,
+          expr: expr_r.hexpr,
+          then_block: then_r.hexpr as HBlock,
+          else_block: else_hblock,
+          span: stmt.span,
+        };
+        return { hstmt, subst: s, effects: combined_effects };
       }
     }
   }

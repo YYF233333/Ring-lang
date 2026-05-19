@@ -180,6 +180,12 @@ function collect_idents_in_stmt(stmt: HStmt, matches: MatchFn, uri: string, out:
       }
       collect_idents_in_expr(stmt.init, matches, uri, out);
       return;
+
+    case "if_let":
+      collect_idents_in_expr(stmt.expr, matches, uri, out);
+      collect_idents_in_block(stmt.then_block, matches, uri, out);
+      if (stmt.else_block) collect_idents_in_block(stmt.else_block, matches, uri, out);
+      return;
   }
 }
 
