@@ -67,9 +67,15 @@ function List_push(self, x) { self.push(x); }
 function List_concat(self, other) { for (var i = 0; i < other.length; i++) self.push(other[i]); }
 function List_slice(self, start, end) { return self.slice(start, end); }
 function List_reverse(self) { self.reverse(); }
+function List_join(self, sep) { return self.join(sep); }
+function List_sort(self) { self.sort(); }
+function List_shift(self) { return self.length > 0 ? { _tag: "some", _0: self.shift() } : { _tag: "none" }; }
+function List_find_index(self, f) { var i = self.findIndex(f); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
+function List_index_of(self, item) { var i = self.indexOf(item); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
 
 function map_new() { return new Map(); }
 function map_from(entries) { return new Map(entries); }
+function map_clone(m) { return new Map(m); }
 function _Map_len(self) { return self.size; }
 function _Map_get(self, key) { return self.has(key) ? { _tag: "some", _0: self.get(key) } : { _tag: "none" }; }
 function _Map_contains_key(self, key) { return self.has(key); }

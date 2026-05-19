@@ -55,14 +55,14 @@ export function apply(subst: Substitution, t: Type): Type {
         kind: "struct",
         name: t.name,
         type_params: t.type_params.map(p => apply(subst, p)),
-        fields: t.fields.map(f => ({ ...f, type: apply(subst, f.type) })),
+        fields: t.fields,
       };
     case "enum":
       return {
         kind: "enum",
         name: t.name,
         type_params: t.type_params.map(p => apply(subst, p)),
-        variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => apply(subst, f)) })),
+        variants: t.variants,
       };
     case "generic":
       return {
@@ -166,11 +166,9 @@ export function occurs_in(var_id: number, t: Type, subst: Substitution): boolean
                (e.kind === "custom" && e.type_args.some(a => occurs_in(var_id, a, subst)))
              );
     case "struct":
-      return resolved.type_params.some(p => occurs_in(var_id, p, subst)) ||
-             resolved.fields.some(f => occurs_in(var_id, f.type, subst));
+      return resolved.type_params.some(p => occurs_in(var_id, p, subst));
     case "enum":
-      return resolved.type_params.some(p => occurs_in(var_id, p, subst)) ||
-             resolved.variants.some(v => v.fields.some(f => occurs_in(var_id, f, subst)));
+      return resolved.type_params.some(p => occurs_in(var_id, p, subst));
     case "generic":
       return occurs_in(var_id, resolved.base, subst) ||
              resolved.args.some(a => occurs_in(var_id, a, subst));

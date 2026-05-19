@@ -1,7 +1,7 @@
 // Ring-lang Pattern Match Exhaustiveness Checking
 // Uses Maranget-style pattern matrix algorithm for cross-column checking.
 import { Pattern, NamedConstructorPattern, Expr, span_zero } from "../ast/index.js";
-import { Type } from "../types/index.js";
+import { Type, type_to_string } from "../types/index.js";
 import { Substitution, apply } from "./unify.js";
 
 /**
@@ -59,7 +59,7 @@ function check_patterns(
           while (padded.length < variant_def.fields.length) padded.push(wild);
           return padded;
         });
-        const missing_fields = check_matrix(normalized, variant_def.fields, subst);
+        const missing_fields = check_matrix(normalized, variant_def.fields, subst, new Set([type_to_string(resolved)]));
         if (missing_fields !== null) {
           return `${name}(${missing_fields.join(", ")})`;
         }
@@ -203,6 +203,7 @@ function check_matrix(
   rows: Pattern[][],
   col_types: Type[],
   subst: Substitution,
+  expanding?: Set<string>,
 ): string[] | null {
   if (col_types.length === 0) {
     return rows.length > 0 ? null : [];
@@ -210,9 +211,15 @@ function check_matrix(
 
   const first_type = apply(subst, col_types[0]);
   const rest_types = col_types.slice(1);
-  const ctors = finite_type_ctors(first_type);
+  // For recursive types: if already expanding this exact type, treat as non-finite to break the cycle.
+  // Use type_to_string to distinguish Option<Int> from Option<Option<Int>> (different params = not reentrant).
+  const type_key = first_type.kind === "enum" ? type_to_string(first_type) : "";
+  const is_reentrant = type_key !== "" && expanding !== undefined && expanding.has(type_key);
+  const ctors = is_reentrant ? null : finite_type_ctors(first_type);
 
   if (ctors !== null) {
+    const new_expanding = new Set(expanding);
+    if (type_key) new_expanding.add(type_key);
     for (const ctor of ctors) {
       const specialized: Pattern[][] = [];
       for (const row of rows) {
@@ -220,7 +227,7 @@ function check_matrix(
         if (s !== null) specialized.push(s);
       }
       const new_types = [...ctor.field_types, ...rest_types];
-      const sub = check_matrix(specialized, new_types, subst);
+      const sub = check_matrix(specialized, new_types, subst, new_expanding);
       if (sub !== null) {
         const ctor_sub = sub.slice(0, ctor.arity);
         const rest_sub = sub.slice(ctor.arity);
@@ -243,7 +250,7 @@ function check_matrix(
         defaults.push(row.slice(1));
       }
     }
-    const sub = check_matrix(defaults, rest_types, subst);
+    const sub = check_matrix(defaults, rest_types, subst, expanding);
     return sub !== null ? ["_", ...sub] : null;
   }
 }

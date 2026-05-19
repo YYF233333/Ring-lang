@@ -2,6 +2,7 @@ pub extern type Map<K, V>
 
 pub extern fn map_new<K, V>() -> Map<K, V>
 pub extern fn map_from<K, V>(entries: List<(K, V)>) -> Map<K, V>
+pub extern fn map_clone<K, V>(m: Map<K, V>) -> Map<K, V>
 
 impl<K, V> Map {
     pub extern fn len(self: Map<K, V>) -> Int

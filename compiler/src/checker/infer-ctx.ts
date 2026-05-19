@@ -127,11 +127,9 @@ export function collect_free_vars(t: Type, result: Set<number>): void {
       break;
     case "struct":
       for (const tp of t.type_params) collect_free_vars(tp, result);
-      for (const f of t.fields) collect_free_vars(f.type, result);
       break;
     case "enum":
       for (const tp of t.type_params) collect_free_vars(tp, result);
-      for (const v of t.variants) for (const f of v.fields) collect_free_vars(f, result);
       break;
     case "generic":
       collect_free_vars(t.base, result);

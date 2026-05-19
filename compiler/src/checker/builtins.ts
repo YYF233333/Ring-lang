@@ -4,7 +4,7 @@
 // AFTER stdlib prelude loading provides the type declarations.
 import {
   Type, TypeVar, FnType, StructType, EffectRow,
-  EMPTY_ROW, STR, BOOL, UNIT, NEVER,
+  EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
   make_option_type, make_map_type,
 } from "../types/index.js";
 import {
@@ -203,6 +203,15 @@ function register_list_hof(env: TypeEnv): void {
     const cb: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: eff };
     methods.set("find", {
       type: { kind: "fn", params: [mk(t), cb], return_type: make_option_type(t), effects: eff } as FnType,
+      type_vars: [t.id, tail_id], bounds: [],
+    });
+  }
+  {
+    const t = env.fresh_var();
+    const { eff, tail_id } = open_row(env);
+    const cb: FnType = { kind: "fn", params: [t], return_type: BOOL, effects: eff };
+    methods.set("find_index", {
+      type: { kind: "fn", params: [mk(t), cb], return_type: make_option_type(INT), effects: eff } as FnType,
       type_vars: [t.id, tail_id], bounds: [],
     });
   }

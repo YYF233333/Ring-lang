@@ -41,9 +41,9 @@ function label_vars(names: Map<number, string>, t: Type): Type {
     case "fn":
       return { ...t, params: t.params.map(p => label_vars(names, p)), return_type: label_vars(names, t.return_type), effects: label_effect_row(names, t.effects) };
     case "struct":
-      return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), fields: t.fields.map(f => ({ ...f, type: label_vars(names, f.type) })) };
+      return { ...t, type_params: t.type_params.map(p => label_vars(names, p)) };
     case "enum":
-      return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => label_vars(names, f)), field_names: v.field_names })) };
+      return { ...t, type_params: t.type_params.map(p => label_vars(names, p)) };
     case "generic":
       return { ...t, base: label_vars(names, t.base), args: t.args.map(a => label_vars(names, a)) };
     case "record": {

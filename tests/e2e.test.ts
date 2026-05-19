@@ -128,6 +128,12 @@ const cases: TestCase[] = [
   { file: "for_map_destructure.ring", expected: "6\n" },
   { file: "block_expr_complex_stmts.ring", expected: "all block expr tests passed\n" },
   { file: "trait_hof_effect.ring", expected: "trait_hof_effect: all tests passed\n" },
+  // Recursive types (self-hosting prerequisite)
+  { file: "recursive_enum.ring", expected: "recursive_enum: all tests passed\n" },
+  { file: "recursive_struct.ring", expected: "recursive_struct: all tests passed\n" },
+  // Extra collection methods (self-hosting prerequisite)
+  { file: "list_extra_methods.ring", expected: "list_extra_methods: all tests passed\n" },
+  { file: "map_clone.ring", expected: "map_clone: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: 3 }, () => {
@@ -327,4 +333,38 @@ describe("e2e: --error-format=llm", { concurrency: 3 }, () => {
     });
     assert.equal(output.trim(), "OK");
   });
+});
+
+// ============================================================
+// Compiler determinism — same input must produce identical JS
+// ============================================================
+
+function build_to_js(file_path: string): string {
+  return execSync(`node "${CLI_PATH}" build "${file_path}"`, {
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: 15000,
+  });
+}
+
+describe("determinism: single-file", { concurrency: 3 }, () => {
+  for (const tc of cases) {
+    test(`build ${tc.file} is deterministic`, () => {
+      const filePath = path.join(CASES_DIR, tc.file);
+      const js1 = build_to_js(filePath);
+      const js2 = build_to_js(filePath);
+      assert.strictEqual(js1, js2);
+    });
+  }
+});
+
+describe("determinism: multi-file modules", { concurrency: 3 }, () => {
+  for (const tc of module_cases) {
+    test(`build modules/${tc.dir} is deterministic`, () => {
+      const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
+      const js1 = build_to_js(mainFile);
+      const js2 = build_to_js(mainFile);
+      assert.strictEqual(js1, js2);
+    });
+  }
 });

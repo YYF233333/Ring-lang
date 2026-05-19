@@ -76,13 +76,8 @@ function register_struct(ctx: InferCtx, decl: StructDecl): void {
     ctx.type_param_scope.set(tp.name, tv);
   }
 
-  const fields = decl.fields.map(f => ({
-    name: f.name,
-    type: resolve_type_expr(ctx, f.type_annotation),
-    is_pub: f.is_pub,
-  }));
-
-  ctx.type_param_scope = saved_tp_scope;
+  // Pre-register with empty fields so recursive references (e.g. struct Node { children: List<Node> }) resolve.
+  const fields: { name: string; type: Type; is_pub: boolean }[] = [];
   const def: StructDef = {
     name: decl.name,
     type_params: type_param_names,
@@ -90,6 +85,16 @@ function register_struct(ctx: InferCtx, decl: StructDecl): void {
     fields,
   };
   ctx.env.structs.set(decl.name, def);
+
+  for (const f of decl.fields) {
+    fields.push({
+      name: f.name,
+      type: resolve_type_expr(ctx, f.type_annotation),
+      is_pub: f.is_pub,
+    });
+  }
+
+  ctx.type_param_scope = saved_tp_scope;
 }
 
 function register_enum(ctx: InferCtx, decl: EnumDecl): void {
@@ -105,19 +110,9 @@ function register_enum(ctx: InferCtx, decl: EnumDecl): void {
     ctx.type_param_scope.set(tp.name, tv);
   }
 
-  const variants = decl.variants.map(v => {
-    if (v.named_fields && v.named_fields.length > 0) {
-      return {
-        name: v.name,
-        fields: v.named_fields.map(f => resolve_type_expr(ctx, f.type_expr)),
-        field_names: v.named_fields.map(f => f.name),
-      };
-    }
-    return {
-      name: v.name,
-      fields: v.fields.map(f => resolve_type_expr(ctx, f)),
-    };
-  });
+  // Pre-register with empty variants so recursive references (e.g. enum Expr { BinOp { left: Expr } }) resolve.
+  // The variants array is shared by reference — pushes below are visible to all EnumType objects.
+  const variants: { name: string; fields: Type[]; field_names?: string[] }[] = [];
   const def: EnumDef = {
     name: decl.name,
     type_params: type_param_names,
@@ -125,6 +120,21 @@ function register_enum(ctx: InferCtx, decl: EnumDecl): void {
     variants,
   };
   ctx.env.enums.set(decl.name, def);
+
+  for (const v of decl.variants) {
+    if (v.named_fields && v.named_fields.length > 0) {
+      variants.push({
+        name: v.name,
+        fields: v.named_fields.map(f => resolve_type_expr(ctx, f.type_expr)),
+        field_names: v.named_fields.map(f => f.name),
+      });
+    } else {
+      variants.push({
+        name: v.name,
+        fields: v.fields.map(f => resolve_type_expr(ctx, f)),
+      });
+    }
+  }
 
   // Register variant constructors as functions
   const enum_type: Type = {
