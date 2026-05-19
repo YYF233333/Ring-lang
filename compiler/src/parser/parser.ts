@@ -1,6 +1,6 @@
 // Ring-lang Parser — recursive descent + Pratt parsing for expressions
 import {
-  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl,
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl, ExternTypeDecl,
   UseDecl, UsePath, UseImport,
   Stmt, LetStmt, VarStmt, AssignStmt, ExprStmt, ReturnStmt, WhileStmt, BreakStmt, ContinueStmt,
   ForInStmt, LetDestructureStmt, IfLetStmt,
@@ -255,7 +255,7 @@ export class Parser {
       case TokenKind.Effect: return this.parse_effect_decl(is_pub);
       case TokenKind.Test: return this.parse_test_decl();
       case TokenKind.Trait: return this.parse_trait_decl(is_pub);
-      case TokenKind.Extern: return this.parse_extern_fn_decl(is_pub);
+      case TokenKind.Extern: return this.parse_extern_decl(is_pub);
       default:
         this.report_error(E.E0101, `Expected declaration, got '${tok.value}' (${tok.kind})`, tok.span);
         throw new Error("parse_decl_failed");
@@ -288,9 +288,16 @@ export class Parser {
     };
   }
 
-  private parse_extern_fn_decl(is_pub: boolean): ExternFnDecl {
+  private parse_extern_decl(is_pub: boolean): ExternFnDecl | ExternTypeDecl {
     const start = this.current_span_start();
     this.expect(TokenKind.Extern);
+    if (this.check(TokenKind.Ident) && this.peek().value === "type") {
+      return this.parse_extern_type_decl_body(is_pub, start);
+    }
+    return this.parse_extern_fn_decl_body(is_pub, start);
+  }
+
+  private parse_extern_fn_decl_body(is_pub: boolean, start: Position): ExternFnDecl {
     this.expect(TokenKind.Fn);
     const name = this.expect(TokenKind.Ident).value;
     const type_params = this.parse_type_params();
@@ -301,6 +308,17 @@ export class Parser {
     const end = this.current_span_start();
     return {
       kind: "extern_fn_decl", name, type_params, params, return_type, is_pub,
+      span: this.make_span(start, end),
+    };
+  }
+
+  private parse_extern_type_decl_body(is_pub: boolean, start: Position): ExternTypeDecl {
+    this.advance(); // consume "type" ident
+    const name = this.expect(TokenKind.Ident).value;
+    const type_params = this.parse_type_params();
+    const end = this.current_span_start();
+    return {
+      kind: "extern_type_decl", name, type_params, is_pub,
       span: this.make_span(start, end),
     };
   }
@@ -401,10 +419,16 @@ export class Parser {
     }
 
     this.expect(TokenKind.LBrace);
-    const methods: FnDecl[] = [];
+    const methods: (FnDecl | ExternFnDecl)[] = [];
     while (!this.check(TokenKind.RBrace) && !this.at_end()) {
       const m_pub = this.try_consume(TokenKind.Pub);
-      methods.push(this.parse_fn_decl(m_pub));
+      if (this.check(TokenKind.Extern)) {
+        const m_start = this.current_span_start();
+        this.expect(TokenKind.Extern);
+        methods.push(this.parse_extern_fn_decl_body(m_pub, m_start));
+      } else {
+        methods.push(this.parse_fn_decl(m_pub));
+      }
     }
     this.expect(TokenKind.RBrace);
     const end = this.current_span_start();

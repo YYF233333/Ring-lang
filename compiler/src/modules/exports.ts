@@ -109,7 +109,7 @@ export function extract_exports(
           // Only export if the target type is a pub type from this module
           // or it's an impl for an external type (trait impl)
           const target_type_decl = program.decls.find(
-            d => (d.kind === "struct_decl" || d.kind === "enum_decl") && d.name === target,
+            d => (d.kind === "struct_decl" || d.kind === "enum_decl" || d.kind === "extern_type_decl") && d.name === target,
           );
           const is_pub_type = target_type_decl && "is_pub" in target_type_decl && target_type_decl.is_pub;
           if (is_pub_type || decl.trait_name) {
@@ -128,6 +128,16 @@ export function extract_exports(
         const scheme = env.lookup(decl.name);
         if (scheme) {
           values.set(decl.name, scheme);
+        }
+        break;
+      }
+
+      case "extern_type_decl": {
+        module_type_names.add(decl.name);
+        if (!decl.is_pub) break;
+        const sdef = env.structs.get(decl.name);
+        if (sdef) {
+          types.set(decl.name, sdef);
         }
         break;
       }

@@ -50,6 +50,11 @@ function find_hover_in_decl(decl: HDecl, pos: Position): HoverCandidate | null {
       const ret = type_to_string(decl.return_type);
       return { type_str: `extern fn ${decl.name}(${params}) -> ${ret}`, span: decl.span };
     }
+    case "extern_type_decl": {
+      const tp = decl.type_params.map((p: any) => p.name).join(", ");
+      const sig = tp ? `extern type ${decl.name}<${tp}>` : `extern type ${decl.name}`;
+      return { type_str: sig, span: decl.span };
+    }
     default:
       return null;
   }

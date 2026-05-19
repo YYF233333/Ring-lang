@@ -216,13 +216,18 @@ function build_symbol_table(ast: readonly Decl[]): SymbolTable {
         for (const method of decl.methods) {
           table.set(`${decl.target_type}.${method.name}`, method.span);
           table.set(method.name, method.span);
-          collect_symbols_from_fn(method, table);
+          if (method.kind !== "extern_fn_decl") {
+            collect_symbols_from_fn(method, table);
+          }
         }
         break;
       case "test_decl":
         collect_symbols_from_ast_block(decl.body, table);
         break;
       case "extern_fn_decl":
+        table.set(decl.name, decl.span);
+        break;
+      case "extern_type_decl":
         table.set(decl.name, decl.span);
         break;
     }

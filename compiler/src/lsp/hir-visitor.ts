@@ -30,6 +30,8 @@ export function walk_decl(decl: HDecl, v: HirVisitor): WalkAction {
       return walk_block(decl.body, v);
     case "extern_fn_decl":
       return;
+    case "extern_type_decl":
+      return;
     default:
       return;
   }
@@ -47,6 +49,7 @@ export function walk_impl(impl: HImplDecl, v: HirVisitor): WalkAction {
     if (v.enter_impl(impl) === "stop") return "stop";
   }
   for (const method of impl.methods) {
+    if (method.kind === "extern_fn_decl") continue;
     if (walk_fn(method, v) === "stop") return "stop";
   }
 }

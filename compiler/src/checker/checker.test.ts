@@ -11,7 +11,7 @@ import {
 } from "../hir/index.js";
 import { CollectingSink, Diagnostic } from "../diagnostics/index.js";
 import { type_to_string, effect_row_to_string } from "../types/index.js";
-import { TypeEnv } from "./env.js";
+// TypeEnv no longer needed — builtins+stdlib tested via check()
 
 // Helper: parse and check, return the HProgram
 function check_source(source: string): HProgram {
@@ -588,9 +588,9 @@ describe("Type Checker", () => {
     });
   });
 
-  describe("builtin method registry consistency (I15)", () => {
-    it("env.ts impl_methods match shared method name lists", () => {
-      const env = new TypeEnv();
+  describe("builtin + stdlib method registry consistency (I15)", () => {
+    it("after prelude loading, impl_methods contain all shared method names", () => {
+      const { env } = check({ uses: [], decls: [], span: { file: "<test>", start: { line: 1, column: 0, offset: 0 }, end: { line: 1, column: 0, offset: 0 } } });
       const expected: [string, readonly string[]][] = [
         [BUILTIN_CELL, [...CELL_METHODS]],
         [BUILTIN_STR, [...STR_METHODS]],
@@ -600,11 +600,11 @@ describe("Type Checker", () => {
       ];
       for (const [type_name, method_names] of expected) {
         const methods = env.impl_methods.get(type_name);
-        assert.ok(methods, `env.ts missing impl_methods for "${type_name}"`);
+        assert.ok(methods, `missing impl_methods for "${type_name}"`);
         const registered = [...methods!.keys()].sort();
         const shared = [...method_names].sort();
         assert.deepStrictEqual(registered, shared,
-          `impl_methods mismatch for ${type_name}: env has [${registered}] but shared lists have [${shared}]`);
+          `impl_methods mismatch for ${type_name}: has [${registered}] but expected [${shared}]`);
       }
     });
   });

@@ -1,78 +1,43 @@
 // Built-in type and method registrations for Ring-lang.
-// Extracted from TypeEnv.register_builtins() to reduce file size and improve readability.
+// Core builtins (Option, Cell, effects) are registered by register_builtins().
+// HOF methods (needing effect polymorphism) are registered by register_hof_intrinsics()
+// AFTER stdlib prelude loading provides the type declarations.
 import {
-  Type, TypeVar, FnType, StructType, TupleType, EffectRow,
-  EMPTY_ROW, INT, STR, BOOL, UNIT, NEVER,
-  make_option_type, make_list_type, make_map_type, make_set_type,
+  Type, TypeVar, FnType, StructType, EffectRow,
+  EMPTY_ROW, STR, BOOL, UNIT, NEVER,
+  make_option_type, make_map_type,
 } from "../types/index.js";
 import {
-  BUILTIN_STR, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL,
+  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL,
 } from "../hir/index.js";
-import { TypeEnv, TypeScheme, mono } from "./env.js";
+import { TypeEnv, TypeScheme } from "./env.js";
 
 type Methods = Map<string, TypeScheme>;
-
-function pure(methods: Methods, name: string, params: Type[], return_type: Type): void {
-  methods.set(name, {
-    type: { kind: "fn", params, return_type, effects: EMPTY_ROW } as FnType,
-    type_vars: [], bounds: [],
-  });
-}
-
-function poly1(
-  env: TypeEnv, methods: Methods, name: string,
-  build: (t: TypeVar) => { params: Type[]; ret: Type },
-): void {
-  const t = env.fresh_var();
-  const { params, ret } = build(t);
-  methods.set(name, {
-    type: { kind: "fn", params, return_type: ret, effects: EMPTY_ROW } as FnType,
-    type_vars: [t.id], bounds: [],
-  });
-}
-
-function poly2(
-  env: TypeEnv, methods: Methods, name: string,
-  build: (a: TypeVar, b: TypeVar) => { params: Type[]; ret: Type },
-): void {
-  const a = env.fresh_var();
-  const b = env.fresh_var();
-  const { params, ret } = build(a, b);
-  methods.set(name, {
-    type: { kind: "fn", params, return_type: ret, effects: EMPTY_ROW } as FnType,
-    type_vars: [a.id, b.id], bounds: [],
-  });
-}
 
 function open_row(env: TypeEnv): { eff: EffectRow; tail_id: number } {
   const tail_id = env.fresh_var_id();
   return { eff: { effects: [], tail: tail_id }, tail_id };
 }
 
+// ================================================================
+// register_builtins — core types that can't be expressed in Ring
+// ================================================================
+
 export function register_builtins(env: TypeEnv): void {
-  register_global_fns(env);
   register_effects(env);
   register_cell(env);
   register_option(env);
-  register_list(env);
-  register_str(env);
-  register_map(env);
-  register_set(env);
 }
 
 // ================================================================
-// Global functions
+// register_hof_intrinsics — HOF methods needing effect polymorphism
+// Called AFTER prelude loading so type declarations exist.
 // ================================================================
 
-function register_global_fns(env: TypeEnv): void {
-  const print_var = env.fresh_var();
-  env.bind("print", {
-    type: { kind: "fn", params: [print_var], return_type: UNIT, effects: EMPTY_ROW } as FnType,
-    type_vars: [print_var.id], bounds: [],
-  });
-  env.bind("assert", mono({ kind: "fn", params: [BOOL], return_type: UNIT, effects: EMPTY_ROW } as FnType));
-  env.bind("exit", mono({ kind: "fn", params: [INT], return_type: NEVER, effects: EMPTY_ROW } as FnType));
-  env.bind("panic", mono({ kind: "fn", params: [STR], return_type: NEVER, effects: EMPTY_ROW } as FnType));
+export function register_hof_intrinsics(env: TypeEnv): void {
+  register_list_hof(env);
+  register_map_hof(env);
+  register_set_hof(env);
 }
 
 // ================================================================
@@ -165,33 +130,19 @@ function register_option(env: TypeEnv): void {
 }
 
 // ================================================================
-// List<T>
+// List<T> HOF methods (effect-polymorphic)
 // ================================================================
 
-function register_list(env: TypeEnv): void {
-  const list_t = env.fresh_var();
-  env.structs.set(BUILTIN_LIST, {
-    name: BUILTIN_LIST, type_params: ["T"], type_param_vars: [list_t.id], fields: [],
-  });
+function get_or_create_methods(env: TypeEnv, type_name: string): Methods {
+  let m = env.impl_methods.get(type_name);
+  if (!m) { m = new Map(); env.impl_methods.set(type_name, m); }
+  return m;
+}
 
-  const methods: Methods = new Map();
+function register_list_hof(env: TypeEnv): void {
+  const methods = get_or_create_methods(env, BUILTIN_LIST);
   const mk = (tv: TypeVar): StructType => ({ kind: "struct", name: BUILTIN_LIST, type_params: [tv], fields: [] });
 
-  // Read methods
-  poly1(env, methods, "len", t => ({ params: [mk(t)], ret: INT }));
-  poly1(env, methods, "get", t => ({ params: [mk(t), INT], ret: make_option_type(t) }));
-  poly1(env, methods, "first", t => ({ params: [mk(t)], ret: make_option_type(t) }));
-  poly1(env, methods, "last", t => ({ params: [mk(t)], ret: make_option_type(t) }));
-  poly1(env, methods, "contains", t => ({ params: [mk(t), t], ret: BOOL }));
-  poly1(env, methods, "is_empty", t => ({ params: [mk(t)], ret: BOOL }));
-
-  // Transform methods
-  poly1(env, methods, "push", t => ({ params: [mk(t), t], ret: UNIT }));
-  poly1(env, methods, "concat", t => ({ params: [mk(t), mk(t)], ret: UNIT }));
-  poly1(env, methods, "slice", t => ({ params: [mk(t), INT, INT], ret: mk(t) }));
-  poly1(env, methods, "reverse", t => ({ params: [mk(t)], ret: UNIT }));
-
-  // HOF methods (effect-polymorphic)
   {
     const t = env.fresh_var(), u = env.fresh_var();
     const { eff, tail_id } = open_row(env);
@@ -255,65 +206,16 @@ function register_list(env: TypeEnv): void {
       type_vars: [t.id, tail_id], bounds: [],
     });
   }
-
-  env.impl_methods.set(BUILTIN_LIST, methods);
 }
 
 // ================================================================
-// Str methods
+// Map<K,V> HOF methods (effect-polymorphic)
 // ================================================================
 
-function register_str(env: TypeEnv): void {
-  const methods: Methods = new Map();
-  pure(methods, "len", [STR], INT);
-  pure(methods, "contains", [STR, STR], BOOL);
-  pure(methods, "starts_with", [STR, STR], BOOL);
-  pure(methods, "ends_with", [STR, STR], BOOL);
-  pure(methods, "slice", [STR, INT, INT], STR);
-  pure(methods, "trim", [STR], STR);
-  pure(methods, "to_upper", [STR], STR);
-  pure(methods, "to_lower", [STR], STR);
-  pure(methods, "split", [STR, STR], make_list_type(STR));
-  pure(methods, "replace", [STR, STR, STR], STR);
-  pure(methods, "char_at", [STR, INT], make_option_type(STR));
-  pure(methods, "index_of", [STR, STR], make_option_type(INT));
-  env.impl_methods.set(BUILTIN_STR, methods);
-}
-
-// ================================================================
-// Map<K,V>
-// ================================================================
-
-function register_map(env: TypeEnv): void {
-  const map_k = env.fresh_var(), map_v = env.fresh_var();
-  env.structs.set(BUILTIN_MAP, {
-    name: BUILTIN_MAP, type_params: ["K", "V"], type_param_vars: [map_k.id, map_v.id], fields: [],
-  });
-
-  const methods: Methods = new Map();
+function register_map_hof(env: TypeEnv): void {
+  const methods = get_or_create_methods(env, BUILTIN_MAP);
   const mk = (k: TypeVar, v: TypeVar): StructType => make_map_type(k, v);
 
-  // Read methods
-  poly2(env, methods, "len", (k, v) => ({ params: [mk(k, v)], ret: INT }));
-  poly2(env, methods, "get", (k, v) => ({ params: [mk(k, v), k], ret: make_option_type(v) }));
-  poly2(env, methods, "contains_key", (k, v) => ({ params: [mk(k, v), k], ret: BOOL }));
-  poly2(env, methods, "is_empty", (k, v) => ({ params: [mk(k, v)], ret: BOOL }));
-  poly2(env, methods, "keys", (k, v) => ({ params: [mk(k, v)], ret: make_list_type(k) }));
-  poly2(env, methods, "values", (k, v) => ({ params: [mk(k, v)], ret: make_list_type(v) }));
-  {
-    const k = env.fresh_var(), v = env.fresh_var();
-    const tuple_type: TupleType = { kind: "tuple", elements: [k, v] };
-    methods.set("entries", {
-      type: { kind: "fn", params: [mk(k, v)], return_type: make_list_type(tuple_type), effects: EMPTY_ROW } as FnType,
-      type_vars: [k.id, v.id], bounds: [],
-    });
-  }
-
-  // Transform methods
-  poly2(env, methods, "insert", (k, v) => ({ params: [mk(k, v), k, v], ret: UNIT }));
-  poly2(env, methods, "remove", (k, v) => ({ params: [mk(k, v), k], ret: UNIT }));
-
-  // HOF methods
   {
     const k = env.fresh_var(), v = env.fresh_var(), u = env.fresh_var();
     const { eff, tail_id } = open_row(env);
@@ -350,54 +252,16 @@ function register_map(env: TypeEnv): void {
       type_vars: [k.id, v.id, tail_id], bounds: [],
     });
   }
-
-  env.impl_methods.set(BUILTIN_MAP, methods);
-
-  // Free functions: map_new, map_from
-  {
-    const k = env.fresh_var(), v = env.fresh_var();
-    env.bind("map_new", {
-      type: { kind: "fn", params: [], return_type: make_map_type(k, v), effects: EMPTY_ROW } as FnType,
-      type_vars: [k.id, v.id], bounds: [],
-    });
-  }
-  {
-    const k = env.fresh_var(), v = env.fresh_var();
-    const tuple_type: TupleType = { kind: "tuple", elements: [k, v] };
-    env.bind("map_from", {
-      type: { kind: "fn", params: [make_list_type(tuple_type)], return_type: make_map_type(k, v), effects: EMPTY_ROW } as FnType,
-      type_vars: [k.id, v.id], bounds: [],
-    });
-  }
 }
 
 // ================================================================
-// Set<T>
+// Set<T> HOF methods (effect-polymorphic)
 // ================================================================
 
-function register_set(env: TypeEnv): void {
-  const set_t = env.fresh_var();
-  env.structs.set(BUILTIN_SET, {
-    name: BUILTIN_SET, type_params: ["T"], type_param_vars: [set_t.id], fields: [],
-  });
-
-  const methods: Methods = new Map();
+function register_set_hof(env: TypeEnv): void {
+  const methods = get_or_create_methods(env, BUILTIN_SET);
   const mk = (tv: TypeVar): StructType => ({ kind: "struct", name: BUILTIN_SET, type_params: [tv], fields: [] });
 
-  // Read methods
-  poly1(env, methods, "len", t => ({ params: [mk(t)], ret: INT }));
-  poly1(env, methods, "contains", t => ({ params: [mk(t), t], ret: BOOL }));
-  poly1(env, methods, "is_empty", t => ({ params: [mk(t)], ret: BOOL }));
-  poly1(env, methods, "to_list", t => ({ params: [mk(t)], ret: make_list_type(t) }));
-
-  // Transform methods
-  poly1(env, methods, "insert", t => ({ params: [mk(t), t], ret: UNIT }));
-  poly1(env, methods, "remove", t => ({ params: [mk(t), t], ret: UNIT }));
-  poly1(env, methods, "union", t => ({ params: [mk(t), mk(t)], ret: mk(t) }));
-  poly1(env, methods, "intersect", t => ({ params: [mk(t), mk(t)], ret: mk(t) }));
-  poly1(env, methods, "difference", t => ({ params: [mk(t), mk(t)], ret: mk(t) }));
-
-  // HOF methods
   {
     const t = env.fresh_var();
     const { eff, tail_id } = open_row(env);
@@ -432,24 +296,6 @@ function register_set(env: TypeEnv): void {
     methods.set("all", {
       type: { kind: "fn", params: [mk(t), cb], return_type: BOOL, effects: eff } as FnType,
       type_vars: [t.id, tail_id], bounds: [],
-    });
-  }
-
-  env.impl_methods.set(BUILTIN_SET, methods);
-
-  // Free functions: set_new, set_from
-  {
-    const t = env.fresh_var();
-    env.bind("set_new", {
-      type: { kind: "fn", params: [], return_type: make_set_type(t), effects: EMPTY_ROW } as FnType,
-      type_vars: [t.id], bounds: [],
-    });
-  }
-  {
-    const t = env.fresh_var();
-    env.bind("set_from", {
-      type: { kind: "fn", params: [make_list_type(t)], return_type: make_set_type(t), effects: EMPTY_ROW } as FnType,
-      type_vars: [t.id], bounds: [],
     });
   }
 }

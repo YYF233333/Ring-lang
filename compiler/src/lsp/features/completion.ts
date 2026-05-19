@@ -215,6 +215,7 @@ function walk_fn_decl_for_receiver(fn: HFnDecl, pos: Position): Type | null {
 
 function walk_impl_decl_for_receiver(impl: HImplDecl, pos: Position): Type | null {
   for (const method of impl.methods) {
+    if (method.kind === "extern_fn_decl") continue;
     const r = walk_fn_decl_for_receiver(method, pos);
     if (r) return r;
   }
@@ -233,6 +234,7 @@ function walk_decl_for_receiver(decl: HDecl, pos: Position): Type | null {
     case "test_decl":
     case "trait_decl":
     case "extern_fn_decl":
+    case "extern_type_decl":
       return null;
   }
 }
@@ -319,6 +321,7 @@ function collect_locals(program: { decls: HDecl[] }, pos: Position): Map<string,
     }
     if (decl.kind === "impl_decl") {
       for (const method of decl.methods) {
+        if (method.kind === "extern_fn_decl") continue;
         if (contains_lsp_position(method.span, pos)) {
           for (const p of method.params) locals.set(p.name, p.type);
           collect_block_locals(method.body, pos, locals);
@@ -344,6 +347,7 @@ function collect_locals_from_ast(ast: { decls: AstDecl[] }, pos: Position): Map<
     }
     if (decl.kind === "impl_decl") {
       for (const method of decl.methods) {
+        if (method.kind === "extern_fn_decl") continue;
         if (contains_lsp_position(method.span, pos)) {
           for (const p of method.params) locals.set(p.name, UNIT);
           collect_block_locals_from_ast(method.body, pos, locals);

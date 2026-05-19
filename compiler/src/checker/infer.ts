@@ -2,7 +2,7 @@
 // Two-pass: register all top-level decls, then infer all bodies.
 
 import {
-  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl,
+  Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl, ExternFnDecl, ExternTypeDecl,
   Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr, IfExpr,
   BinOp, UnaryOp,
   UseDecl,
@@ -18,7 +18,7 @@ import {
   make_option_type, is_option_type, option_inner,
 } from "../types/index.js";
 import {
-  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl, HExternFnDecl,
+  HExpr, HStmt, HDecl, HFnDecl, HStructDecl, HEnumDecl, HImplDecl, HEffectDecl, HTestDecl, HTraitDecl, HExternFnDecl, HExternTypeDecl,
   HBlock, HParam, HProgram, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HWhileStmt, HForInStmt,
   HLetDestructureStmt, HIfLetStmt,
   variant_js_name, trait_dict_name, trait_bound_param_name,
@@ -385,6 +385,10 @@ export class InferEngine {
   // Pass 1: Register declarations
   // ============================================================
 
+  public register_decl_public(decl: Decl): void {
+    this.register_decl(decl);
+  }
+
   private register_decl(decl: Decl): void {
     switch (decl.kind) {
       case "struct_decl":
@@ -409,6 +413,9 @@ export class InferEngine {
         break;
       case "extern_fn_decl":
         this.register_extern_fn(decl);
+        break;
+      case "extern_type_decl":
+        this.register_extern_type(decl);
         break;
       default:
         assertNever(decl, "register_decl");
@@ -547,13 +554,30 @@ export class InferEngine {
   }
 
   private register_impl(decl: ImplDecl): void {
-    // Register methods for later lookup
-    let methods = this.env.impl_methods.get(decl.target_type);
-    if (!methods) {
-      methods = new Map();
-      this.env.impl_methods.set(decl.target_type, methods);
+    let impl_methods_map = this.env.impl_methods.get(decl.target_type);
+    if (!impl_methods_map) {
+      impl_methods_map = new Map();
+      this.env.impl_methods.set(decl.target_type, impl_methods_map);
     }
+
+    const saved_tp_scope = new Map(this.type_param_scope);
+    const impl_type_vars: number[] = [];
+    for (const tp of decl.type_params) {
+      const tv = this.env.fresh_var();
+      impl_type_vars.push((tv as TypeVar).id);
+      this.type_param_scope.set(tp.name, tv);
+    }
+
     for (const method of decl.methods) {
+      const saved_method_tp_scope = new Map(this.type_param_scope);
+      const method_type_vars: number[] = [];
+
+      for (const tp of method.type_params) {
+        const tv = this.env.fresh_var();
+        method_type_vars.push((tv as TypeVar).id);
+        this.type_param_scope.set(tp.name, tv);
+      }
+
       const self_type = this.resolve_self_type(decl.target_type);
       const param_types = method.params.map(p =>
         p.type_annotation ? this.resolve_type_expr(p.type_annotation)
@@ -561,16 +585,31 @@ export class InferEngine {
           : this.env.fresh_var()
       );
       const ret_type = method.return_type ? this.resolve_type_expr(method.return_type) : this.env.fresh_var();
+
+      const all_type_vars = [...impl_type_vars, ...method_type_vars];
+      const declared_tp_names = new Set([
+        ...decl.type_params.map(tp => tp.name),
+        ...method.type_params.map(tp => tp.name),
+      ]);
+      for (const [name, tv] of this.type_param_scope) {
+        if (!saved_tp_scope.has(name) && !declared_tp_names.has(name) && tv.kind === "var") {
+          if (!all_type_vars.includes(tv.id)) {
+            all_type_vars.push(tv.id);
+          }
+        }
+      }
+
       const fn_type: FnType = {
         kind: "fn",
         params: param_types,
         return_type: ret_type,
         effects: EMPTY_ROW,
       };
-      methods.set(method.name, { type: fn_type, type_vars: [], bounds: [] });
+      impl_methods_map.set(method.name, { type: fn_type, type_vars: all_type_vars, bounds: [] });
+
+      this.type_param_scope = saved_method_tp_scope;
     }
 
-    // Task 6b: Validate trait impl completeness
     if (decl.trait_name) {
       const trait_def = this.env.traits.get(decl.trait_name);
       if (!trait_def) {
@@ -589,6 +628,8 @@ export class InferEngine {
         method_names: decl.methods.map(m => m.name),
       });
     }
+
+    this.type_param_scope = saved_tp_scope;
   }
 
   private register_fn(decl: FnDecl): void {
@@ -699,6 +740,26 @@ export class InferEngine {
     this.env.record_def_span(this.env.lookup(decl.name)!.def_id!, decl.span);
   }
 
+  private register_extern_type(decl: ExternTypeDecl): void {
+    const type_param_names = decl.type_params.map(tp => tp.name);
+    const saved_tp_scope = new Map(this.type_param_scope);
+    const type_param_vars: number[] = [];
+    for (const tp of decl.type_params) {
+      const tv = this.env.fresh_var();
+      type_param_vars.push(tv.id);
+      this.type_param_scope.set(tp.name, tv);
+    }
+    this.type_param_scope = saved_tp_scope;
+
+    const def: StructDef = {
+      name: decl.name,
+      type_params: type_param_names,
+      type_param_vars,
+      fields: [],
+    };
+    this.env.structs.set(decl.name, def);
+  }
+
   // ============================================================
   // Pass 2: Check declarations
   // ============================================================
@@ -721,6 +782,8 @@ export class InferEngine {
         return this.check_trait_decl(decl);
       case "extern_fn_decl":
         return this.check_extern_fn_decl(decl);
+      case "extern_type_decl":
+        return { kind: "extern_type_decl", name: decl.name, type_params: decl.type_params, is_pub: decl.is_pub, span: decl.span } as HExternTypeDecl;
       default:
         return assertNever(decl, "check_decl");
     }
@@ -768,17 +831,20 @@ export class InferEngine {
 
   private check_impl_decl(decl: ImplDecl): HImplDecl {
     const impl_self_type = this.resolve_self_type(decl.target_type);
-    const methods: HFnDecl[] = [];
+    const hmethods: (HFnDecl | HExternFnDecl)[] = [];
     for (const method of decl.methods) {
-      const hfn = this.check_fn_decl(method, impl_self_type);
-      methods.push(hfn);
+      if (method.kind === "extern_fn_decl") {
+        hmethods.push(this.check_extern_fn_decl(method));
+      } else {
+        hmethods.push(this.check_fn_decl(method, impl_self_type));
+      }
     }
     return {
       kind: "impl_decl",
       target_type: decl.target_type,
       type_params: decl.type_params,
       trait_name: decl.trait_name,
-      methods,
+      methods: hmethods,
       span: decl.span,
     };
   }

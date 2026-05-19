@@ -135,6 +135,7 @@ class CodeGenerator {
         case "effect_decl": this.local_names.add(decl.name); break;
         case "test_decl": break;
         case "extern_fn_decl": break;
+        case "extern_type_decl": break;
       }
     }
 
@@ -214,6 +215,7 @@ class CodeGenerator {
       case "test_decl": this.emit_test_decl(decl); break;
       case "trait_decl": this.emit_trait_decl(decl); break;
       case "extern_fn_decl": this.emit_extern_fn_decl(decl); break;
+      case "extern_type_decl": break;
       default: assertNever(decl, "emit_decl");
     }
   }
@@ -297,6 +299,7 @@ class CodeGenerator {
       ? `${this.qualify(decl.target_type)}_${safe_ident(decl.trait_name)}`
       : this.qualify(decl.target_type);
     for (const method of decl.methods) {
+      if (method.kind === "extern_fn_decl") continue;
       this.emit_fn_decl(method, prefix);
     }
     if (decl.trait_name) {
