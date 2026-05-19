@@ -134,6 +134,8 @@ const cases: TestCase[] = [
   // Extra collection methods (self-hosting prerequisite)
   { file: "list_extra_methods.ring", expected: "list_extra_methods: all tests passed\n" },
   { file: "map_clone.ring", expected: "map_clone: all tests passed\n" },
+  // OS API (self-hosting prerequisite)
+  { file: "os_api_basic.ring", expected: "os_api_basic: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: 3 }, () => {

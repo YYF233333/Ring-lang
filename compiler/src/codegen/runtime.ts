@@ -1,6 +1,8 @@
 // Ring-lang runtime helpers — emitted as preamble in generated JS.
 
-export const RUNTIME_CODE = `// === Ring-lang Runtime ===
+export const RUNTIME_CODE = `import { createRequire as __cr } from "node:module";
+const __require = __cr(import.meta.url);
+// === Ring-lang Runtime ===
 class __EffectAbort {
   constructor(effect, value) {
     this.effect = effect;
@@ -99,4 +101,19 @@ function _Set_intersect(self, other) { return new Set([...self].filter(function(
 function _Set_difference(self, other) { return new Set([...self].filter(function(x) { return !other.has(x); })); }
 
 function json_stringify(value) { return JSON.stringify(value); }
+
+var __fs = __require("fs"), __path = __require("path");
+function read_file(p) { return __fs.readFileSync(p, "utf-8"); }
+function write_file(p, c) { __fs.writeFileSync(p, c, "utf-8"); }
+function file_exists(p) { return __fs.existsSync(p); }
+function delete_file(p) { __fs.unlinkSync(p); }
+function path_join(a, b) { return __path.join(a, b); }
+function path_resolve(p) { return __path.resolve(p); }
+function path_dirname(p) { return __path.dirname(p); }
+function path_basename(p) { return __path.basename(p); }
+function path_extname(p) { return __path.extname(p); }
+function argv() { return process.argv.slice(2); }
+function exit_process(code) { process.exit(code); }
+function eprintln(msg) { process.stderr.write(msg + "\\n"); }
+function cwd() { return process.cwd(); }
 `;
