@@ -47,7 +47,7 @@ function find_hover_in_decl(decl: HDecl, pos: Position): HoverCandidate | null {
     case "trait_decl":
       return format_trait_hover(decl);
     case "extern_fn_decl": {
-      const params = decl.params.map((p: any) => `${p.name}: ${type_to_string(p.type)}`).join(", ");
+      const params = decl.params.map((p: any) => `${p.is_mutable ? "var " : ""}${p.name}: ${type_to_string(p.type)}`).join(", ");
       const ret = type_to_string(decl.return_type);
       return { type_str: `extern fn ${decl.name}(${params}) -> ${ret}`, span: decl.span };
     }
@@ -68,7 +68,7 @@ function find_hover_in_decl(decl: HDecl, pos: Position): HoverCandidate | null {
 }
 
 function format_fn_hover(fn: HFnDecl): HoverCandidate {
-  const params = fn.params.map(p => `${p.name}: ${type_to_string(p.type)}`).join(", ");
+  const params = fn.params.map(p => `${p.is_mutable ? "var " : ""}${p.name}: ${type_to_string(p.type)}`).join(", ");
   const ret = type_to_string(fn.return_type);
   const eff = effect_row_to_string(fn.effects);
   const type_str = eff ? `fn ${fn.name}(${params}) -> ${ret} / ${eff}` : `fn ${fn.name}(${params}) -> ${ret}`;
@@ -97,7 +97,7 @@ function format_enum_hover(decl: HEnumDecl): HoverCandidate {
 function format_effect_hover(decl: HEffectDecl): HoverCandidate {
   const tparams = decl.type_params.length > 0 ? `<${decl.type_params.map(p => p.name).join(", ")}>` : "";
   const ops = decl.ops.map(op => {
-    const params = op.params.map(p => `${p.name}: ${type_to_string(p.type)}`).join(", ");
+    const params = op.params.map(p => `${p.is_mutable ? "var " : ""}${p.name}: ${type_to_string(p.type)}`).join(", ");
     return `fn ${op.name}(${params}) -> ${type_to_string(op.return_type)}`;
   }).join("; ");
   return { type_str: `effect ${decl.name}${tparams} { ${ops} }`, span: decl.span };
@@ -106,7 +106,7 @@ function format_effect_hover(decl: HEffectDecl): HoverCandidate {
 function format_trait_hover(decl: HTraitDecl): HoverCandidate {
   const tparams = decl.type_params.length > 0 ? `<${decl.type_params.map(p => p.name).join(", ")}>` : "";
   const methods = decl.methods.map(m => {
-    const params = m.params.map(p => `${p.name}: ${type_to_string(p.type)}`).join(", ");
+    const params = m.params.map(p => `${p.is_mutable ? "var " : ""}${p.name}: ${type_to_string(p.type)}`).join(", ");
     return `fn ${m.name}(${params}) -> ${type_to_string(m.return_type)}`;
   }).join("; ");
   return { type_str: `trait ${decl.name}${tparams} { ${methods} }`, span: decl.span };

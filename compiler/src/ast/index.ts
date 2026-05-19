@@ -316,6 +316,7 @@ export interface HandleExpr {
 
 export interface Param {
   name: string;
+  is_mutable?: boolean;
   type_annotation?: TypeExpr;
   span: Span;
 }

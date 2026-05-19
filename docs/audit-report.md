@@ -46,12 +46,11 @@
 - **描述**: 编译器大量使用 `{ ...type, params: newParams }` 模式做浅克隆+修改。zonk、apply、unify 每次递归都用。Ring 无此语法，需手动列出所有字段重建 struct。估计 2000+ 行额外代码。
 - **建议**: 考虑添加 `MyStruct { ..existing, field: new_val }` 语法（Rust 风格 struct update）
 
-### I2: 无 mutable self 方法
+### I2: ✅ 无 mutable self 方法
 - **来源**: Claude C1
 - **文件**: 所有使用 class 的文件（TypeEnv, Parser, Lexer, CodeGenerator, InferEngine 等 9 个 class）
 - **描述**: 编译器 9 个核心 class 都通过 `this.field = value` 累积可变状态。Ring 的 `impl` 方法接收 `self` 按值传递，无法修改 struct 字段。
-- **Workaround**: (a) 所有方法改为独立函数，struct 作为第一个 `var` 参数传入；(b) 用 `Cell<TypeEnv>` 包装；(c) 添加 `var self` 支持
-- **建议**: 添加 `impl` 方法的 `var self` 参数支持。这是最大的工效改进。
+- **修复**: 实现通用 `var` 参数支持。`fn method(var self)` 允许方法内修改 struct 字段。同时修复了 field assignment 对 `let` 绑定的缺失检查（`p.field = x` 现在正确报 E0205）。
 
 ### I3: 无 `?.` 可选链运算符
 - **来源**: Claude I5 + DS I1

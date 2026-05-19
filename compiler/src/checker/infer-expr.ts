@@ -960,7 +960,10 @@ export function infer_lambda(ctx: InferCtx, params: Param[], body: Expr, span: S
     ctx.env.bind_mono(p.name, pt);
     const lam_scheme = ctx.env.lookup(p.name)!;
     ctx.env.record_def_span(lam_scheme.def_id!, p.span);
-    hparams.push({ name: p.name, type: pt, def_id: lam_scheme.def_id });
+    if (p.is_mutable) {
+      ctx.env.mutable_vars.add(lam_scheme.def_id!);
+    }
+    hparams.push({ name: p.name, type: pt, def_id: lam_scheme.def_id, is_mutable: p.is_mutable });
     param_types.push(pt);
   }
 

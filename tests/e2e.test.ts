@@ -136,6 +136,8 @@ const cases: TestCase[] = [
   { file: "map_clone.ring", expected: "map_clone: all tests passed\n" },
   // OS API (self-hosting prerequisite)
   { file: "os_api_basic.ring", expected: "os_api_basic: all tests passed\n" },
+  // Mutable self + var params (self-hosting prerequisite)
+  { file: "var_self_test.ring", expected: "all var_self tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: 3 }, () => {
@@ -186,6 +188,9 @@ describe("e2e: ring check (negative — should reject)", { concurrency: 3 }, () 
     // Enum named fields
     { file: "enum_named_wrong_field.ring", error_pattern: "E0203" },
     { file: "enum_named_missing_field.ring", error_pattern: "E0203" },
+    // Field assignment on immutable
+    { file: "neg_field_assign_immutable.ring", error_pattern: "E0205" },
+    { file: "neg_let_field_assign.ring", error_pattern: "E0205" },
   ];
 
   for (const tc of negative_cases) {

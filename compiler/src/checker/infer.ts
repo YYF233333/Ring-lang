@@ -223,9 +223,10 @@ export class InferEngine implements InferCtx {
 
     const hmethods = trait_def.methods.map(m => {
       const ast_method = decl.methods.find(dm => dm.name === m.name);
-      const params = m.type.params.map((t, i) => ({
+      const params: HParam[] = m.type.params.map((t, i) => ({
         name: ast_method?.params[i]?.name ?? `p${i}`,
         type: t,
+        is_mutable: ast_method?.params[i]?.is_mutable,
       }));
       let body: HBlock | undefined;
       if (m.has_default && ast_method && ast_method.body.stmts.length + (ast_method.body.tail ? 1 : 0) > 0) {
@@ -244,6 +245,10 @@ export class InferEngine implements InferCtx {
           }
           for (const p of params) {
             this.env.bind_mono(p.name, p.type);
+            if (p.is_mutable) {
+              const ps = this.env.lookup(p.name)!;
+              this.env.mutable_vars.add(ps.def_id!);
+            }
           }
           const body_result = this.infer_block(ast_method.body);
           this.subst = body_result.subst;
@@ -319,7 +324,10 @@ export class InferEngine implements InferCtx {
       this.env.bind_mono(p.name, ptype);
       const param_scheme = this.env.lookup(p.name)!;
       this.env.record_def_span(param_scheme.def_id!, p.span);
-      hparams.push({ name: p.name, type: ptype, def_id: param_scheme.def_id });
+      if (p.is_mutable) {
+        this.env.mutable_vars.add(param_scheme.def_id!);
+      }
+      hparams.push({ name: p.name, type: ptype, def_id: param_scheme.def_id, is_mutable: p.is_mutable });
     }
 
     const saved_fn_return = this.current_fn_return_type;
@@ -509,6 +517,20 @@ export class InferEngine implements InferCtx {
               stmt.target.span,
               { kind: "other", detail: `'${stmt.target.name}' is declared with 'let'` },
             );
+          }
+        } else if (stmt.target.kind === "field_access") {
+          let root: Expr = stmt.target;
+          while (root.kind === "field_access") root = root.receiver;
+          if (root.kind === "ident") {
+            const scheme = this.env.lookup(root.name);
+            if (scheme && scheme.def_id !== undefined && !this.env.mutable_vars.has(scheme.def_id)) {
+              type_error(this,
+                E.E0205,
+                `Cannot assign to field of immutable variable '${root.name}'. Use 'var' for mutable bindings.`,
+                stmt.target.span,
+                { kind: "other", detail: `'${root.name}' is not mutable` },
+              );
+            }
           }
         }
         const target_r = this.infer_expr(stmt.target, subst);

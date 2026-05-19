@@ -175,6 +175,7 @@ export interface HParam {
   name: string;
   type: Type;
   def_id?: number;
+  is_mutable?: boolean;
 }
 
 export interface HLambda extends HExprBase {

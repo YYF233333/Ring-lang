@@ -821,11 +821,12 @@ export function parse_params(ctx: ParserCtx): import("../ast/index.js").Param[] 
 
 export function parse_param(ctx: ParserCtx): import("../ast/index.js").Param {
   const start = ctx.current_span_start();
+  const is_mutable = ctx.try_consume(TokenKind.Var);
   const name = ctx.expect(TokenKind.Ident).value;
   let type_annotation: TypeExpr | undefined;
   if (ctx.try_consume(TokenKind.Colon)) {
     type_annotation = parse_type_expr(ctx);
   }
   const end = ctx.current_span_start();
-  return { name, type_annotation, span: ctx.make_span(start, end) };
+  return { name, is_mutable: is_mutable || undefined, type_annotation, span: ctx.make_span(start, end) };
 }
