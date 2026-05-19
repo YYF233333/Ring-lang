@@ -335,6 +335,7 @@ export interface RangeExpr {
   kind: "range";
   start: Expr;
   end: Expr;
+  inclusive: boolean;
   span: Span;
 }
 

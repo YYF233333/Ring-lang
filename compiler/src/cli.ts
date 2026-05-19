@@ -136,10 +136,11 @@ async function main(): Promise<void> {
           if (output) {
             process.stdout.write(output);
           }
-        } catch (execErr: any) {
-          if (execErr.stdout) process.stdout.write(execErr.stdout);
-          if (execErr.stderr) process.stderr.write(execErr.stderr);
-          process.exit(execErr.status ?? 1);
+        } catch (execErr: unknown) {
+          const err = execErr as { stdout?: string; stderr?: string; status?: number };
+          if (err.stdout) process.stdout.write(err.stdout);
+          if (err.stderr) process.stderr.write(err.stderr);
+          process.exit(err.status ?? 1);
         } finally {
           try { fs.unlinkSync(tmpFile); } catch {}
         }

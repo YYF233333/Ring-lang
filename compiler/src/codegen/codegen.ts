@@ -35,6 +35,11 @@ function safe_ident(name: string): string {
   return name;
 }
 
+const LIST_HOF_JS: Record<string, string> = {
+  map: "map", filter: "filter", flat_map: "flatMap",
+  any: "some", all: "every",
+};
+
 // ============================================================
 // CodeGenerator class
 // ============================================================
@@ -45,6 +50,8 @@ class CodeGenerator {
   private impl_methods: Map<string, string | undefined> = new Map();
   private struct_field_order: Map<string, string[]> = new Map();
   private trait_decls: Map<string, HTraitDecl> = new Map();
+  private dt_counter = 0;
+  private loop_counter = 0;
 
   private indent(): string {
     return "  ".repeat(this.indent_level);
@@ -450,9 +457,10 @@ class CodeGenerator {
           const start_js = this.gen_expr(stmt.iterable.start);
           const end_js = this.gen_expr(stmt.iterable.end);
           const binding = safe_ident(stmt.binding);
-          const end_var = `__ring_end_${binding}`;
+          const end_var = `__ring_end${this.loop_counter++}`;
           this.emit(`const ${end_var} = ${end_js};`);
-          this.emit(`for (let ${binding} = ${start_js}; ${binding} < ${end_var}; ${binding}++) {`);
+          const cmp = stmt.iterable.inclusive ? "<=" : "<";
+          this.emit(`for (let ${binding} = ${start_js}; ${binding} ${cmp} ${end_var}; ${binding}++) {`);
         } else {
           const iter = this.gen_expr(stmt.iterable);
           const binding = safe_ident(stmt.binding);
@@ -472,7 +480,7 @@ class CodeGenerator {
         return;
       case "let_destructure": {
         const init = this.gen_expr(stmt.init);
-        const tmp = `__ring_dt`;
+        const tmp = `__ring_dt${this.dt_counter++}`;
         this.emit(`const ${tmp} = ${init};`);
         for (let i = 0; i < stmt.bindings.length; i++) {
           const b = stmt.bindings[i];
@@ -605,10 +613,6 @@ class CodeGenerator {
       const recv_type = expr.callee.receiver.type;
       const method = expr.callee.field;
       if (recv_type.kind === "struct" && recv_type.name === "List") {
-        const LIST_HOF_JS: Record<string, string> = {
-          map: "map", filter: "filter", flat_map: "flatMap",
-          any: "some", all: "every",
-        };
         const js_method = LIST_HOF_JS[method];
         if (js_method) {
           const receiver = this.gen_expr(expr.callee.receiver);
@@ -624,7 +628,7 @@ class CodeGenerator {
         if (method === "find") {
           const receiver = this.gen_expr(expr.callee.receiver);
           const callback = this.gen_lambda_capture_evidence(expr.args[0]);
-          return `((__r) => __r !== undefined ? { _tag: "some", _0: __r } : { _tag: "none" })(${receiver}.find(${callback}))`;
+          return `((__a) => { const __i = __a.findIndex(${callback}); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(${receiver})`;
         }
       }
 

@@ -3,7 +3,7 @@
 
 import {
   Program, Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TestDecl, TraitDecl,
-  Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr,
+  Expr, Stmt, Pattern, MatchArm, TypeExpr, Param, BlockExpr, IfExpr,
   BinOp, UnaryOp,
   Span, span_zero,
 } from "../ast/index.js";
@@ -125,6 +125,16 @@ export class InferEngine {
       case "record":
         for (const f of t.fields) this.collect_free_vars(f.type, result);
         if (t.tail !== undefined) result.add(t.tail);
+        break;
+      case "tuple":
+        for (const e of t.elements) this.collect_free_vars(e, result);
+        break;
+      case "effect_row":
+        if (t.tail !== undefined) result.add(t.tail);
+        for (const e of t.effects) {
+          if (e.kind === "fail") this.collect_free_vars(e.error_type, result);
+          if (e.kind === "custom") for (const a of e.type_args) this.collect_free_vars(a, result);
+        }
         break;
     }
   }
@@ -922,6 +932,13 @@ export class InferEngine {
           element_type = iter_type.type_params[0];
         } else if (iter_type.kind === "struct" && iter_type.name === "Set" && iter_type.type_params.length > 0) {
           element_type = iter_type.type_params[0];
+        } else if (iter_type.kind === "struct" && iter_type.name === "Map") {
+          this.type_error(
+            E.E0301,
+            `Map is not directly iterable with for..in. Use 'for entry in map.entries() { let (k, v) = entry; ... }' instead.`,
+            stmt.iterable.span,
+            { kind: "other", detail: "Map is not iterable; use .entries() to get List<(K, V)>" }
+          );
         } else {
           this.type_error(
             E.E0301,
@@ -1163,7 +1180,7 @@ export class InferEngine {
         const range_type: Type = { kind: "enum", name: "Range", type_params: [INT], variants: [] };
         return {
           hexpr: {
-            kind: "range", start: start_r.hexpr, end: end_r.hexpr,
+            kind: "range", start: start_r.hexpr, end: end_r.hexpr, inclusive: expr.inclusive,
             type: range_type, effects: range_effects, span: expr.span,
           },
           subst: s,
@@ -1558,6 +1575,10 @@ export class InferEngine {
     let effects: EffectRow = EMPTY_ROW;
     const hargs: HExpr[] = [];
 
+    if (args.length !== op.params.length) {
+      this.type_error(E.E0301, `Effect operation '${effect_name}.${op_name}' expects ${op.params.length} argument(s), got ${args.length}`, span, { kind: "type_mismatch", expected: `${op.params.length} args`, actual: `${args.length} args` });
+    }
+
     for (let i = 0; i < args.length; i++) {
       const ar = this.infer_expr(args[i], s);
       s = ar.subst;
@@ -1847,7 +1868,7 @@ export class InferEngine {
     }
   }
 
-  private infer_if(condition: Expr, then_branch: BlockExpr, else_branch: BlockExpr | { kind: "if_expr"; condition: Expr; then_branch: BlockExpr; else_branch?: any; span: Span } | undefined, span: Span, subst: Substitution): InferResult {
+  private infer_if(condition: Expr, then_branch: BlockExpr, else_branch: BlockExpr | IfExpr | undefined, span: Span, subst: Substitution): InferResult {
     const cond_r = this.infer_expr(condition, subst);
     let s = cond_r.subst;
     s = this.unify_at(cond_r.hexpr.type, BOOL, s, span);
@@ -1932,6 +1953,10 @@ export class InferEngine {
     const expr_r = this.infer_expr(expr, subst);
     let s = expr_r.subst;
     const expr_type = apply(s, expr_r.hexpr.type);
+
+    if (expr_type.kind === "var") {
+      this.type_error(E.E0301, `Cannot determine whether 'or' should unwrap Option or catch fail — the expression type is ambiguous. Add a type annotation to clarify.`, span, { kind: "other", detail: "ambiguous 'or' dispatch: expression type is unresolved" });
+    }
 
     // Option path: expr is Option<T>, default is T
     if (is_option_type(expr_type)) {
@@ -2278,6 +2303,9 @@ export class InferEngine {
         // Check if it's a known struct
         if (this.env.structs.has(name)) {
           const def = this.env.structs.get(name)!;
+          if (type_args.length > 0 && type_args.length !== def.type_params.length) {
+            this.type_error(E.E0301, `Type '${name}' expects ${def.type_params.length} type argument(s), got ${type_args.length}`, span, { kind: "type_mismatch", expected: `${def.type_params.length} type args`, actual: `${type_args.length} type args` });
+          }
           return {
             kind: "struct",
             name,
@@ -2288,6 +2316,9 @@ export class InferEngine {
         // Check if it's a known enum
         if (this.env.enums.has(name)) {
           const def = this.env.enums.get(name)!;
+          if (type_args.length > 0 && type_args.length !== def.type_params.length) {
+            this.type_error(E.E0301, `Type '${name}' expects ${def.type_params.length} type argument(s), got ${type_args.length}`, span, { kind: "type_mismatch", expected: `${def.type_params.length} type args`, actual: `${type_args.length} type args` });
+          }
           return {
             kind: "enum",
             name,

@@ -13,16 +13,6 @@ export function span_to_range(span: Span): Range {
   };
 }
 
-export function lsp_to_ring_position(pos: LspPosition, source: string): RingPosition {
-  const lines = source.split("\n");
-  let offset = 0;
-  for (let i = 0; i < pos.line && i < lines.length; i++) {
-    offset += lines[i].length + 1;
-  }
-  offset += pos.character;
-  return { line: pos.line + 1, column: pos.character, offset };
-}
-
 export function offset_to_position(source: string, offset: number): LspPosition {
   let line = 0;
   let last_line_start = 0;

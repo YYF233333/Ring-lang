@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import {
   unify, unify_effect_rows, UnificationError,
-  apply, empty_subst, compose, occurs_in,
+  apply, empty_subst, occurs_in,
   type Substitution,
 } from "./unify.js";
 import {
@@ -267,22 +267,12 @@ describe("unify_effect_rows — dual tail with unmatched effects (C5 regression)
 // 6. Apply & Compose helpers
 // ============================================================
 
-describe("apply and compose", () => {
+describe("apply", () => {
   it("apply resolves a chain of substitutions", () => {
     const s: Substitution = new Map();
     s.set(600, tvar(601));
     s.set(601, INT);
     const result = apply(s, tvar(600));
     assert.equal(result.kind, "int");
-  });
-
-  it("compose merges two substitutions correctly", () => {
-    const s1: Substitution = new Map([[700, tvar(701)]]);
-    const s2: Substitution = new Map([[701, STR]]);
-    const merged = compose(s1, s2);
-    // s1's mapping for 700 should have s2 applied: tvar(701) -> STR
-    assert.equal(apply(merged, tvar(700)).kind, "str");
-    // s2's mapping should also be present
-    assert.equal(apply(merged, tvar(701)).kind, "str");
   });
 });

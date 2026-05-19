@@ -1,5 +1,5 @@
 // Ring-lang Pattern Match Exhaustiveness Checking
-import { Pattern, TuplePattern } from "../ast/index.js";
+import { Pattern, TuplePattern, Expr } from "../ast/index.js";
 import { Type } from "../types/index.js";
 import { Substitution, apply } from "./unify.js";
 
@@ -8,7 +8,7 @@ import { Substitution, apply } from "./unify.js";
  * Returns null if exhaustive, or a description of the missing pattern if not.
  */
 export function check_exhaustive(
-  arms: { pattern: Pattern; guard?: any }[],
+  arms: { pattern: Pattern; guard?: Expr }[],
   scrutinee_type: Type,
   subst: Substitution,
 ): string | null {

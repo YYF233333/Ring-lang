@@ -50,7 +50,8 @@ function infix_precedence(kind: TokenKind): Prec {
     case TokenKind.Gt:
     case TokenKind.LtEq:
     case TokenKind.GtEq: return Prec.Compare;
-    case TokenKind.DotDot: return Prec.Range;
+    case TokenKind.DotDot:
+    case TokenKind.DotDotEq: return Prec.Range;
     case TokenKind.Plus:
     case TokenKind.Minus: return Prec.AddSub;
     case TokenKind.Star:
@@ -118,7 +119,16 @@ export class Parser {
   // ============================================================
 
   private parse_decl(): Decl {
+    let pub_span: Span | undefined;
+    if (this.check(TokenKind.Pub)) {
+      pub_span = this.peek().span;
+    }
     const is_pub = this.try_consume(TokenKind.Pub);
+    if (is_pub && pub_span) {
+      this.sink.report(make_diagnostic("W0002", "warning",
+        "Visibility modifiers are not yet enforced; 'pub' is parsed but has no effect",
+        pub_span, { kind: "other", detail: "pub parsed but not enforced" }));
+    }
     const tok = this.peek();
 
     switch (tok.kind) {
@@ -176,7 +186,10 @@ export class Parser {
       const type_annotation = this.parse_type_expr();
       // Check for where clause on this field (refinement)
       if (this.check(TokenKind.Where)) {
-        // Skip where clause (store as-is for now, just consume tokens until comma or })
+        const where_span = this.peek().span;
+        this.sink.report(make_diagnostic("W0001", "warning",
+          "Refinement types are not yet implemented; 'where' clause is ignored",
+          where_span, { kind: "other", detail: "where clause parsed but not enforced" }));
         this.advance(); // consume 'where'
         // Consume tokens until comma or closing brace (simplified: stop at , or })
         let depth = 0;
@@ -770,11 +783,12 @@ export class Parser {
         const q_tok = this.advance();
         left = { kind: "option_unwrap", expr: left, span: this.make_span(left.span.start, q_tok.span.end) } as OptionUnwrapExpr;
         last_was_comparison = false;
-      } else if (tok.kind === TokenKind.DotDot) {
+      } else if (tok.kind === TokenKind.DotDot || tok.kind === TokenKind.DotDotEq) {
+        const inclusive = tok.kind === TokenKind.DotDotEq;
         this.advance();
         const right = this.parse_expr_bp(prec);
         const span = this.make_span(left.span.start, right.span.end);
-        left = { kind: "range", start: left, end: right, span } as RangeExpr;
+        left = { kind: "range", start: left, end: right, inclusive, span } as RangeExpr;
         last_was_comparison = false;
       } else {
         const is_comparison = prec === Prec.Equality || prec === Prec.Compare;

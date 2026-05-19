@@ -78,6 +78,7 @@ const cases: TestCase[] = [
   { file: "for_range.ring", expected: "10\n" },
   { file: "for_range_nested.ring", expected: "9\n" },
   { file: "for_range_break.ring", expected: "10\n" },
+  { file: "for_range_inclusive.ring", expected: "15\n1\n" },
   { file: "match_multi_stmt.ring", expected: "1\n2\n3\n" },
   // Batch 2: Str methods
   { file: "str_methods.ring", expected: "13\ntrue\ntrue\ntrue\nHello\nHello, World!\nABC\nxyz\na_b_c\n" },
@@ -92,6 +93,7 @@ const cases: TestCase[] = [
   // Batch 3: Tuples
   { file: "tuple_basic.ring", expected: "10\nhello\nx\n" },
   { file: "tuple_fn.ring", expected: "answer\n42\n" },
+  { file: "tuple_multi_destructure.ring", expected: "9\n19\n" },
   // Batch 3: Map<K,V>
   { file: "map_basic.ring", expected: "3\ntrue\nfalse\n4\n3\n" },
   { file: "map_methods.ring", expected: "b\n3\n3\ntrue\n2\n" },

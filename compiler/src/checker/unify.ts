@@ -147,24 +147,6 @@ export function apply_to_effect_row(subst: Substitution, row: EffectRow): Effect
 }
 
 // ============================================================
-// Compose substitutions: apply s1 first, then s2
-// compose(s1, s2) means: first s1, then s2
-// ============================================================
-
-export function compose(s1: Substitution, s2: Substitution): Substitution {
-  const result: Substitution = new Map();
-  // Apply s2 to all mappings in s1
-  for (const [id, t] of s1) {
-    result.set(id, apply(s2, t));
-  }
-  // Add s2 mappings (s2 takes precedence — overwrites s1 for same key)
-  for (const [id, t] of s2) {
-    result.set(id, t);
-  }
-  return result;
-}
-
-// ============================================================
 // Occurs check: does var_id appear anywhere in type?
 // ============================================================
 
@@ -283,6 +265,9 @@ export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitutio
       const fresh = fresh_row_var_id();
       if (b_unmatched.length > 0) {
         const row_for_a_tail: EffectRowType = { kind: "effect_row", effects: b_unmatched, tail: fresh };
+        if (occurs_in(ra.tail, row_for_a_tail, s)) {
+          throw new UnificationError({ kind: "unit" }, { kind: "unit" }, "infinite type in effect row variable");
+        }
         const result = new Map(s);
         result.set(ra.tail, row_for_a_tail);
         s = result;
@@ -291,6 +276,9 @@ export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitutio
       }
       if (a_unmatched.length > 0) {
         const row_for_b_tail: EffectRowType = { kind: "effect_row", effects: a_unmatched, tail: fresh };
+        if (occurs_in(rb.tail, row_for_b_tail, s)) {
+          throw new UnificationError({ kind: "unit" }, { kind: "unit" }, "infinite type in effect row variable");
+        }
         const result = new Map(s);
         result.set(rb.tail, row_for_b_tail);
         s = result;
@@ -386,6 +374,9 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
     if (a.name !== b.name) {
       throw new UnificationError(t1, t2, `different struct types`);
     }
+    if (a.type_params.length !== b.type_params.length) {
+      throw new UnificationError(t1, t2, `different type parameter counts for struct '${a.name}'`);
+    }
     let s = subst;
     for (let i = 0; i < a.type_params.length; i++) {
       s = unify(a.type_params[i], b.type_params[i], s);
@@ -397,6 +388,9 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
   if (a.kind === "enum" && b.kind === "enum") {
     if (a.name !== b.name) {
       throw new UnificationError(t1, t2, `different enum types`);
+    }
+    if (a.type_params.length !== b.type_params.length) {
+      throw new UnificationError(t1, t2, `different type parameter counts for enum '${a.name}'`);
     }
     let s = subst;
     for (let i = 0; i < a.type_params.length; i++) {

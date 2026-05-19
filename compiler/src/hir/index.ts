@@ -204,6 +204,7 @@ export interface HRangeExpr extends HExprBase {
   kind: "range";
   start: HExpr;
   end: HExpr;
+  inclusive: boolean;
 }
 
 export interface HListLit extends HExprBase {

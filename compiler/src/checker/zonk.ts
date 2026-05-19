@@ -51,6 +51,8 @@ function label_vars(names: Map<number, string>, t: Type): Type {
     }
     case "effect_row":
       return { ...t, effects: t.effects.map(e => label_effect(names, e)) };
+    case "tuple":
+      return { ...t, elements: t.elements.map(e => label_vars(names, e)) };
     default:
       return t;
   }
@@ -167,7 +169,7 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
     case "option_unwrap": return { ...base, kind: "option_unwrap", expr: zonk_expr(ctx, expr.expr) };
     case "try_block":     return { ...base, kind: "try_block", body: zonk_expr(ctx, expr.body) };
     case "option_or":     return { ...base, kind: "option_or", expr: zonk_expr(ctx, expr.expr), default_value: zonk_expr(ctx, expr.default_value) };
-    case "range":         return { ...base, kind: "range", start: zonk_expr(ctx, expr.start), end: zonk_expr(ctx, expr.end) };
+    case "range":         return { ...base, kind: "range", start: zonk_expr(ctx, expr.start), end: zonk_expr(ctx, expr.end), inclusive: expr.inclusive };
     case "list_lit":      return { ...base, kind: "list_lit", elements: expr.elements.map(e => zonk_expr(ctx, e)) };
     case "tuple_lit":     return { ...base, kind: "tuple_lit", elements: expr.elements.map(e => zonk_expr(ctx, e)) };
   }

@@ -79,6 +79,7 @@ export enum TokenKind {
   Colon = ":",
   Dot = ".",
   DotDot = "..",
+  DotDotEq = "..=",
   FatArrow = "=>",
   Arrow = "->",
   Question = "?",
@@ -389,7 +390,11 @@ export class Lexer {
       case ";": return this.make_token(TokenKind.Semi, ";", start);
       case "?": return this.make_token(TokenKind.Question, "?", start);
       case ".":
-        if (this.peek() === ".") { this.advance(); return this.make_token(TokenKind.DotDot, "..", start); }
+        if (this.peek() === ".") {
+          this.advance();
+          if (this.peek() === "=") { this.advance(); return this.make_token(TokenKind.DotDotEq, "..=", start); }
+          return this.make_token(TokenKind.DotDot, "..", start);
+        }
         return this.make_token(TokenKind.Dot, ".", start);
       case "+":
         if (this.peek() === "=") { this.advance(); return this.make_token(TokenKind.PlusEq, "+=", start); }
