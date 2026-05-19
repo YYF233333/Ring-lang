@@ -276,3 +276,68 @@ describe("apply", () => {
     assert.equal(result.kind, "int");
   });
 });
+
+// ============================================================
+// 7. Tuple types (M18)
+// ============================================================
+
+function tuple(...elements: Type[]): Type {
+  return { kind: "tuple", elements };
+}
+
+describe("unify — tuple types", () => {
+  it("unifies identical tuples", () => {
+    const s = unify(tuple(INT, STR), tuple(INT, STR), empty_subst());
+    assert.ok(s);
+  });
+
+  it("unifies tuple with type variables", () => {
+    const s = unify(tuple(tvar(700), STR), tuple(INT, tvar(701)), empty_subst());
+    const resolved_a = apply(s, tvar(700));
+    const resolved_b = apply(s, tvar(701));
+    assert.equal(resolved_a.kind, "int");
+    assert.equal(resolved_b.kind, "str");
+  });
+
+  it("rejects tuples of different arity", () => {
+    assert.throws(() => {
+      unify(tuple(INT, STR), tuple(INT), empty_subst());
+    }, UnificationError);
+  });
+
+  it("rejects tuple vs non-tuple", () => {
+    assert.throws(() => {
+      unify(tuple(INT), INT, empty_subst());
+    }, UnificationError);
+  });
+
+  it("unifies nested tuples", () => {
+    const s = unify(
+      tuple(tuple(tvar(710), INT), STR),
+      tuple(tuple(BOOL, INT), tvar(711)),
+      empty_subst()
+    );
+    const inner = apply(s, tvar(710));
+    const outer = apply(s, tvar(711));
+    assert.equal(inner.kind, "bool");
+    assert.equal(outer.kind, "str");
+  });
+
+  it("apply substitutes through tuple elements", () => {
+    const s: Substitution = new Map();
+    s.set(720, INT);
+    s.set(721, STR);
+    const result = apply(s, tuple(tvar(720), tvar(721)));
+    assert.equal(result.kind, "tuple");
+    if (result.kind === "tuple") {
+      assert.equal(result.elements[0].kind, "int");
+      assert.equal(result.elements[1].kind, "str");
+    }
+  });
+
+  it("occurs check detects infinite tuple type", () => {
+    assert.throws(() => {
+      unify(tvar(730), tuple(tvar(730), INT), empty_subst());
+    }, UnificationError);
+  });
+});

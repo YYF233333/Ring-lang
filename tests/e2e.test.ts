@@ -107,6 +107,12 @@ const cases: TestCase[] = [
   { file: "if_let_basic.ring", expected: "42\nwas none\n" },
   { file: "if_let_map.ring", expected: "one\nnot found\n" },
   { file: "if_let_no_else.ring", expected: "4\n" },
+  // Audit batch 2: test coverage gaps
+  { file: "custom_effect.ring", expected: "hello\nworld\n" },
+  { file: "trait_multi_bound.ring", expected: "btn: 12\n" },
+  { file: "nested_handler.ring", expected: "inner-inner-file-outer-outer-file\n" },
+  { file: "for_in_continue.ring", expected: "35\n" },
+  { file: "empty_collection.ring", expected: "0\n0\n0\nfalse\ntrue\nnone\n0\nfalse\n0\nfalse\n0\nfalse\n" },
 ];
 
 describe("e2e: ring run", () => {
@@ -188,6 +194,15 @@ describe("e2e: ring check (negative — should reject)", () => {
     { file: "error_assign_immutable.ring", error_pattern: "E0205" },
     { file: "error_break_outside.ring", error_pattern: "E0206" },
     { file: "error_empty_list.ring", error_pattern: "E0301" },
+    // Audit batch 2: error code coverage
+    { file: "error_unterminated_str.ring", error_pattern: "E0102" },
+    { file: "error_unknown_type.ring", error_pattern: "E0204" },
+    { file: "error_numeric_required.ring", error_pattern: "E0303" },
+    { file: "error_field_non_struct.ring", error_pattern: "E0304" },
+    { file: "error_unknown_effect_op.ring", error_pattern: "E0402" },
+    { file: "error_unknown_trait.ring", error_pattern: "E0501" },
+    { file: "error_unsatisfied_bound.ring", error_pattern: "E0503" },
+    { file: "error_occurs_check.ring", error_pattern: "E0302" },
   ];
 
   for (const tc of negative_cases) {

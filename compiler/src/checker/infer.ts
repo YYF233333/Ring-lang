@@ -65,6 +65,7 @@ export class InferEngine {
   private type_error(code: string, message: string, span: Span, context: DiagnosticContext): never {
     const diag = make_diagnostic(code, "error", message, span, context);
     this.sink.report(diag);
+    // Empty: real diagnostic already sent to sink; throw is purely for control flow
     throw new CompileError([]);
   }
 
@@ -81,7 +82,8 @@ export class InferEngine {
       return unify(t1, t2, s);
     } catch (e) {
       if (e instanceof UnificationError) {
-        this.type_error("E0301", e.message, span, {
+        const code = e.is_occurs_check ? E.E0302 : E.E0301;
+        this.type_error(code, e.message, span, {
           kind: "type_mismatch",
           expected: type_to_string(apply(s, t1)),
           actual: type_to_string(apply(s, t2)),
@@ -1562,10 +1564,7 @@ export class InferEngine {
   }
 
   private infer_effect_op(effect_name: string, op_name: string, args: Expr[], span: Span, subst: Substitution): InferResult {
-    const effect_def = this.env.effects.get(effect_name);
-    if (!effect_def) {
-      this.type_error(E.E0401, `Unknown effect: ${effect_name}`, span, { kind: "effect_unhandled", effect: effect_name });
-    }
+    const effect_def = this.env.effects.get(effect_name)!;
     const op = effect_def.ops.find(o => o.name === op_name);
     if (!op) {
       this.type_error(E.E0402, `Effect ${effect_name} has no operation ${op_name}`, span, { kind: "other", detail: `no operation '${op_name}' on effect '${effect_name}'` });

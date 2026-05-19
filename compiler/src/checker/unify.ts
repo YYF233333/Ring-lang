@@ -202,12 +202,14 @@ export function occurs_in(var_id: number, t: Type, subst: Substitution): boolean
 // ============================================================
 
 export class UnificationError extends Error {
-  constructor(t1: Type, t2: Type, detail?: string) {
+  readonly is_occurs_check: boolean;
+  constructor(t1: Type, t2: Type, detail?: string, is_occurs_check = false) {
     const msg = detail
       ? `Type mismatch: cannot unify ${type_to_string(t1)} with ${type_to_string(t2)} — ${detail}`
       : `Type mismatch: cannot unify ${type_to_string(t1)} with ${type_to_string(t2)}`;
     super(msg);
     this.name = "UnificationError";
+    this.is_occurs_check = is_occurs_check;
   }
 }
 
@@ -330,7 +332,7 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
   // Bind a variable (must come before `never` so that unify(?a, never) binds ?a)
   if (a.kind === "var") {
     if (occurs_in(a.id, b, subst)) {
-      throw new UnificationError(t1, t2, "infinite type (occurs check)");
+      throw new UnificationError(t1, t2, "infinite type (occurs check)", true);
     }
     const result = new Map(subst);
     result.set(a.id, b);
@@ -338,7 +340,7 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
   }
   if (b.kind === "var") {
     if (occurs_in(b.id, a, subst)) {
-      throw new UnificationError(t1, t2, "infinite type (occurs check)");
+      throw new UnificationError(t1, t2, "infinite type (occurs check)", true);
     }
     const result = new Map(subst);
     result.set(b.id, a);

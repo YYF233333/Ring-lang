@@ -4,6 +4,7 @@ import {
   HMatchArm, HEffectHandler, HStructFieldInit,
 } from "../hir/index.js";
 import { Type, Effect, EffectRow } from "../types/index.js";
+import { assertNever } from "../errors.js";
 
 export interface ZonkCtx {
   subst: Substitution;
@@ -101,6 +102,7 @@ function zonk_stmt(ctx: ZonkCtx, stmt: HStmt): HStmt {
         then_block: zonk_block(ctx, stmt.then_block),
         else_block: stmt.else_block ? zonk_block(ctx, stmt.else_block) : null,
       };
+    default: return assertNever(stmt, "zonk_stmt");
   }
 }
 
@@ -172,6 +174,7 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
     case "range":         return { ...base, kind: "range", start: zonk_expr(ctx, expr.start), end: zonk_expr(ctx, expr.end), inclusive: expr.inclusive };
     case "list_lit":      return { ...base, kind: "list_lit", elements: expr.elements.map(e => zonk_expr(ctx, e)) };
     case "tuple_lit":     return { ...base, kind: "tuple_lit", elements: expr.elements.map(e => zonk_expr(ctx, e)) };
+    default: return assertNever(expr, "zonk_expr");
   }
 }
 

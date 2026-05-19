@@ -3,7 +3,6 @@ export const E = {
   E0101: "E0101", // unexpected token
   E0102: "E0102", // unterminated string
   E0103: "E0103", // expected specific token
-  E0104: "E0104", // invalid expression
 
   // Checker general (E02xx)
   E0201: "E0201", // undefined variable
@@ -19,7 +18,6 @@ export const E = {
   E0305: "E0305", // undefined method
 
   // Effect errors (E04xx)
-  E0401: "E0401", // unknown effect
   E0402: "E0402", // unknown effect operation
   E0403: "E0403", // unhandled effect
 
@@ -40,7 +38,6 @@ export const ERROR_DESCRIPTIONS: Record<string, string> = {
   [E.E0101]: "Unexpected token",
   [E.E0102]: "Unterminated string literal",
   [E.E0103]: "Expected token",
-  [E.E0104]: "Invalid expression",
   [E.E0201]: "Undefined variable",
   [E.E0202]: "Arity mismatch",
   [E.E0203]: "Unknown struct",
@@ -50,7 +47,6 @@ export const ERROR_DESCRIPTIONS: Record<string, string> = {
   [E.E0303]: "Numeric type required",
   [E.E0304]: "Invalid field access",
   [E.E0305]: "Undefined method",
-  [E.E0401]: "Unknown effect",
   [E.E0402]: "Unknown effect operation",
   [E.E0403]: "Unhandled effect",
   [E.E0501]: "Unknown trait",

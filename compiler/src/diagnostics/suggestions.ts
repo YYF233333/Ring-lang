@@ -8,6 +8,6 @@ export function enrich(diagnostics: readonly Diagnostic[]): Diagnostic[] {
 }
 
 function suggest(_d: Diagnostic): Suggestion[] {
-  // Framework placeholder — rules added incrementally in future sessions
+  // TODO: add suggestion rules (e.g. "did you mean X?" for typos, auto-import hints)
   return [];
 }

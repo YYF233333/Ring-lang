@@ -25,6 +25,16 @@ export function offset_to_position(source: string, offset: number): LspPosition 
   return { line, character: offset - last_line_start };
 }
 
+export function contains_position(span: Span, pos: LspPosition): boolean {
+  const ring_line = pos.line + 1;
+  const ring_col = pos.character;
+  const { start, end } = span;
+  if (ring_line < start.line || ring_line > end.line) return false;
+  if (ring_line === start.line && ring_col < start.column) return false;
+  if (ring_line === end.line && ring_col >= end.column) return false;
+  return true;
+}
+
 export function format_type_for_hover(type: Type, effects: EffectRow): string {
   const type_str = type_to_string(type);
   const eff_str = effect_row_to_string(effects);

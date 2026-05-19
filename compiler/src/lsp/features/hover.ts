@@ -1,6 +1,6 @@
 import { Hover, Position } from "vscode-languageserver";
 import { DocumentState } from "../document-manager.js";
-import { format_type_for_hover } from "../utils.js";
+import { format_type_for_hover, contains_position } from "../utils.js";
 import { type_to_string, effect_row_to_string } from "../../types/index.js";
 import {
   HDecl,
@@ -15,28 +15,6 @@ import {
   HTraitDecl,
 } from "../../hir/index.js";
 import { Span } from "../../ast/index.js";
-
-// ============================================================
-// Position containment (Ring 1-based lines vs LSP 0-based lines)
-// ============================================================
-
-/**
- * Returns true if the LSP position (0-based line) falls within the Ring span.
- * Ring spans: line is 1-based, column is 0-based.
- * LSP position: line is 0-based, character is 0-based.
- */
-function contains_position(span: Span, pos: Position): boolean {
-  // Convert LSP 0-based line to Ring 1-based
-  const ring_line = pos.line + 1;
-  const ring_col = pos.character;
-
-  const { start, end } = span;
-
-  if (ring_line < start.line || ring_line > end.line) return false;
-  if (ring_line === start.line && ring_col < start.column) return false;
-  if (ring_line === end.line && ring_col >= end.column) return false;
-  return true;
-}
 
 // ============================================================
 // HIR traversal — find the smallest node containing position

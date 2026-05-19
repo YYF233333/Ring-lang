@@ -1,6 +1,6 @@
 import { Location, Position } from "vscode-languageserver";
 import { DocumentState } from "../document-manager.js";
-import { span_to_range } from "../utils.js";
+import { span_to_range, contains_position } from "../utils.js";
 import {
   HExpr,
   HStmt,
@@ -17,21 +17,6 @@ import {
   BlockExpr,
   Span,
 } from "../../ast/index.js";
-
-// ============================================================
-// Position containment (Ring 1-based lines vs LSP 0-based lines)
-// ============================================================
-
-function contains_position(span: Span, pos: Position): boolean {
-  const ring_line = pos.line + 1;
-  const ring_col = pos.character;
-
-  const { start, end } = span;
-  if (ring_line < start.line || ring_line > end.line) return false;
-  if (ring_line === start.line && ring_col < start.column) return false;
-  if (ring_line === end.line && ring_col >= end.column) return false;
-  return true;
-}
 
 // ============================================================
 // HIR traversal — find the HIdent name at cursor position
