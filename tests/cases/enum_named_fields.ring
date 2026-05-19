@@ -19,30 +19,30 @@ fn main() {
     let r = Rect { width: 3, height: 4 }
     let p = Point
 
-    assert(area(c) == 75)
-    assert(area(r) == 12)
-    assert(area(p) == 0)
+    assert(area(c) == 75, "circle area")
+    assert(area(r) == 12, "rect area")
+    assert(area(p) == 0, "point area")
 
     // Explicit binding in pattern (not punning)
     match r {
         Rect { width: w, height: h } => {
-            assert(w == 3)
-            assert(h == 4)
+            assert(w == 3, "rect width")
+            assert(h == 4, "rect height")
         },
-        _ => assert(false),
+        _ => assert(false, "unreachable"),
     }
 
     // Partial match with ..
     match c {
-        Circle { .. } => assert(true),
-        _ => assert(false),
+        Circle { .. } => assert(true, "partial match"),
+        _ => assert(false, "unreachable"),
     }
 
     // Construction with punning
     let w = 10
     let h = 20
     let r2 = Rect { width: w, height: h }
-    assert(area(r2) == 200)
+    assert(area(r2) == 200, "punned rect area")
 
     print("enum_named_fields: all tests passed")
 }

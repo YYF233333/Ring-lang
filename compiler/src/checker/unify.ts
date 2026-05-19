@@ -6,17 +6,10 @@ import {
 } from "../types/index.js";
 
 // ============================================================
-// Fresh variable generation for row unification
+// Fresh variable ID allocator (injected by caller, no global state)
 // ============================================================
 
-// Offset from checker's type var IDs to avoid collision with unifier's fresh row vars
-const UNIFY_ID_OFFSET = 100000;
-
-let _unify_next_id = UNIFY_ID_OFFSET;
-export function init_unify_fresh_counter(base: number): void {
-  _unify_next_id = base + UNIFY_ID_OFFSET;
-}
-function fresh_row_var_id(): number { return _unify_next_id++; }
+export type FreshIdGen = () => number;
 
 // ============================================================
 // Substitution = Map<type_var_id, resolved_Type>
@@ -215,11 +208,8 @@ export class UnificationError extends Error {
 
 /**
  * Unify two effect rows using Koka-style row variable solving.
- * Match effects by kind, unify type params of matching pairs.
- * Unmatched effects are tolerated (keeps backward compat; full strictness
- * would require callers to check for unhandled effects separately).
  */
-export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitution): Substitution {
+export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitution, fresh_id: FreshIdGen): Substitution {
   let s = subst;
 
   const ra = apply_to_effect_row(s, a);
@@ -231,7 +221,7 @@ export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitutio
     for (let bi = 0; bi < rb.effects.length; bi++) {
       if (b_matched.has(bi)) continue;
       if (effects_match_kind(ra.effects[ai], rb.effects[bi])) {
-        s = unify_effect_params(ra.effects[ai], rb.effects[bi], s);
+        s = unify_effect_params(ra.effects[ai], rb.effects[bi], s, fresh_id);
         a_matched.add(ai);
         b_matched.add(bi);
         break;
@@ -262,9 +252,9 @@ export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitutio
     if (ra.tail === rb.tail) {
       // Same tail var — unmatched effects are just extra (already tolerated above)
     } else if (a_unmatched.length === 0 && b_unmatched.length === 0) {
-      s = unify({ kind: "var", id: ra.tail }, { kind: "var", id: rb.tail }, s);
+      s = unify({ kind: "var", id: ra.tail }, { kind: "var", id: rb.tail }, s, fresh_id);
     } else {
-      const fresh = fresh_row_var_id();
+      const fresh = fresh_id();
       if (b_unmatched.length > 0) {
         const row_for_a_tail: EffectRowType = { kind: "effect_row", effects: b_unmatched, tail: fresh };
         if (occurs_in(ra.tail, row_for_a_tail, s)) {
@@ -274,7 +264,7 @@ export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitutio
         result.set(ra.tail, row_for_a_tail);
         s = result;
       } else {
-        s = unify({ kind: "var", id: ra.tail }, { kind: "var", id: fresh }, s);
+        s = unify({ kind: "var", id: ra.tail }, { kind: "var", id: fresh }, s, fresh_id);
       }
       if (a_unmatched.length > 0) {
         const row_for_b_tail: EffectRowType = { kind: "effect_row", effects: a_unmatched, tail: fresh };
@@ -285,7 +275,7 @@ export function unify_effect_rows(a: EffectRow, b: EffectRow, subst: Substitutio
         result.set(rb.tail, row_for_b_tail);
         s = result;
       } else {
-        s = unify({ kind: "var", id: rb.tail }, { kind: "var", id: fresh }, s);
+        s = unify({ kind: "var", id: rb.tail }, { kind: "var", id: fresh }, s, fresh_id);
       }
     }
   }
@@ -299,16 +289,16 @@ function effects_match_kind(a: Effect, b: Effect): boolean {
   return true;
 }
 
-function unify_effect_params(a: Effect, b: Effect, subst: Substitution): Substitution {
+function unify_effect_params(a: Effect, b: Effect, subst: Substitution, fresh_id: FreshIdGen): Substitution {
   if (a.kind === "fail" && b.kind === "fail") {
-    return unify(a.error_type, (b as FailEffect).error_type, subst);
+    return unify(a.error_type, (b as FailEffect).error_type, subst, fresh_id);
   }
   if (a.kind === "custom" && b.kind === "custom") {
     let s = subst;
     const bc = b as CustomEffect;
     const len = Math.min(a.type_args.length, bc.type_args.length);
     for (let i = 0; i < len; i++) {
-      s = unify(a.type_args[i], bc.type_args[i], s);
+      s = unify(a.type_args[i], bc.type_args[i], s, fresh_id);
     }
     return s;
   }
@@ -319,7 +309,7 @@ function unify_effect_params(a: Effect, b: Effect, subst: Substitution): Substit
  * Unify two types, returning updated substitution.
  * Throws UnificationError on failure.
  */
-export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
+export function unify(t1: Type, t2: Type, subst: Substitution, fresh_id: FreshIdGen): Substitution {
   const a = apply(subst, t1);
   const b = apply(subst, t2);
 
@@ -364,10 +354,10 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
     }
     let s = subst;
     for (let i = 0; i < a.params.length; i++) {
-      s = unify(a.params[i], b.params[i], s);
+      s = unify(a.params[i], b.params[i], s, fresh_id);
     }
-    s = unify(a.return_type, b.return_type, s);
-    s = unify_effect_rows(a.effects, b.effects, s);
+    s = unify(a.return_type, b.return_type, s, fresh_id);
+    s = unify_effect_rows(a.effects, b.effects, s, fresh_id);
     return s;
   }
 
@@ -381,7 +371,7 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
     }
     let s = subst;
     for (let i = 0; i < a.type_params.length; i++) {
-      s = unify(a.type_params[i], b.type_params[i], s);
+      s = unify(a.type_params[i], b.type_params[i], s, fresh_id);
     }
     return s;
   }
@@ -396,26 +386,26 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
     }
     let s = subst;
     for (let i = 0; i < a.type_params.length; i++) {
-      s = unify(a.type_params[i], b.type_params[i], s);
+      s = unify(a.type_params[i], b.type_params[i], s, fresh_id);
     }
     return s;
   }
 
   // Generic types
   if (a.kind === "generic" && b.kind === "generic") {
-    let s = unify(a.base, b.base, subst);
+    let s = unify(a.base, b.base, subst, fresh_id);
     if (a.args.length !== b.args.length) {
       throw new UnificationError(t1, t2, "different type argument counts");
     }
     for (let i = 0; i < a.args.length; i++) {
-      s = unify(a.args[i], b.args[i], s);
+      s = unify(a.args[i], b.args[i], s, fresh_id);
     }
     return s;
   }
 
   // Record types (row unification)
   if (a.kind === "record" && b.kind === "record") {
-    return unify_record_rows(a, b, subst);
+    return unify_record_rows(a, b, subst, fresh_id);
   }
 
   // Effect row types
@@ -424,6 +414,7 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
       { effects: a.effects, tail: a.tail },
       { effects: b.effects, tail: b.tail },
       subst,
+      fresh_id,
     );
   }
 
@@ -434,17 +425,17 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
     }
     let s = subst;
     for (let i = 0; i < a.elements.length; i++) {
-      s = unify(a.elements[i], b.elements[i], s);
+      s = unify(a.elements[i], b.elements[i], s, fresh_id);
     }
     return s;
   }
 
   // Struct satisfies record constraint (one-direction coercion)
   if (a.kind === "struct" && b.kind === "record") {
-    return unify_struct_with_record(a, b, subst);
+    return unify_struct_with_record(a, b, subst, fresh_id);
   }
   if (a.kind === "record" && b.kind === "struct") {
-    return unify_struct_with_record(b, a, subst);
+    return unify_struct_with_record(b, a, subst, fresh_id);
   }
 
   throw new UnificationError(t1, t2);
@@ -454,7 +445,7 @@ export function unify(t1: Type, t2: Type, subst: Substitution): Substitution {
 // Record Row Unification
 // ============================================================
 
-function unify_record_rows(a: RecordType, b: RecordType, subst: Substitution): Substitution {
+function unify_record_rows(a: RecordType, b: RecordType, subst: Substitution, fresh_id: FreshIdGen): Substitution {
   let s = subst;
 
   const b_names = new Set(b.fields.map(f => f.name));
@@ -464,7 +455,7 @@ function unify_record_rows(a: RecordType, b: RecordType, subst: Substitution): S
   for (const af of a.fields) {
     const bf = b.fields.find(f => f.name === af.name);
     if (bf) {
-      s = unify(af.type, bf.type, s);
+      s = unify(af.type, bf.type, s, fresh_id);
     }
   }
 
@@ -482,7 +473,7 @@ function unify_record_rows(a: RecordType, b: RecordType, subst: Substitution): S
 
   if (a_only.length > 0 && b_only.length > 0 && a.tail !== undefined && b.tail !== undefined) {
     // Both sides have surplus fields and open tails — need fresh shared tail
-    const fresh_tail = fresh_row_var_id();
+    const fresh_tail = fresh_id();
     const a_tail_record: Type = { kind: "record", fields: b_only, tail: fresh_tail };
     const b_tail_record: Type = { kind: "record", fields: a_only, tail: fresh_tail };
     if (occurs_in(a.tail, a_tail_record, s)) {
@@ -513,7 +504,7 @@ function unify_record_rows(a: RecordType, b: RecordType, subst: Substitution): S
     }
     if (a.tail !== undefined && b.tail !== undefined && a_only.length === 0 && b_only.length === 0) {
       if (a.tail !== b.tail) {
-        s = unify({ kind: "var", id: a.tail }, { kind: "var", id: b.tail }, s);
+        s = unify({ kind: "var", id: a.tail }, { kind: "var", id: b.tail }, s, fresh_id);
       }
     }
   }
@@ -525,7 +516,7 @@ function unify_record_rows(a: RecordType, b: RecordType, subst: Substitution): S
 // Struct → Record Coercion
 // ============================================================
 
-function unify_struct_with_record(struct_t: StructType, record_t: RecordType, subst: Substitution): Substitution {
+function unify_struct_with_record(struct_t: StructType, record_t: RecordType, subst: Substitution, fresh_id: FreshIdGen): Substitution {
   let s = subst;
 
   for (const rf of record_t.fields) {
@@ -534,7 +525,7 @@ function unify_struct_with_record(struct_t: StructType, record_t: RecordType, su
       throw new UnificationError(struct_t, record_t,
         `type '${struct_t.name}' does not satisfy {${record_t.fields.map(f => f.name).join(", ")}, ..} — missing field '${rf.name}'`);
     }
-    s = unify(sf.type, rf.type, s);
+    s = unify(sf.type, rf.type, s, fresh_id);
   }
 
   if (record_t.tail !== undefined) {

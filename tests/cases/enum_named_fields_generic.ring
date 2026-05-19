@@ -16,8 +16,8 @@ fn main() {
     let ok = Ok { value: 42 }
     let err = Err { message: "bad" }
 
-    assert(unwrap_or(ok, 0) == 42)
-    assert(unwrap_or(err, 0) == 0)
+    assert(unwrap_or(ok, 0) == 42, "unwrap ok")
+    assert(unwrap_or(err, 0) == 0, "unwrap err")
 
     // Mixed positional and named in same enum
     print("enum_named_fields_generic: all tests passed")

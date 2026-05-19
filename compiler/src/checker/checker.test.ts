@@ -291,7 +291,7 @@ describe("Type Checker", () => {
   describe("test declarations", () => {
     it("type-checks test blocks", () => {
       const source = `
-        test "basic math" { assert(1 + 1 == 2) }
+        test "basic math" { assert(1 + 1 == 2, "math") }
       `;
       const program = check_source(source);
       const test_decl = program.decls.find(d => d.kind === "test_decl") as HTestDecl;

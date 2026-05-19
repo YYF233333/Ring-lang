@@ -1,7 +1,8 @@
 ﻿// Ring-lang Type Environment — scope management + builtin definitions
-import { Type, TypeVar, FnType, EffectRow } from "../types/index.js";
+import { Type, TypeVar, FnType } from "../types/index.js";
 import { Span } from "../ast/index.js";
 import { register_builtins as register_builtins_impl } from "./builtins.js";
+import { apply } from "./unify.js";
 
 // ============================================================
 // Type Scheme (for let-polymorphism)
@@ -184,100 +185,8 @@ export class TypeEnv {
   }
 }
 
-/** Apply a type variable mapping to a type (used during instantiation) */
+/** Apply a type variable mapping to a type (used during instantiation).
+ *  Delegates to `apply` from unify.ts — same structural traversal. */
 export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
-  switch (t.kind) {
-    case "int":
-    case "float":
-    case "str":
-    case "bool":
-    case "unit":
-    case "never":
-    case "any":
-      return t;
-    case "var": {
-      const replacement = mapping.get(t.id);
-      return replacement ?? t;
-    }
-    case "fn":
-      return {
-        kind: "fn",
-        params: t.params.map(p => substitute_type(p, mapping)),
-        return_type: substitute_type(t.return_type, mapping),
-        effects: substitute_effect_row(t.effects, mapping),
-      };
-    case "struct":
-      return {
-        kind: "struct",
-        name: t.name,
-        type_params: t.type_params.map(p => substitute_type(p, mapping)),
-        fields: t.fields.map(f => ({ ...f, type: substitute_type(f.type, mapping) })),
-      };
-    case "enum":
-      return {
-        kind: "enum",
-        name: t.name,
-        type_params: t.type_params.map(p => substitute_type(p, mapping)),
-        variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => substitute_type(f, mapping)), field_names: v.field_names })),
-      };
-    case "generic":
-      return {
-        kind: "generic",
-        base: substitute_type(t.base, mapping),
-        args: t.args.map(a => substitute_type(a, mapping)),
-      };
-    case "record": {
-      const fields = t.fields.map(f => ({ name: f.name, type: substitute_type(f.type, mapping) }));
-      let tail = t.tail;
-      let tail_name = t.tail_name;
-      if (tail !== undefined && mapping.has(tail)) {
-        const replacement = mapping.get(tail)!;
-        if (replacement.kind === "var") {
-          tail = replacement.id;
-          if (replacement.name) tail_name = replacement.name;
-        } else if (replacement.kind === "record") {
-          return {
-            kind: "record",
-            fields: [...fields, ...replacement.fields.map(f => ({ name: f.name, type: substitute_type(f.type, mapping) }))],
-            tail: replacement.tail,
-            tail_name: replacement.tail_name,
-          };
-        } else {
-          tail = undefined;
-          tail_name = undefined;
-        }
-      }
-      return tail !== undefined
-        ? { kind: "record", fields, tail, tail_name }
-        : { kind: "record", fields };
-    }
-    case "effect_row": {
-      const row = substitute_effect_row({ effects: t.effects, tail: t.tail }, mapping);
-      return { kind: "effect_row", effects: row.effects, tail: row.tail };
-    }
-    case "tuple":
-      return { kind: "tuple", elements: t.elements.map(e => substitute_type(e, mapping)) };
-  }
-}
-
-function substitute_effect_row(row: EffectRow, mapping: Map<number, Type>): EffectRow {
-  let tail = row.tail;
-  if (tail !== undefined && mapping.has(tail)) {
-    const replacement = mapping.get(tail)!;
-    if (replacement.kind === "var") {
-      tail = replacement.id;
-    }
-  }
-  return {
-    effects: row.effects.map(e => {
-      if (e.kind === "fail") {
-        return { kind: "fail", error_type: substitute_type(e.error_type, mapping) };
-      }
-      if (e.kind === "custom") {
-        return { kind: "custom", name: e.name, type_args: e.type_args.map(a => substitute_type(a, mapping)) };
-      }
-      return e;
-    }),
-    tail,
-  };
+  return apply(mapping, t);
 }

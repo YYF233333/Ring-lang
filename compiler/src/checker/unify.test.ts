@@ -11,6 +11,10 @@ import {
   EffectRow, effect_row,
 } from "../types/index.js";
 
+// Fresh ID generator for tests
+let _test_id = 10000;
+function test_fresh(): number { return _test_id++; }
+
 // Helper: create a type variable with a given id
 function tvar(id: number): Type { return { kind: "var", id }; }
 
@@ -32,56 +36,56 @@ function record(fields: Array<{ name: string; type: Type }>, tail?: number): Typ
 
 describe("unify — basic types", () => {
   it("unifies identical Int types", () => {
-    const s = unify(INT, INT, empty_subst());
+    const s = unify(INT, INT, empty_subst(), test_fresh);
     assert.ok(s);
     assert.equal(s.size, 0);
   });
 
   it("unifies identical Str types", () => {
-    const s = unify(STR, STR, empty_subst());
+    const s = unify(STR, STR, empty_subst(), test_fresh);
     assert.ok(s);
     assert.equal(s.size, 0);
   });
 
   it("unifies identical Bool types", () => {
-    const s = unify(BOOL, BOOL, empty_subst());
+    const s = unify(BOOL, BOOL, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("unifies a type variable with a concrete type", () => {
     const v = tvar(500);
-    const s = unify(v, INT, empty_subst());
+    const s = unify(v, INT, empty_subst(), test_fresh);
     assert.equal(s.get(500)?.kind, "int");
   });
 
   it("unifies a concrete type with a type variable (reversed)", () => {
     const v = tvar(501);
-    const s = unify(STR, v, empty_subst());
+    const s = unify(STR, v, empty_subst(), test_fresh);
     assert.equal(s.get(501)?.kind, "str");
   });
 
   it("unifies two identical type variables (same id)", () => {
     const v = tvar(502);
-    const s = unify(v, v, empty_subst());
+    const s = unify(v, v, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("unifies Never with any type (bottom)", () => {
-    const s = unify(NEVER, INT, empty_subst());
+    const s = unify(NEVER, INT, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("unifies Any with any type", () => {
-    const s = unify(ANY, STR, empty_subst());
+    const s = unify(ANY, STR, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("throws when unifying two different concrete types", () => {
-    assert.throws(() => unify(INT, STR, empty_subst()), UnificationError);
+    assert.throws(() => unify(INT, STR, empty_subst(), test_fresh), UnificationError);
   });
 
   it("throws when unifying Int with Bool", () => {
-    assert.throws(() => unify(INT, BOOL, empty_subst()), UnificationError);
+    assert.throws(() => unify(INT, BOOL, empty_subst(), test_fresh), UnificationError);
   });
 });
 
@@ -93,13 +97,13 @@ describe("unify — occurs check", () => {
   it("throws on occurs check: var in fn param", () => {
     const v = tvar(510);
     const t = fn_type([v], INT);
-    assert.throws(() => unify(v, t, empty_subst()), UnificationError);
+    assert.throws(() => unify(v, t, empty_subst(), test_fresh), UnificationError);
   });
 
   it("throws on occurs check: var in fn return type", () => {
     const v = tvar(511);
     const t = fn_type([INT], v);
-    assert.throws(() => unify(v, t, empty_subst()), UnificationError);
+    assert.throws(() => unify(v, t, empty_subst(), test_fresh), UnificationError);
   });
 
   it("occurs_in detects var in nested structure", () => {
@@ -122,14 +126,14 @@ describe("unify — function types", () => {
   it("unifies identical function types", () => {
     const f1 = fn_type([INT], STR);
     const f2 = fn_type([INT], STR);
-    const s = unify(f1, f2, empty_subst());
+    const s = unify(f1, f2, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("unifies function types with type variables", () => {
     const f1 = fn_type([tvar(520)], tvar(521));
     const f2 = fn_type([INT], STR);
-    const s = unify(f1, f2, empty_subst());
+    const s = unify(f1, f2, empty_subst(), test_fresh);
     assert.equal(apply(s, tvar(520)).kind, "int");
     assert.equal(apply(s, tvar(521)).kind, "str");
   });
@@ -137,19 +141,19 @@ describe("unify — function types", () => {
   it("throws on param type mismatch fn(Int)->Str vs fn(Str)->Int", () => {
     const f1 = fn_type([INT], STR);
     const f2 = fn_type([STR], INT);
-    assert.throws(() => unify(f1, f2, empty_subst()), UnificationError);
+    assert.throws(() => unify(f1, f2, empty_subst(), test_fresh), UnificationError);
   });
 
   it("throws on parameter count mismatch", () => {
     const f1 = fn_type([INT, STR], BOOL);
     const f2 = fn_type([INT], BOOL);
-    assert.throws(() => unify(f1, f2, empty_subst()), UnificationError);
+    assert.throws(() => unify(f1, f2, empty_subst(), test_fresh), UnificationError);
   });
 
   it("unifies multi-param function types", () => {
     const f1 = fn_type([INT, tvar(530)], BOOL);
     const f2 = fn_type([INT, FLOAT], BOOL);
-    const s = unify(f1, f2, empty_subst());
+    const s = unify(f1, f2, empty_subst(), test_fresh);
     assert.equal(apply(s, tvar(530)).kind, "float");
   });
 });
@@ -162,22 +166,20 @@ describe("unify — record rows", () => {
   it("unifies two records with matching fields", () => {
     const r1 = record([{ name: "x", type: INT }, { name: "y", type: STR }]);
     const r2 = record([{ name: "x", type: INT }, { name: "y", type: STR }]);
-    const s = unify(r1, r2, empty_subst());
+    const s = unify(r1, r2, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("throws when closed record is missing a field", () => {
     const r1 = record([{ name: "x", type: INT }, { name: "y", type: STR }]);
     const r2 = record([{ name: "x", type: INT }]);
-    assert.throws(() => unify(r1, r2, empty_subst()), UnificationError);
+    assert.throws(() => unify(r1, r2, empty_subst(), test_fresh), UnificationError);
   });
 
   it("unifies open record with extra fields via tail var", () => {
-    // r1 = {x: Int, ..?540}  and  r2 = {x: Int, y: Str}
     const r1 = record([{ name: "x", type: INT }], 540);
     const r2 = record([{ name: "x", type: INT }, { name: "y", type: STR }]);
-    const s = unify(r1, r2, empty_subst());
-    // tail var 540 should be bound to record containing field y
+    const s = unify(r1, r2, empty_subst(), test_fresh);
     const resolved = apply(s, tvar(540));
     assert.equal(resolved.kind, "record");
     if (resolved.kind === "record") {
@@ -190,7 +192,7 @@ describe("unify — record rows", () => {
   it("unifies field types through type variables", () => {
     const r1 = record([{ name: "x", type: tvar(541) }]);
     const r2 = record([{ name: "x", type: INT }]);
-    const s = unify(r1, r2, empty_subst());
+    const s = unify(r1, r2, empty_subst(), test_fresh);
     assert.equal(apply(s, tvar(541)).kind, "int");
   });
 });
@@ -201,36 +203,36 @@ describe("unify — record rows", () => {
 
 describe("unify_effect_rows — basics", () => {
   it("unifies two empty effect rows", () => {
-    const s = unify_effect_rows(EMPTY_ROW, EMPTY_ROW, empty_subst());
+    const s = unify_effect_rows(EMPTY_ROW, EMPTY_ROW, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("unifies matching io effect rows", () => {
     const r1: EffectRow = effect_row({ kind: "io" });
     const r2: EffectRow = effect_row({ kind: "io" });
-    const s = unify_effect_rows(r1, r2, empty_subst());
+    const s = unify_effect_rows(r1, r2, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("unifies matching fail effect rows (same error type)", () => {
     const r1: EffectRow = effect_row({ kind: "fail", error_type: STR });
     const r2: EffectRow = effect_row({ kind: "fail", error_type: STR });
-    const s = unify_effect_rows(r1, r2, empty_subst());
+    const s = unify_effect_rows(r1, r2, empty_subst(), test_fresh);
     assert.equal(s.size, 0);
   });
 
   it("unifies fail effect rows with type variable error type", () => {
     const r1: EffectRow = effect_row({ kind: "fail", error_type: tvar(550) });
     const r2: EffectRow = effect_row({ kind: "fail", error_type: STR });
-    const s = unify_effect_rows(r1, r2, empty_subst());
+    const s = unify_effect_rows(r1, r2, empty_subst(), test_fresh);
     assert.equal(apply(s, tvar(550)).kind, "str");
   });
 
   it("throws when effect present in closed row that lacks it", () => {
     const r1: EffectRow = effect_row({ kind: "io" });
-    const r2: EffectRow = EMPTY_ROW; // closed, no tail
+    const r2: EffectRow = EMPTY_ROW;
     assert.throws(
-      () => unify_effect_rows(r1, r2, empty_subst()),
+      () => unify_effect_rows(r1, r2, empty_subst(), test_fresh),
       UnificationError,
     );
   });
@@ -240,7 +242,7 @@ describe("unify_effect_rows — dual tail with unmatched effects (C5 regression)
   it("preserves unmatched effects from both sides via fresh tail", () => {
     const r1: EffectRow = { effects: [{ kind: "io" }], tail: 900 };
     const r2: EffectRow = { effects: [{ kind: "fail", error_type: STR }], tail: 901 };
-    const s = unify_effect_rows(r1, r2, empty_subst());
+    const s = unify_effect_rows(r1, r2, empty_subst(), test_fresh);
     const resolved_r1 = apply(s, { kind: "var", id: 900 } as Type);
     assert.equal(resolved_r1.kind, "effect_row");
     if (resolved_r1.kind === "effect_row") {
@@ -256,7 +258,7 @@ describe("unify_effect_rows — dual tail with unmatched effects (C5 regression)
   it("unifies dual tail with no unmatched effects (simple case)", () => {
     const r1: EffectRow = { effects: [{ kind: "io" }], tail: 910 };
     const r2: EffectRow = { effects: [{ kind: "io" }], tail: 911 };
-    const s = unify_effect_rows(r1, r2, empty_subst());
+    const s = unify_effect_rows(r1, r2, empty_subst(), test_fresh);
     const resolved = apply(s, { kind: "var", id: 910 } as Type);
     assert.equal(resolved.kind, "var");
     if (resolved.kind === "var") assert.equal(resolved.id, 911);
@@ -287,12 +289,12 @@ function tuple(...elements: Type[]): Type {
 
 describe("unify — tuple types", () => {
   it("unifies identical tuples", () => {
-    const s = unify(tuple(INT, STR), tuple(INT, STR), empty_subst());
+    const s = unify(tuple(INT, STR), tuple(INT, STR), empty_subst(), test_fresh);
     assert.ok(s);
   });
 
   it("unifies tuple with type variables", () => {
-    const s = unify(tuple(tvar(700), STR), tuple(INT, tvar(701)), empty_subst());
+    const s = unify(tuple(tvar(700), STR), tuple(INT, tvar(701)), empty_subst(), test_fresh);
     const resolved_a = apply(s, tvar(700));
     const resolved_b = apply(s, tvar(701));
     assert.equal(resolved_a.kind, "int");
@@ -301,13 +303,13 @@ describe("unify — tuple types", () => {
 
   it("rejects tuples of different arity", () => {
     assert.throws(() => {
-      unify(tuple(INT, STR), tuple(INT), empty_subst());
+      unify(tuple(INT, STR), tuple(INT), empty_subst(), test_fresh);
     }, UnificationError);
   });
 
   it("rejects tuple vs non-tuple", () => {
     assert.throws(() => {
-      unify(tuple(INT), INT, empty_subst());
+      unify(tuple(INT), INT, empty_subst(), test_fresh);
     }, UnificationError);
   });
 
@@ -315,7 +317,8 @@ describe("unify — tuple types", () => {
     const s = unify(
       tuple(tuple(tvar(710), INT), STR),
       tuple(tuple(BOOL, INT), tvar(711)),
-      empty_subst()
+      empty_subst(),
+      test_fresh,
     );
     const inner = apply(s, tvar(710));
     const outer = apply(s, tvar(711));
@@ -337,7 +340,7 @@ describe("unify — tuple types", () => {
 
   it("occurs check detects infinite tuple type", () => {
     assert.throws(() => {
-      unify(tvar(730), tuple(tvar(730), INT), empty_subst());
+      unify(tvar(730), tuple(tvar(730), INT), empty_subst(), test_fresh);
     }, UnificationError);
   });
 });

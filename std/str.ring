@@ -11,8 +11,8 @@ impl Str {
     pub extern fn split(self: Str, sep: Str) -> List<Str>
     pub extern fn char_at(self: Str, i: Int) -> Option<Str>
     pub extern fn index_of(self: Str, s: Str) -> Option<Int>
-    pub extern fn byte_at(self: Str, i: Int) -> Str
+    pub extern fn byte_at(self: Str, i: Int) -> Option<Str>
     pub extern fn pad_start(self: Str, length: Int, fill: Str) -> Str
     pub extern fn repeat(self: Str, count: Int) -> Str
-    pub extern fn char_code_at(self: Str, i: Int) -> Int
+    pub extern fn char_code_at(self: Str, i: Int) -> Option<Int>
 }

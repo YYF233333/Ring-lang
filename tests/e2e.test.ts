@@ -75,6 +75,7 @@ const cases: TestCase[] = [
   { file: "ufcs_basic.ring", expected: "1\n" },
   { file: "match_guard_multi.ring", expected: "big circle\nsmall circle\nsquare\nrectangle\n" },
   { file: "match_nested.ring", expected: "positive\nnon-positive\nnothing\n" },
+  { file: "nested_match_stmt.ring", expected: "42\ndeep\n" },
   { file: "trait_alias.ring", expected: "num\n" },
   { file: "return_if.ring", expected: "5\n3\npositive\nnegative\nzero\n" },
   { file: "while_basic.ring", expected: "10\n" },
@@ -120,8 +121,8 @@ const cases: TestCase[] = [
   { file: "empty_collection.ring", expected: "0\n0\n0\nfalse\ntrue\nnone\n0\nfalse\n0\nfalse\n0\nfalse\n" },
   // extern fn
   { file: "extern_fn_basic.ring", expected: "42\n3.14\n" },
-  { file: "str_byte_at.ring", expected: "h\no\n" },
-  { file: "str_extra_methods.ring", expected: "00042\nababab\n65\n" },
+  { file: "str_byte_at.ring", expected: "h\no\nnone\n" },
+  { file: "str_extra_methods.ring", expected: "00042\nababab\n65\nnone\n" },
   { file: "num_parse_format.ring", expected: "42\n-1\n3.14\n99\n" },
   { file: "type_alias.ring", expected: "42: hello\n" },
   { file: "for_map_destructure.ring", expected: "6\n" },

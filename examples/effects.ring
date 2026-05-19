@@ -17,7 +17,7 @@ fn get_config() -> Config {
 test "effect handler mock" {
     handle {
         let raw = io.read("test.toml")
-        assert(raw == "mock data")
+        assert(raw == "mock data", "mock read")
     } with {
         io.read(_path) => "mock data",
     }

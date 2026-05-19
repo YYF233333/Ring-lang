@@ -19,9 +19,9 @@ fn main() {
     let b = Add { left: 3, right: 7 }
     let c = Neg(5)
 
-    assert(eval(a) == 10)
-    assert(eval(b) == 10)
-    assert(eval(c) == -5)
+    assert(eval(a) == 10, "lit eval")
+    assert(eval(b) == 10, "add eval")
+    assert(eval(c) == -5, "neg eval")
 
     print("enum_named_mixed: all tests passed")
 }

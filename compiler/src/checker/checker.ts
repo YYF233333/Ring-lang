@@ -48,8 +48,8 @@ function load_prelude(engine: InferEngine): void {
       for (const decl of ast.decls) {
         engine.register_decl_public(decl);
       }
-    } catch {
-      // Stdlib parse errors silently skipped in production
+    } catch (e) {
+      console.error(`[ring] warning: failed to load stdlib file ${file}: ${e instanceof Error ? e.message : e}`);
     }
   }
 }

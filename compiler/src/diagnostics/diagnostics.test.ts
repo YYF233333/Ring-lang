@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { format_human, format_llm } from "./formatter.js";
-import { enrich } from "./suggestions.js";
 import { Diagnostic } from "./index.js";
 
 const sample_source = `fn main() {
@@ -93,20 +92,5 @@ describe("Formatter", () => {
       const parsed = JSON.parse(output);
       assert.deepEqual(parsed.diagnostics[0].suggestions, []);
     });
-  });
-});
-
-describe("SuggestionEnricher", () => {
-  it("returns diagnostics unchanged when no rules match", () => {
-    const result = enrich([sample_diagnostic]);
-    assert.equal(result.length, 1);
-    assert.deepEqual(result[0].suggestions, []);
-  });
-
-  it("preserves all diagnostic fields", () => {
-    const result = enrich([sample_diagnostic]);
-    assert.equal(result[0].code, "E0301");
-    assert.equal(result[0].message, sample_diagnostic.message);
-    assert.deepEqual(result[0].context, sample_diagnostic.context);
   });
 });

@@ -223,8 +223,8 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes('__ring_m._tag === "Circle"'));
-      assert.ok(js.includes("const r = __ring_m._0;"));
+      assert.ok(js.includes('__ring_m0._tag === "Circle"'));
+      assert.ok(js.includes("const r = __ring_m0._0;"));
     });
 
     it("generates if-chain for literal patterns", () => {
@@ -260,7 +260,7 @@ describe("codegen", () => {
         span: S,
       };
       const js = generate(program([decl]));
-      assert.ok(js.includes("__ring_m === 1"));
+      assert.ok(js.includes("__ring_m0 === 1"));
       assert.ok(js.includes('"one"'));
       assert.ok(js.includes('"other"'));
     });

@@ -7,7 +7,6 @@ import { Parser } from "./parser/parser.js";
 import { check } from "./checker/checker.js";
 import { generate } from "./codegen/codegen.js";
 import { CollectingSink, make_diagnostic } from "./diagnostics/index.js";
-import { enrich } from "./diagnostics/suggestions.js";
 import { format_human, format_llm } from "./diagnostics/formatter.js";
 import { CompileError } from "./errors.js";
 import { compile_project } from "./modules/compiler.js";
@@ -98,7 +97,6 @@ async function main(): Promise<void> {
       const result = compile_project(filePath, sink);
       if (!result.success) {
         let diagnostics = result.diagnostics;
-        diagnostics = enrich(diagnostics);
         if (error_format === "llm") {
           console.log(format_llm(diagnostics, filePath));
         } else {
@@ -229,8 +227,6 @@ async function main(): Promise<void> {
         { kind: "other", detail: err.message },
       ));
     }
-
-    diagnostics = enrich(diagnostics);
 
     if (error_format === "llm") {
       console.log(format_llm(diagnostics, filePath));

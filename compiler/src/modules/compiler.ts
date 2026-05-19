@@ -55,8 +55,11 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
         return { js: "", diagnostics: [...sink.diagnostics()], success: false };
       }
       module_asts.set(key, ast);
-    } catch {
+    } catch (e) {
       for (const d of mod_sink.diagnostics()) sink.report(d);
+      if (mod_sink.diagnostics().length === 0) {
+        console.error(`[ring] warning: module ${mod.path_segments.join("::")} failed unexpectedly: ${e instanceof Error ? e.message : e}`);
+      }
       return { js: "", diagnostics: [...sink.diagnostics()], success: false };
     }
   }
