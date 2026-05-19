@@ -91,4 +91,6 @@ function _Set_remove(self, x) { self.delete(x); }
 function _Set_union(self, other) { return new Set([...self, ...other]); }
 function _Set_intersect(self, other) { return new Set([...self].filter(function(x) { return other.has(x); })); }
 function _Set_difference(self, other) { return new Set([...self].filter(function(x) { return !other.has(x); })); }
+
+function json_stringify(value) { return JSON.stringify(value); }
 `;

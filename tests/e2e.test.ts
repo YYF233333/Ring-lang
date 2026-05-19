@@ -29,6 +29,7 @@ const cases: TestCase[] = [
   { file: "enum_named_fields.ring", expected: "enum_named_fields: all tests passed\n" },
   { file: "enum_named_fields_generic.ring", expected: "enum_named_fields_generic: all tests passed\n" },
   { file: "enum_named_mixed.ring", expected: "enum_named_mixed: all tests passed\n" },
+  { file: "json_stringify.ring", expected: "json_stringify: all tests passed\n" },
   { file: "string_interp.ring", expected: "Hello, World!\n" },
   { file: "effect_or.ring", expected: "42\n" },
   { file: "effect_catch.ring", expected: "42\n" },

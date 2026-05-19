@@ -46,14 +46,8 @@
 ### ✅ M3. 数字解析/格式化 — parseInt / parseFloat / toString
 - **状态**: 已修复 — 新增 `parse_int(Str) -> Option<Int>`、`parse_float(Str) -> Option<Float>` 自由函数 + `Int.to_str()`、`Float.to_str()` UFCS 方法，声明在 std/num.ring
 
-### M4. JSON 序列化 — debug + LLM format 输出
-- **严重性**: MAJOR
-- **位置**: cli.ts(debug), diagnostics/formatter.ts(LLM format), codegen/codegen.ts(2处)
-- **频率**: ~10处
-- **问题**: `--error-format=llm` 输出 JSON。debug 模式打印 AST 的 JSON。没有 JSON.stringify 就无法生成这些输出。
-- **绕过**: 手写 JSON 字符串拼接（可行但脆弱），或 FFI 调用 JSON.stringify。
-- **需要**: 内置 json_stringify 或 Display trait + 自动序列化
-- **状态**: 未修复
+### ✅ M4. JSON 序列化 — debug + LLM format 输出
+- **状态**: 已修复 — 新增 `json_stringify<T>(value: T) -> Str` 全局函数（runtime 提供，std/io.ring 声明），直接映射 JS `JSON.stringify`
 
 ### ✅ M5. Str 补充方法 — padStart / repeat / charCodeAt
 - **状态**: 已修复 — 新增 `Str.pad_start(length, fill)`、`Str.repeat(count)`、`Str.char_code_at(i)` 方法，声明在 std/str.ring
@@ -109,7 +103,7 @@
 | ~~P1~~ | ~~Enum 命名字段~~ | ~~C6~~ | ✅ 已修复 |
 | P1 | type alias | M2 | 未修复 |
 | ~~P1~~ | ~~Int.parse / Float.parse / to_str~~ | ~~M3~~ | ✅ 已修复 |
-| P2 | JSON 序列化 | M4 | 未修复 |
+| ~~P2~~ | ~~JSON 序列化~~ | ~~M4~~ | ✅ 已修复 |
 | ~~P2~~ | ~~Str.pad_start / repeat~~ | ~~M5~~ | ✅ 已修复 |
 | P2 | for (k,v) in map 语法糖 | M6 | 未修复 |
 
