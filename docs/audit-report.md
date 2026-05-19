@@ -52,12 +52,10 @@
 - **描述**: 编译器 9 个核心 class 都通过 `this.field = value` 累积可变状态。Ring 的 `impl` 方法接收 `self` 按值传递，无法修改 struct 字段。
 - **修复**: 实现通用 `var` 参数支持。`fn method(var self)` 允许方法内修改 struct 字段。同时修复了 field assignment 对 `let` 绑定的缺失检查（`p.field = x` 现在正确报 E0205）。
 
-### I3: 无 `?.` 可选链运算符
+### I3: ❌ ~~无 `?.` 可选链运算符~~ — 设计评审后移除
 - **来源**: Claude I5 + DS I1
-- **文件**: 30+ 处使用（parser, codegen, checker）
-- **描述**: 每个 `a?.b` 需要变成 `match a { some(v) => some(v.b), none => none }` 或 `if let`。极度影响可读性。
-- **Workaround**: 手动 match/if-let。可定义 `fn map_opt<T, U>(opt: T?, f: fn(T) -> U) -> U?` 辅助函数。
-- **建议**: 考虑添加 `?.` 运算符作为 Option 链式语法糖
+- **决策**: `?.` 违反设计哲学——`?` 已定义为 Option→fail 提升（§1.5），`?.` 给 `?` 附加第二层语义（Option map），违反"一种事一种写法"原则。且 `?.` 创建平行于 UFCS 的链式机制，与"`.method()` 是唯一链式调用方式"冲突。
+- **正确方案**: 补 Option\<T\> 方法（map/and_then/is_some/unwrap_or），走 UFCS 路线。对应设计评审 P2-2，另有 session 处理。
 
 ### I4: ✅ 所有 optional field 需改为 `Option<T>`
 - **来源**: Claude C7 + DS I6
