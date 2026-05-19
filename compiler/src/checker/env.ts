@@ -33,7 +33,7 @@ export interface EnumDef {
   name: string;
   type_params: string[];
   type_param_vars: number[];     // type var ids used during registration (for instantiation)
-  variants: { name: string; fields: Type[] }[];
+  variants: { name: string; fields: Type[]; field_names?: string[] }[];
 }
 
 export interface EffectDef {
@@ -218,7 +218,7 @@ export function substitute_type(t: Type, mapping: Map<number, Type>): Type {
         kind: "enum",
         name: t.name,
         type_params: t.type_params.map(p => substitute_type(p, mapping)),
-        variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => substitute_type(f, mapping)) })),
+        variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => substitute_type(f, mapping)), field_names: v.field_names })),
       };
     case "generic":
       return {

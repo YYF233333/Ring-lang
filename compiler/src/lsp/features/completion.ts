@@ -103,6 +103,11 @@ function walk_expr_for_receiver(expr: HExpr, pos: Position): Type | null {
         (acc, f) => acc ?? find_receiver_type(f.value, pos), null,
       );
 
+    case "named_variant_construct":
+      return expr.fields.reduce<Type | null>(
+        (acc, f) => acc ?? find_receiver_type(f.value, pos), null,
+      );
+
     case "match_expr":
       return find_receiver_type(expr.scrutinee, pos) ??
         expr.arms.reduce<Type | null>((acc, arm) => {

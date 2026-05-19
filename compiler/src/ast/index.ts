@@ -79,6 +79,7 @@ export type Pattern =
   | WildcardPattern
   | BindingPattern
   | ConstructorPattern
+  | NamedConstructorPattern
   | LiteralPattern
   | TuplePattern;
 
@@ -103,6 +104,14 @@ export interface ConstructorPattern {
 export interface LiteralPattern {
   kind: "literal";
   value: number | string | boolean;
+  span: Span;
+}
+
+export interface NamedConstructorPattern {
+  kind: "named_constructor";
+  name: string;
+  fields: { name: string; pattern: Pattern; span: Span }[];
+  rest: boolean;
   span: Span;
 }
 
@@ -537,9 +546,16 @@ export interface StructDecl {
   span: Span;
 }
 
+export interface NamedEnumField {
+  name: string;
+  type_expr: TypeExpr;
+  span: Span;
+}
+
 export interface EnumVariant {
   name: string;
   fields: TypeExpr[];
+  named_fields?: NamedEnumField[];
   span: Span;
 }
 

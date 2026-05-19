@@ -15,35 +15,17 @@
 ### ✅ C2. FFI / extern 声明 — 无法调用 Node.js API
 - **状态**: 已修复 — `extern fn name(params) -> RetType` 全管线实现（Lexer→Parser→Checker→Codegen→LSP→模块系统），函数名直接映射 JS 全局函数，支持 pub 导出和跨模块导入
 
-### C3. try/finally 清理语义 — Effect handler 无 finally
-- **严重性**: CRITICAL（P0）
-- **位置**: checker/infer.ts(~10处), parser/parser.ts(~8处), cli.ts(5处), modules/compiler.ts(2处)
-- **频率**: 高（54次throw, 39次try/catch, ~10处try/finally）
-- **问题**: throw/try/catch 可用 fail effect + catch/handle..with 替代。但 try/finally（保证清理）在 Ring effect system 中无对应物。checker 的 push_scope/pop_scope 全部依赖 try/finally 保证 scope 栈不泄漏。
-- **示例**: `this.env.push_scope(); try { ... } finally { this.env.pop_scope(); }`
-- **需要**: Effect handler 增加 finally 语义，或新增 `defer` 语句（Go 风格）
-- **状态**: 未修复
+### ✅ C3. try/finally 清理语义 — Effect handler 无 finally
+- **状态**: 已关闭（设计决策）— `defer` 不符合 Ring 的 effect system 设计哲学。自举时 ~10 处 try/finally 全部使用闭包模式 `with_scope(fn() { ... })` 绕过，不新增语言特性
 
 ### ✅ C4. Str 字符索引 — Lexer 核心循环受阻
 - **状态**: 已修复 — 新增 `Str.byte_at(i) -> Str`（直接返回，越界返回 undefined），Lexer 自举时使用此方法替代 `str[i]`
 
 ### C5. Struct 更新语法 — zonk.ts 等大量复制+修改模式
-- **严重性**: CRITICAL（P0）
-- **位置**: checker/zonk.ts(38处), checker/infer.ts(多处), types/index.ts(row_merge)
-- **频率**: 很高（~46处 object spread `{ ...obj, field: val }`）
-- **问题**: Ring 没有 struct 复制+字段覆盖语法。zonk.ts 的每个 zonk 函数都需要复制 HIR 节点并修改 type 字段。没有更新语法，每个节点需手动重建所有字段。
-- **示例**: `return { ...stmt, type: zonk_type(ctx, stmt.type), init: zonk_expr(ctx, stmt.init) }`
-- **需要**: `{ base with field: value }` 结构更新语法（Rust 风格 `MyStruct { ..base, field: value }`）
-- **状态**: 未修复
+- **状态**: 推迟 — C6（enum 命名字段 + field punning）实现后，zonk.ts 的 ~46 处 spread 可通过命名字段解构+重建覆盖。自举时评估冗长度后按需追加
 
-### C6. Enum 命名字段 — AST/HIR/Type 翻译可行性
-- **严重性**: CRITICAL（P1）
-- **位置**: ast/index.ts(6个union type), hir/index.ts(3个), types/index.ts(3个)
-- **频率**: 极高（所有编译器阶段基于 discriminated union + .field 访问）
-- **问题**: TS 的 union type 变体有命名字段（`t.name`, `t.params`, `t.return_type`）。Ring enum 变体只有位置字段。翻译为 Ring enum 后，每次字段访问都需要 match 解构取位置参数。对于 FnType 有 4 个字段的情况，这极不人性化。
-- **示例**: TS `t.params.map(...)` → Ring 需 `match t { fn(params, _, _, _) => params.map(...) }`
-- **需要**: Enum 命名字段语法 `enum Type { fn(params: List<Type>, ret: Type, effects: EffectRow) }`
-- **状态**: 未修复
+### ✅ C6. Enum 命名字段 — AST/HIR/Type 翻译可行性
+- **状态**: 已修复 — 支持花括号命名字段声明 `Variant { field: Type }`、命名构造 `Variant { field: val }`、命名模式匹配 `Variant { field, .. }`（含 field punning 和 partial match `..`）。位置字段和命名字段可在同一 enum 中共存。struct 字面量同步支持 field punning
 
 ---
 
@@ -117,19 +99,19 @@
 
 ## 自举前必须新增的 Ring 语言特性（按优先级）
 
-| 优先级 | 特性 | 阻塞项 | 工作量估计 |
-|--------|------|--------|-----------|
-| P0 | MutMap<K,V> / MutSet<T> 可变集合 | C1 | 中（类比 List 实现，新增 ~15 个方法） |
-| P0 | extern fn / FFI 声明 | C2 | 中（AST+checker+codegen 新增 extern 节点） |
-| P0 | defer 语句或 finally 语义 | C3 | 中（AST+HIR+codegen 新增 defer 节点） |
-| P0 | Str 字符索引（byte_at 或 [] 重载） | C4 | 小（新增 1 个 Str 内置方法） |
-| P0 | Struct 更新语法 { base with field: val } | C5 | 中（parser+checker+codegen） |
-| P1 | Enum 命名字段 | C6 | 大（parser+checker+codegen+exhaustive 全链路） |
-| P1 | type alias | M2 | 小（纯语法糖） |
-| P1 | Int.parse / Float.parse / to_str | M3 | 小（新增 4 个内置方法） |
-| P2 | JSON 序列化 | M4 | 中（内置函数或 trait） |
-| P2 | Str.pad_start / repeat | M5 | 小（新增 2 个 Str 方法） |
-| P2 | for (k,v) in map 语法糖 | M6 | 小（parser+codegen） |
+| 优先级 | 特性 | 阻塞项 | 状态 |
+|--------|------|--------|------|
+| ~~P0~~ | ~~MutMap/MutSet 可变集合~~ | ~~C1~~ | ✅ 已修复 |
+| ~~P0~~ | ~~extern fn / FFI 声明~~ | ~~C2~~ | ✅ 已修复 |
+| ~~P0~~ | ~~defer 语句或 finally 语义~~ | ~~C3~~ | ✅ 已关闭（闭包绕过） |
+| ~~P0~~ | ~~Str 字符索引（byte_at）~~ | ~~C4~~ | ✅ 已修复 |
+| P0 | Struct 更新语法 { base with field: val } | C5 | 推迟（待评估） |
+| ~~P1~~ | ~~Enum 命名字段~~ | ~~C6~~ | ✅ 已修复 |
+| P1 | type alias | M2 | 未修复 |
+| ~~P1~~ | ~~Int.parse / Float.parse / to_str~~ | ~~M3~~ | ✅ 已修复 |
+| P2 | JSON 序列化 | M4 | 未修复 |
+| ~~P2~~ | ~~Str.pad_start / repeat~~ | ~~M5~~ | ✅ 已修复 |
+| P2 | for (k,v) in map 语法糖 | M6 | 未修复 |
 
 ## 翻译工作量估计
 

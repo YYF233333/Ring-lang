@@ -19,6 +19,7 @@ export type HExpr =
   | HCall
   | HFieldAccess
   | HStructLit
+  | HNamedVariantConstruct
   | HMatchExpr
   | HBlock
   | HIf
@@ -106,6 +107,13 @@ export interface HStructLit extends HExprBase {
   kind: "struct_lit";
   name: string;
   type_args: Type[];
+  fields: HStructFieldInit[];
+}
+
+export interface HNamedVariantConstruct extends HExprBase {
+  kind: "named_variant_construct";
+  enum_name: string;
+  variant_name: string;
   fields: HStructFieldInit[];
 }
 
@@ -366,6 +374,7 @@ export interface HStructDecl {
 export interface HEnumVariant {
   name: string;
   fields: Type[];
+  field_names?: string[];
 }
 
 export interface HEnumDecl {

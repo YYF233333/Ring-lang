@@ -397,6 +397,7 @@ export class Parser {
       const v_start = this.current_span_start();
       const v_name = this.expect(TokenKind.Ident).value;
       let fields: TypeExpr[] = [];
+      let named_fields: import("../ast/index.js").NamedEnumField[] | undefined;
       if (this.try_consume(TokenKind.LParen)) {
         if (!this.check(TokenKind.RParen)) {
           fields.push(this.parse_type_expr());
@@ -406,9 +407,22 @@ export class Parser {
           }
         }
         this.expect(TokenKind.RParen);
+      } else if (this.check(TokenKind.LBrace)) {
+        this.advance();
+        named_fields = [];
+        while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+          const f_start = this.current_span_start();
+          const f_name = this.expect(TokenKind.Ident).value;
+          this.expect(TokenKind.Colon);
+          const f_type = this.parse_type_expr();
+          const f_end = this.current_span_start();
+          named_fields.push({ name: f_name, type_expr: f_type, span: this.make_span(f_start, f_end) });
+          this.try_consume(TokenKind.Comma);
+        }
+        this.expect(TokenKind.RBrace);
       }
       const v_end = this.current_span_start();
-      variants.push({ name: v_name, fields, span: this.make_span(v_start, v_end) });
+      variants.push({ name: v_name, fields, named_fields, span: this.make_span(v_start, v_end) });
       this.try_consume(TokenKind.Comma);
     }
     this.expect(TokenKind.RBrace);
@@ -1417,7 +1431,7 @@ export class Parser {
       this.advance();
       const name = tok.value;
 
-      // Constructor pattern: Name(pat, pat, ...)
+      // Positional constructor pattern: Name(pat, pat, ...)
       if (this.check(TokenKind.LParen)) {
         this.advance(); // consume '('
         const fields: Pattern[] = [];
@@ -1434,6 +1448,38 @@ export class Parser {
           kind: "constructor", name, fields,
           span: this.make_span(start, end),
         } as ConstructorPattern;
+      }
+
+      // Named constructor pattern: Name { field, field: pat, .. }
+      if (this.check(TokenKind.LBrace) && this.is_uppercase(name[0])) {
+        this.advance(); // consume '{'
+        const named_fields: { name: string; pattern: Pattern; span: Span }[] = [];
+        let rest = false;
+        while (!this.check(TokenKind.RBrace) && !this.at_end()) {
+          if (this.check(TokenKind.DotDot)) {
+            this.advance();
+            rest = true;
+            this.try_consume(TokenKind.Comma);
+            break;
+          }
+          const f_start = this.current_span_start();
+          const f_name = this.expect(TokenKind.Ident).value;
+          let pat: Pattern;
+          if (this.try_consume(TokenKind.Colon)) {
+            pat = this.parse_pattern();
+          } else {
+            pat = { kind: "binding", name: f_name, span: this.make_span(f_start, this.current_span_start()) } as BindingPattern;
+          }
+          const f_end = this.current_span_start();
+          named_fields.push({ name: f_name, pattern: pat, span: this.make_span(f_start, f_end) });
+          this.try_consume(TokenKind.Comma);
+        }
+        this.expect(TokenKind.RBrace);
+        const end = this.current_span_start();
+        return {
+          kind: "named_constructor", name, fields: named_fields, rest,
+          span: this.make_span(start, end),
+        } as import("../ast/index.js").NamedConstructorPattern;
       }
 
       // Binding pattern
@@ -1538,8 +1584,12 @@ export class Parser {
     while (!this.check(TokenKind.RBrace) && !this.at_end()) {
       const f_start = this.current_span_start();
       const f_name = this.expect(TokenKind.Ident).value;
-      this.expect(TokenKind.Colon);
-      const f_value = this.parse_expr();
+      let f_value: Expr;
+      if (this.try_consume(TokenKind.Colon)) {
+        f_value = this.parse_expr();
+      } else {
+        f_value = { kind: "ident", name: f_name, span: this.make_span(f_start, this.current_span_start()) } as IdentExpr;
+      }
       const f_end = this.current_span_start();
       fields.push({ name: f_name, value: f_value, span: this.make_span(f_start, f_end) });
       this.try_consume(TokenKind.Comma);

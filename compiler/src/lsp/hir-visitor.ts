@@ -128,6 +128,11 @@ export function walk_expr(expr: HExpr, v: HirVisitor): WalkAction {
         if (walk_expr(f.value, v) === "stop") return "stop";
       }
       return;
+    case "named_variant_construct":
+      for (const f of expr.fields) {
+        if (walk_expr(f.value, v) === "stop") return "stop";
+      }
+      return;
     case "match_expr":
       if (walk_expr(expr.scrutinee, v) === "stop") return "stop";
       for (const arm of expr.arms) {

@@ -26,6 +26,9 @@ interface TestCase {
 const cases: TestCase[] = [
   { file: "hello.ring", expected: "3\n" },
   { file: "enum_match.ring", expected: "red\n" },
+  { file: "enum_named_fields.ring", expected: "enum_named_fields: all tests passed\n" },
+  { file: "enum_named_fields_generic.ring", expected: "enum_named_fields_generic: all tests passed\n" },
+  { file: "enum_named_mixed.ring", expected: "enum_named_mixed: all tests passed\n" },
   { file: "string_interp.ring", expected: "Hello, World!\n" },
   { file: "effect_or.ring", expected: "42\n" },
   { file: "effect_catch.ring", expected: "42\n" },
@@ -213,6 +216,9 @@ describe("e2e: ring check (negative — should reject)", () => {
     { file: "error_occurs_check.ring", error_pattern: "E0302" },
     // Audit batch 3: tuple cross-column exhaustiveness
     { file: "error_tuple_cross_exhaust.ring", error_pattern: "E0601" },
+    // Enum named fields
+    { file: "enum_named_wrong_field.ring", error_pattern: "E0203" },
+    { file: "enum_named_missing_field.ring", error_pattern: "E0203" },
   ];
 
   for (const tc of negative_cases) {

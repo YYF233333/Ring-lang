@@ -467,10 +467,19 @@ export class InferEngine {
       this.type_param_scope.set(tp.name, tv);
     }
 
-    const variants = decl.variants.map(v => ({
-      name: v.name,
-      fields: v.fields.map(f => this.resolve_type_expr(f)),
-    }));
+    const variants = decl.variants.map(v => {
+      if (v.named_fields && v.named_fields.length > 0) {
+        return {
+          name: v.name,
+          fields: v.named_fields.map(f => this.resolve_type_expr(f.type_expr)),
+          field_names: v.named_fields.map(f => f.name),
+        };
+      }
+      return {
+        name: v.name,
+        fields: v.fields.map(f => this.resolve_type_expr(f)),
+      };
+    });
     const def: EnumDef = {
       name: decl.name,
       type_params: type_param_names,
@@ -489,7 +498,15 @@ export class InferEngine {
 
     for (const variant of variants) {
       this.env.variant_to_enum.set(variant.name, decl.name);
-      if (variant.fields.length === 0) {
+      if (variant.field_names) {
+        // Named-field variants use struct-literal construction syntax, not function constructors
+        // Register as the enum type directly (for zero-field-like resolution in patterns)
+        if (type_var_ids.length > 0) {
+          this.env.bind(variant.name, { type: enum_type, type_vars: type_var_ids, bounds: [] });
+        } else {
+          this.env.bind_mono(variant.name, enum_type);
+        }
+      } else if (variant.fields.length === 0) {
         if (type_var_ids.length > 0) {
           this.env.bind(variant.name, { type: enum_type, type_vars: type_var_ids, bounds: [] });
         } else {
@@ -831,7 +848,7 @@ export class InferEngine {
       kind: "enum_decl",
       name: decl.name,
       type_params: decl.type_params,
-      variants: def.variants.map(v => ({ name: v.name, fields: v.fields })),
+      variants: def.variants.map(v => ({ name: v.name, fields: v.fields, field_names: v.field_names })),
       is_pub: decl.is_pub,
       span: decl.span,
     };
@@ -2018,6 +2035,18 @@ export class InferEngine {
   }
 
   private infer_struct_lit(name: string, fields: { name: string; value: Expr; span: Span }[], span: Span, subst: Substitution): InferResult {
+    // Check if this is a named enum variant construction
+    const variant_enum = this.env.variant_to_enum.get(name);
+    if (variant_enum) {
+      const enum_def = this.env.enums.get(variant_enum);
+      if (enum_def) {
+        const variant = enum_def.variants.find(v => v.name === name);
+        if (variant && variant.field_names) {
+          return this.infer_named_variant_construct(variant_enum, name, variant, enum_def, fields, span, subst);
+        }
+      }
+    }
+
     const struct_def = this.env.structs.get(name);
     if (!struct_def) {
       this.type_error(E.E0203, `Unknown struct: ${name}`, span, { kind: "other", detail: `unknown struct '${name}'` });
@@ -2067,6 +2096,70 @@ export class InferEngine {
 
     return {
       hexpr: { kind: "struct_lit", name, type_args: [], fields: hfields, type: struct_type, effects, span },
+      subst: s,
+      effects,
+    };
+  }
+
+  private infer_named_variant_construct(
+    enum_name: string, variant_name: string,
+    variant: { name: string; fields: Type[]; field_names?: string[] },
+    enum_def: EnumDef,
+    fields: { name: string; value: Expr; span: Span }[],
+    span: Span, subst: Substitution,
+  ): InferResult {
+    const field_names = variant.field_names!;
+
+    const instantiation_map = new Map<number, Type>();
+    const type_param_types: Type[] = [];
+    for (let i = 0; i < enum_def.type_params.length; i++) {
+      const tv = this.env.fresh_var();
+      instantiation_map.set(enum_def.type_param_vars[i], tv);
+      type_param_types.push(tv);
+    }
+
+    let s = subst;
+    let effects: EffectRow = EMPTY_ROW;
+    const hfields: import("../hir/index.js").HStructFieldInit[] = [];
+
+    for (const field of fields) {
+      const fr = this.infer_expr(field.value, s);
+      s = fr.subst;
+      [effects, s] = this.merge_effects(effects, fr.effects, s);
+
+      const field_idx = field_names.indexOf(field.name);
+      if (field_idx >= 0 && field_idx < variant.fields.length) {
+        const field_type = substitute_type(variant.fields[field_idx], instantiation_map);
+        s = this.unify_at(fr.hexpr.type, field_type, s, span);
+      } else {
+        this.type_error(E.E0203, `Variant '${variant_name}' has no field '${field.name}'`, field.span,
+          { kind: "missing_field", field: field.name, type: variant_name, available: field_names });
+      }
+      hfields.push({ name: field.name, value: fr.hexpr });
+    }
+
+    const provided = new Set(fields.map(f => f.name));
+    for (const fn_name of field_names) {
+      if (!provided.has(fn_name)) {
+        this.type_error(E.E0203, `Missing field '${fn_name}' in variant '${variant_name}'`, span,
+          { kind: "missing_field", field: fn_name, type: variant_name, available: field_names });
+      }
+    }
+
+    const all_variants = enum_def.variants.map(v => ({
+      name: v.name,
+      fields: v.fields,
+      field_names: v.field_names,
+    }));
+    const enum_type: Type = {
+      kind: "enum", name: enum_name, type_params: type_param_types, variants: all_variants,
+    };
+
+    return {
+      hexpr: {
+        kind: "named_variant_construct", enum_name, variant_name,
+        fields: hfields, type: enum_type, effects, span,
+      },
       subst: s,
       effects,
     };
@@ -2193,6 +2286,45 @@ export class InferEngine {
       }
       case "literal":
         break;
+      case "named_constructor": {
+        const enum_name = this.env.variant_to_enum.get(pattern.name);
+        if (enum_name) {
+          const enum_def = this.env.enums.get(enum_name);
+          if (enum_def) {
+            const variant = enum_def.variants.find(v => v.name === pattern.name);
+            if (variant && variant.field_names) {
+              const resolved_expected = apply(subst, expected_type);
+              if (resolved_expected.kind === "enum" && resolved_expected.name !== enum_name) {
+                this.type_error("E0301",
+                  `variant '${pattern.name}' belongs to enum '${enum_name}', not '${resolved_expected.name}'`,
+                  pattern.span, { kind: "type_mismatch", expected: resolved_expected.name, actual: enum_name });
+              }
+              const instantiation_map = new Map<number, Type>();
+              if (resolved_expected.kind === "enum") {
+                for (let i = 0; i < enum_def.type_param_vars.length; i++) {
+                  if (i < resolved_expected.type_params.length) {
+                    instantiation_map.set(enum_def.type_param_vars[i], resolved_expected.type_params[i]);
+                  }
+                }
+              }
+              for (const field of pattern.fields) {
+                const field_idx = variant.field_names.indexOf(field.name);
+                if (field_idx >= 0 && field_idx < variant.fields.length) {
+                  const field_type = instantiation_map.size > 0
+                    ? substitute_type(variant.fields[field_idx], instantiation_map)
+                    : variant.fields[field_idx];
+                  this.bind_pattern(field.pattern, field_type, subst);
+                } else {
+                  this.type_error("E0301",
+                    `variant '${pattern.name}' has no field '${field.name}'`,
+                    field.span, { kind: "other", detail: `unknown field '${field.name}'` });
+                }
+              }
+            }
+          }
+        }
+        break;
+      }
       case "tuple": {
         const tp = pattern as import("../ast/index.js").TuplePattern;
         const resolved = apply(subst, expected_type);

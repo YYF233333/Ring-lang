@@ -287,6 +287,14 @@ class CodeGenerator {
         this.emit(
           `const ${js_name} = Object.freeze({ ${ENUM_TAG_FIELD}: "${variant.name}" });`
         );
+      } else if (variant.field_names) {
+        const params = variant.field_names.map(n => safe_ident(n)).join(", ");
+        const field_assigns = variant.field_names.map(n => safe_ident(n)).join(", ");
+        this.emit(`function ${js_name}(${params}) {`);
+        this.push_indent();
+        this.emit(`return { ${ENUM_TAG_FIELD}: "${variant.name}", ${field_assigns} };`);
+        this.pop_indent();
+        this.emit("}");
       } else {
         const params = variant.fields.map((_, i) => `_${i}`).join(", ");
         this.emit(`function ${js_name}(${params}) {`);
@@ -631,6 +639,8 @@ class CodeGenerator {
         return `${this.gen_expr(expr.receiver)}.${expr.field}`;
       case "struct_lit":
         return this.gen_struct_lit(expr);
+      case "named_variant_construct":
+        return this.gen_named_variant_construct(expr);
       case "match_expr":
         return this.gen_match(expr);
       case "block":
@@ -802,6 +812,22 @@ class CodeGenerator {
     return `new ${this.qualify(expr.name)}(${args})`;
   }
 
+  private gen_named_variant_construct(expr: HExpr & { kind: "named_variant_construct" }): string {
+    const js_name = `${this.qualify(expr.enum_name)}_${expr.variant_name}`;
+    const field_map = new Map(expr.fields.map(f => [f.name, f.value]));
+    const enum_type = expr.type as import("../types/index.js").EnumType;
+    const variant = enum_type.variants.find(v => v.name === expr.variant_name);
+    if (variant?.field_names) {
+      const args = variant.field_names.map(n => {
+        const val = field_map.get(n);
+        return val ? this.gen_expr(val) : "undefined";
+      }).join(", ");
+      return `${js_name}(${args})`;
+    }
+    const args = expr.fields.map(f => this.gen_expr(f.value)).join(", ");
+    return `${js_name}(${args})`;
+  }
+
   private gen_match(expr: HExpr & { kind: "match_expr" }): string {
     const scrutinee = this.gen_expr(expr.scrutinee);
     const parts: string[] = [];
@@ -847,6 +873,14 @@ class CodeGenerator {
         if (sub_conds.length === 0) return tag_check;
         return `${tag_check} && ${sub_conds.join(" && ")}`;
       }
+      case "named_constructor": {
+        const tag_check = `${target}.${ENUM_TAG_FIELD} === "${pat.name}"`;
+        const sub_conds = pat.fields.map(f =>
+          this.gen_pattern_condition(`${target}.${safe_ident(f.name)}`, f.pattern)
+        ).filter(c => c !== "true");
+        if (sub_conds.length === 0) return tag_check;
+        return `${tag_check} && ${sub_conds.join(" && ")}`;
+      }
       case "tuple": {
         const len_check = `Array.isArray(${target}) && ${target}.length === ${pat.elements.length}`;
         const sub_conds = pat.elements.map((e, i) =>
@@ -870,6 +904,10 @@ class CodeGenerator {
       case "constructor":
         return pat.fields.map((f, i) =>
           this.gen_pattern_bindings(`${target}._${i}`, f)
+        ).join("");
+      case "named_constructor":
+        return pat.fields.map(f =>
+          this.gen_pattern_bindings(`${target}.${safe_ident(f.name)}`, f.pattern)
         ).join("");
       case "tuple":
         return pat.elements.map((e, i) =>

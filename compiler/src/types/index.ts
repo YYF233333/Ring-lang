@@ -83,6 +83,7 @@ export interface StructType {
 export interface EnumVariant {
   name: string;
   fields: Type[];
+  field_names?: string[];
 }
 
 export interface EnumType {

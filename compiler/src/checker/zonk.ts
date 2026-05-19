@@ -43,7 +43,7 @@ function label_vars(names: Map<number, string>, t: Type): Type {
     case "struct":
       return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), fields: t.fields.map(f => ({ ...f, type: label_vars(names, f.type) })) };
     case "enum":
-      return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => label_vars(names, f)) })) };
+      return { ...t, type_params: t.type_params.map(p => label_vars(names, p)), variants: t.variants.map(v => ({ ...v, fields: v.fields.map(f => label_vars(names, f)), field_names: v.field_names })) };
     case "generic":
       return { ...t, base: label_vars(names, t.base), args: t.args.map(a => label_vars(names, a)) };
     case "record": {
@@ -131,6 +131,11 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
       return {
         ...base, kind: "struct_lit", name: expr.name,
         type_args: expr.type_args.map(t => zonk_type(ctx, t)),
+        fields: expr.fields.map((f): HStructFieldInit => ({ name: f.name, value: zonk_expr(ctx, f.value) })),
+      };
+    case "named_variant_construct":
+      return {
+        ...base, kind: "named_variant_construct", enum_name: expr.enum_name, variant_name: expr.variant_name,
         fields: expr.fields.map((f): HStructFieldInit => ({ name: f.name, value: zonk_expr(ctx, f.value) })),
       };
     case "match_expr":

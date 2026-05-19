@@ -1,6 +1,6 @@
 // Ring-lang Pattern Match Exhaustiveness Checking
 // Uses Maranget-style pattern matrix algorithm for cross-column checking.
-import { Pattern, Expr, span_zero } from "../ast/index.js";
+import { Pattern, NamedConstructorPattern, Expr, span_zero } from "../ast/index.js";
 import { Type } from "../types/index.js";
 import { Substitution, apply } from "./unify.js";
 
@@ -38,16 +38,20 @@ function check_patterns(
 
     for (const name of variant_names) {
       const sub_patterns_for_variant: Pattern[][] = [];
+      const variant_def = resolved.variants.find(v => v.name === name)!;
       for (const p of patterns) {
         if (p.kind === "constructor" && p.name === name) {
           covered.add(name);
           sub_patterns_for_variant.push(p.fields);
+        } else if (p.kind === "named_constructor" && p.name === name && variant_def.field_names) {
+          covered.add(name);
+          const positional = named_pattern_to_positional(p, variant_def.field_names, variant_def.fields.length);
+          sub_patterns_for_variant.push(positional);
         }
       }
 
       if (!covered.has(name)) continue;
 
-      const variant_def = resolved.variants.find(v => v.name === name)!;
       if (variant_def.fields.length > 0) {
         const wild: Pattern = { kind: "wildcard", span: span_zero() };
         const normalized = sub_patterns_for_variant.map(row => {
@@ -111,6 +115,7 @@ interface Ctor {
   name: string;
   arity: number;
   field_types: Type[];
+  field_names?: string[];
   is_tuple: boolean;
 }
 
@@ -126,6 +131,7 @@ function finite_type_ctors(type: Type): Ctor[] | null {
       name: v.name,
       arity: v.fields.length,
       field_types: v.fields,
+      field_names: v.field_names,
       is_tuple: false,
     }));
   }
@@ -145,6 +151,21 @@ function finite_type_ctors(type: Type): Ctor[] | null {
 
 const WILD: Pattern = { kind: "wildcard", span: span_zero() };
 
+function named_pattern_to_positional(
+  pat: NamedConstructorPattern,
+  field_names: string[],
+  arity: number,
+): Pattern[] {
+  const result: Pattern[] = Array.from({ length: arity }, () => WILD);
+  for (const f of pat.fields) {
+    const idx = field_names.indexOf(f.name);
+    if (idx >= 0 && idx < arity) {
+      result[idx] = f.pattern;
+    }
+  }
+  return result;
+}
+
 function specialize_row(row: Pattern[], ctor: Ctor): Pattern[] | null {
   const first = row[0];
   const rest = row.slice(1);
@@ -163,6 +184,10 @@ function specialize_row(row: Pattern[], ctor: Ctor): Pattern[] | null {
     const sub = [...first.fields];
     while (sub.length < ctor.arity) sub.push(WILD);
     return [...sub, ...rest];
+  }
+  if (first.kind === "named_constructor" && first.name === ctor.name) {
+    const positional = named_pattern_to_positional(first, ctor.field_names ?? [], ctor.arity);
+    return [...positional, ...rest];
   }
   if (first.kind === "tuple" && ctor.is_tuple && first.elements.length === ctor.arity) {
     return [...first.elements, ...rest];
