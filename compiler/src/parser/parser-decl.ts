@@ -207,6 +207,7 @@ function parse_struct_decl(ctx: ParserCtx, is_pub: boolean): StructDecl {
     const field_start = ctx.current_span_start();
     const field_pub = ctx.try_consume(TokenKind.Pub);
     const field_name = ctx.expect(TokenKind.Ident).value;
+    const field_optional = ctx.try_consume(TokenKind.Question);
     ctx.expect(TokenKind.Colon);
     const type_annotation = ctx.parse_type_expr();
     // Check for where clause on this field (refinement)
@@ -229,6 +230,7 @@ function parse_struct_decl(ctx: ParserCtx, is_pub: boolean): StructDecl {
     const field_end = ctx.current_span_start();
     fields.push({
       name: field_name, type_annotation, is_pub: field_pub,
+      is_optional: field_optional || undefined,
       span: ctx.make_span(field_start, field_end),
     });
     ctx.try_consume(TokenKind.Comma);
@@ -268,10 +270,11 @@ function parse_enum_decl(ctx: ParserCtx, is_pub: boolean): EnumDecl {
       while (!ctx.check(TokenKind.RBrace) && !ctx.at_end()) {
         const f_start = ctx.current_span_start();
         const f_name = ctx.expect(TokenKind.Ident).value;
+        const f_optional = ctx.try_consume(TokenKind.Question);
         ctx.expect(TokenKind.Colon);
         const f_type = ctx.parse_type_expr();
         const f_end = ctx.current_span_start();
-        named_fields.push({ name: f_name, type_expr: f_type, span: ctx.make_span(f_start, f_end) });
+        named_fields.push({ name: f_name, type_expr: f_type, is_optional: f_optional || undefined, span: ctx.make_span(f_start, f_end) });
         ctx.try_consume(TokenKind.Comma);
       }
       ctx.expect(TokenKind.RBrace);

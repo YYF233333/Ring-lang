@@ -84,6 +84,7 @@ export interface EnumVariant {
   name: string;
   fields: Type[];
   field_names?: string[];
+  optional_fields?: boolean[];
 }
 
 export interface EnumType {

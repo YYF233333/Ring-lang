@@ -10,7 +10,7 @@ import type {
   Type, FnType, TypeVar,
 } from "../types/index.js";
 import {
-  EMPTY_ROW,
+  EMPTY_ROW, make_option_type,
 } from "../types/index.js";
 import type { TraitMethodDef } from "./env.js";
 import type { StructDef, EnumDef, EffectDef } from "./env.js";
@@ -77,7 +77,7 @@ function register_struct(ctx: InferCtx, decl: StructDecl): void {
   }
 
   // Pre-register with empty fields so recursive references (e.g. struct Node { children: List<Node> }) resolve.
-  const fields: { name: string; type: Type; is_pub: boolean }[] = [];
+  const fields: { name: string; type: Type; is_pub: boolean; is_optional?: boolean }[] = [];
   const def: StructDef = {
     name: decl.name,
     type_params: type_param_names,
@@ -87,10 +87,15 @@ function register_struct(ctx: InferCtx, decl: StructDecl): void {
   ctx.env.structs.set(decl.name, def);
 
   for (const f of decl.fields) {
+    let field_type = resolve_type_expr(ctx, f.type_annotation);
+    if (f.is_optional) {
+      field_type = make_option_type(field_type);
+    }
     fields.push({
       name: f.name,
-      type: resolve_type_expr(ctx, f.type_annotation),
+      type: field_type,
       is_pub: f.is_pub,
+      is_optional: f.is_optional,
     });
   }
 
@@ -112,7 +117,7 @@ function register_enum(ctx: InferCtx, decl: EnumDecl): void {
 
   // Pre-register with empty variants so recursive references (e.g. enum Expr { BinOp { left: Expr } }) resolve.
   // The variants array is shared by reference — pushes below are visible to all EnumType objects.
-  const variants: { name: string; fields: Type[]; field_names?: string[] }[] = [];
+  const variants: { name: string; fields: Type[]; field_names?: string[]; optional_fields?: boolean[] }[] = [];
   const def: EnumDef = {
     name: decl.name,
     type_params: type_param_names,
@@ -123,10 +128,15 @@ function register_enum(ctx: InferCtx, decl: EnumDecl): void {
 
   for (const v of decl.variants) {
     if (v.named_fields && v.named_fields.length > 0) {
+      const has_optional = v.named_fields.some(f => f.is_optional);
       variants.push({
         name: v.name,
-        fields: v.named_fields.map(f => resolve_type_expr(ctx, f.type_expr)),
+        fields: v.named_fields.map(f => {
+          const t = resolve_type_expr(ctx, f.type_expr);
+          return f.is_optional ? make_option_type(t) : t;
+        }),
         field_names: v.named_fields.map(f => f.name),
+        optional_fields: has_optional ? v.named_fields.map(f => !!f.is_optional) : undefined,
       });
     } else {
       variants.push({

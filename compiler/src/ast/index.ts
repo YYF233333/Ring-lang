@@ -536,6 +536,7 @@ export interface StructField {
   name: string;
   type_annotation: TypeExpr;
   is_pub: boolean;
+  is_optional?: boolean;
   span: Span;
 }
 
@@ -551,6 +552,7 @@ export interface StructDecl {
 export interface NamedEnumField {
   name: string;
   type_expr: TypeExpr;
+  is_optional?: boolean;
   span: Span;
 }
 

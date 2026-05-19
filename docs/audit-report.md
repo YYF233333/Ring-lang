@@ -59,12 +59,11 @@
 - **Workaround**: 手动 match/if-let。可定义 `fn map_opt<T, U>(opt: T?, f: fn(T) -> U) -> U?` 辅助函数。
 - **建议**: 考虑添加 `?.` 运算符作为 Option 链式语法糖
 
-### I4: 所有 optional field 需改为 `Option<T>`
+### I4: ✅ 所有 optional field 需改为 `Option<T>`
 - **来源**: Claude C7 + DS I6
 - **文件**: AST/HIR/Type 中数百个 `field?: Type` 字段
 - **描述**: TS 的 `foo?: Bar` 需全部改为 Ring 的 `foo: Option<Bar>`。机械替换但量大。构造时需显式 `some(x)` / `none`。
-- **Workaround**: 已可表达，只是冗长
-- **建议**: 考虑在 struct 字段声明中支持 `field?: Type` 语法糖（脱糖为 `Option<Type>`，构造时可省略默认 `none`）
+- **修复**: 实现 `field?: Type` 语法糖。Parser 在字段名后检测 `?` token → AST `is_optional` 标记 → register 阶段脱糖为 `Option<Type>` → 构造时可省略（checker 自动填充 `none` HIR 节点）。struct 和 enum 命名变体均支持。
 
 ### I5: class 继承（extends Error）需重构为 enum + effect
 - **来源**: Claude C2 + DS I3
