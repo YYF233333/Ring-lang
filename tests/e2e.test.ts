@@ -145,6 +145,12 @@ const cases: TestCase[] = [
   { file: "var_self_test.ring", expected: "all var_self tests passed\n" },
   // Enum::Variant qualified syntax
   { file: "enum_qualified.ring", expected: "red\nenum_qualified: all tests passed\n" },
+  // Design review P2 API fixes
+  { file: "api_clone.ring", expected: "api_clone: all tests passed\n" },
+  { file: "list_pop.ring", expected: "list_pop: all tests passed\n" },
+  { file: "str_pad_end.ring", expected: "str_pad_end: all tests passed\n" },
+  { file: "collection_clear.ring", expected: "collection_clear: all tests passed\n" },
+  { file: "option_methods.ring", expected: "option_methods: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: 3 }, () => {

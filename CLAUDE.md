@@ -96,10 +96,10 @@ Ring-lang/
 │       └── tsconfig.json
 ├── std/
 │   ├── io.ring                         标准库：print/assert(cond,msg)/panic/exit/json_stringify
-│   ├── list.ring                       标准库：extern type List<T> + 11 非 HOF 方法
-│   ├── map.ring                        标准库：extern type Map<K,V> + 9 方法 + map_new/map_from/map_clone
-│   ├── set.ring                        标准库：extern type Set<T> + 9 方法 + set_new/set_from
-│   ├── str.ring                        标准库：impl Str 16 方法
+│   ├── list.ring                       标准库：extern type List<T> + 13 非 HOF 方法 + list_clone
+│   ├── map.ring                        标准库：extern type Map<K,V> + 10 方法 + map_new/map_from/map_clone
+│   ├── set.ring                        标准库：extern type Set<T> + 10 方法 + set_new/set_from/set_clone
+│   ├── str.ring                        标准库：impl Str 17 方法
 │   └── num.ring                        标准库：Int::to_str, Float::to_str, parse_int, parse_float
 ├── examples/
 │   ├── hello.ring                      基本示例（可运行）
@@ -209,14 +209,15 @@ Lexer + Parser + HM 类型推断 + Effect 推断 + struct/enum/match + UFCS + `o
 | Batch | 主题 | 关键特性 |
 |-------|------|----------|
 | 1 | 控制流 | `let` 不可变性（E0205）、`while`/`break`/`continue`（E0206）、`for x in 0..N` range 循环 |
-| 2 | Str + List | Str 16 个方法、List\<T\> 24 个方法 + `[]` 字面量 + HOF effect 多态 + for..in |
-| 3 | Tuple + Map + Set + if-let | Tuple `(T1, T2)` + 解构、Map\<K,V\> 14 个方法、Set\<T\> 13 个方法、if-let 语句 |
+| 2 | Str + List | Str 17 个方法、List\<T\> 26 个方法 + `[]` 字面量 + HOF effect 多态 + for..in |
+| 3 | Tuple + Map + Set + if-let | Tuple `(T1, T2)` + 解构、Map\<K,V\> 15 个方法、Set\<T\> 14 个方法、if-let 语句 |
 | 4 | 模块系统 | `use` 导入 + `pub use` 再导出 + `pub` 可见性 + 多文件编译 + 单文件 JS bundle |
 | 5 | FFI + 集合可变化 | `extern fn` 声明、List/Map/Set 修改方法改为原地操作 |
 | 6 | 标准库 | `extern type` 声明、`std/` Ring 源码 6 文件、prelude 自动加载 |
 | 7 | Enum 命名字段 | `Variant { field: Type }` 声明/构造/模式匹配、field punning、partial match `..` |
 | 修复 | 自举 Blocker | `var` 参数 + `var self`（可变参数/方法）、struct update 语法 `{ ..base, field: val }` |
 | 修复 | 设计评审 | `sort()` 数值比较器修复 + `sort_by(cmp)` HOF、`concat` 返回新 List + `extend` 原地追加、`Enum::Variant` 限定语法 |
+| 修复 | 设计评审 P2 | `list_clone`/`set_clone`、`List.pop()`、`Str.pad_end()`、集合 `clear()`、`Option<T>` 方法（is_some/is_none/unwrap_or/map/and_then） |
 
 ## 已知限制
 

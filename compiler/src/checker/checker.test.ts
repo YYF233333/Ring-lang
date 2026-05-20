@@ -5,10 +5,11 @@ import { Parser } from "../parser/parser.js";
 import { check } from "./checker.js";
 import {
   HFnDecl, HImplDecl, HTestDecl, HProgram,
-  BUILTIN_CELL, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
+  BUILTIN_CELL, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
   CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
   LIST_NON_HOF_METHODS, LIST_HOF_METHODS,
   MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS,
+  OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS,
 } from "../hir/index.js";
 import { CollectingSink, Diagnostic } from "../diagnostics/index.js";
 import { type_to_string, effect_row_to_string } from "../types/index.js";
@@ -600,6 +601,7 @@ describe("Type Checker", () => {
         [BUILTIN_LIST, [...LIST_NON_HOF_METHODS, ...LIST_HOF_METHODS]],
         [BUILTIN_MAP, [...MAP_NON_HOF_METHODS, ...MAP_HOF_METHODS]],
         [BUILTIN_SET, [...SET_NON_HOF_METHODS, ...SET_HOF_METHODS]],
+        [BUILTIN_OPTION, [...OPTION_NON_HOF_METHODS, ...OPTION_HOF_METHODS]],
       ];
       for (const [type_name, method_names] of expected) {
         const methods = env.impl_methods.get(type_name);

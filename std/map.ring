@@ -14,4 +14,5 @@ impl<K, V> Map {
     pub extern fn entries(self: Map<K, V>) -> List<(K, V)>
     pub extern fn insert(self: Map<K, V>, key: K, value: V) -> Unit
     pub extern fn remove(self: Map<K, V>, key: K) -> Unit
+    pub extern fn clear(self: Map<K, V>) -> Unit
 }

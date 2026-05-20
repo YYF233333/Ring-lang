@@ -4,9 +4,9 @@
 import {
   HProgram, HFnDecl, HTraitDecl, HExpr, HStmt, HBlock,
   ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
-  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_CELL,
+  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_CELL, BUILTIN_OPTION,
   CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
-  LIST_NON_HOF_METHODS, MAP_NON_HOF_METHODS, SET_NON_HOF_METHODS,
+  LIST_NON_HOF_METHODS, MAP_NON_HOF_METHODS, SET_NON_HOF_METHODS, OPTION_NON_HOF_METHODS,
 } from "../hir/index.js";
 import { RUNTIME_CODE } from "./runtime.js";
 
@@ -166,6 +166,7 @@ class CodeGenerator implements CodegenCtx {
     for (const m of SET_NON_HOF_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_SET)}.${m}`, undefined);
     for (const m of INT_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_INT)}.${m}`, undefined);
     for (const m of FLOAT_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_FLOAT)}.${m}`, undefined);
+    for (const m of OPTION_NON_HOF_METHODS) this.impl_methods.set(`${safe_ident(BUILTIN_OPTION)}.${m}`, undefined);
 
     // Emit runtime preamble (skipped for non-root modules in multi-file builds)
     if (!this.skip_preamble) {

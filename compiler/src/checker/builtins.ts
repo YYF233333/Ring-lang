@@ -38,6 +38,7 @@ export function register_hof_intrinsics(env: TypeEnv): void {
   register_list_hof(env);
   register_map_hof(env);
   register_set_hof(env);
+  register_option_hof(env);
 }
 
 // ================================================================
@@ -127,6 +128,23 @@ function register_option(env: TypeEnv): void {
 
   const none_t = env.fresh_var();
   env.bind("none", { type: make_option_type(none_t), type_vars: [none_t.id], bounds: [] });
+
+  // Non-HOF methods
+  const methods = get_or_create_methods(env, BUILTIN_OPTION);
+  const t = env.fresh_var();
+  const self = make_option_type(t);
+  methods.set("is_some", {
+    type: { kind: "fn", params: [self], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+    type_vars: [t.id], bounds: [],
+  });
+  methods.set("is_none", {
+    type: { kind: "fn", params: [self], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+    type_vars: [t.id], bounds: [],
+  });
+  methods.set("unwrap_or", {
+    type: { kind: "fn", params: [self, t], return_type: t, effects: EMPTY_ROW } as FnType,
+    type_vars: [t.id], bounds: [],
+  });
 }
 
 // ================================================================
@@ -314,6 +332,33 @@ function register_set_hof(env: TypeEnv): void {
     methods.set("all", {
       type: { kind: "fn", params: [mk(t), cb], return_type: BOOL, effects: eff } as FnType,
       type_vars: [t.id, tail_id], bounds: [],
+    });
+  }
+}
+
+// ================================================================
+// Option<T> HOF methods (effect-polymorphic)
+// ================================================================
+
+function register_option_hof(env: TypeEnv): void {
+  const methods = get_or_create_methods(env, BUILTIN_OPTION);
+
+  {
+    const t = env.fresh_var(), u = env.fresh_var();
+    const { eff, tail_id } = open_row(env);
+    const cb: FnType = { kind: "fn", params: [t], return_type: u, effects: eff };
+    methods.set("map", {
+      type: { kind: "fn", params: [make_option_type(t), cb], return_type: make_option_type(u), effects: eff } as FnType,
+      type_vars: [t.id, u.id, tail_id], bounds: [],
+    });
+  }
+  {
+    const t = env.fresh_var(), u = env.fresh_var();
+    const { eff, tail_id } = open_row(env);
+    const cb: FnType = { kind: "fn", params: [t], return_type: make_option_type(u), effects: eff };
+    methods.set("and_then", {
+      type: { kind: "fn", params: [make_option_type(t), cb], return_type: make_option_type(u), effects: eff } as FnType,
+      type_vars: [t.id, u.id, tail_id], bounds: [],
     });
   }
 }

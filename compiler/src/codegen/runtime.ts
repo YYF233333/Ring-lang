@@ -37,6 +37,10 @@ function exit(code) {
   process.exit(code);
 }
 
+function Option_is_some(self) { return self._tag === "some"; }
+function Option_is_none(self) { return self._tag === "none"; }
+function Option_unwrap_or(self, def) { return self._tag === "some" ? self._0 : def; }
+
 function Str_len(self) { return self.length; }
 function Str_contains(self, s) { return self.includes(s); }
 function Str_starts_with(self, s) { return self.startsWith(s); }
@@ -51,6 +55,7 @@ function Str_char_at(self, i) { return i >= 0 && i < self.length ? { _tag: "some
 function Str_index_of(self, s) { var i = self.indexOf(s); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
 function Str_byte_at(self, i) { return i >= 0 && i < self.length ? { _tag: "some", _0: self[i] } : { _tag: "none" }; }
 function Str_pad_start(self, length, fill) { return self.padStart(length, fill); }
+function Str_pad_end(self, length, fill) { return self.padEnd(length, fill); }
 function Str_repeat(self, count) { return self.repeat(count); }
 function Str_char_code_at(self, i) { var c = self.charCodeAt(i); return isNaN(c) ? { _tag: "none" } : { _tag: "some", _0: c }; }
 
@@ -73,9 +78,12 @@ function List_reverse(self) { self.reverse(); }
 function List_join(self, sep) { return self.join(sep); }
 function List_sort(self) { self.sort(function(a, b) { return a < b ? -1 : a > b ? 1 : 0; }); }
 function List_sort_by(self, cmp) { self.sort(cmp); }
+function List_pop(self) { return self.length > 0 ? { _tag: "some", _0: self.pop() } : { _tag: "none" }; }
 function List_shift(self) { return self.length > 0 ? { _tag: "some", _0: self.shift() } : { _tag: "none" }; }
+function List_clear(self) { self.length = 0; }
 function List_find_index(self, f) { var i = self.findIndex(f); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
 function List_index_of(self, item) { var i = self.indexOf(item); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
+function list_clone(l) { return l.slice(); }
 
 function map_new() { return new Map(); }
 function map_from(entries) { return new Map(entries); }
@@ -89,9 +97,11 @@ function _Map_values(self) { return Array.from(self.values()); }
 function _Map_entries(self) { return Array.from(self.entries()); }
 function _Map_insert(self, key, value) { self.set(key, value); }
 function _Map_remove(self, key) { self.delete(key); }
+function _Map_clear(self) { self.clear(); }
 
 function set_new() { return new Set(); }
 function set_from(items) { return new Set(items); }
+function set_clone(s) { return new Set(s); }
 function _Set_len(self) { return self.size; }
 function _Set_contains(self, x) { return self.has(x); }
 function _Set_is_empty(self) { return self.size === 0; }
@@ -101,6 +111,7 @@ function _Set_remove(self, x) { self.delete(x); }
 function _Set_union(self, other) { return new Set([...self, ...other]); }
 function _Set_intersect(self, other) { return new Set([...self].filter(function(x) { return other.has(x); })); }
 function _Set_difference(self, other) { return new Set([...self].filter(function(x) { return !other.has(x); })); }
+function _Set_clear(self) { self.clear(); }
 
 function json_stringify(value) { return JSON.stringify(value); }
 

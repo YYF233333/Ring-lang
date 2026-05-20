@@ -6,7 +6,7 @@ import {
   evidence_param_name,
   ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
-  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT,
+  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_OPTION,
 } from "../hir/index.js";
 import type { Type } from "../types/index.js";
 import { assertNever } from "../errors.js";
@@ -191,6 +191,20 @@ function gen_call(ctx: CodegenCtx, expr: HExpr & { kind: "call" }): string {
         const receiver = gen_expr(ctx, expr.callee.receiver);
         const callback = gen_lambda_capture_evidence(ctx, expr.args[0]);
         return `((__s, __f) => { for (const __x of __s) if (!__f(__x)) return false; return true; })(${receiver}, ${callback})`;
+      }
+    }
+
+    // Inline Option HOF methods
+    if (recv_type.kind === "enum" && recv_type.name === BUILTIN_OPTION) {
+      if (method === "map") {
+        const receiver = gen_expr(ctx, expr.callee.receiver);
+        const callback = gen_lambda_capture_evidence(ctx, expr.args[0]);
+        return `((__o, __f) => __o._tag === "some" ? { _tag: "some", _0: __f(__o._0) } : __o)(${receiver}, ${callback})`;
+      }
+      if (method === "and_then") {
+        const receiver = gen_expr(ctx, expr.callee.receiver);
+        const callback = gen_lambda_capture_evidence(ctx, expr.args[0]);
+        return `((__o, __f) => __o._tag === "some" ? __f(__o._0) : __o)(${receiver}, ${callback})`;
       }
     }
   }
