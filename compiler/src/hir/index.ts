@@ -70,11 +70,23 @@ export interface HIdent extends HExprBase {
   dict_closure_dicts?: string[];
 }
 
+export type EqDispatch =
+  | "builtin"
+  | { kind: "direct"; dict: string; extra_dicts?: string[] }
+  | { kind: "dict"; param: string };
+
+export type OrdDispatch =
+  | "builtin"
+  | { kind: "direct"; dict: string; extra_dicts?: string[] }
+  | { kind: "dict"; param: string };
+
 export interface HBinOp extends HExprBase {
   kind: "bin_op";
   op: BinOp;
   left: HExpr;
   right: HExpr;
+  eq_dispatch?: EqDispatch;
+  ord_dispatch?: OrdDispatch;
 }
 
 export interface HUnaryOp extends HExprBase {
@@ -471,6 +483,33 @@ export interface HTypeAliasDecl {
 
 export interface HProgram {
   decls: HDecl[];
+  derived_impls: DerivedImpl[];
+}
+
+export type FieldAction =
+  | "identity"
+  | { kind: "call"; dict_name: string; extra_dicts: string[] };
+
+export interface DerivedField {
+  name: string;
+  positional_index?: number;
+  action: FieldAction;
+}
+
+export interface DerivedVariant {
+  name: string;
+  fields: DerivedField[];
+  has_named_fields: boolean;
+}
+
+export interface DerivedImpl {
+  type_name: string;
+  trait_name: string;
+  type_params: string[];
+  bounds: { type_param: string; trait_name: string }[];
+  type_kind: "struct" | "enum";
+  struct_fields?: DerivedField[];
+  enum_variants?: DerivedVariant[];
 }
 
 // JS codegen naming convention — single source of truth for enum variant identifiers

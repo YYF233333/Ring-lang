@@ -45,7 +45,7 @@ function ident(name: string): HExpr {
 
 // Helper: program from decls
 function program(decls: HProgram["decls"]): HProgram {
-  return { decls };
+  return { decls, derived_impls: [] };
 }
 
 describe("codegen", () => {

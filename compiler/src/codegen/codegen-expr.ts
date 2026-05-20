@@ -6,7 +6,7 @@ import {
   evidence_param_name,
   ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
-  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_OPTION,
+  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_OPTION,
 } from "../hir/index.js";
 import type { Type } from "../types/index.js";
 import { assertNever } from "../errors.js";
@@ -45,6 +45,12 @@ export function gen_expr(ctx: CodegenCtx, expr: HExpr): string {
       return name;
     }
     case "bin_op": {
+      if (expr.eq_dispatch && (expr.op === "==" || expr.op === "!=")) {
+        return gen_eq_dispatch(ctx, expr);
+      }
+      if (expr.ord_dispatch && (expr.op === "<" || expr.op === ">" || expr.op === "<=" || expr.op === ">=")) {
+        return gen_ord_dispatch(ctx, expr);
+      }
       const js_op = expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
       return `(${gen_expr(ctx, expr.left)} ${js_op} ${gen_expr(ctx, expr.right)})`;
     }
@@ -88,6 +94,49 @@ export function gen_expr(ctx: CodegenCtx, expr: HExpr): string {
       return `[${expr.elements.map(e => gen_expr(ctx, e)).join(", ")}]`;
     default:
       return assertNever(expr, "gen_expr");
+  }
+}
+
+// ============================================================
+// Eq / Ord dispatch helpers
+// ============================================================
+
+function gen_eq_dispatch(ctx: CodegenCtx, expr: HExpr & { kind: "bin_op" }): string {
+  const dispatch = expr.eq_dispatch!;
+  const left = gen_expr(ctx, expr.left);
+  const right = gen_expr(ctx, expr.right);
+  const is_ne = expr.op === "!=";
+
+  if (dispatch === "builtin") {
+    return is_ne ? `(${left} !== ${right})` : `(${left} === ${right})`;
+  }
+
+  const dict = dispatch.kind === "direct" ? ctx.qualify(dispatch.dict) : dispatch.param;
+  const extra = dispatch.kind === "direct" && dispatch.extra_dicts && dispatch.extra_dicts.length > 0
+    ? ", " + dispatch.extra_dicts.join(", ") : "";
+  const eq_call = `${dict}.eq(${left}, ${right}${extra})`;
+  return is_ne ? `(!${eq_call})` : eq_call;
+}
+
+function gen_ord_dispatch(ctx: CodegenCtx, expr: HExpr & { kind: "bin_op" }): string {
+  const dispatch = expr.ord_dispatch!;
+  const left = gen_expr(ctx, expr.left);
+  const right = gen_expr(ctx, expr.right);
+
+  if (dispatch === "builtin") {
+    return `(${left} ${expr.op} ${right})`;
+  }
+
+  const dict = dispatch.kind === "direct" ? ctx.qualify(dispatch.dict) : dispatch.param;
+  const extra = dispatch.kind === "direct" && dispatch.extra_dicts && dispatch.extra_dicts.length > 0
+    ? ", " + dispatch.extra_dicts.join(", ") : "";
+  const cmp_call = `${dict}.cmp(${left}, ${right}${extra})`;
+  switch (expr.op) {
+    case "<":  return `(${cmp_call} < 0)`;
+    case "<=": return `(${cmp_call} <= 0)`;
+    case ">":  return `(${cmp_call} > 0)`;
+    case ">=": return `(${cmp_call} >= 0)`;
+    default:   return `(${left} ${expr.op} ${right})`;
   }
 }
 
@@ -218,6 +267,7 @@ function gen_call(ctx: CodegenCtx, expr: HExpr & { kind: "call" }): string {
       : recv_type.kind === "str" ? BUILTIN_STR
       : recv_type.kind === "int" ? BUILTIN_INT
       : recv_type.kind === "float" ? BUILTIN_FLOAT
+      : recv_type.kind === "bool" ? BUILTIN_BOOL
       : null;
     const impl_key = type_name ? `${ctx.qualify(type_name)}.${method}` : null;
     if (type_name && impl_key && ctx.impl_methods.has(impl_key)) {
@@ -228,8 +278,9 @@ function gen_call(ctx: CodegenCtx, expr: HExpr & { kind: "call" }): string {
       const receiver = gen_expr(ctx, expr.callee.receiver);
       const args = expr.args.map(a => gen_expr(ctx, a)).join(", ");
       const all_args = args ? `${receiver}, ${args}` : receiver;
+      const dict_args = (expr.resolved_dicts ?? []).map(d => ctx.qualify(d)).join(", ");
       const ev_args = get_callee_evidence_args(ctx, expr.callee.type);
-      const all_with_ev = [all_args, ev_args].filter(s => s.length > 0).join(", ");
+      const all_with_ev = [all_args, dict_args, ev_args].filter(s => s.length > 0).join(", ");
       return `${fn_name}(${all_with_ev})`;
     }
   }

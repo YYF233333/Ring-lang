@@ -46,6 +46,7 @@ import {
   infer_try_block, infer_option_unwrap,
 } from "./infer-expr.js";
 import { inject_module_exports, resolve_uses } from "./infer-modules.js";
+import { run_derive_pass } from "./derive.js";
 
 // ============================================================
 // InferEngine — thin shell implementing InferCtx
@@ -96,6 +97,9 @@ export class InferEngine implements InferCtx {
       }
     }
 
+    // Derive pass: auto-derive Eq/Clone/Debug/Ord between Pass 1 and Pass 2
+    const derived_impls = run_derive_pass(this.env);
+
     // Pass 2: type-check all declaration bodies (recover at declaration boundaries)
     const hdecls: HDecl[] = [];
     for (const decl of program.decls) {
@@ -115,7 +119,7 @@ export class InferEngine implements InferCtx {
       }
     }
 
-    return { decls: hdecls };
+    return { decls: hdecls, derived_impls };
   }
 
   public register_decl_public(decl: Decl): void {

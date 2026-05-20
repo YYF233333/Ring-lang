@@ -40,6 +40,10 @@ export const E = {
   E0704: "E0704", // circular dependency
   E0705: "E0705", // duplicate import
   E0706: "E0706", // use not at file top
+
+  // Trait dispatch errors (E03xx continued)
+  E0307: "E0307", // type does not implement Eq
+  E0308: "E0308", // type does not implement Ord
 } as const;
 
 export const ERROR_DESCRIPTIONS: Record<string, string> = {
@@ -69,4 +73,6 @@ export const ERROR_DESCRIPTIONS: Record<string, string> = {
   [E.E0704]: "Circular dependency detected",
   [E.E0705]: "Duplicate import",
   [E.E0706]: "Use declaration must appear before other declarations",
+  [E.E0307]: "Type does not implement Eq",
+  [E.E0308]: "Type does not implement Ord",
 };

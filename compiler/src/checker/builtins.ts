@@ -27,6 +27,13 @@ export function register_builtins(env: TypeEnv): void {
   register_effects(env);
   register_cell(env);
   register_option(env);
+  register_eq_trait(env);
+  register_option_eq(env);
+  register_clone_trait(env);
+  register_option_clone(env);
+  register_ord_trait(env);
+  register_debug_trait(env);
+  register_option_debug(env);
 }
 
 // ================================================================
@@ -144,6 +151,247 @@ function register_option(env: TypeEnv): void {
   methods.set("unwrap_or", {
     type: { kind: "fn", params: [self, t], return_type: t, effects: EMPTY_ROW } as FnType,
     type_vars: [t.id], bounds: [],
+  });
+}
+
+// ================================================================
+// Eq trait (builtin)
+// ================================================================
+
+function register_eq_trait(env: TypeEnv): void {
+  const self_var = env.fresh_var();
+
+  // eq method: (Self, Self) -> Bool
+  const eq_fn: FnType = {
+    kind: "fn", params: [self_var, self_var], return_type: BOOL, effects: EMPTY_ROW,
+  };
+  // ne method: (Self, Self) -> Bool (has default impl)
+  const ne_fn: FnType = {
+    kind: "fn", params: [self_var, self_var], return_type: BOOL, effects: EMPTY_ROW,
+  };
+
+  env.traits.set("Eq", {
+    name: "Eq",
+    type_params: [],
+    type_param_vars: [self_var.id],
+    methods: [
+      { name: "eq", type: eq_fn, has_default: false },
+      { name: "ne", type: ne_fn, has_default: true },
+    ],
+  });
+
+  // Register builtin Eq impls for primitive types
+  for (const prim of ["Int", "Float", "Str", "Bool"]) {
+    env.trait_impls.push({
+      trait_name: "Eq",
+      target_type_name: prim,
+      type_params: [],
+      method_names: ["eq", "ne"],
+    });
+  }
+}
+
+function register_option_eq(env: TypeEnv): void {
+  const t = env.fresh_var();
+  const opt = make_option_type(t);
+  const eq_fn: FnType = {
+    kind: "fn", params: [opt, opt], return_type: BOOL, effects: EMPTY_ROW,
+  };
+  const methods = get_or_create_methods(env, BUILTIN_OPTION);
+  methods.set("eq", {
+    type: eq_fn,
+    type_vars: [t.id],
+    bounds: [{ type_var: t.id, trait_name: "Eq" }],
+  });
+  methods.set("ne", {
+    type: { kind: "fn", params: [opt, opt], return_type: BOOL, effects: EMPTY_ROW } as FnType,
+    type_vars: [t.id],
+    bounds: [{ type_var: t.id, trait_name: "Eq" }],
+  });
+  env.trait_impls.push({
+    trait_name: "Eq",
+    target_type_name: BUILTIN_OPTION,
+    type_params: ["T"],
+    method_names: ["eq", "ne"],
+  });
+}
+
+// ================================================================
+// Clone trait (builtin)
+// ================================================================
+
+function register_clone_trait(env: TypeEnv): void {
+  const self_var = env.fresh_var();
+  const clone_fn: FnType = {
+    kind: "fn", params: [self_var], return_type: self_var, effects: EMPTY_ROW,
+  };
+
+  env.traits.set("Clone", {
+    name: "Clone",
+    type_params: [],
+    type_param_vars: [self_var.id],
+    methods: [
+      { name: "clone", type: clone_fn, has_default: false },
+    ],
+  });
+
+  // Primitives: clone is identity (JS value semantics)
+  for (const prim of ["Int", "Float", "Str", "Bool"]) {
+    env.trait_impls.push({
+      trait_name: "Clone",
+      target_type_name: prim,
+      type_params: [],
+      method_names: ["clone"],
+    });
+  }
+  // Collections: shallow clone
+  for (const coll of ["List", "Map", "Set"]) {
+    env.trait_impls.push({
+      trait_name: "Clone",
+      target_type_name: coll,
+      type_params: [],
+      method_names: ["clone"],
+    });
+  }
+}
+
+function register_option_clone(env: TypeEnv): void {
+  const t = env.fresh_var();
+  const opt = make_option_type(t);
+  const clone_fn: FnType = {
+    kind: "fn", params: [opt], return_type: opt, effects: EMPTY_ROW,
+  };
+  const methods = get_or_create_methods(env, BUILTIN_OPTION);
+  methods.set("clone", {
+    type: clone_fn,
+    type_vars: [t.id],
+    bounds: [{ type_var: t.id, trait_name: "Clone" }],
+  });
+  env.trait_impls.push({
+    trait_name: "Clone",
+    target_type_name: BUILTIN_OPTION,
+    type_params: ["T"],
+    method_names: ["clone"],
+  });
+}
+
+// ================================================================
+// Ord trait (builtin)
+// ================================================================
+
+function register_ord_trait(env: TypeEnv): void {
+  const self_var = env.fresh_var();
+  const cmp_fn: FnType = {
+    kind: "fn", params: [self_var, self_var], return_type: INT, effects: EMPTY_ROW,
+  };
+
+  env.traits.set("Ord", {
+    name: "Ord",
+    type_params: [],
+    type_param_vars: [self_var.id],
+    methods: [
+      { name: "cmp", type: cmp_fn, has_default: false },
+    ],
+  });
+
+  // Register builtin Ord impls for primitive types
+  for (const prim of ["Int", "Float", "Str", "Bool"]) {
+    env.trait_impls.push({
+      trait_name: "Ord",
+      target_type_name: prim,
+      type_params: [],
+      method_names: ["cmp"],
+    });
+  }
+}
+
+// ================================================================
+// Debug trait (builtin)
+// ================================================================
+
+function register_debug_trait(env: TypeEnv): void {
+  const self_var = env.fresh_var();
+  const debug_fn: FnType = {
+    kind: "fn", params: [self_var], return_type: STR, effects: EMPTY_ROW,
+  };
+
+  env.traits.set("Debug", {
+    name: "Debug",
+    type_params: [],
+    type_param_vars: [self_var.id],
+    methods: [
+      { name: "debug", type: debug_fn, has_default: false },
+    ],
+  });
+
+  // Primitives
+  for (const prim of ["Int", "Float", "Str", "Bool"]) {
+    env.trait_impls.push({
+      trait_name: "Debug",
+      target_type_name: prim,
+      type_params: [],
+      method_names: ["debug"],
+    });
+  }
+  // List<T>: debug requires T: Debug
+  {
+    const t = env.fresh_var();
+    const list_self: StructType = { kind: "struct", name: BUILTIN_LIST, type_params: [t], fields: [] };
+    const debug_fn: FnType = { kind: "fn", params: [list_self], return_type: STR, effects: EMPTY_ROW };
+    const methods = get_or_create_methods(env, BUILTIN_LIST);
+    methods.set("debug", {
+      type: debug_fn,
+      type_vars: [t.id],
+      bounds: [{ type_var: t.id, trait_name: "Debug" }],
+    });
+    env.trait_impls.push({ trait_name: "Debug", target_type_name: BUILTIN_LIST, type_params: ["T"], method_names: ["debug"] });
+  }
+  // Map<K,V>: debug (no bounds required — uses generic representation)
+  {
+    const k = env.fresh_var();
+    const v = env.fresh_var();
+    const map_self = make_map_type(k, v);
+    const debug_fn: FnType = { kind: "fn", params: [map_self], return_type: STR, effects: EMPTY_ROW };
+    const methods = get_or_create_methods(env, BUILTIN_MAP);
+    methods.set("debug", {
+      type: debug_fn,
+      type_vars: [k.id, v.id],
+      bounds: [],
+    });
+    env.trait_impls.push({ trait_name: "Debug", target_type_name: BUILTIN_MAP, type_params: ["K", "V"], method_names: ["debug"] });
+  }
+  // Set<T>: debug (no bounds required — uses generic representation)
+  {
+    const t = env.fresh_var();
+    const set_self: StructType = { kind: "struct", name: BUILTIN_SET, type_params: [t], fields: [] };
+    const debug_fn: FnType = { kind: "fn", params: [set_self], return_type: STR, effects: EMPTY_ROW };
+    const methods = get_or_create_methods(env, BUILTIN_SET);
+    methods.set("debug", {
+      type: debug_fn,
+      type_vars: [t.id],
+      bounds: [],
+    });
+    env.trait_impls.push({ trait_name: "Debug", target_type_name: BUILTIN_SET, type_params: ["T"], method_names: ["debug"] });
+  }
+}
+
+function register_option_debug(env: TypeEnv): void {
+  const t = env.fresh_var();
+  const opt = make_option_type(t);
+  const debug_fn: FnType = {
+    kind: "fn", params: [opt], return_type: STR, effects: EMPTY_ROW,
+  };
+  const methods = get_or_create_methods(env, BUILTIN_OPTION);
+  methods.set("debug", {
+    type: debug_fn,
+    type_vars: [t.id],
+    bounds: [{ type_var: t.id, trait_name: "Debug" }],
+  });
+  env.trait_impls.push({
+    trait_name: "Debug",
+    target_type_name: BUILTIN_OPTION,
+    type_params: ["T"],
+    method_names: ["debug"],
   });
 }
 

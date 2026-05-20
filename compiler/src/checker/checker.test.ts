@@ -598,10 +598,10 @@ describe("Type Checker", () => {
         [BUILTIN_STR, [...STR_METHODS]],
         [BUILTIN_INT, [...INT_METHODS]],
         [BUILTIN_FLOAT, [...FLOAT_METHODS]],
-        [BUILTIN_LIST, [...LIST_NON_HOF_METHODS, ...LIST_HOF_METHODS]],
-        [BUILTIN_MAP, [...MAP_NON_HOF_METHODS, ...MAP_HOF_METHODS]],
-        [BUILTIN_SET, [...SET_NON_HOF_METHODS, ...SET_HOF_METHODS]],
-        [BUILTIN_OPTION, [...OPTION_NON_HOF_METHODS, ...OPTION_HOF_METHODS]],
+        [BUILTIN_LIST, [...LIST_NON_HOF_METHODS, ...LIST_HOF_METHODS, "debug"]],
+        [BUILTIN_MAP, [...MAP_NON_HOF_METHODS, ...MAP_HOF_METHODS, "debug"]],
+        [BUILTIN_SET, [...SET_NON_HOF_METHODS, ...SET_HOF_METHODS, "debug"]],
+        [BUILTIN_OPTION, [...OPTION_NON_HOF_METHODS, ...OPTION_HOF_METHODS, "eq", "ne", "clone", "debug"]],
       ];
       for (const [type_name, method_names] of expected) {
         const methods = env.impl_methods.get(type_name);

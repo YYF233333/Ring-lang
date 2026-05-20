@@ -19,7 +19,7 @@ export interface IdentInfo {
 export function find_ident_at_position(decls: HDecl[], pos: Position): IdentInfo | null {
   let result: IdentInfo | null = null;
 
-  walk_program({ decls }, {
+  walk_program({ decls, derived_impls: [] }, {
     enter_stmt(stmt) {
       if ((stmt.kind === "let_stmt" || stmt.kind === "var_stmt") &&
           contains_position(stmt.span, pos)) {

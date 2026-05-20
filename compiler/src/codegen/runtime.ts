@@ -129,4 +129,58 @@ function argv() { return process.argv.slice(2); }
 function exit_process(code) { process.exit(code); }
 function eprintln(msg) { process.stderr.write(msg + "\\n"); }
 function cwd() { return process.cwd(); }
+
+const Int_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
+const Float_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
+const Str_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
+const Bool_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
+
+function Option_Eq_eq(a, b, __ring_T_Eq) {
+  if (a._tag !== b._tag) return false;
+  if (a._tag === "none") return true;
+  return __ring_T_Eq.eq(a._0, b._0);
+}
+const Option_Eq = { eq: Option_Eq_eq, ne: function(a, b, __ring_T_Eq) { return !Option_Eq_eq(a, b, __ring_T_Eq); } };
+
+const Int_Clone = { clone: function(a) { return a; } };
+const Float_Clone = { clone: function(a) { return a; } };
+const Str_Clone = { clone: function(a) { return a; } };
+const Bool_Clone = { clone: function(a) { return a; } };
+const List_Clone = { clone: function(a) { return a.slice(); } };
+const Map_Clone = { clone: function(a) { return new Map(a); } };
+const Set_Clone = { clone: function(a) { return new Set(a); } };
+
+function Option_Clone_clone(a, __ring_T_Clone) {
+  return a._tag === "some" ? { _tag: "some", _0: __ring_T_Clone.clone(a._0) } : a;
+}
+const Option_Clone = { clone: Option_Clone_clone };
+
+const Int_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
+const Float_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
+const Str_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
+const Bool_Ord = { cmp: function(a, b) { return a === b ? 0 : a ? 1 : -1; } };
+
+function Int_Debug_debug(a) { return String(a); }
+const Int_Debug = { debug: Int_Debug_debug };
+function Float_Debug_debug(a) { return String(a); }
+const Float_Debug = { debug: Float_Debug_debug };
+function Str_Debug_debug(a) { return '"' + a + '"'; }
+const Str_Debug = { debug: Str_Debug_debug };
+function Bool_Debug_debug(a) { return String(a); }
+const Bool_Debug = { debug: Bool_Debug_debug };
+
+function Option_Debug_debug(a, __ring_T_Debug) {
+  return a._tag === "some" ? "some(" + __ring_T_Debug.debug(a._0) + ")" : "none";
+}
+const Option_Debug = { debug: Option_Debug_debug };
+
+function List_Debug_debug(a, __ring_T_Debug) {
+  return "[" + a.map(function(x) { return __ring_T_Debug.debug(x); }).join(", ") + "]";
+}
+const List_Debug = { debug: List_Debug_debug };
+
+function Map_Debug_debug(a) { return "Map{...}"; }
+const Map_Debug = { debug: Map_Debug_debug };
+function Set_Debug_debug(a) { return "Set{...}"; }
+const Set_Debug = { debug: Set_Debug_debug };
 `;

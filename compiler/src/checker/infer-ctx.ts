@@ -216,15 +216,27 @@ export function build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type
   const scheme_fn = scheme.type as FnType;
   const inst_fn = instantiated_type as FnType;
   for (let i = 0; i < scheme_fn.params.length && i < inst_fn.params.length; i++) {
-    const orig = scheme_fn.params[i];
-    if (orig.kind === "var" && scheme.type_vars.includes(orig.id)) {
-      result.set(orig.id, inst_fn.params[i]);
+    collect_var_mappings(scheme_fn.params[i], inst_fn.params[i], scheme.type_vars, result);
+  }
+  collect_var_mappings(scheme_fn.return_type, inst_fn.return_type, scheme.type_vars, result);
+  return result;
+}
+
+/** Recursively collect type var → concrete type mappings from a scheme type and its instantiation */
+function collect_var_mappings(
+  scheme_type: Type, inst_type: Type, type_vars: number[], result: Map<number, Type>,
+): void {
+  if (scheme_type.kind === "var" && type_vars.includes(scheme_type.id)) {
+    result.set(scheme_type.id, inst_type);
+    return;
+  }
+  // Recurse into struct/enum type params
+  if ((scheme_type.kind === "struct" || scheme_type.kind === "enum") &&
+      inst_type.kind === scheme_type.kind && inst_type.name === scheme_type.name) {
+    for (let i = 0; i < scheme_type.type_params.length && i < inst_type.type_params.length; i++) {
+      collect_var_mappings(scheme_type.type_params[i], inst_type.type_params[i], type_vars, result);
     }
   }
-  if (scheme_fn.return_type.kind === "var" && scheme.type_vars.includes(scheme_fn.return_type.id)) {
-    result.set(scheme_fn.return_type.id, inst_fn.return_type);
-  }
-  return result;
 }
 
 export function resolve_dicts_from_scheme(
@@ -250,6 +262,21 @@ export function resolve_dicts_from_scheme(
         );
         if (matching_bound) {
           resolved_dicts.push(trait_bound_param_name(matching_bound.type_param_name, matching_bound.trait_name));
+          found = true;
+        }
+      }
+      // Handle primitive types with trait impls (e.g., Int: Eq)
+      if (!found) {
+        const prim_name = concrete.kind === "int" ? "Int"
+          : concrete.kind === "float" ? "Float"
+          : concrete.kind === "str" ? "Str"
+          : concrete.kind === "bool" ? "Bool"
+          : concrete.kind === "unit" ? "Unit"
+          : null;
+        if (prim_name && ctx.env.trait_impls.some(
+          impl => impl.target_type_name === prim_name && impl.trait_name === bound.trait_name
+        )) {
+          resolved_dicts.push(trait_dict_name(prim_name, bound.trait_name));
           found = true;
         }
       }

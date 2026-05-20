@@ -17,10 +17,11 @@ import {
 } from "../types/index.js";
 import type {
   HExpr, HParam, HMatchArm, HEffectHandler, HStructFieldInit, HIdent, HBlock,
+  EqDispatch, OrdDispatch,
 } from "../hir/index.js";
 import {
   variant_js_name, trait_dict_name, trait_bound_param_name,
-  BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR,
+  BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
   BUILTIN_LIST,
 } from "../hir/index.js";
 import { substitute_type } from "./env.js";
@@ -80,6 +81,8 @@ export function infer_bin_op(ctx: InferCtx, op: BinOp, left: Expr, right: Expr, 
   const rr = ctx.infer_expr(right, lr.subst);
   let s = rr.subst;
   let result_type: Type;
+  let eq_dispatch: EqDispatch | undefined;
+  let ord_dispatch: OrdDispatch | undefined;
 
   switch (op) {
     case "+": case "-": case "*": case "/": case "%": {
@@ -95,9 +98,76 @@ export function infer_bin_op(ctx: InferCtx, op: BinOp, left: Expr, right: Expr, 
       }
       break;
     }
-    case "==": case "!=": case "<": case "<=": case ">": case ">=": {
+    case "==": case "!=": {
       s = unify_at(ctx, lr.hexpr.type, rr.hexpr.type, s, span);
       result_type = BOOL;
+
+      const resolved = apply(s, lr.hexpr.type);
+
+      if (is_primitive_eq(resolved) || resolved.kind === "tuple") {
+        eq_dispatch = "builtin";
+      } else if (resolved.kind === "var") {
+        // Check if var has Eq bound from current function's trait bounds
+        const eq_bound = ctx.current_fn_bounds.find(
+          fb => fb.type_param_var_id === resolved.id && fb.trait_name === "Eq"
+        );
+        if (eq_bound) {
+          eq_dispatch = { kind: "dict", param: trait_bound_param_name(eq_bound.type_param_name, "Eq") };
+        } else {
+          // Check var_bounds (from instantiation)
+          const var_bounds = ctx.env.var_bounds.get(resolved.id);
+          if (var_bounds && var_bounds.has("Eq")) {
+            eq_dispatch = "builtin";
+          } else {
+            type_error(ctx, E.E0307,
+              `Type does not implement Eq, cannot use '${op}'`,
+              span, { kind: "trait_error", detail: "type does not implement Eq" });
+          }
+        }
+      } else if ((resolved.kind === "struct" || resolved.kind === "enum") &&
+        ctx.env.trait_impls.some(i => i.target_type_name === resolved.name && i.trait_name === "Eq")) {
+        const extra_dicts = resolve_eq_extra_dicts(ctx, resolved.type_params, s);
+        eq_dispatch = { kind: "direct", dict: trait_dict_name(resolved.name, "Eq"), extra_dicts };
+      } else {
+        type_error(ctx, E.E0307,
+          `Type '${type_to_string(resolved)}' does not implement Eq, cannot use '${op}'`,
+          span, { kind: "trait_error", detail: `type '${type_to_string(resolved)}' does not implement Eq` });
+      }
+      break;
+    }
+    case "<": case "<=": case ">": case ">=": {
+      s = unify_at(ctx, lr.hexpr.type, rr.hexpr.type, s, span);
+      result_type = BOOL;
+
+      const resolved = apply(s, lr.hexpr.type);
+
+      if (is_primitive_ord(resolved)) {
+        ord_dispatch = "builtin";
+      } else if (resolved.kind === "var") {
+        const ord_bound = ctx.current_fn_bounds.find(
+          fb => fb.type_param_var_id === resolved.id && fb.trait_name === "Ord"
+        );
+        if (ord_bound) {
+          ord_dispatch = { kind: "dict", param: trait_bound_param_name(ord_bound.type_param_name, "Ord") };
+        } else {
+          const var_bounds = ctx.env.var_bounds.get(resolved.id);
+          if (var_bounds && var_bounds.has("Ord")) {
+            ord_dispatch = "builtin";
+          } else {
+            type_error(ctx, E.E0308,
+              `Type does not implement Ord, cannot use '${op}'`,
+              span, { kind: "trait_error", detail: "type does not implement Ord" });
+          }
+        }
+      } else if ((resolved.kind === "struct" || resolved.kind === "enum") &&
+        ctx.env.trait_impls.some(i => i.target_type_name === resolved.name && i.trait_name === "Ord")) {
+        const extra_dicts = resolve_ord_extra_dicts(ctx, resolved.type_params, s);
+        ord_dispatch = { kind: "direct", dict: trait_dict_name(resolved.name, "Ord"), extra_dicts };
+      } else {
+        type_error(ctx, E.E0308,
+          `Type '${type_to_string(resolved)}' does not implement Ord, cannot use '${op}'`,
+          span, { kind: "trait_error", detail: `type '${type_to_string(resolved)}' does not implement Ord` });
+      }
       break;
     }
     case "&&": case "||": {
@@ -111,10 +181,115 @@ export function infer_bin_op(ctx: InferCtx, op: BinOp, left: Expr, right: Expr, 
   let effects: EffectRow;
   [effects, s] = merge_effects(ctx, lr.effects, rr.effects, s);
   return {
-    hexpr: { kind: "bin_op", op, left: lr.hexpr, right: rr.hexpr, type: result_type!, effects, span },
+    hexpr: { kind: "bin_op", op, left: lr.hexpr, right: rr.hexpr, type: result_type!, effects, span, eq_dispatch, ord_dispatch },
     subst: s,
     effects,
   };
+}
+
+function is_primitive_eq(t: Type): boolean {
+  return t.kind === "int" || t.kind === "float" || t.kind === "str"
+    || t.kind === "bool" || t.kind === "unit";
+}
+
+/**
+ * For a generic struct/enum type like Pair<Int, Str> or Option<Int>,
+ * resolve the Eq dict names for each type argument.
+ * Returns undefined if no extra dicts are needed (non-generic type),
+ * or a string[] of dict names for each type param.
+ */
+function resolve_eq_extra_dicts(
+  ctx: InferCtx, type_args: Type[], subst: Substitution,
+): string[] | undefined {
+  if (type_args.length === 0) return undefined;
+  const dicts: string[] = [];
+  for (const arg of type_args) {
+    const resolved = apply(subst, arg);
+    const dict = resolve_type_to_eq_dict(ctx, resolved);
+    if (dict === null) return undefined; // can't resolve — fall back to no extra dicts
+    dicts.push(dict);
+  }
+  return dicts;
+}
+
+/**
+ * Resolve a single concrete type to its Eq dict name.
+ */
+function resolve_type_to_eq_dict(ctx: InferCtx, t: Type): string | null {
+  switch (t.kind) {
+    case "int":   return trait_dict_name("Int", "Eq");
+    case "float": return trait_dict_name("Float", "Eq");
+    case "str":   return trait_dict_name("Str", "Eq");
+    case "bool":  return trait_dict_name("Bool", "Eq");
+    case "unit":  return trait_dict_name("Unit", "Eq");
+    case "var": {
+      // Check if this type var has an Eq bound from the current function
+      const eq_bound = ctx.current_fn_bounds.find(
+        fb => fb.type_param_var_id === t.id && fb.trait_name === "Eq",
+      );
+      if (eq_bound) return trait_bound_param_name(eq_bound.type_param_name, "Eq");
+      return null;
+    }
+    case "struct":
+    case "enum": {
+      if (ctx.env.trait_impls.some(i => i.target_type_name === t.name && i.trait_name === "Eq")) {
+        return trait_dict_name(t.name, "Eq");
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+function is_primitive_ord(t: Type): boolean {
+  return t.kind === "int" || t.kind === "float" || t.kind === "str" || t.kind === "bool";
+}
+
+/**
+ * For a generic struct/enum type like Pair<Int, Str>,
+ * resolve the Ord dict names for each type argument.
+ */
+function resolve_ord_extra_dicts(
+  ctx: InferCtx, type_args: Type[], subst: Substitution,
+): string[] | undefined {
+  if (type_args.length === 0) return undefined;
+  const dicts: string[] = [];
+  for (const arg of type_args) {
+    const resolved = apply(subst, arg);
+    const dict = resolve_type_to_ord_dict(ctx, resolved);
+    if (dict === null) return undefined;
+    dicts.push(dict);
+  }
+  return dicts;
+}
+
+/**
+ * Resolve a single concrete type to its Ord dict name.
+ */
+function resolve_type_to_ord_dict(ctx: InferCtx, t: Type): string | null {
+  switch (t.kind) {
+    case "int":   return trait_dict_name("Int", "Ord");
+    case "float": return trait_dict_name("Float", "Ord");
+    case "str":   return trait_dict_name("Str", "Ord");
+    case "bool":  return trait_dict_name("Bool", "Ord");
+    case "var": {
+      const ord_bound = ctx.current_fn_bounds.find(
+        fb => fb.type_param_var_id === t.id && fb.trait_name === "Ord",
+      );
+      if (ord_bound) return trait_bound_param_name(ord_bound.type_param_name, "Ord");
+      return null;
+    }
+    case "struct":
+    case "enum": {
+      if (ctx.env.trait_impls.some(i => i.target_type_name === t.name && i.trait_name === "Ord")) {
+        return trait_dict_name(t.name, "Ord");
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
 }
 
 // ============================================================
@@ -215,6 +390,19 @@ export function infer_call(ctx: InferCtx, callee: Expr, args: Expr[], span: Span
           if (matching_bound) {
             dicts.push(trait_bound_param_name(matching_bound.type_param_name, matching_bound.trait_name));
           }
+        } else {
+          // Handle primitive types for dict closure dicts
+          const prim_name = concrete.kind === "int" ? "Int"
+            : concrete.kind === "float" ? "Float"
+            : concrete.kind === "str" ? "Str"
+            : concrete.kind === "bool" ? "Bool"
+            : concrete.kind === "unit" ? "Unit"
+            : null;
+          if (prim_name && ctx.env.trait_impls.some(
+            impl => impl.target_type_name === prim_name && impl.trait_name === bound.trait_name
+          )) {
+            dicts.push(trait_dict_name(prim_name, bound.trait_name));
+          }
         }
       }
     }
@@ -251,12 +439,14 @@ export function infer_method_call(ctx: InferCtx, receiver: Expr, method: string,
   // Look up method in impl
   const recv_type = apply(s, recv_r.hexpr.type);
   let method_type: Type | undefined;
+  let method_scheme: import("./env.js").TypeScheme | undefined;
 
   if (recv_type.kind === "struct") {
     const impl_methods = ctx.env.impl_methods.get(recv_type.name);
     if (impl_methods) {
       const scheme = impl_methods.get(method);
       if (scheme) {
+        method_scheme = scheme;
         method_type = ctx.env.instantiate(scheme);
       }
     }
@@ -265,6 +455,7 @@ export function infer_method_call(ctx: InferCtx, receiver: Expr, method: string,
     if (impl_methods) {
       const scheme = impl_methods.get(method);
       if (scheme) {
+        method_scheme = scheme;
         method_type = ctx.env.instantiate(scheme);
       }
     }
@@ -287,17 +478,24 @@ export function infer_method_call(ctx: InferCtx, receiver: Expr, method: string,
     }
   }
 
-  // Check trait impls for the receiver type
-  if (!method_type && (recv_type.kind === "struct" || recv_type.kind === "enum")) {
-    const type_name = recv_type.name;
-    for (const impl_entry of ctx.env.trait_impls) {
-      if (impl_entry.target_type_name === type_name) {
-        const trait_def = ctx.env.traits.get(impl_entry.trait_name);
-        if (trait_def) {
-          const tm = trait_def.methods.find(m => m.name === method);
-          if (tm) {
-            method_type = ctx.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars, bounds: [] });
-            break;
+  // Check trait impls for the receiver type (struct, enum, and primitives)
+  if (!method_type) {
+    const type_name = recv_type.kind === "struct" || recv_type.kind === "enum" ? recv_type.name
+      : recv_type.kind === "int" ? BUILTIN_INT
+      : recv_type.kind === "float" ? BUILTIN_FLOAT
+      : recv_type.kind === "str" ? BUILTIN_STR
+      : recv_type.kind === "bool" ? BUILTIN_BOOL
+      : null;
+    if (type_name) {
+      for (const impl_entry of ctx.env.trait_impls) {
+        if (impl_entry.target_type_name === type_name) {
+          const trait_def = ctx.env.traits.get(impl_entry.trait_name);
+          if (trait_def) {
+            const tm = trait_def.methods.find(m => m.name === method);
+            if (tm) {
+              method_type = ctx.env.instantiate({ type: tm.type, type_vars: trait_def.type_param_vars, bounds: [] });
+              break;
+            }
           }
         }
       }
@@ -355,13 +553,19 @@ export function infer_method_call(ctx: InferCtx, receiver: Expr, method: string,
     result_type = ctx.env.fresh_var();
   }
 
+  // Resolve trait dicts for method calls with bounds (e.g., .debug() on generic types)
+  let resolved_dicts: string[] = [];
+  if (method_scheme && method_scheme.bounds.length > 0 && method_type) {
+    resolved_dicts = resolve_dicts_from_scheme(ctx, method_scheme, method_type, s, span);
+  }
+
   return {
     hexpr: {
       kind: "call",
       callee: { kind: "field_access", receiver: recv_r.hexpr, field: method, type: method_type ?? ctx.env.fresh_var(), effects: EMPTY_ROW, span },
       args: hargs,
       type_args: [],
-      resolved_dicts: [],
+      resolved_dicts,
       dict_dispatch,
       type: result_type,
       effects,

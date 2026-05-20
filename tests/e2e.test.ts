@@ -151,6 +151,20 @@ const cases: TestCase[] = [
   { file: "str_pad_end.ring", expected: "str_pad_end: all tests passed\n" },
   { file: "collection_clear.ring", expected: "collection_clear: all tests passed\n" },
   { file: "option_methods.ring", expected: "option_methods: all tests passed\n" },
+  // Eq trait: structural equality
+  { file: "eq_struct.ring", expected: "eq_struct: all tests passed\n" },
+  { file: "eq_enum.ring", expected: "eq_enum: all tests passed\n" },
+  { file: "eq_generic.ring", expected: "eq_generic: all tests passed\n" },
+  { file: "eq_nested.ring", expected: "eq_nested: all tests passed\n" },
+  // Clone trait: structural clone
+  { file: "clone_struct.ring", expected: "clone_struct: all tests passed\n" },
+  { file: "clone_enum.ring", expected: "clone_enum: all tests passed\n" },
+  // Ord trait: structural ordering
+  { file: "ord_struct.ring", expected: "ord_struct: all tests passed\n" },
+  { file: "ord_enum.ring", expected: "ord_enum: all tests passed\n" },
+  // Debug trait: debug string representation
+  { file: "debug_basic.ring", expected: "debug_basic: all tests passed\n" },
+  { file: "debug_generic.ring", expected: "debug_generic: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: 3 }, () => {
@@ -206,6 +220,10 @@ describe("e2e: ring check (negative — should reject)", { concurrency: 3 }, () 
     // Field assignment on immutable
     { file: "neg_field_assign_immutable.ring", error_pattern: "E0205" },
     { file: "neg_let_field_assign.ring", error_pattern: "E0205" },
+    // Eq trait: negative
+    { file: "error_no_eq.ring", error_pattern: "E0307" },
+    // Ord trait: negative
+    { file: "error_no_ord.ring", error_pattern: "E0308" },
   ];
 
   for (const tc of negative_cases) {

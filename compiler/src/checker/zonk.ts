@@ -117,7 +117,7 @@ export function zonk_expr(ctx: ZonkCtx, expr: HExpr): HExpr {
     case "str_lit":    return { ...base, kind: "str_lit", value: expr.value };
     case "bool_lit":   return { ...base, kind: "bool_lit", value: expr.value };
     case "ident":      return { ...base, kind: "ident", name: expr.name, resolved_name: expr.resolved_name, def_id: expr.def_id, dict_closure_dicts: expr.dict_closure_dicts };
-    case "bin_op":     return { ...base, kind: "bin_op", op: expr.op, left: zonk_expr(ctx, expr.left), right: zonk_expr(ctx, expr.right) };
+    case "bin_op":     return { ...base, kind: "bin_op", op: expr.op, left: zonk_expr(ctx, expr.left), right: zonk_expr(ctx, expr.right), eq_dispatch: expr.eq_dispatch, ord_dispatch: expr.ord_dispatch };
     case "unary_op":   return { ...base, kind: "unary_op", op: expr.op, operand: zonk_expr(ctx, expr.operand) };
     case "call":
       return {
