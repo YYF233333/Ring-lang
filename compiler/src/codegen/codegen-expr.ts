@@ -12,7 +12,7 @@ import type { Type } from "../types/index.js";
 import { assertNever } from "../errors.js";
 import type { CodegenCtx } from "./codegen-ctx.js";
 import { safe_ident, get_evidence_params, LIST_HOF_JS } from "./codegen-ctx.js";
-import { gen_pattern_condition, gen_pattern_bindings, gen_stmt_inline } from "./codegen-stmt.js";
+import { gen_pattern_condition, gen_pattern_bindings } from "./codegen-stmt.js";
 
 // ============================================================
 // Main expression dispatch
@@ -530,16 +530,19 @@ function gen_handle(ctx: CodegenCtx, expr: HExpr & { kind: "handle_expr" }): str
 
 function gen_handle_body(ctx: CodegenCtx, expr: HExpr, ev_params: string): string {
   if (expr.kind === "block") {
-    const parts: string[] = [];
-    parts.push(`(function(${ev_params}) {`);
-    for (const stmt of (expr as HBlock).stmts) {
-      parts.push("  " + gen_stmt_inline(ctx, stmt));
+    const block = expr as HBlock;
+    if (block.stmts.length === 0 && block.tail) {
+      return `(function(${ev_params}) { return ${gen_expr(ctx, block.tail)}; })(${ev_params})`;
     }
-    if ((expr as HBlock).tail) {
-      parts.push(`  return ${gen_expr(ctx, (expr as HBlock).tail!)};`);
-    }
-    parts.push(`})(${ev_params})`);
-    return parts.join("\n");
+    const saved_lines = ctx.lines;
+    const saved_indent = ctx.indent_level;
+    ctx.lines = [];
+    ctx.indent_level = 1;
+    ctx.emit_block_body(block);
+    const body_lines = ctx.lines;
+    ctx.lines = saved_lines;
+    ctx.indent_level = saved_indent;
+    return [`(function(${ev_params}) {`, ...body_lines, `})(${ev_params})`].join("\n");
   }
   return `(function(${ev_params}) { return ${gen_expr(ctx, expr)}; })(${ev_params})`;
 }

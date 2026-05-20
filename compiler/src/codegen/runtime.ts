@@ -53,7 +53,7 @@ function Str_replace(self, old_str, new_str) { return self.replaceAll(old_str, n
 function Str_split(self, sep) { return self.split(sep); }
 function Str_char_at(self, i) { return i >= 0 && i < self.length ? { _tag: "some", _0: self[i] } : { _tag: "none" }; }
 function Str_index_of(self, s) { var i = self.indexOf(s); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
-function Str_byte_at(self, i) { return i >= 0 && i < self.length ? { _tag: "some", _0: self[i] } : { _tag: "none" }; }
+
 function Str_pad_start(self, length, fill) { return self.padStart(length, fill); }
 function Str_pad_end(self, length, fill) { return self.padEnd(length, fill); }
 function Str_repeat(self, count) { return self.repeat(count); }

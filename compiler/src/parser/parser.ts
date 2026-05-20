@@ -72,12 +72,7 @@ export class Parser implements ParserCtx {
         if (decls_started) {
           this.report_error(E.E0706, "Use declaration must appear before other declarations", this.peek().span);
         }
-        try {
-          uses.push(parse_use_decl(this, false));
-        } catch (e) {
-          if (e instanceof CompileError) throw e;
-          this.synchronize();
-        }
+        uses.push(parse_use_decl(this, false));
         continue;
       }
 
@@ -91,12 +86,7 @@ export class Parser implements ParserCtx {
           if (decls_started) {
             this.report_error(E.E0706, "Use declaration must appear before other declarations", this.tokens[save_pos].span);
           }
-          try {
-            uses.push(parse_use_decl(this, true));
-          } catch (e) {
-            if (e instanceof CompileError) throw e;
-            this.synchronize();
-          }
+          uses.push(parse_use_decl(this, true));
           continue;
         }
         // Not `pub use` — restore and fall through to regular decl parsing
@@ -107,13 +97,7 @@ export class Parser implements ParserCtx {
 
       // Regular declaration
       decls_started = true;
-      try {
-        decls.push(parse_decl(this));
-      } catch (e) {
-        if (e instanceof CompileError) throw e;
-        // Recover: synchronize to next declaration boundary
-        this.synchronize();
-      }
+      decls.push(parse_decl(this));
     }
     if (this.sink.has_errors()) {
       throw new CompileError([...this.sink.diagnostics()]);
@@ -462,27 +446,6 @@ export class Parser implements ParserCtx {
     this.error_count++;
     if (this.error_count >= Parser.MAX_ERRORS) {
       throw new CompileError([...this.sink.diagnostics()]);
-    }
-  }
-
-  private synchronize(): void {
-    while (!this.at_end()) {
-      const tok = this.peek();
-      if (
-        tok.kind === TokenKind.Fn ||
-        tok.kind === TokenKind.Struct ||
-        tok.kind === TokenKind.Enum ||
-        tok.kind === TokenKind.Trait ||
-        tok.kind === TokenKind.Impl ||
-        tok.kind === TokenKind.Effect ||
-        tok.kind === TokenKind.Pub ||
-        tok.kind === TokenKind.Test ||
-        tok.kind === TokenKind.Use ||
-        tok.kind === TokenKind.Extern
-      ) {
-        return;
-      }
-      this.advance();
     }
   }
 

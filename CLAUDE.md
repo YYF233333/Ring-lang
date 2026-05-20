@@ -41,7 +41,7 @@ Ring-lang/
 │   │   │   ├── builtins.ts             内置类型/方法/trait 注册（Eq/Clone/Debug/Ord + Option/Cell/effects）
 │   │   │   ├── derive.ts              Auto-derive fixpoint pass（Eq/Clone/Debug/Ord 自动派生）
 │   │   │   ├── unify.ts                HM Unification + Row Unification（含 EffectRowType）+ 替换
-│   │   │   ├── infer-ctx.ts            InferCtx 接口 + 17 个 helper 函数（type resolution/generalize/bind_pattern 等）
+│   │   │   ├── infer-ctx.ts            InferCtx 接口 + 16 个 helper 函数（type resolution/generalize/bind_pattern 等）
 │   │   │   ├── infer.ts                InferEngine 类薄壳 + check/infer_block/infer_stmt/infer_expr 调度
 │   │   │   ├── infer-register.ts       Pass 1 声明注册（register_struct/enum/trait/impl 等）
 │   │   │   ├── infer-expr.ts           19 个表达式推断函数（call/match/if/lambda/handle 等）
@@ -97,10 +97,10 @@ Ring-lang/
 │       └── tsconfig.json
 ├── std/
 │   ├── io.ring                         标准库：print/assert(cond,msg)/panic/exit/json_stringify
-│   ├── list.ring                       标准库：extern type List<T> + 13 非 HOF 方法 + list_clone
+│   ├── list.ring                       标准库：extern type List<T> + 17 非 HOF 方法 + list_clone
 │   ├── map.ring                        标准库：extern type Map<K,V> + 10 方法 + map_new/map_from/map_clone
 │   ├── set.ring                        标准库：extern type Set<T> + 10 方法 + set_new/set_from/set_clone
-│   ├── str.ring                        标准库：impl Str 17 方法
+│   ├── str.ring                        标准库：impl Str 16 方法
 │   └── num.ring                        标准库：Int::to_str, Float::to_str, parse_int, parse_float
 ├── examples/
 │   ├── hello.ring                      基本示例（可运行）
@@ -210,8 +210,8 @@ Lexer + Parser + HM 类型推断 + Effect 推断 + struct/enum/match + UFCS + `o
 | Batch | 主题 | 关键特性 |
 |-------|------|----------|
 | 1 | 控制流 | `let` 不可变性（E0205）、`while`/`break`/`continue`（E0206）、`for x in 0..N` range 循环 |
-| 2 | Str + List | Str 17 个方法、List\<T\> 26 个方法 + `[]` 字面量 + HOF effect 多态 + for..in |
-| 3 | Tuple + Map + Set + if-let | Tuple `(T1, T2)` + 解构、Map\<K,V\> 15 个方法、Set\<T\> 14 个方法、if-let 语句 |
+| 2 | Str + List | Str 16 个方法、List\<T\> 26 个方法 + `[]` 字面量 + HOF effect 多态 + for..in |
+| 3 | Tuple + Map + Set + if-let | Tuple `(T1, T2)` + 解构、Map\<K,V\> 14 个方法、Set\<T\> 14 个方法、if-let 语句 |
 | 4 | 模块系统 | `use` 导入 + `pub use` 再导出 + `pub` 可见性 + 多文件编译 + 单文件 JS bundle |
 | 5 | FFI + 集合可变化 | `extern fn` 声明、List/Map/Set 修改方法改为原地操作 |
 | 6 | 标准库 | `extern type` 声明、`std/` Ring 源码 6 文件、prelude 自动加载 |

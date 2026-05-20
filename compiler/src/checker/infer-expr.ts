@@ -883,7 +883,8 @@ export function infer_match(ctx: InferCtx, scrutinee: Expr, arms: MatchArm[], sp
   for (const arm of arms) {
     ctx.env.push_scope();
     try {
-      // Reclassify binding patterns that match zero-field enum variants
+      // Reclassify binding patterns that match zero-field enum variants (use local copy, don't mutate AST)
+      let match_pattern = arm.pattern;
       if (arm.pattern.kind === "binding") {
         const pat_name = arm.pattern.name;
         const variant_enum = ctx.env.variant_to_enum.get(pat_name);
@@ -891,12 +892,12 @@ export function infer_match(ctx: InferCtx, scrutinee: Expr, arms: MatchArm[], sp
           const enum_def = ctx.env.enums.get(variant_enum);
           const variant = enum_def?.variants.find(v => v.name === pat_name);
           if (variant && variant.fields.length === 0) {
-            arm.pattern = { kind: "constructor", name: pat_name, fields: [], span: arm.pattern.span };
+            match_pattern = { kind: "constructor", name: pat_name, fields: [], span: arm.pattern.span };
           }
         }
       }
 
-      bind_pattern(ctx, arm.pattern, scrut_r.hexpr.type, s);
+      bind_pattern(ctx, match_pattern, scrut_r.hexpr.type, s);
 
       let guard_hexpr: HExpr | undefined;
       if (arm.guard) {
@@ -913,7 +914,7 @@ export function infer_match(ctx: InferCtx, scrutinee: Expr, arms: MatchArm[], sp
       s = unify_at(ctx, body_r.hexpr.type, result_type, s, arm.span);
 
       harms.push({
-        pattern: arm.pattern,
+        pattern: match_pattern,
         guard: guard_hexpr,
         body: body_r.hexpr,
         span: arm.span,

@@ -6,7 +6,7 @@ export const E = {
 
   // Checker general (E02xx)
   E0201: "E0201", // undefined variable
-  E0202: "E0202", // arity mismatch
+  E0202: "E0202", // reserved (originally arity mismatch, now caught via E0301)
   E0203: "E0203", // unknown struct / invalid constructor fields
   E0204: "E0204", // unknown type
 
@@ -34,16 +34,17 @@ export const E = {
   E0206: "E0206", // break/continue outside loop
 
   // Module errors (E07xx)
-  E0701: "E0701", // import non-pub symbol
+  E0701: "E0701", // reserved (non-pub imports produce E0703 instead)
   E0702: "E0702", // module not found
   E0703: "E0703", // symbol not found in module
   E0704: "E0704", // circular dependency
-  E0705: "E0705", // duplicate import
+  E0705: "E0705", // reserved (duplicate imports currently allowed)
   E0706: "E0706", // use not at file top
 
   // Trait dispatch errors (E03xx continued)
   E0307: "E0307", // type does not implement Eq
   E0308: "E0308", // type does not implement Ord
+  E0207: "E0207", // duplicate definition
 } as const;
 
 export const ERROR_DESCRIPTIONS: Record<string, string> = {
@@ -75,4 +76,5 @@ export const ERROR_DESCRIPTIONS: Record<string, string> = {
   [E.E0706]: "Use declaration must appear before other declarations",
   [E.E0307]: "Type does not implement Eq",
   [E.E0308]: "Type does not implement Ord",
+  [E.E0207]: "Duplicate definition",
 };

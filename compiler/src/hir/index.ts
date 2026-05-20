@@ -558,7 +558,7 @@ export const CELL_METHODS = ["get", "set", "update"] as const;
 export const STR_METHODS = [
   "len", "contains", "starts_with", "ends_with", "slice", "trim",
   "to_upper", "to_lower", "replace", "split", "char_at", "index_of",
-  "byte_at", "pad_start", "pad_end", "repeat", "char_code_at",
+  "pad_start", "pad_end", "repeat", "char_code_at",
 ] as const;
 export const INT_METHODS = ["to_str"] as const;
 export const FLOAT_METHODS = ["to_str"] as const;

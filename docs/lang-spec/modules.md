@@ -39,6 +39,8 @@ use parser
 
 导入模块作为命名空间。通过 `parser::Token` 访问。
 
+> **注意**：当前实现中，`use module_name` 将所有 pub 符号直接导入当前作用域，不支持命名空间访问（`module::symbol`）或 `as` 别名。命名空间导入为未来特性。
+
 ### 重命名导入
 
 ```ring

@@ -50,6 +50,7 @@ export function apply(subst: Substitution, t: Type): Type {
         return_type: apply(subst, t.return_type),
         effects: apply_to_effect_row(subst, t.effects),
       };
+    // struct/enum fields are name-only templates — type info lives in type_params, resolved via instantiation_map at access sites
     case "struct":
       return {
         kind: "struct",
@@ -292,10 +293,15 @@ function unify_effect_params(a: Effect, b: Effect, subst: Substitution, fresh_id
     return unify(a.error_type, (b as FailEffect).error_type, subst, fresh_id);
   }
   if (a.kind === "custom" && b.kind === "custom") {
-    let s = subst;
     const bc = b as CustomEffect;
-    const len = Math.min(a.type_args.length, bc.type_args.length);
-    for (let i = 0; i < len; i++) {
+    if (a.type_args.length !== bc.type_args.length) {
+      throw new UnificationError(
+        { kind: "unit" }, { kind: "unit" },
+        `effect '${a.name}' type argument count mismatch: ${a.type_args.length} vs ${bc.type_args.length}`,
+      );
+    }
+    let s = subst;
+    for (let i = 0; i < a.type_args.length; i++) {
       s = unify(a.type_args[i], bc.type_args[i], s, fresh_id);
     }
     return s;

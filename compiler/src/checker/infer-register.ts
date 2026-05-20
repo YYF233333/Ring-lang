@@ -299,7 +299,19 @@ function register_impl(ctx: InferCtx, decl: ImplDecl): void {
   ctx.type_param_scope = saved_tp_scope;
 }
 
+function check_duplicate_def(ctx: InferCtx, name: string, span: import("../ast/index.js").Span): void {
+  const existing = ctx.env.lookup(name);
+  if (existing && existing.def_id !== undefined) {
+    const existing_span = ctx.env.def_spans.get(existing.def_id);
+    if (existing_span) {
+      type_error(ctx, E.E0207, `Duplicate definition: '${name}' is already defined`, span,
+        { kind: "type_mismatch", expected: "unique name", actual: name });
+    }
+  }
+}
+
 function register_fn(ctx: InferCtx, decl: FnDecl): void {
+  check_duplicate_def(ctx, decl.name, decl.span);
   const type_vars: number[] = [];
   const saved_tp_scope = new Map(ctx.type_param_scope);
   for (const tp of decl.type_params) {

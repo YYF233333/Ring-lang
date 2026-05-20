@@ -123,8 +123,8 @@ export function extract_exports(
         break;
 
       case "extern_fn_decl": {
-        extern_values.add(decl.name);
         if (!decl.is_pub) break;
+        extern_values.add(decl.name);
         const scheme = env.lookup(decl.name);
         if (scheme) {
           values.set(decl.name, scheme);

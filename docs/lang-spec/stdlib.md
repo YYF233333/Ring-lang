@@ -45,8 +45,8 @@ enum Option<T> { some(T), none }
 | `split` | `(self, sep: Str) -> List<Str>` | `self.split(sep)` |
 | `char_at` | `(self, index: Int) -> Option<Str>` | 越界返回 `none` |
 | `index_of` | `(self, sub: Str) -> Option<Int>` | 未找到返回 `none` |
-| `byte_at` | `(self, index: Int) -> Option<Str>` | 单字符，越界返回 `none` |
 | `pad_start` | `(self, len: Int, fill: Str) -> Str` | `self.padStart(len, fill)` |
+| `pad_end` | `(self, len: Int, fill: Str) -> Str` | `self.padEnd(len, fill)` |
 | `repeat` | `(self, count: Int) -> Str` | `self.repeat(count)` |
 | `char_code_at` | `(self, index: Int) -> Option<Int>` | `self.charCodeAt(index)` |
 
@@ -81,12 +81,15 @@ enum Option<T> { some(T), none }
 | `contains` | `(self, value: T) -> Bool` | 是否包含（`===` 比较） |
 | `is_empty` | `(self) -> Bool` | 是否为空 |
 | `push` | `(self, value: T) -> Unit` | 原地追加 |
-| `concat` | `(self, other: List<T>) -> Unit` | 原地拼接 |
+| `pop` | `(self) -> Option<T>` | 移除并返回末元素 |
+| `concat` | `(self, other: List<T>) -> List<T>` | 拼接为新 List（不修改原列表） |
+| `extend` | `(self, other: List<T>) -> Unit` | 原地追加另一个列表 |
 | `slice` | `(self, start: Int, end: Int) -> List<T>` | 子列表（新 List） |
 | `reverse` | `(self) -> Unit` | 原地反转 |
 | `join` | `(self, separator: Str) -> Str` | 用分隔符拼接为字符串 |
-| `sort` | `(self) -> Unit` | 原地排序（JS 默认字典序） |
+| `sort` | `(self) -> Unit` | 原地排序（数值比较器） |
 | `shift` | `(self) -> Option<T>` | 移除并返回首元素 |
+| `clear` | `(self) -> Unit` | 原地清空 |
 | `index_of` | `(self, item: T) -> Option<Int>` | 查找元素索引（`===` 比较） |
 
 ### HOF 方法（effect 多态）
@@ -101,6 +104,7 @@ enum Option<T> { some(T), none }
 | `find_index` | `(self, f: (T) -> Bool / ?ε) -> Option<Int> / ?ε` | 查找满足条件的首个索引 |
 | `any` | `(self, f: (T) -> Bool / ?ε) -> Bool / ?ε` | 存在性 |
 | `all` | `(self, f: (T) -> Bool / ?ε) -> Bool / ?ε` | 全称性 |
+| `sort_by` | `(self, cmp: (T, T) -> Int / ?ε) -> Unit / ?ε` | 自定义比较器原地排序 |
 
 回调的 effect 通过 row 变量 `?ε` 自动传播到外层。
 
@@ -136,6 +140,7 @@ for (i, x) in list.entries() { ... }  // 不支持；需 Map.entries()
 | `entries` | `(self) -> List<(K, V)>` | 所有键值对 |
 | `insert` | `(self, key: K, value: V) -> Unit` | 原地插入 |
 | `remove` | `(self, key: K) -> Unit` | 原地删除 |
+| `clear` | `(self) -> Unit` | 原地清空 |
 
 ### HOF 方法
 
@@ -164,6 +169,7 @@ for (k, v) in map.entries() { ... }
 |------|------|------|
 | `set_new` | `<T>() -> Set<T>` | 空 Set |
 | `set_from` | `<T>(items: List<T>) -> Set<T>` | 从列表构造 |
+| `set_clone` | `<T>(s: Set<T>) -> Set<T>` | 浅拷贝 |
 
 ### 方法
 
@@ -175,6 +181,7 @@ for (k, v) in map.entries() { ... }
 | `to_list` | `(self) -> List<T>` | 转为列表 |
 | `insert` | `(self, value: T) -> Unit` | 原地插入 |
 | `remove` | `(self, value: T) -> Unit` | 原地删除 |
+| `clear` | `(self) -> Unit` | 原地清空 |
 | `union` | `(self, other: Set<T>) -> Set<T>` | 并集（新 Set） |
 | `intersect` | `(self, other: Set<T>) -> Set<T>` | 交集（新 Set） |
 | `difference` | `(self, other: Set<T>) -> Set<T>` | 差集（新 Set） |
@@ -212,4 +219,4 @@ for x in set { ... }
 - 对原始类型（Int、Str、Bool）正确
 - 对 struct/enum 仅比较引用，不做结构相等
 
-待 `Eq` trait 实现后升级为结构相等。
+`Eq` trait 已实现（auto-derive，Phase 3a Batch 8），`==`/`!=` 运算符已解糖为 Eq trait dispatch。集合操作（`contains`、`Map.get`、`Set.contains` 等）计划升级为使用 Eq trait。
