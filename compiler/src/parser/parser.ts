@@ -143,7 +143,7 @@ export class Parser implements ParserCtx {
           pattern,
           init,
           span: this.make_span(start, end),
-        } as LetDestructureStmt;
+        } satisfies LetDestructureStmt;
       }
       // Not a destructuring — backtrack and parse normally
       this.pos = saved_pos;
@@ -191,15 +191,15 @@ export class Parser implements ParserCtx {
       let value: Expr = value_expr;
       // Desugar += and -=
       if (op_tok.kind === TokenKind.PlusEq) {
-        value = { kind: "bin_op", op: "+", left: expr, right: value_expr, span: value_expr.span } as BinOpExpr;
+        value = { kind: "bin_op", op: "+", left: expr, right: value_expr, span: value_expr.span } satisfies BinOpExpr;
       } else if (op_tok.kind === TokenKind.MinusEq) {
-        value = { kind: "bin_op", op: "-", left: expr, right: value_expr, span: value_expr.span } as BinOpExpr;
+        value = { kind: "bin_op", op: "-", left: expr, right: value_expr, span: value_expr.span } satisfies BinOpExpr;
       }
 
       return {
         kind: "assign_stmt", target: expr, value,
         span: this.make_span(start, end),
-      } as AssignStmt;
+      } satisfies AssignStmt;
     }
 
     const has_semi = this.try_consume(TokenKind.Semi);
@@ -207,7 +207,7 @@ export class Parser implements ParserCtx {
     return {
       kind: "expr_stmt", expr, has_semi,
       span: this.make_span(start, end),
-    } as ExprStmt;
+    } satisfies ExprStmt;
   }
 
   private parse_while_stmt(): WhileStmt {
@@ -308,7 +308,7 @@ export class Parser implements ParserCtx {
       then_block,
       else_block,
       span: this.make_span(start, end),
-    } as IfLetStmt;
+    } satisfies IfLetStmt;
   }
 
   private parse_binding_stmt(mutable: boolean): LetStmt | VarStmt {
@@ -327,8 +327,8 @@ export class Parser implements ParserCtx {
     const end = this.current_span_start();
     const span = this.make_span(start, end);
     return mutable
-      ? { kind: "var_stmt", name, name_span, type_annotation, init, span } as VarStmt
-      : { kind: "let_stmt", name, name_span, type_annotation, init, span } as LetStmt;
+      ? { kind: "var_stmt", name, name_span, type_annotation, init, span } satisfies VarStmt
+      : { kind: "let_stmt", name, name_span, type_annotation, init, span } satisfies LetStmt;
   }
 
   private parse_return_stmt(): ReturnStmt {
@@ -360,8 +360,8 @@ export class Parser implements ParserCtx {
       const stmt = this.parse_stmt();
 
       if (this.check(TokenKind.RBrace)) {
-        if (stmt.kind === "expr_stmt" && !(stmt as ExprStmt).has_semi) {
-          tail = (stmt as ExprStmt).expr;
+        if (stmt.kind === "expr_stmt" && !stmt.has_semi) {
+          tail = stmt.expr;
         } else {
           stmts.push(stmt);
         }

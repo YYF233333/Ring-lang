@@ -53,14 +53,14 @@ export function parse_expr_bp(ctx: ParserCtx, min_prec: Prec): Expr {
       last_was_comparison = false;
     } else if (tok.kind === TokenKind.Question) {
       const q_tok = ctx.advance();
-      left = { kind: "option_unwrap", expr: left, span: ctx.make_span(left.span.start, q_tok.span.end) } as OptionUnwrapExpr;
+      left = { kind: "option_unwrap", expr: left, span: ctx.make_span(left.span.start, q_tok.span.end) } satisfies OptionUnwrapExpr;
       last_was_comparison = false;
     } else if (tok.kind === TokenKind.DotDot || tok.kind === TokenKind.DotDotEq) {
       const inclusive = tok.kind === TokenKind.DotDotEq;
       ctx.advance();
       const right = parse_expr_bp(ctx, prec);
       const span = ctx.make_span(left.span.start, right.span.end);
-      left = { kind: "range", start: left, end: right, inclusive, span } as RangeExpr;
+      left = { kind: "range", start: left, end: right, inclusive, span } satisfies RangeExpr;
       last_was_comparison = false;
     } else {
       const is_comparison = prec === Prec.Equality || prec === Prec.Compare;
@@ -73,7 +73,7 @@ export function parse_expr_bp(ctx: ParserCtx, min_prec: Prec): Expr {
       const span = ctx.make_span(left.span.start, right.span.end);
       left = {
         kind: "bin_op", op: tok.value as BinOp, left, right, span,
-      } as BinOpExpr;
+      } satisfies BinOpExpr;
       last_was_comparison = is_comparison;
     }
   }
@@ -93,33 +93,33 @@ export function parse_prefix(ctx: ParserCtx): Expr {
     return {
       kind: "unary_op", op: tok.value as UnaryOp, operand,
       span: ctx.make_span(start, end),
-    } as UnaryOpExpr;
+    } satisfies UnaryOpExpr;
   }
 
   // Literals
   if (tok.kind === TokenKind.IntLit) {
     ctx.advance();
-    return { kind: "int_lit", value: parseInt(tok.value, 10), span: tok.span } as IntLitExpr;
+    return { kind: "int_lit", value: parseInt(tok.value, 10), span: tok.span } satisfies IntLitExpr;
   }
   if (tok.kind === TokenKind.FloatLit) {
     ctx.advance();
-    return { kind: "float_lit", value: parseFloat(tok.value), span: tok.span } as FloatLitExpr;
+    return { kind: "float_lit", value: parseFloat(tok.value), span: tok.span } satisfies FloatLitExpr;
   }
   if (tok.kind === TokenKind.StringLit) {
     ctx.advance();
-    return { kind: "str_lit", value: tok.value, span: tok.span } as StrLitExpr;
+    return { kind: "str_lit", value: tok.value, span: tok.span } satisfies StrLitExpr;
   }
   if (tok.kind === TokenKind.RawStringLit) {
     ctx.advance();
-    return { kind: "str_lit", value: tok.value, span: tok.span } as StrLitExpr;
+    return { kind: "str_lit", value: tok.value, span: tok.span } satisfies StrLitExpr;
   }
   if (tok.kind === TokenKind.True) {
     ctx.advance();
-    return { kind: "bool_lit", value: true, span: tok.span } as BoolLitExpr;
+    return { kind: "bool_lit", value: true, span: tok.span } satisfies BoolLitExpr;
   }
   if (tok.kind === TokenKind.False) {
     ctx.advance();
-    return { kind: "bool_lit", value: false, span: tok.span } as BoolLitExpr;
+    return { kind: "bool_lit", value: false, span: tok.span } satisfies BoolLitExpr;
   }
 
   // String interpolation
@@ -151,7 +151,7 @@ export function parse_prefix(ctx: ParserCtx): Expr {
   if (tok.kind === TokenKind.Try) {
     ctx.advance();
     const body = ctx.parse_block_expr();
-    return { kind: "try_block", body, span: ctx.make_span(start, body.span.end) } as TryBlockExpr;
+    return { kind: "try_block", body, span: ctx.make_span(start, body.span.end) } satisfies TryBlockExpr;
   }
 
   // Lambda: fn(params) -> Type { body }
@@ -176,7 +176,7 @@ export function parse_prefix(ctx: ParserCtx): Expr {
       kind: "list_lit",
       elements,
       span: ctx.make_span(start, end_tok.span.end),
-    } as ListLitExpr;
+    } satisfies ListLitExpr;
   }
 
   // Parenthesized expression or tuple literal
@@ -199,7 +199,7 @@ export function parse_prefix(ctx: ParserCtx): Expr {
         kind: "tuple_lit",
         elements,
         span: ctx.make_span(start, end_tok.span.end),
-      } as TupleLitExpr;
+      } satisfies TupleLitExpr;
     }
     ctx.expect(TokenKind.RParen);
     return first;
@@ -225,7 +225,7 @@ export function parse_prefix(ctx: ParserCtx): Expr {
       return {
         kind: "ident", name: variant_name, qualifier: name,
         span: ctx.make_span(start, variant_tok.span.end),
-      } as IdentExpr;
+      } satisfies IdentExpr;
     }
 
     // Check for struct literal: Name { field: value }
@@ -234,7 +234,7 @@ export function parse_prefix(ctx: ParserCtx): Expr {
       return parse_struct_literal(ctx, name, start);
     }
 
-    return { kind: "ident", name, span: tok.span } as IdentExpr;
+    return { kind: "ident", name, span: tok.span } satisfies IdentExpr;
   }
 
   throw ctx.error(`Unexpected token '${tok.value}' (${tok.kind}) in expression`);
@@ -258,7 +258,7 @@ function parse_dot_expr(ctx: ParserCtx, left: Expr): Expr {
     return {
       kind: "method_call", receiver: left, method: name, args, type_args: [],
       span: ctx.make_span(left.span.start, end),
-    } as MethodCallExpr;
+    } satisfies MethodCallExpr;
   }
 
   // Field access
@@ -266,7 +266,7 @@ function parse_dot_expr(ctx: ParserCtx, left: Expr): Expr {
   return {
     kind: "field_access", receiver: left, field: name,
     span: ctx.make_span(left.span.start, end),
-  } as FieldAccessExpr;
+  } satisfies FieldAccessExpr;
 }
 
 // ============================================================
@@ -281,7 +281,7 @@ function parse_call_expr(ctx: ParserCtx, left: Expr): Expr {
   return {
     kind: "call", callee: left, args, type_args: [],
     span: ctx.make_span(left.span.start, end),
-  } as CallExpr;
+  } satisfies CallExpr;
 }
 
 function parse_arg_list(ctx: ParserCtx): Expr[] {
@@ -441,29 +441,29 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
   // Wildcard
   if (tok.kind === TokenKind.Ident && tok.value === "_") {
     ctx.advance();
-    return { kind: "wildcard", span: tok.span } as WildcardPattern;
+    return { kind: "wildcard", span: tok.span } satisfies WildcardPattern;
   }
 
   // Literal patterns
   if (tok.kind === TokenKind.IntLit) {
     ctx.advance();
-    return { kind: "literal", value: parseInt(tok.value, 10), span: tok.span } as LiteralPattern;
+    return { kind: "literal", value: parseInt(tok.value, 10), span: tok.span } satisfies LiteralPattern;
   }
   if (tok.kind === TokenKind.FloatLit) {
     ctx.advance();
-    return { kind: "literal", value: parseFloat(tok.value), span: tok.span } as LiteralPattern;
+    return { kind: "literal", value: parseFloat(tok.value), span: tok.span } satisfies LiteralPattern;
   }
   if (tok.kind === TokenKind.StringLit) {
     ctx.advance();
-    return { kind: "literal", value: tok.value, span: tok.span } as LiteralPattern;
+    return { kind: "literal", value: tok.value, span: tok.span } satisfies LiteralPattern;
   }
   if (tok.kind === TokenKind.True) {
     ctx.advance();
-    return { kind: "literal", value: true, span: tok.span } as LiteralPattern;
+    return { kind: "literal", value: true, span: tok.span } satisfies LiteralPattern;
   }
   if (tok.kind === TokenKind.False) {
     ctx.advance();
-    return { kind: "literal", value: false, span: tok.span } as LiteralPattern;
+    return { kind: "literal", value: false, span: tok.span } satisfies LiteralPattern;
   }
 
   // Constructor pattern or binding pattern
@@ -496,7 +496,7 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
       return {
         kind: "constructor", name, qualifier, fields,
         span: ctx.make_span(start, end),
-      } as ConstructorPattern;
+      } satisfies ConstructorPattern;
     }
 
     // Named constructor pattern: Name { field, field: pat, .. }
@@ -517,7 +517,7 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
         if (ctx.try_consume(TokenKind.Colon)) {
           pat = ctx.parse_pattern();
         } else {
-          pat = { kind: "binding", name: f_name, span: ctx.make_span(f_start, ctx.current_span_start()) } as BindingPattern;
+          pat = { kind: "binding", name: f_name, span: ctx.make_span(f_start, ctx.current_span_start()) } satisfies BindingPattern;
         }
         const f_end = ctx.current_span_start();
         named_fields.push({ name: f_name, pattern: pat, span: ctx.make_span(f_start, f_end) });
@@ -528,7 +528,7 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
       return {
         kind: "named_constructor", name, qualifier, fields: named_fields, rest,
         span: ctx.make_span(start, end),
-      } as NamedConstructorPattern;
+      } satisfies NamedConstructorPattern;
     }
 
     // If qualifier is present, bare name is a zero-field variant, NOT a binding
@@ -536,11 +536,11 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
       return {
         kind: "constructor", name, qualifier, fields: [],
         span: ctx.make_span(start, ctx.current_span_start()),
-      } as ConstructorPattern;
+      } satisfies ConstructorPattern;
     }
 
     // Binding pattern (no qualifier)
-    return { kind: "binding", name, span: tok.span } as BindingPattern;
+    return { kind: "binding", name, span: tok.span } satisfies BindingPattern;
   }
 
   // Tuple pattern: (pat, pat, ...)
@@ -564,7 +564,7 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
       kind: "tuple",
       elements,
       span: ctx.make_span(start, end_tok.span.end),
-    } as TuplePattern;
+    } satisfies TuplePattern;
   }
 
   throw ctx.error(`Unexpected token '${tok.value}' in pattern`);
@@ -623,7 +623,7 @@ function parse_lambda_expr(ctx: ParserCtx): LambdaExpr {
   const params = ctx.parse_params();
   ctx.expect(TokenKind.RParen);
   const return_type = ctx.try_consume(TokenKind.Arrow) ? ctx.parse_type_expr() : undefined;
-  const body = ctx.parse_block_expr() as Expr;
+  const body: Expr = ctx.parse_block_expr();
   const end = ctx.current_span_start();
   return {
     kind: "lambda", params, return_type, body,
@@ -652,7 +652,7 @@ function parse_struct_literal(ctx: ParserCtx, name: string, start: Position, qua
     if (ctx.try_consume(TokenKind.Colon)) {
       f_value = ctx.parse_expr();
     } else {
-      f_value = { kind: "ident", name: f_name, span: ctx.make_span(f_start, ctx.current_span_start()) } as IdentExpr;
+      f_value = { kind: "ident", name: f_name, span: ctx.make_span(f_start, ctx.current_span_start()) } satisfies IdentExpr;
     }
     const f_end = ctx.current_span_start();
     fields.push({ name: f_name, value: f_value, span: ctx.make_span(f_start, f_end) });
@@ -750,7 +750,7 @@ export function parse_type_expr(ctx: ParserCtx): TypeExpr {
         kind: "tuple_type",
         elements,
         span: ctx.make_span(start, end_tok.span.end),
-      } as TupleTypeExpr;
+      } satisfies TupleTypeExpr;
     }
     ctx.expect(TokenKind.RParen);
     return first;
@@ -764,7 +764,7 @@ export function parse_type_expr(ctx: ParserCtx): TypeExpr {
   let result: TypeExpr = {
     kind: "named", name, type_args,
     span: ctx.make_span(start, end),
-  } as NamedTypeExpr;
+  } satisfies NamedTypeExpr;
 
   // Check for ? (Option type)
   if (ctx.try_consume(TokenKind.Question)) {
@@ -772,7 +772,7 @@ export function parse_type_expr(ctx: ParserCtx): TypeExpr {
     result = {
       kind: "option", inner: result,
       span: ctx.make_span(start, opt_end),
-    } as OptionTypeExpr;
+    } satisfies OptionTypeExpr;
   }
 
   return result;

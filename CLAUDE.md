@@ -28,6 +28,7 @@ Ring-lang/
 │   │   ├── ast/index.ts                AST 节点类型定义
 │   │   ├── types/index.ts              Type、Effect、EffectRow 表示 + BUILTIN_* 常量 + type_to_builtin_name
 │   │   ├── hir/index.ts                HIR 节点定义 + 共享约定（variant_js_name, trait_dict_name, evidence_param_name）
+│   │   ├── builtin-methods.ts          内置方法名注册表（*_METHODS 常量，checker + codegen 共享）
 │   │   ├── errors.ts                   诊断/错误类型 + assertNever 穷尽检查
 │   │   ├── parser/
 │   │   │   ├── lexer.ts                手写词法分析器
@@ -38,11 +39,14 @@ Ring-lang/
 │   │   │   └── parser.test.ts          Parser 测试
 │   │   ├── checker/
 │   │   │   ├── env.ts                  类型环境 + 作用域 + TypeScheme（含 bounds）
-│   │   │   ├── builtins.ts             内置类型/方法/trait 注册（Eq/Clone/Debug/Ord + Option/Cell/effects）
+│   │   │   ├── builtins.ts             Re-export shell（向后兼容入口）
+│   │   │   ├── builtins-core.ts       核心内置注册（effects/Cell/Option/Eq/Clone/Ord/Debug traits）
+│   │   │   ├── builtins-hof.ts        HOF 方法注册（List/Map/Set/Option 的 effect 多态方法）
 │   │   │   ├── derive.ts              Auto-derive fixpoint pass（Eq/Clone/Debug/Ord 自动派生）
 │   │   │   ├── unify.ts                HM Unification + Row Unification（含 EffectRowType）+ 替换
 │   │   │   ├── infer-ctx.ts            InferCtx 接口 + 16 个 helper 函数（type resolution/generalize/bind_pattern 等）
-│   │   │   ├── infer.ts                InferEngine 类薄壳 + check/infer_block/infer_stmt/infer_expr 调度
+│   │   │   ├── infer.ts                InferEngine 类薄壳 + check/infer_expr 调度
+│   │   │   ├── infer-stmt.ts          语句推断（let/var/assign/return/while/for/break/continue/destructure/if-let）
 │   │   │   ├── infer-register.ts       Pass 1 声明注册（register_struct/enum/trait/impl 等）
 │   │   │   ├── infer-expr.ts           19 个表达式推断函数（call/match/if/lambda/handle 等）
 │   │   │   ├── infer-modules.ts        多模块支持（inject_module_exports/resolve_uses）
@@ -256,6 +260,14 @@ Lexer + Parser + HM 类型推断 + Effect 推断 + struct/enum/match + UFCS + `o
 - 模块系统不支持：`sig` 签名、first-class modules、inline `mod` 块、capability 限制、相对路径（`super::`/`self::`）
 - Checker 多错误恢复：declaration 级（同一函数内仍停于首错）
 - E2E 测试通过 `npm run test:e2e` 运行（concurrency 3），`npm run test:all` 运行全部（单元 + E2E）
+
+### 架构技术债（推迟到自举阶段）
+
+- **TypeEnv god object**（env.ts）：17 个 public mutable 字段无封装，自举时重构为 sub-objects
+- **Type 冗余结构数据**：StructType 携带 fields[]、EnumType 携带 variants[] 与 TypeEnv 重复，自举时改为 nominal 表示
+- **HExpr/HStmt switch 重复**（codegen-expr/zonk/hir-visitor/completion）：多 pass 编译器固有模式，可扩展 hir-visitor 覆盖 completion 用例
+- **definition.ts AST 遍历重复**：90 行 switch 平行于 infer-expr 调度，可迁移到 HIR-based 方案
+- **DerivedImpl 跨 3 文件耦合**（derive.ts + hir/index.ts + codegen-derive.ts）：结构良好可接受
 
 ## Phase 3b 路线图（未来方向）
 

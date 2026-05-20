@@ -885,3 +885,128 @@ describe("codegen", () => {
     });
   });
 });
+
+describe("runtime smoke tests", () => {
+  it("RUNTIME_CODE is syntactically valid JS", () => {
+    const stripped = RUNTIME_CODE.replace(/^import .+$/m, "").replace(/const __require .+$/m, "").replace(/__require\("[^"]+"\)/g, "{}");
+    new Function(stripped);
+  });
+
+  it("contains all expected runtime functions", () => {
+    const expected = [
+      "Cell", "Cell_get", "Cell_set", "Cell_update",
+      "__match_fail", "__EffectAbort",
+      "print", "assert", "panic", "exit",
+      "Option_is_some", "Option_is_none", "Option_unwrap_or",
+      "Str_len", "Str_contains", "Str_starts_with", "Str_ends_with",
+      "Str_slice", "Str_trim", "Str_to_upper", "Str_to_lower",
+      "Str_replace", "Str_split", "Str_char_at", "Str_index_of",
+      "Str_pad_start", "Str_pad_end", "Str_repeat", "Str_char_code_at",
+      "Int_to_str", "Float_to_str", "parse_int", "parse_float",
+      "List_len", "List_get", "List_first", "List_last",
+      "List_contains", "List_is_empty", "List_push", "List_concat",
+      "List_extend", "List_slice", "List_reverse", "List_join",
+      "List_sort", "List_sort_by", "List_pop", "List_shift", "List_clear",
+      "List_find_index", "List_index_of", "list_clone",
+      "map_new", "map_from", "map_clone",
+      "_Map_len", "_Map_get", "_Map_contains_key", "_Map_is_empty",
+      "_Map_keys", "_Map_values", "_Map_entries", "_Map_insert", "_Map_remove", "_Map_clear",
+      "set_new", "set_from", "set_clone",
+      "_Set_len", "_Set_contains", "_Set_is_empty", "_Set_to_list",
+      "_Set_insert", "_Set_remove", "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear",
+      "json_stringify",
+      "read_file", "write_file", "file_exists", "delete_file",
+      "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname",
+      "argv", "exit_process", "eprintln", "cwd",
+      "Int_Eq", "Float_Eq", "Str_Eq", "Bool_Eq", "Option_Eq",
+      "Int_Clone", "Float_Clone", "Str_Clone", "Bool_Clone",
+      "List_Clone", "Map_Clone", "Set_Clone", "Option_Clone",
+      "Int_Ord", "Float_Ord", "Str_Ord", "Bool_Ord",
+      "Int_Debug", "Float_Debug", "Str_Debug", "Bool_Debug",
+      "Option_Debug", "List_Debug", "Map_Debug", "Set_Debug",
+    ];
+    for (const name of expected) {
+      assert.ok(RUNTIME_CODE.includes(name), `Runtime missing function: ${name}`);
+    }
+  });
+
+  it("runtime functions produce correct results via eval", () => {
+    const stripped = RUNTIME_CODE.replace(/^import .+$/m, "").replace(/const __require .+$/m, "").replace(/__require\("[^"]+"\)/g, "{}");
+    const fn = new Function(stripped + `
+      return {
+        Cell, Cell_get, Cell_set,
+        Str_len, Str_to_upper, Str_split, Str_char_at, Str_index_of,
+        Int_to_str, parse_int, parse_float,
+        List_len, List_get, List_first, List_last, List_contains, List_is_empty,
+        List_push, List_concat, List_pop, List_sort, list_clone,
+        map_new, _Map_len, _Map_get, _Map_insert, _Map_contains_key,
+        set_new, _Set_len, _Set_contains, _Set_insert,
+        Option_is_some, Option_is_none, Option_unwrap_or,
+        Int_Eq, Str_Eq, Int_Clone, Int_Ord, Int_Debug, Str_Debug,
+        Option_Eq, Option_Clone, Option_Debug, List_Debug,
+      };
+    `);
+    const rt = fn();
+
+    const cell = rt.Cell(42);
+    assert.strictEqual(rt.Cell_get(cell), 42);
+    rt.Cell_set(cell, 99);
+    assert.strictEqual(rt.Cell_get(cell), 99);
+
+    assert.strictEqual(rt.Str_len("hello"), 5);
+    assert.strictEqual(rt.Str_to_upper("hello"), "HELLO");
+    assert.deepStrictEqual(rt.Str_split("a,b,c", ","), ["a", "b", "c"]);
+    assert.deepStrictEqual(rt.Str_char_at("abc", 1), { _tag: "some", _0: "b" });
+    assert.deepStrictEqual(rt.Str_char_at("abc", 5), { _tag: "none" });
+    assert.deepStrictEqual(rt.Str_index_of("hello world", "world"), { _tag: "some", _0: 6 });
+
+    assert.strictEqual(rt.Int_to_str(42), "42");
+    assert.deepStrictEqual(rt.parse_int("123"), { _tag: "some", _0: 123 });
+    assert.deepStrictEqual(rt.parse_int("abc"), { _tag: "none" });
+    assert.deepStrictEqual(rt.parse_float("3.14"), { _tag: "some", _0: 3.14 });
+
+    const list = [1, 2, 3];
+    assert.strictEqual(rt.List_len(list), 3);
+    assert.deepStrictEqual(rt.List_get(list, 1), { _tag: "some", _0: 2 });
+    assert.deepStrictEqual(rt.List_get(list, 5), { _tag: "none" });
+    assert.deepStrictEqual(rt.List_first(list), { _tag: "some", _0: 1 });
+    assert.deepStrictEqual(rt.List_last(list), { _tag: "some", _0: 3 });
+    assert.strictEqual(rt.List_contains(list, 2), true);
+    assert.strictEqual(rt.List_is_empty([]), true);
+    const l2 = [1]; rt.List_push(l2, 2);
+    assert.deepStrictEqual(l2, [1, 2]);
+    assert.deepStrictEqual(rt.List_concat([1], [2, 3]), [1, 2, 3]);
+    assert.deepStrictEqual(rt.List_pop([1, 2]), { _tag: "some", _0: 2 });
+    assert.deepStrictEqual(rt.List_pop([]), { _tag: "none" });
+    const sortable = [3, 1, 2]; rt.List_sort(sortable);
+    assert.deepStrictEqual(sortable, [1, 2, 3]);
+    assert.deepStrictEqual(rt.list_clone([1, 2]), [1, 2]);
+
+    const m = rt.map_new(); rt._Map_insert(m, "a", 1);
+    assert.strictEqual(rt._Map_len(m), 1);
+    assert.deepStrictEqual(rt._Map_get(m, "a"), { _tag: "some", _0: 1 });
+    assert.strictEqual(rt._Map_contains_key(m, "a"), true);
+
+    const s = rt.set_new(); rt._Set_insert(s, 42);
+    assert.strictEqual(rt._Set_len(s), 1);
+    assert.strictEqual(rt._Set_contains(s, 42), true);
+
+    assert.strictEqual(rt.Option_is_some({ _tag: "some", _0: 1 }), true);
+    assert.strictEqual(rt.Option_is_none({ _tag: "none" }), true);
+    assert.strictEqual(rt.Option_unwrap_or({ _tag: "none" }, 0), 0);
+    assert.strictEqual(rt.Option_unwrap_or({ _tag: "some", _0: 5 }, 0), 5);
+
+    assert.strictEqual(rt.Int_Eq.eq(1, 1), true);
+    assert.strictEqual(rt.Int_Eq.eq(1, 2), false);
+    assert.strictEqual(rt.Str_Eq.eq("a", "a"), true);
+    assert.strictEqual(rt.Int_Clone.clone(42), 42);
+    assert.strictEqual(rt.Int_Ord.cmp(1, 2), -1);
+    assert.strictEqual(rt.Int_Ord.cmp(2, 2), 0);
+    assert.strictEqual(rt.Int_Debug.debug(42), "42");
+    assert.strictEqual(rt.Str_Debug.debug("hi"), '"hi"');
+    assert.deepStrictEqual(rt.Option_Eq.eq({ _tag: "some", _0: 1 }, { _tag: "some", _0: 1 }, rt.Int_Eq), true);
+    assert.deepStrictEqual(rt.Option_Clone.clone({ _tag: "some", _0: 1 }, rt.Int_Clone), { _tag: "some", _0: 1 });
+    assert.strictEqual(rt.Option_Debug.debug({ _tag: "some", _0: 1 }, rt.Int_Debug), "some(1)");
+    assert.strictEqual(rt.List_Debug.debug([1, 2], rt.Int_Debug), "[1, 2]");
+  });
+});

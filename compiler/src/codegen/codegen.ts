@@ -5,9 +5,11 @@ import {
   HProgram, HFnDecl, HTraitDecl, HExpr, HStmt, HBlock,
   ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_CELL, BUILTIN_OPTION,
+} from "../hir/index.js";
+import {
   CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
   LIST_NON_HOF_METHODS, MAP_NON_HOF_METHODS, SET_NON_HOF_METHODS, OPTION_NON_HOF_METHODS,
-} from "../hir/index.js";
+} from "../builtin-methods.js";
 import { RUNTIME_CODE } from "./runtime.js";
 
 // Import from split modules
