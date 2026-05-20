@@ -183,4 +183,44 @@ function Map_Debug_debug(a) { return "Map{...}"; }
 const Map_Debug = { debug: Map_Debug_debug };
 function Set_Debug_debug(a) { return "Set{...}"; }
 const Set_Debug = { debug: Set_Debug_debug };
+
+function Option_some(_0) { return { _tag: "some", _0 }; }
+const Option_none = Object.freeze({ _tag: "none" });
 `;
+
+export const RUNTIME_EXPORT_NAMES: string[] = [
+  "__EffectAbort", "Cell", "Cell_get", "Cell_set", "Cell_update",
+  "__match_fail", "print", "assert", "panic", "exit", "json_stringify",
+  "Option_some", "Option_none",
+  "Option_is_some", "Option_is_none", "Option_unwrap_or",
+  "Str_len", "Str_contains", "Str_starts_with", "Str_ends_with",
+  "Str_slice", "Str_trim", "Str_to_upper", "Str_to_lower", "Str_replace",
+  "Str_split", "Str_char_at", "Str_index_of",
+  "Str_pad_start", "Str_pad_end", "Str_repeat", "Str_char_code_at",
+  "Int_to_str", "Float_to_str", "parse_int", "parse_float",
+  "List_len", "List_get", "List_first", "List_last", "List_contains",
+  "List_is_empty", "List_push", "List_concat", "List_extend", "List_slice",
+  "List_reverse", "List_join", "List_sort", "List_sort_by",
+  "List_pop", "List_shift", "List_clear", "List_find_index", "List_index_of",
+  "list_clone",
+  "map_new", "map_from", "map_clone",
+  "_Map_len", "_Map_get", "_Map_contains_key", "_Map_is_empty",
+  "_Map_keys", "_Map_values", "_Map_entries", "_Map_insert", "_Map_remove", "_Map_clear",
+  "set_new", "set_from", "set_clone",
+  "_Set_len", "_Set_contains", "_Set_is_empty", "_Set_to_list",
+  "_Set_insert", "_Set_remove", "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear",
+  "read_file", "write_file", "file_exists", "delete_file",
+  "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname",
+  "argv", "exit_process", "eprintln", "cwd",
+  "Int_Eq", "Float_Eq", "Str_Eq", "Bool_Eq", "Option_Eq",
+  "Int_Clone", "Float_Clone", "Str_Clone", "Bool_Clone",
+  "List_Clone", "Map_Clone", "Set_Clone", "Option_Clone",
+  "Int_Ord", "Float_Ord", "Str_Ord", "Bool_Ord",
+  "Int_Debug", "Float_Debug", "Str_Debug", "Bool_Debug",
+  "Option_Debug", "List_Debug", "Map_Debug", "Set_Debug",
+];
+
+export function runtime_esm_code(): string {
+  const export_line = `\nexport { ${RUNTIME_EXPORT_NAMES.join(", ")} };\n`;
+  return RUNTIME_CODE + export_line;
+}

@@ -3,7 +3,6 @@
 
 import {
   HProgram, HFnDecl, HTraitDecl, HExpr, HStmt, HBlock,
-  ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_CELL, BUILTIN_OPTION,
 } from "../hir/index.js";
 import {
@@ -182,8 +181,6 @@ class CodeGenerator implements CodegenCtx {
     // Emit runtime preamble (skipped for non-root modules in multi-file builds)
     if (!this.skip_preamble) {
       this.emit_raw(RUNTIME_CODE);
-      this.emit_raw(`function Option_some(${OPTION_PAYLOAD_FIELD}) { return { ${ENUM_TAG_FIELD}: "${OPTION_SOME_TAG}", ${OPTION_PAYLOAD_FIELD} }; }`);
-      this.emit_raw(`const Option_none = Object.freeze({ ${ENUM_TAG_FIELD}: "${OPTION_NONE_TAG}" });`);
       this.emit_raw("");
     }
 
