@@ -43,6 +43,8 @@ export interface CodegenOptions {
   skip_main_call?: boolean;             // skip main() auto-invocation
   external_struct_fields?: Map<string, string[]>;     // pre-populated struct field orders from deps
   external_impl_methods?: Map<string, string | undefined>; // pre-populated impl methods from deps
+  module_imports?: string[];    // pre-formatted JS import statements (ESM mode)
+  module_exports?: string[];    // names to export (ESM mode)
 }
 
 // ============================================================
@@ -63,6 +65,8 @@ export interface CodegenCtx {
   skip_preamble: boolean;
   skip_main_call: boolean;
   local_names: Set<string>;
+  module_imports?: string[];
+  module_exports?: string[];
 
   // Utility methods
   emit(line: string): void;

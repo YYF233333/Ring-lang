@@ -41,6 +41,8 @@ class CodeGenerator implements CodegenCtx {
   skip_preamble: boolean;
   skip_main_call: boolean;
   local_names = new Set<string>();
+  module_imports?: string[];
+  module_exports?: string[];
 
   constructor(options?: import("./codegen-ctx.js").CodegenOptions) {
     this.skip_preamble = options?.skip_preamble ?? false;
@@ -53,6 +55,8 @@ class CodeGenerator implements CodegenCtx {
     if (options?.external_impl_methods) {
       for (const [k, v] of options.external_impl_methods) this.impl_methods.set(k, v);
     }
+    if (options?.module_imports) this.module_imports = options.module_imports;
+    if (options?.module_exports) this.module_exports = options.module_exports;
   }
 
   // ============================================================
@@ -120,6 +124,14 @@ class CodeGenerator implements CodegenCtx {
   // ============================================================
 
   generate(program: HProgram): string {
+    // ESM mode: emit import statements at top of file
+    if (this.module_imports) {
+      for (const imp of this.module_imports) {
+        this.emit_raw(imp);
+      }
+      this.emit_raw("");
+    }
+
     // Collect names declared in this module (for qualify — only these get module_prefix)
     for (const decl of program.decls) {
       switch (decl.kind) {
@@ -222,6 +234,12 @@ class CodeGenerator implements CodegenCtx {
           this.emit(`${fn_name}();`);
         }
       }
+    }
+
+    // ESM mode: emit export statement at bottom of file
+    if (this.module_exports && this.module_exports.length > 0) {
+      this.emit_raw("");
+      this.emit_raw(`export { ${this.module_exports.join(", ")} };`);
     }
 
     return this.lines.join("\n");
