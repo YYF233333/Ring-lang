@@ -97,6 +97,7 @@ export interface BindingPattern {
 export interface ConstructorPattern {
   kind: "constructor";
   name: string;
+  qualifier?: string;  // "Color" in Color::red()
   fields: Pattern[];
   span: Span;
 }
@@ -110,6 +111,7 @@ export interface LiteralPattern {
 export interface NamedConstructorPattern {
   kind: "named_constructor";
   name: string;
+  qualifier?: string;  // "Shape" in Shape::Circle { ... }
   fields: { name: string; pattern: Pattern; span: Span }[];
   rest: boolean;
   span: Span;
@@ -189,6 +191,7 @@ export interface BoolLitExpr {
 export interface IdentExpr {
   kind: "ident";
   name: string;
+  qualifier?: string;  // "Color" in Color::red
   span: Span;
 }
 
@@ -247,6 +250,7 @@ export interface StructFieldInit {
 export interface StructLitExpr {
   kind: "struct_lit";
   name: string;
+  qualifier?: string;  // "Shape" in Shape::Circle { ... }
   type_args: TypeExpr[];
   fields: StructFieldInit[];
   spread?: Expr;

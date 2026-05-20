@@ -12,6 +12,18 @@ fn main() {
     nums.sort()
     assert(nums.join(",") == "a,b,c", "sort strings")
 
+    // sort numeric (must NOT do lexicographic)
+    var ints = [10, 2, 1, 20, 3]
+    ints.sort()
+    match ints.get(0) {
+        some(v) => assert(v == 1, "sort ints first"),
+        none => assert(false, "sort ints first none")
+    }
+    match ints.get(4) {
+        some(v) => assert(v == 20, "sort ints last"),
+        none => assert(false, "sort ints last none")
+    }
+
     // shift (remove first element)
     var queue = [10, 20, 30]
     let first = queue.shift()

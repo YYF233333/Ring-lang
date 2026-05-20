@@ -29,6 +29,6 @@ fn main() {
         print("Server at ${config.host}:${config.port}")
     } with {
         io.read(_path) => "fallback",
-        fail.fail(e) => panic("failed"),
+        fail.raise(e) => panic("failed"),
     }
 }

@@ -215,6 +215,15 @@ function register_list_hof(env: TypeEnv): void {
       type_vars: [t.id, tail_id], bounds: [],
     });
   }
+  {
+    const t = env.fresh_var();
+    const { eff, tail_id } = open_row(env);
+    const cb: FnType = { kind: "fn", params: [t, t], return_type: INT, effects: eff };
+    methods.set("sort_by", {
+      type: { kind: "fn", params: [mk(t), cb], return_type: UNIT, effects: eff } as FnType,
+      type_vars: [t.id, tail_id], bounds: [],
+    });
+  }
 }
 
 // ================================================================

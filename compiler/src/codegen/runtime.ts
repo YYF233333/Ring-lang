@@ -66,11 +66,13 @@ function List_last(self) { return self.length > 0 ? { _tag: "some", _0: self[sel
 function List_contains(self, x) { return self.includes(x); }
 function List_is_empty(self) { return self.length === 0; }
 function List_push(self, x) { self.push(x); }
-function List_concat(self, other) { for (var i = 0; i < other.length; i++) self.push(other[i]); }
+function List_concat(self, other) { return self.concat(other); }
+function List_extend(self, other) { for (var i = 0; i < other.length; i++) self.push(other[i]); }
 function List_slice(self, start, end) { return self.slice(start, end); }
 function List_reverse(self) { self.reverse(); }
 function List_join(self, sep) { return self.join(sep); }
-function List_sort(self) { self.sort(); }
+function List_sort(self) { self.sort(function(a, b) { return a < b ? -1 : a > b ? 1 : 0; }); }
+function List_sort_by(self, cmp) { self.sort(cmp); }
 function List_shift(self) { return self.length > 0 ? { _tag: "some", _0: self.shift() } : { _tag: "none" }; }
 function List_find_index(self, f) { var i = self.findIndex(f); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
 function List_index_of(self, item) { var i = self.indexOf(item); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }

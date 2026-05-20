@@ -817,7 +817,7 @@ export class InferEngine implements InferCtx {
           effects: EMPTY_ROW,
         };
       case "ident":
-        return infer_ident(this, expr.name, expr.span, subst);
+        return infer_ident(this, expr.name, expr.span, subst, expr.qualifier);
       case "bin_op":
         return infer_bin_op(this, expr.op, expr.left, expr.right, expr.span, subst);
       case "unary_op":
@@ -829,7 +829,7 @@ export class InferEngine implements InferCtx {
       case "field_access":
         return infer_field_access(this, expr.receiver, expr.field, expr.span, subst);
       case "struct_lit":
-        return infer_struct_lit(this, expr.name, expr.fields, expr.spread, expr.span, subst);
+        return infer_struct_lit(this, expr.name, expr.fields, expr.spread, expr.span, subst, expr.qualifier);
       case "match_expr":
         return infer_match(this, expr.scrutinee, expr.arms, expr.span, subst);
       case "block":

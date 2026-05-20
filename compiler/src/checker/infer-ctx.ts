@@ -383,6 +383,15 @@ export function bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Typ
       ctx.env.record_def_span(ctx.env.lookup(pattern.name)!.def_id!, pattern.span);
       break;
     case "constructor": {
+      // Validate qualifier if present
+      if (pattern.qualifier) {
+        const actual_enum = ctx.env.variant_to_enum.get(pattern.name);
+        if (actual_enum && actual_enum !== pattern.qualifier) {
+          type_error(ctx, E.E0301, `Variant '${pattern.name}' belongs to enum '${actual_enum}', not '${pattern.qualifier}'`, pattern.span, { kind: "type_mismatch", expected: actual_enum, actual: pattern.qualifier });
+        } else if (!actual_enum) {
+          type_error(ctx, E.E0201, `'${pattern.qualifier}' has no variant '${pattern.name}'`, pattern.span, { kind: "undefined_variable", name: pattern.name });
+        }
+      }
       const enum_name = ctx.env.variant_to_enum.get(pattern.name);
       if (enum_name) {
         const enum_def = ctx.env.enums.get(enum_name);
@@ -424,6 +433,15 @@ export function bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Typ
     case "literal":
       break;
     case "named_constructor": {
+      // Validate qualifier if present
+      if (pattern.qualifier) {
+        const actual_enum = ctx.env.variant_to_enum.get(pattern.name);
+        if (actual_enum && actual_enum !== pattern.qualifier) {
+          type_error(ctx, E.E0301, `Variant '${pattern.name}' belongs to enum '${actual_enum}', not '${pattern.qualifier}'`, pattern.span, { kind: "type_mismatch", expected: actual_enum, actual: pattern.qualifier });
+        } else if (!actual_enum) {
+          type_error(ctx, E.E0201, `'${pattern.qualifier}' has no variant '${pattern.name}'`, pattern.span, { kind: "undefined_variable", name: pattern.name });
+        }
+      }
       const enum_name = ctx.env.variant_to_enum.get(pattern.name);
       if (enum_name) {
         const enum_def = ctx.env.enums.get(enum_name);

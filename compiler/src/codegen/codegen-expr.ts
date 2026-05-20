@@ -137,6 +137,11 @@ function gen_call(ctx: CodegenCtx, expr: HExpr & { kind: "call" }): string {
         const callback = gen_lambda_capture_evidence(ctx, expr.args[0]);
         return `((__a) => { const __i = __a.findIndex(${callback}); return __i >= 0 ? { _tag: "some", _0: __i } : { _tag: "none" }; })(${receiver})`;
       }
+      if (method === "sort_by") {
+        const receiver = gen_expr(ctx, expr.callee.receiver);
+        const callback = gen_lambda_capture_evidence(ctx, expr.args[0]);
+        return `${receiver}.sort(${callback})`;
+      }
     }
 
     // Inline Map HOF methods

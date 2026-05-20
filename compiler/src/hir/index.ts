@@ -525,10 +525,10 @@ export const INT_METHODS = ["to_str"] as const;
 export const FLOAT_METHODS = ["to_str"] as const;
 export const LIST_NON_HOF_METHODS = [
   "len", "get", "first", "last", "contains", "is_empty",
-  "push", "concat", "slice", "reverse",
+  "push", "concat", "extend", "slice", "reverse",
   "join", "sort", "shift", "index_of",
 ] as const;
-export const LIST_HOF_METHODS = ["map", "filter", "flat_map", "fold", "any", "all", "find", "find_index"] as const;
+export const LIST_HOF_METHODS = ["map", "filter", "flat_map", "fold", "any", "all", "find", "find_index", "sort_by"] as const;
 export const MAP_NON_HOF_METHODS = [
   "len", "get", "contains_key", "is_empty", "keys", "values", "entries",
   "insert", "remove",

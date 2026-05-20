@@ -205,10 +205,28 @@ export function parse_prefix(ctx: ParserCtx): Expr {
     return first;
   }
 
-  // Identifier (may lead to struct literal)
+  // Identifier (may lead to struct literal or qualified variant)
   if (tok.kind === TokenKind.Ident) {
     ctx.advance();
     const name = tok.value;
+
+    // Qualified variant: EnumName::variant
+    if (ctx.is_uppercase(name[0]) && ctx.check(TokenKind.ColonColon)) {
+      ctx.advance(); // consume '::'
+      const variant_tok = ctx.expect(TokenKind.Ident);
+      const variant_name = variant_tok.value;
+
+      // EnumName::Variant { field: value } — named variant construction
+      if (ctx.is_uppercase(variant_name[0]) && ctx.check(TokenKind.LBrace)) {
+        return parse_struct_literal(ctx, variant_name, start, name);
+      }
+
+      // EnumName::variant or EnumName::variant(args)
+      return {
+        kind: "ident", name: variant_name, qualifier: name,
+        span: ctx.make_span(start, variant_tok.span.end),
+      } as IdentExpr;
+    }
 
     // Check for struct literal: Name { field: value }
     // Heuristic: starts with uppercase letter and followed by {
@@ -451,7 +469,16 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
   // Constructor pattern or binding pattern
   if (tok.kind === TokenKind.Ident) {
     ctx.advance();
-    const name = tok.value;
+    let name = tok.value;
+    let qualifier: string | undefined;
+
+    // Qualified pattern: EnumName::variant
+    if (ctx.is_uppercase(name[0]) && ctx.check(TokenKind.ColonColon)) {
+      ctx.advance(); // consume '::'
+      const variant_tok = ctx.expect(TokenKind.Ident);
+      qualifier = name;
+      name = variant_tok.value;
+    }
 
     // Positional constructor pattern: Name(pat, pat, ...)
     if (ctx.check(TokenKind.LParen)) {
@@ -467,7 +494,7 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
       ctx.expect(TokenKind.RParen);
       const end = ctx.current_span_start();
       return {
-        kind: "constructor", name, fields,
+        kind: "constructor", name, qualifier, fields,
         span: ctx.make_span(start, end),
       } as ConstructorPattern;
     }
@@ -499,12 +526,20 @@ export function parse_pattern(ctx: ParserCtx): Pattern {
       ctx.expect(TokenKind.RBrace);
       const end = ctx.current_span_start();
       return {
-        kind: "named_constructor", name, fields: named_fields, rest,
+        kind: "named_constructor", name, qualifier, fields: named_fields, rest,
         span: ctx.make_span(start, end),
       } as NamedConstructorPattern;
     }
 
-    // Binding pattern
+    // If qualifier is present, bare name is a zero-field variant, NOT a binding
+    if (qualifier) {
+      return {
+        kind: "constructor", name, qualifier, fields: [],
+        span: ctx.make_span(start, ctx.current_span_start()),
+      } as ConstructorPattern;
+    }
+
+    // Binding pattern (no qualifier)
     return { kind: "binding", name, span: tok.span } as BindingPattern;
   }
 
@@ -600,7 +635,7 @@ function parse_lambda_expr(ctx: ParserCtx): LambdaExpr {
 // Struct literal
 // ============================================================
 
-function parse_struct_literal(ctx: ParserCtx, name: string, start: Position): StructLitExpr {
+function parse_struct_literal(ctx: ParserCtx, name: string, start: Position, qualifier?: string): StructLitExpr {
   ctx.expect(TokenKind.LBrace);
   const fields: StructFieldInit[] = [];
   let spread: Expr | undefined;
@@ -626,7 +661,7 @@ function parse_struct_literal(ctx: ParserCtx, name: string, start: Position): St
   ctx.expect(TokenKind.RBrace);
   const end = ctx.current_span_start();
   return {
-    kind: "struct_lit", name, type_args: [], fields,
+    kind: "struct_lit", name, qualifier, type_args: [], fields,
     spread,
     span: ctx.make_span(start, end),
   };

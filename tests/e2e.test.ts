@@ -94,6 +94,7 @@ const cases: TestCase[] = [
   // Batch 2: List<T>
   { file: "list_basic.ring", expected: "3\nfalse\ntrue\n20\n10\n30\n" },
   { file: "list_transform.ring", expected: "4\n5\n2\n2\n" },
+  { file: "list_concat_extend.ring", expected: "list_concat_extend: all tests passed\n" },
   { file: "list_hof.ring", expected: "5\n2\n2\ntrue\ntrue\n4\n" },
   { file: "list_fold.ring", expected: "10\n4\n" },
   { file: "list_for_in.ring", expected: "60\n" },
@@ -136,11 +137,14 @@ const cases: TestCase[] = [
   { file: "recursive_struct.ring", expected: "recursive_struct: all tests passed\n" },
   // Extra collection methods (self-hosting prerequisite)
   { file: "list_extra_methods.ring", expected: "list_extra_methods: all tests passed\n" },
+  { file: "sort_by.ring", expected: "sort_by: all tests passed\n" },
   { file: "map_clone.ring", expected: "map_clone: all tests passed\n" },
   // OS API (self-hosting prerequisite)
   { file: "os_api_basic.ring", expected: "os_api_basic: all tests passed\n" },
   // Mutable self + var params (self-hosting prerequisite)
   { file: "var_self_test.ring", expected: "all var_self tests passed\n" },
+  // Enum::Variant qualified syntax
+  { file: "enum_qualified.ring", expected: "red\nenum_qualified: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: 3 }, () => {
