@@ -1,9 +1,17 @@
 // Ring-lang internal type representations
 // Used during type checking and inference.
-import {
-  BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
-  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
-} from "../hir/index.js";
+
+// Built-in type names — single source of truth for type comparisons and registrations
+export const BUILTIN_INT = "Int";
+export const BUILTIN_FLOAT = "Float";
+export const BUILTIN_STR = "Str";
+export const BUILTIN_BOOL = "Bool";
+export const BUILTIN_RANGE = "Range";
+export const BUILTIN_LIST = "List";
+export const BUILTIN_MAP = "Map";
+export const BUILTIN_SET = "Set";
+export const BUILTIN_OPTION = "Option";
+export const BUILTIN_CELL = "Cell";
 
 // ============================================================
 // Type
@@ -171,6 +179,18 @@ export const BOOL: BoolType = { kind: "bool" };
 export const UNIT: UnitType = { kind: "unit" };
 export const NEVER: NeverType = { kind: "never" };
 export const ANY: AnyType = { kind: "any" };
+
+export function type_to_builtin_name(t: Type): string | null {
+  switch (t.kind) {
+    case "int": return BUILTIN_INT;
+    case "float": return BUILTIN_FLOAT;
+    case "str": return BUILTIN_STR;
+    case "bool": return BUILTIN_BOOL;
+    case "unit": return "Unit";
+    case "struct": case "enum": return t.name;
+    default: return null;
+  }
+}
 
 // ============================================================
 // Option<T> helper — constructs EnumType "Option"

@@ -6,8 +6,9 @@ import {
   evidence_param_name,
   ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
-  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_OPTION,
+  BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
 } from "../hir/index.js";
+import { type_to_builtin_name } from "../types/index.js";
 import type { Type } from "../types/index.js";
 import { assertNever } from "../errors.js";
 import type { CodegenCtx } from "./codegen-ctx.js";
@@ -262,13 +263,7 @@ function gen_call(ctx: CodegenCtx, expr: HExpr & { kind: "call" }): string {
   if (expr.callee.kind === "field_access") {
     const recv_type = expr.callee.receiver.type;
     const method = expr.callee.field;
-    const type_name = recv_type.kind === "struct" ? recv_type.name
-      : recv_type.kind === "enum" ? recv_type.name
-      : recv_type.kind === "str" ? BUILTIN_STR
-      : recv_type.kind === "int" ? BUILTIN_INT
-      : recv_type.kind === "float" ? BUILTIN_FLOAT
-      : recv_type.kind === "bool" ? BUILTIN_BOOL
-      : null;
+    const type_name = type_to_builtin_name(recv_type);
     const impl_key = type_name ? `${ctx.qualify(type_name)}.${method}` : null;
     if (type_name && impl_key && ctx.impl_methods.has(impl_key)) {
       const trait_name = ctx.impl_methods.get(impl_key);

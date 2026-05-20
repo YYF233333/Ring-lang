@@ -26,7 +26,7 @@ Ring-lang/
 ├── compiler/
 │   ├── src/
 │   │   ├── ast/index.ts                AST 节点类型定义
-│   │   ├── types/index.ts              Type（含 EffectRowType）、Effect、EffectRow 表示
+│   │   ├── types/index.ts              Type、Effect、EffectRow 表示 + BUILTIN_* 常量 + type_to_builtin_name
 │   │   ├── hir/index.ts                HIR 节点定义 + 共享约定（variant_js_name, trait_dict_name, evidence_param_name）
 │   │   ├── errors.ts                   诊断/错误类型 + assertNever 穷尽检查
 │   │   ├── parser/
@@ -57,6 +57,7 @@ Ring-lang/
 │   │   │   ├── codegen-decl.ts         声明 codegen（fn/struct/enum/impl/trait/effect）
 │   │   │   ├── codegen-stmt.ts         语句 codegen + match 语句 + pattern condition/bindings
 │   │   │   ├── codegen-expr.ts         表达式 codegen（call/struct_lit/match/if/lambda 等）
+│   │   │   ├── codegen-derive.ts      Auto-derive trait codegen（Eq/Clone/Debug/Ord）
 │   │   │   └── codegen.test.ts         Codegen 测试
 │   │   ├── diagnostics/
 │   │   │   ├── index.ts                DiagnosticSink、CollectingSink、Diagnostic 类型
@@ -237,7 +238,7 @@ Lexer + Parser + HM 类型推断 + Effect 推断 + struct/enum/match + UFCS + `o
 - Refinement `where` 子句只解析不验证（tokens 被消费后丢弃）
 - Trait 系统暂不支持：关联类型、supertrait 继承、`dyn Trait` 动态分发
 - `pub` 可见性在多文件模式下强制执行，单文件模式不强制（向后兼容）
-- 穷尽性检查支持嵌套模式递归检查（每列独立检查，多字段交叉组合不验证）
+- 穷尽性检查支持嵌套模式递归检查（含 Option<Option<T>> 等嵌套 enum）；多字段交叉组合不验证
 - `List.contains` / `List.find` / `Map` key 查找 / `Set.contains` 等仍使用 JS `===` 引用相等——`==` 运算符已解糖为 Eq trait dispatch（struct/enum 结构相等），但集合内部方法尚未升级
 - 深层嵌套泛型类型（如 `Pair<Pair<Int, Int>, Int>`）的 trait method UFCS 调用不支持——auto-derive codegen 和 operator dispatch 正常工作，但 `.eq()`/`.clone()`/`.debug()`/`.cmp()` 直接方法调用受限
 - Tuple 无 `.0` / `.1` 位置字段访问（需解构绑定或模式匹配访问元素）

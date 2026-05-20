@@ -1,6 +1,6 @@
 // Ring-lang Pattern Match Exhaustiveness Checking
 // Uses Maranget-style pattern matrix algorithm for cross-column checking.
-import { Pattern, NamedConstructorPattern, Expr, span_zero } from "../ast/index.js";
+import { Pattern, NamedConstructorPattern, span_zero } from "../ast/index.js";
 import { Type, type_to_string } from "../types/index.js";
 import { Substitution, apply } from "./unify.js";
 
@@ -9,7 +9,7 @@ import { Substitution, apply } from "./unify.js";
  * Returns null if exhaustive, or a description of the missing pattern if not.
  */
 export function check_exhaustive(
-  arms: { pattern: Pattern; guard?: Expr }[],
+  arms: { pattern: Pattern; guard?: unknown }[],
   scrutinee_type: Type,
   subst: Substitution,
 ): string | null {

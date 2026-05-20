@@ -7,7 +7,7 @@ import type {
 import { assertNever } from "../errors.js";
 import { E } from "../diagnostics/codes.js";
 import type {
-  Type, FnType, TypeVar,
+  Type, FnType,
 } from "../types/index.js";
 import {
   EMPTY_ROW,
@@ -231,7 +231,7 @@ function register_impl(ctx: InferCtx, decl: ImplDecl): void {
   const impl_type_vars: number[] = [];
   for (const tp of decl.type_params) {
     const tv = ctx.env.fresh_var();
-    impl_type_vars.push((tv as TypeVar).id);
+    impl_type_vars.push(tv.id);
     ctx.type_param_scope.set(tp.name, tv);
   }
 
@@ -241,7 +241,7 @@ function register_impl(ctx: InferCtx, decl: ImplDecl): void {
 
     for (const tp of method.type_params) {
       const tv = ctx.env.fresh_var();
-      method_type_vars.push((tv as TypeVar).id);
+      method_type_vars.push(tv.id);
       ctx.type_param_scope.set(tp.name, tv);
     }
 
@@ -316,7 +316,7 @@ function register_fn(ctx: InferCtx, decl: FnDecl): void {
   const saved_tp_scope = new Map(ctx.type_param_scope);
   for (const tp of decl.type_params) {
     const tv = ctx.env.fresh_var();
-    type_vars.push((tv as TypeVar).id);
+    type_vars.push(tv.id);
     ctx.type_param_scope.set(tp.name, tv);
   }
 
@@ -373,7 +373,7 @@ function register_extern_fn(ctx: InferCtx, decl: ExternFnDecl): void {
   const saved_tp_scope = new Map(ctx.type_param_scope);
   for (const tp of decl.type_params) {
     const tv = ctx.env.fresh_var();
-    type_vars.push((tv as TypeVar).id);
+    type_vars.push(tv.id);
     ctx.type_param_scope.set(tp.name, tv);
   }
 

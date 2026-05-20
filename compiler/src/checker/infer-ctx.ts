@@ -12,7 +12,7 @@ import {
   Type, FnType, TypeVar, EffectRow,
   INT, FLOAT, STR, BOOL, UNIT, NEVER,
   EMPTY_ROW, row_merge, type_to_string, types_equal,
-  make_option_type,
+  make_option_type, type_to_builtin_name,
 } from "../types/index.js";
 import type {
   HExpr, HStmt,
@@ -265,14 +265,8 @@ export function resolve_dicts_from_scheme(
           found = true;
         }
       }
-      // Handle primitive types with trait impls (e.g., Int: Eq)
       if (!found) {
-        const prim_name = concrete.kind === "int" ? "Int"
-          : concrete.kind === "float" ? "Float"
-          : concrete.kind === "str" ? "Str"
-          : concrete.kind === "bool" ? "Bool"
-          : concrete.kind === "unit" ? "Unit"
-          : null;
+        const prim_name = type_to_builtin_name(concrete);
         if (prim_name && ctx.env.trait_impls.some(
           impl => impl.target_type_name === prim_name && impl.trait_name === bound.trait_name
         )) {

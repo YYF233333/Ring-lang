@@ -95,9 +95,24 @@ export class Parser implements ParserCtx {
         if (sink_checkpoint !== undefined) this.sink.restore?.(sink_checkpoint);
       }
 
-      // Regular declaration
+      // Regular declaration with recovery
       decls_started = true;
-      decls.push(parse_decl(this));
+      try {
+        decls.push(parse_decl(this));
+      } catch (e) {
+        if (e instanceof Error && e.message === "parse_decl_failed") {
+          while (!this.at_end()) {
+            const k = this.peek().kind;
+            if (k === TokenKind.Fn || k === TokenKind.Struct || k === TokenKind.Enum
+              || k === TokenKind.Effect || k === TokenKind.Trait || k === TokenKind.Impl
+              || k === TokenKind.Extern || k === TokenKind.Use || k === TokenKind.Pub
+              || k === TokenKind.Test) break;
+            this.advance();
+          }
+          continue;
+        }
+        throw e;
+      }
     }
     if (this.sink.has_errors()) {
       throw new CompileError([...this.sink.diagnostics()]);

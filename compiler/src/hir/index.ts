@@ -3,6 +3,11 @@
 
 import { Span, Pattern, BinOp, UnaryOp, TypeParam } from "../ast/index.js";
 import { Type, EffectRow } from "../types/index.js";
+export {
+  BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
+  BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
+  BUILTIN_OPTION, BUILTIN_CELL,
+} from "../types/index.js";
 
 // ============================================================
 // HIR Expressions
@@ -70,12 +75,7 @@ export interface HIdent extends HExprBase {
   dict_closure_dicts?: string[];
 }
 
-export type EqDispatch =
-  | "builtin"
-  | { kind: "direct"; dict: string; extra_dicts?: string[] }
-  | { kind: "dict"; param: string };
-
-export type OrdDispatch =
+export type TraitDispatch =
   | "builtin"
   | { kind: "direct"; dict: string; extra_dicts?: string[] }
   | { kind: "dict"; param: string };
@@ -85,8 +85,8 @@ export interface HBinOp extends HExprBase {
   op: BinOp;
   left: HExpr;
   right: HExpr;
-  eq_dispatch?: EqDispatch;
-  ord_dispatch?: OrdDispatch;
+  eq_dispatch?: TraitDispatch;
+  ord_dispatch?: TraitDispatch;
 }
 
 export interface HUnaryOp extends HExprBase {
@@ -540,17 +540,6 @@ export function default_method_self_name(type_name: string): string {
 // JS codegen enum discriminator field name
 export const ENUM_TAG_FIELD = "_tag";
 
-// Built-in type names — single source of truth for type comparisons and registrations
-export const BUILTIN_INT = "Int";
-export const BUILTIN_FLOAT = "Float";
-export const BUILTIN_STR = "Str";
-export const BUILTIN_BOOL = "Bool";
-export const BUILTIN_RANGE = "Range";
-export const BUILTIN_LIST = "List";
-export const BUILTIN_MAP = "Map";
-export const BUILTIN_SET = "Set";
-export const BUILTIN_OPTION = "Option";
-export const BUILTIN_CELL = "Cell";
 
 // Built-in method name registries — shared between env.ts (type checking) and codegen.ts (code gen)
 // HOF methods have special inline codegen; non-HOF methods use runtime function dispatch.
