@@ -918,12 +918,12 @@ describe("runtime smoke tests", () => {
       "read_file", "write_file", "file_exists", "delete_file",
       "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname",
       "argv", "exit_process", "eprintln", "cwd",
-      "Int_Eq", "Float_Eq", "Str_Eq", "Bool_Eq", "Option_Eq",
-      "Int_Clone", "Float_Clone", "Str_Clone", "Bool_Clone",
-      "List_Clone", "Map_Clone", "Set_Clone", "Option_Clone",
-      "Int_Ord", "Float_Ord", "Str_Ord", "Bool_Ord",
-      "Int_Debug", "Float_Debug", "Str_Debug", "Bool_Debug",
-      "Option_Debug", "List_Debug", "Map_Debug", "Set_Debug",
+      "__Int_Eq", "__Float_Eq", "__Str_Eq", "__Bool_Eq", "__Option_Eq",
+      "__Int_Clone", "__Float_Clone", "__Str_Clone", "__Bool_Clone",
+      "__List_Clone", "__Map_Clone", "__Set_Clone", "__Option_Clone",
+      "__Int_Ord", "__Float_Ord", "__Str_Ord", "__Bool_Ord",
+      "__Int_Debug", "__Float_Debug", "__Str_Debug", "__Bool_Debug",
+      "__Option_Debug", "__List_Debug", "__Map_Debug", "__Set_Debug",
     ];
     for (const name of expected) {
       assert.ok(RUNTIME_CODE.includes(name), `Runtime missing function: ${name}`);
@@ -942,8 +942,8 @@ describe("runtime smoke tests", () => {
         map_new, _Map_len, _Map_get, _Map_insert, _Map_contains_key,
         set_new, _Set_len, _Set_contains, _Set_insert,
         Option_is_some, Option_is_none, Option_unwrap_or,
-        Int_Eq, Str_Eq, Int_Clone, Int_Ord, Int_Debug, Str_Debug,
-        Option_Eq, Option_Clone, Option_Debug, List_Debug,
+        __Int_Eq, __Str_Eq, __Int_Clone, __Int_Ord, __Int_Debug, __Str_Debug,
+        __Option_Eq, __Option_Clone, __Option_Debug, __List_Debug,
       };
     `);
     const rt = fn();
@@ -996,17 +996,17 @@ describe("runtime smoke tests", () => {
     assert.strictEqual(rt.Option_unwrap_or({ _tag: "none" }, 0), 0);
     assert.strictEqual(rt.Option_unwrap_or({ _tag: "some", _0: 5 }, 0), 5);
 
-    assert.strictEqual(rt.Int_Eq.eq(1, 1), true);
-    assert.strictEqual(rt.Int_Eq.eq(1, 2), false);
-    assert.strictEqual(rt.Str_Eq.eq("a", "a"), true);
-    assert.strictEqual(rt.Int_Clone.clone(42), 42);
-    assert.strictEqual(rt.Int_Ord.cmp(1, 2), -1);
-    assert.strictEqual(rt.Int_Ord.cmp(2, 2), 0);
-    assert.strictEqual(rt.Int_Debug.debug(42), "42");
-    assert.strictEqual(rt.Str_Debug.debug("hi"), '"hi"');
-    assert.deepStrictEqual(rt.Option_Eq.eq({ _tag: "some", _0: 1 }, { _tag: "some", _0: 1 }, rt.Int_Eq), true);
-    assert.deepStrictEqual(rt.Option_Clone.clone({ _tag: "some", _0: 1 }, rt.Int_Clone), { _tag: "some", _0: 1 });
-    assert.strictEqual(rt.Option_Debug.debug({ _tag: "some", _0: 1 }, rt.Int_Debug), "some(1)");
-    assert.strictEqual(rt.List_Debug.debug([1, 2], rt.Int_Debug), "[1, 2]");
+    assert.strictEqual(rt.__Int_Eq.eq(1, 1), true);
+    assert.strictEqual(rt.__Int_Eq.eq(1, 2), false);
+    assert.strictEqual(rt.__Str_Eq.eq("a", "a"), true);
+    assert.strictEqual(rt.__Int_Clone.clone(42), 42);
+    assert.strictEqual(rt.__Int_Ord.cmp(1, 2), -1);
+    assert.strictEqual(rt.__Int_Ord.cmp(2, 2), 0);
+    assert.strictEqual(rt.__Int_Debug.debug(42), "42");
+    assert.strictEqual(rt.__Str_Debug.debug("hi"), '"hi"');
+    assert.deepStrictEqual(rt.__Option_Eq.eq({ _tag: "some", _0: 1 }, { _tag: "some", _0: 1 }, rt.__Int_Eq), true);
+    assert.deepStrictEqual(rt.__Option_Clone.clone({ _tag: "some", _0: 1 }, rt.__Int_Clone), { _tag: "some", _0: 1 });
+    assert.strictEqual(rt.__Option_Debug.debug({ _tag: "some", _0: 1 }, rt.__Int_Debug), "some(1)");
+    assert.strictEqual(rt.__List_Debug.debug([1, 2], rt.__Int_Debug), "[1, 2]");
   });
 });

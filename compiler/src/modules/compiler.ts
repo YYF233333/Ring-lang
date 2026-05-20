@@ -9,7 +9,7 @@ import { generate, safe_ident, CodegenOptions } from "../codegen/codegen.js";
 import { RUNTIME_EXPORT_NAMES, runtime_esm_code } from "../codegen/runtime.js";
 import { CollectingSink, DiagnosticSink, Diagnostic, make_diagnostic } from "../diagnostics/index.js";
 import { Program } from "../ast/index.js";
-import { HProgram } from "../hir/index.js";
+import { HProgram, trait_dict_name } from "../hir/index.js";
 import { build_module_graph, module_key, module_prefix } from "./resolver.js";
 import type { ModuleGraph } from "./resolver.js";
 import { ModuleExports, extract_exports } from "./exports.js";
@@ -380,10 +380,10 @@ export function compile_project_esm(
       }
 
       for (const impl of dep_exports.trait_impls) {
-        const dict_name = `${impl.target_type_name}_${impl.trait_name}`;
-        const alias = `${dep_prefix}$${safe_ident(impl.target_type_name)}_${safe_ident(impl.trait_name)}`;
-        imports_map.set(dict_name, alias);
-        import_pairs.push(`${safe_ident(impl.target_type_name)}_${safe_ident(impl.trait_name)} as ${alias}`);
+        const dict_js = trait_dict_name(safe_ident(impl.target_type_name), safe_ident(impl.trait_name));
+        const alias = `${dep_prefix}$${dict_js}`;
+        imports_map.set(dict_js, alias);
+        import_pairs.push(`${dict_js} as ${alias}`);
       }
 
       // Import inherent (non-trait) impl methods
@@ -435,7 +435,7 @@ export function compile_project_esm(
 
       if (decl.trait_name) {
         // Trait impl: export the dict object only
-        export_names.push(`${safe_ident(decl.target_type)}_${safe_ident(decl.trait_name)}`);
+        export_names.push(trait_dict_name(safe_ident(decl.target_type), safe_ident(decl.trait_name)));
       } else {
         // Inherent impl: export standalone method functions
         for (const method of decl.methods) {
@@ -449,7 +449,7 @@ export function compile_project_esm(
       if (ast.decls.some(d =>
         (d.kind === "struct_decl" || d.kind === "enum_decl") && d.is_pub && d.name === impl.type_name
       )) {
-        export_names.push(`${safe_ident(impl.type_name)}_${safe_ident(impl.trait_name)}`);
+        export_names.push(trait_dict_name(safe_ident(impl.type_name), safe_ident(impl.trait_name)));
       }
     }
 

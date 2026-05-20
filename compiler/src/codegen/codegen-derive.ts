@@ -37,7 +37,7 @@ export function emit_derived_impl(ctx: CodegenCtx, impl: DerivedImpl): void {
 
 function emit_derived_eq(ctx: CodegenCtx, impl: DerivedImpl): void {
   const name = ctx.qualify(impl.type_name);
-  const fn_name = `${name}_Eq_eq`;
+  const fn_name = `${trait_dict_name(name, "Eq")}_eq`;
   const dict_params = impl.bounds
     .filter(b => b.trait_name === "Eq")
     .map(b => trait_bound_param_name(b.type_param, b.trait_name));
@@ -100,7 +100,7 @@ function gen_field_eq(left: string, right: string, field: DerivedField): string 
 
 function emit_derived_clone(ctx: CodegenCtx, impl: DerivedImpl): void {
   const name = ctx.qualify(impl.type_name);
-  const fn_name = `${name}_Clone_clone`;
+  const fn_name = `${trait_dict_name(name, "Clone")}_clone`;
   const dict_params = impl.bounds
     .filter(b => b.trait_name === "Clone")
     .map(b => trait_bound_param_name(b.type_param, b.trait_name));
@@ -155,7 +155,7 @@ function gen_field_clone(expr: string, field: DerivedField): string {
 
 function emit_derived_ord(ctx: CodegenCtx, impl: DerivedImpl): void {
   const name = ctx.qualify(impl.type_name);
-  const fn_name = `${name}_Ord_cmp`;
+  const fn_name = `${trait_dict_name(name, "Ord")}_cmp`;
   const dict_params = impl.bounds
     .filter(b => b.trait_name === "Ord")
     .map(b => trait_bound_param_name(b.type_param, b.trait_name));
@@ -251,7 +251,7 @@ function gen_field_cmp(left: string, right: string, field: DerivedField): string
 
 function emit_derived_debug(ctx: CodegenCtx, impl: DerivedImpl): void {
   const name = ctx.qualify(impl.type_name);
-  const fn_name = `${name}_Debug_debug`;
+  const fn_name = `${trait_dict_name(name, "Debug")}_debug`;
   const dict_params = impl.bounds
     .filter(b => b.trait_name === "Debug")
     .map(b => trait_bound_param_name(b.type_param, b.trait_name));

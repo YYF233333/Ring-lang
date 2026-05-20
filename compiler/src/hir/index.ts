@@ -519,7 +519,7 @@ export function variant_js_name(enum_name: string, variant_name: string): string
 
 // JS codegen naming convention for trait dictionary objects
 export function trait_dict_name(type_name: string, trait_name: string): string {
-  return `${type_name}_${trait_name}`;
+  return `__${type_name}_${trait_name}`;
 }
 
 // JS codegen naming convention for effect evidence parameters

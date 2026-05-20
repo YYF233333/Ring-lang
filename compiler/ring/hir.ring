@@ -191,7 +191,7 @@ pub fn variant_js_name(enum_name: Str, variant_name: Str) -> Str {
 }
 
 pub fn trait_dict_name(type_name: Str, trait_name: Str) -> Str {
-    "${type_name}_${trait_name}"
+    "__${type_name}_${trait_name}"
 }
 
 pub fn evidence_param_name(effect_name: Str) -> Str {

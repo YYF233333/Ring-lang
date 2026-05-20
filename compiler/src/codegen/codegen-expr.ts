@@ -3,7 +3,7 @@
 
 import type { HExpr, HBlock } from "../hir/index.js";
 import {
-  evidence_param_name,
+  evidence_param_name, trait_dict_name,
   ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
   RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
   BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
@@ -268,7 +268,7 @@ function gen_call(ctx: CodegenCtx, expr: HExpr & { kind: "call" }): string {
     if (type_name && impl_key && ctx.impl_methods.has(impl_key)) {
       const trait_name = ctx.impl_methods.get(impl_key);
       const fn_name = trait_name
-        ? `${ctx.qualify(type_name)}_${safe_ident(trait_name)}_${safe_ident(method)}`
+        ? `${trait_dict_name(ctx.qualify(type_name), safe_ident(trait_name))}_${safe_ident(method)}`
         : `${ctx.qualify(type_name)}_${safe_ident(method)}`;
       const receiver = gen_expr(ctx, expr.callee.receiver);
       const args = expr.args.map(a => gen_expr(ctx, a)).join(", ");

@@ -193,10 +193,9 @@ pub fn row_merge(a: EffectRow, b: EffectRow) -> RowMergeResult {
         }
     }
     let tail: Int? = match (a.tail, b.tail) {
-        (some(ta), some(tb)) => some(ta),
-        (some(ta), none) => some(ta),
-        (none, some(tb)) => some(tb),
-        (none, none) => none
+        (some(ta), _) => some(ta),
+        (_, some(tb)) => some(tb),
+        _ => none
     }
     let tails_to_unify: Option<(Int, Int)> = match (a.tail, b.tail) {
         (some(ta), some(tb)) => if ta != tb { some((ta, tb)) } else { none },
@@ -254,9 +253,8 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
                 if pa.len() != pb.len() { return false }
                 if ea.effects.len() != eb.effects.len() { return false }
                 let tails_ok = match (ea.tail, eb.tail) {
-                    (some(ta), some(tb)) => ta == tb,
-                    (none, none) => true,
-                    _ => false
+                    (some(a_t), some(b_t)) => a_t == b_t,
+                    _ => ea.tail.is_none() && eb.tail.is_none()
                 }
                 if !tails_ok { return false }
                 var i = 0
@@ -338,8 +336,7 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
                 if fa.len() != fb.len() { return false }
                 let tails_ok = match (ta, tb) {
                     (some(a_t), some(b_t)) => a_t == b_t,
-                    (none, none) => true,
-                    _ => false
+                    _ => ta.is_none() && tb.is_none()
                 }
                 if !tails_ok { return false }
                 fa.all(fn(f) {
@@ -353,8 +350,7 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
                 if ea.len() != eb.len() { return false }
                 let tails_ok = match (ta, tb) {
                     (some(a_t), some(b_t)) => a_t == b_t,
-                    (none, none) => true,
-                    _ => false
+                    _ => ta.is_none() && tb.is_none()
                 }
                 if !tails_ok { return false }
                 var i = 0

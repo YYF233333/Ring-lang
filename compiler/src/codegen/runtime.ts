@@ -130,59 +130,59 @@ function exit_process(code) { process.exit(code); }
 function eprintln(msg) { process.stderr.write(msg + "\\n"); }
 function cwd() { return process.cwd(); }
 
-const Int_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
-const Float_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
-const Str_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
-const Bool_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
+const __Int_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
+const __Float_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
+const __Str_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
+const __Bool_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
 
-function Option_Eq_eq(a, b, __ring_T_Eq) {
+function __Option_Eq_eq(a, b, __ring_T_Eq) {
   if (a._tag !== b._tag) return false;
   if (a._tag === "none") return true;
   return __ring_T_Eq.eq(a._0, b._0);
 }
-const Option_Eq = { eq: Option_Eq_eq, ne: function(a, b, __ring_T_Eq) { return !Option_Eq_eq(a, b, __ring_T_Eq); } };
+const __Option_Eq = { eq: __Option_Eq_eq, ne: function(a, b, __ring_T_Eq) { return !__Option_Eq_eq(a, b, __ring_T_Eq); } };
 
-const Int_Clone = { clone: function(a) { return a; } };
-const Float_Clone = { clone: function(a) { return a; } };
-const Str_Clone = { clone: function(a) { return a; } };
-const Bool_Clone = { clone: function(a) { return a; } };
-const List_Clone = { clone: function(a) { return a.slice(); } };
-const Map_Clone = { clone: function(a) { return new Map(a); } };
-const Set_Clone = { clone: function(a) { return new Set(a); } };
+const __Int_Clone = { clone: function(a) { return a; } };
+const __Float_Clone = { clone: function(a) { return a; } };
+const __Str_Clone = { clone: function(a) { return a; } };
+const __Bool_Clone = { clone: function(a) { return a; } };
+const __List_Clone = { clone: function(a) { return a.slice(); } };
+const __Map_Clone = { clone: function(a) { return new Map(a); } };
+const __Set_Clone = { clone: function(a) { return new Set(a); } };
 
-function Option_Clone_clone(a, __ring_T_Clone) {
+function __Option_Clone_clone(a, __ring_T_Clone) {
   return a._tag === "some" ? { _tag: "some", _0: __ring_T_Clone.clone(a._0) } : a;
 }
-const Option_Clone = { clone: Option_Clone_clone };
+const __Option_Clone = { clone: __Option_Clone_clone };
 
-const Int_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
-const Float_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
-const Str_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
-const Bool_Ord = { cmp: function(a, b) { return a === b ? 0 : a ? 1 : -1; } };
+const __Int_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
+const __Float_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
+const __Str_Ord = { cmp: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
+const __Bool_Ord = { cmp: function(a, b) { return a === b ? 0 : a ? 1 : -1; } };
 
-function Int_Debug_debug(a) { return String(a); }
-const Int_Debug = { debug: Int_Debug_debug };
-function Float_Debug_debug(a) { return String(a); }
-const Float_Debug = { debug: Float_Debug_debug };
-function Str_Debug_debug(a) { return '"' + a + '"'; }
-const Str_Debug = { debug: Str_Debug_debug };
-function Bool_Debug_debug(a) { return String(a); }
-const Bool_Debug = { debug: Bool_Debug_debug };
+function __Int_Debug_debug(a) { return String(a); }
+const __Int_Debug = { debug: __Int_Debug_debug };
+function __Float_Debug_debug(a) { return String(a); }
+const __Float_Debug = { debug: __Float_Debug_debug };
+function __Str_Debug_debug(a) { return '"' + a + '"'; }
+const __Str_Debug = { debug: __Str_Debug_debug };
+function __Bool_Debug_debug(a) { return String(a); }
+const __Bool_Debug = { debug: __Bool_Debug_debug };
 
-function Option_Debug_debug(a, __ring_T_Debug) {
+function __Option_Debug_debug(a, __ring_T_Debug) {
   return a._tag === "some" ? "some(" + __ring_T_Debug.debug(a._0) + ")" : "none";
 }
-const Option_Debug = { debug: Option_Debug_debug };
+const __Option_Debug = { debug: __Option_Debug_debug };
 
-function List_Debug_debug(a, __ring_T_Debug) {
+function __List_Debug_debug(a, __ring_T_Debug) {
   return "[" + a.map(function(x) { return __ring_T_Debug.debug(x); }).join(", ") + "]";
 }
-const List_Debug = { debug: List_Debug_debug };
+const __List_Debug = { debug: __List_Debug_debug };
 
-function Map_Debug_debug(a) { return "Map{...}"; }
-const Map_Debug = { debug: Map_Debug_debug };
-function Set_Debug_debug(a) { return "Set{...}"; }
-const Set_Debug = { debug: Set_Debug_debug };
+function __Map_Debug_debug(a) { return "Map{...}"; }
+const __Map_Debug = { debug: __Map_Debug_debug };
+function __Set_Debug_debug(a) { return "Set{...}"; }
+const __Set_Debug = { debug: __Set_Debug_debug };
 
 function Option_some(_0) { return { _tag: "some", _0 }; }
 const Option_none = Object.freeze({ _tag: "none" });
@@ -212,12 +212,12 @@ export const RUNTIME_EXPORT_NAMES: string[] = [
   "read_file", "write_file", "file_exists", "delete_file",
   "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname",
   "argv", "exit_process", "eprintln", "cwd",
-  "Int_Eq", "Float_Eq", "Str_Eq", "Bool_Eq", "Option_Eq",
-  "Int_Clone", "Float_Clone", "Str_Clone", "Bool_Clone",
-  "List_Clone", "Map_Clone", "Set_Clone", "Option_Clone",
-  "Int_Ord", "Float_Ord", "Str_Ord", "Bool_Ord",
-  "Int_Debug", "Float_Debug", "Str_Debug", "Bool_Debug",
-  "Option_Debug", "List_Debug", "Map_Debug", "Set_Debug",
+  "__Int_Eq", "__Float_Eq", "__Str_Eq", "__Bool_Eq", "__Option_Eq",
+  "__Int_Clone", "__Float_Clone", "__Str_Clone", "__Bool_Clone",
+  "__List_Clone", "__Map_Clone", "__Set_Clone", "__Option_Clone",
+  "__Int_Ord", "__Float_Ord", "__Str_Ord", "__Bool_Ord",
+  "__Int_Debug", "__Float_Debug", "__Str_Debug", "__Bool_Debug",
+  "__Option_Debug", "__List_Debug", "__Map_Debug", "__Set_Debug",
 ];
 
 export function runtime_esm_code(): string {
