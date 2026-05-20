@@ -5,11 +5,11 @@
 
 ## 总览
 
-将 TS 编译器逐模块翻译为 Ring。Ring→JS 和 TS→JS 同运行时（V8），可逐模块替换、边翻译边验证。LSP 暂不迁移（保留 TS 版本）。
+将 TS 编译器逐模块翻译为 Ring。需翻译的源文件共 ~13,340 行（30 个文件），LSP 相关代码 ~1,600 行暂不迁移。Ring→JS 和 TS→JS 同运行时（V8），可逐模块替换、边翻译边验证。
 
 **语言特性差距分析结论**：Ring 现有特性已足以翻译整个编译器，无需新增语言特性。所有差距为翻译模式（class→struct+impl, try-catch→fail effect 等）。
 
-**总计估算**：~8-12 天（Batch 1-4） + 收尾验证。
+**总计估算**：~9-12 天（Batch 1-5） + 收尾验证。
 
 ---
 
@@ -66,66 +66,96 @@
 
 ## Part II: 自举执行
 
-### Batch 1: 数据定义（~1 天，可并行 3 个 session）
+### Batch 1: 数据定义 ✅ 已完成
 
-| 文件 | ~行数 | 翻译要点 |
-|------|-------|----------|
-| `types/index.ts` | 200 | type union → enum Type / Effect / EffectRow |
-| `ast/index.ts` | 300 | interfaces → enum AST 节点（命名字段） |
-| `hir/index.ts` | 400 | interfaces → enum HIR 节点 + 共享约定函数 |
-| `errors.ts` | 100 | CompileError class → struct + fail effect |
-| `diagnostics/codes.ts` | 80 | 错误码常量 |
+5 个 Ring 源文件（`compiler/ring/`）+ 1 个 smoke test：
 
-**风险**：低。纯数据定义，无复杂逻辑。
-**验证**：类型定义无直接输出，验证方式为后续 batch 编译通过。
+| Ring 文件 | 行数 | TS 原文件 | 状态 |
+|-----------|------|-----------|------|
+| `types.ring` | 467 | `types/index.ts` (471) | ✅ |
+| `ast.ring` | 272 | `ast/index.ts` (644) | ✅ |
+| `hir.ring` | 214 | `hir/index.ts` (559) | ✅ |
+| `codes.ring` | 55 | `diagnostics/codes.ts` (74) | ✅ |
+| `builtin_methods.ring` | 35 | `builtin-methods.ts` (30) | ✅ |
+| `main.ring` | 33 | （集成 smoke test） | ✅ |
 
-### Batch 2: 基础设施（~1-2 天，可与 Batch 1 部分并行）
+`errors.ts` (18 行) 不翻译：`assertNever` 在 Ring 中无需（穷尽匹配内置），`CompileError` 移至 Batch 2（依赖 Diagnostic）。
 
-| 文件 | ~行数 | 翻译要点 |
-|------|-------|----------|
-| `parser/lexer.ts` | 500 | 字符状态机，纯函数式，直接翻译 |
-| `diagnostics/index.ts` | 150 | DiagnosticSink interface → trait |
-| `diagnostics/formatter.ts` | 200 | format_human / format_llm 纯函数 |
-| `codegen/runtime.ts` | 300 | JS 运行时字符串模板生成 |
+**翻译中发现并修复的编译器问题**：
+1. **两阶段类型注册**（`infer-register.ts`）— 互递归枚举（Type↔Effect）需先注册所有名称再解析字段
+2. **trait_dict_name 命名冲突**（`hir/index.ts` + 5 文件）— `Type_Trait` 与 `Enum_Variant` 同名，改为 `__Type_Trait` 前缀
+3. **元组模式 `(none, none)` codegen bug**（`types.ring`）— 用通配符 `_` 绕行
 
-**风险**：低-中。Lexer 是最大文件，但逻辑简单（字符匹配 + token 产出）。
+**翻译模式补充**：
+- 模块级常量 → 零参函数：`pub fn BUILTIN_INT() -> Str { "Int" }`
+- `type` 字段 → `ty`（Ring 关键字）
+- 空列表字面量 `[]` 类型推断有限 → 用 `fn empty_xxx() -> List<Xxx> { [] }` 辅助函数
+- `(T, T)?` 不支持 → 用 `Option<(T, T)>` 显式泛型
+
+### Batch 2: 诊断 + 词法分析（~684 行，~0.5 天）
+
+| 文件 | 行数 | 翻译要点 |
+|------|------|----------|
+| `diagnostics/index.ts` | 81 | DiagnosticSink interface → trait，CollectingSink class → struct+impl |
+| `diagnostics/formatter.ts` | 94 | format_human / format_llm 纯函数 |
+| `parser/lexer.ts` | 509 | 字符状态机，纯函数式 |
+
+**风险**：低。Lexer 是最大文件但逻辑简单（字符匹配 + token 产出）。
 **验证**：Lexer 可通过 token stream 对比验证。
 
-### Batch 3: 核心算法（~3-5 天，严格串行，最高风险）
+### Batch 3: 语法分析（~1,837 行，~1.5 天）
 
-| 文件 | ~行数 | 翻译要点 |
-|------|-------|----------|
-| `checker/env.ts` | 400 | TypeEnv class → struct + impl + var self |
-| `checker/builtins.ts` | 300 | 内置类型/trait 注册 |
-| `checker/unify.ts` | 500 | HM unification + row unification（**最高风险**） |
-| `checker/infer-ctx.ts` | 200 | InferCtx interface → trait |
-| `checker/infer.ts` | 200 | InferEngine 薄壳 + 调度 |
-| `checker/infer-register.ts` | 400 | Pass 1 声明注册 |
-| `checker/infer-expr.ts` | 800 | 19 个表达式推断函数（**最大文件**） |
-| `checker/infer-modules.ts` | 150 | 多模块支持 |
-| `checker/exhaustive.ts` | 200 | 穷尽性检查（Maranget 风格） |
-| `checker/derive.ts` | 200 | Auto-derive fixpoint pass |
-| `checker/zonk.ts` | 150 | Substitution application |
-| `checker/checker.ts` | 300 | 主入口 check(Program) → HProgram |
+| 文件 | 行数 | 翻译要点 |
+|------|------|----------|
+| `parser/parser-ctx.ts` | 102 | ParserCtx interface → trait + Prec 枚举 |
+| `parser/parser.ts` | 472 | Parser class → struct+impl 薄壳 |
+| `parser/parser-decl.ts` | 388 | 声明解析（fn/struct/enum/impl/trait/effect/extern/use） |
+| `parser/parser-expr.ts` | 875 | Pratt 表达式解析 + 类型表达式 + 模式解析 |
+
+**风险**：低-中。parser-expr 875 行是本 batch 最大文件，但 Pratt 解析模式重复度高。
+**验证**：对比 TS parser 和 Ring parser 对所有 E2E 用例产出的 AST（序列化后 diff）。
+
+### Batch 4: 类型检查（~5,703 行，~4-6 天，最高风险）
+
+内部严格按依赖链串行翻译，每个子阶段翻译后立即全量 E2E diff：
+
+| 子阶段 | 文件 | 行数 | 翻译要点 |
+|--------|------|------|----------|
+| 4a | `checker/env.ts` | 192 | TypeEnv class → struct + impl + var self |
+| 4b | `checker/builtins.ts` | 3 | Re-export shell |
+| 4b | `checker/builtins-core.ts` | 372 | 核心内置注册（effects/Cell/Option/Eq/Clone/Ord/Debug traits） |
+| 4b | `checker/builtins-hof.ts` | 239 | HOF 方法注册（List/Map/Set/Option 的 effect 多态方法） |
+| 4c | `checker/unify.ts` | 549 | HM unification + row unification（**最高风险**） |
+| 4d | `checker/infer-ctx.ts` | 545 | InferCtx interface → trait + 16 个 helper 函数 |
+| 4d | `checker/infer.ts` | 554 | InferEngine 薄壳 + check/infer_expr 调度 |
+| 4e | `checker/infer-register.ts` | 457 | Pass 1 声明注册 |
+| 4e | `checker/infer-expr.ts` | 1,223 | 19 个表达式推断函数（**最大文件**） |
+| 4e | `checker/infer-stmt.ts` | 384 | 语句推断（let/var/assign/return/while/for/break/continue/destructure/if-let） |
+| 4e | `checker/infer-modules.ts` | 158 | 多模块支持 |
+| 4f | `checker/exhaustive.ts` | 256 | 穷尽性检查（Maranget 风格 pattern matrix） |
+| 4f | `checker/derive.ts` | 501 | Auto-derive fixpoint pass（Eq/Clone/Debug/Ord 自动派生） |
+| 4f | `checker/zonk.ts` | 194 | Substitution application |
+| 4g | `checker/checker.ts` | 79 | 主入口 check(Program) → HProgram |
 
 **风险**：高。unify.ts 和 infer-expr.ts 是核心算法，任何翻译错误会导致类型推断结果偏差。
-**串行原因**：checker 内部模块强耦合，env→unify→infer 有严格依赖链。
-**验证**：每个文件翻译后立即做全量 E2E diff，不要累积到 batch 结束。
+**串行原因**：checker 内部模块强耦合，env→builtins→unify→infer→derive→checker 有严格依赖链。
+**验证**：每个子阶段翻译后立即做全量 E2E diff，不要累积到 batch 结束。
 
-### Batch 4: 输出 + 前端（~1-2 天）
+### Batch 5: 代码生成 + 模块系统 + CLI（~3,315 行，~2-3 天）
 
-| 文件 | ~行数 | 翻译要点 |
-|------|-------|----------|
-| `codegen/codegen-ctx.ts` | 100 | CodegenCtx interface → trait |
-| `codegen/codegen.ts` | 100 | CodeGenerator 薄壳 |
-| `codegen/codegen-decl.ts` | 400 | 声明 codegen（fn/struct/enum/impl/trait/effect） |
-| `codegen/codegen-stmt.ts` | 400 | 语句 codegen + match pattern |
-| `codegen/codegen-expr.ts` | 400 | 表达式 codegen |
-| `parser/parser-ctx.ts` | 50 | ParserCtx + Prec 枚举 |
-| `parser/parser.ts` | 200 | Parser 薄壳 |
-| `parser/parser-decl.ts` | 500 | 声明解析 |
-| `parser/parser-expr.ts` | 600 | Pratt 表达式解析 |
-| `cli.ts` | 150 | CLI 入口（ring build/run/check） |
+| 文件 | 行数 | 翻译要点 |
+|------|------|----------|
+| `codegen/runtime.ts` | 226 | JS 运行时字符串模板生成 |
+| `codegen/codegen-ctx.ts` | 122 | CodegenCtx interface → trait + safe_ident + 辅助函数 |
+| `codegen/codegen.ts` | 257 | CodeGenerator 薄壳 + generate() 入口 |
+| `codegen/codegen-decl.ts` | 211 | 声明 codegen（fn/struct/enum/impl/trait/effect） |
+| `codegen/codegen-stmt.ts` | 345 | 语句 codegen + match 语句 + pattern condition/bindings |
+| `codegen/codegen-expr.ts` | 602 | 表达式 codegen（call/struct_lit/match/if/lambda 等） |
+| `codegen/codegen-derive.ts` | 312 | Auto-derive trait codegen（Eq/Clone/Debug/Ord） |
+| `modules/resolver.ts` | 195 | 模块解析（文件发现 + 依赖图 + 拓扑排序 + 循环检测） |
+| `modules/exports.ts` | 219 | ModuleExports 类型 + extract_exports 导出提取 |
+| `modules/compiler.ts` | 570 | 多文件编译编排器（resolve → parse → check → codegen → bundle） |
+| `cli.ts` | 256 | CLI 入口（ring build/run/check） |
 
 **风险**：中。Codegen 和 Parser 逻辑量大但模式重复（每个 AST/HIR 节点一个 case）。
 **验证**：全量 E2E diff + E2E 测试。
@@ -159,7 +189,7 @@ Step 3: diff v1 v2 → 必须 byte-identical
 
 ### 3.4 完成标准
 
-- [ ] Batch 1-4 所有文件翻译完成
+- [ ] Batch 1-5 所有文件翻译完成
 - [ ] 全部 E2E 测试通过（Ring 编译器运行）
 - [ ] Fixed point 验证通过（v1 = v2）
 - [ ] TS 编译器归档
@@ -211,13 +241,14 @@ Step 3: diff v1 v2 → 必须 byte-identical
 - HOF (map/filter/find) → Ring List 方法 ✓
 - 正则表达式 → 编译器未使用 ✓
 - async/await → 编译器逻辑未使用（仅 LSP 异步，暂不迁移） ✓
+- Optional chaining (`?.`) → 编译器未使用（0 处） ✓
+- Nullish coalescing (`??`) → 编译器未使用（0 处） ✓
 
 ### 需要翻译模式转换（无需新语言特性）
 
-- 3 个 class → struct + impl + var self
-- 40+ interface (data) → struct / enum 命名字段
-- 5+ interface (behavior) → trait
-- 10+ try-catch → fail effect + handle/catch
-- 27 处 `?.` → Option 方法
-- 392 处 `??` → `unwrap_or()` / `or`
-- 124 处 `as Type` → match / if-let
+- ~8 个 class → struct + impl + var self
+- 170+ interface (data) → struct / enum 命名字段
+- ~10 interface (behavior) → trait
+- ~37 处 try-catch → fail effect + handle/catch
+- ~210 处 `as Type` → match / if-let
+- 61 处 switch → match
