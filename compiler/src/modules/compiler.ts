@@ -335,9 +335,25 @@ export function compile_project_esm(
 
       const import_pairs: string[] = [];
 
+      // Collect bare enum variant names — these don't have JS declarations
+      // (codegen uses EnumName_VariantName form, resolved via resolved_name in HIR)
+      const bare_variant_names = new Set<string>();
+      for (const [, type_def] of dep_exports.types) {
+        if ("variants" in type_def) {
+          for (const v of type_def.variants) {
+            bare_variant_names.add(v.name);
+          }
+        }
+      }
+
       for (const [name] of dep_exports.values) {
         if (dep_exports.extern_values.has(name)) {
           imports_map.set(name, safe_ident(name));
+        } else if (bare_variant_names.has(name)) {
+          // Bare enum variant: add to imports_map for resolution but don't import
+          // (codegen uses resolved_name which maps to EnumName_VariantName)
+          const alias = `${dep_prefix}$${safe_ident(name)}`;
+          imports_map.set(name, alias);
         } else {
           const alias = `${dep_prefix}$${safe_ident(name)}`;
           imports_map.set(name, alias);
@@ -348,14 +364,18 @@ export function compile_project_esm(
       for (const [name, type_def] of dep_exports.types) {
         const alias = `${dep_prefix}$${safe_ident(name)}`;
         imports_map.set(name, alias);
-        import_pairs.push(`${safe_ident(name)} as ${alias}`);
         if ("variants" in type_def) {
+          // Enum: codegen doesn't produce a function for the enum name itself,
+          // only variant constructors. Don't import the enum name.
           for (const v of type_def.variants) {
             const vname = `${name}_${v.name}`;
             const valias = `${dep_prefix}$${safe_ident(name)}_${v.name}`;
             imports_map.set(vname, valias);
             import_pairs.push(`${safe_ident(name)}_${v.name} as ${valias}`);
           }
+        } else {
+          // Struct: codegen produces a constructor function with the struct name
+          import_pairs.push(`${safe_ident(name)} as ${alias}`);
         }
       }
 
@@ -364,6 +384,15 @@ export function compile_project_esm(
         const alias = `${dep_prefix}$${safe_ident(impl.target_type_name)}_${safe_ident(impl.trait_name)}`;
         imports_map.set(dict_name, alias);
         import_pairs.push(`${safe_ident(impl.target_type_name)}_${safe_ident(impl.trait_name)} as ${alias}`);
+      }
+
+      // Import inherent (non-trait) impl methods
+      for (const [type_name, method_names] of dep_exports.inherent_methods) {
+        for (const mname of method_names) {
+          const method_js = `${safe_ident(type_name)}_${mname}`;
+          const alias = `${dep_prefix}$${method_js}`;
+          import_pairs.push(`${method_js} as ${alias}`);
+        }
       }
 
       if (import_pairs.length > 0) {
@@ -383,7 +412,7 @@ export function compile_project_esm(
           export_names.push(safe_ident(decl.name));
           break;
         case "enum_decl":
-          export_names.push(safe_ident(decl.name));
+          // Enum codegen only produces variant constructors, not the enum name itself
           for (const v of decl.variants) {
             export_names.push(`${safe_ident(decl.name)}_${v.name}`);
           }
@@ -396,24 +425,100 @@ export function compile_project_esm(
       }
     }
 
-    // Add trait impl dict names to exports (when the target type is pub)
+    // Add impl-related exports for pub types
     for (const decl of ast.decls) {
-      if (decl.kind === "impl_decl" && decl.trait_name) {
-        if (ast.decls.some(d =>
-          (d.kind === "struct_decl" || d.kind === "enum_decl") && d.is_pub && d.name === decl.target_type
-        )) {
-          export_names.push(`${safe_ident(decl.target_type)}_${safe_ident(decl.trait_name)}`);
+      if (decl.kind !== "impl_decl") continue;
+      const is_pub_type = ast.decls.some(d =>
+        (d.kind === "struct_decl" || d.kind === "enum_decl") && d.is_pub && d.name === decl.target_type
+      );
+      if (!is_pub_type) continue;
+
+      if (decl.trait_name) {
+        // Trait impl: export the dict object only
+        export_names.push(`${safe_ident(decl.target_type)}_${safe_ident(decl.trait_name)}`);
+      } else {
+        // Inherent impl: export standalone method functions
+        for (const method of decl.methods) {
+          export_names.push(`${safe_ident(decl.target_type)}_${method.name}`);
         }
       }
     }
 
-    // Add auto-derive dict names to exports
+    // Add auto-derive dict names and method names to exports
     for (const impl of hir.derived_impls) {
       if (ast.decls.some(d =>
         (d.kind === "struct_decl" || d.kind === "enum_decl") && d.is_pub && d.name === impl.type_name
       )) {
         export_names.push(`${safe_ident(impl.type_name)}_${safe_ident(impl.trait_name)}`);
       }
+    }
+
+    // Handle pub use re-exports: create local aliases and add to export list
+    const reexport_aliases: string[] = [];
+    for (const use_decl of ast.uses) {
+      if (!use_decl.is_pub) continue;
+      const src_key = use_decl.path.segments.join("::");
+      const src_exports = module_exports_map.get(src_key);
+      if (!src_exports) continue;
+      const src_prefix = src_exports.module_prefix;
+
+      if (use_decl.imports.kind === "named") {
+        for (const { name, alias } of use_decl.imports.names) {
+          const local_name = alias ?? name;
+          const src_js = src_exports.extern_values.has(name)
+            ? safe_ident(name)
+            : `${src_prefix}$${safe_ident(name)}`;
+          const local_js = safe_ident(local_name);
+          if (local_js !== src_js) {
+            reexport_aliases.push(`const ${local_js} = ${src_js};`);
+          }
+          export_names.push(local_js);
+          const type_def = src_exports.types.get(name);
+          if (type_def && "variants" in type_def) {
+            for (const v of type_def.variants) {
+              const src_v = `${src_prefix}$${safe_ident(name)}_${v.name}`;
+              const local_v = `${safe_ident(local_name)}_${v.name}`;
+              if (local_v !== src_v) {
+                reexport_aliases.push(`const ${local_v} = ${src_v};`);
+              }
+              export_names.push(local_v);
+            }
+          }
+        }
+      } else {
+        for (const [name] of src_exports.values) {
+          if (src_exports.extern_values.has(name)) continue;
+          const src_js = `${src_prefix}$${safe_ident(name)}`;
+          const local_js = safe_ident(name);
+          if (local_js !== src_js) {
+            reexport_aliases.push(`const ${local_js} = ${src_js};`);
+          }
+          export_names.push(local_js);
+        }
+        for (const [name, type_def] of src_exports.types) {
+          const src_js = `${src_prefix}$${safe_ident(name)}`;
+          const local_js = safe_ident(name);
+          if (local_js !== src_js) {
+            reexport_aliases.push(`const ${local_js} = ${src_js};`);
+          }
+          export_names.push(local_js);
+          if ("variants" in type_def) {
+            for (const v of type_def.variants) {
+              const src_v = `${src_prefix}$${safe_ident(name)}_${v.name}`;
+              const local_v = `${safe_ident(name)}_${v.name}`;
+              if (local_v !== src_v) {
+                reexport_aliases.push(`const ${local_v} = ${src_v};`);
+              }
+              export_names.push(local_v);
+            }
+          }
+        }
+      }
+    }
+
+    // Append re-export aliases to module imports (they'll be emitted at top of file)
+    for (const alias of reexport_aliases) {
+      module_import_lines.push(alias);
     }
 
     // Build external metadata for cross-module codegen (same as bundle mode)

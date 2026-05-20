@@ -18,6 +18,7 @@ export interface ModuleExports {
   traits: Map<string, TraitDef>;           // pub traits
   trait_impls: ImplEntry[];                // trait impls (for dict resolution)
   impl_methods: Map<string, Map<string, TypeScheme>>;  // type -> method name -> scheme
+  inherent_methods: Map<string, string[]>;  // type -> inherent (non-trait) method names
   struct_field_orders: Map<string, string[]>;           // struct name -> field names in order
   extern_values: Set<string>;              // extern fn names (not module-prefixed in JS)
 }
@@ -38,6 +39,7 @@ export function extract_exports(
   const effects = new Map<string, EffectDef>();
   const traits = new Map<string, TraitDef>();
   const impl_methods = new Map<string, Map<string, TypeScheme>>();
+  const inherent_methods = new Map<string, string[]>();
   const struct_field_orders = new Map<string, string[]>();
   const extern_values = new Set<string>();
 
@@ -106,14 +108,23 @@ export function extract_exports(
         const target = decl.target_type;
         const methods = env.impl_methods.get(target);
         if (methods) {
-          // Only export if the target type is a pub type from this module
-          // or it's an impl for an external type (trait impl)
           const target_type_decl = program.decls.find(
             d => (d.kind === "struct_decl" || d.kind === "enum_decl" || d.kind === "extern_type_decl") && d.name === target,
           );
           const is_pub_type = target_type_decl && "is_pub" in target_type_decl && target_type_decl.is_pub;
           if (is_pub_type || decl.trait_name) {
             impl_methods.set(target, new Map(methods));
+          }
+        }
+        // Track inherent (non-trait) method names for ESM export
+        if (!decl.trait_name) {
+          const target_type_decl = program.decls.find(
+            d => (d.kind === "struct_decl" || d.kind === "enum_decl") && d.name === target,
+          );
+          if (target_type_decl && "is_pub" in target_type_decl && target_type_decl.is_pub) {
+            const method_names = decl.methods.map(m => m.name);
+            const existing = inherent_methods.get(target) ?? [];
+            inherent_methods.set(target, [...existing, ...method_names]);
           }
         }
         break;
@@ -201,6 +212,7 @@ export function extract_exports(
     traits,
     trait_impls,
     impl_methods,
+    inherent_methods,
     struct_field_orders,
     extern_values,
   };
