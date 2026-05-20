@@ -55,7 +55,7 @@ Ring-lang/
 │   │   │   ├── zonk.ts                 Zonk 工具（apply subst + label type var names）
 │   │   │   └── checker.test.ts         Checker 测试
 │   │   ├── codegen/
-│   │   │   ├── runtime.ts              JS 运行时辅助代码
+│   │   │   ├── runtime.ts              JS 运行时辅助代码 + RUNTIME_EXPORT_NAMES + runtime_esm_code()
 │   │   │   ├── codegen-ctx.ts          CodegenCtx 接口 + safe_ident + 辅助函数
 │   │   │   ├── codegen.ts              CodeGenerator 类薄壳 + generate() 入口
 │   │   │   ├── codegen-decl.ts         声明 codegen（fn/struct/enum/impl/trait/effect）
@@ -86,9 +86,9 @@ Ring-lang/
 │   │   ├── modules/
 │   │   │   ├── resolver.ts            模块解析（文件发现 + 依赖图 + 拓扑排序 + 循环检测）
 │   │   │   ├── exports.ts             ModuleExports 类型 + extract_exports 导出提取
-│   │   │   ├── compiler.ts            多文件编译编排器（resolve → parse → check → codegen → bundle）
+│   │   │   ├── compiler.ts            多文件编译编排器（compile_phases + compile_project bundle + compile_project_esm）
 │   │   │   └── resolver.test.ts       Module resolver 测试
-│   │   └── cli.ts                      ring build/run/check/lsp 入口 + --error-format + 多文件自动检测
+│   │   └── cli.ts                      ring build/run/check/lsp 入口 + --error-format + --out-dir + 多文件 ESM 输出
 │   ├── scripts/
 │   │   └── lint.mjs                    自定义 lint 检查（as any 禁令等）
 │   ├── package.json
@@ -225,6 +225,7 @@ Lexer + Parser + HM 类型推断 + Effect 推断 + struct/enum/match + UFCS + `o
 | 修复 | 设计评审 | `sort()` 数值比较器修复 + `sort_by(cmp)` HOF、`concat` 返回新 List + `extend` 原地追加、`Enum::Variant` 限定语法 |
 | 修复 | 设计评审 P2 | `list_clone`/`set_clone`、`List.pop()`、`Str.pad_end()`、集合 `clear()`、`Option<T>` 方法（is_some/is_none/unwrap_or/map/and_then） |
 | 8 | Auto-derive Traits | Eq/Clone/Debug/Ord 四个 trait auto-derive、`==`/`!=` Eq 解糖、`<`/`>`/`<=`/`>=` Ord 解糖、fixpoint derive pass、E0307/E0308 错误码 |
+| 9 | ESM 多文件输出 | `compile_project_esm()` 每模块一个 .js + `__ring_runtime.js`、`--out-dir` CLI 参数、`compile_phases()` 共享管线提取 |
 
 ## 已知限制
 
@@ -307,6 +308,10 @@ cd compiler && npm run typecheck
 
 # 机械 lint 检查（tsc strict + as any/ts-ignore/console.log 扫描）
 cd compiler && npm run lint
+
+# 多文件编译（ESM 输出）
+node compiler/dist/cli.js build examples/multifile/main.ring          # → dist/
+node compiler/dist/cli.js build examples/multifile/main.ring --out-dir=build  # → build/
 
 # 调试模式（打印中间 AST/HIR/JS）
 node compiler/dist/cli.js run --debug examples/hello.ring
