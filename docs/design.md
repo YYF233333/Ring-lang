@@ -1017,16 +1017,31 @@ for item in items {
 - `--error-format=llm` 结构化错误输出
 - 性能优化：effect 编译期特化 + evidence passing、refinement 检查提升/消除、持久化数据结构
 
-### 12.3 Phase 3：研究向扩展
+### 12.3 Phase 3：研究向扩展 + Agent 工具链
 
 低信心，探索性质。
+
+**语言特性：**
 
 - Refinement types（简单谓词自己做 / 复杂约束接 Z3）
 - Dependent types lite
 - Formatter 自动标注等级系统
 - 完整 effect 多态
 - 模块签名 + 一等模块
-- 性能优化：热路径单态化、线性性检测就地修改、融合 + 闭包合并
+
+**Agent 工具链深化**（借鉴 Zero 的 agent-first CLI 设计，见 13.2.1）：
+
+Ring-lang 已有 `--error-format=llm` 和全功能 LSP，但 Zero 证明了 agent 需要的不只是"更好的错误信息"，而是**整条 CLI 都为 machine consumption 设计**。以下特性让 Ring-lang 在保持语言级优势（effect 系统 > Zero 的 capability 对象）的同时，补齐工具链短板：
+
+- `ring check --json` 结构化诊断：扩展现有 `--error-format=llm`，每条错误附带 stable error code（已有 E-code 体系）+ typed repair object（repair.id + 修复类别 + 建议代码片段），agent 无需解析自然语言即可决策
+- `ring fix --plan --json <file>` 自动修复计划：编译器分析错误后输出 machine-readable 修复步骤序列（文件、行号、替换文本），agent 可批量执行。优先覆盖高频错误：类型不匹配、缺失 effect 标注、未处理的 fail
+- `ring explain <error-code>` 错误解释：按 E-code 输出版本匹配的详细解释 + 正误代码示例对比
+- `ring graph --json` 依赖拓扑：模块依赖图 + 函数调用图 + **effect 传播图**（Ring-lang 独有——Zero 的 graph 只有调用关系，Ring 可以展示"哪些函数携带 io/fail/async effect 以及从何处获得"）
+- `ring doctor` 项目健康检查：依赖完整性、未使用导出、effect 泄漏检测、类型覆盖率统计
+
+**性能优化：**
+
+- 热路径单态化、线性性检测就地修改、融合 + 闭包合并
 
 ---
 
@@ -1065,20 +1080,131 @@ MoonBit（ICSE 2024 论文，2025 beta）由张宏波创建（OCaml 核心贡献
 
 ### 13.2 其他项目
 
+#### 13.2.1 Zero（Vercel Labs, 2026-05）——agent-first 系统语言
+
+Zero（zerolang.ai）是 Vercel Labs 推出的 agent-first 系统语言，v0.1.3，Apache-2.0，3.5k stars。定位：**AI agent 是一等用户，语言和工具链从零为 agent 设计**。
+
+**编译器架构（基于源码分析）：**
+
+编译器 100% C 实现（12 个源文件，~1.7MB），无自举——C 是实现语言，不是 bootstrap 语言。GitHub 显示的 17.6% JS 是周边工具（测试运行器、Next.js 文档站、构建脚本、AI eval 框架、VSCode 插件），官方明确声明"It is not a separate TypeScript compiler implementation"。
+
+```
+.0 源码 → lexer.c → parser.c → checker.c + unify.c → ir.c → emit_*.c → 原生二进制
+```
+
+**核心技术选择**：无 LLVM、无 QBE、无汇编器——直接手写 x86-64/ARM64 机器码字节 + 自行构造 ELF/Mach-O/COFF 二进制格式。8 个编译目标（darwin/linux/win32 × arm64/x64 + musl 变体）。Runtime 源码（IO 抽象、JSON 解析、HTTP/libcurl）以 C 字符串数组形式嵌入编译器二进制，按需展开编译。
+
+**Zero vs Ring-lang 对比：**
+
+| 维度 | Zero | Ring-lang |
+|------|------|-----------|
+| 切入点 | **工具链** — JSON 诊断、修复计划、machine-readable 一切 | **语言** — effect 系统、严格编译器、最小语法面 |
+| 类型系统 | 中等深度：泛型 + interface 约束（编译期单态化）+ choice（tagged union） | 激进：refinement/dependent lite/row poly/HM 推断 |
+| 副作用追踪 | Capability 对象（`World` 参数区分纯函数 vs IO 函数），仅区分"有IO/无IO"一个维度 | 完整代数效果系统（io/fail/async/mut 独立追踪 + effect row 传播链） |
+| 所有权/安全 | `owned<T>`/`ref<T>`/`mutref<T>` + 编译期 borrow check + provenance tracking + use-after-move 检测 | GC，零心智负担（Phase B 加 linear types，远期 Perceus RC） |
+| 内存管理 | 手动管理，显式 allocator 传参，无 GC，sub-10 KiB 二进制 | GC，零心智负担 |
+| 并发 | 无隐式并发，无 async/await，极简 | 结构化并发 + async 作为 effect |
+| 编译目标 | 原生二进制（手写 code emitter，零外部依赖） | JS → WasmGC → LLVM（借 LLVM 获得优化和跨平台） |
+| 编译器实现 | C（无自举计划） | TypeScript（自举中 → Ring-lang） |
+| 标准库 | 14 模块（mem/fs/io/net/http/json/crypto/path/parse/codec/time/rand/args/env/proc） | 基础内置类型（Str/List/Map/Set/Tuple），stdlib 扩展中 |
+| 错误处理 | `raises { ErrorName }` + `check`/`rescue`，错误集合编译时验证 | `fail<E>` effect 4 层甜度，effect 推断 + handler |
+
+**之前低估了 Zero 的类型系统深度**——它不止 README 展示的 shape/choice，实际有 borrow checker、泛型单态化 + interface 约束、错误集合验证、provenance tracking。在所有权安全维度上，Zero 比 Ring-lang 当前阶段更成熟（Ring 的 linear types 在 Phase B）。
+
+**但核心差异不变：Zero 没有 effect 系统。** `World` 是 capability 对象而非 effect row——只能区分"有 IO / 无 IO"，无法：
+1. 独立追踪 io/fail/async/mut 四种 effect
+2. 展示 effect 传播链（哪个函数的 fail 从哪个调用获得）
+3. 通过 handler 重解释 effect（测试 mock、错误恢复策略替换）
+4. 在模块签名中压缩完整行为契约
+
+**Zero 的工具链亮点（Ring-lang 应借鉴）：**
+- `zero check --json`：每条错误含 stable code（如 `NAM003`）+ typed repair object + repair.id
+- `zero fix --plan --json`：machine-readable 修复步骤，agent 可直接执行
+- `zero explain <code>`：版本匹配的错误解释
+- `zero graph --json`：依赖拓扑
+- `zero size --json`：二进制大小分析
+- `zero skills get zero --full`：版本匹配的 agent 引导指南（skill-data/*.md 嵌入编译器二进制，`zero skills` 命令输出）
+
+**评估：**
+- Zero 的**工具链深度**领先 Ring-lang——整条 CLI 为 machine consumption 设计，不是"加个 flag"
+- Zero 的**所有权安全**在当前阶段领先 Ring-lang（borrow check + provenance vs Ring 的 GC）
+- Ring-lang 的**副作用追踪维度**远超 Zero——effect 系统是 Ring 的护城河，Zero 的 `World` 只覆盖 IO 一个维度
+- Ring-lang 的**自举叙事**是 Zero 没有的——"编译器用自己写，由 AI vibe-coded"
+- 两者定位不直接冲突：Zero 是系统语言（手动内存、原生二进制），Ring-lang 是应用语言（GC、JS/WASM）
+- **真正的竞争在叙事层面**：Zero 有 Vercel 品牌加持，会占据"AI-first 语言"的注意力。Ring-lang 需要同等水平的工具链来证明"语言级 agent 友好 + 工具链级 agent 友好"可以兼得
+- 已将 Zero 的工具链理念纳入 Phase 3 路线图（见 12.3 Agent 工具链深化）
+
+#### 13.2.2 Mog（Voltropy, 2026-03）——嵌入式 agent 语言
+
+Mog（moglang.org）是一个为 LLM 生成代码设计的静态类型嵌入式语言，定位"静态类型的 Lua"。MIT 许可。
+
+**核心卖点：完整语言规范仅 3,200 tokens，可塞入单次 LLM 上下文窗口。**
+
+| 维度 | Mog | Ring-lang |
+|------|-----|-----------|
+| 定位 | 嵌入式脚本（Lua 生态位） | 通用应用语言 |
+| 规范大小 | ~3,200 tokens | 远大于此 |
+| 安全模型 | Capability 沙箱（宿主控制可调函数） | Effect 系统编译时追踪 |
+| 类型系统 | 基础静态类型 + SoA + Tensor 原语 | HM + refinement + row poly |
+| 运行时 | 原生编译（rqbe/QBE） | JS → WasmGC → LLVM |
+
+**启发：** "规范塞进上下文窗口"是一个强力叙事角度。Ring-lang 应追踪自己的规范 token 数，并优化模块签名的压缩率——effect 系统的模块签名天然信息密度高于 Mog 的简单类型签名。
+
+#### 13.2.3 其他 agent-first 项目
+
+- **Dana**（Aitomatic / AI Alliance, 2025）：agent 编排语言，内置 `agent` 原语和 `reason()` 函数，侧重 agent 自改进代码。企业定位，非通用 PL
+- **Rue**（Steve Klabnik, 2025-12）：简化版 Rust，`inout` 参数替代借用检查器。整个编译器（~70K-100K 行 Rust）由 Claude 在 2 周内完成，本身是 AI 写语言的 proof-of-concept。Ring Phase B 的 linear types 可参考其 `inout` 设计
+- **Darklang-GPT**（Paul Biggar）：Darklang 全面转向"AI 是唯一的代码编写者"，trace-driven 开发 + deployless 部署。理念与 Ring 飞轮对齐，但定位后端 Web
 - **Pel**（2025 arXiv）：AI agent 编排语言，解决 agent 间通信，非"agent 写代码"
 - **PACT**：概念级 LLM 友好语言，零歧义语法，编译到 Rust，无成熟实现
 
-**没有任何现有项目组合了完整代数效果 + HM 推断 + LLM 友好性。**
+**Ring-lang 的独特组合（完整代数效果 + HM 推断 + LLM 友好性）仍无直接竞品。** 最接近的三个方向各有缺失：Zero 有工具链但无效果系统，MoonBit 有成熟度但只追踪错误，Mog 有极简规范但无高级类型。
 
 注：MoonBit 曾被评估为 fork 基础，但因 MoonBit Public License（魔改 SSPL）禁止商业 fork 而排除。其性能数据（"比 Rust 快 9x"等）为自报，无独立基准验证。HN 上曾出现质疑帖。二进制大小优势主要来自 WasmGC 不打包运行时，非 MoonBit 独有。
 
-### 13.3 现有语言的态度
+### 13.3 "够用就行"威胁——现有语言的 AI 适配
 
-现有语言**没有从设计层面拥抱 Agent**。适配全在工具层：LSP 成为 AI agent 主要接口，agent-lsp 项目在 language server 上包装 AI 专用能力。没有任何语言团队公开讨论过"为 AI 改语言设计"。
+2026-05 前，现有语言没有从语言设计层面拥抱 Agent。但现在工具链层的适配正在快速逼近"够用"：
 
-### 13.4 "死亡螺旋"风险
+| 力量 | 做什么 | 威胁等级 |
+|------|--------|---------|
+| **Constrained decoding**（XGrammar、llama.cpp GBNF、Outlines） | 在推理时限制 LLM token 采样，保证输出符合任意 CFG 语法。XGrammar-2 开销 <40μs/token | 高——让现有语言语法有效 |
+| **OpenAI 收购 Astral**（2026-03） | Ruff + uv + ty（极快 Python 类型检查器）集成 Codex 管线，AI 生成的 Python 代码在用户看到前已过 lint + 类型检查 | 高——Python "够用"的上限被拉高 |
+| **TypeScript 7 / Project Corsa** | Go 重写 TS 编译器，10x 加速，语言服务 1.2s 加载。Daniel Rosenwasser 明确提到 AI 工具集成是设计动机 | 高——TS 生态 + 快速反馈循环 |
+| **LSP 桥接**（LSAP、agent-lsp、mcpls、mcp-lsp-bridge） | 将任意语言的 LSP 包装为 MCP/agent 接口，单个 Go/Rust 二进制即可服务 30+ 语言 | 中——通用但浅，无法触及语言语义 |
+| **Spec-driven 开发**（GitHub Spec Kit 90k stars、AWS Kiro） | 在语言之上加结构化意图层（spec → plan → task → code），补偿语言弱点 | 中——绕过语言层面的问题 |
 
-新语言训练数据少 → LLM 写得差 → 没人用 → 训练数据更少。Ring-lang 的缓解：严格编译器本身就是一致性验证器，`--error-format=llm` 让 LLM 靠编译器反馈自修正而非靠训练数据。MoonBit 的缓解：constrained decoding 从采样层保证正确性，但需要特定 AI 管线。
+**最大威胁不是任何单一项目，而是组合**：constrained decoding + 快速类型检查 + LSP 桥接 + spec-driven 框架可以让现有语言"对 AI 够用"，而不需要开发者学任何新东西。
+
+**Ring-lang 的反论**：这些都是在语义不变的语言上做工具层补丁——它们无法改变：
+1. **签名信息密度**：TS 的函数签名不携带 IO/async/mut 信息，agent 必须读函数体才能判断副作用
+2. **错误类别**：constrained decoding 保证语法正确，类型检查保证类型正确，但副作用 bug（忘记 await、意外 IO、可变性竞争）只有 effect 系统能在编译时捕获
+3. **验证深度**：refinement types + dependent types 可以编码业务规则约束，这是任何 linter 做不到的
+
+### 13.4 学术验证
+
+Ring-lang 的核心赌注（代数效果 + 强类型 = AI 代码质量乘数）已获得学术研究的独立验证：
+
+- **LMPL 2025**（Di Wang et al.）：用代数效果和 handler 分离 LLM 工作流逻辑与副作用操作，Tree-of-Thoughts 场景 10x 加速。**直接验证 Ring 的 effect 系统赌注**
+- **TypePilot**（EPFL, arXiv 2510.11151）：用 Scala 的 ADT + refinement types + sealed traits 引导 LLM 生成更安全的代码。**验证高级类型系统是 AI 代码正确性的乘数**
+- **SimPy**（ISSTA 2024）：AI 导向的 Python 语法变体，减少 10-13.5% token 使用量且不损质量。**验证为 AI 优化语法语法有实际收益**
+- **AlphaVerus**（arXiv 2412.06176）：自改进框架实现 LLM 生成形式化验证代码。**验证 Ring Tier 3 飞轮（spec 验证）的可行性**
+- **Kleppmann "Vericoding" 论文**（2025-12）：预测 AI 将使形式化验证主流化——AI 生成的代码 *需要* 形式化验证因为人无法 review。**Ring 的 refinement types + dependent types 路线的哲学基础**
+
+### 13.5 "死亡螺旋"风险
+
+新语言训练数据少 → LLM 写得差 → 没人用 → 训练数据更少。
+
+缓解策略对比：
+
+| 项目 | 策略 | 局限 |
+|------|------|------|
+| Ring-lang | 严格编译器 = 一致性验证器，`--error-format=llm` 让 LLM 靠编译器反馈自修正 | 首次编译通过率可能低 |
+| MoonBit | Constrained decoding 从采样层保证语法正确 | 需特定 AI 管线，只保证语法不保证语义 |
+| Mog | 规范 3,200 tokens 直接注入上下文 | 语言极简，无法构建复杂系统 |
+| Zero | Regularity over brevity + 结构化修复计划 | 语言简单但工具链复杂 |
+
+Ring-lang 的独特缓解：**模块签名自描述**。Effect 系统让模块的完整行为契约（类型 + 副作用）压缩在签名中，LLM 只需签名即可正确使用 API——比 TS 的 `.d.ts` 信息密度高一个数量级。
 
 ---
 
@@ -1146,15 +1272,18 @@ Koka（MIT 许可）在以下子系统上有已验证的实现，Ring-lang 的 T
 
 ### 15.3 渐进式自举
 
-Phase 2 完成后开始用 Ring-lang 重写编译器模块，按复杂度递增：
-1. Formatter（纯 AST→AST 变换）
-2. Codegen（IR→JS 翻译）
-3. Parser（递归下降，ADT + match 天然适合）
-4. Checker（类型推断 + effect 推断，最复杂）
+Phase 3a 完成后开始用 Ring-lang 逐模块翻译编译器。Ring→JS 和 TS→JS 同运行时（V8），可逐模块替换、边翻译边验证。按数据依赖顺序分 4 个 batch：
 
-验证方式：新实现的输出与 TS 版本做 diff，应完全一致。
+1. **数据定义**（types/ast/hir/errors/codes）— 纯数据，可并行
+2. **基础设施**（lexer/diagnostics/runtime）— 低风险
+3. **核心算法**（checker 全部 12 个文件）— 最高风险，严格串行
+4. **输出+前端**（codegen/parser/cli）— 模式重复，中等风险
 
-自举约束：只能使用 Phase 2 子集（无 refinement、无 dependent lite）。如果 Phase 2 语言足以写自己的编译器，说明核心设计完备。
+LSP 暂不迁移，保留 TS 版本。验证方式：保留完整 TS 编译器，翻译后 diff JS 输出必须一致；通过 fixed point 测试（Ring 编译器编译自己两次，输出 byte-identical）。
+
+自举约束：只能使用已实现特性子集（无 refinement、无 dependent lite）。语言特性差距分析结论：现有特性已足以翻译整个编译器。
+
+详细计划见 `docs/bootstrap-roadmap.md`。
 
 自举的叙事价值：**"Ring-lang 的编译器是用 Ring-lang 写的，由 Claude vibe-coded"**——同时证明语言能构建复杂系统、LLM 能高效使用、effect 系统在编译器场景好用。
 
