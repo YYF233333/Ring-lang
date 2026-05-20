@@ -113,17 +113,31 @@
 - `let x = expr \n next_expr` 行分隔歧义 → 用 if-else 或辅助函数代替 `return expr` / 裸表达式
 - format_llm 手工构建 JSON 字符串（Ring 枚举 `_tag` + Option 序列化与 TS 的 `kind` + undefined 省略不兼容）
 
-### Batch 3: 语法分析（~1,837 行，~1.5 天）
+### Batch 3: 语法分析 ✅ 已完成
 
-| 文件 | 行数 | 翻译要点 |
-|------|------|----------|
-| `parser/parser-ctx.ts` | 102 | ParserCtx interface → trait + Prec 枚举 |
-| `parser/parser.ts` | 472 | Parser class → struct+impl 薄壳 |
-| `parser/parser-decl.ts` | 388 | 声明解析（fn/struct/enum/impl/trait/effect/extern/use） |
-| `parser/parser-expr.ts` | 875 | Pratt 表达式解析 + 类型表达式 + 模式解析 |
+1 个 Ring 源文件（`compiler/ring/`）：
 
-**风险**：低-中。parser-expr 875 行是本 batch 最大文件，但 Pratt 解析模式重复度高。
-**验证**：对比 TS parser 和 Ring parser 对所有 E2E 用例产出的 AST（序列化后 diff）。
+| Ring 文件 | 行数 | TS 原文件 | 状态 |
+|-----------|------|-----------|------|
+| `parser.ring` | ~1080 | `parser-ctx.ts` (102) + `parser.ts` (472) + `parser-decl.ts` (388) + `parser-expr.ts` (875) | ✅ |
+| `main.ring` | ~175 | （集成 smoke test，已更新） | ✅ |
+
+4 个 TS 文件合并为 1 个 Ring 文件（ParserCtx interface 不需要——循环依赖问题在单文件中消失）。
+
+**翻译模式补充**：
+- TS `const enum Prec` → Int 常量函数（`PREC_NONE() -> Int { 0 }` 等），避免 Ord derive 复杂性
+- `tok.value as BinOp` → `str_to_binop(tok.value)` 转换函数（Ring BinOp 是 enum 不是 string）
+- `parseInt`/`parseFloat` → Ring `parse_int`/`parse_float` + `unwrap_or`
+- `expr.span` 直接访问 → `expr_span(e)` 辅助函数（Ring enum 不支持跨变体字段访问）
+- `throw new Error("parse_decl_failed")` → `parse_decl` 返回 `Decl?`（none 表示失败），parse_program 用 match 恢复
+- `try { ... } catch { restore }` → save/restore 位置模式（try_parse_type_args）
+- `throw new CompileError(...)` → `panic("Compilation failed")`
+- 递归类型空列表（`List<TypeExpr>`）→ `[0].clear().map(fn(i) -> TypeExpr { panic("unreachable") })` 利用 `panic -> Never` 底类型
+
+**翻译中发现并修复的编译器问题**：
+1. **`panic` 返回类型**（`std/io.ring`）— 从 `-> Unit` 改为 `-> Never`（底类型），使 `panic` 可用于任何需要特定类型的位置
+2. **限定变体名查找 bug**（`infer-expr.ts` + `infer-ctx.ts`）— `EnumA::Foo` 应查找 EnumA 中的 Foo，而非全局 `variant_to_enum` map。修复 3 处：struct_lit 推断、constructor pattern、named_constructor pattern
+3. **变体名冲突**（`ast.ring`）— `UseImport::Named` 与 `TypeExpr::Named` 冲突 → 改名 `NamedItems`；`StringInterpPart::Literal` 与 `Pattern::Literal` 冲突 → 改名 `LitPart`/`ExprPart`
 
 ### Batch 4: 类型检查（~5,703 行，~4-6 天，最高风险）
 

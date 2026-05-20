@@ -52,16 +52,19 @@ export function infer_ident(ctx: InferCtx, name: string, span: Span, subst: Subs
   const t = ctx.env.instantiate(scheme);
 
   let resolved_name: string | undefined;
-  const enum_name = ctx.env.variant_to_enum.get(name);
-  if (enum_name) {
-    // Validate qualifier if present
-    if (qualifier && qualifier !== enum_name) {
-      type_error(ctx, E.E0301, `Variant '${name}' belongs to enum '${enum_name}', not '${qualifier}'`, span, { kind: "type_mismatch", expected: enum_name, actual: qualifier });
+  let enum_name: string | undefined;
+  if (qualifier) {
+    const enum_def = ctx.env.enums.get(qualifier);
+    if (enum_def && enum_def.variants.find(v => v.name === name)) {
+      enum_name = qualifier;
+    } else {
+      type_error(ctx, E.E0201, `'${qualifier}' has no variant '${name}'`, span, { kind: "undefined_variable", name });
     }
+  } else {
+    enum_name = ctx.env.variant_to_enum.get(name);
+  }
+  if (enum_name) {
     resolved_name = variant_js_name(enum_name, name);
-  } else if (qualifier) {
-    // Qualifier present but not found in variant_to_enum — not a variant
-    type_error(ctx, E.E0201, `'${qualifier}' has no variant '${name}'`, span, { kind: "undefined_variable", name });
   }
 
   return {
@@ -604,12 +607,23 @@ export function infer_field_access(ctx: InferCtx, receiver: Expr, field: string,
 
 export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: string; value: Expr; span: Span }[], spread: Expr | undefined, span: Span, subst: Substitution, qualifier?: string): InferResult {
   // Check if this is a named enum variant construction
-  const variant_enum = ctx.env.variant_to_enum.get(name);
-  if (variant_enum) {
-    // Validate qualifier if present
-    if (qualifier && qualifier !== variant_enum) {
-      type_error(ctx, E.E0301, `Variant '${name}' belongs to enum '${variant_enum}', not '${qualifier}'`, span, { kind: "type_mismatch", expected: variant_enum, actual: qualifier });
+  let variant_enum: string | undefined;
+  if (qualifier) {
+    // When qualifier is provided, look up variant in the specified enum directly
+    const enum_def = ctx.env.enums.get(qualifier);
+    if (enum_def) {
+      const variant = enum_def.variants.find(v => v.name === name);
+      if (variant) {
+        variant_enum = qualifier;
+      }
     }
+    if (!variant_enum) {
+      type_error(ctx, E.E0201, `'${qualifier}' has no variant '${name}'`, span, { kind: "undefined_variable", name });
+    }
+  } else {
+    variant_enum = ctx.env.variant_to_enum.get(name);
+  }
+  if (variant_enum) {
     const enum_def = ctx.env.enums.get(variant_enum);
     if (enum_def) {
       const variant = enum_def.variants.find(v => v.name === name);
@@ -617,9 +631,6 @@ export function infer_struct_lit(ctx: InferCtx, name: string, fields: { name: st
         return infer_named_variant_construct(ctx, variant_enum, name, variant, enum_def, fields, spread, span, subst);
       }
     }
-  } else if (qualifier) {
-    // Qualifier present but name is not an enum variant
-    type_error(ctx, E.E0201, `'${qualifier}' has no variant '${name}'`, span, { kind: "undefined_variable", name });
   }
 
   const struct_def = ctx.env.structs.get(name);

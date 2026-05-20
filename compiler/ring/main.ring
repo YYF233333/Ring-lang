@@ -6,6 +6,7 @@ use builtin_methods::{STR_METHODS, LIST_HOF_METHODS}
 use diagnostics::{Severity, DiagnosticContext, Diagnostic, CollectingSink, new_collecting_sink, make_diagnostic, make_diag, severity_to_str}
 use formatter::{format_human, format_llm}
 use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
+use parser::{parse}
 
 fn main() {
     // Test types module
@@ -112,6 +113,66 @@ fn main() {
     var lex3 = new_lexer("x >= 0 && y != 1", "<test>", new_collecting_sink())
     let tokens3 = lex3.tokenize()
     print("operator token count: ${tokens3.len().to_str()}")
+
+    // ============================================================
+    // Batch 3: Parser
+    // ============================================================
+
+    // Test parser — parse a simple function
+    let prog = parse("fn main() { let x = 42 }", "<test>")
+    assert(prog.decls.len() == 1, "one decl")
+    match prog.decls.get(0) {
+        some(decl) => match decl {
+            Decl::Fn { name, params, .. } => {
+                assert(name == "main", "fn name is main")
+                assert(params.len() == 0, "main has no params")
+            },
+            _ => panic("expected fn decl")
+        },
+        none => panic("no decls")
+    }
+    print("parser: simple fn ok")
+
+    // Test parser — parse struct
+    let prog2 = parse("struct Point { x: Int, y: Int }", "<test>")
+    assert(prog2.decls.len() == 1, "one struct decl")
+    match prog2.decls.get(0) {
+        some(decl) => match decl {
+            Decl::Struct { name, fields, .. } => {
+                assert(name == "Point", "struct name is Point")
+                assert(fields.len() == 2, "Point has 2 fields")
+            },
+            _ => panic("expected struct decl")
+        },
+        none => panic("no decls")
+    }
+    print("parser: struct ok")
+
+    // Test parser — parse enum
+    let prog3 = parse("enum Color { Red, Green, Blue }", "<test>")
+    assert(prog3.decls.len() == 1, "one enum decl")
+    match prog3.decls.get(0) {
+        some(decl) => match decl {
+            Decl::Enum { name, variants, .. } => {
+                assert(name == "Color", "enum name is Color")
+                assert(variants.len() == 3, "Color has 3 variants")
+            },
+            _ => panic("expected enum decl")
+        },
+        none => panic("no decls")
+    }
+    print("parser: enum ok")
+
+    // Test parser — precedence and operators
+    let prog4 = parse("fn f() { 1 + 2 * 3 }", "<test>")
+    assert(prog4.decls.len() == 1, "one decl for expr")
+    print("parser: operators ok")
+
+    // Test parser — use declaration
+    let prog5 = parse("use foo::{bar, baz}\nfn main() {}", "<test>")
+    assert(prog5.uses.len() == 1, "one use decl")
+    assert(prog5.decls.len() == 1, "one fn decl after use")
+    print("parser: use decl ok")
 
     print("All modules linked successfully!")
 }

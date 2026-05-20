@@ -119,8 +119,8 @@ pub struct EffectHandler {
 }
 
 pub enum StringInterpPart {
-    Literal(Str),
-    Expression(Expr)
+    LitPart(Str),
+    ExprPart(Expr)
 }
 
 // ============================================================
@@ -193,7 +193,7 @@ pub struct NamedImport {
 }
 
 pub enum UseImport {
-    Named { names: List<NamedImport> },
+    NamedItems { names: List<NamedImport> },
     Module
 }
 
