@@ -69,8 +69,6 @@ fn empty_fields() -> List<StructField> {
     let x: List<StructField> = [dummy]; x.clear(); x
 }
 
-// Helper for string equality in nested closures (workaround: == in nested lambdas)
-fn str_eq(a: Str, b: Str) -> Bool { a == b }
 
 pub fn INT() -> Type { Type::IntType }
 pub fn FLOAT() -> Type { Type::FloatType }
@@ -340,7 +338,7 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
                 }
                 if !tails_ok { return false }
                 fa.all(fn(f) {
-                    fb.any(fn(bf) { str_eq(bf.name, f.name) && types_equal(f.ty, bf.ty) })
+                    fb.any(fn(bf) { bf.name == f.name && types_equal(f.ty, bf.ty) })
                 })
             },
             _ => false

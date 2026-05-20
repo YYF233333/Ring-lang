@@ -422,10 +422,27 @@ export function infer_method_call(ctx: InferCtx, receiver: Expr, method: string,
     }
   }
 
-  // Infer arguments
+  // Early receiver-method unification: propagate element type before arg inference
+  // so lambda callbacks get concrete types via bidirectional checking.
+  if (method_type && method_type.kind === "fn" && method_type.params.length > 0) {
+    s = unify_at(ctx, recv_r.hexpr.type, method_type.params[0], s, span);
+  }
+
+  // Infer arguments — for lambda args, propagate expected param types
   const hargs: HExpr[] = [];
-  for (const arg of args) {
-    const ar = ctx.infer_expr(arg, s);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    let ar: InferResult;
+    if (arg.kind === "lambda" && method_type?.kind === "fn" && i + 1 < method_type.params.length) {
+      const expected = apply(s, method_type.params[i + 1]);
+      if (expected.kind === "fn") {
+        ar = infer_lambda(ctx, arg.params, arg.body, arg.span, s, expected.params);
+      } else {
+        ar = ctx.infer_expr(arg, s);
+      }
+    } else {
+      ar = ctx.infer_expr(arg, s);
+    }
     s = ar.subst;
     [effects, s] = merge_effects(ctx, effects, ar.effects, s);
     hargs.push(ar.hexpr);
@@ -433,9 +450,6 @@ export function infer_method_call(ctx: InferCtx, receiver: Expr, method: string,
 
   let result_type: Type;
   if (method_type && method_type.kind === "fn") {
-    if (method_type.params.length > 0) {
-      s = unify_at(ctx, recv_r.hexpr.type, method_type.params[0], s, span);
-    }
     for (let i = 0; i < hargs.length && i + 1 < method_type.params.length; i++) {
       s = unify_at(ctx, hargs[i].type, method_type.params[i + 1], s, span);
     }
@@ -1101,13 +1115,18 @@ export function infer_handle(ctx: InferCtx, body: Expr, handlers: { effect_name:
 // infer_lambda
 // ============================================================
 
-export function infer_lambda(ctx: InferCtx, params: Param[], body: Expr, span: Span, subst: Substitution): InferResult {
+export function infer_lambda(ctx: InferCtx, params: Param[], body: Expr, span: Span, subst: Substitution, expected_param_types?: Type[]): InferResult {
   ctx.env.push_scope();
+  let s = subst;
 
   const hparams: HParam[] = [];
   const param_types: Type[] = [];
-  for (const p of params) {
+  for (let i = 0; i < params.length; i++) {
+    const p = params[i];
     const pt = p.type_annotation ? resolve_type_expr(ctx, p.type_annotation) : ctx.env.fresh_var();
+    if (!p.type_annotation && expected_param_types && i < expected_param_types.length) {
+      s = unify_at(ctx, pt, expected_param_types[i], s, span);
+    }
     ctx.env.bind_mono(p.name, pt);
     const lam_scheme = ctx.env.lookup(p.name)!;
     ctx.env.record_def_span(lam_scheme.def_id!, p.span);
@@ -1120,11 +1139,11 @@ export function infer_lambda(ctx: InferCtx, params: Param[], body: Expr, span: S
 
   let body_r!: InferResult;
   try {
-    body_r = ctx.infer_expr(body, subst);
+    body_r = ctx.infer_expr(body, s);
   } finally {
     ctx.env.pop_scope();
   }
-  const s = body_r.subst;
+  s = body_r.subst;
 
   const fn_type: FnType = {
     kind: "fn",

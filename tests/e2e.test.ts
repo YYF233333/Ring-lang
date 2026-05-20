@@ -166,6 +166,9 @@ const cases: TestCase[] = [
   // Debug trait: debug string representation
   { file: "debug_basic.ring", expected: "debug_basic: all tests passed\n" },
   { file: "debug_generic.ring", expected: "debug_generic: all tests passed\n" },
+
+  // Regression: == in nested closures (bidirectional type propagation)
+  { file: "nested-closure-eq.ring", expected: "nested closure eq: all passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: 3 }, () => {
