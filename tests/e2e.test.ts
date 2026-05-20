@@ -272,6 +272,7 @@ const module_cases: ModuleTestCase[] = [
   { dir: "cross_effect", expected: "5\n-1\n" },
   { dir: "cross_trait", expected: "Rex\n" },
   { dir: "extern_fn", expected: "100\n2.5\n42\n" },
+  { dir: "esm_verify", expected: "hello, world\n3\n" },
 ];
 
 const MODULES_DIR = path.resolve(REPO_ROOT, "tests/cases/modules");
@@ -391,6 +392,34 @@ function build_and_read_js(ring_path: string): string {
   return content;
 }
 
+function build_and_read_esm_dir(ring_path: string): Map<string, string> {
+  const project_dir = path.dirname(ring_path);
+  const dist_dir = path.join(project_dir, "dist");
+  if (fs.existsSync(dist_dir)) fs.rmSync(dist_dir, { recursive: true, force: true });
+
+  execSync(`node "${CLI_PATH}" build "${ring_path}"`, {
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: 15000,
+  });
+
+  const files = new Map<string, string>();
+  function walk(dir: string) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.name.endsWith(".js")) {
+        const rel = path.relative(dist_dir, full);
+        files.set(rel, fs.readFileSync(full, "utf-8"));
+      }
+    }
+  }
+  walk(dist_dir);
+  fs.rmSync(dist_dir, { recursive: true, force: true });
+  return files;
+}
+
 describe("determinism: single-file", { concurrency: 3 }, () => {
   for (const tc of cases) {
     test(`build ${tc.file} is deterministic`, () => {
@@ -406,9 +435,53 @@ describe("determinism: multi-file modules", { concurrency: 3 }, () => {
   for (const tc of module_cases) {
     test(`build modules/${tc.dir} is deterministic`, () => {
       const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
-      const js1 = build_and_read_js(mainFile);
-      const js2 = build_and_read_js(mainFile);
-      assert.strictEqual(js1, js2);
+      const js1 = build_and_read_esm_dir(mainFile);
+      const js2 = build_and_read_esm_dir(mainFile);
+      assert.strictEqual(js1.size, js2.size, "different number of output files");
+      for (const [file, content] of js1) {
+        assert.ok(js2.has(file), `file ${file} missing in second build`);
+        assert.strictEqual(content, js2.get(file), `content differs: ${file}`);
+      }
     });
   }
+});
+
+describe("e2e: ESM output structure", () => {
+  test("ring build produces dist/ with separate .js files", () => {
+    const mainFile = path.join(MODULES_DIR, "esm_verify", "main.ring");
+    const dist_dir = path.join(MODULES_DIR, "esm_verify", "dist");
+
+    if (fs.existsSync(dist_dir)) fs.rmSync(dist_dir, { recursive: true, force: true });
+
+    execSync(`node "${CLI_PATH}" build "${mainFile}"`, {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 15000,
+    });
+
+    // Verify structure
+    assert.ok(fs.existsSync(path.join(dist_dir, "__ring_runtime.js")), "runtime.js exists");
+    assert.ok(fs.existsSync(path.join(dist_dir, "main.js")), "main.js exists");
+    assert.ok(fs.existsSync(path.join(dist_dir, "lib.js")), "lib.js exists");
+
+    // Verify ESM imports
+    const main_js = fs.readFileSync(path.join(dist_dir, "main.js"), "utf-8");
+    assert.ok(main_js.includes("import "), "main.js has import statements");
+    assert.ok(main_js.includes("__ring_runtime.js"), "main.js imports runtime");
+    assert.ok(main_js.includes("from \"./lib.js\""), "main.js imports lib");
+
+    const lib_js = fs.readFileSync(path.join(dist_dir, "lib.js"), "utf-8");
+    assert.ok(lib_js.includes("export {"), "lib.js has export statement");
+    assert.ok(lib_js.includes("greet"), "lib.js exports greet");
+
+    // Verify it runs correctly via node
+    const output = execSync(`node "${path.join(dist_dir, "main.js")}"`, {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 15000,
+    });
+    assert.strictEqual(output, "hello, world\n3\n");
+
+    fs.rmSync(dist_dir, { recursive: true, force: true });
+  });
 });
