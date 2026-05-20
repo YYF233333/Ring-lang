@@ -139,16 +139,16 @@
 2. **限定变体名查找 bug**（`infer-expr.ts` + `infer-ctx.ts`）— `EnumA::Foo` 应查找 EnumA 中的 Foo，而非全局 `variant_to_enum` map。修复 3 处：struct_lit 推断、constructor pattern、named_constructor pattern
 3. **变体名冲突**（`ast.ring`）— `UseImport::Named` 与 `TypeExpr::Named` 冲突 → 改名 `NamedItems`；`StringInterpPart::Literal` 与 `Pattern::Literal` 冲突 → 改名 `LitPart`/`ExprPart`
 
-### Batch 4: 类型检查（~5,703 行，~4-6 天，最高风险）
+### Batch 4: 类型检查（~5,295 行，~4-6 天，最高风险）
 
 内部严格按依赖链串行翻译，每个子阶段翻译后立即全量 E2E diff：
 
 | 子阶段 | 文件 | 行数 | 翻译要点 |
 |--------|------|------|----------|
-| 4a | `checker/env.ts` | 192 | TypeEnv class → struct + impl + var self |
-| 4b | `checker/builtins.ts` | 3 | Re-export shell |
-| 4b | `checker/builtins-core.ts` | 372 | 核心内置注册（effects/Cell/Option/Eq/Clone/Ord/Debug traits） |
-| 4b | `checker/builtins-hof.ts` | 239 | HOF 方法注册（List/Map/Set/Option 的 effect 多态方法） |
+| 4a | `checker/env.ts` | 161 | TypeEnv class → struct + impl + var self ✅ |
+| 4b | `checker/builtins.ts` | 3 | Re-export shell ✅ |
+| 4b | `checker/builtins-core.ts` | 336 | 核心内置注册（effects/Cell/Option/Eq/Clone/Ord/Debug traits） ✅ |
+| 4b | `checker/builtins-hof.ts` | 224 | HOF 方法注册（List/Map/Set/Option 的 effect 多态方法） ✅ |
 | 4c | `checker/unify.ts` | 549 | HM unification + row unification（**最高风险**） |
 | 4d | `checker/infer-ctx.ts` | 545 | InferCtx interface → trait + 16 个 helper 函数 |
 | 4d | `checker/infer.ts` | 554 | InferEngine 薄壳 + check/infer_expr 调度 |
@@ -164,6 +164,16 @@
 **风险**：高。unify.ts 和 infer-expr.ts 是核心算法，任何翻译错误会导致类型推断结果偏差。
 **串行原因**：checker 内部模块强耦合，env→builtins→unify→infer→derive→checker 有严格依赖链。
 **验证**：每个子阶段翻译后立即做全量 E2E diff，不要累积到 batch 结束。
+
+**翻译模式补充（4a+4b）**：
+- TS `TypeScheme.type` → Ring `TypeScheme.ty`（`type` 为关键字，同 Batch 1-2 模式）
+- TS `TypeScheme.bounds[].type_var` → Ring `SchemeBound`（避免 ast.ring `TypeBound` + hir.ring `TraitBound` 命名冲突）
+- TS `EffectDef.built_in_kind?: "io"|"fail"|"mut"` → Ring `BuiltInKind?` 枚举（`BkIo`/`BkFail`/`BkMut`）
+- TS block scoping `{ const t = ...; ... }` 在 Ring 中无效（`{ let x = ... }` 不创建新作用域）→ 同函数内多段注册必须用 `var` + 重赋值，或拆分为独立函数
+- `env.fresh_var()` 返回 `Type`（非 TS 的 `TypeVar`）→ 用 `fresh_var_id()` + 手动构造 `Type::TypeVar { id, name: none }` 分离 id 和类型值
+- `apply_subst` 临时放在 env.ring（4c unify.ring 创建后整合）
+- `Map.set()` → `Map.insert()`，`new Map()` → `map_new()`，`new Set()` → `set_new()`
+- `map_new()`/`set_new()` 支持从 struct 字段上下文推断泛型参数（与 `[]` 空列表不同）
 
 ### Batch 5: 代码生成 + 模块系统 + CLI（~3,315 行，~2-3 天）
 

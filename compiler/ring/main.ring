@@ -7,6 +7,8 @@ use diagnostics::{Severity, DiagnosticContext, Diagnostic, CollectingSink, new_c
 use formatter::{format_human, format_llm}
 use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
 use parser::{parse}
+use env::{SchemeBound, TypeScheme, mono, StructDef, EnumDef, EffectOpDef, BuiltInKind, EffectDef, TraitMethodDef, TraitDef, ImplEntry, TypeAliasDef, FnBound, Scope, TypeEnv, new_type_env, apply_subst, apply_subst_row}
+use builtins::{register_builtins, register_hof_intrinsics, get_or_create_methods}
 
 fn main() {
     // Test types module
@@ -173,6 +175,110 @@ fn main() {
     assert(prog5.uses.len() == 1, "one use decl")
     assert(prog5.decls.len() == 1, "one fn decl after use")
     print("parser: use decl ok")
+
+    // ============================================================
+    // Batch 4a: TypeEnv
+    // ============================================================
+
+    // Test TypeScheme + mono
+    let ts = mono(INT())
+    assert(ts.type_vars.len() == 0, "mono has no type_vars")
+    assert(ts.bounds.len() == 0, "mono has no bounds")
+    assert(ts.def_id.is_none(), "mono has no def_id")
+    print("env: mono ok")
+
+    // Test TypeEnv creation
+    var env = new_type_env()
+    assert(env.scopes.len() == 1, "initial scope count")
+    assert(env.current_var_id() == 0, "initial var id")
+    print("env: new_type_env ok")
+
+    // Test fresh_var
+    let v1 = env.fresh_var()
+    let v2 = env.fresh_var()
+    assert(env.current_var_id() == 2, "var id after 2 fresh")
+    print("env: fresh_var ok")
+
+    // Test scope management
+    env.push_scope()
+    assert(env.scopes.len() == 2, "2 scopes after push")
+    env.bind_mono("x", INT())
+    match env.lookup("x") {
+        some(ts_x) => print("env: lookup x ok"),
+        none => panic("lookup x failed")
+    }
+    env.pop_scope()
+    assert(env.scopes.len() == 1, "1 scope after pop")
+    assert(env.lookup("x").is_none(), "x not found after pop")
+    print("env: scope management ok")
+
+    // Test instantiate with type vars
+    let tv_id = env.fresh_var_id()
+    let scheme = TypeScheme {
+        ty: Type::FnType {
+            params: [Type::TypeVar { id: tv_id, name: none }],
+            return_type: Type::TypeVar { id: tv_id, name: none },
+            effects: EMPTY_ROW()
+        },
+        type_vars: [tv_id],
+        bounds: [SchemeBound { type_var: tv_id, trait_name: "Eq" }],
+        def_id: none
+    }
+    let instantiated = env.instantiate(scheme)
+    match instantiated {
+        Type::FnType { params, .. } => print("env: instantiate ok"),
+        _ => panic("instantiate should return FnType")
+    }
+
+    // Test apply_subst
+    let subst: Map<Int, Type> = map_new()
+    subst.insert(99, INT())
+    let substituted = apply_subst(subst, Type::TypeVar { id: 99, name: none })
+    match substituted {
+        Type::IntType => print("env: apply_subst ok"),
+        _ => panic("apply_subst failed")
+    }
+
+    // ============================================================
+    // Batch 4b: Builtins registration
+    // ============================================================
+
+    var env2 = new_type_env()
+    register_builtins(env2)
+
+    // Verify effects registered
+    assert(env2.effects.contains_key("io"), "io effect registered")
+    assert(env2.effects.contains_key("fail"), "fail effect registered")
+    print("builtins: effects ok")
+
+    // Verify Cell struct registered
+    assert(env2.structs.contains_key("Cell"), "Cell struct registered")
+    print("builtins: Cell ok")
+
+    // Verify Option enum registered
+    assert(env2.enums.contains_key("Option"), "Option enum registered")
+    assert(env2.variant_to_enum.contains_key("some"), "some variant registered")
+    assert(env2.variant_to_enum.contains_key("none"), "none variant registered")
+    print("builtins: Option ok")
+
+    // Verify traits registered
+    assert(env2.traits.contains_key("Eq"), "Eq trait registered")
+    assert(env2.traits.contains_key("Clone"), "Clone trait registered")
+    assert(env2.traits.contains_key("Ord"), "Ord trait registered")
+    assert(env2.traits.contains_key("Debug"), "Debug trait registered")
+    print("builtins: traits ok")
+
+    // Verify trait impls exist
+    assert(env2.trait_impls.len() > 0, "trait impls registered")
+    print("builtins: trait_impls count: ${env2.trait_impls.len().to_str()}")
+
+    // Verify HOF registration
+    register_hof_intrinsics(env2)
+    let list_methods = get_or_create_methods(env2, "List")
+    assert(list_methods.contains_key("map"), "List.map registered")
+    assert(list_methods.contains_key("filter"), "List.filter registered")
+    assert(list_methods.contains_key("fold"), "List.fold registered")
+    print("builtins: HOF ok")
 
     print("All modules linked successfully!")
 }

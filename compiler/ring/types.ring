@@ -62,9 +62,9 @@ pub struct RowMergeResult {
 }
 
 // Helper functions for typed empty lists (Ring cannot infer element type of `[]`)
-fn empty_types() -> List<Type> { let x: List<Type> = [INT()]; x.clear(); x }
-fn empty_effects() -> List<Effect> { let x: List<Effect> = [Effect::IoEffect]; x.clear(); x }
-fn empty_fields() -> List<StructField> {
+pub fn empty_types() -> List<Type> { let x: List<Type> = [INT()]; x.clear(); x }
+pub fn empty_effects() -> List<Effect> { let x: List<Effect> = [Effect::IoEffect]; x.clear(); x }
+pub fn empty_fields() -> List<StructField> {
     let dummy = StructField { name: "", ty: INT(), is_pub: false }
     let x: List<StructField> = [dummy]; x.clear(); x
 }
