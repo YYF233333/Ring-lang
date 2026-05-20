@@ -1,0 +1,200 @@
+use ast::{Span, Position}
+
+// ============================================================
+// Severity
+// ============================================================
+
+pub enum Severity {
+    SevError,
+    SevWarning,
+    SevInfo,
+    SevHint
+}
+
+pub fn severity_to_str(s: Severity) -> Str {
+    match s {
+        SevError => "error",
+        SevWarning => "warning",
+        SevInfo => "info",
+        SevHint => "hint"
+    }
+}
+
+// ============================================================
+// Diagnostic data types
+// ============================================================
+
+pub struct DiagnosticNote {
+    pub message: Str,
+    pub span: Span?
+}
+
+pub enum DiagnosticContext {
+    TypeMismatch { expected: Str, actual: Str, expression: Str? },
+    UndefinedVariable { name: Str, scope_locals: List<Str>? },
+    MissingField { field: Str, ty: Str, available: List<Str>? },
+    EffectUnhandled { eff: Str, in_function: Str? },
+    ParseError { token: Str, expected: List<Str>? },
+    PatternError { detail: Str },
+    TraitError { detail: Str },
+    OtherContext { detail: Str? }
+}
+
+pub struct Suggestion {
+    pub message: Str,
+    pub replacement: Str?,
+    pub span: Span?
+}
+
+pub struct Diagnostic {
+    pub severity: Severity,
+    pub code: Str,
+    pub message: Str,
+    pub span: Span,
+    pub notes: List<DiagnosticNote>,
+    pub context: DiagnosticContext,
+    pub suggestions: List<Suggestion>
+}
+
+// ============================================================
+// Typed empty list helpers (Ring cannot infer element type of [])
+// ============================================================
+
+fn empty_notes() -> List<DiagnosticNote> {
+    let x = [DiagnosticNote { message: "", span: none }]
+    x.clear()
+    x
+}
+
+fn empty_suggestions() -> List<Suggestion> {
+    let x = [Suggestion { message: "", replacement: none, span: none }]
+    x.clear()
+    x
+}
+
+fn dummy_span() -> Span {
+    Span {
+        file: "",
+        start: Position { line: 0, column: 0, offset: 0 },
+        end: Position { line: 0, column: 0, offset: 0 }
+    }
+}
+
+fn empty_diagnostics() -> List<Diagnostic> {
+    let x = [Diagnostic {
+        severity: Severity::SevError,
+        code: "",
+        message: "",
+        span: dummy_span(),
+        notes: empty_notes(),
+        context: DiagnosticContext::OtherContext { detail: none },
+        suggestions: empty_suggestions()
+    }]
+    x.clear()
+    x
+}
+
+// ============================================================
+// DiagnosticSink trait
+// ============================================================
+
+pub trait DiagnosticSink {
+    fn report(self, d: Diagnostic)
+    fn has_errors(self) -> Bool
+    fn get_diagnostics(self) -> List<Diagnostic>
+}
+
+// ============================================================
+// CollectingSink
+// ============================================================
+
+pub struct CollectingSink {
+    pub items: List<Diagnostic>
+}
+
+pub fn new_collecting_sink() -> CollectingSink {
+    CollectingSink { items: empty_diagnostics() }
+}
+
+impl CollectingSink {
+    pub fn report(self, d: Diagnostic) {
+        self.items.push(d)
+    }
+
+    pub fn has_errors(self) -> Bool {
+        self.items.any(fn(d: Diagnostic) -> Bool {
+            match d.severity {
+                SevError => true,
+                _ => false
+            }
+        })
+    }
+
+    pub fn diagnostics(self) -> List<Diagnostic> {
+        self.items
+    }
+
+    pub fn clear(self) {
+        self.items.clear()
+    }
+
+    pub fn save(self) -> Int {
+        self.items.len()
+    }
+
+    pub fn restore(var self, checkpoint: Int) {
+        self.items = self.items.slice(0, checkpoint)
+    }
+}
+
+impl DiagnosticSink for CollectingSink {
+    fn report(self, d: Diagnostic) {
+        self.items.push(d)
+    }
+
+    fn has_errors(self) -> Bool {
+        self.items.any(fn(d: Diagnostic) -> Bool {
+            match d.severity {
+                SevError => true,
+                _ => false
+            }
+        })
+    }
+
+    fn get_diagnostics(self) -> List<Diagnostic> {
+        self.items
+    }
+}
+
+// ============================================================
+// make_diagnostic helper
+// ============================================================
+
+pub fn make_diagnostic(
+    code: Str,
+    severity: Severity,
+    message: Str,
+    span: Span,
+    context: DiagnosticContext,
+    notes: List<DiagnosticNote>
+) -> Diagnostic {
+    Diagnostic {
+        severity: severity,
+        code: code,
+        message: message,
+        span: span,
+        notes: notes,
+        context: context,
+        suggestions: empty_suggestions()
+    }
+}
+
+pub fn make_diag(
+    code: Str,
+    severity: Severity,
+    message: Str,
+    span: Span,
+    context: DiagnosticContext
+) -> Diagnostic {
+    make_diagnostic(code, severity, message, span, context, empty_notes())
+}

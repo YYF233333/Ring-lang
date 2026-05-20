@@ -92,16 +92,26 @@
 - 空列表字面量 `[]` 类型推断有限 → 用 `fn empty_xxx() -> List<Xxx> { [] }` 辅助函数
 - `(T, T)?` 不支持 → 用 `Option<(T, T)>` 显式泛型
 
-### Batch 2: 诊断 + 词法分析（~684 行，~0.5 天）
+### Batch 2: 诊断 + 词法分析 ✅ 已完成
 
-| 文件 | 行数 | 翻译要点 |
-|------|------|----------|
-| `diagnostics/index.ts` | 81 | DiagnosticSink interface → trait，CollectingSink class → struct+impl |
-| `diagnostics/formatter.ts` | 94 | format_human / format_llm 纯函数 |
-| `parser/lexer.ts` | 509 | 字符状态机，纯函数式 |
+3 个 Ring 源文件（`compiler/ring/`）：
 
-**风险**：低。Lexer 是最大文件但逻辑简单（字符匹配 + token 产出）。
-**验证**：Lexer 可通过 token stream 对比验证。
+| Ring 文件 | 行数 | TS 原文件 | 状态 |
+|-----------|------|-----------|------|
+| `diagnostics.ring` | 170 | `diagnostics/index.ts` (81) | ✅ |
+| `formatter.ring` | 199 | `diagnostics/formatter.ts` (94) | ✅ |
+| `lexer.ring` | 477 | `parser/lexer.ts` (509) | ✅ |
+| `main.ring` | 102 | （集成 smoke test，已更新） | ✅ |
+
+**翻译模式补充**：
+- `effect` 字段名 → `eff`（Ring 关键字冲突，同 `type` → `ty` 模式）
+- TS 枚举 `TokenKind` → Ring enum 用 `Tk` 前缀避免关键字冲突（`TkFn`, `TkLet` 等）
+- `List.set(index, value)` 不可用 → pop/push 操作最后一个元素（string interpolation brace depth tracking）
+- DiagnosticSink trait 保留定义但用 CollectingSink 具体类型（无 `dyn Trait` 支持）
+- 空列表推断限制扩展确认：即使 `let x: List<T> = []` 带类型标注也无法推断，必须用 `[dummy].clear()` 模式
+- 字符范围比较（`ch >= "a"`）→ `char_code_at` + 整数比较（避免 Str 上 Ord trait 依赖）
+- `let x = expr \n next_expr` 行分隔歧义 → 用 if-else 或辅助函数代替 `return expr` / 裸表达式
+- format_llm 手工构建 JSON 字符串（Ring 枚举 `_tag` + Option 序列化与 TS 的 `kind` + undefined 省略不兼容）
 
 ### Batch 3: 语法分析（~1,837 行，~1.5 天）
 
