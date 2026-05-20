@@ -9,13 +9,15 @@ import { generate } from "./codegen/codegen.js";
 import { CollectingSink, make_diagnostic } from "./diagnostics/index.js";
 import { format_human, format_llm } from "./diagnostics/formatter.js";
 import { CompileError } from "./errors.js";
-import { compile_project } from "./modules/compiler.js";
+import { compile_project, compile_project_esm } from "./modules/compiler.js";
+import * as os from "node:os";
 
 type ErrorFormat = "human" | "llm";
 
-function parse_args(args: string[]): { command: string; file: string; debug: boolean; error_format: ErrorFormat } {
+function parse_args(args: string[]): { command: string; file: string; debug: boolean; error_format: ErrorFormat; out_dir: string } {
   let debug = false;
   let error_format: ErrorFormat = "human";
+  let out_dir = "dist";
   const positional: string[] = [];
 
   for (const arg of args) {
@@ -28,19 +30,21 @@ function parse_args(args: string[]): { command: string; file: string; debug: boo
         process.exit(1);
       }
       error_format = fmt;
+    } else if (arg.startsWith("--out-dir=")) {
+      out_dir = arg.slice("--out-dir=".length);
     } else {
       positional.push(arg);
     }
   }
 
-  return { command: positional[0] ?? "help", file: positional[1] ?? "", debug, error_format };
+  return { command: positional[0] ?? "help", file: positional[1] ?? "", debug, error_format, out_dir };
 }
 
 function usage(): void {
   console.log(`Ring-lang compiler v0.1.0
 
 Usage:
-  ring build <file.ring>    Compile to .js file
+  ring build <file.ring>    Compile to .js file(s)
   ring run <file.ring>      Compile and execute with Node.js
   ring check <file.ring>    Type-check only
   ring lsp                 Start Language Server Protocol server
@@ -49,12 +53,13 @@ Usage:
 Options:
   --debug                   Print intermediate AST/HIR/JS for debugging
   --error-format=human|llm  Error output format (default: human)
+  --out-dir=<path>          Output directory for multi-file builds (default: dist)
 `);
   process.exit(0);
 }
 
 async function main(): Promise<void> {
-  const { command, file, debug, error_format } = parse_args(process.argv.slice(2));
+  const { command, file, debug, error_format, out_dir } = parse_args(process.argv.slice(2));
 
   if (!command || command === "help") {
     usage();
@@ -94,53 +99,61 @@ async function main(): Promise<void> {
 
     // Multi-file mode: if the entry file has `use` declarations, use project compilation
     if (ast.uses.length > 0) {
-      const result = compile_project(filePath, sink);
-      if (!result.success) {
-        let diagnostics = result.diagnostics;
-        if (error_format === "llm") {
-          console.log(format_llm(diagnostics, filePath));
-        } else {
-          console.error(format_human(diagnostics, source));
-        }
-        process.exit(1);
-      }
-
-      const js = result.js;
-      if (debug) {
-        console.error("[DEBUG] Generated JS (multi-file):");
-        console.error(js);
-        console.error("");
-      }
-
       switch (command) {
-        case "check":
+        case "check": {
+          const result = compile_project(filePath, sink);
+          if (!result.success) {
+            const diagnostics = result.diagnostics;
+            if (error_format === "llm") {
+              console.log(format_llm(diagnostics, filePath));
+            } else {
+              console.error(format_human(diagnostics, source));
+            }
+            process.exit(1);
+          }
           console.log("OK");
           break;
+        }
         case "build": {
-          const outPath = filePath.replace(/\.ring$/, ".js");
-          fs.writeFileSync(outPath, js, "utf-8");
-          console.log(`Compiled: ${outPath}`);
+          const abs_out_dir = path.resolve(path.dirname(filePath), out_dir);
+          const result = compile_project_esm(filePath, abs_out_dir, sink);
+          if (!result.success) {
+            const diagnostics = result.diagnostics;
+            if (error_format === "llm") {
+              console.log(format_llm(diagnostics, filePath));
+            } else {
+              console.error(format_human(diagnostics, source));
+            }
+            process.exit(1);
+          }
+          console.log(`Compiled: ${abs_out_dir}/`);
           break;
         }
         case "run": {
-          const tmpDir = path.dirname(filePath);
-          const tmpFile = path.join(tmpDir, `.ring_tmp_${Date.now()}.js`);
-          fs.writeFileSync(tmpFile, js, "utf-8");
+          const tmp_dir = fs.mkdtempSync(path.join(os.tmpdir(), "ring_esm_"));
           try {
-            const output = execSync(`node "${tmpFile}"`, {
+            const result = compile_project_esm(filePath, tmp_dir, sink);
+            if (!result.success) {
+              const diagnostics = result.diagnostics;
+              if (error_format === "llm") {
+                console.log(format_llm(diagnostics, filePath));
+              } else {
+                console.error(format_human(diagnostics, source));
+              }
+              process.exit(1);
+            }
+            const output = execSync(`node "${result.entry_js_path}"`, {
               encoding: "utf-8",
               stdio: ["pipe", "pipe", "pipe"],
             });
-            if (output) {
-              process.stdout.write(output);
-            }
+            if (output) process.stdout.write(output);
           } catch (execErr: unknown) {
             const err = execErr as { stdout?: string; stderr?: string; status?: number };
             if (err.stdout) process.stdout.write(err.stdout);
             if (err.stderr) process.stderr.write(err.stderr);
             process.exit(err.status ?? 1);
           } finally {
-            try { fs.unlinkSync(tmpFile); } catch {}
+            fs.rmSync(tmp_dir, { recursive: true, force: true });
           }
           break;
         }
