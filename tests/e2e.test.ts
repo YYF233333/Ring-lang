@@ -135,6 +135,7 @@ const cases: TestCase[] = [
   // Recursive types (self-hosting prerequisite)
   { file: "recursive_enum.ring", expected: "recursive_enum: all tests passed\n" },
   { file: "recursive_struct.ring", expected: "recursive_struct: all tests passed\n" },
+  { file: "mutual_recursive_types.ring", expected: "Int\nfail<Int>\nFoo\n" },
   // Extra collection methods (self-hosting prerequisite)
   { file: "list_extra_methods.ring", expected: "list_extra_methods: all tests passed\n" },
   { file: "sort_by.ring", expected: "sort_by: all tests passed\n" },

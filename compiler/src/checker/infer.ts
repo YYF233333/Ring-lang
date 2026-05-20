@@ -33,7 +33,7 @@ import {
   update_fn_effects,
   resolve_type_expr, resolve_self_type,
 } from "./infer-ctx.js";
-import { register_decl, register_decl_public } from "./infer-register.js";
+import { register_decl_public, register_decls_two_phase } from "./infer-register.js";
 import {
   infer_ident, infer_bin_op, infer_unary_op,
   infer_call, infer_method_call, infer_field_access,
@@ -85,15 +85,11 @@ export class InferEngine implements InferCtx {
   // ============================================================
 
   check(program: Program): HProgram {
-    // Pass 1: register all top-level declarations (recover per decl)
-    for (const decl of program.decls) {
-      try {
-        register_decl(this, decl);
-      } catch (e) {
-        if (e instanceof CompileError) continue;
-        throw e;
-      }
-    }
+    // Pass 1: register all top-level declarations using two-phase registration.
+    // Phase 1a pre-registers all struct/enum names (empty fields/variants),
+    // then Phase 1b resolves their fields/variants — enabling mutual recursion
+    // between types (e.g. Type <-> Effect in the self-hosted compiler).
+    register_decls_two_phase(this, program.decls);
 
     // Derive pass: auto-derive Eq/Clone/Debug/Ord between Pass 1 and Pass 2
     const derived_impls = run_derive_pass(this.env);

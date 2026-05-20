@@ -4,7 +4,7 @@
 import type {
   Decl, FnDecl, StructDecl, EnumDecl, ImplDecl, EffectDecl, TraitDecl, ExternFnDecl, ExternTypeDecl, TypeAliasDecl,
 } from "../ast/index.js";
-import { assertNever } from "../errors.js";
+import { assertNever, CompileError } from "../errors.js";
 import { E } from "../diagnostics/codes.js";
 import type {
   Type, FnType,
@@ -20,6 +20,13 @@ import { type_error, resolve_type_expr, resolve_self_type } from "./infer-ctx.js
 // ============================================================
 // register_decl + register_decl_public
 // ============================================================
+
+// Deferred struct/enum registrations for two-phase type resolution.
+// Phase 1a pre-registers type names (empty fields/variants) so mutual
+// recursion between types (e.g. Type <-> Effect) resolves correctly.
+// Phase 1b fills in the actual fields/variants + variant constructors.
+interface DeferredStruct { ctx: InferCtx; decl: StructDecl; def: StructDef; fields: { name: string; type: Type; is_pub: boolean }[]; saved_tp_scope: Map<string, Type>; }
+interface DeferredEnum { ctx: InferCtx; decl: EnumDecl; def: EnumDef; variants: { name: string; fields: Type[]; field_names?: string[] }[]; type_var_ids: number[]; type_var_types: Type[]; saved_tp_scope: Map<string, Type>; }
 
 export function register_decl_public(ctx: InferCtx, decl: Decl): void {
   register_decl(ctx, decl);
@@ -61,13 +68,65 @@ export function register_decl(ctx: InferCtx, decl: Decl): void {
   }
 }
 
+// Two-phase registration for mutually recursive struct/enum types.
+// Call register_decls_two_phase instead of individual register_decl when
+// the program may contain types that reference each other (e.g. Type <-> Effect).
+export function register_decls_two_phase(ctx: InferCtx, decls: readonly Decl[]): void {
+  const deferred_structs: DeferredStruct[] = [];
+  const deferred_enums: DeferredEnum[] = [];
+
+  // Phase 1a: pre-register all struct/enum names with empty fields/variants,
+  // and register all other declarations normally.
+  for (const decl of decls) {
+    try {
+      switch (decl.kind) {
+        case "struct_decl": {
+          const d = preregister_struct(ctx, decl);
+          if (d) deferred_structs.push(d);
+          break;
+        }
+        case "enum_decl": {
+          const d = preregister_enum(ctx, decl);
+          if (d) deferred_enums.push(d);
+          break;
+        }
+        default:
+          register_decl(ctx, decl);
+          break;
+      }
+    } catch (e) {
+      if (e instanceof CompileError) continue;
+      throw e;
+    }
+  }
+
+  // Phase 1b: resolve struct fields and enum variant fields.
+  // All type names are now in scope, so mutual references resolve.
+  for (const d of deferred_structs) {
+    try {
+      complete_struct(d);
+    } catch (e) {
+      if (e instanceof CompileError) continue;
+      throw e;
+    }
+  }
+  for (const d of deferred_enums) {
+    try {
+      complete_enum(d);
+    } catch (e) {
+      if (e instanceof CompileError) continue;
+      throw e;
+    }
+  }
+}
+
 // ============================================================
 // Individual registration functions
 // ============================================================
 
-function register_struct(ctx: InferCtx, decl: StructDecl): void {
+// Pre-register struct: add name to env with empty fields, return deferred state.
+function preregister_struct(ctx: InferCtx, decl: StructDecl): DeferredStruct {
   const type_param_names = decl.type_params.map(tp => tp.name);
-
   const saved_tp_scope = new Map(ctx.type_param_scope);
   const type_param_vars: number[] = [];
   for (const tp of decl.type_params) {
@@ -75,31 +134,32 @@ function register_struct(ctx: InferCtx, decl: StructDecl): void {
     type_param_vars.push(tv.id);
     ctx.type_param_scope.set(tp.name, tv);
   }
-
-  // Pre-register with empty fields so recursive references (e.g. struct Node { children: List<Node> }) resolve.
   const fields: { name: string; type: Type; is_pub: boolean }[] = [];
-  const def: StructDef = {
-    name: decl.name,
-    type_params: type_param_names,
-    type_param_vars,
-    fields,
-  };
+  const def: StructDef = { name: decl.name, type_params: type_param_names, type_param_vars, fields };
   ctx.env.structs.set(decl.name, def);
+  // Save type_param_scope state (don't restore yet — complete_struct will use it)
+  const current_tp_scope = new Map(ctx.type_param_scope);
+  ctx.type_param_scope = saved_tp_scope;
+  return { ctx, decl, def, fields, saved_tp_scope: current_tp_scope };
+}
 
-  for (const f of decl.fields) {
-    fields.push({
+// Complete struct registration: resolve field types (all type names now in scope).
+function complete_struct(d: DeferredStruct): void {
+  const original_tp_scope = new Map(d.ctx.type_param_scope);
+  d.ctx.type_param_scope = d.saved_tp_scope;
+  for (const f of d.decl.fields) {
+    d.fields.push({
       name: f.name,
-      type: resolve_type_expr(ctx, f.type_annotation),
+      type: resolve_type_expr(d.ctx, f.type_annotation),
       is_pub: f.is_pub,
     });
   }
-
-  ctx.type_param_scope = saved_tp_scope;
+  d.ctx.type_param_scope = original_tp_scope;
 }
 
-function register_enum(ctx: InferCtx, decl: EnumDecl): void {
+// Pre-register enum: add name to env with empty variants, return deferred state.
+function preregister_enum(ctx: InferCtx, decl: EnumDecl): DeferredEnum {
   const type_param_names = decl.type_params.map(tp => tp.name);
-
   const saved_tp_scope = new Map(ctx.type_param_scope);
   const type_var_ids: number[] = [];
   const type_var_types: Type[] = [];
@@ -109,29 +169,30 @@ function register_enum(ctx: InferCtx, decl: EnumDecl): void {
     type_var_types.push(tv);
     ctx.type_param_scope.set(tp.name, tv);
   }
-
-  // Pre-register with empty variants so recursive references (e.g. enum Expr { BinOp { left: Expr } }) resolve.
-  // The variants array is shared by reference — pushes below are visible to all EnumType objects.
   const variants: { name: string; fields: Type[]; field_names?: string[] }[] = [];
-  const def: EnumDef = {
-    name: decl.name,
-    type_params: type_param_names,
-    type_param_vars: type_var_ids,
-    variants,
-  };
+  const def: EnumDef = { name: decl.name, type_params: type_param_names, type_param_vars: type_var_ids, variants };
   ctx.env.enums.set(decl.name, def);
+  const current_tp_scope = new Map(ctx.type_param_scope);
+  ctx.type_param_scope = saved_tp_scope;
+  return { ctx, decl, def, variants, type_var_ids, type_var_types, saved_tp_scope: current_tp_scope };
+}
 
-  for (const v of decl.variants) {
+// Complete enum registration: resolve variant field types + register variant constructors.
+function complete_enum(d: DeferredEnum): void {
+  const original_tp_scope = new Map(d.ctx.type_param_scope);
+  d.ctx.type_param_scope = d.saved_tp_scope;
+
+  for (const v of d.decl.variants) {
     if (v.named_fields && v.named_fields.length > 0) {
-      variants.push({
+      d.variants.push({
         name: v.name,
-        fields: v.named_fields.map(f => resolve_type_expr(ctx, f.type_expr)),
+        fields: v.named_fields.map(f => resolve_type_expr(d.ctx, f.type_expr)),
         field_names: v.named_fields.map(f => f.name),
       });
     } else {
-      variants.push({
+      d.variants.push({
         name: v.name,
-        fields: v.fields.map(f => resolve_type_expr(ctx, f)),
+        fields: v.fields.map(f => resolve_type_expr(d.ctx, f)),
       });
     }
   }
@@ -139,25 +200,24 @@ function register_enum(ctx: InferCtx, decl: EnumDecl): void {
   // Register variant constructors as functions
   const enum_type: Type = {
     kind: "enum",
-    name: decl.name,
-    type_params: type_var_types,
-    variants: variants,
+    name: d.decl.name,
+    type_params: d.type_var_types,
+    variants: d.variants,
   };
 
-  for (const variant of variants) {
-    ctx.env.variant_to_enum.set(variant.name, decl.name);
+  for (const variant of d.variants) {
+    d.ctx.env.variant_to_enum.set(variant.name, d.decl.name);
     if (variant.field_names) {
-      // Named-field variants use struct-literal construction syntax, not function constructors
-      if (type_var_ids.length > 0) {
-        ctx.env.bind(variant.name, { type: enum_type, type_vars: type_var_ids, bounds: [] });
+      if (d.type_var_ids.length > 0) {
+        d.ctx.env.bind(variant.name, { type: enum_type, type_vars: d.type_var_ids, bounds: [] });
       } else {
-        ctx.env.bind_mono(variant.name, enum_type);
+        d.ctx.env.bind_mono(variant.name, enum_type);
       }
     } else if (variant.fields.length === 0) {
-      if (type_var_ids.length > 0) {
-        ctx.env.bind(variant.name, { type: enum_type, type_vars: type_var_ids, bounds: [] });
+      if (d.type_var_ids.length > 0) {
+        d.ctx.env.bind(variant.name, { type: enum_type, type_vars: d.type_var_ids, bounds: [] });
       } else {
-        ctx.env.bind_mono(variant.name, enum_type);
+        d.ctx.env.bind_mono(variant.name, enum_type);
       }
     } else {
       const fn_type: FnType = {
@@ -166,15 +226,26 @@ function register_enum(ctx: InferCtx, decl: EnumDecl): void {
         return_type: enum_type,
         effects: EMPTY_ROW,
       };
-      if (type_var_ids.length > 0) {
-        ctx.env.bind(variant.name, { type: fn_type, type_vars: type_var_ids, bounds: [] });
+      if (d.type_var_ids.length > 0) {
+        d.ctx.env.bind(variant.name, { type: fn_type, type_vars: d.type_var_ids, bounds: [] });
       } else {
-        ctx.env.bind_mono(variant.name, fn_type);
+        d.ctx.env.bind_mono(variant.name, fn_type);
       }
     }
   }
 
-  ctx.type_param_scope = saved_tp_scope;
+  d.ctx.type_param_scope = original_tp_scope;
+}
+
+// Single-declaration registration (backward compat): pre-register + immediately complete.
+function register_struct(ctx: InferCtx, decl: StructDecl): void {
+  const d = preregister_struct(ctx, decl);
+  complete_struct(d);
+}
+
+function register_enum(ctx: InferCtx, decl: EnumDecl): void {
+  const d = preregister_enum(ctx, decl);
+  complete_enum(d);
 }
 
 function register_effect(ctx: InferCtx, decl: EffectDecl): void {
