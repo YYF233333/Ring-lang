@@ -2,13 +2,16 @@
 // Resolves module graph → parses all → checks in topo order → codegen → bundle
 
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { Parser } from "../parser/parser.js";
 import { check_module } from "../checker/checker.js";
 import { generate, safe_ident, CodegenOptions } from "../codegen/codegen.js";
+import { RUNTIME_EXPORT_NAMES, runtime_esm_code } from "../codegen/runtime.js";
 import { CollectingSink, DiagnosticSink, Diagnostic, make_diagnostic } from "../diagnostics/index.js";
 import { Program } from "../ast/index.js";
 import { HProgram } from "../hir/index.js";
 import { build_module_graph, module_key, module_prefix } from "./resolver.js";
+import type { ModuleGraph } from "./resolver.js";
 import { ModuleExports, extract_exports } from "./exports.js";
 import { CompileError } from "../errors.js";
 import { E } from "../diagnostics/codes.js";
@@ -19,7 +22,27 @@ export interface CompileProjectResult {
   success: boolean;
 }
 
-export function compile_project(entry_file: string, sink: DiagnosticSink): CompileProjectResult {
+export interface EsmCompileResult {
+  success: boolean;
+  diagnostics: Diagnostic[];
+  entry_js_path: string;
+}
+
+// ============================================================
+// Shared resolve → parse → check pipeline
+// ============================================================
+
+interface CompilePhaseResult {
+  graph: ModuleGraph;
+  module_asts: Map<string, Program>;
+  module_hirs: Map<string, HProgram>;
+  module_exports_map: Map<string, ModuleExports>;
+}
+
+function compile_phases(
+  entry_file: string,
+  sink: DiagnosticSink,
+): CompilePhaseResult | null {
   // Step 1: Build dependency graph
   const graph_result = build_module_graph(entry_file);
   if ("error" in graph_result) {
@@ -30,7 +53,7 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
       { file: entry_file, start: { line: 1, column: 0, offset: 0 }, end: { line: 1, column: 0, offset: 0 } },
       { kind: "other", detail: graph_result.error },
     ));
-    return { js: "", diagnostics: [...sink.diagnostics()], success: false };
+    return null;
   }
 
   const graph = graph_result;
@@ -45,22 +68,17 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
     const mod_sink = new CollectingSink();
     try {
       const ast = Parser.parse(source, mod.file_path, mod_sink);
-      // Forward any parser warnings/info to the main sink
       for (const d of mod_sink.diagnostics()) {
-        if (d.severity === "error") {
-          sink.report(d);
-        }
+        if (d.severity === "error") sink.report(d);
       }
-      if (mod_sink.has_errors()) {
-        return { js: "", diagnostics: [...sink.diagnostics()], success: false };
-      }
+      if (mod_sink.has_errors()) return null;
       module_asts.set(key, ast);
     } catch (e) {
       for (const d of mod_sink.diagnostics()) sink.report(d);
       if (mod_sink.diagnostics().length === 0) {
         console.error(`[ring] warning: module ${mod.path_segments.join("::")} failed unexpectedly: ${e instanceof Error ? e.message : e}`);
       }
-      return { js: "", diagnostics: [...sink.diagnostics()], success: false };
+      return null;
     }
   }
 
@@ -68,7 +86,6 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
   for (const key of graph.topo_order) {
     const ast = module_asts.get(key)!;
     const mod_sink = new CollectingSink();
-
     const deps = graph.dependencies.get(key) ?? [];
     const dep_exports: ModuleExports[] = deps
       .map(dk => module_exports_map.get(dk))
@@ -76,14 +93,11 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
 
     try {
       const { program: hir, env } = check_module(ast, dep_exports, mod_sink);
-
       if ([...mod_sink.diagnostics()].some(d => d.severity === "error")) {
         for (const d of mod_sink.diagnostics()) sink.report(d);
-        return { js: "", diagnostics: [...sink.diagnostics()], success: false };
+        return null;
       }
-
       module_hirs.set(key, hir);
-
       const mod = graph.modules.get(key)!;
       const prefix = module_prefix(mod.path_segments);
       const exports = extract_exports(key, prefix, ast, hir, env);
@@ -95,9 +109,24 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
           if (![...sink.diagnostics()].includes(d)) sink.report(d);
         }
       }
-      return { js: "", diagnostics: [...sink.diagnostics()], success: false };
+      return null;
     }
   }
+
+  return { graph, module_asts, module_hirs, module_exports_map };
+}
+
+// ============================================================
+// Bundle mode (existing behavior)
+// ============================================================
+
+export function compile_project(entry_file: string, sink: DiagnosticSink): CompileProjectResult {
+  const phases = compile_phases(entry_file, sink);
+  if (!phases) {
+    return { js: "", diagnostics: [...sink.diagnostics()], success: false };
+  }
+
+  const { graph, module_asts, module_hirs, module_exports_map } = phases;
 
   // Step 4: Generate JS bundle
   const entry_key = module_key(graph.entry.path_segments);
@@ -246,4 +275,191 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
     diagnostics: [...sink.diagnostics()],
     success: true,
   };
+}
+
+// ============================================================
+// ESM multi-file output mode
+// ============================================================
+
+export function compile_project_esm(
+  entry_file: string,
+  out_dir: string,
+  sink: DiagnosticSink,
+): EsmCompileResult {
+  const phases = compile_phases(entry_file, sink);
+  if (!phases) {
+    return { success: false, diagnostics: [...sink.diagnostics()], entry_js_path: "" };
+  }
+
+  const { graph, module_asts, module_hirs, module_exports_map } = phases;
+  const entry_key = module_key(graph.entry.path_segments);
+  const project_root = path.dirname(path.resolve(entry_file));
+
+  fs.mkdirSync(out_dir, { recursive: true });
+
+  // Write __ring_runtime.js
+  const runtime_path = path.join(out_dir, "__ring_runtime.js");
+  fs.writeFileSync(runtime_path, runtime_esm_code(), "utf-8");
+
+  let entry_js_path = "";
+
+  for (const key of graph.topo_order) {
+    const mod = graph.modules.get(key)!;
+    const hir = module_hirs.get(key)!;
+    const ast = module_asts.get(key)!;
+
+    // Compute this module's output path
+    const mod_relative = path.relative(project_root, mod.file_path).replace(/\.ring$/, ".js");
+    const mod_out_path = path.join(out_dir, mod_relative);
+    const mod_out_dir = path.dirname(mod_out_path);
+    fs.mkdirSync(mod_out_dir, { recursive: true });
+
+    // Compute relative path from this module to __ring_runtime.js
+    const depth = path.relative(out_dir, mod_out_dir).split(path.sep).filter(Boolean).length;
+    const runtime_rel = (depth === 0 ? "./" : "../".repeat(depth)) + "__ring_runtime.js";
+
+    // Build runtime import
+    const runtime_import = `import { ${RUNTIME_EXPORT_NAMES.join(", ")} } from "${runtime_rel}";`;
+
+    // Build cross-module imports
+    const imports_map = new Map<string, string>();
+    const module_import_lines: string[] = [runtime_import];
+    const deps = graph.dependencies.get(key) ?? [];
+
+    for (const dk of deps) {
+      const dep_exports = module_exports_map.get(dk)!;
+      const dep_prefix = dep_exports.module_prefix;
+      const dep_mod = graph.modules.get(dk)!;
+      const dep_relative = path.relative(project_root, dep_mod.file_path).replace(/\.ring$/, ".js");
+      const dep_js_from_mod = compute_relative_import(mod_relative, dep_relative);
+
+      const import_pairs: string[] = [];
+
+      for (const [name] of dep_exports.values) {
+        if (dep_exports.extern_values.has(name)) {
+          imports_map.set(name, safe_ident(name));
+        } else {
+          const alias = `${dep_prefix}$${safe_ident(name)}`;
+          imports_map.set(name, alias);
+          import_pairs.push(`${safe_ident(name)} as ${alias}`);
+        }
+      }
+
+      for (const [name, type_def] of dep_exports.types) {
+        const alias = `${dep_prefix}$${safe_ident(name)}`;
+        imports_map.set(name, alias);
+        import_pairs.push(`${safe_ident(name)} as ${alias}`);
+        if ("variants" in type_def) {
+          for (const v of type_def.variants) {
+            const vname = `${name}_${v.name}`;
+            const valias = `${dep_prefix}$${safe_ident(name)}_${v.name}`;
+            imports_map.set(vname, valias);
+            import_pairs.push(`${safe_ident(name)}_${v.name} as ${valias}`);
+          }
+        }
+      }
+
+      for (const impl of dep_exports.trait_impls) {
+        const dict_name = `${impl.target_type_name}_${impl.trait_name}`;
+        const alias = `${dep_prefix}$${safe_ident(impl.target_type_name)}_${safe_ident(impl.trait_name)}`;
+        imports_map.set(dict_name, alias);
+        import_pairs.push(`${safe_ident(impl.target_type_name)}_${safe_ident(impl.trait_name)} as ${alias}`);
+      }
+
+      if (import_pairs.length > 0) {
+        module_import_lines.push(`import { ${import_pairs.join(", ")} } from "${dep_js_from_mod}";`);
+      }
+    }
+
+    // Build export list from pub declarations
+    const export_names: string[] = [];
+    for (const decl of ast.decls) {
+      if (!("is_pub" in decl) || !decl.is_pub) continue;
+      switch (decl.kind) {
+        case "fn_decl":
+          export_names.push(safe_ident(decl.name));
+          break;
+        case "struct_decl":
+          export_names.push(safe_ident(decl.name));
+          break;
+        case "enum_decl":
+          export_names.push(safe_ident(decl.name));
+          for (const v of decl.variants) {
+            export_names.push(`${safe_ident(decl.name)}_${v.name}`);
+          }
+          break;
+        case "trait_decl":
+        case "effect_decl":
+        case "extern_fn_decl":
+        case "extern_type_decl":
+          break;
+      }
+    }
+
+    // Add trait impl dict names to exports (when the target type is pub)
+    for (const decl of ast.decls) {
+      if (decl.kind === "impl_decl" && decl.trait_name) {
+        if (ast.decls.some(d =>
+          (d.kind === "struct_decl" || d.kind === "enum_decl") && d.is_pub && d.name === decl.target_type
+        )) {
+          export_names.push(`${safe_ident(decl.target_type)}_${safe_ident(decl.trait_name)}`);
+        }
+      }
+    }
+
+    // Add auto-derive dict names to exports
+    for (const impl of hir.derived_impls) {
+      if (ast.decls.some(d =>
+        (d.kind === "struct_decl" || d.kind === "enum_decl") && d.is_pub && d.name === impl.type_name
+      )) {
+        export_names.push(`${safe_ident(impl.type_name)}_${safe_ident(impl.trait_name)}`);
+      }
+    }
+
+    // Build external metadata for cross-module codegen (same as bundle mode)
+    const external_struct_fields = new Map<string, string[]>();
+    const external_impl_methods = new Map<string, string | undefined>();
+    for (const dk of deps) {
+      const dep_exports = module_exports_map.get(dk)!;
+      const dep_prefix = dep_exports.module_prefix;
+      for (const [name, fields] of dep_exports.struct_field_orders) {
+        external_struct_fields.set(`${dep_prefix}$${safe_ident(name)}`, fields);
+      }
+      for (const [type_name, methods] of dep_exports.impl_methods) {
+        for (const [mname] of methods) {
+          external_impl_methods.set(`${dep_prefix}$${safe_ident(type_name)}.${mname}`, undefined);
+        }
+      }
+    }
+
+    const options: CodegenOptions = {
+      imports_map,
+      skip_preamble: true,
+      skip_main_call: key !== entry_key,
+      external_struct_fields,
+      external_impl_methods,
+      module_imports: module_import_lines,
+      module_exports: export_names,
+    };
+
+    const module_js = generate(hir, options);
+    fs.writeFileSync(mod_out_path, module_js, "utf-8");
+
+    if (key === entry_key) {
+      entry_js_path = mod_out_path;
+    }
+  }
+
+  return {
+    success: true,
+    diagnostics: [...sink.diagnostics()],
+    entry_js_path,
+  };
+}
+
+function compute_relative_import(from_relative: string, to_relative: string): string {
+  const from_dir = path.dirname(from_relative);
+  let rel = path.relative(from_dir, to_relative).replace(/\\/g, "/");
+  if (!rel.startsWith(".")) rel = "./" + rel;
+  return rel;
 }
