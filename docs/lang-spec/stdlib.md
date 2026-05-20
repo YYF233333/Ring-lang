@@ -27,6 +27,21 @@ enum Option<T> { some(T), none }
 - `try { expr }` — 将 fail 转为 Option
 - `opt or default` — 解包或使用默认值
 
+### 方法
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `is_some` | `(self) -> Bool` | 是否为 some |
+| `is_none` | `(self) -> Bool` | 是否为 none |
+| `unwrap_or` | `(self, default: T) -> T` | 解包或返回默认值 |
+
+### HOF 方法
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `map` | `<U>(self, f: (T) -> U / ?ε) -> Option<U> / ?ε` | 映射 some 内的值 |
+| `and_then` | `<U>(self, f: (T) -> Option<U> / ?ε) -> Option<U> / ?ε` | 链式操作（flatMap） |
+
 ## Str 方法
 
 通过 `std/str.ring` 中的 `impl Str` 声明。
@@ -70,6 +85,10 @@ enum Option<T> { some(T), none }
 - `[expr, ...]` — 列表字面量
 - 空列表 `[]` 需要类型上下文
 
+| 函数 | 签名 | 描述 |
+|------|------|------|
+| `list_clone` | `<T>(l: List<T>) -> List<T>` | 浅拷贝 |
+
 ### 非 HOF 方法
 
 | 方法 | 签名 | 描述 |
@@ -112,7 +131,7 @@ enum Option<T> { some(T), none }
 
 ```ring
 for x in list { ... }           // for-of
-for (i, x) in list.entries() { ... }  // 不支持；需 Map.entries()
+// List 不支持 index-value 迭代（无 entries() 方法）
 ```
 
 ## Map\<K, V\>
@@ -220,3 +239,31 @@ for x in set { ... }
 - 对 struct/enum 仅比较引用，不做结构相等
 
 `Eq` trait 已实现（auto-derive，Phase 3a Batch 8），`==`/`!=` 运算符已解糖为 Eq trait dispatch。集合操作（`contains`、`Map.get`、`Set.contains` 等）计划升级为使用 Eq trait。
+
+## 文件系统（std/fs.ring）
+
+| 函数 | 签名 | 描述 |
+|------|------|------|
+| `read_file` | `(path: Str) -> Str` | 读取文件内容 |
+| `write_file` | `(path: Str, content: Str) -> Unit` | 写入文件内容 |
+| `file_exists` | `(path: Str) -> Bool` | 文件是否存在 |
+| `delete_file` | `(path: Str) -> Unit` | 删除文件 |
+
+## 路径操作（std/path.ring）
+
+| 函数 | 签名 | 描述 |
+|------|------|------|
+| `path_join` | `(a: Str, b: Str) -> Str` | 拼接路径 |
+| `path_resolve` | `(p: Str) -> Str` | 解析为绝对路径 |
+| `path_dirname` | `(p: Str) -> Str` | 目录部分 |
+| `path_basename` | `(p: Str) -> Str` | 文件名部分 |
+| `path_extname` | `(p: Str) -> Str` | 扩展名部分 |
+
+## 进程操作（std/process.ring）
+
+| 函数 | 签名 | 描述 |
+|------|------|------|
+| `argv` | `() -> List<Str>` | 命令行参数 |
+| `exit_process` | `(code: Int) -> Unit` | 以指定退出码终止进程 |
+| `eprintln` | `(msg: Str) -> Unit` | 输出到 stderr |
+| `cwd` | `() -> Str` | 当前工作目录 |

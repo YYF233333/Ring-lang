@@ -34,10 +34,10 @@ DeclKind     ::= FnDecl
 FnDecl       ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? Block
 
 Params       ::= (Param (',' Param)* ','?)?
-Param        ::= Ident (':' TypeExpr)?
+Param        ::= 'var'? Ident (':' TypeExpr)?
 ```
 
-省略返回类型注解时由推断确定。省略参数类型注解时分配 fresh 类型变量。
+省略返回类型注解时由推断确定。省略参数类型注解时分配 fresh 类型变量。`var` 前缀标记参数为可变（允许在函数体内重赋值），也适用于方法的 `var self`。
 
 ### Struct 声明
 
@@ -242,6 +242,7 @@ PrimaryExpr  ::= IntLit | FloatLit | StringLit | RawStringLit
                | 'true' | 'false'
                | InterpString
                | Ident
+               | QualifiedVariant
                | StructLit
                | ListLit
                | TupleOrParen
@@ -252,17 +253,20 @@ PrimaryExpr  ::= IntLit | FloatLit | StringLit | RawStringLit
                | TryBlock
                | LambdaExpr
                | UnaryExpr
+
+QualifiedVariant ::= UpperIdent '::' Ident ArgList?
+                   | UpperIdent '::' UpperIdent '{' FieldInit (',' FieldInit)* ','? '}'
 ```
 
 ### Struct 字面量
 
 ```ebnf
-StructLit    ::= UpperIdent '{' FieldInit (',' FieldInit)* ','? '}'
+StructLit    ::= UpperIdent '{' ('..' Expr ',')? FieldInit (',' FieldInit)* ','? '}'
 
 FieldInit    ::= Ident (':' Expr)?
 ```
 
-大写字母开头的标识符后跟 `{` 触发 struct/变体字面量解析。字段 punning：`{ x }` 是 `{ x: x }` 的语法糖。
+大写字母开头的标识符后跟 `{` 触发 struct/变体字面量解析。字段 punning：`{ x }` 是 `{ x: x }` 的语法糖。`..expr` 前缀是 struct update 语法：从基础值复制未指定的字段。
 
 ### List 字面量
 
@@ -398,7 +402,11 @@ Pattern      ::= '_'                                      (* 通配符 *)
                | Ident                                     (* 绑定或 unit 变体 *)
                | UpperIdent '(' PatList ')'               (* 位置构造器 *)
                | UpperIdent '{' NamedPat* '..'? '}'       (* 命名构造器 *)
+               | UpperIdent '::' Ident PatFields?         (* 限定构造器 *)
                | '(' Pattern ',' PatList ')'              (* tuple *)
+
+PatFields    ::= '(' PatList ')'
+               | '{' NamedPat* '..'? '}'
 
 PatList      ::= Pattern (',' Pattern)* ','?
 
