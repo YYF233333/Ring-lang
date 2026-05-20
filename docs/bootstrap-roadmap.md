@@ -149,13 +149,13 @@
 | 4b | `checker/builtins.ts` | 3 | Re-export shell ✅ |
 | 4b | `checker/builtins-core.ts` | 336 | 核心内置注册（effects/Cell/Option/Eq/Clone/Ord/Debug traits） ✅ |
 | 4b | `checker/builtins-hof.ts` | 224 | HOF 方法注册（List/Map/Set/Option 的 effect 多态方法） ✅ |
-| 4c | `checker/unify.ts` | 549 | HM unification + row unification（**最高风险**） |
-| 4d | `checker/infer-ctx.ts` | 545 | InferCtx interface → trait + 16 个 helper 函数 |
-| 4d | `checker/infer.ts` | 554 | InferEngine 薄壳 + check/infer_expr 调度 |
-| 4e | `checker/infer-register.ts` | 457 | Pass 1 声明注册 |
+| 4c | `checker/unify.ts` | 549 | HM unification + row unification（**最高风险**） ✅ |
+| 4d | `checker/infer-ctx.ts` | 545 | InferCtx interface → trait + 16 个 helper 函数 ✅ |
+| 4d | `checker/infer.ts` | 554 | InferEngine 薄壳 + check/infer_expr 调度（结构+依赖待4e/4f完成后集成） |
+| 4e | `checker/infer-register.ts` | 457 | Pass 1 声明注册 ✅ |
 | 4e | `checker/infer-expr.ts` | 1,223 | 19 个表达式推断函数（**最大文件**） |
 | 4e | `checker/infer-stmt.ts` | 384 | 语句推断（let/var/assign/return/while/for/break/continue/destructure/if-let） |
-| 4e | `checker/infer-modules.ts` | 158 | 多模块支持 |
+| 4e | `checker/infer-modules.ts` | 158 | 多模块支持（依赖 ModuleExports，待 Batch 5） |
 | 4f | `checker/exhaustive.ts` | 256 | 穷尽性检查（Maranget 风格 pattern matrix） |
 | 4f | `checker/derive.ts` | 501 | Auto-derive fixpoint pass（Eq/Clone/Debug/Ord 自动派生） |
 | 4f | `checker/zonk.ts` | 194 | Substitution application |
@@ -171,9 +171,33 @@
 - TS `EffectDef.built_in_kind?: "io"|"fail"|"mut"` → Ring `BuiltInKind?` 枚举（`BkIo`/`BkFail`/`BkMut`）
 - TS block scoping `{ const t = ...; ... }` 在 Ring 中无效（`{ let x = ... }` 不创建新作用域）→ 同函数内多段注册必须用 `var` + 重赋值，或拆分为独立函数
 - `env.fresh_var()` 返回 `Type`（非 TS 的 `TypeVar`）→ 用 `fresh_var_id()` + 手动构造 `Type::TypeVar { id, name: none }` 分离 id 和类型值
-- `apply_subst` 临时放在 env.ring（4c unify.ring 创建后整合）
+- `apply_subst` 保留在 env.ring（unify.ring 导入使用，避免循环依赖）
 - `Map.set()` → `Map.insert()`，`new Map()` → `map_new()`，`new Set()` → `set_new()`
 - `map_new()`/`set_new()` 支持从 struct 字段上下文推断泛型参数（与 `[]` 空列表不同）
+
+**翻译模式补充（4c）**：
+- `throw new UnificationError(...)` → `fail.raise(UnificationError { message, is_occurs_check })` via Ring fail effect
+- `FreshIdGen = () => number` → 直接传 `var env: TypeEnv`，调用 `env.fresh_var_id()`
+- `new Map(subst)` 拷贝语义 → `map_clone(subst)`（substitution 不可变更新）
+- Ring 不支持 or-pattern `|` in match → 每个变体单独列 arm
+- `return` 不可在 match arm 中作为裸表达式，需用 `{ return expr }` block 包裹或改用 `if` + helper 函数
+- match arm 内 `var env` 调用端不写 `var`（`var` 仅在函数签名处声明）
+- `Set<number>` 索引跟踪 → `Set<Int>` + `for` 循环手动维护索引计数器
+- `filter((_, i) => ...)` 索引过滤 → 自定义 `filter_by_index_not_in` helper
+
+**翻译模式补充（4d）**：
+- `InferCtx` interface → Ring `pub struct InferCtx`（无 trait，字段直接暴露）
+- `CompileError` → `pub struct CompileError {}` + `fail.raise(CompileError {})` via fail effect（声明级 `try { ... }` 捕获）
+- `type_error(ctx, code, msg, span, context)` → `type_error(ctx.sink, code, msg, span, context)` 拆分 sink 传递
+- `unify_at` 使用 `expr catch UnificationError fn(e) { type_error(...) }` 实现（catch handler 中 raise CompileError）
+- `make_diagnostic(code, "error", ...)` → `make_diag(code, Severity::SevError, ...)`（Ring 版使用 Severity 枚举非字符串）
+- `substitute_type(t, mapping)` → 直接用 `apply_subst(mapping, t)`（两者等价）
+- `assertNever(expr, "...")` → 不需要（Ring 穷尽匹配内置）
+- `for (const [, scheme] of scope.variables)` → `for entry in scope.variables.entries() { let (_, scheme) = entry }`
+- 避免 `.map()` 闭包捕获 `var ctx` → 改用 `for` 循环 + `push`
+
+**翻译中发现并修复的编译器问题**：
+1. **`catch TypeName` 跨模块 codegen bug**（`codegen-expr.ts:473`）— typed catch 的 `instanceof` 检查使用裸名 `TypeName` 而非模块限定名 `module$TypeName`。修复：`safe_ident(expr.error_type)` → `ctx.qualify(safe_ident(expr.error_type))`
 
 ### Batch 5: 代码生成 + 模块系统 + CLI（~3,315 行，~2-3 天）
 

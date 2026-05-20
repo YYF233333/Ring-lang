@@ -470,7 +470,7 @@ function gen_try_catch(ctx: CodegenCtx, expr: HExpr & { kind: "try_catch" }): st
   if (expr.error_binding) {
     const binding = safe_ident(expr.error_binding);
     if (expr.error_type) {
-      const type_name = safe_ident(expr.error_type);
+      const type_name = ctx.qualify(safe_ident(expr.error_type));
       return `(function() { const ${evidence_param_name("fail")} = { raise: (${binding}) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", ${binding}); } }; try { return ${body}; } catch (__ring_e) { if (__ring_e instanceof ${RUNTIME_EFFECT_ABORT} && __ring_e.effect === "fail" && __ring_e.value instanceof ${type_name}) { const ${binding} = __ring_e.value; return ${handler}; } throw __ring_e; } })()`;
     }
     return `(function() { const ${evidence_param_name("fail")} = { raise: (${binding}) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", ${binding}); } }; try { return ${body}; } catch (__ring_e) { if (__ring_e instanceof ${RUNTIME_EFFECT_ABORT} && __ring_e.effect === "fail") { const ${binding} = __ring_e.value; return ${handler}; } throw __ring_e; } })()`;

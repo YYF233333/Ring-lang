@@ -278,7 +278,7 @@ impl TypeEnv {
 
 // ============================================================
 // Substitution: apply type variable mapping to a type
-// (will be consolidated with unify.ring in Batch 4c)
+// Kept here (not in unify.ring) to avoid circular dependency
 // ============================================================
 
 pub fn apply_subst(subst: Map<Int, Type>, t: Type) -> Type {

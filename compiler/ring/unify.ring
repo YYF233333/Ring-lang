@@ -1,0 +1,574 @@
+use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, empty_effects, UNIT}
+use env::{TypeEnv, apply_subst, apply_subst_row}
+
+// ============================================================
+// Unification error (raised via fail effect, caught by infer-ctx)
+// ============================================================
+
+pub struct UnificationError {
+    pub message: Str,
+    pub is_occurs_check: Bool
+}
+
+pub fn empty_subst() -> Map<Int, Type> { map_new() }
+
+// ============================================================
+// Error helpers
+// ============================================================
+
+fn unify_error(t1: Type, t2: Type, detail: Str?) -> Never {
+    let base = "Type mismatch: cannot unify ${type_to_string(t1)} with ${type_to_string(t2)}"
+    let msg = match detail { some(d) => "${base} — ${d}", none => base }
+    fail.raise(UnificationError { message: msg, is_occurs_check: false })
+}
+
+fn unify_error_occurs(t1: Type, t2: Type) -> Never {
+    let msg = "Type mismatch: cannot unify ${type_to_string(t1)} with ${type_to_string(t2)} — infinite type (occurs check)"
+    fail.raise(UnificationError { message: msg, is_occurs_check: true })
+}
+
+fn unify_error_msg(detail: Str) -> Never {
+    fail.raise(UnificationError { message: detail, is_occurs_check: false })
+}
+
+// ============================================================
+// Occurs check: does var_id appear anywhere in type?
+// ============================================================
+
+pub fn occurs_in(var_id: Int, t: Type, subst: Map<Int, Type>) -> Bool {
+    let resolved = apply_subst(subst, t)
+    match resolved {
+        Type::IntType => false,
+        Type::FloatType => false,
+        Type::StrType => false,
+        Type::BoolType => false,
+        Type::UnitType => false,
+        Type::NeverType => false,
+        Type::AnyType => false,
+        Type::TypeVar { id, .. } => id == var_id,
+        Type::FnType { params, return_type, effects } =>
+            params.any(fn(p) { occurs_in(var_id, p, subst) }) ||
+            occurs_in(var_id, return_type, subst) ||
+            occurs_in_row(var_id, effects, subst),
+        Type::StructType { type_params, .. } =>
+            type_params.any(fn(p) { occurs_in(var_id, p, subst) }),
+        Type::EnumType { type_params, .. } =>
+            type_params.any(fn(p) { occurs_in(var_id, p, subst) }),
+        Type::GenericType { base, args } =>
+            occurs_in(var_id, base, subst) ||
+            args.any(fn(a) { occurs_in(var_id, a, subst) }),
+        Type::RecordType { fields, tail, .. } => {
+            let in_tail = match tail {
+                some(t_id) => occurs_in(var_id, Type::TypeVar { id: t_id, name: none }, subst),
+                none => false
+            }
+            in_tail || fields.any(fn(f) { occurs_in(var_id, f.ty, subst) })
+        },
+        Type::EffectRowType { effects, tail } =>
+            occurs_in_row(var_id, EffectRow { effects: effects, tail: tail }, subst),
+        Type::TupleType { elements } =>
+            elements.any(fn(e) { occurs_in(var_id, e, subst) })
+    }
+}
+
+fn occurs_in_row(var_id: Int, row: EffectRow, subst: Map<Int, Type>) -> Bool {
+    let in_tail = match row.tail {
+        some(t_id) => occurs_in(var_id, Type::TypeVar { id: t_id, name: none }, subst),
+        none => false
+    }
+    in_tail || row.effects.any(fn(e) { occurs_in_effect(var_id, e, subst) })
+}
+
+fn occurs_in_effect(var_id: Int, e: Effect, subst: Map<Int, Type>) -> Bool {
+    match e {
+        Effect::FailEffect { error_type } => occurs_in(var_id, error_type, subst),
+        Effect::CustomEffect { type_args, .. } =>
+            type_args.any(fn(a) { occurs_in(var_id, a, subst) }),
+        _ => false
+    }
+}
+
+// ============================================================
+// Effect matching helpers
+// ============================================================
+
+fn effects_match_kind(a: Effect, b: Effect) -> Bool {
+    match a {
+        Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
+        Effect::MutEffect => match b { Effect::MutEffect => true, _ => false },
+        Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
+        Effect::CustomEffect { name: na, .. } => match b {
+            Effect::CustomEffect { name: nb, .. } => na == nb,
+            _ => false
+        }
+    }
+}
+
+fn effect_kind_name(e: Effect) -> Str {
+    match e {
+        Effect::IoEffect => "io",
+        Effect::MutEffect => "mut",
+        Effect::FailEffect { .. } => "fail",
+        Effect::CustomEffect { name, .. } => name
+    }
+}
+
+fn unify_effect_params(a: Effect, b: Effect, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+    match (a, b) {
+        (Effect::FailEffect { error_type: et_a }, Effect::FailEffect { error_type: et_b }) =>
+            unify(et_a, et_b, subst, env),
+        (Effect::CustomEffect { name, type_args: ta_a }, Effect::CustomEffect { type_args: ta_b, .. }) => {
+            if ta_a.len() != ta_b.len() {
+                unify_error_msg("effect '${name}' type argument count mismatch: ${ta_a.len()} vs ${ta_b.len()}")
+            }
+            var s = subst
+            var i = 0
+            while i < ta_a.len() {
+                s = unify(
+                    ta_a.get(i).unwrap_or(UNIT()),
+                    ta_b.get(i).unwrap_or(UNIT()),
+                    s, env
+                )
+                i = i + 1
+            }
+            s
+        },
+        _ => subst
+    }
+}
+
+// ============================================================
+// Index filter helper
+// ============================================================
+
+fn filter_by_index_not_in(effects: List<Effect>, excluded: Set<Int>) -> List<Effect> {
+    var result = empty_effects()
+    var idx = 0
+    for e in effects {
+        if !excluded.contains(idx) {
+            result.push(e)
+        }
+        idx = idx + 1
+    }
+    result
+}
+
+// ============================================================
+// Unify effect rows (Koka-style row variable solving)
+// ============================================================
+
+pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+    var s = subst
+    let ra = apply_subst_row(s, a)
+    let rb = apply_subst_row(s, b)
+
+    let a_matched: Set<Int> = set_new()
+    let b_matched: Set<Int> = set_new()
+    var ai = 0
+    while ai < ra.effects.len() {
+        var bi = 0
+        while bi < rb.effects.len() {
+            if !b_matched.contains(bi) {
+                match (ra.effects.get(ai), rb.effects.get(bi)) {
+                    (some(eff_a), some(eff_b)) => {
+                        if effects_match_kind(eff_a, eff_b) {
+                            s = unify_effect_params(eff_a, eff_b, s, env)
+                            a_matched.insert(ai)
+                            b_matched.insert(bi)
+                            break
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            bi = bi + 1
+        }
+        ai = ai + 1
+    }
+
+    let a_unmatched = filter_by_index_not_in(ra.effects, a_matched)
+    let b_unmatched = filter_by_index_not_in(rb.effects, b_matched)
+
+    if a_unmatched.len() > 0 && rb.tail.is_none() {
+        let names = a_unmatched.map(fn(e) { effect_kind_name(e) }).join(", ")
+        unify_error_msg("effect mismatch: effects [${names}] not allowed in pure context")
+    }
+    if b_unmatched.len() > 0 && ra.tail.is_none() {
+        let names = b_unmatched.map(fn(e) { effect_kind_name(e) }).join(", ")
+        unify_error_msg("effect mismatch: effects [${names}] not allowed in pure context")
+    }
+
+    match (ra.tail, rb.tail) {
+        (some(ta), some(tb)) => {
+            if ta == tb {
+                // same tail var — unmatched effects already tolerated
+            } else if a_unmatched.len() == 0 && b_unmatched.len() == 0 {
+                s = unify(Type::TypeVar { id: ta, name: none }, Type::TypeVar { id: tb, name: none }, s, env)
+            } else {
+                let fresh = env.fresh_var_id()
+                if b_unmatched.len() > 0 {
+                    let row_for_a_tail = Type::EffectRowType { effects: b_unmatched, tail: some(fresh) }
+                    if occurs_in(ta, row_for_a_tail, s) {
+                        unify_error_msg("infinite type in effect row variable")
+                    }
+                    let new_s = map_clone(s)
+                    new_s.insert(ta, row_for_a_tail)
+                    s = new_s
+                } else {
+                    s = unify(Type::TypeVar { id: ta, name: none }, Type::TypeVar { id: fresh, name: none }, s, env)
+                }
+                if a_unmatched.len() > 0 {
+                    let row_for_b_tail = Type::EffectRowType { effects: a_unmatched, tail: some(fresh) }
+                    if occurs_in(tb, row_for_b_tail, s) {
+                        unify_error_msg("infinite type in effect row variable")
+                    }
+                    let new_s = map_clone(s)
+                    new_s.insert(tb, row_for_b_tail)
+                    s = new_s
+                } else {
+                    s = unify(Type::TypeVar { id: tb, name: none }, Type::TypeVar { id: fresh, name: none }, s, env)
+                }
+            }
+        },
+        _ => {}
+    }
+
+    s
+}
+
+// ============================================================
+// Record row unification
+// ============================================================
+
+fn unify_record_rows(ra: Type, rb: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+    match (ra, rb) {
+        (Type::RecordType { fields: a_fields, tail: a_tail, .. },
+         Type::RecordType { fields: b_fields, tail: b_tail, .. }) => {
+            var s = subst
+
+            let b_name_set: Set<Str> = set_new()
+            for f in b_fields { b_name_set.insert(f.name) }
+            let a_name_set: Set<Str> = set_new()
+            for f in a_fields { a_name_set.insert(f.name) }
+
+            for af in a_fields {
+                let bf = b_fields.find(fn(f) { f.name == af.name })
+                match bf {
+                    some(matched) => { s = unify(af.ty, matched.ty, s, env) },
+                    none => {}
+                }
+            }
+
+            let a_only = a_fields.filter(fn(f) { !b_name_set.contains(f.name) })
+            let b_only = b_fields.filter(fn(f) { !a_name_set.contains(f.name) })
+
+            if a_only.len() > 0 && b_tail.is_none() {
+                let missing = a_only.map(fn(f) { f.name }).join(", ")
+                unify_error(ra, rb, some("record missing fields: ${missing}"))
+            }
+            if b_only.len() > 0 && a_tail.is_none() {
+                let missing = b_only.map(fn(f) { f.name }).join(", ")
+                unify_error(ra, rb, some("record missing fields: ${missing}"))
+            }
+
+            if a_only.len() > 0 && b_only.len() > 0 && a_tail.is_some() && b_tail.is_some() {
+                match (a_tail, b_tail) {
+                    (some(ta), some(tb)) => {
+                        let fresh_tail = env.fresh_var_id()
+                        let a_tail_record = Type::RecordType { fields: b_only, tail: some(fresh_tail), tail_name: none }
+                        let b_tail_record = Type::RecordType { fields: a_only, tail: some(fresh_tail), tail_name: none }
+                        if occurs_in(ta, a_tail_record, s) {
+                            unify_error(ra, rb, some("infinite type in row variable"))
+                        }
+                        if occurs_in(tb, b_tail_record, s) {
+                            unify_error(ra, rb, some("infinite type in row variable"))
+                        }
+                        let new_s = map_clone(s)
+                        new_s.insert(ta, a_tail_record)
+                        new_s.insert(tb, b_tail_record)
+                        s = new_s
+                    },
+                    _ => {}
+                }
+            } else {
+                match a_tail {
+                    some(ta) => {
+                        if b_only.len() > 0 {
+                            let record_for_tail = Type::RecordType { fields: b_only, tail: none, tail_name: none }
+                            if occurs_in(ta, record_for_tail, s) {
+                                unify_error(ra, rb, some("infinite type in row variable"))
+                            }
+                            let new_s = map_clone(s)
+                            new_s.insert(ta, record_for_tail)
+                            s = new_s
+                        }
+                    },
+                    none => {}
+                }
+                match b_tail {
+                    some(tb) => {
+                        if a_only.len() > 0 {
+                            let record_for_tail = Type::RecordType { fields: a_only, tail: none, tail_name: none }
+                            if occurs_in(tb, record_for_tail, s) {
+                                unify_error(ra, rb, some("infinite type in row variable"))
+                            }
+                            let new_s = map_clone(s)
+                            new_s.insert(tb, record_for_tail)
+                            s = new_s
+                        }
+                    },
+                    none => {}
+                }
+                match (a_tail, b_tail) {
+                    (some(ta), some(tb)) => {
+                        if a_only.len() == 0 && b_only.len() == 0 && ta != tb {
+                            s = unify(
+                                Type::TypeVar { id: ta, name: none },
+                                Type::TypeVar { id: tb, name: none },
+                                s, env
+                            )
+                        }
+                    },
+                    _ => {}
+                }
+            }
+
+            s
+        },
+        _ => panic("unify_record_rows: expected RecordType")
+    }
+}
+
+// ============================================================
+// Struct -> Record coercion
+// ============================================================
+
+fn unify_struct_with_record(st: Type, rt: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+    match (st, rt) {
+        (Type::StructType { name, fields: struct_fields, .. },
+         Type::RecordType { fields: record_fields, tail: record_tail, .. }) => {
+            var s = subst
+
+            for rf in record_fields {
+                let sf = struct_fields.find(fn(f) { f.name == rf.name })
+                match sf {
+                    some(matched) => { s = unify(matched.ty, rf.ty, s, env) },
+                    none => {
+                        let field_names = record_fields.map(fn(f) { f.name }).join(", ")
+                        unify_error(st, rt, some("type '${name}' does not satisfy {${field_names}, ..} — missing field '${rf.name}'"))
+                    }
+                }
+            }
+
+            match record_tail {
+                some(tail_id) => {
+                    let remaining = struct_fields.filter(fn(sf) {
+                        !record_fields.any(fn(rf) { rf.name == sf.name })
+                    })
+                    let remaining_mapped = remaining.map(fn(f) {
+                        RecordField { name: f.name, ty: apply_subst(s, f.ty) }
+                    })
+                    let tail_record = Type::RecordType { fields: remaining_mapped, tail: none, tail_name: none }
+                    if occurs_in(tail_id, tail_record, s) {
+                        unify_error(st, rt, some("infinite type in row variable"))
+                    }
+                    let new_s = map_clone(s)
+                    new_s.insert(tail_id, tail_record)
+                    s = new_s
+                },
+                none => {}
+            }
+
+            s
+        },
+        _ => panic("unify_struct_with_record: expected StructType and RecordType")
+    }
+}
+
+// ============================================================
+// Type kind helpers (for early returns in unify)
+// ============================================================
+
+fn is_any(t: Type) -> Bool { match t { Type::AnyType => true, _ => false } }
+fn is_never(t: Type) -> Bool { match t { Type::NeverType => true, _ => false } }
+fn var_id(t: Type) -> Int? { match t { Type::TypeVar { id, .. } => some(id), _ => none } }
+
+// ============================================================
+// Bind type variable (with occurs check)
+// ============================================================
+
+fn bind_var(id: Int, target: Type, t1: Type, t2: Type, subst: Map<Int, Type>) -> Map<Int, Type> {
+    if occurs_in(id, target, subst) {
+        unify_error_occurs(t1, t2)
+    }
+    let result = map_clone(subst)
+    result.insert(id, target)
+    result
+}
+
+// ============================================================
+// Main unification
+// ============================================================
+
+pub fn unify(t1: Type, t2: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+    let a = apply_subst(subst, t1)
+    let b = apply_subst(subst, t2)
+
+    // any unifies with anything
+    if is_any(a) || is_any(b) { return subst }
+
+    // Same type variable
+    let va = var_id(a)
+    let vb = var_id(b)
+    match (va, vb) {
+        (some(ia), some(ib)) => { if ia == ib { return subst } },
+        _ => {}
+    }
+
+    // Bind a variable (must come before never so that unify(?a, never) binds ?a)
+    match va {
+        some(id) => { return bind_var(id, b, t1, t2, subst) },
+        none => {}
+    }
+    match vb {
+        some(id) => { return bind_var(id, a, t1, t2, subst) },
+        none => {}
+    }
+
+    // never unifies with anything (bottom type)
+    if is_never(a) || is_never(b) { return subst }
+
+    // Structured type unification
+    match (a, b) {
+        // Same primitive types
+        (Type::IntType, Type::IntType) => subst,
+        (Type::FloatType, Type::FloatType) => subst,
+        (Type::StrType, Type::StrType) => subst,
+        (Type::BoolType, Type::BoolType) => subst,
+        (Type::UnitType, Type::UnitType) => subst,
+
+        // Function types
+        (Type::FnType { params: pa, return_type: ra, effects: ea },
+         Type::FnType { params: pb, return_type: rb, effects: eb }) => {
+            if pa.len() != pb.len() {
+                unify_error(t1, t2, some("parameter count mismatch: ${pa.len()} vs ${pb.len()}"))
+            }
+            var s = subst
+            var i = 0
+            while i < pa.len() {
+                s = unify(
+                    pa.get(i).unwrap_or(UNIT()),
+                    pb.get(i).unwrap_or(UNIT()),
+                    s, env
+                )
+                i = i + 1
+            }
+            s = unify(ra, rb, s, env)
+            s = unify_effect_rows(ea, eb, s, env)
+            s
+        },
+
+        // Struct types
+        (Type::StructType { name: na, type_params: tpa, .. },
+         Type::StructType { name: nb, type_params: tpb, .. }) => {
+            if na != nb {
+                unify_error(t1, t2, some("different struct types"))
+            }
+            if tpa.len() != tpb.len() {
+                unify_error(t1, t2, some("different type parameter counts for struct '${na}'"))
+            }
+            var s = subst
+            var i = 0
+            while i < tpa.len() {
+                s = unify(
+                    tpa.get(i).unwrap_or(UNIT()),
+                    tpb.get(i).unwrap_or(UNIT()),
+                    s, env
+                )
+                i = i + 1
+            }
+            s
+        },
+
+        // Enum types
+        (Type::EnumType { name: na, type_params: tpa, .. },
+         Type::EnumType { name: nb, type_params: tpb, .. }) => {
+            if na != nb {
+                unify_error(t1, t2, some("different enum types"))
+            }
+            if tpa.len() != tpb.len() {
+                unify_error(t1, t2, some("different type parameter counts for enum '${na}'"))
+            }
+            var s = subst
+            var i = 0
+            while i < tpa.len() {
+                s = unify(
+                    tpa.get(i).unwrap_or(UNIT()),
+                    tpb.get(i).unwrap_or(UNIT()),
+                    s, env
+                )
+                i = i + 1
+            }
+            s
+        },
+
+        // Generic types
+        (Type::GenericType { base: ba, args: aa },
+         Type::GenericType { base: bb, args: ab }) => {
+            var s = unify(ba, bb, subst, env)
+            if aa.len() != ab.len() {
+                unify_error(t1, t2, some("different type argument counts"))
+            }
+            var i = 0
+            while i < aa.len() {
+                s = unify(
+                    aa.get(i).unwrap_or(UNIT()),
+                    ab.get(i).unwrap_or(UNIT()),
+                    s, env
+                )
+                i = i + 1
+            }
+            s
+        },
+
+        // Record types (row unification)
+        (Type::RecordType { .. }, Type::RecordType { .. }) =>
+            unify_record_rows(a, b, subst, env),
+
+        // Effect row types
+        (Type::EffectRowType { effects: ea, tail: ta },
+         Type::EffectRowType { effects: eb, tail: tb }) =>
+            unify_effect_rows(
+                EffectRow { effects: ea, tail: ta },
+                EffectRow { effects: eb, tail: tb },
+                subst, env
+            ),
+
+        // Tuple types
+        (Type::TupleType { elements: ea }, Type::TupleType { elements: eb }) => {
+            if ea.len() != eb.len() {
+                unify_error(t1, t2, some("tuple arity mismatch: ${ea.len()} vs ${eb.len()}"))
+            }
+            var s = subst
+            var i = 0
+            while i < ea.len() {
+                s = unify(
+                    ea.get(i).unwrap_or(UNIT()),
+                    eb.get(i).unwrap_or(UNIT()),
+                    s, env
+                )
+                i = i + 1
+            }
+            s
+        },
+
+        // Struct satisfies record constraint (one-direction coercion)
+        (Type::StructType { .. }, Type::RecordType { .. }) =>
+            unify_struct_with_record(a, b, subst, env),
+        (Type::RecordType { .. }, Type::StructType { .. }) =>
+            unify_struct_with_record(b, a, subst, env),
+
+        // Mismatch
+        _ => unify_error(t1, t2, none)
+    }
+}
