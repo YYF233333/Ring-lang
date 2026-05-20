@@ -346,7 +346,6 @@ export class InferEngine implements InferCtx {
     try {
       const body_result = this.infer_block(decl.body);
       this.subst = body_result.subst;
-
       this.subst = unify_at(this, body_result.hexpr.type, expected_ret, this.subst, decl.span);
 
       const local_names = new Map<number, string>();
@@ -837,7 +836,7 @@ export class InferEngine implements InferCtx {
       case "match_expr":
         return infer_match(this, expr.scrutinee, expr.arms, expr.span, subst);
       case "block":
-        return this.infer_block(expr);
+        return this.infer_block(expr, subst);
       case "if_expr":
         return infer_if(this, expr.condition, expr.then_branch, expr.else_branch, expr.span, subst);
       case "string_interp":

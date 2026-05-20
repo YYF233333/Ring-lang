@@ -441,16 +441,7 @@ export function infer_method_call(ctx: InferCtx, receiver: Expr, method: string,
   let method_type: Type | undefined;
   let method_scheme: import("./env.js").TypeScheme | undefined;
 
-  if (recv_type.kind === "struct") {
-    const impl_methods = ctx.env.impl_methods.get(recv_type.name);
-    if (impl_methods) {
-      const scheme = impl_methods.get(method);
-      if (scheme) {
-        method_scheme = scheme;
-        method_type = ctx.env.instantiate(scheme);
-      }
-    }
-  } else if (recv_type.kind === "enum") {
+  if (recv_type.kind === "struct" || recv_type.kind === "enum") {
     const impl_methods = ctx.env.impl_methods.get(recv_type.name);
     if (impl_methods) {
       const scheme = impl_methods.get(method);
