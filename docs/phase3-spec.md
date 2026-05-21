@@ -16,13 +16,13 @@ Phase 3 是 bootstrap 完成到 Phase B（安全类型：refinement types / line
 
 | # | 标准 | 当前状态 | 目标状态 |
 |---|------|----------|----------|
-| E1 | E2E 测试全部通过 | 318/324（6 个 parser panic） | 324/324 |
-| E2 | Parser 错误恢复 | 遇错误直接 panic | 声明级恢复 + 多错误报告 |
-| E3 | 语言 gotcha 消除 | 8+ 个已知陷阱（CLAUDE.md） | 高频陷阱全部修复 |
-| E4 | 编译器最大文件行数 | infer.ring 2763 行 | 所有文件 < 1500 行 |
-| E5 | TypeEnv god object | 17+ public mutable 字段 | 拆分为职责清晰的子结构 |
+| E1 | E2E 测试全部通过 | ✅ 352/352 | 324/324 |
+| E2 | Parser 错误恢复 | ✅ 声明级恢复已实现（B1） | 声明级恢复 + 多错误报告 |
+| E3 | 语言 gotcha 消除 | ✅ A3-A7 全部完成 | 高频陷阱全部修复 |
+| E4 | 编译器最大文件行数 | ✅ infer.ring 已拆分（C2） | 所有文件 < 1500 行 |
+| E5 | TypeEnv god object | 15 个 public mutable 字段 | 拆分为职责清晰的子结构 |
 | E6 | Substitution 性能 | O(n²) 全量复制 | Union-find O(α(n)) |
-| E7 | 编译器 boilerplate | ~300 行 `empty_xxx()` | 通过语言改进消除 |
+| E7 | 编译器 boilerplate | ✅ const 声明消除 ~300 行（A3） | 通过语言改进消除 |
 
 ## 3. 三轨架构
 
@@ -30,15 +30,15 @@ Phase 3 是 bootstrap 完成到 Phase B（安全类型：refinement types / line
 
 消除 LLM 和编译器代码反复踩的语言陷阱。每项 1-3 天。
 
-| # | 改进项 | 痛点 | 预期效果 | 难度 |
-|---|--------|------|----------|------|
-| A1 | **空列表 `[]` 类型推断** | `let x: List<T> = []` 失败，必须 `[dummy]; x.clear()` | 消除 ~300 行 `empty_xxx()` boilerplate + LLM 第一大 gotcha | 中 |
-| A2 | **Tuple 字段访问 `.0`/`.1`** | 必须解构绑定才能取 tuple 元素 | 消除 wrapper struct，代码更简洁 | 中 |
-| A3 | **`const` 声明** | `BUILTIN_*()` / `JS_RESERVED()` 每次调用分配新对象 | 编译器性能改善 + 惯用代码模式 | 中 |
-| A4 | **字符串插值嵌套引号** | `"\{fn("arg")}"` 解析失败 | 消除 LLM 反复踩的 gotcha | 小 |
-| A5 | **`BinOp::Eq {` 解析歧义** | `op == BinOp::Eq` 后跟 `{` 误解析为命名字段变体构造 | 消除编译器代码的括号 workaround | 小 |
-| A6 | **`loop` 关键字** | `while true` 可替代但不惯用 | 微小改善 | 极小 |
-| A7 | **`List.set(i, v)` 方法** | 修改列表元素需重建整个列表 | 编译器 codegen 等场景实用 | 极小 |
+| # | 改进项 | 痛点 | 预期效果 | 难度 | 状态 |
+|---|--------|------|----------|------|------|
+| A1 | **空列表 `[]` 类型推断** | `let x: List<T> = []` 失败，必须 `[dummy]; x.clear()` | 消除 ~300 行 `empty_xxx()` boilerplate + LLM 第一大 gotcha | 中 | ✅ It1 |
+| A2 | **Tuple 字段访问 `.0`/`.1`** | 必须解构绑定才能取 tuple 元素 | 消除 wrapper struct，代码更简洁 | 中 | ✅ It1 |
+| A3 | **`const` 声明** | `BUILTIN_*()` / `JS_RESERVED()` 每次调用分配新对象 | 编译器性能改善 + 惯用代码模式 | 中 | ✅ It2 |
+| A4 | **字符串插值嵌套引号** | `"\{fn("arg")}"` 解析失败 | 消除 LLM 反复踩的 gotcha | 小 | ✅ It2 |
+| A5 | **`BinOp::Eq {` 解析歧义** | `op == BinOp::Eq` 后跟 `{` 误解析为命名字段变体构造 | 消除编译器代码的括号 workaround | 小 | ✅ It3 |
+| A6 | **`loop` 关键字** | `while true` 可替代但不惯用 | 微小改善 | 极小 | ✅ It3 |
+| A7 | **`List.set(i, v)` 方法** | 修改列表元素需重建整个列表 | 编译器 codegen 等场景实用 | 极小 | ✅ WaveA |
 
 **A1 实现思路**：在 unification 中，当空列表字面量（元素类型为 fresh type var）遇到 `List<T>` 约束时，将元素类型变量统一为 `T`。需要在 parser（生成 `ListLit` 节点）、checker（推断空列表类型）、codegen（生成 `[]`）三处协调。
 
@@ -46,12 +46,12 @@ Phase 3 是 bootstrap 完成到 Phase B（安全类型：refinement types / line
 
 系统性提升编译器错误报告能力，直接影响 LLM 迭代效率。
 
-| # | 改进项 | 当前状态 | 预期效果 | 难度 |
-|---|--------|----------|----------|------|
-| B1 | **Parser 错误恢复** | 遇语法错误直接 panic | 声明级同步恢复，一次 parse 报告多个语法错误 | **大** |
-| B2 | **Checker 函数内多错误恢复** | 同一函数体内首错即停 | 表达式/语句级恢复，一个函数报多个类型错误 | 中 |
-| B3 | **诊断信息质量提升** | 部分错误码缺乏上下文 | "did you mean..." 建议、常见误用提示 | 中 |
-| B4 | **`--error-format=llm` 增强** | 基本结构化输出 | 修复建议、错误分类标签 | 小 |
+| # | 改进项 | 当前状态 | 预期效果 | 难度 | 状态 |
+|---|--------|----------|----------|------|------|
+| B1 | **Parser 错误恢复** | 遇语法错误直接 panic | 声明级同步恢复，一次 parse 报告多个语法错误 | **大** | ✅ It2 |
+| B2 | **Checker 函数内多错误恢复** | 同一函数体内首错即停 | 表达式/语句级恢复，一个函数报多个类型错误 | 中 | 🔄 WaveB |
+| B3 | **诊断信息质量提升** | 部分错误码缺乏上下文 | "did you mean..." 建议、常见误用提示 | 中 | |
+| B4 | **`--error-format=llm` 增强** | 基本结构化输出 | 修复建议、错误分类标签 | 小 | |
 
 **B1 实现策略**：
 - 声明级同步：遇到语法错误时，跳过 token 直到下一个声明起始关键字（`fn`/`struct`/`enum`/`trait`/`impl`/`use`/`let`），插入 `ErrorDecl` 占位节点
@@ -63,17 +63,17 @@ Phase 3 是 bootstrap 完成到 Phase B（安全类型：refinement types / line
 
 降低编译器代码复杂度，为 Phase B 新特性做好架构准备。
 
-| # | 改进项 | 当前状态 | 预期效果 | 难度 |
-|---|--------|----------|----------|------|
-| C1 | **HIR accessor 统一** | `hexpr_type`/`expr_type`/`expr_effects` 在 3 个文件重复 | 统一到 `hir.ring`，审计报告"最高 ROI 重构" | 小 |
-| C2 | **`infer.ring` 拆分** | 2763 行单文件 | 拆为 `infer.ring` + `infer_expr.ring` + `infer_stmt.ring` | 中 |
-| C3 | **TypeEnv 拆分** | 17+ public mutable 字段 god object | 拆为职责清晰的子结构 | **大** |
-| C4 | **Substitution union-find** | 每次 unify 复制整个 Map（O(n²)） | union-find O(α(n))，大项目编译提速 | 大 |
-| C5 | **代码去重** | `types_equal` 148 行重复、HOF inline ~100 行重复 | 抽象 helper + 统一模式 | 中 |
-| C6 | **if/else → match 重构** | derive.ring/codegen_derive.ring 嵌套 if/else | 改用 match 表达式 | 小 |
-| C7 | **模块 resolver AST 缓存** | 每个文件 parse 两次 | 缓存首次 parse 结果 | 小 |
-| C8 | **`try_eq_dispatch` sentinel → Option** | 用空字符串作 sentinel | 改用 `Option<Str>` | 极小 |
-| C9 | **`panic()` → DiagnosticSink** | 68 处 panic（~40 unreachable） | 可行的替换为诊断报错 | 中 |
+| # | 改进项 | 当前状态 | 预期效果 | 难度 | 状态 |
+|---|--------|----------|----------|------|------|
+| C1 | **HIR accessor 统一** | `hexpr_type`/`expr_type`/`expr_effects` 在 3 个文件重复 | 统一到 `hir.ring`，审计报告"最高 ROI 重构" | 小 | ✅ It1 |
+| C2 | **`infer.ring` 拆分** | 2763 行单文件 | 拆为 `infer.ring` + `infer_decl.ring` | 中 | ✅ It3 |
+| C3 | **TypeEnv 拆分** | 17+ public mutable 字段 god object | 拆为职责清晰的子结构 | **大** | |
+| C4 | **Substitution union-find** | 每次 unify 复制整个 Map（O(n²)） | union-find O(α(n))，大项目编译提速 | 大 | |
+| C5 | **代码去重** | `types_equal` 148 行重复、HOF inline ~100 行重复 | 抽象 helper + 统一模式 | 中 | 🔄 WaveB |
+| C6 | **if/else → match 重构** | derive.ring/codegen_derive.ring 嵌套 if/else | 改用 match 表达式 | 小 | ✅ WaveA |
+| C7 | **模块 resolver AST 缓存** | 每个文件 parse 两次 | 缓存首次 parse 结果 | 小 | ✅ WaveA |
+| C8 | **`try_eq_dispatch` sentinel → Option** | 用空字符串作 sentinel | 改用 `Option<Str>` | 极小 | ✅ It3 |
+| C9 | **`panic()` → DiagnosticSink** | 68 处 panic（~40 unreachable） | 可行的替换为诊断报错 | 中 | |
 
 **C3 实现策略**（分步）：
 1. 提取只读查询接口（不改变外部 API）
@@ -82,7 +82,7 @@ Phase 3 是 bootstrap 完成到 Phase B（安全类型：refinement types / line
 
 ## 4. 迭代编排
 
-### Iteration 1："解锁器"（Week 1-2）
+### Iteration 1："解锁器"（Week 1-2）✅ 完成
 
 | 轨道 | 任务 | 理由 |
 |------|------|------|
@@ -90,9 +90,7 @@ Phase 3 是 bootstrap 完成到 Phase B（安全类型：refinement types / line
 | A | A2: Tuple 字段访问 `.0`/`.1` | 解锁 wrapper struct 清理 |
 | C | C1: HIR accessor 统一 | 独立、高 ROI |
 
-**里程碑**：空列表和 tuple 访问可用。编译器代码开始用新特性自我简化。
-
-### Iteration 2："Parser 攻坚 + 语言完善"（Week 3-5）
+### Iteration 2："Parser 攻坚 + 语言完善"（Week 3-5）✅ 完成
 
 | 轨道 | 任务 | 理由 |
 |------|------|------|
@@ -100,47 +98,47 @@ Phase 3 是 bootstrap 完成到 Phase B（安全类型：refinement types / line
 | A | A3: `const` 声明 | 穿插在 parser 工作间隙 |
 | A | A4: 字符串插值嵌套引号 | 小修复，parser 相关 |
 
-**里程碑**：324/324 测试全绿。Parser 不再 panic，一次 parse 报告多个错误。`const` 可用。
-
-### Iteration 3："大文件拆分 + 小修"（Week 6-7）
+### Iteration 3："大文件拆分 + 小修"（Week 6-7）✅ 完成
 
 | 轨道 | 任务 | 理由 |
 |------|------|------|
-| C | C2: `infer.ring` 拆分 | 为 TypeEnv 重构做准备 |
+| C | C2: `infer.ring` 拆分（→ infer_decl.ring） | 为 TypeEnv 重构做准备 |
 | A | A5: `BinOp::Eq {` 解析歧义 | 小修 |
 | A | A6: `loop` 关键字 | 极小改动 |
 | C | C8: `try_eq_dispatch` sentinel → Option | 极小 |
 
-**里程碑**：所有文件 < 1500 行。
+### Wave A："独立冲刺"（与 It3 并行）✅ 完成
 
-### Iteration 4："核心架构"（Week 8-10）
-
-| 轨道 | 任务 | 理由 |
-|------|------|------|
-| C | C3: TypeEnv 拆分 | 最大架构债 |
-| B | B2: Checker 函数内多错误恢复 | TypeEnv 拆分过程中顺势改进 |
-| A | A7: `List.set(i, v)` | 小改动 |
-
-**里程碑**：TypeEnv 不再是 god object。Checker 函数内多错误报告。
-
-### Iteration 5："性能 + 质量"（Week 11-12）
+原 It4/5/6 的无依赖任务提前并行执行（3 worktrees）。
 
 | 轨道 | 任务 | 理由 |
 |------|------|------|
-| C | C4: Substitution union-find | 性能关键改进 |
-| C | C5: 代码去重 | 利用 A1/A2 新特性清理 |
-| B | B3: 诊断信息质量提升 | 在新架构上更容易 |
+| A | A7: `List.set(i, v)` | 无依赖，与 It3 零文件冲突 |
+| C | C6: if/else → match 重构 | 无依赖，derive.ring/codegen_derive.ring |
+| C | C7: 模块 resolver AST 缓存 | 无依赖，消除双重 parse |
 
-**里程碑**：编译性能显著改善。错误消息对 LLM 更友好。
-
-### Iteration 6："收尾 + 巩固"（Week 13-14）
+### Wave B："错误恢复 + 去重"（Wave A 后）🔄 进行中
 
 | 轨道 | 任务 | 理由 |
 |------|------|------|
-| C | C6: if/else → match 重构 | 最后清理 |
-| C | C7: 模块 resolver AST 缓存 | 编译速度最后一英里 |
-| C | C9: `panic()` → DiagnosticSink（部分） | 逐步替换 |
-| B | B4: `--error-format=llm` 增强 | 最终打磨 |
+| B | B2: Checker 函数内多错误恢复 | ErrorType 吸收错误，函数内继续 |
+| C | C5: 代码去重（types_equal + HOF inline） | 利用 A1/A2 新特性清理 |
+
+### Wave C："核心架构"（Wave B 后）
+
+| 轨道 | 任务 | 理由 |
+|------|------|------|
+| C | C3: TypeEnv 拆分 | 最大架构债，独占 main |
+
+**里程碑**：TypeEnv 不再是 god object。
+
+### Wave D："性能 + 打磨"（Wave C 后，3 worktrees 并行）
+
+| 轨道 | 任务 | 理由 |
+|------|------|------|
+| C | C4: Substitution union-find | unify.ring，与 B3/C9 零冲突 |
+| B | B3 + B4: 诊断质量 + error-format=llm | diagnostics.ring/formatter.ring |
+| C | C9: `panic()` → DiagnosticSink（部分） | ~28 个可恢复 panic |
 
 **里程碑**：Phase 3 退出标准全部达成。准备进入 Phase B。
 
