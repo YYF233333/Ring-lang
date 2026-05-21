@@ -1,18 +1,18 @@
-use types::{Type, EffectRow, UNIT, EMPTY_ROW}
-use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl}
+use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string}
+use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl, EffectExpr}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod,
     hexpr_type}
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0201, E0204, E0402, E0501}
+use codes::{E0201, E0204, E0402, E0404, E0501}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error,
     unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type,
     generalize}
-use infer_register::{register_decls_two_phase}
+use infer_register::{register_decls_two_phase, resolve_declared_effects}
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
@@ -31,14 +31,14 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
             check_effect_decl(ctx, name, type_params, ops, is_pub, span),
         Decl::Impl { target_type, type_params, trait_name, methods, span } =>
             check_impl_decl(ctx, target_type, type_params, trait_name, methods, span),
-        Decl::Fn { name, type_params, params, return_type, body, is_pub, span, .. } =>
-            check_fn_decl(ctx, name, type_params, params, return_type, body, is_pub, span, none),
+        Decl::Fn { name, type_params, params, return_type, declared_effects, body, is_pub, span, .. } =>
+            check_fn_decl(ctx, name, type_params, params, return_type, declared_effects, body, is_pub, span, none),
         Decl::Test { description, body, span } =>
             check_test_decl(ctx, description, body, span),
         Decl::Trait { name, type_params, methods, is_pub, span, .. } =>
             check_trait_decl(ctx, name, type_params, methods, is_pub, span),
-        Decl::ExternFn { name, type_params, params, return_type, is_pub, span } =>
-            check_extern_fn_decl(ctx, name, type_params, params, is_pub, span),
+        Decl::ExternFn { name, type_params, params, return_type, declared_effects, is_pub, span } =>
+            check_extern_fn_decl(ctx, name, type_params, params, declared_effects, is_pub, span),
         Decl::ExternType { name, type_params, is_pub, span } =>
             HDecl::ExternType { name: name, type_params: type_params, is_pub: is_pub, span: span },
         Decl::TypeAlias { name, is_pub, span, .. } => {
@@ -153,10 +153,10 @@ fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypePa
     var hmethods: List<HDecl> = []
     for method in methods {
         match method {
-            Decl::ExternFn { name, type_params: mtps, params, return_type, is_pub, span: mspan } =>
-                hmethods.push(check_extern_fn_decl(ctx, name, mtps, params, is_pub, mspan)),
-            Decl::Fn { name, type_params: mtps, params, return_type, body, is_pub, span: mspan, .. } =>
-                hmethods.push(check_fn_decl(ctx, name, mtps, params, return_type, body, is_pub, mspan, some(impl_self_type))),
+            Decl::ExternFn { name, type_params: mtps, params, return_type, declared_effects, is_pub, span: mspan } =>
+                hmethods.push(check_extern_fn_decl(ctx, name, mtps, params, declared_effects, is_pub, mspan)),
+            Decl::Fn { name, type_params: mtps, params, return_type, declared_effects, body, is_pub, span: mspan, .. } =>
+                hmethods.push(check_fn_decl(ctx, name, mtps, params, return_type, declared_effects, body, is_pub, mspan, some(impl_self_type))),
             _ => {}
         }
     }
@@ -297,7 +297,7 @@ fn find_ast_fn_by_name(methods: List<Decl>, name: Str) -> Decl? {
     })
 }
 
-fn check_extern_fn_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, is_pub: Bool, span: Span) -> HDecl {
+fn check_extern_fn_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, declared_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
     let scheme = match ctx.env.lookup(name) {
         some(s) => s,
         none => {
@@ -321,9 +321,13 @@ fn check_extern_fn_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: false })
         i = i + 1
     }
+    let extern_effects = match declared_effects {
+        some(de) => resolve_declared_effects(ctx, de),
+        none => EMPTY_ROW
+    }
     HDecl::ExternFn {
         name: name, def_id: scheme.def_id, type_params: type_params,
-        params: hparams, return_type: fn_ret, effects: EMPTY_ROW,
+        params: hparams, return_type: fn_ret, effects: extern_effects,
         is_pub: is_pub, span: span
     }
 }
@@ -377,7 +381,19 @@ fn check_fn_body(var ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     FnBodyResult { params: final_params, ret: final_ret, eff: eff, body: final_body }
 }
 
-fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {
+fn effects_match_kind(a: Effect, b: Effect) -> Bool {
+    match a {
+        Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
+        Effect::MutEffect => match b { Effect::MutEffect => true, _ => false },
+        Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
+        Effect::CustomEffect { name: na, .. } => match b {
+            Effect::CustomEffect { name: nb, .. } => na == nb,
+            _ => false
+        }
+    }
+}
+
+fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
@@ -460,8 +476,33 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     }
     let final_params = fn_result.params
     let final_ret = fn_result.ret
-    let effects = fn_result.eff
+    let inferred_effects = fn_result.eff
     let final_body = fn_result.body
+
+    // Verify: inferred effects <= declared effects
+    let final_effects = match declared_effects {
+        some(de) => {
+            let declared_row = resolve_declared_effects(ctx, de)
+            // Check each inferred effect is in declared set
+            for inferred_eff in inferred_effects.effects {
+                var found = false
+                for declared_eff in declared_row.effects {
+                    if effects_match_kind(inferred_eff, declared_eff) {
+                        found = true
+                    }
+                }
+                if !found {
+                    let _ = type_error(ctx.sink, E0404,
+                        "Function '${name}' has undeclared effect: ${effect_to_string(inferred_eff)}",
+                        span,
+                        DiagnosticContext::OtherContext { detail: some("effect annotation violation") })
+                }
+            }
+            // Use declared effects (they are the public contract)
+            declared_row
+        },
+        none => inferred_effects
+    }
 
     var trait_bounds: List<TraitBound> = []
     for tp in type_params {
@@ -479,7 +520,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
 
     HDecl::Fn {
         name: name, def_id: fn_def_id, type_params: type_params,
-        params: final_params, return_type: final_ret, effects: effects,
+        params: final_params, return_type: final_ret, effects: final_effects,
         body: final_body, is_pub: is_pub, trait_bounds: trait_bounds, span: span
     }
 }

@@ -17,6 +17,7 @@ pub const E0307: Str = "E0307"
 pub const E0308: Str = "E0308"
 pub const E0402: Str = "E0402"
 pub const E0403: Str = "E0403"
+pub const E0404: Str = "E0404"
 pub const E0501: Str = "E0501"
 pub const E0502: Str = "E0502"
 pub const E0503: Str = "E0503"
@@ -46,6 +47,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0308" { return "Type does not implement Ord" }
     if code == "E0402" { return "Unknown effect operation" }
     if code == "E0403" { return "Unhandled effect" }
+    if code == "E0404" { return "Effect annotation violation" }
     if code == "E0501" { return "Unknown trait" }
     if code == "E0502" { return "Missing trait method implementation" }
     if code == "E0503" { return "Unsatisfied trait bound" }
