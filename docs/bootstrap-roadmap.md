@@ -50,6 +50,21 @@
 | `throw new Error(msg)` | `raise(Error { msg })` (fail effect) |
 | `obj.field !== undefined` | `match obj.field { Some(v) => ..., None => ... }` |
 
+翻译过程中反复出现的额外模式（原表未覆盖）：
+
+| TypeScript 模式 | Ring 等价物 |
+|----------------|------------|
+| `const X = "value"` (模块常量) | `pub fn X() -> Str { "value" }` 零参函数 |
+| `field.type` / `field.effect` | `field.ty` / `field.eff`（Ring 关键字回避） |
+| `new Array<T>()` / `[] as T[]` | `empty_xxx()` helper（`let x = [dummy]; x.clear(); x`） |
+| `arr[i]` (直接下标) | `list.get(i)` → `Option<T>`，封装 `_at(list, i)` helper |
+| `"a" + "b"` (字符串拼接) | `"\{a}\{b}"` 插值或 `[a, b].join("")` |
+| `\`${expr}\`` (JS template literal) | `List<Str> + push + join("")`（Ring `${...}` 冲突） |
+| `fn("str_arg")` inside `"\{...}"` | `let v = fn("str_arg"); "\{v}"`（嵌套引号回避） |
+| `arr.map(x => ...)` 捕获 `var` | `for x in arr { result.push(...) }`（闭包不能捕获 var） |
+| `return expr` in match arm | 提取为独立函数或改用 if-else（match arm 是表达式） |
+| `StructDef \| EnumDef` union | `enum TypeDef { StructDef_(StructDef), EnumDef_(EnumDef) }` 包装 |
+
 ### 4. 增量替换管线
 
 每个 batch 的工作流：
