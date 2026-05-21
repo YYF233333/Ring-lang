@@ -136,11 +136,23 @@ function ring_check(file_path: string): { success: boolean; error_output: string
       return { success: false, error_output: text };
     }
     if (/^use\s+|^pub\s+use\s+/m.test(source)) {
-      const result = compile_project(file_path);
-      if (!result.success) {
-        return { success: false, error_output: "Compilation failed" };
+      let captured_stderr = "";
+      const orig_write = process.stderr.write;
+      process.stderr.write = ((chunk: any, ...args: any[]) => {
+        captured_stderr += typeof chunk === "string" ? chunk : chunk.toString();
+        return true;
+      }) as any;
+      try {
+        const result = compile_project(file_path);
+        process.stderr.write = orig_write;
+        if (!result.success) {
+          return { success: false, error_output: captured_stderr || "Compilation failed" };
+        }
+        return { success: true, error_output: "" };
+      } catch (e: any) {
+        process.stderr.write = orig_write;
+        return { success: false, error_output: captured_stderr || e.message || String(e) };
       }
-      return { success: true, error_output: "" };
     }
     const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
     const result = check(ast, sink, fail_ev);
@@ -566,18 +578,22 @@ describe("e2e: multi-file modules (ring check)", { concurrency: true }, () => {
 
 describe("e2e: multi-file modules (negative)", () => {
   const module_negative_cases = [
-    { dir: "error_not_found", desc: "missing module" },
-    { dir: "error_circular", desc: "circular dependency" },
-    { dir: "error_private_import", desc: "private symbol import" },
-    { dir: "error_symbol_not_found", desc: "symbol not found in module" },
+    { dir: "error_not_found", desc: "missing module", error_pattern: "E0702" },
+    { dir: "error_circular", desc: "circular dependency", error_pattern: "E0704" },
+    { dir: "error_private_import", desc: "private symbol import", error_pattern: "E0703" },
+    { dir: "error_symbol_not_found", desc: "symbol not found in module", error_pattern: "E0703" },
   ];
 
   for (const tc of module_negative_cases) {
-    test(`modules/${tc.dir} should fail (${tc.desc})`, () => {
+    test(`modules/${tc.dir} should fail with ${tc.error_pattern} (${tc.desc})`, () => {
       const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
       assert.ok(fs.existsSync(mainFile), `Test entry not found: ${mainFile}`);
       const result = ring_check(mainFile);
       assert.ok(!result.success, `Expected compilation to fail for ${tc.dir}`);
+      assert.ok(
+        result.error_output.includes(tc.error_pattern),
+        `Expected error containing "${tc.error_pattern}", got: ${result.error_output.slice(0, 300)}`
+      );
     });
   }
 });

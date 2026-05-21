@@ -318,6 +318,14 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                                             match prefixed {
                                                 Decl::Fn { name: fname, is_pub: fpub, .. } => { if fpub { export_names.push(safe_ident(fname)) } },
                                                 Decl::Struct { name: sname, is_pub: spub, .. } => { if spub { export_names.push(safe_ident(sname)) } },
+                                                Decl::Enum { name: ename, is_pub: epub, variants, .. } => {
+                                                    if epub {
+                                                        for v in variants {
+                                                            let sn = safe_ident(ename)
+                                                            export_names.push("${sn}_${v.name}")
+                                                        }
+                                                    }
+                                                },
                                                 Decl::Const { name: cname, is_pub: cpub, .. } => { if cpub { export_names.push(safe_ident(cname)) } },
                                                 _ => {},
                                             }

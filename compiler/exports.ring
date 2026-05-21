@@ -191,6 +191,22 @@ pub fn extract_exports(
                                     }
                                 }
                             },
+                            Decl::Enum { name: ename, is_pub: epub, .. } => {
+                                if epub {
+                                    match env.types.enums.get(ename) {
+                                        some(edef) => {
+                                            types.insert(ename, TypeDef::EnumDef_(edef))
+                                            for v in edef.variants {
+                                                match env.lookup(v.name) {
+                                                    some(vscheme) => { values.insert(v.name, vscheme) },
+                                                    none => {},
+                                                }
+                                            }
+                                        },
+                                        none => {},
+                                    }
+                                }
+                            },
                             Decl::Const { name: cname, is_pub: cpub, .. } => {
                                 if cpub {
                                     match env.lookup(cname) {

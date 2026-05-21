@@ -169,7 +169,7 @@ Ring-lang/
 - **Struct literal 不能直接出现在 if/while/for/match 条件位置**：`if x == MyStruct { f: 1 } { ... }` 歧义——parser 无法区分 struct literal 和块的 `{`。需用括号 `if x == (MyStruct { f: 1 }) { ... }` 或变量绑定。Go/Rust 同有此限制。
 - `for..in` 不支持 Map 直接迭代（需 `for entry in map.entries()` + 解构）
 - 无 CI 管线（test 依赖手动执行）
-- 模块系统不支持：`sig` 签名、first-class modules、inline `mod` 块、capability 限制、相对路径（`super::`/`self::`）
+- 模块系统不支持：`sig` 签名、first-class modules、capability 限制、相对路径（`super::`/`self::`）
 - Checker 多错误恢复：declaration 级（同一函数内仍停于首错）
 - Parser 声明级错误恢复：遇到语法错误时跳到下一个声明关键字继续，一次 parse 报告多个语法错误
 - **Impl 方法 effect 不传播**：impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后不回传。Workaround：parser 用 `__ring_raise_fail` extern fn 直接抛 `__EffectAbort`，codegen 的 `gen_try_catch` 已去除 `has_fail_effect` 前置检查

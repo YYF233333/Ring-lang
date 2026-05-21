@@ -647,7 +647,7 @@ pub use config
 
 - `sig` 模块签名（OCaml/SML 风格接口）
 - 一等模块（模块作为值传递）
-- `inline mod` 块
+- ~~`inline mod` 块~~ ✅ 已实现（`pub mod name { ... }` 嵌套命名空间，声明自动加前缀 `mod_name::decl_name`）
 - 相对路径导入（`super::`/`self::`）
 - Capability 限制
 

@@ -1,6 +1,9 @@
-use ast::{Program}
+use ast::{Program, Span, Position}
 use parser::{parse}
-use diagnostics::{CollectingSink, new_collecting_sink}
+use diagnostics::{CollectingSink, Diagnostic, Severity, DiagnosticContext,
+    new_collecting_sink, make_diag}
+use formatter::{format_human}
+use codes::{E0702, E0704}
 
 // ============================================================
 // Types
@@ -85,7 +88,10 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                         let source = read_file(current_mod.file_path)
                         let resolve_sink = new_collecting_sink()
                         let ast = parse(source, current_mod.file_path, resolve_sink)
-                        if resolve_sink.has_errors() { return none }
+                        if resolve_sink.has_errors() {
+                            eprintln(format_human(resolve_sink.diagnostics(), source))
+                            return none
+                        }
                         asts_map.insert(current_key, ast)
 
                         var deps: List<Str> = [""]; deps.clear()
@@ -113,7 +119,17 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                                         deps.push(dep_key)
                                     },
                                     none => {
-                                        // Module not found — return none
+                                        let mod_path = segments.join("::")
+                                        let diag = make_diag(
+                                            E0702,
+                                            Severity::SevError,
+                                            "Module '${mod_path}' not found",
+                                            use_decl.span,
+                                            DiagnosticContext::OtherContext { detail: some("no file '${mod_path}.ring' in project root") }
+                                        )
+                                        let err_sink = new_collecting_sink()
+                                        err_sink.report(diag)
+                                        eprintln(format_human(err_sink.diagnostics(), source))
                                         return none
                                     },
                                 }
@@ -166,7 +182,33 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
     }
 
     if topo_order.len() != modules.len() {
-        // Cycle detected
+        // Cycle detected — find and report the cycle path
+        var cycle_nodes: List<Str> = [""]; cycle_nodes.clear()
+        for entry in modules.entries() {
+            let (key, _) = entry
+            if !topo_order.contains(key) {
+                cycle_nodes.push(key)
+            }
+        }
+        // Build a human-readable cycle path by following dependencies
+        let cycle_path = find_cycle_path(cycle_nodes, dependencies)
+        let cycle_desc = cycle_path.join(" -> ")
+        let file_span = Span {
+            file: abs_entry,
+            start: Position { line: 1, column: 0, offset: 0 },
+            end: Position { line: 1, column: 0, offset: 0 }
+        }
+        let diag = make_diag(
+            E0704,
+            Severity::SevError,
+            "Circular dependency detected: ${cycle_desc}",
+            file_span,
+            DiagnosticContext::OtherContext { detail: some("modules form a dependency cycle") }
+        )
+        let err_sink = new_collecting_sink()
+        err_sink.report(diag)
+        let entry_source = read_file(abs_entry)
+        eprintln(format_human(err_sink.diagnostics(), entry_source))
         return none
     }
 
@@ -177,4 +219,57 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
         topo_order: topo_order,
         asts: asts_map
     })
+}
+
+// Find a cycle path among the nodes that weren't topologically sorted.
+// Returns a list like ["a", "b", "a"] showing the cycle.
+fn find_cycle_path(cycle_nodes: List<Str>, dependencies: Map<Str, List<Str>>) -> List<Str> {
+    if cycle_nodes.len() == 0 { return ["(unknown)"] }
+    let cycle_set: Set<Str> = set_from(cycle_nodes)
+
+    // Try each cycle node as a potential cycle start.
+    // Follow a single path through cycle-member deps; if we return to start, that's the cycle.
+    for start_node in cycle_nodes {
+        var path: List<Str> = [start_node]
+        var current = start_node
+        var visited: Set<Str> = set_new()
+        visited.insert(current)
+        var found_cycle = false
+
+        while !found_cycle {
+            let maybe_deps = dependencies.get(current)
+            if maybe_deps.is_none() { break }
+            let deps = maybe_deps.unwrap()
+            var advanced = false
+            for dep in deps {
+                if cycle_set.contains(dep) {
+                    if dep == start_node {
+                        path.push(dep)
+                        found_cycle = true
+                        advanced = true
+                        break
+                    }
+                    if !visited.contains(dep) {
+                        visited.insert(dep)
+                        path.push(dep)
+                        current = dep
+                        advanced = true
+                        break
+                    }
+                }
+            }
+            if !advanced { break }
+        }
+
+        if found_cycle { return path }
+    }
+
+    // Fallback: just list the cycle nodes
+    var fallback: List<Str> = [""]; fallback.clear()
+    for n in cycle_nodes { fallback.push(n) }
+    match cycle_nodes.get(0) {
+        some(first) => fallback.push(first),
+        none => {},
+    }
+    fallback
 }

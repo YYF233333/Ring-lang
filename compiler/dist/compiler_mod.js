@@ -440,6 +440,16 @@ function compile_project_esm(entry_file, out_dir) {
                           }
                           break __ring_match18;
                         }
+                        if (__ring_m18._tag === "Enum") {
+                          const ename = __ring_m18.name; const epub = __ring_m18.is_pub; const variants = __ring_m18.variants;
+                          if (epub) {
+                            for (const v of variants) {
+                              const sn = codegen_ctx$safe_ident(ename);
+                              List_push(export_names, `${sn}_${v.name}`);
+                            }
+                          }
+                          break __ring_match18;
+                        }
                         if (__ring_m18._tag === "Const") {
                           const cname = __ring_m18.name; const cpub = __ring_m18.is_pub;
                           if (cpub) {
