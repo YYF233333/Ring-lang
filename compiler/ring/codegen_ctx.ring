@@ -22,7 +22,7 @@ fn JS_RESERVED() -> Set<Str> {
 }
 
 pub fn safe_ident(name: Str) -> Str {
-    if JS_RESERVED().contains(name) { "_\{name}" } else { name }
+    if JS_RESERVED().contains(name) { "_${name}" } else { name }
 }
 
 pub struct CodegenCtx {
@@ -71,14 +71,14 @@ pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx 
 fn indent_str(level: Int) -> Str {
     var result = ""
     for i in 0..level {
-        result = "\{result}  "
+        result = "${result}  "
     }
     result
 }
 
 pub fn emit(var ctx: CodegenCtx, line: Str) {
     let prefix = indent_str(ctx.indent_level)
-    ctx.lines.push("\{prefix}\{line}")
+    ctx.lines.push("${prefix}${line}")
 }
 
 pub fn emit_raw(var ctx: CodegenCtx, text: Str) {
@@ -105,7 +105,7 @@ pub fn qualify(ctx: CodegenCtx, name: Str) -> Str {
         some(prefix) => {
             if ctx.local_names.contains(name) {
                 let safe = safe_ident(name)
-                return "\{prefix}$\{safe}"
+                return "${prefix}$${safe}"
             }
         },
         none => {},

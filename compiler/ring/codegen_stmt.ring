@@ -24,9 +24,9 @@ pub fn emit_in_stmt_context(var ctx: CodegenCtx, expr: HExpr, mode: Str) {
         _ => {
             let e = gen_expr(ctx, expr)
             if mode == "return" {
-                emit(ctx, "return \{e};")
+                emit(ctx, "return ${e};")
             } else {
-                emit(ctx, "\{e};")
+                emit(ctx, "${e};")
             }
         },
     }
@@ -38,7 +38,7 @@ pub fn emit_in_stmt_context(var ctx: CodegenCtx, expr: HExpr, mode: Str) {
 
 fn emit_if_stmt(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, mode: Str) {
     let cond = gen_expr(ctx, condition)
-    emit(ctx, "if (\{cond}) {")
+    emit(ctx, "if (${cond}) {")
     push_indent(ctx)
     emit_block_in_stmt_context(ctx, then_branch, mode)
     pop_indent(ctx)
@@ -61,7 +61,7 @@ fn emit_if_stmt(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_
 
 fn emit_else_if(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, mode: Str) {
     let cond = gen_expr(ctx, condition)
-    emit(ctx, "} else if (\{cond}) {")
+    emit(ctx, "} else if (${cond}) {")
     push_indent(ctx)
     emit_block_in_stmt_context(ctx, then_branch, mode)
     pop_indent(ctx)
@@ -128,13 +128,13 @@ pub fn emit_block_body(var ctx: CodegenCtx, block: HExpr) {
 // ============================================================
 
 fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>, mode: Str) {
-    let label = "__ring_match\{ctx.match_counter}"
+    let label = "__ring_match${ctx.match_counter}"
     ctx.match_counter = ctx.match_counter + 1
     let scrut_js = gen_expr(ctx, scrutinee)
-    emit(ctx, "\{label}: {")
+    emit(ctx, "${label}: {")
     push_indent(ctx)
-    let scrut_var = "__ring_m\{ctx.match_counter - 1}"
-    emit(ctx, "const \{scrut_var} = \{scrut_js};")
+    let scrut_var = "__ring_m${ctx.match_counter - 1}"
+    emit(ctx, "const ${scrut_var} = ${scrut_js};")
 
     for arm in arms {
         let cond = gen_pattern_condition(scrut_var, arm.pattern)
@@ -144,26 +144,26 @@ fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
                 if cond == "true" {
                     if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
                     emit_in_stmt_context(ctx, arm.body, mode)
-                    emit(ctx, "break \{label};")
+                    emit(ctx, "break ${label};")
                 } else {
-                    emit(ctx, "if (\{cond}) {")
+                    emit(ctx, "if (${cond}) {")
                     push_indent(ctx)
                     if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
                     emit_in_stmt_context(ctx, arm.body, mode)
-                    emit(ctx, "break \{label};")
+                    emit(ctx, "break ${label};")
                     pop_indent(ctx)
                     emit(ctx, "}")
                 }
             },
             some(guard) => {
-                emit(ctx, "if (\{cond}) {")
+                emit(ctx, "if (${cond}) {")
                 push_indent(ctx)
                 if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
                 let guard_js = gen_expr(ctx, guard)
-                emit(ctx, "if (\{guard_js}) {")
+                emit(ctx, "if (${guard_js}) {")
                 push_indent(ctx)
                 emit_in_stmt_context(ctx, arm.body, mode)
-                emit(ctx, "break \{label};")
+                emit(ctx, "break ${label};")
                 pop_indent(ctx)
                 emit(ctx, "}")
                 pop_indent(ctx)
@@ -181,7 +181,7 @@ fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
         }
     }
     if has_catchall == false {
-        emit(ctx, "\{RUNTIME_MATCH_FAIL()}(\{scrut_var});")
+        emit(ctx, "${RUNTIME_MATCH_FAIL()}(${scrut_var});")
     }
     pop_indent(ctx)
     emit(ctx, "}")
@@ -200,7 +200,7 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
         },
         HStmt::While { condition, body, .. } => {
             let cond = gen_expr(ctx, condition)
-            emit(ctx, "while (\{cond}) {")
+            emit(ctx, "while (${cond}) {")
             push_indent(ctx)
             emit_block_in_stmt_context(ctx, body, "discard")
             pop_indent(ctx)
@@ -212,11 +212,11 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
                     let start_js = gen_expr(ctx, start)
                     let end_js = gen_expr(ctx, end)
                     let b = safe_ident(binding)
-                    let end_var = "__ring_end\{ctx.loop_counter}"
+                    let end_var = "__ring_end${ctx.loop_counter}"
                     ctx.loop_counter = ctx.loop_counter + 1
-                    emit(ctx, "const \{end_var} = \{end_js};")
+                    emit(ctx, "const ${end_var} = ${end_js};")
                     let cmp = if inclusive { "<=" } else { "<" }
-                    emit(ctx, "for (let \{b} = \{start_js}; \{b} \{cmp} \{end_var}; \{b}++) {")
+                    emit(ctx, "for (let ${b} = ${start_js}; ${b} ${cmp} ${end_var}; ${b}++) {")
                 },
                 _ => match destructure {
                     some(ds) => {
@@ -225,17 +225,17 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
                             var names: List<Str> = [""]; names.clear()
                             for d in ds { names.push(safe_ident(d.name)) }
                             let joined = names.join(", ")
-                            emit(ctx, "for (const [\{joined}] of \{iter}) {")
+                            emit(ctx, "for (const [${joined}] of ${iter}) {")
                         } else {
                             let iter = gen_expr(ctx, iterable)
                             let b = safe_ident(binding)
-                            emit(ctx, "for (const \{b} of \{iter}) {")
+                            emit(ctx, "for (const ${b} of ${iter}) {")
                         }
                     },
                     none => {
                         let iter = gen_expr(ctx, iterable)
                         let b = safe_ident(binding)
-                        emit(ctx, "for (const \{b} of \{iter}) {")
+                        emit(ctx, "for (const ${b} of ${iter}) {")
                     },
                 },
             }
@@ -248,15 +248,15 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
         HStmt::Continue { .. } => emit(ctx, "continue;"),
         HStmt::LetDestructure { bindings, init, .. } => {
             let init_js = gen_expr(ctx, init)
-            let tmp = "__ring_dt\{ctx.dt_counter}"
+            let tmp = "__ring_dt${ctx.dt_counter}"
             ctx.dt_counter = ctx.dt_counter + 1
-            emit(ctx, "const \{tmp} = \{init_js};")
+            emit(ctx, "const ${tmp} = ${init_js};")
             for i in 0..bindings.len() {
                 match bindings.get(i) {
                     some(b) => {
                         if b.name != "_" {
                             let sname = safe_ident(b.name)
-                            emit(ctx, "const \{sname} = \{tmp}[\{i}];")
+                            emit(ctx, "const ${sname} = ${tmp}[${i}];")
                         }
                     },
                     none => {},
@@ -267,9 +267,9 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
             emit(ctx, "{")
             push_indent(ctx)
             let scrutinee = gen_expr(ctx, expr)
-            emit(ctx, "const __ring_t = \{scrutinee};")
+            emit(ctx, "const __ring_t = ${scrutinee};")
             let cond = gen_pattern_condition("__ring_t", pattern)
-            emit(ctx, "if (\{cond}) {")
+            emit(ctx, "if (${cond}) {")
             push_indent(ctx)
             let bindings = gen_pattern_bindings("__ring_t", pattern)
             if bindings.trim().len() > 0 { emit(ctx, bindings.trim()) }
@@ -291,17 +291,17 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
         HStmt::Let { name, init, .. } => {
             let sname = safe_ident(name)
             let init_js = gen_expr(ctx, init)
-            emit(ctx, "const \{sname} = \{init_js};")
+            emit(ctx, "const ${sname} = ${init_js};")
         },
         HStmt::Var { name, init, .. } => {
             let sname = safe_ident(name)
             let init_js = gen_expr(ctx, init)
-            emit(ctx, "let \{sname} = \{init_js};")
+            emit(ctx, "let ${sname} = ${init_js};")
         },
         HStmt::Assign { target, value, .. } => {
             let t = gen_expr(ctx, target)
             let v = gen_expr(ctx, value)
-            emit(ctx, "\{t} = \{v};")
+            emit(ctx, "${t} = ${v};")
         },
     }
 }
@@ -315,26 +315,26 @@ pub fn gen_stmt_inline(var ctx: CodegenCtx, stmt: HStmt) -> Str {
         HStmt::Let { name, init, .. } => {
             let sname = safe_ident(name)
             let init_js = gen_expr(ctx, init)
-            "const \{sname} = \{init_js};"
+            "const ${sname} = ${init_js};"
         },
         HStmt::Var { name, init, .. } => {
             let sname = safe_ident(name)
             let init_js = gen_expr(ctx, init)
-            "let \{sname} = \{init_js};"
+            "let ${sname} = ${init_js};"
         },
         HStmt::Assign { target, value, .. } => {
             let t = gen_expr(ctx, target)
             let v = gen_expr(ctx, value)
-            "\{t} = \{v};"
+            "${t} = ${v};"
         },
         HStmt::ExprStmt { expr, .. } => {
             let e = gen_expr(ctx, expr)
-            "\{e};"
+            "${e};"
         },
         HStmt::Return { value, .. } => match value {
             some(v) => {
                 let e = gen_expr(ctx, v)
-                "return \{e};"
+                "return ${e};"
             },
             none => "return;",
         },
@@ -357,15 +357,15 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
                 LiteralValue::StrVal(s) => json_stringify(s),
                 LiteralValue::BoolVal(b) => if b { "true" } else { "false" },
             }
-            "\{target} === \{val_str}"
+            "${target} === ${val_str}"
         },
         Pattern::Constructor { name, fields, .. } => {
-            let tag_check = "\{target}.\{ENUM_TAG_FIELD()} === \"\{name}\""
+            let tag_check = "${target}.${ENUM_TAG_FIELD()} === \"${name}\""
             var sub_conds: List<Str> = [""]; sub_conds.clear()
             for i in 0..fields.len() {
                 match fields.get(i) {
                     some(f) => {
-                        let sub = gen_pattern_condition("\{target}._\{i}", f)
+                        let sub = gen_pattern_condition("${target}._${i}", f)
                         if sub != "true" { sub_conds.push(sub) }
                     },
                     none => {},
@@ -374,30 +374,30 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
             if sub_conds.len() == 0 { tag_check }
             else {
                 let joined = sub_conds.join(" && ")
-                "\{tag_check} && \{joined}"
+                "${tag_check} && ${joined}"
             }
         },
         Pattern::NamedConstructor { name, fields, .. } => {
-            let tag_check = "\{target}.\{ENUM_TAG_FIELD()} === \"\{name}\""
+            let tag_check = "${target}.${ENUM_TAG_FIELD()} === \"${name}\""
             var sub_conds: List<Str> = [""]; sub_conds.clear()
             for f in fields {
                 let sname = safe_ident(f.name)
-                let sub = gen_pattern_condition("\{target}.\{sname}", f.pattern)
+                let sub = gen_pattern_condition("${target}.${sname}", f.pattern)
                 if sub != "true" { sub_conds.push(sub) }
             }
             if sub_conds.len() == 0 { tag_check }
             else {
                 let joined = sub_conds.join(" && ")
-                "\{tag_check} && \{joined}"
+                "${tag_check} && ${joined}"
             }
         },
         Pattern::TuplePattern { elements, .. } => {
-            let len_check = "Array.isArray(\{target}) && \{target}.length === \{elements.len()}"
+            let len_check = "Array.isArray(${target}) && ${target}.length === ${elements.len()}"
             var sub_conds: List<Str> = [""]; sub_conds.clear()
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(e) => {
-                        let sub = gen_pattern_condition("\{target}[\{i}]", e)
+                        let sub = gen_pattern_condition("${target}[${i}]", e)
                         if sub != "true" { sub_conds.push(sub) }
                     },
                     none => {},
@@ -406,7 +406,7 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
             if sub_conds.len() == 0 { len_check }
             else {
                 let joined = sub_conds.join(" && ")
-                "\{len_check} && \{joined}"
+                "${len_check} && ${joined}"
             }
         },
     }
@@ -422,15 +422,15 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
         Pattern::Literal { .. } => "",
         Pattern::Binding { name, .. } => {
             let sname = safe_ident(name)
-            "const \{sname} = \{target}; "
+            "const ${sname} = ${target}; "
         },
         Pattern::Constructor { fields, .. } => {
             var result = ""
             for i in 0..fields.len() {
                 match fields.get(i) {
                     some(f) => {
-                        let sub = gen_pattern_bindings("\{target}._\{i}", f)
-                        result = "\{result}\{sub}"
+                        let sub = gen_pattern_bindings("${target}._${i}", f)
+                        result = "${result}${sub}"
                     },
                     none => {},
                 }
@@ -441,8 +441,8 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
             var result = ""
             for f in fields {
                 let sname = safe_ident(f.name)
-                let sub = gen_pattern_bindings("\{target}.\{sname}", f.pattern)
-                result = "\{result}\{sub}"
+                let sub = gen_pattern_bindings("${target}.${sname}", f.pattern)
+                result = "${result}${sub}"
             }
             result
         },
@@ -451,8 +451,8 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(e) => {
-                        let sub = gen_pattern_bindings("\{target}[\{i}]", e)
-                        result = "\{result}\{sub}"
+                        let sub = gen_pattern_bindings("${target}[${i}]", e)
+                        result = "${result}${sub}"
                     },
                     none => {},
                 }

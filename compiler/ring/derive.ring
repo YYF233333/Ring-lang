@@ -165,10 +165,10 @@ fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> D
                             let fname = if has_named_fields {
                                 match v.field_names {
                                     some(fns) => str_at(fns, i),
-                                    none => "_\{i}",
+                                    none => "_${i}",
                                 }
                             } else {
-                                "_\{i}"
+                                "_${i}"
                             }
                             field_entries.push(FieldEntry { name: fname, ty: type_at(v.fields, i) })
                         }

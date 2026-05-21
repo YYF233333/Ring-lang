@@ -225,7 +225,7 @@ pub fn RUNTIME_EXPORT_NAMES() -> List<Str> {
 pub fn runtime_esm_code() -> Str {
     let names = RUNTIME_EXPORT_NAMES()
     let joined = names.join(", ")
-    let export_line = "\nexport { \{joined} };\n"
+    let export_line = "\nexport { ${joined} };\n"
     let code = RUNTIME_CODE()
-    "\{code}\{export_line}"
+    "${code}${export_line}"
 }

@@ -103,7 +103,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: Map<Int, Type>) -> S
                         match missing_fields {
                             some(mf) => {
                                 let joined = join_strs(mf, ", ")
-                                return some("\{v.name}(\{joined})")
+                                return some("${v.name}(${joined})")
                             },
                             none => {},
                         }
@@ -158,13 +158,13 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: Map<Int, Type>) -> S
             if matrix.len() == 0 {
                 let underscores = elements.map(fn(e: Type) { "_" })
                 let joined = join_strs(underscores, ", ")
-                return some("(\{joined})")
+                return some("(${joined})")
             }
             let missing = check_matrix(matrix, elements, subst, set_new())
             match missing {
                 some(m) => {
                     let joined = join_strs(m, ", ")
-                    some("(\{joined})")
+                    some("(${joined})")
                 },
                 none => none,
             }
@@ -396,13 +396,13 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: Map<Int
                         var ctor_str = ""
                         if ctor.is_tuple {
                             let joined_sub = join_strs(ctor_sub, ", ")
-                            ctor_str = "(\{joined_sub})"
+                            ctor_str = "(${joined_sub})"
                         } else {
                             if ctor.arity == 0 {
                                 ctor_str = ctor.name
                             } else {
                                 let joined_sub2 = join_strs(ctor_sub, ", ")
-                                ctor_str = "\{ctor.name}(\{joined_sub2})"
+                                ctor_str = "${ctor.name}(${joined_sub2})"
                             }
                         }
                         var result: List<Str> = empty_strs()
@@ -454,9 +454,9 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: Map<Int
 fn join_strs(parts: List<Str>, sep: Str) -> Str {
     var result = ""
     for i in 0..parts.len() {
-        if i > 0 { result = "\{result}\{sep}" }
+        if i > 0 { result = "${result}${sep}" }
         let part = str_at(parts, i)
-        result = "\{result}\{part}"
+        result = "${result}${part}"
     }
     result
 }
