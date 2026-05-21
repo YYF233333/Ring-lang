@@ -284,7 +284,7 @@ Step 3: diff v1 v2 → 必须 byte-identical
 ### 3.4 完成标准
 
 - [x] Batch 1-5 所有文件翻译完成（31 文件，~14,260 行 Ring 代码）
-- [~] 全部 E2E 测试通过（Ring 编译器运行）— **187/188 单文件测试通过（99.5%）**
+- [~] 全部 E2E 测试通过（Ring 编译器运行）— **186/188 单文件测试通过（98.9%）**
 - [ ] Fixed point 验证通过（v1 = v2）
 - [ ] TS 编译器归档
 - [ ] 文档同步更新
@@ -295,6 +295,8 @@ Step 3: diff v1 v2 → 必须 byte-identical
 2. **`qualify()` 优先级 bug**（`codegen.ts`）— 导入名覆盖本地定义名（`imports_map` 优先于 `local_names`）
 3. **跨模块 `extern fn` ESM 导入**（`compiler.ts`）— ESM 模式不解析跨模块 extern fn 声明
 4. **裸变体名覆盖枚举类型名**（`compiler.ts`）— `HDecl::Effect` 变体构造器覆盖 `types::Effect` 枚举映射
+5. **传递效应 evidence 转发**（`codegen.ts` + `codegen-expr.ts`）— 函数注册时 effect row 为空，调用处不传 evidence。通过在 codegen 层计算传递闭包修复
+6. **trait impl 方法命名不一致**（`codegen-decl.ts`）— 用户 impl 用 `Type_Trait_method`，auto-derive/builtin 用 `__Type_Trait_method`。统一为 `__` 前缀
 
 ### 3.6 自举验证期间修复的 Ring 源码问题
 
@@ -304,8 +306,8 @@ Step 3: diff v1 v2 → 必须 byte-identical
 
 ### 3.7 剩余问题
 
-- `nested-closure-eq` 测试（fail effect evidence 参数未传递到 type_error 函数）— Ring 源码翻译修复
-- `trait_generic_impl` 测试 — **TS 编译器也失败**（已有 bug，非自举引入）
+- `nested-closure-eq` 测试 — Ring 编译器嵌套闭包中 Eq trait 解析失败（Ring 源码翻译 bug，TS 编译器正常）
+- `trait_generic_impl` 测试 — Ring 编译器的 codegen_decl.ring 尚未更新为 `__` 前缀命名约定（需要重新翻译）
 
 ---
 
