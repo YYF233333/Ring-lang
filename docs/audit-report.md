@@ -1,8 +1,8 @@
 # Ring 编译器技术债清单
 
 自举审计 (2026-05-21) + Phase B Wave 1 审计 (2026-05-22) 产出。三路并行审计（Claude×2 + DS V4 Pro）去重合并后的长期跟踪清单。
-已修复项以删除线标记。53 项中 29 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, C1-C3）。
-Phase B Wave 1 审计新增 16 项（#54-69）。
+已修复项以删除线标记。69 项中 33 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, #54-57, C1-C3）。
+Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-57 已修复。
 
 ---
 
@@ -99,10 +99,10 @@ Phase B Wave 1 审计新增 16 项（#54-69）。
 
 | # | 问题 | 影响 | 发现者 | 备注 |
 |---|------|------|--------|------|
-| 54 | `prefix_decl_name` 仅处理 Fn/Struct/Enum/ExternFn/Const，对 Impl/Trait/Effect/TypeAlias/ExternType/ModBlock 返回原值 | **Bug：mod 内 impl 方法注册在未限定名下，外部调用报 E0305** | Claude×2+DS | `mod shapes { impl Circle { fn area... } }` → 方法注册在 `Circle` 而非 `shapes::Circle`，`shapes::Circle.area()` 查找失败。根因：一个 wildcard `_ => decl` 影响 7 种声明类型 |
-| 55 | `parse_type_expr` 不支持限定类型语法 `mod::Type` | **Bug：函数签名不能引用 mod 内类型** | Sonnet | `fn foo(x: shapes::Circle)` 报 E0103。`parse_type_expr` 只解析 bare TkIdent + 类型参数，无 `::` 处理 |
-| 56 | 两级限定访问 `mod::Enum::Variant` 不支持 | **Bug：无法引用 mod 内 enum 变体** | Sonnet | `shapes::Color::Red` 解析为 `Ident{name:"Color", qualifier:"shapes"}` 后遇到 `::Red` 报错。Parser 只支持一层 `::` |
-| 57 | `is_decl_start` 缺少 `TkMod` | **Bug：解析错误恢复跳过 mod 块** | Opus+Sonnet | 错误恢复扫描 `TkFn/TkStruct/...` 但不含 `TkMod`，parse error 后整个 mod 块被跳过 |
+| 54 | ~~`prefix_decl_name` 仅处理 Fn/Struct/Enum/ExternFn/Const，对 Impl/Trait/Effect/TypeAlias/ExternType/ModBlock 返回原值~~ | ~~**Bug：mod 内 impl 方法注册在未限定名下，外部调用报 E0305**~~ | Claude×2+DS | **已修复**：扩展 `prefix_decl_name` 处理 Impl/Trait/Effect/ExternType/TypeAlias；ModBlock 注册增加 Trait/Effect 短名别名；codegen 补充 ModBlock 内 Impl/Trait 收集 |
+| 55 | ~~`parse_type_expr` 不支持限定类型语法 `mod::Type`~~ | ~~**Bug：函数签名不能引用 mod 内类型**~~ | Sonnet | **已修复**：`TypeExpr::Named` 增加 `qualifier: Str?` 字段，`parse_type_expr` 支持 `mod::Type` 和 `super::Type` 语法，`resolve_type_expr` 使用 qualifier 构建限定名 |
+| 56 | ~~两级限定访问 `mod::Enum::Variant` 不支持~~ | ~~**Bug：无法引用 mod 内 enum 变体**~~ | Sonnet | **已修复**：表达式和模式 parser 支持 `mod::Enum::Variant` 三级限定访问；enum 名称解析改用 `enum_def.name`（规范名）而非查找键 |
+| 57 | ~~`is_decl_start` 缺少 `TkMod`~~ | ~~**Bug：解析错误恢复跳过 mod 块**~~ | Opus+Sonnet | **已修复**：`TkMod` 已在 `is_decl_start` 中（发现时已修复） |
 | 58 | `exports.ring` + `compiler_mod.ring` 的 ModBlock 分支遗漏 Enum 导出 | Issue：多文件 pub mod 中的 enum 类型对外不可见 | Opus+Sonnet | ModBlock 导出只处理 Fn/Struct/Const，Enum 及其 variant 构造器落入 `_ => {}` |
 | 59 | 嵌套 mod 块产生错误限定名 | Concern | Opus+DS | `mod a { mod b { fn f } }` → 注册为 `b::f` 而非 `a::b::f`。`prefix_decl_name` 不处理 ModBlock，内层 mod 丢失外层前缀 |
 | 60 | `parse_mod_block` 缺少错误恢复 | Issue | Sonnet | 内部 `parse_decl()` 无 `catch` 包裹（对比 `parse_program` 有 `catch { _ => none }`），一个子声明解析失败会放弃整个 mod 块 |

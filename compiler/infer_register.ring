@@ -37,6 +37,21 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
                          is_pub: is_pub, span: span },
         Decl::Sig { name, members, is_pub, span } =>
             Decl::Sig { name: "${mod_name}::${name}", members: members, is_pub: is_pub, span: span },
+        Decl::Impl { target_type, type_params, trait_name, methods, span } =>
+            Decl::Impl { target_type: "${mod_name}::${target_type}", type_params: type_params,
+                         trait_name: trait_name, methods: methods, span: span },
+        Decl::Trait { name, type_params, supertraits, methods, is_pub, span } =>
+            Decl::Trait { name: "${mod_name}::${name}", type_params: type_params, supertraits: supertraits,
+                         methods: methods, is_pub: is_pub, span: span },
+        Decl::Effect { name, type_params, ops, is_pub, span } =>
+            Decl::Effect { name: "${mod_name}::${name}", type_params: type_params, ops: ops,
+                          is_pub: is_pub, span: span },
+        Decl::ExternType { name, type_params, is_pub, span } =>
+            Decl::ExternType { name: "${mod_name}::${name}", type_params: type_params,
+                              is_pub: is_pub, span: span },
+        Decl::TypeAlias { name, type_params, type_expr, is_pub, span } =>
+            Decl::TypeAlias { name: "${mod_name}::${name}", type_params: type_params, type_expr: type_expr,
+                             is_pub: is_pub, span: span },
         _ => decl
     }
 }
@@ -66,6 +81,24 @@ fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: Lis
                     _ => {}
                 }
             }
+            // Pass 1b: register trait/effect/extern-type before impl
+            for d in mod_decls {
+                match d {
+                    Decl::Trait { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                    },
+                    Decl::Effect { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                    },
+                    Decl::ExternType { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                    },
+                    _ => {}
+                }
+            }
             // Add short-name aliases so mod-internal type references resolve
             for d in mod_decls {
                 match d {
@@ -83,14 +116,31 @@ fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: Lis
                             none => {}
                         }
                     },
+                    Decl::Trait { name, .. } => {
+                        let qualified = "${mod_name}::${name}"
+                        match ctx.env.trait_reg.traits.get(qualified) {
+                            some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
+                            none => {}
+                        }
+                    },
+                    Decl::Effect { name, .. } => {
+                        let qualified = "${mod_name}::${name}"
+                        match ctx.env.types.effects.get(qualified) {
+                            some(edef) => { ctx.env.types.effects.insert(name, edef) },
+                            none => {}
+                        }
+                    },
                     _ => {}
                 }
             }
-            // Pass 2: register everything else (functions, consts, etc.)
+            // Pass 2: register everything else (functions, impls, consts, etc.)
             for d in mod_decls {
                 match d {
                     Decl::Struct { .. } => {},
                     Decl::Enum { .. } => {},
+                    Decl::Trait { .. } => {},
+                    Decl::Effect { .. } => {},
+                    Decl::ExternType { .. } => {},
                     _ => {
                         let prefixed = prefix_decl_name(mod_name, d)
                         register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
@@ -809,7 +859,7 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
         Decl::Sig { name, members, is_pub, .. } =>
             register_sig(ctx, name, members, is_pub),
         Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
-            // Register struct/enum types first, add aliases, then register the rest
+            // Register struct/enum types first
             for d in mod_decls {
                 match d {
                     Decl::Struct { .. } => {
@@ -823,6 +873,25 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
                     _ => {}
                 }
             }
+            // Register trait/effect/extern-type before impl
+            for d in mod_decls {
+                match d {
+                    Decl::Trait { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_decl(ctx, prefixed)
+                    },
+                    Decl::Effect { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_decl(ctx, prefixed)
+                    },
+                    Decl::ExternType { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_decl(ctx, prefixed)
+                    },
+                    _ => {}
+                }
+            }
+            // Add short-name aliases
             for d in mod_decls {
                 match d {
                     Decl::Struct { name, .. } => {
@@ -839,13 +908,31 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
                             none => {}
                         }
                     },
+                    Decl::Trait { name, .. } => {
+                        let qualified = "${mod_name}::${name}"
+                        match ctx.env.trait_reg.traits.get(qualified) {
+                            some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
+                            none => {}
+                        }
+                    },
+                    Decl::Effect { name, .. } => {
+                        let qualified = "${mod_name}::${name}"
+                        match ctx.env.types.effects.get(qualified) {
+                            some(edef) => { ctx.env.types.effects.insert(name, edef) },
+                            none => {}
+                        }
+                    },
                     _ => {}
                 }
             }
+            // Register everything else (functions, impls, consts, etc.)
             for d in mod_decls {
                 match d {
                     Decl::Struct { .. } => {},
                     Decl::Enum { .. } => {},
+                    Decl::Trait { .. } => {},
+                    Decl::Effect { .. } => {},
+                    Decl::ExternType { .. } => {},
                     _ => {
                         let prefixed = prefix_decl_name(mod_name, d)
                         register_decl(ctx, prefixed)

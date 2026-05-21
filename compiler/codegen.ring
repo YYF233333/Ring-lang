@@ -224,6 +224,33 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                             for f in fields { field_names.push(f.name) }
                             ctx.struct_field_order.insert(qname, field_names)
                         },
+                        HDecl::Impl { target_type: tt, trait_name: ttn, methods: mm, .. } => {
+                            for m in mm {
+                                match m {
+                                    HDecl::Fn { name: mn, .. } => {
+                                        let key = "${qualify(ctx, tt)}.${mn}"
+                                        match ttn {
+                                            none => {
+                                                match ctx.impl_methods.get(key) {
+                                                    none => { ctx.impl_methods.insert(key, none) },
+                                                    some(_) => {},
+                                                }
+                                            },
+                                            some(tn) => {
+                                                match ctx.impl_methods.get(key) {
+                                                    none => { ctx.impl_methods.insert(key, some(tn)) },
+                                                    some(_) => {},
+                                                }
+                                            },
+                                        }
+                                    },
+                                    _ => {},
+                                }
+                            }
+                        },
+                        HDecl::Trait { name: tname, methods: tmethods, .. } => {
+                            ctx.trait_decls.insert(tname, HTraitDeclInfo { name: tname, methods: tmethods })
+                        },
                         _ => {}
                     }
                 }

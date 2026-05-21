@@ -560,8 +560,24 @@ pub fn resolve_dicts_from_scheme(
 
 pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
     match texpr {
-        TypeExpr::Named { name, type_args, span } =>
-            resolve_named_type(ctx, name, type_args, span),
+        TypeExpr::Named { name, qualifier, type_args, span } =>
+            match qualifier {
+                some(q) => {
+                    var resolved_q = q
+                    if q == "self" || q.starts_with("super") {
+                        match resolve_relative_qualifier(q, ctx.mod_path_stack) {
+                            some(prefix) => { resolved_q = prefix },
+                            none => { resolved_q = q }
+                        }
+                    }
+                    if resolved_q == "" {
+                        resolve_named_type(ctx, name, type_args, span)
+                    } else {
+                        resolve_named_type(ctx, "${resolved_q}::${name}", type_args, span)
+                    }
+                },
+                none => resolve_named_type(ctx, name, type_args, span)
+            },
         TypeExpr::FnType { params, return_type, .. } => {
             var resolved_params: List<Type> = []
             for p in params { resolved_params.push(resolve_type_expr(ctx, p)) }
@@ -866,7 +882,7 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
         some(q) => match ctx.env.types.enums.get(q) {
             some(enum_def) => {
                 if enum_def.variants.any(fn(v) { v.name == variant_name }) {
-                    some(q)
+                    some(enum_def.name)
                 } else {
                     type_error(ctx.sink, E0201,
                         "'${q}' has no variant '${variant_name}'",

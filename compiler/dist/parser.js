@@ -179,7 +179,7 @@ function str_to_unaryop(s) {
 }
 
 function dummy_type_expr() {
-  return ast$TypeExpr_Named("", [], ast$span_zero());
+  return ast$TypeExpr_Named("", Option_none, [], ast$span_zero());
 }
 
 function is_decl_start(k) {
@@ -1421,6 +1421,16 @@ function Parser_parse_prefix(self, allow_struct_lit) {
       Parser_advance(self);
       const member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
       const member_name = member_tok.value;
+      if ((is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+        Parser_advance(self);
+        const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+        const variant_name = variant_tok.value;
+        const full_qualifier = `${name}::${member_name}`;
+        if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(variant_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
+          return Parser_parse_struct_literal(self, variant_name, start, Option_some(full_qualifier));
+        }
+        return ast$Expr_Ident(variant_name, Option_some(full_qualifier), Parser_make_span(self, start, variant_tok.span.end));
+      }
       if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
         return Parser_parse_struct_literal(self, member_name, start, Option_some(name));
       }
@@ -1600,10 +1610,29 @@ function Parser_parse_pattern(self) {
     Parser_advance(self);
     let name = tok.value;
     let qualifier = Option_none;
+    if (((!is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+      Parser_advance(self);
+      const enum_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+      const enum_name = enum_tok.value;
+      if ((is_uppercase(Option_unwrap_or(Str_char_at(enum_name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+        Parser_advance(self);
+        const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+        qualifier = Option_some(`${name}::${enum_name}`);
+        name = variant_tok.value;
+      } else {
+        qualifier = Option_some(name);
+        name = enum_name;
+      }
+    }
     if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
       Parser_advance(self);
       const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
-      qualifier = Option_some(name);
+      qualifier = Option_some((function() {
+  const __ring_m = qualifier;
+  if (__ring_m._tag === "some") { const q = __ring_m._0; return `${q}::${name}`; }
+  if (__ring_m._tag === "none") { return name; }
+  __match_fail(__ring_m);
+})());
       name = variant_tok.value;
     }
     if (Parser_check(self, lexer$TokenKind_TkLParen)) {
@@ -1808,10 +1837,37 @@ function Parser_parse_type_expr(self) {
     Parser_expect(self, lexer$TokenKind_TkRParen);
     return first;
   }
+  if (Parser_check(self, lexer$TokenKind_TkSuper)) {
+    Parser_advance(self);
+    Parser_expect(self, lexer$TokenKind_TkColonColon);
+    let qualifier_parts = ["super"];
+    while (Parser_check(self, lexer$TokenKind_TkSuper)) {
+      List_push(qualifier_parts, "super");
+      Parser_advance(self);
+      Parser_expect(self, lexer$TokenKind_TkColonColon);
+    }
+    const type_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
+    const type_args = Parser_try_parse_type_args(self);
+    const end = Parser_current_span_start(self);
+    let result = ast$TypeExpr_Named(type_name, Option_some(List_join(qualifier_parts, "::")), type_args, Parser_make_span(self, start, end));
+    if (Parser_try_consume(self, lexer$TokenKind_TkQuestion)) {
+      const opt_end = Parser_current_span_start(self);
+      result = ast$TypeExpr_OptionType(result, Parser_make_span(self, start, opt_end));
+    }
+    return result;
+  }
   const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
+  let qualifier = Option_none;
+  let actual_name = name;
+  if (Parser_check(self, lexer$TokenKind_TkColonColon)) {
+    Parser_advance(self);
+    const member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+    qualifier = Option_some(name);
+    actual_name = member_tok.value;
+  }
   const type_args = Parser_try_parse_type_args(self);
   const end = Parser_current_span_start(self);
-  let result = ast$TypeExpr_Named(name, type_args, Parser_make_span(self, start, end));
+  let result = ast$TypeExpr_Named(actual_name, qualifier, type_args, Parser_make_span(self, start, end));
   if (Parser_try_consume(self, lexer$TokenKind_TkQuestion)) {
     const opt_end = Parser_current_span_start(self);
     result = ast$TypeExpr_OptionType(result, Parser_make_span(self, start, opt_end));

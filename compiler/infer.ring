@@ -752,7 +752,7 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
                     match ctx.env.types.enums.get(q) {
                         some(enum_def) => {
                             if enum_def.variants.any(fn(v) { v.name == name }) {
-                                enum_name = some(q)
+                                enum_name = some(enum_def.name)
                             } else {
                                 let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
                                     DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
@@ -1670,7 +1670,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     match resolved_qualifier {
         some(q) => match ctx.env.types.enums.get(q) {
             some(enum_def) => {
-                if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(q) }
+                if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(enum_def.name) }
             },
             none => {}
         },

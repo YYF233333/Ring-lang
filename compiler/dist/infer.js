@@ -987,7 +987,7 @@ function infer_ident(ctx, name, span, subst, qualifier) {
             if (__ring_m48._tag === "some") {
               const enum_def = __ring_m48._0;
               if (enum_def.variants.some((function(v) { return (v.name === name); }))) {
-                enum_name = Option_some(q);
+                enum_name = Option_some(enum_def.name);
               } else {
                 const _ = infer_ctx$type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(name, Option_none));
               }
@@ -2277,7 +2277,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
         if (__ring_m117._tag === "some") {
           const enum_def = __ring_m117._0;
           if (enum_def.variants.some((function(v) { return (v.name === name); }))) {
-            variant_enum = Option_some(q);
+            variant_enum = Option_some(enum_def.name);
           }
           break __ring_match117;
         }

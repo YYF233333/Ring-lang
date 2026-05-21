@@ -85,6 +85,24 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
                     none => {}
                 }
             },
+            Decl::Trait { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                match ctx.env.trait_reg.traits.get(qualified) {
+                    some(tdef) => {
+                        ctx.env.trait_reg.traits.insert(name, tdef)
+                    },
+                    none => {}
+                }
+            },
+            Decl::Effect { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                match ctx.env.types.effects.get(qualified) {
+                    some(edef) => {
+                        ctx.env.types.effects.insert(name, edef)
+                    },
+                    none => {}
+                }
+            },
             _ => {}
         }
     }

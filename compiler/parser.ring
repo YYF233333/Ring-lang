@@ -83,7 +83,7 @@ fn str_to_unaryop(s: Str) -> UnaryOp {
 }
 
 fn dummy_type_expr() -> TypeExpr {
-    TypeExpr::Named { name: "", type_args: [], span: span_zero() }
+    TypeExpr::Named { name: "", qualifier: none, type_args: [], span: span_zero() }
 }
 
 fn is_decl_start(k: TokenKind) -> Bool {
@@ -1305,6 +1305,20 @@ impl Parser {
                 let member_tok = self.expect(TokenKind::TkIdent)
                 let member_name = member_tok.value
 
+                // Two-level qualified: mod::Enum::Variant
+                if is_uppercase(member_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
+                    self.advance()
+                    let variant_tok = self.expect(TokenKind::TkIdent)
+                    let variant_name = variant_tok.value
+                    let full_qualifier = "${name}::${member_name}"
+
+                    if allow_struct_lit && is_uppercase(variant_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
+                        return self.parse_struct_literal(variant_name, start, some(full_qualifier))
+                    }
+
+                    return Expr::Ident { name: variant_name, qualifier: some(full_qualifier), span: self.make_span(start, variant_tok.span.end) }
+                }
+
                 if allow_struct_lit && is_uppercase(member_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
                     return self.parse_struct_literal(member_name, start, some(name))
                 }
@@ -1537,10 +1551,27 @@ impl Parser {
             var name = tok.value
             var qualifier: Str? = none
 
+            // Module-qualified enum pattern: mod::Enum::Variant(...)
+            if !is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
+                self.advance()
+                let enum_tok = self.expect(TokenKind::TkIdent)
+                let enum_name = enum_tok.value
+                if is_uppercase(enum_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
+                    self.advance()
+                    let variant_tok = self.expect(TokenKind::TkIdent)
+                    qualifier = some("${name}::${enum_name}")
+                    name = variant_tok.value
+                } else {
+                    qualifier = some(name)
+                    name = enum_name
+                }
+            }
+
+            // Enum::Variant pattern
             if is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
                 self.advance()
                 let variant_tok = self.expect(TokenKind::TkIdent)
-                qualifier = some(name)
+                qualifier = some(match qualifier { some(q) => "${q}::${name}", none => name })
                 name = variant_tok.value
             }
 
@@ -1774,11 +1805,41 @@ impl Parser {
             return first
         }
 
+        if self.check(TokenKind::TkSuper) {
+            self.advance()
+            self.expect(TokenKind::TkColonColon)
+            var qualifier_parts: List<Str> = ["super"]
+            while self.check(TokenKind::TkSuper) {
+                qualifier_parts.push("super")
+                self.advance()
+                self.expect(TokenKind::TkColonColon)
+            }
+            let type_name = self.expect(TokenKind::TkIdent).value
+            let type_args = self.try_parse_type_args()
+            let end = self.current_span_start()
+            var result: TypeExpr = TypeExpr::Named { name: type_name, qualifier: some(qualifier_parts.join("::")), type_args: type_args, span: self.make_span(start, end) }
+            if self.try_consume(TokenKind::TkQuestion) {
+                let opt_end = self.current_span_start()
+                result = TypeExpr::OptionType { inner: result, span: self.make_span(start, opt_end) }
+            }
+            return result
+        }
+
         let name = self.expect(TokenKind::TkIdent).value
+        var qualifier: Str? = none
+        var actual_name = name
+
+        if self.check(TokenKind::TkColonColon) {
+            self.advance()
+            let member_tok = self.expect(TokenKind::TkIdent)
+            qualifier = some(name)
+            actual_name = member_tok.value
+        }
+
         let type_args = self.try_parse_type_args()
 
         let end = self.current_span_start()
-        var result: TypeExpr = TypeExpr::Named { name: name, type_args: type_args, span: self.make_span(start, end) }
+        var result: TypeExpr = TypeExpr::Named { name: actual_name, qualifier: qualifier, type_args: type_args, span: self.make_span(start, end) }
 
         if self.try_consume(TokenKind::TkQuestion) {
             let opt_end = self.current_span_start()
