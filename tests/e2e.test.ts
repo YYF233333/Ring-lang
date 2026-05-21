@@ -322,6 +322,7 @@ const cases: TestCase[] = [
   { file: "debug_generic.ring", expected: "debug_generic: all tests passed\n" },
   { file: "nested-closure-eq.ring", expected: "nested closure eq: all passed\n" },
   { file: "trait_generic_impl.ring", expected: "trait_generic_impl: all passed\n" },
+  { file: "list_set.ring", expected: "list_set: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

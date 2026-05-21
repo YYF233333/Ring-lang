@@ -20,4 +20,5 @@ impl<T> List {
     pub extern fn shift(self: List<T>) -> Option<T>
     pub extern fn clear(self: List<T>) -> Unit
     pub extern fn index_of(self: List<T>, item: T) -> Option<Int>
+    pub extern fn set(self: List<T>, index: Int, value: T) -> Unit
 }
