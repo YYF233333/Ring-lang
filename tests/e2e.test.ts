@@ -342,6 +342,8 @@ const cases: TestCase[] = [
   { file: "enum_variant_brace_disambig.ring", expected: "enum_variant_brace_disambig: all tests passed\n" },
   { file: "list_set.ring", expected: "list_set: all tests passed\n" },
   { file: "stdlib_native_methods.ring", expected: "stdlib_native_methods: all tests passed\n" },
+  { file: "effect_annotation.ring", expected: "Hello, Ring\n5\n3\n6\n" },
+  { file: "effect_annotation_extern.ring", expected: "effect_annotation_extern: passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -390,6 +392,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_enum_empty_parens.ring", error_pattern: "E0104" },
     { file: "error_const_reassign.ring", error_pattern: "E0205" },
     { file: "error_with_suggestion.ring", error_pattern: "E0301" },
+    { file: "effect_annotation_violation.ring", error_pattern: "E0404" },
   ];
 
   for (const tc of negative_cases) {

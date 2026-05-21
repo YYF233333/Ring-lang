@@ -44,6 +44,16 @@ pub enum TypeExpr {
 }
 
 // ============================================================
+// Effect Expressions (syntactic — for effect annotations)
+// ============================================================
+
+pub struct EffectExpr {
+    pub name: Str,
+    pub type_args: List<TypeExpr>,
+    pub span: Span
+}
+
+// ============================================================
 // Literal values
 // ============================================================
 
@@ -246,14 +256,14 @@ pub struct EffectOpDecl {
 }
 
 pub enum Decl {
-    Fn { name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, body: Expr, is_pub: Bool, is_abstract: Bool, span: Span },
+    Fn { name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, is_abstract: Bool, span: Span },
     Struct { name: Str, type_params: List<TypeParam>, fields: List<StructFieldDecl>, is_pub: Bool, span: Span },
     Enum { name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>, is_pub: Bool, span: Span },
     Impl { target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span },
     Effect { name: Str, type_params: List<TypeParam>, ops: List<EffectOpDecl>, is_pub: Bool, span: Span },
     Test { description: Str, body: Expr, span: Span },
     Trait { name: Str, type_params: List<TypeParam>, supertraits: List<TypeBound>, methods: List<Decl>, is_pub: Bool, span: Span },
-    ExternFn { name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, is_pub: Bool, span: Span },
+    ExternFn { name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, is_pub: Bool, span: Span },
     ExternType { name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span },
     TypeAlias { name: Str, type_params: List<TypeParam>, type_expr: TypeExpr, is_pub: Bool, span: Span },
     Const { name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span }

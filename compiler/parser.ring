@@ -1,6 +1,6 @@
 use ast::{
     Position, Span, span_zero,
-    TypeExpr, RecordTypeField,
+    TypeExpr, RecordTypeField, EffectExpr,
     Pattern, NamedPatternField, LiteralValue,
     BinOp, UnaryOp,
     Param, MatchArm, StructFieldInit, EffectHandler, StringInterpPart,
@@ -642,6 +642,34 @@ impl Parser {
         }
     }
 
+    fn parse_effect_annotation(var self) -> List<EffectExpr> {
+        self.expect(TokenKind::TkWith)
+        self.expect(TokenKind::TkLBrace)
+        var effects: List<EffectExpr> = []
+        while !self.check(TokenKind::TkRBrace) && !self.at_end() {
+            let estart = self.current_span_start()
+            let ename = self.expect(TokenKind::TkIdent).value
+            var type_args: List<TypeExpr> = []
+            if self.check(TokenKind::TkLt) {
+                self.advance()
+                while !self.check(TokenKind::TkGt) && !self.at_end() {
+                    type_args.push(self.parse_type_expr())
+                    if !self.check(TokenKind::TkGt) {
+                        self.expect(TokenKind::TkComma)
+                    }
+                }
+                self.expect(TokenKind::TkGt)
+            }
+            let eend = self.current_span_start()
+            effects.push(EffectExpr { name: ename, type_args: type_args, span: self.make_span(estart, eend) })
+            if !self.check(TokenKind::TkRBrace) {
+                self.expect(TokenKind::TkComma)
+            }
+        }
+        self.expect(TokenKind::TkRBrace)
+        effects
+    }
+
     fn parse_fn_decl(var self, is_pub: Bool, body_optional: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkFn)
@@ -653,6 +681,11 @@ impl Parser {
         var return_type: TypeExpr? = none
         if self.try_consume(TokenKind::TkArrow) {
             return_type = some(self.parse_type_expr())
+        }
+        // Parse effect annotation: with { effect1, effect2<T> }
+        var declared_effects: List<EffectExpr>? = none
+        if self.check(TokenKind::TkWith) {
+            declared_effects = some(self.parse_effect_annotation())
         }
         var body = Expr::Block { stmts: [], tail: none, span: span_zero() }
         var is_abstract_val = false
@@ -669,6 +702,7 @@ impl Parser {
             type_params: type_params,
             params: params,
             return_type: return_type,
+            declared_effects: declared_effects,
             body: body,
             is_pub: is_pub,
             is_abstract: is_abstract_val,
@@ -710,12 +744,18 @@ impl Parser {
         if self.try_consume(TokenKind::TkArrow) {
             return_type = some(self.parse_type_expr())
         }
+        // Parse effect annotation: with { effect1, effect2<T> }
+        var declared_effects: List<EffectExpr>? = none
+        if self.check(TokenKind::TkWith) {
+            declared_effects = some(self.parse_effect_annotation())
+        }
         let end = self.current_span_start()
         Decl::ExternFn {
             name: name,
             type_params: type_params,
             params: params,
             return_type: return_type,
+            declared_effects: declared_effects,
             is_pub: is_pub,
             span: self.make_span(start, end)
         }

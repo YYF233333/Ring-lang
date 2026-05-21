@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     EMPTY_ROW}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
-    EnumVariantDecl, NamedEnumField, TypeBound, span_zero}
+    EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, mono, apply_subst}
 use diagnostics::{DiagnosticContext}
@@ -289,10 +289,10 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
 
     for method in methods {
         match method {
-            Decl::Fn { name: mname, type_params: mtps, params, return_type, .. } =>
-                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, saved),
-            Decl::ExternFn { name: mname, type_params: mtps, params, return_type, .. } =>
-                register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, saved),
+            Decl::Fn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
+                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, saved),
+            Decl::ExternFn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
+                register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, saved),
             _ => {}
         }
     }
@@ -341,7 +341,7 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
 fn register_impl_method(
     var ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
-    return_type: TypeExpr?, outer_saved: Map<Str, Type>
+    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, outer_saved: Map<Str, Type>
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
     var method_tv_ids: List<Int> = []
@@ -378,7 +378,11 @@ fn register_impl_method(
         }
     }
 
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
+    let impl_m_effects = match declared_effects {
+        some(de) => resolve_declared_effects(ctx, de),
+        none => EMPTY_ROW
+    }
+    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_m_effects }
     methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: [], def_id: none })
     ctx.type_param_scope = saved_method
 }
@@ -386,7 +390,7 @@ fn register_impl_method(
 fn register_impl_extern_method(
     var ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
-    return_type: TypeExpr?, outer_saved: Map<Str, Type>
+    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, outer_saved: Map<Str, Type>
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
     var method_tv_ids: List<Int> = []
@@ -406,9 +410,47 @@ fn register_impl_extern_method(
     let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
     var all_tvs = list_clone(impl_tv_ids)
     for mtv in method_tv_ids { all_tvs.push(mtv) }
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
+    let impl_ext_effects = match declared_effects {
+        some(de) => resolve_declared_effects(ctx, de),
+        none => EMPTY_ROW
+    }
+    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_ext_effects }
     methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: [], def_id: none })
     ctx.type_param_scope = saved_method
+}
+
+// ============================================================
+// Effect annotation resolution
+// ============================================================
+
+pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
+    if eff.name == "io" { return Effect::IoEffect }
+    if eff.name == "mut" { return Effect::MutEffect }
+    if eff.name == "fail" {
+        let err_type = if eff.type_args.len() > 0 {
+            match eff.type_args.first() {
+                some(t) => resolve_type_expr(ctx, t),
+                none => ctx.env.fresh_var()
+            }
+        } else {
+            ctx.env.fresh_var()
+        }
+        return Effect::FailEffect { error_type: err_type }
+    }
+    // Custom effects
+    var resolved_args: List<Type> = []
+    for ta in eff.type_args {
+        resolved_args.push(resolve_type_expr(ctx, ta))
+    }
+    Effect::CustomEffect { name: eff.name, type_args: resolved_args }
+}
+
+pub fn resolve_declared_effects(ctx: InferCtx, decl_effects: List<EffectExpr>) -> EffectRow {
+    var effects: List<Effect> = []
+    for eff in decl_effects {
+        effects.push(resolve_effect_expr(ctx, eff))
+    }
+    EffectRow { effects: effects, tail: none }
 }
 
 // ============================================================
@@ -430,7 +472,7 @@ fn check_duplicate_def(ctx: InferCtx, name: Str, span: Span) {
     }
 }
 
-fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, span: Span) {
+fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
     check_duplicate_def(ctx, name, span)
     var type_vars: List<Int> = []
     let saved = map_clone(ctx.type_param_scope)
@@ -458,7 +500,11 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
         }
     }
 
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
+    let effects = match declared_effects {
+        some(de) => resolve_declared_effects(ctx, de),
+        none => EMPTY_ROW
+    }
+    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: effects }
 
     var fn_bounds_list: List<FnBound> = []
     var scheme_bounds: List<SchemeBound> = []
@@ -494,7 +540,7 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
     }
 }
 
-fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, span: Span) {
+fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
     var type_vars: List<Int> = []
     let saved = map_clone(ctx.type_param_scope)
     for tp in type_params {
@@ -521,7 +567,11 @@ fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
         }
     }
 
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
+    let reg_effects = match declared_effects {
+        some(de) => resolve_declared_effects(ctx, de),
+        none => EMPTY_ROW
+    }
+    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: reg_effects }
 
     var scheme_bounds: List<SchemeBound> = []
     for tp in type_params {
@@ -619,13 +669,13 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
             register_effect(ctx, name, type_params, ops),
         Decl::Impl { target_type, type_params, trait_name, methods, span } =>
             register_impl(ctx, target_type, type_params, trait_name, methods, span),
-        Decl::Fn { name, type_params, params, return_type, span, .. } =>
-            register_fn(ctx, name, type_params, params, return_type, span),
+        Decl::Fn { name, type_params, params, return_type, declared_effects, span, .. } =>
+            register_fn(ctx, name, type_params, params, return_type, declared_effects, span),
         Decl::Test { .. } => {},
         Decl::Trait { name, type_params, methods, .. } =>
             register_trait(ctx, name, type_params, methods),
-        Decl::ExternFn { name, type_params, params, return_type, span, .. } =>
-            register_extern_fn(ctx, name, type_params, params, return_type, span),
+        Decl::ExternFn { name, type_params, params, return_type, declared_effects, span, .. } =>
+            register_extern_fn(ctx, name, type_params, params, return_type, declared_effects, span),
         Decl::ExternType { name, type_params, .. } =>
             register_extern_type(ctx, name, type_params),
         Decl::TypeAlias { name, type_params, type_expr, .. } =>
