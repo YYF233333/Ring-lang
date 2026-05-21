@@ -435,23 +435,12 @@ fn register_derived_impl(var env: TypeEnv, di: DerivedImpl, trait_name: Str) {
 }
 
 fn get_method_names(trait_name: Str) -> List<Str> {
-    if trait_name == "Eq" {
-        let r = ["eq"]; r.push("ne"); r
-    } else {
-        if trait_name == "Clone" {
-            ["clone"]
-        } else {
-            if trait_name == "Debug" {
-                ["debug"]
-            } else {
-                if trait_name == "Ord" {
-                    ["cmp"]
-                } else {
-                    let e: List<Str> = empty_strs()
-                    e
-                }
-            }
-        }
+    match trait_name {
+        "Eq" => { let r = ["eq"]; r.push("ne"); r },
+        "Clone" => ["clone"],
+        "Debug" => ["debug"],
+        "Ord" => ["cmp"],
+        _ => { let e: List<Str> = empty_strs(); e },
     }
 }
 
@@ -489,26 +478,26 @@ fn register_trait_methods(
     type_var_ids: List<Int>,
     bounds: List<SchemeBound>
 ) {
-    if trait_name == "Eq" {
-        let eq_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL(), effects: EMPTY_ROW() }
-        methods.insert("eq", TypeScheme { ty: eq_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
-        let ne_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL(), effects: EMPTY_ROW() }
-        methods.insert("ne", TypeScheme { ty: ne_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
-    } else {
-        if trait_name == "Clone" {
+    match trait_name {
+        "Eq" => {
+            let eq_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL(), effects: EMPTY_ROW() }
+            methods.insert("eq", TypeScheme { ty: eq_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
+            let ne_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL(), effects: EMPTY_ROW() }
+            methods.insert("ne", TypeScheme { ty: ne_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
+        },
+        "Clone" => {
             let clone_fn = Type::FnType { params: [self_type], return_type: self_type, effects: EMPTY_ROW() }
             methods.insert("clone", TypeScheme { ty: clone_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
-        } else {
-            if trait_name == "Ord" {
-                let cmp_fn = Type::FnType { params: [self_type, self_type], return_type: INT(), effects: EMPTY_ROW() }
-                methods.insert("cmp", TypeScheme { ty: cmp_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
-            } else {
-                if trait_name == "Debug" {
-                    let debug_fn = Type::FnType { params: [self_type], return_type: STR(), effects: EMPTY_ROW() }
-                    methods.insert("debug", TypeScheme { ty: debug_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
-                }
-            }
-        }
+        },
+        "Ord" => {
+            let cmp_fn = Type::FnType { params: [self_type, self_type], return_type: INT(), effects: EMPTY_ROW() }
+            methods.insert("cmp", TypeScheme { ty: cmp_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
+        },
+        "Debug" => {
+            let debug_fn = Type::FnType { params: [self_type], return_type: STR(), effects: EMPTY_ROW() }
+            methods.insert("debug", TypeScheme { ty: debug_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
+        },
+        _ => {},
     }
 }
 

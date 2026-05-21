@@ -4,18 +4,23 @@ use codegen_ctx::{CodegenCtx, emit, emit_raw, push_indent, pop_indent,
     qualify, safe_ident}
 
 pub fn get_derived_method_names(trait_name: Str) -> List<Str> {
-    if trait_name == "Eq" { ["eq", "ne"] }
-    else { if trait_name == "Clone" { ["clone"] }
-    else { if trait_name == "Debug" { ["debug"] }
-    else { if trait_name == "Ord" { ["cmp"] }
-    else { let e: List<Str> = [""]; e.clear(); e } } } }
+    match trait_name {
+        "Eq" => ["eq", "ne"],
+        "Clone" => ["clone"],
+        "Debug" => ["debug"],
+        "Ord" => ["cmp"],
+        _ => { let e: List<Str> = [""]; e.clear(); e },
+    }
 }
 
 pub fn emit_derived_impl(var ctx: CodegenCtx, impl_: DerivedImpl) {
-    if impl_.trait_name == "Eq" { emit_derived_eq(ctx, impl_) }
-    if impl_.trait_name == "Clone" { emit_derived_clone(ctx, impl_) }
-    if impl_.trait_name == "Ord" { emit_derived_ord(ctx, impl_) }
-    if impl_.trait_name == "Debug" { emit_derived_debug(ctx, impl_) }
+    match impl_.trait_name {
+        "Eq" => emit_derived_eq(ctx, impl_),
+        "Clone" => emit_derived_clone(ctx, impl_),
+        "Ord" => emit_derived_ord(ctx, impl_),
+        "Debug" => emit_derived_debug(ctx, impl_),
+        _ => {},
+    }
 }
 
 // ============================================================
