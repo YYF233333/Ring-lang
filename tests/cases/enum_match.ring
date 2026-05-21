@@ -1,14 +1,14 @@
 enum Color {
-    red(),
-    green(),
-    blue(),
+    red,
+    green,
+    blue,
 }
 
 fn name(c: Color) -> Str {
     match c {
-        red() => "red",
-        green() => "green",
-        blue() => "blue",
+        red => "red",
+        green => "green",
+        blue => "blue",
     }
 }
 

@@ -12,6 +12,10 @@ function E0103() {
   return "E0103";
 }
 
+function E0104() {
+  return "E0104";
+}
+
 function E0201() {
   return "E0201";
 }
@@ -114,6 +118,9 @@ function error_description(code) {
   if ((code === "E0103")) {
     return "Expected token";
   }
+  if ((code === "E0104")) {
+    return "Empty parentheses on enum variant";
+  }
   if ((code === "E0201")) {
     return "Undefined variable";
   }
@@ -187,4 +194,4 @@ function error_description(code) {
 }
 
 
-export { E0101, E0102, E0103, E0201, E0203, E0204, E0205, E0206, E0207, E0301, E0302, E0303, E0304, E0305, E0307, E0308, E0402, E0403, E0501, E0502, E0503, E0601, E0702, E0703, E0704, E0706, error_description };
+export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0301, E0302, E0303, E0304, E0305, E0307, E0308, E0402, E0403, E0501, E0502, E0503, E0601, E0702, E0703, E0704, E0706, error_description };

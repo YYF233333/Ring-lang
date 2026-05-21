@@ -26,7 +26,7 @@ fn main() {
     // pop on empty returns none
     assert(xs.is_empty(), "list now empty")
     match xs.pop() {
-        none() => assert(true, "pop on empty is none"),
+        none => assert(true, "pop on empty is none"),
         some(v) => panic("should be none"),
     }
 

@@ -11,7 +11,7 @@ use ast::{
 }
 use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
 use diagnostics::{CollectingSink, Severity, DiagnosticContext, new_collecting_sink, make_diag, make_diagnostic}
-use codes::{E0101, E0103, E0706}
+use codes::{E0101, E0103, E0104, E0706}
 
 // ============================================================
 // Operator Precedence
@@ -289,7 +289,14 @@ impl Parser {
             }
         }
         if self.sink.has_errors() {
-            panic("Compilation failed with parse errors")
+            var error_msgs: List<Str> = []
+            for d in self.sink.items {
+                match d.severity {
+                    SevError => error_msgs.push("${d.code}: ${d.message}"),
+                    _ => {}
+                }
+            }
+            panic("Compilation failed with parse errors: ${error_msgs.join("; ")}")
         }
         let end = self.current_span_start()
         Program { uses: uses, decls: decls, span: self.make_span(start, end) }
@@ -772,14 +779,19 @@ impl Parser {
             var v_fields: List<TypeExpr> = []
             var named_fields: List<NamedEnumField>? = none
             if self.try_consume(TokenKind::TkLParen) {
-                if !self.check(TokenKind::TkRParen) {
+                if self.check(TokenKind::TkRParen) {
+                    // Reject empty parentheses — use bare name instead
+                    let rp_span = self.peek().span
+                    self.report_error(E0104(), "empty parentheses on enum variant '${v_name}' — use bare name instead", some(rp_span))
+                    let _rp = self.advance()  // consume ')'
+                } else {
                     v_fields.push(self.parse_type_expr())
                     while self.try_consume(TokenKind::TkComma) {
                         if self.check(TokenKind::TkRParen) { break }
                         v_fields.push(self.parse_type_expr())
                     }
+                    let _rp = self.expect(TokenKind::TkRParen)
                 }
-                let _rp = self.expect(TokenKind::TkRParen)
             } else if self.check(TokenKind::TkLBrace) {
                 self.advance()
                 var nf: List<NamedEnumField> = []

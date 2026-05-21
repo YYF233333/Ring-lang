@@ -2,7 +2,7 @@ import { __EffectAbort, Cell, Cell_get, Cell_set, Cell_update, __match_fail, pri
 import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Span_Eq as ast$__Span_Eq, __NamedImport_Eq as ast$__NamedImport_Eq, __LiteralValue_Eq as ast$__LiteralValue_Eq, __BinOp_Eq as ast$__BinOp_Eq, __UnaryOp_Eq as ast$__UnaryOp_Eq, __Position_Clone as ast$__Position_Clone, __Span_Clone as ast$__Span_Clone, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __UsePath_Clone as ast$__UsePath_Clone, __NamedImport_Clone as ast$__NamedImport_Clone, __LiteralValue_Clone as ast$__LiteralValue_Clone, __BinOp_Clone as ast$__BinOp_Clone, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UseImport_Clone as ast$__UseImport_Clone, __UseDecl_Clone as ast$__UseDecl_Clone, __Position_Ord as ast$__Position_Ord, __Span_Ord as ast$__Span_Ord, __LiteralValue_Ord as ast$__LiteralValue_Ord, __BinOp_Ord as ast$__BinOp_Ord, __UnaryOp_Ord as ast$__UnaryOp_Ord, __Position_Debug as ast$__Position_Debug, __Span_Debug as ast$__Span_Debug, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Debug as ast$__UsePath_Debug, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
 import { token_kind_value as lexer$token_kind_value, new_lexer as lexer$new_lexer, TokenKind_TkFn as lexer$TokenKind_TkFn, TokenKind_TkLet as lexer$TokenKind_TkLet, TokenKind_TkVar as lexer$TokenKind_TkVar, TokenKind_TkStruct as lexer$TokenKind_TkStruct, TokenKind_TkEnum as lexer$TokenKind_TkEnum, TokenKind_TkMatch as lexer$TokenKind_TkMatch, TokenKind_TkImpl as lexer$TokenKind_TkImpl, TokenKind_TkEffect as lexer$TokenKind_TkEffect, TokenKind_TkHandle as lexer$TokenKind_TkHandle, TokenKind_TkWith as lexer$TokenKind_TkWith, TokenKind_TkIf as lexer$TokenKind_TkIf, TokenKind_TkElse as lexer$TokenKind_TkElse, TokenKind_TkCatch as lexer$TokenKind_TkCatch, TokenKind_TkTest as lexer$TokenKind_TkTest, TokenKind_TkReturn as lexer$TokenKind_TkReturn, TokenKind_TkFor as lexer$TokenKind_TkFor, TokenKind_TkIn as lexer$TokenKind_TkIn, TokenKind_TkPub as lexer$TokenKind_TkPub, TokenKind_TkWhere as lexer$TokenKind_TkWhere, TokenKind_TkTrue as lexer$TokenKind_TkTrue, TokenKind_TkFalse as lexer$TokenKind_TkFalse, TokenKind_TkTrait as lexer$TokenKind_TkTrait, TokenKind_TkTry as lexer$TokenKind_TkTry, TokenKind_TkWhile as lexer$TokenKind_TkWhile, TokenKind_TkBreak as lexer$TokenKind_TkBreak, TokenKind_TkContinue as lexer$TokenKind_TkContinue, TokenKind_TkUse as lexer$TokenKind_TkUse, TokenKind_TkAs as lexer$TokenKind_TkAs, TokenKind_TkExtern as lexer$TokenKind_TkExtern, TokenKind_TkIntLit as lexer$TokenKind_TkIntLit, TokenKind_TkFloatLit as lexer$TokenKind_TkFloatLit, TokenKind_TkStringLit as lexer$TokenKind_TkStringLit, TokenKind_TkStringInterpStart as lexer$TokenKind_TkStringInterpStart, TokenKind_TkStringInterpMiddle as lexer$TokenKind_TkStringInterpMiddle, TokenKind_TkStringInterpEnd as lexer$TokenKind_TkStringInterpEnd, TokenKind_TkRawStringLit as lexer$TokenKind_TkRawStringLit, TokenKind_TkIdent as lexer$TokenKind_TkIdent, TokenKind_TkPlus as lexer$TokenKind_TkPlus, TokenKind_TkMinus as lexer$TokenKind_TkMinus, TokenKind_TkStar as lexer$TokenKind_TkStar, TokenKind_TkSlash as lexer$TokenKind_TkSlash, TokenKind_TkPercent as lexer$TokenKind_TkPercent, TokenKind_TkEqEq as lexer$TokenKind_TkEqEq, TokenKind_TkBangEq as lexer$TokenKind_TkBangEq, TokenKind_TkLt as lexer$TokenKind_TkLt, TokenKind_TkGt as lexer$TokenKind_TkGt, TokenKind_TkLtEq as lexer$TokenKind_TkLtEq, TokenKind_TkGtEq as lexer$TokenKind_TkGtEq, TokenKind_TkAmpAmp as lexer$TokenKind_TkAmpAmp, TokenKind_TkPipePipe as lexer$TokenKind_TkPipePipe, TokenKind_TkBang as lexer$TokenKind_TkBang, TokenKind_TkEq as lexer$TokenKind_TkEq, TokenKind_TkPlusEq as lexer$TokenKind_TkPlusEq, TokenKind_TkMinusEq as lexer$TokenKind_TkMinusEq, TokenKind_TkLParen as lexer$TokenKind_TkLParen, TokenKind_TkRParen as lexer$TokenKind_TkRParen, TokenKind_TkLBrace as lexer$TokenKind_TkLBrace, TokenKind_TkRBrace as lexer$TokenKind_TkRBrace, TokenKind_TkLBracket as lexer$TokenKind_TkLBracket, TokenKind_TkRBracket as lexer$TokenKind_TkRBracket, TokenKind_TkComma as lexer$TokenKind_TkComma, TokenKind_TkColon as lexer$TokenKind_TkColon, TokenKind_TkColonColon as lexer$TokenKind_TkColonColon, TokenKind_TkDot as lexer$TokenKind_TkDot, TokenKind_TkDotDot as lexer$TokenKind_TkDotDot, TokenKind_TkDotDotEq as lexer$TokenKind_TkDotDotEq, TokenKind_TkFatArrow as lexer$TokenKind_TkFatArrow, TokenKind_TkArrow as lexer$TokenKind_TkArrow, TokenKind_TkQuestion as lexer$TokenKind_TkQuestion, TokenKind_TkSemi as lexer$TokenKind_TkSemi, TokenKind_TkEof as lexer$TokenKind_TkEof, TokenKind_TkError as lexer$TokenKind_TkError, Token as lexer$Token, Lexer as lexer$Lexer, __TokenKind_Eq as lexer$__TokenKind_Eq, __Token_Eq as lexer$__Token_Eq, __Lexer_Clone as lexer$__Lexer_Clone, __TokenKind_Clone as lexer$__TokenKind_Clone, __Token_Clone as lexer$__Token_Clone, __TokenKind_Ord as lexer$__TokenKind_Ord, __Token_Ord as lexer$__Token_Ord, __Lexer_Debug as lexer$__Lexer_Debug, __TokenKind_Debug as lexer$__TokenKind_Debug, __Token_Debug as lexer$__Token_Debug, Lexer_tokenize as lexer$Lexer_tokenize, Lexer_next_token as lexer$Lexer_next_token, Lexer_lex_string as lexer$Lexer_lex_string, Lexer_lex_string_continuation as lexer$Lexer_lex_string_continuation, Lexer_lex_string_body as lexer$Lexer_lex_string_body, Lexer_lex_raw_string as lexer$Lexer_lex_raw_string, Lexer_lex_number as lexer$Lexer_lex_number, Lexer_lex_ident as lexer$Lexer_lex_ident, Lexer_lex_punctuation as lexer$Lexer_lex_punctuation, Lexer_skip_whitespace_and_comments as lexer$Lexer_skip_whitespace_and_comments, Lexer_peek as lexer$Lexer_peek, Lexer_advance as lexer$Lexer_advance, Lexer_current_position as lexer$Lexer_current_position, Lexer_make_token as lexer$Lexer_make_token, Lexer_inc_last_depth as lexer$Lexer_inc_last_depth, Lexer_dec_last_depth as lexer$Lexer_dec_last_depth, Lexer_reset_last_depth as lexer$Lexer_reset_last_depth } from "./lexer.js";
 import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Severity_Eq as diagnostics$__Severity_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Severity_Clone as diagnostics$__Severity_Clone, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
-import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0706 as codes$E0706, error_description as codes$error_description } from "./codes.js";
+import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0706 as codes$E0706, error_description as codes$error_description } from "./codes.js";
 
 function PREC_NONE() {
   return 0;
@@ -481,7 +481,18 @@ function Parser_parse_program(self) {
     }
   }
   if (diagnostics$CollectingSink_has_errors(self.sink)) {
-    panic("Compilation failed with parse errors");
+    let error_msgs = [];
+    for (const d of self.sink.items) {
+      __ring_match4: {
+        const __ring_m4 = d.severity;
+        if (__ring_m4._tag === "SevError") {
+          List_push(error_msgs, `${d.code}: ${d.message}`);
+          break __ring_match4;
+        }
+        break __ring_match4;
+      }
+    }
+    panic(`Compilation failed with parse errors: ${List_join(error_msgs, "; ")}`);
   }
   const end = Parser_current_span_start(self);
   return new ast$Program(uses, decls, Parser_make_span(self, start, end));
@@ -670,19 +681,19 @@ function Parser_parse_block_expr(self) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const stmt = Parser_parse_stmt(self);
     if (Parser_check(self, lexer$TokenKind_TkRBrace)) {
-      __ring_match4: {
-        const __ring_m4 = stmt;
-        if (__ring_m4._tag === "ExprStmt") {
-          const e = __ring_m4.expr; const hs = __ring_m4.has_semi;
+      __ring_match5: {
+        const __ring_m5 = stmt;
+        if (__ring_m5._tag === "ExprStmt") {
+          const e = __ring_m5.expr; const hs = __ring_m5.has_semi;
           if ((!hs)) {
             tail = Option_some(e);
           } else {
             List_push(stmts, stmt);
           }
-          break __ring_match4;
+          break __ring_match5;
         }
         List_push(stmts, stmt);
-        break __ring_match4;
+        break __ring_match5;
       }
     } else {
       List_push(stmts, stmt);
@@ -747,51 +758,51 @@ function Parser_parse_use_decl(self, is_pub) {
 function Parser_parse_decl(self) {
   const is_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
   const tok = Parser_peek(self);
-  __ring_match5: {
-    const __ring_m5 = tok.kind;
-    if (__ring_m5._tag === "TkFn") {
+  __ring_match6: {
+    const __ring_m6 = tok.kind;
+    if (__ring_m6._tag === "TkFn") {
       return Option_some(Parser_parse_fn_decl(self, is_pub, false));
-      break __ring_match5;
+      break __ring_match6;
     }
-    if (__ring_m5._tag === "TkStruct") {
+    if (__ring_m6._tag === "TkStruct") {
       return Option_some(Parser_parse_struct_decl(self, is_pub));
-      break __ring_match5;
+      break __ring_match6;
     }
-    if (__ring_m5._tag === "TkEnum") {
+    if (__ring_m6._tag === "TkEnum") {
       return Option_some(Parser_parse_enum_decl(self, is_pub));
-      break __ring_match5;
+      break __ring_match6;
     }
-    if (__ring_m5._tag === "TkImpl") {
+    if (__ring_m6._tag === "TkImpl") {
       return Option_some(Parser_parse_impl_decl(self));
-      break __ring_match5;
+      break __ring_match6;
     }
-    if (__ring_m5._tag === "TkEffect") {
+    if (__ring_m6._tag === "TkEffect") {
       return Option_some(Parser_parse_effect_decl(self, is_pub));
-      break __ring_match5;
+      break __ring_match6;
     }
-    if (__ring_m5._tag === "TkTest") {
+    if (__ring_m6._tag === "TkTest") {
       return Option_some(Parser_parse_test_decl(self));
-      break __ring_match5;
+      break __ring_match6;
     }
-    if (__ring_m5._tag === "TkTrait") {
+    if (__ring_m6._tag === "TkTrait") {
       return Option_some(Parser_parse_trait_decl(self, is_pub));
-      break __ring_match5;
+      break __ring_match6;
     }
-    if (__ring_m5._tag === "TkExtern") {
+    if (__ring_m6._tag === "TkExtern") {
       return Option_some(Parser_parse_extern_decl(self, is_pub));
-      break __ring_match5;
+      break __ring_match6;
     }
-    if (__ring_m5._tag === "TkIdent") {
+    if (__ring_m6._tag === "TkIdent") {
       if ((tok.value === "type")) {
         return Option_some(Parser_parse_type_alias_decl(self, is_pub));
       }
       Parser_report_error(self, codes$E0101(), `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
       return Option_none;
-      break __ring_match5;
+      break __ring_match6;
     }
     Parser_report_error(self, codes$E0101(), `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
     return Option_none;
-    break __ring_match5;
+    break __ring_match6;
   }
 }
 function Parser_parse_fn_decl(self, is_pub, body_optional) {
@@ -912,7 +923,11 @@ function Parser_parse_enum_decl(self, is_pub) {
     let v_fields = [];
     let named_fields = Option_none;
     if (Parser_try_consume(self, lexer$TokenKind_TkLParen)) {
-      if ((!Parser_check(self, lexer$TokenKind_TkRParen))) {
+      if (Parser_check(self, lexer$TokenKind_TkRParen)) {
+        const rp_span = Parser_peek(self).span;
+        Parser_report_error(self, codes$E0104(), `empty parentheses on enum variant '${v_name}' — use bare name instead`, Option_some(rp_span));
+        const _rp = Parser_advance(self);
+      } else {
         List_push(v_fields, Parser_parse_type_expr(self));
         while (Parser_try_consume(self, lexer$TokenKind_TkComma)) {
           if (Parser_check(self, lexer$TokenKind_TkRParen)) {
@@ -920,8 +935,8 @@ function Parser_parse_enum_decl(self, is_pub) {
           }
           List_push(v_fields, Parser_parse_type_expr(self));
         }
+        const _rp = Parser_expect(self, lexer$TokenKind_TkRParen);
       }
-      const _rp = Parser_expect(self, lexer$TokenKind_TkRParen);
     } else {
       if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
         Parser_advance(self);

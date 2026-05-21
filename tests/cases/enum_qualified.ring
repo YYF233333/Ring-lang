@@ -1,7 +1,7 @@
 enum Color {
-    red(),
-    green(),
-    blue(),
+    red,
+    green,
+    blue,
 }
 
 enum Shape {
@@ -22,11 +22,11 @@ fn main() {
     // Qualified unit variant (no parens in declaration)
     let p = Shape::Point
 
-    // Qualified in match — positional
+    // Qualified in match — bare name
     match c {
-        Color::red() => print("red"),
-        Color::green() => print("green"),
-        Color::blue() => print("blue"),
+        Color::red => print("red"),
+        Color::green => print("green"),
+        Color::blue => print("blue"),
     }
 
     // Qualified Option match

@@ -2,22 +2,22 @@
 // Previously generated duplicate default: in JS switch, causing SyntaxError
 
 enum Animal {
-    cat(),
-    dog(),
-    bird(),
+    cat,
+    dog,
+    bird,
 }
 
 fn is_cat(a: Animal) -> Str {
     match a {
-        cat() => "yes",
+        cat => "yes",
         _ => "no",
     }
 }
 
 fn describe(a: Animal) -> Str {
     match a {
-        cat() => "meow",
-        dog() => "woof",
+        cat => "meow",
+        dog => "woof",
         _ => "other",
     }
 }

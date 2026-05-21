@@ -373,6 +373,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_no_eq.ring", error_pattern: "E0307" },
     { file: "error_no_ord.ring", error_pattern: "E0308" },
     { file: "error_tuple_oob.ring", error_pattern: "E0304" },
+    { file: "error_enum_empty_parens.ring", error_pattern: "E0104" },
   ];
 
   for (const tc of negative_cases) {

@@ -1,6 +1,7 @@
 pub fn E0101() -> Str { "E0101" }
 pub fn E0102() -> Str { "E0102" }
 pub fn E0103() -> Str { "E0103" }
+pub fn E0104() -> Str { "E0104" }
 pub fn E0201() -> Str { "E0201" }
 pub fn E0203() -> Str { "E0203" }
 pub fn E0204() -> Str { "E0204" }
@@ -29,6 +30,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0101" { return "Unexpected token" }
     if code == "E0102" { return "Unterminated string literal" }
     if code == "E0103" { return "Expected token" }
+    if code == "E0104" { return "Empty parentheses on enum variant" }
     if code == "E0201" { return "Undefined variable" }
     if code == "E0203" { return "Unknown struct or invalid constructor fields" }
     if code == "E0204" { return "Unknown type" }
