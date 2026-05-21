@@ -4,7 +4,7 @@ use hir::{HProgram}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env}
 use builtins::{register_builtins, register_hof_intrinsics}
-use infer::{check as infer_check}
+use infer_decl::{check as infer_check}
 use infer_ctx::{InferCtx}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
