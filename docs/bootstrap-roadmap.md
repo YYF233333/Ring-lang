@@ -1,5 +1,7 @@
 # Ring-lang 自举路线图
 
+> **自举已于 2026-05-21 全部完成。** TS 编译器已归档于 git tag `ts-compiler-final` 并从仓库删除。本文档保留作为归档参考。
+
 > 2026-05-20。统一的自举迁移计划，覆盖准备、执行、收尾、推迟特性四个阶段。
 > 替代原 `bootstrap-plan.md` 和 `phase2-vision.md`。
 
@@ -286,8 +288,8 @@ Step 3: diff v1 v2 → 必须 byte-identical
 - [x] Batch 1-5 所有文件翻译完成（31 文件，~14,260 行 Ring 代码）
 - [x] 全部 E2E 测试通过（TS 编译器运行）— **325/325 测试通过（100%）**
 - [x] Fixed point 验证通过（v1 = v2，32/32 文件 byte-identical）
-- [ ] TS 编译器归档
-- [ ] 文档同步更新
+- [x] TS 编译器归档（git tag `ts-compiler-final`，TS 源码从仓库删除）
+- [x] 文档同步更新（CLAUDE.md + bootstrap-roadmap.md 更新于 2026-05-21）
 
 ### 3.5 自举验证期间发现并修复的 TS 编译器 bug
 
