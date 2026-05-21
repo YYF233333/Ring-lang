@@ -16,6 +16,50 @@ pub fn register_decl_public(var ctx: InferCtx, decl: Decl) {
     register_decl(ctx, decl)
 }
 
+pub fn insert_mod_aliases(var ctx: InferCtx, mod_name: Str, decls: List<Decl>, guard: Bool) {
+    for d in decls {
+        match d {
+            Decl::Struct { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                if !guard || !ctx.env.types.structs.contains_key(name) {
+                    match ctx.env.types.structs.get(qualified) {
+                        some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
+                        none => {}
+                    }
+                }
+            },
+            Decl::Enum { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                if !guard || !ctx.env.types.enums.contains_key(name) {
+                    match ctx.env.types.enums.get(qualified) {
+                        some(edef) => { ctx.env.types.enums.insert(name, edef) },
+                        none => {}
+                    }
+                }
+            },
+            Decl::Trait { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                if !guard || !ctx.env.trait_reg.traits.contains_key(name) {
+                    match ctx.env.trait_reg.traits.get(qualified) {
+                        some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
+                        none => {}
+                    }
+                }
+            },
+            Decl::Effect { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                if !guard || !ctx.env.types.effects.contains_key(name) {
+                    match ctx.env.types.effects.get(qualified) {
+                        some(edef) => { ctx.env.types.effects.insert(name, edef) },
+                        none => {}
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+}
+
 pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
     match decl {
         Decl::Fn { name, type_params, params, return_type, declared_effects, body, is_pub, is_abstract, span } =>
@@ -99,49 +143,7 @@ fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: Lis
                     _ => {}
                 }
             }
-            // Add short-name aliases so mod-internal type references resolve
-            // Skip if alias already occupied by a different module (first wins)
-            for d in mod_decls {
-                match d {
-                    Decl::Struct { name, .. } => {
-                        let qualified = "${mod_name}::${name}"
-                        if !ctx.env.types.structs.contains_key(name) {
-                            match ctx.env.types.structs.get(qualified) {
-                                some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
-                                none => {}
-                            }
-                        }
-                    },
-                    Decl::Enum { name, .. } => {
-                        let qualified = "${mod_name}::${name}"
-                        if !ctx.env.types.enums.contains_key(name) {
-                            match ctx.env.types.enums.get(qualified) {
-                                some(edef) => { ctx.env.types.enums.insert(name, edef) },
-                                none => {}
-                            }
-                        }
-                    },
-                    Decl::Trait { name, .. } => {
-                        let qualified = "${mod_name}::${name}"
-                        if !ctx.env.trait_reg.traits.contains_key(name) {
-                            match ctx.env.trait_reg.traits.get(qualified) {
-                                some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
-                                none => {}
-                            }
-                        }
-                    },
-                    Decl::Effect { name, .. } => {
-                        let qualified = "${mod_name}::${name}"
-                        if !ctx.env.types.effects.contains_key(name) {
-                            match ctx.env.types.effects.get(qualified) {
-                                some(edef) => { ctx.env.types.effects.insert(name, edef) },
-                                none => {}
-                            }
-                        }
-                    },
-                    _ => {}
-                }
-            }
+            insert_mod_aliases(ctx, mod_name, mod_decls, true)
             // Pass 2: register everything else (functions, impls, consts, etc.)
             for d in mod_decls {
                 match d {
@@ -900,48 +902,7 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
                     _ => {}
                 }
             }
-            // Add short-name aliases (skip if already occupied)
-            for d in mod_decls {
-                match d {
-                    Decl::Struct { name, .. } => {
-                        let qualified = "${mod_name}::${name}"
-                        if !ctx.env.types.structs.contains_key(name) {
-                            match ctx.env.types.structs.get(qualified) {
-                                some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
-                                none => {}
-                            }
-                        }
-                    },
-                    Decl::Enum { name, .. } => {
-                        let qualified = "${mod_name}::${name}"
-                        if !ctx.env.types.enums.contains_key(name) {
-                            match ctx.env.types.enums.get(qualified) {
-                                some(edef) => { ctx.env.types.enums.insert(name, edef) },
-                                none => {}
-                            }
-                        }
-                    },
-                    Decl::Trait { name, .. } => {
-                        let qualified = "${mod_name}::${name}"
-                        if !ctx.env.trait_reg.traits.contains_key(name) {
-                            match ctx.env.trait_reg.traits.get(qualified) {
-                                some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
-                                none => {}
-                            }
-                        }
-                    },
-                    Decl::Effect { name, .. } => {
-                        let qualified = "${mod_name}::${name}"
-                        if !ctx.env.types.effects.contains_key(name) {
-                            match ctx.env.types.effects.get(qualified) {
-                                some(edef) => { ctx.env.types.effects.insert(name, edef) },
-                                none => {}
-                            }
-                        }
-                    },
-                    _ => {}
-                }
-            }
+            insert_mod_aliases(ctx, mod_name, mod_decls, true)
             // Register everything else (functions, impls, consts, etc.)
             for d in mod_decls {
                 match d {

@@ -395,6 +395,8 @@ const cases: TestCase[] = [
   { file: "mod_qualified_type.ring", expected: "3,4\n" },
   { file: "mod_enum_variant.ring", expected: "red\ngreen-42\n1-2-3\n" },
   { file: "mod_alias_collision.ring", expected: "42\nhello\n" },
+  { file: "mod_const_trait.ring", expected: "release-v42\n" },
+  { file: "effect_annotation_multi.ring", expected: "reading 5\n5\ndefault\nreading 42\n42\nreading 10\n10\ncaught\n" },
   { file: "mut_param.ring", expected: "mut_param: all tests passed\n" },
   { file: "mod_self_path.ring", expected: "mod_self_path: all tests passed\n" },
   { file: "mod_relative_path.ring", expected: "mod_relative_path: all tests passed\n" },

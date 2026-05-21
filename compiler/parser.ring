@@ -196,7 +196,7 @@ impl Parser {
     }
 
     pub fn check(self, kind: TokenKind) -> Bool {
-        token_kind_value(self.peek().kind) == token_kind_value(kind)
+        self.peek().kind == kind
     }
 
     pub fn try_consume(var self, kind: TokenKind) -> Bool {
@@ -209,7 +209,7 @@ impl Parser {
 
     pub fn expect(var self, kind: TokenKind) -> Token {
         let tok = self.peek()
-        if token_kind_value(tok.kind) != token_kind_value(kind) {
+        if tok.kind != kind {
             self.error("Expected '${token_kind_value(kind)}', got '${tok.value}' (${token_kind_value(tok.kind)})")
         }
         self.advance()
@@ -389,9 +389,9 @@ impl Parser {
             let end = self.current_span_start()
 
             var value = value_expr
-            if token_kind_value(op_tok.kind) == "+=" {
+            if op_tok.kind == TokenKind::TkPlusEq {
                 value = Expr::BinOp { op: BinOp::Add, left: expr, right: value_expr, span: expr_span(value_expr) }
-            } else if token_kind_value(op_tok.kind) == "-=" {
+            } else if op_tok.kind == TokenKind::TkMinusEq {
                 value = Expr::BinOp { op: BinOp::Sub, left: expr, right: value_expr, span: expr_span(value_expr) }
             }
 
@@ -587,7 +587,7 @@ impl Parser {
         if self.check(TokenKind::TkSuper) {
             segments.push("super")
             let _ = self.advance()
-        } else if self.check(TokenKind::TkIdent) && self.peek().value == "self" && token_kind_value(self.peek_at(1).kind) == "::" {
+        } else if self.check(TokenKind::TkIdent) && self.peek().value == "self" && self.peek_at(1).kind == TokenKind::TkColonColon {
             segments.push("self")
             let _ = self.advance()
         } else {

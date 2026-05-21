@@ -1,7 +1,7 @@
 # Ring 编译器技术债清单
 
 自举审计 (2026-05-21) + Phase B Wave 1 审计 (2026-05-22) 产出。三路并行审计（Claude×2 + DS V4 Pro）去重合并后的长期跟踪清单。
-已修复项以删除线标记。69 项中 37 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, #54-58, #60-61, #65, C1-C3）。
+已修复项以删除线标记。69 项中 44 项已修复（#1-5, #9-13, #15, #17-18, #21, #23-24, #25, #27, #31-33, #35, #43-44, #46-50, #52-58, #60-63, #65, #69, C1-C3）。
 Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复。
 
 ---
@@ -19,7 +19,7 @@ Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复
 | 7 | `infer.ring` 2763 行单文件 | 可导航性 | 拆分为 infer_stmt/infer_expr/infer |
 | 8 | `compiler_mod.ring` ESM 输出 310 行单函数 | 可维护性 | 提取 helper |
 | 9 | ~~嵌套 if/else 链代替 match（derive.ring, codegen_derive.ring）~~ | ~~可读性~~ | **已修复**：C6 改为 match（Phase 3） |
-| 10 | `token_kind_value` 字符串比较代替 Eq trait 派生 | 性能 | 为 TokenKind derive Eq |
+| 10 | ~~`token_kind_value` 字符串比较代替 Eq trait 派生~~ | ~~性能~~ | **已修复**：`check`/`expect`/compound assign/use 路径改为直接 `==` 比较 TokenKind；`token_kind_value` 仅保留用于错误消息 |
 | 11 | ~~`MergeResult` 等 wrapper struct~~ | ~~噪音~~ | **已修复**：MergeResult 已用 `.0`/`.1` 替代（Phase 3 Iter 1） |
 | 12 | ~~`index_of_int`/`index_of_str` 重复实现~~ | ~~小重复~~ | **已修复**：函数已在自举重构中移除 |
 | 49 | ~~4 处重复的 effect→name 转换函数~~ | ~~维护负担~~ | **已修复**：提取 `effect_kind_name` 到 `types.ring`，4 个调用点统一引用 |
@@ -70,13 +70,13 @@ Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复
 | # | 问题 | 影响 | 备注 |
 |---|------|------|------|
 | 31 | ~~`extract_exports` 包含 builtin impls 导致重复注册~~ | ~~低~~ | **已修复**：仅导出用户 AST 中的 impl，builtin impls 已正确过滤 |
-| 32 | 循环依赖检测返回 none 无诊断详情 | 用户体验 | 报告具体循环路径 |
+| 32 | ~~循环依赖检测返回 none 无诊断详情~~ | ~~用户体验~~ | **已修复**：（commit 4657e0d）resolver 报告完整循环路径 via E0704 |
 | 33 | ~~`load_prelude` 找不到 std 目录时静默跳过~~ | ~~误导性错误~~ | **已修复**：函数已在自举重构中移除/重构 |
 | 34 | 错误码编号有缺口（E0202/E0400/E0401 等） | 文档 | |
 | 35 | ~~`resolver.ring:39` 未使用的 `relative` 变量~~ | ~~死代码~~ | **已修复**：删除未使用变量 |
 | 51 | ~~4 个错误码缺负向测试覆盖~~ | ~~回归保护不完整~~ | **部分修复**：E0101/E0207/E0706 已补充负向测试；E0403 定义但未实现（无触发点），待 effect 检查完善后补充 |
-| 52 | effect 标注语法（F1）测试覆盖薄 | 回归保护不充分 | 仅 3 个用例（正向×2+负向×1），缺多 effect 组合、impl 方法交互、effect 类型不匹配等边界用例 |
-| 53 | 模块负向测试不验证具体错误码 | 测试精度不足 | `e2e.test.ts` 模块负向测试仅断言 `!result.success`，与单文件负向测试（验证具体错误码）标准不一致 |
+| 52 | ~~effect 标注语法（F1）测试覆盖薄~~ | ~~回归保护不充分~~ | **已修复**：新增 `effect_annotation_multi.ring` 覆盖多 effect 组合、fail 传播、catch 交互、无标注后向兼容 |
+| 53 | ~~模块负向测试不验证具体错误码~~ | ~~测试精度不足~~ | **已修复**：（commit 4657e0d）模块负向测试已验证具体错误码（E0702/E0703/E0704） |
 
 ## 设计-实现差距（未实现特性）
 
@@ -107,8 +107,8 @@ Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复
 | 59 | 嵌套 mod 块产生错误限定名 | Concern | Opus+DS | `mod a { mod b { fn f } }` → 注册为 `b::f` 而非 `a::b::f`。`prefix_decl_name` 不处理 ModBlock，内层 mod 丢失外层前缀 |
 | 60 | ~~`parse_mod_block` 缺少错误恢复~~ | ~~Issue~~ | Sonnet | **已修复**：添加 `catch { _ => none }` + 声明级恢复扫描（与 `parse_program` 一致） |
 | 61 | ~~短名别名泄漏且可互相覆盖~~ | ~~Issue~~ | Opus+Sonnet+DS | **已修复**：注册阶段别名插入前检查 `contains_key`，已有别名不覆盖（first wins）；用户通过限定名 `mod::Type` 消歧义 |
-| 62 | 短名别名插入逻辑在 3 处重复 | Concern | Opus | `register_phase1`、`register_decl`（ModBlock 分支）、`check_mod_decl` 中重复相同的 Struct/Enum 别名插入，维护风险 |
-| 63 | 无 mod 块负向测试、无 impl-in-mod 测试、无 const-in-mod 测试、无嵌套 mod 测试 | Concern | 全部 | 仅有 `mod_basic.ring`（函数）和 `mod_struct.ring`（struct）两个正向测试 |
+| 62 | ~~短名别名插入逻辑在 3 处重复~~ | ~~Concern~~ | Opus | **已修复**：提取 `pub fn insert_mod_aliases(ctx, mod_name, decls, guard)` 到 `infer_register.ring`，3 处调用统一为一行 |
+| 63 | ~~无 mod 块负向测试、无 impl-in-mod 测试、无 const-in-mod 测试、无嵌套 mod 测试~~ | ~~Concern~~ | 全部 | **已修复**：新增 `mod_impl.ring`（impl-in-mod）、`mod_const_trait.ring`（const+trait-in-mod）、`mod_alias_collision.ring`（别名冲突）、`mod_qualified_type.ring`（限定类型）、`mod_enum_variant.ring`（三级限定 enum） |
 
 ### Effect 标注（F1）缺陷
 
@@ -124,4 +124,4 @@ Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复
 
 | # | 问题 | 影响 | 发现者 | 备注 |
 |---|------|------|--------|------|
-| 69 | `docs/design.md` 仍将 inline mod 块列为"未实现" | 文档过时 | Opus | M1 已完成，需更新 design.md 实现状态附录 |
+| 69 | ~~`docs/design.md` 仍将 inline mod 块列为"未实现"~~ | ~~文档过时~~ | Opus | **已修复**：（commit 4657e0d）design.md 已更新 inline mod 块为"已实现" |

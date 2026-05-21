@@ -13,7 +13,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type,
     generalize, resolve_relative_qualifier}
-use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name}
+use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases}
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
@@ -65,47 +65,7 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     // type annotations like `c: Circle` resolve to `shapes::Circle`.
     // These aliases remain in scope for the rest of the file, which
     // is acceptable because inline mods share the file scope.
-    for decl in decls {
-        match decl {
-            Decl::Struct { name, .. } => {
-                let qualified = "${mod_name}::${name}"
-                match ctx.env.types.structs.get(qualified) {
-                    some(sdef) => {
-                        ctx.env.types.structs.insert(name, sdef)
-                    },
-                    none => {}
-                }
-            },
-            Decl::Enum { name, .. } => {
-                let qualified = "${mod_name}::${name}"
-                match ctx.env.types.enums.get(qualified) {
-                    some(edef) => {
-                        ctx.env.types.enums.insert(name, edef)
-                    },
-                    none => {}
-                }
-            },
-            Decl::Trait { name, .. } => {
-                let qualified = "${mod_name}::${name}"
-                match ctx.env.trait_reg.traits.get(qualified) {
-                    some(tdef) => {
-                        ctx.env.trait_reg.traits.insert(name, tdef)
-                    },
-                    none => {}
-                }
-            },
-            Decl::Effect { name, .. } => {
-                let qualified = "${mod_name}::${name}"
-                match ctx.env.types.effects.get(qualified) {
-                    some(edef) => {
-                        ctx.env.types.effects.insert(name, edef)
-                    },
-                    none => {}
-                }
-            },
-            _ => {}
-        }
-    }
+    insert_mod_aliases(ctx, mod_name, decls, false)
 
     // Resolve use declarations with relative paths (self::/super::)
     resolve_mod_uses(ctx, uses)

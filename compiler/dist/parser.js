@@ -401,7 +401,7 @@ function Parser_advance(self) {
   return tok;
 }
 function Parser_check(self, kind) {
-  return (lexer$token_kind_value(Parser_peek(self).kind) === lexer$token_kind_value(kind));
+  return lexer$__TokenKind_Eq.eq(Parser_peek(self).kind, kind);
 }
 function Parser_try_consume(self, kind) {
   if (Parser_check(self, kind)) {
@@ -412,7 +412,7 @@ function Parser_try_consume(self, kind) {
 }
 function Parser_expect(self, kind) {
   const tok = Parser_peek(self);
-  if ((lexer$token_kind_value(tok.kind) !== lexer$token_kind_value(kind))) {
+  if ((!lexer$__TokenKind_Eq.eq(tok.kind, kind))) {
     Parser_error(self, `Expected '${lexer$token_kind_value(kind)}', got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`);
   }
   return Parser_advance(self);
@@ -585,10 +585,10 @@ function Parser_parse_stmt(self) {
     Parser_try_consume(self, lexer$TokenKind_TkSemi);
     const end = Parser_current_span_start(self);
     let value = value_expr;
-    if ((lexer$token_kind_value(op_tok.kind) === "+=")) {
+    if (lexer$__TokenKind_Eq.eq(op_tok.kind, lexer$TokenKind_TkPlusEq)) {
       value = ast$Expr_BinOp(ast$BinOp_Add, expr, value_expr, expr_span(value_expr));
     } else {
-      if ((lexer$token_kind_value(op_tok.kind) === "-=")) {
+      if (lexer$__TokenKind_Eq.eq(op_tok.kind, lexer$TokenKind_TkMinusEq)) {
         value = ast$Expr_BinOp(ast$BinOp_Sub, expr, value_expr, expr_span(value_expr));
       }
     }
@@ -759,7 +759,7 @@ function Parser_parse_use_decl(self, is_pub) {
     List_push(segments, "super");
     const _ = Parser_advance(self);
   } else {
-    if (((Parser_check(self, lexer$TokenKind_TkIdent) && (Parser_peek(self).value === "self")) && (lexer$token_kind_value(Parser_peek_at(self, 1).kind) === "::"))) {
+    if (((Parser_check(self, lexer$TokenKind_TkIdent) && (Parser_peek(self).value === "self")) && lexer$__TokenKind_Eq.eq(Parser_peek_at(self, 1).kind, lexer$TokenKind_TkColonColon))) {
       List_push(segments, "self");
       const _ = Parser_advance(self);
     } else {
