@@ -3,7 +3,7 @@ fn find(x: Int) -> Int? {
 }
 
 fn use_find() -> Int {
-    let v = find(42)?
+    let v = find(42).to_fail("not found")
     v + 1
 }
 

@@ -16,43 +16,49 @@ pub fn register_decl_public(var ctx: InferCtx, decl: Decl) {
     register_decl(ctx, decl)
 }
 
+fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: List<Str>, var deferred_enum_names: List<Str>) {
+    match decl {
+        Decl::Struct { name, type_params, fields, span, .. } => {
+            preregister_struct(ctx, name, type_params)
+            deferred_struct_names.push(name)
+        },
+        Decl::Enum { name, type_params, variants, span, .. } => {
+            preregister_enum(ctx, name, type_params)
+            deferred_enum_names.push(name)
+        },
+        _ => register_decl(ctx, decl)
+    }
+}
+
+fn register_phase2_struct(var ctx: InferCtx, decl: Decl) {
+    match decl {
+        Decl::Struct { name, type_params, fields, span, .. } =>
+            complete_struct_fields(ctx, name, fields),
+        _ => {}
+    }
+}
+
+fn register_phase2_enum(var ctx: InferCtx, decl: Decl) {
+    match decl {
+        Decl::Enum { name, type_params, variants, span, .. } =>
+            complete_enum_variants(ctx, name, type_params, variants),
+        _ => {}
+    }
+}
+
 pub fn register_decls_two_phase(var ctx: InferCtx, decls: List<Decl>) {
     var deferred_struct_names: List<Str> = []
     var deferred_enum_names: List<Str> = []
 
     for decl in decls {
-        let result = try {
-            match decl {
-                Decl::Struct { name, type_params, fields, span, .. } => {
-                    preregister_struct(ctx, name, type_params)
-                    deferred_struct_names.push(name)
-                },
-                Decl::Enum { name, type_params, variants, span, .. } => {
-                    preregister_enum(ctx, name, type_params)
-                    deferred_enum_names.push(name)
-                },
-                _ => register_decl(ctx, decl)
-            }
-        }
+        let result = some(register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names)) catch { _ => none }
     }
 
     for decl in decls {
-        let result = try {
-            match decl {
-                Decl::Struct { name, type_params, fields, span, .. } =>
-                    complete_struct_fields(ctx, name, fields),
-                _ => {}
-            }
-        }
+        let result = some(register_phase2_struct(ctx, decl)) catch { _ => none }
     }
     for decl in decls {
-        let result = try {
-            match decl {
-                Decl::Enum { name, type_params, variants, span, .. } =>
-                    complete_enum_variants(ctx, name, type_params, variants),
-                _ => {}
-            }
-        }
+        let result = some(register_phase2_enum(ctx, decl)) catch { _ => none }
     }
 }
 

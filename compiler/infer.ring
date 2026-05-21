@@ -229,7 +229,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             var s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL(), cond_r.subst, span)
             ctx.env.push_scope()
             ctx.loop_depth = ctx.loop_depth + 1
-            let body_result = try { infer_block(ctx, body, some(s)) }
+            let body_result = some(infer_block(ctx, body, some(s))) catch { _ => none }
             ctx.loop_depth = ctx.loop_depth - 1
             ctx.env.pop_scope()
             match body_result {
@@ -353,7 +353,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                 none => {}
             }
             ctx.loop_depth = ctx.loop_depth + 1
-            let body_result = try { infer_block(ctx, body, some(s)) }
+            let body_result = some(infer_block(ctx, body, some(s))) catch { _ => none }
             ctx.loop_depth = ctx.loop_depth - 1
             ctx.env.pop_scope()
             match body_result {
@@ -465,10 +465,10 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             let expr_type = apply_subst(s, hexpr_type(expr_r.hexpr))
 
             ctx.env.push_scope()
-            let then_result = try {
+            let then_result = some({
                 bind_pattern(ctx, pattern, expr_type, s)
                 infer_block(ctx, then_block, some(s))
-            }
+            }) catch { _ => none }
             ctx.env.pop_scope()
 
             match then_result {
@@ -482,7 +482,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     match else_block {
                         some(eb) => {
                             ctx.env.push_scope()
-                            let else_result = try { infer_block(ctx, eb, some(s)) }
+                            let else_result = some(infer_block(ctx, eb, some(s))) catch { _ => none }
                             ctx.env.pop_scope()
                             match else_result {
                                 some(else_r) => {
@@ -618,8 +618,6 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
             infer_handle(ctx, body, handlers, span, subst),
         Expr::Lambda { params, body, span, .. } =>
             infer_lambda(ctx, params, body, span, subst, none),
-        Expr::OptionUnwrap { expr: uw_expr, span } =>
-            infer_option_unwrap(ctx, uw_expr, span, subst),
         Expr::ListLit { elements, span } =>
             infer_list_literal(ctx, elements, span, subst),
         Expr::TupleLit { elements, span } => {
@@ -1697,7 +1695,7 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
 
     for arm in arms {
         ctx.env.push_scope()
-        let arm_result = try {
+        let arm_result = some({
             var match_pattern = arm.pattern
             match arm.pattern {
                 Pattern::Binding { name: pat_name, span: pspan } => {
@@ -1747,7 +1745,7 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
 
             harms.push(HMatchArm { pattern: match_pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
             true
-        }
+        }) catch { _ => none }
         ctx.env.pop_scope()
         match arm_result {
             none => fail.raise(CompileError {}),
@@ -1883,7 +1881,7 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
 
     for arm in arms {
         ctx.env.push_scope()
-        let arm_result = try {
+        let arm_result = some({
             bind_pattern(ctx, arm.pattern, error_type, s)
 
             var guard_hexpr: HExpr? = none
@@ -1922,7 +1920,7 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
 
             harms.push(HMatchArm { pattern: arm.pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
             true
-        }
+        }) catch { _ => none }
         ctx.env.pop_scope()
         match arm_result {
             none => fail.raise(CompileError {}),
@@ -1987,7 +1985,7 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             none => {}
         }
 
-        let handler_body_result = try { infer_expr(ctx, handler.body, s) }
+        let handler_body_result = some(infer_expr(ctx, handler.body, s)) catch { _ => none }
         ctx.env.pop_scope()
 
         match handler_body_result {
@@ -2074,7 +2072,7 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
         pi = pi + 1
     }
 
-    let body_result = try { infer_expr(ctx, body, s) }
+    let body_result = some(infer_expr(ctx, body, s)) catch { _ => none }
     ctx.env.pop_scope()
 
     match body_result {
@@ -2134,26 +2132,6 @@ fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst
     InferResult {
         hexpr: HExpr::ListLit { elements: helements, ty: list_type, effects: combined_effects, span: span },
         subst: s, effects: combined_effects
-    }
-}
-
-// ============================================================
-// infer_option_unwrap
-// ============================================================
-
-fn infer_option_unwrap(var ctx: InferCtx, inner_expr: Expr, span: Span, subst: Map<Int, Type>) -> InferResult {
-    let inner_r = infer_expr(ctx, inner_expr, subst)
-    var s = inner_r.subst
-    let inner_type = ctx.env.fresh_var()
-    s = unify_at(ctx.sink, ctx.env, hexpr_type(inner_r.hexpr), make_option_type(inner_type), s, span)
-    let unwrapped = apply_subst(s, inner_type)
-    let fail_eff = Effect::FailEffect { error_type: ctx.env.fresh_var() }
-    let me = merge_effects(ctx.env, inner_r.effects, EffectRow { effects: [fail_eff], tail: none }, s)
-    var effects = me.0
-    s = me.1
-    InferResult {
-        hexpr: HExpr::OptionUnwrap { expr: inner_r.hexpr, ty: unwrapped, effects: effects, span: span },
-        subst: s, effects: effects
     }
 }
 
@@ -2351,7 +2329,7 @@ fn check_trait_default_body(var ctx: InferCtx, trait_name: Str, self_var: Type, 
         }
     }
 
-    let body_result = try { infer_block(ctx, body, none) }
+    let body_result = some(infer_block(ctx, body, none)) catch { _ => none }
 
     ctx.env.pop_scope()
     ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => [] }
@@ -2514,9 +2492,9 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     }
     ctx.current_fn_return_type = some(expected_ret)
 
-    let try_result = try {
+    let try_result = some(
         check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_scope, span)
-    }
+    ) catch { _ => none }
 
     // Cleanup
     ctx.current_fn_return_type = saved_fn_return
@@ -2559,7 +2537,7 @@ fn check_test_decl(var ctx: InferCtx, description: Str, body: Expr, span: Span) 
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
-    let body_result = try { infer_block(ctx, body, none) }
+    let body_result = some(infer_block(ctx, body, none)) catch { _ => none }
     ctx.env.pop_scope()
 
     let final_body = match body_result {
@@ -2580,24 +2558,26 @@ fn check_test_decl(var ctx: InferCtx, description: Str, body: Expr, span: Span) 
 // Public entry point
 // ============================================================
 
+fn check_one_decl(var ctx: InferCtx, decl: Decl, var hdecls: List<HDecl>) {
+    let hd = check_decl(ctx, decl)
+    hdecls.push(hd)
+    match hd {
+        HDecl::Fn { name, effects, .. } => {
+            if effects.effects.len() > 0 {
+                update_fn_effects(ctx.env, name, effects)
+            }
+        },
+        _ => {}
+    }
+}
+
 pub fn check(var ctx: InferCtx, program: Program) -> HProgram {
     register_decls_two_phase(ctx, program.decls)
     let derived_impls = run_derive_pass(ctx.env)
 
     var hdecls: List<HDecl> = []
     for decl in program.decls {
-        let result = try {
-            let hd = check_decl(ctx, decl)
-            hdecls.push(hd)
-            match hd {
-                HDecl::Fn { name, effects, .. } => {
-                    if effects.effects.len() > 0 {
-                        update_fn_effects(ctx.env, name, effects)
-                    }
-                },
-                _ => {}
-            }
-        }
+        let result = some(check_one_decl(ctx, decl, hdecls)) catch { _ => none }
     }
 
     HProgram { decls: hdecls, derived_impls: derived_impls }

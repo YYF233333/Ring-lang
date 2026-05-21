@@ -302,8 +302,6 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             },
         HExpr::EffectOp { effect_name, op_name, args, .. } =>
             HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: args.map(fn(a) { zonk_expr(ctx, a) }), ty: z_ty, effects: z_eff, span: z_span },
-        HExpr::OptionUnwrap { expr, .. } =>
-            HExpr::OptionUnwrap { expr: zonk_expr(ctx, expr), ty: z_ty, effects: z_eff, span: z_span },
         HExpr::RangeExpr { start, end, inclusive, .. } =>
             HExpr::RangeExpr { start: zonk_expr(ctx, start), end: zonk_expr(ctx, end), inclusive: inclusive, ty: z_ty, effects: z_eff, span: z_span },
         HExpr::ListLit { elements, .. } =>

@@ -253,6 +253,24 @@ fn register_option(var env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+
+    methods.insert("unwrap", TypeScheme {
+        ty: Type::FnType { params: [self_type], return_type: t, effects: EMPTY_ROW() },
+        type_vars: [t_id],
+        bounds: [],
+        def_id: none
+    })
+
+    let e_id = env.fresh_var_id()
+    let e = Type::TypeVar { id: e_id, name: none }
+    let self_type2 = make_option_type(Type::TypeVar { id: t_id, name: none })
+    let fail_eff = Effect::FailEffect { error_type: e }
+    methods.insert("to_fail", TypeScheme {
+        ty: Type::FnType { params: [self_type2, e], return_type: Type::TypeVar { id: t_id, name: none }, effects: EffectRow { effects: [fail_eff], tail: none } },
+        type_vars: [t_id, e_id],
+        bounds: [],
+        def_id: none
+    })
 }
 
 // ============================================================

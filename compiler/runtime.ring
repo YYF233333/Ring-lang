@@ -41,6 +41,7 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function Option_is_some(self) { return self._tag === \"some\"; }")
     lines.push("function Option_is_none(self) { return self._tag === \"none\"; }")
     lines.push("function Option_unwrap_or(self, def) { return self._tag === \"some\" ? self._0 : def; }")
+    lines.push("function Option_unwrap(self) { if (self._tag === \"some\") return self._0; throw new Error(\"panic: called unwrap on none\"); }")
     lines.push("")
     lines.push("function Str_len(self) { return self.length; }")
     lines.push("function Str_contains(self, s) { return self.includes(s); }")
@@ -195,7 +196,7 @@ pub fn RUNTIME_EXPORT_NAMES() -> List<Str> {
     ["__EffectAbort", "Cell", "Cell_get", "Cell_set", "Cell_update",
      "__match_fail", "print", "assert", "panic", "exit", "json_stringify",
      "Option_some", "Option_none",
-     "Option_is_some", "Option_is_none", "Option_unwrap_or",
+     "Option_is_some", "Option_is_none", "Option_unwrap_or", "Option_unwrap",
      "Str_len", "Str_contains", "Str_starts_with", "Str_ends_with",
      "Str_slice", "Str_trim", "Str_to_upper", "Str_to_lower", "Str_replace",
      "Str_split", "Str_char_at", "Str_index_of",

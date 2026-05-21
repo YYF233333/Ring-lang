@@ -94,7 +94,8 @@ function ring_run_single(file_path: string): string {
   if (has_errors(sink)) {
     throw new Error(`Parse error in ${file_path}`);
   }
-  const result = check(ast, sink);
+  const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+  const result = check(ast, sink, fail_ev);
   if (has_errors(sink)) {
     throw new Error(`Type error in ${file_path}: ${sink.items.map((d: any) => d.message).join("; ")}`);
   }
@@ -126,14 +127,10 @@ function ring_run(file_path: string): string {
 }
 
 function ring_check(file_path: string): { success: boolean; error_output: string } {
+  const sink = new_collecting_sink();
   try {
     const source = fs.readFileSync(file_path, "utf-8");
-    const sink = new_collecting_sink();
     const ast = parse(source, file_path);
-    if (has_errors(sink)) {
-      const text = sink.items.map((d: any) => `${d.code}: ${d.message}`).join("\n");
-      return { success: false, error_output: text };
-    }
     if (/^\s*use\s+/m.test(source)) {
       const result = compile_project(file_path);
       if (!result.success) {
@@ -141,16 +138,20 @@ function ring_check(file_path: string): { success: boolean; error_output: string
       }
       return { success: true, error_output: "" };
     }
-    const result = check(ast, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    const result = check(ast, sink, fail_ev);
     if (has_errors(sink)) {
       const text = sink.items.filter((d: any) => d.severity._tag === "SevError").map((d: any) => `${d.code}: ${d.message}`).join("\n");
       return { success: false, error_output: text };
     }
     return { success: true, error_output: "" };
   } catch (err: any) {
-    const sink_text = sink.items.map((d: any) => `${d.code}: ${d.message}`).join("\n");
+    if (has_errors(sink)) {
+      const text = sink.items.filter((d: any) => d.severity._tag === "SevError").map((d: any) => `${d.code}: ${d.message}`).join("\n");
+      return { success: false, error_output: text };
+    }
     const err_text = err.message || String(err);
-    return { success: false, error_output: sink_text ? sink_text : err_text };
+    return { success: false, error_output: err_text };
   }
 }
 
@@ -158,7 +159,8 @@ function ring_build_single(file_path: string): string {
   const source = fs.readFileSync(file_path, "utf-8");
   const sink = new_collecting_sink();
   const ast = parse(source, file_path);
-  const result = check(ast, sink);
+  const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+  const result = check(ast, sink, fail_ev);
   return generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
 }
 
@@ -226,6 +228,8 @@ const cases: TestCase[] = [
   { file: "option_unwrap.ring", expected: "43\n" },
   { file: "option_try.ring", expected: "42\n" },
   { file: "option_or.ring", expected: "141\n" },
+  { file: "option_chain.ring", expected: "option_chain: all tests passed\n" },
+  { file: "option_unwrap_method.ring", expected: "42\nhello\n" },
   { file: "catch_typed.ring", expected: "99\n" },
   { file: "catch_multi_arm.ring", expected: "catch_multi_arm: all tests passed\n" },
   { file: "match_wildcard.ring", expected: "yes\nno\nother\n" },

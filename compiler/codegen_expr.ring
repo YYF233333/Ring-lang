@@ -95,8 +95,6 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
             let joined = arg_strs.join(", ")
             "${ev_name}.${op_name}(${joined})"
         },
-        HExpr::OptionUnwrap { expr: inner, .. } =>
-            gen_option_unwrap(ctx, inner),
         HExpr::RangeExpr { start, end, .. } => {
             let s = gen_expr(ctx, start)
             let e = gen_expr(ctx, end)
@@ -431,6 +429,18 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                             let r = gen_expr(ctx, receiver)
                             let cb = gen_lambda_capture_evidence(ctx, args, 0)
                             return gen_option_unwrap_or_else_expr(r, cb)
+                        }
+                        if method == "to_fail" {
+                            let r = gen_expr(ctx, receiver)
+                            let err_arg = match args.get(0) {
+                                some(a) => gen_expr(ctx, a),
+                                none => "undefined"
+                            }
+                            let ev = evidence_param_name("fail")
+                            let tag_f = ENUM_TAG_FIELD()
+                            let some_t = OPTION_SOME_TAG()
+                            let pay_f = OPTION_PAYLOAD_FIELD()
+                            return "((v) => v.${tag_f} === \"${some_t}\" ? v.${pay_f} : ${ev}.raise(${err_arg}))(${r})"
                         }
                     }
                 },
@@ -842,30 +852,6 @@ fn gen_string_interp(var ctx: CodegenCtx, parts: List<HStringInterpPart>) -> Str
     result.join("")
 }
 
-// ============================================================
-// OptionUnwrap helper
-// ============================================================
-
-fn gen_option_unwrap(var ctx: CodegenCtx, inner: HExpr) -> Str {
-    let e = gen_expr(ctx, inner)
-    let ev = evidence_param_name("fail")
-    let tag_f = ENUM_TAG_FIELD()
-    let some_t = OPTION_SOME_TAG()
-    let pay_f = OPTION_PAYLOAD_FIELD()
-    var p: List<Str> = [""]; p.clear()
-    p.push("((v) => v.")
-    p.push(tag_f)
-    p.push(" === \"")
-    p.push(some_t)
-    p.push("\" ? v.")
-    p.push(pay_f)
-    p.push(" : ")
-    p.push(ev)
-    p.push(".raise(undefined))(")
-    p.push(e)
-    p.push(")")
-    p.join("")
-}
 
 // ============================================================
 // Try/catch expression
@@ -1004,7 +990,6 @@ fn has_fail_effect(expr: HExpr) -> Bool {
         HExpr::HandleExpr { effects, .. } => check_fail(effects),
         HExpr::Lambda { effects, .. } => check_fail(effects),
         HExpr::EffectOp { effects, .. } => check_fail(effects),
-        HExpr::OptionUnwrap { effects, .. } => check_fail(effects),
         HExpr::RangeExpr { effects, .. } => check_fail(effects),
         HExpr::ListLit { effects, .. } => check_fail(effects),
         HExpr::TupleLit { effects, .. } => check_fail(effects),

@@ -146,7 +146,6 @@ pub enum Expr {
     CatchExpr { expr: Expr, arms: List<MatchArm>, span: Span },
     HandleExpr { body: Expr, handlers: List<EffectHandler>, span: Span },
     Lambda { params: List<Param>, return_type: TypeExpr?, body: Expr, span: Span },
-    OptionUnwrap { expr: Expr, span: Span },
     Range { start: Expr, end: Expr, inclusive: Bool, span: Span },
     ListLit { elements: List<Expr>, span: Span },
     TupleLit { elements: List<Expr>, span: Span }

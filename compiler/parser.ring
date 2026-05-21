@@ -49,7 +49,6 @@ pub fn infix_precedence(kind: TokenKind) -> Int {
         TkPercent => PREC_MUL_DIV(),
         TkDot => PREC_POSTFIX(),
         TkLParen => PREC_POSTFIX(),
-        TkQuestion => PREC_POSTFIX(),
         _ => PREC_NONE()
     }
 }
@@ -119,7 +118,6 @@ pub fn expr_span(e: Expr) -> Span {
         CatchExpr { span, .. } => span,
         HandleExpr { span, .. } => span,
         Lambda { span, .. } => span,
-        OptionUnwrap { span, .. } => span,
         Range { span, .. } => span,
         ListLit { span, .. } => span,
         TupleLit { span, .. } => span
@@ -940,10 +938,6 @@ impl Parser {
             } else if self.check(TokenKind::TkLParen) {
                 if tok.span.start.line > expr_span(left).end.line { break }
                 left = self.parse_call_expr(left)
-                last_was_comparison = false
-            } else if self.check(TokenKind::TkQuestion) {
-                let q_tok = self.advance()
-                left = Expr::OptionUnwrap { expr: left, span: self.make_span(expr_span(left).start, q_tok.span.end) }
                 last_was_comparison = false
             } else if self.check(TokenKind::TkDotDot) || self.check(TokenKind::TkDotDotEq) {
                 let inclusive = self.check(TokenKind::TkDotDotEq)

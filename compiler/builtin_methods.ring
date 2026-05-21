@@ -33,5 +33,5 @@ pub fn SET_NON_HOF_METHODS() -> List<Str> {
 
 pub fn SET_HOF_METHODS() -> List<Str> { ["filter", "fold", "any", "all"] }
 
-pub fn OPTION_NON_HOF_METHODS() -> List<Str> { ["is_some", "is_none", "unwrap_or"] }
+pub fn OPTION_NON_HOF_METHODS() -> List<Str> { ["is_some", "is_none", "unwrap_or", "unwrap", "to_fail"] }
 pub fn OPTION_HOF_METHODS() -> List<Str> { ["map", "and_then", "unwrap_or_else"] }
