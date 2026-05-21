@@ -1,4 +1,5 @@
 use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, UNIT}
+use union_find::{UnionFind, uf_bind, uf_lookup, uf_insert, new_union_find}
 use env::{TypeEnv, apply_subst, apply_subst_row}
 
 // ============================================================
@@ -10,7 +11,7 @@ pub struct UnificationError {
     pub is_occurs_check: Bool
 }
 
-pub fn empty_subst() -> Map<Int, Type> { map_new() }
+pub fn empty_subst() -> UnionFind { new_union_find() }
 
 // ============================================================
 // Error helpers
@@ -35,7 +36,7 @@ fn unify_error_msg(detail: Str) -> Never {
 // Occurs check: does var_id appear anywhere in type?
 // ============================================================
 
-pub fn occurs_in(var_id: Int, t: Type, subst: Map<Int, Type>) -> Bool {
+pub fn occurs_in(var_id: Int, t: Type, subst: UnionFind) -> Bool {
     let resolved = apply_subst(subst, t)
     match resolved {
         Type::IntType => false,
@@ -72,7 +73,7 @@ pub fn occurs_in(var_id: Int, t: Type, subst: Map<Int, Type>) -> Bool {
     }
 }
 
-fn occurs_in_row(var_id: Int, row: EffectRow, subst: Map<Int, Type>) -> Bool {
+fn occurs_in_row(var_id: Int, row: EffectRow, subst: UnionFind) -> Bool {
     let in_tail = match row.tail {
         some(t_id) => occurs_in(var_id, Type::TypeVar { id: t_id, name: none }, subst),
         none => false
@@ -80,7 +81,7 @@ fn occurs_in_row(var_id: Int, row: EffectRow, subst: Map<Int, Type>) -> Bool {
     in_tail || row.effects.any(fn(e) { occurs_in_effect(var_id, e, subst) })
 }
 
-fn occurs_in_effect(var_id: Int, e: Effect, subst: Map<Int, Type>) -> Bool {
+fn occurs_in_effect(var_id: Int, e: Effect, subst: UnionFind) -> Bool {
     match e {
         Effect::FailEffect { error_type } => occurs_in(var_id, error_type, subst),
         Effect::CustomEffect { type_args, .. } =>
@@ -114,7 +115,7 @@ fn effect_kind_name(e: Effect) -> Str {
     }
 }
 
-fn unify_effect_params(a: Effect, b: Effect, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, var env: TypeEnv) -> UnionFind {
     match (a, b) {
         (Effect::FailEffect { error_type: et_a }, Effect::FailEffect { error_type: et_b }) =>
             unify(et_a, et_b, subst, env),
@@ -158,7 +159,7 @@ fn filter_by_index_not_in(effects: List<Effect>, excluded: Set<Int>) -> List<Eff
 // Unify effect rows (Koka-style row variable solving)
 // ============================================================
 
-pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: UnionFind, var env: TypeEnv) -> UnionFind {
     var s = subst
     let ra = apply_subst_row(s, a)
     let rb = apply_subst_row(s, b)
@@ -212,9 +213,7 @@ pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: Map<Int, Type>, var 
                     if occurs_in(ta, row_for_a_tail, s) {
                         unify_error_msg("infinite type in effect row variable")
                     }
-                    let new_s = map_clone(s)
-                    new_s.insert(ta, row_for_a_tail)
-                    s = new_s
+                    uf_insert(s, ta, row_for_a_tail)
                 } else {
                     s = unify(Type::TypeVar { id: ta, name: none }, Type::TypeVar { id: fresh, name: none }, s, env)
                 }
@@ -223,9 +222,7 @@ pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: Map<Int, Type>, var 
                     if occurs_in(tb, row_for_b_tail, s) {
                         unify_error_msg("infinite type in effect row variable")
                     }
-                    let new_s = map_clone(s)
-                    new_s.insert(tb, row_for_b_tail)
-                    s = new_s
+                    uf_insert(s, tb, row_for_b_tail)
                 } else {
                     s = unify(Type::TypeVar { id: tb, name: none }, Type::TypeVar { id: fresh, name: none }, s, env)
                 }
@@ -241,7 +238,7 @@ pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: Map<Int, Type>, var 
 // Record row unification
 // ============================================================
 
-fn unify_record_rows(ra: Type, rb: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+fn unify_record_rows(ra: Type, rb: Type, subst: UnionFind, var env: TypeEnv) -> UnionFind {
     match (ra, rb) {
         (Type::RecordType { fields: a_fields, tail: a_tail, .. },
          Type::RecordType { fields: b_fields, tail: b_tail, .. }) => {
@@ -284,10 +281,8 @@ fn unify_record_rows(ra: Type, rb: Type, subst: Map<Int, Type>, var env: TypeEnv
                         if occurs_in(tb, b_tail_record, s) {
                             unify_error(ra, rb, some("infinite type in row variable"))
                         }
-                        let new_s = map_clone(s)
-                        new_s.insert(ta, a_tail_record)
-                        new_s.insert(tb, b_tail_record)
-                        s = new_s
+                        uf_insert(s, ta, a_tail_record)
+                        uf_insert(s, tb, b_tail_record)
                     },
                     _ => {}
                 }
@@ -299,9 +294,7 @@ fn unify_record_rows(ra: Type, rb: Type, subst: Map<Int, Type>, var env: TypeEnv
                             if occurs_in(ta, record_for_tail, s) {
                                 unify_error(ra, rb, some("infinite type in row variable"))
                             }
-                            let new_s = map_clone(s)
-                            new_s.insert(ta, record_for_tail)
-                            s = new_s
+                            uf_insert(s, ta, record_for_tail)
                         }
                     },
                     none => {}
@@ -313,9 +306,7 @@ fn unify_record_rows(ra: Type, rb: Type, subst: Map<Int, Type>, var env: TypeEnv
                             if occurs_in(tb, record_for_tail, s) {
                                 unify_error(ra, rb, some("infinite type in row variable"))
                             }
-                            let new_s = map_clone(s)
-                            new_s.insert(tb, record_for_tail)
-                            s = new_s
+                            uf_insert(s, tb, record_for_tail)
                         }
                     },
                     none => {}
@@ -344,7 +335,7 @@ fn unify_record_rows(ra: Type, rb: Type, subst: Map<Int, Type>, var env: TypeEnv
 // Struct -> Record coercion
 // ============================================================
 
-fn unify_struct_with_record(st: Type, rt: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+fn unify_struct_with_record(st: Type, rt: Type, subst: UnionFind, var env: TypeEnv) -> UnionFind {
     match (st, rt) {
         (Type::StructType { name, fields: struct_fields, .. },
          Type::RecordType { fields: record_fields, tail: record_tail, .. }) => {
@@ -373,9 +364,7 @@ fn unify_struct_with_record(st: Type, rt: Type, subst: Map<Int, Type>, var env: 
                     if occurs_in(tail_id, tail_record, s) {
                         unify_error(st, rt, some("infinite type in row variable"))
                     }
-                    let new_s = map_clone(s)
-                    new_s.insert(tail_id, tail_record)
-                    s = new_s
+                    uf_insert(s, tail_id, tail_record)
                 },
                 none => {}
             }
@@ -398,20 +387,19 @@ fn var_id(t: Type) -> Int? { match t { Type::TypeVar { id, .. } => some(id), _ =
 // Bind type variable (with occurs check)
 // ============================================================
 
-fn bind_var(id: Int, target: Type, t1: Type, t2: Type, subst: Map<Int, Type>) -> Map<Int, Type> {
+fn bind_var(id: Int, target: Type, t1: Type, t2: Type, subst: UnionFind) -> UnionFind {
     if occurs_in(id, target, subst) {
         unify_error_occurs(t1, t2)
     }
-    let result = map_clone(subst)
-    result.insert(id, target)
-    result
+    uf_bind(subst, id, target)
+    subst
 }
 
 // ============================================================
 // Main unification
 // ============================================================
 
-pub fn unify(t1: Type, t2: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
+pub fn unify(t1: Type, t2: Type, subst: UnionFind, var env: TypeEnv) -> UnionFind {
     let a = apply_subst(subst, t1)
     let b = apply_subst(subst, t2)
 

@@ -7,7 +7,8 @@ use hir::{HExpr, HStmt, HParam, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0204, E0301, E0302, E0503}
-use env::{TypeEnv, TypeScheme, SchemeBound, new_type_env, mono, apply_subst, apply_subst_row}
+use union_find::{UnionFind, new_union_find}
+use env::{TypeEnv, TypeScheme, SchemeBound, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map}
 use unify::{UnificationError, empty_subst, unify, occurs_in}
 
 // ============================================================
@@ -16,7 +17,7 @@ use unify::{UnificationError, empty_subst, unify, occurs_in}
 
 pub struct InferResult {
     pub hexpr: HExpr,
-    pub subst: Map<Int, Type>,
+    pub subst: UnionFind,
     pub effects: EffectRow
 }
 
@@ -42,7 +43,7 @@ pub struct CompileError {}
 
 pub struct InferCtx {
     pub env: TypeEnv,
-    pub subst: Map<Int, Type>,
+    pub subst: UnionFind,
     pub sink: CollectingSink,
     pub type_param_scope: Map<Str, Type>,
     pub current_fn_return_type: Type?,
@@ -78,7 +79,7 @@ pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, con
 // Unification / effect helpers
 // ============================================================
 
-pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: Map<Int, Type>) -> (EffectRow, Map<Int, Type>) {
+pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: UnionFind) -> (EffectRow, UnionFind) {
     let m = row_merge(a, b)
     var result_s = s
     match m.tails_to_unify {
@@ -96,7 +97,7 @@ pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: Map<Int, Type>
     out
 }
 
-pub fn unify_at(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: Map<Int, Type>, span: Span) -> Map<Int, Type> {
+pub fn unify_at(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: UnionFind, span: Span) -> UnionFind {
     unify(t1, t2, s, env) catch {
         e => {
             let code = if e.is_occurs_check { E0302 } else { E0301 }
@@ -114,7 +115,7 @@ pub fn unify_at(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: Map<I
 // Free type variable collection
 // ============================================================
 
-pub fn free_type_vars(t: Type, subst: Map<Int, Type>) -> Set<Int> {
+pub fn free_type_vars(t: Type, subst: UnionFind) -> Set<Int> {
     let resolved = apply_subst(subst, t)
     let result: Set<Int> = set_new()
     collect_free_vars(resolved, result)
@@ -181,7 +182,7 @@ pub fn collect_free_vars(t: Type, result: Set<Int>) {
     }
 }
 
-pub fn free_type_vars_in_env(env: TypeEnv, subst: Map<Int, Type>) -> Set<Int> {
+pub fn free_type_vars_in_env(env: TypeEnv, subst: UnionFind) -> Set<Int> {
     let result: Set<Int> = set_new()
     for scope in env.scope.scopes {
         for entry in scope.variables.entries() {
@@ -207,7 +208,7 @@ pub fn free_type_vars_in_env(env: TypeEnv, subst: Map<Int, Type>) -> Set<Int> {
 // Generalization
 // ============================================================
 
-pub fn generalize(env: TypeEnv, t: Type, subst: Map<Int, Type>) -> TypeScheme {
+pub fn generalize(env: TypeEnv, t: Type, subst: UnionFind) -> TypeScheme {
     let resolved = apply_subst(subst, t)
     let ftv_type = free_type_vars(resolved, empty_subst())
     let ftv_env = free_type_vars_in_env(env, subst)
@@ -318,7 +319,7 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: List<Int>
 pub fn resolve_dicts_from_scheme(
     sink: CollectingSink, env: TypeEnv,
     current_fn_bounds: List<FnBoundsEntry>,
-    scheme: TypeScheme, callee_type: Type, s: Map<Int, Type>, span: Span
+    scheme: TypeScheme, callee_type: Type, s: UnionFind, span: Span
 ) -> List<Str> {
     if scheme.bounds.len() == 0 { return [] }
     let var_map = build_scheme_var_map(scheme, callee_type)
@@ -536,7 +537,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                 }
                 i = i + 1
             }
-            return apply_subst(mapping, alias.ty)
+            return apply_subst_map(mapping, alias.ty)
         },
         none => {}
     }
@@ -549,7 +550,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
 // Pattern binding
 // ============================================================
 
-pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst: Map<Int, Type>) {
+pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst: UnionFind) {
     match pattern {
         Pattern::Wildcard { .. } => {},
         Pattern::Binding { name, span } => {
@@ -595,7 +596,7 @@ pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst:
 
 fn bind_constructor_pattern(
     ctx: InferCtx, name: Str, qualifier: Str?, fields: List<Pattern>,
-    expected_type: Type, subst: Map<Int, Type>, span: Span
+    expected_type: Type, subst: UnionFind, span: Span
 ) {
     let enum_name = resolve_pattern_enum(ctx, name, qualifier, span)
     match enum_name {
@@ -623,7 +624,7 @@ fn bind_constructor_pattern(
                         while i < fields.len() && i < v.fields.len() {
                             match (fields.get(i), v.fields.get(i)) {
                                 (some(fpat), some(ftype)) => {
-                                    let field_type = if inst_map.len() > 0 { apply_subst(inst_map, ftype) } else { ftype }
+                                    let field_type = if inst_map.len() > 0 { apply_subst_map(inst_map, ftype) } else { ftype }
                                     bind_pattern(ctx, fpat, field_type, subst)
                                 },
                                 _ => {}
@@ -642,7 +643,7 @@ fn bind_constructor_pattern(
 
 fn bind_named_constructor_pattern(
     ctx: InferCtx, name: Str, qualifier: Str?, fields: List<NamedPatternField>,
-    expected_type: Type, subst: Map<Int, Type>, span: Span
+    expected_type: Type, subst: UnionFind, span: Span
 ) {
     let enum_name = resolve_pattern_enum(ctx, name, qualifier, span)
     match enum_name {
@@ -669,7 +670,7 @@ fn bind_named_constructor_pattern(
                                 match field_idx {
                                     some(idx) => match v.fields.get(idx) {
                                         some(ftype) => {
-                                            let field_type = if inst_map.len() > 0 { apply_subst(inst_map, ftype) } else { ftype }
+                                            let field_type = if inst_map.len() > 0 { apply_subst_map(inst_map, ftype) } else { ftype }
                                             bind_pattern(ctx, field.pattern, field_type, subst)
                                         },
                                         none => {}
@@ -744,7 +745,7 @@ pub fn remove_fail_effect(row: EffectRow) -> EffectRow {
     EffectRow { effects: filtered, tail: row.tail }
 }
 
-pub fn remove_specific_fail_effect(row: EffectRow, target: Type, subst: Map<Int, Type>) -> EffectRow {
+pub fn remove_specific_fail_effect(row: EffectRow, target: Type, subst: UnionFind) -> EffectRow {
     let resolved_target = apply_subst(subst, target)
     let filtered = row.effects.filter(fn(e) {
         match e {

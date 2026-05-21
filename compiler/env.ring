@@ -1,4 +1,5 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT}
+use union_find::{UnionFind, uf_find, uf_lookup}
 use ast::{Span}
 
 // ============================================================
@@ -283,16 +284,16 @@ impl TypeEnv {
                 none => {}
             }
         }
-        apply_subst(mapping, scheme.ty)
+        apply_subst_map(mapping, scheme.ty)
     }
 }
 
 // ============================================================
-// Substitution: apply type variable mapping to a type
-// Kept here (not in unify.ring) to avoid circular dependency
+// Map-based substitution: apply a local Map<Int, Type> mapping to a type.
+// Used for local type parameter instantiation maps (not the global substitution).
 // ============================================================
 
-pub fn apply_subst(subst: Map<Int, Type>, t: Type) -> Type {
+pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
     match t {
         Type::IntType => t,
         Type::FloatType => t,
@@ -302,8 +303,125 @@ pub fn apply_subst(subst: Map<Int, Type>, t: Type) -> Type {
         Type::NeverType => t,
         Type::AnyType => t,
         Type::TypeVar { id, .. } => match subst.get(id) {
-            some(resolved) => apply_subst(subst, resolved),
+            some(resolved) => apply_subst_map(subst, resolved),
             none => t
+        },
+        Type::FnType { params, return_type, effects } =>
+            Type::FnType {
+                params: params.map(fn(p) { apply_subst_map(subst, p) }),
+                return_type: apply_subst_map(subst, return_type),
+                effects: apply_subst_row_map(subst, effects)
+            },
+        Type::StructType { name, type_params, fields } =>
+            Type::StructType {
+                name: name,
+                type_params: type_params.map(fn(p) { apply_subst_map(subst, p) }),
+                fields: fields
+            },
+        Type::EnumType { name, type_params, variants } =>
+            Type::EnumType {
+                name: name,
+                type_params: type_params.map(fn(p) { apply_subst_map(subst, p) }),
+                variants: variants
+            },
+        Type::GenericType { base, args } =>
+            Type::GenericType {
+                base: apply_subst_map(subst, base),
+                args: args.map(fn(a) { apply_subst_map(subst, a) })
+            },
+        Type::RecordType { fields, tail, tail_name } => {
+            let mapped_fields = fields.map(fn(f) {
+                RecordField { name: f.name, ty: apply_subst_map(subst, f.ty) }
+            })
+            match tail {
+                some(t_id) => match subst.get(t_id) {
+                    some(resolved) => {
+                        let chased = apply_subst_map(subst, resolved)
+                        match chased {
+                            Type::TypeVar { id: new_id, name: new_name } =>
+                                Type::RecordType { fields: mapped_fields, tail: some(new_id), tail_name: new_name },
+                            Type::RecordType { fields: extra_fields, tail: extra_tail, tail_name: extra_tn } => {
+                                let all_fields = list_clone(mapped_fields)
+                                for ef in extra_fields {
+                                    all_fields.push(RecordField { name: ef.name, ty: apply_subst_map(subst, ef.ty) })
+                                }
+                                Type::RecordType { fields: all_fields, tail: extra_tail, tail_name: extra_tn }
+                            },
+                            _ => Type::RecordType { fields: mapped_fields, tail: none, tail_name: none }
+                        }
+                    },
+                    none => Type::RecordType { fields: mapped_fields, tail: some(t_id), tail_name: tail_name }
+                },
+                none => Type::RecordType { fields: mapped_fields, tail: none, tail_name: tail_name }
+            }
+        },
+        Type::EffectRowType { effects, tail } => {
+            let row = apply_subst_row_map(subst, EffectRow { effects: effects, tail: tail })
+            Type::EffectRowType { effects: row.effects, tail: row.tail }
+        },
+        Type::TupleType { elements } =>
+            Type::TupleType { elements: elements.map(fn(e) { apply_subst_map(subst, e) }) },
+        Type::ErrorType => t
+    }
+}
+
+fn apply_subst_effect_map(subst: Map<Int, Type>, e: Effect) -> Effect {
+    match e {
+        Effect::FailEffect { error_type } =>
+            Effect::FailEffect { error_type: apply_subst_map(subst, error_type) },
+        Effect::CustomEffect { name, type_args } =>
+            Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { apply_subst_map(subst, a) }) },
+        _ => e
+    }
+}
+
+pub fn apply_subst_row_map(subst: Map<Int, Type>, row: EffectRow) -> EffectRow {
+    let effects = row.effects.map(fn(e) { apply_subst_effect_map(subst, e) })
+    match row.tail {
+        some(t_id) => match subst.get(t_id) {
+            some(resolved) => {
+                let chased = apply_subst_map(subst, resolved)
+                match chased {
+                    Type::TypeVar { id: new_id, .. } =>
+                        EffectRow { effects: effects, tail: some(new_id) },
+                    Type::EffectRowType { effects: extra_effs, tail: extra_tail } => {
+                        let merged = list_clone(effects)
+                        for ee in extra_effs {
+                            merged.push(apply_subst_effect_map(subst, ee))
+                        }
+                        EffectRow { effects: merged, tail: extra_tail }
+                    },
+                    _ => EffectRow { effects: effects, tail: none }
+                }
+            },
+            none => EffectRow { effects: effects, tail: some(t_id) }
+        },
+        none => EffectRow { effects: effects, tail: none }
+    }
+}
+
+// ============================================================
+// Union-Find substitution: apply UnionFind-based substitution to a type.
+// This is the primary apply_subst used by the type inference engine.
+// Uses uf_find for O(alpha(n)) path-compressed type variable resolution.
+// ============================================================
+
+pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
+    match t {
+        Type::IntType => t,
+        Type::FloatType => t,
+        Type::StrType => t,
+        Type::BoolType => t,
+        Type::UnitType => t,
+        Type::NeverType => t,
+        Type::AnyType => t,
+        Type::TypeVar { id, .. } => match uf_lookup(subst, id) {
+            some(resolved) => apply_subst(subst, resolved),
+            none => {
+                // Even without a type binding, path compression may have changed the root
+                let root = uf_find(subst, id)
+                if root == id { t } else { Type::TypeVar { id: root, name: none } }
+            }
         },
         Type::FnType { params, return_type, effects } =>
             Type::FnType {
@@ -333,23 +451,29 @@ pub fn apply_subst(subst: Map<Int, Type>, t: Type) -> Type {
                 RecordField { name: f.name, ty: apply_subst(subst, f.ty) }
             })
             match tail {
-                some(t_id) => match subst.get(t_id) {
-                    some(resolved) => {
-                        let chased = apply_subst(subst, resolved)
-                        match chased {
-                            Type::TypeVar { id: new_id, name: new_name } =>
-                                Type::RecordType { fields: mapped_fields, tail: some(new_id), tail_name: new_name },
-                            Type::RecordType { fields: extra_fields, tail: extra_tail, tail_name: extra_tn } => {
-                                let all_fields = list_clone(mapped_fields)
-                                for ef in extra_fields {
-                                    all_fields.push(RecordField { name: ef.name, ty: apply_subst(subst, ef.ty) })
-                                }
-                                Type::RecordType { fields: all_fields, tail: extra_tail, tail_name: extra_tn }
-                            },
-                            _ => Type::RecordType { fields: mapped_fields, tail: none, tail_name: none }
+                some(t_id) => {
+                    let root_id = uf_find(subst, t_id)
+                    match uf_lookup(subst, root_id) {
+                        some(resolved) => {
+                            let chased = apply_subst(subst, resolved)
+                            match chased {
+                                Type::TypeVar { id: new_id, name: new_name } =>
+                                    Type::RecordType { fields: mapped_fields, tail: some(new_id), tail_name: new_name },
+                                Type::RecordType { fields: extra_fields, tail: extra_tail, tail_name: extra_tn } => {
+                                    let all_fields = list_clone(mapped_fields)
+                                    for ef in extra_fields {
+                                        all_fields.push(RecordField { name: ef.name, ty: apply_subst(subst, ef.ty) })
+                                    }
+                                    Type::RecordType { fields: all_fields, tail: extra_tail, tail_name: extra_tn }
+                                },
+                                _ => Type::RecordType { fields: mapped_fields, tail: none, tail_name: none }
+                            }
+                        },
+                        none => {
+                            let actual_id = if root_id == t_id { t_id } else { root_id }
+                            Type::RecordType { fields: mapped_fields, tail: some(actual_id), tail_name: tail_name }
                         }
-                    },
-                    none => Type::RecordType { fields: mapped_fields, tail: some(t_id), tail_name: tail_name }
+                    }
                 },
                 none => Type::RecordType { fields: mapped_fields, tail: none, tail_name: tail_name }
             }
@@ -364,7 +488,7 @@ pub fn apply_subst(subst: Map<Int, Type>, t: Type) -> Type {
     }
 }
 
-fn apply_subst_effect(subst: Map<Int, Type>, e: Effect) -> Effect {
+fn apply_subst_effect(subst: UnionFind, e: Effect) -> Effect {
     match e {
         Effect::FailEffect { error_type } =>
             Effect::FailEffect { error_type: apply_subst(subst, error_type) },
@@ -374,26 +498,32 @@ fn apply_subst_effect(subst: Map<Int, Type>, e: Effect) -> Effect {
     }
 }
 
-pub fn apply_subst_row(subst: Map<Int, Type>, row: EffectRow) -> EffectRow {
+pub fn apply_subst_row(subst: UnionFind, row: EffectRow) -> EffectRow {
     let effects = row.effects.map(fn(e) { apply_subst_effect(subst, e) })
     match row.tail {
-        some(t_id) => match subst.get(t_id) {
-            some(resolved) => {
-                let chased = apply_subst(subst, resolved)
-                match chased {
-                    Type::TypeVar { id: new_id, .. } =>
-                        EffectRow { effects: effects, tail: some(new_id) },
-                    Type::EffectRowType { effects: extra_effs, tail: extra_tail } => {
-                        let merged = list_clone(effects)
-                        for ee in extra_effs {
-                            merged.push(apply_subst_effect(subst, ee))
-                        }
-                        EffectRow { effects: merged, tail: extra_tail }
-                    },
-                    _ => EffectRow { effects: effects, tail: none }
+        some(t_id) => {
+            let root_id = uf_find(subst, t_id)
+            match uf_lookup(subst, root_id) {
+                some(resolved) => {
+                    let chased = apply_subst(subst, resolved)
+                    match chased {
+                        Type::TypeVar { id: new_id, .. } =>
+                            EffectRow { effects: effects, tail: some(new_id) },
+                        Type::EffectRowType { effects: extra_effs, tail: extra_tail } => {
+                            let merged = list_clone(effects)
+                            for ee in extra_effs {
+                                merged.push(apply_subst_effect(subst, ee))
+                            }
+                            EffectRow { effects: merged, tail: extra_tail }
+                        },
+                        _ => EffectRow { effects: effects, tail: none }
+                    }
+                },
+                none => {
+                    let actual_id = if root_id == t_id { t_id } else { root_id }
+                    EffectRow { effects: effects, tail: some(actual_id) }
                 }
-            },
-            none => EffectRow { effects: effects, tail: some(t_id) }
+            }
         },
         none => EffectRow { effects: effects, tail: none }
     }

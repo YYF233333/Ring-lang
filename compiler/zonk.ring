@@ -4,10 +4,11 @@ use ast::{Pattern, Span}
 use hir::{HExpr, HStmt, HParam, HMatchArm, HEffectHandler,
     HStructFieldInit, HStringInterpPart, HForInDestructure,
     HLetDestructureBinding, hexpr_type, hexpr_effects, hexpr_span}
+use union_find::{UnionFind}
 use env::{apply_subst, apply_subst_row}
 
 pub struct ZonkCtx {
-    pub subst: Map<Int, Type>,
+    pub subst: UnionFind,
     pub names: Map<Int, Str>
 }
 
