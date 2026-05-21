@@ -8,7 +8,7 @@ const INT_METHODS = ["to_str"];
 
 const FLOAT_METHODS = ["to_str"];
 
-const LIST_NON_HOF_METHODS = ["len", "get", "first", "last", "contains", "is_empty", "push", "pop", "concat", "extend", "slice", "reverse", "join", "sort", "shift", "clear", "index_of"];
+const LIST_NON_HOF_METHODS = ["len", "get", "set", "first", "last", "contains", "is_empty", "push", "pop", "concat", "extend", "slice", "reverse", "join", "sort", "shift", "clear", "index_of"];
 
 const LIST_HOF_METHODS = ["map", "filter", "flat_map", "fold", "any", "all", "find", "find_index", "sort_by"];
 

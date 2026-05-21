@@ -91,6 +91,7 @@ function RUNTIME_CODE() {
   List_push(lines, "function List_clear(self) { self.length = 0; }");
   List_push(lines, "function List_find_index(self, f) { var i = self.findIndex(f); return i >= 0 ? { _tag: \"some\", _0: i } : { _tag: \"none\" }; }");
   List_push(lines, "function List_index_of(self, item) { var i = self.indexOf(item); return i >= 0 ? { _tag: \"some\", _0: i } : { _tag: \"none\" }; }");
+  List_push(lines, "function List_set(self, i, v) { self[i] = v; }");
   List_push(lines, "function list_clone(l) { return l.slice(); }");
   List_push(lines, "");
   List_push(lines, "function map_new() { return new Map(); }");
