@@ -16,6 +16,10 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function Cell_set(self, val, __ring_ev_mut) { self.value = val; }")
     lines.push("function Cell_update(self, f, __ring_ev_mut) { self.value = f(self.value); }")
     lines.push("")
+    lines.push("function __ring_raise_fail(msg) {")
+    lines.push("  throw new __EffectAbort(\"fail\", msg);")
+    lines.push("}")
+    lines.push("")
     lines.push("function __match_fail(value) {")
     lines.push("  throw new Error(\"Non-exhaustive match: \" + JSON.stringify(value));")
     lines.push("}")
@@ -193,7 +197,7 @@ pub fn RUNTIME_CODE() -> Str {
 }
 
 pub fn RUNTIME_EXPORT_NAMES() -> List<Str> {
-    ["__EffectAbort", "Cell", "Cell_get", "Cell_set", "Cell_update",
+    ["__EffectAbort", "__ring_raise_fail", "Cell", "Cell_get", "Cell_set", "Cell_update",
      "__match_fail", "print", "assert", "panic", "exit", "json_stringify",
      "Option_some", "Option_none",
      "Option_is_some", "Option_is_none", "Option_unwrap_or", "Option_unwrap",

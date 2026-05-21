@@ -83,7 +83,8 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                 match modules.get(current_key) {
                     some(current_mod) => {
                         let source = read_file(current_mod.file_path)
-                        let ast = parse(source, current_mod.file_path)
+                        let resolve_sink = new_collecting_sink()
+                        let ast = parse(source, current_mod.file_path, resolve_sink)
 
                         var deps: List<Str> = [""]; deps.clear()
                         for use_decl in ast.uses {

@@ -889,11 +889,9 @@ fn gen_catch_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> St
 fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str {
     let body_has_fail = has_fail_effect(body)
     let saved_in_try = ctx.in_try_fail
-    if body_has_fail { ctx.in_try_fail = true }
+    ctx.in_try_fail = true
     let body_js = gen_expr(ctx, body)
     ctx.in_try_fail = saved_in_try
-
-    if body_has_fail == false { return body_js }
 
     let ev = evidence_param_name("fail")
     let ea = RUNTIME_EFFECT_ABORT()

@@ -49,8 +49,14 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
                     match graph.modules.get(key) {
                         some(mod_) => {
                             let source = read_file(mod_.file_path)
-                            let ast = parse(source, mod_.file_path)
-                            module_asts.insert(key, ast)
+                            let mod_sink = new_collecting_sink()
+                            let ast = parse(source, mod_.file_path, mod_sink)
+                            if mod_sink.has_errors() {
+                                eprintln(format_human(mod_sink.diagnostics(), source))
+                                parse_ok = false
+                            } else {
+                                module_asts.insert(key, ast)
+                            }
                         },
                         none => { parse_ok = false },
                     }

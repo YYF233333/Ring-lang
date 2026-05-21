@@ -39,7 +39,8 @@ fn load_prelude(var ctx: InferCtx) {
                 let file_path = path_join(std_dir, file)
                 if file_exists(file_path) {
                     let source = read_file(file_path)
-                    let ast = parse(source, file_path)
+                    let prelude_sink = new_collecting_sink()
+                    let ast = parse(source, file_path, prelude_sink)
                     for decl in ast.decls {
                         register_decl_public(ctx, decl)
                     }

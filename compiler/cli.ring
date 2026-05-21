@@ -37,7 +37,19 @@ pub fn cli_main() {
     }
 
     let source = read_file(file_path)
-    let ast = parse(source, file_path)
+    let parse_sink = new_collecting_sink()
+    let ast = parse(source, file_path, parse_sink)
+
+    if parse_sink.has_errors() {
+        let diagnostics = parse_sink.items
+        if parsed.error_format == "llm" {
+            print(format_llm(diagnostics, file_path))
+        } else {
+            eprintln(format_human(diagnostics, source))
+        }
+        exit_process(1)
+        return
+    }
 
     // Multi-file mode
     if ast.uses.len() > 0 {

@@ -13,6 +13,8 @@ use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
 use diagnostics::{CollectingSink, Severity, DiagnosticContext, new_collecting_sink, make_diag, make_diagnostic}
 use codes::{E0101, E0103, E0104, E0706}
 
+extern fn __ring_raise_fail(msg: Str) -> Never
+
 // ============================================================
 // Operator Precedence
 // ============================================================
@@ -142,8 +144,7 @@ pub fn new_parser(tokens: List<Token>, file: Str, sink: CollectingSink) -> Parse
     Parser { tokens: tokens, pos: 0, file: file, sink: sink, error_count: 0 }
 }
 
-pub fn parse(source: Str, file: Str) -> Program {
-    var sink = new_collecting_sink()
+pub fn parse(source: Str, file: Str, sink: CollectingSink) -> Program {
     var lexer = new_lexer(source, file, sink)
     let tokens = lexer.tokenize()
     var parser = new_parser(tokens, file, sink)
@@ -236,7 +237,7 @@ impl Parser {
     fn error(var self, msg: Str) -> Never {
         let tok = self.peek()
         self.report_error(E0103(), msg, some(tok.span))
-        panic("Parse error: ${msg}")
+        __ring_raise_fail(msg)
     }
 
     // ============================================================
@@ -256,7 +257,16 @@ impl Parser {
                 if decls_started {
                     self.report_error(E0706(), "Use declaration must appear before other declarations", some(self.peek().span))
                 }
-                uses.push(self.parse_use_decl(false))
+                let use_result: UseDecl? = some(self.parse_use_decl(false)) catch { _ => none }
+                match use_result {
+                    some(ud) => uses.push(ud),
+                    none => {
+                        while !self.at_end() {
+                            if is_decl_start(self.peek().kind) { break }
+                            self.advance()
+                        }
+                    }
+                }
                 continue
             }
 
@@ -269,7 +279,16 @@ impl Parser {
                     if decls_started {
                         self.report_error(E0706(), "Use declaration must appear before other declarations", some(self.tokens.get(save_pos).unwrap_or(self.peek()).span))
                     }
-                    uses.push(self.parse_use_decl(true))
+                    let pub_use_result: UseDecl? = some(self.parse_use_decl(true)) catch { _ => none }
+                    match pub_use_result {
+                        some(ud) => uses.push(ud),
+                        none => {
+                            while !self.at_end() {
+                                if is_decl_start(self.peek().kind) { break }
+                                self.advance()
+                            }
+                        }
+                    }
                     continue
                 }
                 self.pos = save_pos
@@ -278,7 +297,8 @@ impl Parser {
             }
 
             decls_started = true
-            match self.parse_decl() {
+            let maybe_decl: Decl? = self.parse_decl() catch { _ => none }
+            match maybe_decl {
                 some(decl) => decls.push(decl),
                 none => {
                     while !self.at_end() {
@@ -287,16 +307,6 @@ impl Parser {
                     }
                 }
             }
-        }
-        if self.sink.has_errors() {
-            var error_msgs: List<Str> = []
-            for d in self.sink.items {
-                match d.severity {
-                    SevError => error_msgs.push("${d.code}: ${d.message}"),
-                    _ => {}
-                }
-            }
-            panic("Compilation failed with parse errors: ${error_msgs.join("; ")}")
         }
         let end = self.current_span_start()
         Program { uses: uses, decls: decls, span: self.make_span(start, end) }
