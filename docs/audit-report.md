@@ -12,8 +12,8 @@
 | 1 | ~~`empty_xxx()` 空列表 boilerplate~~ | ~~可读性~~ | **已修复**：`[]` 类型推断 + 全量清理（Phase 3 Iter 1） |
 | 2 | ~~`hexpr_type`/`expr_type`/`expr_effects` accessor 重复~~ | ~~维护陷阱~~ | **已修复**：统一到 `hir.ring`（Phase 3 Iter 1） |
 | 3 | `types_equal` 148 行重复模式 | 可读性 | 抽象为 `list_zip_all` helper |
-| 4 | `JS_RESERVED()` 每次 `safe_ident()` 调用重建 Set | 性能 | 缓存到 CodegenCtx |
-| 5 | `BUILTIN_*()` 每次调用分配新字符串 | 性能 | 需 `const` 语言特性 |
+| 4 | ~~`JS_RESERVED()` 每次 `safe_ident()` 调用重建 Set~~ | ~~性能~~ | **已修复**：迁移为 `const`（Phase 3 Iter 2） |
+| 5 | ~~`BUILTIN_*()` 每次调用分配新字符串~~ | ~~性能~~ | **已修复**：75 个常量函数迁移为 `const`（Phase 3 Iter 2） |
 | 6 | `runtime.ring` 用数百个 `.push()` 拼接 JS 运行时代码 | 可维护性 | 改用 raw string 或外部 .js 文件 |
 | 7 | `infer.ring` 2763 行单文件 | 可导航性 | 拆分为 infer_stmt/infer_expr/infer |
 | 8 | `compiler_mod.ring` ESM 输出 310 行单函数 | 可维护性 | 提取 helper |
@@ -43,8 +43,9 @@
 | 22 | `bind_pattern` named constructor 不验证字段完整性 | 低 | 穷尽性检查兜底 |
 | 23 | `infer_if` 无 else 返回 UNIT 不与 then 分支统一 | 表达式位置意外 | 考虑 warning |
 | 24 | `is_primitive_eq` 缺少 NeverType/AnyType | 边界情况 | |
-| 25 | `?` 运算符 `fail<fresh_var>` 错误类型未约束 | 极低 | 实践中被 or/catch 兜住 |
+| 25 | ~~`?` 运算符 `fail<fresh_var>` 错误类型未约束~~ | ~~极低~~ | **已修复**：`?` 运算符已移除（语法修订），替换为 `unwrap`/`to_fail` 方法 |
 | 26 | `CollectingSink.report()` 非 var self 但通过引用突变 | 语义不一致 | 深不可变性强制前不会 break |
+| 42 | **Impl 方法 effect 不回传**：impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获 | **中** | Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境 |
 
 ## Codegen 关注项
 
