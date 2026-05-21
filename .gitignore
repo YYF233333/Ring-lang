@@ -1,6 +1,6 @@
 node_modules/
 dist/
-!compiler/ring/dist/
+!compiler/dist/
 out/
 *.js.map
 .DS_Store
