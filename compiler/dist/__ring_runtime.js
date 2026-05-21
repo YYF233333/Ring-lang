@@ -86,6 +86,7 @@ function List_shift(self) { return self.length > 0 ? { _tag: "some", _0: self.sh
 function List_clear(self) { self.length = 0; }
 function List_find_index(self, f) { var i = self.findIndex(f); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
 function List_index_of(self, item) { var i = self.indexOf(item); return i >= 0 ? { _tag: "some", _0: i } : { _tag: "none" }; }
+function List_set(self, i, v) { self[i] = v; }
 function list_clone(l) { return l.slice(); }
 
 function map_new() { return new Map(); }

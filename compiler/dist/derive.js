@@ -543,32 +543,35 @@ function register_derived_impl(env, di, trait_name) {
 }
 
 function get_method_names(trait_name) {
-  if ((trait_name === "Eq")) {
-    const r = ["eq"];
-    List_push(r, "ne");
-    return r;
-  } else {
-    if ((trait_name === "Clone")) {
-      return ["clone"];
-    } else {
-      if ((trait_name === "Debug")) {
-        return ["debug"];
-      } else {
-        if ((trait_name === "Ord")) {
-          return ["cmp"];
-        } else {
-          const e = [];
-          return e;
-        }
-      }
+  __ring_match18: {
+    const __ring_m18 = trait_name;
+    if (__ring_m18 === "Eq") {
+      const r = ["eq"];
+      List_push(r, "ne");
+      return r;
+      break __ring_match18;
     }
+    if (__ring_m18 === "Clone") {
+      return ["clone"];
+      break __ring_match18;
+    }
+    if (__ring_m18 === "Debug") {
+      return ["debug"];
+      break __ring_match18;
+    }
+    if (__ring_m18 === "Ord") {
+      return ["cmp"];
+      break __ring_match18;
+    }
+    return [];
+    break __ring_match18;
   }
 }
 
 function build_self_type(env, type_name, type_kind, type_params) {
-  __ring_match18: {
-    const __ring_m18 = type_kind;
-    if (__ring_m18._tag === "StructKind") {
+  __ring_match19: {
+    const __ring_m19 = type_kind;
+    if (__ring_m19._tag === "StructKind") {
       const def = _Map_get(env.structs, type_name);
       const fields = (function() {
   const __ring_m = def;
@@ -580,9 +583,9 @@ function build_self_type(env, type_name, type_kind, type_params) {
   __match_fail(__ring_m);
 })();
       return types$Type_StructType(type_name, type_params, fields);
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "EnumKind") {
+    if (__ring_m19._tag === "EnumKind") {
       const def = _Map_get(env.enums, type_name);
       const variants = (function() {
   const __ring_m = def;
@@ -594,33 +597,38 @@ function build_self_type(env, type_name, type_kind, type_params) {
   __match_fail(__ring_m);
 })();
       return types$Type_EnumType(type_name, type_params, variants);
-      break __ring_match18;
+      break __ring_match19;
     }
-    __match_fail(__ring_m18);
+    __match_fail(__ring_m19);
   }
 }
 
 function register_trait_methods(methods, trait_name, self_type, type_var_ids, bounds) {
-  if ((trait_name === "Eq")) {
-    const eq_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
-    _Map_insert(methods, "eq", new env$TypeScheme(eq_fn, type_var_ids, bounds, Option_none));
-    const ne_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
-    return _Map_insert(methods, "ne", new env$TypeScheme(ne_fn, type_var_ids, bounds, Option_none));
-  } else {
-    if ((trait_name === "Clone")) {
+  __ring_match20: {
+    const __ring_m20 = trait_name;
+    if (__ring_m20 === "Eq") {
+      const eq_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
+      _Map_insert(methods, "eq", new env$TypeScheme(eq_fn, type_var_ids, bounds, Option_none));
+      const ne_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
+      return _Map_insert(methods, "ne", new env$TypeScheme(ne_fn, type_var_ids, bounds, Option_none));
+      break __ring_match20;
+    }
+    if (__ring_m20 === "Clone") {
       const clone_fn = types$Type_FnType([self_type], self_type, types$EMPTY_ROW);
       return _Map_insert(methods, "clone", new env$TypeScheme(clone_fn, type_var_ids, bounds, Option_none));
-    } else {
-      if ((trait_name === "Ord")) {
-        const cmp_fn = types$Type_FnType([self_type, self_type], types$INT, types$EMPTY_ROW);
-        return _Map_insert(methods, "cmp", new env$TypeScheme(cmp_fn, type_var_ids, bounds, Option_none));
-      } else {
-        if ((trait_name === "Debug")) {
-          const debug_fn = types$Type_FnType([self_type], types$STR, types$EMPTY_ROW);
-          return _Map_insert(methods, "debug", new env$TypeScheme(debug_fn, type_var_ids, bounds, Option_none));
-        }
-      }
+      break __ring_match20;
     }
+    if (__ring_m20 === "Ord") {
+      const cmp_fn = types$Type_FnType([self_type, self_type], types$INT, types$EMPTY_ROW);
+      return _Map_insert(methods, "cmp", new env$TypeScheme(cmp_fn, type_var_ids, bounds, Option_none));
+      break __ring_match20;
+    }
+    if (__ring_m20 === "Debug") {
+      const debug_fn = types$Type_FnType([self_type], types$STR, types$EMPTY_ROW);
+      return _Map_insert(methods, "debug", new env$TypeScheme(debug_fn, type_var_ids, bounds, Option_none));
+      break __ring_match20;
+    }
+    break __ring_match20;
   }
 }
 
