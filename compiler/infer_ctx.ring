@@ -68,10 +68,10 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
 // Error helper
 // ============================================================
 
-pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, context: DiagnosticContext) -> Never {
+pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, context: DiagnosticContext) -> Type {
     let diag = make_diag(code, Severity::SevError, message, span, context)
     sink.report(diag)
-    fail.raise(CompileError {})
+    Type::ErrorType
 }
 
 // ============================================================
@@ -100,11 +100,12 @@ pub fn unify_at(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: Map<I
     unify(t1, t2, s, env) catch {
         e => {
             let code = if e.is_occurs_check { E0302 } else { E0301 }
-            type_error(sink, code, e.message, span, DiagnosticContext::TypeMismatch {
+            let _ = type_error(sink, code, e.message, span, DiagnosticContext::TypeMismatch {
                 expected: type_to_string(apply_subst(s, t1)),
                 actual: type_to_string(apply_subst(s, t2)),
                 expression: none
             })
+            s
         }
     }
 }
@@ -129,6 +130,7 @@ pub fn collect_free_vars(t: Type, result: Set<Int>) {
         Type::UnitType => {},
         Type::NeverType => {},
         Type::AnyType => {},
+        Type::ErrorType => {},
         Type::TypeVar { id, .. } => { result.insert(id) },
         Type::FnType { params, return_type, effects } => {
             for p in params { collect_free_vars(p, result) }
@@ -374,7 +376,7 @@ pub fn resolve_dicts_from_scheme(
             none => {}
         }
         if !found {
-            type_error(sink, E0503,
+            let _ = type_error(sink, E0503,
                 "Type does not satisfy trait bound '${bound.trait_name}'",
                 span, DiagnosticContext::TraitError { detail: "type does not satisfy '${bound.trait_name}'" })
         }
@@ -456,7 +458,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
         match ctx.env.structs.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
-                    type_error(ctx.sink, E0301,
+                    let _ = type_error(ctx.sink, E0301,
                         "Type '${name}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                         span, DiagnosticContext::TypeMismatch {
                             expected: "${def.type_params.len().to_str()} type args",
@@ -485,7 +487,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
         match ctx.env.enums.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
-                    type_error(ctx.sink, E0301,
+                    let _ = type_error(ctx.sink, E0301,
                         "Type '${name}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                         span, DiagnosticContext::TypeMismatch {
                             expected: "${def.type_params.len().to_str()} type args",
@@ -513,7 +515,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
     match ctx.env.type_aliases.get(name) {
         some(alias) => {
             if type_args.len() > 0 && type_args.len() != alias.type_params.len() {
-                type_error(ctx.sink, E0301,
+                let _ = type_error(ctx.sink, E0301,
                     "Type '${name}' expects ${alias.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                     span, DiagnosticContext::TypeMismatch {
                         expected: "${alias.type_params.len().to_str()} type args",
@@ -570,7 +572,7 @@ pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst:
             match resolved {
                 Type::TupleType { elements: type_elems } => {
                     if elements.len() != type_elems.len() {
-                        type_error(ctx.sink, E0301,
+                        let _ = type_error(ctx.sink, E0301,
                             "Tuple pattern has ${elements.len().to_str()} elements but type has ${type_elems.len().to_str()}",
                             span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                     }
@@ -583,9 +585,9 @@ pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst:
                         i = i + 1
                     }
                 },
-                _ => type_error(ctx.sink, E0301,
+                _ => { let _ = type_error(ctx.sink, E0301,
                     "Tuple pattern requires tuple type, got ${type_to_string(resolved)}",
-                    span, DiagnosticContext::TypeMismatch { expected: "tuple", actual: type_to_string(resolved), expression: none })
+                    span, DiagnosticContext::TypeMismatch { expected: "tuple", actual: type_to_string(resolved), expression: none }) }
             }
         }
     }
@@ -606,15 +608,15 @@ fn bind_constructor_pattern(
                         match resolved_expected {
                             Type::EnumType { name: rname, .. } => {
                                 if rname != ename {
-                                    type_error(ctx.sink, E0301,
+                                    let _ = type_error(ctx.sink, E0301,
                                         "variant '${name}' belongs to enum '${ename}', not '${rname}'",
                                         span, DiagnosticContext::TypeMismatch { expected: rname, actual: ename, expression: none })
                                 }
                             },
                             Type::TypeVar { .. } => {},
-                            _ => type_error(ctx.sink, E0301,
+                            _ => { let _ = type_error(ctx.sink, E0301,
                                 "cannot destructure type '${type_to_string(resolved_expected)}' with constructor pattern '${name}'",
-                                span, DiagnosticContext::PatternError { detail: "constructor pattern on non-enum type" })
+                                span, DiagnosticContext::PatternError { detail: "constructor pattern on non-enum type" }) }
                         }
                         let inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected)
                         var i = 0
@@ -654,7 +656,7 @@ fn bind_named_constructor_pattern(
                             match resolved_expected {
                                 Type::EnumType { name: rname, .. } => {
                                     if rname != ename {
-                                        type_error(ctx.sink, E0301,
+                                        let _ = type_error(ctx.sink, E0301,
                                             "variant '${name}' belongs to enum '${ename}', not '${rname}'",
                                             span, DiagnosticContext::TypeMismatch { expected: rname, actual: ename, expression: none })
                                     }
@@ -672,9 +674,9 @@ fn bind_named_constructor_pattern(
                                         },
                                         none => {}
                                     },
-                                    none => type_error(ctx.sink, E0301,
+                                    none => { let _ = type_error(ctx.sink, E0301,
                                         "variant '${name}' has no field '${field.name}'",
-                                        field.span, DiagnosticContext::OtherContext { detail: some("unknown field '${field.name}'") })
+                                        field.span, DiagnosticContext::OtherContext { detail: some("unknown field '${field.name}'") }) }
                                 }
                             }
                         },
@@ -699,11 +701,15 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
                     type_error(ctx.sink, E0201,
                         "'${q}' has no variant '${variant_name}'",
                         span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
+                    none
                 }
             },
-            none => type_error(ctx.sink, E0201,
-                "'${q}' has no variant '${variant_name}'",
-                span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
+            none => {
+                type_error(ctx.sink, E0201,
+                    "'${q}' has no variant '${variant_name}'",
+                    span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
+                none
+            }
         },
         none => ctx.env.variant_to_enum.get(variant_name)
     }

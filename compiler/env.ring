@@ -331,7 +331,8 @@ pub fn apply_subst(subst: Map<Int, Type>, t: Type) -> Type {
             Type::EffectRowType { effects: row.effects, tail: row.tail }
         },
         Type::TupleType { elements } =>
-            Type::TupleType { elements: elements.map(fn(e) { apply_subst(subst, e) }) }
+            Type::TupleType { elements: elements.map(fn(e) { apply_subst(subst, e) }) },
+        Type::ErrorType => t
     }
 }
 

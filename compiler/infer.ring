@@ -253,7 +253,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     if name == BUILTIN_RANGE && type_params.len() > 0 {
                         element_type = match type_params.first() { some(t) => t, none => INT }
                     } else {
-                        type_error(ctx.sink, E0301,
+                        let _ = type_error(ctx.sink, E0301,
                             "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
                             span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
                     }
@@ -265,7 +265,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                         element_type = match type_params.first() { some(t) => t, none => element_type }
                     } else if name == BUILTIN_MAP && type_params.len() >= 2 {
                         if !is_destructure {
-                            type_error(ctx.sink, E0301,
+                            let _ = type_error(ctx.sink, E0301,
                                 "Map is not directly iterable with for..in. Use 'for (k, v) in map { ... }' instead.",
                                 span, DiagnosticContext::OtherContext { detail: some("Map requires destructuring: for (k, v) in map") })
                         }
@@ -276,13 +276,13 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                             _ => {}
                         }
                     } else {
-                        type_error(ctx.sink, E0301,
+                        let _ = type_error(ctx.sink, E0301,
                             "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
                             span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
                     }
                 },
                 _ => {
-                    type_error(ctx.sink, E0301,
+                    let _ = type_error(ctx.sink, E0301,
                         "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
                         span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
                 }
@@ -295,13 +295,13 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     match element_type {
                         Type::TupleType { elements: type_elems } => {
                             if destr.names.len() != type_elems.len() {
-                                type_error(ctx.sink, E0301,
+                                let _ = type_error(ctx.sink, E0301,
                                     "Destructure binding expects ${destr.names.len().to_str()} elements, but iterable element type is ${type_to_string(element_type)}",
                                     span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                             }
                         },
                         _ => {
-                            type_error(ctx.sink, E0301,
+                            let _ = type_error(ctx.sink, E0301,
                                 "Destructure binding expects tuple elements, but iterable element type is ${type_to_string(element_type)}",
                                 span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                         }
@@ -373,14 +373,14 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
         },
         Stmt::Break { span } => {
             if ctx.loop_depth == 0 {
-                type_error(ctx.sink, E0206, "'break' can only be used inside a loop", span,
+                let _ = type_error(ctx.sink, E0206, "'break' can only be used inside a loop", span,
                     DiagnosticContext::OtherContext { detail: some("break outside loop") })
             }
             StmtResult { hstmt: HStmt::Break { span: span }, subst: subst, effects: EMPTY_ROW }
         },
         Stmt::Continue { span } => {
             if ctx.loop_depth == 0 {
-                type_error(ctx.sink, E0206, "'continue' can only be used inside a loop", span,
+                let _ = type_error(ctx.sink, E0206, "'continue' can only be used inside a loop", span,
                     DiagnosticContext::OtherContext { detail: some("continue outside loop") })
             }
             StmtResult { hstmt: HStmt::Continue { span: span }, subst: subst, effects: EMPTY_ROW }
@@ -391,9 +391,9 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             let init_type = apply_subst(s, hexpr_type(init_r.hexpr))
             match init_type {
                 Type::TupleType { .. } => {},
-                _ => type_error(ctx.sink, E0301,
+                _ => { let _ = type_error(ctx.sink, E0301,
                     "let destructuring requires tuple type, got ${type_to_string(init_type)}",
-                    span, DiagnosticContext::OtherContext { detail: some("not a tuple") })
+                    span, DiagnosticContext::OtherContext { detail: some("not a tuple") }) }
             }
             let tuple_elements: List<Type> = match init_type {
                 Type::TupleType { elements } => elements,
@@ -402,7 +402,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             match pattern {
                 Pattern::TuplePattern { elements: pat_elements, .. } => {
                     if pat_elements.len() != tuple_elements.len() {
-                        type_error(ctx.sink, E0301,
+                        let _ = type_error(ctx.sink, E0301,
                             "Tuple has ${tuple_elements.len().to_str()} elements but pattern has ${pat_elements.len().to_str()}",
                             span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                     }
@@ -433,7 +433,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                                         bindings.push(HLetDestructureBinding { name: "_", def_id: none, ty: elem_type })
                                     },
                                     _ => {
-                                        type_error(ctx.sink, E0301,
+                                        let _ = type_error(ctx.sink, E0301,
                                             "Only binding and wildcard patterns are supported in let destructuring",
                                             span, DiagnosticContext::OtherContext { detail: some("unsupported pattern kind") })
                                     }
@@ -450,9 +450,14 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     }
                 },
                 _ => {
-                    type_error(ctx.sink, E0301,
+                    let _ = type_error(ctx.sink, E0301,
                         "let destructuring requires tuple pattern",
                         span, DiagnosticContext::OtherContext { detail: some("not a tuple pattern") })
+                    StmtResult {
+                        hstmt: HStmt::ExprStmt { expr: HExpr::IntLit { value: 0, ty: UNIT, effects: EMPTY_ROW, span: span }, span: span },
+                        subst: s,
+                        effects: init_r.effects
+                    }
                 }
             }
         },
@@ -518,7 +523,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                 some(s) => match s.def_id {
                     some(did) => {
                         if !ctx.env.mutable_vars.contains(did) {
-                            type_error(ctx.sink, E0205,
+                            let _ = type_error(ctx.sink, E0205,
                                 "Cannot assign to immutable variable '${name}' (declared with 'let'). Use 'var' for mutable bindings.",
                                 span, DiagnosticContext::OtherContext { detail: some("'${name}' is declared with 'let'") })
                         }
@@ -537,7 +542,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                         some(s) => match s.def_id {
                             some(did) => {
                                 if !ctx.env.mutable_vars.contains(did) {
-                                    type_error(ctx.sink, E0205,
+                                    let _ = type_error(ctx.sink, E0205,
                                         "Cannot assign to field of immutable variable '${name}'. Use 'var' for mutable bindings.",
                                         span, DiagnosticContext::OtherContext { detail: some("'${name}' is not mutable") })
                                 }
@@ -666,12 +671,16 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: Map<Int, Type>, 
     match scheme {
         none => {
             match qualifier {
-                some(q) => type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
-                    DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }),
+                some(q) => { let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
+                    DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }) },
                 none => {}
             }
-            type_error(ctx.sink, E0201, "Undefined variable: ${name}", span,
+            let _ = type_error(ctx.sink, E0201, "Undefined variable: ${name}", span,
                 DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
+            InferResult {
+                hexpr: HExpr::Ident { name: name, resolved_name: none, def_id: none, dict_closure_dicts: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
+            }
         },
         some(s) => {
             let t = ctx.env.instantiate(s)
@@ -684,12 +693,12 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: Map<Int, Type>, 
                             if enum_def.variants.any(fn(v) { v.name == name }) {
                                 enum_name = some(q)
                             } else {
-                                type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
+                                let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
                                     DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
                             }
                         },
-                        none => type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
-                            DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
+                        none => { let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
+                            DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }) }
                     }
                 },
                 none => { enum_name = ctx.env.variant_to_enum.get(name) }
@@ -838,31 +847,37 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
                 },
                 none => {}
             }
-            type_error(ctx.sink, error_code,
+            let _ = type_error(ctx.sink, error_code,
                 "Type does not implement ${trait_name}, cannot use '${op}'",
                 span, DiagnosticContext::TraitError { detail: "type does not implement ${trait_name}" })
+            TraitDispatch::Builtin
         },
         Type::StructType { name, type_params, .. } => {
             if ctx.env.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
                 let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
                 return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
-            type_error(ctx.sink, error_code,
+            let _ = type_error(ctx.sink, error_code,
                 "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
                 span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_name}" })
+            TraitDispatch::Builtin
         },
         Type::EnumType { name, type_params, .. } => {
             if ctx.env.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
                 let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
                 return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
-            type_error(ctx.sink, error_code,
+            let _ = type_error(ctx.sink, error_code,
                 "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
                 span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_name}" })
+            TraitDispatch::Builtin
         },
-        _ => type_error(ctx.sink, error_code,
-            "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
-            span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_name}" })
+        _ => {
+            let _ = type_error(ctx.sink, error_code,
+                "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
+                span, DiagnosticContext::TraitError { detail: "type '${type_to_string(resolved)}' does not implement ${trait_name}" })
+            TraitDispatch::Builtin
+        }
     }
 }
 
@@ -928,9 +943,9 @@ fn infer_unary_op(var ctx: InferCtx, op: UnaryOp, operand: Expr, span: Span, sub
                 Type::TypeVar { .. } => { s = unify_at(ctx.sink, ctx.env, resolved, INT, s, span); result_type = INT },
                 Type::IntType => { result_type = INT },
                 Type::FloatType => { result_type = FLOAT },
-                _ => type_error(ctx.sink, E0303,
+                _ => { let _ = type_error(ctx.sink, E0303,
                     "Unary - requires numeric type, got ${type_to_string(resolved)}",
-                    span, DiagnosticContext::TypeMismatch { expected: "Int or Float", actual: type_to_string(resolved), expression: none })
+                    span, DiagnosticContext::TypeMismatch { expected: "Int or Float", actual: type_to_string(resolved), expression: none }) }
             }
         },
         UnaryOp::Not => {
@@ -1286,18 +1301,18 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
             _ => {
                 match recv_type {
                     Type::TypeVar { .. } => {},
-                    _ => type_error(ctx.sink, E0305,
+                    _ => { let _ = type_error(ctx.sink, E0305,
                         "Type '${type_to_string(recv_type)}' has no method '${method}'",
-                        span, DiagnosticContext::OtherContext { detail: some("no method '${method}' on type '${type_to_string(recv_type)}'") })
+                        span, DiagnosticContext::OtherContext { detail: some("no method '${method}' on type '${type_to_string(recv_type)}'") }) }
                 }
             }
         },
         none => {
             match recv_type {
                 Type::TypeVar { .. } => {},
-                _ => type_error(ctx.sink, E0305,
+                _ => { let _ = type_error(ctx.sink, E0305,
                     "Type '${type_to_string(recv_type)}' has no method '${method}'",
-                    span, DiagnosticContext::OtherContext { detail: some("no method '${method}' on type '${type_to_string(recv_type)}'") })
+                    span, DiagnosticContext::OtherContext { detail: some("no method '${method}' on type '${type_to_string(recv_type)}'") }) }
             }
         }
     }
@@ -1370,15 +1385,23 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         some(ed) => ed,
         none => panic("effect_def not found: ${effect_name}")
     }
-    let op = match effect_def.ops.find(fn(o) { o.name == op_name }) {
-        some(o) => o,
-        none => type_error(ctx.sink, E0402,
-            "Effect ${effect_name} has no operation ${op_name}",
-            span, DiagnosticContext::OtherContext { detail: some("no operation '${op_name}' on effect '${effect_name}'") })
+    let op_opt = effect_def.ops.find(fn(o) { o.name == op_name })
+    match op_opt {
+        none => {
+            let _ = type_error(ctx.sink, E0402,
+                "Effect ${effect_name} has no operation ${op_name}",
+                span, DiagnosticContext::OtherContext { detail: some("no operation '${op_name}' on effect '${effect_name}'") })
+            return InferResult {
+                hexpr: HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: [], ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
+            }
+        },
+        _ => {}
     }
+    let op = match op_opt { some(o) => o, none => panic("unreachable") }
 
     if args.len() != op.params.len() {
-        type_error(ctx.sink, E0301,
+        let _ = type_error(ctx.sink, E0301,
             "Effect operation '${effect_name}.${op_name}' expects ${op.params.len().to_str()} argument(s), got ${args.len().to_str()}",
             span, DiagnosticContext::TypeMismatch { expected: "${op.params.len().to_str()} args", actual: "${args.len().to_str()} args", expression: none })
     }
@@ -1453,14 +1476,14 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                             }
                             field_type = apply_subst(inst_map, found_field.ty)
                         },
-                        none => type_error(ctx.sink, E0304,
+                        none => { let _ = type_error(ctx.sink, E0304,
                             "Struct ${name} has no field ${field}",
-                            span, DiagnosticContext::MissingField { field: field, ty: name, available: none })
+                            span, DiagnosticContext::MissingField { field: field, ty: name, available: none }) }
                     }
                 },
-                none => type_error(ctx.sink, E0203,
+                none => { let _ = type_error(ctx.sink, E0203,
                     "Unknown struct: ${name}",
-                    span, DiagnosticContext::OtherContext { detail: some("unknown struct '${name}'") })
+                    span, DiagnosticContext::OtherContext { detail: some("unknown struct '${name}'") }) }
             }
         },
         Type::RecordType { fields: rec_fields, tail, .. } => {
@@ -1469,20 +1492,20 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                 some(found_field) => { field_type = found_field.ty },
                 none => match tail {
                     some(_) => {},
-                    none => type_error(ctx.sink, E0304,
+                    none => { let _ = type_error(ctx.sink, E0304,
                         "Record type has no field '${field}'",
-                        span, DiagnosticContext::MissingField { field: field, ty: "record", available: none })
+                        span, DiagnosticContext::MissingField { field: field, ty: "record", available: none }) }
                 }
             }
         },
         Type::TupleType { elements } => {
             match parse_int(field) {
-                none => type_error(ctx.sink, E0304,
+                none => { let _ = type_error(ctx.sink, E0304,
                     "Cannot access named field '${field}' on tuple type; use .0, .1, etc.",
-                    span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none }),
+                    span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none }) },
                 some(i) => {
                     if i >= elements.len() {
-                        type_error(ctx.sink, E0304,
+                        let _ = type_error(ctx.sink, E0304,
                             "Tuple index ${field} out of bounds; tuple has ${elements.len().to_str()} elements",
                             span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none })
                     }
@@ -1494,9 +1517,9 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
             }
         },
         Type::TypeVar { .. } => {},
-        _ => type_error(ctx.sink, E0304,
+        _ => { let _ = type_error(ctx.sink, E0304,
             "Cannot access field '${field}' on type ${type_to_string(recv_type)}",
-            span, DiagnosticContext::MissingField { field: field, ty: type_to_string(recv_type), available: none })
+            span, DiagnosticContext::MissingField { field: field, ty: type_to_string(recv_type), available: none }) }
     }
 
     InferResult {
@@ -1523,8 +1546,8 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
     if variant_enum.is_none() && qualifier.is_some() {
         match qualifier {
-            some(q) => type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
-                DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }),
+            some(q) => { let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
+                DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }) },
             none => {}
         }
     }
@@ -1545,11 +1568,19 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         none => {}
     }
 
-    let struct_def = match ctx.env.structs.get(name) {
-        some(sd) => sd,
-        none => type_error(ctx.sink, E0203, "Unknown struct: ${name}", span,
-            DiagnosticContext::OtherContext { detail: some("unknown struct '${name}'") })
+    let struct_def_opt = ctx.env.structs.get(name)
+    match struct_def_opt {
+        none => {
+            let _ = type_error(ctx.sink, E0203, "Unknown struct: ${name}", span,
+                DiagnosticContext::OtherContext { detail: some("unknown struct '${name}'") })
+            return InferResult {
+                hexpr: HExpr::StructLit { name: name, type_args: [], fields: [], spread: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
+            }
+        },
+        _ => {}
     }
+    let struct_def = match struct_def_opt { some(sd) => sd, none => panic("unreachable") }
 
     let inst_map: Map<Int, Type> = map_new()
     var type_param_types: List<Type> = []
@@ -1601,9 +1632,9 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
                 let ft = apply_subst(inst_map, df.ty)
                 s = unify_at(ctx.sink, ctx.env, hexpr_type(fr.hexpr), ft, s, span)
             },
-            none => type_error(ctx.sink, E0203,
+            none => { let _ = type_error(ctx.sink, E0203,
                 "Struct '${name}' has no field '${field.name}'",
-                field.span, DiagnosticContext::MissingField { field: field.name, ty: name, available: none })
+                field.span, DiagnosticContext::MissingField { field: field.name, ty: name, available: none }) }
         }
         hfields.push(HStructFieldInit { name: field.name, value: fr.hexpr })
     }
@@ -1613,7 +1644,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         for f in fields { provided.insert(f.name) }
         for df in struct_def.fields {
             if !provided.contains(df.name) {
-                type_error(ctx.sink, E0203,
+                let _ = type_error(ctx.sink, E0203,
                     "Missing field '${df.name}' in struct literal '${name}'",
                     span, DiagnosticContext::MissingField { field: df.name, ty: name, available: none })
             }
@@ -1683,9 +1714,9 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
                 },
                 none => {}
             },
-            none => type_error(ctx.sink, E0203,
+            none => { let _ = type_error(ctx.sink, E0203,
                 "Variant '${variant_name}' has no field '${field.name}'",
-                field.span, DiagnosticContext::MissingField { field: field.name, ty: variant_name, available: none })
+                field.span, DiagnosticContext::MissingField { field: field.name, ty: variant_name, available: none }) }
         }
         hfields.push(HStructFieldInit { name: field.name, value: fr.hexpr })
     }
@@ -1695,7 +1726,7 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
         for f in fields { provided.insert(f.name) }
         for fn_name in field_names {
             if !provided.contains(fn_name) {
-                type_error(ctx.sink, E0203,
+                let _ = type_error(ctx.sink, E0203,
                     "Missing field '${fn_name}' in variant '${variant_name}'",
                     span, DiagnosticContext::MissingField { field: fn_name, ty: variant_name, available: none })
             }
@@ -1787,9 +1818,9 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
     let scrut_type_resolved = apply_subst(s, hexpr_type(scrut_r.hexpr))
     let missing = check_exhaustive(harms, scrut_type_resolved, s)
     match missing {
-        some(m) => type_error(ctx.sink, E0601,
+        some(m) => { let _ = type_error(ctx.sink, E0601,
             "Non-exhaustive match on type ${type_to_string(scrut_type_resolved)}: missing pattern for ${m}",
-            span, DiagnosticContext::PatternError { detail: "missing: ${m}" }),
+            span, DiagnosticContext::PatternError { detail: "missing: ${m}" }) },
         none => {}
     }
 

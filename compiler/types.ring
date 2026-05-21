@@ -41,7 +41,8 @@ pub enum Type {
     GenericType { base: Type, args: List<Type> },
     RecordType { fields: List<RecordField>, tail: Int?, tail_name: Str? },
     EffectRowType { effects: List<Effect>, tail: Int? },
-    TupleType { elements: List<Type> }
+    TupleType { elements: List<Type> },
+    ErrorType
 }
 
 pub enum Effect {
@@ -80,6 +81,7 @@ pub fn type_to_builtin_name(t: Type) -> Str? {
         Type::UnitType => some("Unit"),
         Type::StructType { name, .. } => some(name),
         Type::EnumType { name, .. } => some(name),
+        Type::ErrorType => none,
         _ => none
     }
 }
@@ -236,6 +238,7 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
         Type::UnitType => match b { Type::UnitType => true, _ => false },
         Type::NeverType => match b { Type::NeverType => true, _ => false },
         Type::AnyType => match b { Type::AnyType => true, _ => false },
+        Type::ErrorType => match b { Type::ErrorType => true, _ => false },
         Type::TypeVar { id: id_a, .. } => match b {
             Type::TypeVar { id: id_b, .. } => id_a == id_b,
             _ => false
@@ -419,7 +422,8 @@ pub fn type_to_string(t: Type) -> Str {
             }
         },
         Type::TupleType { elements } =>
-            "(${elements.map(fn(e) { type_to_string(e) }).join(", ")})"
+            "(${elements.map(fn(e) { type_to_string(e) }).join(", ")})",
+        Type::ErrorType => "<error>"
     }
 }
 

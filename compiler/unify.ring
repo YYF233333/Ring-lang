@@ -45,6 +45,7 @@ pub fn occurs_in(var_id: Int, t: Type, subst: Map<Int, Type>) -> Bool {
         Type::UnitType => false,
         Type::NeverType => false,
         Type::AnyType => false,
+        Type::ErrorType => false,
         Type::TypeVar { id, .. } => id == var_id,
         Type::FnType { params, return_type, effects } =>
             params.any(fn(p) { occurs_in(var_id, p, subst) }) ||
@@ -413,6 +414,10 @@ fn bind_var(id: Int, target: Type, t1: Type, t2: Type, subst: Map<Int, Type>) ->
 pub fn unify(t1: Type, t2: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map<Int, Type> {
     let a = apply_subst(subst, t1)
     let b = apply_subst(subst, t2)
+
+    // ErrorType absorbs: unification with ErrorType always succeeds
+    match a { Type::ErrorType => { return subst }, _ => {} }
+    match b { Type::ErrorType => { return subst }, _ => {} }
 
     // any unifies with anything
     if is_any(a) || is_any(b) { return subst }
