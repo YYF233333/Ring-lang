@@ -211,24 +211,33 @@
 - `checker.ring` 入口：`new_type_env()` + `register_builtins` + `register_hof_intrinsics` + `load_prelude` + `infer_check`
 - prelude 加载使用 `extern fn` 的 `read_file` / `file_exists` / `path_join`（声明在 std/fs.ring + std/path.ring）
 
-### Batch 5: 代码生成 + 模块系统 + CLI（~3,315 行，~2-3 天）
+### Batch 5: 代码生成 + 模块系统 + CLI（~3,315 行，~2-3 天） ✅ 已完成
 
 | 文件 | 行数 | 翻译要点 |
 |------|------|----------|
-| `codegen/runtime.ts` | 226 | JS 运行时字符串模板生成 |
-| `codegen/codegen-ctx.ts` | 122 | CodegenCtx interface → trait + safe_ident + 辅助函数 |
-| `codegen/codegen.ts` | 257 | CodeGenerator 薄壳 + generate() 入口 |
-| `codegen/codegen-decl.ts` | 211 | 声明 codegen（fn/struct/enum/impl/trait/effect） |
-| `codegen/codegen-stmt.ts` | 345 | 语句 codegen + match 语句 + pattern condition/bindings |
-| `codegen/codegen-expr.ts` | 602 | 表达式 codegen（call/struct_lit/match/if/lambda 等） |
-| `codegen/codegen-derive.ts` | 312 | Auto-derive trait codegen（Eq/Clone/Debug/Ord） |
-| `modules/resolver.ts` | 195 | 模块解析（文件发现 + 依赖图 + 拓扑排序 + 循环检测） |
-| `modules/exports.ts` | 219 | ModuleExports 类型 + extract_exports 导出提取 |
-| `modules/compiler.ts` | 570 | 多文件编译编排器（resolve → parse → check → codegen → bundle） |
-| `cli.ts` | 256 | CLI 入口（ring build/run/check） |
+| `codegen/runtime.ts` | 226 | JS 运行时字符串模板生成 ✅ |
+| `codegen/codegen-ctx.ts` | 122 | CodegenCtx struct + safe_ident + 辅助函数 ✅ |
+| `codegen/codegen.ts` | 257 | generate() 入口 + builtin method 注册 ✅ |
+| `codegen/codegen-decl.ts` | 211 | 声明 codegen（fn/struct/enum/impl/trait/effect） ✅ |
+| `codegen/codegen-stmt.ts` | 345 | 语句 codegen + match 语句 + pattern condition/bindings ✅ |
+| `codegen/codegen-expr.ts` | 602 | 表达式 codegen（call/struct_lit/match/if/lambda 等） ✅ |
+| `codegen/codegen-derive.ts` | 312 | Auto-derive trait codegen（Eq/Clone/Debug/Ord） ✅ |
+| `modules/resolver.ts` | 195 | 模块解析（文件发现 + 依赖图 + 拓扑排序 + 循环检测） ✅ |
+| `modules/exports.ts` | 219 | ModuleExports 类型 + extract_exports 导出提取 ✅ |
+| `modules/compiler.ts` | 570 | 多文件编译编排器（resolve → parse → check → codegen → bundle） ✅ |
+| `cli.ts` | 256 | CLI 入口（ring build/check/help） ✅ |
 
-**风险**：中。Codegen 和 Parser 逻辑量大但模式重复（每个 AST/HIR 节点一个 case）。
-**验证**：全量 E2E diff + E2E 测试。
+**翻译模式补充（Batch 5）**：
+- Ring `${...}` 字符串插值与 JS template literal `${...}` 冲突 → 通过 `List<Str> + join("")` 构建 JS 输出
+- 字符串内不能有嵌套引号的 `\{fn("str")}` → 预计算到变量再插值
+- `RUNTIME_CODE` 作为函数逐行 push 构建（190 行 JS 运行时代码）
+- `escape_for_template_literal()` helper 替代 `.replace()` 链（避免 `$\{` 解析问题）
+- `gen_binop()` 提取为独立函数避免 match arm 中 return
+- `extern fn gen_expr_str` 声明解决 codegen_stmt → codegen_expr 循环依赖
+- `TypeDef` enum 包装 `StructDef | EnumDef`（Ring 无法直接 union 两个 struct 类型）
+- `cli.ring` 的 `run` 命令暂未完成（需要 `exec_sync` extern fn）
+
+**统计**：31 个 Ring 文件，共 ~14,260 行。翻译自 30 个 TS 文件（~13,340 行）。
 
 ---
 
@@ -259,7 +268,7 @@ Step 3: diff v1 v2 → 必须 byte-identical
 
 ### 3.4 完成标准
 
-- [ ] Batch 1-5 所有文件翻译完成
+- [x] Batch 1-5 所有文件翻译完成（31 文件，~14,260 行 Ring 代码）
 - [ ] 全部 E2E 测试通过（Ring 编译器运行）
 - [ ] Fixed point 验证通过（v1 = v2）
 - [ ] TS 编译器归档
