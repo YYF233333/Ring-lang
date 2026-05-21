@@ -390,7 +390,7 @@ impl Parser {
     fn parse_while_stmt(var self) -> Stmt {
         let start = self.current_span_start()
         self.expect(TokenKind::TkWhile)
-        let condition = self.parse_expr()
+        let condition = self.parse_expr_no_struct()
         let body = self.parse_block_expr()
         let end = self.current_span_start()
         Stmt::While { condition: condition, body: body, span: self.make_span(start, end) }
@@ -439,7 +439,7 @@ impl Parser {
         }
 
         self.expect(TokenKind::TkIn)
-        let iterable = self.parse_expr()
+        let iterable = self.parse_expr_no_struct()
         let body = self.parse_block_expr()
         let end = self.current_span_start()
         Stmt::ForIn {
@@ -967,11 +967,15 @@ impl Parser {
     // ============================================================
 
     pub fn parse_expr(var self) -> Expr {
-        self.parse_expr_bp(PREC_NONE)
+        self.parse_expr_bp(PREC_NONE, true)
     }
 
-    pub fn parse_expr_bp(var self, min_prec: Int) -> Expr {
-        var left = self.parse_prefix()
+    fn parse_expr_no_struct(var self) -> Expr {
+        self.parse_expr_bp(PREC_NONE, false)
+    }
+
+    pub fn parse_expr_bp(var self, min_prec: Int, allow_struct_lit: Bool) -> Expr {
+        var left = self.parse_prefix(allow_struct_lit)
         var last_was_comparison = false
 
         while true {
@@ -992,7 +996,7 @@ impl Parser {
             } else if self.check(TokenKind::TkDotDot) || self.check(TokenKind::TkDotDotEq) {
                 let inclusive = self.check(TokenKind::TkDotDotEq)
                 self.advance()
-                let right = self.parse_expr_bp(prec)
+                let right = self.parse_expr_bp(prec, allow_struct_lit)
                 let span = self.make_span(expr_span(left).start, expr_span(right).end)
                 left = Expr::Range { start: left, end: right, inclusive: inclusive, span: span }
                 last_was_comparison = false
@@ -1002,7 +1006,7 @@ impl Parser {
                     self.error("Comparison operators are non-associative: cannot chain '${tok.value}' after another comparison")
                 }
                 self.advance()
-                let right = self.parse_expr_bp(prec)
+                let right = self.parse_expr_bp(prec, allow_struct_lit)
                 let span = self.make_span(expr_span(left).start, expr_span(right).end)
                 left = Expr::BinOp { op: str_to_binop(tok.value), left: left, right: right, span: span }
                 last_was_comparison = is_comparison
@@ -1012,13 +1016,13 @@ impl Parser {
         left
     }
 
-    pub fn parse_prefix(var self) -> Expr {
+    fn parse_prefix(var self, allow_struct_lit: Bool) -> Expr {
         let tok = self.peek()
         let start = self.current_span_start()
 
         if self.check(TokenKind::TkMinus) || self.check(TokenKind::TkBang) {
             self.advance()
-            let operand = self.parse_expr_bp(PREC_UNARY)
+            let operand = self.parse_expr_bp(PREC_UNARY, allow_struct_lit)
             let end = self.current_span_start()
             return Expr::UnaryOp { op: str_to_unaryop(tok.value), operand: operand, span: self.make_span(start, end) }
         }
@@ -1117,14 +1121,14 @@ impl Parser {
                 let variant_tok = self.expect(TokenKind::TkIdent)
                 let variant_name = variant_tok.value
 
-                if is_uppercase(variant_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
+                if allow_struct_lit && is_uppercase(variant_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
                     return self.parse_struct_literal(variant_name, start, some(name))
                 }
 
                 return Expr::Ident { name: variant_name, qualifier: some(name), span: self.make_span(start, variant_tok.span.end) }
             }
 
-            if is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
+            if allow_struct_lit && is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
                 return self.parse_struct_literal(name, start, none)
             }
 
@@ -1263,7 +1267,7 @@ impl Parser {
     pub fn parse_if_expr(var self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkIf)
-        let condition = self.parse_expr()
+        let condition = self.parse_expr_no_struct()
         let then_branch = self.parse_block_expr()
         var else_branch: Expr? = none
         if self.try_consume(TokenKind::TkElse) {
@@ -1284,7 +1288,7 @@ impl Parser {
     fn parse_match_expr(var self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkMatch)
-        let scrutinee = self.parse_expr()
+        let scrutinee = self.parse_expr_no_struct()
         self.expect(TokenKind::TkLBrace)
         var arms: List<MatchArm> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {

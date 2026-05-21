@@ -144,7 +144,7 @@ fn gen_binop(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispa
 fn try_eq_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?) -> Str? {
     match eq_dispatch {
         some(dispatch) => {
-            let is_eq_op = (op == BinOp::Eq) || (op == BinOp::Neq)
+            let is_eq_op = op == BinOp::Eq || op == BinOp::Neq
             if is_eq_op {
                 return some(gen_eq_dispatch(ctx, op, left, right, dispatch))
             }
@@ -157,7 +157,7 @@ fn try_eq_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq
 fn try_ord_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, ord_dispatch: TraitDispatch?) -> Str? {
     match ord_dispatch {
         some(dispatch) => {
-            let is_ord_op = (op == BinOp::Lt) || (op == BinOp::Gt) || (op == BinOp::Lte) || (op == BinOp::Gte)
+            let is_ord_op = op == BinOp::Lt || op == BinOp::Gt || op == BinOp::Lte || op == BinOp::Gte
             if is_ord_op {
                 return some(gen_ord_dispatch(ctx, op, left, right, dispatch))
             }

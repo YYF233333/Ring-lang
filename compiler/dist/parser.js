@@ -568,7 +568,7 @@ function Parser_parse_stmt(self) {
 function Parser_parse_while_stmt(self) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkWhile);
-  const condition = Parser_parse_expr(self);
+  const condition = Parser_parse_expr_no_struct(self);
   const body = Parser_parse_block_expr(self);
   const end = Parser_current_span_start(self);
   return ast$Stmt_While(condition, body, Parser_make_span(self, start, end));
@@ -614,7 +614,7 @@ function Parser_parse_for_in_stmt(self) {
     binding_span = name_tok.span;
   }
   Parser_expect(self, lexer$TokenKind_TkIn);
-  const iterable = Parser_parse_expr(self);
+  const iterable = Parser_parse_expr_no_struct(self);
   const body = Parser_parse_block_expr(self);
   const end = Parser_current_span_start(self);
   return ast$Stmt_ForIn(binding, binding_span, destructure, iterable, body, Parser_make_span(self, start, end));
@@ -1071,10 +1071,13 @@ function Parser_parse_trait_decl(self, is_pub) {
   return ast$Decl_Trait(name, type_params, supertraits, methods, is_pub, Parser_make_span(self, start, end));
 }
 function Parser_parse_expr(self) {
-  return Parser_parse_expr_bp(self, PREC_NONE);
+  return Parser_parse_expr_bp(self, PREC_NONE, true);
 }
-function Parser_parse_expr_bp(self, min_prec) {
-  let left = Parser_parse_prefix(self);
+function Parser_parse_expr_no_struct(self) {
+  return Parser_parse_expr_bp(self, PREC_NONE, false);
+}
+function Parser_parse_expr_bp(self, min_prec, allow_struct_lit) {
+  let left = Parser_parse_prefix(self, allow_struct_lit);
   let last_was_comparison = false;
   while (true) {
     const tok = Parser_peek(self);
@@ -1100,7 +1103,7 @@ function Parser_parse_expr_bp(self, min_prec) {
           if ((Parser_check(self, lexer$TokenKind_TkDotDot) || Parser_check(self, lexer$TokenKind_TkDotDotEq))) {
             const inclusive = Parser_check(self, lexer$TokenKind_TkDotDotEq);
             Parser_advance(self);
-            const right = Parser_parse_expr_bp(self, prec);
+            const right = Parser_parse_expr_bp(self, prec, allow_struct_lit);
             const span = Parser_make_span(self, expr_span(left).start, expr_span(right).end);
             left = ast$Expr_Range(left, right, inclusive, span);
             last_was_comparison = false;
@@ -1110,7 +1113,7 @@ function Parser_parse_expr_bp(self, min_prec) {
               Parser_error(self, `Comparison operators are non-associative: cannot chain '${tok.value}' after another comparison`);
             }
             Parser_advance(self);
-            const right = Parser_parse_expr_bp(self, prec);
+            const right = Parser_parse_expr_bp(self, prec, allow_struct_lit);
             const span = Parser_make_span(self, expr_span(left).start, expr_span(right).end);
             left = ast$Expr_BinOp(str_to_binop(tok.value), left, right, span);
             last_was_comparison = is_comparison;
@@ -1121,12 +1124,12 @@ function Parser_parse_expr_bp(self, min_prec) {
   }
   return left;
 }
-function Parser_parse_prefix(self) {
+function Parser_parse_prefix(self, allow_struct_lit) {
   const tok = Parser_peek(self);
   const start = Parser_current_span_start(self);
   if ((Parser_check(self, lexer$TokenKind_TkMinus) || Parser_check(self, lexer$TokenKind_TkBang))) {
     Parser_advance(self);
-    const operand = Parser_parse_expr_bp(self, PREC_UNARY);
+    const operand = Parser_parse_expr_bp(self, PREC_UNARY, allow_struct_lit);
     const end = Parser_current_span_start(self);
     return ast$Expr_UnaryOp(str_to_unaryop(tok.value), operand, Parser_make_span(self, start, end));
   }
@@ -1217,12 +1220,12 @@ function Parser_parse_prefix(self) {
       Parser_advance(self);
       const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
       const variant_name = variant_tok.value;
-      if ((is_uppercase(Option_unwrap_or(Str_char_at(variant_name, 0), "")) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
+      if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(variant_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
         return Parser_parse_struct_literal(self, variant_name, start, Option_some(name));
       }
       return ast$Expr_Ident(variant_name, Option_some(name), Parser_make_span(self, start, variant_tok.span.end));
     }
-    if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
+    if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
       return Parser_parse_struct_literal(self, name, start, Option_none);
     }
     return ast$Expr_Ident(name, Option_none, tok.span);
@@ -1325,7 +1328,7 @@ function Parser_parse_string_interp(self) {
 function Parser_parse_if_expr(self) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkIf);
-  const condition = Parser_parse_expr(self);
+  const condition = Parser_parse_expr_no_struct(self);
   const then_branch = Parser_parse_block_expr(self);
   let else_branch = Option_none;
   if (Parser_try_consume(self, lexer$TokenKind_TkElse)) {
@@ -1341,7 +1344,7 @@ function Parser_parse_if_expr(self) {
 function Parser_parse_match_expr(self) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkMatch);
-  const scrutinee = Parser_parse_expr(self);
+  const scrutinee = Parser_parse_expr_no_struct(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let arms = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
@@ -1708,4 +1711,4 @@ function __Parser_Debug_debug(self) {
 const __Parser_Debug = { debug: __Parser_Debug_debug };
 
 
-export { PREC_NONE, PREC_CATCH, PREC_LOGIC_OR, PREC_LOGIC_AND, PREC_EQUALITY, PREC_COMPARE, PREC_RANGE, PREC_ADD_SUB, PREC_MUL_DIV, PREC_UNARY, PREC_POSTFIX, infix_precedence, expr_span, Parser, new_parser, parse, Parser_peek, Parser_advance, Parser_check, Parser_try_consume, Parser_expect, Parser_at_end, Parser_current_span_start, Parser_make_span, Parser_report_error, Parser_error, Parser_parse_program, Parser_parse_stmt, Parser_parse_while_stmt, Parser_parse_loop_stmt, Parser_parse_for_in_stmt, Parser_parse_break_stmt, Parser_parse_continue_stmt, Parser_parse_if_let_stmt, Parser_parse_binding_stmt, Parser_parse_return_stmt, Parser_parse_block_expr, Parser_parse_use_decl, Parser_parse_decl, Parser_parse_fn_decl, Parser_parse_const_decl, Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl, Parser_parse_struct_decl, Parser_parse_enum_decl, Parser_parse_impl_decl, Parser_parse_effect_decl, Parser_parse_test_decl, Parser_parse_trait_decl, Parser_parse_expr, Parser_parse_expr_bp, Parser_parse_prefix, Parser_parse_dot_expr, Parser_parse_call_expr, Parser_parse_arg_list, Parser_parse_catch_expr, Parser_parse_string_interp, Parser_parse_if_expr, Parser_parse_match_expr, Parser_parse_match_arm, Parser_parse_pattern, Parser_parse_handle_expr, Parser_parse_effect_handler, Parser_parse_lambda_expr, Parser_parse_struct_literal, Parser_try_parse_type_args, Parser_parse_type_expr, Parser_parse_record_type_expr, Parser_parse_type_params, Parser_parse_type_bound, Parser_parse_params, Parser_parse_param, __Parser_Clone, __Parser_Debug };
+export { PREC_NONE, PREC_CATCH, PREC_LOGIC_OR, PREC_LOGIC_AND, PREC_EQUALITY, PREC_COMPARE, PREC_RANGE, PREC_ADD_SUB, PREC_MUL_DIV, PREC_UNARY, PREC_POSTFIX, infix_precedence, expr_span, Parser, new_parser, parse, Parser_peek, Parser_advance, Parser_check, Parser_try_consume, Parser_expect, Parser_at_end, Parser_current_span_start, Parser_make_span, Parser_report_error, Parser_error, Parser_parse_program, Parser_parse_stmt, Parser_parse_while_stmt, Parser_parse_loop_stmt, Parser_parse_for_in_stmt, Parser_parse_break_stmt, Parser_parse_continue_stmt, Parser_parse_if_let_stmt, Parser_parse_binding_stmt, Parser_parse_return_stmt, Parser_parse_block_expr, Parser_parse_use_decl, Parser_parse_decl, Parser_parse_fn_decl, Parser_parse_const_decl, Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl, Parser_parse_struct_decl, Parser_parse_enum_decl, Parser_parse_impl_decl, Parser_parse_effect_decl, Parser_parse_test_decl, Parser_parse_trait_decl, Parser_parse_expr, Parser_parse_expr_no_struct, Parser_parse_expr_bp, Parser_parse_prefix, Parser_parse_dot_expr, Parser_parse_call_expr, Parser_parse_arg_list, Parser_parse_catch_expr, Parser_parse_string_interp, Parser_parse_if_expr, Parser_parse_match_expr, Parser_parse_match_arm, Parser_parse_pattern, Parser_parse_handle_expr, Parser_parse_effect_handler, Parser_parse_lambda_expr, Parser_parse_struct_literal, Parser_try_parse_type_args, Parser_parse_type_expr, Parser_parse_record_type_expr, Parser_parse_type_params, Parser_parse_type_bound, Parser_parse_params, Parser_parse_param, __Parser_Clone, __Parser_Debug };
