@@ -1,7 +1,8 @@
 # Ring 编译器技术债清单
 
-自举审计 (2026-05-21) 产出。三路并行审计（Claude×2 + DS V4 Pro）去重合并后的长期跟踪清单。
+自举审计 (2026-05-21) + Phase B Wave 1 审计 (2026-05-22) 产出。三路并行审计（Claude×2 + DS V4 Pro）去重合并后的长期跟踪清单。
 已修复项以删除线标记。53 项中 29 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, C1-C3）。
+Phase B Wave 1 审计新增 16 项（#54-69）。
 
 ---
 
@@ -87,3 +88,40 @@
 | 39 | `dyn Trait` 动态分发 | 未实现 | 未排期 |
 | 40 | Supertrait 继承 | AST 字段存在但空 | 未排期 |
 | 41 | 关联类型 | 未实现 | 未排期 |
+
+---
+
+## Phase B Wave 1 审计 (2026-05-22)
+
+三路并行审计（Claude Opus + Claude Sonnet + DS V4 Pro）。审计范围：S1（标准库迁移）、F1（effect 标注语法）、M1（inline mod 块）。
+
+### Mod 块实现缺陷
+
+| # | 问题 | 影响 | 发现者 | 备注 |
+|---|------|------|--------|------|
+| 54 | `prefix_decl_name` 仅处理 Fn/Struct/Enum/ExternFn/Const，对 Impl/Trait/Effect/TypeAlias/ExternType/ModBlock 返回原值 | **Bug：mod 内 impl 方法注册在未限定名下，外部调用报 E0305** | Claude×2+DS | `mod shapes { impl Circle { fn area... } }` → 方法注册在 `Circle` 而非 `shapes::Circle`，`shapes::Circle.area()` 查找失败。根因：一个 wildcard `_ => decl` 影响 7 种声明类型 |
+| 55 | `parse_type_expr` 不支持限定类型语法 `mod::Type` | **Bug：函数签名不能引用 mod 内类型** | Sonnet | `fn foo(x: shapes::Circle)` 报 E0103。`parse_type_expr` 只解析 bare TkIdent + 类型参数，无 `::` 处理 |
+| 56 | 两级限定访问 `mod::Enum::Variant` 不支持 | **Bug：无法引用 mod 内 enum 变体** | Sonnet | `shapes::Color::Red` 解析为 `Ident{name:"Color", qualifier:"shapes"}` 后遇到 `::Red` 报错。Parser 只支持一层 `::` |
+| 57 | `is_decl_start` 缺少 `TkMod` | **Bug：解析错误恢复跳过 mod 块** | Opus+Sonnet | 错误恢复扫描 `TkFn/TkStruct/...` 但不含 `TkMod`，parse error 后整个 mod 块被跳过 |
+| 58 | `exports.ring` + `compiler_mod.ring` 的 ModBlock 分支遗漏 Enum 导出 | Issue：多文件 pub mod 中的 enum 类型对外不可见 | Opus+Sonnet | ModBlock 导出只处理 Fn/Struct/Const，Enum 及其 variant 构造器落入 `_ => {}` |
+| 59 | 嵌套 mod 块产生错误限定名 | Concern | Opus+DS | `mod a { mod b { fn f } }` → 注册为 `b::f` 而非 `a::b::f`。`prefix_decl_name` 不处理 ModBlock，内层 mod 丢失外层前缀 |
+| 60 | `parse_mod_block` 缺少错误恢复 | Issue | Sonnet | 内部 `parse_decl()` 无 `catch` 包裹（对比 `parse_program` 有 `catch { _ => none }`），一个子声明解析失败会放弃整个 mod 块 |
+| 61 | 短名别名泄漏且可互相覆盖 | Issue | Opus+Sonnet+DS | `mod a { struct Foo {} }` + `mod b { struct Foo {} }` → 第二个覆盖第一个的 `Foo` 别名。设计文档说共享文件作用域是有意的，但无冲突检测 |
+| 62 | 短名别名插入逻辑在 3 处重复 | Concern | Opus | `register_phase1`、`register_decl`（ModBlock 分支）、`check_mod_decl` 中重复相同的 Struct/Enum 别名插入，维护风险 |
+| 63 | 无 mod 块负向测试、无 impl-in-mod 测试、无 const-in-mod 测试、无嵌套 mod 测试 | Concern | 全部 | 仅有 `mod_basic.ring`（函数）和 `mod_struct.ring`（struct）两个正向测试 |
+
+### Effect 标注（F1）缺陷
+
+| # | 问题 | 影响 | 发现者 | 备注 |
+|---|------|------|--------|------|
+| 64 | `effects_match_kind` 只做 kind 级匹配，忽略 fail 错误类型 | Issue（设计决策） | Opus | `with {fail<Str>}` 匹配 `fail<Int>` 不报错。标注中的错误类型是装饰性的。若标注作为公共契约，应验证类型参数 |
+| 65 | `effects_match_kind` 在 `unify.ring` 和 `infer_decl.ring` 中完全重复 | Issue | DS | 字节级相同的函数在两个文件中各一份，改一处易忘另一处 |
+| 66 | `register_impl_method` 接收 `declared_effects` 参数但完全不使用 | Issue（已知限制扩展） | DS | impl 方法 effect 注册为 `EMPTY_ROW`，显式 `with {io}` 标注被忽略。关联 #42 |
+| 67 | `std/io.ring` 的 `print`/`assert`/`exit` 缺少 `with {io}` 标注 | Issue | Sonnet | 纯函数 `with {}` 内调用 `print()` 不报 E0404——extern fn 无标注时注册为 EMPTY_ROW |
+| 68 | `resolve_effect_expr` 不验证 effect 名是否存在 | Concern | Opus | `with {typo}` 静默创建 CustomEffect，不报错。因为标注是上界，不使用的 effect 合法，但拼写错误无法捕获 |
+
+### 文档 / 其他
+
+| # | 问题 | 影响 | 发现者 | 备注 |
+|---|------|------|--------|------|
+| 69 | `docs/design.md` 仍将 inline mod 块列为"未实现" | 文档过时 | Opus | M1 已完成，需更新 design.md 实现状态附录 |
