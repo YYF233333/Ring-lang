@@ -89,6 +89,7 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function List_clear(self) { self.length = 0; }")
     lines.push("function List_find_index(self, f) { var i = self.findIndex(f); return i >= 0 ? { _tag: \"some\", _0: i } : { _tag: \"none\" }; }")
     lines.push("function List_index_of(self, item) { var i = self.indexOf(item); return i >= 0 ? { _tag: \"some\", _0: i } : { _tag: \"none\" }; }")
+    lines.push("function List_set(self, i, v) { self[i] = v; }")
     lines.push("function list_clone(l) { return l.slice(); }")
     lines.push("")
     lines.push("function map_new() { return new Map(); }")

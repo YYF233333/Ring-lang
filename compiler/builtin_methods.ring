@@ -9,7 +9,7 @@ pub const INT_METHODS: List<Str> = ["to_str"]
 pub const FLOAT_METHODS: List<Str> = ["to_str"]
 
 pub const LIST_NON_HOF_METHODS: List<Str> =
-    ["len", "get", "first", "last", "contains", "is_empty",
+    ["len", "get", "set", "first", "last", "contains", "is_empty",
      "push", "pop", "concat", "extend", "slice", "reverse",
      "join", "sort", "shift", "clear", "index_of"]
 
