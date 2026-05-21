@@ -199,6 +199,41 @@ pub fn row_merge(a: EffectRow, b: EffectRow) -> RowMergeResult {
     }
 }
 
+fn type_lists_equal(a: List<Type>, b: List<Type>) -> Bool {
+    if a.len() != b.len() { return false }
+    var i = 0
+    while i < a.len() {
+        if let some(x) = a.get(i) {
+            if let some(y) = b.get(i) {
+                if !types_equal(x, y) { return false }
+            }
+        }
+        i = i + 1
+    }
+    true
+}
+
+fn effects_list_equal(a: List<Effect>, b: List<Effect>) -> Bool {
+    if a.len() != b.len() { return false }
+    var i = 0
+    while i < a.len() {
+        if let some(x) = a.get(i) {
+            if let some(y) = b.get(i) {
+                if !effects_equal(x, y) { return false }
+            }
+        }
+        i = i + 1
+    }
+    true
+}
+
+fn optional_ids_equal(a: Int?, b: Int?) -> Bool {
+    match (a, b) {
+        (some(x), some(y)) => x == y,
+        _ => a.is_none() && b.is_none()
+    }
+}
+
 pub fn effects_equal(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
@@ -208,20 +243,8 @@ pub fn effects_equal(a: Effect, b: Effect) -> Bool {
             _ => false
         },
         Effect::CustomEffect { name: na, type_args: args_a } => match b {
-            Effect::CustomEffect { name: nb, type_args: args_b } => {
-                if na != nb { return false }
-                if args_a.len() != args_b.len() { return false }
-                var i = 0
-                while i < args_a.len() {
-                    if let some(aa) = args_a.get(i) {
-                        if let some(bb) = args_b.get(i) {
-                            if !types_equal(aa, bb) { return false }
-                        }
-                    }
-                    i = i + 1
-                }
-                true
-            },
+            Effect::CustomEffect { name: nb, type_args: args_b } =>
+                na == nb && type_lists_equal(args_a, args_b),
             _ => false
         }
     }
@@ -241,96 +264,31 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
             _ => false
         },
         Type::FnType { params: pa, return_type: ra, effects: ea } => match b {
-            Type::FnType { params: pb, return_type: rb, effects: eb } => {
-                if pa.len() != pb.len() { return false }
-                if ea.effects.len() != eb.effects.len() { return false }
-                let tails_ok = match (ea.tail, eb.tail) {
-                    (some(a_t), some(b_t)) => a_t == b_t,
-                    _ => ea.tail.is_none() && eb.tail.is_none()
-                }
-                if !tails_ok { return false }
-                var i = 0
-                while i < pa.len() {
-                    if let some(ap) = pa.get(i) {
-                        if let some(bp) = pb.get(i) {
-                            if !types_equal(ap, bp) { return false }
-                        }
-                    }
-                    i = i + 1
-                }
-                if !types_equal(ra, rb) { return false }
-                var j = 0
-                while j < ea.effects.len() {
-                    if let some(ae) = ea.effects.get(j) {
-                        if let some(be) = eb.effects.get(j) {
-                            if !effects_equal(ae, be) { return false }
-                        }
-                    }
-                    j = j + 1
-                }
-                true
-            },
+            Type::FnType { params: pb, return_type: rb, effects: eb } =>
+                type_lists_equal(pa, pb) && types_equal(ra, rb)
+                    && effects_list_equal(ea.effects, eb.effects)
+                    && optional_ids_equal(ea.tail, eb.tail),
             _ => false
         },
         Type::StructType { name: na, type_params: tpa, .. } => match b {
-            Type::StructType { name: nb, type_params: tpb, .. } => {
-                if na != nb { return false }
-                if tpa.len() != tpb.len() { return false }
-                var i = 0
-                while i < tpa.len() {
-                    if let some(ap) = tpa.get(i) {
-                        if let some(bp) = tpb.get(i) {
-                            if !types_equal(ap, bp) { return false }
-                        }
-                    }
-                    i = i + 1
-                }
-                true
-            },
+            Type::StructType { name: nb, type_params: tpb, .. } =>
+                na == nb && type_lists_equal(tpa, tpb),
             _ => false
         },
         Type::EnumType { name: na, type_params: tpa, .. } => match b {
-            Type::EnumType { name: nb, type_params: tpb, .. } => {
-                if na != nb { return false }
-                if tpa.len() != tpb.len() { return false }
-                var i = 0
-                while i < tpa.len() {
-                    if let some(ap) = tpa.get(i) {
-                        if let some(bp) = tpb.get(i) {
-                            if !types_equal(ap, bp) { return false }
-                        }
-                    }
-                    i = i + 1
-                }
-                true
-            },
+            Type::EnumType { name: nb, type_params: tpb, .. } =>
+                na == nb && type_lists_equal(tpa, tpb),
             _ => false
         },
         Type::GenericType { base: ba, args: aa } => match b {
-            Type::GenericType { base: bb, args: ab } => {
-                if !types_equal(ba, bb) { return false }
-                if aa.len() != ab.len() { return false }
-                var i = 0
-                while i < aa.len() {
-                    if let some(ap) = aa.get(i) {
-                        if let some(bp) = ab.get(i) {
-                            if !types_equal(ap, bp) { return false }
-                        }
-                    }
-                    i = i + 1
-                }
-                true
-            },
+            Type::GenericType { base: bb, args: ab } =>
+                types_equal(ba, bb) && type_lists_equal(aa, ab),
             _ => false
         },
         Type::RecordType { fields: fa, tail: ta, .. } => match b {
             Type::RecordType { fields: fb, tail: tb, .. } => {
                 if fa.len() != fb.len() { return false }
-                let tails_ok = match (ta, tb) {
-                    (some(a_t), some(b_t)) => a_t == b_t,
-                    _ => ta.is_none() && tb.is_none()
-                }
-                if !tails_ok { return false }
+                if !optional_ids_equal(ta, tb) { return false }
                 fa.all(fn(f) {
                     fb.any(fn(bf) { bf.name == f.name && types_equal(f.ty, bf.ty) })
                 })
@@ -339,30 +297,14 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
         },
         Type::EffectRowType { effects: ea, tail: ta } => match b {
             Type::EffectRowType { effects: eb, tail: tb } => {
+                if !optional_ids_equal(ta, tb) { return false }
                 if ea.len() != eb.len() { return false }
-                let tails_ok = match (ta, tb) {
-                    (some(a_t), some(b_t)) => a_t == b_t,
-                    _ => ta.is_none() && tb.is_none()
-                }
-                if !tails_ok { return false }
                 ea.all(fn(ae) { eb.any(fn(be) { effects_equal(ae, be) }) })
             },
             _ => false
         },
         Type::TupleType { elements: ea } => match b {
-            Type::TupleType { elements: eb } => {
-                if ea.len() != eb.len() { return false }
-                var i = 0
-                while i < ea.len() {
-                    if let some(ae) = ea.get(i) {
-                        if let some(be) = eb.get(i) {
-                            if !types_equal(ae, be) { return false }
-                        }
-                    }
-                    i = i + 1
-                }
-                true
-            },
+            Type::TupleType { elements: eb } => type_lists_equal(ea, eb),
             _ => false
         }
     }
