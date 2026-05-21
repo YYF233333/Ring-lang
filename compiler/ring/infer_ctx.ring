@@ -52,7 +52,7 @@ pub struct InferCtx {
 }
 
 // Empty list helpers
-fn empty_fn_bounds() -> List<FnBoundsEntry> {
+pub fn empty_fn_bounds() -> List<FnBoundsEntry> {
     let dummy = FnBoundsEntry { type_param_var_id: 0, trait_name: "", type_param_name: "" }
     let x = [dummy]; x.clear(); x
 }
