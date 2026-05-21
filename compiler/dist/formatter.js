@@ -45,6 +45,9 @@ function format_human(diagnostics, source) {
       }
       __match_fail(__ring_m0);
     }
+    for (const s of d.suggestions) {
+      List_push(parts, `   = help: ${s.message}`);
+    }
     List_push(parts, "   |");
     List_push(parts, "");
   }
@@ -144,8 +147,22 @@ function format_llm(diagnostics, file) {
         List_push(parts, "      },\n");
         List_push(parts, `      "context": ${context_to_json(diag.context)},
 `);
-        List_push(parts, `      "suggestions": ${suggestions_to_json(diag.suggestions)}
+        List_push(parts, `      "suggestions": ${suggestions_to_json(diag.suggestions)},
 `);
+        __ring_match4: {
+          const __ring_m4 = diag.category;
+          if (__ring_m4._tag === "some") {
+            const cat = __ring_m4._0;
+            List_push(parts, `      "category": ${jq(cat)}
+`);
+            break __ring_match4;
+          }
+          if (__ring_m4._tag === "none") {
+            List_push(parts, "      \"category\": null\n");
+            break __ring_match4;
+          }
+          __match_fail(__ring_m4);
+        }
         List_push(parts, "    }");
         break __ring_match3;
       }
@@ -166,40 +183,19 @@ function jq(s) {
 }
 
 function context_to_json(ctx) {
-  __ring_match4: {
-    const __ring_m4 = ctx;
-    if (__ring_m4._tag === "TypeMismatch") {
-      const expected = __ring_m4.expected; const actual = __ring_m4.actual; const expression = __ring_m4.expression;
+  __ring_match5: {
+    const __ring_m5 = ctx;
+    if (__ring_m5._tag === "TypeMismatch") {
+      const expected = __ring_m5.expected; const actual = __ring_m5.actual; const expression = __ring_m5.expression;
       let parts = [];
       List_push(parts, "\"kind\": \"type_mismatch\"");
       List_push(parts, `"expected": ${jq(expected)}`);
       List_push(parts, `"actual": ${jq(actual)}`);
-      __ring_match5: {
-        const __ring_m5 = expression;
-        if (__ring_m5._tag === "some") {
-          const e = __ring_m5._0;
-          List_push(parts, `"expression": ${jq(e)}`);
-          break __ring_match5;
-        }
-        if (__ring_m5._tag === "none") {
-          break __ring_match5;
-        }
-        __match_fail(__ring_m5);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match4;
-    }
-    if (__ring_m4._tag === "UndefinedVariable") {
-      const name = __ring_m4.name; const scope_locals = __ring_m4.scope_locals;
-      let parts = [];
-      List_push(parts, "\"kind\": \"undefined_variable\"");
-      List_push(parts, `"name": ${jq(name)}`);
       __ring_match6: {
-        const __ring_m6 = scope_locals;
+        const __ring_m6 = expression;
         if (__ring_m6._tag === "some") {
-          const locals = __ring_m6._0;
-          const items = locals.map((function(s) { return jq(s); }));
-          List_push(parts, `"scope_locals": [${List_join(items, ", ")}]`);
+          const e = __ring_m6._0;
+          List_push(parts, `"expression": ${jq(e)}`);
           break __ring_match6;
         }
         if (__ring_m6._tag === "none") {
@@ -208,20 +204,19 @@ function context_to_json(ctx) {
         __match_fail(__ring_m6);
       }
       return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match4;
+      break __ring_match5;
     }
-    if (__ring_m4._tag === "MissingField") {
-      const field = __ring_m4.field; const ty = __ring_m4.ty; const available = __ring_m4.available;
+    if (__ring_m5._tag === "UndefinedVariable") {
+      const name = __ring_m5.name; const scope_locals = __ring_m5.scope_locals;
       let parts = [];
-      List_push(parts, "\"kind\": \"missing_field\"");
-      List_push(parts, `"field": ${jq(field)}`);
-      List_push(parts, `"type": ${jq(ty)}`);
+      List_push(parts, "\"kind\": \"undefined_variable\"");
+      List_push(parts, `"name": ${jq(name)}`);
       __ring_match7: {
-        const __ring_m7 = available;
+        const __ring_m7 = scope_locals;
         if (__ring_m7._tag === "some") {
-          const avail = __ring_m7._0;
-          const items = avail.map((function(s) { return jq(s); }));
-          List_push(parts, `"available": [${List_join(items, ", ")}]`);
+          const locals = __ring_m7._0;
+          const items = locals.map((function(s) { return jq(s); }));
+          List_push(parts, `"scope_locals": [${List_join(items, ", ")}]`);
           break __ring_match7;
         }
         if (__ring_m7._tag === "none") {
@@ -230,18 +225,20 @@ function context_to_json(ctx) {
         __match_fail(__ring_m7);
       }
       return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match4;
+      break __ring_match5;
     }
-    if (__ring_m4._tag === "EffectUnhandled") {
-      const eff = __ring_m4.eff; const in_function = __ring_m4.in_function;
+    if (__ring_m5._tag === "MissingField") {
+      const field = __ring_m5.field; const ty = __ring_m5.ty; const available = __ring_m5.available;
       let parts = [];
-      List_push(parts, "\"kind\": \"effect_unhandled\"");
-      List_push(parts, `"effect": ${jq(eff)}`);
+      List_push(parts, "\"kind\": \"missing_field\"");
+      List_push(parts, `"field": ${jq(field)}`);
+      List_push(parts, `"type": ${jq(ty)}`);
       __ring_match8: {
-        const __ring_m8 = in_function;
+        const __ring_m8 = available;
         if (__ring_m8._tag === "some") {
-          const f = __ring_m8._0;
-          List_push(parts, `"in_function": ${jq(f)}`);
+          const avail = __ring_m8._0;
+          const items = avail.map((function(s) { return jq(s); }));
+          List_push(parts, `"available": [${List_join(items, ", ")}]`);
           break __ring_match8;
         }
         if (__ring_m8._tag === "none") {
@@ -250,19 +247,18 @@ function context_to_json(ctx) {
         __match_fail(__ring_m8);
       }
       return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match4;
+      break __ring_match5;
     }
-    if (__ring_m4._tag === "ParseError") {
-      const token = __ring_m4.token; const expected = __ring_m4.expected;
+    if (__ring_m5._tag === "EffectUnhandled") {
+      const eff = __ring_m5.eff; const in_function = __ring_m5.in_function;
       let parts = [];
-      List_push(parts, "\"kind\": \"parse_error\"");
-      List_push(parts, `"token": ${jq(token)}`);
+      List_push(parts, "\"kind\": \"effect_unhandled\"");
+      List_push(parts, `"effect": ${jq(eff)}`);
       __ring_match9: {
-        const __ring_m9 = expected;
+        const __ring_m9 = in_function;
         if (__ring_m9._tag === "some") {
-          const exp = __ring_m9._0;
-          const items = exp.map((function(s) { return jq(s); }));
-          List_push(parts, `"expected": [${List_join(items, ", ")}]`);
+          const f = __ring_m9._0;
+          List_push(parts, `"in_function": ${jq(f)}`);
           break __ring_match9;
         }
         if (__ring_m9._tag === "none") {
@@ -271,36 +267,57 @@ function context_to_json(ctx) {
         __match_fail(__ring_m9);
       }
       return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match4;
+      break __ring_match5;
     }
-    if (__ring_m4._tag === "PatternError") {
-      const detail = __ring_m4.detail;
-      return `{ "kind": "pattern_error", "detail": ${jq(detail)} }`;
-      break __ring_match4;
-    }
-    if (__ring_m4._tag === "TraitError") {
-      const detail = __ring_m4.detail;
-      return `{ "kind": "trait_error", "detail": ${jq(detail)} }`;
-      break __ring_match4;
-    }
-    if (__ring_m4._tag === "OtherContext") {
-      const detail = __ring_m4.detail;
+    if (__ring_m5._tag === "ParseError") {
+      const token = __ring_m5.token; const expected = __ring_m5.expected;
+      let parts = [];
+      List_push(parts, "\"kind\": \"parse_error\"");
+      List_push(parts, `"token": ${jq(token)}`);
       __ring_match10: {
-        const __ring_m10 = detail;
+        const __ring_m10 = expected;
         if (__ring_m10._tag === "some") {
-          const d = __ring_m10._0;
-          return `{ "kind": "other", "detail": ${jq(d)} }`;
+          const exp = __ring_m10._0;
+          const items = exp.map((function(s) { return jq(s); }));
+          List_push(parts, `"expected": [${List_join(items, ", ")}]`);
           break __ring_match10;
         }
         if (__ring_m10._tag === "none") {
-          return "{ \"kind\": \"other\" }";
           break __ring_match10;
         }
         __match_fail(__ring_m10);
       }
-      break __ring_match4;
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match5;
     }
-    __match_fail(__ring_m4);
+    if (__ring_m5._tag === "PatternError") {
+      const detail = __ring_m5.detail;
+      return `{ "kind": "pattern_error", "detail": ${jq(detail)} }`;
+      break __ring_match5;
+    }
+    if (__ring_m5._tag === "TraitError") {
+      const detail = __ring_m5.detail;
+      return `{ "kind": "trait_error", "detail": ${jq(detail)} }`;
+      break __ring_match5;
+    }
+    if (__ring_m5._tag === "OtherContext") {
+      const detail = __ring_m5.detail;
+      __ring_match11: {
+        const __ring_m11 = detail;
+        if (__ring_m11._tag === "some") {
+          const d = __ring_m11._0;
+          return `{ "kind": "other", "detail": ${jq(d)} }`;
+          break __ring_match11;
+        }
+        if (__ring_m11._tag === "none") {
+          return "{ \"kind\": \"other\" }";
+          break __ring_match11;
+        }
+        __match_fail(__ring_m11);
+      }
+      break __ring_match5;
+    }
+    __match_fail(__ring_m5);
   }
 }
 
@@ -310,18 +327,18 @@ function suggestions_to_json(suggestions) {
   }
   let items = [];
   for (const s of suggestions) {
-    __ring_match11: {
-      const __ring_m11 = s.replacement;
-      if (__ring_m11._tag === "some") {
-        const r = __ring_m11._0;
+    __ring_match12: {
+      const __ring_m12 = s.replacement;
+      if (__ring_m12._tag === "some") {
+        const r = __ring_m12._0;
         List_push(items, `{ "message": ${jq(s.message)}, "replacement": ${jq(r)} }`);
-        break __ring_match11;
+        break __ring_match12;
       }
-      if (__ring_m11._tag === "none") {
+      if (__ring_m12._tag === "none") {
         List_push(items, `{ "message": ${jq(s.message)} }`);
-        break __ring_match11;
+        break __ring_match12;
       }
-      __match_fail(__ring_m11);
+      __match_fail(__ring_m12);
     }
   }
   return `[${List_join(items, ", ")}]`;

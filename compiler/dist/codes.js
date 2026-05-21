@@ -139,5 +139,30 @@ function error_description(code) {
   return "Unknown error";
 }
 
+function error_category(code) {
+  if (Str_starts_with(code, "E01")) {
+    return "parse";
+  }
+  if (Str_starts_with(code, "E02")) {
+    return "resolution";
+  }
+  if (Str_starts_with(code, "E03")) {
+    return "type";
+  }
+  if (Str_starts_with(code, "E04")) {
+    return "effect";
+  }
+  if (Str_starts_with(code, "E05")) {
+    return "pattern";
+  }
+  if (Str_starts_with(code, "E06")) {
+    return "import";
+  }
+  if (Str_starts_with(code, "E07")) {
+    return "semantic";
+  }
+  return "unknown";
+}
 
-export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0301, E0302, E0303, E0304, E0305, E0307, E0308, E0402, E0403, E0501, E0502, E0503, E0601, E0702, E0703, E0704, E0706, error_description };
+
+export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0301, E0302, E0303, E0304, E0305, E0307, E0308, E0402, E0403, E0501, E0502, E0503, E0601, E0702, E0703, E0704, E0706, error_description, error_category };

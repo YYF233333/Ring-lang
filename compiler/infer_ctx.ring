@@ -5,7 +5,7 @@ use types::{Type, Effect, EffectRow, RecordField, StructField,
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero}
 use hir::{HExpr, HStmt, HParam, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
-use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, make_diag}
+use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
 use codes::{E0201, E0204, E0301, E0302, E0503}
 use env::{TypeEnv, TypeScheme, SchemeBound, new_type_env, mono, apply_subst, apply_subst_row}
 use unify::{UnificationError, empty_subst, unify, occurs_in}
@@ -68,8 +68,171 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
 // Error helper
 // ============================================================
 
+fn infer_suggestion(code: Str, message: Str, context: DiagnosticContext) -> List<Suggestion> {
+    var suggestions: List<Suggestion> = []
+
+    // Type mismatch suggestions
+    if code == "E0301" {
+        if message.contains("Str") && message.contains("Int") {
+            suggestions.push(Suggestion {
+                message: "Use parse_int() to convert Str to Int, or .to_str() for Int to Str",
+                replacement: none,
+                span: none
+            })
+        }
+        if message.contains("Str") && message.contains("Float") {
+            suggestions.push(Suggestion {
+                message: "Use parse_float() to convert Str to Float, or .to_str() for Float to Str",
+                replacement: none,
+                span: none
+            })
+        }
+        if message.contains("Option") {
+            suggestions.push(Suggestion {
+                message: "Use match, .unwrap_or(), or .unwrap_or_else() to handle Option values",
+                replacement: none,
+                span: none
+            })
+        }
+        if message.contains("Bool") && (message.contains("Int") || message.contains("Str")) {
+            suggestions.push(Suggestion {
+                message: "Bool cannot be implicitly converted; use an if expression instead",
+                replacement: none,
+                span: none
+            })
+        }
+    }
+
+    // Numeric type required (E0303) — string concatenation attempt
+    if code == "E0303" {
+        if message.contains("Str") {
+            suggestions.push(Suggestion {
+                message: "Strings cannot use + for concatenation; use string interpolation or List<Str>.join()",
+                replacement: none,
+                span: none
+            })
+        }
+    }
+
+    // Undefined variable suggestions
+    if code == "E0201" {
+        match context {
+            UndefinedVariable { name, scope_locals } => {
+                match scope_locals {
+                    some(locals) => {
+                        let similar = find_similar_name(name, locals)
+                        match similar {
+                            some(suggestion) => {
+                                suggestions.push(Suggestion {
+                                    message: "Did you mean '${suggestion}'?",
+                                    replacement: some(suggestion),
+                                    span: none
+                                })
+                            },
+                            none => {}
+                        }
+                    },
+                    none => {}
+                }
+            },
+            _ => {}
+        }
+    }
+
+    // Missing field suggestions
+    if code == "E0203" {
+        match context {
+            MissingField { field, available, .. } => {
+                match available {
+                    some(avail) => {
+                        let similar = find_similar_name(field, avail)
+                        match similar {
+                            some(suggestion) => {
+                                suggestions.push(Suggestion {
+                                    message: "Did you mean '${suggestion}'?",
+                                    replacement: some(suggestion),
+                                    span: none
+                                })
+                            },
+                            none => {}
+                        }
+                    },
+                    none => {}
+                }
+            },
+            _ => {}
+        }
+    }
+
+    // Undefined method
+    if code == "E0305" {
+        suggestions.push(Suggestion {
+            message: "Check available methods using the type's impl block or trait implementations",
+            replacement: none,
+            span: none
+        })
+    }
+
+    // Immutable assignment
+    if code == "E0205" {
+        suggestions.push(Suggestion {
+            message: "Declare the variable with 'var' instead of 'let' to allow reassignment",
+            replacement: none,
+            span: none
+        })
+    }
+
+    // Non-exhaustive pattern match
+    if code == "E0601" {
+        suggestions.push(Suggestion {
+            message: "Add a wildcard pattern '_ => ...' or cover all missing variants",
+            replacement: none,
+            span: none
+        })
+    }
+
+    suggestions
+}
+
+fn find_similar_name(target: Str, candidates: List<Str>) -> Str? {
+    // Simple similarity: find a candidate that starts with the same first 2 chars,
+    // or where one is a prefix of the other, or they differ by only 1-2 characters in length
+    var best: Str? = none
+    var best_score = 0
+
+    for candidate in candidates {
+        var score = 0
+        // Exact prefix match (one is prefix of the other)
+        if candidate.starts_with(target) || target.starts_with(candidate) {
+            score = 3
+        }
+        // Same first 2 characters and similar length
+        if target.len() >= 2 && candidate.len() >= 2 {
+            if target.slice(0, 2) == candidate.slice(0, 2) {
+                let len_diff = if target.len() > candidate.len() { target.len() - candidate.len() } else { candidate.len() - target.len() }
+                if len_diff <= 2 { score = 2 }
+            }
+        }
+        // Same length and similar starting character
+        if target.len() == candidate.len() && target.len() >= 1 {
+            if target.slice(0, 1) == candidate.slice(0, 1) {
+                score = 1
+            }
+        }
+        if score > best_score {
+            best_score = score
+            best = some(candidate)
+        }
+    }
+    best
+}
+
 pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, context: DiagnosticContext) -> Type {
-    let diag = make_diag(code, Severity::SevError, message, span, context)
+    var diag = make_diag(code, Severity::SevError, message, span, context)
+    let suggestions = infer_suggestion(code, message, context)
+    if suggestions.len() > 0 {
+        diag = Diagnostic { ..diag, suggestions: suggestions }
+    }
     sink.report(diag)
     Type::ErrorType
 }
