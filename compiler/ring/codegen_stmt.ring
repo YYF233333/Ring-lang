@@ -7,7 +7,7 @@ use codegen_ctx::{CodegenCtx, emit, push_indent, pop_indent, safe_ident}
 // In Ring, we pass gen_expr as a function parameter or use a separate module import
 // For now we declare the cross-module functions
 
-extern fn gen_expr_str(var ctx: CodegenCtx, expr: HExpr) -> Str
+extern fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str
 
 // ============================================================
 // Statement-mode expression emission
@@ -22,7 +22,7 @@ pub fn emit_in_stmt_context(var ctx: CodegenCtx, expr: HExpr, mode: Str) {
         HExpr::MatchExpr { scrutinee, arms, .. } =>
             emit_match_stmt(ctx, scrutinee, arms, mode),
         _ => {
-            let e = gen_expr_str(ctx, expr)
+            let e = gen_expr(ctx, expr)
             if mode == "return" {
                 emit(ctx, "return \{e};")
             } else {
@@ -37,7 +37,7 @@ pub fn emit_in_stmt_context(var ctx: CodegenCtx, expr: HExpr, mode: Str) {
 // ============================================================
 
 fn emit_if_stmt(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, mode: Str) {
-    let cond = gen_expr_str(ctx, condition)
+    let cond = gen_expr(ctx, condition)
     emit(ctx, "if (\{cond}) {")
     push_indent(ctx)
     emit_block_in_stmt_context(ctx, then_branch, mode)
@@ -60,7 +60,7 @@ fn emit_if_stmt(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_
 }
 
 fn emit_else_if(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, mode: Str) {
-    let cond = gen_expr_str(ctx, condition)
+    let cond = gen_expr(ctx, condition)
     emit(ctx, "} else if (\{cond}) {")
     push_indent(ctx)
     emit_block_in_stmt_context(ctx, then_branch, mode)
@@ -130,7 +130,7 @@ pub fn emit_block_body(var ctx: CodegenCtx, block: HExpr) {
 fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>, mode: Str) {
     let label = "__ring_match\{ctx.match_counter}"
     ctx.match_counter = ctx.match_counter + 1
-    let scrut_js = gen_expr_str(ctx, scrutinee)
+    let scrut_js = gen_expr(ctx, scrutinee)
     emit(ctx, "\{label}: {")
     push_indent(ctx)
     let scrut_var = "__ring_m\{ctx.match_counter - 1}"
@@ -159,7 +159,7 @@ fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
                 emit(ctx, "if (\{cond}) {")
                 push_indent(ctx)
                 if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
-                let guard_js = gen_expr_str(ctx, guard)
+                let guard_js = gen_expr(ctx, guard)
                 emit(ctx, "if (\{guard_js}) {")
                 push_indent(ctx)
                 emit_in_stmt_context(ctx, arm.body, mode)
@@ -199,7 +199,7 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
             none => emit(ctx, "return;"),
         },
         HStmt::While { condition, body, .. } => {
-            let cond = gen_expr_str(ctx, condition)
+            let cond = gen_expr(ctx, condition)
             emit(ctx, "while (\{cond}) {")
             push_indent(ctx)
             emit_block_in_stmt_context(ctx, body, "discard")
@@ -209,8 +209,8 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
         HStmt::ForIn { binding, destructure, iterable, body, .. } => {
             match iterable {
                 HExpr::RangeExpr { start, end, inclusive, .. } => {
-                    let start_js = gen_expr_str(ctx, start)
-                    let end_js = gen_expr_str(ctx, end)
+                    let start_js = gen_expr(ctx, start)
+                    let end_js = gen_expr(ctx, end)
                     let b = safe_ident(binding)
                     let end_var = "__ring_end\{ctx.loop_counter}"
                     ctx.loop_counter = ctx.loop_counter + 1
@@ -221,19 +221,19 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
                 _ => match destructure {
                     some(ds) => {
                         if ds.len() > 0 {
-                            let iter = gen_expr_str(ctx, iterable)
+                            let iter = gen_expr(ctx, iterable)
                             var names: List<Str> = [""]; names.clear()
                             for d in ds { names.push(safe_ident(d.name)) }
                             let joined = names.join(", ")
                             emit(ctx, "for (const [\{joined}] of \{iter}) {")
                         } else {
-                            let iter = gen_expr_str(ctx, iterable)
+                            let iter = gen_expr(ctx, iterable)
                             let b = safe_ident(binding)
                             emit(ctx, "for (const \{b} of \{iter}) {")
                         }
                     },
                     none => {
-                        let iter = gen_expr_str(ctx, iterable)
+                        let iter = gen_expr(ctx, iterable)
                         let b = safe_ident(binding)
                         emit(ctx, "for (const \{b} of \{iter}) {")
                     },
@@ -247,7 +247,7 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
         HStmt::Break { .. } => emit(ctx, "break;"),
         HStmt::Continue { .. } => emit(ctx, "continue;"),
         HStmt::LetDestructure { bindings, init, .. } => {
-            let init_js = gen_expr_str(ctx, init)
+            let init_js = gen_expr(ctx, init)
             let tmp = "__ring_dt\{ctx.dt_counter}"
             ctx.dt_counter = ctx.dt_counter + 1
             emit(ctx, "const \{tmp} = \{init_js};")
@@ -266,7 +266,7 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
         HStmt::IfLet { pattern, expr, then_block, else_block, .. } => {
             emit(ctx, "{")
             push_indent(ctx)
-            let scrutinee = gen_expr_str(ctx, expr)
+            let scrutinee = gen_expr(ctx, expr)
             emit(ctx, "const __ring_t = \{scrutinee};")
             let cond = gen_pattern_condition("__ring_t", pattern)
             emit(ctx, "if (\{cond}) {")
@@ -290,17 +290,17 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
         },
         HStmt::Let { name, init, .. } => {
             let sname = safe_ident(name)
-            let init_js = gen_expr_str(ctx, init)
+            let init_js = gen_expr(ctx, init)
             emit(ctx, "const \{sname} = \{init_js};")
         },
         HStmt::Var { name, init, .. } => {
             let sname = safe_ident(name)
-            let init_js = gen_expr_str(ctx, init)
+            let init_js = gen_expr(ctx, init)
             emit(ctx, "let \{sname} = \{init_js};")
         },
         HStmt::Assign { target, value, .. } => {
-            let t = gen_expr_str(ctx, target)
-            let v = gen_expr_str(ctx, value)
+            let t = gen_expr(ctx, target)
+            let v = gen_expr(ctx, value)
             emit(ctx, "\{t} = \{v};")
         },
     }
@@ -314,26 +314,26 @@ pub fn gen_stmt_inline(var ctx: CodegenCtx, stmt: HStmt) -> Str {
     match stmt {
         HStmt::Let { name, init, .. } => {
             let sname = safe_ident(name)
-            let init_js = gen_expr_str(ctx, init)
+            let init_js = gen_expr(ctx, init)
             "const \{sname} = \{init_js};"
         },
         HStmt::Var { name, init, .. } => {
             let sname = safe_ident(name)
-            let init_js = gen_expr_str(ctx, init)
+            let init_js = gen_expr(ctx, init)
             "let \{sname} = \{init_js};"
         },
         HStmt::Assign { target, value, .. } => {
-            let t = gen_expr_str(ctx, target)
-            let v = gen_expr_str(ctx, value)
+            let t = gen_expr(ctx, target)
+            let v = gen_expr(ctx, value)
             "\{t} = \{v};"
         },
         HStmt::ExprStmt { expr, .. } => {
-            let e = gen_expr_str(ctx, expr)
+            let e = gen_expr(ctx, expr)
             "\{e};"
         },
         HStmt::Return { value, .. } => match value {
             some(v) => {
-                let e = gen_expr_str(ctx, v)
+                let e = gen_expr(ctx, v)
                 "return \{e};"
             },
             none => "return;",

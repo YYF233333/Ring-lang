@@ -64,7 +64,9 @@ class CodeGenerator implements CodegenCtx {
   // ============================================================
 
   qualify(name: string): string {
-    if (this.imports_map?.has(name)) return this.imports_map.get(name)!;
+    if (this.imports_map?.has(name) && !this.local_names.has(name)) {
+      return this.imports_map.get(name)!;
+    }
     if (this.module_prefix && this.local_names.has(name)) {
       return `${this.module_prefix}$${safe_ident(name)}`;
     }

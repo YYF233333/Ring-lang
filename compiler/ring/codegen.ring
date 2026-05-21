@@ -12,6 +12,7 @@ use codegen_ctx::{CodegenCtx, HTraitDeclInfo, new_codegen_ctx,
     emit, emit_raw, push_indent, pop_indent, qualify, safe_ident,
     get_evidence_params}
 use codegen_decl::{emit_decl, emit_toplevel_evidence}
+use codegen_expr::{gen_expr}
 use codegen_derive::{emit_derived_impl, get_derived_method_names}
 
 // ============================================================

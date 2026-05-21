@@ -176,6 +176,19 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
       }
     }
 
+    // Add use-alias entries to imports_map (`use mod::{name as alias}`)
+    const bundle_ast = module_asts.get(key)!;
+    for (const use_decl of bundle_ast.uses) {
+      if (use_decl.imports.kind === "named") {
+        for (const { name, alias } of use_decl.imports.names) {
+          if (alias) {
+            const existing = imports_map.get(name);
+            if (existing) imports_map.set(alias, existing);
+          }
+        }
+      }
+    }
+
     // Build external struct fields + impl methods for cross-module codegen
     const external_struct_fields = new Map<string, string[]>();
     const external_impl_methods = new Map<string, string | undefined>();
@@ -209,7 +222,7 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
     // When module "facade" has `pub use inner::greet`, we emit:
     //   const facade$greet = inner$greet;
     // so consumers that import from "facade" can reference facade$greet.
-    const ast = module_asts.get(key)!;
+    const ast = bundle_ast;
     for (const use_decl of ast.uses) {
       if (!use_decl.is_pub) continue;
       const src_key = use_decl.path.segments.join("::");
@@ -397,6 +410,40 @@ export function compile_project_esm(
 
       if (import_pairs.length > 0) {
         module_import_lines.push(`import { ${import_pairs.join(", ")} } from "${dep_js_from_mod}";`);
+      }
+    }
+
+    // Add use-alias entries to imports_map (`use mod::{name as alias}`)
+    for (const use_decl of ast.uses) {
+      if (use_decl.imports.kind === "named") {
+        for (const { name, alias } of use_decl.imports.names) {
+          if (alias) {
+            const existing = imports_map.get(name);
+            if (existing) imports_map.set(alias, existing);
+          }
+        }
+      }
+    }
+
+    // Resolve cross-module extern fn: if this module declares `extern fn X`
+    // and another (non-dependency) module exports `X`, add a JS-level import.
+    // This handles circular dependencies broken by extern fn declarations.
+    for (const decl of ast.decls) {
+      if (decl.kind !== "extern_fn_decl") continue;
+      const name = decl.name;
+      if (imports_map.has(name)) continue;
+      for (const [other_key, other_exports] of module_exports_map) {
+        if (other_key === key) continue;
+        if (!other_exports.values.has(name)) continue;
+        if (other_exports.extern_values.has(name)) continue;
+        const other_mod = graph.modules.get(other_key)!;
+        const other_rel = path.relative(project_root, other_mod.file_path).replace(/\.ring$/, ".js");
+        const other_js_from_mod = compute_relative_import(mod_relative, other_rel);
+        const other_prefix = other_exports.module_prefix;
+        const alias = `${other_prefix}$${safe_ident(name)}`;
+        imports_map.set(name, alias);
+        module_import_lines.push(`import { ${safe_ident(name)} as ${alias} } from "${other_js_from_mod}";`);
+        break;
       }
     }
 
