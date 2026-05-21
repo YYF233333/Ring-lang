@@ -139,7 +139,7 @@
 2. **限定变体名查找 bug**（`infer-expr.ts` + `infer-ctx.ts`）— `EnumA::Foo` 应查找 EnumA 中的 Foo，而非全局 `variant_to_enum` map。修复 3 处：struct_lit 推断、constructor pattern、named_constructor pattern
 3. **变体名冲突**（`ast.ring`）— `UseImport::Named` 与 `TypeExpr::Named` 冲突 → 改名 `NamedItems`；`StringInterpPart::Literal` 与 `Pattern::Literal` 冲突 → 改名 `LitPart`/`ExprPart`
 
-### Batch 4: 类型检查（~5,295 行，~4-6 天，最高风险）
+### Batch 4: 类型检查（~5,295 行，~4-6 天，最高风险） ✅ 已完成
 
 内部严格按依赖链串行翻译，每个子阶段翻译后立即全量 E2E diff：
 
@@ -151,15 +151,15 @@
 | 4b | `checker/builtins-hof.ts` | 224 | HOF 方法注册（List/Map/Set/Option 的 effect 多态方法） ✅ |
 | 4c | `checker/unify.ts` | 549 | HM unification + row unification（**最高风险**） ✅ |
 | 4d | `checker/infer-ctx.ts` | 545 | InferCtx interface → trait + 16 个 helper 函数 ✅ |
-| 4d | `checker/infer.ts` | 554 | InferEngine 薄壳 + check/infer_expr 调度（结构+依赖待4e/4f完成后集成） |
+| 4d | `checker/infer.ts` | 554 | InferEngine 合并为 infer.ring（含 infer-expr + infer-stmt + infer-modules） ✅ |
 | 4e | `checker/infer-register.ts` | 457 | Pass 1 声明注册 ✅ |
-| 4e | `checker/infer-expr.ts` | 1,223 | 19 个表达式推断函数（**最大文件**） |
-| 4e | `checker/infer-stmt.ts` | 384 | 语句推断（let/var/assign/return/while/for/break/continue/destructure/if-let） |
-| 4e | `checker/infer-modules.ts` | 158 | 多模块支持（依赖 ModuleExports，待 Batch 5） |
-| 4f | `checker/exhaustive.ts` | 256 | 穷尽性检查（Maranget 风格 pattern matrix） |
-| 4f | `checker/derive.ts` | 501 | Auto-derive fixpoint pass（Eq/Clone/Debug/Ord 自动派生） |
-| 4f | `checker/zonk.ts` | 194 | Substitution application |
-| 4g | `checker/checker.ts` | 79 | 主入口 check(Program) → HProgram |
+| 4e | `checker/infer-expr.ts` | 1,223 | 19 个表达式推断函数（**最大文件**） ✅ |
+| 4e | `checker/infer-stmt.ts` | 384 | 语句推断（let/var/assign/return/while/for/break/continue/destructure/if-let） ✅ |
+| 4e | `checker/infer-modules.ts` | 158 | 多模块支持（待 Batch 5 ModuleExports 后完整集成） |
+| 4f | `checker/exhaustive.ts` | 256 | 穷尽性检查（Maranget 风格 pattern matrix） ✅ |
+| 4f | `checker/derive.ts` | 501 | Auto-derive fixpoint pass（Eq/Clone/Debug/Ord 自动派生） ✅ |
+| 4f | `checker/zonk.ts` | 194 | Substitution application ✅ |
+| 4g | `checker/checker.ts` | 79 | 主入口 check(Program) → HProgram ✅ |
 
 **风险**：高。unify.ts 和 infer-expr.ts 是核心算法，任何翻译错误会导致类型推断结果偏差。
 **串行原因**：checker 内部模块强耦合，env→builtins→unify→infer→derive→checker 有严格依赖链。
@@ -198,6 +198,18 @@
 
 **翻译中发现并修复的编译器问题**：
 1. **`catch TypeName` 跨模块 codegen bug**（`codegen-expr.ts:473`）— typed catch 的 `instanceof` 检查使用裸名 `TypeName` 而非模块限定名 `module$TypeName`。修复：`safe_ident(expr.error_type)` → `ctx.qualify(safe_ident(expr.error_type))`
+
+**翻译模式补充（4f+4g）**：
+- `List.get(i)` 返回 `Option<T>` → 添加 `*_at(list, i)` helper 函数（`match list.get(i) { some(v) => v, none => panic("out of bounds") }`）
+- 字符串拼接 `a + b` → 字符串插值 `"\{a}\{b}"`（Ring `+` 仅支持数值类型）
+- 字符串插值不支持嵌套引号 → 预先计算到变量再插值（`let joined = join_strs(x, ", "); "\{joined}"`）
+- `[T].clear()` 返回 `Unit` → 提取为 `empty_xxx()` helper 函数（`let x = [dummy]; x.clear(); x`）
+- `var` 仅在函数签名中声明，调用处**不写** `var`
+- 非 `pub` struct 定义需在文件中位于引用它的函数之前（两阶段注册顺序敏感）
+- `FieldAction::Identity` / `FieldAction::Call { ... }` 替代 TS 的 `"identity"` / `{ kind: "call", ... }` union 类型
+- `TypeKind::StructKind` / `TypeKind::EnumKind` 替代 TS 的 `"struct" | "enum"` 字符串 union
+- `checker.ring` 入口：`new_type_env()` + `register_builtins` + `register_hof_intrinsics` + `load_prelude` + `infer_check`
+- prelude 加载使用 `extern fn` 的 `read_file` / `file_exists` / `path_join`（声明在 std/fs.ring + std/path.ring）
 
 ### Batch 5: 代码生成 + 模块系统 + CLI（~3,315 行，~2-3 天）
 
