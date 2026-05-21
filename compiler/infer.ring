@@ -2189,9 +2189,12 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
 
 fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst: Map<Int, Type>) -> InferResult {
     if elements.len() == 0 {
-        type_error(ctx.sink, E0301(),
-            "Cannot infer element type of empty list literal; provide a type annotation",
-            span, DiagnosticContext::OtherContext { detail: some("Empty list literal requires context to determine element type") })
+        let elem_type = ctx.env.fresh_var()
+        let list_type = Type::StructType { name: BUILTIN_LIST(), type_params: [elem_type], fields: empty_fields() }
+        return InferResult {
+            hexpr: HExpr::ListLit { elements: empty_hexprs(), ty: list_type, effects: EMPTY_ROW(), span: span },
+            subst: subst, effects: EMPTY_ROW()
+        }
     }
     var s = subst
     var helements = empty_hexprs()

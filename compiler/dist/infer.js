@@ -2922,7 +2922,9 @@ function infer_lambda(ctx, params, body, span, subst, expected_param_types, __ri
 
 function infer_list_literal(ctx, elements, span, subst, __ring_ev_fail) {
   if ((List_len(elements) === 0)) {
-    infer_ctx$type_error(ctx.sink, codes$E0301(), "Cannot infer element type of empty list literal; provide a type annotation", span, diagnostics$DiagnosticContext_OtherContext(Option_some("Empty list literal requires context to determine element type")), __ring_ev_fail);
+    const elem_type = env$TypeEnv_fresh_var(ctx.env);
+    const list_type = types$Type_StructType(hir$BUILTIN_LIST(), [elem_type], types$empty_fields());
+    return new infer_ctx$InferResult(hir$HExpr_ListLit(empty_hexprs(), list_type, types$EMPTY_ROW(), span), subst, types$EMPTY_ROW());
   }
   let s = subst;
   let helements = empty_hexprs();

@@ -322,6 +322,7 @@ const cases: TestCase[] = [
   { file: "debug_generic.ring", expected: "debug_generic: all tests passed\n" },
   { file: "nested-closure-eq.ring", expected: "nested closure eq: all passed\n" },
   { file: "trait_generic_impl.ring", expected: "trait_generic_impl: all passed\n" },
+  { file: "empty_list.ring", expected: "empty_list: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -349,7 +350,6 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_missing_field.ring", error_pattern: "E0203" },
     { file: "error_assign_immutable.ring", error_pattern: "E0205" },
     { file: "error_break_outside.ring", error_pattern: "E0206" },
-    { file: "error_empty_list.ring", error_pattern: "E0301" },
     { file: "error_unterminated_str.ring", error_pattern: "E0102" },
     { file: "error_unknown_type.ring", error_pattern: "E0204" },
     { file: "error_numeric_required.ring", error_pattern: "E0303" },
