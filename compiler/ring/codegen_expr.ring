@@ -1,4 +1,4 @@
-use types::{Type, type_to_builtin_name}
+use types::{Type, Effect, EffectRow, type_to_builtin_name}
 use ast::{Pattern, BinOp, UnaryOp}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     HStringInterpPart, HEffectHandler,
@@ -34,7 +34,7 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
                                 var p_names: List<Str> = [""]; p_names.clear()
                                 for i in 0..params.len() { p_names.push("__ring_a${i}") }
                                 let dict_args = dicts.join(", ")
-                                let ev_args = get_callee_evidence_args(ty)
+                                let ev_args = get_callee_evidence_args(ctx, ty, none)
                                 var all_call: List<Str> = [""]; all_call.clear()
                                 all_call.extend(p_names)
                                 all_call.push(dict_args)
@@ -260,13 +260,55 @@ fn extra_dicts_str(dicts: List<Str>) -> Str {
 // Call expression
 // ============================================================
 
-fn get_callee_evidence_args(callee_type: Type) -> Str {
+fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str?) -> Str {
     match callee_type {
         Type::FnType { effects, .. } => {
-            if effects.effects.len() == 0 { return "" }
-            get_evidence_params(effects).join(", ")
+            if effects.effects.len() > 0 {
+                return get_evidence_params(effects).join(", ")
+            }
         },
-        _ => "",
+        _ => {},
+    }
+    match callee_name {
+        some(cn) => {
+            match ctx.local_fn_effects.get(cn) {
+                some(actual_effects) => {
+                    if actual_effects.effects.len() > 0 {
+                        var caller_effect_names = set_new()
+                        match ctx.current_fn_effects {
+                            some(cfe) => {
+                                for e in cfe.effects {
+                                    caller_effect_names.insert(callee_eff_name(e))
+                                }
+                            },
+                            none => {},
+                        }
+                        if ctx.in_try_fail { caller_effect_names.insert("fail") }
+                        var needed: List<Effect> = [Effect::IoEffect]; needed.clear()
+                        for e in actual_effects.effects {
+                            if caller_effect_names.contains(callee_eff_name(e)) {
+                                needed.push(e)
+                            }
+                        }
+                        if needed.len() > 0 {
+                            return get_evidence_params(EffectRow { effects: needed, tail: none }).join(", ")
+                        }
+                    }
+                },
+                none => {},
+            }
+        },
+        none => {},
+    }
+    ""
+}
+
+fn callee_eff_name(e: Effect) -> Str {
+    match e {
+        Effect::IoEffect => "io",
+        Effect::FailEffect { .. } => "fail",
+        Effect::MutEffect => "mut",
+        Effect::CustomEffect { name, .. } => name,
     }
 }
 
@@ -422,7 +464,7 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                             var dict_parts: List<Str> = [""]; dict_parts.clear()
                             for d in resolved_dicts { dict_parts.push(qualify(ctx, d)) }
                             let dict_str = dict_parts.join(", ")
-                            let ev_args = get_callee_evidence_args(callee_type)
+                            let ev_args = get_callee_evidence_args(ctx, callee_type, none)
                             var parts: List<Str> = [""]; parts.clear()
                             parts.push(all_args)
                             if dict_str.len() > 0 { parts.push(dict_str) }
@@ -441,13 +483,17 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
 
     // Regular call with dict args + evidence
     let callee_str = gen_expr(ctx, callee)
+    let cn = match callee {
+        HExpr::Ident { name, .. } => some(name),
+        _ => none,
+    }
     var arg_strs: List<Str> = [""]; arg_strs.clear()
     for a in args { arg_strs.push(gen_expr(ctx, a)) }
     let args_str = arg_strs.join(", ")
     var dict_parts: List<Str> = [""]; dict_parts.clear()
     for d in resolved_dicts { dict_parts.push(qualify(ctx, d)) }
     let dict_str = dict_parts.join(", ")
-    let ev_args = get_callee_evidence_args(get_expr_type(callee))
+    let ev_args = get_callee_evidence_args(ctx, get_expr_type(callee), cn)
     var all_parts: List<Str> = [""]; all_parts.clear()
     if args_str.len() > 0 { all_parts.push(args_str) }
     if dict_str.len() > 0 { all_parts.push(dict_str) }
@@ -818,7 +864,10 @@ fn gen_option_unwrap(var ctx: CodegenCtx, inner: HExpr) -> Str {
 // ============================================================
 
 fn gen_try_block(var ctx: CodegenCtx, body: HExpr) -> Str {
+    let saved_in_try = ctx.in_try_fail
+    ctx.in_try_fail = true
     let b = gen_expr(ctx, body)
+    ctx.in_try_fail = saved_in_try
     let ev = evidence_param_name("fail")
     let tag = ENUM_TAG_FIELD()
     let stag = OPTION_SOME_TAG()
@@ -867,7 +916,10 @@ fn gen_try_block(var ctx: CodegenCtx, body: HExpr) -> Str {
 
 fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, error_binding: Str?, error_type: Str?, handler: HExpr) -> Str {
     let body_has_fail = has_fail_effect(body)
+    let saved_in_try = ctx.in_try_fail
+    if body_has_fail { ctx.in_try_fail = true }
     let body_js = gen_expr(ctx, body)
+    ctx.in_try_fail = saved_in_try
     let handler_js = gen_expr(ctx, handler)
 
     if body_has_fail == false { return body_js }
@@ -1179,7 +1231,7 @@ fn gen_lambda_capture_evidence(var ctx: CodegenCtx, args: List<HExpr>, idx: Int)
                         let arity = params.len()
                         var p_names: List<Str> = [""]; p_names.clear()
                         for i in 0..arity { p_names.push("__ring_a${i}") }
-                        let ev_args = get_callee_evidence_args(arg_type)
+                        let ev_args = get_callee_evidence_args(ctx, arg_type, none)
                         var all: List<Str> = [""]; all.clear()
                         all.extend(p_names)
                         if ev_args.len() > 0 { all.push(ev_args) }

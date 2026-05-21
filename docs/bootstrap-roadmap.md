@@ -285,7 +285,7 @@ Step 3: diff v1 v2 → 必须 byte-identical
 
 - [x] Batch 1-5 所有文件翻译完成（31 文件，~14,260 行 Ring 代码）
 - [x] 全部 E2E 测试通过（TS 编译器运行）— **325/325 测试通过（100%）**
-- [x] Fixed point 验证通过（v2 = v3，32/32 文件 byte-identical）— v1 vs v2 有 7 个非功能性 codegen 差异（TS 与 Ring 编译器的 codegen 细节不同），不影响正确性
+- [x] Fixed point 验证通过（v1 = v2，32/32 文件 byte-identical）
 - [ ] TS 编译器归档
 - [ ] 文档同步更新
 
@@ -315,6 +315,16 @@ Step 3: diff v1 v2 → 必须 byte-identical
 7. **`codegen_expr.ring` template literal `\r` 规范化** — JS template literal 将 raw CR 字符规范化为 LF，`escape_for_template_literal` 需转义 `\r`。同时修复了 TS 版 `codegen-expr.ts` 的相同 bug
 8. **`compiler_mod.ring` bare variant 覆盖** — `build_imports_map` 缺少 bare variant 保护（`!imports_map.has(name)` 检查），后处理的依赖覆盖先处理的正确映射
 9. **`compiler_mod.ring` trait dict 命名不匹配** — `build_imports_map` 用 `"Type_Trait"` 而非 `trait_dict_name` 返回的 `"__Type_Trait"`，导致 imports_map key 与 codegen 查找 key 不一致
+
+### 3.8 TS/Ring 编译器输出一致性修复（160/160 单文件 + 32/32 ESM 文件）
+
+1. **`runtime.ring` 尾部空行缺失** — `RUNTIME_CODE()` 末尾缺少 `lines.push("")`，导致 runtime 比 TS 版少 1 行，所有测试输出偏移 1 行
+2. **`codegen_decl.ring` trait impl 方法命名缺少 `__` 前缀** — `emit_impl_decl` 手动拼接 `"${qt}_${st}"` 而非使用 `trait_dict_name()`，导致 impl 方法名为 `Type_Trait_method` 而非 `__Type_Trait_method`；`emit_trait_dictionary` 中 `fn_name` 同样缺少前缀
+3. **`codegen.ring` 完全缺失传递效应闭包计算** — `local_fn_effects` 字段未声明，`collect_local_calls`/`collect_local_calls_stmt` 函数未翻译，导致 handle 表达式内调用的函数不传递 evidence 参数（15 个 effect 相关测试）
+4. **`codegen_ctx.ring` 缺失 `current_fn_effects`/`in_try_fail`** — `CodegenCtx` 缺少 3 个字段：`local_fn_effects`（传递效应映射）、`current_fn_effects`（当前函数 effects）、`in_try_fail`（try 块内标记）
+5. **`codegen_decl.ring` emit_fn_decl 不查 `local_fn_effects`** — 函数声明直接用 `decl.effects` 而非 `local_fn_effects.get(name) ?? effects`，且不保存/恢复 `current_fn_effects`
+6. **`codegen_expr.ring` get_callee_evidence_args 无 fallback** — 仅检查 callee type effects，缺少 `local_fn_effects` 回退查找；`gen_try_catch`/`gen_try_block` 不设置 `in_try_fail`
+7. **`compiler_mod.ring` ESM export 排列顺序错误** — export_names 构建在单个循环中混合处理 pub fn 和 impl decl，导致 impl 方法先于后续 pub fn 出现。拆分为两遍循环与 TS 版一致
 
 ---
 

@@ -52,7 +52,11 @@ pub fn emit_fn_decl(var ctx: CodegenCtx, name: Str, params: List<HParam>, effect
     for b in trait_bounds {
         dict_params.push(trait_bound_param_name(b.type_param, b.trait_name))
     }
-    let ev_params = get_evidence_params(effects)
+    let effective_effects = match ctx.local_fn_effects.get(name) {
+        some(eff) => eff,
+        none => effects,
+    }
+    let ev_params = get_evidence_params(effective_effects)
     var all: List<Str> = [""]; all.clear()
     all.extend(param_names)
     all.extend(dict_params)
@@ -60,7 +64,10 @@ pub fn emit_fn_decl(var ctx: CodegenCtx, name: Str, params: List<HParam>, effect
     let all_str = all.join(", ")
     emit(ctx, "function ${fn_name}(${all_str}) {")
     push_indent(ctx)
+    let saved_fn_effects = ctx.current_fn_effects
+    ctx.current_fn_effects = some(effective_effects)
     emit_block_body(ctx, body)
+    ctx.current_fn_effects = saved_fn_effects
     pop_indent(ctx)
     emit(ctx, "}")
 }
@@ -152,11 +159,7 @@ fn emit_enum_decl(var ctx: CodegenCtx, name: Str, variants: List<HEnumVariant>) 
 
 fn emit_impl_decl(var ctx: CodegenCtx, target_type: Str, trait_name: Str?, methods: List<HDecl>) {
     let prefix = match trait_name {
-        some(tn) => {
-            let qt = qualify(ctx, target_type)
-            let st = safe_ident(tn)
-            "${qt}_${st}"
-        },
+        some(tn) => trait_dict_name(qualify(ctx, target_type), safe_ident(tn)),
         none => qualify(ctx, target_type),
     }
     for method in methods {
@@ -188,9 +191,8 @@ fn emit_trait_dictionary(var ctx: CodegenCtx, target_type: Str, trait_name: Str,
     for m in methods {
         match m {
             HDecl::Fn { name, .. } => {
-                let stn = safe_ident(trait_name)
                 let smn = safe_ident(name)
-                let fn_name = "${qt}_${stn}_${smn}"
+                let fn_name = "${dict_name}_${smn}"
                 entries.push("${smn}: ${fn_name}")
             },
             _ => {},

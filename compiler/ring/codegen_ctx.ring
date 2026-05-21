@@ -39,6 +39,9 @@ pub struct CodegenCtx {
     pub skip_preamble: Bool,
     pub skip_main_call: Bool,
     pub local_names: Set<Str>,
+    pub local_fn_effects: Map<Str, EffectRow>,
+    pub current_fn_effects: EffectRow?,
+    pub in_try_fail: Bool,
     pub module_imports: List<Str>?,
     pub module_exports: List<Str>?
 }
@@ -63,6 +66,9 @@ pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx 
         skip_preamble: skip_preamble,
         skip_main_call: skip_main_call,
         local_names: set_new(),
+        local_fn_effects: map_new(),
+        current_fn_effects: none,
+        in_try_fail: false,
         module_imports: none,
         module_exports: none
     }

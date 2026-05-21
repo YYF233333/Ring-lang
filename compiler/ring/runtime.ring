@@ -187,6 +187,7 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("")
     lines.push("function Option_some(_0) { return { _tag: \"some\", _0 }; }")
     lines.push("const Option_none = Object.freeze({ _tag: \"none\" });")
+    lines.push("")
     lines.join("\n")
 }
 

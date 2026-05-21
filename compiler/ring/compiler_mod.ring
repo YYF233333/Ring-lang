@@ -305,6 +305,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
 
                         // Build export names
                         var export_names: List<Str> = [""]; export_names.clear()
+                        // Pass 1: pub fn/struct/enum declarations
                         for decl in ast.decls {
                             match decl {
                                 Decl::Fn { name, is_pub, .. } => { if is_pub { export_names.push(safe_ident(name)) } },
@@ -317,6 +318,12 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                                         }
                                     }
                                 },
+                                _ => {},
+                            }
+                        }
+                        // Pass 2: impl-related exports for pub types
+                        for decl in ast.decls {
+                            match decl {
                                 Decl::Impl { target_type, trait_name: impl_trait, methods, .. } => {
                                     var is_pub_type = false
                                     for d in ast.decls {

@@ -1,7 +1,8 @@
-use types::{Type, EffectRow}
+use types::{Type, Effect, EffectRow}
 use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
-    HTraitMethod, TraitBound, DerivedImpl,
+    HTraitMethod, TraitBound, DerivedImpl, HStringInterpPart, HMatchArm,
+    HEffectHandler, HStructFieldInit,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT,
     BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_CELL, BUILTIN_OPTION}
 use builtin_methods::{CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
@@ -68,10 +69,15 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
         emit_raw(ctx, empty)
     }
 
-    // Collect local names
+    // Collect local names and fn effects
     for decl in program.decls {
         match decl {
-            HDecl::Fn { name, .. } => { ctx.local_names.insert(name) },
+            HDecl::Fn { name, effects, .. } => {
+                ctx.local_names.insert(name)
+                if effects.effects.len() > 0 {
+                    ctx.local_fn_effects.insert(name, effects)
+                }
+            },
             HDecl::Struct { name, .. } => { ctx.local_names.insert(name) },
             HDecl::Enum { name, variants, .. } => {
                 ctx.local_names.insert(name)
@@ -84,6 +90,56 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
             HDecl::Trait { name, .. } => { ctx.local_names.insert(name) },
             HDecl::Effect { name, .. } => { ctx.local_names.insert(name) },
             _ => {},
+        }
+    }
+
+    // Compute transitive effect closure
+    if ctx.local_fn_effects.len() > 0 {
+        var fn_callees: Map<Str, Set<Str>> = map_new()
+        for decl in program.decls {
+            match decl {
+                HDecl::Fn { name, body, .. } => {
+                    var callees = set_new()
+                    collect_local_calls(body, ctx.local_names, callees)
+                    fn_callees.insert(name, callees)
+                },
+                _ => {},
+            }
+        }
+        var changed = true
+        while changed {
+            changed = false
+            for entry in fn_callees.entries() {
+                let (name, callees) = entry
+                for callee in callees.to_list() {
+                    match ctx.local_fn_effects.get(callee) {
+                        some(callee_effects) => {
+                            match ctx.local_fn_effects.get(name) {
+                                none => {
+                                    var effs: List<Effect> = [Effect::IoEffect]; effs.clear()
+                                    for e in callee_effects.effects { effs.push(e) }
+                                    ctx.local_fn_effects.insert(name, EffectRow { effects: effs, tail: none })
+                                    changed = true
+                                },
+                                some(current) => {
+                                    for e in callee_effects.effects {
+                                        let ename = effect_name_str(e)
+                                        var found = false
+                                        for ce in current.effects {
+                                            if effect_name_str(ce) == ename { found = true }
+                                        }
+                                        if found == false {
+                                            current.effects.push(e)
+                                            changed = true
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                        none => {},
+                    }
+                }
+            }
         }
     }
 
@@ -218,5 +274,157 @@ fn register_builtin_methods(var ctx: CodegenCtx, type_name: Str, methods: List<S
     for m in methods {
         let key = "${sn}.${m}"
         ctx.impl_methods.insert(key, none)
+    }
+}
+
+fn effect_name_str(e: Effect) -> Str {
+    match e {
+        Effect::IoEffect => "io",
+        Effect::FailEffect { .. } => "fail",
+        Effect::MutEffect => "mut",
+        Effect::CustomEffect { name, .. } => name,
+    }
+}
+
+fn collect_local_calls(expr: HExpr, local_names: Set<Str>, var out: Set<Str>) {
+    match expr {
+        HExpr::Call { callee, args, .. } => {
+            match callee {
+                HExpr::Ident { name, .. } => {
+                    if local_names.contains(name) { out.insert(name) }
+                },
+                _ => {},
+            }
+            collect_local_calls(callee, local_names, out)
+            for a in args { collect_local_calls(a, local_names, out) }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for s in stmts { collect_local_calls_stmt(s, local_names, out) }
+            match tail {
+                some(t) => collect_local_calls(t, local_names, out),
+                none => {},
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            collect_local_calls(condition, local_names, out)
+            collect_local_calls(then_branch, local_names, out)
+            match else_branch {
+                some(eb) => collect_local_calls(eb, local_names, out),
+                none => {},
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_local_calls(scrutinee, local_names, out)
+            for arm in arms {
+                collect_local_calls(arm.body, local_names, out)
+                match arm.guard {
+                    some(g) => collect_local_calls(g, local_names, out),
+                    none => {},
+                }
+            }
+        },
+        HExpr::BinOp { left, right, .. } => {
+            collect_local_calls(left, local_names, out)
+            collect_local_calls(right, local_names, out)
+        },
+        HExpr::UnaryOp { operand, .. } => {
+            collect_local_calls(operand, local_names, out)
+        },
+        HExpr::FieldAccess { receiver, .. } => {
+            collect_local_calls(receiver, local_names, out)
+        },
+        HExpr::StructLit { fields, spread, .. } => {
+            for f in fields { collect_local_calls(f.value, local_names, out) }
+            match spread {
+                some(s) => collect_local_calls(s, local_names, out),
+                none => {},
+            }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for f in fields { collect_local_calls(f.value, local_names, out) }
+            match spread {
+                some(s) => collect_local_calls(s, local_names, out),
+                none => {},
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for p in parts {
+                match p {
+                    HStringInterpPart::Expression(e) => collect_local_calls(e, local_names, out),
+                    HStringInterpPart::Literal(_) => {},
+                }
+            }
+        },
+        HExpr::TryCatch { body, handler, .. } => {
+            collect_local_calls(body, local_names, out)
+            collect_local_calls(handler, local_names, out)
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            collect_local_calls(body, local_names, out)
+            for h in handlers { collect_local_calls(h.body, local_names, out) }
+        },
+        HExpr::Lambda { body, .. } => {
+            collect_local_calls(body, local_names, out)
+        },
+        HExpr::TryBlock { body, .. } => {
+            collect_local_calls(body, local_names, out)
+        },
+        HExpr::OptionUnwrap { expr, .. } => {
+            collect_local_calls(expr, local_names, out)
+        },
+        HExpr::OptionOr { expr, default_value, .. } => {
+            collect_local_calls(expr, local_names, out)
+            collect_local_calls(default_value, local_names, out)
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            collect_local_calls(start, local_names, out)
+            collect_local_calls(end, local_names, out)
+        },
+        HExpr::ListLit { elements, .. } => {
+            for e in elements { collect_local_calls(e, local_names, out) }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for e in elements { collect_local_calls(e, local_names, out) }
+        },
+        HExpr::EffectOp { args, .. } => {
+            for a in args { collect_local_calls(a, local_names, out) }
+        },
+        _ => {},
+    }
+}
+
+fn collect_local_calls_stmt(stmt: HStmt, local_names: Set<Str>, var out: Set<Str>) {
+    match stmt {
+        HStmt::Let { init, .. } => collect_local_calls(init, local_names, out),
+        HStmt::Var { init, .. } => collect_local_calls(init, local_names, out),
+        HStmt::Assign { target, value, .. } => {
+            collect_local_calls(target, local_names, out)
+            collect_local_calls(value, local_names, out)
+        },
+        HStmt::ExprStmt { expr, .. } => collect_local_calls(expr, local_names, out),
+        HStmt::Return { value, .. } => {
+            match value {
+                some(v) => collect_local_calls(v, local_names, out),
+                none => {},
+            }
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_local_calls(condition, local_names, out)
+            collect_local_calls(body, local_names, out)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            collect_local_calls(iterable, local_names, out)
+            collect_local_calls(body, local_names, out)
+        },
+        HStmt::LetDestructure { init, .. } => collect_local_calls(init, local_names, out),
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            collect_local_calls(expr, local_names, out)
+            collect_local_calls(then_block, local_names, out)
+            match else_block {
+                some(eb) => collect_local_calls(eb, local_names, out),
+                none => {},
+            }
+        },
+        _ => {},
     }
 }
