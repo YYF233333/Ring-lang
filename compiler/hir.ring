@@ -146,7 +146,8 @@ pub enum HDecl {
     ExternFn { name: Str, def_id: Int?, type_params: List<TypeParam>, params: List<HParam>, return_type: Type, effects: EffectRow, is_pub: Bool, span: Span },
     ExternType { name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span },
     TypeAlias { name: Str, ty: Type, is_pub: Bool, span: Span },
-    Const { name: Str, def_id: Int?, ty: Type, init: HExpr, is_pub: Bool, span: Span }
+    Const { name: Str, def_id: Int?, ty: Type, init: HExpr, is_pub: Bool, span: Span },
+    ModBlock { name: Str, decls: List<HDecl>, is_pub: Bool, span: Span }
 }
 
 pub enum FieldAction {

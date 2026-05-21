@@ -637,7 +637,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                     for _ in def.type_params { resolved_params.push(ctx.env.fresh_var()) }
                 }
                 return Type::StructType {
-                    name: name,
+                    name: def.name,
                     type_params: resolved_params,
                     fields: def.fields
                 }
@@ -666,7 +666,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                     for _ in def.type_params { resolved_params.push(ctx.env.fresh_var()) }
                 }
                 return Type::EnumType {
-                    name: name,
+                    name: def.name,
                     type_params: resolved_params,
                     variants: def.variants
                 }

@@ -90,6 +90,29 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
             HDecl::Trait { name, .. } => { ctx.local_names.insert(name) },
             HDecl::Effect { name, .. } => { ctx.local_names.insert(name) },
             HDecl::Const { name, .. } => { ctx.local_names.insert(name) },
+            HDecl::ModBlock { name: mname, decls: mod_decls, .. } => {
+                ctx.local_names.insert(mname)
+                for subdecl in mod_decls {
+                    match subdecl {
+                        HDecl::Fn { name: fname, effects, .. } => {
+                            ctx.local_names.insert(fname)
+                            if effects.effects.len() > 0 {
+                                ctx.local_fn_effects.insert(fname, effects)
+                            }
+                        },
+                        HDecl::Struct { name: sname, .. } => { ctx.local_names.insert(sname) },
+                        HDecl::Enum { name: ename, variants, .. } => {
+                            ctx.local_names.insert(ename)
+                            for v in variants {
+                                ctx.local_names.insert(v.name)
+                                ctx.local_names.insert("${ename}_${v.name}")
+                            }
+                        },
+                        HDecl::Const { name: cname, .. } => { ctx.local_names.insert(cname) },
+                        _ => {}
+                    }
+                }
+            },
             _ => {},
         }
     }
@@ -103,6 +126,18 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                     var callees = set_new()
                     collect_local_calls(body, ctx.local_names, callees)
                     fn_callees.insert(name, callees)
+                },
+                HDecl::ModBlock { decls: mod_decls, .. } => {
+                    for subdecl in mod_decls {
+                        match subdecl {
+                            HDecl::Fn { name: fname, body, .. } => {
+                                var callees = set_new()
+                                collect_local_calls(body, ctx.local_names, callees)
+                                fn_callees.insert(fname, callees)
+                            },
+                            _ => {}
+                        }
+                    }
                 },
                 _ => {},
             }
@@ -179,6 +214,19 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
             },
             HDecl::Trait { name, methods, .. } => {
                 ctx.trait_decls.insert(name, HTraitDeclInfo { name: name, methods: methods })
+            },
+            HDecl::ModBlock { decls: mod_decls, .. } => {
+                for subdecl in mod_decls {
+                    match subdecl {
+                        HDecl::Struct { name: sname, fields, .. } => {
+                            let qname = qualify(ctx, sname)
+                            var field_names: List<Str> = [""]; field_names.clear()
+                            for f in fields { field_names.push(f.name) }
+                            ctx.struct_field_order.insert(qname, field_names)
+                        },
+                        _ => {}
+                    }
+                }
             },
             _ => {},
         }

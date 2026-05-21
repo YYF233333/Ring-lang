@@ -1,5 +1,6 @@
 use types::{Type}
 use ast::{Program, Decl, UseImport}
+use infer_register::{prefix_decl_name}
 use hir::{HProgram, HDecl, trait_dict_name}
 use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
 use formatter::{format_human}
@@ -310,6 +311,19 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                                     }
                                 },
                                 Decl::Const { name, is_pub, .. } => { if is_pub { export_names.push(safe_ident(name)) } },
+                                Decl::ModBlock { name: mod_name, decls: mod_decls, is_pub: mpub, .. } => {
+                                    if mpub {
+                                        for subdecl in mod_decls {
+                                            let prefixed = prefix_decl_name(mod_name, subdecl)
+                                            match prefixed {
+                                                Decl::Fn { name: fname, is_pub: fpub, .. } => { if fpub { export_names.push(safe_ident(fname)) } },
+                                                Decl::Struct { name: sname, is_pub: spub, .. } => { if spub { export_names.push(safe_ident(sname)) } },
+                                                Decl::Const { name: cname, is_pub: cpub, .. } => { if cpub { export_names.push(safe_ident(cname)) } },
+                                                _ => {},
+                                            }
+                                        }
+                                    }
+                                },
                                 _ => {},
                             }
                         }

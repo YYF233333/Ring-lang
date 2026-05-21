@@ -33,6 +33,11 @@ pub fn emit_decl(var ctx: CodegenCtx, decl: HDecl) {
         HDecl::ExternType { .. } => {},
         HDecl::TypeAlias { .. } => {},
         HDecl::Const { name, init, .. } => emit_const_decl(ctx, name, init),
+        HDecl::ModBlock { decls: mod_decls, .. } => {
+            for subdecl in mod_decls {
+                emit_decl(ctx, subdecl)
+            }
+        },
     }
 }
 

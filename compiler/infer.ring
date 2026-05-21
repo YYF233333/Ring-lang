@@ -668,12 +668,31 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
 // ============================================================
 
 fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
+    // Try module-qualified lookup first: qualifier::name
+    match qualifier {
+        some(q) => {
+            let qualified_name = "${q}::${name}"
+            let mod_scheme = ctx.env.lookup(qualified_name)
+            match mod_scheme {
+                some(ms) => {
+                    let t = ctx.env.instantiate(ms)
+                    return InferResult {
+                        hexpr: HExpr::Ident { name: qualified_name, resolved_name: none, def_id: ms.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                        subst: subst, effects: EMPTY_ROW
+                    }
+                },
+                none => {}
+            }
+        },
+        none => {}
+    }
+
     let scheme = ctx.env.lookup(name)
     match scheme {
         none => {
             match qualifier {
                 some(q) => {
-                    let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
+                    let _ = type_error(ctx.sink, E0201, "'${q}' has no member '${name}'", span,
                         DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
                     return InferResult {
                         hexpr: HExpr::Ident { name: name, resolved_name: none, def_id: none, dict_closure_dicts: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
@@ -1550,6 +1569,21 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
 // ============================================================
 
 fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>, spread: Expr?, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
+    // Try module-qualified struct lookup: qualifier::name
+    match qualifier {
+        some(q) => {
+            let qualified_name = "${q}::${name}"
+            let mod_struct = ctx.env.types.structs.get(qualified_name)
+            match mod_struct {
+                some(_) => {
+                    return infer_struct_lit(ctx, qualified_name, fields, spread, span, subst, none)
+                },
+                none => {}
+            }
+        },
+        none => {}
+    }
+
     // Check for named enum variant
     var variant_enum: Str? = none
     match qualifier {

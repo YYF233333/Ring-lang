@@ -12,7 +12,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type,
     generalize}
-use infer_register::{register_decls_two_phase, resolve_declared_effects}
+use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name}
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
@@ -49,8 +49,51 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
             HDecl::TypeAlias { name: name, ty: alias_type, is_pub: is_pub, span: span }
         },
         Decl::Const { name, type_annotation, init, is_pub, span } =>
-            check_const_decl(ctx, name, type_annotation, init, is_pub, span)
+            check_const_decl(ctx, name, type_annotation, init, is_pub, span),
+        Decl::ModBlock { name, decls, is_pub, span } =>
+            check_mod_decl(ctx, name, decls, is_pub, span)
     }
+}
+
+fn check_mod_decl(var ctx: InferCtx, mod_name: Str, decls: List<Decl>, is_pub: Bool, span: Span) -> HDecl {
+    // Register short-name aliases for mod-internal types so that
+    // type annotations like `c: Circle` resolve to `shapes::Circle`.
+    // These aliases remain in scope for the rest of the file, which
+    // is acceptable because inline mods share the file scope.
+    for decl in decls {
+        match decl {
+            Decl::Struct { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                match ctx.env.types.structs.get(qualified) {
+                    some(sdef) => {
+                        ctx.env.types.structs.insert(name, sdef)
+                    },
+                    none => {}
+                }
+            },
+            Decl::Enum { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                match ctx.env.types.enums.get(qualified) {
+                    some(edef) => {
+                        ctx.env.types.enums.insert(name, edef)
+                    },
+                    none => {}
+                }
+            },
+            _ => {}
+        }
+    }
+
+    var hdecls: List<HDecl> = []
+    for decl in decls {
+        let prefixed = prefix_decl_name(mod_name, decl)
+        let result = some(check_decl(ctx, prefixed)) catch { _ => none }
+        match result {
+            some(hd) => hdecls.push(hd),
+            none => {}
+        }
+    }
+    HDecl::ModBlock { name: mod_name, decls: hdecls, is_pub: is_pub, span: span }
 }
 
 fn check_const_decl(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {

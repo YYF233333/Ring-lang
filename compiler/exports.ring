@@ -2,6 +2,7 @@ use types::{Type}
 use ast::{Program, Decl, UseImport, NamedImport}
 use hir::{HProgram, HDecl}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry}
+use infer_register::{prefix_decl_name}
 
 // ============================================================
 // ModuleExports — the public interface of a compiled module
@@ -161,6 +162,45 @@ pub fn extract_exports(
                     match env.lookup(name) {
                         some(scheme) => { values.insert(name, scheme) },
                         none => {},
+                    }
+                }
+            },
+            Decl::ModBlock { name: mod_name, decls: mod_decls, is_pub: mpub, .. } => {
+                if mpub {
+                    for subdecl in mod_decls {
+                        let prefixed = prefix_decl_name(mod_name, subdecl)
+                        match prefixed {
+                            Decl::Fn { name: fname, is_pub: fpub, .. } => {
+                                if fpub {
+                                    match env.lookup(fname) {
+                                        some(scheme) => { values.insert(fname, scheme) },
+                                        none => {},
+                                    }
+                                }
+                            },
+                            Decl::Struct { name: sname, is_pub: spub, .. } => {
+                                if spub {
+                                    match env.types.structs.get(sname) {
+                                        some(sdef) => {
+                                            types.insert(sname, TypeDef::StructDef_(sdef))
+                                            var field_names: List<Str> = [""]; field_names.clear()
+                                            for f in sdef.fields { field_names.push(f.name) }
+                                            struct_field_orders.insert(sname, field_names)
+                                        },
+                                        none => {},
+                                    }
+                                }
+                            },
+                            Decl::Const { name: cname, is_pub: cpub, .. } => {
+                                if cpub {
+                                    match env.lookup(cname) {
+                                        some(scheme) => { values.insert(cname, scheme) },
+                                        none => {},
+                                    }
+                                }
+                            },
+                            _ => {},
+                        }
                     }
                 }
             },

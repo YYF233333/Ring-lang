@@ -17,7 +17,8 @@ const JS_RESERVED: Set<Str> = set_from(
      "Int8Array", "Uint8Array", "Float32Array", "Float64Array"])
 
 pub fn safe_ident(name: Str) -> Str {
-    if JS_RESERVED.contains(name) { "_${name}" } else { name }
+    let result = if name.contains("::") { name.replace("::", "$") } else { name }
+    if JS_RESERVED.contains(result) { "_${result}" } else { result }
 }
 
 pub struct CodegenCtx {

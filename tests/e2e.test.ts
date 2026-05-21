@@ -377,6 +377,8 @@ const cases: TestCase[] = [
   { file: "ufcs_in_lambda.ring", expected: "ufcs_in_lambda: all tests passed\n" },
   { file: "var_reassign.ring", expected: "var_reassign: all tests passed\n" },
   { file: "while_nested.ring", expected: "while_nested: all tests passed\n" },
+  { file: "mod_basic.ring", expected: "7\n25\n" },
+  { file: "mod_struct.ring", expected: "75\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
