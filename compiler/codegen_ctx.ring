@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow}
+use types::{Type, Effect, EffectRow, effect_kind_name}
 use hir::{HExpr, HStmt, HTraitMethod, evidence_param_name}
 
 const JS_RESERVED: Set<Str> = set_from(
@@ -119,19 +119,10 @@ pub fn qualify(ctx: CodegenCtx, name: Str) -> Str {
     safe_ident(name)
 }
 
-fn effect_name(e: Effect) -> Str {
-    match e {
-        Effect::IoEffect => "io",
-        Effect::FailEffect { .. } => "fail",
-        Effect::MutEffect => "mut",
-        Effect::CustomEffect { name, .. } => name,
-    }
-}
-
 pub fn extract_effect_names(effects: EffectRow) -> List<Str> {
     var names: List<Str> = []
     for e in effects.effects {
-        let n = effect_name(e)
+        let n = effect_kind_name(e)
         if names.contains(n) == false {
             names.push(n)
         }

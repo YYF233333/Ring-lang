@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow}
+use types::{Type, Effect, EffectRow, effect_kind_name}
 use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, DerivedImpl, HStringInterpPart, HMatchArm,
@@ -159,10 +159,10 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                                 },
                                 some(current) => {
                                     for e in callee_effects.effects {
-                                        let ename = effect_name_str(e)
+                                        let ename = effect_kind_name(e)
                                         var found = false
                                         for ce in current.effects {
-                                            if effect_name_str(ce) == ename { found = true }
+                                            if effect_kind_name(ce) == ename { found = true }
                                         }
                                         if found == false {
                                             current.effects.push(e)
@@ -323,15 +323,6 @@ fn register_builtin_methods(var ctx: CodegenCtx, type_name: Str, methods: List<S
     for m in methods {
         let key = "${sn}.${m}"
         ctx.impl_methods.insert(key, none)
-    }
-}
-
-fn effect_name_str(e: Effect) -> Str {
-    match e {
-        Effect::IoEffect => "io",
-        Effect::FailEffect { .. } => "fail",
-        Effect::MutEffect => "mut",
-        Effect::CustomEffect { name, .. } => name,
     }
 }
 

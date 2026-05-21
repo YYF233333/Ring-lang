@@ -16,7 +16,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     hexpr_type, hexpr_effects, hexpr_span}
 use diagnostics::{DiagnosticContext, CollectingSink}
 use codes::{E0201, E0203, E0205, E0206, E0301, E0303, E0304, E0305,
-    E0307, E0308, E0402, E0601}
+    E0307, E0308, E0402, E0504, E0601}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
@@ -821,7 +821,10 @@ fn infer_bin_op(var ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
 fn infer_numeric_op(ctx: InferCtx, left: HExpr, right: HExpr, s: UnionFind, span: Span, op_str: Str) -> Type {
     let resolved = apply_subst(s, hexpr_type(left))
     match resolved {
-        Type::TypeVar { .. } => INT,
+        Type::TypeVar { .. } => {
+            let _ = unify_at(ctx.sink, ctx.env, resolved, INT, s, span)
+            INT
+        },
         Type::IntType => INT,
         Type::FloatType => FLOAT,
         _ => type_error(ctx.sink, E0303,
@@ -837,6 +840,8 @@ fn is_primitive_eq(t: Type) -> Bool {
         Type::StrType => true,
         Type::BoolType => true,
         Type::UnitType => true,
+        Type::NeverType => true,
+        Type::AnyType => true,
         _ => false
     }
 }
@@ -1212,7 +1217,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     if method_type.is_none() {
         match type_to_builtin_name(recv_type) {
             some(type_name) => {
-                method_type = lookup_trait_method(ctx, type_name, method)
+                method_type = lookup_trait_method(ctx, type_name, method, span)
             },
             none => {}
         }
@@ -1382,7 +1387,9 @@ fn lookup_impl_method(var ctx: InferCtx, type_name: Str, method: Str) -> MethodL
     }
 }
 
-fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str) -> Type? {
+fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str, span: Span) -> Type? {
+    var found_type: Type? = none
+    var found_trait_name: Str? = none
     for impl_entry in ctx.env.trait_reg.trait_impls {
         if impl_entry.target_type_name == type_name {
             match ctx.env.trait_reg.traits.get(impl_entry.trait_name) {
@@ -1390,7 +1397,18 @@ fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str) -> Type? 
                     let tm = trait_def.methods.find(fn(m) { m.name == method })
                     match tm {
                         some(found_method) => {
-                            return some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: [], def_id: none }))
+                            match found_trait_name {
+                                some(prev_trait) => {
+                                    let _ = type_error(ctx.sink, E0504,
+                                        "Ambiguous method '${method}' on '${type_name}': found in trait '${prev_trait}' and '${impl_entry.trait_name}'",
+                                        span, DiagnosticContext::OtherContext { detail: some("disambiguate by calling TraitName::${method}") })
+                                    return found_type
+                                },
+                                none => {
+                                    found_type = some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: [], def_id: none }))
+                                    found_trait_name = some(impl_entry.trait_name)
+                                }
+                            }
                         },
                         none => {}
                     }
@@ -1399,7 +1417,7 @@ fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str) -> Type? 
             }
         }
     }
-    none
+    found_type
 }
 
 // ============================================================
@@ -1978,11 +1996,19 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
     var s = expr_r.subst
     var effects = expr_r.effects
 
-    // Extract error type from the body's fail effect
+    // Extract error type from the body's fail effects, unifying if multiple
     var error_type: Type = ctx.env.fresh_var()
+    var found_fail = false
     for eff in effects.effects {
         match eff {
-            Effect::FailEffect { error_type: et } => { error_type = et },
+            Effect::FailEffect { error_type: et } => {
+                if found_fail {
+                    s = unify_at(ctx.sink, ctx.env, error_type, et, s, span)
+                } else {
+                    error_type = et
+                    found_fail = true
+                }
+            },
             _ => {}
         }
     }

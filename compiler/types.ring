@@ -72,6 +72,15 @@ pub const ANY: Type = Type::AnyType
 
 pub const EMPTY_ROW: EffectRow = EffectRow { effects: [], tail: none }
 
+pub fn effect_kind_name(e: Effect) -> Str {
+    match e {
+        Effect::IoEffect => "io",
+        Effect::MutEffect => "mut",
+        Effect::FailEffect { .. } => "fail",
+        Effect::CustomEffect { name, .. } => name
+    }
+}
+
 pub fn type_to_builtin_name(t: Type) -> Str? {
     match t {
         Type::IntType => some(BUILTIN_INT),

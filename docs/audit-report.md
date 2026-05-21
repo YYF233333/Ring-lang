@@ -1,7 +1,7 @@
 # Ring 编译器技术债清单
 
 自举审计 (2026-05-21) 产出。三路并行审计（Claude×2 + DS V4 Pro）去重合并后的长期跟踪清单。
-已修复项以删除线标记。53 项中 20 项已修复（#1-5, #9, #11-13, #15, #17-18, #23, #25, #27, #31, #33, C1-C3 已在 2026-05-22 修复）。
+已修复项以删除线标记。53 项中 29 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, C1-C3）。
 
 ---
 
@@ -21,8 +21,8 @@
 | 10 | `token_kind_value` 字符串比较代替 Eq trait 派生 | 性能 | 为 TokenKind derive Eq |
 | 11 | ~~`MergeResult` 等 wrapper struct~~ | ~~噪音~~ | **已修复**：MergeResult 已用 `.0`/`.1` 替代（Phase 3 Iter 1） |
 | 12 | ~~`index_of_int`/`index_of_str` 重复实现~~ | ~~小重复~~ | **已修复**：函数已在自举重构中移除 |
-| 49 | 4 处重复的 effect→name 转换函数 | 维护负担 | `codegen.ring:281`/`codegen_ctx.ring:121`/`codegen_expr.ring:300`/`infer_decl.ring:384`，逻辑相同，应提取到 `hir.ring` |
-| 50 | `package.json` 含未使用的 LSP 依赖 | 安装体积 | `vscode-languageserver` + `textdocument` 在编译器和测试中均未使用，LSP 暂不可用 |
+| 49 | ~~4 处重复的 effect→name 转换函数~~ | ~~维护负担~~ | **已修复**：提取 `effect_kind_name` 到 `types.ring`，4 个调用点统一引用 |
+| 50 | ~~`package.json` 含未使用的 LSP 依赖~~ | ~~安装体积~~ | **已修复**：移除 `vscode-languageserver` + `textdocument` 依赖 |
 | 13 | ~~`try_eq_dispatch` 用空字符串作 sentinel~~ | ~~脆弱约定~~ | **已修复**：C8 改为 `Option<Str>`（Phase 3） |
 | 14 | 68 处 `panic()` 调用（约 40 处 unreachable） | 崩溃而非友好报错 | 逐步替换为 DiagnosticSink |
 
@@ -41,18 +41,18 @@
 
 | # | 问题 | 影响 | 备注 |
 |---|------|------|------|
-| 21 | Trait 方法查找无歧义检测 | 潜在错误解析 | 多 trait 同名方法取第一个 |
+| 21 | ~~Trait 方法查找无歧义检测~~ | ~~潜在错误解析~~ | **已修复**：`lookup_trait_method` 检测到多 trait 同名方法时报 E0504 歧义错误 |
 | 22 | `bind_pattern` named constructor 不验证字段完整性 | 低 | 穷尽性检查兜底 |
 | 23 | ~~`infer_if` 无 else 返回 UNIT 不与 then 分支统一~~ | ~~表达式位置意外~~ | **已修复**：无 else 返回 UNIT 是正确语义，有 else 时已正确 unify 两个分支 |
-| 24 | `is_primitive_eq` 缺少 NeverType/AnyType | 边界情况 | |
+| 24 | ~~`is_primitive_eq` 缺少 NeverType/AnyType~~ | ~~边界情况~~ | **已修复**：添加 NeverType/AnyType 分支 |
 | 25 | ~~`?` 运算符 `fail<fresh_var>` 错误类型未约束~~ | ~~极低~~ | **已修复**：`?` 运算符已移除（语法修订），替换为 `unwrap`/`to_fail` 方法 |
 | 26 | `CollectingSink.report()` 非 var self 但通过引用突变 | 语义不一致 | 深不可变性强制前不会 break |
-| 43 | `infer_catch` 只取最后一个 `FailEffect` 的 error_type | 类型推断不准 | `infer.ring:1942-1948`：body 有多个不同 error_type 的 fail effect 时后者覆盖前者，catch arm 类型推断可能不准 |
-| 44 | `infer_numeric_op` 对 `TypeVar` 直接返回 `INT` | 类型多态丢失 | `infer.ring:796-806`：未解析的 TypeVar 不走 unify，两个操作数都是 TypeVar 时结果固定为 Int |
-| 45 | `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields | 潜在类型变量逃逸 | `env.ring:315-320,432-436`：仅替换 type_params，fields 中的类型变量保持原始；当前通过 infer_field_access 手动 inst_map 兜底，但直接读取路径不安全 |
-| 46 | `rebind` 找不到变量时静默失败 | 掩盖调用端 bug | `env.ring:236-250`：遍历所有 scope 找不到时静默返回 Unit，不报错不 panic |
-| 47 | `apply_subst_map` 无循环引用深度保护 | 潜在栈溢出 | `env.ring:305-306`：TypeVar 递归追踪替换，意外循环引用会无限递归；实践中不易触发 |
-| 48 | `unify_effect_rows` 同 tail 不匹配 effects 静默跳过 | 语义待确认 | `unify.ring:204-206`：相同 tail variable 但有 unmatched effects 时空处理，注释说 "tolerated" 但未解释原因，需验证是否符合 Koka 语义 |
+| 43 | ~~`infer_catch` 只取最后一个 `FailEffect` 的 error_type~~ | ~~类型推断不准~~ | **已修复**：收集所有 fail effect 的 error_type 并 unify 为统一类型 |
+| 44 | ~~`infer_numeric_op` 对 `TypeVar` 直接返回 `INT`~~ | ~~类型多态丢失~~ | **已修复**：对 TypeVar 调用 `unify_at(resolved, INT)` 正确约束类型变量 |
+| 45 | `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields | 设计约束 | fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16） |
+| 46 | ~~`rebind` 找不到变量时静默失败~~ | ~~掩盖调用端 bug~~ | **已修复**：找不到变量时 panic 报告内部错误 |
+| 47 | ~~`apply_subst_map` 无循环引用深度保护~~ | ~~潜在栈溢出~~ | **已修复**：TypeVar 追踪提取为 `chase_type_var_map`，深度超过 100 时终止递归 |
+| 48 | ~~`unify_effect_rows` 同 tail 不匹配 effects 静默跳过~~ | ~~语义待确认~~ | **已修复**：同 tail 有 unmatched effects 时，绑定 tail 到包含所有 unmatched effects 的扩展行（符合 Koka row unification 语义） |
 | 42 | **Impl 方法 effect 不回传**：impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获 | **中** | Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境 |
 
 ## Codegen 关注项
@@ -72,7 +72,7 @@
 | 32 | 循环依赖检测返回 none 无诊断详情 | 用户体验 | 报告具体循环路径 |
 | 33 | ~~`load_prelude` 找不到 std 目录时静默跳过~~ | ~~误导性错误~~ | **已修复**：函数已在自举重构中移除/重构 |
 | 34 | 错误码编号有缺口（E0202/E0400/E0401 等） | 文档 | |
-| 35 | `resolver.ring:39` 未使用的 `relative` 变量 | 死代码 | |
+| 35 | ~~`resolver.ring:39` 未使用的 `relative` 变量~~ | ~~死代码~~ | **已修复**：删除未使用变量 |
 | 51 | ~~4 个错误码缺负向测试覆盖~~ | ~~回归保护不完整~~ | **部分修复**：E0101/E0207/E0706 已补充负向测试；E0403 定义但未实现（无触发点），待 effect 检查完善后补充 |
 | 52 | effect 标注语法（F1）测试覆盖薄 | 回归保护不充分 | 仅 3 个用例（正向×2+负向×1），缺多 effect 组合、impl 方法交互、effect 类型不匹配等边界用例 |
 | 53 | 模块负向测试不验证具体错误码 | 测试精度不足 | `e2e.test.ts` 模块负向测试仅断言 `!result.success`，与单文件负向测试（验证具体错误码）标准不一致 |

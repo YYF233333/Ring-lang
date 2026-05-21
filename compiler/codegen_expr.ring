@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, type_to_builtin_name}
+use types::{Type, Effect, EffectRow, type_to_builtin_name, effect_kind_name}
 use ast::{Pattern, BinOp, UnaryOp}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     HStringInterpPart, HEffectHandler,
@@ -272,7 +272,7 @@ fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str
                         match ctx.current_fn_effects {
                             some(cfe) => {
                                 for e in cfe.effects {
-                                    caller_effect_names.insert(callee_eff_name(e))
+                                    caller_effect_names.insert(effect_kind_name(e))
                                 }
                             },
                             none => {},
@@ -280,7 +280,7 @@ fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str
                         if ctx.in_try_fail { caller_effect_names.insert("fail") }
                         var needed: List<Effect> = [Effect::IoEffect]; needed.clear()
                         for e in actual_effects.effects {
-                            if caller_effect_names.contains(callee_eff_name(e)) {
+                            if caller_effect_names.contains(effect_kind_name(e)) {
                                 needed.push(e)
                             }
                         }
@@ -295,15 +295,6 @@ fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str
         none => {},
     }
     ""
-}
-
-fn callee_eff_name(e: Effect) -> Str {
-    match e {
-        Effect::IoEffect => "io",
-        Effect::FailEffect { .. } => "fail",
-        Effect::MutEffect => "mut",
-        Effect::CustomEffect { name, .. } => name,
-    }
 }
 
 fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<Str>, dict_dispatch: DictDispatchInfo?) -> Str {

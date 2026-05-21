@@ -54,7 +54,6 @@ function module_prefix(segments) {
 }
 
 function resolve_module_file(use_path_segments, project_root) {
-  const relative = path_join(List_join(use_path_segments, "/"), ".ring");
   let path_part = "";
   const __ring_end0 = List_len(use_path_segments);
   for (let i = 0; i < __ring_end0; i++) {

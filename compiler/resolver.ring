@@ -37,8 +37,6 @@ pub fn module_prefix(segments: List<Str>) -> Str {
 }
 
 pub fn resolve_module_file(use_path_segments: List<Str>, project_root: Str) -> Str? {
-    let relative = path_join(use_path_segments.join("/"), ".ring")
-    // Fix: join segments as path then add .ring
     var path_part = ""
     for i in 0..use_path_segments.len() {
         match use_path_segments.get(i) {

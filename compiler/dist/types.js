@@ -133,45 +133,69 @@ const ANY = Type_AnyType;
 
 const EMPTY_ROW = new EffectRow([], Option_none);
 
-function type_to_builtin_name(t) {
+function effect_kind_name(e) {
   __ring_match0: {
-    const __ring_m0 = t;
-    if (__ring_m0._tag === "IntType") {
+    const __ring_m0 = e;
+    if (__ring_m0._tag === "IoEffect") {
+      return "io";
+      break __ring_match0;
+    }
+    if (__ring_m0._tag === "MutEffect") {
+      return "mut";
+      break __ring_match0;
+    }
+    if (__ring_m0._tag === "FailEffect") {
+      return "fail";
+      break __ring_match0;
+    }
+    if (__ring_m0._tag === "CustomEffect") {
+      const name = __ring_m0.name;
+      return name;
+      break __ring_match0;
+    }
+    __match_fail(__ring_m0);
+  }
+}
+
+function type_to_builtin_name(t) {
+  __ring_match1: {
+    const __ring_m1 = t;
+    if (__ring_m1._tag === "IntType") {
       return Option_some(BUILTIN_INT);
-      break __ring_match0;
+      break __ring_match1;
     }
-    if (__ring_m0._tag === "FloatType") {
+    if (__ring_m1._tag === "FloatType") {
       return Option_some(BUILTIN_FLOAT);
-      break __ring_match0;
+      break __ring_match1;
     }
-    if (__ring_m0._tag === "StrType") {
+    if (__ring_m1._tag === "StrType") {
       return Option_some(BUILTIN_STR);
-      break __ring_match0;
+      break __ring_match1;
     }
-    if (__ring_m0._tag === "BoolType") {
+    if (__ring_m1._tag === "BoolType") {
       return Option_some(BUILTIN_BOOL);
-      break __ring_match0;
+      break __ring_match1;
     }
-    if (__ring_m0._tag === "UnitType") {
+    if (__ring_m1._tag === "UnitType") {
       return Option_some("Unit");
-      break __ring_match0;
+      break __ring_match1;
     }
-    if (__ring_m0._tag === "StructType") {
-      const name = __ring_m0.name;
+    if (__ring_m1._tag === "StructType") {
+      const name = __ring_m1.name;
       return Option_some(name);
-      break __ring_match0;
+      break __ring_match1;
     }
-    if (__ring_m0._tag === "EnumType") {
-      const name = __ring_m0.name;
+    if (__ring_m1._tag === "EnumType") {
+      const name = __ring_m1.name;
       return Option_some(name);
-      break __ring_match0;
+      break __ring_match1;
     }
-    if (__ring_m0._tag === "ErrorType") {
+    if (__ring_m1._tag === "ErrorType") {
       return Option_none;
-      break __ring_match0;
+      break __ring_match1;
     }
     return Option_none;
-    break __ring_match0;
+    break __ring_match1;
   }
 }
 
@@ -180,28 +204,28 @@ function make_option_type(inner) {
 }
 
 function is_option_type(t) {
-  __ring_match1: {
-    const __ring_m1 = t;
-    if (__ring_m1._tag === "EnumType") {
-      const name = __ring_m1.name; const type_params = __ring_m1.type_params;
+  __ring_match2: {
+    const __ring_m2 = t;
+    if (__ring_m2._tag === "EnumType") {
+      const name = __ring_m2.name; const type_params = __ring_m2.type_params;
       return ((name === BUILTIN_OPTION) && (List_len(type_params) === 1));
-      break __ring_match1;
+      break __ring_match2;
     }
     return false;
-    break __ring_match1;
+    break __ring_match2;
   }
 }
 
 function option_inner(t) {
-  __ring_match2: {
-    const __ring_m2 = t;
-    if (__ring_m2._tag === "EnumType") {
-      const type_params = __ring_m2.type_params;
+  __ring_match3: {
+    const __ring_m3 = t;
+    if (__ring_m3._tag === "EnumType") {
+      const type_params = __ring_m3.type_params;
       return Option_unwrap_or(List_first(type_params), UNIT);
-      break __ring_match2;
+      break __ring_match3;
     }
     return UNIT;
-    break __ring_match2;
+    break __ring_match3;
   }
 }
 
@@ -210,28 +234,28 @@ function make_list_type(element) {
 }
 
 function is_list_type(t) {
-  __ring_match3: {
-    const __ring_m3 = t;
-    if (__ring_m3._tag === "StructType") {
-      const name = __ring_m3.name;
+  __ring_match4: {
+    const __ring_m4 = t;
+    if (__ring_m4._tag === "StructType") {
+      const name = __ring_m4.name;
       return (name === BUILTIN_LIST);
-      break __ring_match3;
+      break __ring_match4;
     }
     return false;
-    break __ring_match3;
+    break __ring_match4;
   }
 }
 
 function list_element(t) {
-  __ring_match4: {
-    const __ring_m4 = t;
-    if (__ring_m4._tag === "StructType") {
-      const type_params = __ring_m4.type_params;
+  __ring_match5: {
+    const __ring_m5 = t;
+    if (__ring_m5._tag === "StructType") {
+      const type_params = __ring_m5.type_params;
       return Option_unwrap_or(List_first(type_params), UNIT);
-      break __ring_match4;
+      break __ring_match5;
     }
     return UNIT;
-    break __ring_match4;
+    break __ring_match5;
   }
 }
 
@@ -240,15 +264,15 @@ function make_map_type(key, value) {
 }
 
 function is_map_type(t) {
-  __ring_match5: {
-    const __ring_m5 = t;
-    if (__ring_m5._tag === "StructType") {
-      const name = __ring_m5.name;
+  __ring_match6: {
+    const __ring_m6 = t;
+    if (__ring_m6._tag === "StructType") {
+      const name = __ring_m6.name;
       return (name === BUILTIN_MAP);
-      break __ring_match5;
+      break __ring_match6;
     }
     return false;
-    break __ring_match5;
+    break __ring_match6;
   }
 }
 
@@ -257,15 +281,15 @@ function make_set_type(element) {
 }
 
 function is_set_type(t) {
-  __ring_match6: {
-    const __ring_m6 = t;
-    if (__ring_m6._tag === "StructType") {
-      const name = __ring_m6.name;
+  __ring_match7: {
+    const __ring_m7 = t;
+    if (__ring_m7._tag === "StructType") {
+      const name = __ring_m7.name;
       return (name === BUILTIN_SET);
-      break __ring_match6;
+      break __ring_match7;
     }
     return false;
-    break __ring_match6;
+    break __ring_match7;
   }
 }
 
@@ -282,61 +306,61 @@ function row_contains(row, eff) {
 }
 
 function effects_same_kind(a, b) {
-  __ring_match7: {
-    const __ring_m7 = a;
-    if (__ring_m7._tag === "IoEffect") {
-      __ring_match8: {
-        const __ring_m8 = b;
-        if (__ring_m8._tag === "IoEffect") {
-          return true;
-          break __ring_match8;
-        }
-        return false;
-        break __ring_match8;
-      }
-      break __ring_match7;
-    }
-    if (__ring_m7._tag === "MutEffect") {
+  __ring_match8: {
+    const __ring_m8 = a;
+    if (__ring_m8._tag === "IoEffect") {
       __ring_match9: {
         const __ring_m9 = b;
-        if (__ring_m9._tag === "MutEffect") {
+        if (__ring_m9._tag === "IoEffect") {
           return true;
           break __ring_match9;
         }
         return false;
         break __ring_match9;
       }
-      break __ring_match7;
+      break __ring_match8;
     }
-    if (__ring_m7._tag === "FailEffect") {
-      const ea = __ring_m7.error_type;
+    if (__ring_m8._tag === "MutEffect") {
       __ring_match10: {
         const __ring_m10 = b;
-        if (__ring_m10._tag === "FailEffect") {
-          const eb = __ring_m10.error_type;
-          return types_equal(ea, eb);
+        if (__ring_m10._tag === "MutEffect") {
+          return true;
           break __ring_match10;
         }
         return false;
         break __ring_match10;
       }
-      break __ring_match7;
+      break __ring_match8;
     }
-    if (__ring_m7._tag === "CustomEffect") {
-      const na = __ring_m7.name;
+    if (__ring_m8._tag === "FailEffect") {
+      const ea = __ring_m8.error_type;
       __ring_match11: {
         const __ring_m11 = b;
-        if (__ring_m11._tag === "CustomEffect") {
-          const nb = __ring_m11.name;
-          return (na === nb);
+        if (__ring_m11._tag === "FailEffect") {
+          const eb = __ring_m11.error_type;
+          return types_equal(ea, eb);
           break __ring_match11;
         }
         return false;
         break __ring_match11;
       }
-      break __ring_match7;
+      break __ring_match8;
     }
-    __match_fail(__ring_m7);
+    if (__ring_m8._tag === "CustomEffect") {
+      const na = __ring_m8.name;
+      __ring_match12: {
+        const __ring_m12 = b;
+        if (__ring_m12._tag === "CustomEffect") {
+          const nb = __ring_m12.name;
+          return (na === nb);
+          break __ring_match12;
+        }
+        return false;
+        break __ring_match12;
+      }
+      break __ring_match8;
+    }
+    __match_fail(__ring_m8);
   }
 }
 
@@ -414,223 +438,209 @@ function effects_list_equal(a, b) {
 }
 
 function optional_ids_equal(a, b) {
-  __ring_match12: {
-    const __ring_m12 = [a, b];
-    if (Array.isArray(__ring_m12) && __ring_m12.length === 2 && __ring_m12[0]._tag === "some" && __ring_m12[1]._tag === "some") {
-      const x = __ring_m12[0]._0; const y = __ring_m12[1]._0;
+  __ring_match13: {
+    const __ring_m13 = [a, b];
+    if (Array.isArray(__ring_m13) && __ring_m13.length === 2 && __ring_m13[0]._tag === "some" && __ring_m13[1]._tag === "some") {
+      const x = __ring_m13[0]._0; const y = __ring_m13[1]._0;
       return (x === y);
-      break __ring_match12;
+      break __ring_match13;
     }
     return (Option_is_none(a) && Option_is_none(b));
-    break __ring_match12;
+    break __ring_match13;
   }
 }
 
 function effects_equal(a, b) {
-  __ring_match13: {
-    const __ring_m13 = a;
-    if (__ring_m13._tag === "IoEffect") {
-      __ring_match14: {
-        const __ring_m14 = b;
-        if (__ring_m14._tag === "IoEffect") {
-          return true;
-          break __ring_match14;
-        }
-        return false;
-        break __ring_match14;
-      }
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "MutEffect") {
+  __ring_match14: {
+    const __ring_m14 = a;
+    if (__ring_m14._tag === "IoEffect") {
       __ring_match15: {
         const __ring_m15 = b;
-        if (__ring_m15._tag === "MutEffect") {
+        if (__ring_m15._tag === "IoEffect") {
           return true;
           break __ring_match15;
         }
         return false;
         break __ring_match15;
       }
-      break __ring_match13;
+      break __ring_match14;
     }
-    if (__ring_m13._tag === "FailEffect") {
-      const et_a = __ring_m13.error_type;
+    if (__ring_m14._tag === "MutEffect") {
       __ring_match16: {
         const __ring_m16 = b;
-        if (__ring_m16._tag === "FailEffect") {
-          const et_b = __ring_m16.error_type;
-          return types_equal(et_a, et_b);
+        if (__ring_m16._tag === "MutEffect") {
+          return true;
           break __ring_match16;
         }
         return false;
         break __ring_match16;
       }
-      break __ring_match13;
+      break __ring_match14;
     }
-    if (__ring_m13._tag === "CustomEffect") {
-      const na = __ring_m13.name; const args_a = __ring_m13.type_args;
+    if (__ring_m14._tag === "FailEffect") {
+      const et_a = __ring_m14.error_type;
       __ring_match17: {
         const __ring_m17 = b;
-        if (__ring_m17._tag === "CustomEffect") {
-          const nb = __ring_m17.name; const args_b = __ring_m17.type_args;
-          return ((na === nb) && type_lists_equal(args_a, args_b));
+        if (__ring_m17._tag === "FailEffect") {
+          const et_b = __ring_m17.error_type;
+          return types_equal(et_a, et_b);
           break __ring_match17;
         }
         return false;
         break __ring_match17;
       }
-      break __ring_match13;
+      break __ring_match14;
     }
-    __match_fail(__ring_m13);
+    if (__ring_m14._tag === "CustomEffect") {
+      const na = __ring_m14.name; const args_a = __ring_m14.type_args;
+      __ring_match18: {
+        const __ring_m18 = b;
+        if (__ring_m18._tag === "CustomEffect") {
+          const nb = __ring_m18.name; const args_b = __ring_m18.type_args;
+          return ((na === nb) && type_lists_equal(args_a, args_b));
+          break __ring_match18;
+        }
+        return false;
+        break __ring_match18;
+      }
+      break __ring_match14;
+    }
+    __match_fail(__ring_m14);
   }
 }
 
 function types_equal(a, b) {
-  __ring_match18: {
-    const __ring_m18 = a;
-    if (__ring_m18._tag === "IntType") {
-      __ring_match19: {
-        const __ring_m19 = b;
-        if (__ring_m19._tag === "IntType") {
-          return true;
-          break __ring_match19;
-        }
-        return false;
-        break __ring_match19;
-      }
-      break __ring_match18;
-    }
-    if (__ring_m18._tag === "FloatType") {
+  __ring_match19: {
+    const __ring_m19 = a;
+    if (__ring_m19._tag === "IntType") {
       __ring_match20: {
         const __ring_m20 = b;
-        if (__ring_m20._tag === "FloatType") {
+        if (__ring_m20._tag === "IntType") {
           return true;
           break __ring_match20;
         }
         return false;
         break __ring_match20;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "StrType") {
+    if (__ring_m19._tag === "FloatType") {
       __ring_match21: {
         const __ring_m21 = b;
-        if (__ring_m21._tag === "StrType") {
+        if (__ring_m21._tag === "FloatType") {
           return true;
           break __ring_match21;
         }
         return false;
         break __ring_match21;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "BoolType") {
+    if (__ring_m19._tag === "StrType") {
       __ring_match22: {
         const __ring_m22 = b;
-        if (__ring_m22._tag === "BoolType") {
+        if (__ring_m22._tag === "StrType") {
           return true;
           break __ring_match22;
         }
         return false;
         break __ring_match22;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "UnitType") {
+    if (__ring_m19._tag === "BoolType") {
       __ring_match23: {
         const __ring_m23 = b;
-        if (__ring_m23._tag === "UnitType") {
+        if (__ring_m23._tag === "BoolType") {
           return true;
           break __ring_match23;
         }
         return false;
         break __ring_match23;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "NeverType") {
+    if (__ring_m19._tag === "UnitType") {
       __ring_match24: {
         const __ring_m24 = b;
-        if (__ring_m24._tag === "NeverType") {
+        if (__ring_m24._tag === "UnitType") {
           return true;
           break __ring_match24;
         }
         return false;
         break __ring_match24;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "AnyType") {
+    if (__ring_m19._tag === "NeverType") {
       __ring_match25: {
         const __ring_m25 = b;
-        if (__ring_m25._tag === "AnyType") {
+        if (__ring_m25._tag === "NeverType") {
           return true;
           break __ring_match25;
         }
         return false;
         break __ring_match25;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "ErrorType") {
+    if (__ring_m19._tag === "AnyType") {
       __ring_match26: {
         const __ring_m26 = b;
-        if (__ring_m26._tag === "ErrorType") {
+        if (__ring_m26._tag === "AnyType") {
           return true;
           break __ring_match26;
         }
         return false;
         break __ring_match26;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "TypeVar") {
-      const id_a = __ring_m18.id;
+    if (__ring_m19._tag === "ErrorType") {
       __ring_match27: {
         const __ring_m27 = b;
-        if (__ring_m27._tag === "TypeVar") {
-          const id_b = __ring_m27.id;
-          return (id_a === id_b);
+        if (__ring_m27._tag === "ErrorType") {
+          return true;
           break __ring_match27;
         }
         return false;
         break __ring_match27;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "FnType") {
-      const pa = __ring_m18.params; const ra = __ring_m18.return_type; const ea = __ring_m18.effects;
+    if (__ring_m19._tag === "TypeVar") {
+      const id_a = __ring_m19.id;
       __ring_match28: {
         const __ring_m28 = b;
-        if (__ring_m28._tag === "FnType") {
-          const pb = __ring_m28.params; const rb = __ring_m28.return_type; const eb = __ring_m28.effects;
-          return (((type_lists_equal(pa, pb) && types_equal(ra, rb)) && effects_list_equal(ea.effects, eb.effects)) && optional_ids_equal(ea.tail, eb.tail));
+        if (__ring_m28._tag === "TypeVar") {
+          const id_b = __ring_m28.id;
+          return (id_a === id_b);
           break __ring_match28;
         }
         return false;
         break __ring_match28;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "StructType") {
-      const na = __ring_m18.name; const tpa = __ring_m18.type_params;
+    if (__ring_m19._tag === "FnType") {
+      const pa = __ring_m19.params; const ra = __ring_m19.return_type; const ea = __ring_m19.effects;
       __ring_match29: {
         const __ring_m29 = b;
-        if (__ring_m29._tag === "StructType") {
-          const nb = __ring_m29.name; const tpb = __ring_m29.type_params;
-          return ((na === nb) && type_lists_equal(tpa, tpb));
+        if (__ring_m29._tag === "FnType") {
+          const pb = __ring_m29.params; const rb = __ring_m29.return_type; const eb = __ring_m29.effects;
+          return (((type_lists_equal(pa, pb) && types_equal(ra, rb)) && effects_list_equal(ea.effects, eb.effects)) && optional_ids_equal(ea.tail, eb.tail));
           break __ring_match29;
         }
         return false;
         break __ring_match29;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "EnumType") {
-      const na = __ring_m18.name; const tpa = __ring_m18.type_params;
+    if (__ring_m19._tag === "StructType") {
+      const na = __ring_m19.name; const tpa = __ring_m19.type_params;
       __ring_match30: {
         const __ring_m30 = b;
-        if (__ring_m30._tag === "EnumType") {
+        if (__ring_m30._tag === "StructType") {
           const nb = __ring_m30.name; const tpb = __ring_m30.type_params;
           return ((na === nb) && type_lists_equal(tpa, tpb));
           break __ring_match30;
@@ -638,28 +648,42 @@ function types_equal(a, b) {
         return false;
         break __ring_match30;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "GenericType") {
-      const ba = __ring_m18.base; const aa = __ring_m18.args;
+    if (__ring_m19._tag === "EnumType") {
+      const na = __ring_m19.name; const tpa = __ring_m19.type_params;
       __ring_match31: {
         const __ring_m31 = b;
-        if (__ring_m31._tag === "GenericType") {
-          const bb = __ring_m31.base; const ab = __ring_m31.args;
-          return (types_equal(ba, bb) && type_lists_equal(aa, ab));
+        if (__ring_m31._tag === "EnumType") {
+          const nb = __ring_m31.name; const tpb = __ring_m31.type_params;
+          return ((na === nb) && type_lists_equal(tpa, tpb));
           break __ring_match31;
         }
         return false;
         break __ring_match31;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "RecordType") {
-      const fa = __ring_m18.fields; const ta = __ring_m18.tail;
+    if (__ring_m19._tag === "GenericType") {
+      const ba = __ring_m19.base; const aa = __ring_m19.args;
       __ring_match32: {
         const __ring_m32 = b;
-        if (__ring_m32._tag === "RecordType") {
-          const fb = __ring_m32.fields; const tb = __ring_m32.tail;
+        if (__ring_m32._tag === "GenericType") {
+          const bb = __ring_m32.base; const ab = __ring_m32.args;
+          return (types_equal(ba, bb) && type_lists_equal(aa, ab));
+          break __ring_match32;
+        }
+        return false;
+        break __ring_match32;
+      }
+      break __ring_match19;
+    }
+    if (__ring_m19._tag === "RecordType") {
+      const fa = __ring_m19.fields; const ta = __ring_m19.tail;
+      __ring_match33: {
+        const __ring_m33 = b;
+        if (__ring_m33._tag === "RecordType") {
+          const fb = __ring_m33.fields; const tb = __ring_m33.tail;
           if ((List_len(fa) !== List_len(fb))) {
             return false;
           }
@@ -667,19 +691,19 @@ function types_equal(a, b) {
             return false;
           }
           return fa.every((function(f) { return fb.some((function(bf) { return ((bf.name === f.name) && types_equal(f.ty, bf.ty)); })); }));
-          break __ring_match32;
+          break __ring_match33;
         }
         return false;
-        break __ring_match32;
+        break __ring_match33;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    if (__ring_m18._tag === "EffectRowType") {
-      const ea = __ring_m18.effects; const ta = __ring_m18.tail;
-      __ring_match33: {
-        const __ring_m33 = b;
-        if (__ring_m33._tag === "EffectRowType") {
-          const eb = __ring_m33.effects; const tb = __ring_m33.tail;
+    if (__ring_m19._tag === "EffectRowType") {
+      const ea = __ring_m19.effects; const ta = __ring_m19.tail;
+      __ring_match34: {
+        const __ring_m34 = b;
+        if (__ring_m34._tag === "EffectRowType") {
+          const eb = __ring_m34.effects; const tb = __ring_m34.tail;
           if ((!optional_ids_equal(ta, tb))) {
             return false;
           }
@@ -687,81 +711,81 @@ function types_equal(a, b) {
             return false;
           }
           return ea.every((function(ae) { return eb.some((function(be) { return effects_equal(ae, be); })); }));
-          break __ring_match33;
-        }
-        return false;
-        break __ring_match33;
-      }
-      break __ring_match18;
-    }
-    if (__ring_m18._tag === "TupleType") {
-      const ea = __ring_m18.elements;
-      __ring_match34: {
-        const __ring_m34 = b;
-        if (__ring_m34._tag === "TupleType") {
-          const eb = __ring_m34.elements;
-          return type_lists_equal(ea, eb);
           break __ring_match34;
         }
         return false;
         break __ring_match34;
       }
-      break __ring_match18;
+      break __ring_match19;
     }
-    __match_fail(__ring_m18);
+    if (__ring_m19._tag === "TupleType") {
+      const ea = __ring_m19.elements;
+      __ring_match35: {
+        const __ring_m35 = b;
+        if (__ring_m35._tag === "TupleType") {
+          const eb = __ring_m35.elements;
+          return type_lists_equal(ea, eb);
+          break __ring_match35;
+        }
+        return false;
+        break __ring_match35;
+      }
+      break __ring_match19;
+    }
+    __match_fail(__ring_m19);
   }
 }
 
 function type_to_string(t) {
-  __ring_match35: {
-    const __ring_m35 = t;
-    if (__ring_m35._tag === "IntType") {
+  __ring_match36: {
+    const __ring_m36 = t;
+    if (__ring_m36._tag === "IntType") {
       return BUILTIN_INT;
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "FloatType") {
+    if (__ring_m36._tag === "FloatType") {
       return BUILTIN_FLOAT;
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "StrType") {
+    if (__ring_m36._tag === "StrType") {
       return BUILTIN_STR;
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "BoolType") {
+    if (__ring_m36._tag === "BoolType") {
       return BUILTIN_BOOL;
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "UnitType") {
+    if (__ring_m36._tag === "UnitType") {
       return "()";
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "NeverType") {
+    if (__ring_m36._tag === "NeverType") {
       return "Never";
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "AnyType") {
+    if (__ring_m36._tag === "AnyType") {
       return "Any";
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "TypeVar") {
-      const name = __ring_m35.name; const id = __ring_m35.id;
-      __ring_match36: {
-        const __ring_m36 = name;
-        if (__ring_m36._tag === "some") {
-          const n = __ring_m36._0;
+    if (__ring_m36._tag === "TypeVar") {
+      const name = __ring_m36.name; const id = __ring_m36.id;
+      __ring_match37: {
+        const __ring_m37 = name;
+        if (__ring_m37._tag === "some") {
+          const n = __ring_m37._0;
           return n;
-          break __ring_match36;
+          break __ring_match37;
         }
-        if (__ring_m36._tag === "none") {
+        if (__ring_m37._tag === "none") {
           return `?${Int_to_str(id)}`;
-          break __ring_match36;
+          break __ring_match37;
         }
-        __match_fail(__ring_m36);
+        __match_fail(__ring_m37);
       }
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "FnType") {
-      const params = __ring_m35.params; const return_type = __ring_m35.return_type; const effects = __ring_m35.effects;
+    if (__ring_m36._tag === "FnType") {
+      const params = __ring_m36.params; const return_type = __ring_m36.return_type; const effects = __ring_m36.effects;
       const ps = List_join(params.map((function(p) { return type_to_string(p); })), ", ");
       const ret = type_to_string(return_type);
       const eff = effect_row_to_string(effects);
@@ -770,19 +794,19 @@ function type_to_string(t) {
       } else {
         return `(${ps}) -> ${ret}`;
       }
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "StructType") {
-      const name = __ring_m35.name; const type_params = __ring_m35.type_params;
+    if (__ring_m36._tag === "StructType") {
+      const name = __ring_m36.name; const type_params = __ring_m36.type_params;
       if ((List_len(type_params) === 0)) {
         return name;
       } else {
         return `${name}<${List_join(type_params.map((function(p) { return type_to_string(p); })), ", ")}>`;
       }
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "EnumType") {
-      const name = __ring_m35.name; const type_params = __ring_m35.type_params;
+    if (__ring_m36._tag === "EnumType") {
+      const name = __ring_m36.name; const type_params = __ring_m36.type_params;
       if (((name === BUILTIN_OPTION) && (List_len(type_params) === 1))) {
         return `${type_to_string(Option_unwrap_or(List_first(type_params), UNIT))}?`;
       } else {
@@ -792,20 +816,20 @@ function type_to_string(t) {
           return `${name}<${List_join(type_params.map((function(p) { return type_to_string(p); })), ", ")}>`;
         }
       }
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "GenericType") {
-      const base = __ring_m35.base; const args = __ring_m35.args;
+    if (__ring_m36._tag === "GenericType") {
+      const base = __ring_m36.base; const args = __ring_m36.args;
       return `${type_to_string(base)}<${List_join(args.map((function(a) { return type_to_string(a); })), ", ")}>`;
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "RecordType") {
-      const fields = __ring_m35.fields; const tail = __ring_m35.tail; const tail_name = __ring_m35.tail_name;
+    if (__ring_m36._tag === "RecordType") {
+      const fields = __ring_m36.fields; const tail = __ring_m36.tail; const tail_name = __ring_m36.tail_name;
       const fs = List_join(fields.map((function(f) { return `${f.name}: ${type_to_string(f.ty)}`; })), ", ");
-      __ring_match37: {
-        const __ring_m37 = tail;
-        if (__ring_m37._tag === "some") {
-          const t = __ring_m37._0;
+      __ring_match38: {
+        const __ring_m38 = tail;
+        if (__ring_m38._tag === "some") {
+          const t = __ring_m38._0;
           const ts = (function() {
   const __ring_m = tail_name;
   if (__ring_m._tag === "some") { const n = __ring_m._0; return n; }
@@ -817,73 +841,73 @@ function type_to_string(t) {
           } else {
             return `{..${ts}}`;
           }
-          break __ring_match37;
-        }
-        if (__ring_m37._tag === "none") {
-          return `{${fs}}`;
-          break __ring_match37;
-        }
-        __match_fail(__ring_m37);
-      }
-      break __ring_match35;
-    }
-    if (__ring_m35._tag === "EffectRowType") {
-      const effects = __ring_m35.effects; const tail = __ring_m35.tail;
-      const es = List_join(effects.map((function(e) { return effect_to_string(e); })), ", ");
-      __ring_match38: {
-        const __ring_m38 = tail;
-        if (__ring_m38._tag === "some") {
-          const t = __ring_m38._0;
-          return `<${es}, ?${Int_to_str(t)}>`;
           break __ring_match38;
         }
         if (__ring_m38._tag === "none") {
-          return `<${es}>`;
+          return `{${fs}}`;
           break __ring_match38;
         }
         __match_fail(__ring_m38);
       }
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "TupleType") {
-      const elements = __ring_m35.elements;
+    if (__ring_m36._tag === "EffectRowType") {
+      const effects = __ring_m36.effects; const tail = __ring_m36.tail;
+      const es = List_join(effects.map((function(e) { return effect_to_string(e); })), ", ");
+      __ring_match39: {
+        const __ring_m39 = tail;
+        if (__ring_m39._tag === "some") {
+          const t = __ring_m39._0;
+          return `<${es}, ?${Int_to_str(t)}>`;
+          break __ring_match39;
+        }
+        if (__ring_m39._tag === "none") {
+          return `<${es}>`;
+          break __ring_match39;
+        }
+        __match_fail(__ring_m39);
+      }
+      break __ring_match36;
+    }
+    if (__ring_m36._tag === "TupleType") {
+      const elements = __ring_m36.elements;
       return `(${List_join(elements.map((function(e) { return type_to_string(e); })), ", ")})`;
-      break __ring_match35;
+      break __ring_match36;
     }
-    if (__ring_m35._tag === "ErrorType") {
+    if (__ring_m36._tag === "ErrorType") {
       return "<error>";
-      break __ring_match35;
+      break __ring_match36;
     }
-    __match_fail(__ring_m35);
+    __match_fail(__ring_m36);
   }
 }
 
 function effect_to_string(e) {
-  __ring_match39: {
-    const __ring_m39 = e;
-    if (__ring_m39._tag === "IoEffect") {
+  __ring_match40: {
+    const __ring_m40 = e;
+    if (__ring_m40._tag === "IoEffect") {
       return "io";
-      break __ring_match39;
+      break __ring_match40;
     }
-    if (__ring_m39._tag === "MutEffect") {
+    if (__ring_m40._tag === "MutEffect") {
       return "mut";
-      break __ring_match39;
+      break __ring_match40;
     }
-    if (__ring_m39._tag === "FailEffect") {
-      const error_type = __ring_m39.error_type;
+    if (__ring_m40._tag === "FailEffect") {
+      const error_type = __ring_m40.error_type;
       return `fail<${type_to_string(error_type)}>`;
-      break __ring_match39;
+      break __ring_match40;
     }
-    if (__ring_m39._tag === "CustomEffect") {
-      const name = __ring_m39.name; const type_args = __ring_m39.type_args;
+    if (__ring_m40._tag === "CustomEffect") {
+      const name = __ring_m40.name; const type_args = __ring_m40.type_args;
       if ((List_len(type_args) === 0)) {
         return name;
       } else {
         return `${name}<${List_join(type_args.map((function(a) { return type_to_string(a); })), ", ")}>`;
       }
-      break __ring_match39;
+      break __ring_match40;
     }
-    __match_fail(__ring_m39);
+    __match_fail(__ring_m40);
   }
 }
 
@@ -892,20 +916,20 @@ function effect_row_to_string(row) {
     return "";
   }
   let parts = row.effects.map((function(e) { return effect_to_string(e); }));
-  __ring_match40: {
-    const __ring_m40 = row.tail;
-    if (__ring_m40._tag === "some") {
-      const t = __ring_m40._0;
+  __ring_match41: {
+    const __ring_m41 = row.tail;
+    if (__ring_m41._tag === "some") {
+      const t = __ring_m41._0;
       List_push(parts, `?${Int_to_str(t)}`);
-      break __ring_match40;
+      break __ring_match41;
     }
-    if (__ring_m40._tag === "none") {
-      break __ring_match40;
+    if (__ring_m41._tag === "none") {
+      break __ring_match41;
     }
-    __match_fail(__ring_m40);
+    __match_fail(__ring_m41);
   }
   return List_join(parts, ", ");
 }
 
 
-export { BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, StructField, EnumVariant, RecordField, Type_IntType, Type_FloatType, Type_StrType, Type_BoolType, Type_UnitType, Type_NeverType, Type_AnyType, Type_TypeVar, Type_FnType, Type_StructType, Type_EnumType, Type_GenericType, Type_RecordType, Type_EffectRowType, Type_TupleType, Type_ErrorType, Effect_IoEffect, Effect_FailEffect, Effect_MutEffect, Effect_CustomEffect, EffectRow, RowMergeResult, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW, type_to_builtin_name, make_option_type, is_option_type, option_inner, make_list_type, is_list_type, list_element, make_map_type, is_map_type, make_set_type, is_set_type, effect_row, open_effect_row, row_contains, row_merge, effects_equal, types_equal, type_to_string, effect_to_string, effect_row_to_string };
+export { BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, StructField, EnumVariant, RecordField, Type_IntType, Type_FloatType, Type_StrType, Type_BoolType, Type_UnitType, Type_NeverType, Type_AnyType, Type_TypeVar, Type_FnType, Type_StructType, Type_EnumType, Type_GenericType, Type_RecordType, Type_EffectRowType, Type_TupleType, Type_ErrorType, Effect_IoEffect, Effect_FailEffect, Effect_MutEffect, Effect_CustomEffect, EffectRow, RowMergeResult, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW, effect_kind_name, type_to_builtin_name, make_option_type, is_option_type, option_inner, make_list_type, is_list_type, list_element, make_map_type, is_map_type, make_set_type, is_set_type, effect_row, open_effect_row, row_contains, row_merge, effects_equal, types_equal, type_to_string, effect_to_string, effect_row_to_string };

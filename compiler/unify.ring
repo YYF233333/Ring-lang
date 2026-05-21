@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, UNIT}
+use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, effect_kind_name, UNIT}
 use union_find::{UnionFind, uf_bind, uf_lookup, uf_insert, new_union_find}
 use env::{TypeEnv, apply_subst, apply_subst_row}
 
@@ -106,14 +106,7 @@ fn effects_match_kind(a: Effect, b: Effect) -> Bool {
     }
 }
 
-fn effect_kind_name(e: Effect) -> Str {
-    match e {
-        Effect::IoEffect => "io",
-        Effect::MutEffect => "mut",
-        Effect::FailEffect { .. } => "fail",
-        Effect::CustomEffect { name, .. } => name
-    }
-}
+
 
 fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, var env: TypeEnv) -> UnionFind {
     match (a, b) {
@@ -203,7 +196,17 @@ pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: UnionFind, var env: 
     match (ra.tail, rb.tail) {
         (some(ta), some(tb)) => {
             if ta == tb {
-                // same tail var — unmatched effects already tolerated
+                if a_unmatched.len() > 0 || b_unmatched.len() > 0 {
+                    let fresh = env.fresh_var_id()
+                    var all_unmatched: List<Effect> = []
+                    for e in a_unmatched { all_unmatched.push(e) }
+                    for e in b_unmatched { all_unmatched.push(e) }
+                    let extended_row = Type::EffectRowType { effects: all_unmatched, tail: some(fresh) }
+                    if occurs_in(ta, extended_row, s) {
+                        unify_error_msg("infinite type in effect row variable")
+                    }
+                    uf_insert(s, ta, extended_row)
+                }
             } else if a_unmatched.len() == 0 && b_unmatched.len() == 0 {
                 s = unify(Type::TypeVar { id: ta, name: none }, Type::TypeVar { id: tb, name: none }, s, env)
             } else {

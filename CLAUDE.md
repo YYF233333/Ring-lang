@@ -28,10 +28,10 @@ Ring-lang/
 │   └── audit-report.md                 技术债清单（41 项）
 ├── compiler/
 │   ├── ast.ring                        AST 节点类型定义
-│   ├── types.ring                      Type、Effect、EffectRow 表示 + BUILTIN_* 常量 + type_to_builtin_name
+│   ├── types.ring                      Type、Effect、EffectRow 表示 + BUILTIN_* 常量 + type_to_builtin_name + effect_kind_name
 │   ├── hir.ring                        HIR 节点定义 + 共享约定（variant_js_name, trait_dict_name, evidence_param_name）
 │   ├── builtin_methods.ring            内置方法名注册表（*_METHODS 常量，checker + codegen 共享）
-│   ├── codes.ring                      错误码目录（E0101-E0706）
+│   ├── codes.ring                      错误码目录（E0101-E0706 + E0504）
 │   ├── diagnostics.ring                DiagnosticSink trait、CollectingSink、Diagnostic 类型
 │   ├── formatter.ring                  format_human + format_llm 输出格式化
 │   ├── lexer.ring                      手写词法分析器
@@ -182,7 +182,7 @@ Ring-lang/
 - ~~Parser 错误恢复~~（已完成：声明级恢复）
 - Impl 方法 effect 传播修复（当前用 `__ring_raise_fail` workaround）
 - LSP 移植到 Ring（从 TS 归档版本翻译）
-- 技术债清理（41 项，详见 `docs/audit-report.md`）
+- 技术债清理（53 项中 29 项已修复，详见 `docs/audit-report.md`）
 
 ### 语言特性（中期）
 

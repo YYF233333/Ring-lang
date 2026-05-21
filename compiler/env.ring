@@ -247,6 +247,7 @@ impl TypeEnv {
             }
             i = i - 1
         }
+        panic("internal: rebind failed — variable '${name}' not found in any scope")
     }
 
     pub fn lookup(self, name: Str) -> TypeScheme? {
@@ -293,6 +294,17 @@ impl TypeEnv {
 // Used for local type parameter instantiation maps (not the global substitution).
 // ============================================================
 
+fn chase_type_var_map(subst: Map<Int, Type>, id: Int, depth: Int) -> Type {
+    if depth > 100 { return Type::TypeVar { id: id, name: none } }
+    match subst.get(id) {
+        some(resolved) => match resolved {
+            Type::TypeVar { id: next_id, .. } => chase_type_var_map(subst, next_id, depth + 1),
+            _ => apply_subst_map(subst, resolved)
+        },
+        none => Type::TypeVar { id: id, name: none }
+    }
+}
+
 pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
     match t {
         Type::IntType => t,
@@ -302,10 +314,7 @@ pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
         Type::UnitType => t,
         Type::NeverType => t,
         Type::AnyType => t,
-        Type::TypeVar { id, .. } => match subst.get(id) {
-            some(resolved) => apply_subst_map(subst, resolved),
-            none => t
-        },
+        Type::TypeVar { id, .. } => chase_type_var_map(subst, id, 0),
         Type::FnType { params, return_type, effects } =>
             Type::FnType {
                 params: params.map(fn(p) { apply_subst_map(subst, p) }),

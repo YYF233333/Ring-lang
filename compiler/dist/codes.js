@@ -64,6 +64,8 @@ const E0502 = "E0502";
 
 const E0503 = "E0503";
 
+const E0504 = "E0504";
+
 const E0601 = "E0601";
 
 const E0702 = "E0702";
@@ -144,6 +146,9 @@ function error_description(code) {
   if ((code === "E0503")) {
     return "Unsatisfied trait bound";
   }
+  if ((code === "E0504")) {
+    return "Ambiguous trait method";
+  }
   if ((code === "E0601")) {
     return "Non-exhaustive pattern match";
   }
@@ -188,4 +193,4 @@ function error_category(code) {
 }
 
 
-export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0301, E0302, E0303, E0304, E0305, E0307, E0308, E0402, E0403, E0404, E0501, E0502, E0503, E0601, E0702, E0703, E0704, E0706, error_description, error_category };
+export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0301, E0302, E0303, E0304, E0305, E0307, E0308, E0402, E0403, E0404, E0501, E0502, E0503, E0504, E0601, E0702, E0703, E0704, E0706, error_description, error_category };
