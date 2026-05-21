@@ -5,7 +5,8 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     evidence_param_name, trait_dict_name,
     ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
     RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
-    BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION}
+    BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
+    hexpr_type}
 use codegen_ctx::{CodegenCtx, emit, emit_raw, push_indent, pop_indent,
     qualify, safe_ident, get_evidence_params, LIST_HOF_JS_METHOD}
 use codegen_stmt::{gen_pattern_condition, gen_pattern_bindings,
@@ -339,7 +340,7 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
     // UFCS method call detection
     match callee {
         HExpr::FieldAccess { receiver, field, ty: callee_type, .. } => {
-            let recv_type = get_expr_type(receiver)
+            let recv_type = hexpr_type(receiver)
             let method = field
 
             // Inline List HOF
@@ -493,7 +494,7 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
     var dict_parts: List<Str> = [""]; dict_parts.clear()
     for d in resolved_dicts { dict_parts.push(qualify(ctx, d)) }
     let dict_str = dict_parts.join(", ")
-    let ev_args = get_callee_evidence_args(ctx, get_expr_type(callee), cn)
+    let ev_args = get_callee_evidence_args(ctx, hexpr_type(callee), cn)
     var all_parts: List<Str> = [""]; all_parts.clear()
     if args_str.len() > 0 { all_parts.push(args_str) }
     if dict_str.len() > 0 { all_parts.push(dict_str) }
@@ -1225,7 +1226,7 @@ fn gen_lambda_capture_evidence(var ctx: CodegenCtx, args: List<HExpr>, idx: Int)
             },
             _ => {
                 let fn_expr = gen_expr(ctx, arg)
-                let arg_type = get_expr_type(arg)
+                let arg_type = hexpr_type(arg)
                 match arg_type {
                     Type::FnType { params, .. } => {
                         let arity = params.len()
@@ -1244,39 +1245,5 @@ fn gen_lambda_capture_evidence(var ctx: CodegenCtx, args: List<HExpr>, idx: Int)
             },
         },
         none => "undefined",
-    }
-}
-
-// ============================================================
-// Helpers
-// ============================================================
-
-fn get_expr_type(e: HExpr) -> Type {
-    match e {
-        HExpr::IntLit { ty, .. } => ty,
-        HExpr::FloatLit { ty, .. } => ty,
-        HExpr::StrLit { ty, .. } => ty,
-        HExpr::BoolLit { ty, .. } => ty,
-        HExpr::Ident { ty, .. } => ty,
-        HExpr::BinOp { ty, .. } => ty,
-        HExpr::UnaryOp { ty, .. } => ty,
-        HExpr::Call { ty, .. } => ty,
-        HExpr::FieldAccess { ty, .. } => ty,
-        HExpr::StructLit { ty, .. } => ty,
-        HExpr::NamedVariantConstruct { ty, .. } => ty,
-        HExpr::MatchExpr { ty, .. } => ty,
-        HExpr::Block { ty, .. } => ty,
-        HExpr::IfExpr { ty, .. } => ty,
-        HExpr::StringInterp { ty, .. } => ty,
-        HExpr::TryCatch { ty, .. } => ty,
-        HExpr::HandleExpr { ty, .. } => ty,
-        HExpr::Lambda { ty, .. } => ty,
-        HExpr::EffectOp { ty, .. } => ty,
-        HExpr::OptionUnwrap { ty, .. } => ty,
-        HExpr::TryBlock { ty, .. } => ty,
-        HExpr::OptionOr { ty, .. } => ty,
-        HExpr::RangeExpr { ty, .. } => ty,
-        HExpr::ListLit { ty, .. } => ty,
-        HExpr::TupleLit { ty, .. } => ty,
     }
 }

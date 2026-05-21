@@ -12,7 +12,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod,
     HForInDestructure, HLetDestructureBinding,
     variant_js_name, trait_dict_name, trait_bound_param_name,
-    BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET}
+    BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
+    hexpr_type, hexpr_effects, hexpr_span}
 use diagnostics::{DiagnosticContext, CollectingSink}
 use codes::{E0201, E0203, E0205, E0206, E0301, E0303, E0304, E0305,
     E0307, E0308, E0402, E0601}
@@ -120,70 +121,6 @@ struct MethodLookupResult {
     method_scheme: TypeScheme?
 }
 
-
-// ============================================================
-// HExpr accessor helpers (Ring enum requires match for field access)
-// ============================================================
-
-fn hexpr_type(e: HExpr) -> Type {
-    match e {
-        HExpr::IntLit { ty, .. } => ty,
-        HExpr::FloatLit { ty, .. } => ty,
-        HExpr::StrLit { ty, .. } => ty,
-        HExpr::BoolLit { ty, .. } => ty,
-        HExpr::Ident { ty, .. } => ty,
-        HExpr::BinOp { ty, .. } => ty,
-        HExpr::UnaryOp { ty, .. } => ty,
-        HExpr::Call { ty, .. } => ty,
-        HExpr::FieldAccess { ty, .. } => ty,
-        HExpr::StructLit { ty, .. } => ty,
-        HExpr::NamedVariantConstruct { ty, .. } => ty,
-        HExpr::MatchExpr { ty, .. } => ty,
-        HExpr::Block { ty, .. } => ty,
-        HExpr::IfExpr { ty, .. } => ty,
-        HExpr::StringInterp { ty, .. } => ty,
-        HExpr::TryCatch { ty, .. } => ty,
-        HExpr::HandleExpr { ty, .. } => ty,
-        HExpr::Lambda { ty, .. } => ty,
-        HExpr::EffectOp { ty, .. } => ty,
-        HExpr::OptionUnwrap { ty, .. } => ty,
-        HExpr::TryBlock { ty, .. } => ty,
-        HExpr::OptionOr { ty, .. } => ty,
-        HExpr::RangeExpr { ty, .. } => ty,
-        HExpr::ListLit { ty, .. } => ty,
-        HExpr::TupleLit { ty, .. } => ty
-    }
-}
-
-fn hexpr_effects(e: HExpr) -> EffectRow {
-    match e {
-        HExpr::IntLit { effects, .. } => effects,
-        HExpr::FloatLit { effects, .. } => effects,
-        HExpr::StrLit { effects, .. } => effects,
-        HExpr::BoolLit { effects, .. } => effects,
-        HExpr::Ident { effects, .. } => effects,
-        HExpr::BinOp { effects, .. } => effects,
-        HExpr::UnaryOp { effects, .. } => effects,
-        HExpr::Call { effects, .. } => effects,
-        HExpr::FieldAccess { effects, .. } => effects,
-        HExpr::StructLit { effects, .. } => effects,
-        HExpr::NamedVariantConstruct { effects, .. } => effects,
-        HExpr::MatchExpr { effects, .. } => effects,
-        HExpr::Block { effects, .. } => effects,
-        HExpr::IfExpr { effects, .. } => effects,
-        HExpr::StringInterp { effects, .. } => effects,
-        HExpr::TryCatch { effects, .. } => effects,
-        HExpr::HandleExpr { effects, .. } => effects,
-        HExpr::Lambda { effects, .. } => effects,
-        HExpr::EffectOp { effects, .. } => effects,
-        HExpr::OptionUnwrap { effects, .. } => effects,
-        HExpr::TryBlock { effects, .. } => effects,
-        HExpr::OptionOr { effects, .. } => effects,
-        HExpr::RangeExpr { effects, .. } => effects,
-        HExpr::ListLit { effects, .. } => effects,
-        HExpr::TupleLit { effects, .. } => effects
-    }
-}
 
 // ============================================================
 // Resolve substitution var chain

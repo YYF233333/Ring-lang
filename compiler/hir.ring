@@ -212,3 +212,93 @@ pub fn OPTION_NONE_TAG() -> Str { "none" }
 pub fn OPTION_PAYLOAD_FIELD() -> Str { "_0" }
 pub fn RUNTIME_EFFECT_ABORT() -> Str { "__EffectAbort" }
 pub fn RUNTIME_MATCH_FAIL() -> Str { "__match_fail" }
+
+pub fn hexpr_type(e: HExpr) -> Type {
+    match e {
+        HExpr::IntLit { ty, .. } => ty,
+        HExpr::FloatLit { ty, .. } => ty,
+        HExpr::StrLit { ty, .. } => ty,
+        HExpr::BoolLit { ty, .. } => ty,
+        HExpr::Ident { ty, .. } => ty,
+        HExpr::BinOp { ty, .. } => ty,
+        HExpr::UnaryOp { ty, .. } => ty,
+        HExpr::Call { ty, .. } => ty,
+        HExpr::FieldAccess { ty, .. } => ty,
+        HExpr::StructLit { ty, .. } => ty,
+        HExpr::NamedVariantConstruct { ty, .. } => ty,
+        HExpr::MatchExpr { ty, .. } => ty,
+        HExpr::Block { ty, .. } => ty,
+        HExpr::IfExpr { ty, .. } => ty,
+        HExpr::StringInterp { ty, .. } => ty,
+        HExpr::TryCatch { ty, .. } => ty,
+        HExpr::HandleExpr { ty, .. } => ty,
+        HExpr::Lambda { ty, .. } => ty,
+        HExpr::EffectOp { ty, .. } => ty,
+        HExpr::OptionUnwrap { ty, .. } => ty,
+        HExpr::TryBlock { ty, .. } => ty,
+        HExpr::OptionOr { ty, .. } => ty,
+        HExpr::RangeExpr { ty, .. } => ty,
+        HExpr::ListLit { ty, .. } => ty,
+        HExpr::TupleLit { ty, .. } => ty
+    }
+}
+
+pub fn hexpr_effects(e: HExpr) -> EffectRow {
+    match e {
+        HExpr::IntLit { effects, .. } => effects,
+        HExpr::FloatLit { effects, .. } => effects,
+        HExpr::StrLit { effects, .. } => effects,
+        HExpr::BoolLit { effects, .. } => effects,
+        HExpr::Ident { effects, .. } => effects,
+        HExpr::BinOp { effects, .. } => effects,
+        HExpr::UnaryOp { effects, .. } => effects,
+        HExpr::Call { effects, .. } => effects,
+        HExpr::FieldAccess { effects, .. } => effects,
+        HExpr::StructLit { effects, .. } => effects,
+        HExpr::NamedVariantConstruct { effects, .. } => effects,
+        HExpr::MatchExpr { effects, .. } => effects,
+        HExpr::Block { effects, .. } => effects,
+        HExpr::IfExpr { effects, .. } => effects,
+        HExpr::StringInterp { effects, .. } => effects,
+        HExpr::TryCatch { effects, .. } => effects,
+        HExpr::HandleExpr { effects, .. } => effects,
+        HExpr::Lambda { effects, .. } => effects,
+        HExpr::EffectOp { effects, .. } => effects,
+        HExpr::OptionUnwrap { effects, .. } => effects,
+        HExpr::TryBlock { effects, .. } => effects,
+        HExpr::OptionOr { effects, .. } => effects,
+        HExpr::RangeExpr { effects, .. } => effects,
+        HExpr::ListLit { effects, .. } => effects,
+        HExpr::TupleLit { effects, .. } => effects
+    }
+}
+
+pub fn hexpr_span(e: HExpr) -> Span {
+    match e {
+        HExpr::IntLit { span, .. } => span,
+        HExpr::FloatLit { span, .. } => span,
+        HExpr::StrLit { span, .. } => span,
+        HExpr::BoolLit { span, .. } => span,
+        HExpr::Ident { span, .. } => span,
+        HExpr::BinOp { span, .. } => span,
+        HExpr::UnaryOp { span, .. } => span,
+        HExpr::Call { span, .. } => span,
+        HExpr::FieldAccess { span, .. } => span,
+        HExpr::StructLit { span, .. } => span,
+        HExpr::NamedVariantConstruct { span, .. } => span,
+        HExpr::MatchExpr { span, .. } => span,
+        HExpr::Block { span, .. } => span,
+        HExpr::IfExpr { span, .. } => span,
+        HExpr::StringInterp { span, .. } => span,
+        HExpr::TryCatch { span, .. } => span,
+        HExpr::HandleExpr { span, .. } => span,
+        HExpr::Lambda { span, .. } => span,
+        HExpr::EffectOp { span, .. } => span,
+        HExpr::OptionUnwrap { span, .. } => span,
+        HExpr::TryBlock { span, .. } => span,
+        HExpr::OptionOr { span, .. } => span,
+        HExpr::RangeExpr { span, .. } => span,
+        HExpr::ListLit { span, .. } => span,
+        HExpr::TupleLit { span, .. } => span
+    }
+}
