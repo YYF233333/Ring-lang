@@ -25,7 +25,7 @@ fn main() {
         targets.all(fn(t) { t != name })
     })
     assert(excluded.len() == 1, "case 3: nested closure !=")
-    assert((excluded.get(0) or "?") == "b", "case 3: excluded element is b")
+    assert(excluded.get(0).unwrap_or("?") == "b", "case 3: excluded element is b")
 
     print("nested closure eq: all passed")
 }

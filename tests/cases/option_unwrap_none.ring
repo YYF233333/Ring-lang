@@ -8,8 +8,8 @@ fn try_find(x: Int) -> Int {
 }
 
 fn main() {
-    let a = try_find(-1) or 99
-    let b = try_find(5) or 99
+    let a = try_find(-1) catch { _ => 99 }
+    let b = try_find(5) catch { _ => 99 }
     print(a)
     print(b)
 }

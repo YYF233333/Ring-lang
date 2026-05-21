@@ -76,7 +76,6 @@ pub enum HExpr {
     EffectOp { effect_name: Str, op_name: Str, args: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
     OptionUnwrap { expr: HExpr, ty: Type, effects: EffectRow, span: Span },
     TryBlock { body: HExpr, ty: Type, effects: EffectRow, span: Span },
-    OptionOr { expr: HExpr, default_value: HExpr, ty: Type, effects: EffectRow, span: Span },
     RangeExpr { start: HExpr, end: HExpr, inclusive: Bool, ty: Type, effects: EffectRow, span: Span },
     ListLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
     TupleLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span }
@@ -236,7 +235,6 @@ pub fn hexpr_type(e: HExpr) -> Type {
         HExpr::EffectOp { ty, .. } => ty,
         HExpr::OptionUnwrap { ty, .. } => ty,
         HExpr::TryBlock { ty, .. } => ty,
-        HExpr::OptionOr { ty, .. } => ty,
         HExpr::RangeExpr { ty, .. } => ty,
         HExpr::ListLit { ty, .. } => ty,
         HExpr::TupleLit { ty, .. } => ty
@@ -266,7 +264,6 @@ pub fn hexpr_effects(e: HExpr) -> EffectRow {
         HExpr::EffectOp { effects, .. } => effects,
         HExpr::OptionUnwrap { effects, .. } => effects,
         HExpr::TryBlock { effects, .. } => effects,
-        HExpr::OptionOr { effects, .. } => effects,
         HExpr::RangeExpr { effects, .. } => effects,
         HExpr::ListLit { effects, .. } => effects,
         HExpr::TupleLit { effects, .. } => effects
@@ -296,7 +293,6 @@ pub fn hexpr_span(e: HExpr) -> Span {
         HExpr::EffectOp { span, .. } => span,
         HExpr::OptionUnwrap { span, .. } => span,
         HExpr::TryBlock { span, .. } => span,
-        HExpr::OptionOr { span, .. } => span,
         HExpr::RangeExpr { span, .. } => span,
         HExpr::ListLit { span, .. } => span,
         HExpr::TupleLit { span, .. } => span

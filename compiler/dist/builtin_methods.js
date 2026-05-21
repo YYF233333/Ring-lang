@@ -45,7 +45,7 @@ function OPTION_NON_HOF_METHODS() {
 }
 
 function OPTION_HOF_METHODS() {
-  return ["map", "and_then"];
+  return ["map", "and_then", "unwrap_or_else"];
 }
 
 

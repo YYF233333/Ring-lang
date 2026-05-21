@@ -306,8 +306,6 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             HExpr::OptionUnwrap { expr: zonk_expr(ctx, expr), ty: z_ty, effects: z_eff, span: z_span },
         HExpr::TryBlock { body, .. } =>
             HExpr::TryBlock { body: zonk_expr(ctx, body), ty: z_ty, effects: z_eff, span: z_span },
-        HExpr::OptionOr { expr, default_value, .. } =>
-            HExpr::OptionOr { expr: zonk_expr(ctx, expr), default_value: zonk_expr(ctx, default_value), ty: z_ty, effects: z_eff, span: z_span },
         HExpr::RangeExpr { start, end, inclusive, .. } =>
             HExpr::RangeExpr { start: zonk_expr(ctx, start), end: zonk_expr(ctx, end), inclusive: inclusive, ty: z_ty, effects: z_eff, span: z_span },
         HExpr::ListLit { elements, .. } =>

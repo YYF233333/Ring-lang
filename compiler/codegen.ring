@@ -372,10 +372,6 @@ fn collect_local_calls(expr: HExpr, local_names: Set<Str>, var out: Set<Str>) {
         HExpr::OptionUnwrap { expr, .. } => {
             collect_local_calls(expr, local_names, out)
         },
-        HExpr::OptionOr { expr, default_value, .. } => {
-            collect_local_calls(expr, local_names, out)
-            collect_local_calls(default_value, local_names, out)
-        },
         HExpr::RangeExpr { start, end, .. } => {
             collect_local_calls(start, local_names, out)
             collect_local_calls(end, local_names, out)

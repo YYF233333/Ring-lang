@@ -99,26 +99,6 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
             gen_option_unwrap(ctx, inner),
         HExpr::TryBlock { body, .. } =>
             gen_try_block(ctx, body),
-        HExpr::OptionOr { expr: inner, default_value, .. } => {
-            let e = gen_expr(ctx, inner)
-            let d = gen_expr(ctx, default_value)
-            let tag_f = ENUM_TAG_FIELD()
-            let some_t = OPTION_SOME_TAG()
-            let pay_f = OPTION_PAYLOAD_FIELD()
-            var p: List<Str> = [""]; p.clear()
-            p.push("((v) => v.")
-            p.push(tag_f)
-            p.push(" === \"")
-            p.push(some_t)
-            p.push("\" ? v.")
-            p.push(pay_f)
-            p.push(" : ")
-            p.push(d)
-            p.push(")(")
-            p.push(e)
-            p.push(")")
-            p.join("")
-        },
         HExpr::RangeExpr { start, end, .. } => {
             let s = gen_expr(ctx, start)
             let e = gen_expr(ctx, end)
@@ -449,6 +429,11 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                             let cb = gen_lambda_capture_evidence(ctx, args, 0)
                             return gen_option_and_then_expr(r, cb)
                         }
+                        if method == "unwrap_or_else" {
+                            let r = gen_expr(ctx, receiver)
+                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
+                            return gen_option_unwrap_or_else_expr(r, cb)
+                        }
                     }
                 },
                 _ => {},
@@ -553,6 +538,17 @@ fn gen_option_map_expr(receiver: Str, cb: Str) -> Str {
 fn gen_option_and_then_expr(receiver: Str, cb: Str) -> Str {
     var p: List<Str> = [""]; p.clear()
     p.push("((__o, __f) => __o._tag === \"some\" ? __f(__o._0) : __o)(")
+    p.push(receiver)
+    p.push(", ")
+    p.push(cb)
+    p.push(")")
+    p.join("")
+}
+
+// Helper: Option.unwrap_or_else codegen
+fn gen_option_unwrap_or_else_expr(receiver: Str, cb: Str) -> Str {
+    var p: List<Str> = [""]; p.clear()
+    p.push("((__o, __f) => __o._tag === \"some\" ? __o._0 : __f())(")
     p.push(receiver)
     p.push(", ")
     p.push(cb)
@@ -1063,7 +1059,6 @@ fn has_fail_effect(expr: HExpr) -> Bool {
         HExpr::EffectOp { effects, .. } => check_fail(effects),
         HExpr::OptionUnwrap { effects, .. } => check_fail(effects),
         HExpr::TryBlock { effects, .. } => check_fail(effects),
-        HExpr::OptionOr { effects, .. } => check_fail(effects),
         HExpr::RangeExpr { effects, .. } => check_fail(effects),
         HExpr::ListLit { effects, .. } => check_fail(effects),
         HExpr::TupleLit { effects, .. } => check_fail(effects),

@@ -3,7 +3,7 @@ fn find(x: Int) -> Int? {
 }
 
 fn main() {
-    let a = find(42) or 0
-    let b = find(-1) or 99
+    let a = find(42).unwrap_or(0)
+    let b = find(-1).unwrap_or(99)
     print(a + b)
 }

@@ -814,4 +814,16 @@ fn register_option_hof(var env: TypeEnv) {
         bounds: [],
         def_id: none
     })
+
+    // unwrap_or_else: (Option<T>, () -> T / e) -> T / e
+    t_id = env.fresh_var_id()
+    t = Type::TypeVar { id: t_id, name: none }
+    orow = open_row(env)
+    cb = Type::FnType { params: [], return_type: t, effects: orow.eff }
+    methods.insert("unwrap_or_else", TypeScheme {
+        ty: Type::FnType { params: [make_option_type(t), cb], return_type: t, effects: orow.eff },
+        type_vars: [t_id, orow.tail_id],
+        bounds: [],
+        def_id: none
+    })
 }

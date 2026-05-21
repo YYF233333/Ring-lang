@@ -8,6 +8,6 @@ fn use_find() -> Int {
 }
 
 fn main() {
-    let result = use_find() or 0
+    let result = use_find() catch { _ => 0 }
     print(result)
 }

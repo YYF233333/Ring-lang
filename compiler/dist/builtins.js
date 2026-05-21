@@ -336,7 +336,12 @@ function register_option_hof(env) {
   u = types$Type_TypeVar(u_id, Option_none);
   orow = open_row(env);
   cb = types$Type_FnType([t], types$make_option_type(u), orow.eff);
-  return _Map_insert(methods, "and_then", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], types$make_option_type(u), orow.eff), [t_id, u_id, orow.tail_id], [], Option_none));
+  _Map_insert(methods, "and_then", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], types$make_option_type(u), orow.eff), [t_id, u_id, orow.tail_id], [], Option_none));
+  t_id = env$TypeEnv_fresh_var_id(env);
+  t = types$Type_TypeVar(t_id, Option_none);
+  orow = open_row(env);
+  cb = types$Type_FnType([], t, orow.eff);
+  return _Map_insert(methods, "unwrap_or_else", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], t, orow.eff), [t_id, orow.tail_id], [], Option_none));
 }
 
 

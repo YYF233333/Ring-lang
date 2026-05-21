@@ -143,7 +143,6 @@ pub enum Expr {
     Block { stmts: List<Stmt>, tail: Expr?, span: Span },
     IfExpr { condition: Expr, then_branch: Expr, else_branch: Expr?, span: Span },
     StringInterp { parts: List<StringInterpPart>, span: Span },
-    OrExpr { expr: Expr, default_value: Expr, span: Span },
     CatchExpr { expr: Expr, arms: List<MatchArm>, span: Span },
     HandleExpr { body: Expr, handlers: List<EffectHandler>, span: Span },
     Lambda { params: List<Param>, return_type: TypeExpr?, body: Expr, span: Span },

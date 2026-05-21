@@ -612,8 +612,6 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
             infer_if(ctx, condition, then_branch, else_branch, span, subst),
         Expr::StringInterp { parts, span } =>
             infer_string_interp(ctx, parts, span, subst),
-        Expr::OrExpr { expr: or_expr, default_value, span } =>
-            infer_or(ctx, or_expr, default_value, span, subst),
         Expr::CatchExpr { expr: catch_expr, arms, span } =>
             infer_catch(ctx, catch_expr, arms, span, subst),
         Expr::HandleExpr { body, handlers, span } =>
@@ -1858,55 +1856,6 @@ fn infer_string_interp(var ctx: InferCtx, parts: List<StringInterpPart>, span: S
 
     InferResult {
         hexpr: HExpr::StringInterp { parts: hparts, ty: STR(), effects: effects, span: span },
-        subst: s, effects: effects
-    }
-}
-
-// ============================================================
-// infer_or
-// ============================================================
-
-fn infer_or(var ctx: InferCtx, expr: Expr, default_value: Expr, span: Span, subst: Map<Int, Type>) -> InferResult {
-    let expr_r = infer_expr(ctx, expr, subst)
-    var s = expr_r.subst
-    let expr_type = apply_subst(s, hexpr_type(expr_r.hexpr))
-
-    match expr_type {
-        Type::TypeVar { .. } => type_error(ctx.sink, E0301(),
-            "Cannot determine whether 'or' should unwrap Option or catch fail — the expression type is ambiguous. Add a type annotation to clarify.",
-            span, DiagnosticContext::OtherContext { detail: some("ambiguous 'or' dispatch: expression type is unresolved") }),
-        _ => {}
-    }
-
-    if is_option_type(expr_type) {
-        let inner = option_inner(expr_type)
-        let default_r = infer_expr(ctx, default_value, s)
-        s = default_r.subst
-        s = unify_at(ctx.sink, ctx.env, inner, hexpr_type(default_r.hexpr), s, span)
-        let result_type = apply_subst(s, inner)
-        let me = merge_effects(ctx.env, expr_r.effects, default_r.effects, s)
-        return InferResult {
-            hexpr: HExpr::OptionOr { expr: expr_r.hexpr, default_value: default_r.hexpr, ty: result_type, effects: me.0, span: span },
-            subst: me.1, effects: me.0
-        }
-    }
-
-    let default_r = infer_expr(ctx, default_value, s)
-    s = default_r.subst
-    s = unify_at(ctx.sink, ctx.env, hexpr_type(expr_r.hexpr), hexpr_type(default_r.hexpr), s, span)
-    let me = merge_effects(ctx.env, expr_r.effects, default_r.effects, s)
-    var effects = me.0
-    s = me.1
-    effects = remove_fail_effect(effects)
-    let result_type = apply_subst(s, hexpr_type(expr_r.hexpr))
-    let wildcard_arm = HMatchArm {
-        pattern: Pattern::Wildcard { span: span },
-        guard: none,
-        body: default_r.hexpr,
-        span: span
-    }
-    InferResult {
-        hexpr: HExpr::TryCatch { body: expr_r.hexpr, arms: [wildcard_arm], ty: result_type, effects: effects, span: span },
         subst: s, effects: effects
     }
 }

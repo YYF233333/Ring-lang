@@ -44,12 +44,12 @@ fn main() {
     let no_pos = try { first_positive([-1, -2]) }
     assert(no_pos.is_none(), "? with method chain none")
 
-    // or as alternative to try+unwrap
-    let age_or = get_user_age(1) or -1
-    assert(age_or == 30, "or with ? chain success")
+    // catch as alternative to try+unwrap
+    let age_or = get_user_age(1) catch { _ => -1 }
+    assert(age_or == 30, "catch with ? chain success")
 
-    let age_or_fail = get_user_age(99) or -1
-    assert(age_or_fail == -1, "or with ? chain fail")
+    let age_or_fail = get_user_age(99) catch { _ => -1 }
+    assert(age_or_fail == -1, "catch with ? chain fail")
 
     print("option_chain: all tests passed")
 }

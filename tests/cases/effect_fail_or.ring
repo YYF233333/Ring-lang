@@ -1,4 +1,4 @@
-// Test: fail effect with or (catch default), combining with Option
+// Test: fail effect with catch (catch default), combining with Option
 
 fn divide(a: Int, b: Int) -> Int {
     if b == 0 {
@@ -8,19 +8,19 @@ fn divide(a: Int, b: Int) -> Int {
 }
 
 fn safe_divide(a: Int, b: Int) -> Int {
-    divide(a, b) or -1
+    divide(a, b) catch { _ => -1 }
 }
 
 fn main() {
-    // or catches fail effect
+    // catch catches fail effect
     assert(safe_divide(10, 2) == 5, "safe div success")
     assert(safe_divide(10, 0) == -1, "safe div catch")
 
-    // or with option
+    // unwrap_or with option
     let x: Int? = some(42)
     let y: Int? = none
-    assert((x or 0) == 42, "option or some")
-    assert((y or 0) == 0, "option or none")
+    assert(x.unwrap_or(0) == 42, "option unwrap_or some")
+    assert(y.unwrap_or(0) == 0, "option unwrap_or none")
 
     // try with fail
     let r1 = try { divide(10, 2) }

@@ -18,21 +18,19 @@ use codes::{E0101, E0103, E0706}
 // ============================================================
 
 pub fn PREC_NONE() -> Int { 0 }
-pub fn PREC_OR() -> Int { 1 }
-pub fn PREC_CATCH() -> Int { 2 }
-pub fn PREC_LOGIC_OR() -> Int { 3 }
-pub fn PREC_LOGIC_AND() -> Int { 4 }
-pub fn PREC_EQUALITY() -> Int { 5 }
-pub fn PREC_COMPARE() -> Int { 6 }
-pub fn PREC_RANGE() -> Int { 7 }
-pub fn PREC_ADD_SUB() -> Int { 8 }
-pub fn PREC_MUL_DIV() -> Int { 9 }
-pub fn PREC_UNARY() -> Int { 10 }
-pub fn PREC_POSTFIX() -> Int { 11 }
+pub fn PREC_CATCH() -> Int { 1 }
+pub fn PREC_LOGIC_OR() -> Int { 2 }
+pub fn PREC_LOGIC_AND() -> Int { 3 }
+pub fn PREC_EQUALITY() -> Int { 4 }
+pub fn PREC_COMPARE() -> Int { 5 }
+pub fn PREC_RANGE() -> Int { 6 }
+pub fn PREC_ADD_SUB() -> Int { 7 }
+pub fn PREC_MUL_DIV() -> Int { 8 }
+pub fn PREC_UNARY() -> Int { 9 }
+pub fn PREC_POSTFIX() -> Int { 10 }
 
 pub fn infix_precedence(kind: TokenKind) -> Int {
     match kind {
-        TkOr => PREC_OR(),
         TkCatch => PREC_CATCH(),
         TkPipePipe => PREC_LOGIC_OR(),
         TkAmpAmp => PREC_LOGIC_AND(),
@@ -118,7 +116,6 @@ pub fn expr_span(e: Expr) -> Span {
         Block { span, .. } => span,
         IfExpr { span, .. } => span,
         StringInterp { span, .. } => span,
-        OrExpr { span, .. } => span,
         CatchExpr { span, .. } => span,
         HandleExpr { span, .. } => span,
         Lambda { span, .. } => span,
@@ -935,10 +932,7 @@ impl Parser {
             let prec = infix_precedence(tok.kind)
             if prec <= min_prec { break }
 
-            if self.check(TokenKind::TkOr) {
-                left = self.parse_or_expr(left)
-                last_was_comparison = false
-            } else if self.check(TokenKind::TkCatch) {
+            if self.check(TokenKind::TkCatch) {
                 left = self.parse_catch_expr(left)
                 last_was_comparison = false
             } else if self.check(TokenKind::TkDot) {
@@ -1169,17 +1163,6 @@ impl Parser {
             args.push(self.parse_expr())
         }
         args
-    }
-
-    // ============================================================
-    // Or expression
-    // ============================================================
-
-    fn parse_or_expr(var self, left: Expr) -> Expr {
-        self.advance()
-        let default_value = self.parse_expr_bp(PREC_OR())
-        let span = self.make_span(expr_span(left).start, expr_span(default_value).end)
-        Expr::OrExpr { expr: left, default_value: default_value, span: span }
     }
 
     // ============================================================
