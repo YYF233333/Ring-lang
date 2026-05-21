@@ -7,6 +7,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
 use codegen_ctx::{CodegenCtx, HTraitDeclInfo, emit, emit_raw, push_indent, pop_indent,
     qualify, safe_ident, extract_effect_names, get_evidence_params}
 use codegen_stmt::{emit_block_body}
+use codegen_expr::{gen_expr}
 
 // ============================================================
 // Top-level dispatch
@@ -31,6 +32,7 @@ pub fn emit_decl(var ctx: CodegenCtx, decl: HDecl) {
             emit_extern_fn_decl(ctx, name),
         HDecl::ExternType { .. } => {},
         HDecl::TypeAlias { .. } => {},
+        HDecl::Const { name, init, .. } => emit_const_decl(ctx, name, init),
     }
 }
 
@@ -85,6 +87,16 @@ fn emit_extern_fn_decl(var ctx: CodegenCtx, name: Str) {
         },
         none => {},
     }
+}
+
+// ============================================================
+// Const declarations
+// ============================================================
+
+fn emit_const_decl(var ctx: CodegenCtx, name: Str, init: HExpr) {
+    let sn = qualify(ctx, name)
+    let init_js = gen_expr(ctx, init)
+    emit(ctx, "const ${sn} = ${init_js};")
 }
 
 // ============================================================

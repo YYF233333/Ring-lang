@@ -91,6 +91,7 @@ fn is_decl_start(k: TokenKind) -> Bool {
         TkFn => true, TkStruct => true, TkEnum => true,
         TkEffect => true, TkTrait => true, TkImpl => true,
         TkExtern => true, TkUse => true, TkPub => true, TkTest => true,
+        TkConst => true,
         _ => false
     }
 }
@@ -616,6 +617,7 @@ impl Parser {
             TkTest => some(self.parse_test_decl()),
             TkTrait => some(self.parse_trait_decl(is_pub)),
             TkExtern => some(self.parse_extern_decl(is_pub)),
+            TkConst => some(self.parse_const_decl(is_pub)),
             TkIdent => {
                 if tok.value == "type" { return some(self.parse_type_alias_decl(is_pub)) }
                 self.report_error(E0101(), "Expected declaration, got '${tok.value}' (${token_kind_value(tok.kind)})", some(tok.span))
@@ -660,6 +662,20 @@ impl Parser {
             is_abstract: is_abstract_val,
             span: self.make_span(start, end)
         }
+    }
+
+    fn parse_const_decl(var self, is_pub: Bool) -> Decl {
+        let start = self.current_span_start()
+        self.expect(TokenKind::TkConst)
+        let name = self.expect(TokenKind::TkIdent).value
+        var type_annotation: TypeExpr? = none
+        if self.try_consume(TokenKind::TkColon) {
+            type_annotation = some(self.parse_type_expr())
+        }
+        self.expect(TokenKind::TkEq)
+        let init = self.parse_expr()
+        let end = self.current_span_start()
+        Decl::Const { name: name, type_annotation: type_annotation, init: init, is_pub: is_pub, span: self.make_span(start, end) }
     }
 
     fn parse_extern_decl(var self, is_pub: Bool) -> Decl {

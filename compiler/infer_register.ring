@@ -583,6 +583,24 @@ fn register_type_alias(var ctx: InferCtx, name: Str, type_params: List<TypeParam
     ctx.env.type_aliases.insert(name, TypeAliasDef { type_params: tp_names, type_param_vars: tp_vars, ty: resolved })
 }
 
+fn register_const(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span: Span) {
+    check_duplicate_def(ctx, name, span)
+    match type_annotation {
+        some(texpr) => {
+            let ty = resolve_type_expr(ctx, texpr)
+            ctx.env.bind_mono(name, ty)
+        },
+        none => {
+            let tv = ctx.env.fresh_var()
+            ctx.env.bind_mono(name, tv)
+        }
+    }
+    match ctx.env.lookup(name) {
+        some(s) => match s.def_id { some(did) => ctx.env.record_def_span(did, span), none => {} },
+        none => {}
+    }
+}
+
 // ============================================================
 // Dispatch: register individual declaration
 // ============================================================
@@ -611,6 +629,8 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
         Decl::ExternType { name, type_params, .. } =>
             register_extern_type(ctx, name, type_params),
         Decl::TypeAlias { name, type_params, type_expr, .. } =>
-            register_type_alias(ctx, name, type_params, type_expr)
+            register_type_alias(ctx, name, type_params, type_expr),
+        Decl::Const { name, type_annotation, span, .. } =>
+            register_const(ctx, name, type_annotation, span)
     }
 }

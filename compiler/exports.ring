@@ -156,6 +156,14 @@ pub fn extract_exports(
                     }
                 }
             },
+            Decl::Const { name, is_pub, .. } => {
+                if is_pub {
+                    match env.lookup(name) {
+                        some(scheme) => { values.insert(name, scheme) },
+                        none => {},
+                    }
+                }
+            },
             _ => {},
         }
     }

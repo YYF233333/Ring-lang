@@ -89,6 +89,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
             HDecl::Impl { target_type, .. } => { ctx.local_names.insert(target_type) },
             HDecl::Trait { name, .. } => { ctx.local_names.insert(name) },
             HDecl::Effect { name, .. } => { ctx.local_names.insert(name) },
+            HDecl::Const { name, .. } => { ctx.local_names.insert(name) },
             _ => {},
         }
     }

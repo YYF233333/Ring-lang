@@ -8,7 +8,7 @@ use codes::{E0101, E0102}
 
 pub enum TokenKind {
     // Keywords
-    TkFn, TkLet, TkVar, TkStruct, TkEnum, TkMatch,
+    TkFn, TkLet, TkVar, TkConst, TkStruct, TkEnum, TkMatch,
     TkImpl, TkEffect, TkHandle, TkWith,
     TkIf, TkElse, TkCatch, TkTest, TkReturn,
     TkFor, TkIn, TkPub, TkWhere,
@@ -44,7 +44,7 @@ pub enum TokenKind {
 
 pub fn token_kind_value(k: TokenKind) -> Str {
     match k {
-        TkFn => "fn", TkLet => "let", TkVar => "var",
+        TkFn => "fn", TkLet => "let", TkVar => "var", TkConst => "const",
         TkStruct => "struct", TkEnum => "enum", TkMatch => "match",
         TkImpl => "impl", TkEffect => "effect", TkHandle => "handle", TkWith => "with",
         TkIf => "if", TkElse => "else", TkCatch => "catch",
@@ -79,6 +79,7 @@ fn keyword_lookup(word: Str) -> TokenKind? {
         "fn" => some(TokenKind::TkFn),
         "let" => some(TokenKind::TkLet),
         "var" => some(TokenKind::TkVar),
+        "const" => some(TokenKind::TkConst),
         "struct" => some(TokenKind::TkStruct),
         "enum" => some(TokenKind::TkEnum),
         "match" => some(TokenKind::TkMatch),

@@ -145,7 +145,8 @@ pub enum HDecl {
     Trait { name: Str, type_params: List<TypeParam>, methods: List<HTraitMethod>, is_pub: Bool, span: Span },
     ExternFn { name: Str, def_id: Int?, type_params: List<TypeParam>, params: List<HParam>, return_type: Type, effects: EffectRow, is_pub: Bool, span: Span },
     ExternType { name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span },
-    TypeAlias { name: Str, ty: Type, is_pub: Bool, span: Span }
+    TypeAlias { name: Str, ty: Type, is_pub: Bool, span: Span },
+    Const { name: Str, def_id: Int?, ty: Type, init: HExpr, is_pub: Bool, span: Span }
 }
 
 pub enum FieldAction {

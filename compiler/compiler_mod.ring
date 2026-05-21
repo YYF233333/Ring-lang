@@ -324,6 +324,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                                         }
                                     }
                                 },
+                                Decl::Const { name, is_pub, .. } => { if is_pub { export_names.push(safe_ident(name)) } },
                                 _ => {},
                             }
                         }

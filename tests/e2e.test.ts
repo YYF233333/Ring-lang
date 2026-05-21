@@ -336,6 +336,7 @@ const cases: TestCase[] = [
   { file: "empty_list.ring", expected: "empty_list: all tests passed\n" },
   { file: "tuple_field_access.ring", expected: "tuple_field_access: all tests passed\n" },
   { file: "result_basic.ring", expected: "result_basic: all tests passed\n" },
+  { file: "const_basic.ring", expected: "const_basic: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -381,6 +382,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_no_ord.ring", error_pattern: "E0308" },
     { file: "error_tuple_oob.ring", error_pattern: "E0304" },
     { file: "error_enum_empty_parens.ring", error_pattern: "E0104" },
+    { file: "error_const_reassign.ring", error_pattern: "E0205" },
   ];
 
   for (const tc of negative_cases) {

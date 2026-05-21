@@ -2199,8 +2199,42 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
                 none => UNIT()
             }
             HDecl::TypeAlias { name: name, ty: alias_type, is_pub: is_pub, span: span }
-        }
+        },
+        Decl::Const { name, type_annotation, init, is_pub, span } =>
+            check_const_decl(ctx, name, type_annotation, init, is_pub, span)
     }
+}
+
+fn check_const_decl(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {
+    let saved_subst = ctx.subst
+    ctx.subst = empty_subst()
+    // Retrieve the def_id assigned during registration
+    let old_def_id = match ctx.env.lookup(name) {
+        some(sc) => sc.def_id,
+        none => none
+    }
+    var expected_ty: Type? = none
+    match type_annotation {
+        some(texpr) => { expected_ty = some(resolve_type_expr(ctx, texpr)) },
+        none => {}
+    }
+    let init_r = infer_expr(ctx, init, ctx.subst)
+    var s = init_r.subst
+    var init_ty = hexpr_type(init_r.hexpr)
+    match expected_ty {
+        some(ann_ty) => {
+            s = unify_at(ctx.sink, ctx.env, init_ty, ann_ty, s, span)
+            init_ty = apply_subst(s, ann_ty)
+        },
+        none => {}
+    }
+    let resolved = apply_subst(s, init_ty)
+    let gen_scheme = generalize(ctx.env, resolved, s)
+    // Preserve the original def_id so mutability checks work
+    let scheme = TypeScheme { ty: gen_scheme.ty, type_vars: gen_scheme.type_vars, bounds: gen_scheme.bounds, def_id: old_def_id }
+    ctx.env.rebind(name, scheme)
+    ctx.subst = saved_subst
+    HDecl::Const { name: name, def_id: old_def_id, ty: resolved, init: init_r.hexpr, is_pub: is_pub, span: span }
 }
 
 fn check_struct_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span) -> HDecl {
