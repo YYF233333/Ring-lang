@@ -61,15 +61,6 @@ pub struct RowMergeResult {
     pub tails_to_unify: Option<(Int, Int)>
 }
 
-// Helper functions for typed empty lists (Ring cannot infer element type of `[]`)
-pub fn empty_types() -> List<Type> { let x: List<Type> = [INT()]; x.clear(); x }
-pub fn empty_effects() -> List<Effect> { let x: List<Effect> = [Effect::IoEffect]; x.clear(); x }
-pub fn empty_fields() -> List<StructField> {
-    let dummy = StructField { name: "", ty: INT(), is_pub: false }
-    let x: List<StructField> = [dummy]; x.clear(); x
-}
-
-
 pub fn INT() -> Type { Type::IntType }
 pub fn FLOAT() -> Type { Type::FloatType }
 pub fn STR() -> Type { Type::StrType }
@@ -78,7 +69,7 @@ pub fn UNIT() -> Type { Type::UnitType }
 pub fn NEVER() -> Type { Type::NeverType }
 pub fn ANY() -> Type { Type::AnyType }
 
-pub fn EMPTY_ROW() -> EffectRow { EffectRow { effects: empty_effects(), tail: none } }
+pub fn EMPTY_ROW() -> EffectRow { EffectRow { effects: [], tail: none } }
 
 pub fn type_to_builtin_name(t: Type) -> Str? {
     match t {
@@ -99,7 +90,7 @@ pub fn make_option_type(inner: Type) -> Type {
         type_params: [inner],
         variants: [
             EnumVariant { name: "some", fields: [inner], field_names: none },
-            EnumVariant { name: "none", fields: empty_types(), field_names: none }
+            EnumVariant { name: "none", fields: [], field_names: none }
         ]
     }
 }
@@ -120,7 +111,7 @@ pub fn option_inner(t: Type) -> Type {
 }
 
 pub fn make_list_type(element: Type) -> Type {
-    Type::StructType { name: BUILTIN_LIST(), type_params: [element], fields: empty_fields() }
+    Type::StructType { name: BUILTIN_LIST(), type_params: [element], fields: [] }
 }
 
 pub fn is_list_type(t: Type) -> Bool {
@@ -138,7 +129,7 @@ pub fn list_element(t: Type) -> Type {
 }
 
 pub fn make_map_type(key: Type, value: Type) -> Type {
-    Type::StructType { name: BUILTIN_MAP(), type_params: [key, value], fields: empty_fields() }
+    Type::StructType { name: BUILTIN_MAP(), type_params: [key, value], fields: [] }
 }
 
 pub fn is_map_type(t: Type) -> Bool {
@@ -149,7 +140,7 @@ pub fn is_map_type(t: Type) -> Bool {
 }
 
 pub fn make_set_type(element: Type) -> Type {
-    Type::StructType { name: BUILTIN_SET(), type_params: [element], fields: empty_fields() }
+    Type::StructType { name: BUILTIN_SET(), type_params: [element], fields: [] }
 }
 
 pub fn is_set_type(t: Type) -> Bool {

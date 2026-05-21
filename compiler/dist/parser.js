@@ -193,140 +193,8 @@ function str_to_unaryop(s) {
   return panic(`Unknown unary operator: ${s}`);
 }
 
-function empty_strs() {
-  const x = [""];
-  List_clear(x);
-  return x;
-}
-
-function empty_spans() {
-  const x = [ast$span_zero()];
-  List_clear(x);
-  return x;
-}
-
-function empty_type_exprs() {
-  const x = [0];
-  List_clear(x);
-  return x.map((function(i) { return panic("unreachable"); }));
-}
-
 function dummy_type_expr() {
-  return ast$TypeExpr_Named("", empty_type_exprs(), ast$span_zero());
-}
-
-function empty_exprs() {
-  const x = [ast$Expr_IntLit(0, ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_stmts() {
-  const x = [ast$Stmt_Break(ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_patterns() {
-  const x = [ast$Pattern_Wildcard(ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_params() {
-  const x = [new ast$Param("", false, Option_none, ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_type_bounds() {
-  const x = [new ast$TypeBound("", empty_type_exprs(), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_type_params() {
-  const x = [new ast$TypeParam("", empty_type_bounds(), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_match_arms() {
-  const x = [new ast$MatchArm(ast$Pattern_Wildcard(ast$span_zero()), Option_none, ast$Expr_IntLit(0, ast$span_zero()), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_struct_field_inits() {
-  const x = [new ast$StructFieldInit("", ast$Expr_IntLit(0, ast$span_zero()), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_effect_handlers() {
-  const x = [new ast$EffectHandler("", "", empty_params(), Option_none, ast$Expr_IntLit(0, ast$span_zero()), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_struct_field_decls() {
-  const x = [new ast$StructFieldDecl("", dummy_type_expr(), false, ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_enum_variant_decls() {
-  const x = [new ast$EnumVariantDecl("", empty_type_exprs(), Option_none, ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_named_enum_fields() {
-  const x = [new ast$NamedEnumField("", dummy_type_expr(), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_effect_op_decls() {
-  const x = [new ast$EffectOpDecl("", empty_params(), dummy_type_expr(), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_decls() {
-  const x = [ast$Decl_Test("", ast$Expr_IntLit(0, ast$span_zero()), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_use_decls() {
-  const x = [new ast$UseDecl(new ast$UsePath(empty_strs(), ast$span_zero()), ast$UseImport_Module, Option_none, false, ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_named_imports() {
-  const x = [new ast$NamedImport("", Option_none, ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_named_pattern_fields() {
-  const x = [new ast$NamedPatternField("", ast$Pattern_Wildcard(ast$span_zero()), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_record_type_fields() {
-  const x = [new ast$RecordTypeField("", dummy_type_expr(), ast$span_zero())];
-  List_clear(x);
-  return x;
-}
-
-function empty_string_interp_parts() {
-  const x = [ast$StringInterpPart_LitPart("")];
-  List_clear(x);
-  return x;
+  return ast$TypeExpr_Named("", [], ast$span_zero());
 }
 
 function is_decl_start(k) {
@@ -588,8 +456,8 @@ function Parser_error(self, msg) {
 }
 function Parser_parse_program(self) {
   const start = Parser_current_span_start(self);
-  let uses = empty_use_decls();
-  let decls = empty_decls();
+  let uses = [];
+  let decls = [];
   let decls_started = false;
   while ((!Parser_at_end(self))) {
     if (Parser_check(self, lexer$TokenKind_TkError)) {
@@ -723,8 +591,8 @@ function Parser_parse_for_in_stmt(self) {
   let destructure = Option_none;
   if (Parser_check(self, lexer$TokenKind_TkLParen)) {
     Parser_advance(self);
-    let names = empty_strs();
-    let spans = empty_spans();
+    let names = [];
+    let spans = [];
     const first = Parser_expect(self, lexer$TokenKind_TkIdent);
     List_push(names, first.value);
     List_push(spans, first.span);
@@ -824,7 +692,7 @@ function Parser_parse_return_stmt(self) {
 function Parser_parse_block_expr(self) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let stmts = empty_stmts();
+  let stmts = [];
   let tail = Option_none;
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const stmt = Parser_parse_stmt(self);
@@ -854,7 +722,7 @@ function Parser_parse_block_expr(self) {
 function Parser_parse_use_decl(self, is_pub) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkUse);
-  let segments = empty_strs();
+  let segments = [];
   const path_start = Parser_current_span_start(self);
   List_push(segments, Parser_expect(self, lexer$TokenKind_TkIdent).value);
   while (Parser_check(self, lexer$TokenKind_TkColonColon)) {
@@ -870,7 +738,7 @@ function Parser_parse_use_decl(self, is_pub) {
   let alias = Option_none;
   if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
     Parser_advance(self);
-    let names = empty_named_imports();
+    let names = [];
     while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
       const name_start = Parser_current_span_start(self);
       const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
@@ -965,11 +833,11 @@ function Parser_parse_fn_decl(self, is_pub, body_optional) {
   if (Parser_try_consume(self, lexer$TokenKind_TkArrow)) {
     return_type = Option_some(Parser_parse_type_expr(self));
   }
-  let body = ast$Expr_Block(empty_stmts(), Option_none, ast$span_zero());
+  let body = ast$Expr_Block([], Option_none, ast$span_zero());
   let is_abstract_val = false;
   if ((body_optional && (!Parser_check(self, lexer$TokenKind_TkLBrace)))) {
     const pos = Parser_current_span_start(self);
-    body = ast$Expr_Block(empty_stmts(), Option_none, Parser_make_span(self, pos, pos));
+    body = ast$Expr_Block([], Option_none, Parser_make_span(self, pos, pos));
     is_abstract_val = true;
   } else {
     body = Parser_parse_block_expr(self);
@@ -1022,7 +890,7 @@ function Parser_parse_struct_decl(self, is_pub) {
   const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
   const type_params = Parser_parse_type_params(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let fields = empty_struct_field_decls();
+  let fields = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const field_start = Parser_current_span_start(self);
     const field_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
@@ -1064,11 +932,11 @@ function Parser_parse_enum_decl(self, is_pub) {
   const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
   const type_params = Parser_parse_type_params(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let variants = empty_enum_variant_decls();
+  let variants = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const v_start = Parser_current_span_start(self);
     const v_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
-    let v_fields = empty_type_exprs();
+    let v_fields = [];
     let named_fields = Option_none;
     if (Parser_try_consume(self, lexer$TokenKind_TkLParen)) {
       if ((!Parser_check(self, lexer$TokenKind_TkRParen))) {
@@ -1084,7 +952,7 @@ function Parser_parse_enum_decl(self, is_pub) {
     } else {
       if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
         Parser_advance(self);
-        let nf = empty_named_enum_fields();
+        let nf = [];
         while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
           const f_start = Parser_current_span_start(self);
           const f_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
@@ -1119,7 +987,7 @@ function Parser_parse_impl_decl(self) {
     target_type = Parser_expect(self, lexer$TokenKind_TkIdent).value;
   }
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let methods = empty_decls();
+  let methods = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const m_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
     if (Parser_check(self, lexer$TokenKind_TkExtern)) {
@@ -1140,7 +1008,7 @@ function Parser_parse_effect_decl(self, is_pub) {
   const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
   const type_params = Parser_parse_type_params(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let ops = empty_effect_op_decls();
+  let ops = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const op_start = Parser_current_span_start(self);
     Parser_expect(self, lexer$TokenKind_TkFn);
@@ -1172,9 +1040,9 @@ function Parser_parse_trait_decl(self, is_pub) {
   Parser_expect(self, lexer$TokenKind_TkTrait);
   const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
   const type_params = Parser_parse_type_params(self);
-  const supertraits = empty_type_bounds();
+  const supertraits = [];
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let methods = empty_decls();
+  let methods = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const m_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
     List_push(methods, Parser_parse_fn_decl(self, m_pub, true));
@@ -1303,7 +1171,7 @@ function Parser_parse_prefix(self) {
   }
   if (Parser_check(self, lexer$TokenKind_TkLBracket)) {
     Parser_advance(self);
-    let elements = empty_exprs();
+    let elements = [];
     if ((!Parser_check(self, lexer$TokenKind_TkRBracket))) {
       List_push(elements, Parser_parse_expr(self));
       while (Parser_check(self, lexer$TokenKind_TkComma)) {
@@ -1367,7 +1235,7 @@ function Parser_parse_dot_expr(self, left) {
     const args = Parser_parse_arg_list(self);
     Parser_expect(self, lexer$TokenKind_TkRParen);
     const end = Parser_current_span_start(self);
-    return ast$Expr_MethodCall(left, name, args, empty_type_exprs(), Parser_make_span(self, expr_span(left).start, end));
+    return ast$Expr_MethodCall(left, name, args, [], Parser_make_span(self, expr_span(left).start, end));
   }
   const end = Parser_current_span_start(self);
   return ast$Expr_FieldAccess(left, name, Parser_make_span(self, expr_span(left).start, end));
@@ -1377,10 +1245,10 @@ function Parser_parse_call_expr(self, left) {
   const args = Parser_parse_arg_list(self);
   Parser_expect(self, lexer$TokenKind_TkRParen);
   const end = Parser_current_span_start(self);
-  return ast$Expr_Call(left, args, empty_type_exprs(), Parser_make_span(self, expr_span(left).start, end));
+  return ast$Expr_Call(left, args, [], Parser_make_span(self, expr_span(left).start, end));
 }
 function Parser_parse_arg_list(self) {
-  let args = empty_exprs();
+  let args = [];
   if (Parser_check(self, lexer$TokenKind_TkRParen)) {
     return args;
   }
@@ -1428,7 +1296,7 @@ function Parser_parse_catch_expr(self, left) {
 }
 function Parser_parse_string_interp(self) {
   const start_tok = Parser_advance(self);
-  let parts = empty_string_interp_parts();
+  let parts = [];
   if ((Str_len(start_tok.value) > 0)) {
     List_push(parts, ast$StringInterpPart_LitPart(start_tok.value));
   }
@@ -1477,7 +1345,7 @@ function Parser_parse_match_expr(self) {
   Parser_expect(self, lexer$TokenKind_TkMatch);
   const scrutinee = Parser_parse_expr(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let arms = empty_match_arms();
+  let arms = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     List_push(arms, Parser_parse_match_arm(self));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
@@ -1538,7 +1406,7 @@ function Parser_parse_pattern(self) {
     }
     if (Parser_check(self, lexer$TokenKind_TkLParen)) {
       Parser_advance(self);
-      let fields = empty_patterns();
+      let fields = [];
       if ((!Parser_check(self, lexer$TokenKind_TkRParen))) {
         List_push(fields, Parser_parse_pattern(self));
         while (Parser_try_consume(self, lexer$TokenKind_TkComma)) {
@@ -1554,7 +1422,7 @@ function Parser_parse_pattern(self) {
     }
     if ((Parser_check(self, lexer$TokenKind_TkLBrace) && is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")))) {
       Parser_advance(self);
-      let named_fields = empty_named_pattern_fields();
+      let named_fields = [];
       let rest = false;
       while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
         if (Parser_check(self, lexer$TokenKind_TkDotDot)) {
@@ -1578,7 +1446,7 @@ function Parser_parse_pattern(self) {
       return ast$Pattern_NamedConstructor(name, qualifier, named_fields, rest, Parser_make_span(self, start, end));
     }
     if (Option_is_some(qualifier)) {
-      return ast$Pattern_Constructor(name, qualifier, empty_patterns(), Parser_make_span(self, start, Parser_current_span_start(self)));
+      return ast$Pattern_Constructor(name, qualifier, [], Parser_make_span(self, start, Parser_current_span_start(self)));
     }
     return ast$Pattern_Binding(name, tok.span);
   }
@@ -1610,7 +1478,7 @@ function Parser_parse_handle_expr(self) {
   const body = Parser_parse_block_expr(self);
   Parser_expect(self, lexer$TokenKind_TkWith);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let handlers = empty_effect_handlers();
+  let handlers = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     List_push(handlers, Parser_parse_effect_handler(self));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
@@ -1648,7 +1516,7 @@ function Parser_parse_lambda_expr(self) {
 }
 function Parser_parse_struct_literal(self, name, start, qualifier) {
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let fields = empty_struct_field_inits();
+  let fields = [];
   let spread = Option_none;
   if (Parser_check(self, lexer$TokenKind_TkDotDot)) {
     Parser_advance(self);
@@ -1668,17 +1536,17 @@ function Parser_parse_struct_literal(self, name, start, qualifier) {
   }
   Parser_expect(self, lexer$TokenKind_TkRBrace);
   const end = Parser_current_span_start(self);
-  return ast$Expr_StructLit(name, qualifier, empty_type_exprs(), fields, spread, Parser_make_span(self, start, end));
+  return ast$Expr_StructLit(name, qualifier, [], fields, spread, Parser_make_span(self, start, end));
 }
 function Parser_try_parse_type_args(self) {
   if ((!Parser_check(self, lexer$TokenKind_TkLt))) {
-    return empty_type_exprs();
+    return [];
   }
   const save_pos = self.pos;
   const save_errors = self.error_count;
   const sink_checkpoint = diagnostics$CollectingSink_save(self.sink);
   Parser_advance(self);
-  let args = empty_type_exprs();
+  let args = [];
   List_push(args, Parser_parse_type_expr(self));
   while (Parser_try_consume(self, lexer$TokenKind_TkComma)) {
     List_push(args, Parser_parse_type_expr(self));
@@ -1687,7 +1555,7 @@ function Parser_try_parse_type_args(self) {
     self.pos = save_pos;
     self.error_count = save_errors;
     diagnostics$CollectingSink_restore(self.sink, sink_checkpoint);
-    return empty_type_exprs();
+    return [];
   }
   Parser_advance(self);
   return args;
@@ -1700,7 +1568,7 @@ function Parser_parse_type_expr(self) {
   if (Parser_check(self, lexer$TokenKind_TkFn)) {
     Parser_advance(self);
     Parser_expect(self, lexer$TokenKind_TkLParen);
-    let params = empty_type_exprs();
+    let params = [];
     if ((!Parser_check(self, lexer$TokenKind_TkRParen))) {
       List_push(params, Parser_parse_type_expr(self));
       while (Parser_try_consume(self, lexer$TokenKind_TkComma)) {
@@ -1751,7 +1619,7 @@ function Parser_parse_type_expr(self) {
 function Parser_parse_record_type_expr(self) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
-  let fields = empty_record_type_fields();
+  let fields = [];
   let rest = Option_none;
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     if (Parser_check(self, lexer$TokenKind_TkDotDot)) {
@@ -1776,14 +1644,14 @@ function Parser_parse_record_type_expr(self) {
 }
 function Parser_parse_type_params(self) {
   if ((!Parser_check(self, lexer$TokenKind_TkLt))) {
-    return empty_type_params();
+    return [];
   }
   Parser_advance(self);
-  let params = empty_type_params();
+  let params = [];
   while (((!Parser_check(self, lexer$TokenKind_TkGt)) && (!Parser_at_end(self)))) {
     const tp_start = Parser_current_span_start(self);
     const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
-    let bounds = empty_type_bounds();
+    let bounds = [];
     if (Parser_try_consume(self, lexer$TokenKind_TkColon)) {
       List_push(bounds, Parser_parse_type_bound(self));
       while (Parser_check(self, lexer$TokenKind_TkPlus)) {
@@ -1806,7 +1674,7 @@ function Parser_parse_type_bound(self) {
   return new ast$TypeBound(trait_name, type_args, Parser_make_span(self, start, end));
 }
 function Parser_parse_params(self) {
-  let params = empty_params();
+  let params = [];
   if (Parser_check(self, lexer$TokenKind_TkRParen)) {
     return params;
   }

@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, empty_effects, UNIT}
+use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, UNIT}
 use env::{TypeEnv, apply_subst, apply_subst_row}
 
 // ============================================================
@@ -142,7 +142,7 @@ fn unify_effect_params(a: Effect, b: Effect, subst: Map<Int, Type>, var env: Typ
 // ============================================================
 
 fn filter_by_index_not_in(effects: List<Effect>, excluded: Set<Int>) -> List<Effect> {
-    var result = empty_effects()
+    var result: List<Effect> = []
     var idx = 0
     for e in effects {
         if !excluded.contains(idx) {

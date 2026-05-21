@@ -67,9 +67,9 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
                             let sink = new_collecting_sink()
                             let deps = match graph.dependencies.get(key) {
                                 some(dk) => dk,
-                                none => empty_str_list(),
+                                none => [],
                             }
-                            var dep_exports: List<ModuleExports> = empty_module_exports_list()
+                            var dep_exports: List<ModuleExports> = []
                             for dk in deps {
                                 match module_exports_map.get(dk) {
                                     some(e) => dep_exports.push(e),
@@ -182,7 +182,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         import_lines.push("import { ${rnames_joined} } from \"./__ring_runtime.js\";")
 
                         // Cross-module import lines
-                        let deps = match phases.graph.dependencies.get(key) { some(d) => d, none => empty_str_list() }
+                        let deps = match phases.graph.dependencies.get(key) { some(d) => d, none => [] }
                         for dk in deps {
                             match (phases.module_exports_map.get(dk), phases.graph.modules.get(dk)) {
                                 (some(dep_exports), some(dep_mod)) => {
@@ -560,13 +560,6 @@ fn build_external_struct_fields(graph: ModuleGraph, exports_map: Map<Str, Module
     result
 }
 
-fn empty_module_exports_list() -> List<ModuleExports> {
-    let x = [0]; x.clear(); x.map(fn(i: Int) -> ModuleExports { panic("unreachable") })
-}
-
-fn empty_str_list() -> List<Str> {
-    let x = [""]; x.clear(); x
-}
 
 fn build_external_impl_methods(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, Str?> {
     var result: Map<Str, Str?> = map_new()

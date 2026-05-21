@@ -53,7 +53,7 @@ pub struct HTraitDeclInfo {
 
 pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx {
     CodegenCtx {
-        lines: empty_strs(),
+        lines: [],
         indent_level: 0,
         impl_methods: map_new(),
         struct_field_order: map_new(),
@@ -133,7 +133,7 @@ fn effect_name(e: Effect) -> Str {
 }
 
 pub fn extract_effect_names(effects: EffectRow) -> List<Str> {
-    var names: List<Str> = empty_strs()
+    var names: List<Str> = []
     for e in effects.effects {
         let n = effect_name(e)
         if names.contains(n) == false {
@@ -157,4 +157,3 @@ pub fn LIST_HOF_JS_METHOD(method: Str) -> Str? {
     else { none } } } } }
 }
 
-fn empty_strs() -> List<Str> { let x = [""]; x.clear(); x }

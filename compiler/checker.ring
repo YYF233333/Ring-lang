@@ -5,7 +5,7 @@ use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_c
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer::{check as infer_check}
-use infer_ctx::{InferCtx, FnBoundsEntry, empty_fn_bounds}
+use infer_ctx::{InferCtx}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
 use codes::{E0702, E0703}
@@ -55,22 +55,16 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
     register_builtins(env)
     register_hof_intrinsics(env)
 
-    var fn_bounds_stack = empty_fn_bounds_stack()
-
     InferCtx {
         env: env,
         subst: empty_subst(),
         sink: sink,
         type_param_scope: map_new(),
         current_fn_return_type: none,
-        current_fn_bounds: empty_fn_bounds(),
-        fn_bounds_stack: fn_bounds_stack,
+        current_fn_bounds: [],
+        fn_bounds_stack: [],
         loop_depth: 0
     }
-}
-
-fn empty_fn_bounds_stack() -> List<List<FnBoundsEntry>> {
-    let x = [empty_fn_bounds()]; x.clear(); x
 }
 
 pub fn check(program: Program, sink: CollectingSink) -> CheckResult {

@@ -120,28 +120,11 @@ pub struct TypeEnv {
 }
 
 // ============================================================
-// Empty list helpers (Ring cannot infer element type of `[]`)
-// ============================================================
-
-fn empty_ints() -> List<Int> { let x = [0]; x.clear(); x }
-fn empty_strs() -> List<Str> { let x = [""]; x.clear(); x }
-
-fn empty_bounds() -> List<SchemeBound> {
-    let dummy = SchemeBound { type_var: 0, trait_name: "" }
-    let x = [dummy]; x.clear(); x
-}
-
-fn empty_impl_entries() -> List<ImplEntry> {
-    let dummy = ImplEntry { trait_name: "", target_type_name: "", type_params: ["x"], method_names: ["x"] }
-    let x = [dummy]; x.clear(); x
-}
-
-// ============================================================
 // Constructor + helpers
 // ============================================================
 
 pub fn mono(ty: Type) -> TypeScheme {
-    TypeScheme { ty: ty, type_vars: empty_ints(), bounds: empty_bounds(), def_id: none }
+    TypeScheme { ty: ty, type_vars: [], bounds: [], def_id: none }
 }
 
 pub fn new_type_env() -> TypeEnv {
@@ -156,7 +139,7 @@ pub fn new_type_env() -> TypeEnv {
         impl_methods: map_new(),
         variant_to_enum: map_new(),
         traits: map_new(),
-        trait_impls: empty_impl_entries(),
+        trait_impls: [],
         fn_bounds: map_new(),
         var_bounds: map_new(),
         def_spans: map_new(),

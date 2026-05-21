@@ -161,7 +161,7 @@ pub fn extract_exports(
     }
 
     // Filter trait impls
-    var trait_impls: List<ImplEntry> = empty_impl_entries()
+    var trait_impls: List<ImplEntry> = []
     for impl_ in env.trait_impls {
         if types.contains_key(impl_.target_type_name) || traits.contains_key(impl_.trait_name) {
             trait_impls.push(impl_)
@@ -225,6 +225,3 @@ pub fn extract_exports(
     }
 }
 
-fn empty_impl_entries() -> List<ImplEntry> {
-    let x = [0]; x.clear(); x.map(fn(i: Int) -> ImplEntry { panic("unreachable") })
-}

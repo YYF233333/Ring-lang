@@ -56,42 +56,12 @@ pub struct Diagnostic {
     pub suggestions: List<Suggestion>
 }
 
-// ============================================================
-// Typed empty list helpers (Ring cannot infer element type of [])
-// ============================================================
-
-fn empty_notes() -> List<DiagnosticNote> {
-    let x = [DiagnosticNote { message: "", span: none }]
-    x.clear()
-    x
-}
-
-fn empty_suggestions() -> List<Suggestion> {
-    let x = [Suggestion { message: "", replacement: none, span: none }]
-    x.clear()
-    x
-}
-
 fn dummy_span() -> Span {
     Span {
         file: "",
         start: Position { line: 0, column: 0, offset: 0 },
         end: Position { line: 0, column: 0, offset: 0 }
     }
-}
-
-fn empty_diagnostics() -> List<Diagnostic> {
-    let x = [Diagnostic {
-        severity: Severity::SevError,
-        code: "",
-        message: "",
-        span: dummy_span(),
-        notes: empty_notes(),
-        context: DiagnosticContext::OtherContext { detail: none },
-        suggestions: empty_suggestions()
-    }]
-    x.clear()
-    x
 }
 
 // ============================================================
@@ -113,7 +83,7 @@ pub struct CollectingSink {
 }
 
 pub fn new_collecting_sink() -> CollectingSink {
-    CollectingSink { items: empty_diagnostics() }
+    CollectingSink { items: [] }
 }
 
 impl CollectingSink {
@@ -185,7 +155,7 @@ pub fn make_diagnostic(
         span: span,
         notes: notes,
         context: context,
-        suggestions: empty_suggestions()
+        suggestions: []
     }
 }
 
@@ -196,5 +166,5 @@ pub fn make_diag(
     span: Span,
     context: DiagnosticContext
 ) -> Diagnostic {
-    make_diagnostic(code, severity, message, span, context, empty_notes())
+    make_diagnostic(code, severity, message, span, context, [])
 }

@@ -118,25 +118,6 @@ class RowMergeResult {
   }
 }
 
-function empty_types() {
-  const x = [INT()];
-  List_clear(x);
-  return x;
-}
-
-function empty_effects() {
-  const x = [Effect_IoEffect];
-  List_clear(x);
-  return x;
-}
-
-function empty_fields() {
-  const dummy = new StructField("", INT(), false);
-  const x = [dummy];
-  List_clear(x);
-  return x;
-}
-
 function INT() {
   return Type_IntType;
 }
@@ -166,7 +147,7 @@ function ANY() {
 }
 
 function EMPTY_ROW() {
-  return new EffectRow(empty_effects(), Option_none);
+  return new EffectRow([], Option_none);
 }
 
 function type_to_builtin_name(t) {
@@ -208,7 +189,7 @@ function type_to_builtin_name(t) {
 }
 
 function make_option_type(inner) {
-  return Type_EnumType(BUILTIN_OPTION(), [inner], [new EnumVariant("some", [inner], Option_none), new EnumVariant("none", empty_types(), Option_none)]);
+  return Type_EnumType(BUILTIN_OPTION(), [inner], [new EnumVariant("some", [inner], Option_none), new EnumVariant("none", [], Option_none)]);
 }
 
 function is_option_type(t) {
@@ -238,7 +219,7 @@ function option_inner(t) {
 }
 
 function make_list_type(element) {
-  return Type_StructType(BUILTIN_LIST(), [element], empty_fields());
+  return Type_StructType(BUILTIN_LIST(), [element], []);
 }
 
 function is_list_type(t) {
@@ -268,7 +249,7 @@ function list_element(t) {
 }
 
 function make_map_type(key, value) {
-  return Type_StructType(BUILTIN_MAP(), [key, value], empty_fields());
+  return Type_StructType(BUILTIN_MAP(), [key, value], []);
 }
 
 function is_map_type(t) {
@@ -285,7 +266,7 @@ function is_map_type(t) {
 }
 
 function make_set_type(element) {
-  return Type_StructType(BUILTIN_SET(), [element], empty_fields());
+  return Type_StructType(BUILTIN_SET(), [element], []);
 }
 
 function is_set_type(t) {
@@ -1046,4 +1027,4 @@ function effect_row_to_string(row) {
 }
 
 
-export { BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, StructField, EnumVariant, RecordField, Type_IntType, Type_FloatType, Type_StrType, Type_BoolType, Type_UnitType, Type_NeverType, Type_AnyType, Type_TypeVar, Type_FnType, Type_StructType, Type_EnumType, Type_GenericType, Type_RecordType, Type_EffectRowType, Type_TupleType, Effect_IoEffect, Effect_FailEffect, Effect_MutEffect, Effect_CustomEffect, EffectRow, RowMergeResult, empty_types, empty_effects, empty_fields, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW, type_to_builtin_name, make_option_type, is_option_type, option_inner, make_list_type, is_list_type, list_element, make_map_type, is_map_type, make_set_type, is_set_type, effect_row, open_effect_row, row_contains, row_merge, effects_equal, types_equal, type_to_string, effect_to_string, effect_row_to_string };
+export { BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, StructField, EnumVariant, RecordField, Type_IntType, Type_FloatType, Type_StrType, Type_BoolType, Type_UnitType, Type_NeverType, Type_AnyType, Type_TypeVar, Type_FnType, Type_StructType, Type_EnumType, Type_GenericType, Type_RecordType, Type_EffectRowType, Type_TupleType, Effect_IoEffect, Effect_FailEffect, Effect_MutEffect, Effect_CustomEffect, EffectRow, RowMergeResult, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW, type_to_builtin_name, make_option_type, is_option_type, option_inner, make_list_type, is_list_type, list_element, make_map_type, is_map_type, make_set_type, is_set_type, effect_row, open_effect_row, row_contains, row_merge, effects_equal, types_equal, type_to_string, effect_to_string, effect_row_to_string };

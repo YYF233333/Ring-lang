@@ -36,7 +36,7 @@ fn BUILTIN_TYPES() -> Set<Str> {
 // ================================================================
 
 pub fn run_derive_pass(var env: TypeEnv) -> List<DerivedImpl> {
-    var derived_impls: List<DerivedImpl> = empty_derived_impls()
+    var derived_impls: List<DerivedImpl> = []
     let all_types = collect_user_types(env)
     derive_trait(env, all_types, "Eq", derived_impls)
     derive_trait(env, all_types, "Clone", derived_impls)
@@ -58,7 +58,7 @@ struct UserType {
 
 fn collect_user_types(env: TypeEnv) -> List<UserType> {
     let builtins = BUILTIN_TYPES()
-    var result: List<UserType> = empty_user_types()
+    var result: List<UserType> = []
     for entry in env.structs.entries() {
         let (name, def) = entry
         if builtins.contains(name) == false {
@@ -128,7 +128,7 @@ fn has_manual_impl(env: TypeEnv, type_name: Str, trait_name: Str) -> Bool {
 // ================================================================
 
 fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> DerivedImpl? {
-    var bounds: List<TraitBound> = empty_trait_bounds()
+    var bounds: List<TraitBound> = []
 
     match ut.type_kind {
         TypeKind::StructKind => match ut.struct_def {
@@ -152,7 +152,7 @@ fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> D
         },
         TypeKind::EnumKind => match ut.enum_def {
             some(def) => {
-                var variants: List<DerivedVariant> = empty_derived_variants()
+                var variants: List<DerivedVariant> = []
                 var ok = true
                 for v in def.variants {
                     if ok {
@@ -160,7 +160,7 @@ fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> D
                             some(fns) => fns.len() > 0,
                             none => false,
                         }
-                        var field_entries: List<FieldEntry> = empty_field_entries()
+                        var field_entries: List<FieldEntry> = []
                         for i in 0..v.fields.len() {
                             let fname = if has_named_fields {
                                 match v.field_names {
@@ -177,7 +177,7 @@ fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> D
                             some(fs) => {
                                 var final_fields = fs
                                 if has_named_fields == false {
-                                    var updated: List<DerivedField> = empty_derived_fields()
+                                    var updated: List<DerivedField> = []
                                     for j in 0..fs.len() {
                                         let f = df_at(fs, j)
                                         updated.push(DerivedField { name: f.name, positional_index: some(j), action: f.action })
@@ -228,7 +228,7 @@ fn try_derive_fields(
     self_type_name: Str,
     var bounds: List<TraitBound>
 ) -> List<DerivedField>? {
-    var result: List<DerivedField> = empty_derived_fields()
+    var result: List<DerivedField> = []
     for field in fields {
         let action = resolve_field_action(env, field.ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
         match action {
@@ -268,7 +268,7 @@ fn resolve_field_action(
             }
             some(FieldAction::Call {
                 dict_name: trait_bound_param_name(param_name, trait_name),
-                extra_dicts: empty_strs()
+                extra_dicts: []
             })
         },
         Type::StructType { name, type_params, .. } => {
@@ -334,7 +334,7 @@ fn resolve_extra_dicts(
     self_type_name: Str,
     var bounds: List<TraitBound>
 ) -> List<Str>? {
-    var dicts: List<Str> = empty_strs()
+    var dicts: List<Str> = []
     for arg in type_args {
         let dict = resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
         match dict {
@@ -412,8 +412,8 @@ fn register_derived_impl(var env: TypeEnv, di: DerivedImpl, trait_name: Str) {
         none => map_new(),
     }
 
-    var type_var_ids: List<Int> = empty_ints()
-    var self_type_params: List<Type> = empty_type_list()
+    var type_var_ids: List<Int> = []
+    var self_type_params: List<Type> = []
     for i in 0..di.type_params.len() {
         let var_id = env.fresh_var_id()
         type_var_ids.push(var_id)
@@ -422,7 +422,7 @@ fn register_derived_impl(var env: TypeEnv, di: DerivedImpl, trait_name: Str) {
 
     let self_type = build_self_type(env, di.type_name, di.type_kind, self_type_params)
 
-    var scheme_bounds: List<SchemeBound> = empty_scheme_bounds()
+    var scheme_bounds: List<SchemeBound> = []
     for b in di.bounds {
         let param_idx = index_of_str(di.type_params, b.type_param)
         if param_idx >= 0 {
@@ -447,7 +447,7 @@ fn get_method_names(trait_name: Str) -> List<Str> {
                 if trait_name == "Ord" {
                     ["cmp"]
                 } else {
-                    let e: List<Str> = empty_strs()
+                    let e: List<Str> = []
                     e
                 }
             }
@@ -462,7 +462,7 @@ fn build_self_type(env: TypeEnv, type_name: Str, type_kind: TypeKind, type_param
             let fields = match def {
                 some(d) => d.fields.map(fn(f) { StructField { name: f.name, ty: f.ty, is_pub: f.is_pub } }),
                 none => {
-                    let e: List<StructField> = empty_struct_fields()
+                    let e: List<StructField> = []
                     e
                 },
             }
@@ -473,7 +473,7 @@ fn build_self_type(env: TypeEnv, type_name: Str, type_kind: TypeKind, type_param
             let variants = match def {
                 some(d) => d.variants.map(fn(v) { EnumVariant { name: v.name, fields: v.fields, field_names: v.field_names } }),
                 none => {
-                    let e: List<EnumVariant> = empty_enum_variants()
+                    let e: List<EnumVariant> = []
                     e
                 },
             }
@@ -541,15 +541,3 @@ fn has_bound(bounds: List<TraitBound>, type_param: Str, trait_name: Str) -> Bool
     false
 }
 
-fn empty_strs() -> List<Str> { let x = [""]; x.clear(); x }
-fn empty_ints() -> List<Int> { let x = [0]; x.clear(); x }
-fn empty_derived_impls() -> List<DerivedImpl> { let x = [0]; x.clear(); x.map(fn(i: Int) -> DerivedImpl { panic("unreachable") }) }
-fn empty_user_types() -> List<UserType> { let x = [0]; x.clear(); x.map(fn(i: Int) -> UserType { panic("unreachable") }) }
-fn empty_trait_bounds() -> List<TraitBound> { let x = [0]; x.clear(); x.map(fn(i: Int) -> TraitBound { panic("unreachable") }) }
-fn empty_derived_variants() -> List<DerivedVariant> { let x = [0]; x.clear(); x.map(fn(i: Int) -> DerivedVariant { panic("unreachable") }) }
-fn empty_field_entries() -> List<FieldEntry> { let x = [0]; x.clear(); x.map(fn(i: Int) -> FieldEntry { panic("unreachable") }) }
-fn empty_derived_fields() -> List<DerivedField> { let x = [0]; x.clear(); x.map(fn(i: Int) -> DerivedField { panic("unreachable") }) }
-fn empty_type_list() -> List<Type> { let x = [0]; x.clear(); x.map(fn(i: Int) -> Type { panic("unreachable") }) }
-fn empty_scheme_bounds() -> List<SchemeBound> { let x = [0]; x.clear(); x.map(fn(i: Int) -> SchemeBound { panic("unreachable") }) }
-fn empty_struct_fields() -> List<StructField> { let x = [0]; x.clear(); x.map(fn(i: Int) -> StructField { panic("unreachable") }) }
-fn empty_enum_variants() -> List<EnumVariant> { let x = [0]; x.clear(); x.map(fn(i: Int) -> EnumVariant { panic("unreachable") }) }

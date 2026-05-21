@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
     type_to_string, types_equal, make_option_type, is_option_type, option_inner,
-    type_to_builtin_name, empty_types, empty_fields, effect_row}
+    type_to_builtin_name, effect_row}
 use ast::{Program, Decl, Expr, Stmt, Param, MatchArm, StructFieldInit,
     EffectHandler, StringInterpPart, Pattern, BinOp, UnaryOp, TypeExpr,
     TypeParam, TypeBound, Span, UseDecl, DestructureBinding, span_zero,
@@ -26,86 +26,11 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     resolve_type_expr, resolve_self_type, resolve_named_type,
     bind_pattern, build_scheme_var_map, resolve_dicts_from_scheme,
     remove_fail_effect, remove_specific_fail_effect,
-    generalize, empty_fn_bounds}
+    generalize}
 use infer_register::{register_decl_public, register_decls_two_phase}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
 use exhaustive::{check_exhaustive}
-
-// ============================================================
-// Empty list helpers
-// ============================================================
-
-fn empty_hdecls() -> List<HDecl> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HDecl { panic("unreachable") })
-}
-
-fn empty_hexprs() -> List<HExpr> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HExpr { panic("unreachable") })
-}
-
-fn empty_hstmts() -> List<HStmt> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HStmt { panic("unreachable") })
-}
-
-fn empty_hparams() -> List<HParam> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HParam { panic("unreachable") })
-}
-
-fn empty_hfield_inits() -> List<HStructFieldInit> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HStructFieldInit { panic("unreachable") })
-}
-
-fn empty_harms() -> List<HMatchArm> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HMatchArm { panic("unreachable") })
-}
-
-fn empty_hhandlers() -> List<HEffectHandler> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HEffectHandler { panic("unreachable") })
-}
-
-fn empty_hinterp_parts() -> List<HStringInterpPart> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HStringInterpPart { panic("unreachable") })
-}
-
-fn empty_trait_bounds() -> List<TraitBound> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> TraitBound { panic("unreachable") })
-}
-
-fn empty_strs() -> List<Str> { let x = [""]; x.clear(); x }
-
-fn empty_effects() -> List<Effect> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> Effect { panic("unreachable") })
-}
-
-fn empty_hstruct_fields() -> List<HStructField> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HStructField { panic("unreachable") })
-}
-
-fn empty_henum_variants() -> List<HEnumVariant> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HEnumVariant { panic("unreachable") })
-}
-
-fn empty_heffect_ops() -> List<HEffectOp> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HEffectOp { panic("unreachable") })
-}
-
-fn empty_htrait_methods() -> List<HTraitMethod> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HTraitMethod { panic("unreachable") })
-}
-
-fn empty_for_in_destructures() -> List<HForInDestructure> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HForInDestructure { panic("unreachable") })
-}
-
-fn empty_let_destructure_bindings() -> List<HLetDestructureBinding> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> HLetDestructureBinding { panic("unreachable") })
-}
-
-fn empty_scheme_bounds() -> List<SchemeBound> {
-    let dummy = SchemeBound { type_var: 0, trait_name: "" }
-    let x = [dummy]; x.clear(); x
-}
 
 // Struct wrapper for merge_effects return (Ring has no .0/.1 tuple access)
 struct MergeResult { eff: EffectRow, s: Map<Int, Type> }
@@ -145,7 +70,7 @@ pub fn infer_block(var ctx: InferCtx, body: Expr, initial_subst: Map<Int, Type>?
         Expr::Block { stmts, tail, span } => {
             var subst = match initial_subst { some(s) => s, none => ctx.subst }
             var effects: EffectRow = EMPTY_ROW()
-            var hstmts = empty_hstmts()
+            var hstmts: List<HStmt> = []
 
             for stmt in stmts {
                 let sr = infer_stmt(ctx, stmt, subst)
@@ -392,7 +317,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                                 span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                         }
                     }
-                    var hd = empty_for_in_destructures()
+                    var hd: List<HForInDestructure> = []
                     var di = 0
                     while di < destr.names.len() {
                         match destr.names.get(di) {
@@ -481,9 +406,9 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     "let destructuring requires tuple type, got ${type_to_string(init_type)}",
                     span, DiagnosticContext::OtherContext { detail: some("not a tuple") })
             }
-            let tuple_elements = match init_type {
+            let tuple_elements: List<Type> = match init_type {
                 Type::TupleType { elements } => elements,
-                _ => empty_types()
+                _ => []
             }
             match pattern {
                 Pattern::TuplePattern { elements: pat_elements, .. } => {
@@ -492,7 +417,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                             "Tuple has ${tuple_elements.len().to_str()} elements but pattern has ${pat_elements.len().to_str()}",
                             span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                     }
-                    var bindings = empty_let_destructure_bindings()
+                    var bindings: List<HLetDestructureBinding> = []
                     var bi = 0
                     while bi < pat_elements.len() {
                         match pat_elements.get(bi) {
@@ -711,7 +636,7 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
             infer_list_literal(ctx, elements, span, subst),
         Expr::TupleLit { elements, span } => {
             var s = subst
-            var helements = empty_hexprs()
+            var helements: List<HExpr> = []
             var combined_effects: EffectRow = EMPTY_ROW()
             for el in elements {
                 let r = infer_expr(ctx, el, s)
@@ -721,7 +646,7 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
                 combined_effects = me.eff
                 s = me.s
             }
-            var elem_types = empty_types()
+            var elem_types: List<Type> = []
             for he in helements { elem_types.push(apply_subst(s, hexpr_type(he))) }
             let tuple_type = Type::TupleType { elements: elem_types }
             InferResult {
@@ -737,7 +662,7 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
             let me = merge_eff(ctx.env, start_r.effects, end_r.effects, s)
             var range_effects = me.eff
             s = me.s
-            let range_type = Type::EnumType { name: BUILTIN_RANGE(), type_params: [INT()], variants: empty_variants() }
+            let range_type = Type::EnumType { name: BUILTIN_RANGE(), type_params: [INT()], variants: [] }
             InferResult {
                 hexpr: HExpr::RangeExpr {
                     start: start_r.hexpr, end: end_r.hexpr, inclusive: inclusive,
@@ -747,11 +672,6 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
             }
         }
     }
-}
-
-fn empty_variants() -> List<EnumVariant> {
-    let dummy = EnumVariant { name: "", fields: empty_types(), field_names: none }
-    let x = [dummy]; x.clear(); x
 }
 
 // ============================================================
@@ -942,7 +862,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
         Type::StructType { name, type_params, .. } => {
             if ctx.env.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
                 let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
-                return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => empty_strs() } }
+                return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
             type_error(ctx.sink, error_code,
                 "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
@@ -951,7 +871,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
         Type::EnumType { name, type_params, .. } => {
             if ctx.env.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
                 let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
-                return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => empty_strs() } }
+                return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
             type_error(ctx.sink, error_code,
                 "Type '${type_to_string(resolved)}' does not implement ${trait_name}, cannot use '${op}'",
@@ -965,7 +885,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
 
 fn resolve_trait_extra_dicts(ctx: InferCtx, type_args: List<Type>, subst: Map<Int, Type>, trait_name: Str) -> List<Str>? {
     if type_args.len() == 0 { return none }
-    var dicts = empty_strs()
+    var dicts: List<Str> = []
     for arg in type_args {
         let resolved = apply_subst(subst, arg)
         let dict = resolve_type_to_trait_dict(ctx, resolved, trait_name)
@@ -1050,8 +970,8 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     var s = callee_r.subst
     var effects = callee_r.effects
 
-    var hargs = empty_hexprs()
-    var arg_types = empty_types()
+    var hargs: List<HExpr> = []
+    var arg_types: List<Type> = []
     for arg in args {
         let ar = infer_expr(ctx, arg, s)
         s = ar.subst
@@ -1067,7 +987,7 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     let expected_fn = Type::FnType {
         params: arg_types,
         return_type: ret_var,
-        effects: EffectRow { effects: empty_effects(), tail: some(effect_tail) }
+        effects: EffectRow { effects: [], tail: some(effect_tail) }
     }
 
     s = unify_at(ctx.sink, ctx.env, hexpr_type(callee_r.hexpr), expected_fn, s, span)
@@ -1084,7 +1004,7 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
 
     let result_type = apply_subst(s, ret_var)
 
-    var resolved_dicts = empty_strs()
+    var resolved_dicts: List<Str> = []
     match callee {
         Expr::Ident { name: callee_name, .. } => {
             match ctx.env.lookup(callee_name) {
@@ -1100,14 +1020,14 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     }
 
     // Post-process: resolve dict_closure_dicts for ident args
-    var final_hargs = empty_hexprs()
+    var final_hargs: List<HExpr> = []
     for harg in hargs {
         final_hargs.push(resolve_arg_dict_closure(ctx, harg, s))
     }
 
     InferResult {
         hexpr: HExpr::Call {
-            callee: callee_r.hexpr, args: final_hargs, type_args: empty_types(),
+            callee: callee_r.hexpr, args: final_hargs, type_args: [],
             resolved_dicts: resolved_dicts, dict_dispatch: none,
             ty: result_type, effects: effects, span: span
         },
@@ -1123,7 +1043,7 @@ fn resolve_arg_dict_closure(ctx: InferCtx, harg: HExpr, s: Map<Int, Type>) -> HE
                 some(as_) => {
                     if as_.bounds.len() == 0 { return harg }
                     let var_map = build_scheme_var_map(as_, ty)
-                    var dicts = empty_strs()
+                    var dicts: List<Str> = []
                     for bound in as_.bounds {
                         match var_map.get(bound.type_var) {
                             some(fresh_var) => {
@@ -1257,7 +1177,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
                                 let tm = trait_def.methods.find(fn(m) { m.name == method })
                                 match tm {
                                     some(found_method) => {
-                                        method_type = some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: empty_scheme_bounds(), def_id: none }))
+                                        method_type = some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: [], def_id: none }))
                                         dict_dispatch = some(DictDispatchInfo { dict_param: trait_bound_param_name(fb.type_param_name, fb.trait_name), method: method })
                                     },
                                     none => {}
@@ -1289,7 +1209,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     }
 
     // Infer arguments with lambda type propagation
-    var hargs = empty_hexprs()
+    var hargs: List<HExpr> = []
     var ai = 0
     for arg in args {
         var ar: InferResult = match arg {
@@ -1365,7 +1285,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
         }
     }
 
-    var resolved_dicts = empty_strs()
+    var resolved_dicts: List<Str> = []
     match method_scheme {
         some(ms) => {
             if ms.bounds.len() > 0 {
@@ -1384,7 +1304,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     InferResult {
         hexpr: HExpr::Call {
             callee: HExpr::FieldAccess { receiver: recv_r.hexpr, field: method, ty: callee_type, effects: EMPTY_ROW(), span: span },
-            args: hargs, type_args: empty_types(), resolved_dicts: resolved_dicts,
+            args: hargs, type_args: [], resolved_dicts: resolved_dicts,
             dict_dispatch: dict_dispatch, ty: result_type, effects: effects, span: span
         },
         subst: s, effects: effects
@@ -1412,7 +1332,7 @@ fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str) -> Type? 
                     let tm = trait_def.methods.find(fn(m) { m.name == method })
                     match tm {
                         some(found_method) => {
-                            return some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: empty_scheme_bounds(), def_id: none }))
+                            return some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: [], def_id: none }))
                         },
                         none => {}
                     }
@@ -1448,7 +1368,7 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
 
     var s = subst
     var effects: EffectRow = EMPTY_ROW()
-    var hargs = empty_hexprs()
+    var hargs: List<HExpr> = []
 
     var i = 0
     for arg in args {
@@ -1465,7 +1385,7 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         i = i + 1
     }
 
-    var eff: Effect = Effect::CustomEffect { name: effect_name, type_args: empty_types() }
+    var eff: Effect = Effect::CustomEffect { name: effect_name, type_args: [] }
     match effect_def.built_in_kind {
         some(bik) => match bik {
             BuiltInKind::BkIo => { eff = Effect::IoEffect },
@@ -1597,7 +1517,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
 
     let inst_map: Map<Int, Type> = map_new()
-    var type_param_types = empty_types()
+    var type_param_types: List<Type> = []
     var tpi = 0
     while tpi < struct_def.type_param_vars.len() {
         match struct_def.type_param_vars.get(tpi) {
@@ -1613,7 +1533,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
 
     var s = subst
     var effects: EffectRow = EMPTY_ROW()
-    var hfields = empty_hfield_inits()
+    var hfields: List<HStructFieldInit> = []
 
     var hspread: HExpr? = none
     match spread {
@@ -1623,7 +1543,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
             let me = merge_eff(ctx.env, effects, sr.effects, s)
             effects = me.eff
             s = me.s
-            var spread_fields = empty_fields()
+            var spread_fields: List<StructField> = []
             for f in struct_def.fields {
                 spread_fields.push(StructField { name: f.name, ty: apply_subst(inst_map, f.ty), is_pub: f.is_pub })
             }
@@ -1671,16 +1591,16 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
 
     InferResult {
-        hexpr: HExpr::StructLit { name: name, type_args: empty_types(), fields: hfields, spread: hspread, ty: struct_type, effects: effects, span: span },
+        hexpr: HExpr::StructLit { name: name, type_args: [], fields: hfields, spread: hspread, ty: struct_type, effects: effects, span: span },
         subst: s, effects: effects
     }
 }
 
 fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name: Str, variant: EnumVariant, enum_def: EnumDef, fields: List<StructFieldInit>, spread: Expr?, span: Span, subst: Map<Int, Type>) -> InferResult {
-    let field_names = match variant.field_names { some(fn_) => fn_, none => empty_strs() }
+    let field_names = match variant.field_names { some(fn_) => fn_, none => [] }
 
     let inst_map: Map<Int, Type> = map_new()
-    var type_param_types = empty_types()
+    var type_param_types: List<Type> = []
     var tpi = 0
     while tpi < enum_def.type_param_vars.len() {
         match enum_def.type_param_vars.get(tpi) {
@@ -1696,7 +1616,7 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
 
     var s = subst
     var effects: EffectRow = EMPTY_ROW()
-    var hfields = empty_hfield_inits()
+    var hfields: List<HStructFieldInit> = []
 
     var hspread: HExpr? = none
     match spread {
@@ -1767,7 +1687,7 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
     var s = scrut_r.subst
     var effects = scrut_r.effects
     let result_type = ctx.env.fresh_var()
-    var harms = empty_harms()
+    var harms: List<HMatchArm> = []
 
     for arm in arms {
         ctx.env.push_scope()
@@ -1885,7 +1805,7 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
                 s = unify_at(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_if_r.hexpr), s, span)
                 result_type = apply_subst(s, hexpr_type(then_r.hexpr))
                 else_hexpr = some(HExpr::Block {
-                    stmts: empty_hstmts(), tail: some(else_if_r.hexpr),
+                    stmts: [], tail: some(else_if_r.hexpr),
                     ty: hexpr_type(else_if_r.hexpr), effects: else_if_r.effects, span: espan
                 })
             },
@@ -1910,7 +1830,7 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
 fn infer_string_interp(var ctx: InferCtx, parts: List<StringInterpPart>, span: Span, subst: Map<Int, Type>) -> InferResult {
     var s = subst
     var effects: EffectRow = EMPTY_ROW()
-    var hparts = empty_hinterp_parts()
+    var hparts: List<HStringInterpPart> = []
 
     for part in parts {
         match part {
@@ -1986,7 +1906,7 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, error_type_name: Str?, error_bindi
     ctx.env.push_scope()
     var error_var_type: Type = ctx.env.fresh_var()
     match error_type_name {
-        some(etn) => { error_var_type = resolve_named_type(ctx, etn, empty_type_exprs(), span) },
+        some(etn) => { error_var_type = resolve_named_type(ctx, etn, [], span) },
         none => {}
     }
     ctx.env.bind_mono(error_binding, error_var_type)
@@ -2018,10 +1938,6 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, error_type_name: Str?, error_bindi
     }
 }
 
-fn empty_type_exprs() -> List<TypeExpr> {
-    let _x = [0]; _x.clear(); _x.map(fn(i: Int) -> TypeExpr { panic("unreachable") })
-}
-
 // ============================================================
 // infer_handle
 // ============================================================
@@ -2031,7 +1947,7 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     var s = body_r.subst
     var effects = body_r.effects
 
-    var hhandlers = empty_hhandlers()
+    var hhandlers: List<HEffectHandler> = []
     let handled_effects: Set<Str> = set_new()
 
     for handler in handlers {
@@ -2043,7 +1959,7 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             none => {}
         }
 
-        var hparams = empty_hparams()
+        var hparams: List<HParam> = []
         var hi = 0
         for p in handler.params {
             let pt = match p.type_annotation {
@@ -2085,7 +2001,7 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     }
 
     let resolved_effects = apply_subst_row(s, effects)
-    var filtered_effects = empty_effects()
+    var filtered_effects: List<Effect> = []
     for e in resolved_effects.effects {
         let should_keep = match e {
             Effect::IoEffect => !handled_effects.contains("io"),
@@ -2113,8 +2029,8 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, subst: Map<Int, Type>, expected_param_types: List<Type>?) -> InferResult {
     ctx.env.push_scope()
     var s = subst
-    var hparams = empty_hparams()
-    var param_types = empty_types()
+    var hparams: List<HParam> = []
+    var param_types: List<Type> = []
 
     var pi = 0
     for p in params {
@@ -2160,13 +2076,13 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
     match body_result {
         some(body_r) => {
             s = body_r.subst
-            var applied_params = empty_types()
+            var applied_params: List<Type> = []
             for pt in param_types { applied_params.push(apply_subst(s, pt)) }
             let applied_ret = apply_subst(s, hexpr_type(body_r.hexpr))
 
             let fn_type = Type::FnType { params: applied_params, return_type: applied_ret, effects: body_r.effects }
 
-            var final_hparams = empty_hparams()
+            var final_hparams: List<HParam> = []
             for hp in hparams {
                 final_hparams.push(HParam { name: hp.name, ty: apply_subst(s, hp.ty), def_id: hp.def_id, is_mutable: hp.is_mutable })
             }
@@ -2190,14 +2106,14 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
 fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst: Map<Int, Type>) -> InferResult {
     if elements.len() == 0 {
         let elem_type = ctx.env.fresh_var()
-        let list_type = Type::StructType { name: BUILTIN_LIST(), type_params: [elem_type], fields: empty_fields() }
+        let list_type = Type::StructType { name: BUILTIN_LIST(), type_params: [elem_type], fields: [] }
         return InferResult {
-            hexpr: HExpr::ListLit { elements: empty_hexprs(), ty: list_type, effects: EMPTY_ROW(), span: span },
+            hexpr: HExpr::ListLit { elements: [], ty: list_type, effects: EMPTY_ROW(), span: span },
             subst: subst, effects: EMPTY_ROW()
         }
     }
     var s = subst
-    var helements = empty_hexprs()
+    var helements: List<HExpr> = []
     var elem_type: Type = ctx.env.fresh_var()
     var combined_effects: EffectRow = EMPTY_ROW()
     for el in elements {
@@ -2210,7 +2126,7 @@ fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst
         combined_effects = me.eff
         s = me.s
     }
-    let list_type = Type::StructType { name: BUILTIN_LIST(), type_params: [apply_subst(s, elem_type)], fields: empty_fields() }
+    let list_type = Type::StructType { name: BUILTIN_LIST(), type_params: [apply_subst(s, elem_type)], fields: [] }
     InferResult {
         hexpr: HExpr::ListLit { elements: helements, ty: list_type, effects: combined_effects, span: span },
         subst: s, effects: combined_effects
@@ -2287,7 +2203,7 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
 
 fn check_struct_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span) -> HDecl {
     let def = match ctx.env.structs.get(name) { some(d) => d, none => panic("struct not found: ${name}") }
-    var hfields = empty_hstruct_fields()
+    var hfields: List<HStructField> = []
     for f in def.fields {
         hfields.push(HStructField { name: f.name, ty: f.ty, is_pub: f.is_pub })
     }
@@ -2296,7 +2212,7 @@ fn check_struct_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_
 
 fn check_enum_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span) -> HDecl {
     let def = match ctx.env.enums.get(name) { some(d) => d, none => panic("enum not found: ${name}") }
-    var hvariants = empty_henum_variants()
+    var hvariants: List<HEnumVariant> = []
     for v in def.variants {
         hvariants.push(HEnumVariant { name: v.name, fields: v.fields, field_names: v.field_names })
     }
@@ -2305,10 +2221,10 @@ fn check_enum_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pu
 
 fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast_ops: List<EffectOpDecl>, is_pub: Bool, span: Span) -> HDecl {
     let def = match ctx.env.effects.get(name) { some(d) => d, none => panic("effect not found: ${name}") }
-    var hops = empty_heffect_ops()
+    var hops: List<HEffectOp> = []
     var oi = 0
     for op in def.ops {
-        var op_params = empty_hparams()
+        var op_params: List<HParam> = []
         var pi = 0
         for pt in op.params {
             let p_name = match ast_ops.get(oi) {
@@ -2329,7 +2245,7 @@ fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast
 
 fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
     let impl_self_type = resolve_self_type(ctx, target_type)
-    var hmethods = empty_hdecls()
+    var hmethods: List<HDecl> = []
     for method in methods {
         match method {
             Decl::ExternFn { name, type_params: mtps, params, return_type, is_pub, span: mspan } =>
@@ -2360,12 +2276,12 @@ fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         }
     }
 
-    var hmethods = empty_htrait_methods()
+    var hmethods: List<HTraitMethod> = []
     for m in trait_def.methods {
         let ast_method = find_ast_fn_by_name(ast_methods, m.name)
-        let fn_params = match m.ty {
+        let fn_params: List<Type> = match m.ty {
             Type::FnType { params, .. } => params,
-            _ => empty_types()
+            _ => []
         }
         let fn_ret = match m.ty {
             Type::FnType { return_type, .. } => return_type,
@@ -2376,7 +2292,7 @@ fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
             none => none
         }
 
-        var hparams = empty_hparams()
+        var hparams: List<HParam> = []
         var pi = 0
         for param_type in fn_params {
             let p_name = match ast_params {
@@ -2421,7 +2337,7 @@ fn check_trait_default_body(var ctx: InferCtx, trait_name: Str, self_var: Type, 
     ctx.subst = empty_subst()
     ctx.env.push_scope()
     ctx.fn_bounds_stack.push(ctx.current_fn_bounds)
-    ctx.current_fn_bounds = empty_fn_bounds()
+    ctx.current_fn_bounds = []
 
     match self_var {
         Type::TypeVar { id, .. } => {
@@ -2448,7 +2364,7 @@ fn check_trait_default_body(var ctx: InferCtx, trait_name: Str, self_var: Type, 
     let body_result = try { infer_block(ctx, body, none) }
 
     ctx.env.pop_scope()
-    ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => empty_fn_bounds() }
+    ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => [] }
 
     let final_body = match body_result {
         some(br) => {
@@ -2471,15 +2387,15 @@ fn find_ast_fn_by_name(methods: List<Decl>, name: Str) -> Decl? {
 
 fn check_extern_fn_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, is_pub: Bool, span: Span) -> HDecl {
     let scheme = match ctx.env.lookup(name) { some(s) => s, none => panic("extern fn not found: ${name}") }
-    let fn_params = match scheme.ty {
+    let fn_params: List<Type> = match scheme.ty {
         Type::FnType { params: fps, .. } => fps,
-        _ => empty_types()
+        _ => []
     }
     let fn_ret = match scheme.ty {
         Type::FnType { return_type, .. } => return_type,
         _ => UNIT()
     }
-    var hparams = empty_hparams()
+    var hparams: List<HParam> = []
     var i = 0
     for p in params {
         let ptype = match fn_params.get(i) { some(t) => t, none => UNIT() }
@@ -2534,7 +2450,7 @@ fn check_fn_body(var ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     }
 
     let zctx = ZonkCtx { subst: ctx.subst, names: local_names }
-    var final_params = empty_hparams()
+    var final_params: List<HParam> = []
     for hp in hparams { final_params.push(zonk_param(zctx, hp)) }
     let final_ret = zonk_type(zctx, expected_ret)
     let eff = zonk_row(zctx, body_result.effects)
@@ -2555,7 +2471,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     }
 
     ctx.fn_bounds_stack.push(ctx.current_fn_bounds)
-    ctx.current_fn_bounds = empty_fn_bounds()
+    ctx.current_fn_bounds = []
     for tp in type_params {
         match ctx.type_param_scope.get(tp.name) {
             some(tv) => match tv {
@@ -2572,7 +2488,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
         }
     }
 
-    var hparams = empty_hparams()
+    var hparams: List<HParam> = []
     for p in params {
         let ptype = match p.type_annotation {
             some(ta) => resolve_type_expr(ctx, ta),
@@ -2616,7 +2532,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     ctx.current_fn_return_type = saved_fn_return
     ctx.env.pop_scope()
     ctx.type_param_scope = saved_tp_scope
-    ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => empty_fn_bounds() }
+    ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => [] }
     ctx.subst = saved_subst
 
     let fn_result = match try_result {
@@ -2628,7 +2544,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     let effects = fn_result.eff
     let final_body = fn_result.body
 
-    var trait_bounds = empty_trait_bounds()
+    var trait_bounds: List<TraitBound> = []
     for tp in type_params {
         for bound in tp.bounds {
             trait_bounds.push(TraitBound { type_param: tp.name, trait_name: bound.trait_name })
@@ -2678,7 +2594,7 @@ pub fn check(var ctx: InferCtx, program: Program) -> HProgram {
     register_decls_two_phase(ctx, program.decls)
     let derived_impls = run_derive_pass(ctx.env)
 
-    var hdecls = empty_hdecls()
+    var hdecls: List<HDecl> = []
     for decl in program.decls {
         let result = try {
             let hd = check_decl(ctx, decl)

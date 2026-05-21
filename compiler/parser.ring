@@ -83,135 +83,8 @@ fn str_to_unaryop(s: Str) -> UnaryOp {
     panic("Unknown unary operator: ${s}")
 }
 
-// ============================================================
-// Typed empty list helpers
-// ============================================================
-
-fn empty_strs() -> List<Str> { let x = [""]; x.clear(); x }
-fn empty_spans() -> List<Span> { let x = [span_zero()]; x.clear(); x }
-
-fn empty_type_exprs() -> List<TypeExpr> {
-    let x = [0]
-    x.clear()
-    x.map(fn(i: Int) -> TypeExpr { panic("unreachable") })
-}
-
 fn dummy_type_expr() -> TypeExpr {
-    TypeExpr::Named { name: "", type_args: empty_type_exprs(), span: span_zero() }
-}
-
-fn empty_exprs() -> List<Expr> {
-    let x = [Expr::IntLit { value: 0, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_stmts() -> List<Stmt> {
-    let x = [Stmt::Break { span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_patterns() -> List<Pattern> {
-    let x = [Pattern::Wildcard { span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_params() -> List<Param> {
-    let x = [Param { name: "", is_mutable: false, type_annotation: none, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_type_bounds() -> List<TypeBound> {
-    let x = [TypeBound { trait_name: "", type_args: empty_type_exprs(), span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_type_params() -> List<TypeParam> {
-    let x = [TypeParam { name: "", bounds: empty_type_bounds(), span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_match_arms() -> List<MatchArm> {
-    let x = [MatchArm { pattern: Pattern::Wildcard { span: span_zero() }, guard: none, body: Expr::IntLit { value: 0, span: span_zero() }, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_struct_field_inits() -> List<StructFieldInit> {
-    let x = [StructFieldInit { name: "", value: Expr::IntLit { value: 0, span: span_zero() }, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_effect_handlers() -> List<EffectHandler> {
-    let x = [EffectHandler { effect_name: "", op_name: "", params: empty_params(), resume_name: none, body: Expr::IntLit { value: 0, span: span_zero() }, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_struct_field_decls() -> List<StructFieldDecl> {
-    let x = [StructFieldDecl { name: "", type_annotation: dummy_type_expr(), is_pub: false, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_enum_variant_decls() -> List<EnumVariantDecl> {
-    let x = [EnumVariantDecl { name: "", fields: empty_type_exprs(), named_fields: none, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_named_enum_fields() -> List<NamedEnumField> {
-    let x = [NamedEnumField { name: "", type_expr: dummy_type_expr(), span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_effect_op_decls() -> List<EffectOpDecl> {
-    let x = [EffectOpDecl { name: "", params: empty_params(), return_type: dummy_type_expr(), span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_decls() -> List<Decl> {
-    let x = [Decl::Test { description: "", body: Expr::IntLit { value: 0, span: span_zero() }, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_use_decls() -> List<UseDecl> {
-    let x = [UseDecl { path: UsePath { segments: empty_strs(), span: span_zero() }, imports: UseImport::Module, alias: none, is_pub: false, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_named_imports() -> List<NamedImport> {
-    let x = [NamedImport { name: "", alias: none, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_named_pattern_fields() -> List<NamedPatternField> {
-    let x = [NamedPatternField { name: "", pattern: Pattern::Wildcard { span: span_zero() }, span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_record_type_fields() -> List<RecordTypeField> {
-    let x = [RecordTypeField { name: "", ty: dummy_type_expr(), span: span_zero() }]
-    x.clear()
-    x
-}
-
-fn empty_string_interp_parts() -> List<StringInterpPart> {
-    let x = [StringInterpPart::LitPart("")]
-    x.clear()
-    x
+    TypeExpr::Named { name: "", type_args: [], span: span_zero() }
 }
 
 fn is_decl_start(k: TokenKind) -> Bool {
@@ -378,8 +251,8 @@ impl Parser {
 
     pub fn parse_program(var self) -> Program {
         let start = self.current_span_start()
-        var uses = empty_use_decls()
-        var decls = empty_decls()
+        var uses: List<UseDecl> = []
+        var decls: List<Decl> = []
         var decls_started = false
 
         while !self.at_end() {
@@ -518,8 +391,8 @@ impl Parser {
 
         if self.check(TokenKind::TkLParen) {
             self.advance()
-            var names = empty_strs()
-            var spans = empty_spans()
+            var names: List<Str> = []
+            var spans: List<Span> = []
             let first = self.expect(TokenKind::TkIdent)
             names.push(first.value)
             spans.push(first.span)
@@ -635,7 +508,7 @@ impl Parser {
     pub fn parse_block_expr(var self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkLBrace)
-        var stmts = empty_stmts()
+        var stmts: List<Stmt> = []
         var tail: Expr? = none
 
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
@@ -667,7 +540,7 @@ impl Parser {
         let start = self.current_span_start()
         self.expect(TokenKind::TkUse)
 
-        var segments = empty_strs()
+        var segments: List<Str> = []
         let path_start = self.current_span_start()
         segments.push(self.expect(TokenKind::TkIdent).value)
 
@@ -684,7 +557,7 @@ impl Parser {
 
         if self.check(TokenKind::TkLBrace) {
             self.advance()
-            var names = empty_named_imports()
+            var names: List<NamedImport> = []
             while !self.check(TokenKind::TkRBrace) && !self.at_end() {
                 let name_start = self.current_span_start()
                 let name = self.expect(TokenKind::TkIdent).value
@@ -756,11 +629,11 @@ impl Parser {
         if self.try_consume(TokenKind::TkArrow) {
             return_type = some(self.parse_type_expr())
         }
-        var body = Expr::Block { stmts: empty_stmts(), tail: none, span: span_zero() }
+        var body = Expr::Block { stmts: [], tail: none, span: span_zero() }
         var is_abstract_val = false
         if body_optional && !self.check(TokenKind::TkLBrace) {
             let pos = self.current_span_start()
-            body = Expr::Block { stmts: empty_stmts(), tail: none, span: self.make_span(pos, pos) }
+            body = Expr::Block { stmts: [], tail: none, span: self.make_span(pos, pos) }
             is_abstract_val = true
         } else {
             body = self.parse_block_expr()
@@ -845,7 +718,7 @@ impl Parser {
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLBrace)
-        var fields = empty_struct_field_decls()
+        var fields: List<StructFieldDecl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let field_start = self.current_span_start()
             let field_pub = self.try_consume(TokenKind::TkPub)
@@ -898,11 +771,11 @@ impl Parser {
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLBrace)
-        var variants = empty_enum_variant_decls()
+        var variants: List<EnumVariantDecl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let v_start = self.current_span_start()
             let v_name = self.expect(TokenKind::TkIdent).value
-            var v_fields = empty_type_exprs()
+            var v_fields: List<TypeExpr> = []
             var named_fields: List<NamedEnumField>? = none
             if self.try_consume(TokenKind::TkLParen) {
                 if !self.check(TokenKind::TkRParen) {
@@ -915,7 +788,7 @@ impl Parser {
                 let _rp = self.expect(TokenKind::TkRParen)
             } else if self.check(TokenKind::TkLBrace) {
                 self.advance()
-                var nf = empty_named_enum_fields()
+                var nf: List<NamedEnumField> = []
                 while !self.check(TokenKind::TkRBrace) && !self.at_end() {
                     let f_start = self.current_span_start()
                     let f_name = self.expect(TokenKind::TkIdent).value
@@ -958,7 +831,7 @@ impl Parser {
         }
 
         self.expect(TokenKind::TkLBrace)
-        var methods = empty_decls()
+        var methods: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let m_pub = self.try_consume(TokenKind::TkPub)
             if self.check(TokenKind::TkExtern) {
@@ -986,7 +859,7 @@ impl Parser {
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLBrace)
-        var ops = empty_effect_op_decls()
+        var ops: List<EffectOpDecl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let op_start = self.current_span_start()
             self.expect(TokenKind::TkFn)
@@ -1026,9 +899,9 @@ impl Parser {
         self.expect(TokenKind::TkTrait)
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
-        let supertraits = empty_type_bounds()
+        let supertraits: List<TypeBound> = []
         self.expect(TokenKind::TkLBrace)
-        var methods = empty_decls()
+        var methods: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let m_pub = self.try_consume(TokenKind::TkPub)
             methods.push(self.parse_fn_decl(m_pub, true))
@@ -1170,7 +1043,7 @@ impl Parser {
 
         if self.check(TokenKind::TkLBracket) {
             self.advance()
-            var elements = empty_exprs()
+            var elements: List<Expr> = []
             if !self.check(TokenKind::TkRBracket) {
                 elements.push(self.parse_expr())
                 while self.check(TokenKind::TkComma) {
@@ -1248,7 +1121,7 @@ impl Parser {
                 receiver: left,
                 method: name,
                 args: args,
-                type_args: empty_type_exprs(),
+                type_args: [],
                 span: self.make_span(expr_span(left).start, end)
             }
         }
@@ -1266,11 +1139,11 @@ impl Parser {
         let args = self.parse_arg_list()
         self.expect(TokenKind::TkRParen)
         let end = self.current_span_start()
-        Expr::Call { callee: left, args: args, type_args: empty_type_exprs(), span: self.make_span(expr_span(left).start, end) }
+        Expr::Call { callee: left, args: args, type_args: [], span: self.make_span(expr_span(left).start, end) }
     }
 
     fn parse_arg_list(var self) -> List<Expr> {
-        var args = empty_exprs()
+        var args: List<Expr> = []
         if self.check(TokenKind::TkRParen) { return args }
         args.push(self.parse_expr())
         while self.try_consume(TokenKind::TkComma) {
@@ -1323,7 +1196,7 @@ impl Parser {
 
     fn parse_string_interp(var self) -> Expr {
         let start_tok = self.advance()
-        var parts = empty_string_interp_parts()
+        var parts: List<StringInterpPart> = []
 
         if start_tok.value.len() > 0 {
             parts.push(StringInterpPart::LitPart(start_tok.value))
@@ -1384,7 +1257,7 @@ impl Parser {
         self.expect(TokenKind::TkMatch)
         let scrutinee = self.parse_expr()
         self.expect(TokenKind::TkLBrace)
-        var arms = empty_match_arms()
+        var arms: List<MatchArm> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             arms.push(self.parse_match_arm())
             self.try_consume(TokenKind::TkComma)
@@ -1456,7 +1329,7 @@ impl Parser {
 
             if self.check(TokenKind::TkLParen) {
                 self.advance()
-                var fields = empty_patterns()
+                var fields: List<Pattern> = []
                 if !self.check(TokenKind::TkRParen) {
                     fields.push(self.parse_pattern())
                     while self.try_consume(TokenKind::TkComma) {
@@ -1471,7 +1344,7 @@ impl Parser {
 
             if self.check(TokenKind::TkLBrace) && is_uppercase(name.char_at(0).unwrap_or("")) {
                 self.advance()
-                var named_fields = empty_named_pattern_fields()
+                var named_fields: List<NamedPatternField> = []
                 var rest = false
                 while !self.check(TokenKind::TkRBrace) && !self.at_end() {
                     if self.check(TokenKind::TkDotDot) {
@@ -1496,7 +1369,7 @@ impl Parser {
             }
 
             if qualifier.is_some() {
-                return Pattern::Constructor { name: name, qualifier: qualifier, fields: empty_patterns(), span: self.make_span(start, self.current_span_start()) }
+                return Pattern::Constructor { name: name, qualifier: qualifier, fields: [], span: self.make_span(start, self.current_span_start()) }
             }
 
             return Pattern::Binding { name: name, span: tok.span }
@@ -1534,7 +1407,7 @@ impl Parser {
         let body = self.parse_block_expr()
         self.expect(TokenKind::TkWith)
         self.expect(TokenKind::TkLBrace)
-        var handlers = empty_effect_handlers()
+        var handlers: List<EffectHandler> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             handlers.push(self.parse_effect_handler())
             self.try_consume(TokenKind::TkComma)
@@ -1583,7 +1456,7 @@ impl Parser {
 
     fn parse_struct_literal(var self, name: Str, start: Position, qualifier: Str?) -> Expr {
         self.expect(TokenKind::TkLBrace)
-        var fields = empty_struct_field_inits()
+        var fields: List<StructFieldInit> = []
         var spread: Expr? = none
         if self.check(TokenKind::TkDotDot) {
             self.advance()
@@ -1606,7 +1479,7 @@ impl Parser {
         Expr::StructLit {
             name: name,
             qualifier: qualifier,
-            type_args: empty_type_exprs(),
+            type_args: [],
             fields: fields,
             spread: spread,
             span: self.make_span(start, end)
@@ -1618,12 +1491,12 @@ impl Parser {
     // ============================================================
 
     pub fn try_parse_type_args(var self) -> List<TypeExpr> {
-        if !self.check(TokenKind::TkLt) { return empty_type_exprs() }
+        if !self.check(TokenKind::TkLt) { return [] }
         let save_pos = self.pos
         let save_errors = self.error_count
         let sink_checkpoint = self.sink.save()
         self.advance()
-        var args = empty_type_exprs()
+        var args: List<TypeExpr> = []
         args.push(self.parse_type_expr())
         while self.try_consume(TokenKind::TkComma) {
             args.push(self.parse_type_expr())
@@ -1632,7 +1505,7 @@ impl Parser {
             self.pos = save_pos
             self.error_count = save_errors
             self.sink.restore(sink_checkpoint)
-            return empty_type_exprs()
+            return []
         }
         self.advance()
         args
@@ -1648,7 +1521,7 @@ impl Parser {
         if self.check(TokenKind::TkFn) {
             self.advance()
             self.expect(TokenKind::TkLParen)
-            var params = empty_type_exprs()
+            var params: List<TypeExpr> = []
             if !self.check(TokenKind::TkRParen) {
                 params.push(self.parse_type_expr())
                 while self.try_consume(TokenKind::TkComma) {
@@ -1701,7 +1574,7 @@ impl Parser {
     fn parse_record_type_expr(var self) -> TypeExpr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkLBrace)
-        var fields = empty_record_type_fields()
+        var fields: List<RecordTypeField> = []
         var rest: Str? = none
 
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
@@ -1732,13 +1605,13 @@ impl Parser {
     // ============================================================
 
     pub fn parse_type_params(var self) -> List<TypeParam> {
-        if !self.check(TokenKind::TkLt) { return empty_type_params() }
+        if !self.check(TokenKind::TkLt) { return [] }
         self.advance()
-        var params = empty_type_params()
+        var params: List<TypeParam> = []
         while !self.check(TokenKind::TkGt) && !self.at_end() {
             let tp_start = self.current_span_start()
             let name = self.expect(TokenKind::TkIdent).value
-            var bounds = empty_type_bounds()
+            var bounds: List<TypeBound> = []
             if self.try_consume(TokenKind::TkColon) {
                 bounds.push(self.parse_type_bound())
                 while self.check(TokenKind::TkPlus) {
@@ -1767,7 +1640,7 @@ impl Parser {
     // ============================================================
 
     pub fn parse_params(var self) -> List<Param> {
-        var params = empty_params()
+        var params: List<Param> = []
         if self.check(TokenKind::TkRParen) { return params }
         params.push(self.parse_param())
         while self.try_consume(TokenKind::TkComma) {

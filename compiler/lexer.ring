@@ -144,27 +144,6 @@ fn is_ident_continue(ch: Str) -> Bool {
 }
 
 // ============================================================
-// Typed empty list helpers
-// ============================================================
-
-fn empty_tokens() -> List<Token> {
-    let dummy = Token {
-        kind: TokenKind::TkEof,
-        value: "",
-        span: Span { file: "", start: Position { line: 0, column: 0, offset: 0 }, end: Position { line: 0, column: 0, offset: 0 } }
-    }
-    let x = [dummy]
-    x.clear()
-    x
-}
-
-fn empty_ints() -> List<Int> {
-    let x = [0]
-    x.clear()
-    x
-}
-
-// ============================================================
 // Lexer
 // ============================================================
 
@@ -186,13 +165,13 @@ pub fn new_lexer(source: Str, file: Str, sink: CollectingSink) -> Lexer {
         line: 1,
         column: 0,
         sink: sink,
-        interp_brace_depth: empty_ints()
+        interp_brace_depth: []
     }
 }
 
 impl Lexer {
     pub fn tokenize(var self) -> List<Token> {
-        var tokens = empty_tokens()
+        var tokens: List<Token> = []
         while true {
             let tok = self.next_token()
             let is_eof = match tok.kind { TkEof => true, _ => false }

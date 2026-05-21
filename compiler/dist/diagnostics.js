@@ -81,26 +81,8 @@ class Diagnostic {
   }
 }
 
-function empty_notes() {
-  const x = [new DiagnosticNote("", Option_none)];
-  List_clear(x);
-  return x;
-}
-
-function empty_suggestions() {
-  const x = [new Suggestion("", Option_none, Option_none)];
-  List_clear(x);
-  return x;
-}
-
 function dummy_span() {
   return new ast$Span("", new ast$Position(0, 0, 0), new ast$Position(0, 0, 0));
-}
-
-function empty_diagnostics() {
-  const x = [new Diagnostic(Severity_SevError, "", "", dummy_span(), empty_notes(), DiagnosticContext_OtherContext(Option_none), empty_suggestions())];
-  List_clear(x);
-  return x;
 }
 
 
@@ -111,7 +93,7 @@ class CollectingSink {
 }
 
 function new_collecting_sink() {
-  return new CollectingSink(empty_diagnostics());
+  return new CollectingSink([]);
 }
 
 function CollectingSink_report(self, d) {
@@ -153,11 +135,11 @@ function __CollectingSink_DiagnosticSink_get_diagnostics(self) {
 const __CollectingSink_DiagnosticSink = { report: __CollectingSink_DiagnosticSink_report, has_errors: __CollectingSink_DiagnosticSink_has_errors, get_diagnostics: __CollectingSink_DiagnosticSink_get_diagnostics };
 
 function make_diagnostic(code, severity, message, span, context, notes) {
-  return new Diagnostic(severity, code, message, span, notes, context, empty_suggestions());
+  return new Diagnostic(severity, code, message, span, notes, context, []);
 }
 
 function make_diag(code, severity, message, span, context) {
-  return make_diagnostic(code, severity, message, span, context, empty_notes());
+  return make_diagnostic(code, severity, message, span, context, []);
 }
 
 function __DiagnosticNote_Eq_eq(self, other) {

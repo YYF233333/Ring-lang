@@ -545,19 +545,6 @@ function is_ident_continue(ch) {
   }
 }
 
-function empty_tokens() {
-  const dummy = new Token(TokenKind_TkEof, "", new ast$Span("", new ast$Position(0, 0, 0), new ast$Position(0, 0, 0)));
-  const x = [dummy];
-  List_clear(x);
-  return x;
-}
-
-function empty_ints() {
-  const x = [0];
-  List_clear(x);
-  return x;
-}
-
 class Lexer {
   constructor(source, file, pos, line, column, sink, interp_brace_depth) {
     this.source = source;
@@ -571,11 +558,11 @@ class Lexer {
 }
 
 function new_lexer(source, file, sink) {
-  return new Lexer(source, file, 0, 1, 0, sink, empty_ints());
+  return new Lexer(source, file, 0, 1, 0, sink, []);
 }
 
 function Lexer_tokenize(self) {
-  let tokens = empty_tokens();
+  let tokens = [];
   while (true) {
     const tok = Lexer_next_token(self);
     const is_eof = (function() {

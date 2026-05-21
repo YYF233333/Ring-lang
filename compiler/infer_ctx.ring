@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, RecordField, StructField,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
     type_to_string, types_equal, make_option_type, type_to_builtin_name,
-    empty_types, row_merge}
+    row_merge}
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero}
 use hir::{HExpr, HStmt, HParam, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
@@ -51,25 +51,6 @@ pub struct InferCtx {
     pub loop_depth: Int
 }
 
-// Empty list helpers
-pub fn empty_fn_bounds() -> List<FnBoundsEntry> {
-    let dummy = FnBoundsEntry { type_param_var_id: 0, trait_name: "", type_param_name: "" }
-    let x = [dummy]; x.clear(); x
-}
-
-fn empty_fn_bounds_stack() -> List<List<FnBoundsEntry>> {
-    let x = [empty_fn_bounds()]; x.clear(); x
-}
-
-fn empty_ints() -> List<Int> { let x = [0]; x.clear(); x }
-
-fn empty_scheme_bounds() -> List<SchemeBound> {
-    let dummy = SchemeBound { type_var: 0, trait_name: "" }
-    let x = [dummy]; x.clear(); x
-}
-
-fn empty_strs() -> List<Str> { let x = [""]; x.clear(); x }
-
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
     InferCtx {
         env: new_type_env(),
@@ -77,8 +58,8 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         sink: sink,
         type_param_scope: map_new(),
         current_fn_return_type: none,
-        current_fn_bounds: empty_fn_bounds(),
-        fn_bounds_stack: empty_fn_bounds_stack(),
+        current_fn_bounds: [],
+        fn_bounds_stack: [],
         loop_depth: 0
     }
 }
@@ -226,11 +207,11 @@ pub fn generalize(env: TypeEnv, t: Type, subst: Map<Int, Type>) -> TypeScheme {
     let resolved = apply_subst(subst, t)
     let ftv_type = free_type_vars(resolved, empty_subst())
     let ftv_env = free_type_vars_in_env(env, subst)
-    var type_vars = empty_ints()
+    var type_vars: List<Int> = []
     for v in ftv_type {
         if !ftv_env.contains(v) { type_vars.push(v) }
     }
-    var bounds = empty_scheme_bounds()
+    var bounds: List<SchemeBound> = []
     for tv in type_vars {
         match env.var_bounds.get(tv) {
             some(traits) => {
@@ -335,9 +316,9 @@ pub fn resolve_dicts_from_scheme(
     current_fn_bounds: List<FnBoundsEntry>,
     scheme: TypeScheme, callee_type: Type, s: Map<Int, Type>, span: Span
 ) -> List<Str> {
-    if scheme.bounds.len() == 0 { return empty_strs() }
+    if scheme.bounds.len() == 0 { return [] }
     let var_map = build_scheme_var_map(scheme, callee_type)
-    var resolved_dicts = empty_strs()
+    var resolved_dicts: List<Str> = []
     for bound in scheme.bounds {
         var found = false
         match var_map.get(bound.type_var) {
@@ -408,7 +389,7 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
         TypeExpr::Named { name, type_args, span } =>
             resolve_named_type(ctx, name, type_args, span),
         TypeExpr::FnType { params, return_type, .. } => {
-            var resolved_params = empty_types()
+            var resolved_params: List<Type> = []
             for p in params { resolved_params.push(resolve_type_expr(ctx, p)) }
             let ret = resolve_type_expr(ctx, return_type)
             Type::FnType { params: resolved_params, return_type: ret, effects: EMPTY_ROW() }
@@ -416,7 +397,7 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
         TypeExpr::OptionType { inner, .. } =>
             make_option_type(resolve_type_expr(ctx, inner)),
         TypeExpr::RecordType { fields, rest, .. } => {
-            var resolved_fields = empty_record_fields()
+            var resolved_fields: List<RecordField> = []
             for f in fields {
                 resolved_fields.push(RecordField { name: f.name, ty: resolve_type_expr(ctx, f.ty) })
             }
@@ -435,27 +416,15 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
             }
         },
         TypeExpr::TupleType { elements, .. } => {
-            var resolved_elems = empty_types()
+            var resolved_elems: List<Type> = []
             for e in elements { resolved_elems.push(resolve_type_expr(ctx, e)) }
             Type::TupleType { elements: resolved_elems }
         }
     }
 }
 
-fn empty_record_fields() -> List<RecordField> {
-    let dummy = RecordField { name: "", ty: UNIT() }
-    let x = [dummy]; x.clear(); x
-}
-
 pub fn resolve_self_type(ctx: InferCtx, name: Str) -> Type {
-    let empty_args = empty_type_exprs()
-    resolve_named_type(ctx, name, empty_args, span_zero())
-}
-
-fn empty_type_exprs() -> List<TypeExpr> {
-    let x = [0]
-    x.clear()
-    x.map(fn(i: Int) -> TypeExpr { panic("unreachable") })
+    resolve_named_type(ctx, name, [], span_zero())
 }
 
 pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, span: Span) -> Type {
@@ -493,7 +462,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                             expression: none
                         })
                 }
-                var resolved_params = empty_types()
+                var resolved_params: List<Type> = []
                 if type_args.len() > 0 {
                     for a in type_args { resolved_params.push(resolve_type_expr(ctx, a)) }
                 } else {
@@ -522,7 +491,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                             expression: none
                         })
                 }
-                var resolved_params = empty_types()
+                var resolved_params: List<Type> = []
                 if type_args.len() > 0 {
                     for a in type_args { resolved_params.push(resolve_type_expr(ctx, a)) }
                 } else {
@@ -551,7 +520,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                     })
             }
             if alias.type_param_vars.len() == 0 { return alias.ty }
-            var resolved_args = empty_types()
+            var resolved_args: List<Type> = []
             for a in type_args { resolved_args.push(resolve_type_expr(ctx, a)) }
             let mapping: Map<Int, Type> = map_new()
             var i = 0

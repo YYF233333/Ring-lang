@@ -4,22 +4,9 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     INT, STR, BOOL, UNIT, NEVER, EMPTY_ROW,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL,
-    make_option_type, make_map_type, empty_types, empty_effects, empty_fields}
+    make_option_type, make_map_type}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
     EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef, ImplEntry, mono}
-
-// ============================================================
-// Empty list helpers (local to this module)
-// ============================================================
-
-fn empty_strs() -> List<Str> { let x = [""]; x.clear(); x }
-
-fn empty_ints() -> List<Int> { let x = [0]; x.clear(); x }
-
-fn empty_scheme_bounds() -> List<SchemeBound> {
-    let dummy = SchemeBound { type_var: 0, trait_name: "" }
-    let x = [dummy]; x.clear(); x
-}
 
 // ============================================================
 // Struct for open_row return value
@@ -52,7 +39,7 @@ pub fn get_or_create_methods(var env: TypeEnv, type_name: Str) -> Map<Str, TypeS
 fn open_row(var env: TypeEnv) -> OpenRow {
     let tail_id = env.fresh_var_id()
     OpenRow {
-        eff: EffectRow { effects: empty_effects(), tail: some(tail_id) },
+        eff: EffectRow { effects: [], tail: some(tail_id) },
         tail_id: tail_id
     }
 }
@@ -62,7 +49,7 @@ fn open_row(var env: TypeEnv) -> OpenRow {
 // ============================================================
 
 fn make_list_struct(t: Type) -> Type {
-    Type::StructType { name: BUILTIN_LIST(), type_params: [t], fields: empty_fields() }
+    Type::StructType { name: BUILTIN_LIST(), type_params: [t], fields: [] }
 }
 
 // ============================================================
@@ -70,7 +57,7 @@ fn make_list_struct(t: Type) -> Type {
 // ============================================================
 
 fn make_set_struct(t: Type) -> Type {
-    Type::StructType { name: BUILTIN_SET(), type_params: [t], fields: empty_fields() }
+    Type::StructType { name: BUILTIN_SET(), type_params: [t], fields: [] }
 }
 
 // ============================================================
@@ -106,7 +93,7 @@ fn register_effects(var env: TypeEnv) {
     // io effect
     env.effects.insert("io", EffectDef {
         name: "io",
-        type_params: empty_strs(),
+        type_params: [],
         ops: [
             EffectOpDef { name: "read", params: [STR()], return_type: STR() },
             EffectOpDef { name: "write", params: [STR(), STR()], return_type: UNIT() }
@@ -153,7 +140,7 @@ fn register_cell(var env: TypeEnv) {
     env.bind(BUILTIN_CELL(), TypeScheme {
         ty: Type::FnType { params: [ctor_t], return_type: ctor_ret, effects: EMPTY_ROW() },
         type_vars: [ctor_t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -174,7 +161,7 @@ fn register_cell(var env: TypeEnv) {
     methods.insert("get", TypeScheme {
         ty: Type::FnType { params: [self_type], return_type: m_t, effects: mut_row },
         type_vars: [m_t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -182,7 +169,7 @@ fn register_cell(var env: TypeEnv) {
     methods.insert("set", TypeScheme {
         ty: Type::FnType { params: [self_type, m_t], return_type: UNIT(), effects: mut_row },
         type_vars: [m_t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -191,7 +178,7 @@ fn register_cell(var env: TypeEnv) {
     methods.insert("update", TypeScheme {
         ty: Type::FnType { params: [self_type, update_cb], return_type: UNIT(), effects: mut_row },
         type_vars: [m_t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -212,7 +199,7 @@ fn register_option(var env: TypeEnv) {
         type_param_vars: [option_t_id],
         variants: [
             EnumVariant { name: "some", fields: [option_t], field_names: none },
-            EnumVariant { name: "none", fields: empty_types(), field_names: none }
+            EnumVariant { name: "none", fields: [], field_names: none }
         ]
     })
 
@@ -225,7 +212,7 @@ fn register_option(var env: TypeEnv) {
     env.bind("some", TypeScheme {
         ty: Type::FnType { params: [some_t], return_type: make_option_type(some_t), effects: EMPTY_ROW() },
         type_vars: [some_t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -235,7 +222,7 @@ fn register_option(var env: TypeEnv) {
     env.bind("none", TypeScheme {
         ty: make_option_type(none_t),
         type_vars: [none_t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -249,21 +236,21 @@ fn register_option(var env: TypeEnv) {
     methods.insert("is_some", TypeScheme {
         ty: Type::FnType { params: [self_type], return_type: BOOL(), effects: EMPTY_ROW() },
         type_vars: [t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
     methods.insert("is_none", TypeScheme {
         ty: Type::FnType { params: [self_type], return_type: BOOL(), effects: EMPTY_ROW() },
         type_vars: [t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
     methods.insert("unwrap_or", TypeScheme {
         ty: Type::FnType { params: [self_type, t], return_type: t, effects: EMPTY_ROW() },
         type_vars: [t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 }
@@ -281,7 +268,7 @@ fn register_eq_trait(var env: TypeEnv) {
 
     env.traits.insert("Eq", TraitDef {
         name: "Eq",
-        type_params: empty_strs(),
+        type_params: [],
         type_param_vars: [self_var_id],
         methods: [
             TraitMethodDef { name: "eq", ty: eq_fn, has_default: false },
@@ -294,7 +281,7 @@ fn register_eq_trait(var env: TypeEnv) {
         env.trait_impls.push(ImplEntry {
             trait_name: "Eq",
             target_type_name: prim,
-            type_params: empty_strs(),
+            type_params: [],
             method_names: ["eq", "ne"]
         })
     }
@@ -347,7 +334,7 @@ fn register_clone_trait(var env: TypeEnv) {
 
     env.traits.insert("Clone", TraitDef {
         name: "Clone",
-        type_params: empty_strs(),
+        type_params: [],
         type_param_vars: [self_var_id],
         methods: [
             TraitMethodDef { name: "clone", ty: clone_fn, has_default: false }
@@ -359,7 +346,7 @@ fn register_clone_trait(var env: TypeEnv) {
         env.trait_impls.push(ImplEntry {
             trait_name: "Clone",
             target_type_name: prim,
-            type_params: empty_strs(),
+            type_params: [],
             method_names: ["clone"]
         })
     }
@@ -369,7 +356,7 @@ fn register_clone_trait(var env: TypeEnv) {
         env.trait_impls.push(ImplEntry {
             trait_name: "Clone",
             target_type_name: coll,
-            type_params: empty_strs(),
+            type_params: [],
             method_names: ["clone"]
         })
     }
@@ -413,7 +400,7 @@ fn register_ord_trait(var env: TypeEnv) {
 
     env.traits.insert("Ord", TraitDef {
         name: "Ord",
-        type_params: empty_strs(),
+        type_params: [],
         type_param_vars: [self_var_id],
         methods: [
             TraitMethodDef { name: "cmp", ty: cmp_fn, has_default: false }
@@ -424,7 +411,7 @@ fn register_ord_trait(var env: TypeEnv) {
         env.trait_impls.push(ImplEntry {
             trait_name: "Ord",
             target_type_name: prim,
-            type_params: empty_strs(),
+            type_params: [],
             method_names: ["cmp"]
         })
     }
@@ -442,7 +429,7 @@ fn register_debug_trait(var env: TypeEnv) {
 
     env.traits.insert("Debug", TraitDef {
         name: "Debug",
-        type_params: empty_strs(),
+        type_params: [],
         type_param_vars: [self_var_id],
         methods: [
             TraitMethodDef { name: "debug", ty: debug_fn, has_default: false }
@@ -454,7 +441,7 @@ fn register_debug_trait(var env: TypeEnv) {
         env.trait_impls.push(ImplEntry {
             trait_name: "Debug",
             target_type_name: prim,
-            type_params: empty_strs(),
+            type_params: [],
             method_names: ["debug"]
         })
     }
@@ -462,7 +449,7 @@ fn register_debug_trait(var env: TypeEnv) {
     // List<T: Debug> Debug impl
     var t_id = env.fresh_var_id()
     var t = Type::TypeVar { id: t_id, name: none }
-    let list_self = Type::StructType { name: BUILTIN_LIST(), type_params: [t], fields: empty_fields() }
+    let list_self = Type::StructType { name: BUILTIN_LIST(), type_params: [t], fields: [] }
     let list_debug_fn = Type::FnType { params: [list_self], return_type: STR(), effects: EMPTY_ROW() }
     let list_methods = get_or_create_methods(env, BUILTIN_LIST())
     list_methods.insert("debug", TypeScheme {
@@ -489,7 +476,7 @@ fn register_debug_trait(var env: TypeEnv) {
     map_methods.insert("debug", TypeScheme {
         ty: map_debug_fn,
         type_vars: [k_id, v_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
     env.trait_impls.push(ImplEntry {
@@ -502,13 +489,13 @@ fn register_debug_trait(var env: TypeEnv) {
     // Set<T> Debug impl (no bounds required in TS source)
     t_id = env.fresh_var_id()
     t = Type::TypeVar { id: t_id, name: none }
-    let set_self = Type::StructType { name: BUILTIN_SET(), type_params: [t], fields: empty_fields() }
+    let set_self = Type::StructType { name: BUILTIN_SET(), type_params: [t], fields: [] }
     let set_debug_fn = Type::FnType { params: [set_self], return_type: STR(), effects: EMPTY_ROW() }
     let set_methods = get_or_create_methods(env, BUILTIN_SET())
     set_methods.insert("debug", TypeScheme {
         ty: set_debug_fn,
         type_vars: [t_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
     env.trait_impls.push(ImplEntry {
@@ -562,7 +549,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("map", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(u), effects: orow.eff },
         type_vars: [t_id, u_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -574,7 +561,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("filter", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(t), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -588,7 +575,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("flat_map", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(u), effects: orow.eff },
         type_vars: [t_id, u_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -602,7 +589,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("fold", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), u, cb], return_type: u, effects: orow.eff },
         type_vars: [t_id, u_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -614,7 +601,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("any", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: BOOL(), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -626,7 +613,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("all", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: BOOL(), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -638,7 +625,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("find", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_option_type(t), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -650,7 +637,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("find_index", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_option_type(INT()), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -662,7 +649,7 @@ fn register_list_hof(var env: TypeEnv) {
     methods.insert("sort_by", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: UNIT(), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 }
@@ -686,7 +673,7 @@ fn register_map_hof(var env: TypeEnv) {
     methods.insert("map_values", TypeScheme {
         ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: make_map_type(k, u), effects: orow.eff },
         type_vars: [k_id, v_id, u_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -700,7 +687,7 @@ fn register_map_hof(var env: TypeEnv) {
     methods.insert("filter", TypeScheme {
         ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: make_map_type(k, v), effects: orow.eff },
         type_vars: [k_id, v_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -716,7 +703,7 @@ fn register_map_hof(var env: TypeEnv) {
     methods.insert("fold", TypeScheme {
         ty: Type::FnType { params: [make_map_type(k, v), u, cb], return_type: u, effects: orow.eff },
         type_vars: [k_id, v_id, u_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -730,7 +717,7 @@ fn register_map_hof(var env: TypeEnv) {
     methods.insert("any", TypeScheme {
         ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: BOOL(), effects: orow.eff },
         type_vars: [k_id, v_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 }
@@ -750,7 +737,7 @@ fn register_set_hof(var env: TypeEnv) {
     methods.insert("filter", TypeScheme {
         ty: Type::FnType { params: [make_set_struct(t), cb], return_type: make_set_struct(t), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -764,7 +751,7 @@ fn register_set_hof(var env: TypeEnv) {
     methods.insert("fold", TypeScheme {
         ty: Type::FnType { params: [make_set_struct(t), u, cb], return_type: u, effects: orow.eff },
         type_vars: [t_id, u_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -776,7 +763,7 @@ fn register_set_hof(var env: TypeEnv) {
     methods.insert("any", TypeScheme {
         ty: Type::FnType { params: [make_set_struct(t), cb], return_type: BOOL(), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -788,7 +775,7 @@ fn register_set_hof(var env: TypeEnv) {
     methods.insert("all", TypeScheme {
         ty: Type::FnType { params: [make_set_struct(t), cb], return_type: BOOL(), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 }
@@ -810,7 +797,7 @@ fn register_option_hof(var env: TypeEnv) {
     methods.insert("map", TypeScheme {
         ty: Type::FnType { params: [make_option_type(t), cb], return_type: make_option_type(u), effects: orow.eff },
         type_vars: [t_id, u_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 
@@ -824,7 +811,7 @@ fn register_option_hof(var env: TypeEnv) {
     methods.insert("and_then", TypeScheme {
         ty: Type::FnType { params: [make_option_type(t), cb], return_type: make_option_type(u), effects: orow.eff },
         type_vars: [t_id, u_id, orow.tail_id],
-        bounds: empty_scheme_bounds(),
+        bounds: [],
         def_id: none
     })
 }

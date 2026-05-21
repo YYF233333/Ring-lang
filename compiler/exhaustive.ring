@@ -32,7 +32,7 @@ fn ctor_at(list: List<Ctor>, i: Int) -> Ctor {
 }
 
 pub fn check_exhaustive(arms: List<HMatchArm>, scrutinee_type: Type, subst: Map<Int, Type>) -> Str? {
-    var patterns: List<Pattern> = empty_patterns()
+    var patterns: List<Pattern> = []
     for arm in arms {
         match arm.guard {
             some(_) => {},
@@ -59,7 +59,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: Map<Int, Type>) -> S
             var covered = set_new()
 
             for v in variants {
-                var sub_patterns_for_variant: List<List<Pattern>> = empty_pattern_rows()
+                var sub_patterns_for_variant: List<List<Pattern>> = []
                 for p in patterns {
                     match p {
                         Pattern::Constructor { name: pname, fields, .. } => {
@@ -89,7 +89,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: Map<Int, Type>) -> S
                 } else {
                     if v.fields.len() > 0 {
                         let wild = Pattern::Wildcard { span: span_zero() }
-                        var normalized: List<List<Pattern>> = empty_pattern_rows()
+                        var normalized: List<List<Pattern>> = []
                         for row in sub_patterns_for_variant {
                             var padded = list_clone(row)
                             while padded.len() < v.fields.len() {
@@ -144,7 +144,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: Map<Int, Type>) -> S
         },
         Type::UnitType => none,
         Type::TupleType { elements } => {
-            var matrix: List<List<Pattern>> = empty_pattern_rows()
+            var matrix: List<List<Pattern>> = []
             for p in patterns {
                 match p {
                     Pattern::TuplePattern { elements: pelems, .. } => {
@@ -178,25 +178,25 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: Map<Int, Type>) -> S
 fn finite_type_ctors(ty: Type) -> List<Ctor>? {
     match ty {
         Type::BoolType => {
-            var result: List<Ctor> = empty_ctors()
-            result.push(Ctor { name: "true", arity: 0, field_types: empty_types(), field_names: none, is_tuple: false })
-            result.push(Ctor { name: "false", arity: 0, field_types: empty_types(), field_names: none, is_tuple: false })
+            var result: List<Ctor> = []
+            result.push(Ctor { name: "true", arity: 0, field_types: [], field_names: none, is_tuple: false })
+            result.push(Ctor { name: "false", arity: 0, field_types: [], field_names: none, is_tuple: false })
             some(result)
         },
         Type::EnumType { variants, .. } => {
-            var result: List<Ctor> = empty_ctors()
+            var result: List<Ctor> = []
             for v in variants {
                 result.push(Ctor { name: v.name, arity: v.fields.len(), field_types: v.fields, field_names: v.field_names, is_tuple: false })
             }
             some(result)
         },
         Type::UnitType => {
-            var result: List<Ctor> = empty_ctors()
-            result.push(Ctor { name: "()", arity: 0, field_types: empty_types(), field_names: none, is_tuple: false })
+            var result: List<Ctor> = []
+            result.push(Ctor { name: "()", arity: 0, field_types: [], field_names: none, is_tuple: false })
             some(result)
         },
         Type::TupleType { elements } => {
-            var result: List<Ctor> = empty_ctors()
+            var result: List<Ctor> = []
             result.push(Ctor { name: "", arity: elements.len(), field_types: elements, field_names: none, is_tuple: true })
             some(result)
         },
@@ -204,31 +204,13 @@ fn finite_type_ctors(ty: Type) -> List<Ctor>? {
     }
 }
 
-fn empty_patterns() -> List<Pattern> {
-    let x = [0]; x.clear(); x.map(fn(i: Int) -> Pattern { panic("unreachable") })
-}
-
-fn empty_pattern_rows() -> List<List<Pattern>> {
-    let x = [0]; x.clear(); x.map(fn(i: Int) -> List<Pattern> { panic("unreachable") })
-}
-
-fn empty_ctors() -> List<Ctor> {
-    let x = [0]; x.clear(); x.map(fn(i: Int) -> Ctor { panic("unreachable") })
-}
-
-fn empty_types() -> List<Type> {
-    let x = [0]; x.clear(); x.map(fn(i: Int) -> Type { panic("unreachable") })
-}
-
-fn empty_strs() -> List<Str> { let x = [""]; x.clear(); x }
-
 fn wild_pattern() -> Pattern {
     Pattern::Wildcard { span: span_zero() }
 }
 
 fn named_pattern_to_positional(fields: List<NamedPatternField>, field_names: List<Str>, arity: Int) -> List<Pattern> {
     let wild = wild_pattern()
-    var result: List<Pattern> = empty_patterns()
+    var result: List<Pattern> = []
     for i in 0..arity {
         result.push(wild)
     }
@@ -238,7 +220,7 @@ fn named_pattern_to_positional(fields: List<NamedPatternField>, field_names: Lis
             if idx < arity {
                 // Replace result[idx] with f.pattern
                 // Ring has no List.set — rebuild with replacement
-                var new_result: List<Pattern> = empty_patterns()
+                var new_result: List<Pattern> = []
                 for j in 0..result.len() {
                     if j == idx {
                         new_result.push(f.pattern)
@@ -262,14 +244,14 @@ fn index_of(list: List<Str>, target: Str) -> Int {
 
 fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
     let first = pat_at(row, 0)
-    var rest: List<Pattern> = empty_patterns()
+    var rest: List<Pattern> = []
     for i in 1..row.len() {
         rest.push(pat_at(row, i))
     }
 
     match first {
         Pattern::Wildcard { .. } => {
-            var result: List<Pattern> = empty_patterns()
+            var result: List<Pattern> = []
             let wild = wild_pattern()
             for i in 0..ctor.arity {
                 result.push(wild)
@@ -278,7 +260,7 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
             some(result)
         },
         Pattern::Binding { .. } => {
-            var result: List<Pattern> = empty_patterns()
+            var result: List<Pattern> = []
             let wild = wild_pattern()
             for i in 0..ctor.arity {
                 result.push(wild)
@@ -317,7 +299,7 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
                 let field_names = match ctor.field_names {
                     some(fns) => fns,
                     none => {
-                        let empty: List<Str> = empty_strs()
+                        let empty: List<Str> = []
                         empty
                     },
                 }
@@ -349,13 +331,13 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: Map<Int
         if rows.len() > 0 {
             return none
         } else {
-            let empty: List<Str> = empty_strs()
+            let empty: List<Str> = []
             return some(empty)
         }
     }
 
     let first_type = apply_subst(subst, type_at(col_types, 0))
-    var rest_types: List<Type> = empty_types()
+    var rest_types: List<Type> = []
     for i in 1..col_types.len() {
         rest_types.push(type_at(col_types, i))
     }
@@ -372,24 +354,24 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: Map<Int
             var new_expanding = set_clone(expanding)
             if type_key != "" { new_expanding.insert(type_key) }
             for ctor in ctor_list {
-                var specialized: List<List<Pattern>> = empty_pattern_rows()
+                var specialized: List<List<Pattern>> = []
                 for row in rows {
                     match specialize_row(row, ctor) {
                         some(s) => specialized.push(s),
                         none => {},
                     }
                 }
-                var new_types: List<Type> = empty_types()
+                var new_types: List<Type> = []
                 new_types.extend(ctor.field_types)
                 new_types.extend(rest_types)
                 let sub = check_matrix(specialized, new_types, subst, new_expanding)
                 match sub {
                     some(sub_result) => {
-                        var ctor_sub: List<Str> = empty_strs()
+                        var ctor_sub: List<Str> = []
                         for i in 0..ctor.arity {
                             ctor_sub.push(str_at(sub_result, i))
                         }
-                        var rest_sub: List<Str> = empty_strs()
+                        var rest_sub: List<Str> = []
                         for i in ctor.arity..sub_result.len() {
                             rest_sub.push(str_at(sub_result, i))
                         }
@@ -405,7 +387,7 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: Map<Int
                                 ctor_str = "${ctor.name}(${joined_sub2})"
                             }
                         }
-                        var result: List<Str> = empty_strs()
+                        var result: List<Str> = []
                         result.push(ctor_str)
                         result.extend(rest_sub)
                         return some(result)
@@ -416,19 +398,19 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: Map<Int
             none
         },
         none => {
-            var defaults: List<List<Pattern>> = empty_pattern_rows()
+            var defaults: List<List<Pattern>> = []
             for row in rows {
                 let first = pat_at(row, 0)
                 match first {
                     Pattern::Wildcard { .. } => {
-                        var tail: List<Pattern> = empty_patterns()
+                        var tail: List<Pattern> = []
                         for i in 1..row.len() {
                             tail.push(pat_at(row, i))
                         }
                         defaults.push(tail)
                     },
                     Pattern::Binding { .. } => {
-                        var tail: List<Pattern> = empty_patterns()
+                        var tail: List<Pattern> = []
                         for i in 1..row.len() {
                             tail.push(pat_at(row, i))
                         }
@@ -440,7 +422,7 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: Map<Int
             let sub = check_matrix(defaults, rest_types, subst, expanding)
             match sub {
                 some(s) => {
-                    var result: List<Str> = empty_strs()
+                    var result: List<Str> = []
                     result.push("_")
                     result.extend(s)
                     some(result)

@@ -1,19 +1,13 @@
 use ast::{Span}
 use diagnostics::{Diagnostic, DiagnosticContext, Suggestion, Severity, severity_to_str}
 
-fn empty_strs() -> List<Str> {
-    let x = [""]
-    x.clear()
-    x
-}
-
 // ============================================================
 // format_human — Rustc-style human-readable diagnostic output
 // ============================================================
 
 pub fn format_human(diagnostics: List<Diagnostic>, source: Str) -> Str {
     let lines = source.split("\n")
-    var parts = empty_strs()
+    var parts: List<Str> = []
 
     for d in diagnostics {
         parts.push("${severity_to_str(d.severity)}[${d.code}]: ${d.message}")
@@ -79,7 +73,7 @@ fn format_hint(d: Diagnostic) -> Str {
 // ============================================================
 
 pub fn format_llm(diagnostics: List<Diagnostic>, file: Str) -> Str {
-    var parts = empty_strs()
+    var parts: List<Str> = []
     parts.push("{\n")
     parts.push("  \"version\": 1,\n")
     parts.push("  \"file\": ${jq(file)},\n")
@@ -129,7 +123,7 @@ fn jq(s: Str) -> Str {
 fn context_to_json(ctx: DiagnosticContext) -> Str {
     match ctx {
         TypeMismatch { expected, actual, expression } => {
-            var parts = empty_strs()
+            var parts: List<Str> = []
             parts.push("\"kind\": \"type_mismatch\"")
             parts.push("\"expected\": ${jq(expected)}")
             parts.push("\"actual\": ${jq(actual)}")
@@ -140,7 +134,7 @@ fn context_to_json(ctx: DiagnosticContext) -> Str {
             "{ ${parts.join(", ")} }"
         },
         UndefinedVariable { name, scope_locals } => {
-            var parts = empty_strs()
+            var parts: List<Str> = []
             parts.push("\"kind\": \"undefined_variable\"")
             parts.push("\"name\": ${jq(name)}")
             match scope_locals {
@@ -153,7 +147,7 @@ fn context_to_json(ctx: DiagnosticContext) -> Str {
             "{ ${parts.join(", ")} }"
         },
         MissingField { field, ty, available } => {
-            var parts = empty_strs()
+            var parts: List<Str> = []
             parts.push("\"kind\": \"missing_field\"")
             parts.push("\"field\": ${jq(field)}")
             parts.push("\"type\": ${jq(ty)}")
@@ -167,7 +161,7 @@ fn context_to_json(ctx: DiagnosticContext) -> Str {
             "{ ${parts.join(", ")} }"
         },
         EffectUnhandled { eff, in_function } => {
-            var parts = empty_strs()
+            var parts: List<Str> = []
             parts.push("\"kind\": \"effect_unhandled\"")
             parts.push("\"effect\": ${jq(eff)}")
             match in_function {
@@ -177,7 +171,7 @@ fn context_to_json(ctx: DiagnosticContext) -> Str {
             "{ ${parts.join(", ")} }"
         },
         ParseError { token, expected } => {
-            var parts = empty_strs()
+            var parts: List<Str> = []
             parts.push("\"kind\": \"parse_error\"")
             parts.push("\"token\": ${jq(token)}")
             match expected {
@@ -206,7 +200,7 @@ fn context_to_json(ctx: DiagnosticContext) -> Str {
 
 fn suggestions_to_json(suggestions: List<Suggestion>) -> Str {
     if suggestions.is_empty() { return "[]" }
-    var items = empty_strs()
+    var items: List<Str> = []
     for s in suggestions {
         match s.replacement {
             some(r) => items.push("{ \"message\": ${jq(s.message)}, \"replacement\": ${jq(r)} }"),
