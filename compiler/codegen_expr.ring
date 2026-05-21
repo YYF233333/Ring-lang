@@ -121,11 +121,15 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
 
 fn gen_binop(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?, ord_dispatch: TraitDispatch?) -> Str {
     // Check eq dispatch: unwrap option, check op, early return
-    var eq_result = try_eq_dispatch(ctx, op, left, right, eq_dispatch)
-    if eq_result.len() > 0 { return eq_result }
+    match try_eq_dispatch(ctx, op, left, right, eq_dispatch) {
+        some(result) => { return result },
+        none => {},
+    }
     // Check ord dispatch: unwrap option, check op, early return
-    var ord_result = try_ord_dispatch(ctx, op, left, right, ord_dispatch)
-    if ord_result.len() > 0 { return ord_result }
+    match try_ord_dispatch(ctx, op, left, right, ord_dispatch) {
+        some(result) => { return result },
+        none => {},
+    }
     // Fallback: plain JS operator
     let js_op = match op {
         BinOp::Eq => "===",
@@ -137,30 +141,30 @@ fn gen_binop(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispa
     "(${l} ${js_op} ${r})"
 }
 
-fn try_eq_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?) -> Str {
+fn try_eq_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?) -> Str? {
     match eq_dispatch {
         some(dispatch) => {
             let is_eq_op = (op == BinOp::Eq) || (op == BinOp::Neq)
             if is_eq_op {
-                return gen_eq_dispatch(ctx, op, left, right, dispatch)
+                return some(gen_eq_dispatch(ctx, op, left, right, dispatch))
             }
         },
         none => {},
     }
-    ""
+    none
 }
 
-fn try_ord_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, ord_dispatch: TraitDispatch?) -> Str {
+fn try_ord_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, ord_dispatch: TraitDispatch?) -> Str? {
     match ord_dispatch {
         some(dispatch) => {
             let is_ord_op = (op == BinOp::Lt) || (op == BinOp::Gt) || (op == BinOp::Lte) || (op == BinOp::Gte)
             if is_ord_op {
-                return gen_ord_dispatch(ctx, op, left, right, dispatch)
+                return some(gen_ord_dispatch(ctx, op, left, right, dispatch))
             }
         },
         none => {},
     }
-    ""
+    none
 }
 
 fn binop_str(op: BinOp) -> Str {
