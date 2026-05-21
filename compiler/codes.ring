@@ -26,6 +26,7 @@ pub const E0601: Str = "E0601"
 pub const E0702: Str = "E0702"
 pub const E0703: Str = "E0703"
 pub const E0704: Str = "E0704"
+pub const E0705: Str = "E0705"
 pub const E0706: Str = "E0706"
 
 pub fn error_description(code: Str) -> Str {
@@ -57,6 +58,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0702" { return "Module not found" }
     if code == "E0703" { return "Symbol not found in module" }
     if code == "E0704" { return "Circular dependency detected" }
+    if code == "E0705" { return "Relative path out of scope" }
     if code == "E0706" { return "Use declaration must appear before other declarations" }
     "Unknown error"
 }

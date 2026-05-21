@@ -5,8 +5,8 @@ import { variant_js_name as hir$variant_js_name, trait_dict_name as hir$trait_di
 import { mono as env$mono, new_type_env as env$new_type_env, apply_subst_map as env$apply_subst_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, FnBound as env$FnBound, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __SchemeBound_Eq as env$__SchemeBound_Eq, __FnBound_Eq as env$__FnBound_Eq, __IdGen_Eq as env$__IdGen_Eq, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __SchemeBound_Clone as env$__SchemeBound_Clone, __ImplEntry_Clone as env$__ImplEntry_Clone, __FnBound_Clone as env$__FnBound_Clone, __IdGen_Clone as env$__IdGen_Clone, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __SchemeBound_Ord as env$__SchemeBound_Ord, __FnBound_Ord as env$__FnBound_Ord, __IdGen_Ord as env$__IdGen_Ord, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __SchemeBound_Debug as env$__SchemeBound_Debug, __ImplEntry_Debug as env$__ImplEntry_Debug, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 import { empty_subst as unify$empty_subst, occurs_in as unify$occurs_in, unify_effect_rows as unify$unify_effect_rows, unify as unify$unify, UnificationError as unify$UnificationError, __UnificationError_Eq as unify$__UnificationError_Eq, __UnificationError_Clone as unify$__UnificationError_Clone, __UnificationError_Ord as unify$__UnificationError_Ord, __UnificationError_Debug as unify$__UnificationError_Debug } from "./unify.js";
 import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Severity_Eq as diagnostics$__Severity_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Severity_Clone as diagnostics$__Severity_Clone, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
-import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0504 as codes$E0504, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0706 as codes$E0706, error_description as codes$error_description, error_category as codes$error_category } from "./codes.js";
-import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_error, merge_effects as infer_ctx$merge_effects, unify_at as infer_ctx$unify_at, free_type_vars as infer_ctx$free_type_vars, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, update_fn_effects as infer_ctx$update_fn_effects, build_scheme_var_map as infer_ctx$build_scheme_var_map, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_type_expr as infer_ctx$resolve_type_expr, resolve_self_type as infer_ctx$resolve_self_type, resolve_named_type as infer_ctx$resolve_named_type, bind_pattern as infer_ctx$bind_pattern, remove_fail_effect as infer_ctx$remove_fail_effect, remove_specific_fail_effect as infer_ctx$remove_specific_fail_effect, InferResult as infer_ctx$InferResult, FnBoundsEntry as infer_ctx$FnBoundsEntry, CompileError as infer_ctx$CompileError, InferCtx as infer_ctx$InferCtx, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __CompileError_Eq as infer_ctx$__CompileError_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __CompileError_Clone as infer_ctx$__CompileError_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __CompileError_Ord as infer_ctx$__CompileError_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug, __CompileError_Debug as infer_ctx$__CompileError_Debug } from "./infer_ctx.js";
+import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0504 as codes$E0504, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, error_description as codes$error_description, error_category as codes$error_category } from "./codes.js";
+import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_error, merge_effects as infer_ctx$merge_effects, unify_at as infer_ctx$unify_at, free_type_vars as infer_ctx$free_type_vars, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, update_fn_effects as infer_ctx$update_fn_effects, build_scheme_var_map as infer_ctx$build_scheme_var_map, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_type_expr as infer_ctx$resolve_type_expr, resolve_self_type as infer_ctx$resolve_self_type, resolve_named_type as infer_ctx$resolve_named_type, bind_pattern as infer_ctx$bind_pattern, remove_fail_effect as infer_ctx$remove_fail_effect, remove_specific_fail_effect as infer_ctx$remove_specific_fail_effect, resolve_relative_qualifier as infer_ctx$resolve_relative_qualifier, InferResult as infer_ctx$InferResult, FnBoundsEntry as infer_ctx$FnBoundsEntry, CompileError as infer_ctx$CompileError, InferCtx as infer_ctx$InferCtx, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __CompileError_Eq as infer_ctx$__CompileError_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __CompileError_Clone as infer_ctx$__CompileError_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __CompileError_Ord as infer_ctx$__CompileError_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug, __CompileError_Debug as infer_ctx$__CompileError_Debug } from "./infer_ctx.js";
 import { register_decl_public as infer_register$register_decl_public, prefix_decl_name as infer_register$prefix_decl_name, register_decls_two_phase as infer_register$register_decls_two_phase, resolve_effect_expr as infer_register$resolve_effect_expr, resolve_declared_effects as infer_register$resolve_declared_effects } from "./infer_register.js";
 import { infer_block as infer$infer_block, infer_stmt as infer$infer_stmt, infer_expr as infer$infer_expr } from "./infer.js";
 import { zonk_type as zonk$zonk_type, zonk_row as zonk$zonk_row, zonk_param as zonk$zonk_param, zonk_block as zonk$zonk_block, zonk_expr as zonk$zonk_expr, ZonkCtx as zonk$ZonkCtx } from "./zonk.js";
@@ -95,15 +95,16 @@ function check_decl(ctx, decl, __ring_ev_fail) {
       break __ring_match0;
     }
     if (__ring_m0._tag === "ModBlock") {
-      const name = __ring_m0.name; const decls = __ring_m0.decls; const is_pub = __ring_m0.is_pub; const span = __ring_m0.span;
-      return check_mod_decl(ctx, name, decls, is_pub, span, __ring_ev_fail);
+      const name = __ring_m0.name; const uses = __ring_m0.uses; const decls = __ring_m0.decls; const is_pub = __ring_m0.is_pub; const span = __ring_m0.span;
+      return check_mod_decl(ctx, name, uses, decls, is_pub, span, __ring_ev_fail);
       break __ring_match0;
     }
     __match_fail(__ring_m0);
   }
 }
 
-function check_mod_decl(ctx, mod_name, decls, is_pub, span, __ring_ev_fail) {
+function check_mod_decl(ctx, mod_name, uses, decls, is_pub, span, __ring_ev_fail) {
+  List_push(ctx.mod_path_stack, mod_name);
   for (const decl of decls) {
     __ring_match1: {
       const __ring_m1 = decl;
@@ -144,6 +145,7 @@ function check_mod_decl(ctx, mod_name, decls, is_pub, span, __ring_ev_fail) {
       break __ring_match1;
     }
   }
+  resolve_mod_uses(ctx, uses);
   let hdecls = [];
   for (const decl of decls) {
     const prefixed = infer_register$prefix_decl_name(mod_name, decl);
@@ -161,7 +163,104 @@ function check_mod_decl(ctx, mod_name, decls, is_pub, span, __ring_ev_fail) {
       __match_fail(__ring_m4);
     }
   }
+  List_pop(ctx.mod_path_stack);
   return hir$HDecl_ModBlock(mod_name, hdecls, is_pub, span);
+}
+
+function resolve_mod_uses(ctx, uses) {
+  for (const use_decl of uses) {
+    const segments = use_decl.path.segments;
+    if ((List_len(segments) === 0)) {
+      continue;
+    }
+    const first = Option_unwrap_or(List_get(segments, 0), "");
+    if (((first !== "self") && (first !== "super"))) {
+      continue;
+    }
+    let qualifier = first;
+    let name_start_idx = 1;
+    let i = 1;
+    while ((i < List_len(segments))) {
+      const seg = Option_unwrap_or(List_get(segments, i), "");
+      if ((seg === "super")) {
+        qualifier = `${qualifier}::${seg}`;
+        name_start_idx = (i + 1);
+      } else {
+        break;
+      }
+      i = (i + 1);
+    }
+    const resolved = infer_ctx$resolve_relative_qualifier(qualifier, ctx.mod_path_stack);
+    __ring_match5: {
+      const __ring_m5 = resolved;
+      if (__ring_m5._tag === "none") {
+        const _ = infer_ctx$type_error(ctx.sink, codes$E0705, `Cannot use '${qualifier}' — relative path exceeds module nesting depth`, use_decl.path.span, diagnostics$DiagnosticContext_OtherContext(Option_some("relative path out of scope")));
+        continue;
+        break __ring_match5;
+      }
+      if (__ring_m5._tag === "some") {
+        const prefix = __ring_m5._0;
+        __ring_match6: {
+          const __ring_m6 = use_decl.imports;
+          if (__ring_m6._tag === "NamedItems") {
+            const names = __ring_m6.names;
+            for (const item of names) {
+              const local_name = (function() {
+  const __ring_m = item.alias;
+  if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
+  if (__ring_m._tag === "none") { return item.name; }
+  __match_fail(__ring_m);
+})();
+              const qualified_name = ((prefix === "") ? item.name : `${prefix}::${item.name}`);
+              __ring_match7: {
+                const __ring_m7 = env$TypeEnv_lookup(ctx.env, qualified_name);
+                if (__ring_m7._tag === "some") {
+                  const scheme = __ring_m7._0;
+                  env$TypeEnv_bind(ctx.env, local_name, scheme);
+                  if ((local_name !== qualified_name)) {
+                    _Map_insert(ctx.use_aliases, local_name, qualified_name);
+                  }
+                  break __ring_match7;
+                }
+                if (__ring_m7._tag === "none") {
+                  const _ = infer_ctx$type_error(ctx.sink, codes$E0201, `Undefined variable: ${qualified_name}`, item.span, diagnostics$DiagnosticContext_UndefinedVariable(qualified_name, Option_none));
+                  break __ring_match7;
+                }
+                __match_fail(__ring_m7);
+              }
+            }
+            break __ring_match6;
+          }
+          if (__ring_m6._tag === "Module") {
+            if ((name_start_idx < List_len(segments))) {
+              const name = Option_unwrap_or(List_get(segments, (List_len(segments) - 1)), "");
+              const qualified_name = ((prefix === "") ? name : `${prefix}::${name}`);
+              __ring_match8: {
+                const __ring_m8 = env$TypeEnv_lookup(ctx.env, qualified_name);
+                if (__ring_m8._tag === "some") {
+                  const scheme = __ring_m8._0;
+                  env$TypeEnv_bind(ctx.env, name, scheme);
+                  if ((name !== qualified_name)) {
+                    _Map_insert(ctx.use_aliases, name, qualified_name);
+                  }
+                  break __ring_match8;
+                }
+                if (__ring_m8._tag === "none") {
+                  const _ = infer_ctx$type_error(ctx.sink, codes$E0201, `Undefined variable: ${qualified_name}`, use_decl.path.span, diagnostics$DiagnosticContext_UndefinedVariable(qualified_name, Option_none));
+                  break __ring_match8;
+                }
+                __match_fail(__ring_m8);
+              }
+            }
+            break __ring_match6;
+          }
+          __match_fail(__ring_m6);
+        }
+        break __ring_match5;
+      }
+      __match_fail(__ring_m5);
+    }
+  }
 }
 
 function check_const_decl(ctx, name, type_annotation, init, is_pub, span, __ring_ev_fail) {
@@ -174,33 +273,33 @@ function check_const_decl(ctx, name, type_annotation, init, is_pub, span, __ring
   __match_fail(__ring_m);
 })();
   let expected_ty = Option_none;
-  __ring_match5: {
-    const __ring_m5 = type_annotation;
-    if (__ring_m5._tag === "some") {
-      const texpr = __ring_m5._0;
+  __ring_match9: {
+    const __ring_m9 = type_annotation;
+    if (__ring_m9._tag === "some") {
+      const texpr = __ring_m9._0;
       expected_ty = Option_some(infer_ctx$resolve_type_expr(ctx, texpr));
-      break __ring_match5;
+      break __ring_match9;
     }
-    if (__ring_m5._tag === "none") {
-      break __ring_match5;
+    if (__ring_m9._tag === "none") {
+      break __ring_match9;
     }
-    __match_fail(__ring_m5);
+    __match_fail(__ring_m9);
   }
   const init_r = infer$infer_expr(ctx, init, ctx.subst, __ring_ev_fail);
   let s = init_r.subst;
   let init_ty = hir$hexpr_type(init_r.hexpr);
-  __ring_match6: {
-    const __ring_m6 = expected_ty;
-    if (__ring_m6._tag === "some") {
-      const ann_ty = __ring_m6._0;
+  __ring_match10: {
+    const __ring_m10 = expected_ty;
+    if (__ring_m10._tag === "some") {
+      const ann_ty = __ring_m10._0;
       s = infer_ctx$unify_at(ctx.sink, ctx.env, init_ty, ann_ty, s, span);
       init_ty = env$apply_subst(s, ann_ty);
-      break __ring_match6;
+      break __ring_match10;
     }
-    if (__ring_m6._tag === "none") {
-      break __ring_match6;
+    if (__ring_m10._tag === "none") {
+      break __ring_match10;
     }
-    __match_fail(__ring_m6);
+    __match_fail(__ring_m10);
   }
   const resolved = env$apply_subst(s, init_ty);
   const gen_scheme = infer_ctx$generalize(ctx.env, resolved, s);
@@ -284,19 +383,19 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
   const impl_self_type = infer_ctx$resolve_self_type(ctx, target_type);
   let hmethods = [];
   for (const method of methods) {
-    __ring_match7: {
-      const __ring_m7 = method;
-      if (__ring_m7._tag === "ExternFn") {
-        const name = __ring_m7.name; const mtps = __ring_m7.type_params; const params = __ring_m7.params; const return_type = __ring_m7.return_type; const declared_effects = __ring_m7.declared_effects; const is_pub = __ring_m7.is_pub; const mspan = __ring_m7.span;
+    __ring_match11: {
+      const __ring_m11 = method;
+      if (__ring_m11._tag === "ExternFn") {
+        const name = __ring_m11.name; const mtps = __ring_m11.type_params; const params = __ring_m11.params; const return_type = __ring_m11.return_type; const declared_effects = __ring_m11.declared_effects; const is_pub = __ring_m11.is_pub; const mspan = __ring_m11.span;
         List_push(hmethods, check_extern_fn_decl(ctx, name, mtps, params, declared_effects, is_pub, mspan, __ring_ev_fail));
-        break __ring_match7;
+        break __ring_match11;
       }
-      if (__ring_m7._tag === "Fn") {
-        const name = __ring_m7.name; const mtps = __ring_m7.type_params; const params = __ring_m7.params; const return_type = __ring_m7.return_type; const declared_effects = __ring_m7.declared_effects; const body = __ring_m7.body; const is_pub = __ring_m7.is_pub; const mspan = __ring_m7.span;
+      if (__ring_m11._tag === "Fn") {
+        const name = __ring_m11.name; const mtps = __ring_m11.type_params; const params = __ring_m11.params; const return_type = __ring_m11.return_type; const declared_effects = __ring_m11.declared_effects; const body = __ring_m11.body; const is_pub = __ring_m11.is_pub; const mspan = __ring_m11.span;
         List_push(hmethods, check_fn_decl(ctx, name, mtps, params, return_type, declared_effects, body, is_pub, mspan, Option_some(impl_self_type), __ring_ev_fail));
-        break __ring_match7;
+        break __ring_match11;
       }
-      break __ring_match7;
+      break __ring_match11;
     }
   }
   return hir$HDecl_Impl(target_type, type_params, trait_name, hmethods, span);
@@ -314,38 +413,38 @@ function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __r
 })();
   let self_var = env$TypeEnv_fresh_var(ctx.env);
   if ((List_len(trait_def.methods) > 0)) {
-    __ring_match8: {
-      const __ring_m8 = List_first(trait_def.methods);
-      if (__ring_m8._tag === "some") {
-        const first_method = __ring_m8._0;
-        __ring_match9: {
-          const __ring_m9 = first_method.ty;
-          if (__ring_m9._tag === "FnType") {
-            const fps = __ring_m9.params;
+    __ring_match12: {
+      const __ring_m12 = List_first(trait_def.methods);
+      if (__ring_m12._tag === "some") {
+        const first_method = __ring_m12._0;
+        __ring_match13: {
+          const __ring_m13 = first_method.ty;
+          if (__ring_m13._tag === "FnType") {
+            const fps = __ring_m13.params;
             if ((List_len(fps) > 0)) {
-              __ring_match10: {
-                const __ring_m10 = List_first(fps);
-                if (__ring_m10._tag === "some") {
-                  const fp = __ring_m10._0;
+              __ring_match14: {
+                const __ring_m14 = List_first(fps);
+                if (__ring_m14._tag === "some") {
+                  const fp = __ring_m14._0;
                   self_var = fp;
-                  break __ring_match10;
+                  break __ring_match14;
                 }
-                if (__ring_m10._tag === "none") {
-                  break __ring_match10;
+                if (__ring_m14._tag === "none") {
+                  break __ring_match14;
                 }
-                __match_fail(__ring_m10);
+                __match_fail(__ring_m14);
               }
             }
-            break __ring_match9;
+            break __ring_match13;
           }
-          break __ring_match9;
+          break __ring_match13;
         }
-        break __ring_match8;
+        break __ring_match12;
       }
-      if (__ring_m8._tag === "none") {
-        break __ring_match8;
+      if (__ring_m12._tag === "none") {
+        break __ring_match12;
       }
-      __match_fail(__ring_m8);
+      __match_fail(__ring_m12);
     }
   }
   let hmethods = [];
@@ -401,14 +500,14 @@ function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __r
     }
     let method_body = Option_none;
     if (m.has_default) {
-      __ring_match11: {
-        const __ring_m11 = ast_method;
-        if (__ring_m11._tag === "some") {
-          const am = __ring_m11._0;
-          __ring_match12: {
-            const __ring_m12 = am;
-            if (__ring_m12._tag === "Fn") {
-              const abody = __ring_m12.body;
+      __ring_match15: {
+        const __ring_m15 = ast_method;
+        if (__ring_m15._tag === "some") {
+          const am = __ring_m15._0;
+          __ring_match16: {
+            const __ring_m16 = am;
+            if (__ring_m16._tag === "Fn") {
+              const abody = __ring_m16.body;
               const has_body = (function() {
   const __ring_m = abody;
   if (__ring_m._tag === "Block") { const stmts = __ring_m.stmts; const tail = __ring_m.tail; return ((List_len(stmts) > 0) || Option_is_some(tail)); }
@@ -417,16 +516,16 @@ function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __r
               if (has_body) {
                 method_body = check_trait_default_body(ctx, name, self_var, hparams, abody);
               }
-              break __ring_match12;
+              break __ring_match16;
             }
-            break __ring_match12;
+            break __ring_match16;
           }
-          break __ring_match11;
+          break __ring_match15;
         }
-        if (__ring_m11._tag === "none") {
-          break __ring_match11;
+        if (__ring_m15._tag === "none") {
+          break __ring_match15;
         }
-        __match_fail(__ring_m11);
+        __match_fail(__ring_m15);
       }
     }
     List_push(hmethods, new hir$HTraitMethod(m.name, hparams, fn_ret, m.has_default, method_body));
@@ -440,40 +539,40 @@ function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
   env$TypeEnv_push_scope(ctx.env);
   List_push(ctx.fn_bounds_stack, ctx.current_fn_bounds);
   ctx.current_fn_bounds = [];
-  __ring_match13: {
-    const __ring_m13 = self_var;
-    if (__ring_m13._tag === "TypeVar") {
-      const id = __ring_m13.id;
+  __ring_match17: {
+    const __ring_m17 = self_var;
+    if (__ring_m17._tag === "TypeVar") {
+      const id = __ring_m17.id;
       List_push(ctx.current_fn_bounds, new infer_ctx$FnBoundsEntry(id, trait_name, "self"));
-      break __ring_match13;
+      break __ring_match17;
     }
-    break __ring_match13;
+    break __ring_match17;
   }
   for (const p of hparams) {
     env$TypeEnv_bind_mono(ctx.env, p.name, p.ty);
     if (p.is_mutable) {
-      __ring_match14: {
-        const __ring_m14 = env$TypeEnv_lookup(ctx.env, p.name);
-        if (__ring_m14._tag === "some") {
-          const ps = __ring_m14._0;
-          __ring_match15: {
-            const __ring_m15 = ps.def_id;
-            if (__ring_m15._tag === "some") {
-              const did = __ring_m15._0;
+      __ring_match18: {
+        const __ring_m18 = env$TypeEnv_lookup(ctx.env, p.name);
+        if (__ring_m18._tag === "some") {
+          const ps = __ring_m18._0;
+          __ring_match19: {
+            const __ring_m19 = ps.def_id;
+            if (__ring_m19._tag === "some") {
+              const did = __ring_m19._0;
               _Set_insert(ctx.env.scope.mutable_vars, did);
-              break __ring_match15;
+              break __ring_match19;
             }
-            if (__ring_m15._tag === "none") {
-              break __ring_match15;
+            if (__ring_m19._tag === "none") {
+              break __ring_match19;
             }
-            __match_fail(__ring_m15);
+            __match_fail(__ring_m19);
           }
-          break __ring_match14;
+          break __ring_match18;
         }
-        if (__ring_m14._tag === "none") {
-          break __ring_match14;
+        if (__ring_m18._tag === "none") {
+          break __ring_match18;
         }
-        __match_fail(__ring_m14);
+        __match_fail(__ring_m18);
       }
     }
   }
@@ -567,33 +666,33 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
   ctx.subst = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span);
   const local_names = map_new();
   for (const tp of type_params) {
-    __ring_match16: {
-      const __ring_m16 = _Map_get(ctx.type_param_scope, tp.name);
-      if (__ring_m16._tag === "some") {
-        const tv = __ring_m16._0;
-        __ring_match17: {
-          const __ring_m17 = tv;
-          if (__ring_m17._tag === "TypeVar") {
+    __ring_match20: {
+      const __ring_m20 = _Map_get(ctx.type_param_scope, tp.name);
+      if (__ring_m20._tag === "some") {
+        const tv = __ring_m20._0;
+        __ring_match21: {
+          const __ring_m21 = tv;
+          if (__ring_m21._tag === "TypeVar") {
             const resolved = env$apply_subst(ctx.subst, tv);
-            __ring_match18: {
-              const __ring_m18 = resolved;
-              if (__ring_m18._tag === "TypeVar") {
-                const rid = __ring_m18.id;
+            __ring_match22: {
+              const __ring_m22 = resolved;
+              if (__ring_m22._tag === "TypeVar") {
+                const rid = __ring_m22.id;
                 _Map_insert(local_names, rid, tp.name);
-                break __ring_match18;
+                break __ring_match22;
               }
-              break __ring_match18;
+              break __ring_match22;
             }
-            break __ring_match17;
+            break __ring_match21;
           }
-          break __ring_match17;
+          break __ring_match21;
         }
-        break __ring_match16;
+        break __ring_match20;
       }
-      if (__ring_m16._tag === "none") {
-        break __ring_match16;
+      if (__ring_m20._tag === "none") {
+        break __ring_match20;
       }
-      __match_fail(__ring_m16);
+      __match_fail(__ring_m20);
     }
   }
   const declared_names = set_new();
@@ -605,22 +704,22 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
     const tpname = __ring_dt0[0];
     const tv = __ring_dt0[1];
     if (((!_Map_contains_key(saved_tp_scope, tpname)) && (!_Set_contains(declared_names, tpname)))) {
-      __ring_match19: {
-        const __ring_m19 = tv;
-        if (__ring_m19._tag === "TypeVar") {
+      __ring_match23: {
+        const __ring_m23 = tv;
+        if (__ring_m23._tag === "TypeVar") {
           const resolved = env$apply_subst(ctx.subst, tv);
-          __ring_match20: {
-            const __ring_m20 = resolved;
-            if (__ring_m20._tag === "TypeVar") {
-              const rid = __ring_m20.id;
+          __ring_match24: {
+            const __ring_m24 = resolved;
+            if (__ring_m24._tag === "TypeVar") {
+              const rid = __ring_m24.id;
               _Map_insert(local_names, rid, tpname);
-              break __ring_match20;
+              break __ring_match24;
             }
-            break __ring_match20;
+            break __ring_match24;
           }
-          break __ring_match19;
+          break __ring_match23;
         }
-        break __ring_match19;
+        break __ring_match23;
       }
     }
   }
@@ -636,59 +735,59 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
 }
 
 function effects_match_kind(a, b) {
-  __ring_match21: {
-    const __ring_m21 = a;
-    if (__ring_m21._tag === "IoEffect") {
-      __ring_match22: {
-        const __ring_m22 = b;
-        if (__ring_m22._tag === "IoEffect") {
+  __ring_match25: {
+    const __ring_m25 = a;
+    if (__ring_m25._tag === "IoEffect") {
+      __ring_match26: {
+        const __ring_m26 = b;
+        if (__ring_m26._tag === "IoEffect") {
           return true;
-          break __ring_match22;
+          break __ring_match26;
         }
         return false;
-        break __ring_match22;
+        break __ring_match26;
       }
-      break __ring_match21;
+      break __ring_match25;
     }
-    if (__ring_m21._tag === "MutEffect") {
-      __ring_match23: {
-        const __ring_m23 = b;
-        if (__ring_m23._tag === "MutEffect") {
+    if (__ring_m25._tag === "MutEffect") {
+      __ring_match27: {
+        const __ring_m27 = b;
+        if (__ring_m27._tag === "MutEffect") {
           return true;
-          break __ring_match23;
+          break __ring_match27;
         }
         return false;
-        break __ring_match23;
+        break __ring_match27;
       }
-      break __ring_match21;
+      break __ring_match25;
     }
-    if (__ring_m21._tag === "FailEffect") {
-      __ring_match24: {
-        const __ring_m24 = b;
-        if (__ring_m24._tag === "FailEffect") {
+    if (__ring_m25._tag === "FailEffect") {
+      __ring_match28: {
+        const __ring_m28 = b;
+        if (__ring_m28._tag === "FailEffect") {
           return true;
-          break __ring_match24;
+          break __ring_match28;
         }
         return false;
-        break __ring_match24;
+        break __ring_match28;
       }
-      break __ring_match21;
+      break __ring_match25;
     }
-    if (__ring_m21._tag === "CustomEffect") {
-      const na = __ring_m21.name;
-      __ring_match25: {
-        const __ring_m25 = b;
-        if (__ring_m25._tag === "CustomEffect") {
-          const nb = __ring_m25.name;
+    if (__ring_m25._tag === "CustomEffect") {
+      const na = __ring_m25.name;
+      __ring_match29: {
+        const __ring_m29 = b;
+        if (__ring_m29._tag === "CustomEffect") {
+          const nb = __ring_m29.name;
           return (na === nb);
-          break __ring_match25;
+          break __ring_match29;
         }
         return false;
-        break __ring_match25;
+        break __ring_match29;
       }
-      break __ring_match21;
+      break __ring_match25;
     }
-    __match_fail(__ring_m21);
+    __match_fail(__ring_m25);
   }
 }
 
@@ -705,27 +804,27 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   List_push(ctx.fn_bounds_stack, ctx.current_fn_bounds);
   ctx.current_fn_bounds = [];
   for (const tp of type_params) {
-    __ring_match26: {
-      const __ring_m26 = _Map_get(ctx.type_param_scope, tp.name);
-      if (__ring_m26._tag === "some") {
-        const tv = __ring_m26._0;
-        __ring_match27: {
-          const __ring_m27 = tv;
-          if (__ring_m27._tag === "TypeVar") {
-            const id = __ring_m27.id;
+    __ring_match30: {
+      const __ring_m30 = _Map_get(ctx.type_param_scope, tp.name);
+      if (__ring_m30._tag === "some") {
+        const tv = __ring_m30._0;
+        __ring_match31: {
+          const __ring_m31 = tv;
+          if (__ring_m31._tag === "TypeVar") {
+            const id = __ring_m31.id;
             for (const bound of tp.bounds) {
               List_push(ctx.current_fn_bounds, new infer_ctx$FnBoundsEntry(id, bound.trait_name, tp.name));
             }
-            break __ring_match27;
+            break __ring_match31;
           }
-          break __ring_match27;
+          break __ring_match31;
         }
-        break __ring_match26;
+        break __ring_match30;
       }
-      if (__ring_m26._tag === "none") {
-        break __ring_match26;
+      if (__ring_m30._tag === "none") {
+        break __ring_match30;
       }
-      __match_fail(__ring_m26);
+      __match_fail(__ring_m30);
     }
   }
   let hparams = [];
@@ -743,33 +842,33 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
 })();
     env$TypeEnv_bind_mono(ctx.env, p.name, ptype);
     const param_scheme = env$TypeEnv_lookup(ctx.env, p.name);
-    __ring_match28: {
-      const __ring_m28 = param_scheme;
-      if (__ring_m28._tag === "some") {
-        const ps = __ring_m28._0;
-        __ring_match29: {
-          const __ring_m29 = ps.def_id;
-          if (__ring_m29._tag === "some") {
-            const did = __ring_m29._0;
+    __ring_match32: {
+      const __ring_m32 = param_scheme;
+      if (__ring_m32._tag === "some") {
+        const ps = __ring_m32._0;
+        __ring_match33: {
+          const __ring_m33 = ps.def_id;
+          if (__ring_m33._tag === "some") {
+            const did = __ring_m33._0;
             env$TypeEnv_record_def_span(ctx.env, did, p.span);
             if (p.is_mutable) {
               _Set_insert(ctx.env.scope.mutable_vars, did);
             }
-            break __ring_match29;
+            break __ring_match33;
           }
-          if (__ring_m29._tag === "none") {
-            break __ring_match29;
+          if (__ring_m33._tag === "none") {
+            break __ring_match33;
           }
-          __match_fail(__ring_m29);
+          __match_fail(__ring_m33);
         }
         List_push(hparams, new hir$HParam(p.name, ptype, ps.def_id, p.is_mutable));
-        break __ring_match28;
+        break __ring_match32;
       }
-      if (__ring_m28._tag === "none") {
+      if (__ring_m32._tag === "none") {
         List_push(hparams, new hir$HParam(p.name, ptype, Option_none, p.is_mutable));
-        break __ring_match28;
+        break __ring_match32;
       }
-      __match_fail(__ring_m28);
+      __match_fail(__ring_m32);
     }
   }
   const saved_fn_return = ctx.current_fn_return_type;
@@ -834,17 +933,17 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-  __ring_match30: {
-    const __ring_m30 = fn_def_id;
-    if (__ring_m30._tag === "some") {
-      const did = __ring_m30._0;
+  __ring_match34: {
+    const __ring_m34 = fn_def_id;
+    if (__ring_m34._tag === "some") {
+      const did = __ring_m34._0;
       env$TypeEnv_record_def_span(ctx.env, did, span);
-      break __ring_match30;
+      break __ring_match34;
     }
-    if (__ring_m30._tag === "none") {
-      break __ring_match30;
+    if (__ring_m34._tag === "none") {
+      break __ring_match34;
     }
-    __match_fail(__ring_m30);
+    __match_fail(__ring_m34);
   }
   return hir$HDecl_Fn(name, fn_def_id, type_params, final_params, final_ret, final_effects, final_body, is_pub, trait_bounds, span);
 }
@@ -876,16 +975,16 @@ function check_test_decl(ctx, description, body, span, __ring_ev_fail) {
 function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
   const hd = check_decl(ctx, decl, __ring_ev_fail);
   List_push(hdecls, hd);
-  __ring_match31: {
-    const __ring_m31 = hd;
-    if (__ring_m31._tag === "Fn") {
-      const name = __ring_m31.name; const effects = __ring_m31.effects;
+  __ring_match35: {
+    const __ring_m35 = hd;
+    if (__ring_m35._tag === "Fn") {
+      const name = __ring_m35.name; const effects = __ring_m35.effects;
       if ((List_len(effects.effects) > 0)) {
         return infer_ctx$update_fn_effects(ctx.env, name, effects);
       }
-      break __ring_match31;
+      break __ring_match35;
     }
-    break __ring_match31;
+    break __ring_match35;
   }
 }
 

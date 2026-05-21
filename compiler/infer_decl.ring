@@ -1,17 +1,18 @@
 use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string}
-use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl, EffectExpr}
+use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl, EffectExpr,
+    UseDecl, UseImport, NamedImport}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod,
     hexpr_type}
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0201, E0204, E0402, E0404, E0501}
+use codes::{E0201, E0204, E0402, E0404, E0501, E0705}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error,
     unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type,
-    generalize}
+    generalize, resolve_relative_qualifier}
 use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name}
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
@@ -50,12 +51,14 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
         },
         Decl::Const { name, type_annotation, init, is_pub, span } =>
             check_const_decl(ctx, name, type_annotation, init, is_pub, span),
-        Decl::ModBlock { name, decls, is_pub, span } =>
-            check_mod_decl(ctx, name, decls, is_pub, span)
+        Decl::ModBlock { name, uses, decls, is_pub, span } =>
+            check_mod_decl(ctx, name, uses, decls, is_pub, span)
     }
 }
 
-fn check_mod_decl(var ctx: InferCtx, mod_name: Str, decls: List<Decl>, is_pub: Bool, span: Span) -> HDecl {
+fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: List<Decl>, is_pub: Bool, span: Span) -> HDecl {
+    ctx.mod_path_stack.push(mod_name)
+
     // Register short-name aliases for mod-internal types so that
     // type annotations like `c: Circle` resolve to `shapes::Circle`.
     // These aliases remain in scope for the rest of the file, which
@@ -84,6 +87,9 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, decls: List<Decl>, is_pub: B
         }
     }
 
+    // Resolve use declarations with relative paths (self::/super::)
+    resolve_mod_uses(ctx, uses)
+
     var hdecls: List<HDecl> = []
     for decl in decls {
         let prefixed = prefix_decl_name(mod_name, decl)
@@ -93,7 +99,97 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, decls: List<Decl>, is_pub: B
             none => {}
         }
     }
+    ctx.mod_path_stack.pop()
     HDecl::ModBlock { name: mod_name, decls: hdecls, is_pub: is_pub, span: span }
+}
+
+fn resolve_mod_uses(var ctx: InferCtx, uses: List<UseDecl>) {
+    for use_decl in uses {
+        let segments = use_decl.path.segments
+        if segments.len() == 0 { continue }
+        let first = segments.get(0).unwrap_or("")
+
+        // Check if path starts with relative prefix
+        if first != "self" && first != "super" { continue }
+
+        // Build qualifier from relative segments
+        var qualifier = first
+        var name_start_idx = 1
+        var i = 1
+        while i < segments.len() {
+            let seg = segments.get(i).unwrap_or("")
+            if seg == "super" {
+                qualifier = "${qualifier}::${seg}"
+                name_start_idx = i + 1
+            } else {
+                break
+            }
+            i = i + 1
+        }
+
+        // Resolve the relative qualifier against mod_path_stack
+        let resolved = resolve_relative_qualifier(qualifier, ctx.mod_path_stack)
+        match resolved {
+            none => {
+                let _ = type_error(ctx.sink, E0705,
+                    "Cannot use '${qualifier}' — relative path exceeds module nesting depth",
+                    use_decl.path.span,
+                    DiagnosticContext::OtherContext { detail: some("relative path out of scope") })
+                continue
+            },
+            some(prefix) => {
+                // Rebuild the actual path: prefix + remaining segments
+                match use_decl.imports {
+                    UseImport::NamedItems { names } => {
+                        for item in names {
+                            let local_name = match item.alias {
+                                some(a) => a,
+                                none => item.name
+                            }
+                            let qualified_name = if prefix == "" { item.name } else { "${prefix}::${item.name}" }
+                            match ctx.env.lookup(qualified_name) {
+                                some(scheme) => {
+                                    ctx.env.bind(local_name, scheme)
+                                    // Track alias so codegen emits the qualified name
+                                    if local_name != qualified_name {
+                                        ctx.use_aliases.insert(local_name, qualified_name)
+                                    }
+                                },
+                                none => {
+                                    let _ = type_error(ctx.sink, E0201,
+                                        "Undefined variable: ${qualified_name}",
+                                        item.span,
+                                        DiagnosticContext::UndefinedVariable { name: qualified_name, scope_locals: none })
+                                }
+                            }
+                        }
+                    },
+                    UseImport::Module => {
+                        // use super::name — single name import (last segment is the name)
+                        if name_start_idx < segments.len() {
+                            let name = segments.get(segments.len() - 1).unwrap_or("")
+                            let qualified_name = if prefix == "" { name } else { "${prefix}::${name}" }
+                            match ctx.env.lookup(qualified_name) {
+                                some(scheme) => {
+                                    ctx.env.bind(name, scheme)
+                                    // Track alias so codegen emits the qualified name
+                                    if name != qualified_name {
+                                        ctx.use_aliases.insert(name, qualified_name)
+                                    }
+                                },
+                                none => {
+                                    let _ = type_error(ctx.sink, E0201,
+                                        "Undefined variable: ${qualified_name}",
+                                        use_decl.path.span,
+                                        DiagnosticContext::UndefinedVariable { name: qualified_name, scope_locals: none })
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn check_const_decl(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {

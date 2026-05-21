@@ -16,7 +16,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     hexpr_type, hexpr_effects, hexpr_span}
 use diagnostics::{DiagnosticContext, CollectingSink}
 use codes::{E0201, E0203, E0205, E0206, E0301, E0303, E0304, E0305,
-    E0307, E0308, E0402, E0504, E0601}
+    E0307, E0308, E0402, E0504, E0601, E0705}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
@@ -27,7 +27,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     resolve_type_expr, resolve_self_type, resolve_named_type,
     bind_pattern, build_scheme_var_map, resolve_dicts_from_scheme,
     remove_fail_effect, remove_specific_fail_effect,
-    generalize}
+    generalize, resolve_relative_qualifier}
 use exhaustive::{check_exhaustive}
 
 
@@ -668,8 +668,37 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
 // ============================================================
 
 fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
-    // Try module-qualified lookup first: qualifier::name
+    // Resolve relative paths (self::/super::) to actual qualified names
+    var resolved_qualifier = qualifier
     match qualifier {
+        some(q) => {
+            if q == "self" || q.starts_with("super") {
+                match resolve_relative_qualifier(q, ctx.mod_path_stack) {
+                    some(prefix) => {
+                        if prefix == "" {
+                            // super from top-level mod — name is at root scope
+                            resolved_qualifier = none
+                        } else {
+                            resolved_qualifier = some(prefix)
+                        }
+                    },
+                    none => {
+                        let _ = type_error(ctx.sink, E0705,
+                            "Cannot use '${q}' — relative path exceeds module nesting depth",
+                            span, DiagnosticContext::OtherContext { detail: some("relative path out of scope") })
+                        return InferResult {
+                            hexpr: HExpr::Ident { name: name, resolved_name: none, def_id: none, dict_closure_dicts: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
+                            subst: subst, effects: EMPTY_ROW
+                        }
+                    }
+                }
+            }
+        },
+        none => {}
+    }
+
+    // Try module-qualified lookup first: qualifier::name
+    match resolved_qualifier {
         some(q) => {
             let qualified_name = "${q}::${name}"
             let mod_scheme = ctx.env.lookup(qualified_name)
@@ -690,7 +719,7 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
     let scheme = ctx.env.lookup(name)
     match scheme {
         none => {
-            match qualifier {
+            match resolved_qualifier {
                 some(q) => {
                     let _ = type_error(ctx.sink, E0201, "'${q}' has no member '${name}'", span,
                         DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
@@ -712,7 +741,13 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
             let t = ctx.env.instantiate(s)
             var resolved_name: Str? = none
             var enum_name: Str? = none
-            match qualifier {
+            // Check if this name was imported via use alias (e.g. use super::value)
+            // If so, use the qualified name in HIR for correct codegen
+            let actual_name = match ctx.use_aliases.get(name) {
+                some(qualified) => qualified,
+                none => name
+            }
+            match resolved_qualifier {
                 some(q) => {
                     match ctx.env.types.enums.get(q) {
                         some(enum_def) => {
@@ -734,7 +769,7 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
                 none => {}
             }
             InferResult {
-                hexpr: HExpr::Ident { name: name, resolved_name: resolved_name, def_id: s.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                hexpr: HExpr::Ident { name: actual_name, resolved_name: resolved_name, def_id: s.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
                 subst: subst, effects: EMPTY_ROW
             }
         }
@@ -1587,8 +1622,36 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
 // ============================================================
 
 fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>, spread: Expr?, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
-    // Try module-qualified struct lookup: qualifier::name
+    // Resolve relative paths (self::/super::)
+    var resolved_qualifier = qualifier
     match qualifier {
+        some(q) => {
+            if q == "self" || q.starts_with("super") {
+                match resolve_relative_qualifier(q, ctx.mod_path_stack) {
+                    some(prefix) => {
+                        if prefix == "" {
+                            resolved_qualifier = none
+                        } else {
+                            resolved_qualifier = some(prefix)
+                        }
+                    },
+                    none => {
+                        let _ = type_error(ctx.sink, E0705,
+                            "Cannot use '${q}' — relative path exceeds module nesting depth",
+                            span, DiagnosticContext::OtherContext { detail: some("relative path out of scope") })
+                        return InferResult {
+                            hexpr: HExpr::StructLit { name: name, type_args: [], fields: [], spread: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
+                            subst: subst, effects: EMPTY_ROW
+                        }
+                    }
+                }
+            }
+        },
+        none => {}
+    }
+
+    // Try module-qualified struct lookup: qualifier::name
+    match resolved_qualifier {
         some(q) => {
             let qualified_name = "${q}::${name}"
             let mod_struct = ctx.env.types.structs.get(qualified_name)
@@ -1604,7 +1667,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
 
     // Check for named enum variant
     var variant_enum: Str? = none
-    match qualifier {
+    match resolved_qualifier {
         some(q) => match ctx.env.types.enums.get(q) {
             some(enum_def) => {
                 if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(q) }
@@ -1613,8 +1676,8 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         },
         none => { variant_enum = ctx.env.types.variant_to_enum.get(name) }
     }
-    if variant_enum.is_none() && qualifier.is_some() {
-        match qualifier {
+    if variant_enum.is_none() && resolved_qualifier.is_some() {
+        match resolved_qualifier {
             some(q) => { let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
                 DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }) },
             none => {}

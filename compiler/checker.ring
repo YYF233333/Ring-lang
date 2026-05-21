@@ -8,7 +8,7 @@ use infer_decl::{check as infer_check, check_prelude_decl}
 use infer_ctx::{InferCtx}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
-use codes::{E0702, E0703}
+use codes::{E0702, E0703, E0705}
 use parser::{parse}
 use union_find::{UnionFind}
 use unify::{empty_subst}
@@ -112,7 +112,9 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         current_fn_return_type: none,
         current_fn_bounds: [],
         fn_bounds_stack: [],
-        loop_depth: 0
+        loop_depth: 0,
+        mod_path_stack: [],
+        use_aliases: map_new()
     }
 }
 
@@ -195,6 +197,19 @@ fn resolve_uses(var ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
     }
 
     for use_decl in uses {
+        // Reject relative paths (self::/super::) at file level
+        let first_seg = use_decl.path.segments.get(0).unwrap_or("")
+        if first_seg == "self" || first_seg == "super" {
+            let d = make_diag(
+                E0705, Severity::SevError,
+                "Cannot use '${first_seg}::' at file level — relative paths are only supported inside mod blocks",
+                use_decl.path.span,
+                DiagnosticContext::OtherContext { detail: some("relative path out of scope") }
+            )
+            ctx.sink.report(d)
+            continue
+        }
+
         let mod_key = use_decl.path.segments.join("::")
         match module_map.get(mod_key) {
             none => {
