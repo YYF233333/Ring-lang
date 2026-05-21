@@ -8,7 +8,7 @@ impl<K, V> Map {
     pub extern fn len(self: Map<K, V>) -> Int
     pub extern fn get(self: Map<K, V>, key: K) -> Option<V>
     pub extern fn contains_key(self: Map<K, V>, key: K) -> Bool
-    pub extern fn is_empty(self: Map<K, V>) -> Bool
+    pub fn is_empty(self: Map<K, V>) -> Bool { self.len() == 0 }
     pub extern fn keys(self: Map<K, V>) -> List<K>
     pub extern fn values(self: Map<K, V>) -> List<V>
     pub extern fn entries(self: Map<K, V>) -> List<(K, V)>

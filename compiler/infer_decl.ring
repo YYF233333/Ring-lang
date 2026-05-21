@@ -537,3 +537,13 @@ pub fn check(var ctx: InferCtx, program: Program) -> HProgram {
 pub fn resolve_type_expr_public(var ctx: InferCtx, texpr: TypeExpr) -> Type {
     resolve_type_expr(ctx, texpr)
 }
+
+pub fn check_prelude_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
+    // Note: check_decl uses fail.raise internally. Due to the known limitation
+    // where cross-module effect propagation doesn't work (effects registered as
+    // EMPTY_ROW in Pass 1), we must explicitly surface the fail effect here so
+    // callers pass the __ring_ev_fail evidence.
+    let result = check_decl(ctx, decl)
+    if false { fail.raise(CompileError {}) }
+    result
+}

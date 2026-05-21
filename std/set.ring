@@ -7,7 +7,7 @@ pub extern fn set_clone<T>(s: Set<T>) -> Set<T>
 impl<T> Set {
     pub extern fn len(self: Set<T>) -> Int
     pub extern fn contains(self: Set<T>, item: T) -> Bool
-    pub extern fn is_empty(self: Set<T>) -> Bool
+    pub fn is_empty(self: Set<T>) -> Bool { self.len() == 0 }
     pub extern fn to_list(self: Set<T>) -> List<T>
     pub extern fn insert(self: Set<T>, item: T) -> Unit
     pub extern fn remove(self: Set<T>, item: T) -> Unit

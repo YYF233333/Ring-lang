@@ -1,4 +1,22 @@
-import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, print, assert, panic, exit, json_stringify, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_first, List_last, List_contains, List_is_empty, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_pop, List_shift, List_clear, List_find_index, List_index_of, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_is_empty, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_contains, _Set_is_empty, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
+import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, print, assert, panic, exit, json_stringify, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_contains, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_pop, List_shift, List_clear, List_find_index, List_index_of, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_contains, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
+
+function List_first(self) {
+  return List_get(self, 0);
+}
+function List_last(self) {
+  return List_get(self, (List_len(self) - 1));
+}
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
+
+function _Map_is_empty(self) {
+  return (_Map_len(self) === 0);
+}
+
+function _Set_is_empty(self) {
+  return (_Set_len(self) === 0);
+}
 
 function RUNTIME_CODE() {
   let lines = [""];
@@ -74,10 +92,7 @@ function RUNTIME_CODE() {
   List_push(lines, "");
   List_push(lines, "function List_len(self) { return self.length; }");
   List_push(lines, "function List_get(self, i) { return i >= 0 && i < self.length ? { _tag: \"some\", _0: self[i] } : { _tag: \"none\" }; }");
-  List_push(lines, "function List_first(self) { return self.length > 0 ? { _tag: \"some\", _0: self[0] } : { _tag: \"none\" }; }");
-  List_push(lines, "function List_last(self) { return self.length > 0 ? { _tag: \"some\", _0: self[self.length - 1] } : { _tag: \"none\" }; }");
   List_push(lines, "function List_contains(self, x) { return self.includes(x); }");
-  List_push(lines, "function List_is_empty(self) { return self.length === 0; }");
   List_push(lines, "function List_push(self, x) { self.push(x); }");
   List_push(lines, "function List_concat(self, other) { return self.concat(other); }");
   List_push(lines, "function List_extend(self, other) { for (var i = 0; i < other.length; i++) self.push(other[i]); }");
@@ -100,7 +115,6 @@ function RUNTIME_CODE() {
   List_push(lines, "function _Map_len(self) { return self.size; }");
   List_push(lines, "function _Map_get(self, key) { return self.has(key) ? { _tag: \"some\", _0: self.get(key) } : { _tag: \"none\" }; }");
   List_push(lines, "function _Map_contains_key(self, key) { return self.has(key); }");
-  List_push(lines, "function _Map_is_empty(self) { return self.size === 0; }");
   List_push(lines, "function _Map_keys(self) { return Array.from(self.keys()); }");
   List_push(lines, "function _Map_values(self) { return Array.from(self.values()); }");
   List_push(lines, "function _Map_entries(self) { return Array.from(self.entries()); }");
@@ -113,7 +127,6 @@ function RUNTIME_CODE() {
   List_push(lines, "function set_clone(s) { return new Set(s); }");
   List_push(lines, "function _Set_len(self) { return self.size; }");
   List_push(lines, "function _Set_contains(self, x) { return self.has(x); }");
-  List_push(lines, "function _Set_is_empty(self) { return self.size === 0; }");
   List_push(lines, "function _Set_to_list(self) { return Array.from(self); }");
   List_push(lines, "function _Set_insert(self, x) { self.add(x); }");
   List_push(lines, "function _Set_remove(self, x) { self.delete(x); }");
@@ -199,7 +212,7 @@ function RUNTIME_CODE() {
   return List_join(lines, "\n");
 }
 
-const RUNTIME_EXPORT_NAMES = ["__EffectAbort", "__ring_raise_fail", "Cell", "Cell_get", "Cell_set", "Cell_update", "__match_fail", "print", "assert", "panic", "exit", "json_stringify", "Option_some", "Option_none", "Option_is_some", "Option_is_none", "Option_unwrap_or", "Option_unwrap", "Str_len", "Str_contains", "Str_starts_with", "Str_ends_with", "Str_slice", "Str_trim", "Str_to_upper", "Str_to_lower", "Str_replace", "Str_split", "Str_char_at", "Str_index_of", "Str_pad_start", "Str_pad_end", "Str_repeat", "Str_char_code_at", "Int_to_str", "Float_to_str", "parse_int", "parse_float", "List_len", "List_get", "List_first", "List_last", "List_contains", "List_is_empty", "List_push", "List_concat", "List_extend", "List_slice", "List_reverse", "List_join", "List_sort", "List_sort_by", "List_pop", "List_shift", "List_clear", "List_find_index", "List_index_of", "list_clone", "map_new", "map_from", "map_clone", "_Map_len", "_Map_get", "_Map_contains_key", "_Map_is_empty", "_Map_keys", "_Map_values", "_Map_entries", "_Map_insert", "_Map_remove", "_Map_clear", "set_new", "set_from", "set_clone", "_Set_len", "_Set_contains", "_Set_is_empty", "_Set_to_list", "_Set_insert", "_Set_remove", "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear", "read_file", "write_file", "file_exists", "delete_file", "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname", "argv", "exit_process", "eprintln", "cwd", "__Int_Eq", "__Float_Eq", "__Str_Eq", "__Bool_Eq", "__Option_Eq", "__Int_Clone", "__Float_Clone", "__Str_Clone", "__Bool_Clone", "__List_Clone", "__Map_Clone", "__Set_Clone", "__Option_Clone", "__Int_Ord", "__Float_Ord", "__Str_Ord", "__Bool_Ord", "__Int_Debug", "__Float_Debug", "__Str_Debug", "__Bool_Debug", "__Option_Debug", "__List_Debug", "__Map_Debug", "__Set_Debug"];
+const RUNTIME_EXPORT_NAMES = ["__EffectAbort", "__ring_raise_fail", "Cell", "Cell_get", "Cell_set", "Cell_update", "__match_fail", "print", "assert", "panic", "exit", "json_stringify", "Option_some", "Option_none", "Option_is_some", "Option_is_none", "Option_unwrap_or", "Option_unwrap", "Str_len", "Str_contains", "Str_starts_with", "Str_ends_with", "Str_slice", "Str_trim", "Str_to_upper", "Str_to_lower", "Str_replace", "Str_split", "Str_char_at", "Str_index_of", "Str_pad_start", "Str_pad_end", "Str_repeat", "Str_char_code_at", "Int_to_str", "Float_to_str", "parse_int", "parse_float", "List_len", "List_get", "List_contains", "List_push", "List_concat", "List_extend", "List_slice", "List_reverse", "List_join", "List_sort", "List_sort_by", "List_pop", "List_shift", "List_clear", "List_find_index", "List_index_of", "list_clone", "map_new", "map_from", "map_clone", "_Map_len", "_Map_get", "_Map_contains_key", "_Map_keys", "_Map_values", "_Map_entries", "_Map_insert", "_Map_remove", "_Map_clear", "set_new", "set_from", "set_clone", "_Set_len", "_Set_contains", "_Set_to_list", "_Set_insert", "_Set_remove", "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear", "read_file", "write_file", "file_exists", "delete_file", "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname", "argv", "exit_process", "eprintln", "cwd", "__Int_Eq", "__Float_Eq", "__Str_Eq", "__Bool_Eq", "__Option_Eq", "__Int_Clone", "__Float_Clone", "__Str_Clone", "__Bool_Clone", "__List_Clone", "__Map_Clone", "__Set_Clone", "__Option_Clone", "__Int_Ord", "__Float_Ord", "__Str_Ord", "__Bool_Ord", "__Int_Debug", "__Float_Debug", "__Str_Debug", "__Bool_Debug", "__Option_Debug", "__List_Debug", "__Map_Debug", "__Set_Debug"];
 
 function runtime_esm_code() {
   const names = RUNTIME_EXPORT_NAMES;

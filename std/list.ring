@@ -5,10 +5,10 @@ pub extern fn list_clone<T>(l: List<T>) -> List<T>
 impl<T> List {
     pub extern fn len(self: List<T>) -> Int
     pub extern fn get(self: List<T>, index: Int) -> Option<T>
-    pub extern fn first(self: List<T>) -> Option<T>
-    pub extern fn last(self: List<T>) -> Option<T>
+    pub fn first(self: List<T>) -> Option<T> { self.get(0) }
+    pub fn last(self: List<T>) -> Option<T> { self.get(self.len() - 1) }
     pub extern fn contains(self: List<T>, item: T) -> Bool
-    pub extern fn is_empty(self: List<T>) -> Bool
+    pub fn is_empty(self: List<T>) -> Bool { self.len() == 0 }
     pub extern fn push(self: List<T>, item: T) -> Unit
     pub extern fn pop(self: List<T>) -> Option<T>
     pub extern fn concat(self: List<T>, other: List<T>) -> List<T>

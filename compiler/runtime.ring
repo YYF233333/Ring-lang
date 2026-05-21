@@ -72,10 +72,7 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("")
     lines.push("function List_len(self) { return self.length; }")
     lines.push("function List_get(self, i) { return i >= 0 && i < self.length ? { _tag: \"some\", _0: self[i] } : { _tag: \"none\" }; }")
-    lines.push("function List_first(self) { return self.length > 0 ? { _tag: \"some\", _0: self[0] } : { _tag: \"none\" }; }")
-    lines.push("function List_last(self) { return self.length > 0 ? { _tag: \"some\", _0: self[self.length - 1] } : { _tag: \"none\" }; }")
     lines.push("function List_contains(self, x) { return self.includes(x); }")
-    lines.push("function List_is_empty(self) { return self.length === 0; }")
     lines.push("function List_push(self, x) { self.push(x); }")
     lines.push("function List_concat(self, other) { return self.concat(other); }")
     lines.push("function List_extend(self, other) { for (var i = 0; i < other.length; i++) self.push(other[i]); }")
@@ -98,7 +95,6 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function _Map_len(self) { return self.size; }")
     lines.push("function _Map_get(self, key) { return self.has(key) ? { _tag: \"some\", _0: self.get(key) } : { _tag: \"none\" }; }")
     lines.push("function _Map_contains_key(self, key) { return self.has(key); }")
-    lines.push("function _Map_is_empty(self) { return self.size === 0; }")
     lines.push("function _Map_keys(self) { return Array.from(self.keys()); }")
     lines.push("function _Map_values(self) { return Array.from(self.values()); }")
     lines.push("function _Map_entries(self) { return Array.from(self.entries()); }")
@@ -111,7 +107,6 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function set_clone(s) { return new Set(s); }")
     lines.push("function _Set_len(self) { return self.size; }")
     lines.push("function _Set_contains(self, x) { return self.has(x); }")
-    lines.push("function _Set_is_empty(self) { return self.size === 0; }")
     lines.push("function _Set_to_list(self) { return Array.from(self); }")
     lines.push("function _Set_insert(self, x) { self.add(x); }")
     lines.push("function _Set_remove(self, x) { self.delete(x); }")
@@ -207,16 +202,16 @@ pub const RUNTIME_EXPORT_NAMES: List<Str> =
      "Str_split", "Str_char_at", "Str_index_of",
      "Str_pad_start", "Str_pad_end", "Str_repeat", "Str_char_code_at",
      "Int_to_str", "Float_to_str", "parse_int", "parse_float",
-     "List_len", "List_get", "List_first", "List_last", "List_contains",
-     "List_is_empty", "List_push", "List_concat", "List_extend", "List_slice",
+     "List_len", "List_get", "List_contains",
+     "List_push", "List_concat", "List_extend", "List_slice",
      "List_reverse", "List_join", "List_sort", "List_sort_by",
      "List_pop", "List_shift", "List_clear", "List_find_index", "List_index_of",
      "list_clone",
      "map_new", "map_from", "map_clone",
-     "_Map_len", "_Map_get", "_Map_contains_key", "_Map_is_empty",
+     "_Map_len", "_Map_get", "_Map_contains_key",
      "_Map_keys", "_Map_values", "_Map_entries", "_Map_insert", "_Map_remove", "_Map_clear",
      "set_new", "set_from", "set_clone",
-     "_Set_len", "_Set_contains", "_Set_is_empty", "_Set_to_list",
+     "_Set_len", "_Set_contains", "_Set_to_list",
      "_Set_insert", "_Set_remove", "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear",
      "read_file", "write_file", "file_exists", "delete_file",
      "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname",

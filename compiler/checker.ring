@@ -1,10 +1,10 @@
 use types::{Type, UNIT}
-use ast::{Program, UseDecl, UseImport, NamedImport}
-use hir::{HProgram}
+use ast::{Program, Decl, UseDecl, UseImport, NamedImport, Span, TypeParam}
+use hir::{HDecl, HProgram}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env}
 use builtins::{register_builtins, register_hof_intrinsics}
-use infer_decl::{check as infer_check}
+use infer_decl::{check as infer_check, check_prelude_decl}
 use infer_ctx::{InferCtx}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
@@ -32,9 +32,12 @@ fn find_std_dir() -> Str? {
     none
 }
 
-fn load_prelude(var ctx: InferCtx) {
+fn load_prelude(var ctx: InferCtx) -> List<HDecl> {
+    var prelude_hdecls: List<HDecl> = []
     match find_std_dir() {
         some(std_dir) => {
+            // Phase 1: collect and register all prelude declarations
+            var all_prelude_decls: List<Decl> = []
             for file in (STD_FILES) {
                 let file_path = path_join(std_dir, file)
                 if file_exists(file_path) {
@@ -43,12 +46,57 @@ fn load_prelude(var ctx: InferCtx) {
                     let ast = parse(source, file_path, prelude_sink)
                     for decl in ast.decls {
                         register_decl_public(ctx, decl)
+                        all_prelude_decls.push(decl)
                     }
+                }
+            }
+            // Phase 2: compile non-extern impl methods and top-level functions
+            for decl in all_prelude_decls {
+                match decl {
+                    Decl::Impl { target_type, type_params, trait_name, methods, span } => {
+                        // Filter to only Fn methods — ExternFn methods are already handled
+                        // by the runtime and cannot be looked up via check_extern_fn_decl
+                        // because they're registered in impl_methods_map, not the main scope.
+                        var fn_methods: List<Decl> = []
+                        for m in methods {
+                            match m { Decl::Fn { .. } => { fn_methods.push(m) }, _ => {} }
+                        }
+                        if fn_methods.len() > 0 {
+                            // Set up impl type params in scope so method type annotations resolve
+                            let saved_tp_scope = map_clone(ctx.type_param_scope)
+                            for tp in type_params {
+                                let tv = ctx.env.fresh_var()
+                                ctx.type_param_scope.insert(tp.name, tv)
+                            }
+                            let filtered_decl = Decl::Impl {
+                                target_type: target_type,
+                                type_params: type_params,
+                                trait_name: trait_name,
+                                methods: fn_methods,
+                                span: span
+                            }
+                            let result = some(check_prelude_decl(ctx, filtered_decl)) catch { _ => none }
+                            match result {
+                                some(hd) => { prelude_hdecls.push(hd) },
+                                none => {}
+                            }
+                            ctx.type_param_scope = saved_tp_scope
+                        }
+                    },
+                    Decl::Fn { .. } => {
+                        let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
+                        match result {
+                            some(hd) => { prelude_hdecls.push(hd) },
+                            none => {}
+                        }
+                    },
+                    _ => {}
                 }
             }
         },
         none => {},
     }
+    prelude_hdecls
 }
 
 fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -70,18 +118,30 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
 
 pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     var ctx = new_infer_ctx(sink)
-    load_prelude(ctx)
+    let prelude_hdecls = load_prelude(ctx)
     let hprogram = infer_check(ctx, program)
-    CheckResult { program: hprogram, env: ctx.env }
+    // Prepend prelude hdecls to the program's decls
+    var all_decls = list_clone(prelude_hdecls)
+    for d in hprogram.decls { all_decls.push(d) }
+    CheckResult {
+        program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls },
+        env: ctx.env
+    }
 }
 
 pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink: CollectingSink) -> CheckResult {
     var ctx = new_infer_ctx(sink)
-    load_prelude(ctx)
+    let prelude_hdecls = load_prelude(ctx)
     inject_module_exports(ctx, module_exports)
     resolve_uses(ctx, program.uses, module_exports)
     let hprogram = infer_check(ctx, program)
-    CheckResult { program: hprogram, env: ctx.env }
+    // Prepend prelude hdecls to the program's decls
+    var all_decls = list_clone(prelude_hdecls)
+    for d in hprogram.decls { all_decls.push(d) }
+    CheckResult {
+        program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls },
+        env: ctx.env
+    }
 }
 
 fn inject_module_exports(var ctx: InferCtx, exports: List<ModuleExports>) {
