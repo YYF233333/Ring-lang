@@ -485,7 +485,7 @@ function gen_stmt_inline(ctx, stmt) {
       }
       break __ring_match19;
     }
-    return panic("gen_stmt_inline: unhandled stmt kind");
+    return "/* codegen: unhandled inline stmt */ undefined;";
     break __ring_match19;
   }
 }

@@ -1381,10 +1381,20 @@ fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str) -> Type? 
 // ============================================================
 
 fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List<Expr>, span: Span, subst: Map<Int, Type>) -> InferResult {
-    let effect_def = match ctx.env.types.effects.get(effect_name) {
-        some(ed) => ed,
-        none => panic("effect_def not found: ${effect_name}")
+    let effect_def_opt = ctx.env.types.effects.get(effect_name)
+    match effect_def_opt {
+        none => {
+            let _ = type_error(ctx.sink, E0402,
+                "Unknown effect: ${effect_name}",
+                span, DiagnosticContext::OtherContext { detail: some("effect '${effect_name}' not found") })
+            return InferResult {
+                hexpr: HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: [], ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
+            }
+        },
+        _ => {}
     }
+    let effect_def = match effect_def_opt { some(ed) => ed, none => panic("unreachable") }
     let op_opt = effect_def.ops.find(fn(o) { o.name == op_name })
     match op_opt {
         none => {

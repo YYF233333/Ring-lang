@@ -1881,21 +1881,31 @@ function lookup_trait_method(ctx, type_name, method) {
 }
 
 function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev_fail) {
-  const effect_def = (function() {
-  const __ring_m = _Map_get(ctx.env.types.effects, effect_name);
-  if (__ring_m._tag === "some") { const ed = __ring_m._0; return ed; }
-  if (__ring_m._tag === "none") { return panic(`effect_def not found: ${effect_name}`); }
-  __match_fail(__ring_m);
-})();
-  const op_opt = ((__a) => { const __i = __a.findIndex((function(o) { return (o.name === op_name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(effect_def.ops);
+  const effect_def_opt = _Map_get(ctx.env.types.effects, effect_name);
   __ring_match94: {
-    const __ring_m94 = op_opt;
+    const __ring_m94 = effect_def_opt;
     if (__ring_m94._tag === "none") {
-      const _ = infer_ctx$type_error(ctx.sink, codes$E0402, `Effect ${effect_name} has no operation ${op_name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`no operation '${op_name}' on effect '${effect_name}'`)));
+      const _ = infer_ctx$type_error(ctx.sink, codes$E0402, `Unknown effect: ${effect_name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`effect '${effect_name}' not found`)));
       return new infer_ctx$InferResult(hir$HExpr_EffectOp(effect_name, op_name, [], types$Type_ErrorType, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
       break __ring_match94;
     }
     break __ring_match94;
+  }
+  const effect_def = (function() {
+  const __ring_m = effect_def_opt;
+  if (__ring_m._tag === "some") { const ed = __ring_m._0; return ed; }
+  if (__ring_m._tag === "none") { return panic("unreachable"); }
+  __match_fail(__ring_m);
+})();
+  const op_opt = ((__a) => { const __i = __a.findIndex((function(o) { return (o.name === op_name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(effect_def.ops);
+  __ring_match95: {
+    const __ring_m95 = op_opt;
+    if (__ring_m95._tag === "none") {
+      const _ = infer_ctx$type_error(ctx.sink, codes$E0402, `Effect ${effect_name} has no operation ${op_name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`no operation '${op_name}' on effect '${effect_name}'`)));
+      return new infer_ctx$InferResult(hir$HExpr_EffectOp(effect_name, op_name, [], types$Type_ErrorType, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
+      break __ring_match95;
+    }
+    break __ring_match95;
   }
   const op = (function() {
   const __ring_m = op_opt;
@@ -1917,32 +1927,32 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
     effects = me[0];
     s = me[1];
     List_push(hargs, ar.hexpr);
-    __ring_match95: {
-      const __ring_m95 = List_get(op.params, i);
-      if (__ring_m95._tag === "some") {
-        const param_type = __ring_m95._0;
+    __ring_match96: {
+      const __ring_m96 = List_get(op.params, i);
+      if (__ring_m96._tag === "some") {
+        const param_type = __ring_m96._0;
         s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(ar.hexpr), param_type, s, span);
-        break __ring_match95;
+        break __ring_match96;
       }
-      if (__ring_m95._tag === "none") {
-        break __ring_match95;
+      if (__ring_m96._tag === "none") {
+        break __ring_match96;
       }
-      __match_fail(__ring_m95);
+      __match_fail(__ring_m96);
     }
     i = (i + 1);
   }
   let eff = types$Effect_CustomEffect(effect_name, []);
-  __ring_match96: {
-    const __ring_m96 = effect_def.built_in_kind;
-    if (__ring_m96._tag === "some") {
-      const bik = __ring_m96._0;
-      __ring_match97: {
-        const __ring_m97 = bik;
-        if (__ring_m97._tag === "BkIo") {
+  __ring_match97: {
+    const __ring_m97 = effect_def.built_in_kind;
+    if (__ring_m97._tag === "some") {
+      const bik = __ring_m97._0;
+      __ring_match98: {
+        const __ring_m98 = bik;
+        if (__ring_m98._tag === "BkIo") {
           eff = types$Effect_IoEffect;
-          break __ring_match97;
+          break __ring_match98;
         }
-        if (__ring_m97._tag === "BkFail") {
+        if (__ring_m98._tag === "BkFail") {
           const error_type = ((List_len(hargs) > 0) ? env$apply_subst(s, hir$hexpr_type((function() {
   const __ring_m = List_first(hargs);
   if (__ring_m._tag === "some") { const h = __ring_m._0; return h; }
@@ -1950,20 +1960,20 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
   __match_fail(__ring_m);
 })())) : types$UNIT);
           eff = types$Effect_FailEffect(error_type);
-          break __ring_match97;
+          break __ring_match98;
         }
-        if (__ring_m97._tag === "BkMut") {
+        if (__ring_m98._tag === "BkMut") {
           eff = types$Effect_MutEffect;
-          break __ring_match97;
+          break __ring_match98;
         }
-        __match_fail(__ring_m97);
+        __match_fail(__ring_m98);
       }
-      break __ring_match96;
+      break __ring_match97;
     }
-    if (__ring_m96._tag === "none") {
-      break __ring_match96;
+    if (__ring_m97._tag === "none") {
+      break __ring_match97;
     }
-    __match_fail(__ring_m96);
+    __match_fail(__ring_m97);
   }
   const me = infer_ctx$merge_effects(ctx.env, effects, types$effect_row([eff]), s, __ring_ev_fail);
   effects = me[0];
@@ -1976,217 +1986,217 @@ function infer_field_access(ctx, receiver, field, span, subst, __ring_ev_fail) {
   const s = recv_r.subst;
   const recv_type = env$apply_subst(s, hir$hexpr_type(recv_r.hexpr));
   let field_type = env$TypeEnv_fresh_var(ctx.env);
-  __ring_match98: {
-    const __ring_m98 = recv_type;
-    if (__ring_m98._tag === "StructType") {
-      const name = __ring_m98.name; const type_params = __ring_m98.type_params;
-      __ring_match99: {
-        const __ring_m99 = _Map_get(ctx.env.types.structs, name);
-        if (__ring_m99._tag === "some") {
-          const struct_def = __ring_m99._0;
+  __ring_match99: {
+    const __ring_m99 = recv_type;
+    if (__ring_m99._tag === "StructType") {
+      const name = __ring_m99.name; const type_params = __ring_m99.type_params;
+      __ring_match100: {
+        const __ring_m100 = _Map_get(ctx.env.types.structs, name);
+        if (__ring_m100._tag === "some") {
+          const struct_def = __ring_m100._0;
           const f = ((__a) => { const __i = __a.findIndex((function(f_) { return (f_.name === field); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(struct_def.fields);
-          __ring_match100: {
-            const __ring_m100 = f;
-            if (__ring_m100._tag === "some") {
-              const found_field = __ring_m100._0;
+          __ring_match101: {
+            const __ring_m101 = f;
+            if (__ring_m101._tag === "some") {
+              const found_field = __ring_m101._0;
               const inst_map = map_new();
               let fi = 0;
               while (((fi < List_len(struct_def.type_param_vars)) && (fi < List_len(type_params)))) {
-                __ring_match101: {
-                  const __ring_m101 = [List_get(struct_def.type_param_vars, fi), List_get(type_params, fi)];
-                  if (Array.isArray(__ring_m101) && __ring_m101.length === 2 && __ring_m101[0]._tag === "some" && __ring_m101[1]._tag === "some") {
-                    const var_id = __ring_m101[0]._0; const tp = __ring_m101[1]._0;
+                __ring_match102: {
+                  const __ring_m102 = [List_get(struct_def.type_param_vars, fi), List_get(type_params, fi)];
+                  if (Array.isArray(__ring_m102) && __ring_m102.length === 2 && __ring_m102[0]._tag === "some" && __ring_m102[1]._tag === "some") {
+                    const var_id = __ring_m102[0]._0; const tp = __ring_m102[1]._0;
                     _Map_insert(inst_map, var_id, tp);
-                    break __ring_match101;
+                    break __ring_match102;
                   }
-                  break __ring_match101;
+                  break __ring_match102;
                 }
                 fi = (fi + 1);
               }
               field_type = env$apply_subst(inst_map, found_field.ty);
-              break __ring_match100;
+              break __ring_match101;
             }
-            if (__ring_m100._tag === "none") {
+            if (__ring_m101._tag === "none") {
               const _ = infer_ctx$type_error(ctx.sink, codes$E0304, `Struct ${name} has no field ${field}`, span, diagnostics$DiagnosticContext_MissingField(field, name, Option_none));
-              break __ring_match100;
+              break __ring_match101;
             }
-            __match_fail(__ring_m100);
+            __match_fail(__ring_m101);
           }
-          break __ring_match99;
+          break __ring_match100;
         }
-        if (__ring_m99._tag === "none") {
+        if (__ring_m100._tag === "none") {
           const _ = infer_ctx$type_error(ctx.sink, codes$E0203, `Unknown struct: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown struct '${name}'`)));
-          break __ring_match99;
+          break __ring_match100;
         }
-        __match_fail(__ring_m99);
+        __match_fail(__ring_m100);
       }
-      break __ring_match98;
+      break __ring_match99;
     }
-    if (__ring_m98._tag === "RecordType") {
-      const rec_fields = __ring_m98.fields; const tail = __ring_m98.tail;
+    if (__ring_m99._tag === "RecordType") {
+      const rec_fields = __ring_m99.fields; const tail = __ring_m99.tail;
       const f = ((__a) => { const __i = __a.findIndex((function(f_) { return (f_.name === field); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(rec_fields);
-      __ring_match102: {
-        const __ring_m102 = f;
-        if (__ring_m102._tag === "some") {
-          const found_field = __ring_m102._0;
+      __ring_match103: {
+        const __ring_m103 = f;
+        if (__ring_m103._tag === "some") {
+          const found_field = __ring_m103._0;
           field_type = found_field.ty;
-          break __ring_match102;
+          break __ring_match103;
         }
-        if (__ring_m102._tag === "none") {
-          __ring_match103: {
-            const __ring_m103 = tail;
-            if (__ring_m103._tag === "some") {
-              break __ring_match103;
+        if (__ring_m103._tag === "none") {
+          __ring_match104: {
+            const __ring_m104 = tail;
+            if (__ring_m104._tag === "some") {
+              break __ring_match104;
             }
-            if (__ring_m103._tag === "none") {
+            if (__ring_m104._tag === "none") {
               const _ = infer_ctx$type_error(ctx.sink, codes$E0304, `Record type has no field '${field}'`, span, diagnostics$DiagnosticContext_MissingField(field, "record", Option_none));
-              break __ring_match103;
+              break __ring_match104;
             }
-            __match_fail(__ring_m103);
+            __match_fail(__ring_m104);
           }
-          break __ring_match102;
+          break __ring_match103;
         }
-        __match_fail(__ring_m102);
+        __match_fail(__ring_m103);
       }
-      break __ring_match98;
+      break __ring_match99;
     }
-    if (__ring_m98._tag === "TupleType") {
-      const elements = __ring_m98.elements;
-      __ring_match104: {
-        const __ring_m104 = parse_int(field);
-        if (__ring_m104._tag === "none") {
+    if (__ring_m99._tag === "TupleType") {
+      const elements = __ring_m99.elements;
+      __ring_match105: {
+        const __ring_m105 = parse_int(field);
+        if (__ring_m105._tag === "none") {
           const _ = infer_ctx$type_error(ctx.sink, codes$E0304, `Cannot access named field '${field}' on tuple type; use .0, .1, etc.`, span, diagnostics$DiagnosticContext_MissingField(field, "tuple", Option_none));
-          break __ring_match104;
+          break __ring_match105;
         }
-        if (__ring_m104._tag === "some") {
-          const i = __ring_m104._0;
+        if (__ring_m105._tag === "some") {
+          const i = __ring_m105._0;
           if ((i >= List_len(elements))) {
             const _ = infer_ctx$type_error(ctx.sink, codes$E0304, `Tuple index ${field} out of bounds; tuple has ${Int_to_str(List_len(elements))} elements`, span, diagnostics$DiagnosticContext_MissingField(field, "tuple", Option_none));
           }
-          __ring_match105: {
-            const __ring_m105 = List_get(elements, i);
-            if (__ring_m105._tag === "some") {
-              const t = __ring_m105._0;
+          __ring_match106: {
+            const __ring_m106 = List_get(elements, i);
+            if (__ring_m106._tag === "some") {
+              const t = __ring_m106._0;
               field_type = t;
-              break __ring_match105;
+              break __ring_match106;
             }
-            if (__ring_m105._tag === "none") {
+            if (__ring_m106._tag === "none") {
               panic("unreachable: tuple index bounds already checked");
-              break __ring_match105;
+              break __ring_match106;
             }
-            __match_fail(__ring_m105);
+            __match_fail(__ring_m106);
           }
-          break __ring_match104;
+          break __ring_match105;
         }
-        __match_fail(__ring_m104);
+        __match_fail(__ring_m105);
       }
-      break __ring_match98;
+      break __ring_match99;
     }
-    if (__ring_m98._tag === "TypeVar") {
-      break __ring_match98;
+    if (__ring_m99._tag === "TypeVar") {
+      break __ring_match99;
     }
     const _ = infer_ctx$type_error(ctx.sink, codes$E0304, `Cannot access field '${field}' on type ${types$type_to_string(recv_type)}`, span, diagnostics$DiagnosticContext_MissingField(field, types$type_to_string(recv_type), Option_none));
-    break __ring_match98;
+    break __ring_match99;
   }
   return new infer_ctx$InferResult(hir$HExpr_FieldAccess(recv_r.hexpr, field, field_type, recv_r.effects, span), s, recv_r.effects);
 }
 
 function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __ring_ev_fail) {
   let variant_enum = Option_none;
-  __ring_match106: {
-    const __ring_m106 = qualifier;
-    if (__ring_m106._tag === "some") {
-      const q = __ring_m106._0;
-      __ring_match107: {
-        const __ring_m107 = _Map_get(ctx.env.types.enums, q);
-        if (__ring_m107._tag === "some") {
-          const enum_def = __ring_m107._0;
+  __ring_match107: {
+    const __ring_m107 = qualifier;
+    if (__ring_m107._tag === "some") {
+      const q = __ring_m107._0;
+      __ring_match108: {
+        const __ring_m108 = _Map_get(ctx.env.types.enums, q);
+        if (__ring_m108._tag === "some") {
+          const enum_def = __ring_m108._0;
           if (enum_def.variants.some((function(v) { return (v.name === name); }))) {
             variant_enum = Option_some(q);
           }
-          break __ring_match107;
+          break __ring_match108;
         }
-        if (__ring_m107._tag === "none") {
-          break __ring_match107;
+        if (__ring_m108._tag === "none") {
+          break __ring_match108;
         }
-        __match_fail(__ring_m107);
+        __match_fail(__ring_m108);
       }
-      break __ring_match106;
+      break __ring_match107;
     }
-    if (__ring_m106._tag === "none") {
+    if (__ring_m107._tag === "none") {
       variant_enum = _Map_get(ctx.env.types.variant_to_enum, name);
-      break __ring_match106;
+      break __ring_match107;
     }
-    __match_fail(__ring_m106);
+    __match_fail(__ring_m107);
   }
   if ((Option_is_none(variant_enum) && Option_is_some(qualifier))) {
-    __ring_match108: {
-      const __ring_m108 = qualifier;
-      if (__ring_m108._tag === "some") {
-        const q = __ring_m108._0;
+    __ring_match109: {
+      const __ring_m109 = qualifier;
+      if (__ring_m109._tag === "some") {
+        const q = __ring_m109._0;
         const _ = infer_ctx$type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(name, Option_none));
-        break __ring_match108;
+        break __ring_match109;
       }
-      if (__ring_m108._tag === "none") {
-        break __ring_match108;
+      if (__ring_m109._tag === "none") {
+        break __ring_match109;
       }
-      __match_fail(__ring_m108);
+      __match_fail(__ring_m109);
     }
   }
-  __ring_match109: {
-    const __ring_m109 = variant_enum;
-    if (__ring_m109._tag === "some") {
-      const ve = __ring_m109._0;
-      __ring_match110: {
-        const __ring_m110 = _Map_get(ctx.env.types.enums, ve);
-        if (__ring_m110._tag === "some") {
-          const enum_def = __ring_m110._0;
+  __ring_match110: {
+    const __ring_m110 = variant_enum;
+    if (__ring_m110._tag === "some") {
+      const ve = __ring_m110._0;
+      __ring_match111: {
+        const __ring_m111 = _Map_get(ctx.env.types.enums, ve);
+        if (__ring_m111._tag === "some") {
+          const enum_def = __ring_m111._0;
           const variant = ((__a) => { const __i = __a.findIndex((function(v) { return (v.name === name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(enum_def.variants);
-          __ring_match111: {
-            const __ring_m111 = variant;
-            if (__ring_m111._tag === "some") {
-              const v = __ring_m111._0;
-              __ring_match112: {
-                const __ring_m112 = v.field_names;
-                if (__ring_m112._tag === "some") {
+          __ring_match112: {
+            const __ring_m112 = variant;
+            if (__ring_m112._tag === "some") {
+              const v = __ring_m112._0;
+              __ring_match113: {
+                const __ring_m113 = v.field_names;
+                if (__ring_m113._tag === "some") {
                   return infer_named_variant_construct(ctx, ve, name, v, enum_def, fields, spread, span, subst, __ring_ev_fail);
-                  break __ring_match112;
+                  break __ring_match113;
                 }
-                if (__ring_m112._tag === "none") {
-                  break __ring_match112;
+                if (__ring_m113._tag === "none") {
+                  break __ring_match113;
                 }
-                __match_fail(__ring_m112);
+                __match_fail(__ring_m113);
               }
-              break __ring_match111;
+              break __ring_match112;
             }
-            if (__ring_m111._tag === "none") {
-              break __ring_match111;
+            if (__ring_m112._tag === "none") {
+              break __ring_match112;
             }
-            __match_fail(__ring_m111);
+            __match_fail(__ring_m112);
           }
-          break __ring_match110;
+          break __ring_match111;
         }
-        if (__ring_m110._tag === "none") {
-          break __ring_match110;
+        if (__ring_m111._tag === "none") {
+          break __ring_match111;
         }
-        __match_fail(__ring_m110);
+        __match_fail(__ring_m111);
       }
-      break __ring_match109;
+      break __ring_match110;
     }
-    if (__ring_m109._tag === "none") {
-      break __ring_match109;
+    if (__ring_m110._tag === "none") {
+      break __ring_match110;
     }
-    __match_fail(__ring_m109);
+    __match_fail(__ring_m110);
   }
   const struct_def_opt = _Map_get(ctx.env.types.structs, name);
-  __ring_match113: {
-    const __ring_m113 = struct_def_opt;
-    if (__ring_m113._tag === "none") {
+  __ring_match114: {
+    const __ring_m114 = struct_def_opt;
+    if (__ring_m114._tag === "none") {
       const _ = infer_ctx$type_error(ctx.sink, codes$E0203, `Unknown struct: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown struct '${name}'`)));
       return new infer_ctx$InferResult(hir$HExpr_StructLit(name, [], [], Option_none, types$Type_ErrorType, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
-      break __ring_match113;
+      break __ring_match114;
     }
-    break __ring_match113;
+    break __ring_match114;
   }
   const struct_def = (function() {
   const __ring_m = struct_def_opt;
@@ -2198,19 +2208,19 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
   let type_param_types = [];
   let tpi = 0;
   while ((tpi < List_len(struct_def.type_param_vars))) {
-    __ring_match114: {
-      const __ring_m114 = List_get(struct_def.type_param_vars, tpi);
-      if (__ring_m114._tag === "some") {
-        const var_id = __ring_m114._0;
+    __ring_match115: {
+      const __ring_m115 = List_get(struct_def.type_param_vars, tpi);
+      if (__ring_m115._tag === "some") {
+        const var_id = __ring_m115._0;
         const tv = env$TypeEnv_fresh_var(ctx.env);
         _Map_insert(inst_map, var_id, tv);
         List_push(type_param_types, tv);
-        break __ring_match114;
+        break __ring_match115;
       }
-      if (__ring_m114._tag === "none") {
-        break __ring_match114;
+      if (__ring_m115._tag === "none") {
+        break __ring_match115;
       }
-      __match_fail(__ring_m114);
+      __match_fail(__ring_m115);
     }
     tpi = (tpi + 1);
   }
@@ -2218,10 +2228,10 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
   let effects = types$EMPTY_ROW;
   let hfields = [];
   let hspread = Option_none;
-  __ring_match115: {
-    const __ring_m115 = spread;
-    if (__ring_m115._tag === "some") {
-      const sp = __ring_m115._0;
+  __ring_match116: {
+    const __ring_m116 = spread;
+    if (__ring_m116._tag === "some") {
+      const sp = __ring_m116._0;
       const sr = infer_expr(ctx, sp, s, __ring_ev_fail);
       s = sr.subst;
       const me = infer_ctx$merge_effects(ctx.env, effects, sr.effects, s, __ring_ev_fail);
@@ -2234,12 +2244,12 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
       const spread_type = types$Type_StructType(name, type_param_types, spread_fields);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(sr.hexpr), spread_type, s, span);
       hspread = Option_some(sr.hexpr);
-      break __ring_match115;
+      break __ring_match116;
     }
-    if (__ring_m115._tag === "none") {
-      break __ring_match115;
+    if (__ring_m116._tag === "none") {
+      break __ring_match116;
     }
-    __match_fail(__ring_m115);
+    __match_fail(__ring_m116);
   }
   for (const field of fields) {
     const fr = infer_expr(ctx, field.value, s, __ring_ev_fail);
@@ -2248,19 +2258,19 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
     effects = me[0];
     s = me[1];
     const def_field = ((__a) => { const __i = __a.findIndex((function(f) { return (f.name === field.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(struct_def.fields);
-    __ring_match116: {
-      const __ring_m116 = def_field;
-      if (__ring_m116._tag === "some") {
-        const df = __ring_m116._0;
+    __ring_match117: {
+      const __ring_m117 = def_field;
+      if (__ring_m117._tag === "some") {
+        const df = __ring_m117._0;
         const ft = env$apply_subst(inst_map, df.ty);
         s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(fr.hexpr), ft, s, span);
-        break __ring_match116;
+        break __ring_match117;
       }
-      if (__ring_m116._tag === "none") {
+      if (__ring_m117._tag === "none") {
         const _ = infer_ctx$type_error(ctx.sink, codes$E0203, `Struct '${name}' has no field '${field.name}'`, field.span, diagnostics$DiagnosticContext_MissingField(field.name, name, Option_none));
-        break __ring_match116;
+        break __ring_match117;
       }
-      __match_fail(__ring_m116);
+      __match_fail(__ring_m117);
     }
     List_push(hfields, new hir$HStructFieldInit(field.name, fr.hexpr));
   }
@@ -2290,19 +2300,19 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
   let type_param_types = [];
   let tpi = 0;
   while ((tpi < List_len(enum_def.type_param_vars))) {
-    __ring_match117: {
-      const __ring_m117 = List_get(enum_def.type_param_vars, tpi);
-      if (__ring_m117._tag === "some") {
-        const var_id = __ring_m117._0;
+    __ring_match118: {
+      const __ring_m118 = List_get(enum_def.type_param_vars, tpi);
+      if (__ring_m118._tag === "some") {
+        const var_id = __ring_m118._0;
         const tv = env$TypeEnv_fresh_var(ctx.env);
         _Map_insert(inst_map, var_id, tv);
         List_push(type_param_types, tv);
-        break __ring_match117;
+        break __ring_match118;
       }
-      if (__ring_m117._tag === "none") {
-        break __ring_match117;
+      if (__ring_m118._tag === "none") {
+        break __ring_match118;
       }
-      __match_fail(__ring_m117);
+      __match_fail(__ring_m118);
     }
     tpi = (tpi + 1);
   }
@@ -2310,10 +2320,10 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
   let effects = types$EMPTY_ROW;
   let hfields = [];
   let hspread = Option_none;
-  __ring_match118: {
-    const __ring_m118 = spread;
-    if (__ring_m118._tag === "some") {
-      const sp = __ring_m118._0;
+  __ring_match119: {
+    const __ring_m119 = spread;
+    if (__ring_m119._tag === "some") {
+      const sp = __ring_m119._0;
       const sr = infer_expr(ctx, sp, s, __ring_ev_fail);
       s = sr.subst;
       const me = infer_ctx$merge_effects(ctx.env, effects, sr.effects, s, __ring_ev_fail);
@@ -2322,12 +2332,12 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
       const spread_enum_type = types$Type_EnumType(enum_name, type_param_types, enum_def.variants);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(sr.hexpr), spread_enum_type, s, span);
       hspread = Option_some(sr.hexpr);
-      break __ring_match118;
+      break __ring_match119;
     }
-    if (__ring_m118._tag === "none") {
-      break __ring_match118;
+    if (__ring_m119._tag === "none") {
+      break __ring_match119;
     }
-    __match_fail(__ring_m118);
+    __match_fail(__ring_m119);
   }
   for (const field of fields) {
     const fr = infer_expr(ctx, field.value, s, __ring_ev_fail);
@@ -2336,30 +2346,30 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
     effects = me[0];
     s = me[1];
     const field_idx = List_index_of(field_names, field.name);
-    __ring_match119: {
-      const __ring_m119 = field_idx;
-      if (__ring_m119._tag === "some") {
-        const idx = __ring_m119._0;
-        __ring_match120: {
-          const __ring_m120 = List_get(variant.fields, idx);
-          if (__ring_m120._tag === "some") {
-            const ftype = __ring_m120._0;
+    __ring_match120: {
+      const __ring_m120 = field_idx;
+      if (__ring_m120._tag === "some") {
+        const idx = __ring_m120._0;
+        __ring_match121: {
+          const __ring_m121 = List_get(variant.fields, idx);
+          if (__ring_m121._tag === "some") {
+            const ftype = __ring_m121._0;
             const ft = env$apply_subst(inst_map, ftype);
             s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(fr.hexpr), ft, s, span);
-            break __ring_match120;
+            break __ring_match121;
           }
-          if (__ring_m120._tag === "none") {
-            break __ring_match120;
+          if (__ring_m121._tag === "none") {
+            break __ring_match121;
           }
-          __match_fail(__ring_m120);
+          __match_fail(__ring_m121);
         }
-        break __ring_match119;
+        break __ring_match120;
       }
-      if (__ring_m119._tag === "none") {
+      if (__ring_m120._tag === "none") {
         const _ = infer_ctx$type_error(ctx.sink, codes$E0203, `Variant '${variant_name}' has no field '${field.name}'`, field.span, diagnostics$DiagnosticContext_MissingField(field.name, variant_name, Option_none));
-        break __ring_match119;
+        break __ring_match120;
       }
-      __match_fail(__ring_m119);
+      __match_fail(__ring_m120);
     }
     List_push(hfields, new hir$HStructFieldInit(field.name, fr.hexpr));
   }
@@ -2388,60 +2398,60 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
     env$TypeEnv_push_scope(ctx.env);
     const arm_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some((function() {
   let match_pattern = arm.pattern;
-  __ring_match121: {
-    const __ring_m121 = arm.pattern;
-    if (__ring_m121._tag === "Binding") {
-      const pat_name = __ring_m121.name; const pspan = __ring_m121.span;
-      __ring_match122: {
-        const __ring_m122 = _Map_get(ctx.env.types.variant_to_enum, pat_name);
-        if (__ring_m122._tag === "some") {
-          const ve = __ring_m122._0;
-          __ring_match123: {
-            const __ring_m123 = _Map_get(ctx.env.types.enums, ve);
-            if (__ring_m123._tag === "some") {
-              const edef = __ring_m123._0;
+  __ring_match122: {
+    const __ring_m122 = arm.pattern;
+    if (__ring_m122._tag === "Binding") {
+      const pat_name = __ring_m122.name; const pspan = __ring_m122.span;
+      __ring_match123: {
+        const __ring_m123 = _Map_get(ctx.env.types.variant_to_enum, pat_name);
+        if (__ring_m123._tag === "some") {
+          const ve = __ring_m123._0;
+          __ring_match124: {
+            const __ring_m124 = _Map_get(ctx.env.types.enums, ve);
+            if (__ring_m124._tag === "some") {
+              const edef = __ring_m124._0;
               const v = ((__a) => { const __i = __a.findIndex((function(v_) { return (v_.name === pat_name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(edef.variants);
-              __ring_match124: {
-                const __ring_m124 = v;
-                if (__ring_m124._tag === "some") {
-                  const found_v = __ring_m124._0;
+              __ring_match125: {
+                const __ring_m125 = v;
+                if (__ring_m125._tag === "some") {
+                  const found_v = __ring_m125._0;
                   if ((List_len(found_v.fields) === 0)) {
                     const _ep = [0];
                     List_clear(_ep);
                     const empty_pats = _ep.map((function(i) { return panic("unreachable"); }));
                     match_pattern = ast$Pattern_Constructor(pat_name, Option_none, empty_pats, pspan);
                   }
-                  break __ring_match124;
+                  break __ring_match125;
                 }
-                if (__ring_m124._tag === "none") {
-                  break __ring_match124;
+                if (__ring_m125._tag === "none") {
+                  break __ring_match125;
                 }
-                __match_fail(__ring_m124);
+                __match_fail(__ring_m125);
               }
-              break __ring_match123;
+              break __ring_match124;
             }
-            if (__ring_m123._tag === "none") {
-              break __ring_match123;
+            if (__ring_m124._tag === "none") {
+              break __ring_match124;
             }
-            __match_fail(__ring_m123);
+            __match_fail(__ring_m124);
           }
-          break __ring_match122;
+          break __ring_match123;
         }
-        if (__ring_m122._tag === "none") {
-          break __ring_match122;
+        if (__ring_m123._tag === "none") {
+          break __ring_match123;
         }
-        __match_fail(__ring_m122);
+        __match_fail(__ring_m123);
       }
-      break __ring_match121;
+      break __ring_match122;
     }
-    break __ring_match121;
+    break __ring_match122;
   }
   infer_ctx$bind_pattern(ctx, match_pattern, hir$hexpr_type(scrut_r.hexpr), s);
   let guard_hexpr = Option_none;
-  __ring_match125: {
-    const __ring_m125 = arm.guard;
-    if (__ring_m125._tag === "some") {
-      const g = __ring_m125._0;
+  __ring_match126: {
+    const __ring_m126 = arm.guard;
+    if (__ring_m126._tag === "some") {
+      const g = __ring_m126._0;
       const gr = infer_expr(ctx, g, s, __ring_ev_fail);
       s = gr.subst;
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(gr.hexpr), types$BOOL, s, arm.span);
@@ -2449,12 +2459,12 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
       effects = me[0];
       s = me[1];
       guard_hexpr = Option_some(gr.hexpr);
-      break __ring_match125;
+      break __ring_match126;
     }
-    if (__ring_m125._tag === "none") {
-      break __ring_match125;
+    if (__ring_m126._tag === "none") {
+      break __ring_match126;
     }
-    __match_fail(__ring_m125);
+    __match_fail(__ring_m126);
   }
   const body_r = infer_expr(ctx, arm.body, s, __ring_ev_fail);
   s = body_r.subst;
@@ -2466,28 +2476,28 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
   return true;
 })()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
     env$TypeEnv_pop_scope(ctx.env);
-    __ring_match126: {
-      const __ring_m126 = arm_result;
-      if (__ring_m126._tag === "none") {
+    __ring_match127: {
+      const __ring_m127 = arm_result;
+      if (__ring_m127._tag === "none") {
         __ring_ev_fail.raise(new infer_ctx$CompileError());
-        break __ring_match126;
+        break __ring_match127;
       }
-      break __ring_match126;
+      break __ring_match127;
     }
   }
   const scrut_type_resolved = env$apply_subst(s, hir$hexpr_type(scrut_r.hexpr));
   const missing = exhaustive$check_exhaustive(harms, scrut_type_resolved, s);
-  __ring_match127: {
-    const __ring_m127 = missing;
-    if (__ring_m127._tag === "some") {
-      const m = __ring_m127._0;
+  __ring_match128: {
+    const __ring_m128 = missing;
+    if (__ring_m128._tag === "some") {
+      const m = __ring_m128._0;
       const _ = infer_ctx$type_error(ctx.sink, codes$E0601, `Non-exhaustive match on type ${types$type_to_string(scrut_type_resolved)}: missing pattern for ${m}`, span, diagnostics$DiagnosticContext_PatternError(`missing: ${m}`));
-      break __ring_match127;
+      break __ring_match128;
     }
-    if (__ring_m127._tag === "none") {
-      break __ring_match127;
+    if (__ring_m128._tag === "none") {
+      break __ring_match128;
     }
-    __match_fail(__ring_m127);
+    __match_fail(__ring_m128);
   }
   const final_type = env$apply_subst(s, result_type);
   return new infer_ctx$InferResult(hir$HExpr_MatchExpr(scrut_r.hexpr, harms, final_type, effects, span), s, effects);
@@ -2505,13 +2515,13 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
   s = me[1];
   let else_hexpr = Option_none;
   let result_type = types$UNIT;
-  __ring_match128: {
-    const __ring_m128 = else_branch;
-    if (__ring_m128._tag === "some") {
-      const eb = __ring_m128._0;
-      __ring_match129: {
-        const __ring_m129 = eb;
-        if (__ring_m129._tag === "Block") {
+  __ring_match129: {
+    const __ring_m129 = else_branch;
+    if (__ring_m129._tag === "some") {
+      const eb = __ring_m129._0;
+      __ring_match130: {
+        const __ring_m130 = eb;
+        if (__ring_m130._tag === "Block") {
           const else_r = infer_block(ctx, eb, Option_some(s), __ring_ev_fail);
           s = else_r.subst;
           const me2 = infer_ctx$merge_effects(ctx.env, effects, else_r.effects, s, __ring_ev_fail);
@@ -2520,10 +2530,10 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
           s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(then_r.hexpr), hir$hexpr_type(else_r.hexpr), s, span);
           result_type = env$apply_subst(s, hir$hexpr_type(then_r.hexpr));
           else_hexpr = Option_some(else_r.hexpr);
-          break __ring_match129;
+          break __ring_match130;
         }
-        if (__ring_m129._tag === "IfExpr") {
-          const ec = __ring_m129.condition; const etb = __ring_m129.then_branch; const eeb = __ring_m129.else_branch; const espan = __ring_m129.span;
+        if (__ring_m130._tag === "IfExpr") {
+          const ec = __ring_m130.condition; const etb = __ring_m130.then_branch; const eeb = __ring_m130.else_branch; const espan = __ring_m130.span;
           const else_if_r = infer_if(ctx, ec, etb, eeb, espan, s, __ring_ev_fail);
           s = else_if_r.subst;
           const me2 = infer_ctx$merge_effects(ctx.env, effects, else_if_r.effects, s, __ring_ev_fail);
@@ -2532,17 +2542,17 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
           s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(then_r.hexpr), hir$hexpr_type(else_if_r.hexpr), s, span);
           result_type = env$apply_subst(s, hir$hexpr_type(then_r.hexpr));
           else_hexpr = Option_some(hir$HExpr_Block([], Option_some(else_if_r.hexpr), hir$hexpr_type(else_if_r.hexpr), else_if_r.effects, espan));
-          break __ring_match129;
+          break __ring_match130;
         }
         result_type = types$UNIT;
-        break __ring_match129;
+        break __ring_match130;
       }
-      break __ring_match128;
+      break __ring_match129;
     }
-    if (__ring_m128._tag === "none") {
-      break __ring_match128;
+    if (__ring_m129._tag === "none") {
+      break __ring_match129;
     }
-    __match_fail(__ring_m128);
+    __match_fail(__ring_m129);
   }
   return new infer_ctx$InferResult(hir$HExpr_IfExpr(cond_r.hexpr, then_r.hexpr, else_hexpr, result_type, effects, span), s, effects);
 }
@@ -2552,24 +2562,24 @@ function infer_string_interp(ctx, parts, span, subst, __ring_ev_fail) {
   let effects = types$EMPTY_ROW;
   let hparts = [];
   for (const part of parts) {
-    __ring_match130: {
-      const __ring_m130 = part;
-      if (__ring_m130._tag === "LitPart") {
-        const str_val = __ring_m130._0;
+    __ring_match131: {
+      const __ring_m131 = part;
+      if (__ring_m131._tag === "LitPart") {
+        const str_val = __ring_m131._0;
         List_push(hparts, hir$HStringInterpPart_Literal(str_val));
-        break __ring_match130;
+        break __ring_match131;
       }
-      if (__ring_m130._tag === "ExprPart") {
-        const expr = __ring_m130._0;
+      if (__ring_m131._tag === "ExprPart") {
+        const expr = __ring_m131._0;
         const r = infer_expr(ctx, expr, s, __ring_ev_fail);
         s = r.subst;
         const me = infer_ctx$merge_effects(ctx.env, effects, r.effects, s, __ring_ev_fail);
         effects = me[0];
         s = me[1];
         List_push(hparts, hir$HStringInterpPart_Expression(r.hexpr));
-        break __ring_match130;
+        break __ring_match131;
       }
-      __match_fail(__ring_m130);
+      __match_fail(__ring_m131);
     }
   }
   return new infer_ctx$InferResult(hir$HExpr_StringInterp(hparts, types$STR, effects, span), s, effects);
@@ -2581,14 +2591,14 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
   let effects = expr_r.effects;
   let error_type = env$TypeEnv_fresh_var(ctx.env);
   for (const eff of effects.effects) {
-    __ring_match131: {
-      const __ring_m131 = eff;
-      if (__ring_m131._tag === "FailEffect") {
-        const et = __ring_m131.error_type;
+    __ring_match132: {
+      const __ring_m132 = eff;
+      if (__ring_m132._tag === "FailEffect") {
+        const et = __ring_m132.error_type;
         error_type = et;
-        break __ring_match131;
+        break __ring_match132;
       }
-      break __ring_match131;
+      break __ring_match132;
     }
   }
   const result_type = env$TypeEnv_fresh_var(ctx.env);
@@ -2600,10 +2610,10 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
     const arm_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some((function() {
   infer_ctx$bind_pattern(ctx, arm.pattern, error_type, s);
   let guard_hexpr = Option_none;
-  __ring_match132: {
-    const __ring_m132 = arm.guard;
-    if (__ring_m132._tag === "some") {
-      const g = __ring_m132._0;
+  __ring_match133: {
+    const __ring_m133 = arm.guard;
+    if (__ring_m133._tag === "some") {
+      const g = __ring_m133._0;
       const gr = infer_expr(ctx, g, s, __ring_ev_fail);
       s = gr.subst;
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(gr.hexpr), types$BOOL, s, arm.span);
@@ -2611,12 +2621,12 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
       effects = me[0];
       s = me[1];
       guard_hexpr = Option_some(gr.hexpr);
-      break __ring_match132;
+      break __ring_match133;
     }
-    if (__ring_m132._tag === "none") {
-      break __ring_match132;
+    if (__ring_m133._tag === "none") {
+      break __ring_match133;
     }
-    __match_fail(__ring_m132);
+    __match_fail(__ring_m133);
   }
   const body_r = infer_expr(ctx, arm.body, s, __ring_ev_fail);
   s = body_r.subst;
@@ -2624,20 +2634,9 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
   effects = me[0];
   s = me[1];
   s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(body_r.hexpr), result_type, s, arm.span);
-  __ring_match133: {
-    const __ring_m133 = arm.pattern;
-    if (__ring_m133._tag === "Wildcard") {
-      __ring_match134: {
-        const __ring_m134 = arm.guard;
-        if (__ring_m134._tag === "none") {
-          has_catch_all = true;
-          break __ring_match134;
-        }
-        break __ring_match134;
-      }
-      break __ring_match133;
-    }
-    if (__ring_m133._tag === "Binding") {
+  __ring_match134: {
+    const __ring_m134 = arm.pattern;
+    if (__ring_m134._tag === "Wildcard") {
       __ring_match135: {
         const __ring_m135 = arm.guard;
         if (__ring_m135._tag === "none") {
@@ -2646,21 +2645,32 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
         }
         break __ring_match135;
       }
-      break __ring_match133;
+      break __ring_match134;
     }
-    break __ring_match133;
+    if (__ring_m134._tag === "Binding") {
+      __ring_match136: {
+        const __ring_m136 = arm.guard;
+        if (__ring_m136._tag === "none") {
+          has_catch_all = true;
+          break __ring_match136;
+        }
+        break __ring_match136;
+      }
+      break __ring_match134;
+    }
+    break __ring_match134;
   }
   List_push(harms, new hir$HMatchArm(arm.pattern, guard_hexpr, body_r.hexpr, arm.span));
   return true;
 })()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
     env$TypeEnv_pop_scope(ctx.env);
-    __ring_match136: {
-      const __ring_m136 = arm_result;
-      if (__ring_m136._tag === "none") {
+    __ring_match137: {
+      const __ring_m137 = arm_result;
+      if (__ring_m137._tag === "none") {
         __ring_ev_fail.raise(new infer_ctx$CompileError());
-        break __ring_match136;
+        break __ring_match137;
       }
-      break __ring_match136;
+      break __ring_match137;
     }
   }
   if (has_catch_all) {
@@ -2680,17 +2690,17 @@ function infer_handle(ctx, body, handlers, span, subst, __ring_ev_fail) {
     env$TypeEnv_push_scope(ctx.env);
     const effect_def = _Map_get(ctx.env.types.effects, handler.effect_name);
     let op_def = Option_none;
-    __ring_match137: {
-      const __ring_m137 = effect_def;
-      if (__ring_m137._tag === "some") {
-        const ed = __ring_m137._0;
+    __ring_match138: {
+      const __ring_m138 = effect_def;
+      if (__ring_m138._tag === "some") {
+        const ed = __ring_m138._0;
         op_def = ((__a) => { const __i = __a.findIndex((function(o) { return (o.name === handler.op_name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(ed.ops);
-        break __ring_match137;
+        break __ring_match138;
       }
-      if (__ring_m137._tag === "none") {
-        break __ring_match137;
+      if (__ring_m138._tag === "none") {
+        break __ring_match138;
       }
-      __match_fail(__ring_m137);
+      __match_fail(__ring_m138);
     }
     let hparams = [];
     let hi = 0;
@@ -2715,10 +2725,10 @@ function infer_handle(ctx, body, handlers, span, subst, __ring_ev_fail) {
       List_push(hparams, new hir$HParam(p.name, pt, Option_none, false));
       hi = (hi + 1);
     }
-    __ring_match138: {
-      const __ring_m138 = handler.resume_name;
-      if (__ring_m138._tag === "some") {
-        const rn = __ring_m138._0;
+    __ring_match139: {
+      const __ring_m139 = handler.resume_name;
+      if (__ring_m139._tag === "some") {
+        const rn = __ring_m139._0;
         const resume_param = (function() {
   const __ring_m = op_def;
   if (__ring_m._tag === "some") { const od = __ring_m._0; return od.return_type; }
@@ -2727,28 +2737,28 @@ function infer_handle(ctx, body, handlers, span, subst, __ring_ev_fail) {
 })();
         const resume_ret = env$TypeEnv_fresh_var(ctx.env);
         env$TypeEnv_bind_mono(ctx.env, rn, types$Type_FnType([resume_param], resume_ret, types$EMPTY_ROW));
-        break __ring_match138;
-      }
-      if (__ring_m138._tag === "none") {
-        break __ring_match138;
-      }
-      __match_fail(__ring_m138);
-    }
-    const handler_body_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_expr(ctx, handler.body, s, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
-    env$TypeEnv_pop_scope(ctx.env);
-    __ring_match139: {
-      const __ring_m139 = handler_body_result;
-      if (__ring_m139._tag === "some") {
-        const hbr = __ring_m139._0;
-        s = hbr.subst;
-        List_push(hhandlers, new hir$HEffectHandler(handler.effect_name, handler.op_name, hparams, handler.resume_name, hbr.hexpr));
         break __ring_match139;
       }
       if (__ring_m139._tag === "none") {
-        __ring_ev_fail.raise(new infer_ctx$CompileError());
         break __ring_match139;
       }
       __match_fail(__ring_m139);
+    }
+    const handler_body_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_expr(ctx, handler.body, s, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+    env$TypeEnv_pop_scope(ctx.env);
+    __ring_match140: {
+      const __ring_m140 = handler_body_result;
+      if (__ring_m140._tag === "some") {
+        const hbr = __ring_m140._0;
+        s = hbr.subst;
+        List_push(hhandlers, new hir$HEffectHandler(handler.effect_name, handler.op_name, hparams, handler.resume_name, hbr.hexpr));
+        break __ring_match140;
+      }
+      if (__ring_m140._tag === "none") {
+        __ring_ev_fail.raise(new infer_ctx$CompileError());
+        break __ring_match140;
+      }
+      __match_fail(__ring_m140);
     }
     _Set_insert(handled_effects, handler.effect_name);
   }
@@ -2784,70 +2794,70 @@ function infer_lambda(ctx, params, body, span, subst, expected_param_types, __ri
   if (__ring_m._tag === "none") { return env$TypeEnv_fresh_var(ctx.env); }
   __match_fail(__ring_m);
 })();
-    __ring_match140: {
-      const __ring_m140 = expected_param_types;
-      if (__ring_m140._tag === "some") {
-        const epts = __ring_m140._0;
+    __ring_match141: {
+      const __ring_m141 = expected_param_types;
+      if (__ring_m141._tag === "some") {
+        const epts = __ring_m141._0;
         if (Option_is_none(p.type_annotation)) {
-          __ring_match141: {
-            const __ring_m141 = List_get(epts, pi);
-            if (__ring_m141._tag === "some") {
-              const expected_t = __ring_m141._0;
+          __ring_match142: {
+            const __ring_m142 = List_get(epts, pi);
+            if (__ring_m142._tag === "some") {
+              const expected_t = __ring_m142._0;
               s = infer_ctx$unify_at(ctx.sink, ctx.env, pt, expected_t, s, span);
-              break __ring_match141;
+              break __ring_match142;
             }
-            if (__ring_m141._tag === "none") {
-              break __ring_match141;
+            if (__ring_m142._tag === "none") {
+              break __ring_match142;
             }
-            __match_fail(__ring_m141);
+            __match_fail(__ring_m142);
           }
         }
-        break __ring_match140;
+        break __ring_match141;
       }
-      if (__ring_m140._tag === "none") {
-        break __ring_match140;
+      if (__ring_m141._tag === "none") {
+        break __ring_match141;
       }
-      __match_fail(__ring_m140);
+      __match_fail(__ring_m141);
     }
     env$TypeEnv_bind_mono(ctx.env, p.name, pt);
     const lam_scheme = env$TypeEnv_lookup(ctx.env, p.name);
-    __ring_match142: {
-      const __ring_m142 = lam_scheme;
-      if (__ring_m142._tag === "some") {
-        const ls = __ring_m142._0;
-        __ring_match143: {
-          const __ring_m143 = ls.def_id;
-          if (__ring_m143._tag === "some") {
-            const did = __ring_m143._0;
+    __ring_match143: {
+      const __ring_m143 = lam_scheme;
+      if (__ring_m143._tag === "some") {
+        const ls = __ring_m143._0;
+        __ring_match144: {
+          const __ring_m144 = ls.def_id;
+          if (__ring_m144._tag === "some") {
+            const did = __ring_m144._0;
             env$TypeEnv_record_def_span(ctx.env, did, p.span);
             if (p.is_mutable) {
               _Set_insert(ctx.env.scope.mutable_vars, did);
             }
-            break __ring_match143;
+            break __ring_match144;
           }
-          if (__ring_m143._tag === "none") {
-            break __ring_match143;
+          if (__ring_m144._tag === "none") {
+            break __ring_match144;
           }
-          __match_fail(__ring_m143);
+          __match_fail(__ring_m144);
         }
         List_push(hparams, new hir$HParam(p.name, pt, ls.def_id, p.is_mutable));
-        break __ring_match142;
+        break __ring_match143;
       }
-      if (__ring_m142._tag === "none") {
+      if (__ring_m143._tag === "none") {
         List_push(hparams, new hir$HParam(p.name, pt, Option_none, p.is_mutable));
-        break __ring_match142;
+        break __ring_match143;
       }
-      __match_fail(__ring_m142);
+      __match_fail(__ring_m143);
     }
     List_push(param_types, pt);
     pi = (pi + 1);
   }
   const body_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_expr(ctx, body, s, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
   env$TypeEnv_pop_scope(ctx.env);
-  __ring_match144: {
-    const __ring_m144 = body_result;
-    if (__ring_m144._tag === "some") {
-      const body_r = __ring_m144._0;
+  __ring_match145: {
+    const __ring_m145 = body_result;
+    if (__ring_m145._tag === "some") {
+      const body_r = __ring_m145._0;
       s = body_r.subst;
       let applied_params = [];
       for (const pt of param_types) {
@@ -2860,13 +2870,13 @@ function infer_lambda(ctx, params, body, span, subst, expected_param_types, __ri
         List_push(final_hparams, new hir$HParam(hp.name, env$apply_subst(s, hp.ty), hp.def_id, hp.is_mutable));
       }
       return new infer_ctx$InferResult(hir$HExpr_Lambda(final_hparams, applied_ret, body_r.hexpr, fn_type, types$EMPTY_ROW, span), s, types$EMPTY_ROW);
-      break __ring_match144;
+      break __ring_match145;
     }
-    if (__ring_m144._tag === "none") {
+    if (__ring_m145._tag === "none") {
       return __ring_ev_fail.raise(new infer_ctx$CompileError());
-      break __ring_match144;
+      break __ring_match145;
     }
-    __match_fail(__ring_m144);
+    __match_fail(__ring_m145);
   }
 }
 

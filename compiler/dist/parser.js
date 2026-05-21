@@ -399,7 +399,7 @@ function Parser_report_error(self, code, msg, span) {
   diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(code, diagnostics$Severity_SevError, msg, error_span, diagnostics$DiagnosticContext_ParseError(tok.value, Option_none)));
   self.error_count = (self.error_count + 1);
   if ((self.error_count >= MAX_ERRORS)) {
-    return panic("Too many parse errors");
+    return __ring_raise_fail("Too many parse errors");
   }
 }
 function Parser_error(self, msg) {

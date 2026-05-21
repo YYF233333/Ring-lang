@@ -4,6 +4,8 @@ import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span,
 import { variant_js_name as hir$variant_js_name, trait_dict_name as hir$trait_dict_name, evidence_param_name as hir$evidence_param_name, trait_bound_param_name as hir$trait_bound_param_name, default_method_self_name as hir$default_method_self_name, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, hexpr_type as hir$hexpr_type, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_CELL as hir$BUILTIN_CELL, CELL_METHODS as hir$CELL_METHODS, STR_METHODS as hir$STR_METHODS, INT_METHODS as hir$INT_METHODS, FLOAT_METHODS as hir$FLOAT_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, SET_HOF_METHODS as hir$SET_HOF_METHODS, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, HParam as hir$HParam, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, DictDispatchInfo as hir$DictDispatchInfo, HStructFieldInit as hir$HStructFieldInit, HMatchArm as hir$HMatchArm, HEffectHandler as hir$HEffectHandler, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStructField as hir$HStructField, HEnumVariant as hir$HEnumVariant, HEffectOp as hir$HEffectOp, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_Call as hir$FieldAction_Call, DerivedField as hir$DerivedField, DerivedVariant as hir$DerivedVariant, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, DerivedImpl as hir$DerivedImpl, HProgram as hir$HProgram, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __TraitBound_Eq as hir$__TraitBound_Eq, __TypeKind_Eq as hir$__TypeKind_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __FieldAction_Clone as hir$__FieldAction_Clone, __TypeKind_Clone as hir$__TypeKind_Clone, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __TraitBound_Ord as hir$__TraitBound_Ord, __TypeKind_Ord as hir$__TypeKind_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Debug as hir$__TraitBound_Debug, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __FieldAction_Debug as hir$__FieldAction_Debug, __TypeKind_Debug as hir$__TypeKind_Debug, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DerivedImpl_Debug as hir$__DerivedImpl_Debug } from "./hir.js";
 import { mono as env$mono, new_type_env as env$new_type_env, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, FnBound as env$FnBound, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __SchemeBound_Eq as env$__SchemeBound_Eq, __FnBound_Eq as env$__FnBound_Eq, __IdGen_Eq as env$__IdGen_Eq, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __SchemeBound_Clone as env$__SchemeBound_Clone, __ImplEntry_Clone as env$__ImplEntry_Clone, __FnBound_Clone as env$__FnBound_Clone, __IdGen_Clone as env$__IdGen_Clone, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __SchemeBound_Ord as env$__SchemeBound_Ord, __FnBound_Ord as env$__FnBound_Ord, __IdGen_Ord as env$__IdGen_Ord, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __SchemeBound_Debug as env$__SchemeBound_Debug, __ImplEntry_Debug as env$__ImplEntry_Debug, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 import { empty_subst as unify$empty_subst, occurs_in as unify$occurs_in, unify_effect_rows as unify$unify_effect_rows, unify as unify$unify, UnificationError as unify$UnificationError, __UnificationError_Eq as unify$__UnificationError_Eq, __UnificationError_Clone as unify$__UnificationError_Clone, __UnificationError_Ord as unify$__UnificationError_Ord, __UnificationError_Debug as unify$__UnificationError_Debug } from "./unify.js";
+import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Severity_Eq as diagnostics$__Severity_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Severity_Clone as diagnostics$__Severity_Clone, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
+import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0706 as codes$E0706, error_description as codes$error_description } from "./codes.js";
 import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_error, merge_effects as infer_ctx$merge_effects, unify_at as infer_ctx$unify_at, free_type_vars as infer_ctx$free_type_vars, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, update_fn_effects as infer_ctx$update_fn_effects, build_scheme_var_map as infer_ctx$build_scheme_var_map, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_type_expr as infer_ctx$resolve_type_expr, resolve_self_type as infer_ctx$resolve_self_type, resolve_named_type as infer_ctx$resolve_named_type, bind_pattern as infer_ctx$bind_pattern, remove_fail_effect as infer_ctx$remove_fail_effect, remove_specific_fail_effect as infer_ctx$remove_specific_fail_effect, InferResult as infer_ctx$InferResult, FnBoundsEntry as infer_ctx$FnBoundsEntry, CompileError as infer_ctx$CompileError, InferCtx as infer_ctx$InferCtx, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __CompileError_Eq as infer_ctx$__CompileError_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __CompileError_Clone as infer_ctx$__CompileError_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __CompileError_Ord as infer_ctx$__CompileError_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug, __CompileError_Debug as infer_ctx$__CompileError_Debug } from "./infer_ctx.js";
 import { register_decl_public as infer_register$register_decl_public, register_decls_two_phase as infer_register$register_decls_two_phase } from "./infer_register.js";
 import { infer_block as infer$infer_block, infer_stmt as infer$infer_stmt, infer_expr as infer$infer_expr } from "./infer.js";
@@ -15,17 +17,17 @@ function check_decl(ctx, decl, __ring_ev_fail) {
     const __ring_m0 = decl;
     if (__ring_m0._tag === "Struct") {
       const name = __ring_m0.name; const type_params = __ring_m0.type_params; const is_pub = __ring_m0.is_pub; const span = __ring_m0.span;
-      return check_struct_decl(ctx, name, type_params, is_pub, span);
+      return check_struct_decl(ctx, name, type_params, is_pub, span, __ring_ev_fail);
       break __ring_match0;
     }
     if (__ring_m0._tag === "Enum") {
       const name = __ring_m0.name; const type_params = __ring_m0.type_params; const is_pub = __ring_m0.is_pub; const span = __ring_m0.span;
-      return check_enum_decl(ctx, name, type_params, is_pub, span);
+      return check_enum_decl(ctx, name, type_params, is_pub, span, __ring_ev_fail);
       break __ring_match0;
     }
     if (__ring_m0._tag === "Effect") {
       const name = __ring_m0.name; const type_params = __ring_m0.type_params; const ops = __ring_m0.ops; const is_pub = __ring_m0.is_pub; const span = __ring_m0.span;
-      return check_effect_decl(ctx, name, type_params, ops, is_pub, span);
+      return check_effect_decl(ctx, name, type_params, ops, is_pub, span, __ring_ev_fail);
       break __ring_match0;
     }
     if (__ring_m0._tag === "Impl") {
@@ -45,12 +47,12 @@ function check_decl(ctx, decl, __ring_ev_fail) {
     }
     if (__ring_m0._tag === "Trait") {
       const name = __ring_m0.name; const type_params = __ring_m0.type_params; const methods = __ring_m0.methods; const is_pub = __ring_m0.is_pub; const span = __ring_m0.span;
-      return check_trait_decl(ctx, name, type_params, methods, is_pub, span);
+      return check_trait_decl(ctx, name, type_params, methods, is_pub, span, __ring_ev_fail);
       break __ring_match0;
     }
     if (__ring_m0._tag === "ExternFn") {
       const name = __ring_m0.name; const type_params = __ring_m0.type_params; const params = __ring_m0.params; const return_type = __ring_m0.return_type; const is_pub = __ring_m0.is_pub; const span = __ring_m0.span;
-      return check_extern_fn_decl(ctx, name, type_params, params, is_pub, span);
+      return check_extern_fn_decl(ctx, name, type_params, params, is_pub, span, __ring_ev_fail);
       break __ring_match0;
     }
     if (__ring_m0._tag === "ExternType") {
@@ -124,11 +126,14 @@ function check_const_decl(ctx, name, type_annotation, init, is_pub, span, __ring
   return hir$HDecl_Const(name, old_def_id, resolved, init_r.hexpr, is_pub, span);
 }
 
-function check_struct_decl(ctx, name, type_params, is_pub, span) {
+function check_struct_decl(ctx, name, type_params, is_pub, span, __ring_ev_fail) {
   const def = (function() {
   const __ring_m = _Map_get(ctx.env.types.structs, name);
   if (__ring_m._tag === "some") { const d = __ring_m._0; return d; }
-  if (__ring_m._tag === "none") { return panic(`struct not found: ${name}`); }
+  if (__ring_m._tag === "none") { return (function() {
+  const _ = infer_ctx$type_error(ctx.sink, codes$E0204, `struct not found: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`struct '${name}' was not registered`)));
+  return __ring_ev_fail.raise(new infer_ctx$CompileError());
+})(); }
   __match_fail(__ring_m);
 })();
   let hfields = [];
@@ -138,11 +143,14 @@ function check_struct_decl(ctx, name, type_params, is_pub, span) {
   return hir$HDecl_Struct(name, type_params, hfields, is_pub, span);
 }
 
-function check_enum_decl(ctx, name, type_params, is_pub, span) {
+function check_enum_decl(ctx, name, type_params, is_pub, span, __ring_ev_fail) {
   const def = (function() {
   const __ring_m = _Map_get(ctx.env.types.enums, name);
   if (__ring_m._tag === "some") { const d = __ring_m._0; return d; }
-  if (__ring_m._tag === "none") { return panic(`enum not found: ${name}`); }
+  if (__ring_m._tag === "none") { return (function() {
+  const _ = infer_ctx$type_error(ctx.sink, codes$E0204, `enum not found: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`enum '${name}' was not registered`)));
+  return __ring_ev_fail.raise(new infer_ctx$CompileError());
+})(); }
   __match_fail(__ring_m);
 })();
   let hvariants = [];
@@ -152,11 +160,14 @@ function check_enum_decl(ctx, name, type_params, is_pub, span) {
   return hir$HDecl_Enum(name, type_params, hvariants, is_pub, span);
 }
 
-function check_effect_decl(ctx, name, type_params, ast_ops, is_pub, span) {
+function check_effect_decl(ctx, name, type_params, ast_ops, is_pub, span, __ring_ev_fail) {
   const def = (function() {
   const __ring_m = _Map_get(ctx.env.types.effects, name);
   if (__ring_m._tag === "some") { const d = __ring_m._0; return d; }
-  if (__ring_m._tag === "none") { return panic(`effect not found: ${name}`); }
+  if (__ring_m._tag === "none") { return (function() {
+  const _ = infer_ctx$type_error(ctx.sink, codes$E0402, `effect not found: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`effect '${name}' was not registered`)));
+  return __ring_ev_fail.raise(new infer_ctx$CompileError());
+})(); }
   __match_fail(__ring_m);
 })();
   let hops = [];
@@ -193,7 +204,7 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
       const __ring_m3 = method;
       if (__ring_m3._tag === "ExternFn") {
         const name = __ring_m3.name; const mtps = __ring_m3.type_params; const params = __ring_m3.params; const return_type = __ring_m3.return_type; const is_pub = __ring_m3.is_pub; const mspan = __ring_m3.span;
-        List_push(hmethods, check_extern_fn_decl(ctx, name, mtps, params, is_pub, mspan));
+        List_push(hmethods, check_extern_fn_decl(ctx, name, mtps, params, is_pub, mspan, __ring_ev_fail));
         break __ring_match3;
       }
       if (__ring_m3._tag === "Fn") {
@@ -207,11 +218,14 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
   return hir$HDecl_Impl(target_type, type_params, trait_name, hmethods, span);
 }
 
-function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span) {
+function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __ring_ev_fail) {
   const trait_def = (function() {
   const __ring_m = _Map_get(ctx.env.trait_reg.traits, name);
   if (__ring_m._tag === "some") { const d = __ring_m._0; return d; }
-  if (__ring_m._tag === "none") { return panic(`trait not found: ${name}`); }
+  if (__ring_m._tag === "none") { return (function() {
+  const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `trait not found: ${name}`, span, diagnostics$DiagnosticContext_TraitError(`trait '${name}' was not registered`));
+  return __ring_ev_fail.raise(new infer_ctx$CompileError());
+})(); }
   __match_fail(__ring_m);
 })();
   let self_var = env$TypeEnv_fresh_var(ctx.env);
@@ -413,11 +427,14 @@ function find_ast_fn_by_name(methods, name) {
 })(); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(methods);
 }
 
-function check_extern_fn_decl(ctx, name, type_params, params, is_pub, span) {
+function check_extern_fn_decl(ctx, name, type_params, params, is_pub, span, __ring_ev_fail) {
   const scheme = (function() {
   const __ring_m = env$TypeEnv_lookup(ctx.env, name);
   if (__ring_m._tag === "some") { const s = __ring_m._0; return s; }
-  if (__ring_m._tag === "none") { return panic(`extern fn not found: ${name}`); }
+  if (__ring_m._tag === "none") { return (function() {
+  const _ = infer_ctx$type_error(ctx.sink, codes$E0201, `extern fn not found: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`extern fn '${name}' was not registered`)));
+  return __ring_ev_fail.raise(new infer_ctx$CompileError());
+})(); }
   __match_fail(__ring_m);
 })();
   const fn_params = (function() {
