@@ -231,7 +231,7 @@ impl Parser {
         ))
         self.error_count = self.error_count + 1
         if (self.error_count >= MAX_ERRORS) {
-            panic("Too many parse errors")
+            __ring_raise_fail("Too many parse errors")
         }
     }
 

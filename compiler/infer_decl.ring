@@ -5,7 +5,10 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
     hexpr_type}
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
+use diagnostics::{DiagnosticContext}
+use codes::{E0201, E0204, E0402, E0501}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
+    type_error,
     unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type,
     generalize}
@@ -83,7 +86,14 @@ fn check_const_decl(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
 }
 
 fn check_struct_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span) -> HDecl {
-    let def = match ctx.env.types.structs.get(name) { some(d) => d, none => panic("struct not found: ${name}") }
+    let def = match ctx.env.types.structs.get(name) {
+        some(d) => d,
+        none => {
+            let _ = type_error(ctx.sink, E0204, "struct not found: ${name}", span,
+                DiagnosticContext::OtherContext { detail: some("struct '${name}' was not registered") })
+            fail.raise(CompileError {})
+        }
+    }
     var hfields: List<HStructField> = []
     for f in def.fields {
         hfields.push(HStructField { name: f.name, ty: f.ty, is_pub: f.is_pub })
@@ -92,7 +102,14 @@ fn check_struct_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_
 }
 
 fn check_enum_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span) -> HDecl {
-    let def = match ctx.env.types.enums.get(name) { some(d) => d, none => panic("enum not found: ${name}") }
+    let def = match ctx.env.types.enums.get(name) {
+        some(d) => d,
+        none => {
+            let _ = type_error(ctx.sink, E0204, "enum not found: ${name}", span,
+                DiagnosticContext::OtherContext { detail: some("enum '${name}' was not registered") })
+            fail.raise(CompileError {})
+        }
+    }
     var hvariants: List<HEnumVariant> = []
     for v in def.variants {
         hvariants.push(HEnumVariant { name: v.name, fields: v.fields, field_names: v.field_names })
@@ -101,7 +118,14 @@ fn check_enum_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pu
 }
 
 fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast_ops: List<EffectOpDecl>, is_pub: Bool, span: Span) -> HDecl {
-    let def = match ctx.env.types.effects.get(name) { some(d) => d, none => panic("effect not found: ${name}") }
+    let def = match ctx.env.types.effects.get(name) {
+        some(d) => d,
+        none => {
+            let _ = type_error(ctx.sink, E0402, "effect not found: ${name}", span,
+                DiagnosticContext::OtherContext { detail: some("effect '${name}' was not registered") })
+            fail.raise(CompileError {})
+        }
+    }
     var hops: List<HEffectOp> = []
     var oi = 0
     for op in def.ops {
@@ -140,7 +164,14 @@ fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypePa
 }
 
 fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast_methods: List<Decl>, is_pub: Bool, span: Span) -> HDecl {
-    let trait_def = match ctx.env.trait_reg.traits.get(name) { some(d) => d, none => panic("trait not found: ${name}") }
+    let trait_def = match ctx.env.trait_reg.traits.get(name) {
+        some(d) => d,
+        none => {
+            let _ = type_error(ctx.sink, E0501, "trait not found: ${name}", span,
+                DiagnosticContext::TraitError { detail: "trait '${name}' was not registered" })
+            fail.raise(CompileError {})
+        }
+    }
 
     var self_var: Type = ctx.env.fresh_var()
     if trait_def.methods.len() > 0 {
@@ -267,7 +298,14 @@ fn find_ast_fn_by_name(methods: List<Decl>, name: Str) -> Decl? {
 }
 
 fn check_extern_fn_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, is_pub: Bool, span: Span) -> HDecl {
-    let scheme = match ctx.env.lookup(name) { some(s) => s, none => panic("extern fn not found: ${name}") }
+    let scheme = match ctx.env.lookup(name) {
+        some(s) => s,
+        none => {
+            let _ = type_error(ctx.sink, E0201, "extern fn not found: ${name}", span,
+                DiagnosticContext::OtherContext { detail: some("extern fn '${name}' was not registered") })
+            fail.raise(CompileError {})
+        }
+    }
     let fn_params: List<Type> = match scheme.ty {
         Type::FnType { params: fps, .. } => fps,
         _ => []

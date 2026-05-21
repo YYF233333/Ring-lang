@@ -338,7 +338,7 @@ pub fn gen_stmt_inline(var ctx: CodegenCtx, stmt: HStmt) -> Str {
             },
             none => "return;",
         },
-        _ => panic("gen_stmt_inline: unhandled stmt kind"),
+        _ => "/* codegen: unhandled inline stmt */ undefined;",
     }
 }
 
