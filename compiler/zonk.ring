@@ -93,6 +93,7 @@ fn label_vars(names: Map<Int, Str>, t: Type) -> Type {
         Type::UnitType => t,
         Type::NeverType => t,
         Type::AnyType => t,
+        Type::ErrorType => t,
     }
 }
 

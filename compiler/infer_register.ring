@@ -307,7 +307,7 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
                     }
                     for tm in trait_def.methods {
                         if !tm.has_default && !impl_method_names.contains(tm.name) {
-                            type_error(ctx.sink, E0502,
+                            let _ = type_error(ctx.sink, E0502,
                                 "Missing method '${tm.name}' in impl ${tname} for ${target_type}",
                                 span, DiagnosticContext::TraitError { detail: "missing method '${tm.name}'" })
                         }
@@ -327,9 +327,9 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
                         type_params: tp_names, method_names: method_names
                     })
                 },
-                none => type_error(ctx.sink, E0501,
+                none => { let _ = type_error(ctx.sink, E0501,
                     "Unknown trait: ${tname}", span,
-                    DiagnosticContext::TraitError { detail: "unknown trait '${tname}'" })
+                    DiagnosticContext::TraitError { detail: "unknown trait '${tname}'" }) }
             }
         },
         none => {}
@@ -419,9 +419,9 @@ fn check_duplicate_def(ctx: InferCtx, name: Str, span: Span) {
     match ctx.env.lookup(name) {
         some(existing) => match existing.def_id {
             some(did) => match ctx.env.def_spans.get(did) {
-                some(_) => type_error(ctx.sink, E0207,
+                some(_) => { let _ = type_error(ctx.sink, E0207,
                     "Duplicate definition: '${name}' is already defined", span,
-                    DiagnosticContext::TypeMismatch { expected: "unique name", actual: name, expression: none }),
+                    DiagnosticContext::TypeMismatch { expected: "unique name", actual: name, expression: none }) },
                 none => {}
             },
             none => {}
@@ -466,7 +466,7 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
             if !ctx.env.traits.contains_key(b.trait_name) {
-                type_error(ctx.sink, E0501,
+                let _ = type_error(ctx.sink, E0501,
                     "Unknown trait: ${b.trait_name}", tp.span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
             }
@@ -528,7 +528,7 @@ fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
             if !ctx.env.traits.contains_key(b.trait_name) {
-                type_error(ctx.sink, E0501,
+                let _ = type_error(ctx.sink, E0501,
                     "Unknown trait: ${b.trait_name}", tp.span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
             }
