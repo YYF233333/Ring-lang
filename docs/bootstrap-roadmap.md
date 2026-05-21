@@ -284,10 +284,28 @@ Step 3: diff v1 v2 → 必须 byte-identical
 ### 3.4 完成标准
 
 - [x] Batch 1-5 所有文件翻译完成（31 文件，~14,260 行 Ring 代码）
-- [ ] 全部 E2E 测试通过（Ring 编译器运行）
+- [~] 全部 E2E 测试通过（Ring 编译器运行）— **187/188 单文件测试通过（99.5%）**
 - [ ] Fixed point 验证通过（v1 = v2）
 - [ ] TS 编译器归档
 - [ ] 文档同步更新
+
+### 3.5 自举验证期间发现并修复的 TS 编译器 bug
+
+1. **`use as` 别名 codegen bug**（`compiler.ts`）— `imports_map` 不包含 `use mod::{name as alias}` 的别名条目
+2. **`qualify()` 优先级 bug**（`codegen.ts`）— 导入名覆盖本地定义名（`imports_map` 优先于 `local_names`）
+3. **跨模块 `extern fn` ESM 导入**（`compiler.ts`）— ESM 模式不解析跨模块 extern fn 声明
+4. **裸变体名覆盖枚举类型名**（`compiler.ts`）— `HDecl::Effect` 变体构造器覆盖 `types::Effect` 枚举映射
+
+### 3.6 自举验证期间修复的 Ring 源码问题
+
+1. **字符串插值语法错误** — 229 处使用 `\{expr}` 改为 `${expr}`（Ring 用 `${...}` 做插值）
+2. **extern fn 命名错误** — `gen_expr_str` → `gen_expr`（与实际导出函数名匹配）
+3. **缺失模块导入** — `codegen.ring` 缺少 `use codegen_expr::{gen_expr}`，导致模块不在依赖图中
+
+### 3.7 剩余问题
+
+- `nested-closure-eq` 测试（fail effect evidence 参数未传递到 type_error 函数）— Ring 源码翻译修复
+- `trait_generic_impl` 测试 — **TS 编译器也失败**（已有 bug，非自举引入）
 
 ---
 
