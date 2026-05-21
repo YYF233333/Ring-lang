@@ -81,6 +81,18 @@ pub fn effect_kind_name(e: Effect) -> Str {
     }
 }
 
+pub fn effects_match_kind(a: Effect, b: Effect) -> Bool {
+    match a {
+        Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
+        Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },
+        Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
+        Effect::CustomEffect { name: na, .. } => match b {
+            Effect::CustomEffect { name: nb, .. } => na == nb,
+            _ => false
+        }
+    }
+}
+
 pub fn type_to_builtin_name(t: Type) -> Str? {
     match t {
         Type::IntType => some(BUILTIN_INT),

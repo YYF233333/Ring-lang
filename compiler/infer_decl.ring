@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string}
+use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string, effects_match_kind}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl, EffectExpr,
     UseDecl, UseImport, NamedImport, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
@@ -558,18 +558,6 @@ fn check_fn_body(var ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     let eff = zonk_row(zctx, body_result.effects)
     let final_body = zonk_block(zctx, body_result.hexpr)
     FnBodyResult { params: final_params, ret: final_ret, eff: eff, body: final_body }
-}
-
-fn effects_match_kind(a: Effect, b: Effect) -> Bool {
-    match a {
-        Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
-        Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },
-        Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
-        Effect::CustomEffect { name: na, .. } => match b {
-            Effect::CustomEffect { name: nb, .. } => na == nb,
-            _ => false
-        }
-    }
 }
 
 fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {

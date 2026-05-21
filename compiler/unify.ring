@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, effect_kind_name, UNIT}
+use types::{Type, Effect, EffectRow, RecordField, StructField, type_to_string, effect_kind_name, effects_match_kind, UNIT}
 use union_find::{UnionFind, uf_bind, uf_lookup, uf_insert, new_union_find}
 use env::{TypeEnv, apply_subst, apply_subst_row}
 
@@ -92,21 +92,6 @@ fn occurs_in_effect(var_id: Int, e: Effect, subst: UnionFind) -> Bool {
 }
 
 // ============================================================
-// Effect matching helpers
-// ============================================================
-
-fn effects_match_kind(a: Effect, b: Effect) -> Bool {
-    match a {
-        Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
-        Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },
-        Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
-        Effect::CustomEffect { name: na, .. } => match b {
-            Effect::CustomEffect { name: nb, .. } => na == nb,
-            _ => false
-        }
-    }
-}
-
 
 
 fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, var env: TypeEnv) -> UnionFind {

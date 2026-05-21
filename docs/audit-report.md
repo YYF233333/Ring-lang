@@ -1,7 +1,7 @@
 # Ring 编译器技术债清单
 
 自举审计 (2026-05-21) + Phase B Wave 1 审计 (2026-05-22) 产出。三路并行审计（Claude×2 + DS V4 Pro）去重合并后的长期跟踪清单。
-已修复项以删除线标记。69 项中 36 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, #54-58, #60-61, C1-C3）。
+已修复项以删除线标记。69 项中 37 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, #54-58, #60-61, #65, C1-C3）。
 Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复。
 
 ---
@@ -115,7 +115,7 @@ Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复
 | # | 问题 | 影响 | 发现者 | 备注 |
 |---|------|------|--------|------|
 | 64 | `effects_match_kind` 只做 kind 级匹配，忽略 fail 错误类型 | Issue（设计决策） | Opus | `with {fail<Str>}` 匹配 `fail<Int>` 不报错。标注中的错误类型是装饰性的。若标注作为公共契约，应验证类型参数 |
-| 65 | `effects_match_kind` 在 `unify.ring` 和 `infer_decl.ring` 中完全重复 | Issue | DS | 字节级相同的函数在两个文件中各一份，改一处易忘另一处 |
+| 65 | ~~`effects_match_kind` 在 `unify.ring` 和 `infer_decl.ring` 中完全重复~~ | ~~Issue~~ | DS | **已修复**：提取到 `types.ring` 作为 `pub fn effects_match_kind`，两处改为 import |
 | 66 | `register_impl_method` 接收 `declared_effects` 参数但完全不使用 | Issue（已知限制扩展） | DS | impl 方法 effect 注册为 `EMPTY_ROW`，显式 `with {io}` 标注被忽略。关联 #42 |
 | 67 | `std/io.ring` 的 `print`/`assert`/`exit` 缺少 `with {io}` 标注 | Issue | Sonnet | 纯函数 `with {}` 内调用 `print()` 不报 E0404——extern fn 无标注时注册为 EMPTY_ROW |
 | 68 | `resolve_effect_expr` 不验证 effect 名是否存在 | Concern | Opus | `with {typo}` 静默创建 CustomEffect，不报错。因为标注是上界，不使用的 effect 合法，但拼写错误无法捕获 |
