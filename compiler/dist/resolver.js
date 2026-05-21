@@ -11,11 +11,12 @@ class ModuleId {
 }
 
 class ModuleGraph {
-  constructor(entry, modules, dependencies, topo_order) {
+  constructor(entry, modules, dependencies, topo_order, asts) {
     this.entry = entry;
     this.modules = modules;
     this.dependencies = dependencies;
     this.topo_order = topo_order;
+    this.asts = asts;
   }
 }
 
@@ -73,6 +74,7 @@ function build_module_graph(entry_file) {
   const entry_key = module_key(entry_id.path_segments);
   let modules = map_new();
   let dependencies = map_new();
+  let asts_map = map_new();
   _Map_insert(modules, entry_key, entry_id);
   const empty_deps = [""];
   List_clear(empty_deps);
@@ -90,6 +92,10 @@ function build_module_graph(entry_file) {
             const source = read_file(current_mod.file_path);
             const resolve_sink = diagnostics$new_collecting_sink();
             const ast = parser$parse(source, current_mod.file_path, resolve_sink);
+            if (diagnostics$CollectingSink_has_errors(resolve_sink)) {
+              return Option_none;
+            }
+            _Map_insert(asts_map, current_key, ast);
             let deps = [""];
             List_clear(deps);
             for (const use_decl of ast.uses) {
@@ -204,18 +210,13 @@ function build_module_graph(entry_file) {
   if ((List_len(topo_order) !== _Map_len(modules))) {
     return Option_none;
   }
-  return Option_some(new ModuleGraph(new ModuleId([entry_basename], abs_entry), modules, dependencies, topo_order));
+  return Option_some(new ModuleGraph(new ModuleId([entry_basename], abs_entry), modules, dependencies, topo_order, asts_map));
 }
 
 function __ModuleId_Clone_clone(self) {
   return new ModuleId(__List_Clone.clone(self.path_segments, __Str_Clone), self.file_path);
 }
 const __ModuleId_Clone = { clone: __ModuleId_Clone_clone };
-
-function __ModuleGraph_Clone_clone(self) {
-  return new ModuleGraph(__ModuleId_Clone.clone(self.entry), __Map_Clone.clone(self.modules, __Str_Clone, __ModuleId_Clone), __Map_Clone.clone(self.dependencies, __Str_Clone, __List_Clone), __List_Clone.clone(self.topo_order, __Str_Clone));
-}
-const __ModuleGraph_Clone = { clone: __ModuleGraph_Clone_clone };
 
 function __GraphError_Clone_clone(self) {
   return new GraphError(self.message, __Option_Clone.clone(self.cycle, __List_Clone));
@@ -227,15 +228,10 @@ function __ModuleId_Debug_debug(self) {
 }
 const __ModuleId_Debug = { debug: __ModuleId_Debug_debug };
 
-function __ModuleGraph_Debug_debug(self) {
-  return "ModuleGraph { " + "entry: " + __ModuleId_Debug.debug(self.entry) + ", " + "modules: " + __Map_Debug.debug(self.modules, __Str_Debug, __ModuleId_Debug) + ", " + "dependencies: " + __Map_Debug.debug(self.dependencies, __Str_Debug, __List_Debug) + ", " + "topo_order: " + __List_Debug.debug(self.topo_order, __Str_Debug) + " }";
-}
-const __ModuleGraph_Debug = { debug: __ModuleGraph_Debug_debug };
-
 function __GraphError_Debug_debug(self) {
   return "GraphError { " + "message: " + String(self.message) + ", " + "cycle: " + __Option_Debug.debug(self.cycle, __List_Debug) + " }";
 }
 const __GraphError_Debug = { debug: __GraphError_Debug_debug };
 
 
-export { ModuleId, ModuleGraph, GraphError, module_key, module_prefix, resolve_module_file, build_module_graph, __ModuleId_Clone, __ModuleGraph_Clone, __GraphError_Clone, __ModuleId_Debug, __ModuleGraph_Debug, __GraphError_Debug };
+export { ModuleId, ModuleGraph, GraphError, module_key, module_prefix, resolve_module_file, build_module_graph, __ModuleId_Clone, __GraphError_Clone, __ModuleId_Debug, __GraphError_Debug };

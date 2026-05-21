@@ -11,7 +11,6 @@ use runtime::{RUNTIME_CODE, RUNTIME_EXPORT_NAMES, runtime_esm_code}
 use resolver::{ModuleGraph, ModuleId, module_key, module_prefix,
     build_module_graph}
 use exports::{ModuleExports, TypeDef, extract_exports}
-use parser::{parse}
 
 pub struct CompileProjectResult {
     pub js: Str,
@@ -42,27 +41,13 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
             var module_hirs: Map<Str, HProgram> = map_new()
             var module_exports_map: Map<Str, ModuleExports> = map_new()
 
-            // Parse all modules
-            var parse_ok = true
+            // Use cached ASTs from resolver (already parsed during graph construction)
             for key in graph.topo_order {
-                if parse_ok {
-                    match graph.modules.get(key) {
-                        some(mod_) => {
-                            let source = read_file(mod_.file_path)
-                            let mod_sink = new_collecting_sink()
-                            let ast = parse(source, mod_.file_path, mod_sink)
-                            if mod_sink.has_errors() {
-                                eprintln(format_human(mod_sink.diagnostics(), source))
-                                parse_ok = false
-                            } else {
-                                module_asts.insert(key, ast)
-                            }
-                        },
-                        none => { parse_ok = false },
-                    }
+                match graph.asts.get(key) {
+                    some(ast) => { module_asts.insert(key, ast) },
+                    none => {},
                 }
             }
-            if parse_ok == false { return none }
 
             // Check all modules in topological order
             var check_ok = true
@@ -73,9 +58,9 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
                             let sink = new_collecting_sink()
                             let deps = match graph.dependencies.get(key) {
                                 some(dk) => dk,
-                                none => [],
+                                none => empty_str_list(),
                             }
-                            var dep_exports: List<ModuleExports> = []
+                            var dep_exports: List<ModuleExports> = empty_module_exports_list()
                             for dk in deps {
                                 match module_exports_map.get(dk) {
                                     some(e) => dep_exports.push(e),
@@ -188,7 +173,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         import_lines.push("import { ${rnames_joined} } from \"./__ring_runtime.js\";")
 
                         // Cross-module import lines
-                        let deps = match phases.graph.dependencies.get(key) { some(d) => d, none => [] }
+                        let deps = match phases.graph.dependencies.get(key) { some(d) => d, none => empty_str_list() }
                         for dk in deps {
                             match (phases.module_exports_map.get(dk), phases.graph.modules.get(dk)) {
                                 (some(dep_exports), some(dep_mod)) => {
@@ -311,7 +296,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
 
                         // Build export names
                         var export_names: List<Str> = [""]; export_names.clear()
-                        // Pass 1: pub fn/struct/enum declarations
+                        // Pass 1: pub fn/struct/enum/const declarations
                         for decl in ast.decls {
                             match decl {
                                 Decl::Fn { name, is_pub, .. } => { if is_pub { export_names.push(safe_ident(name)) } },
@@ -567,6 +552,13 @@ fn build_external_struct_fields(graph: ModuleGraph, exports_map: Map<Str, Module
     result
 }
 
+fn empty_module_exports_list() -> List<ModuleExports> {
+    let x = [0]; x.clear(); x.map(fn(i: Int) -> ModuleExports { panic("unreachable") })
+}
+
+fn empty_str_list() -> List<Str> {
+    let x = [""]; x.clear(); x
+}
 
 fn build_external_impl_methods(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, Str?> {
     var result: Map<Str, Str?> = map_new()
