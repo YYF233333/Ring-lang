@@ -32,14 +32,6 @@ use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
 use exhaustive::{check_exhaustive}
 
-// Struct wrapper for merge_effects return
-struct MergeResult { eff: EffectRow, s: Map<Int, Type> }
-
-fn merge_eff(env: TypeEnv, a: EffectRow, b: EffectRow, s: Map<Int, Type>) -> MergeResult {
-    let result = merge_effects(env, a, b, s)
-    let (new_eff, new_s) = result
-    MergeResult { eff: new_eff, s: new_s }
-}
 
 struct MethodLookupResult {
     method_type: Type?,
@@ -75,9 +67,9 @@ pub fn infer_block(var ctx: InferCtx, body: Expr, initial_subst: Map<Int, Type>?
             for stmt in stmts {
                 let sr = infer_stmt(ctx, stmt, subst)
                 subst = sr.subst
-                let me = merge_eff(ctx.env, effects, sr.effects, subst)
-                effects = me.eff
-                subst = me.s
+                let me = merge_effects(ctx.env, effects, sr.effects, subst)
+                effects = me.0
+                subst = me.1
                 hstmts.push(sr.hstmt)
             }
 
@@ -88,9 +80,9 @@ pub fn infer_block(var ctx: InferCtx, body: Expr, initial_subst: Map<Int, Type>?
                 some(t) => {
                     let tr = infer_expr(ctx, t, subst)
                     subst = tr.subst
-                    let me = merge_eff(ctx.env, effects, tr.effects, subst)
-                    effects = me.eff
-                    subst = me.s
+                    let me = merge_effects(ctx.env, effects, tr.effects, subst)
+                    effects = me.0
+                    subst = me.1
                     tail_hexpr = some(tr.hexpr)
                     block_type = hexpr_type(tr.hexpr)
                 },
@@ -185,12 +177,12 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             let target_r = infer_expr(ctx, target, subst)
             let value_r = infer_expr(ctx, value, target_r.subst)
             var s = unify_at(ctx.sink, ctx.env, hexpr_type(target_r.hexpr), hexpr_type(value_r.hexpr), value_r.subst, span)
-            let me = merge_eff(ctx.env, target_r.effects, value_r.effects, s)
-            s = me.s
+            let me = merge_effects(ctx.env, target_r.effects, value_r.effects, s)
+            s = me.1
             StmtResult {
                 hstmt: HStmt::Assign { target: target_r.hexpr, value: value_r.hexpr, span: span },
                 subst: s,
-                effects: me.eff
+                effects: me.0
             }
         },
         Stmt::ExprStmt { expr, span, .. } => {
@@ -243,11 +235,11 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             match body_result {
                 some(body_r) => {
                     s = body_r.subst
-                    let me = merge_eff(ctx.env, cond_r.effects, body_r.effects, s)
+                    let me = merge_effects(ctx.env, cond_r.effects, body_r.effects, s)
                     StmtResult {
                         hstmt: HStmt::While { condition: cond_r.hexpr, body: body_r.hexpr, span: span },
-                        subst: me.s,
-                        effects: me.eff
+                        subst: me.1,
+                        effects: me.0
                     }
                 },
                 none => fail.raise(CompileError {})
@@ -367,7 +359,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             match body_result {
                 some(body_r) => {
                     s = body_r.subst
-                    let me = merge_eff(ctx.env, iter_r.effects, body_r.effects, s)
+                    let me = merge_effects(ctx.env, iter_r.effects, body_r.effects, s)
                     StmtResult {
                         hstmt: HStmt::ForIn {
                             binding: binding, binding_span: binding_span,
@@ -375,8 +367,8 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                             destructure: hdestructure,
                             iterable: iter_r.hexpr, body: body_r.hexpr, span: span
                         },
-                        subst: me.s,
-                        effects: me.eff
+                        subst: me.1,
+                        effects: me.0
                     }
                 },
                 none => fail.raise(CompileError {})
@@ -482,9 +474,9 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             match then_result {
                 some(then_r) => {
                     s = then_r.subst
-                    var combined = merge_eff(ctx.env, expr_r.effects, then_r.effects, s)
-                    var combined_effects = combined.eff
-                    s = combined.s
+                    var combined = merge_effects(ctx.env, expr_r.effects, then_r.effects, s)
+                    var combined_effects = combined.0
+                    s = combined.1
 
                     var else_hblock: HExpr? = none
                     match else_block {
@@ -496,9 +488,9 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                                 some(else_r) => {
                                     s = else_r.subst
                                     else_hblock = some(else_r.hexpr)
-                                    let me2 = merge_eff(ctx.env, combined_effects, else_r.effects, s)
-                                    combined_effects = me2.eff
-                                    s = me2.s
+                                    let me2 = merge_effects(ctx.env, combined_effects, else_r.effects, s)
+                                    combined_effects = me2.0
+                                    s = me2.1
                                 },
                                 none => fail.raise(CompileError {})
                             }
@@ -642,9 +634,9 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
                 let r = infer_expr(ctx, el, s)
                 s = r.subst
                 helements.push(r.hexpr)
-                let me = merge_eff(ctx.env, combined_effects, r.effects, s)
-                combined_effects = me.eff
-                s = me.s
+                let me = merge_effects(ctx.env, combined_effects, r.effects, s)
+                combined_effects = me.0
+                s = me.1
             }
             var elem_types: List<Type> = []
             for he in helements { elem_types.push(apply_subst(s, hexpr_type(he))) }
@@ -659,9 +651,9 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
             var s = unify_at(ctx.sink, ctx.env, hexpr_type(start_r.hexpr), INT(), start_r.subst, span)
             let end_r = infer_expr(ctx, end, s)
             s = unify_at(ctx.sink, ctx.env, hexpr_type(end_r.hexpr), INT(), end_r.subst, span)
-            let me = merge_eff(ctx.env, start_r.effects, end_r.effects, s)
-            var range_effects = me.eff
-            s = me.s
+            let me = merge_effects(ctx.env, start_r.effects, end_r.effects, s)
+            var range_effects = me.0
+            s = me.1
             let range_type = Type::EnumType { name: BUILTIN_RANGE(), type_params: [INT()], variants: [] }
             InferResult {
                 hexpr: HExpr::RangeExpr {
@@ -791,9 +783,9 @@ fn infer_bin_op(var ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
         }
     }
 
-    let me = merge_eff(ctx.env, lr.effects, rr.effects, s)
-    var effects = me.eff
-    s = me.s
+    let me = merge_effects(ctx.env, lr.effects, rr.effects, s)
+    var effects = me.0
+    s = me.1
     InferResult {
         hexpr: HExpr::BinOp { op: op, left: lr.hexpr, right: rr.hexpr, eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch, ty: result_type, effects: effects, span: span },
         subst: s, effects: effects
@@ -975,9 +967,9 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     for arg in args {
         let ar = infer_expr(ctx, arg, s)
         s = ar.subst
-        let me = merge_eff(ctx.env, effects, ar.effects, s)
-        effects = me.eff
-        s = me.s
+        let me = merge_effects(ctx.env, effects, ar.effects, s)
+        effects = me.0
+        s = me.1
         hargs.push(ar.hexpr)
         arg_types.push(hexpr_type(ar.hexpr))
     }
@@ -995,9 +987,9 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
 
     match resolved_callee_type {
         Type::FnType { effects: fn_effects, .. } => {
-            let me = merge_eff(ctx.env, effects, fn_effects, s)
-            effects = me.eff
-            s = me.s
+            let me = merge_effects(ctx.env, effects, fn_effects, s)
+            effects = me.0
+            s = me.1
         },
         _ => {}
     }
@@ -1240,9 +1232,9 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
             _ => infer_expr(ctx, arg, s)
         }
         s = ar.subst
-        let me = merge_eff(ctx.env, effects, ar.effects, s)
-        effects = me.eff
-        s = me.s
+        let me = merge_effects(ctx.env, effects, ar.effects, s)
+        effects = me.0
+        s = me.1
         hargs.push(ar.hexpr)
         ai = ai + 1
     }
@@ -1262,9 +1254,9 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
                     i = i + 1
                 }
                 result_type = apply_subst(s, mt_ret)
-                let me = merge_eff(ctx.env, effects, mt_effects, s)
-                effects = me.eff
-                s = me.s
+                let me = merge_effects(ctx.env, effects, mt_effects, s)
+                effects = me.0
+                s = me.1
             },
             _ => {
                 match recv_type {
@@ -1374,9 +1366,9 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     for arg in args {
         let ar = infer_expr(ctx, arg, s)
         s = ar.subst
-        let me = merge_eff(ctx.env, effects, ar.effects, s)
-        effects = me.eff
-        s = me.s
+        let me = merge_effects(ctx.env, effects, ar.effects, s)
+        effects = me.0
+        s = me.1
         hargs.push(ar.hexpr)
         match op.params.get(i) {
             some(param_type) => { s = unify_at(ctx.sink, ctx.env, hexpr_type(ar.hexpr), param_type, s, span) },
@@ -1398,9 +1390,9 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         none => {}
     }
 
-    let me = merge_eff(ctx.env, effects, effect_row([eff]), s)
-    effects = me.eff
-    s = me.s
+    let me = merge_effects(ctx.env, effects, effect_row([eff]), s)
+    effects = me.0
+    s = me.1
 
     InferResult {
         hexpr: HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: hargs, ty: op.return_type, effects: effects, span: span },
@@ -1558,9 +1550,9 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         some(sp) => {
             let sr = infer_expr(ctx, sp, s)
             s = sr.subst
-            let me = merge_eff(ctx.env, effects, sr.effects, s)
-            effects = me.eff
-            s = me.s
+            let me = merge_effects(ctx.env, effects, sr.effects, s)
+            effects = me.0
+            s = me.1
             var spread_fields: List<StructField> = []
             for f in struct_def.fields {
                 spread_fields.push(StructField { name: f.name, ty: apply_subst(inst_map, f.ty), is_pub: f.is_pub })
@@ -1575,9 +1567,9 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     for field in fields {
         let fr = infer_expr(ctx, field.value, s)
         s = fr.subst
-        let me = merge_eff(ctx.env, effects, fr.effects, s)
-        effects = me.eff
-        s = me.s
+        let me = merge_effects(ctx.env, effects, fr.effects, s)
+        effects = me.0
+        s = me.1
         let def_field = struct_def.fields.find(fn(f) { f.name == field.name })
         match def_field {
             some(df) => {
@@ -1641,9 +1633,9 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
         some(sp) => {
             let sr = infer_expr(ctx, sp, s)
             s = sr.subst
-            let me = merge_eff(ctx.env, effects, sr.effects, s)
-            effects = me.eff
-            s = me.s
+            let me = merge_effects(ctx.env, effects, sr.effects, s)
+            effects = me.0
+            s = me.1
             let spread_enum_type = Type::EnumType { name: enum_name, type_params: type_param_types, variants: enum_def.variants }
             s = unify_at(ctx.sink, ctx.env, hexpr_type(sr.hexpr), spread_enum_type, s, span)
             hspread = some(sr.hexpr)
@@ -1654,9 +1646,9 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
     for field in fields {
         let fr = infer_expr(ctx, field.value, s)
         s = fr.subst
-        let me = merge_eff(ctx.env, effects, fr.effects, s)
-        effects = me.eff
-        s = me.s
+        let me = merge_effects(ctx.env, effects, fr.effects, s)
+        effects = me.0
+        s = me.1
         let field_idx = field_names.index_of(field.name)
         match field_idx {
             some(idx) => match variant.fields.get(idx) {
@@ -1742,9 +1734,9 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
                     let gr = infer_expr(ctx, g, s)
                     s = gr.subst
                     s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL(), s, arm.span)
-                    let me = merge_eff(ctx.env, effects, gr.effects, s)
-                    effects = me.eff
-                    s = me.s
+                    let me = merge_effects(ctx.env, effects, gr.effects, s)
+                    effects = me.0
+                    s = me.1
                     guard_hexpr = some(gr.hexpr)
                 },
                 none => {}
@@ -1752,9 +1744,9 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
 
             let body_r = infer_expr(ctx, arm.body, s)
             s = body_r.subst
-            let me = merge_eff(ctx.env, effects, body_r.effects, s)
-            effects = me.eff
-            s = me.s
+            let me = merge_effects(ctx.env, effects, body_r.effects, s)
+            effects = me.0
+            s = me.1
             s = unify_at(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span)
 
             harms.push(HMatchArm { pattern: match_pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
@@ -1795,9 +1787,9 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
 
     let then_r = infer_block(ctx, then_branch, some(s))
     s = then_r.subst
-    let me = merge_eff(ctx.env, effects, then_r.effects, s)
-    effects = me.eff
-    s = me.s
+    let me = merge_effects(ctx.env, effects, then_r.effects, s)
+    effects = me.0
+    s = me.1
 
     var else_hexpr: HExpr? = none
     var result_type: Type = UNIT()
@@ -1807,9 +1799,9 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
             Expr::Block { .. } => {
                 let else_r = infer_block(ctx, eb, some(s))
                 s = else_r.subst
-                let me2 = merge_eff(ctx.env, effects, else_r.effects, s)
-                effects = me2.eff
-                s = me2.s
+                let me2 = merge_effects(ctx.env, effects, else_r.effects, s)
+                effects = me2.0
+                s = me2.1
                 s = unify_at(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_r.hexpr), s, span)
                 result_type = apply_subst(s, hexpr_type(then_r.hexpr))
                 else_hexpr = some(else_r.hexpr)
@@ -1817,9 +1809,9 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
             Expr::IfExpr { condition: ec, then_branch: etb, else_branch: eeb, span: espan } => {
                 let else_if_r = infer_if(ctx, ec, etb, eeb, espan, s)
                 s = else_if_r.subst
-                let me2 = merge_eff(ctx.env, effects, else_if_r.effects, s)
-                effects = me2.eff
-                s = me2.s
+                let me2 = merge_effects(ctx.env, effects, else_if_r.effects, s)
+                effects = me2.0
+                s = me2.1
                 s = unify_at(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_if_r.hexpr), s, span)
                 result_type = apply_subst(s, hexpr_type(then_r.hexpr))
                 else_hexpr = some(HExpr::Block {
@@ -1856,9 +1848,9 @@ fn infer_string_interp(var ctx: InferCtx, parts: List<StringInterpPart>, span: S
             StringInterpPart::ExprPart(expr) => {
                 let r = infer_expr(ctx, expr, s)
                 s = r.subst
-                let me = merge_eff(ctx.env, effects, r.effects, s)
-                effects = me.eff
-                s = me.s
+                let me = merge_effects(ctx.env, effects, r.effects, s)
+                effects = me.0
+                s = me.1
                 hparts.push(HStringInterpPart::Expression(r.hexpr))
             }
         }
@@ -1892,19 +1884,19 @@ fn infer_or(var ctx: InferCtx, expr: Expr, default_value: Expr, span: Span, subs
         s = default_r.subst
         s = unify_at(ctx.sink, ctx.env, inner, hexpr_type(default_r.hexpr), s, span)
         let result_type = apply_subst(s, inner)
-        let me = merge_eff(ctx.env, expr_r.effects, default_r.effects, s)
+        let me = merge_effects(ctx.env, expr_r.effects, default_r.effects, s)
         return InferResult {
-            hexpr: HExpr::OptionOr { expr: expr_r.hexpr, default_value: default_r.hexpr, ty: result_type, effects: me.eff, span: span },
-            subst: me.s, effects: me.eff
+            hexpr: HExpr::OptionOr { expr: expr_r.hexpr, default_value: default_r.hexpr, ty: result_type, effects: me.0, span: span },
+            subst: me.1, effects: me.0
         }
     }
 
     let default_r = infer_expr(ctx, default_value, s)
     s = default_r.subst
     s = unify_at(ctx.sink, ctx.env, hexpr_type(expr_r.hexpr), hexpr_type(default_r.hexpr), s, span)
-    let me = merge_eff(ctx.env, expr_r.effects, default_r.effects, s)
-    var effects = me.eff
-    s = me.s
+    let me = merge_effects(ctx.env, expr_r.effects, default_r.effects, s)
+    var effects = me.0
+    s = me.1
     effects = remove_fail_effect(effects)
     let result_type = apply_subst(s, hexpr_type(expr_r.hexpr))
     InferResult {
@@ -1936,9 +1928,9 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, error_type_name: Str?, error_bindi
         some(handler_r) => {
             s = handler_r.subst
             s = unify_at(ctx.sink, ctx.env, hexpr_type(expr_r.hexpr), hexpr_type(handler_r.hexpr), s, span)
-            let me = merge_eff(ctx.env, expr_r.effects, handler_r.effects, s)
-            var effects = me.eff
-            s = me.s
+            let me = merge_effects(ctx.env, expr_r.effects, handler_r.effects, s)
+            var effects = me.0
+            s = me.1
             match error_type_name {
                 some(_) => { effects = remove_specific_fail_effect(effects, error_var_type, s) },
                 none => { effects = remove_fail_effect(effects) }
@@ -2140,9 +2132,9 @@ fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst
         s = unify_at(ctx.sink, ctx.env, apply_subst(s, hexpr_type(r.hexpr)), apply_subst(s, elem_type), s, span)
         elem_type = apply_subst(s, elem_type)
         helements.push(r.hexpr)
-        let me = merge_eff(ctx.env, combined_effects, r.effects, s)
-        combined_effects = me.eff
-        s = me.s
+        let me = merge_effects(ctx.env, combined_effects, r.effects, s)
+        combined_effects = me.0
+        s = me.1
     }
     let list_type = Type::StructType { name: BUILTIN_LIST(), type_params: [apply_subst(s, elem_type)], fields: [] }
     InferResult {
@@ -2176,9 +2168,9 @@ fn infer_option_unwrap(var ctx: InferCtx, inner_expr: Expr, span: Span, subst: M
     s = unify_at(ctx.sink, ctx.env, hexpr_type(inner_r.hexpr), make_option_type(inner_type), s, span)
     let unwrapped = apply_subst(s, inner_type)
     let fail_eff = Effect::FailEffect { error_type: ctx.env.fresh_var() }
-    let me = merge_eff(ctx.env, inner_r.effects, EffectRow { effects: [fail_eff], tail: none }, s)
-    var effects = me.eff
-    s = me.s
+    let me = merge_effects(ctx.env, inner_r.effects, EffectRow { effects: [fail_eff], tail: none }, s)
+    var effects = me.0
+    s = me.1
     InferResult {
         hexpr: HExpr::OptionUnwrap { expr: inner_r.hexpr, ty: unwrapped, effects: effects, span: span },
         subst: s, effects: effects

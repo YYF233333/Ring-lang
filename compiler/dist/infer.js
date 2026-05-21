@@ -12,21 +12,6 @@ import { zonk_type as zonk$zonk_type, zonk_row as zonk$zonk_row, zonk_param as z
 import { run_derive_pass as derive$run_derive_pass } from "./derive.js";
 import { check_exhaustive as exhaustive$check_exhaustive } from "./exhaustive.js";
 
-class MergeResult {
-  constructor(eff, s) {
-    this.eff = eff;
-    this.s = s;
-  }
-}
-
-function merge_eff(env, a, b, s, __ring_ev_fail) {
-  const result = infer_ctx$merge_effects(env, a, b, s, __ring_ev_fail);
-  const __ring_dt0 = result;
-  const new_eff = __ring_dt0[0];
-  const new_s = __ring_dt0[1];
-  return new MergeResult(new_eff, new_s);
-}
-
 class MethodLookupResult {
   constructor(method_type, method_scheme) {
     this.method_type = method_type;
@@ -75,9 +60,9 @@ function infer_block(ctx, body, initial_subst, __ring_ev_fail) {
       for (const stmt of stmts) {
         const sr = infer_stmt(ctx, stmt, subst, __ring_ev_fail);
         subst = sr.subst;
-        const me = merge_eff(ctx.env, effects, sr.effects, subst, __ring_ev_fail);
-        effects = me.eff;
-        subst = me.s;
+        const me = infer_ctx$merge_effects(ctx.env, effects, sr.effects, subst, __ring_ev_fail);
+        effects = me[0];
+        subst = me[1];
         List_push(hstmts, sr.hstmt);
       }
       let tail_hexpr = Option_none;
@@ -88,9 +73,9 @@ function infer_block(ctx, body, initial_subst, __ring_ev_fail) {
           const t = __ring_m3._0;
           const tr = infer_expr(ctx, t, subst, __ring_ev_fail);
           subst = tr.subst;
-          const me = merge_eff(ctx.env, effects, tr.effects, subst, __ring_ev_fail);
-          effects = me.eff;
-          subst = me.s;
+          const me = infer_ctx$merge_effects(ctx.env, effects, tr.effects, subst, __ring_ev_fail);
+          effects = me[0];
+          subst = me[1];
           tail_hexpr = Option_some(tr.hexpr);
           block_type = hir$hexpr_type(tr.hexpr);
           break __ring_match3;
@@ -212,9 +197,9 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
       const target_r = infer_expr(ctx, target, subst, __ring_ev_fail);
       const value_r = infer_expr(ctx, value, target_r.subst, __ring_ev_fail);
       let s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(target_r.hexpr), hir$hexpr_type(value_r.hexpr), value_r.subst, span, __ring_ev_fail);
-      const me = merge_eff(ctx.env, target_r.effects, value_r.effects, s, __ring_ev_fail);
-      s = me.s;
-      return new StmtResult(hir$HStmt_Assign(target_r.hexpr, value_r.hexpr, span), s, me.eff);
+      const me = infer_ctx$merge_effects(ctx.env, target_r.effects, value_r.effects, s, __ring_ev_fail);
+      s = me[1];
+      return new StmtResult(hir$HStmt_Assign(target_r.hexpr, value_r.hexpr, span), s, me[0]);
       break __ring_match4;
     }
     if (__ring_m4._tag === "ExprStmt") {
@@ -281,8 +266,8 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
         if (__ring_m13._tag === "some") {
           const body_r = __ring_m13._0;
           s = body_r.subst;
-          const me = merge_eff(ctx.env, cond_r.effects, body_r.effects, s, __ring_ev_fail);
-          return new StmtResult(hir$HStmt_While(cond_r.hexpr, body_r.hexpr, span), me.s, me.eff);
+          const me = infer_ctx$merge_effects(ctx.env, cond_r.effects, body_r.effects, s, __ring_ev_fail);
+          return new StmtResult(hir$HStmt_While(cond_r.hexpr, body_r.hexpr, span), me[1], me[0]);
           break __ring_match13;
         }
         if (__ring_m13._tag === "none") {
@@ -467,13 +452,13 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
         if (__ring_m23._tag === "some") {
           const body_r = __ring_m23._0;
           s = body_r.subst;
-          const me = merge_eff(ctx.env, iter_r.effects, body_r.effects, s, __ring_ev_fail);
+          const me = infer_ctx$merge_effects(ctx.env, iter_r.effects, body_r.effects, s, __ring_ev_fail);
           return new StmtResult(hir$HStmt_ForIn(binding, binding_span, (function() {
   const __ring_m = binding_scheme;
   if (__ring_m._tag === "some") { const bs = __ring_m._0; return bs.def_id; }
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
-})(), hdestructure, iter_r.hexpr, body_r.hexpr, span), me.s, me.eff);
+})(), hdestructure, iter_r.hexpr, body_r.hexpr, span), me[1], me[0]);
           break __ring_match23;
         }
         if (__ring_m23._tag === "none") {
@@ -611,9 +596,9 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
         if (__ring_m30._tag === "some") {
           const then_r = __ring_m30._0;
           s = then_r.subst;
-          let combined = merge_eff(ctx.env, expr_r.effects, then_r.effects, s, __ring_ev_fail);
-          let combined_effects = combined.eff;
-          s = combined.s;
+          let combined = infer_ctx$merge_effects(ctx.env, expr_r.effects, then_r.effects, s, __ring_ev_fail);
+          let combined_effects = combined[0];
+          s = combined[1];
           let else_hblock = Option_none;
           __ring_match31: {
             const __ring_m31 = else_block;
@@ -628,9 +613,9 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
                   const else_r = __ring_m32._0;
                   s = else_r.subst;
                   else_hblock = Option_some(else_r.hexpr);
-                  const me2 = merge_eff(ctx.env, combined_effects, else_r.effects, s, __ring_ev_fail);
-                  combined_effects = me2.eff;
-                  s = me2.s;
+                  const me2 = infer_ctx$merge_effects(ctx.env, combined_effects, else_r.effects, s, __ring_ev_fail);
+                  combined_effects = me2[0];
+                  s = me2[1];
                   break __ring_match32;
                 }
                 if (__ring_m32._tag === "none") {
@@ -871,9 +856,9 @@ function infer_expr(ctx, expr, subst, __ring_ev_fail) {
         const r = infer_expr(ctx, el, s, __ring_ev_fail);
         s = r.subst;
         List_push(helements, r.hexpr);
-        const me = merge_eff(ctx.env, combined_effects, r.effects, s, __ring_ev_fail);
-        combined_effects = me.eff;
-        s = me.s;
+        const me = infer_ctx$merge_effects(ctx.env, combined_effects, r.effects, s, __ring_ev_fail);
+        combined_effects = me[0];
+        s = me[1];
       }
       let elem_types = [];
       for (const he of helements) {
@@ -889,9 +874,9 @@ function infer_expr(ctx, expr, subst, __ring_ev_fail) {
       let s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(start_r.hexpr), types$INT(), start_r.subst, span, __ring_ev_fail);
       const end_r = infer_expr(ctx, end, s, __ring_ev_fail);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(end_r.hexpr), types$INT(), end_r.subst, span, __ring_ev_fail);
-      const me = merge_eff(ctx.env, start_r.effects, end_r.effects, s, __ring_ev_fail);
-      let range_effects = me.eff;
-      s = me.s;
+      const me = infer_ctx$merge_effects(ctx.env, start_r.effects, end_r.effects, s, __ring_ev_fail);
+      let range_effects = me[0];
+      s = me[1];
       const range_type = types$Type_EnumType(hir$BUILTIN_RANGE(), [types$INT()], []);
       return new infer_ctx$InferResult(hir$HExpr_RangeExpr(start_r.hexpr, end_r.hexpr, inclusive, range_type, range_effects, span), s, range_effects);
       break __ring_match40;
@@ -1065,9 +1050,9 @@ function infer_bin_op(ctx, op, left, right, span, subst, __ring_ev_fail) {
     }
     __match_fail(__ring_m46);
   }
-  const me = merge_eff(ctx.env, lr.effects, rr.effects, s, __ring_ev_fail);
-  let effects = me.eff;
-  s = me.s;
+  const me = infer_ctx$merge_effects(ctx.env, lr.effects, rr.effects, s, __ring_ev_fail);
+  let effects = me[0];
+  s = me[1];
   return new infer_ctx$InferResult(hir$HExpr_BinOp(op, lr.hexpr, rr.hexpr, eq_dispatch, ord_dispatch, result_type, effects, span), s, effects);
 }
 
@@ -1365,9 +1350,9 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
   for (const arg of args) {
     const ar = infer_expr(ctx, arg, s, __ring_ev_fail);
     s = ar.subst;
-    const me = merge_eff(ctx.env, effects, ar.effects, s, __ring_ev_fail);
-    effects = me.eff;
-    s = me.s;
+    const me = infer_ctx$merge_effects(ctx.env, effects, ar.effects, s, __ring_ev_fail);
+    effects = me[0];
+    s = me[1];
     List_push(hargs, ar.hexpr);
     List_push(arg_types, hir$hexpr_type(ar.hexpr));
   }
@@ -1380,9 +1365,9 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
     const __ring_m61 = resolved_callee_type;
     if (__ring_m61._tag === "FnType") {
       const fn_effects = __ring_m61.effects;
-      const me = merge_eff(ctx.env, effects, fn_effects, s, __ring_ev_fail);
-      effects = me.eff;
-      s = me.s;
+      const me = infer_ctx$merge_effects(ctx.env, effects, fn_effects, s, __ring_ev_fail);
+      effects = me[0];
+      s = me[1];
       break __ring_match61;
     }
     break __ring_match61;
@@ -1711,9 +1696,9 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
   return infer_expr(ctx, arg, s, __ring_ev_fail);
 })();
     s = ar.subst;
-    const me = merge_eff(ctx.env, effects, ar.effects, s, __ring_ev_fail);
-    effects = me.eff;
-    s = me.s;
+    const me = infer_ctx$merge_effects(ctx.env, effects, ar.effects, s, __ring_ev_fail);
+    effects = me[0];
+    s = me[1];
     List_push(hargs, ar.hexpr);
     ai = (ai + 1);
   }
@@ -1745,9 +1730,9 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
             i = (i + 1);
           }
           result_type = env$apply_subst(s, mt_ret);
-          const me = merge_eff(ctx.env, effects, mt_effects, s, __ring_ev_fail);
-          effects = me.eff;
-          s = me.s;
+          const me = infer_ctx$merge_effects(ctx.env, effects, mt_effects, s, __ring_ev_fail);
+          effects = me[0];
+          s = me[1];
           break __ring_match83;
         }
         __ring_match85: {
@@ -1893,9 +1878,9 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
   for (const arg of args) {
     const ar = infer_expr(ctx, arg, s, __ring_ev_fail);
     s = ar.subst;
-    const me = merge_eff(ctx.env, effects, ar.effects, s, __ring_ev_fail);
-    effects = me.eff;
-    s = me.s;
+    const me = infer_ctx$merge_effects(ctx.env, effects, ar.effects, s, __ring_ev_fail);
+    effects = me[0];
+    s = me[1];
     List_push(hargs, ar.hexpr);
     __ring_match93: {
       const __ring_m93 = List_get(op.params, i);
@@ -1945,9 +1930,9 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
     }
     __match_fail(__ring_m94);
   }
-  const me = merge_eff(ctx.env, effects, types$effect_row([eff]), s, __ring_ev_fail);
-  effects = me.eff;
-  s = me.s;
+  const me = infer_ctx$merge_effects(ctx.env, effects, types$effect_row([eff]), s, __ring_ev_fail);
+  effects = me[0];
+  s = me[1];
   return new infer_ctx$InferResult(hir$HExpr_EffectOp(effect_name, op_name, hargs, op.return_type, effects, span), s, effects);
 }
 
@@ -2194,9 +2179,9 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
       const sp = __ring_m112._0;
       const sr = infer_expr(ctx, sp, s, __ring_ev_fail);
       s = sr.subst;
-      const me = merge_eff(ctx.env, effects, sr.effects, s, __ring_ev_fail);
-      effects = me.eff;
-      s = me.s;
+      const me = infer_ctx$merge_effects(ctx.env, effects, sr.effects, s, __ring_ev_fail);
+      effects = me[0];
+      s = me[1];
       let spread_fields = [];
       for (const f of struct_def.fields) {
         List_push(spread_fields, new types$StructField(f.name, env$apply_subst(inst_map, f.ty), f.is_pub));
@@ -2214,9 +2199,9 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
   for (const field of fields) {
     const fr = infer_expr(ctx, field.value, s, __ring_ev_fail);
     s = fr.subst;
-    const me = merge_eff(ctx.env, effects, fr.effects, s, __ring_ev_fail);
-    effects = me.eff;
-    s = me.s;
+    const me = infer_ctx$merge_effects(ctx.env, effects, fr.effects, s, __ring_ev_fail);
+    effects = me[0];
+    s = me[1];
     const def_field = ((__a) => { const __i = __a.findIndex((function(f) { return (f.name === field.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(struct_def.fields);
     __ring_match113: {
       const __ring_m113 = def_field;
@@ -2286,9 +2271,9 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
       const sp = __ring_m115._0;
       const sr = infer_expr(ctx, sp, s, __ring_ev_fail);
       s = sr.subst;
-      const me = merge_eff(ctx.env, effects, sr.effects, s, __ring_ev_fail);
-      effects = me.eff;
-      s = me.s;
+      const me = infer_ctx$merge_effects(ctx.env, effects, sr.effects, s, __ring_ev_fail);
+      effects = me[0];
+      s = me[1];
       const spread_enum_type = types$Type_EnumType(enum_name, type_param_types, enum_def.variants);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(sr.hexpr), spread_enum_type, s, span, __ring_ev_fail);
       hspread = Option_some(sr.hexpr);
@@ -2302,9 +2287,9 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
   for (const field of fields) {
     const fr = infer_expr(ctx, field.value, s, __ring_ev_fail);
     s = fr.subst;
-    const me = merge_eff(ctx.env, effects, fr.effects, s, __ring_ev_fail);
-    effects = me.eff;
-    s = me.s;
+    const me = infer_ctx$merge_effects(ctx.env, effects, fr.effects, s, __ring_ev_fail);
+    effects = me[0];
+    s = me[1];
     const field_idx = List_index_of(field_names, field.name);
     __ring_match116: {
       const __ring_m116 = field_idx;
@@ -2415,9 +2400,9 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
       const gr = infer_expr(ctx, g, s, __ring_ev_fail);
       s = gr.subst;
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(gr.hexpr), types$BOOL(), s, arm.span, __ring_ev_fail);
-      const me = merge_eff(ctx.env, effects, gr.effects, s, __ring_ev_fail);
-      effects = me.eff;
-      s = me.s;
+      const me = infer_ctx$merge_effects(ctx.env, effects, gr.effects, s, __ring_ev_fail);
+      effects = me[0];
+      s = me[1];
       guard_hexpr = Option_some(gr.hexpr);
       break __ring_match122;
     }
@@ -2428,9 +2413,9 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
   }
   const body_r = infer_expr(ctx, arm.body, s, __ring_ev_fail);
   s = body_r.subst;
-  const me = merge_eff(ctx.env, effects, body_r.effects, s, __ring_ev_fail);
-  effects = me.eff;
-  s = me.s;
+  const me = infer_ctx$merge_effects(ctx.env, effects, body_r.effects, s, __ring_ev_fail);
+  effects = me[0];
+  s = me[1];
   s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(body_r.hexpr), result_type, s, arm.span, __ring_ev_fail);
   List_push(harms, new hir$HMatchArm(match_pattern, guard_hexpr, body_r.hexpr, arm.span));
   return true;
@@ -2470,9 +2455,9 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
   let effects = cond_r.effects;
   const then_r = infer_block(ctx, then_branch, Option_some(s), __ring_ev_fail);
   s = then_r.subst;
-  const me = merge_eff(ctx.env, effects, then_r.effects, s, __ring_ev_fail);
-  effects = me.eff;
-  s = me.s;
+  const me = infer_ctx$merge_effects(ctx.env, effects, then_r.effects, s, __ring_ev_fail);
+  effects = me[0];
+  s = me[1];
   let else_hexpr = Option_none;
   let result_type = types$UNIT();
   __ring_match125: {
@@ -2484,9 +2469,9 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
         if (__ring_m126._tag === "Block") {
           const else_r = infer_block(ctx, eb, Option_some(s), __ring_ev_fail);
           s = else_r.subst;
-          const me2 = merge_eff(ctx.env, effects, else_r.effects, s, __ring_ev_fail);
-          effects = me2.eff;
-          s = me2.s;
+          const me2 = infer_ctx$merge_effects(ctx.env, effects, else_r.effects, s, __ring_ev_fail);
+          effects = me2[0];
+          s = me2[1];
           s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(then_r.hexpr), hir$hexpr_type(else_r.hexpr), s, span, __ring_ev_fail);
           result_type = env$apply_subst(s, hir$hexpr_type(then_r.hexpr));
           else_hexpr = Option_some(else_r.hexpr);
@@ -2496,9 +2481,9 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
           const ec = __ring_m126.condition; const etb = __ring_m126.then_branch; const eeb = __ring_m126.else_branch; const espan = __ring_m126.span;
           const else_if_r = infer_if(ctx, ec, etb, eeb, espan, s, __ring_ev_fail);
           s = else_if_r.subst;
-          const me2 = merge_eff(ctx.env, effects, else_if_r.effects, s, __ring_ev_fail);
-          effects = me2.eff;
-          s = me2.s;
+          const me2 = infer_ctx$merge_effects(ctx.env, effects, else_if_r.effects, s, __ring_ev_fail);
+          effects = me2[0];
+          s = me2[1];
           s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(then_r.hexpr), hir$hexpr_type(else_if_r.hexpr), s, span, __ring_ev_fail);
           result_type = env$apply_subst(s, hir$hexpr_type(then_r.hexpr));
           else_hexpr = Option_some(hir$HExpr_Block([], Option_some(else_if_r.hexpr), hir$hexpr_type(else_if_r.hexpr), else_if_r.effects, espan));
@@ -2533,9 +2518,9 @@ function infer_string_interp(ctx, parts, span, subst, __ring_ev_fail) {
         const expr = __ring_m127._0;
         const r = infer_expr(ctx, expr, s, __ring_ev_fail);
         s = r.subst;
-        const me = merge_eff(ctx.env, effects, r.effects, s, __ring_ev_fail);
-        effects = me.eff;
-        s = me.s;
+        const me = infer_ctx$merge_effects(ctx.env, effects, r.effects, s, __ring_ev_fail);
+        effects = me[0];
+        s = me[1];
         List_push(hparts, hir$HStringInterpPart_Expression(r.hexpr));
         break __ring_match127;
       }
@@ -2563,15 +2548,15 @@ function infer_or(ctx, expr, default_value, span, subst, __ring_ev_fail) {
     s = default_r.subst;
     s = infer_ctx$unify_at(ctx.sink, ctx.env, inner, hir$hexpr_type(default_r.hexpr), s, span, __ring_ev_fail);
     const result_type = env$apply_subst(s, inner);
-    const me = merge_eff(ctx.env, expr_r.effects, default_r.effects, s, __ring_ev_fail);
-    return new infer_ctx$InferResult(hir$HExpr_OptionOr(expr_r.hexpr, default_r.hexpr, result_type, me.eff, span), me.s, me.eff);
+    const me = infer_ctx$merge_effects(ctx.env, expr_r.effects, default_r.effects, s, __ring_ev_fail);
+    return new infer_ctx$InferResult(hir$HExpr_OptionOr(expr_r.hexpr, default_r.hexpr, result_type, me[0], span), me[1], me[0]);
   }
   const default_r = infer_expr(ctx, default_value, s, __ring_ev_fail);
   s = default_r.subst;
   s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(expr_r.hexpr), hir$hexpr_type(default_r.hexpr), s, span, __ring_ev_fail);
-  const me = merge_eff(ctx.env, expr_r.effects, default_r.effects, s, __ring_ev_fail);
-  let effects = me.eff;
-  s = me.s;
+  const me = infer_ctx$merge_effects(ctx.env, expr_r.effects, default_r.effects, s, __ring_ev_fail);
+  let effects = me[0];
+  s = me[1];
   effects = infer_ctx$remove_fail_effect(effects);
   const result_type = env$apply_subst(s, hir$hexpr_type(expr_r.hexpr));
   return new infer_ctx$InferResult(hir$HExpr_TryCatch(expr_r.hexpr, Option_none, Option_none, default_r.hexpr, result_type, effects, span), s, effects);
@@ -2603,9 +2588,9 @@ function infer_catch(ctx, expr, error_type_name, error_binding, handler, span, s
       const handler_r = __ring_m130._0;
       s = handler_r.subst;
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(expr_r.hexpr), hir$hexpr_type(handler_r.hexpr), s, span, __ring_ev_fail);
-      const me = merge_eff(ctx.env, expr_r.effects, handler_r.effects, s, __ring_ev_fail);
-      let effects = me.eff;
-      s = me.s;
+      const me = infer_ctx$merge_effects(ctx.env, expr_r.effects, handler_r.effects, s, __ring_ev_fail);
+      let effects = me[0];
+      s = me[1];
       __ring_match131: {
         const __ring_m131 = error_type_name;
         if (__ring_m131._tag === "some") {
@@ -2846,9 +2831,9 @@ function infer_list_literal(ctx, elements, span, subst, __ring_ev_fail) {
     s = infer_ctx$unify_at(ctx.sink, ctx.env, env$apply_subst(s, hir$hexpr_type(r.hexpr)), env$apply_subst(s, elem_type), s, span, __ring_ev_fail);
     elem_type = env$apply_subst(s, elem_type);
     List_push(helements, r.hexpr);
-    const me = merge_eff(ctx.env, combined_effects, r.effects, s, __ring_ev_fail);
-    combined_effects = me.eff;
-    s = me.s;
+    const me = infer_ctx$merge_effects(ctx.env, combined_effects, r.effects, s, __ring_ev_fail);
+    combined_effects = me[0];
+    s = me[1];
   }
   const list_type = types$Type_StructType(hir$BUILTIN_LIST(), [env$apply_subst(s, elem_type)], []);
   return new infer_ctx$InferResult(hir$HExpr_ListLit(helements, list_type, combined_effects, span), s, combined_effects);
@@ -2868,9 +2853,9 @@ function infer_option_unwrap(ctx, inner_expr, span, subst, __ring_ev_fail) {
   s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(inner_r.hexpr), types$make_option_type(inner_type), s, span, __ring_ev_fail);
   const unwrapped = env$apply_subst(s, inner_type);
   const fail_eff = types$Effect_FailEffect(env$TypeEnv_fresh_var(ctx.env));
-  const me = merge_eff(ctx.env, inner_r.effects, new types$EffectRow([fail_eff], Option_none), s, __ring_ev_fail);
-  let effects = me.eff;
-  s = me.s;
+  const me = infer_ctx$merge_effects(ctx.env, inner_r.effects, new types$EffectRow([fail_eff], Option_none), s, __ring_ev_fail);
+  let effects = me[0];
+  s = me[1];
   return new infer_ctx$InferResult(hir$HExpr_OptionUnwrap(inner_r.hexpr, unwrapped, effects, span), s, effects);
 }
 
@@ -3307,9 +3292,9 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
     _Set_insert(declared_names, tp.name);
   }
   for (const entry of _Map_entries(ctx.type_param_scope)) {
-    const __ring_dt1 = entry;
-    const tpname = __ring_dt1[0];
-    const tv = __ring_dt1[1];
+    const __ring_dt0 = entry;
+    const tpname = __ring_dt0[0];
+    const tv = __ring_dt0[1];
     if (((!_Map_contains_key(saved_tp_scope, tpname)) && (!_Set_contains(declared_names, tpname)))) {
       __ring_match153: {
         const __ring_m153 = tv;
