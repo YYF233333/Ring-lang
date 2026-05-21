@@ -428,6 +428,9 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "effect_annotation_violation.ring", error_pattern: "E0404" },
     { file: "error_missing_impl_method.ring", error_pattern: "E0502" },
     { file: "error_nested_match.ring", error_pattern: "E0601" },
+    { file: "error_unexpected_token.ring", error_pattern: "E0101" },
+    { file: "error_duplicate_def.ring", error_pattern: "E0207" },
+    { file: "error_use_after_decl.ring", error_pattern: "E0706" },
   ];
 
   for (const tc of negative_cases) {
