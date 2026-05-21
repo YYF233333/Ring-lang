@@ -124,7 +124,7 @@ export function emit_enum_decl(ctx: CodegenCtx, decl: HEnumDecl): void {
 
 export function emit_impl_decl(ctx: CodegenCtx, decl: HImplDecl): void {
   const prefix = decl.trait_name
-    ? `${ctx.qualify(decl.target_type)}_${safe_ident(decl.trait_name)}`
+    ? trait_dict_name(ctx.qualify(decl.target_type), safe_ident(decl.trait_name))
     : ctx.qualify(decl.target_type);
   for (const method of decl.methods) {
     if (method.kind === "extern_fn_decl") continue;
@@ -139,7 +139,7 @@ function emit_trait_dictionary(ctx: CodegenCtx, decl: HImplDecl): void {
   const dict_name = trait_dict_name(ctx.qualify(decl.target_type), decl.trait_name!);
   const impl_method_names = new Set(decl.methods.map(m => m.name));
   const entries = decl.methods.map(m => {
-    const fn_name = `${ctx.qualify(decl.target_type)}_${safe_ident(decl.trait_name!)}_${safe_ident(m.name)}`;
+    const fn_name = `${dict_name}_${safe_ident(m.name)}`;
     return `${safe_ident(m.name)}: ${fn_name}`;
   });
   const trait_decl = ctx.trait_decls.get(decl.trait_name!);

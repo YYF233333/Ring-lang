@@ -44,6 +44,7 @@ class CodeGenerator implements CodegenCtx {
   local_fn_effects = new Map<string, import("../types/index.js").EffectRow>();
   current_fn_effects?: import("../types/index.js").EffectRow;
   in_try_fail = false;
+  derived_impls = new Set<string>();
   module_imports?: string[];
   module_exports?: string[];
 
@@ -240,6 +241,11 @@ class CodeGenerator implements CodegenCtx {
     if (!this.skip_preamble) {
       this.emit_raw(RUNTIME_CODE);
       this.emit_raw("");
+    }
+
+    // Track which type+trait combos are auto-derived (naming uses __ prefix)
+    for (const impl of program.derived_impls) {
+      this.derived_impls.add(`${impl.type_name}.${impl.trait_name}`);
     }
 
     // Register auto-derived impl methods for UFCS dispatch BEFORE emitting declarations,

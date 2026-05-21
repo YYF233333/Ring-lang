@@ -68,6 +68,7 @@ export interface CodegenCtx {
   local_fn_effects: Map<string, EffectRow>;
   current_fn_effects?: EffectRow;
   in_try_fail: boolean;
+  derived_impls: Set<string>;
   module_imports?: string[];
   module_exports?: string[];
 
