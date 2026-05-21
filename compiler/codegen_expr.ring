@@ -335,7 +335,7 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
             // Inline List HOF
             match recv_type {
                 Type::StructType { name, .. } => {
-                    if name == BUILTIN_LIST() {
+                    if (name == BUILTIN_LIST) {
                         match LIST_HOF_JS_METHOD(method) {
                             some(js_method) => {
                                 let r = gen_expr(ctx, receiver)
@@ -366,7 +366,7 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                             return "${r}.sort(${cb})"
                         }
                     }
-                    if name == BUILTIN_MAP() {
+                    if (name == BUILTIN_MAP) {
                         if method == "map_values" {
                             let r = gen_expr(ctx, receiver)
                             let cb = gen_lambda_capture_evidence(ctx, args, 0)
@@ -389,7 +389,7 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                             return "((__m, __f) => { for (const [__k, __v] of __m) if (__f(__k, __v)) return true; return false; })(${r}, ${cb})"
                         }
                     }
-                    if name == BUILTIN_SET() {
+                    if (name == BUILTIN_SET) {
                         if method == "filter" {
                             let r = gen_expr(ctx, receiver)
                             let cb = gen_lambda_capture_evidence(ctx, args, 0)
@@ -414,7 +414,7 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                     }
                 },
                 Type::EnumType { name, .. } => {
-                    if name == BUILTIN_OPTION() {
+                    if (name == BUILTIN_OPTION) {
                         if method == "map" {
                             let r = gen_expr(ctx, receiver)
                             let cb = gen_lambda_capture_evidence(ctx, args, 0)
@@ -437,9 +437,9 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                                 none => "undefined"
                             }
                             let ev = evidence_param_name("fail")
-                            let tag_f = ENUM_TAG_FIELD()
-                            let some_t = OPTION_SOME_TAG()
-                            let pay_f = OPTION_PAYLOAD_FIELD()
+                            let tag_f = ENUM_TAG_FIELD
+                            let some_t = OPTION_SOME_TAG
+                            let pay_f = OPTION_PAYLOAD_FIELD
                             return "((v) => v.${tag_f} === \"${some_t}\" ? v.${pay_f} : ${ev}.raise(${err_arg}))(${r})"
                         }
                     }
@@ -729,7 +729,7 @@ fn gen_match(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
         }
     }
     if has_catchall == false {
-        let mf = RUNTIME_MATCH_FAIL()
+        let mf = RUNTIME_MATCH_FAIL
         parts.push("  ${mf}(__ring_m);")
     }
 
@@ -894,7 +894,7 @@ fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
     ctx.in_try_fail = saved_in_try
 
     let ev = evidence_param_name("fail")
-    let ea = RUNTIME_EFFECT_ABORT()
+    let ea = RUNTIME_EFFECT_ABORT
     let q = "\""
 
     // Generate arm code
@@ -1034,7 +1034,7 @@ fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
             let is_abort = effect_name == "fail" && h.op_name == "raise"
             if is_abort {
                 has_abort = true
-                let ea = RUNTIME_EFFECT_ABORT()
+                let ea = RUNTIME_EFFECT_ABORT
                 var ep: List<Str> = [""]; ep.clear()
                 ep.push(h.op_name)
                 ep.push(": (")
@@ -1074,7 +1074,7 @@ fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
     let ev_args = ev_param_names.join(", ")
     let body_code = gen_handle_body(ctx, body, ev_args)
     let decls = ev_decls.join(" ")
-    let ea = RUNTIME_EFFECT_ABORT()
+    let ea = RUNTIME_EFFECT_ABORT
 
     if has_abort {
         var p: List<Str> = [""]; p.clear()

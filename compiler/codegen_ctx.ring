@@ -1,28 +1,23 @@
 use types::{Type, Effect, EffectRow}
 use hir::{HExpr, HStmt, HTraitMethod, evidence_param_name}
 
-fn JS_RESERVED() -> Set<Str> {
-    var s = set_new()
-    for w in ["abstract", "arguments", "await", "boolean", "break", "byte", "case", "catch",
-              "char", "class", "const", "continue", "debugger", "default", "delete", "do",
-              "double", "else", "enum", "eval", "export", "extends", "false", "final",
-              "finally", "float", "for", "function", "goto", "if", "implements", "import",
-              "in", "instanceof", "int", "interface", "let", "long", "native", "new",
-              "null", "package", "private", "protected", "public", "return", "short",
-              "static", "super", "switch", "synchronized", "this", "throw", "throws",
-              "transient", "true", "try", "typeof", "undefined", "var", "void",
-              "volatile", "while", "with", "yield",
-              "Object", "Array", "Map", "Set", "String", "Number", "Boolean", "Symbol",
-              "Promise", "Error", "RegExp", "Date", "Math", "JSON", "Proxy", "Reflect",
-              "WeakMap", "WeakSet", "WeakRef", "BigInt", "ArrayBuffer", "DataView",
-              "Int8Array", "Uint8Array", "Float32Array", "Float64Array"] {
-        s.insert(w)
-    }
-    s
-}
+const JS_RESERVED: Set<Str> = set_from(
+    ["abstract", "arguments", "await", "boolean", "break", "byte", "case", "catch",
+     "char", "class", "const", "continue", "debugger", "default", "delete", "do",
+     "double", "else", "enum", "eval", "export", "extends", "false", "final",
+     "finally", "float", "for", "function", "goto", "if", "implements", "import",
+     "in", "instanceof", "int", "interface", "let", "long", "native", "new",
+     "null", "package", "private", "protected", "public", "return", "short",
+     "static", "super", "switch", "synchronized", "this", "throw", "throws",
+     "transient", "true", "try", "typeof", "undefined", "var", "void",
+     "volatile", "while", "with", "yield",
+     "Object", "Array", "Map", "Set", "String", "Number", "Boolean", "Symbol",
+     "Promise", "Error", "RegExp", "Date", "Math", "JSON", "Proxy", "Reflect",
+     "WeakMap", "WeakSet", "WeakRef", "BigInt", "ArrayBuffer", "DataView",
+     "Int8Array", "Uint8Array", "Float32Array", "Float64Array"])
 
 pub fn safe_ident(name: Str) -> Str {
-    if JS_RESERVED().contains(name) { "_${name}" } else { name }
+    if JS_RESERVED.contains(name) { "_${name}" } else { name }
 }
 
 pub struct CodegenCtx {

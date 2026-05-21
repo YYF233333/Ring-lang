@@ -20,16 +20,7 @@ fn df_at(list: List<DerivedField>, i: Int) -> DerivedField {
     match list.get(i) { some(v) => v, none => panic("df_at: out of bounds") }
 }
 
-fn BUILTIN_TYPES() -> Set<Str> {
-    var s = set_new()
-    s.insert("Option")
-    s.insert("Cell")
-    s.insert("List")
-    s.insert("Map")
-    s.insert("Set")
-    s.insert("Range")
-    s
-}
+const BUILTIN_TYPES: Set<Str> = set_from(["Option", "Cell", "List", "Map", "Set", "Range"])
 
 // ================================================================
 // Public entry point
@@ -57,7 +48,7 @@ struct UserType {
 }
 
 fn collect_user_types(env: TypeEnv) -> List<UserType> {
-    let builtins = BUILTIN_TYPES()
+    let builtins = BUILTIN_TYPES
     var result: List<UserType> = []
     for entry in env.structs.entries() {
         let (name, def) = entry
@@ -490,21 +481,21 @@ fn register_trait_methods(
     bounds: List<SchemeBound>
 ) {
     if trait_name == "Eq" {
-        let eq_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL(), effects: EMPTY_ROW() }
+        let eq_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL, effects: EMPTY_ROW }
         methods.insert("eq", TypeScheme { ty: eq_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
-        let ne_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL(), effects: EMPTY_ROW() }
+        let ne_fn = Type::FnType { params: [self_type, self_type], return_type: BOOL, effects: EMPTY_ROW }
         methods.insert("ne", TypeScheme { ty: ne_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
     } else {
         if trait_name == "Clone" {
-            let clone_fn = Type::FnType { params: [self_type], return_type: self_type, effects: EMPTY_ROW() }
+            let clone_fn = Type::FnType { params: [self_type], return_type: self_type, effects: EMPTY_ROW }
             methods.insert("clone", TypeScheme { ty: clone_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
         } else {
             if trait_name == "Ord" {
-                let cmp_fn = Type::FnType { params: [self_type, self_type], return_type: INT(), effects: EMPTY_ROW() }
+                let cmp_fn = Type::FnType { params: [self_type, self_type], return_type: INT, effects: EMPTY_ROW }
                 methods.insert("cmp", TypeScheme { ty: cmp_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
             } else {
                 if trait_name == "Debug" {
-                    let debug_fn = Type::FnType { params: [self_type], return_type: STR(), effects: EMPTY_ROW() }
+                    let debug_fn = Type::FnType { params: [self_type], return_type: STR, effects: EMPTY_ROW }
                     methods.insert("debug", TypeScheme { ty: debug_fn, type_vars: type_var_ids, bounds: bounds, def_id: none })
                 }
             }

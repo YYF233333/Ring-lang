@@ -1,30 +1,30 @@
-pub fn E0101() -> Str { "E0101" }
-pub fn E0102() -> Str { "E0102" }
-pub fn E0103() -> Str { "E0103" }
-pub fn E0104() -> Str { "E0104" }
-pub fn E0201() -> Str { "E0201" }
-pub fn E0203() -> Str { "E0203" }
-pub fn E0204() -> Str { "E0204" }
-pub fn E0205() -> Str { "E0205" }
-pub fn E0206() -> Str { "E0206" }
-pub fn E0207() -> Str { "E0207" }
-pub fn E0301() -> Str { "E0301" }
-pub fn E0302() -> Str { "E0302" }
-pub fn E0303() -> Str { "E0303" }
-pub fn E0304() -> Str { "E0304" }
-pub fn E0305() -> Str { "E0305" }
-pub fn E0307() -> Str { "E0307" }
-pub fn E0308() -> Str { "E0308" }
-pub fn E0402() -> Str { "E0402" }
-pub fn E0403() -> Str { "E0403" }
-pub fn E0501() -> Str { "E0501" }
-pub fn E0502() -> Str { "E0502" }
-pub fn E0503() -> Str { "E0503" }
-pub fn E0601() -> Str { "E0601" }
-pub fn E0702() -> Str { "E0702" }
-pub fn E0703() -> Str { "E0703" }
-pub fn E0704() -> Str { "E0704" }
-pub fn E0706() -> Str { "E0706" }
+pub const E0101: Str = "E0101"
+pub const E0102: Str = "E0102"
+pub const E0103: Str = "E0103"
+pub const E0104: Str = "E0104"
+pub const E0201: Str = "E0201"
+pub const E0203: Str = "E0203"
+pub const E0204: Str = "E0204"
+pub const E0205: Str = "E0205"
+pub const E0206: Str = "E0206"
+pub const E0207: Str = "E0207"
+pub const E0301: Str = "E0301"
+pub const E0302: Str = "E0302"
+pub const E0303: Str = "E0303"
+pub const E0304: Str = "E0304"
+pub const E0305: Str = "E0305"
+pub const E0307: Str = "E0307"
+pub const E0308: Str = "E0308"
+pub const E0402: Str = "E0402"
+pub const E0403: Str = "E0403"
+pub const E0501: Str = "E0501"
+pub const E0502: Str = "E0502"
+pub const E0503: Str = "E0503"
+pub const E0601: Str = "E0601"
+pub const E0702: Str = "E0702"
+pub const E0703: Str = "E0703"
+pub const E0704: Str = "E0704"
+pub const E0706: Str = "E0706"
 
 pub fn error_description(code: Str) -> Str {
     if code == "E0101" { return "Unexpected token" }

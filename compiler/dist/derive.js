@@ -67,16 +67,7 @@ function df_at(list, i) {
   }
 }
 
-function BUILTIN_TYPES() {
-  let s = set_new();
-  _Set_insert(s, "Option");
-  _Set_insert(s, "Cell");
-  _Set_insert(s, "List");
-  _Set_insert(s, "Map");
-  _Set_insert(s, "Set");
-  _Set_insert(s, "Range");
-  return s;
-}
+const BUILTIN_TYPES = set_from(["Option", "Cell", "List", "Map", "Set", "Range"]);
 
 function run_derive_pass(env) {
   let derived_impls = [];
@@ -98,7 +89,7 @@ class UserType {
 }
 
 function collect_user_types(env) {
-  const builtins = BUILTIN_TYPES();
+  const builtins = BUILTIN_TYPES;
   let result = [];
   for (const entry of _Map_entries(env.structs)) {
     const __ring_dt0 = entry;
@@ -611,21 +602,21 @@ function build_self_type(env, type_name, type_kind, type_params) {
 
 function register_trait_methods(methods, trait_name, self_type, type_var_ids, bounds) {
   if ((trait_name === "Eq")) {
-    const eq_fn = types$Type_FnType([self_type, self_type], types$BOOL(), types$EMPTY_ROW());
+    const eq_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
     _Map_insert(methods, "eq", new env$TypeScheme(eq_fn, type_var_ids, bounds, Option_none));
-    const ne_fn = types$Type_FnType([self_type, self_type], types$BOOL(), types$EMPTY_ROW());
+    const ne_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
     return _Map_insert(methods, "ne", new env$TypeScheme(ne_fn, type_var_ids, bounds, Option_none));
   } else {
     if ((trait_name === "Clone")) {
-      const clone_fn = types$Type_FnType([self_type], self_type, types$EMPTY_ROW());
+      const clone_fn = types$Type_FnType([self_type], self_type, types$EMPTY_ROW);
       return _Map_insert(methods, "clone", new env$TypeScheme(clone_fn, type_var_ids, bounds, Option_none));
     } else {
       if ((trait_name === "Ord")) {
-        const cmp_fn = types$Type_FnType([self_type, self_type], types$INT(), types$EMPTY_ROW());
+        const cmp_fn = types$Type_FnType([self_type, self_type], types$INT, types$EMPTY_ROW);
         return _Map_insert(methods, "cmp", new env$TypeScheme(cmp_fn, type_var_ids, bounds, Option_none));
       } else {
         if ((trait_name === "Debug")) {
-          const debug_fn = types$Type_FnType([self_type], types$STR(), types$EMPTY_ROW());
+          const debug_fn = types$Type_FnType([self_type], types$STR, types$EMPTY_ROW);
           return _Map_insert(methods, "debug", new env$TypeScheme(debug_fn, type_var_ids, bounds, Option_none));
         }
       }

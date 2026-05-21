@@ -181,7 +181,7 @@ fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
         }
     }
     if has_catchall == false {
-        emit(ctx, "${RUNTIME_MATCH_FAIL()}(${scrut_var});")
+        emit(ctx, "${RUNTIME_MATCH_FAIL}(${scrut_var});")
     }
     pop_indent(ctx)
     emit(ctx, "}")
@@ -360,7 +360,7 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
             "${target} === ${val_str}"
         },
         Pattern::Constructor { name, fields, .. } => {
-            let tag_check = "${target}.${ENUM_TAG_FIELD()} === \"${name}\""
+            let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
             var sub_conds: List<Str> = [""]; sub_conds.clear()
             for i in 0..fields.len() {
                 match fields.get(i) {
@@ -378,7 +378,7 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
             }
         },
         Pattern::NamedConstructor { name, fields, .. } => {
-            let tag_check = "${target}.${ENUM_TAG_FIELD()} === \"${name}\""
+            let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
             var sub_conds: List<Str> = [""]; sub_conds.clear()
             for f in fields {
                 let sname = safe_ident(f.name)

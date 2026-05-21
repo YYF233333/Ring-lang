@@ -99,7 +99,7 @@ pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: Map<Int, Type>
 pub fn unify_at(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: Map<Int, Type>, span: Span) -> Map<Int, Type> {
     unify(t1, t2, s, env) catch {
         e => {
-            let code = if e.is_occurs_check { E0302() } else { E0301() }
+            let code = if e.is_occurs_check { E0302 } else { E0301 }
             type_error(sink, code, e.message, span, DiagnosticContext::TypeMismatch {
                 expected: type_to_string(apply_subst(s, t1)),
                 actual: type_to_string(apply_subst(s, t2)),
@@ -374,7 +374,7 @@ pub fn resolve_dicts_from_scheme(
             none => {}
         }
         if !found {
-            type_error(sink, E0503(),
+            type_error(sink, E0503,
                 "Type does not satisfy trait bound '${bound.trait_name}'",
                 span, DiagnosticContext::TraitError { detail: "type does not satisfy '${bound.trait_name}'" })
         }
@@ -394,7 +394,7 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
             var resolved_params: List<Type> = []
             for p in params { resolved_params.push(resolve_type_expr(ctx, p)) }
             let ret = resolve_type_expr(ctx, return_type)
-            Type::FnType { params: resolved_params, return_type: ret, effects: EMPTY_ROW() }
+            Type::FnType { params: resolved_params, return_type: ret, effects: EMPTY_ROW }
         },
         TypeExpr::OptionType { inner, .. } =>
             make_option_type(resolve_type_expr(ctx, inner)),
@@ -430,12 +430,12 @@ pub fn resolve_self_type(ctx: InferCtx, name: Str) -> Type {
 }
 
 pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, span: Span) -> Type {
-    if name == BUILTIN_INT() { return INT() }
-    if name == BUILTIN_FLOAT() { return FLOAT() }
-    if name == BUILTIN_STR() { return STR() }
-    if name == BUILTIN_BOOL() { return BOOL() }
-    if name == "Never" { return NEVER() }
-    if name == "Unit" { return UNIT() }
+    if (name == BUILTIN_INT) { return INT }
+    if (name == BUILTIN_FLOAT) { return FLOAT }
+    if (name == BUILTIN_STR) { return STR }
+    if (name == BUILTIN_BOOL) { return BOOL }
+    if name == "Never" { return NEVER }
+    if name == "Unit" { return UNIT }
 
     // Check type parameter scope
     match ctx.type_param_scope.get(name) {
@@ -444,7 +444,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
     }
 
     // Option<T>
-    if name == BUILTIN_OPTION() && type_args.len() == 1 {
+    if name == BUILTIN_OPTION && type_args.len() == 1 {
         match type_args.get(0) {
             some(arg) => { return make_option_type(resolve_type_expr(ctx, arg)) },
             none => {}
@@ -456,7 +456,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
         match ctx.env.structs.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
-                    type_error(ctx.sink, E0301(),
+                    type_error(ctx.sink, E0301,
                         "Type '${name}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                         span, DiagnosticContext::TypeMismatch {
                             expected: "${def.type_params.len().to_str()} type args",
@@ -485,7 +485,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
         match ctx.env.enums.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
-                    type_error(ctx.sink, E0301(),
+                    type_error(ctx.sink, E0301,
                         "Type '${name}' expects ${def.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                         span, DiagnosticContext::TypeMismatch {
                             expected: "${def.type_params.len().to_str()} type args",
@@ -513,7 +513,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
     match ctx.env.type_aliases.get(name) {
         some(alias) => {
             if type_args.len() > 0 && type_args.len() != alias.type_params.len() {
-                type_error(ctx.sink, E0301(),
+                type_error(ctx.sink, E0301,
                     "Type '${name}' expects ${alias.type_params.len().to_str()} type argument(s), got ${type_args.len().to_str()}",
                     span, DiagnosticContext::TypeMismatch {
                         expected: "${alias.type_params.len().to_str()} type args",
@@ -539,7 +539,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
         none => {}
     }
 
-    type_error(ctx.sink, E0204(), "Unknown type: ${name}", span,
+    type_error(ctx.sink, E0204, "Unknown type: ${name}", span,
         DiagnosticContext::OtherContext { detail: some("unknown type '${name}'") })
 }
 
@@ -570,7 +570,7 @@ pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst:
             match resolved {
                 Type::TupleType { elements: type_elems } => {
                     if elements.len() != type_elems.len() {
-                        type_error(ctx.sink, E0301(),
+                        type_error(ctx.sink, E0301,
                             "Tuple pattern has ${elements.len().to_str()} elements but type has ${type_elems.len().to_str()}",
                             span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                     }
@@ -583,7 +583,7 @@ pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst:
                         i = i + 1
                     }
                 },
-                _ => type_error(ctx.sink, E0301(),
+                _ => type_error(ctx.sink, E0301,
                     "Tuple pattern requires tuple type, got ${type_to_string(resolved)}",
                     span, DiagnosticContext::TypeMismatch { expected: "tuple", actual: type_to_string(resolved), expression: none })
             }
@@ -606,13 +606,13 @@ fn bind_constructor_pattern(
                         match resolved_expected {
                             Type::EnumType { name: rname, .. } => {
                                 if rname != ename {
-                                    type_error(ctx.sink, E0301(),
+                                    type_error(ctx.sink, E0301,
                                         "variant '${name}' belongs to enum '${ename}', not '${rname}'",
                                         span, DiagnosticContext::TypeMismatch { expected: rname, actual: ename, expression: none })
                                 }
                             },
                             Type::TypeVar { .. } => {},
-                            _ => type_error(ctx.sink, E0301(),
+                            _ => type_error(ctx.sink, E0301,
                                 "cannot destructure type '${type_to_string(resolved_expected)}' with constructor pattern '${name}'",
                                 span, DiagnosticContext::PatternError { detail: "constructor pattern on non-enum type" })
                         }
@@ -654,7 +654,7 @@ fn bind_named_constructor_pattern(
                             match resolved_expected {
                                 Type::EnumType { name: rname, .. } => {
                                     if rname != ename {
-                                        type_error(ctx.sink, E0301(),
+                                        type_error(ctx.sink, E0301,
                                             "variant '${name}' belongs to enum '${ename}', not '${rname}'",
                                             span, DiagnosticContext::TypeMismatch { expected: rname, actual: ename, expression: none })
                                     }
@@ -672,7 +672,7 @@ fn bind_named_constructor_pattern(
                                         },
                                         none => {}
                                     },
-                                    none => type_error(ctx.sink, E0301(),
+                                    none => type_error(ctx.sink, E0301,
                                         "variant '${name}' has no field '${field.name}'",
                                         field.span, DiagnosticContext::OtherContext { detail: some("unknown field '${field.name}'") })
                                 }
@@ -696,12 +696,12 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
                 if enum_def.variants.any(fn(v) { v.name == variant_name }) {
                     some(q)
                 } else {
-                    type_error(ctx.sink, E0201(),
+                    type_error(ctx.sink, E0201,
                         "'${q}' has no variant '${variant_name}'",
                         span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
                 }
             },
-            none => type_error(ctx.sink, E0201(),
+            none => type_error(ctx.sink, E0201,
                 "'${q}' has no variant '${variant_name}'",
                 span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
         },

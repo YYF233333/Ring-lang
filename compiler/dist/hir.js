@@ -336,29 +336,17 @@ function default_method_self_name(type_name) {
   return `__ring_self_${type_name}`;
 }
 
-function ENUM_TAG_FIELD() {
-  return "_tag";
-}
+const ENUM_TAG_FIELD = "_tag";
 
-function OPTION_SOME_TAG() {
-  return "some";
-}
+const OPTION_SOME_TAG = "some";
 
-function OPTION_NONE_TAG() {
-  return "none";
-}
+const OPTION_NONE_TAG = "none";
 
-function OPTION_PAYLOAD_FIELD() {
-  return "_0";
-}
+const OPTION_PAYLOAD_FIELD = "_0";
 
-function RUNTIME_EFFECT_ABORT() {
-  return "__EffectAbort";
-}
+const RUNTIME_EFFECT_ABORT = "__EffectAbort";
 
-function RUNTIME_MATCH_FAIL() {
-  return "__match_fail";
-}
+const RUNTIME_MATCH_FAIL = "__match_fail";
 
 function hexpr_type(e) {
   __ring_match0: {

@@ -204,12 +204,12 @@ pub fn default_method_self_name(type_name: Str) -> Str {
     "__ring_self_${type_name}"
 }
 
-pub fn ENUM_TAG_FIELD() -> Str { "_tag" }
-pub fn OPTION_SOME_TAG() -> Str { "some" }
-pub fn OPTION_NONE_TAG() -> Str { "none" }
-pub fn OPTION_PAYLOAD_FIELD() -> Str { "_0" }
-pub fn RUNTIME_EFFECT_ABORT() -> Str { "__EffectAbort" }
-pub fn RUNTIME_MATCH_FAIL() -> Str { "__match_fail" }
+pub const ENUM_TAG_FIELD: Str = "_tag"
+pub const OPTION_SOME_TAG: Str = "some"
+pub const OPTION_NONE_TAG: Str = "none"
+pub const OPTION_PAYLOAD_FIELD: Str = "_0"
+pub const RUNTIME_EFFECT_ABORT: Str = "__EffectAbort"
+pub const RUNTIME_MATCH_FAIL: Str = "__match_fail"
 
 pub fn hexpr_type(e: HExpr) -> Type {
     match e {

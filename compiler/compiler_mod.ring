@@ -183,7 +183,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
 
                         // Build import lines (runtime + cross-module)
                         var import_lines: List<Str> = [""]; import_lines.clear()
-                        let runtime_names = RUNTIME_EXPORT_NAMES()
+                        let runtime_names = RUNTIME_EXPORT_NAMES
                         let rnames_joined = runtime_names.join(", ")
                         import_lines.push("import { ${rnames_joined} } from \"./__ring_runtime.js\";")
 

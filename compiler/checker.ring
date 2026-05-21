@@ -17,9 +17,8 @@ pub struct CheckResult {
     pub env: TypeEnv
 }
 
-fn STD_FILES() -> List<Str> {
+const STD_FILES: List<Str> =
     ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "fs.ring", "path.ring", "process.ring"]
-}
 
 fn find_std_dir() -> Str? {
     let candidates = [
@@ -35,7 +34,7 @@ fn find_std_dir() -> Str? {
 fn load_prelude(var ctx: InferCtx) {
     match find_std_dir() {
         some(std_dir) => {
-            for file in STD_FILES() {
+            for file in (STD_FILES) {
                 let file_path = path_join(std_dir, file)
                 if file_exists(file_path) {
                     let source = read_file(file_path)
@@ -139,7 +138,7 @@ fn resolve_uses(var ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
         match module_map.get(mod_key) {
             none => {
                 let d = make_diag(
-                    E0702(), Severity::SevError,
+                    E0702, Severity::SevError,
                     "Module '${mod_key}' not found",
                     use_decl.path.span,
                     DiagnosticContext::OtherContext { detail: some("module not found") }
@@ -187,7 +186,7 @@ fn resolve_uses(var ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
 
                             if found == false {
                                 let d = make_diag(
-                                    E0703(), Severity::SevError,
+                                    E0703, Severity::SevError,
                                     "Symbol '${item.name}' not found in module '${mod_key}'",
                                     item.span,
                                     DiagnosticContext::OtherContext { detail: some("symbol not found") }

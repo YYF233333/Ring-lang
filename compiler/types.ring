@@ -1,13 +1,13 @@
-pub fn BUILTIN_INT() -> Str { "Int" }
-pub fn BUILTIN_FLOAT() -> Str { "Float" }
-pub fn BUILTIN_STR() -> Str { "Str" }
-pub fn BUILTIN_BOOL() -> Str { "Bool" }
-pub fn BUILTIN_RANGE() -> Str { "Range" }
-pub fn BUILTIN_LIST() -> Str { "List" }
-pub fn BUILTIN_MAP() -> Str { "Map" }
-pub fn BUILTIN_SET() -> Str { "Set" }
-pub fn BUILTIN_OPTION() -> Str { "Option" }
-pub fn BUILTIN_CELL() -> Str { "Cell" }
+pub const BUILTIN_INT: Str = "Int"
+pub const BUILTIN_FLOAT: Str = "Float"
+pub const BUILTIN_STR: Str = "Str"
+pub const BUILTIN_BOOL: Str = "Bool"
+pub const BUILTIN_RANGE: Str = "Range"
+pub const BUILTIN_LIST: Str = "List"
+pub const BUILTIN_MAP: Str = "Map"
+pub const BUILTIN_SET: Str = "Set"
+pub const BUILTIN_OPTION: Str = "Option"
+pub const BUILTIN_CELL: Str = "Cell"
 
 pub struct StructField {
     pub name: Str,
@@ -61,22 +61,22 @@ pub struct RowMergeResult {
     pub tails_to_unify: Option<(Int, Int)>
 }
 
-pub fn INT() -> Type { Type::IntType }
-pub fn FLOAT() -> Type { Type::FloatType }
-pub fn STR() -> Type { Type::StrType }
-pub fn BOOL() -> Type { Type::BoolType }
-pub fn UNIT() -> Type { Type::UnitType }
-pub fn NEVER() -> Type { Type::NeverType }
-pub fn ANY() -> Type { Type::AnyType }
+pub const INT: Type = Type::IntType
+pub const FLOAT: Type = Type::FloatType
+pub const STR: Type = Type::StrType
+pub const BOOL: Type = Type::BoolType
+pub const UNIT: Type = Type::UnitType
+pub const NEVER: Type = Type::NeverType
+pub const ANY: Type = Type::AnyType
 
-pub fn EMPTY_ROW() -> EffectRow { EffectRow { effects: [], tail: none } }
+pub const EMPTY_ROW: EffectRow = EffectRow { effects: [], tail: none }
 
 pub fn type_to_builtin_name(t: Type) -> Str? {
     match t {
-        Type::IntType => some(BUILTIN_INT()),
-        Type::FloatType => some(BUILTIN_FLOAT()),
-        Type::StrType => some(BUILTIN_STR()),
-        Type::BoolType => some(BUILTIN_BOOL()),
+        Type::IntType => some(BUILTIN_INT),
+        Type::FloatType => some(BUILTIN_FLOAT),
+        Type::StrType => some(BUILTIN_STR),
+        Type::BoolType => some(BUILTIN_BOOL),
         Type::UnitType => some("Unit"),
         Type::StructType { name, .. } => some(name),
         Type::EnumType { name, .. } => some(name),
@@ -86,7 +86,7 @@ pub fn type_to_builtin_name(t: Type) -> Str? {
 
 pub fn make_option_type(inner: Type) -> Type {
     Type::EnumType {
-        name: BUILTIN_OPTION(),
+        name: BUILTIN_OPTION,
         type_params: [inner],
         variants: [
             EnumVariant { name: "some", fields: [inner], field_names: none },
@@ -98,54 +98,54 @@ pub fn make_option_type(inner: Type) -> Type {
 pub fn is_option_type(t: Type) -> Bool {
     match t {
         Type::EnumType { name, type_params, .. } =>
-            name == BUILTIN_OPTION() && type_params.len() == 1,
+            name == BUILTIN_OPTION && type_params.len() == 1,
         _ => false
     }
 }
 
 pub fn option_inner(t: Type) -> Type {
     match t {
-        Type::EnumType { type_params, .. } => type_params.first().unwrap_or(UNIT()),
-        _ => UNIT()
+        Type::EnumType { type_params, .. } => type_params.first().unwrap_or(UNIT),
+        _ => UNIT
     }
 }
 
 pub fn make_list_type(element: Type) -> Type {
-    Type::StructType { name: BUILTIN_LIST(), type_params: [element], fields: [] }
+    Type::StructType { name: BUILTIN_LIST, type_params: [element], fields: [] }
 }
 
 pub fn is_list_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, .. } => name == BUILTIN_LIST(),
+        Type::StructType { name, .. } => name == BUILTIN_LIST,
         _ => false
     }
 }
 
 pub fn list_element(t: Type) -> Type {
     match t {
-        Type::StructType { type_params, .. } => type_params.first().unwrap_or(UNIT()),
-        _ => UNIT()
+        Type::StructType { type_params, .. } => type_params.first().unwrap_or(UNIT),
+        _ => UNIT
     }
 }
 
 pub fn make_map_type(key: Type, value: Type) -> Type {
-    Type::StructType { name: BUILTIN_MAP(), type_params: [key, value], fields: [] }
+    Type::StructType { name: BUILTIN_MAP, type_params: [key, value], fields: [] }
 }
 
 pub fn is_map_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, .. } => name == BUILTIN_MAP(),
+        Type::StructType { name, .. } => name == BUILTIN_MAP,
         _ => false
     }
 }
 
 pub fn make_set_type(element: Type) -> Type {
-    Type::StructType { name: BUILTIN_SET(), type_params: [element], fields: [] }
+    Type::StructType { name: BUILTIN_SET, type_params: [element], fields: [] }
 }
 
 pub fn is_set_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, .. } => name == BUILTIN_SET(),
+        Type::StructType { name, .. } => name == BUILTIN_SET,
         _ => false
     }
 }
@@ -370,10 +370,10 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
 
 pub fn type_to_string(t: Type) -> Str {
     match t {
-        Type::IntType => BUILTIN_INT(),
-        Type::FloatType => BUILTIN_FLOAT(),
-        Type::StrType => BUILTIN_STR(),
-        Type::BoolType => BUILTIN_BOOL(),
+        Type::IntType => BUILTIN_INT,
+        Type::FloatType => BUILTIN_FLOAT,
+        Type::StrType => BUILTIN_STR,
+        Type::BoolType => BUILTIN_BOOL,
         Type::UnitType => "()",
         Type::NeverType => "Never",
         Type::AnyType => "Any",
@@ -393,8 +393,8 @@ pub fn type_to_string(t: Type) -> Str {
             else { "${name}<${type_params.map(fn(p) { type_to_string(p) }).join(", ")}>" }
         },
         Type::EnumType { name, type_params, .. } => {
-            if name == BUILTIN_OPTION() && type_params.len() == 1 {
-                "${type_to_string(type_params.first().unwrap_or(UNIT()))}?"
+            if name == BUILTIN_OPTION && type_params.len() == 1 {
+                "${type_to_string(type_params.first().unwrap_or(UNIT))}?"
             } else if type_params.len() == 0 { name }
             else { "${name}<${type_params.map(fn(p) { type_to_string(p) }).join(", ")}>" }
         },

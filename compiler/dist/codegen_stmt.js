@@ -249,7 +249,7 @@ function emit_match_stmt(ctx, scrutinee, arms, mode) {
     }
   }
   if ((has_catchall === false)) {
-    codegen_ctx$emit(ctx, `${hir$RUNTIME_MATCH_FAIL()}(${scrut_var});`);
+    codegen_ctx$emit(ctx, `${hir$RUNTIME_MATCH_FAIL}(${scrut_var});`);
   }
   codegen_ctx$pop_indent(ctx);
   return codegen_ctx$emit(ctx, "}");
@@ -516,7 +516,7 @@ function gen_pattern_condition(target, pat) {
     }
     if (__ring_m21._tag === "Constructor") {
       const name = __ring_m21.name; const fields = __ring_m21.fields;
-      const tag_check = `${target}.${hir$ENUM_TAG_FIELD()} === "${name}"`;
+      const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
       let sub_conds = [""];
       List_clear(sub_conds);
       const __ring_end1 = List_len(fields);
@@ -547,7 +547,7 @@ function gen_pattern_condition(target, pat) {
     }
     if (__ring_m21._tag === "NamedConstructor") {
       const name = __ring_m21.name; const fields = __ring_m21.fields;
-      const tag_check = `${target}.${hir$ENUM_TAG_FIELD()} === "${name}"`;
+      const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
       let sub_conds = [""];
       List_clear(sub_conds);
       for (const f of fields) {

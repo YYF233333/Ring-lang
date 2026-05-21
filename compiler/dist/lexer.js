@@ -680,7 +680,7 @@ function Lexer_lex_string_body(self, start, is_new) {
   }
   const end = Lexer_current_position(self);
   const span = new ast$Span(self.file, start, end);
-  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102(), diagnostics$Severity_SevError, "Unterminated string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
+  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
   return Lexer_make_token(self, TokenKind_TkError, value, start, end);
 }
 function Lexer_lex_raw_string(self, start) {
@@ -710,7 +710,7 @@ function Lexer_lex_raw_string(self, start) {
     Lexer_advance(self);
   }
   const span = new ast$Span(self.file, start, Lexer_current_position(self));
-  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102(), diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
+  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
   const end = Lexer_current_position(self);
   return Lexer_make_token(self, TokenKind_TkError, value, start, end);
 }
@@ -866,7 +866,7 @@ function Lexer_lex_punctuation(self, start) {
       return Lexer_make_token(self, TokenKind_TkAmpAmp, "&&", start, Lexer_current_position(self));
     }
     const tok = Lexer_make_token(self, TokenKind_TkError, "&", start, Lexer_current_position(self));
-    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0101(), diagnostics$Severity_SevError, "Unexpected character '&' (use '&&' for logical AND)", tok.span, diagnostics$DiagnosticContext_ParseError("&", Option_none)));
+    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0101, diagnostics$Severity_SevError, "Unexpected character '&' (use '&&' for logical AND)", tok.span, diagnostics$DiagnosticContext_ParseError("&", Option_none)));
     return tok;
   }
   if ((ch === "|")) {
@@ -875,11 +875,11 @@ function Lexer_lex_punctuation(self, start) {
       return Lexer_make_token(self, TokenKind_TkPipePipe, "||", start, Lexer_current_position(self));
     }
     const tok = Lexer_make_token(self, TokenKind_TkError, "|", start, Lexer_current_position(self));
-    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0101(), diagnostics$Severity_SevError, "Unexpected character '|' (use '||' for logical OR)", tok.span, diagnostics$DiagnosticContext_ParseError("|", Option_none)));
+    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0101, diagnostics$Severity_SevError, "Unexpected character '|' (use '||' for logical OR)", tok.span, diagnostics$DiagnosticContext_ParseError("|", Option_none)));
     return tok;
   }
   const tok = Lexer_make_token(self, TokenKind_TkError, ch, start, Lexer_current_position(self));
-  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0101(), diagnostics$Severity_SevError, `Unexpected character '${ch}'`, tok.span, diagnostics$DiagnosticContext_ParseError(ch, Option_none)));
+  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0101, diagnostics$Severity_SevError, `Unexpected character '${ch}'`, tok.span, diagnostics$DiagnosticContext_ParseError(ch, Option_none)));
   return tok;
 }
 function Lexer_skip_whitespace_and_comments(self) {

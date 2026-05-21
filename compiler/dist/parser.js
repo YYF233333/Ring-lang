@@ -5,126 +5,104 @@ import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as 
 import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0706 as codes$E0706, error_description as codes$error_description } from "./codes.js";
 
 
-function PREC_NONE() {
-  return 0;
-}
+const PREC_NONE = 0;
 
-function PREC_CATCH() {
-  return 1;
-}
+const PREC_CATCH = 1;
 
-function PREC_LOGIC_OR() {
-  return 2;
-}
+const PREC_LOGIC_OR = 2;
 
-function PREC_LOGIC_AND() {
-  return 3;
-}
+const PREC_LOGIC_AND = 3;
 
-function PREC_EQUALITY() {
-  return 4;
-}
+const PREC_EQUALITY = 4;
 
-function PREC_COMPARE() {
-  return 5;
-}
+const PREC_COMPARE = 5;
 
-function PREC_RANGE() {
-  return 6;
-}
+const PREC_RANGE = 6;
 
-function PREC_ADD_SUB() {
-  return 7;
-}
+const PREC_ADD_SUB = 7;
 
-function PREC_MUL_DIV() {
-  return 8;
-}
+const PREC_MUL_DIV = 8;
 
-function PREC_UNARY() {
-  return 9;
-}
+const PREC_UNARY = 9;
 
-function PREC_POSTFIX() {
-  return 10;
-}
+const PREC_POSTFIX = 10;
 
 function infix_precedence(kind) {
   __ring_match0: {
     const __ring_m0 = kind;
     if (__ring_m0._tag === "TkCatch") {
-      return PREC_CATCH();
+      return PREC_CATCH;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkPipePipe") {
-      return PREC_LOGIC_OR();
+      return PREC_LOGIC_OR;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkAmpAmp") {
-      return PREC_LOGIC_AND();
+      return PREC_LOGIC_AND;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkEqEq") {
-      return PREC_EQUALITY();
+      return PREC_EQUALITY;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkBangEq") {
-      return PREC_EQUALITY();
+      return PREC_EQUALITY;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkLt") {
-      return PREC_COMPARE();
+      return PREC_COMPARE;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkGt") {
-      return PREC_COMPARE();
+      return PREC_COMPARE;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkLtEq") {
-      return PREC_COMPARE();
+      return PREC_COMPARE;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkGtEq") {
-      return PREC_COMPARE();
+      return PREC_COMPARE;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkDotDot") {
-      return PREC_RANGE();
+      return PREC_RANGE;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkDotDotEq") {
-      return PREC_RANGE();
+      return PREC_RANGE;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkPlus") {
-      return PREC_ADD_SUB();
+      return PREC_ADD_SUB;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkMinus") {
-      return PREC_ADD_SUB();
+      return PREC_ADD_SUB;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkStar") {
-      return PREC_MUL_DIV();
+      return PREC_MUL_DIV;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkSlash") {
-      return PREC_MUL_DIV();
+      return PREC_MUL_DIV;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkPercent") {
-      return PREC_MUL_DIV();
+      return PREC_MUL_DIV;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkDot") {
-      return PREC_POSTFIX();
+      return PREC_POSTFIX;
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkLParen") {
-      return PREC_POSTFIX();
+      return PREC_POSTFIX;
       break __ring_match0;
     }
-    return PREC_NONE();
+    return PREC_NONE;
     break __ring_match0;
   }
 }
@@ -365,9 +343,7 @@ class Parser {
   }
 }
 
-function max_errors() {
-  return 20;
-}
+const MAX_ERRORS = 20;
 
 function new_parser(tokens, file, sink) {
   return new Parser(tokens, 0, file, sink, 0);
@@ -422,13 +398,13 @@ function Parser_report_error(self, code, msg, span) {
   const error_span = Option_unwrap_or(span, tok.span);
   diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(code, diagnostics$Severity_SevError, msg, error_span, diagnostics$DiagnosticContext_ParseError(tok.value, Option_none)));
   self.error_count = (self.error_count + 1);
-  if ((self.error_count >= max_errors())) {
+  if ((self.error_count >= MAX_ERRORS)) {
     return panic("Too many parse errors");
   }
 }
 function Parser_error(self, msg) {
   const tok = Parser_peek(self);
-  Parser_report_error(self, codes$E0103(), msg, Option_some(tok.span));
+  Parser_report_error(self, codes$E0103, msg, Option_some(tok.span));
   return __ring_raise_fail(msg);
 }
 function Parser_parse_program(self) {
@@ -443,7 +419,7 @@ function Parser_parse_program(self) {
     }
     if (Parser_check(self, lexer$TokenKind_TkUse)) {
       if (decls_started) {
-        Parser_report_error(self, codes$E0706(), "Use declaration must appear before other declarations", Option_some(Parser_peek(self).span));
+        Parser_report_error(self, codes$E0706, "Use declaration must appear before other declarations", Option_some(Parser_peek(self).span));
       }
       const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
       __ring_match3: {
@@ -473,7 +449,7 @@ function Parser_parse_program(self) {
       Parser_advance(self);
       if (Parser_check(self, lexer$TokenKind_TkUse)) {
         if (decls_started) {
-          Parser_report_error(self, codes$E0706(), "Use declaration must appear before other declarations", Option_some(Option_unwrap_or(List_get(self.tokens, save_pos), Parser_peek(self)).span));
+          Parser_report_error(self, codes$E0706, "Use declaration must appear before other declarations", Option_some(Option_unwrap_or(List_get(self.tokens, save_pos), Parser_peek(self)).span));
         }
         const pub_use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, true)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
         __ring_match4: {
@@ -827,11 +803,11 @@ function Parser_parse_decl(self) {
       if ((tok.value === "type")) {
         return Option_some(Parser_parse_type_alias_decl(self, is_pub));
       }
-      Parser_report_error(self, codes$E0101(), `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
+      Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
       return Option_none;
       break __ring_match7;
     }
-    Parser_report_error(self, codes$E0101(), `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
+    Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
     return Option_none;
     break __ring_match7;
   }
@@ -969,7 +945,7 @@ function Parser_parse_enum_decl(self, is_pub) {
     if (Parser_try_consume(self, lexer$TokenKind_TkLParen)) {
       if (Parser_check(self, lexer$TokenKind_TkRParen)) {
         const rp_span = Parser_peek(self).span;
-        Parser_report_error(self, codes$E0104(), `empty parentheses on enum variant '${v_name}' — use bare name instead`, Option_some(rp_span));
+        Parser_report_error(self, codes$E0104, `empty parentheses on enum variant '${v_name}' — use bare name instead`, Option_some(rp_span));
         const _rp = Parser_advance(self);
       } else {
         List_push(v_fields, Parser_parse_type_expr(self));
@@ -1084,7 +1060,7 @@ function Parser_parse_trait_decl(self, is_pub) {
   return ast$Decl_Trait(name, type_params, supertraits, methods, is_pub, Parser_make_span(self, start, end));
 }
 function Parser_parse_expr(self) {
-  return Parser_parse_expr_bp(self, PREC_NONE());
+  return Parser_parse_expr_bp(self, PREC_NONE);
 }
 function Parser_parse_expr_bp(self, min_prec) {
   let left = Parser_parse_prefix(self);
@@ -1118,7 +1094,7 @@ function Parser_parse_expr_bp(self, min_prec) {
             left = ast$Expr_Range(left, right, inclusive, span);
             last_was_comparison = false;
           } else {
-            const is_comparison = ((prec === PREC_EQUALITY()) || (prec === PREC_COMPARE()));
+            const is_comparison = ((prec === PREC_EQUALITY) || (prec === PREC_COMPARE));
             if ((is_comparison && last_was_comparison)) {
               Parser_error(self, `Comparison operators are non-associative: cannot chain '${tok.value}' after another comparison`);
             }
@@ -1139,7 +1115,7 @@ function Parser_parse_prefix(self) {
   const start = Parser_current_span_start(self);
   if ((Parser_check(self, lexer$TokenKind_TkMinus) || Parser_check(self, lexer$TokenKind_TkBang))) {
     Parser_advance(self);
-    const operand = Parser_parse_expr_bp(self, PREC_UNARY());
+    const operand = Parser_parse_expr_bp(self, PREC_UNARY);
     const end = Parser_current_span_start(self);
     return ast$Expr_UnaryOp(str_to_unaryop(tok.value), operand, Parser_make_span(self, start, end));
   }

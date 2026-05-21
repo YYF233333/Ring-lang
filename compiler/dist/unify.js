@@ -240,7 +240,7 @@ function unify_effect_params(a, b, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(ta_a))) {
-        s = unify(Option_unwrap_or(List_get(ta_a, i), types$UNIT()), Option_unwrap_or(List_get(ta_b, i), types$UNIT()), s, env, __ring_ev_fail);
+        s = unify(Option_unwrap_or(List_get(ta_a, i), types$UNIT), Option_unwrap_or(List_get(ta_b, i), types$UNIT), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;
@@ -639,7 +639,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(pa))) {
-        s = unify(Option_unwrap_or(List_get(pa, i), types$UNIT()), Option_unwrap_or(List_get(pb, i), types$UNIT()), s, env, __ring_ev_fail);
+        s = unify(Option_unwrap_or(List_get(pa, i), types$UNIT), Option_unwrap_or(List_get(pb, i), types$UNIT), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       s = unify(ra, rb, s, env, __ring_ev_fail);
@@ -658,7 +658,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(tpa))) {
-        s = unify(Option_unwrap_or(List_get(tpa, i), types$UNIT()), Option_unwrap_or(List_get(tpb, i), types$UNIT()), s, env, __ring_ev_fail);
+        s = unify(Option_unwrap_or(List_get(tpa, i), types$UNIT), Option_unwrap_or(List_get(tpb, i), types$UNIT), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;
@@ -675,7 +675,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(tpa))) {
-        s = unify(Option_unwrap_or(List_get(tpa, i), types$UNIT()), Option_unwrap_or(List_get(tpb, i), types$UNIT()), s, env, __ring_ev_fail);
+        s = unify(Option_unwrap_or(List_get(tpa, i), types$UNIT), Option_unwrap_or(List_get(tpb, i), types$UNIT), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;
@@ -689,7 +689,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       }
       let i = 0;
       while ((i < List_len(aa))) {
-        s = unify(Option_unwrap_or(List_get(aa, i), types$UNIT()), Option_unwrap_or(List_get(ab, i), types$UNIT()), s, env, __ring_ev_fail);
+        s = unify(Option_unwrap_or(List_get(aa, i), types$UNIT), Option_unwrap_or(List_get(ab, i), types$UNIT), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;
@@ -712,7 +712,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(ea))) {
-        s = unify(Option_unwrap_or(List_get(ea, i), types$UNIT()), Option_unwrap_or(List_get(eb, i), types$UNIT()), s, env, __ring_ev_fail);
+        s = unify(Option_unwrap_or(List_get(ea, i), types$UNIT), Option_unwrap_or(List_get(eb, i), types$UNIT), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;

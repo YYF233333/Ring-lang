@@ -162,7 +162,7 @@ function emit_struct_decl(ctx, name, fields) {
 }
 
 function emit_enum_decl(ctx, name, variants) {
-  const tag = hir$ENUM_TAG_FIELD();
+  const tag = hir$ENUM_TAG_FIELD;
   for (const v of variants) {
     const js_name = `${codegen_ctx$qualify(ctx, name)}_${v.name}`;
     if ((List_len(v.fields) === 0)) {

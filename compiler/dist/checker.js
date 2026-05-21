@@ -20,9 +20,7 @@ class CheckResult {
   }
 }
 
-function STD_FILES() {
-  return ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "fs.ring", "path.ring", "process.ring"];
-}
+const STD_FILES = ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "fs.ring", "path.ring", "process.ring"];
 
 function find_std_dir() {
   const candidates = [path_resolve(path_join(path_dirname(path_resolve(".")), "std")), path_resolve("std")];
@@ -39,7 +37,7 @@ function load_prelude(ctx) {
     const __ring_m0 = find_std_dir();
     if (__ring_m0._tag === "some") {
       const std_dir = __ring_m0._0;
-      for (const file of STD_FILES()) {
+      for (const file of STD_FILES) {
         const file_path = path_join(std_dir, file);
         if (file_exists(file_path)) {
           const source = read_file(file_path);
@@ -157,7 +155,7 @@ function resolve_uses(ctx, uses, available_modules) {
     __ring_match3: {
       const __ring_m3 = _Map_get(module_map, mod_key);
       if (__ring_m3._tag === "none") {
-        const d = diagnostics$make_diag(codes$E0702(), diagnostics$Severity_SevError, `Module '${mod_key}' not found`, use_decl.path.span, diagnostics$DiagnosticContext_OtherContext(Option_some("module not found")));
+        const d = diagnostics$make_diag(codes$E0702, diagnostics$Severity_SevError, `Module '${mod_key}' not found`, use_decl.path.span, diagnostics$DiagnosticContext_OtherContext(Option_some("module not found")));
         diagnostics$CollectingSink_report(ctx.sink, d);
         break __ring_match3;
       }
@@ -229,7 +227,7 @@ function resolve_uses(ctx, uses, available_modules) {
                 found = true;
               }
               if ((found === false)) {
-                const d = diagnostics$make_diag(codes$E0703(), diagnostics$Severity_SevError, `Symbol '${item.name}' not found in module '${mod_key}'`, item.span, diagnostics$DiagnosticContext_OtherContext(Option_some("symbol not found")));
+                const d = diagnostics$make_diag(codes$E0703, diagnostics$Severity_SevError, `Symbol '${item.name}' not found in module '${mod_key}'`, item.span, diagnostics$DiagnosticContext_OtherContext(Option_some("symbol not found")));
                 diagnostics$CollectingSink_report(ctx.sink, d);
               }
             }

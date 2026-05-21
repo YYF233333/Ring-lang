@@ -219,7 +219,7 @@ function compile_project_esm(entry_file, out_dir) {
             const eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key);
             let import_lines = [""];
             List_clear(import_lines);
-            const runtime_names = runtime$RUNTIME_EXPORT_NAMES();
+            const runtime_names = runtime$RUNTIME_EXPORT_NAMES;
             const rnames_joined = List_join(runtime_names, ", ");
             List_push(import_lines, `import { ${rnames_joined} } from "./__ring_runtime.js";`);
             const deps = (function() {

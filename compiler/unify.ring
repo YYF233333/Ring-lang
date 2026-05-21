@@ -125,8 +125,8 @@ fn unify_effect_params(a: Effect, b: Effect, subst: Map<Int, Type>, var env: Typ
             var i = 0
             while i < ta_a.len() {
                 s = unify(
-                    ta_a.get(i).unwrap_or(UNIT()),
-                    ta_b.get(i).unwrap_or(UNIT()),
+                    ta_a.get(i).unwrap_or(UNIT),
+                    ta_b.get(i).unwrap_or(UNIT),
                     s, env
                 )
                 i = i + 1
@@ -457,8 +457,8 @@ pub fn unify(t1: Type, t2: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map
             var i = 0
             while i < pa.len() {
                 s = unify(
-                    pa.get(i).unwrap_or(UNIT()),
-                    pb.get(i).unwrap_or(UNIT()),
+                    pa.get(i).unwrap_or(UNIT),
+                    pb.get(i).unwrap_or(UNIT),
                     s, env
                 )
                 i = i + 1
@@ -481,8 +481,8 @@ pub fn unify(t1: Type, t2: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map
             var i = 0
             while i < tpa.len() {
                 s = unify(
-                    tpa.get(i).unwrap_or(UNIT()),
-                    tpb.get(i).unwrap_or(UNIT()),
+                    tpa.get(i).unwrap_or(UNIT),
+                    tpb.get(i).unwrap_or(UNIT),
                     s, env
                 )
                 i = i + 1
@@ -503,8 +503,8 @@ pub fn unify(t1: Type, t2: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map
             var i = 0
             while i < tpa.len() {
                 s = unify(
-                    tpa.get(i).unwrap_or(UNIT()),
-                    tpb.get(i).unwrap_or(UNIT()),
+                    tpa.get(i).unwrap_or(UNIT),
+                    tpb.get(i).unwrap_or(UNIT),
                     s, env
                 )
                 i = i + 1
@@ -522,8 +522,8 @@ pub fn unify(t1: Type, t2: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map
             var i = 0
             while i < aa.len() {
                 s = unify(
-                    aa.get(i).unwrap_or(UNIT()),
-                    ab.get(i).unwrap_or(UNIT()),
+                    aa.get(i).unwrap_or(UNIT),
+                    ab.get(i).unwrap_or(UNIT),
                     s, env
                 )
                 i = i + 1
@@ -553,8 +553,8 @@ pub fn unify(t1: Type, t2: Type, subst: Map<Int, Type>, var env: TypeEnv) -> Map
             var i = 0
             while i < ea.len() {
                 s = unify(
-                    ea.get(i).unwrap_or(UNIT()),
-                    eb.get(i).unwrap_or(UNIT()),
+                    ea.get(i).unwrap_or(UNIT),
+                    eb.get(i).unwrap_or(UNIT),
                     s, env
                 )
                 i = i + 1

@@ -207,7 +207,7 @@ function complete_enum_variants(ctx, name, type_params, variants) {
           if ((List_len(variant.fields) === 0)) {
             bind_variant_constructor(ctx, variant.name, enum_type, tv_ids);
           } else {
-            const fn_type = types$Type_FnType(variant.fields, enum_type, types$EMPTY_ROW());
+            const fn_type = types$Type_FnType(variant.fields, enum_type, types$EMPTY_ROW);
             if ((List_len(tv_ids) > 0)) {
               env$TypeEnv_bind(ctx.env, variant.name, new env$TypeScheme(fn_type, tv_ids, [], Option_none));
             } else {
@@ -314,7 +314,7 @@ function register_trait(ctx, name, type_params, methods) {
   if (__ring_m._tag === "none") { return env$TypeEnv_fresh_var(ctx.env); }
   __match_fail(__ring_m);
 })();
-        const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW());
+        const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW);
         List_push(trait_methods, new env$TraitMethodDef(mname, fn_type, (!is_abstract)));
         break __ring_match12;
       }
@@ -389,7 +389,7 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span,
           }
           for (const tm of trait_def.methods) {
             if (((!tm.has_default) && (!_Set_contains(impl_method_names, tm.name)))) {
-              infer_ctx$type_error(ctx.sink, codes$E0502(), `Missing method '${tm.name}' in impl ${tname} for ${target_type}`, span, diagnostics$DiagnosticContext_TraitError(`missing method '${tm.name}'`), __ring_ev_fail);
+              infer_ctx$type_error(ctx.sink, codes$E0502, `Missing method '${tm.name}' in impl ${tname} for ${target_type}`, span, diagnostics$DiagnosticContext_TraitError(`missing method '${tm.name}'`), __ring_ev_fail);
             }
           }
           let tp_names = [];
@@ -417,7 +417,7 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span,
           break __ring_match17;
         }
         if (__ring_m17._tag === "none") {
-          infer_ctx$type_error(ctx.sink, codes$E0501(), `Unknown trait: ${tname}`, span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${tname}'`), __ring_ev_fail);
+          infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${tname}`, span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${tname}'`), __ring_ev_fail);
           break __ring_match17;
         }
         __match_fail(__ring_m17);
@@ -505,7 +505,7 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
       }
     }
   }
-  const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW());
+  const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW);
   _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, [], Option_none));
   ctx.type_param_scope = saved_method;
 }
@@ -557,7 +557,7 @@ function register_impl_extern_method(ctx, methods_map, impl_tv_ids, target_type,
   for (const mtv of method_tv_ids) {
     List_push(all_tvs, mtv);
   }
-  const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW());
+  const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW);
   _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, [], Option_none));
   ctx.type_param_scope = saved_method;
 }
@@ -574,7 +574,7 @@ function check_duplicate_def(ctx, name, span, __ring_ev_fail) {
           __ring_match27: {
             const __ring_m27 = _Map_get(ctx.env.def_spans, did);
             if (__ring_m27._tag === "some") {
-              return infer_ctx$type_error(ctx.sink, codes$E0207(), `Duplicate definition: '${name}' is already defined`, span, diagnostics$DiagnosticContext_TypeMismatch("unique name", name, Option_none), __ring_ev_fail);
+              return infer_ctx$type_error(ctx.sink, codes$E0207, `Duplicate definition: '${name}' is already defined`, span, diagnostics$DiagnosticContext_TypeMismatch("unique name", name, Option_none), __ring_ev_fail);
               break __ring_match27;
             }
             if (__ring_m27._tag === "none") {
@@ -657,14 +657,14 @@ function register_fn(ctx, name, type_params, params, return_type, span, __ring_e
       }
     }
   }
-  const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW());
+  const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW);
   let fn_bounds_list = [];
   let scheme_bounds = [];
   for (const tp of type_params) {
     const tv = _Map_get(ctx.type_param_scope, tp.name);
     for (const b of tp.bounds) {
       if ((!_Map_contains_key(ctx.env.traits, b.trait_name))) {
-        infer_ctx$type_error(ctx.sink, codes$E0501(), `Unknown trait: ${b.trait_name}`, tp.span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${b.trait_name}'`), __ring_ev_fail);
+        infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${b.trait_name}`, tp.span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${b.trait_name}'`), __ring_ev_fail);
       }
       List_push(fn_bounds_list, new env$FnBound(tp.name, b.trait_name));
       __ring_match31: {
@@ -781,13 +781,13 @@ function register_extern_fn(ctx, name, type_params, params, return_type, span, _
       }
     }
   }
-  const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW());
+  const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW);
   let scheme_bounds = [];
   for (const tp of type_params) {
     const tv = _Map_get(ctx.type_param_scope, tp.name);
     for (const b of tp.bounds) {
       if ((!_Map_contains_key(ctx.env.traits, b.trait_name))) {
-        infer_ctx$type_error(ctx.sink, codes$E0501(), `Unknown trait: ${b.trait_name}`, tp.span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${b.trait_name}'`), __ring_ev_fail);
+        infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${b.trait_name}`, tp.span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${b.trait_name}'`), __ring_ev_fail);
       }
       __ring_match38: {
         const __ring_m38 = tv;

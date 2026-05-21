@@ -1,44 +1,24 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, print, assert, panic, exit, json_stringify, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_first, List_last, List_contains, List_is_empty, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_pop, List_shift, List_clear, List_find_index, List_index_of, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_is_empty, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_contains, _Set_is_empty, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
 
-function BUILTIN_INT() {
-  return "Int";
-}
+const BUILTIN_INT = "Int";
 
-function BUILTIN_FLOAT() {
-  return "Float";
-}
+const BUILTIN_FLOAT = "Float";
 
-function BUILTIN_STR() {
-  return "Str";
-}
+const BUILTIN_STR = "Str";
 
-function BUILTIN_BOOL() {
-  return "Bool";
-}
+const BUILTIN_BOOL = "Bool";
 
-function BUILTIN_RANGE() {
-  return "Range";
-}
+const BUILTIN_RANGE = "Range";
 
-function BUILTIN_LIST() {
-  return "List";
-}
+const BUILTIN_LIST = "List";
 
-function BUILTIN_MAP() {
-  return "Map";
-}
+const BUILTIN_MAP = "Map";
 
-function BUILTIN_SET() {
-  return "Set";
-}
+const BUILTIN_SET = "Set";
 
-function BUILTIN_OPTION() {
-  return "Option";
-}
+const BUILTIN_OPTION = "Option";
 
-function BUILTIN_CELL() {
-  return "Cell";
-}
+const BUILTIN_CELL = "Cell";
 
 class StructField {
   constructor(name, ty, is_pub) {
@@ -118,55 +98,39 @@ class RowMergeResult {
   }
 }
 
-function INT() {
-  return Type_IntType;
-}
+const INT = Type_IntType;
 
-function FLOAT() {
-  return Type_FloatType;
-}
+const FLOAT = Type_FloatType;
 
-function STR() {
-  return Type_StrType;
-}
+const STR = Type_StrType;
 
-function BOOL() {
-  return Type_BoolType;
-}
+const BOOL = Type_BoolType;
 
-function UNIT() {
-  return Type_UnitType;
-}
+const UNIT = Type_UnitType;
 
-function NEVER() {
-  return Type_NeverType;
-}
+const NEVER = Type_NeverType;
 
-function ANY() {
-  return Type_AnyType;
-}
+const ANY = Type_AnyType;
 
-function EMPTY_ROW() {
-  return new EffectRow([], Option_none);
-}
+const EMPTY_ROW = new EffectRow([], Option_none);
 
 function type_to_builtin_name(t) {
   __ring_match0: {
     const __ring_m0 = t;
     if (__ring_m0._tag === "IntType") {
-      return Option_some(BUILTIN_INT());
+      return Option_some(BUILTIN_INT);
       break __ring_match0;
     }
     if (__ring_m0._tag === "FloatType") {
-      return Option_some(BUILTIN_FLOAT());
+      return Option_some(BUILTIN_FLOAT);
       break __ring_match0;
     }
     if (__ring_m0._tag === "StrType") {
-      return Option_some(BUILTIN_STR());
+      return Option_some(BUILTIN_STR);
       break __ring_match0;
     }
     if (__ring_m0._tag === "BoolType") {
-      return Option_some(BUILTIN_BOOL());
+      return Option_some(BUILTIN_BOOL);
       break __ring_match0;
     }
     if (__ring_m0._tag === "UnitType") {
@@ -189,7 +153,7 @@ function type_to_builtin_name(t) {
 }
 
 function make_option_type(inner) {
-  return Type_EnumType(BUILTIN_OPTION(), [inner], [new EnumVariant("some", [inner], Option_none), new EnumVariant("none", [], Option_none)]);
+  return Type_EnumType(BUILTIN_OPTION, [inner], [new EnumVariant("some", [inner], Option_none), new EnumVariant("none", [], Option_none)]);
 }
 
 function is_option_type(t) {
@@ -197,7 +161,7 @@ function is_option_type(t) {
     const __ring_m1 = t;
     if (__ring_m1._tag === "EnumType") {
       const name = __ring_m1.name; const type_params = __ring_m1.type_params;
-      return ((name === BUILTIN_OPTION()) && (List_len(type_params) === 1));
+      return ((name === BUILTIN_OPTION) && (List_len(type_params) === 1));
       break __ring_match1;
     }
     return false;
@@ -210,16 +174,16 @@ function option_inner(t) {
     const __ring_m2 = t;
     if (__ring_m2._tag === "EnumType") {
       const type_params = __ring_m2.type_params;
-      return Option_unwrap_or(List_first(type_params), UNIT());
+      return Option_unwrap_or(List_first(type_params), UNIT);
       break __ring_match2;
     }
-    return UNIT();
+    return UNIT;
     break __ring_match2;
   }
 }
 
 function make_list_type(element) {
-  return Type_StructType(BUILTIN_LIST(), [element], []);
+  return Type_StructType(BUILTIN_LIST, [element], []);
 }
 
 function is_list_type(t) {
@@ -227,7 +191,7 @@ function is_list_type(t) {
     const __ring_m3 = t;
     if (__ring_m3._tag === "StructType") {
       const name = __ring_m3.name;
-      return (name === BUILTIN_LIST());
+      return (name === BUILTIN_LIST);
       break __ring_match3;
     }
     return false;
@@ -240,16 +204,16 @@ function list_element(t) {
     const __ring_m4 = t;
     if (__ring_m4._tag === "StructType") {
       const type_params = __ring_m4.type_params;
-      return Option_unwrap_or(List_first(type_params), UNIT());
+      return Option_unwrap_or(List_first(type_params), UNIT);
       break __ring_match4;
     }
-    return UNIT();
+    return UNIT;
     break __ring_match4;
   }
 }
 
 function make_map_type(key, value) {
-  return Type_StructType(BUILTIN_MAP(), [key, value], []);
+  return Type_StructType(BUILTIN_MAP, [key, value], []);
 }
 
 function is_map_type(t) {
@@ -257,7 +221,7 @@ function is_map_type(t) {
     const __ring_m5 = t;
     if (__ring_m5._tag === "StructType") {
       const name = __ring_m5.name;
-      return (name === BUILTIN_MAP());
+      return (name === BUILTIN_MAP);
       break __ring_match5;
     }
     return false;
@@ -266,7 +230,7 @@ function is_map_type(t) {
 }
 
 function make_set_type(element) {
-  return Type_StructType(BUILTIN_SET(), [element], []);
+  return Type_StructType(BUILTIN_SET, [element], []);
 }
 
 function is_set_type(t) {
@@ -274,7 +238,7 @@ function is_set_type(t) {
     const __ring_m6 = t;
     if (__ring_m6._tag === "StructType") {
       const name = __ring_m6.name;
-      return (name === BUILTIN_SET());
+      return (name === BUILTIN_SET);
       break __ring_match6;
     }
     return false;
@@ -839,19 +803,19 @@ function type_to_string(t) {
   __ring_match33: {
     const __ring_m33 = t;
     if (__ring_m33._tag === "IntType") {
-      return BUILTIN_INT();
+      return BUILTIN_INT;
       break __ring_match33;
     }
     if (__ring_m33._tag === "FloatType") {
-      return BUILTIN_FLOAT();
+      return BUILTIN_FLOAT;
       break __ring_match33;
     }
     if (__ring_m33._tag === "StrType") {
-      return BUILTIN_STR();
+      return BUILTIN_STR;
       break __ring_match33;
     }
     if (__ring_m33._tag === "BoolType") {
-      return BUILTIN_BOOL();
+      return BUILTIN_BOOL;
       break __ring_match33;
     }
     if (__ring_m33._tag === "UnitType") {
@@ -906,8 +870,8 @@ function type_to_string(t) {
     }
     if (__ring_m33._tag === "EnumType") {
       const name = __ring_m33.name; const type_params = __ring_m33.type_params;
-      if (((name === BUILTIN_OPTION()) && (List_len(type_params) === 1))) {
-        return `${type_to_string(Option_unwrap_or(List_first(type_params), UNIT()))}?`;
+      if (((name === BUILTIN_OPTION) && (List_len(type_params) === 1))) {
+        return `${type_to_string(Option_unwrap_or(List_first(type_params), UNIT))}?`;
       } else {
         if ((List_len(type_params) === 0)) {
           return name;

@@ -174,7 +174,7 @@ fn complete_enum_variants(var ctx: InferCtx, name: Str, type_params: List<TypePa
                 } else if variant.fields.len() == 0 {
                     bind_variant_constructor(ctx, variant.name, enum_type, tv_ids)
                 } else {
-                    let fn_type = Type::FnType { params: variant.fields, return_type: enum_type, effects: EMPTY_ROW() }
+                    let fn_type = Type::FnType { params: variant.fields, return_type: enum_type, effects: EMPTY_ROW }
                     if tv_ids.len() > 0 {
                         ctx.env.bind(variant.name, TypeScheme { ty: fn_type, type_vars: tv_ids, bounds: [], def_id: none })
                     } else {
@@ -254,7 +254,7 @@ fn register_trait(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, me
                     some(rt) => resolve_type_expr(ctx, rt),
                     none => ctx.env.fresh_var()
                 }
-                let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW() }
+                let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
                 trait_methods.push(TraitMethodDef { name: mname, ty: fn_type, has_default: !is_abstract })
             },
             _ => {}
@@ -307,7 +307,7 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
                     }
                     for tm in trait_def.methods {
                         if !tm.has_default && !impl_method_names.contains(tm.name) {
-                            type_error(ctx.sink, E0502(),
+                            type_error(ctx.sink, E0502,
                                 "Missing method '${tm.name}' in impl ${tname} for ${target_type}",
                                 span, DiagnosticContext::TraitError { detail: "missing method '${tm.name}'" })
                         }
@@ -327,7 +327,7 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
                         type_params: tp_names, method_names: method_names
                     })
                 },
-                none => type_error(ctx.sink, E0501(),
+                none => type_error(ctx.sink, E0501,
                     "Unknown trait: ${tname}", span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${tname}'" })
             }
@@ -378,7 +378,7 @@ fn register_impl_method(
         }
     }
 
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW() }
+    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
     methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: [], def_id: none })
     ctx.type_param_scope = saved_method
 }
@@ -406,7 +406,7 @@ fn register_impl_extern_method(
     let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
     var all_tvs = list_clone(impl_tv_ids)
     for mtv in method_tv_ids { all_tvs.push(mtv) }
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW() }
+    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
     methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: [], def_id: none })
     ctx.type_param_scope = saved_method
 }
@@ -419,7 +419,7 @@ fn check_duplicate_def(ctx: InferCtx, name: Str, span: Span) {
     match ctx.env.lookup(name) {
         some(existing) => match existing.def_id {
             some(did) => match ctx.env.def_spans.get(did) {
-                some(_) => type_error(ctx.sink, E0207(),
+                some(_) => type_error(ctx.sink, E0207,
                     "Duplicate definition: '${name}' is already defined", span,
                     DiagnosticContext::TypeMismatch { expected: "unique name", actual: name, expression: none }),
                 none => {}
@@ -458,7 +458,7 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
         }
     }
 
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW() }
+    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
 
     var fn_bounds_list: List<FnBound> = []
     var scheme_bounds: List<SchemeBound> = []
@@ -466,7 +466,7 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
             if !ctx.env.traits.contains_key(b.trait_name) {
-                type_error(ctx.sink, E0501(),
+                type_error(ctx.sink, E0501,
                     "Unknown trait: ${b.trait_name}", tp.span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
             }
@@ -521,14 +521,14 @@ fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
         }
     }
 
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW() }
+    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
 
     var scheme_bounds: List<SchemeBound> = []
     for tp in type_params {
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
             if !ctx.env.traits.contains_key(b.trait_name) {
-                type_error(ctx.sink, E0501(),
+                type_error(ctx.sink, E0501,
                     "Unknown trait: ${b.trait_name}", tp.span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
             }

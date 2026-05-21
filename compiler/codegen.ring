@@ -185,21 +185,21 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     }
 
     // Register built-in impl methods
-    register_builtin_methods(ctx, BUILTIN_CELL(), CELL_METHODS())
-    register_builtin_methods(ctx, BUILTIN_STR(), STR_METHODS())
-    register_builtin_methods(ctx, BUILTIN_LIST(), LIST_NON_HOF_METHODS())
-    register_builtin_methods(ctx, BUILTIN_MAP(), MAP_NON_HOF_METHODS())
-    register_builtin_methods(ctx, BUILTIN_SET(), SET_NON_HOF_METHODS())
-    register_builtin_methods(ctx, BUILTIN_INT(), INT_METHODS())
-    register_builtin_methods(ctx, BUILTIN_FLOAT(), FLOAT_METHODS())
-    register_builtin_methods(ctx, BUILTIN_OPTION(), OPTION_NON_HOF_METHODS())
+    register_builtin_methods(ctx, BUILTIN_CELL, CELL_METHODS)
+    register_builtin_methods(ctx, BUILTIN_STR, STR_METHODS)
+    register_builtin_methods(ctx, BUILTIN_LIST, LIST_NON_HOF_METHODS)
+    register_builtin_methods(ctx, BUILTIN_MAP, MAP_NON_HOF_METHODS)
+    register_builtin_methods(ctx, BUILTIN_SET, SET_NON_HOF_METHODS)
+    register_builtin_methods(ctx, BUILTIN_INT, INT_METHODS)
+    register_builtin_methods(ctx, BUILTIN_FLOAT, FLOAT_METHODS)
+    register_builtin_methods(ctx, BUILTIN_OPTION, OPTION_NON_HOF_METHODS)
 
     // Register builtin trait methods for UFCS dispatch
-    for prim in [BUILTIN_INT(), BUILTIN_FLOAT(), BUILTIN_STR(), BUILTIN_BOOL()] {
+    for prim in [BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL] {
         let key = "${safe_ident(prim)}.debug"
         ctx.impl_methods.insert(key, some("Debug"))
     }
-    for coll in [BUILTIN_LIST(), BUILTIN_MAP(), BUILTIN_SET(), BUILTIN_OPTION()] {
+    for coll in [BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION] {
         let key = "${safe_ident(coll)}.debug"
         ctx.impl_methods.insert(key, some("Debug"))
     }

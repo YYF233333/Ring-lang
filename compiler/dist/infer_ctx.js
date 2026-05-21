@@ -75,7 +75,7 @@ function merge_effects(env, a, b, s, __ring_ev_fail) {
 
 function unify_at(sink, env, t1, t2, s, span, __ring_ev_fail) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return unify$unify(t1, t2, s, env, __ring_ev_fail); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return (function() {
-  const code = (e.is_occurs_check ? codes$E0302() : codes$E0301());
+  const code = (e.is_occurs_check ? codes$E0302 : codes$E0301);
   return type_error(sink, code, e.message, span, diagnostics$DiagnosticContext_TypeMismatch(types$type_to_string(env$apply_subst(s, t1)), types$type_to_string(env$apply_subst(s, t2)), Option_none), __ring_ev_fail);
 })(); } } throw __ring_e; } })();
 }
@@ -499,7 +499,7 @@ function resolve_dicts_from_scheme(sink, env, current_fn_bounds, scheme, callee_
       __match_fail(__ring_m18);
     }
     if ((!found)) {
-      type_error(sink, codes$E0503(), `Type does not satisfy trait bound '${bound.trait_name}'`, span, diagnostics$DiagnosticContext_TraitError(`type does not satisfy '${bound.trait_name}'`), __ring_ev_fail);
+      type_error(sink, codes$E0503, `Type does not satisfy trait bound '${bound.trait_name}'`, span, diagnostics$DiagnosticContext_TraitError(`type does not satisfy '${bound.trait_name}'`), __ring_ev_fail);
     }
   }
   return resolved_dicts;
@@ -520,7 +520,7 @@ function resolve_type_expr(ctx, texpr, __ring_ev_fail) {
         List_push(resolved_params, resolve_type_expr(ctx, p, __ring_ev_fail));
       }
       const ret = resolve_type_expr(ctx, return_type, __ring_ev_fail);
-      return types$Type_FnType(resolved_params, ret, types$EMPTY_ROW());
+      return types$Type_FnType(resolved_params, ret, types$EMPTY_ROW);
       break __ring_match22;
     }
     if (__ring_m22._tag === "OptionType") {
@@ -578,23 +578,23 @@ function resolve_self_type(ctx, name, __ring_ev_fail) {
 }
 
 function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
-  if ((name === hir$BUILTIN_INT())) {
-    return types$INT();
+  if ((name === hir$BUILTIN_INT)) {
+    return types$INT;
   }
-  if ((name === hir$BUILTIN_FLOAT())) {
-    return types$FLOAT();
+  if ((name === hir$BUILTIN_FLOAT)) {
+    return types$FLOAT;
   }
-  if ((name === hir$BUILTIN_STR())) {
-    return types$STR();
+  if ((name === hir$BUILTIN_STR)) {
+    return types$STR;
   }
-  if ((name === hir$BUILTIN_BOOL())) {
-    return types$BOOL();
+  if ((name === hir$BUILTIN_BOOL)) {
+    return types$BOOL;
   }
   if ((name === "Never")) {
-    return types$NEVER();
+    return types$NEVER;
   }
   if ((name === "Unit")) {
-    return types$UNIT();
+    return types$UNIT;
   }
   __ring_match25: {
     const __ring_m25 = _Map_get(ctx.type_param_scope, name);
@@ -608,7 +608,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
     }
     __match_fail(__ring_m25);
   }
-  if (((name === hir$BUILTIN_OPTION()) && (List_len(type_args) === 1))) {
+  if (((name === hir$BUILTIN_OPTION) && (List_len(type_args) === 1))) {
     __ring_match26: {
       const __ring_m26 = List_get(type_args, 0);
       if (__ring_m26._tag === "some") {
@@ -628,7 +628,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
       if (__ring_m27._tag === "some") {
         const def = __ring_m27._0;
         if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(def.type_params)))) {
-          type_error(ctx.sink, codes$E0301(), `Type '${name}' expects ${Int_to_str(List_len(def.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(def.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none), __ring_ev_fail);
+          type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(def.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(def.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none), __ring_ev_fail);
         }
         let resolved_params = [];
         if ((List_len(type_args) > 0)) {
@@ -655,7 +655,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
       if (__ring_m28._tag === "some") {
         const def = __ring_m28._0;
         if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(def.type_params)))) {
-          type_error(ctx.sink, codes$E0301(), `Type '${name}' expects ${Int_to_str(List_len(def.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(def.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none), __ring_ev_fail);
+          type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(def.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(def.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none), __ring_ev_fail);
         }
         let resolved_params = [];
         if ((List_len(type_args) > 0)) {
@@ -681,7 +681,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
     if (__ring_m29._tag === "some") {
       const alias = __ring_m29._0;
       if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(alias.type_params)))) {
-        type_error(ctx.sink, codes$E0301(), `Type '${name}' expects ${Int_to_str(List_len(alias.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(alias.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none), __ring_ev_fail);
+        type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(alias.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(alias.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none), __ring_ev_fail);
       }
       if ((List_len(alias.type_param_vars) === 0)) {
         return alias.ty;
@@ -713,7 +713,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
     }
     __match_fail(__ring_m29);
   }
-  return type_error(ctx.sink, codes$E0204(), `Unknown type: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown type '${name}'`)), __ring_ev_fail);
+  return type_error(ctx.sink, codes$E0204, `Unknown type: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown type '${name}'`)), __ring_ev_fail);
 }
 
 function bind_pattern(ctx, pattern, expected_type, subst, __ring_ev_fail) {
@@ -771,7 +771,7 @@ function bind_pattern(ctx, pattern, expected_type, subst, __ring_ev_fail) {
         if (__ring_m34._tag === "TupleType") {
           const type_elems = __ring_m34.elements;
           if ((List_len(elements) !== List_len(type_elems))) {
-            type_error(ctx.sink, codes$E0301(), `Tuple pattern has ${Int_to_str(List_len(elements))} elements but type has ${Int_to_str(List_len(type_elems))}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some("tuple arity mismatch")), __ring_ev_fail);
+            type_error(ctx.sink, codes$E0301, `Tuple pattern has ${Int_to_str(List_len(elements))} elements but type has ${Int_to_str(List_len(type_elems))}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some("tuple arity mismatch")), __ring_ev_fail);
           }
           let i = 0;
           while ((i < List_len(elements))) {
@@ -788,7 +788,7 @@ function bind_pattern(ctx, pattern, expected_type, subst, __ring_ev_fail) {
           }
           break __ring_match34;
         }
-        return type_error(ctx.sink, codes$E0301(), `Tuple pattern requires tuple type, got ${types$type_to_string(resolved)}`, span, diagnostics$DiagnosticContext_TypeMismatch("tuple", types$type_to_string(resolved), Option_none), __ring_ev_fail);
+        return type_error(ctx.sink, codes$E0301, `Tuple pattern requires tuple type, got ${types$type_to_string(resolved)}`, span, diagnostics$DiagnosticContext_TypeMismatch("tuple", types$type_to_string(resolved), Option_none), __ring_ev_fail);
         break __ring_match34;
       }
       break __ring_match31;
@@ -818,14 +818,14 @@ function bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, s
                 if (__ring_m39._tag === "EnumType") {
                   const rname = __ring_m39.name;
                   if ((rname !== ename)) {
-                    type_error(ctx.sink, codes$E0301(), `variant '${name}' belongs to enum '${ename}', not '${rname}'`, span, diagnostics$DiagnosticContext_TypeMismatch(rname, ename, Option_none), __ring_ev_fail);
+                    type_error(ctx.sink, codes$E0301, `variant '${name}' belongs to enum '${ename}', not '${rname}'`, span, diagnostics$DiagnosticContext_TypeMismatch(rname, ename, Option_none), __ring_ev_fail);
                   }
                   break __ring_match39;
                 }
                 if (__ring_m39._tag === "TypeVar") {
                   break __ring_match39;
                 }
-                type_error(ctx.sink, codes$E0301(), `cannot destructure type '${types$type_to_string(resolved_expected)}' with constructor pattern '${name}'`, span, diagnostics$DiagnosticContext_PatternError("constructor pattern on non-enum type"), __ring_ev_fail);
+                type_error(ctx.sink, codes$E0301, `cannot destructure type '${types$type_to_string(resolved_expected)}' with constructor pattern '${name}'`, span, diagnostics$DiagnosticContext_PatternError("constructor pattern on non-enum type"), __ring_ev_fail);
                 break __ring_match39;
               }
               const inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected);
@@ -891,7 +891,7 @@ function bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_t
                     if (__ring_m45._tag === "EnumType") {
                       const rname = __ring_m45.name;
                       if ((rname !== ename)) {
-                        type_error(ctx.sink, codes$E0301(), `variant '${name}' belongs to enum '${ename}', not '${rname}'`, span, diagnostics$DiagnosticContext_TypeMismatch(rname, ename, Option_none), __ring_ev_fail);
+                        type_error(ctx.sink, codes$E0301, `variant '${name}' belongs to enum '${ename}', not '${rname}'`, span, diagnostics$DiagnosticContext_TypeMismatch(rname, ename, Option_none), __ring_ev_fail);
                       }
                       break __ring_match45;
                     }
@@ -920,7 +920,7 @@ function bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_t
                         break __ring_match46;
                       }
                       if (__ring_m46._tag === "none") {
-                        type_error(ctx.sink, codes$E0301(), `variant '${name}' has no field '${field.name}'`, field.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown field '${field.name}'`)), __ring_ev_fail);
+                        type_error(ctx.sink, codes$E0301, `variant '${name}' has no field '${field.name}'`, field.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown field '${field.name}'`)), __ring_ev_fail);
                         break __ring_match46;
                       }
                       __match_fail(__ring_m46);
@@ -968,12 +968,12 @@ function resolve_pattern_enum(ctx, variant_name, qualifier, span, __ring_ev_fail
           if (enum_def.variants.some((function(v) { return (v.name === variant_name); }))) {
             return Option_some(q);
           } else {
-            return type_error(ctx.sink, codes$E0201(), `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none), __ring_ev_fail);
+            return type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none), __ring_ev_fail);
           }
           break __ring_match49;
         }
         if (__ring_m49._tag === "none") {
-          return type_error(ctx.sink, codes$E0201(), `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none), __ring_ev_fail);
+          return type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none), __ring_ev_fail);
           break __ring_match49;
         }
         __match_fail(__ring_m49);

@@ -133,7 +133,7 @@ fn emit_struct_decl(var ctx: CodegenCtx, name: Str, fields: List<HStructField>) 
 // ============================================================
 
 fn emit_enum_decl(var ctx: CodegenCtx, name: Str, variants: List<HEnumVariant>) {
-    let tag = ENUM_TAG_FIELD()
+    let tag = ENUM_TAG_FIELD
     for v in variants {
         let js_name = "${qualify(ctx, name)}_${v.name}"
         if v.fields.len() == 0 {

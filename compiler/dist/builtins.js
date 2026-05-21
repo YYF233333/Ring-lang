@@ -33,11 +33,11 @@ function open_row(env) {
 }
 
 function make_list_struct(t) {
-  return types$Type_StructType(types$BUILTIN_LIST(), [t], []);
+  return types$Type_StructType(types$BUILTIN_LIST, [t], []);
 }
 
 function make_set_struct(t) {
-  return types$Type_StructType(types$BUILTIN_SET(), [t], []);
+  return types$Type_StructType(types$BUILTIN_SET, [t], []);
 }
 
 function register_builtins(env) {
@@ -61,52 +61,52 @@ function register_hof_intrinsics(env) {
 }
 
 function register_effects(env) {
-  _Map_insert(env.effects, "io", new env$EffectDef("io", [], [new env$EffectOpDef("read", [types$STR()], types$STR()), new env$EffectOpDef("write", [types$STR(), types$STR()], types$UNIT())], Option_some(env$BuiltInKind_BkIo)));
+  _Map_insert(env.effects, "io", new env$EffectDef("io", [], [new env$EffectOpDef("read", [types$STR], types$STR), new env$EffectOpDef("write", [types$STR, types$STR], types$UNIT)], Option_some(env$BuiltInKind_BkIo)));
   const fail_t_id = env$TypeEnv_fresh_var_id(env);
   const fail_t = types$Type_TypeVar(fail_t_id, Option_none);
-  return _Map_insert(env.effects, "fail", new env$EffectDef("fail", ["E"], [new env$EffectOpDef("raise", [fail_t], types$NEVER())], Option_some(env$BuiltInKind_BkFail)));
+  return _Map_insert(env.effects, "fail", new env$EffectDef("fail", ["E"], [new env$EffectOpDef("raise", [fail_t], types$NEVER)], Option_some(env$BuiltInKind_BkFail)));
 }
 
 function register_cell(env) {
   const cell_t_id = env$TypeEnv_fresh_var_id(env);
   const cell_t = types$Type_TypeVar(cell_t_id, Option_none);
-  _Map_insert(env.structs, types$BUILTIN_CELL(), new env$StructDef(types$BUILTIN_CELL(), ["T"], [cell_t_id], [new types$StructField("value", cell_t, true)]));
+  _Map_insert(env.structs, types$BUILTIN_CELL, new env$StructDef(types$BUILTIN_CELL, ["T"], [cell_t_id], [new types$StructField("value", cell_t, true)]));
   const ctor_t_id = env$TypeEnv_fresh_var_id(env);
   const ctor_t = types$Type_TypeVar(ctor_t_id, Option_none);
-  const ctor_ret = types$Type_StructType(types$BUILTIN_CELL(), [ctor_t], [new types$StructField("value", ctor_t, true)]);
-  env$TypeEnv_bind(env, types$BUILTIN_CELL(), new env$TypeScheme(types$Type_FnType([ctor_t], ctor_ret, types$EMPTY_ROW()), [ctor_t_id], [], Option_none));
+  const ctor_ret = types$Type_StructType(types$BUILTIN_CELL, [ctor_t], [new types$StructField("value", ctor_t, true)]);
+  env$TypeEnv_bind(env, types$BUILTIN_CELL, new env$TypeScheme(types$Type_FnType([ctor_t], ctor_ret, types$EMPTY_ROW), [ctor_t_id], [], Option_none));
   const mut_row = new types$EffectRow([types$Effect_MutEffect], Option_none);
   const m_t_id = env$TypeEnv_fresh_var_id(env);
   const m_t = types$Type_TypeVar(m_t_id, Option_none);
-  const self_type = types$Type_StructType(types$BUILTIN_CELL(), [m_t], [new types$StructField("value", m_t, true)]);
+  const self_type = types$Type_StructType(types$BUILTIN_CELL, [m_t], [new types$StructField("value", m_t, true)]);
   const methods = map_new();
   _Map_insert(methods, "get", new env$TypeScheme(types$Type_FnType([self_type], m_t, mut_row), [m_t_id], [], Option_none));
-  _Map_insert(methods, "set", new env$TypeScheme(types$Type_FnType([self_type, m_t], types$UNIT(), mut_row), [m_t_id], [], Option_none));
-  const update_cb = types$Type_FnType([m_t], m_t, types$EMPTY_ROW());
-  _Map_insert(methods, "update", new env$TypeScheme(types$Type_FnType([self_type, update_cb], types$UNIT(), mut_row), [m_t_id], [], Option_none));
-  return _Map_insert(env.impl_methods, types$BUILTIN_CELL(), methods);
+  _Map_insert(methods, "set", new env$TypeScheme(types$Type_FnType([self_type, m_t], types$UNIT, mut_row), [m_t_id], [], Option_none));
+  const update_cb = types$Type_FnType([m_t], m_t, types$EMPTY_ROW);
+  _Map_insert(methods, "update", new env$TypeScheme(types$Type_FnType([self_type, update_cb], types$UNIT, mut_row), [m_t_id], [], Option_none));
+  return _Map_insert(env.impl_methods, types$BUILTIN_CELL, methods);
 }
 
 function register_option(env) {
   const option_t_id = env$TypeEnv_fresh_var_id(env);
   const option_t = types$Type_TypeVar(option_t_id, Option_none);
-  _Map_insert(env.enums, types$BUILTIN_OPTION(), new env$EnumDef(types$BUILTIN_OPTION(), ["T"], [option_t_id], [new types$EnumVariant("some", [option_t], Option_none), new types$EnumVariant("none", [], Option_none)]));
-  _Map_insert(env.variant_to_enum, "some", types$BUILTIN_OPTION());
-  _Map_insert(env.variant_to_enum, "none", types$BUILTIN_OPTION());
+  _Map_insert(env.enums, types$BUILTIN_OPTION, new env$EnumDef(types$BUILTIN_OPTION, ["T"], [option_t_id], [new types$EnumVariant("some", [option_t], Option_none), new types$EnumVariant("none", [], Option_none)]));
+  _Map_insert(env.variant_to_enum, "some", types$BUILTIN_OPTION);
+  _Map_insert(env.variant_to_enum, "none", types$BUILTIN_OPTION);
   const some_t_id = env$TypeEnv_fresh_var_id(env);
   const some_t = types$Type_TypeVar(some_t_id, Option_none);
-  env$TypeEnv_bind(env, "some", new env$TypeScheme(types$Type_FnType([some_t], types$make_option_type(some_t), types$EMPTY_ROW()), [some_t_id], [], Option_none));
+  env$TypeEnv_bind(env, "some", new env$TypeScheme(types$Type_FnType([some_t], types$make_option_type(some_t), types$EMPTY_ROW), [some_t_id], [], Option_none));
   const none_t_id = env$TypeEnv_fresh_var_id(env);
   const none_t = types$Type_TypeVar(none_t_id, Option_none);
   env$TypeEnv_bind(env, "none", new env$TypeScheme(types$make_option_type(none_t), [none_t_id], [], Option_none));
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION());
+  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   const t_id = env$TypeEnv_fresh_var_id(env);
   const t = types$Type_TypeVar(t_id, Option_none);
   const self_type = types$make_option_type(t);
-  _Map_insert(methods, "is_some", new env$TypeScheme(types$Type_FnType([self_type], types$BOOL(), types$EMPTY_ROW()), [t_id], [], Option_none));
-  _Map_insert(methods, "is_none", new env$TypeScheme(types$Type_FnType([self_type], types$BOOL(), types$EMPTY_ROW()), [t_id], [], Option_none));
-  _Map_insert(methods, "unwrap_or", new env$TypeScheme(types$Type_FnType([self_type, t], t, types$EMPTY_ROW()), [t_id], [], Option_none));
-  _Map_insert(methods, "unwrap", new env$TypeScheme(types$Type_FnType([self_type], t, types$EMPTY_ROW()), [t_id], [], Option_none));
+  _Map_insert(methods, "is_some", new env$TypeScheme(types$Type_FnType([self_type], types$BOOL, types$EMPTY_ROW), [t_id], [], Option_none));
+  _Map_insert(methods, "is_none", new env$TypeScheme(types$Type_FnType([self_type], types$BOOL, types$EMPTY_ROW), [t_id], [], Option_none));
+  _Map_insert(methods, "unwrap_or", new env$TypeScheme(types$Type_FnType([self_type, t], t, types$EMPTY_ROW), [t_id], [], Option_none));
+  _Map_insert(methods, "unwrap", new env$TypeScheme(types$Type_FnType([self_type], t, types$EMPTY_ROW), [t_id], [], Option_none));
   const e_id = env$TypeEnv_fresh_var_id(env);
   const e = types$Type_TypeVar(e_id, Option_none);
   const self_type2 = types$make_option_type(types$Type_TypeVar(t_id, Option_none));
@@ -117,8 +117,8 @@ function register_option(env) {
 function register_eq_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
-  const eq_fn = types$Type_FnType([self_var, self_var], types$BOOL(), types$EMPTY_ROW());
-  const ne_fn = types$Type_FnType([self_var, self_var], types$BOOL(), types$EMPTY_ROW());
+  const eq_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
+  const ne_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
   _Map_insert(env.traits, "Eq", new env$TraitDef("Eq", [], [self_var_id], [new env$TraitMethodDef("eq", eq_fn, false), new env$TraitMethodDef("ne", ne_fn, true)]));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
     List_push(env.trait_impls, new env$ImplEntry("Eq", prim, [], ["eq", "ne"]));
@@ -129,17 +129,17 @@ function register_option_eq(env) {
   const t_id = env$TypeEnv_fresh_var_id(env);
   const t = types$Type_TypeVar(t_id, Option_none);
   const opt = types$make_option_type(t);
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION());
+  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   const eq_bounds = [new env$SchemeBound(t_id, "Eq")];
-  _Map_insert(methods, "eq", new env$TypeScheme(types$Type_FnType([opt, opt], types$BOOL(), types$EMPTY_ROW()), [t_id], eq_bounds, Option_none));
-  _Map_insert(methods, "ne", new env$TypeScheme(types$Type_FnType([opt, opt], types$BOOL(), types$EMPTY_ROW()), [t_id], [new env$SchemeBound(t_id, "Eq")], Option_none));
-  return List_push(env.trait_impls, new env$ImplEntry("Eq", types$BUILTIN_OPTION(), ["T"], ["eq", "ne"]));
+  _Map_insert(methods, "eq", new env$TypeScheme(types$Type_FnType([opt, opt], types$BOOL, types$EMPTY_ROW), [t_id], eq_bounds, Option_none));
+  _Map_insert(methods, "ne", new env$TypeScheme(types$Type_FnType([opt, opt], types$BOOL, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Eq")], Option_none));
+  return List_push(env.trait_impls, new env$ImplEntry("Eq", types$BUILTIN_OPTION, ["T"], ["eq", "ne"]));
 }
 
 function register_clone_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
-  const clone_fn = types$Type_FnType([self_var], self_var, types$EMPTY_ROW());
+  const clone_fn = types$Type_FnType([self_var], self_var, types$EMPTY_ROW);
   _Map_insert(env.traits, "Clone", new env$TraitDef("Clone", [], [self_var_id], [new env$TraitMethodDef("clone", clone_fn, false)]));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
     List_push(env.trait_impls, new env$ImplEntry("Clone", prim, [], ["clone"]));
@@ -153,15 +153,15 @@ function register_option_clone(env) {
   const t_id = env$TypeEnv_fresh_var_id(env);
   const t = types$Type_TypeVar(t_id, Option_none);
   const opt = types$make_option_type(t);
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION());
-  _Map_insert(methods, "clone", new env$TypeScheme(types$Type_FnType([opt], opt, types$EMPTY_ROW()), [t_id], [new env$SchemeBound(t_id, "Clone")], Option_none));
-  return List_push(env.trait_impls, new env$ImplEntry("Clone", types$BUILTIN_OPTION(), ["T"], ["clone"]));
+  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  _Map_insert(methods, "clone", new env$TypeScheme(types$Type_FnType([opt], opt, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Clone")], Option_none));
+  return List_push(env.trait_impls, new env$ImplEntry("Clone", types$BUILTIN_OPTION, ["T"], ["clone"]));
 }
 
 function register_ord_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
-  const cmp_fn = types$Type_FnType([self_var, self_var], types$INT(), types$EMPTY_ROW());
+  const cmp_fn = types$Type_FnType([self_var, self_var], types$INT, types$EMPTY_ROW);
   _Map_insert(env.traits, "Ord", new env$TraitDef("Ord", [], [self_var_id], [new env$TraitMethodDef("cmp", cmp_fn, false)]));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
     List_push(env.trait_impls, new env$ImplEntry("Ord", prim, [], ["cmp"]));
@@ -171,47 +171,47 @@ function register_ord_trait(env) {
 function register_debug_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
-  const debug_fn = types$Type_FnType([self_var], types$STR(), types$EMPTY_ROW());
+  const debug_fn = types$Type_FnType([self_var], types$STR, types$EMPTY_ROW);
   _Map_insert(env.traits, "Debug", new env$TraitDef("Debug", [], [self_var_id], [new env$TraitMethodDef("debug", debug_fn, false)]));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
     List_push(env.trait_impls, new env$ImplEntry("Debug", prim, [], ["debug"]));
   }
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
-  const list_self = types$Type_StructType(types$BUILTIN_LIST(), [t], []);
-  const list_debug_fn = types$Type_FnType([list_self], types$STR(), types$EMPTY_ROW());
-  const list_methods = get_or_create_methods(env, types$BUILTIN_LIST());
+  const list_self = types$Type_StructType(types$BUILTIN_LIST, [t], []);
+  const list_debug_fn = types$Type_FnType([list_self], types$STR, types$EMPTY_ROW);
+  const list_methods = get_or_create_methods(env, types$BUILTIN_LIST);
   _Map_insert(list_methods, "debug", new env$TypeScheme(list_debug_fn, [t_id], [new env$SchemeBound(t_id, "Debug")], Option_none));
-  List_push(env.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_LIST(), ["T"], ["debug"]));
+  List_push(env.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_LIST, ["T"], ["debug"]));
   const k_id = env$TypeEnv_fresh_var_id(env);
   const k = types$Type_TypeVar(k_id, Option_none);
   const v_id = env$TypeEnv_fresh_var_id(env);
   const v = types$Type_TypeVar(v_id, Option_none);
   const map_self = types$make_map_type(k, v);
-  const map_debug_fn = types$Type_FnType([map_self], types$STR(), types$EMPTY_ROW());
-  const map_methods = get_or_create_methods(env, types$BUILTIN_MAP());
+  const map_debug_fn = types$Type_FnType([map_self], types$STR, types$EMPTY_ROW);
+  const map_methods = get_or_create_methods(env, types$BUILTIN_MAP);
   _Map_insert(map_methods, "debug", new env$TypeScheme(map_debug_fn, [k_id, v_id], [], Option_none));
-  List_push(env.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_MAP(), ["K", "V"], ["debug"]));
+  List_push(env.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_MAP, ["K", "V"], ["debug"]));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
-  const set_self = types$Type_StructType(types$BUILTIN_SET(), [t], []);
-  const set_debug_fn = types$Type_FnType([set_self], types$STR(), types$EMPTY_ROW());
-  const set_methods = get_or_create_methods(env, types$BUILTIN_SET());
+  const set_self = types$Type_StructType(types$BUILTIN_SET, [t], []);
+  const set_debug_fn = types$Type_FnType([set_self], types$STR, types$EMPTY_ROW);
+  const set_methods = get_or_create_methods(env, types$BUILTIN_SET);
   _Map_insert(set_methods, "debug", new env$TypeScheme(set_debug_fn, [t_id], [], Option_none));
-  return List_push(env.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_SET(), ["T"], ["debug"]));
+  return List_push(env.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_SET, ["T"], ["debug"]));
 }
 
 function register_option_debug(env) {
   const t_id = env$TypeEnv_fresh_var_id(env);
   const t = types$Type_TypeVar(t_id, Option_none);
   const opt = types$make_option_type(t);
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION());
-  _Map_insert(methods, "debug", new env$TypeScheme(types$Type_FnType([opt], types$STR(), types$EMPTY_ROW()), [t_id], [new env$SchemeBound(t_id, "Debug")], Option_none));
-  return List_push(env.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_OPTION(), ["T"], ["debug"]));
+  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  _Map_insert(methods, "debug", new env$TypeScheme(types$Type_FnType([opt], types$STR, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Debug")], Option_none));
+  return List_push(env.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_OPTION, ["T"], ["debug"]));
 }
 
 function register_list_hof(env) {
-  const methods = get_or_create_methods(env, types$BUILTIN_LIST());
+  const methods = get_or_create_methods(env, types$BUILTIN_LIST);
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
   let u_id = env$TypeEnv_fresh_var_id(env);
@@ -222,7 +222,7 @@ function register_list_hof(env) {
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([t], types$BOOL(), orow.eff);
+  cb = types$Type_FnType([t], types$BOOL, orow.eff);
   _Map_insert(methods, "filter", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], make_list_struct(t), orow.eff), [t_id, orow.tail_id], [], Option_none));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
@@ -241,32 +241,32 @@ function register_list_hof(env) {
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([t], types$BOOL(), orow.eff);
-  _Map_insert(methods, "any", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$BOOL(), orow.eff), [t_id, orow.tail_id], [], Option_none));
+  cb = types$Type_FnType([t], types$BOOL, orow.eff);
+  _Map_insert(methods, "any", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$BOOL, orow.eff), [t_id, orow.tail_id], [], Option_none));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([t], types$BOOL(), orow.eff);
-  _Map_insert(methods, "all", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$BOOL(), orow.eff), [t_id, orow.tail_id], [], Option_none));
+  cb = types$Type_FnType([t], types$BOOL, orow.eff);
+  _Map_insert(methods, "all", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$BOOL, orow.eff), [t_id, orow.tail_id], [], Option_none));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([t], types$BOOL(), orow.eff);
+  cb = types$Type_FnType([t], types$BOOL, orow.eff);
   _Map_insert(methods, "find", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$make_option_type(t), orow.eff), [t_id, orow.tail_id], [], Option_none));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([t], types$BOOL(), orow.eff);
-  _Map_insert(methods, "find_index", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$make_option_type(types$INT()), orow.eff), [t_id, orow.tail_id], [], Option_none));
+  cb = types$Type_FnType([t], types$BOOL, orow.eff);
+  _Map_insert(methods, "find_index", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$make_option_type(types$INT), orow.eff), [t_id, orow.tail_id], [], Option_none));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([t, t], types$INT(), orow.eff);
-  return _Map_insert(methods, "sort_by", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$UNIT(), orow.eff), [t_id, orow.tail_id], [], Option_none));
+  cb = types$Type_FnType([t, t], types$INT, orow.eff);
+  return _Map_insert(methods, "sort_by", new env$TypeScheme(types$Type_FnType([make_list_struct(t), cb], types$UNIT, orow.eff), [t_id, orow.tail_id], [], Option_none));
 }
 
 function register_map_hof(env) {
-  const methods = get_or_create_methods(env, types$BUILTIN_MAP());
+  const methods = get_or_create_methods(env, types$BUILTIN_MAP);
   let k_id = env$TypeEnv_fresh_var_id(env);
   let k = types$Type_TypeVar(k_id, Option_none);
   let v_id = env$TypeEnv_fresh_var_id(env);
@@ -281,7 +281,7 @@ function register_map_hof(env) {
   v_id = env$TypeEnv_fresh_var_id(env);
   v = types$Type_TypeVar(v_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([k, v], types$BOOL(), orow.eff);
+  cb = types$Type_FnType([k, v], types$BOOL, orow.eff);
   _Map_insert(methods, "filter", new env$TypeScheme(types$Type_FnType([types$make_map_type(k, v), cb], types$make_map_type(k, v), orow.eff), [k_id, v_id, orow.tail_id], [], Option_none));
   k_id = env$TypeEnv_fresh_var_id(env);
   k = types$Type_TypeVar(k_id, Option_none);
@@ -297,16 +297,16 @@ function register_map_hof(env) {
   v_id = env$TypeEnv_fresh_var_id(env);
   v = types$Type_TypeVar(v_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([k, v], types$BOOL(), orow.eff);
-  return _Map_insert(methods, "any", new env$TypeScheme(types$Type_FnType([types$make_map_type(k, v), cb], types$BOOL(), orow.eff), [k_id, v_id, orow.tail_id], [], Option_none));
+  cb = types$Type_FnType([k, v], types$BOOL, orow.eff);
+  return _Map_insert(methods, "any", new env$TypeScheme(types$Type_FnType([types$make_map_type(k, v), cb], types$BOOL, orow.eff), [k_id, v_id, orow.tail_id], [], Option_none));
 }
 
 function register_set_hof(env) {
-  const methods = get_or_create_methods(env, types$BUILTIN_SET());
+  const methods = get_or_create_methods(env, types$BUILTIN_SET);
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
   let orow = open_row(env);
-  let cb = types$Type_FnType([t], types$BOOL(), orow.eff);
+  let cb = types$Type_FnType([t], types$BOOL, orow.eff);
   _Map_insert(methods, "filter", new env$TypeScheme(types$Type_FnType([make_set_struct(t), cb], make_set_struct(t), orow.eff), [t_id, orow.tail_id], [], Option_none));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
@@ -318,17 +318,17 @@ function register_set_hof(env) {
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([t], types$BOOL(), orow.eff);
-  _Map_insert(methods, "any", new env$TypeScheme(types$Type_FnType([make_set_struct(t), cb], types$BOOL(), orow.eff), [t_id, orow.tail_id], [], Option_none));
+  cb = types$Type_FnType([t], types$BOOL, orow.eff);
+  _Map_insert(methods, "any", new env$TypeScheme(types$Type_FnType([make_set_struct(t), cb], types$BOOL, orow.eff), [t_id, orow.tail_id], [], Option_none));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   orow = open_row(env);
-  cb = types$Type_FnType([t], types$BOOL(), orow.eff);
-  return _Map_insert(methods, "all", new env$TypeScheme(types$Type_FnType([make_set_struct(t), cb], types$BOOL(), orow.eff), [t_id, orow.tail_id], [], Option_none));
+  cb = types$Type_FnType([t], types$BOOL, orow.eff);
+  return _Map_insert(methods, "all", new env$TypeScheme(types$Type_FnType([make_set_struct(t), cb], types$BOOL, orow.eff), [t_id, orow.tail_id], [], Option_none));
 }
 
 function register_option_hof(env) {
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION());
+  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
   let u_id = env$TypeEnv_fresh_var_id(env);

@@ -260,19 +260,19 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
       break __ring_match7;
     }
   }
-  register_builtin_methods(ctx, hir$BUILTIN_CELL(), builtin_methods$CELL_METHODS());
-  register_builtin_methods(ctx, hir$BUILTIN_STR(), builtin_methods$STR_METHODS());
-  register_builtin_methods(ctx, hir$BUILTIN_LIST(), builtin_methods$LIST_NON_HOF_METHODS());
-  register_builtin_methods(ctx, hir$BUILTIN_MAP(), builtin_methods$MAP_NON_HOF_METHODS());
-  register_builtin_methods(ctx, hir$BUILTIN_SET(), builtin_methods$SET_NON_HOF_METHODS());
-  register_builtin_methods(ctx, hir$BUILTIN_INT(), builtin_methods$INT_METHODS());
-  register_builtin_methods(ctx, hir$BUILTIN_FLOAT(), builtin_methods$FLOAT_METHODS());
-  register_builtin_methods(ctx, hir$BUILTIN_OPTION(), builtin_methods$OPTION_NON_HOF_METHODS());
-  for (const prim of [hir$BUILTIN_INT(), hir$BUILTIN_FLOAT(), hir$BUILTIN_STR(), hir$BUILTIN_BOOL()]) {
+  register_builtin_methods(ctx, hir$BUILTIN_CELL, builtin_methods$CELL_METHODS);
+  register_builtin_methods(ctx, hir$BUILTIN_STR, builtin_methods$STR_METHODS);
+  register_builtin_methods(ctx, hir$BUILTIN_LIST, builtin_methods$LIST_NON_HOF_METHODS);
+  register_builtin_methods(ctx, hir$BUILTIN_MAP, builtin_methods$MAP_NON_HOF_METHODS);
+  register_builtin_methods(ctx, hir$BUILTIN_SET, builtin_methods$SET_NON_HOF_METHODS);
+  register_builtin_methods(ctx, hir$BUILTIN_INT, builtin_methods$INT_METHODS);
+  register_builtin_methods(ctx, hir$BUILTIN_FLOAT, builtin_methods$FLOAT_METHODS);
+  register_builtin_methods(ctx, hir$BUILTIN_OPTION, builtin_methods$OPTION_NON_HOF_METHODS);
+  for (const prim of [hir$BUILTIN_INT, hir$BUILTIN_FLOAT, hir$BUILTIN_STR, hir$BUILTIN_BOOL]) {
     const key = `${codegen_ctx$safe_ident(prim)}.debug`;
     _Map_insert(ctx.impl_methods, key, Option_some("Debug"));
   }
-  for (const coll of [hir$BUILTIN_LIST(), hir$BUILTIN_MAP(), hir$BUILTIN_SET(), hir$BUILTIN_OPTION()]) {
+  for (const coll of [hir$BUILTIN_LIST, hir$BUILTIN_MAP, hir$BUILTIN_SET, hir$BUILTIN_OPTION]) {
     const key = `${codegen_ctx$safe_ident(coll)}.debug`;
     _Map_insert(ctx.impl_methods, key, Option_some("Debug"));
   }

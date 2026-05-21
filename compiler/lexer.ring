@@ -280,7 +280,7 @@ impl Lexer {
         }
         let end = self.current_position()
         let span = Span { file: self.file, start: start, end: end }
-        self.sink.report(make_diag(E0102(), Severity::SevError, "Unterminated string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
+        self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
         self.make_token(TokenKind::TkError, value, start, end)
     }
 
@@ -311,7 +311,7 @@ impl Lexer {
             self.advance()
         }
         let span = Span { file: self.file, start: start, end: self.current_position() }
-        self.sink.report(make_diag(E0102(), Severity::SevError, "Unterminated raw string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
+        self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated raw string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
         let end = self.current_position()
         self.make_token(TokenKind::TkError, value, start, end)
     }
@@ -433,18 +433,18 @@ impl Lexer {
         if ch == "&" {
             if self.peek() == "&" { self.advance(); return self.make_token(TokenKind::TkAmpAmp, "&&", start, self.current_position()) }
             let tok = self.make_token(TokenKind::TkError, "&", start, self.current_position())
-            self.sink.report(make_diag(E0101(), Severity::SevError, "Unexpected character '&' (use '&&' for logical AND)", tok.span, DiagnosticContext::ParseError { token: "&", expected: none }))
+            self.sink.report(make_diag(E0101, Severity::SevError, "Unexpected character '&' (use '&&' for logical AND)", tok.span, DiagnosticContext::ParseError { token: "&", expected: none }))
             return tok
         }
         if ch == "|" {
             if self.peek() == "|" { self.advance(); return self.make_token(TokenKind::TkPipePipe, "||", start, self.current_position()) }
             let tok = self.make_token(TokenKind::TkError, "|", start, self.current_position())
-            self.sink.report(make_diag(E0101(), Severity::SevError, "Unexpected character '|' (use '||' for logical OR)", tok.span, DiagnosticContext::ParseError { token: "|", expected: none }))
+            self.sink.report(make_diag(E0101, Severity::SevError, "Unexpected character '|' (use '||' for logical OR)", tok.span, DiagnosticContext::ParseError { token: "|", expected: none }))
             return tok
         }
 
         let tok = self.make_token(TokenKind::TkError, ch, start, self.current_position())
-        self.sink.report(make_diag(E0101(), Severity::SevError, "Unexpected character '${ch}'", tok.span, DiagnosticContext::ParseError { token: ch, expected: none }))
+        self.sink.report(make_diag(E0101, Severity::SevError, "Unexpected character '${ch}'", tok.span, DiagnosticContext::ParseError { token: ch, expected: none }))
         tok
     }
 

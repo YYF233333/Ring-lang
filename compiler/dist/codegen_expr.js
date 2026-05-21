@@ -595,7 +595,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
         const __ring_m18 = recv_type;
         if (__ring_m18._tag === "StructType") {
           const name = __ring_m18.name;
-          if ((name === hir$BUILTIN_LIST())) {
+          if ((name === hir$BUILTIN_LIST)) {
             __ring_match19: {
               const __ring_m19 = codegen_ctx$LIST_HOF_JS_METHOD(method);
               if (__ring_m19._tag === "some") {
@@ -637,7 +637,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
               return `${r}.sort(${cb})`;
             }
           }
-          if ((name === hir$BUILTIN_MAP())) {
+          if ((name === hir$BUILTIN_MAP)) {
             if ((method === "map_values")) {
               const r = gen_expr(ctx, receiver);
               const cb = gen_lambda_capture_evidence(ctx, args, 0);
@@ -665,7 +665,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
               return `((__m, __f) => { for (const [__k, __v] of __m) if (__f(__k, __v)) return true; return false; })(${r}, ${cb})`;
             }
           }
-          if ((name === hir$BUILTIN_SET())) {
+          if ((name === hir$BUILTIN_SET)) {
             if ((method === "filter")) {
               const r = gen_expr(ctx, receiver);
               const cb = gen_lambda_capture_evidence(ctx, args, 0);
@@ -697,7 +697,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
         }
         if (__ring_m18._tag === "EnumType") {
           const name = __ring_m18.name;
-          if ((name === hir$BUILTIN_OPTION())) {
+          if ((name === hir$BUILTIN_OPTION)) {
             if ((method === "map")) {
               const r = gen_expr(ctx, receiver);
               const cb = gen_lambda_capture_evidence(ctx, args, 0);
@@ -722,9 +722,9 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
   __match_fail(__ring_m);
 })();
               const ev = hir$evidence_param_name("fail");
-              const tag_f = hir$ENUM_TAG_FIELD();
-              const some_t = hir$OPTION_SOME_TAG();
-              const pay_f = hir$OPTION_PAYLOAD_FIELD();
+              const tag_f = hir$ENUM_TAG_FIELD;
+              const some_t = hir$OPTION_SOME_TAG;
+              const pay_f = hir$OPTION_PAYLOAD_FIELD;
               return `((v) => v.${tag_f} === "${some_t}" ? v.${pay_f} : ${ev}.raise(${err_arg}))(${r})`;
             }
           }
@@ -1157,7 +1157,7 @@ function gen_match(ctx, scrutinee, arms) {
     }
   }
   if ((has_catchall === false)) {
-    const mf = hir$RUNTIME_MATCH_FAIL();
+    const mf = hir$RUNTIME_MATCH_FAIL;
     List_push(parts, `  ${mf}(__ring_m);`);
   }
   List_push(parts, "})()");
@@ -1351,7 +1351,7 @@ function gen_try_catch(ctx, body, arms) {
   const body_js = gen_expr(ctx, body);
   ctx.in_try_fail = saved_in_try;
   const ev = hir$evidence_param_name("fail");
-  const ea = hir$RUNTIME_EFFECT_ABORT();
+  const ea = hir$RUNTIME_EFFECT_ABORT;
   const q = "\"";
   let arm_js = [];
   let has_catch_all = false;
@@ -1607,7 +1607,7 @@ function gen_handle(ctx, body, handlers) {
       const is_abort = ((effect_name === "fail") && (h.op_name === "raise"));
       if (is_abort) {
         has_abort = true;
-        const ea = hir$RUNTIME_EFFECT_ABORT();
+        const ea = hir$RUNTIME_EFFECT_ABORT;
         let ep = [""];
         List_clear(ep);
         List_push(ep, h.op_name);
@@ -1650,7 +1650,7 @@ function gen_handle(ctx, body, handlers) {
   const ev_args = List_join(ev_param_names, ", ");
   const body_code = gen_handle_body(ctx, body, ev_args);
   const decls = List_join(ev_decls, " ");
-  const ea = hir$RUNTIME_EFFECT_ABORT();
+  const ea = hir$RUNTIME_EFFECT_ABORT;
   if (has_abort) {
     let p = [""];
     List_clear(p);

@@ -19,39 +19,39 @@ extern fn __ring_raise_fail(msg: Str) -> Never
 // Operator Precedence
 // ============================================================
 
-pub fn PREC_NONE() -> Int { 0 }
-pub fn PREC_CATCH() -> Int { 1 }
-pub fn PREC_LOGIC_OR() -> Int { 2 }
-pub fn PREC_LOGIC_AND() -> Int { 3 }
-pub fn PREC_EQUALITY() -> Int { 4 }
-pub fn PREC_COMPARE() -> Int { 5 }
-pub fn PREC_RANGE() -> Int { 6 }
-pub fn PREC_ADD_SUB() -> Int { 7 }
-pub fn PREC_MUL_DIV() -> Int { 8 }
-pub fn PREC_UNARY() -> Int { 9 }
-pub fn PREC_POSTFIX() -> Int { 10 }
+pub const PREC_NONE: Int = 0
+pub const PREC_CATCH: Int = 1
+pub const PREC_LOGIC_OR: Int = 2
+pub const PREC_LOGIC_AND: Int = 3
+pub const PREC_EQUALITY: Int = 4
+pub const PREC_COMPARE: Int = 5
+pub const PREC_RANGE: Int = 6
+pub const PREC_ADD_SUB: Int = 7
+pub const PREC_MUL_DIV: Int = 8
+pub const PREC_UNARY: Int = 9
+pub const PREC_POSTFIX: Int = 10
 
 pub fn infix_precedence(kind: TokenKind) -> Int {
     match kind {
-        TkCatch => PREC_CATCH(),
-        TkPipePipe => PREC_LOGIC_OR(),
-        TkAmpAmp => PREC_LOGIC_AND(),
-        TkEqEq => PREC_EQUALITY(),
-        TkBangEq => PREC_EQUALITY(),
-        TkLt => PREC_COMPARE(),
-        TkGt => PREC_COMPARE(),
-        TkLtEq => PREC_COMPARE(),
-        TkGtEq => PREC_COMPARE(),
-        TkDotDot => PREC_RANGE(),
-        TkDotDotEq => PREC_RANGE(),
-        TkPlus => PREC_ADD_SUB(),
-        TkMinus => PREC_ADD_SUB(),
-        TkStar => PREC_MUL_DIV(),
-        TkSlash => PREC_MUL_DIV(),
-        TkPercent => PREC_MUL_DIV(),
-        TkDot => PREC_POSTFIX(),
-        TkLParen => PREC_POSTFIX(),
-        _ => PREC_NONE()
+        TkCatch => PREC_CATCH,
+        TkPipePipe => PREC_LOGIC_OR,
+        TkAmpAmp => PREC_LOGIC_AND,
+        TkEqEq => PREC_EQUALITY,
+        TkBangEq => PREC_EQUALITY,
+        TkLt => PREC_COMPARE,
+        TkGt => PREC_COMPARE,
+        TkLtEq => PREC_COMPARE,
+        TkGtEq => PREC_COMPARE,
+        TkDotDot => PREC_RANGE,
+        TkDotDotEq => PREC_RANGE,
+        TkPlus => PREC_ADD_SUB,
+        TkMinus => PREC_ADD_SUB,
+        TkStar => PREC_MUL_DIV,
+        TkSlash => PREC_MUL_DIV,
+        TkPercent => PREC_MUL_DIV,
+        TkDot => PREC_POSTFIX,
+        TkLParen => PREC_POSTFIX,
+        _ => PREC_NONE
     }
 }
 
@@ -139,7 +139,7 @@ pub struct Parser {
     pub error_count: Int
 }
 
-fn max_errors() -> Int { 20 }
+const MAX_ERRORS: Int = 20
 
 pub fn new_parser(tokens: List<Token>, file: Str, sink: CollectingSink) -> Parser {
     Parser { tokens: tokens, pos: 0, file: file, sink: sink, error_count: 0 }
@@ -230,14 +230,14 @@ impl Parser {
             DiagnosticContext::ParseError { token: tok.value, expected: none }
         ))
         self.error_count = self.error_count + 1
-        if self.error_count >= max_errors() {
+        if (self.error_count >= MAX_ERRORS) {
             panic("Too many parse errors")
         }
     }
 
     fn error(var self, msg: Str) -> Never {
         let tok = self.peek()
-        self.report_error(E0103(), msg, some(tok.span))
+        self.report_error(E0103, msg, some(tok.span))
         __ring_raise_fail(msg)
     }
 
@@ -256,7 +256,7 @@ impl Parser {
 
             if self.check(TokenKind::TkUse) {
                 if decls_started {
-                    self.report_error(E0706(), "Use declaration must appear before other declarations", some(self.peek().span))
+                    self.report_error(E0706, "Use declaration must appear before other declarations", some(self.peek().span))
                 }
                 let use_result: UseDecl? = some(self.parse_use_decl(false)) catch { _ => none }
                 match use_result {
@@ -278,7 +278,7 @@ impl Parser {
                 self.advance()
                 if self.check(TokenKind::TkUse) {
                     if decls_started {
-                        self.report_error(E0706(), "Use declaration must appear before other declarations", some(self.tokens.get(save_pos).unwrap_or(self.peek()).span))
+                        self.report_error(E0706, "Use declaration must appear before other declarations", some(self.tokens.get(save_pos).unwrap_or(self.peek()).span))
                     }
                     let pub_use_result: UseDecl? = some(self.parse_use_decl(true)) catch { _ => none }
                     match pub_use_result {
@@ -620,11 +620,11 @@ impl Parser {
             TkConst => some(self.parse_const_decl(is_pub)),
             TkIdent => {
                 if tok.value == "type" { return some(self.parse_type_alias_decl(is_pub)) }
-                self.report_error(E0101(), "Expected declaration, got '${tok.value}' (${token_kind_value(tok.kind)})", some(tok.span))
+                self.report_error(E0101, "Expected declaration, got '${tok.value}' (${token_kind_value(tok.kind)})", some(tok.span))
                 none
             },
             _ => {
-                self.report_error(E0101(), "Expected declaration, got '${tok.value}' (${token_kind_value(tok.kind)})", some(tok.span))
+                self.report_error(E0101, "Expected declaration, got '${tok.value}' (${token_kind_value(tok.kind)})", some(tok.span))
                 none
             }
         }
@@ -808,7 +808,7 @@ impl Parser {
                 if self.check(TokenKind::TkRParen) {
                     // Reject empty parentheses — use bare name instead
                     let rp_span = self.peek().span
-                    self.report_error(E0104(), "empty parentheses on enum variant '${v_name}' — use bare name instead", some(rp_span))
+                    self.report_error(E0104, "empty parentheses on enum variant '${v_name}' — use bare name instead", some(rp_span))
                     let _rp = self.advance()  // consume ')'
                 } else {
                     v_fields.push(self.parse_type_expr())
@@ -955,7 +955,7 @@ impl Parser {
     // ============================================================
 
     pub fn parse_expr(var self) -> Expr {
-        self.parse_expr_bp(PREC_NONE())
+        self.parse_expr_bp(PREC_NONE)
     }
 
     pub fn parse_expr_bp(var self, min_prec: Int) -> Expr {
@@ -985,7 +985,7 @@ impl Parser {
                 left = Expr::Range { start: left, end: right, inclusive: inclusive, span: span }
                 last_was_comparison = false
             } else {
-                let is_comparison = prec == PREC_EQUALITY() || prec == PREC_COMPARE()
+                let is_comparison = prec == PREC_EQUALITY || prec == PREC_COMPARE
                 if is_comparison && last_was_comparison {
                     self.error("Comparison operators are non-associative: cannot chain '${tok.value}' after another comparison")
                 }
@@ -1006,7 +1006,7 @@ impl Parser {
 
         if self.check(TokenKind::TkMinus) || self.check(TokenKind::TkBang) {
             self.advance()
-            let operand = self.parse_expr_bp(PREC_UNARY())
+            let operand = self.parse_expr_bp(PREC_UNARY)
             let end = self.current_span_start()
             return Expr::UnaryOp { op: str_to_unaryop(tok.value), operand: operand, span: self.make_span(start, end) }
         }

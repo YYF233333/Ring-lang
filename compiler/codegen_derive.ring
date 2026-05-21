@@ -59,13 +59,13 @@ fn emit_derived_eq(var ctx: CodegenCtx, impl_: DerivedImpl) {
         },
         TypeKind::EnumKind => match impl_.enum_variants {
             some(variants) => {
-                emit(ctx, "if (self.${ENUM_TAG_FIELD()} !== other.${ENUM_TAG_FIELD()}) return false;")
+                emit(ctx, "if (self.${ENUM_TAG_FIELD} !== other.${ENUM_TAG_FIELD}) return false;")
                 var has_fields = false
                 for v in variants {
                     if v.fields.len() > 0 { has_fields = true }
                 }
                 if has_fields {
-                    emit(ctx, "switch (self.${ENUM_TAG_FIELD()}) {")
+                    emit(ctx, "switch (self.${ENUM_TAG_FIELD}) {")
                     push_indent(ctx)
                     for v in variants {
                         if v.fields.len() == 0 {
@@ -144,7 +144,7 @@ fn emit_derived_clone(var ctx: CodegenCtx, impl_: DerivedImpl) {
         },
         TypeKind::EnumKind => match impl_.enum_variants {
             some(variants) => {
-                emit(ctx, "switch (self.${ENUM_TAG_FIELD()}) {")
+                emit(ctx, "switch (self.${ENUM_TAG_FIELD}) {")
                 push_indent(ctx)
                 for v in variants {
                     if v.fields.len() == 0 {
@@ -252,13 +252,13 @@ fn emit_derived_ord(var ctx: CodegenCtx, impl_: DerivedImpl) {
         },
         TypeKind::EnumKind => match impl_.enum_variants {
             some(variants) => {
-                emit(ctx, "var t1 = __${name}_tag_order[self.${ENUM_TAG_FIELD()}];")
-                emit(ctx, "var t2 = __${name}_tag_order[other.${ENUM_TAG_FIELD()}];")
+                emit(ctx, "var t1 = __${name}_tag_order[self.${ENUM_TAG_FIELD}];")
+                emit(ctx, "var t2 = __${name}_tag_order[other.${ENUM_TAG_FIELD}];")
                 emit(ctx, "if (t1 !== t2) return (t1 < t2 ? -1 : 1);")
                 var has_fields = false
                 for v in variants { if v.fields.len() > 0 { has_fields = true } }
                 if has_fields {
-                    emit(ctx, "switch (self.${ENUM_TAG_FIELD()}) {")
+                    emit(ctx, "switch (self.${ENUM_TAG_FIELD}) {")
                     push_indent(ctx)
                     for v in variants {
                         if v.fields.len() == 0 { } else {
@@ -363,7 +363,7 @@ fn emit_derived_debug(var ctx: CodegenCtx, impl_: DerivedImpl) {
         },
         TypeKind::EnumKind => match impl_.enum_variants {
             some(variants) => {
-                emit(ctx, "switch (self.${ENUM_TAG_FIELD()}) {")
+                emit(ctx, "switch (self.${ENUM_TAG_FIELD}) {")
                 push_indent(ctx)
                 for v in variants {
                     if v.fields.len() == 0 {
@@ -388,7 +388,7 @@ fn emit_derived_debug(var ctx: CodegenCtx, impl_: DerivedImpl) {
                         }
                     }
                 }
-                emit(ctx, "default: return self.${ENUM_TAG_FIELD()};")
+                emit(ctx, "default: return self.${ENUM_TAG_FIELD};")
                 pop_indent(ctx)
                 emit(ctx, "}")
             },

@@ -196,7 +196,7 @@ pub fn RUNTIME_CODE() -> Str {
     lines.join("\n")
 }
 
-pub fn RUNTIME_EXPORT_NAMES() -> List<Str> {
+pub const RUNTIME_EXPORT_NAMES: List<Str> =
     ["__EffectAbort", "__ring_raise_fail", "Cell", "Cell_get", "Cell_set", "Cell_update",
      "__match_fail", "print", "assert", "panic", "exit", "json_stringify",
      "Option_some", "Option_none",
@@ -226,10 +226,9 @@ pub fn RUNTIME_EXPORT_NAMES() -> List<Str> {
      "__Int_Ord", "__Float_Ord", "__Str_Ord", "__Bool_Ord",
      "__Int_Debug", "__Float_Debug", "__Str_Debug", "__Bool_Debug",
      "__Option_Debug", "__List_Debug", "__Map_Debug", "__Set_Debug"]
-}
 
 pub fn runtime_esm_code() -> Str {
-    let names = RUNTIME_EXPORT_NAMES()
+    let names = RUNTIME_EXPORT_NAMES
     let joined = names.join(", ")
     let export_line = "\nexport { ${joined} };\n"
     let code = RUNTIME_CODE()

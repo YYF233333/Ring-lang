@@ -89,7 +89,7 @@ function emit_derived_eq(ctx, impl_) {
         const __ring_m2 = impl_.enum_variants;
         if (__ring_m2._tag === "some") {
           const variants = __ring_m2._0;
-          codegen_ctx$emit(ctx, `if (self.${hir$ENUM_TAG_FIELD()} !== other.${hir$ENUM_TAG_FIELD()}) return false;`);
+          codegen_ctx$emit(ctx, `if (self.${hir$ENUM_TAG_FIELD} !== other.${hir$ENUM_TAG_FIELD}) return false;`);
           let has_fields = false;
           for (const v of variants) {
             if ((List_len(v.fields) > 0)) {
@@ -97,7 +97,7 @@ function emit_derived_eq(ctx, impl_) {
             }
           }
           if (has_fields) {
-            codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD()}) {`);
+            codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD}) {`);
             codegen_ctx$push_indent(ctx);
             for (const v of variants) {
               if ((List_len(v.fields) === 0)) {
@@ -203,7 +203,7 @@ function emit_derived_clone(ctx, impl_) {
         const __ring_m6 = impl_.enum_variants;
         if (__ring_m6._tag === "some") {
           const variants = __ring_m6._0;
-          codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD()}) {`);
+          codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD}) {`);
           codegen_ctx$push_indent(ctx);
           for (const v of variants) {
             if ((List_len(v.fields) === 0)) {
@@ -363,8 +363,8 @@ function emit_derived_ord(ctx, impl_) {
         const __ring_m14 = impl_.enum_variants;
         if (__ring_m14._tag === "some") {
           const variants = __ring_m14._0;
-          codegen_ctx$emit(ctx, `var t1 = __${name}_tag_order[self.${hir$ENUM_TAG_FIELD()}];`);
-          codegen_ctx$emit(ctx, `var t2 = __${name}_tag_order[other.${hir$ENUM_TAG_FIELD()}];`);
+          codegen_ctx$emit(ctx, `var t1 = __${name}_tag_order[self.${hir$ENUM_TAG_FIELD}];`);
+          codegen_ctx$emit(ctx, `var t2 = __${name}_tag_order[other.${hir$ENUM_TAG_FIELD}];`);
           codegen_ctx$emit(ctx, "if (t1 !== t2) return (t1 < t2 ? -1 : 1);");
           let has_fields = false;
           for (const v of variants) {
@@ -373,7 +373,7 @@ function emit_derived_ord(ctx, impl_) {
             }
           }
           if (has_fields) {
-            codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD()}) {`);
+            codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD}) {`);
             codegen_ctx$push_indent(ctx);
             for (const v of variants) {
               if ((List_len(v.fields) === 0)) {
@@ -523,7 +523,7 @@ function emit_derived_debug(ctx, impl_) {
         const __ring_m20 = impl_.enum_variants;
         if (__ring_m20._tag === "some") {
           const variants = __ring_m20._0;
-          codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD()}) {`);
+          codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD}) {`);
           codegen_ctx$push_indent(ctx);
           for (const v of variants) {
             if ((List_len(v.fields) === 0)) {
@@ -555,7 +555,7 @@ function emit_derived_debug(ctx, impl_) {
               }
             }
           }
-          codegen_ctx$emit(ctx, `default: return self.${hir$ENUM_TAG_FIELD()};`);
+          codegen_ctx$emit(ctx, `default: return self.${hir$ENUM_TAG_FIELD};`);
           codegen_ctx$pop_indent(ctx);
           codegen_ctx$emit(ctx, "}");
           break __ring_match20;

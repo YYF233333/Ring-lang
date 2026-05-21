@@ -61,7 +61,7 @@ pub fn infer_block(var ctx: InferCtx, body: Expr, initial_subst: Map<Int, Type>?
     match body {
         Expr::Block { stmts, tail, span } => {
             var subst = match initial_subst { some(s) => s, none => ctx.subst }
-            var effects: EffectRow = EMPTY_ROW()
+            var effects: EffectRow = EMPTY_ROW
             var hstmts: List<HStmt> = []
 
             for stmt in stmts {
@@ -74,7 +74,7 @@ pub fn infer_block(var ctx: InferCtx, body: Expr, initial_subst: Map<Int, Type>?
             }
 
             var tail_hexpr: HExpr? = none
-            var block_type: Type = UNIT()
+            var block_type: Type = UNIT
 
             match tail {
                 some(t) => {
@@ -213,20 +213,20 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                 var s = subst
                 match ctx.current_fn_return_type {
                     some(ret_type) => {
-                        s = unify_at(ctx.sink, ctx.env, UNIT(), ret_type, s, span)
+                        s = unify_at(ctx.sink, ctx.env, UNIT, ret_type, s, span)
                     },
                     none => {}
                 }
                 StmtResult {
                     hstmt: HStmt::Return { value: none, span: span },
                     subst: s,
-                    effects: EMPTY_ROW()
+                    effects: EMPTY_ROW
                 }
             }
         },
         Stmt::While { condition, body, span } => {
             let cond_r = infer_expr(ctx, condition, subst)
-            var s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL(), cond_r.subst, span)
+            var s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL, cond_r.subst, span)
             ctx.env.push_scope()
             ctx.loop_depth = ctx.loop_depth + 1
             let body_result = some(infer_block(ctx, body, some(s))) catch { _ => none }
@@ -253,22 +253,22 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             var element_type: Type = ctx.env.fresh_var()
             match iter_type {
                 Type::EnumType { name, type_params, .. } => {
-                    if name == BUILTIN_RANGE() && type_params.len() > 0 {
-                        element_type = match type_params.first() { some(t) => t, none => INT() }
+                    if name == BUILTIN_RANGE && type_params.len() > 0 {
+                        element_type = match type_params.first() { some(t) => t, none => INT }
                     } else {
-                        type_error(ctx.sink, E0301(),
+                        type_error(ctx.sink, E0301,
                             "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
                             span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
                     }
                 },
                 Type::StructType { name, type_params, .. } => {
-                    if name == BUILTIN_LIST() && type_params.len() > 0 {
+                    if name == BUILTIN_LIST && type_params.len() > 0 {
                         element_type = match type_params.first() { some(t) => t, none => element_type }
-                    } else if name == BUILTIN_SET() && type_params.len() > 0 {
+                    } else if name == BUILTIN_SET && type_params.len() > 0 {
                         element_type = match type_params.first() { some(t) => t, none => element_type }
-                    } else if name == BUILTIN_MAP() && type_params.len() >= 2 {
+                    } else if name == BUILTIN_MAP && type_params.len() >= 2 {
                         if !is_destructure {
-                            type_error(ctx.sink, E0301(),
+                            type_error(ctx.sink, E0301,
                                 "Map is not directly iterable with for..in. Use 'for (k, v) in map { ... }' instead.",
                                 span, DiagnosticContext::OtherContext { detail: some("Map requires destructuring: for (k, v) in map") })
                         }
@@ -279,13 +279,13 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                             _ => {}
                         }
                     } else {
-                        type_error(ctx.sink, E0301(),
+                        type_error(ctx.sink, E0301,
                             "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
                             span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
                     }
                 },
                 _ => {
-                    type_error(ctx.sink, E0301(),
+                    type_error(ctx.sink, E0301,
                         "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
                         span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
                 }
@@ -298,13 +298,13 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     match element_type {
                         Type::TupleType { elements: type_elems } => {
                             if destr.names.len() != type_elems.len() {
-                                type_error(ctx.sink, E0301(),
+                                type_error(ctx.sink, E0301,
                                     "Destructure binding expects ${destr.names.len().to_str()} elements, but iterable element type is ${type_to_string(element_type)}",
                                     span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                             }
                         },
                         _ => {
-                            type_error(ctx.sink, E0301(),
+                            type_error(ctx.sink, E0301,
                                 "Destructure binding expects tuple elements, but iterable element type is ${type_to_string(element_type)}",
                                 span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                         }
@@ -376,17 +376,17 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
         },
         Stmt::Break { span } => {
             if ctx.loop_depth == 0 {
-                type_error(ctx.sink, E0206(), "'break' can only be used inside a loop", span,
+                type_error(ctx.sink, E0206, "'break' can only be used inside a loop", span,
                     DiagnosticContext::OtherContext { detail: some("break outside loop") })
             }
-            StmtResult { hstmt: HStmt::Break { span: span }, subst: subst, effects: EMPTY_ROW() }
+            StmtResult { hstmt: HStmt::Break { span: span }, subst: subst, effects: EMPTY_ROW }
         },
         Stmt::Continue { span } => {
             if ctx.loop_depth == 0 {
-                type_error(ctx.sink, E0206(), "'continue' can only be used inside a loop", span,
+                type_error(ctx.sink, E0206, "'continue' can only be used inside a loop", span,
                     DiagnosticContext::OtherContext { detail: some("continue outside loop") })
             }
-            StmtResult { hstmt: HStmt::Continue { span: span }, subst: subst, effects: EMPTY_ROW() }
+            StmtResult { hstmt: HStmt::Continue { span: span }, subst: subst, effects: EMPTY_ROW }
         },
         Stmt::LetDestructure { pattern, init, span } => {
             let init_r = infer_expr(ctx, init, subst)
@@ -394,7 +394,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             let init_type = apply_subst(s, hexpr_type(init_r.hexpr))
             match init_type {
                 Type::TupleType { .. } => {},
-                _ => type_error(ctx.sink, E0301(),
+                _ => type_error(ctx.sink, E0301,
                     "let destructuring requires tuple type, got ${type_to_string(init_type)}",
                     span, DiagnosticContext::OtherContext { detail: some("not a tuple") })
             }
@@ -405,7 +405,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
             match pattern {
                 Pattern::TuplePattern { elements: pat_elements, .. } => {
                     if pat_elements.len() != tuple_elements.len() {
-                        type_error(ctx.sink, E0301(),
+                        type_error(ctx.sink, E0301,
                             "Tuple has ${tuple_elements.len().to_str()} elements but pattern has ${pat_elements.len().to_str()}",
                             span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                     }
@@ -414,7 +414,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     while bi < pat_elements.len() {
                         match pat_elements.get(bi) {
                             some(p) => {
-                                let elem_type = match tuple_elements.get(bi) { some(et) => et, none => UNIT() }
+                                let elem_type = match tuple_elements.get(bi) { some(et) => et, none => UNIT }
                                 match p {
                                     Pattern::Binding { name, span: pspan } => {
                                         ctx.env.bind_mono(name, elem_type)
@@ -436,7 +436,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                                         bindings.push(HLetDestructureBinding { name: "_", def_id: none, ty: elem_type })
                                     },
                                     _ => {
-                                        type_error(ctx.sink, E0301(),
+                                        type_error(ctx.sink, E0301,
                                             "Only binding and wildcard patterns are supported in let destructuring",
                                             span, DiagnosticContext::OtherContext { detail: some("unsupported pattern kind") })
                                     }
@@ -453,7 +453,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     }
                 },
                 _ => {
-                    type_error(ctx.sink, E0301(),
+                    type_error(ctx.sink, E0301,
                         "let destructuring requires tuple pattern",
                         span, DiagnosticContext::OtherContext { detail: some("not a tuple pattern") })
                 }
@@ -521,7 +521,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                 some(s) => match s.def_id {
                     some(did) => {
                         if !ctx.env.mutable_vars.contains(did) {
-                            type_error(ctx.sink, E0205(),
+                            type_error(ctx.sink, E0205,
                                 "Cannot assign to immutable variable '${name}' (declared with 'let'). Use 'var' for mutable bindings.",
                                 span, DiagnosticContext::OtherContext { detail: some("'${name}' is declared with 'let'") })
                         }
@@ -540,7 +540,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                         some(s) => match s.def_id {
                             some(did) => {
                                 if !ctx.env.mutable_vars.contains(did) {
-                                    type_error(ctx.sink, E0205(),
+                                    type_error(ctx.sink, E0205,
                                         "Cannot assign to field of immutable variable '${name}'. Use 'var' for mutable bindings.",
                                         span, DiagnosticContext::OtherContext { detail: some("'${name}' is not mutable") })
                                 }
@@ -572,23 +572,23 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
     match expr {
         Expr::IntLit { value, span } =>
             InferResult {
-                hexpr: HExpr::IntLit { value: value, ty: INT(), effects: EMPTY_ROW(), span: span },
-                subst: subst, effects: EMPTY_ROW()
+                hexpr: HExpr::IntLit { value: value, ty: INT, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
             },
         Expr::FloatLit { value, span } =>
             InferResult {
-                hexpr: HExpr::FloatLit { value: value, ty: FLOAT(), effects: EMPTY_ROW(), span: span },
-                subst: subst, effects: EMPTY_ROW()
+                hexpr: HExpr::FloatLit { value: value, ty: FLOAT, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
             },
         Expr::StrLit { value, span } =>
             InferResult {
-                hexpr: HExpr::StrLit { value: value, ty: STR(), effects: EMPTY_ROW(), span: span },
-                subst: subst, effects: EMPTY_ROW()
+                hexpr: HExpr::StrLit { value: value, ty: STR, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
             },
         Expr::BoolLit { value, span } =>
             InferResult {
-                hexpr: HExpr::BoolLit { value: value, ty: BOOL(), effects: EMPTY_ROW(), span: span },
-                subst: subst, effects: EMPTY_ROW()
+                hexpr: HExpr::BoolLit { value: value, ty: BOOL, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
             },
         Expr::Ident { name, qualifier, span } =>
             infer_ident(ctx, name, span, subst, qualifier),
@@ -623,7 +623,7 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
         Expr::TupleLit { elements, span } => {
             var s = subst
             var helements: List<HExpr> = []
-            var combined_effects: EffectRow = EMPTY_ROW()
+            var combined_effects: EffectRow = EMPTY_ROW
             for el in elements {
                 let r = infer_expr(ctx, el, s)
                 s = r.subst
@@ -642,13 +642,13 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
         },
         Expr::Range { start, end, inclusive, span } => {
             let start_r = infer_expr(ctx, start, subst)
-            var s = unify_at(ctx.sink, ctx.env, hexpr_type(start_r.hexpr), INT(), start_r.subst, span)
+            var s = unify_at(ctx.sink, ctx.env, hexpr_type(start_r.hexpr), INT, start_r.subst, span)
             let end_r = infer_expr(ctx, end, s)
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(end_r.hexpr), INT(), end_r.subst, span)
+            s = unify_at(ctx.sink, ctx.env, hexpr_type(end_r.hexpr), INT, end_r.subst, span)
             let me = merge_effects(ctx.env, start_r.effects, end_r.effects, s)
             var range_effects = me.0
             s = me.1
-            let range_type = Type::EnumType { name: BUILTIN_RANGE(), type_params: [INT()], variants: [] }
+            let range_type = Type::EnumType { name: BUILTIN_RANGE, type_params: [INT], variants: [] }
             InferResult {
                 hexpr: HExpr::RangeExpr {
                     start: start_r.hexpr, end: end_r.hexpr, inclusive: inclusive,
@@ -669,11 +669,11 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: Map<Int, Type>, 
     match scheme {
         none => {
             match qualifier {
-                some(q) => type_error(ctx.sink, E0201(), "'${q}' has no variant '${name}'", span,
+                some(q) => type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
                     DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }),
                 none => {}
             }
-            type_error(ctx.sink, E0201(), "Undefined variable: ${name}", span,
+            type_error(ctx.sink, E0201, "Undefined variable: ${name}", span,
                 DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
         },
         some(s) => {
@@ -687,11 +687,11 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: Map<Int, Type>, 
                             if enum_def.variants.any(fn(v) { v.name == name }) {
                                 enum_name = some(q)
                             } else {
-                                type_error(ctx.sink, E0201(), "'${q}' has no variant '${name}'", span,
+                                type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
                                     DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
                             }
                         },
-                        none => type_error(ctx.sink, E0201(), "'${q}' has no variant '${name}'", span,
+                        none => type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
                             DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
                     }
                 },
@@ -702,8 +702,8 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: Map<Int, Type>, 
                 none => {}
             }
             InferResult {
-                hexpr: HExpr::Ident { name: name, resolved_name: resolved_name, def_id: s.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW(), span: span },
-                subst: subst, effects: EMPTY_ROW()
+                hexpr: HExpr::Ident { name: name, resolved_name: resolved_name, def_id: s.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                subst: subst, effects: EMPTY_ROW
             }
         }
     }
@@ -717,7 +717,7 @@ fn infer_bin_op(var ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
     let lr = infer_expr(ctx, left, subst)
     let rr = infer_expr(ctx, right, lr.subst)
     var s = rr.subst
-    var result_type: Type = UNIT()
+    var result_type: Type = UNIT
     var eq_dispatch: TraitDispatch? = none
     var ord_dispatch: TraitDispatch? = none
 
@@ -729,51 +729,51 @@ fn infer_bin_op(var ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
         BinOp::Mod => { result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "%"); s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span) },
         BinOp::Eq => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL()
+            result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
             let is_builtin = is_primitive_eq(resolved) || is_tuple_type(resolved)
-            eq_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Eq", E0307(), s, span, "==", is_builtin))
+            eq_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Eq", E0307, s, span, "==", is_builtin))
         },
         BinOp::Neq => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL()
+            result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
             let is_builtin = is_primitive_eq(resolved) || is_tuple_type(resolved)
-            eq_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Eq", E0307(), s, span, "!=", is_builtin))
+            eq_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Eq", E0307, s, span, "!=", is_builtin))
         },
         BinOp::Lt => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL()
+            result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308(), s, span, "<", is_primitive_ord(resolved)))
+            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, "<", is_primitive_ord(resolved)))
         },
         BinOp::Lte => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL()
+            result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308(), s, span, "<=", is_primitive_ord(resolved)))
+            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, "<=", is_primitive_ord(resolved)))
         },
         BinOp::Gt => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL()
+            result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308(), s, span, ">", is_primitive_ord(resolved)))
+            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, ">", is_primitive_ord(resolved)))
         },
         BinOp::Gte => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL()
+            result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308(), s, span, ">=", is_primitive_ord(resolved)))
+            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, ">=", is_primitive_ord(resolved)))
         },
         BinOp::And => {
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), BOOL(), s, span)
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(rr.hexpr), BOOL(), s, span)
-            result_type = BOOL()
+            s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), BOOL, s, span)
+            s = unify_at(ctx.sink, ctx.env, hexpr_type(rr.hexpr), BOOL, s, span)
+            result_type = BOOL
         },
         BinOp::Or => {
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), BOOL(), s, span)
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(rr.hexpr), BOOL(), s, span)
-            result_type = BOOL()
+            s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), BOOL, s, span)
+            s = unify_at(ctx.sink, ctx.env, hexpr_type(rr.hexpr), BOOL, s, span)
+            result_type = BOOL
         }
     }
 
@@ -789,10 +789,10 @@ fn infer_bin_op(var ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
 fn infer_numeric_op(ctx: InferCtx, left: HExpr, right: HExpr, s: Map<Int, Type>, span: Span, op_str: Str) -> Type {
     let resolved = apply_subst(s, hexpr_type(left))
     match resolved {
-        Type::TypeVar { .. } => INT(),
-        Type::IntType => INT(),
-        Type::FloatType => FLOAT(),
-        _ => type_error(ctx.sink, E0303(),
+        Type::TypeVar { .. } => INT,
+        Type::IntType => INT,
+        Type::FloatType => FLOAT,
+        _ => type_error(ctx.sink, E0303,
             "Operator ${op_str} requires numeric types, got ${type_to_string(resolved)}",
             span, DiagnosticContext::TypeMismatch { expected: "Int or Float", actual: type_to_string(resolved), expression: none })
     }
@@ -923,22 +923,22 @@ fn resolve_type_to_trait_dict(ctx: InferCtx, t: Type, trait_name: Str) -> Str? {
 fn infer_unary_op(var ctx: InferCtx, op: UnaryOp, operand: Expr, span: Span, subst: Map<Int, Type>) -> InferResult {
     let r = infer_expr(ctx, operand, subst)
     var s = r.subst
-    var result_type: Type = UNIT()
+    var result_type: Type = UNIT
     match op {
         UnaryOp::Neg => {
             let resolved = apply_subst(s, hexpr_type(r.hexpr))
             match resolved {
-                Type::TypeVar { .. } => { s = unify_at(ctx.sink, ctx.env, resolved, INT(), s, span); result_type = INT() },
-                Type::IntType => { result_type = INT() },
-                Type::FloatType => { result_type = FLOAT() },
-                _ => type_error(ctx.sink, E0303(),
+                Type::TypeVar { .. } => { s = unify_at(ctx.sink, ctx.env, resolved, INT, s, span); result_type = INT },
+                Type::IntType => { result_type = INT },
+                Type::FloatType => { result_type = FLOAT },
+                _ => type_error(ctx.sink, E0303,
                     "Unary - requires numeric type, got ${type_to_string(resolved)}",
                     span, DiagnosticContext::TypeMismatch { expected: "Int or Float", actual: type_to_string(resolved), expression: none })
             }
         },
         UnaryOp::Not => {
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(r.hexpr), BOOL(), s, span)
-            result_type = BOOL()
+            s = unify_at(ctx.sink, ctx.env, hexpr_type(r.hexpr), BOOL, s, span)
+            result_type = BOOL
         }
     }
     InferResult {
@@ -1289,7 +1289,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
             _ => {
                 match recv_type {
                     Type::TypeVar { .. } => {},
-                    _ => type_error(ctx.sink, E0305(),
+                    _ => type_error(ctx.sink, E0305,
                         "Type '${type_to_string(recv_type)}' has no method '${method}'",
                         span, DiagnosticContext::OtherContext { detail: some("no method '${method}' on type '${type_to_string(recv_type)}'") })
                 }
@@ -1298,7 +1298,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
         none => {
             match recv_type {
                 Type::TypeVar { .. } => {},
-                _ => type_error(ctx.sink, E0305(),
+                _ => type_error(ctx.sink, E0305,
                     "Type '${type_to_string(recv_type)}' has no method '${method}'",
                     span, DiagnosticContext::OtherContext { detail: some("no method '${method}' on type '${type_to_string(recv_type)}'") })
             }
@@ -1323,7 +1323,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     let callee_type = match method_type { some(mt) => mt, none => ctx.env.fresh_var() }
     InferResult {
         hexpr: HExpr::Call {
-            callee: HExpr::FieldAccess { receiver: recv_r.hexpr, field: method, ty: callee_type, effects: EMPTY_ROW(), span: span },
+            callee: HExpr::FieldAccess { receiver: recv_r.hexpr, field: method, ty: callee_type, effects: EMPTY_ROW, span: span },
             args: hargs, type_args: [], resolved_dicts: resolved_dicts,
             dict_dispatch: dict_dispatch, ty: result_type, effects: effects, span: span
         },
@@ -1375,19 +1375,19 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     }
     let op = match effect_def.ops.find(fn(o) { o.name == op_name }) {
         some(o) => o,
-        none => type_error(ctx.sink, E0402(),
+        none => type_error(ctx.sink, E0402,
             "Effect ${effect_name} has no operation ${op_name}",
             span, DiagnosticContext::OtherContext { detail: some("no operation '${op_name}' on effect '${effect_name}'") })
     }
 
     if args.len() != op.params.len() {
-        type_error(ctx.sink, E0301(),
+        type_error(ctx.sink, E0301,
             "Effect operation '${effect_name}.${op_name}' expects ${op.params.len().to_str()} argument(s), got ${args.len().to_str()}",
             span, DiagnosticContext::TypeMismatch { expected: "${op.params.len().to_str()} args", actual: "${args.len().to_str()} args", expression: none })
     }
 
     var s = subst
-    var effects: EffectRow = EMPTY_ROW()
+    var effects: EffectRow = EMPTY_ROW
     var hargs: List<HExpr> = []
 
     var i = 0
@@ -1410,7 +1410,7 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         some(bik) => match bik {
             BuiltInKind::BkIo => { eff = Effect::IoEffect },
             BuiltInKind::BkFail => {
-                let error_type = if hargs.len() > 0 { apply_subst(s, hexpr_type(match hargs.first() { some(h) => h, none => panic("unreachable") })) } else { UNIT() }
+                let error_type = if hargs.len() > 0 { apply_subst(s, hexpr_type(match hargs.first() { some(h) => h, none => panic("unreachable") })) } else { UNIT }
                 eff = Effect::FailEffect { error_type: error_type }
             },
             BuiltInKind::BkMut => { eff = Effect::MutEffect }
@@ -1456,12 +1456,12 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                             }
                             field_type = apply_subst(inst_map, found_field.ty)
                         },
-                        none => type_error(ctx.sink, E0304(),
+                        none => type_error(ctx.sink, E0304,
                             "Struct ${name} has no field ${field}",
                             span, DiagnosticContext::MissingField { field: field, ty: name, available: none })
                     }
                 },
-                none => type_error(ctx.sink, E0203(),
+                none => type_error(ctx.sink, E0203,
                     "Unknown struct: ${name}",
                     span, DiagnosticContext::OtherContext { detail: some("unknown struct '${name}'") })
             }
@@ -1472,7 +1472,7 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                 some(found_field) => { field_type = found_field.ty },
                 none => match tail {
                     some(_) => {},
-                    none => type_error(ctx.sink, E0304(),
+                    none => type_error(ctx.sink, E0304,
                         "Record type has no field '${field}'",
                         span, DiagnosticContext::MissingField { field: field, ty: "record", available: none })
                 }
@@ -1480,12 +1480,12 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
         },
         Type::TupleType { elements } => {
             match parse_int(field) {
-                none => type_error(ctx.sink, E0304(),
+                none => type_error(ctx.sink, E0304,
                     "Cannot access named field '${field}' on tuple type; use .0, .1, etc.",
                     span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none }),
                 some(i) => {
                     if i >= elements.len() {
-                        type_error(ctx.sink, E0304(),
+                        type_error(ctx.sink, E0304,
                             "Tuple index ${field} out of bounds; tuple has ${elements.len().to_str()} elements",
                             span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none })
                     }
@@ -1497,7 +1497,7 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
             }
         },
         Type::TypeVar { .. } => {},
-        _ => type_error(ctx.sink, E0304(),
+        _ => type_error(ctx.sink, E0304,
             "Cannot access field '${field}' on type ${type_to_string(recv_type)}",
             span, DiagnosticContext::MissingField { field: field, ty: type_to_string(recv_type), available: none })
     }
@@ -1526,7 +1526,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
     if variant_enum.is_none() && qualifier.is_some() {
         match qualifier {
-            some(q) => type_error(ctx.sink, E0201(), "'${q}' has no variant '${name}'", span,
+            some(q) => type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
                 DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }),
             none => {}
         }
@@ -1550,7 +1550,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
 
     let struct_def = match ctx.env.structs.get(name) {
         some(sd) => sd,
-        none => type_error(ctx.sink, E0203(), "Unknown struct: ${name}", span,
+        none => type_error(ctx.sink, E0203, "Unknown struct: ${name}", span,
             DiagnosticContext::OtherContext { detail: some("unknown struct '${name}'") })
     }
 
@@ -1570,7 +1570,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
 
     var s = subst
-    var effects: EffectRow = EMPTY_ROW()
+    var effects: EffectRow = EMPTY_ROW
     var hfields: List<HStructFieldInit> = []
 
     var hspread: HExpr? = none
@@ -1604,7 +1604,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
                 let ft = apply_subst(inst_map, df.ty)
                 s = unify_at(ctx.sink, ctx.env, hexpr_type(fr.hexpr), ft, s, span)
             },
-            none => type_error(ctx.sink, E0203(),
+            none => type_error(ctx.sink, E0203,
                 "Struct '${name}' has no field '${field.name}'",
                 field.span, DiagnosticContext::MissingField { field: field.name, ty: name, available: none })
         }
@@ -1616,7 +1616,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         for f in fields { provided.insert(f.name) }
         for df in struct_def.fields {
             if !provided.contains(df.name) {
-                type_error(ctx.sink, E0203(),
+                type_error(ctx.sink, E0203,
                     "Missing field '${df.name}' in struct literal '${name}'",
                     span, DiagnosticContext::MissingField { field: df.name, ty: name, available: none })
             }
@@ -1653,7 +1653,7 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
     }
 
     var s = subst
-    var effects: EffectRow = EMPTY_ROW()
+    var effects: EffectRow = EMPTY_ROW
     var hfields: List<HStructFieldInit> = []
 
     var hspread: HExpr? = none
@@ -1686,7 +1686,7 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
                 },
                 none => {}
             },
-            none => type_error(ctx.sink, E0203(),
+            none => type_error(ctx.sink, E0203,
                 "Variant '${variant_name}' has no field '${field.name}'",
                 field.span, DiagnosticContext::MissingField { field: field.name, ty: variant_name, available: none })
         }
@@ -1698,7 +1698,7 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
         for f in fields { provided.insert(f.name) }
         for fn_name in field_names {
             if !provided.contains(fn_name) {
-                type_error(ctx.sink, E0203(),
+                type_error(ctx.sink, E0203,
                     "Missing field '${fn_name}' in variant '${variant_name}'",
                     span, DiagnosticContext::MissingField { field: fn_name, ty: variant_name, available: none })
             }
@@ -1761,7 +1761,7 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
                 some(g) => {
                     let gr = infer_expr(ctx, g, s)
                     s = gr.subst
-                    s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL(), s, arm.span)
+                    s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL, s, arm.span)
                     let me = merge_effects(ctx.env, effects, gr.effects, s)
                     effects = me.0
                     s = me.1
@@ -1790,7 +1790,7 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
     let scrut_type_resolved = apply_subst(s, hexpr_type(scrut_r.hexpr))
     let missing = check_exhaustive(harms, scrut_type_resolved, s)
     match missing {
-        some(m) => type_error(ctx.sink, E0601(),
+        some(m) => type_error(ctx.sink, E0601,
             "Non-exhaustive match on type ${type_to_string(scrut_type_resolved)}: missing pattern for ${m}",
             span, DiagnosticContext::PatternError { detail: "missing: ${m}" }),
         none => {}
@@ -1810,7 +1810,7 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
 fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: Expr?, span: Span, subst: Map<Int, Type>) -> InferResult {
     let cond_r = infer_expr(ctx, condition, subst)
     var s = cond_r.subst
-    s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL(), s, span)
+    s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL, s, span)
     var effects = cond_r.effects
 
     let then_r = infer_block(ctx, then_branch, some(s))
@@ -1820,7 +1820,7 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
     s = me.1
 
     var else_hexpr: HExpr? = none
-    var result_type: Type = UNIT()
+    var result_type: Type = UNIT
 
     match else_branch {
         some(eb) => match eb {
@@ -1847,7 +1847,7 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
                     ty: hexpr_type(else_if_r.hexpr), effects: else_if_r.effects, span: espan
                 })
             },
-            _ => { result_type = UNIT() }
+            _ => { result_type = UNIT }
         },
         none => {}
     }
@@ -1867,7 +1867,7 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
 
 fn infer_string_interp(var ctx: InferCtx, parts: List<StringInterpPart>, span: Span, subst: Map<Int, Type>) -> InferResult {
     var s = subst
-    var effects: EffectRow = EMPTY_ROW()
+    var effects: EffectRow = EMPTY_ROW
     var hparts: List<HStringInterpPart> = []
 
     for part in parts {
@@ -1885,7 +1885,7 @@ fn infer_string_interp(var ctx: InferCtx, parts: List<StringInterpPart>, span: S
     }
 
     InferResult {
-        hexpr: HExpr::StringInterp { parts: hparts, ty: STR(), effects: effects, span: span },
+        hexpr: HExpr::StringInterp { parts: hparts, ty: STR, effects: effects, span: span },
         subst: s, effects: effects
     }
 }
@@ -1923,7 +1923,7 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
                 some(g) => {
                     let gr = infer_expr(ctx, g, s)
                     s = gr.subst
-                    s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL(), s, arm.span)
+                    s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL, s, arm.span)
                     let me = merge_effects(ctx.env, effects, gr.effects, s)
                     effects = me.0
                     s = me.1
@@ -2014,7 +2014,7 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             some(rn) => {
                 let resume_param = match op_def { some(od) => od.return_type, none => ctx.env.fresh_var() }
                 let resume_ret = ctx.env.fresh_var()
-                ctx.env.bind_mono(rn, Type::FnType { params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW() })
+                ctx.env.bind_mono(rn, Type::FnType { params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW })
             },
             none => {}
         }
@@ -2126,9 +2126,9 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
             InferResult {
                 hexpr: HExpr::Lambda {
                     params: final_hparams, return_type: applied_ret,
-                    body: body_r.hexpr, ty: fn_type, effects: EMPTY_ROW(), span: span
+                    body: body_r.hexpr, ty: fn_type, effects: EMPTY_ROW, span: span
                 },
-                subst: s, effects: EMPTY_ROW()
+                subst: s, effects: EMPTY_ROW
             }
         },
         none => fail.raise(CompileError {})
@@ -2142,16 +2142,16 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
 fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst: Map<Int, Type>) -> InferResult {
     if elements.len() == 0 {
         let elem_type = ctx.env.fresh_var()
-        let list_type = Type::StructType { name: BUILTIN_LIST(), type_params: [elem_type], fields: [] }
+        let list_type = Type::StructType { name: BUILTIN_LIST, type_params: [elem_type], fields: [] }
         return InferResult {
-            hexpr: HExpr::ListLit { elements: [], ty: list_type, effects: EMPTY_ROW(), span: span },
-            subst: subst, effects: EMPTY_ROW()
+            hexpr: HExpr::ListLit { elements: [], ty: list_type, effects: EMPTY_ROW, span: span },
+            subst: subst, effects: EMPTY_ROW
         }
     }
     var s = subst
     var helements: List<HExpr> = []
     var elem_type: Type = ctx.env.fresh_var()
-    var combined_effects: EffectRow = EMPTY_ROW()
+    var combined_effects: EffectRow = EMPTY_ROW
     for el in elements {
         let r = infer_expr(ctx, el, s)
         s = r.subst
@@ -2162,7 +2162,7 @@ fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst
         combined_effects = me.0
         s = me.1
     }
-    let list_type = Type::StructType { name: BUILTIN_LIST(), type_params: [apply_subst(s, elem_type)], fields: [] }
+    let list_type = Type::StructType { name: BUILTIN_LIST, type_params: [apply_subst(s, elem_type)], fields: [] }
     InferResult {
         hexpr: HExpr::ListLit { elements: helements, ty: list_type, effects: combined_effects, span: span },
         subst: s, effects: combined_effects
@@ -2196,7 +2196,7 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
         Decl::TypeAlias { name, is_pub, span, .. } => {
             let alias_type = match ctx.env.type_aliases.get(name) {
                 some(alias) => alias.ty,
-                none => UNIT()
+                none => UNIT
             }
             HDecl::TypeAlias { name: name, ty: alias_type, is_pub: is_pub, span: span }
         },
@@ -2321,7 +2321,7 @@ fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         }
         let fn_ret = match m.ty {
             Type::FnType { return_type, .. } => return_type,
-            _ => UNIT()
+            _ => UNIT
         }
         let ast_params = match ast_method {
             some(am) => match am { Decl::Fn { params, .. } => some(params), _ => none },
@@ -2429,18 +2429,18 @@ fn check_extern_fn_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
     }
     let fn_ret = match scheme.ty {
         Type::FnType { return_type, .. } => return_type,
-        _ => UNIT()
+        _ => UNIT
     }
     var hparams: List<HParam> = []
     var i = 0
     for p in params {
-        let ptype = match fn_params.get(i) { some(t) => t, none => UNIT() }
+        let ptype = match fn_params.get(i) { some(t) => t, none => UNIT }
         hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: false })
         i = i + 1
     }
     HDecl::ExternFn {
         name: name, def_id: scheme.def_id, type_params: type_params,
-        params: hparams, return_type: fn_ret, effects: EMPTY_ROW(),
+        params: hparams, return_type: fn_ret, effects: EMPTY_ROW,
         is_pub: is_pub, span: span
     }
 }
