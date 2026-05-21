@@ -55,13 +55,7 @@ function emit_derived_eq(ctx, impl_) {
   const name = codegen_ctx$qualify(ctx, impl_.type_name);
   const dict_base = hir$trait_dict_name(name, "Eq");
   const fn_name = `${dict_base}_eq`;
-  let dict_params = [""];
-  List_clear(dict_params);
-  for (const b of impl_.bounds) {
-    if ((b.trait_name === "Eq")) {
-      List_push(dict_params, hir$trait_bound_param_name(b.type_param, b.trait_name));
-    }
-  }
+  const dict_params = collect_dict_params(impl_, "Eq");
   let all_params_list = ["self", "other"];
   List_extend(all_params_list, dict_params);
   const all_params = List_join(all_params_list, ", ");
@@ -102,13 +96,7 @@ function emit_derived_eq(ctx, impl_) {
         if (__ring_m4._tag === "some") {
           const variants = __ring_m4._0;
           codegen_ctx$emit(ctx, `if (self.${hir$ENUM_TAG_FIELD} !== other.${hir$ENUM_TAG_FIELD}) return false;`);
-          let has_fields = false;
-          for (const v of variants) {
-            if ((List_len(v.fields) > 0)) {
-              has_fields = true;
-            }
-          }
-          if (has_fields) {
+          if (variants_have_fields(variants)) {
             codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD}) {`);
             codegen_ctx$push_indent(ctx);
             for (const v of variants) {
@@ -118,12 +106,7 @@ function emit_derived_eq(ctx, impl_) {
                 let feqs = [""];
                 List_clear(feqs);
                 for (const f of v.fields) {
-                  const accessor = (v.has_named_fields ? codegen_ctx$safe_ident(f.name) : (function() {
-  const __ring_m = f.positional_index;
-  if (__ring_m._tag === "some") { const pi = __ring_m._0; return `_${pi}`; }
-  if (__ring_m._tag === "none") { return f.name; }
-  __match_fail(__ring_m);
-})());
+                  const accessor = field_accessor(v, f);
                   List_push(feqs, gen_field_eq(`self.${accessor}`, `other.${accessor}`, f));
                 }
                 const joined = List_join(feqs, " && ");
@@ -175,13 +158,7 @@ function emit_derived_clone(ctx, impl_) {
   const name = codegen_ctx$qualify(ctx, impl_.type_name);
   const dict_base = hir$trait_dict_name(name, "Clone");
   const fn_name = `${dict_base}_clone`;
-  let dict_params = [""];
-  List_clear(dict_params);
-  for (const b of impl_.bounds) {
-    if ((b.trait_name === "Clone")) {
-      List_push(dict_params, hir$trait_bound_param_name(b.type_param, b.trait_name));
-    }
-  }
+  const dict_params = collect_dict_params(impl_, "Clone");
   let all_list = ["self"];
   List_extend(all_list, dict_params);
   const all_params = List_join(all_list, ", ");
@@ -224,12 +201,7 @@ function emit_derived_clone(ctx, impl_) {
               let args = [""];
               List_clear(args);
               for (const f of v.fields) {
-                const accessor = (v.has_named_fields ? codegen_ctx$safe_ident(f.name) : (function() {
-  const __ring_m = f.positional_index;
-  if (__ring_m._tag === "some") { const pi = __ring_m._0; return `_${pi}`; }
-  if (__ring_m._tag === "none") { return f.name; }
-  __match_fail(__ring_m);
-})());
+                const accessor = field_accessor(v, f);
                 List_push(args, gen_field_clone(`self.${accessor}`, f));
               }
               const joined = List_join(args, ", ");
@@ -277,13 +249,7 @@ function emit_derived_ord(ctx, impl_) {
   const name = codegen_ctx$qualify(ctx, impl_.type_name);
   const dict_base = hir$trait_dict_name(name, "Ord");
   const fn_name = `${dict_base}_cmp`;
-  let dict_params = [""];
-  List_clear(dict_params);
-  for (const b of impl_.bounds) {
-    if ((b.trait_name === "Ord")) {
-      List_push(dict_params, hir$trait_bound_param_name(b.type_param, b.trait_name));
-    }
-  }
+  const dict_params = collect_dict_params(impl_, "Ord");
   let all_list = ["self", "other"];
   List_extend(all_list, dict_params);
   const all_params = List_join(all_list, ", ");
@@ -378,13 +344,7 @@ function emit_derived_ord(ctx, impl_) {
           codegen_ctx$emit(ctx, `var t1 = __${name}_tag_order[self.${hir$ENUM_TAG_FIELD}];`);
           codegen_ctx$emit(ctx, `var t2 = __${name}_tag_order[other.${hir$ENUM_TAG_FIELD}];`);
           codegen_ctx$emit(ctx, "if (t1 !== t2) return (t1 < t2 ? -1 : 1);");
-          let has_fields = false;
-          for (const v of variants) {
-            if ((List_len(v.fields) > 0)) {
-              has_fields = true;
-            }
-          }
-          if (has_fields) {
+          if (variants_have_fields(variants)) {
             codegen_ctx$emit(ctx, `switch (self.${hir$ENUM_TAG_FIELD}) {`);
             codegen_ctx$push_indent(ctx);
             for (const v of variants) {
@@ -395,12 +355,7 @@ function emit_derived_ord(ctx, impl_) {
                     const __ring_m17 = List_get(v.fields, 0);
                     if (__ring_m17._tag === "some") {
                       const f = __ring_m17._0;
-                      const accessor = (v.has_named_fields ? codegen_ctx$safe_ident(f.name) : (function() {
-  const __ring_m = f.positional_index;
-  if (__ring_m._tag === "some") { const pi = __ring_m._0; return `_${pi}`; }
-  if (__ring_m._tag === "none") { return f.name; }
-  __match_fail(__ring_m);
-})());
+                      const accessor = field_accessor(v, f);
                       const cmp = gen_field_cmp(`self.${accessor}`, `other.${accessor}`, f);
                       codegen_ctx$emit(ctx, `case "${v.name}": return ${cmp};`);
                       break __ring_match17;
@@ -420,12 +375,7 @@ function emit_derived_ord(ctx, impl_) {
                       const __ring_m18 = List_get(v.fields, i);
                       if (__ring_m18._tag === "some") {
                         const f = __ring_m18._0;
-                        const accessor = (v.has_named_fields ? codegen_ctx$safe_ident(f.name) : (function() {
-  const __ring_m = f.positional_index;
-  if (__ring_m._tag === "some") { const pi = __ring_m._0; return `_${pi}`; }
-  if (__ring_m._tag === "none") { return f.name; }
-  __match_fail(__ring_m);
-})());
+                        const accessor = field_accessor(v, f);
                         const cmp = gen_field_cmp(`self.${accessor}`, `other.${accessor}`, f);
                         if ((i < (List_len(v.fields) - 1))) {
                           codegen_ctx$emit(ctx, `c = ${cmp};`);
@@ -490,13 +440,7 @@ function emit_derived_debug(ctx, impl_) {
   const name = codegen_ctx$qualify(ctx, impl_.type_name);
   const dict_base = hir$trait_dict_name(name, "Debug");
   const fn_name = `${dict_base}_debug`;
-  let dict_params = [""];
-  List_clear(dict_params);
-  for (const b of impl_.bounds) {
-    if ((b.trait_name === "Debug")) {
-      List_push(dict_params, hir$trait_bound_param_name(b.type_param, b.trait_name));
-    }
-  }
+  const dict_params = collect_dict_params(impl_, "Debug");
   let all_list = ["self"];
   List_extend(all_list, dict_params);
   const all_params = List_join(all_list, ", ");
@@ -545,7 +489,8 @@ function emit_derived_debug(ctx, impl_) {
                 let parts = [""];
                 List_clear(parts);
                 for (const f of v.fields) {
-                  const val = gen_field_debug(`self.${codegen_ctx$safe_ident(f.name)}`, f);
+                  const accessor = field_accessor(v, f);
+                  const val = gen_field_debug(`self.${accessor}`, f);
                   List_push(parts, `"${f.name}: " + ${val}`);
                 }
                 const joined = List_join(parts, " + \", \" + ");
@@ -554,12 +499,7 @@ function emit_derived_debug(ctx, impl_) {
                 let parts = [""];
                 List_clear(parts);
                 for (const f of v.fields) {
-                  const accessor = (function() {
-  const __ring_m = f.positional_index;
-  if (__ring_m._tag === "some") { const pi = __ring_m._0; return `_${pi}`; }
-  if (__ring_m._tag === "none") { return f.name; }
-  __match_fail(__ring_m);
-})();
+                  const accessor = field_accessor(v, f);
                   List_push(parts, gen_field_debug(`self.${accessor}`, f));
                 }
                 const joined = List_join(parts, " + \", \" + ");
@@ -602,6 +542,47 @@ function gen_field_debug(expr, field) {
     }
     __match_fail(__ring_m23);
   }
+}
+
+function field_accessor(v, f) {
+  if (v.has_named_fields) {
+    return codegen_ctx$safe_ident(f.name);
+  } else {
+    __ring_match24: {
+      const __ring_m24 = f.positional_index;
+      if (__ring_m24._tag === "some") {
+        const pi = __ring_m24._0;
+        return `_${pi}`;
+        break __ring_match24;
+      }
+      if (__ring_m24._tag === "none") {
+        return f.name;
+        break __ring_match24;
+      }
+      __match_fail(__ring_m24);
+    }
+  }
+}
+
+function collect_dict_params(impl_, trait_name) {
+  let params = [""];
+  List_clear(params);
+  for (const b of impl_.bounds) {
+    if ((b.trait_name === trait_name)) {
+      List_push(params, hir$trait_bound_param_name(b.type_param, b.trait_name));
+    }
+  }
+  return params;
+}
+
+function variants_have_fields(variants) {
+  let result = false;
+  for (const v of variants) {
+    if ((List_len(v.fields) > 0)) {
+      result = true;
+    }
+  }
+  return result;
 }
 
 function extra_dicts_str(dicts) {
