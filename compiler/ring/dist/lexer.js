@@ -668,7 +668,7 @@ function Lexer_lex_string_body(self, start, is_new) {
           value = `${value}	`;
         } else {
           if ((esc === "r")) {
-            value = `${value}`;
+            value = `${value}\r`;
           } else {
             if ((esc === "\\")) {
               value = `${value}\\`;

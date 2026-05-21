@@ -137,20 +137,20 @@ function CollectingSink_restore(self, checkpoint) {
   self.items = List_slice(self.items, 0, checkpoint);
 }
 
-function CollectingSink_DiagnosticSink_report(self, d) {
+function __CollectingSink_DiagnosticSink_report(self, d) {
   return List_push(self.items, d);
 }
-function CollectingSink_DiagnosticSink_has_errors(self) {
+function __CollectingSink_DiagnosticSink_has_errors(self) {
   return self.items.some((function(d) { return (function() {
   const __ring_m = d.severity;
   if (__ring_m._tag === "SevError") { return true; }
   return false;
 })(); }));
 }
-function CollectingSink_DiagnosticSink_get_diagnostics(self) {
+function __CollectingSink_DiagnosticSink_get_diagnostics(self) {
   return self.items;
 }
-const __CollectingSink_DiagnosticSink = { report: CollectingSink_DiagnosticSink_report, has_errors: CollectingSink_DiagnosticSink_has_errors, get_diagnostics: CollectingSink_DiagnosticSink_get_diagnostics };
+const __CollectingSink_DiagnosticSink = { report: __CollectingSink_DiagnosticSink_report, has_errors: __CollectingSink_DiagnosticSink_has_errors, get_diagnostics: __CollectingSink_DiagnosticSink_get_diagnostics };
 
 function make_diagnostic(code, severity, message, span, context, notes) {
   return new Diagnostic(severity, code, message, span, notes, context, empty_suggestions());

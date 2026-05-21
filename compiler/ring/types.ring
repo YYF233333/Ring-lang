@@ -175,7 +175,10 @@ fn effects_same_kind(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
         Effect::MutEffect => match b { Effect::MutEffect => true, _ => false },
-        Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
+        Effect::FailEffect { error_type: ea } => match b {
+            Effect::FailEffect { error_type: eb } => types_equal(ea, eb),
+            _ => false
+        },
         Effect::CustomEffect { name: na, .. } => match b {
             Effect::CustomEffect { name: nb, .. } => na == nb,
             _ => false
@@ -351,16 +354,7 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
                     _ => ta.is_none() && tb.is_none()
                 }
                 if !tails_ok { return false }
-                var i = 0
-                while i < ea.len() {
-                    if let some(ae) = ea.get(i) {
-                        if let some(be) = eb.get(i) {
-                            if !effects_equal(ae, be) { return false }
-                        }
-                    }
-                    i = i + 1
-                }
-                true
+                ea.all(fn(ae) { eb.any(fn(be) { effects_equal(ae, be) }) })
             },
             _ => false
         },

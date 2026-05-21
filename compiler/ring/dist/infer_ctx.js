@@ -105,7 +105,7 @@ function merge_effects(env, a, b, s, __ring_ev_fail) {
   return out;
 }
 
-function unify_at(sink, env, t1, t2, s, span) {
+function unify_at(sink, env, t1, t2, s, span, __ring_ev_fail) {
   return (function() { const __ring_ev_fail = { raise: (e) => { throw new __EffectAbort("fail", e); } }; try { return unify$unify(t1, t2, s, env, __ring_ev_fail); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail" && __ring_e.value instanceof unify$UnificationError) { const e = __ring_e.value; return (function() {
   const code = (e.is_occurs_check ? codes$E0302() : codes$E0301());
   return type_error(sink, code, e.message, span, diagnostics$DiagnosticContext_TypeMismatch(types$type_to_string(env$apply_subst(s, t1)), types$type_to_string(env$apply_subst(s, t2)), Option_none), __ring_ev_fail);
@@ -537,34 +537,34 @@ function resolve_dicts_from_scheme(sink, env, current_fn_bounds, scheme, callee_
   return resolved_dicts;
 }
 
-function resolve_type_expr(ctx, texpr) {
+function resolve_type_expr(ctx, texpr, __ring_ev_fail) {
   __ring_match22: {
     const __ring_m22 = texpr;
     if (__ring_m22._tag === "Named") {
       const name = __ring_m22.name; const type_args = __ring_m22.type_args; const span = __ring_m22.span;
-      return resolve_named_type(ctx, name, type_args, span);
+      return resolve_named_type(ctx, name, type_args, span, __ring_ev_fail);
       break __ring_match22;
     }
     if (__ring_m22._tag === "FnType") {
       const params = __ring_m22.params; const return_type = __ring_m22.return_type;
       let resolved_params = types$empty_types();
       for (const p of params) {
-        List_push(resolved_params, resolve_type_expr(ctx, p));
+        List_push(resolved_params, resolve_type_expr(ctx, p, __ring_ev_fail));
       }
-      const ret = resolve_type_expr(ctx, return_type);
+      const ret = resolve_type_expr(ctx, return_type, __ring_ev_fail);
       return types$Type_FnType(resolved_params, ret, types$EMPTY_ROW());
       break __ring_match22;
     }
     if (__ring_m22._tag === "OptionType") {
       const inner = __ring_m22.inner;
-      return types$make_option_type(resolve_type_expr(ctx, inner));
+      return types$make_option_type(resolve_type_expr(ctx, inner, __ring_ev_fail));
       break __ring_match22;
     }
     if (__ring_m22._tag === "RecordType") {
       const fields = __ring_m22.fields; const rest = __ring_m22.rest;
       let resolved_fields = empty_record_fields();
       for (const f of fields) {
-        List_push(resolved_fields, new types$RecordField(f.name, resolve_type_expr(ctx, f.ty)));
+        List_push(resolved_fields, new types$RecordField(f.name, resolve_type_expr(ctx, f.ty, __ring_ev_fail)));
       }
       __ring_match23: {
         const __ring_m23 = rest;
@@ -596,7 +596,7 @@ function resolve_type_expr(ctx, texpr) {
       const elements = __ring_m22.elements;
       let resolved_elems = types$empty_types();
       for (const e of elements) {
-        List_push(resolved_elems, resolve_type_expr(ctx, e));
+        List_push(resolved_elems, resolve_type_expr(ctx, e, __ring_ev_fail));
       }
       return types$Type_TupleType(resolved_elems);
       break __ring_match22;
@@ -612,9 +612,9 @@ function empty_record_fields() {
   return x;
 }
 
-function resolve_self_type(ctx, name) {
+function resolve_self_type(ctx, name, __ring_ev_fail) {
   const empty_args = empty_type_exprs();
-  return resolve_named_type(ctx, name, empty_args, ast$span_zero());
+  return resolve_named_type(ctx, name, empty_args, ast$span_zero(), __ring_ev_fail);
 }
 
 function empty_type_exprs() {
@@ -659,7 +659,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
       const __ring_m26 = List_get(type_args, 0);
       if (__ring_m26._tag === "some") {
         const arg = __ring_m26._0;
-        return types$make_option_type(resolve_type_expr(ctx, arg));
+        return types$make_option_type(resolve_type_expr(ctx, arg, __ring_ev_fail));
         break __ring_match26;
       }
       if (__ring_m26._tag === "none") {
@@ -679,7 +679,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
         let resolved_params = types$empty_types();
         if ((List_len(type_args) > 0)) {
           for (const a of type_args) {
-            List_push(resolved_params, resolve_type_expr(ctx, a));
+            List_push(resolved_params, resolve_type_expr(ctx, a, __ring_ev_fail));
           }
         } else {
           for (const _ of def.type_params) {
@@ -706,7 +706,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
         let resolved_params = types$empty_types();
         if ((List_len(type_args) > 0)) {
           for (const a of type_args) {
-            List_push(resolved_params, resolve_type_expr(ctx, a));
+            List_push(resolved_params, resolve_type_expr(ctx, a, __ring_ev_fail));
           }
         } else {
           for (const _ of def.type_params) {
@@ -734,7 +734,7 @@ function resolve_named_type(ctx, name, type_args, span, __ring_ev_fail) {
       }
       let resolved_args = types$empty_types();
       for (const a of type_args) {
-        List_push(resolved_args, resolve_type_expr(ctx, a));
+        List_push(resolved_args, resolve_type_expr(ctx, a, __ring_ev_fail));
       }
       const mapping = map_new();
       let i = 0;
@@ -798,7 +798,7 @@ function bind_pattern(ctx, pattern, expected_type, subst, __ring_ev_fail) {
     }
     if (__ring_m31._tag === "Constructor") {
       const name = __ring_m31.name; const qualifier = __ring_m31.qualifier; const fields = __ring_m31.fields; const span = __ring_m31.span;
-      return bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span);
+      return bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span, __ring_ev_fail);
       break __ring_match31;
     }
     if (__ring_m31._tag === "Literal") {
@@ -806,7 +806,7 @@ function bind_pattern(ctx, pattern, expected_type, subst, __ring_ev_fail) {
     }
     if (__ring_m31._tag === "NamedConstructor") {
       const name = __ring_m31.name; const qualifier = __ring_m31.qualifier; const fields = __ring_m31.fields; const span = __ring_m31.span;
-      return bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span);
+      return bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span, __ring_ev_fail);
       break __ring_match31;
     }
     if (__ring_m31._tag === "TuplePattern") {
@@ -825,7 +825,7 @@ function bind_pattern(ctx, pattern, expected_type, subst, __ring_ev_fail) {
               const __ring_m35 = [List_get(elements, i), List_get(type_elems, i)];
               if (Array.isArray(__ring_m35) && __ring_m35.length === 2 && __ring_m35[0]._tag === "some" && __ring_m35[1]._tag === "some") {
                 const pat = __ring_m35[0]._0; const ty = __ring_m35[1]._0;
-                bind_pattern(ctx, pat, ty, subst);
+                bind_pattern(ctx, pat, ty, subst, __ring_ev_fail);
                 break __ring_match35;
               }
               break __ring_match35;
@@ -844,7 +844,7 @@ function bind_pattern(ctx, pattern, expected_type, subst, __ring_ev_fail) {
 }
 
 function bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span, __ring_ev_fail) {
-  const enum_name = resolve_pattern_enum(ctx, name, qualifier, span);
+  const enum_name = resolve_pattern_enum(ctx, name, qualifier, span, __ring_ev_fail);
   __ring_match36: {
     const __ring_m36 = enum_name;
     if (__ring_m36._tag === "some") {
@@ -913,7 +913,7 @@ function bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, s
 }
 
 function bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span, __ring_ev_fail) {
-  const enum_name = resolve_pattern_enum(ctx, name, qualifier, span);
+  const enum_name = resolve_pattern_enum(ctx, name, qualifier, span, __ring_ev_fail);
   __ring_match41: {
     const __ring_m41 = enum_name;
     if (__ring_m41._tag === "some") {

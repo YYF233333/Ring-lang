@@ -206,7 +206,7 @@ export function emit_toplevel_evidence(ctx: CodegenCtx, effects: EffectRow): voi
   for (const name of effect_names) {
     const ev_name = evidence_param_name(name);
     if (name === "io") {
-      ctx.emit(`const ${ev_name} = { read: (p) => require("fs").readFileSync(p, "utf-8"), write: (p, d) => require("fs").writeFileSync(p, d, "utf-8") };`);
+      ctx.emit(`const ${ev_name} = { read: (p) => __require("fs").readFileSync(p, "utf-8"), write: (p, d) => __require("fs").writeFileSync(p, d, "utf-8") };`);
     } else if (name === "fail") {
       ctx.emit(`const ${ev_name} = { raise: (error) => { throw error; } };`);
     } else {

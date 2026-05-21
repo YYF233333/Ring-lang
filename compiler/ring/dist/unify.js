@@ -229,7 +229,7 @@ function unify_effect_params(a, b, subst, env, __ring_ev_fail) {
     const __ring_m8 = [a, b];
     if (Array.isArray(__ring_m8) && __ring_m8.length === 2 && __ring_m8[0]._tag === "FailEffect" && __ring_m8[1]._tag === "FailEffect") {
       const et_a = __ring_m8[0].error_type; const et_b = __ring_m8[1].error_type;
-      return unify(et_a, et_b, subst, env);
+      return unify(et_a, et_b, subst, env, __ring_ev_fail);
       break __ring_match8;
     }
     if (Array.isArray(__ring_m8) && __ring_m8.length === 2 && __ring_m8[0]._tag === "CustomEffect" && __ring_m8[1]._tag === "CustomEffect") {
@@ -240,7 +240,7 @@ function unify_effect_params(a, b, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(ta_a))) {
-        s = unify(Option_unwrap_or(List_get(ta_a, i), types$UNIT()), Option_unwrap_or(List_get(ta_b, i), types$UNIT()), s, env);
+        s = unify(Option_unwrap_or(List_get(ta_a, i), types$UNIT()), Option_unwrap_or(List_get(ta_b, i), types$UNIT()), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;
@@ -310,7 +310,7 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
       if ((ta === tb)) {
       } else {
         if (((List_len(a_unmatched) === 0) && (List_len(b_unmatched) === 0))) {
-          s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(tb, Option_none), s, env);
+          s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(tb, Option_none), s, env, __ring_ev_fail);
         } else {
           const fresh = env$TypeEnv_fresh_var_id(env);
           if ((List_len(b_unmatched) > 0)) {
@@ -322,7 +322,7 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
             _Map_insert(new_s, ta, row_for_a_tail);
             s = new_s;
           } else {
-            s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(fresh, Option_none), s, env);
+            s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(fresh, Option_none), s, env, __ring_ev_fail);
           }
           if ((List_len(a_unmatched) > 0)) {
             const row_for_b_tail = types$Type_EffectRowType(a_unmatched, Option_some(fresh));
@@ -333,7 +333,7 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
             _Map_insert(new_s, tb, row_for_b_tail);
             s = new_s;
           } else {
-            s = unify(types$Type_TypeVar(tb, Option_none), types$Type_TypeVar(fresh, Option_none), s, env);
+            s = unify(types$Type_TypeVar(tb, Option_none), types$Type_TypeVar(fresh, Option_none), s, env, __ring_ev_fail);
           }
         }
       }
@@ -364,7 +364,7 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
           const __ring_m12 = bf;
           if (__ring_m12._tag === "some") {
             const matched = __ring_m12._0;
-            s = unify(af.ty, matched.ty, s, env);
+            s = unify(af.ty, matched.ty, s, env, __ring_ev_fail);
             break __ring_match12;
           }
           if (__ring_m12._tag === "none") {
@@ -451,7 +451,7 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
           if (Array.isArray(__ring_m16) && __ring_m16.length === 2 && __ring_m16[0]._tag === "some" && __ring_m16[1]._tag === "some") {
             const ta = __ring_m16[0]._0; const tb = __ring_m16[1]._0;
             if ((((List_len(a_only) === 0) && (List_len(b_only) === 0)) && (ta !== tb))) {
-              s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(tb, Option_none), s, env);
+              s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(tb, Option_none), s, env, __ring_ev_fail);
             }
             break __ring_match16;
           }
@@ -478,7 +478,7 @@ function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {
           const __ring_m18 = sf;
           if (__ring_m18._tag === "some") {
             const matched = __ring_m18._0;
-            s = unify(matched.ty, rf.ty, s, env);
+            s = unify(matched.ty, rf.ty, s, env, __ring_ev_fail);
             break __ring_match18;
           }
           if (__ring_m18._tag === "none") {
@@ -639,10 +639,10 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(pa))) {
-        s = unify(Option_unwrap_or(List_get(pa, i), types$UNIT()), Option_unwrap_or(List_get(pb, i), types$UNIT()), s, env);
+        s = unify(Option_unwrap_or(List_get(pa, i), types$UNIT()), Option_unwrap_or(List_get(pb, i), types$UNIT()), s, env, __ring_ev_fail);
         i = (i + 1);
       }
-      s = unify(ra, rb, s, env);
+      s = unify(ra, rb, s, env, __ring_ev_fail);
       s = unify_effect_rows(ea, eb, s, env, __ring_ev_fail);
       return s;
       break __ring_match26;
@@ -658,7 +658,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(tpa))) {
-        s = unify(Option_unwrap_or(List_get(tpa, i), types$UNIT()), Option_unwrap_or(List_get(tpb, i), types$UNIT()), s, env);
+        s = unify(Option_unwrap_or(List_get(tpa, i), types$UNIT()), Option_unwrap_or(List_get(tpb, i), types$UNIT()), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;
@@ -675,7 +675,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(tpa))) {
-        s = unify(Option_unwrap_or(List_get(tpa, i), types$UNIT()), Option_unwrap_or(List_get(tpb, i), types$UNIT()), s, env);
+        s = unify(Option_unwrap_or(List_get(tpa, i), types$UNIT()), Option_unwrap_or(List_get(tpb, i), types$UNIT()), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;
@@ -683,13 +683,13 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
     }
     if (Array.isArray(__ring_m26) && __ring_m26.length === 2 && __ring_m26[0]._tag === "GenericType" && __ring_m26[1]._tag === "GenericType") {
       const ba = __ring_m26[0].base; const aa = __ring_m26[0].args; const bb = __ring_m26[1].base; const ab = __ring_m26[1].args;
-      let s = unify(ba, bb, subst, env);
+      let s = unify(ba, bb, subst, env, __ring_ev_fail);
       if ((List_len(aa) !== List_len(ab))) {
         unify_error(t1, t2, Option_some("different type argument counts"), __ring_ev_fail);
       }
       let i = 0;
       while ((i < List_len(aa))) {
-        s = unify(Option_unwrap_or(List_get(aa, i), types$UNIT()), Option_unwrap_or(List_get(ab, i), types$UNIT()), s, env);
+        s = unify(Option_unwrap_or(List_get(aa, i), types$UNIT()), Option_unwrap_or(List_get(ab, i), types$UNIT()), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;
@@ -712,7 +712,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       let s = subst;
       let i = 0;
       while ((i < List_len(ea))) {
-        s = unify(Option_unwrap_or(List_get(ea, i), types$UNIT()), Option_unwrap_or(List_get(eb, i), types$UNIT()), s, env);
+        s = unify(Option_unwrap_or(List_get(ea, i), types$UNIT()), Option_unwrap_or(List_get(eb, i), types$UNIT()), s, env, __ring_ev_fail);
         i = (i + 1);
       }
       return s;

@@ -341,10 +341,12 @@ function effects_same_kind(a, b) {
       break __ring_match7;
     }
     if (__ring_m7._tag === "FailEffect") {
+      const ea = __ring_m7.error_type;
       __ring_match10: {
         const __ring_m10 = b;
         if (__ring_m10._tag === "FailEffect") {
-          return true;
+          const eb = __ring_m10.error_type;
+          return types_equal(ea, eb);
           break __ring_match10;
         }
         return false;
@@ -804,26 +806,7 @@ function types_equal(a, b) {
           if ((!tails_ok)) {
             return false;
           }
-          let i = 0;
-          while ((i < List_len(ea))) {
-            {
-              const __ring_t = List_get(ea, i);
-              if (__ring_t._tag === "some") {
-                const ae = __ring_t._0;
-                {
-                  const __ring_t = List_get(eb, i);
-                  if (__ring_t._tag === "some") {
-                    const be = __ring_t._0;
-                    if ((!effects_equal(ae, be))) {
-                      return false;
-                    }
-                  }
-                }
-              }
-            }
-            i = (i + 1);
-          }
-          return true;
+          return ea.every((function(ae) { return eb.some((function(be) { return effects_equal(ae, be); })); }));
           break __ring_match31;
         }
         return false;

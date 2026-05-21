@@ -284,7 +284,8 @@ export interface RowMergeResult {
 function effects_same_kind(a: Effect, b: Effect): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
-    case "io": case "mut": case "fail": return true;
+    case "io": case "mut": return true;
+    case "fail": return types_equal(a.error_type, (b as FailEffect).error_type);
     case "custom": return a.name === (b as CustomEffect).name;
   }
 }
@@ -384,7 +385,7 @@ export function types_equal(a: Type, b: Type): boolean {
       const ber = b as EffectRowType;
       if (a.effects.length !== ber.effects.length) return false;
       if (a.tail !== ber.tail) return false;
-      return a.effects.every((e, i) => effects_equal(e, ber.effects[i]));
+      return a.effects.every(e => ber.effects.some(be => effects_equal(e, be)));
     }
     case "tuple": {
       const bt = b as TupleType;

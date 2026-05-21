@@ -60,11 +60,11 @@ function empty_fn_bounds() {
   return x;
 }
 
-function register_decl_public(ctx, decl) {
-  return register_decl(ctx, decl);
+function register_decl_public(ctx, decl, __ring_ev_fail) {
+  return register_decl(ctx, decl, __ring_ev_fail);
 }
 
-function register_decls_two_phase(ctx, decls) {
+function register_decls_two_phase(ctx, decls, __ring_ev_fail) {
   let deferred_struct_names = empty_strs();
   let deferred_enum_names = empty_strs();
   for (const decl of decls) {
@@ -78,7 +78,7 @@ function register_decls_two_phase(ctx, decls) {
   preregister_enum(ctx, name, type_params);
   return List_push(deferred_enum_names, name);
 })(); }
-  return register_decl(ctx, decl);
+  return register_decl(ctx, decl, __ring_ev_fail);
 })() }; } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") return { _tag: "none" }; throw __ring_e; } })();
   }
   for (const decl of decls) {
