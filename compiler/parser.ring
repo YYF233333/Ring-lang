@@ -120,7 +120,6 @@ pub fn expr_span(e: Expr) -> Span {
         HandleExpr { span, .. } => span,
         Lambda { span, .. } => span,
         OptionUnwrap { span, .. } => span,
-        TryBlock { span, .. } => span,
         Range { span, .. } => span,
         ListLit { span, .. } => span,
         TupleLit { span, .. } => span
@@ -1023,12 +1022,6 @@ impl Parser {
 
         if self.check(TokenKind::TkHandle) {
             return self.parse_handle_expr()
-        }
-
-        if self.check(TokenKind::TkTry) {
-            self.advance()
-            let body = self.parse_block_expr()
-            return Expr::TryBlock { body: body, span: self.make_span(start, expr_span(body).end) }
         }
 
         if self.check(TokenKind::TkFn) {

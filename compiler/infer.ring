@@ -620,8 +620,6 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
             infer_lambda(ctx, params, body, span, subst, none),
         Expr::OptionUnwrap { expr: uw_expr, span } =>
             infer_option_unwrap(ctx, uw_expr, span, subst),
-        Expr::TryBlock { body, span } =>
-            infer_try_block(ctx, body, span, subst),
         Expr::ListLit { elements, span } =>
             infer_list_literal(ctx, elements, span, subst),
         Expr::TupleLit { elements, span } => {
@@ -2136,20 +2134,6 @@ fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst
     InferResult {
         hexpr: HExpr::ListLit { elements: helements, ty: list_type, effects: combined_effects, span: span },
         subst: s, effects: combined_effects
-    }
-}
-
-// ============================================================
-// infer_try_block
-// ============================================================
-
-fn infer_try_block(var ctx: InferCtx, body: Expr, span: Span, subst: Map<Int, Type>) -> InferResult {
-    let body_r = infer_expr(ctx, body, subst)
-    let result_type = make_option_type(hexpr_type(body_r.hexpr))
-    let effects = remove_fail_effect(body_r.effects)
-    InferResult {
-        hexpr: HExpr::TryBlock { body: body_r.hexpr, ty: result_type, effects: effects, span: span },
-        subst: body_r.subst, effects: effects
     }
 }
 

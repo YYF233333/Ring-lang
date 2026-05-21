@@ -97,8 +97,6 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
         },
         HExpr::OptionUnwrap { expr: inner, .. } =>
             gen_option_unwrap(ctx, inner),
-        HExpr::TryBlock { body, .. } =>
-            gen_try_block(ctx, body),
         HExpr::RangeExpr { start, end, .. } => {
             let s = gen_expr(ctx, start)
             let e = gen_expr(ctx, end)
@@ -870,57 +868,6 @@ fn gen_option_unwrap(var ctx: CodegenCtx, inner: HExpr) -> Str {
 }
 
 // ============================================================
-// TryBlock helper
-// ============================================================
-
-fn gen_try_block(var ctx: CodegenCtx, body: HExpr) -> Str {
-    let saved_in_try = ctx.in_try_fail
-    ctx.in_try_fail = true
-    let b = gen_expr(ctx, body)
-    ctx.in_try_fail = saved_in_try
-    let ev = evidence_param_name("fail")
-    let tag = ENUM_TAG_FIELD()
-    let stag = OPTION_SOME_TAG()
-    let ntag = OPTION_NONE_TAG()
-    let pf = OPTION_PAYLOAD_FIELD()
-    let ea = RUNTIME_EFFECT_ABORT()
-    let q = "\""
-    var p: List<Str> = [""]; p.clear()
-    p.push("(function() { const ")
-    p.push(ev)
-    p.push(" = { raise: (__ring_err) => { throw new ")
-    p.push(ea)
-    p.push("(")
-    p.push(q)
-    p.push("fail")
-    p.push(q)
-    p.push(", __ring_err); } }; try { return { ")
-    p.push(tag)
-    p.push(": ")
-    p.push(q)
-    p.push(stag)
-    p.push(q)
-    p.push(", ")
-    p.push(pf)
-    p.push(": ")
-    p.push(b)
-    p.push(" }; } catch (__ring_e) { if (__ring_e instanceof ")
-    p.push(ea)
-    p.push(" && __ring_e.effect === ")
-    p.push(q)
-    p.push("fail")
-    p.push(q)
-    p.push(") return { ")
-    p.push(tag)
-    p.push(": ")
-    p.push(q)
-    p.push(ntag)
-    p.push(q)
-    p.push(" }; throw __ring_e; } })()")
-    p.join("")
-}
-
-// ============================================================
 // Try/catch expression
 // ============================================================
 
@@ -1058,7 +1005,6 @@ fn has_fail_effect(expr: HExpr) -> Bool {
         HExpr::Lambda { effects, .. } => check_fail(effects),
         HExpr::EffectOp { effects, .. } => check_fail(effects),
         HExpr::OptionUnwrap { effects, .. } => check_fail(effects),
-        HExpr::TryBlock { effects, .. } => check_fail(effects),
         HExpr::RangeExpr { effects, .. } => check_fail(effects),
         HExpr::ListLit { effects, .. } => check_fail(effects),
         HExpr::TupleLit { effects, .. } => check_fail(effects),

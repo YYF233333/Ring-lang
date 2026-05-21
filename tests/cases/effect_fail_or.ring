@@ -22,10 +22,10 @@ fn main() {
     assert(x.unwrap_or(0) == 42, "option unwrap_or some")
     assert(y.unwrap_or(0) == 0, "option unwrap_or none")
 
-    // try with fail
-    let r1 = try { divide(10, 2) }
+    // some()+catch replaces try
+    let r1 = some(divide(10, 2)) catch { _ => none }
     assert(r1.unwrap_or(-1) == 5, "try success")
-    let r2 = try { divide(10, 0) }
+    let r2 = some(divide(10, 0)) catch { _ => none }
     assert(r2.is_none(), "try fail becomes none")
 
     print("effect_fail_or: all tests passed")

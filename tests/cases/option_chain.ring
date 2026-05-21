@@ -25,23 +25,23 @@ fn first_positive(xs: List<Int>) -> Int {
 }
 
 fn main() {
-    // Successful chain — use try to capture result as Option
-    let age1 = try { get_user_age(1) }
+    // Successful chain — use some()+catch to capture result as Option
+    let age1 = some(get_user_age(1)) catch { _ => none }
     assert(age1.unwrap_or(0) == 30, "chain success")
 
     // First ? fails
-    let age3 = try { get_user_age(3) }
+    let age3 = some(get_user_age(3)) catch { _ => none }
     assert(age3.is_none(), "chain fail at first")
 
     // Second ? fails (bob has no age)
-    let age2 = try { get_user_age(2) }
+    let age2 = some(get_user_age(2)) catch { _ => none }
     assert(age2.is_none(), "chain fail at second")
 
     // ? with method calls
-    let pos = try { first_positive([-1, -2, 5, 3]) }
+    let pos = some(first_positive([-1, -2, 5, 3])) catch { _ => none }
     assert(pos.unwrap_or(0) == 50, "? with method chain")
 
-    let no_pos = try { first_positive([-1, -2]) }
+    let no_pos = some(first_positive([-1, -2])) catch { _ => none }
     assert(no_pos.is_none(), "? with method chain none")
 
     // catch as alternative to try+unwrap

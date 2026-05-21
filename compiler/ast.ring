@@ -147,7 +147,6 @@ pub enum Expr {
     HandleExpr { body: Expr, handlers: List<EffectHandler>, span: Span },
     Lambda { params: List<Param>, return_type: TypeExpr?, body: Expr, span: Span },
     OptionUnwrap { expr: Expr, span: Span },
-    TryBlock { body: Expr, span: Span },
     Range { start: Expr, end: Expr, inclusive: Bool, span: Span },
     ListLit { elements: List<Expr>, span: Span },
     TupleLit { elements: List<Expr>, span: Span }

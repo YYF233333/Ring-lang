@@ -47,15 +47,15 @@ fn load_data() -> Str {
     config
 }
 
-// === Option<T> + ? + try + or ===
+// === Option<T> + ? + catch ===
 
 fn find(x: Int) -> Int? {
     if x > 0 { some(x) } else { none }
 }
 
 fn safe_add(a: Int, b: Int) -> Int {
-    let result = try { find(a)? + find(b)? }
-    result or 0
+    let result = some(find(a)? + find(b)?) catch { _ => none }
+    result.unwrap_or(0)
 }
 
 // === Row Polymorphism ===
