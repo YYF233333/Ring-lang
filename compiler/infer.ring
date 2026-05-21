@@ -614,8 +614,8 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: Map<Int, Type>) -> Infer
             infer_string_interp(ctx, parts, span, subst),
         Expr::OrExpr { expr: or_expr, default_value, span } =>
             infer_or(ctx, or_expr, default_value, span, subst),
-        Expr::CatchExpr { expr: catch_expr, error_type, error_binding, handler, span } =>
-            infer_catch(ctx, catch_expr, error_type, error_binding, handler, span, subst),
+        Expr::CatchExpr { expr: catch_expr, arms, span } =>
+            infer_catch(ctx, catch_expr, arms, span, subst),
         Expr::HandleExpr { body, handlers, span } =>
             infer_handle(ctx, body, handlers, span, subst),
         Expr::Lambda { params, body, span, .. } =>
@@ -1899,8 +1899,14 @@ fn infer_or(var ctx: InferCtx, expr: Expr, default_value: Expr, span: Span, subs
     s = me.1
     effects = remove_fail_effect(effects)
     let result_type = apply_subst(s, hexpr_type(expr_r.hexpr))
+    let wildcard_arm = HMatchArm {
+        pattern: Pattern::Wildcard { span: span },
+        guard: none,
+        body: default_r.hexpr,
+        span: span
+    }
     InferResult {
-        hexpr: HExpr::TryCatch { body: expr_r.hexpr, error_binding: none, error_type: none, handler: default_r.hexpr, ty: result_type, effects: effects, span: span },
+        hexpr: HExpr::TryCatch { body: expr_r.hexpr, arms: [wildcard_arm], ty: result_type, effects: effects, span: span },
         subst: s, effects: effects
     }
 }
@@ -1909,42 +1915,83 @@ fn infer_or(var ctx: InferCtx, expr: Expr, default_value: Expr, span: Span, subs
 // infer_catch
 // ============================================================
 
-fn infer_catch(var ctx: InferCtx, expr: Expr, error_type_name: Str?, error_binding: Str, handler: Expr, span: Span, subst: Map<Int, Type>) -> InferResult {
+fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, subst: Map<Int, Type>) -> InferResult {
     let expr_r = infer_expr(ctx, expr, subst)
     var s = expr_r.subst
+    var effects = expr_r.effects
 
-    ctx.env.push_scope()
-    var error_var_type: Type = ctx.env.fresh_var()
-    match error_type_name {
-        some(etn) => { error_var_type = resolve_named_type(ctx, etn, [], span) },
-        none => {}
+    // Extract error type from the body's fail effect
+    var error_type: Type = ctx.env.fresh_var()
+    for eff in effects.effects {
+        match eff {
+            Effect::FailEffect { error_type: et } => { error_type = et },
+            _ => {}
+        }
     }
-    ctx.env.bind_mono(error_binding, error_var_type)
 
-    let handler_result = try { infer_expr(ctx, handler, s) }
-    ctx.env.pop_scope()
+    let result_type = ctx.env.fresh_var()
+    s = unify_at(ctx.sink, ctx.env, hexpr_type(expr_r.hexpr), result_type, s, span)
+    var harms: List<HMatchArm> = []
+    var has_catch_all = false
 
-    match handler_result {
-        some(handler_r) => {
-            s = handler_r.subst
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(expr_r.hexpr), hexpr_type(handler_r.hexpr), s, span)
-            let me = merge_effects(ctx.env, expr_r.effects, handler_r.effects, s)
-            var effects = me.0
-            s = me.1
-            match error_type_name {
-                some(_) => { effects = remove_specific_fail_effect(effects, error_var_type, s) },
-                none => { effects = remove_fail_effect(effects) }
-            }
-            let result_type = apply_subst(s, hexpr_type(expr_r.hexpr))
-            InferResult {
-                hexpr: HExpr::TryCatch {
-                    body: expr_r.hexpr, error_binding: some(error_binding), error_type: error_type_name,
-                    handler: handler_r.hexpr, ty: result_type, effects: effects, span: span
+    for arm in arms {
+        ctx.env.push_scope()
+        let arm_result = try {
+            bind_pattern(ctx, arm.pattern, error_type, s)
+
+            var guard_hexpr: HExpr? = none
+            match arm.guard {
+                some(g) => {
+                    let gr = infer_expr(ctx, g, s)
+                    s = gr.subst
+                    s = unify_at(ctx.sink, ctx.env, hexpr_type(gr.hexpr), BOOL(), s, arm.span)
+                    let me = merge_effects(ctx.env, effects, gr.effects, s)
+                    effects = me.0
+                    s = me.1
+                    guard_hexpr = some(gr.hexpr)
                 },
-                subst: s, effects: effects
+                none => {}
             }
-        },
-        none => fail.raise(CompileError {})
+
+            let body_r = infer_expr(ctx, arm.body, s)
+            s = body_r.subst
+            let me = merge_effects(ctx.env, effects, body_r.effects, s)
+            effects = me.0
+            s = me.1
+            s = unify_at(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span)
+
+            // Check if this arm is a catch-all (wildcard or binding without guard)
+            match arm.pattern {
+                Pattern::Wildcard { .. } => match arm.guard {
+                    none => { has_catch_all = true },
+                    _ => {}
+                },
+                Pattern::Binding { .. } => match arm.guard {
+                    none => { has_catch_all = true },
+                    _ => {}
+                },
+                _ => {}
+            }
+
+            harms.push(HMatchArm { pattern: arm.pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
+            true
+        }
+        ctx.env.pop_scope()
+        match arm_result {
+            none => fail.raise(CompileError {}),
+            _ => {}
+        }
+    }
+
+    // If catch-all exists, remove fail effect; otherwise fail propagates
+    if has_catch_all {
+        effects = remove_fail_effect(effects)
+    }
+
+    let final_type = apply_subst(s, result_type)
+    InferResult {
+        hexpr: HExpr::TryCatch { body: expr_r.hexpr, arms: harms, ty: final_type, effects: effects, span: span },
+        subst: s, effects: effects
     }
 }
 

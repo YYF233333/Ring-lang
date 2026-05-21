@@ -525,9 +525,11 @@ function collect_local_calls(expr, local_names, out) {
       break __ring_match16;
     }
     if (__ring_m16._tag === "TryCatch") {
-      const body = __ring_m16.body; const handler = __ring_m16.handler;
+      const body = __ring_m16.body; const arms = __ring_m16.arms;
       collect_local_calls(body, local_names, out);
-      return collect_local_calls(handler, local_names, out);
+      for (const arm of arms) {
+        collect_local_calls(arm.body, local_names, out);
+      }
       break __ring_match16;
     }
     if (__ring_m16._tag === "HandleExpr") {

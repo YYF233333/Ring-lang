@@ -193,8 +193,8 @@ function Expr_StringInterp(parts, span) {
 function Expr_OrExpr(expr, default_value, span) {
   return { _tag: "OrExpr", expr, default_value, span };
 }
-function Expr_CatchExpr(expr, error_type, error_binding, handler, span) {
-  return { _tag: "CatchExpr", expr, error_type, error_binding, handler, span };
+function Expr_CatchExpr(expr, arms, span) {
+  return { _tag: "CatchExpr", expr, arms, span };
 }
 function Expr_HandleExpr(body, handlers, span) {
   return { _tag: "HandleExpr", body, handlers, span };

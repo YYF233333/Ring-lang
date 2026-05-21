@@ -365,8 +365,13 @@ function zonk_expr(ctx, expr) {
       break __ring_match5;
     }
     if (__ring_m5._tag === "TryCatch") {
-      const body = __ring_m5.body; const error_binding = __ring_m5.error_binding; const error_type = __ring_m5.error_type; const handler = __ring_m5.handler;
-      return hir$HExpr_TryCatch(zonk_expr(ctx, body), error_binding, error_type, zonk_expr(ctx, handler), z_ty, z_eff, z_span);
+      const body = __ring_m5.body; const arms = __ring_m5.arms;
+      return hir$HExpr_TryCatch(zonk_expr(ctx, body), arms.map((function(a) { return new hir$HMatchArm(a.pattern, (function() {
+  const __ring_m = a.guard;
+  if (__ring_m._tag === "some") { const g = __ring_m._0; return Option_some(zonk_expr(ctx, g)); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})(), zonk_expr(ctx, a.body), a.span); })), z_ty, z_eff, z_span);
       break __ring_match5;
     }
     if (__ring_m5._tag === "HandleExpr") {

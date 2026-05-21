@@ -70,7 +70,7 @@ pub enum HExpr {
     Block { stmts: List<HStmt>, tail: HExpr?, ty: Type, effects: EffectRow, span: Span },
     IfExpr { condition: HExpr, then_branch: HExpr, else_branch: HExpr?, ty: Type, effects: EffectRow, span: Span },
     StringInterp { parts: List<HStringInterpPart>, ty: Type, effects: EffectRow, span: Span },
-    TryCatch { body: HExpr, error_binding: Str?, error_type: Str?, handler: HExpr, ty: Type, effects: EffectRow, span: Span },
+    TryCatch { body: HExpr, arms: List<HMatchArm>, ty: Type, effects: EffectRow, span: Span },
     HandleExpr { body: HExpr, handlers: List<HEffectHandler>, ty: Type, effects: EffectRow, span: Span },
     Lambda { params: List<HParam>, return_type: Type, body: HExpr, ty: Type, effects: EffectRow, span: Span },
     EffectOp { effect_name: Str, op_name: Str, args: List<HExpr>, ty: Type, effects: EffectRow, span: Span },

@@ -5,6 +5,6 @@ fn may_fail(x: Int) -> Int {
 }
 
 fn main() {
-    let result = may_fail(-1) catch ParseError fn(e) { 99 }
+    let result = may_fail(-1) catch { ParseError { msg } => 99 }
     print(result)
 }

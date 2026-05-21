@@ -144,7 +144,7 @@ pub enum Expr {
     IfExpr { condition: Expr, then_branch: Expr, else_branch: Expr?, span: Span },
     StringInterp { parts: List<StringInterpPart>, span: Span },
     OrExpr { expr: Expr, default_value: Expr, span: Span },
-    CatchExpr { expr: Expr, error_type: Str?, error_binding: Str, handler: Expr, span: Span },
+    CatchExpr { expr: Expr, arms: List<MatchArm>, span: Span },
     HandleExpr { body: Expr, handlers: List<EffectHandler>, span: Span },
     Lambda { params: List<Param>, return_type: TypeExpr?, body: Expr, span: Span },
     OptionUnwrap { expr: Expr, span: Span },

@@ -1285,30 +1285,15 @@ function Parser_parse_or_expr(self, left) {
 }
 function Parser_parse_catch_expr(self, left) {
   Parser_advance(self);
-  let error_type = Option_none;
-  if ((Parser_check(self, lexer$TokenKind_TkIdent) && ((self.pos + 1) < List_len(self.tokens)))) {
-    __ring_match6: {
-      const __ring_m6 = List_get(self.tokens, (self.pos + 1));
-      if (__ring_m6._tag === "some") {
-        const next_tok = __ring_m6._0;
-        if ((lexer$token_kind_value(next_tok.kind) === "fn")) {
-          error_type = Option_some(Parser_advance(self).value);
-        }
-        break __ring_match6;
-      }
-      if (__ring_m6._tag === "none") {
-        break __ring_match6;
-      }
-      __match_fail(__ring_m6);
-    }
+  Parser_expect(self, lexer$TokenKind_TkLBrace);
+  let arms = [];
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+    List_push(arms, Parser_parse_match_arm(self));
+    Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
-  Parser_expect(self, lexer$TokenKind_TkFn);
-  Parser_expect(self, lexer$TokenKind_TkLParen);
-  const error_binding = Parser_expect(self, lexer$TokenKind_TkIdent).value;
-  Parser_expect(self, lexer$TokenKind_TkRParen);
-  const handler = Parser_parse_block_expr(self);
-  const span = Parser_make_span(self, expr_span(left).start, expr_span(handler).end);
-  return ast$Expr_CatchExpr(left, error_type, error_binding, handler, span);
+  const end_tok = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  const span = Parser_make_span(self, expr_span(left).start, end_tok.span.end);
+  return ast$Expr_CatchExpr(left, arms, span);
 }
 function Parser_parse_string_interp(self) {
   const start_tok = Parser_advance(self);

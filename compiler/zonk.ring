@@ -264,8 +264,22 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
                 }),
                 ty: z_ty, effects: z_eff, span: z_span
             },
-        HExpr::TryCatch { body, error_binding, error_type, handler, .. } =>
-            HExpr::TryCatch { body: zonk_expr(ctx, body), error_binding: error_binding, error_type: error_type, handler: zonk_expr(ctx, handler), ty: z_ty, effects: z_eff, span: z_span },
+        HExpr::TryCatch { body, arms, .. } =>
+            HExpr::TryCatch {
+                body: zonk_expr(ctx, body),
+                arms: arms.map(fn(a) {
+                    HMatchArm {
+                        pattern: a.pattern,
+                        guard: match a.guard {
+                            some(g) => some(zonk_expr(ctx, g)),
+                            none => none
+                        },
+                        body: zonk_expr(ctx, a.body),
+                        span: a.span
+                    }
+                }),
+                ty: z_ty, effects: z_eff, span: z_span
+            },
         HExpr::HandleExpr { body, handlers, .. } =>
             HExpr::HandleExpr {
                 body: zonk_expr(ctx, body),

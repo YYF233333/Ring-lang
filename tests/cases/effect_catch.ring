@@ -1,9 +1,8 @@
-// Phase 1: catch expression with error binding
 fn risky() -> Int {
     42
 }
 
 fn main() {
-    let result = risky() catch fn(e) { 0 }
+    let result = risky() catch { e => 0 }
     print(result)
 }

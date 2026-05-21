@@ -74,10 +74,10 @@ function merge_effects(env, a, b, s, __ring_ev_fail) {
 }
 
 function unify_at(sink, env, t1, t2, s, span, __ring_ev_fail) {
-  return (function() { const __ring_ev_fail = { raise: (e) => { throw new __EffectAbort("fail", e); } }; try { return unify$unify(t1, t2, s, env, __ring_ev_fail); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail" && __ring_e.value instanceof unify$UnificationError) { const e = __ring_e.value; return (function() {
+  return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return unify$unify(t1, t2, s, env, __ring_ev_fail); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return (function() {
   const code = (e.is_occurs_check ? codes$E0302() : codes$E0301());
   return type_error(sink, code, e.message, span, diagnostics$DiagnosticContext_TypeMismatch(types$type_to_string(env$apply_subst(s, t1)), types$type_to_string(env$apply_subst(s, t2)), Option_none), __ring_ev_fail);
-})(); } throw __ring_e; } })();
+})(); } } throw __ring_e; } })();
 }
 
 function free_type_vars(t, subst) {

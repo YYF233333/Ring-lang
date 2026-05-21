@@ -97,13 +97,15 @@ pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: Map<Int, Type>
 }
 
 pub fn unify_at(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: Map<Int, Type>, span: Span) -> Map<Int, Type> {
-    unify(t1, t2, s, env) catch UnificationError fn(e) {
-        let code = if e.is_occurs_check { E0302() } else { E0301() }
-        type_error(sink, code, e.message, span, DiagnosticContext::TypeMismatch {
-            expected: type_to_string(apply_subst(s, t1)),
-            actual: type_to_string(apply_subst(s, t2)),
-            expression: none
-        })
+    unify(t1, t2, s, env) catch {
+        e => {
+            let code = if e.is_occurs_check { E0302() } else { E0301() }
+            type_error(sink, code, e.message, span, DiagnosticContext::TypeMismatch {
+                expected: type_to_string(apply_subst(s, t1)),
+                actual: type_to_string(apply_subst(s, t2)),
+                expression: none
+            })
+        }
     }
 }
 

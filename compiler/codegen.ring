@@ -355,9 +355,9 @@ fn collect_local_calls(expr: HExpr, local_names: Set<Str>, var out: Set<Str>) {
                 }
             }
         },
-        HExpr::TryCatch { body, handler, .. } => {
+        HExpr::TryCatch { body, arms, .. } => {
             collect_local_calls(body, local_names, out)
-            collect_local_calls(handler, local_names, out)
+            for arm in arms { collect_local_calls(arm.body, local_names, out) }
         },
         HExpr::HandleExpr { body, handlers, .. } => {
             collect_local_calls(body, local_names, out)

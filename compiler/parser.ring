@@ -1188,24 +1188,15 @@ impl Parser {
 
     fn parse_catch_expr(var self, left: Expr) -> Expr {
         self.advance()
-        var error_type: Str? = none
-        if self.check(TokenKind::TkIdent) && self.pos + 1 < self.tokens.len() {
-            match self.tokens.get(self.pos + 1) {
-                some(next_tok) => {
-                    if token_kind_value(next_tok.kind) == "fn" {
-                        error_type = some(self.advance().value)
-                    }
-                },
-                none => {}
-            }
+        self.expect(TokenKind::TkLBrace)
+        var arms: List<MatchArm> = []
+        while !self.check(TokenKind::TkRBrace) && !self.at_end() {
+            arms.push(self.parse_match_arm())
+            self.try_consume(TokenKind::TkComma)
         }
-        self.expect(TokenKind::TkFn)
-        self.expect(TokenKind::TkLParen)
-        let error_binding = self.expect(TokenKind::TkIdent).value
-        self.expect(TokenKind::TkRParen)
-        let handler = self.parse_block_expr()
-        let span = self.make_span(expr_span(left).start, expr_span(handler).end)
-        Expr::CatchExpr { expr: left, error_type: error_type, error_binding: error_binding, handler: handler, span: span }
+        let end_tok = self.expect(TokenKind::TkRBrace)
+        let span = self.make_span(expr_span(left).start, end_tok.span.end)
+        Expr::CatchExpr { expr: left, arms: arms, span: span }
     }
 
     // ============================================================

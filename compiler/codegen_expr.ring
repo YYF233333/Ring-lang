@@ -82,8 +82,8 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
             gen_if(ctx, condition, then_branch, else_branch),
         HExpr::StringInterp { parts, .. } =>
             gen_string_interp(ctx, parts),
-        HExpr::TryCatch { body, error_binding, error_type, handler, .. } =>
-            gen_try_catch(ctx, body, error_binding, error_type, handler),
+        HExpr::TryCatch { body, arms, .. } =>
+            gen_try_catch(ctx, body, arms),
         HExpr::HandleExpr { body, handlers, .. } =>
             gen_handle(ctx, body, handlers),
         HExpr::Lambda { params, body, ty, .. } =>
@@ -928,13 +928,41 @@ fn gen_try_block(var ctx: CodegenCtx, body: HExpr) -> Str {
 // Try/catch expression
 // ============================================================
 
-fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, error_binding: Str?, error_type: Str?, handler: HExpr) -> Str {
+fn gen_catch_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str {
+    // For catch arms, NamedConstructor patterns for structs need instanceof checks,
+    // while enum variant patterns (Constructor/NamedConstructor) use _tag checks.
+    match pat {
+        Pattern::NamedConstructor { name, fields, .. } => {
+            // Check if this is a struct (not an enum variant) by looking at struct_field_order
+            if ctx.struct_field_order.contains_key(name) {
+                let qualified_name = qualify(ctx, safe_ident(name))
+                let inst_check = "${target} instanceof ${qualified_name}"
+                var sub_conds: List<Str> = []
+                for f in fields {
+                    let sname = safe_ident(f.name)
+                    let sub = gen_pattern_condition("${target}.${sname}", f.pattern)
+                    if sub != "true" { sub_conds.push(sub) }
+                }
+                if sub_conds.len() == 0 { inst_check }
+                else {
+                    let joined = sub_conds.join(" && ")
+                    "${inst_check} && ${joined}"
+                }
+            } else {
+                // Enum variant — use _tag check (same as gen_pattern_condition)
+                gen_pattern_condition(target, pat)
+            }
+        },
+        _ => gen_pattern_condition(target, pat)
+    }
+}
+
+fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str {
     let body_has_fail = has_fail_effect(body)
     let saved_in_try = ctx.in_try_fail
     if body_has_fail { ctx.in_try_fail = true }
     let body_js = gen_expr(ctx, body)
     ctx.in_try_fail = saved_in_try
-    let handler_js = gen_expr(ctx, handler)
 
     if body_has_fail == false { return body_js }
 
@@ -942,89 +970,38 @@ fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, error_binding: Str?, error_ty
     let ea = RUNTIME_EFFECT_ABORT()
     let q = "\""
 
-    match error_binding {
-        some(binding) => {
-            let sb = safe_ident(binding)
-            match error_type {
-                some(et) => {
-                    let type_name = qualify(ctx, safe_ident(et))
-                    gen_typed_try_catch(ev, ea, sb, body_js, handler_js, type_name, q)
-                },
-                none => {
-                    gen_untyped_try_catch_with_binding(ev, ea, sb, body_js, handler_js, q)
-                },
-            }
-        },
-        none => {
-            gen_untyped_try_catch(ev, ea, body_js, handler_js, q)
-        },
+    // Generate arm code
+    var arm_js: List<Str> = []
+    var has_catch_all = false
+    for arm in arms {
+        let cond = gen_catch_pattern_condition(ctx, "__ring_err", arm.pattern)
+        let bindings = gen_pattern_bindings("__ring_err", arm.pattern)
+        let arm_body_js = gen_expr(ctx, arm.body)
+
+        // Check for guard
+        var guard_js = ""
+        match arm.guard {
+            some(g) => { guard_js = " && (${gen_expr(ctx, g)})" },
+            none => {}
+        }
+
+        // Check if catch-all
+        match arm.pattern {
+            Pattern::Wildcard { .. } => match arm.guard {
+                none => { has_catch_all = true },
+                _ => {}
+            },
+            Pattern::Binding { .. } => match arm.guard {
+                none => { has_catch_all = true },
+                _ => {}
+            },
+            _ => {}
+        }
+
+        arm_js.push("if (${cond}${guard_js}) { ${bindings}return ${arm_body_js}; }")
     }
-}
 
-fn gen_typed_try_catch(ev: Str, ea: Str, sb: Str, body_js: Str, handler_js: Str, type_name: Str, q: Str) -> Str {
-    var p: List<Str> = [""]; p.clear()
-    p.push("(function() { const ")
-    p.push(ev)
-    p.push(" = { raise: (")
-    p.push(sb)
-    p.push(") => { throw new ")
-    p.push(ea)
-    p.push("(")
-    p.push(q)
-    p.push("fail")
-    p.push(q)
-    p.push(", ")
-    p.push(sb)
-    p.push("); } }; try { return ")
-    p.push(body_js)
-    p.push("; } catch (__ring_e) { if (__ring_e instanceof ")
-    p.push(ea)
-    p.push(" && __ring_e.effect === ")
-    p.push(q)
-    p.push("fail")
-    p.push(q)
-    p.push(" && __ring_e.value instanceof ")
-    p.push(type_name)
-    p.push(") { const ")
-    p.push(sb)
-    p.push(" = __ring_e.value; return ")
-    p.push(handler_js)
-    p.push("; } throw __ring_e; } })()")
-    p.join("")
-}
-
-fn gen_untyped_try_catch_with_binding(ev: Str, ea: Str, sb: Str, body_js: Str, handler_js: Str, q: Str) -> Str {
-    var p: List<Str> = [""]; p.clear()
-    p.push("(function() { const ")
-    p.push(ev)
-    p.push(" = { raise: (")
-    p.push(sb)
-    p.push(") => { throw new ")
-    p.push(ea)
-    p.push("(")
-    p.push(q)
-    p.push("fail")
-    p.push(q)
-    p.push(", ")
-    p.push(sb)
-    p.push("); } }; try { return ")
-    p.push(body_js)
-    p.push("; } catch (__ring_e) { if (__ring_e instanceof ")
-    p.push(ea)
-    p.push(" && __ring_e.effect === ")
-    p.push(q)
-    p.push("fail")
-    p.push(q)
-    p.push(") { const ")
-    p.push(sb)
-    p.push(" = __ring_e.value; return ")
-    p.push(handler_js)
-    p.push("; } throw __ring_e; } })()")
-    p.join("")
-}
-
-fn gen_untyped_try_catch(ev: Str, ea: Str, body_js: Str, handler_js: Str, q: Str) -> Str {
-    var p: List<Str> = [""]; p.clear()
+    var p: List<Str> = []
     p.push("(function() { const ")
     p.push(ev)
     p.push(" = { raise: (__ring_err) => { throw new ")
@@ -1033,7 +1010,7 @@ fn gen_untyped_try_catch(ev: Str, ea: Str, body_js: Str, handler_js: Str, q: Str
     p.push(q)
     p.push("fail")
     p.push(q)
-    p.push(", undefined); } }; try { return ")
+    p.push(", __ring_err); } }; try { return ")
     p.push(body_js)
     p.push("; } catch (__ring_e) { if (__ring_e instanceof ")
     p.push(ea)
@@ -1041,9 +1018,25 @@ fn gen_untyped_try_catch(ev: Str, ea: Str, body_js: Str, handler_js: Str, q: Str
     p.push(q)
     p.push("fail")
     p.push(q)
-    p.push(") return ")
-    p.push(handler_js)
-    p.push("; throw __ring_e; } })()")
+    p.push(") { const __ring_err = __ring_e.value; ")
+
+    // Emit arm chain
+    var first = true
+    for aj in arm_js {
+        if first { p.push(aj); first = false }
+        else { p.push(" else ${aj}") }
+    }
+
+    // If no catch-all, re-throw
+    if has_catch_all == false {
+        if arm_js.len() > 0 {
+            p.push(" else { throw __ring_e; }")
+        } else {
+            p.push("throw __ring_e;")
+        }
+    }
+
+    p.push(" } throw __ring_e; } })()")
     p.join("")
 }
 

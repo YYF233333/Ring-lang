@@ -127,8 +127,8 @@ function HExpr_IfExpr(condition, then_branch, else_branch, ty, effects, span) {
 function HExpr_StringInterp(parts, ty, effects, span) {
   return { _tag: "StringInterp", parts, ty, effects, span };
 }
-function HExpr_TryCatch(body, error_binding, error_type, handler, ty, effects, span) {
-  return { _tag: "TryCatch", body, error_binding, error_type, handler, ty, effects, span };
+function HExpr_TryCatch(body, arms, ty, effects, span) {
+  return { _tag: "TryCatch", body, arms, ty, effects, span };
 }
 function HExpr_HandleExpr(body, handlers, ty, effects, span) {
   return { _tag: "HandleExpr", body, handlers, ty, effects, span };
