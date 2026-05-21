@@ -472,7 +472,7 @@ function gen_block_as_value(ctx: CodegenCtx, block: HBlock): string {
 function gen_string_interp(ctx: CodegenCtx, expr: HExpr & { kind: "string_interp" }): string {
   const parts = expr.parts.map(p => {
     if (typeof p === "string") {
-      return p.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+      return p.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${").replace(/\r/g, "\\r");
     }
     return `\${${gen_expr(ctx, p)}}`;
   });

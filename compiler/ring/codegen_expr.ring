@@ -749,22 +749,19 @@ fn escape_for_template_literal(s: Str) -> Str {
         let ch = s.char_at(i).unwrap_or("")
         if ch == "\\" {
             result.push("\\\\")
-        } else {
-            if ch == "`" {
-                result.push("\\`")
+        } else if ch == "`" {
+            result.push("\\`")
+        } else if ch == "\r" {
+            result.push("\\r")
+        } else if ch == "\$" {
+            let next = if i + 1 < s.len() { s.char_at(i + 1).unwrap_or("") } else { "" }
+            if next == "{" {
+                result.push("\\\$")
             } else {
-                if ch == "\$" {
-                    // Escape $ only when followed by { to prevent JS interpolation
-                    let next = if i + 1 < s.len() { s.char_at(i + 1).unwrap_or("") } else { "" }
-                    if next == "{" {
-                        result.push("\\\$")
-                    } else {
-                        result.push(ch)
-                    }
-                } else {
-                    result.push(ch)
-                }
+                result.push(ch)
             }
+        } else {
+            result.push(ch)
         }
         i = i + 1
     }

@@ -43,9 +43,6 @@ export function extract_exports(
   const struct_field_orders = new Map<string, string[]>();
   const extern_values = new Set<string>();
 
-  // Track which type names are declared in this module (for filtering impls)
-  const module_type_names = new Set<string>();
-
   for (const decl of program.decls) {
     switch (decl.kind) {
       case "fn_decl": {
@@ -58,7 +55,7 @@ export function extract_exports(
       }
 
       case "struct_decl": {
-        module_type_names.add(decl.name);
+
         if (!decl.is_pub) break;
         const sdef = env.structs.get(decl.name);
         if (sdef) {
@@ -69,7 +66,7 @@ export function extract_exports(
       }
 
       case "enum_decl": {
-        module_type_names.add(decl.name);
+
         if (!decl.is_pub) break;
         const edef = env.enums.get(decl.name);
         if (edef) {
@@ -144,7 +141,7 @@ export function extract_exports(
       }
 
       case "extern_type_decl": {
-        module_type_names.add(decl.name);
+
         if (!decl.is_pub) break;
         const sdef = env.structs.get(decl.name);
         if (sdef) {
@@ -163,7 +160,7 @@ export function extract_exports(
   for (const impl of env.trait_impls) {
     // An impl belongs to this module if its target type is declared here
     // or if the impl's trait is declared here (orphan rule approximation)
-    if (module_type_names.has(impl.target_type_name) || traits.has(impl.trait_name)) {
+    if (types.has(impl.target_type_name) || traits.has(impl.trait_name)) {
       trait_impls.push(impl);
     }
   }

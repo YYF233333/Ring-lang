@@ -95,9 +95,13 @@ pub fn pop_indent(var ctx: CodegenCtx) {
 
 pub fn qualify(ctx: CodegenCtx, name: Str) -> Str {
     match ctx.imports_map {
-        some(imap) => match imap.get(name) {
-            some(qualified) => { return qualified },
-            none => {},
+        some(imap) => {
+            if !ctx.local_names.contains(name) {
+                match imap.get(name) {
+                    some(qualified) => { return qualified },
+                    none => {},
+                }
+            }
         },
         none => {},
     }

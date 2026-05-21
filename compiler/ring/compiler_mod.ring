@@ -1,9 +1,10 @@
 use types::{Type}
-use ast::{Program, Decl}
+use ast::{Program, Decl, UseImport}
 use hir::{HProgram, HDecl, trait_dict_name}
 use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
+use formatter::{format_human}
 use env::{TypeEnv}
-use checker::{CheckResult, check as check_single}
+use checker::{CheckResult, check as check_single, check_module}
 use codegen::{generate}
 use codegen_ctx::{safe_ident}
 use runtime::{RUNTIME_CODE, RUNTIME_EXPORT_NAMES, runtime_esm_code}
@@ -63,10 +64,22 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
                 if check_ok {
                     match module_asts.get(key) {
                         some(ast) => {
-                            // For now, use single-file check (multi-module inject_module_exports needs Batch 5 completion)
                             let sink = new_collecting_sink()
-                            let result = check_single(ast, sink)
+                            let deps = match graph.dependencies.get(key) {
+                                some(dk) => dk,
+                                none => empty_str_list(),
+                            }
+                            var dep_exports: List<ModuleExports> = empty_module_exports_list()
+                            for dk in deps {
+                                match module_exports_map.get(dk) {
+                                    some(e) => dep_exports.push(e),
+                                    none => {},
+                                }
+                            }
+                            let result = check_module(ast, dep_exports, sink)
                             if sink.has_errors() {
+                                let src = read_file(match graph.modules.get(key) { some(m) => m.file_path, none => "" })
+                                eprintln(format_human(sink.diagnostics(), src))
                                 check_ok = false
                             } else {
                                 module_hirs.insert(key, result.program)
@@ -162,11 +175,133 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         let esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key)
                         let eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key)
 
-                        // Build import lines
+                        // Build import lines (runtime + cross-module)
                         var import_lines: List<Str> = [""]; import_lines.clear()
                         let runtime_names = RUNTIME_EXPORT_NAMES()
                         let rnames_joined = runtime_names.join(", ")
                         import_lines.push("import { ${rnames_joined} } from \"./__ring_runtime.js\";")
+
+                        // Cross-module import lines
+                        let deps = match phases.graph.dependencies.get(key) { some(d) => d, none => empty_str_list() }
+                        for dk in deps {
+                            match (phases.module_exports_map.get(dk), phases.graph.modules.get(dk)) {
+                                (some(dep_exports), some(dep_mod)) => {
+                                    let dep_prefix = dep_exports.module_prefix
+                                    let dep_js = path_basename(dep_mod.file_path.replace(".ring", ".js"))
+                                    var import_pairs: List<Str> = [""]; import_pairs.clear()
+
+                                    // Collect bare variant names (no JS declaration)
+                                    var bare_variants: Set<Str> = set_new()
+                                    for tentry in dep_exports.types.entries() {
+                                        let (_, tdef) = tentry
+                                        match tdef {
+                                            TypeDef::EnumDef_(edef) => {
+                                                for v in edef.variants { bare_variants.insert(v.name) }
+                                            },
+                                            _ => {},
+                                        }
+                                    }
+
+                                    // Import values
+                                    for ventry in dep_exports.values.entries() {
+                                        let (name, _) = ventry
+                                        if !dep_exports.extern_values.contains(name) && !bare_variants.contains(name) {
+                                            let si = safe_ident(name)
+                                            let alias = "${dep_prefix}$${si}"
+                                            import_pairs.push("${si} as ${alias}")
+                                        }
+                                    }
+
+                                    // Import types (struct constructors, enum variant constructors)
+                                    for tentry in dep_exports.types.entries() {
+                                        let (name, tdef) = tentry
+                                        let si = safe_ident(name)
+                                        match tdef {
+                                            TypeDef::EnumDef_(edef) => {
+                                                for v in edef.variants {
+                                                    let valias = "${dep_prefix}$${si}_${v.name}"
+                                                    import_pairs.push("${si}_${v.name} as ${valias}")
+                                                }
+                                            },
+                                            TypeDef::StructDef_(_) => {
+                                                let alias = "${dep_prefix}$${si}"
+                                                import_pairs.push("${si} as ${alias}")
+                                            },
+                                        }
+                                    }
+
+                                    // Import trait dict names
+                                    for impl_ in dep_exports.trait_impls {
+                                        let dict_js = trait_dict_name(safe_ident(impl_.target_type_name), safe_ident(impl_.trait_name))
+                                        let alias = "${dep_prefix}$${dict_js}"
+                                        import_pairs.push("${dict_js} as ${alias}")
+                                    }
+
+                                    // Import inherent method names
+                                    for ientry in dep_exports.inherent_methods.entries() {
+                                        let (type_name, method_names) = ientry
+                                        for mname in method_names {
+                                            let method_js = "${safe_ident(type_name)}_${mname}"
+                                            let alias = "${dep_prefix}$${method_js}"
+                                            import_pairs.push("${method_js} as ${alias}")
+                                        }
+                                    }
+
+                                    if import_pairs.len() > 0 {
+                                        let joined = import_pairs.join(", ")
+                                        import_lines.push("import { ${joined} } from \"./${dep_js}\";")
+                                    }
+                                },
+                                _ => {},
+                            }
+                        }
+
+                        // Use-alias entries
+                        for use_decl in ast.uses {
+                            match use_decl.imports {
+                                UseImport::NamedItems { names } => {
+                                    for item in names {
+                                        match item.alias {
+                                            some(alias) => {
+                                                match imports_map.get(item.name) {
+                                                    some(existing) => { imports_map.insert(alias, existing) },
+                                                    none => {},
+                                                }
+                                            },
+                                            none => {},
+                                        }
+                                    }
+                                },
+                                _ => {},
+                            }
+                        }
+
+                        // Cross-module extern fn resolution
+                        for decl in ast.decls {
+                            match decl {
+                                Decl::ExternFn { name, .. } => {
+                                    if !imports_map.contains_key(name) {
+                                        for eentry in phases.module_exports_map.entries() {
+                                            let (other_key, other_exports) = eentry
+                                            if other_key != key && other_exports.values.contains_key(name) && !other_exports.extern_values.contains(name) {
+                                                match phases.graph.modules.get(other_key) {
+                                                    some(other_mod) => {
+                                                        let other_js = path_basename(other_mod.file_path.replace(".ring", ".js"))
+                                                        let other_prefix = other_exports.module_prefix
+                                                        let si = safe_ident(name)
+                                                        let alias = "${other_prefix}$${si}"
+                                                        imports_map.insert(name, alias)
+                                                        import_lines.push("import { ${si} as ${alias} } from \"./${other_js}\";")
+                                                    },
+                                                    none => {},
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                _ => {},
+                            }
+                        }
 
                         // Build export names
                         var export_names: List<Str> = [""]; export_names.clear()
@@ -182,8 +317,129 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                                         }
                                     }
                                 },
+                                Decl::Impl { target_type, trait_name: impl_trait, methods, .. } => {
+                                    var is_pub_type = false
+                                    for d in ast.decls {
+                                        match d {
+                                            Decl::Struct { name: dn, is_pub: dp, .. } => { if dn == target_type && dp { is_pub_type = true } },
+                                            Decl::Enum { name: dn, is_pub: dp, .. } => { if dn == target_type && dp { is_pub_type = true } },
+                                            _ => {},
+                                        }
+                                    }
+                                    if is_pub_type {
+                                        match impl_trait {
+                                            some(tn) => {
+                                                export_names.push(trait_dict_name(safe_ident(target_type), safe_ident(tn)))
+                                            },
+                                            none => {
+                                                for m in methods {
+                                                    match m {
+                                                        Decl::Fn { name: mn, .. } => export_names.push("${safe_ident(target_type)}_${mn}"),
+                                                        _ => {},
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    }
+                                },
                                 _ => {},
                             }
+                        }
+
+                        // Auto-derive dict exports
+                        for di in hir.derived_impls {
+                            var is_pub_type2 = false
+                            for d in ast.decls {
+                                match d {
+                                    Decl::Struct { name: dn, is_pub: dp, .. } => { if dn == di.type_name && dp { is_pub_type2 = true } },
+                                    Decl::Enum { name: dn, is_pub: dp, .. } => { if dn == di.type_name && dp { is_pub_type2 = true } },
+                                    _ => {},
+                                }
+                            }
+                            if is_pub_type2 {
+                                export_names.push(trait_dict_name(safe_ident(di.type_name), safe_ident(di.trait_name)))
+                            }
+                        }
+
+                        // Pub use re-exports
+                        var reexport_aliases: List<Str> = [""]; reexport_aliases.clear()
+                        for use_decl in ast.uses {
+                            if use_decl.is_pub {
+                                let src_key = use_decl.path.segments.join("::")
+                                match phases.module_exports_map.get(src_key) {
+                                    some(src_exports) => {
+                                        let src_prefix = src_exports.module_prefix
+                                        match use_decl.imports {
+                                            UseImport::NamedItems { names } => {
+                                                for item in names {
+                                                    let local_name = match item.alias { some(a) => a, none => item.name }
+                                                    let src_js = if src_exports.extern_values.contains(item.name) { safe_ident(item.name) } else { "${src_prefix}$${safe_ident(item.name)}" }
+                                                    let local_js = safe_ident(local_name)
+                                                    if local_js != src_js {
+                                                        reexport_aliases.push("const ${local_js} = ${src_js};")
+                                                    }
+                                                    export_names.push(local_js)
+                                                    match src_exports.types.get(item.name) {
+                                                        some(tdef) => match tdef {
+                                                            TypeDef::EnumDef_(edef) => {
+                                                                for v in edef.variants {
+                                                                    let src_v = "${src_prefix}$${safe_ident(item.name)}_${v.name}"
+                                                                    let local_v = "${safe_ident(local_name)}_${v.name}"
+                                                                    if local_v != src_v {
+                                                                        reexport_aliases.push("const ${local_v} = ${src_v};")
+                                                                    }
+                                                                    export_names.push(local_v)
+                                                                }
+                                                            },
+                                                            _ => {},
+                                                        },
+                                                        none => {},
+                                                    }
+                                                }
+                                            },
+                                            UseImport::Module => {
+                                                for ventry in src_exports.values.entries() {
+                                                    let (vname, _) = ventry
+                                                    if !src_exports.extern_values.contains(vname) {
+                                                        let src_js = "${src_prefix}$${safe_ident(vname)}"
+                                                        let local_js = safe_ident(vname)
+                                                        if local_js != src_js {
+                                                            reexport_aliases.push("const ${local_js} = ${src_js};")
+                                                        }
+                                                        export_names.push(local_js)
+                                                    }
+                                                }
+                                                for tentry in src_exports.types.entries() {
+                                                    let (tname, tdef) = tentry
+                                                    let src_js = "${src_prefix}$${safe_ident(tname)}"
+                                                    let local_js = safe_ident(tname)
+                                                    if local_js != src_js {
+                                                        reexport_aliases.push("const ${local_js} = ${src_js};")
+                                                    }
+                                                    export_names.push(local_js)
+                                                    match tdef {
+                                                        TypeDef::EnumDef_(edef) => {
+                                                            for v in edef.variants {
+                                                                let src_v = "${src_prefix}$${safe_ident(tname)}_${v.name}"
+                                                                let local_v = "${safe_ident(tname)}_${v.name}"
+                                                                if local_v != src_v {
+                                                                    reexport_aliases.push("const ${local_v} = ${src_v};")
+                                                                }
+                                                                export_names.push(local_v)
+                                                            }
+                                                        },
+                                                        _ => {},
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    },
+                                    none => {},
+                                }
+                            }
+                        }
+                        for ra in reexport_aliases {
+                            import_lines.push(ra)
                         }
 
                         let skip_main = key != entry_key
@@ -218,10 +474,28 @@ fn build_imports_map(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, k
                 match exports_map.get(dk) {
                     some(dep_exports) => {
                         let dep_prefix = dep_exports.module_prefix
+
+                        // Collect bare variant names (no JS declaration)
+                        var bare_variants: Set<Str> = set_new()
+                        for tentry in dep_exports.types.entries() {
+                            let (_, tdef) = tentry
+                            match tdef {
+                                TypeDef::EnumDef_(edef) => {
+                                    for v in edef.variants { bare_variants.insert(v.name) }
+                                },
+                                _ => {},
+                            }
+                        }
+
                         for entry in dep_exports.values.entries() {
                             let (name, _) = entry
                             if dep_exports.extern_values.contains(name) {
                                 imports_map.insert(name, safe_ident(name))
+                            } else if bare_variants.contains(name) {
+                                if !imports_map.contains_key(name) {
+                                    let si = safe_ident(name)
+                                    imports_map.insert(name, "${dep_prefix}$${si}")
+                                }
                             } else {
                                 let si = safe_ident(name)
                                 imports_map.insert(name, "${dep_prefix}$${si}")
@@ -243,10 +517,8 @@ fn build_imports_map(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, k
                         }
                         // Import trait dict names
                         for impl_ in dep_exports.trait_impls {
-                            let dict_name = "${impl_.target_type_name}_${impl_.trait_name}"
-                            let si_tn = safe_ident(impl_.target_type_name)
-                            let si_tr = safe_ident(impl_.trait_name)
-                            imports_map.insert(dict_name, "${dep_prefix}$${si_tn}_${si_tr}")
+                            let dict_js = trait_dict_name(safe_ident(impl_.target_type_name), safe_ident(impl_.trait_name))
+                            imports_map.insert(dict_js, "${dep_prefix}$${dict_js}")
                         }
                     },
                     none => {},
@@ -279,6 +551,14 @@ fn build_external_struct_fields(graph: ModuleGraph, exports_map: Map<Str, Module
         none => {},
     }
     result
+}
+
+fn empty_module_exports_list() -> List<ModuleExports> {
+    let x = [0]; x.clear(); x.map(fn(i: Int) -> ModuleExports { panic("unreachable") })
+}
+
+fn empty_str_list() -> List<Str> {
+    let x = [""]; x.clear(); x
 }
 
 fn build_external_impl_methods(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, Str?> {

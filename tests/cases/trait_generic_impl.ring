@@ -1,7 +1,9 @@
-// Test: trait with generic functions (not generic impl target)
-
+// Regression: generic trait impl + default method + __prefix naming convention
 trait Summable {
     fn total(self) -> Int
+    fn label(self) -> Str {
+        "total=${self.total()}"
+    }
 }
 
 struct Scores {
@@ -26,17 +28,23 @@ impl Summable for Counts {
 }
 
 fn show_total<T: Summable>(x: T) -> Str {
-    "total=${x.total()}"
+    x.label()
+}
+
+fn sum_both<T: Summable, U: Summable>(a: T, b: U) -> Int {
+    a.total() + b.total()
 }
 
 fn main() {
     let s = Scores { values: [10, 20, 30] }
     assert(s.total() == 60, "scores total")
-    assert(show_total(s) == "total=60", "show total scores")
+    assert(show_total(s) == "total=60", "show scores label")
 
     let c = Counts { a: 7, b: 3 }
     assert(c.total() == 10, "counts total")
-    assert(show_total(c) == "total=10", "show total counts")
+    assert(show_total(c) == "total=10", "show counts label")
 
-    print("trait_generic_impl: all tests passed")
+    assert(sum_both(s, c) == 70, "sum both")
+
+    print("trait_generic_impl: all passed")
 }

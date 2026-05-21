@@ -45,8 +45,6 @@ pub fn extract_exports(
     var inherent_methods: Map<Str, List<Str>> = map_new()
     var struct_field_orders: Map<Str, List<Str>> = map_new()
     var extern_values: Set<Str> = set_new()
-    var module_type_names: Set<Str> = set_new()
-
     for decl in program.decls {
         match decl {
             Decl::Fn { name, is_pub, .. } => {
@@ -58,7 +56,6 @@ pub fn extract_exports(
                 }
             },
             Decl::Struct { name, is_pub, .. } => {
-                module_type_names.insert(name)
                 if is_pub {
                     match env.structs.get(name) {
                         some(sdef) => {
@@ -72,7 +69,6 @@ pub fn extract_exports(
                 }
             },
             Decl::Enum { name, is_pub, .. } => {
-                module_type_names.insert(name)
                 if is_pub {
                     match env.enums.get(name) {
                         some(edef) => {
@@ -153,7 +149,6 @@ pub fn extract_exports(
                 }
             },
             Decl::ExternType { name, is_pub, .. } => {
-                module_type_names.insert(name)
                 if is_pub {
                     match env.structs.get(name) {
                         some(sdef) => { types.insert(name, TypeDef::StructDef_(sdef)) },
@@ -168,7 +163,7 @@ pub fn extract_exports(
     // Filter trait impls
     var trait_impls: List<ImplEntry> = empty_impl_entries()
     for impl_ in env.trait_impls {
-        if module_type_names.contains(impl_.target_type_name) || traits.contains_key(impl_.trait_name) {
+        if types.contains_key(impl_.target_type_name) || traits.contains_key(impl_.trait_name) {
             trait_impls.push(impl_)
         }
     }

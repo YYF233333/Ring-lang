@@ -51,7 +51,7 @@ pub fn cli_main() {
             }
         } else {
             if parsed.command == "build" {
-                let out_dir = path_resolve(path_join(path_dirname(file_path), parsed.out_dir))
+                let out_dir = path_resolve(parsed.out_dir)
                 let result = compile_project_esm(file_path, out_dir)
                 if result.success {
                     print("Compiled: ${out_dir}/")

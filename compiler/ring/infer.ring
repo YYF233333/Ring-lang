@@ -1355,30 +1355,32 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     var hargs = empty_hexprs()
     var ai = 0
     for arg in args {
-        var ar: InferResult = infer_expr(ctx, arg, s)
-        match arg {
-            Expr::Lambda { params: lparams, body: lbody, span: lspan, .. } => match method_type {
-                some(mt) => match mt {
-                    Type::FnType { params: mt_params, .. } => {
-                        if ai + 1 < mt_params.len() {
-                            match mt_params.get(ai + 1) {
-                                some(expected_raw) => {
-                                    let expected = apply_subst(s, expected_raw)
-                                    match expected {
-                                        Type::FnType { params: exp_params, .. } =>
-                                            { ar = infer_lambda(ctx, lparams, lbody, lspan, s, some(exp_params)) },
-                                        _ => {}
-                                    }
-                                },
-                                none => {}
-                            }
-                        }
+        var ar: InferResult = match arg {
+            Expr::Lambda { params: lparams, body: lbody, span: lspan, .. } => {
+                match method_type {
+                    some(mt) => match mt {
+                        Type::FnType { params: mt_params, .. } => {
+                            if ai + 1 < mt_params.len() {
+                                match mt_params.get(ai + 1) {
+                                    some(expected_raw) => {
+                                        let expected = apply_subst(s, expected_raw)
+                                        match expected {
+                                            Type::FnType { params: exp_params, .. } => {
+                                                infer_lambda(ctx, lparams, lbody, lspan, s, some(exp_params))
+                                            },
+                                            _ => infer_expr(ctx, arg, s)
+                                        }
+                                    },
+                                    none => infer_expr(ctx, arg, s)
+                                }
+                            } else { infer_expr(ctx, arg, s) }
+                        },
+                        _ => infer_expr(ctx, arg, s)
                     },
-                    _ => {}
-                },
-                none => {}
+                    none => infer_expr(ctx, arg, s)
+                }
             },
-            _ => {}
+            _ => infer_expr(ctx, arg, s)
         }
         s = ar.subst
         let me = merge_eff(ctx.env, effects, ar.effects, s)
