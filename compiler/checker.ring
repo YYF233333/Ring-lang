@@ -10,6 +10,7 @@ use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
 use codes::{E0702, E0703}
 use parser::{parse}
+use union_find::{UnionFind}
 use unify::{empty_subst}
 
 pub struct CheckResult {

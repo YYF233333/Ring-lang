@@ -1,5 +1,6 @@
 use ast::{Pattern, NamedPatternField, span_zero, LiteralValue}
 use types::{Type, type_to_string}
+use union_find::{UnionFind}
 use env::{apply_subst}
 use hir::{HMatchArm}
 
@@ -31,7 +32,7 @@ fn ctor_at(list: List<Ctor>, i: Int) -> Ctor {
     match list.get(i) { some(v) => v, none => panic("ctor_at: out of bounds") }
 }
 
-pub fn check_exhaustive(arms: List<HMatchArm>, scrutinee_type: Type, subst: Map<Int, Type>) -> Str? {
+pub fn check_exhaustive(arms: List<HMatchArm>, scrutinee_type: Type, subst: UnionFind) -> Str? {
     var patterns: List<Pattern> = []
     for arm in arms {
         match arm.guard {
@@ -42,7 +43,7 @@ pub fn check_exhaustive(arms: List<HMatchArm>, scrutinee_type: Type, subst: Map<
     check_patterns(patterns, scrutinee_type, subst)
 }
 
-fn check_patterns(patterns: List<Pattern>, ty: Type, subst: Map<Int, Type>) -> Str? {
+fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
     let resolved = apply_subst(subst, ty)
 
     for p in patterns {
@@ -326,7 +327,7 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
     }
 }
 
-fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: Map<Int, Type>, expanding: Set<Str>) -> List<Str>? {
+fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFind, expanding: Set<Str>) -> List<Str>? {
     if col_types.len() == 0 {
         if rows.len() > 0 {
             return none

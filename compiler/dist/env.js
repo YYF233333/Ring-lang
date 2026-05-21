@@ -1,5 +1,6 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, print, assert, panic, exit, json_stringify, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_first, List_last, List_contains, List_is_empty, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_pop, List_shift, List_clear, List_find_index, List_index_of, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_is_empty, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_contains, _Set_is_empty, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
 import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
+import { new_union_find as union_find$new_union_find, uf_find as union_find$uf_find, uf_bind as union_find$uf_bind, uf_lookup as union_find$uf_lookup, uf_union as union_find$uf_union, uf_insert as union_find$uf_insert, UnionFind as union_find$UnionFind } from "./union_find.js";
 import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Span_Eq as ast$__Span_Eq, __NamedImport_Eq as ast$__NamedImport_Eq, __LiteralValue_Eq as ast$__LiteralValue_Eq, __BinOp_Eq as ast$__BinOp_Eq, __UnaryOp_Eq as ast$__UnaryOp_Eq, __Position_Clone as ast$__Position_Clone, __Span_Clone as ast$__Span_Clone, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __UsePath_Clone as ast$__UsePath_Clone, __NamedImport_Clone as ast$__NamedImport_Clone, __LiteralValue_Clone as ast$__LiteralValue_Clone, __BinOp_Clone as ast$__BinOp_Clone, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UseImport_Clone as ast$__UseImport_Clone, __UseDecl_Clone as ast$__UseDecl_Clone, __Position_Ord as ast$__Position_Ord, __Span_Ord as ast$__Span_Ord, __LiteralValue_Ord as ast$__LiteralValue_Ord, __BinOp_Ord as ast$__BinOp_Ord, __UnaryOp_Ord as ast$__UnaryOp_Ord, __Position_Debug as ast$__Position_Debug, __Span_Debug as ast$__Span_Debug, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Debug as ast$__UsePath_Debug, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
 
 class SchemeBound {
@@ -286,10 +287,10 @@ function TypeEnv_instantiate(self, scheme) {
       __match_fail(__ring_m2);
     }
   }
-  return apply_subst(mapping, scheme.ty);
+  return apply_subst_map(mapping, scheme.ty);
 }
 
-function apply_subst(subst, t) {
+function apply_subst_map(subst, t) {
   __ring_match4: {
     const __ring_m4 = t;
     if (__ring_m4._tag === "IntType") {
@@ -326,7 +327,7 @@ function apply_subst(subst, t) {
         const __ring_m5 = _Map_get(subst, id);
         if (__ring_m5._tag === "some") {
           const resolved = __ring_m5._0;
-          return apply_subst(subst, resolved);
+          return apply_subst_map(subst, resolved);
           break __ring_match5;
         }
         if (__ring_m5._tag === "none") {
@@ -339,27 +340,27 @@ function apply_subst(subst, t) {
     }
     if (__ring_m4._tag === "FnType") {
       const params = __ring_m4.params; const return_type = __ring_m4.return_type; const effects = __ring_m4.effects;
-      return types$Type_FnType(params.map((function(p) { return apply_subst(subst, p); })), apply_subst(subst, return_type), apply_subst_row(subst, effects));
+      return types$Type_FnType(params.map((function(p) { return apply_subst_map(subst, p); })), apply_subst_map(subst, return_type), apply_subst_row_map(subst, effects));
       break __ring_match4;
     }
     if (__ring_m4._tag === "StructType") {
       const name = __ring_m4.name; const type_params = __ring_m4.type_params; const fields = __ring_m4.fields;
-      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst(subst, p); })), fields);
+      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })), fields);
       break __ring_match4;
     }
     if (__ring_m4._tag === "EnumType") {
       const name = __ring_m4.name; const type_params = __ring_m4.type_params; const variants = __ring_m4.variants;
-      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst(subst, p); })), variants);
+      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })), variants);
       break __ring_match4;
     }
     if (__ring_m4._tag === "GenericType") {
       const base = __ring_m4.base; const args = __ring_m4.args;
-      return types$Type_GenericType(apply_subst(subst, base), args.map((function(a) { return apply_subst(subst, a); })));
+      return types$Type_GenericType(apply_subst_map(subst, base), args.map((function(a) { return apply_subst_map(subst, a); })));
       break __ring_match4;
     }
     if (__ring_m4._tag === "RecordType") {
       const fields = __ring_m4.fields; const tail = __ring_m4.tail; const tail_name = __ring_m4.tail_name;
-      const mapped_fields = fields.map((function(f) { return new types$RecordField(f.name, apply_subst(subst, f.ty)); }));
+      const mapped_fields = fields.map((function(f) { return new types$RecordField(f.name, apply_subst_map(subst, f.ty)); }));
       __ring_match6: {
         const __ring_m6 = tail;
         if (__ring_m6._tag === "some") {
@@ -368,7 +369,7 @@ function apply_subst(subst, t) {
             const __ring_m7 = _Map_get(subst, t_id);
             if (__ring_m7._tag === "some") {
               const resolved = __ring_m7._0;
-              const chased = apply_subst(subst, resolved);
+              const chased = apply_subst_map(subst, resolved);
               __ring_match8: {
                 const __ring_m8 = chased;
                 if (__ring_m8._tag === "TypeVar") {
@@ -380,7 +381,7 @@ function apply_subst(subst, t) {
                   const extra_fields = __ring_m8.fields; const extra_tail = __ring_m8.tail; const extra_tn = __ring_m8.tail_name;
                   const all_fields = list_clone(mapped_fields);
                   for (const ef of extra_fields) {
-                    List_push(all_fields, new types$RecordField(ef.name, apply_subst(subst, ef.ty)));
+                    List_push(all_fields, new types$RecordField(ef.name, apply_subst_map(subst, ef.ty)));
                   }
                   return types$Type_RecordType(all_fields, extra_tail, extra_tn);
                   break __ring_match8;
@@ -408,13 +409,13 @@ function apply_subst(subst, t) {
     }
     if (__ring_m4._tag === "EffectRowType") {
       const effects = __ring_m4.effects; const tail = __ring_m4.tail;
-      const row = apply_subst_row(subst, new types$EffectRow(effects, tail));
+      const row = apply_subst_row_map(subst, new types$EffectRow(effects, tail));
       return types$Type_EffectRowType(row.effects, row.tail);
       break __ring_match4;
     }
     if (__ring_m4._tag === "TupleType") {
       const elements = __ring_m4.elements;
-      return types$Type_TupleType(elements.map((function(e) { return apply_subst(subst, e); })));
+      return types$Type_TupleType(elements.map((function(e) { return apply_subst_map(subst, e); })));
       break __ring_match4;
     }
     if (__ring_m4._tag === "ErrorType") {
@@ -425,17 +426,17 @@ function apply_subst(subst, t) {
   }
 }
 
-function apply_subst_effect(subst, e) {
+function apply_subst_effect_map(subst, e) {
   __ring_match9: {
     const __ring_m9 = e;
     if (__ring_m9._tag === "FailEffect") {
       const error_type = __ring_m9.error_type;
-      return types$Effect_FailEffect(apply_subst(subst, error_type));
+      return types$Effect_FailEffect(apply_subst_map(subst, error_type));
       break __ring_match9;
     }
     if (__ring_m9._tag === "CustomEffect") {
       const name = __ring_m9.name; const type_args = __ring_m9.type_args;
-      return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst(subst, a); })));
+      return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst_map(subst, a); })));
       break __ring_match9;
     }
     return e;
@@ -443,8 +444,8 @@ function apply_subst_effect(subst, e) {
   }
 }
 
-function apply_subst_row(subst, row) {
-  const effects = row.effects.map((function(e) { return apply_subst_effect(subst, e); }));
+function apply_subst_row_map(subst, row) {
+  const effects = row.effects.map((function(e) { return apply_subst_effect_map(subst, e); }));
   __ring_match10: {
     const __ring_m10 = row.tail;
     if (__ring_m10._tag === "some") {
@@ -453,7 +454,7 @@ function apply_subst_row(subst, row) {
         const __ring_m11 = _Map_get(subst, t_id);
         if (__ring_m11._tag === "some") {
           const resolved = __ring_m11._0;
-          const chased = apply_subst(subst, resolved);
+          const chased = apply_subst_map(subst, resolved);
           __ring_match12: {
             const __ring_m12 = chased;
             if (__ring_m12._tag === "TypeVar") {
@@ -465,7 +466,7 @@ function apply_subst_row(subst, row) {
               const extra_effs = __ring_m12.effects; const extra_tail = __ring_m12.tail;
               const merged = list_clone(effects);
               for (const ee of extra_effs) {
-                List_push(merged, apply_subst_effect(subst, ee));
+                List_push(merged, apply_subst_effect_map(subst, ee));
               }
               return new types$EffectRow(merged, extra_tail);
               break __ring_match12;
@@ -488,6 +489,217 @@ function apply_subst_row(subst, row) {
       break __ring_match10;
     }
     __match_fail(__ring_m10);
+  }
+}
+
+function apply_subst(subst, t) {
+  __ring_match13: {
+    const __ring_m13 = t;
+    if (__ring_m13._tag === "IntType") {
+      return t;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "FloatType") {
+      return t;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "StrType") {
+      return t;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "BoolType") {
+      return t;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "UnitType") {
+      return t;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "NeverType") {
+      return t;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "AnyType") {
+      return t;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "TypeVar") {
+      const id = __ring_m13.id;
+      __ring_match14: {
+        const __ring_m14 = union_find$uf_lookup(subst, id);
+        if (__ring_m14._tag === "some") {
+          const resolved = __ring_m14._0;
+          return apply_subst(subst, resolved);
+          break __ring_match14;
+        }
+        if (__ring_m14._tag === "none") {
+          const root = union_find$uf_find(subst, id);
+          if ((root === id)) {
+            return t;
+          } else {
+            return types$Type_TypeVar(root, Option_none);
+          }
+          break __ring_match14;
+        }
+        __match_fail(__ring_m14);
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "FnType") {
+      const params = __ring_m13.params; const return_type = __ring_m13.return_type; const effects = __ring_m13.effects;
+      return types$Type_FnType(params.map((function(p) { return apply_subst(subst, p); })), apply_subst(subst, return_type), apply_subst_row(subst, effects));
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "StructType") {
+      const name = __ring_m13.name; const type_params = __ring_m13.type_params; const fields = __ring_m13.fields;
+      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst(subst, p); })), fields);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "EnumType") {
+      const name = __ring_m13.name; const type_params = __ring_m13.type_params; const variants = __ring_m13.variants;
+      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst(subst, p); })), variants);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "GenericType") {
+      const base = __ring_m13.base; const args = __ring_m13.args;
+      return types$Type_GenericType(apply_subst(subst, base), args.map((function(a) { return apply_subst(subst, a); })));
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "RecordType") {
+      const fields = __ring_m13.fields; const tail = __ring_m13.tail; const tail_name = __ring_m13.tail_name;
+      const mapped_fields = fields.map((function(f) { return new types$RecordField(f.name, apply_subst(subst, f.ty)); }));
+      __ring_match15: {
+        const __ring_m15 = tail;
+        if (__ring_m15._tag === "some") {
+          const t_id = __ring_m15._0;
+          const root_id = union_find$uf_find(subst, t_id);
+          __ring_match16: {
+            const __ring_m16 = union_find$uf_lookup(subst, root_id);
+            if (__ring_m16._tag === "some") {
+              const resolved = __ring_m16._0;
+              const chased = apply_subst(subst, resolved);
+              __ring_match17: {
+                const __ring_m17 = chased;
+                if (__ring_m17._tag === "TypeVar") {
+                  const new_id = __ring_m17.id; const new_name = __ring_m17.name;
+                  return types$Type_RecordType(mapped_fields, Option_some(new_id), new_name);
+                  break __ring_match17;
+                }
+                if (__ring_m17._tag === "RecordType") {
+                  const extra_fields = __ring_m17.fields; const extra_tail = __ring_m17.tail; const extra_tn = __ring_m17.tail_name;
+                  const all_fields = list_clone(mapped_fields);
+                  for (const ef of extra_fields) {
+                    List_push(all_fields, new types$RecordField(ef.name, apply_subst(subst, ef.ty)));
+                  }
+                  return types$Type_RecordType(all_fields, extra_tail, extra_tn);
+                  break __ring_match17;
+                }
+                return types$Type_RecordType(mapped_fields, Option_none, Option_none);
+                break __ring_match17;
+              }
+              break __ring_match16;
+            }
+            if (__ring_m16._tag === "none") {
+              const actual_id = ((root_id === t_id) ? t_id : root_id);
+              return types$Type_RecordType(mapped_fields, Option_some(actual_id), tail_name);
+              break __ring_match16;
+            }
+            __match_fail(__ring_m16);
+          }
+          break __ring_match15;
+        }
+        if (__ring_m15._tag === "none") {
+          return types$Type_RecordType(mapped_fields, Option_none, tail_name);
+          break __ring_match15;
+        }
+        __match_fail(__ring_m15);
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "EffectRowType") {
+      const effects = __ring_m13.effects; const tail = __ring_m13.tail;
+      const row = apply_subst_row(subst, new types$EffectRow(effects, tail));
+      return types$Type_EffectRowType(row.effects, row.tail);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "TupleType") {
+      const elements = __ring_m13.elements;
+      return types$Type_TupleType(elements.map((function(e) { return apply_subst(subst, e); })));
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "ErrorType") {
+      return t;
+      break __ring_match13;
+    }
+    __match_fail(__ring_m13);
+  }
+}
+
+function apply_subst_effect(subst, e) {
+  __ring_match18: {
+    const __ring_m18 = e;
+    if (__ring_m18._tag === "FailEffect") {
+      const error_type = __ring_m18.error_type;
+      return types$Effect_FailEffect(apply_subst(subst, error_type));
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "CustomEffect") {
+      const name = __ring_m18.name; const type_args = __ring_m18.type_args;
+      return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst(subst, a); })));
+      break __ring_match18;
+    }
+    return e;
+    break __ring_match18;
+  }
+}
+
+function apply_subst_row(subst, row) {
+  const effects = row.effects.map((function(e) { return apply_subst_effect(subst, e); }));
+  __ring_match19: {
+    const __ring_m19 = row.tail;
+    if (__ring_m19._tag === "some") {
+      const t_id = __ring_m19._0;
+      const root_id = union_find$uf_find(subst, t_id);
+      __ring_match20: {
+        const __ring_m20 = union_find$uf_lookup(subst, root_id);
+        if (__ring_m20._tag === "some") {
+          const resolved = __ring_m20._0;
+          const chased = apply_subst(subst, resolved);
+          __ring_match21: {
+            const __ring_m21 = chased;
+            if (__ring_m21._tag === "TypeVar") {
+              const new_id = __ring_m21.id;
+              return new types$EffectRow(effects, Option_some(new_id));
+              break __ring_match21;
+            }
+            if (__ring_m21._tag === "EffectRowType") {
+              const extra_effs = __ring_m21.effects; const extra_tail = __ring_m21.tail;
+              const merged = list_clone(effects);
+              for (const ee of extra_effs) {
+                List_push(merged, apply_subst_effect(subst, ee));
+              }
+              return new types$EffectRow(merged, extra_tail);
+              break __ring_match21;
+            }
+            return new types$EffectRow(effects, Option_none);
+            break __ring_match21;
+          }
+          break __ring_match20;
+        }
+        if (__ring_m20._tag === "none") {
+          const actual_id = ((root_id === t_id) ? t_id : root_id);
+          return new types$EffectRow(effects, Option_some(actual_id));
+          break __ring_match20;
+        }
+        __match_fail(__ring_m20);
+      }
+      break __ring_match19;
+    }
+    if (__ring_m19._tag === "none") {
+      return new types$EffectRow(effects, Option_none);
+      break __ring_match19;
+    }
+    __match_fail(__ring_m19);
   }
 }
 
@@ -606,4 +818,4 @@ function __BuiltInKind_Debug_debug(self) {
 const __BuiltInKind_Debug = { debug: __BuiltInKind_Debug_debug };
 
 
-export { SchemeBound, TypeScheme, StructDef, EnumDef, EffectOpDef, BuiltInKind_BkIo, BuiltInKind_BkFail, BuiltInKind_BkMut, EffectDef, TraitMethodDef, TraitDef, ImplEntry, TypeAliasDef, FnBound, Scope, TypeRegistry, TraitRegistry, ScopeManager, IdGen, TypeEnv, mono, new_type_env, apply_subst, apply_subst_row, TypeEnv_current_var_id, TypeEnv_fresh_var, TypeEnv_fresh_var_id, TypeEnv_fresh_def_id, TypeEnv_push_scope, TypeEnv_pop_scope, TypeEnv_bind, TypeEnv_bind_mono, TypeEnv_record_def_span, TypeEnv_rebind, TypeEnv_lookup, TypeEnv_instantiate, __SchemeBound_Eq, __FnBound_Eq, __IdGen_Eq, __BuiltInKind_Eq, __SchemeBound_Clone, __ImplEntry_Clone, __FnBound_Clone, __IdGen_Clone, __BuiltInKind_Clone, __SchemeBound_Ord, __FnBound_Ord, __IdGen_Ord, __BuiltInKind_Ord, __SchemeBound_Debug, __ImplEntry_Debug, __FnBound_Debug, __IdGen_Debug, __BuiltInKind_Debug };
+export { SchemeBound, TypeScheme, StructDef, EnumDef, EffectOpDef, BuiltInKind_BkIo, BuiltInKind_BkFail, BuiltInKind_BkMut, EffectDef, TraitMethodDef, TraitDef, ImplEntry, TypeAliasDef, FnBound, Scope, TypeRegistry, TraitRegistry, ScopeManager, IdGen, TypeEnv, mono, new_type_env, apply_subst_map, apply_subst_row_map, apply_subst, apply_subst_row, TypeEnv_current_var_id, TypeEnv_fresh_var, TypeEnv_fresh_var_id, TypeEnv_fresh_def_id, TypeEnv_push_scope, TypeEnv_pop_scope, TypeEnv_bind, TypeEnv_bind_mono, TypeEnv_record_def_span, TypeEnv_rebind, TypeEnv_lookup, TypeEnv_instantiate, __SchemeBound_Eq, __FnBound_Eq, __IdGen_Eq, __BuiltInKind_Eq, __SchemeBound_Clone, __ImplEntry_Clone, __FnBound_Clone, __IdGen_Clone, __BuiltInKind_Clone, __SchemeBound_Ord, __FnBound_Ord, __IdGen_Ord, __BuiltInKind_Ord, __SchemeBound_Debug, __ImplEntry_Debug, __FnBound_Debug, __IdGen_Debug, __BuiltInKind_Debug };
