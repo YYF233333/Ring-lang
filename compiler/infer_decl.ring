@@ -1,8 +1,8 @@
 use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl, EffectExpr,
-    UseDecl, UseImport, NamedImport}
+    UseDecl, UseImport, NamedImport, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
-    HStructField, HEnumVariant, HEffectOp, HTraitMethod,
+    HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     hexpr_type}
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
@@ -52,7 +52,9 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
         Decl::Const { name, type_annotation, init, is_pub, span } =>
             check_const_decl(ctx, name, type_annotation, init, is_pub, span),
         Decl::ModBlock { name, uses, decls, is_pub, span } =>
-            check_mod_decl(ctx, name, uses, decls, is_pub, span)
+            check_mod_decl(ctx, name, uses, decls, is_pub, span),
+        Decl::Sig { name, members, is_pub, span } =>
+            check_sig_decl(ctx, name, members, is_pub, span)
     }
 }
 
@@ -101,6 +103,26 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     }
     ctx.mod_path_stack.pop()
     HDecl::ModBlock { name: mod_name, decls: hdecls, is_pub: is_pub, span: span }
+}
+
+fn check_sig_decl(var ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool, span: Span) -> HDecl {
+    var hmembers: List<HSigMember> = []
+    match ctx.env.types.sigs.get(name) {
+        some(sig_def) => {
+            for m in members {
+                match sig_def.members.get(m.name) {
+                    some(scheme) => {
+                        hmembers.push(HSigMember { name: m.name, fn_type: scheme.ty, span: m.span })
+                    },
+                    none => {
+                        hmembers.push(HSigMember { name: m.name, fn_type: UNIT, span: m.span })
+                    }
+                }
+            }
+        },
+        none => {}
+    }
+    HDecl::Sig { name: name, members: hmembers, is_pub: is_pub, span: span }
 }
 
 fn resolve_mod_uses(var ctx: InferCtx, uses: List<UseDecl>) {

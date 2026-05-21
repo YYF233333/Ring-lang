@@ -90,6 +90,12 @@ pub struct FnBound {
     pub trait_name: Str
 }
 
+pub struct SigDef {
+    pub name: Str,
+    pub members: Map<Str, TypeScheme>,
+    pub is_pub: Bool
+}
+
 // ============================================================
 // Scope
 // ============================================================
@@ -107,7 +113,8 @@ pub struct TypeRegistry {
     pub enums: Map<Str, EnumDef>,
     pub effects: Map<Str, EffectDef>,
     pub variant_to_enum: Map<Str, Str>,
-    pub type_aliases: Map<Str, TypeAliasDef>
+    pub type_aliases: Map<Str, TypeAliasDef>,
+    pub sigs: Map<Str, SigDef>
 }
 
 pub struct TraitRegistry {
@@ -156,7 +163,8 @@ pub fn new_type_env() -> TypeEnv {
             enums: map_new(),
             effects: map_new(),
             variant_to_enum: map_new(),
-            type_aliases: map_new()
+            type_aliases: map_new(),
+            sigs: map_new()
         },
         trait_reg: TraitRegistry {
             traits: map_new(),

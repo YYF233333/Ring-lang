@@ -394,6 +394,8 @@ const cases: TestCase[] = [
   { file: "mut_param.ring", expected: "mut_param: all tests passed\n" },
   { file: "mod_self_path.ring", expected: "mod_self_path: all tests passed\n" },
   { file: "mod_relative_path.ring", expected: "mod_relative_path: all tests passed\n" },
+  { file: "sig_basic.ring", expected: "sig_basic: all tests passed\n" },
+  { file: "sig_with_effects.ring", expected: "sig_with_effects: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

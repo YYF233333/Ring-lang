@@ -1,9 +1,9 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     EMPTY_ROW}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
-    EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr}
+    EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
-    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, mono, apply_subst}
+    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, mono, apply_subst}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0501, E0502}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
@@ -35,6 +35,8 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
         Decl::Const { name, type_annotation, init, is_pub, span } =>
             Decl::Const { name: "${mod_name}::${name}", type_annotation: type_annotation, init: init,
                          is_pub: is_pub, span: span },
+        Decl::Sig { name, members, is_pub, span } =>
+            Decl::Sig { name: "${mod_name}::${name}", members: members, is_pub: is_pub, span: span },
         _ => decl
     }
 }
@@ -743,6 +745,36 @@ fn register_const(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span
     }
 }
 
+fn register_sig(var ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool) {
+    let saved = map_clone(ctx.type_param_scope)
+    let sig_members: Map<Str, TypeScheme> = map_new()
+    for m in members {
+        var type_vars: List<Int> = []
+        let msaved = map_clone(ctx.type_param_scope)
+        for tp in m.type_params {
+            let tv = ctx.env.fresh_var()
+            match tv { Type::TypeVar { id, .. } => { type_vars.push(id) }, _ => {} }
+            ctx.type_param_scope.insert(tp.name, tv)
+        }
+        var param_types: List<Type> = []
+        for p in m.params {
+            match p.type_annotation {
+                some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
+                none => param_types.push(ctx.env.fresh_var())
+            }
+        }
+        let ret = match m.return_type {
+            some(rt) => resolve_type_expr(ctx, rt),
+            none => ctx.env.fresh_var()
+        }
+        let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
+        sig_members.insert(m.name, TypeScheme { ty: fn_type, type_vars: type_vars, bounds: [], def_id: none })
+        ctx.type_param_scope = msaved
+    }
+    ctx.type_param_scope = saved
+    ctx.env.types.sigs.insert(name, SigDef { name: name, members: sig_members, is_pub: is_pub })
+}
+
 // ============================================================
 // Dispatch: register individual declaration
 // ============================================================
@@ -774,6 +806,8 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
             register_type_alias(ctx, name, type_params, type_expr),
         Decl::Const { name, type_annotation, span, .. } =>
             register_const(ctx, name, type_annotation, span),
+        Decl::Sig { name, members, is_pub, .. } =>
+            register_sig(ctx, name, members, is_pub),
         Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
             // Register struct/enum types first, add aliases, then register the rest
             for d in mod_decls {

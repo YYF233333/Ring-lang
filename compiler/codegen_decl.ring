@@ -38,6 +38,7 @@ pub fn emit_decl(var ctx: CodegenCtx, decl: HDecl) {
                 emit_decl(ctx, subdecl)
             }
         },
+        HDecl::Sig { .. } => {},
     }
 }
 

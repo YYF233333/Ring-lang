@@ -7,7 +7,7 @@ use ast::{
     Expr, Stmt, DestructureBinding,
     UsePath, NamedImport, UseImport, UseDecl,
     TypeBound, TypeParam, StructFieldDecl, NamedEnumField, EnumVariantDecl, EffectOpDecl,
-    Decl, Program
+    SigMember, Decl, Program
 }
 use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
 use diagnostics::{CollectingSink, Severity, DiagnosticContext, new_collecting_sink, make_diag, make_diagnostic}
@@ -91,7 +91,7 @@ fn is_decl_start(k: TokenKind) -> Bool {
         TkFn => true, TkStruct => true, TkEnum => true,
         TkEffect => true, TkTrait => true, TkImpl => true,
         TkExtern => true, TkUse => true, TkPub => true, TkTest => true,
-        TkConst => true, TkMod => true,
+        TkConst => true, TkMod => true, TkSig => true,
         _ => false
     }
 }
@@ -696,6 +696,7 @@ impl Parser {
             TkTrait => some(self.parse_trait_decl(is_pub)),
             TkExtern => some(self.parse_extern_decl(is_pub)),
             TkConst => some(self.parse_const_decl(is_pub)),
+            TkSig => some(self.parse_sig_block(is_pub)),
             TkIdent => {
                 if tok.value == "type" { return some(self.parse_type_alias_decl(is_pub)) }
                 self.report_error(E0101, "Expected declaration, got '${tok.value}' (${token_kind_value(tok.kind)})", some(tok.span))
@@ -788,6 +789,47 @@ impl Parser {
         let init = self.parse_expr()
         let end = self.current_span_start()
         Decl::Const { name: name, type_annotation: type_annotation, init: init, is_pub: is_pub, span: self.make_span(start, end) }
+    }
+
+    fn parse_sig_block(var self, is_pub: Bool) -> Decl {
+        let start = self.current_span_start()
+        self.expect(TokenKind::TkSig)
+        let name = self.expect(TokenKind::TkIdent).value
+        self.expect(TokenKind::TkLBrace)
+
+        var members: List<SigMember> = []
+        while !self.check(TokenKind::TkRBrace) && !self.at_end() {
+            let mstart = self.current_span_start()
+            self.expect(TokenKind::TkFn)
+            let mname = self.expect(TokenKind::TkIdent).value
+            let mtps = self.parse_type_params()
+            self.expect(TokenKind::TkLParen)
+            let mparams = self.parse_params()
+            self.expect(TokenKind::TkRParen)
+            var ret: TypeExpr? = none
+            if self.try_consume(TokenKind::TkArrow) {
+                ret = some(self.parse_type_expr())
+            }
+            var meffects: List<TypeExpr> = []
+            if self.try_consume(TokenKind::TkWith) {
+                self.expect(TokenKind::TkLBrace)
+                while !self.check(TokenKind::TkRBrace) && !self.at_end() {
+                    let eff = self.parse_type_expr()
+                    meffects.push(eff)
+                    self.try_consume(TokenKind::TkComma)
+                }
+                self.expect(TokenKind::TkRBrace)
+            }
+            let mend = self.current_span_start()
+            members.push(SigMember {
+                name: mname, type_params: mtps, params: mparams,
+                return_type: ret, declared_effects: meffects,
+                span: self.make_span(mstart, mend)
+            })
+        }
+        self.expect(TokenKind::TkRBrace)
+        let end = self.current_span_start()
+        Decl::Sig { name: name, members: members, is_pub: is_pub, span: self.make_span(start, end) }
     }
 
     fn parse_extern_decl(var self, is_pub: Bool) -> Decl {

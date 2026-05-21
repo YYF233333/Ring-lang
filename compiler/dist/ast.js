@@ -357,6 +357,17 @@ class EffectOpDecl {
   }
 }
 
+class SigMember {
+  constructor(name, type_params, params, return_type, declared_effects, span) {
+    this.name = name;
+    this.type_params = type_params;
+    this.params = params;
+    this.return_type = return_type;
+    this.declared_effects = declared_effects;
+    this.span = span;
+  }
+}
+
 function Decl_Fn(name, type_params, params, return_type, declared_effects, body, is_pub, is_abstract, span) {
   return { _tag: "Fn", name, type_params, params, return_type, declared_effects, body, is_pub, is_abstract, span };
 }
@@ -392,6 +403,9 @@ function Decl_Const(name, type_annotation, init, is_pub, span) {
 }
 function Decl_ModBlock(name, uses, decls, is_pub, span) {
   return { _tag: "ModBlock", name, uses, decls, is_pub, span };
+}
+function Decl_Sig(name, members, is_pub, span) {
+  return { _tag: "Sig", name, members, is_pub, span };
 }
 
 class Program {
@@ -653,4 +667,4 @@ function __UseDecl_Debug_debug(self) {
 const __UseDecl_Debug = { debug: __UseDecl_Debug_debug };
 
 
-export { Position, Span, span_zero, RecordTypeField, TypeExpr_Named, TypeExpr_FnType, TypeExpr_OptionType, TypeExpr_RecordType, TypeExpr_TupleType, EffectExpr, LiteralValue_IntVal, LiteralValue_FloatVal, LiteralValue_StrVal, LiteralValue_BoolVal, NamedPatternField, Pattern_Wildcard, Pattern_Binding, Pattern_Constructor, Pattern_NamedConstructor, Pattern_Literal, Pattern_TuplePattern, BinOp_Add, BinOp_Sub, BinOp_Mul, BinOp_Div, BinOp_Mod, BinOp_Eq, BinOp_Neq, BinOp_Lt, BinOp_Lte, BinOp_Gt, BinOp_Gte, BinOp_And, BinOp_Or, UnaryOp_Neg, UnaryOp_Not, Param, MatchArm, StructFieldInit, EffectHandler, StringInterpPart_LitPart, StringInterpPart_ExprPart, Expr_IntLit, Expr_FloatLit, Expr_StrLit, Expr_BoolLit, Expr_Ident, Expr_BinOp, Expr_UnaryOp, Expr_Call, Expr_MethodCall, Expr_FieldAccess, Expr_StructLit, Expr_MatchExpr, Expr_Block, Expr_IfExpr, Expr_StringInterp, Expr_CatchExpr, Expr_HandleExpr, Expr_Lambda, Expr_Range, Expr_ListLit, Expr_TupleLit, DestructureBinding, Stmt_Let, Stmt_Var, Stmt_Assign, Stmt_ExprStmt, Stmt_Return, Stmt_While, Stmt_ForIn, Stmt_Break, Stmt_Continue, Stmt_LetDestructure, Stmt_IfLet, UsePath, NamedImport, UseImport_NamedItems, UseImport_Module, UseDecl, TypeBound, TypeParam, StructFieldDecl, NamedEnumField, EnumVariantDecl, EffectOpDecl, Decl_Fn, Decl_Struct, Decl_Enum, Decl_Impl, Decl_Effect, Decl_Test, Decl_Trait, Decl_ExternFn, Decl_ExternType, Decl_TypeAlias, Decl_Const, Decl_ModBlock, Program, __Position_Eq, __Span_Eq, __NamedImport_Eq, __LiteralValue_Eq, __BinOp_Eq, __UnaryOp_Eq, __Position_Clone, __Span_Clone, __DestructureBinding_Clone, __UsePath_Clone, __NamedImport_Clone, __LiteralValue_Clone, __BinOp_Clone, __UnaryOp_Clone, __UseImport_Clone, __UseDecl_Clone, __Position_Ord, __Span_Ord, __LiteralValue_Ord, __BinOp_Ord, __UnaryOp_Ord, __Position_Debug, __Span_Debug, __DestructureBinding_Debug, __UsePath_Debug, __NamedImport_Debug, __LiteralValue_Debug, __BinOp_Debug, __UnaryOp_Debug, __UseImport_Debug, __UseDecl_Debug };
+export { Position, Span, span_zero, RecordTypeField, TypeExpr_Named, TypeExpr_FnType, TypeExpr_OptionType, TypeExpr_RecordType, TypeExpr_TupleType, EffectExpr, LiteralValue_IntVal, LiteralValue_FloatVal, LiteralValue_StrVal, LiteralValue_BoolVal, NamedPatternField, Pattern_Wildcard, Pattern_Binding, Pattern_Constructor, Pattern_NamedConstructor, Pattern_Literal, Pattern_TuplePattern, BinOp_Add, BinOp_Sub, BinOp_Mul, BinOp_Div, BinOp_Mod, BinOp_Eq, BinOp_Neq, BinOp_Lt, BinOp_Lte, BinOp_Gt, BinOp_Gte, BinOp_And, BinOp_Or, UnaryOp_Neg, UnaryOp_Not, Param, MatchArm, StructFieldInit, EffectHandler, StringInterpPart_LitPart, StringInterpPart_ExprPart, Expr_IntLit, Expr_FloatLit, Expr_StrLit, Expr_BoolLit, Expr_Ident, Expr_BinOp, Expr_UnaryOp, Expr_Call, Expr_MethodCall, Expr_FieldAccess, Expr_StructLit, Expr_MatchExpr, Expr_Block, Expr_IfExpr, Expr_StringInterp, Expr_CatchExpr, Expr_HandleExpr, Expr_Lambda, Expr_Range, Expr_ListLit, Expr_TupleLit, DestructureBinding, Stmt_Let, Stmt_Var, Stmt_Assign, Stmt_ExprStmt, Stmt_Return, Stmt_While, Stmt_ForIn, Stmt_Break, Stmt_Continue, Stmt_LetDestructure, Stmt_IfLet, UsePath, NamedImport, UseImport_NamedItems, UseImport_Module, UseDecl, TypeBound, TypeParam, StructFieldDecl, NamedEnumField, EnumVariantDecl, EffectOpDecl, SigMember, Decl_Fn, Decl_Struct, Decl_Enum, Decl_Impl, Decl_Effect, Decl_Test, Decl_Trait, Decl_ExternFn, Decl_ExternType, Decl_TypeAlias, Decl_Const, Decl_ModBlock, Decl_Sig, Program, __Position_Eq, __Span_Eq, __NamedImport_Eq, __LiteralValue_Eq, __BinOp_Eq, __UnaryOp_Eq, __Position_Clone, __Span_Clone, __DestructureBinding_Clone, __UsePath_Clone, __NamedImport_Clone, __LiteralValue_Clone, __BinOp_Clone, __UnaryOp_Clone, __UseImport_Clone, __UseDecl_Clone, __Position_Ord, __Span_Ord, __LiteralValue_Ord, __BinOp_Ord, __UnaryOp_Ord, __Position_Debug, __Span_Debug, __DestructureBinding_Debug, __UsePath_Debug, __NamedImport_Debug, __LiteralValue_Debug, __BinOp_Debug, __UnaryOp_Debug, __UseImport_Debug, __UseDecl_Debug };

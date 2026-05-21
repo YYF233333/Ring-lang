@@ -255,6 +255,15 @@ pub struct EffectOpDecl {
     pub span: Span
 }
 
+pub struct SigMember {
+    pub name: Str,
+    pub type_params: List<TypeParam>,
+    pub params: List<Param>,
+    pub return_type: TypeExpr?,
+    pub declared_effects: List<TypeExpr>,
+    pub span: Span
+}
+
 pub enum Decl {
     Fn { name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, is_abstract: Bool, span: Span },
     Struct { name: Str, type_params: List<TypeParam>, fields: List<StructFieldDecl>, is_pub: Bool, span: Span },
@@ -267,7 +276,8 @@ pub enum Decl {
     ExternType { name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span },
     TypeAlias { name: Str, type_params: List<TypeParam>, type_expr: TypeExpr, is_pub: Bool, span: Span },
     Const { name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span },
-    ModBlock { name: Str, uses: List<UseDecl>, decls: List<Decl>, is_pub: Bool, span: Span }
+    ModBlock { name: Str, uses: List<UseDecl>, decls: List<Decl>, is_pub: Bool, span: Span },
+    Sig { name: Str, members: List<SigMember>, is_pub: Bool, span: Span }
 }
 
 // ============================================================
