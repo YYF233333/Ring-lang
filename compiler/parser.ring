@@ -616,11 +616,30 @@ impl Parser {
         }
     }
 
+    fn parse_mod_block(var self, is_pub: Bool) -> Decl {
+        let start = self.current_span_start()
+        self.expect(TokenKind::TkMod)
+        let name = self.expect(TokenKind::TkIdent).value
+        self.expect(TokenKind::TkLBrace)
+        var decls: List<Decl> = []
+        while !self.check(TokenKind::TkRBrace) && !self.at_end() {
+            let d = self.parse_decl()
+            match d {
+                some(decl) => decls.push(decl),
+                none => { let _ = self.advance() }
+            }
+        }
+        self.expect(TokenKind::TkRBrace)
+        let end = self.current_span_start()
+        Decl::ModBlock { name: name, decls: decls, is_pub: is_pub, span: self.make_span(start, end) }
+    }
+
     fn parse_decl(var self) -> Decl? {
         let is_pub = self.try_consume(TokenKind::TkPub)
         let tok = self.peek()
 
         match tok.kind {
+            TkMod => some(self.parse_mod_block(is_pub)),
             TkFn => some(self.parse_fn_decl(is_pub, false)),
             TkStruct => some(self.parse_struct_decl(is_pub)),
             TkEnum => some(self.parse_enum_decl(is_pub)),
@@ -1166,6 +1185,19 @@ impl Parser {
                 }
 
                 return Expr::Ident { name: variant_name, qualifier: some(name), span: self.make_span(start, variant_tok.span.end) }
+            }
+
+            // Module-qualified access: mod_name::member (lowercase qualifier)
+            if !is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
+                self.advance()
+                let member_tok = self.expect(TokenKind::TkIdent)
+                let member_name = member_tok.value
+
+                if allow_struct_lit && is_uppercase(member_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
+                    return self.parse_struct_literal(member_name, start, some(name))
+                }
+
+                return Expr::Ident { name: member_name, qualifier: some(name), span: self.make_span(start, member_tok.span.end) }
             }
 
             if allow_struct_lit && is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {

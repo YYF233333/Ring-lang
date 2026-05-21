@@ -266,7 +266,8 @@ pub enum Decl {
     ExternFn { name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, is_pub: Bool, span: Span },
     ExternType { name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span },
     TypeAlias { name: Str, type_params: List<TypeParam>, type_expr: TypeExpr, is_pub: Bool, span: Span },
-    Const { name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span }
+    Const { name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span },
+    ModBlock { name: Str, decls: List<Decl>, is_pub: Bool, span: Span }
 }
 
 // ============================================================

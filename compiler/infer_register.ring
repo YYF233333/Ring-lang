@@ -16,6 +16,29 @@ pub fn register_decl_public(var ctx: InferCtx, decl: Decl) {
     register_decl(ctx, decl)
 }
 
+pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
+    match decl {
+        Decl::Fn { name, type_params, params, return_type, declared_effects, body, is_pub, is_abstract, span } =>
+            Decl::Fn { name: "${mod_name}::${name}", type_params: type_params, params: params,
+                       return_type: return_type, declared_effects: declared_effects, body: body,
+                       is_pub: is_pub, is_abstract: is_abstract, span: span },
+        Decl::Struct { name, type_params, fields, is_pub, span } =>
+            Decl::Struct { name: "${mod_name}::${name}", type_params: type_params, fields: fields,
+                          is_pub: is_pub, span: span },
+        Decl::Enum { name, type_params, variants, is_pub, span } =>
+            Decl::Enum { name: "${mod_name}::${name}", type_params: type_params, variants: variants,
+                        is_pub: is_pub, span: span },
+        Decl::ExternFn { name, type_params, params, return_type, declared_effects, is_pub, span } =>
+            Decl::ExternFn { name: "${mod_name}::${name}", type_params: type_params, params: params,
+                            return_type: return_type, declared_effects: declared_effects,
+                            is_pub: is_pub, span: span },
+        Decl::Const { name, type_annotation, init, is_pub, span } =>
+            Decl::Const { name: "${mod_name}::${name}", type_annotation: type_annotation, init: init,
+                         is_pub: is_pub, span: span },
+        _ => decl
+    }
+}
+
 fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: List<Str>, var deferred_enum_names: List<Str>) {
     match decl {
         Decl::Struct { name, type_params, fields, span, .. } => {
@@ -26,6 +49,53 @@ fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: Lis
             preregister_enum(ctx, name, type_params)
             deferred_enum_names.push(name)
         },
+        Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
+            // Pass 1: register struct/enum types first (preregister)
+            for d in mod_decls {
+                match d {
+                    Decl::Struct { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                    },
+                    Decl::Enum { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                    },
+                    _ => {}
+                }
+            }
+            // Add short-name aliases so mod-internal type references resolve
+            for d in mod_decls {
+                match d {
+                    Decl::Struct { name, .. } => {
+                        let qualified = "${mod_name}::${name}"
+                        match ctx.env.types.structs.get(qualified) {
+                            some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
+                            none => {}
+                        }
+                    },
+                    Decl::Enum { name, .. } => {
+                        let qualified = "${mod_name}::${name}"
+                        match ctx.env.types.enums.get(qualified) {
+                            some(edef) => { ctx.env.types.enums.insert(name, edef) },
+                            none => {}
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            // Pass 2: register everything else (functions, consts, etc.)
+            for d in mod_decls {
+                match d {
+                    Decl::Struct { .. } => {},
+                    Decl::Enum { .. } => {},
+                    _ => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                    }
+                }
+            }
+        },
         _ => register_decl(ctx, decl)
     }
 }
@@ -34,6 +104,12 @@ fn register_phase2_struct(var ctx: InferCtx, decl: Decl) {
     match decl {
         Decl::Struct { name, type_params, fields, span, .. } =>
             complete_struct_fields(ctx, name, fields),
+        Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
+            for d in mod_decls {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_phase2_struct(ctx, prefixed)
+            }
+        },
         _ => {}
     }
 }
@@ -42,6 +118,12 @@ fn register_phase2_enum(var ctx: InferCtx, decl: Decl) {
     match decl {
         Decl::Enum { name, type_params, variants, span, .. } =>
             complete_enum_variants(ctx, name, type_params, variants),
+        Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
+            for d in mod_decls {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_phase2_enum(ctx, prefixed)
+            }
+        },
         _ => {}
     }
 }
@@ -681,6 +763,51 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
         Decl::TypeAlias { name, type_params, type_expr, .. } =>
             register_type_alias(ctx, name, type_params, type_expr),
         Decl::Const { name, type_annotation, span, .. } =>
-            register_const(ctx, name, type_annotation, span)
+            register_const(ctx, name, type_annotation, span),
+        Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
+            // Register struct/enum types first, add aliases, then register the rest
+            for d in mod_decls {
+                match d {
+                    Decl::Struct { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_decl(ctx, prefixed)
+                    },
+                    Decl::Enum { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_decl(ctx, prefixed)
+                    },
+                    _ => {}
+                }
+            }
+            for d in mod_decls {
+                match d {
+                    Decl::Struct { name, .. } => {
+                        let qualified = "${mod_name}::${name}"
+                        match ctx.env.types.structs.get(qualified) {
+                            some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
+                            none => {}
+                        }
+                    },
+                    Decl::Enum { name, .. } => {
+                        let qualified = "${mod_name}::${name}"
+                        match ctx.env.types.enums.get(qualified) {
+                            some(edef) => { ctx.env.types.enums.insert(name, edef) },
+                            none => {}
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            for d in mod_decls {
+                match d {
+                    Decl::Struct { .. } => {},
+                    Decl::Enum { .. } => {},
+                    _ => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_decl(ctx, prefixed)
+                    }
+                }
+            }
+        }
     }
 }

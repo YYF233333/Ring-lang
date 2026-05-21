@@ -14,7 +14,7 @@ pub enum TokenKind {
     TkFor, TkIn, TkPub, TkWhere,
     TkTrue, TkFalse, TkTrait, TkTry,
     TkWhile, TkBreak, TkContinue, TkLoop,
-    TkUse, TkAs, TkExtern,
+    TkUse, TkAs, TkExtern, TkMod,
 
     // Literals
     TkIntLit, TkFloatLit, TkStringLit,
@@ -52,7 +52,7 @@ pub fn token_kind_value(k: TokenKind) -> Str {
         TkFor => "for", TkIn => "in", TkPub => "pub", TkWhere => "where",
         TkTrue => "true", TkFalse => "false", TkTrait => "trait", TkTry => "try",
         TkWhile => "while", TkBreak => "break", TkContinue => "continue", TkLoop => "loop",
-        TkUse => "use", TkAs => "as", TkExtern => "extern",
+        TkUse => "use", TkAs => "as", TkExtern => "extern", TkMod => "mod",
         TkIntLit => "int_lit", TkFloatLit => "float_lit", TkStringLit => "string_lit",
         TkStringInterpStart => "string_interp_start",
         TkStringInterpMiddle => "string_interp_middle",
@@ -107,6 +107,7 @@ fn keyword_lookup(word: Str) -> TokenKind? {
         "use" => some(TokenKind::TkUse),
         "as" => some(TokenKind::TkAs),
         "extern" => some(TokenKind::TkExtern),
+        "mod" => some(TokenKind::TkMod),
         _ => none
     }
 }
