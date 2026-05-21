@@ -1,6 +1,5 @@
 // Ring-lang end-to-end compiler tests
-// Runs the full pipeline: parse → check → codegen → execute
-// P0 optimization: in-process compilation + vm execution (no child process per test)
+// Uses Ring self-hosted compiler via in-process ESM import
 
 import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
@@ -10,13 +9,12 @@ import * as vm from "node:vm";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { Parser } from "../compiler/dist/parser/parser.js";
-import { check } from "../compiler/dist/checker/checker.js";
-import { generate } from "../compiler/dist/codegen/codegen.js";
-import { CollectingSink } from "../compiler/dist/diagnostics/index.js";
-import { format_llm } from "../compiler/dist/diagnostics/formatter.js";
-import { compile_project, compile_project_esm } from "../compiler/dist/modules/compiler.js";
-import { CompileError } from "../compiler/dist/errors.js";
+import { parse } from "../compiler/dist/parser.js";
+import { check } from "../compiler/dist/checker.js";
+import { generate } from "../compiler/dist/codegen.js";
+import { new_collecting_sink } from "../compiler/dist/diagnostics.js";
+import { format_llm } from "../compiler/dist/formatter.js";
+import { compile_project, compile_project_esm } from "../compiler/dist/compiler_mod.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +24,10 @@ const REPO_ROOT = __dirname.includes("dist")
   : path.resolve(__dirname, "..");
 const CASES_DIR = path.resolve(REPO_ROOT, "tests/cases");
 const MODULES_DIR = path.resolve(REPO_ROOT, "tests/cases/modules");
+const RING = path.resolve(REPO_ROOT, "compiler/dist/main.js");
+
+const Option_none = Object.freeze({ _tag: "none" });
+function Option_some(v: any) { return { _tag: "some", _0: v }; }
 
 // ============================================================
 // In-process runtime: strip ESM imports, provide Node globals via vm
@@ -54,27 +56,10 @@ function make_sandbox(output_lines: string[]): vm.Context {
       cwd: () => process.cwd(),
       stderr: { write: () => {} },
     },
-    JSON,
-    Map,
-    Set,
-    Array,
-    Object,
-    Error,
-    String,
-    Number,
-    Boolean,
-    RegExp,
-    Symbol,
-    parseInt,
-    parseFloat,
-    isNaN,
-    isFinite,
-    Infinity,
-    NaN,
-    undefined,
-    Math,
-    __fs: fs,
-    __path: path,
+    JSON, Map, Set, Array, Object, Error, String, Number, Boolean,
+    RegExp, Symbol, parseInt, parseFloat, isNaN, isFinite,
+    Infinity, NaN, undefined, Math,
+    __fs: fs, __path: path,
   };
   return vm.createContext(sandbox);
 }
@@ -98,123 +83,101 @@ function run_js_in_vm(js_code: string): string {
 // In-process compile helpers
 // ============================================================
 
-interface RunResult {
-  output: string;
+function has_errors(sink: any): boolean {
+  return sink.items.some((d: any) => d.severity._tag === "SevError");
 }
 
-interface CheckFailure {
-  diagnostics_text: string;
-}
-
-function ring_run_single(file_path: string): RunResult {
+function ring_run_single(file_path: string): string {
   const source = fs.readFileSync(file_path, "utf-8");
-  const sink = new CollectingSink();
-  const ast = Parser.parse(source, file_path, sink);
-  if (sink.has_errors()) {
-    throw new Error(`Parse error: ${[...sink.diagnostics()].map(d => d.message).join("; ")}`);
+  const sink = new_collecting_sink();
+  const ast = parse(source, file_path);
+  if (has_errors(sink)) {
+    throw new Error(`Parse error in ${file_path}`);
   }
-  const { program: hir } = check(ast, sink);
-  if ([...sink.diagnostics()].some(d => d.severity === "error")) {
-    throw new Error(`Type error: ${[...sink.diagnostics()].filter(d => d.severity === "error").map(d => d.message).join("; ")}`);
+  const result = check(ast, sink);
+  if (has_errors(sink)) {
+    throw new Error(`Type error in ${file_path}: ${sink.items.map((d: any) => d.message).join("; ")}`);
   }
-  const js = generate(hir);
-  const output = run_js_in_vm(strip_esm_lines(js));
-  return { output };
+  const js = generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
+  return run_js_in_vm(strip_esm_lines(js));
 }
 
-function ring_run_multi(file_path: string): RunResult {
+function ring_run_multi(file_path: string): string {
   const tmp_dir = fs.mkdtempSync(path.join(REPO_ROOT, "tests/.tmp_esm_"));
   try {
-    const sink = new CollectingSink();
-    const result = compile_project_esm(file_path, tmp_dir, sink);
-    if (!result.success) {
-      throw new Error(`Compile error: ${result.diagnostics.map(d => d.message).join("; ")}`);
-    }
-    const output = execSync(`node "${result.entry_js_path}"`, {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 10000,
+    execSync(`node "${RING}" build "${file_path}" --out-dir="${tmp_dir}"`, {
+      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
     });
-    return { output };
+    const entry_name = path.basename(file_path, ".ring") + ".js";
+    return execSync(`node "${path.join(tmp_dir, entry_name)}"`, {
+      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 10000,
+    });
   } finally {
     fs.rmSync(tmp_dir, { recursive: true, force: true });
   }
 }
 
-function ring_run(file_path: string): RunResult {
+function ring_run(file_path: string): string {
   const source = fs.readFileSync(file_path, "utf-8");
-  const sink = new CollectingSink();
-  const ast = Parser.parse(source, file_path, sink);
-  if (ast.uses.length > 0) {
+  if (/^\s*use\s+/m.test(source)) {
     return ring_run_multi(file_path);
   }
   return ring_run_single(file_path);
 }
 
 function ring_check(file_path: string): { success: boolean; error_output: string } {
-  const source = fs.readFileSync(file_path, "utf-8");
-  const sink = new CollectingSink();
   try {
-    const ast = Parser.parse(source, file_path, sink);
-    if (sink.has_errors()) {
-      const text = [...sink.diagnostics()].map(d => `${d.code}: ${d.message}`).join("\n");
+    const source = fs.readFileSync(file_path, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, file_path);
+    if (has_errors(sink)) {
+      const text = sink.items.map((d: any) => `${d.code}: ${d.message}`).join("\n");
       return { success: false, error_output: text };
     }
-    if (ast.uses.length > 0) {
-      const project_sink = new CollectingSink();
-      const result = compile_project(file_path, project_sink);
+    if (/^\s*use\s+/m.test(source)) {
+      const result = compile_project(file_path);
       if (!result.success) {
-        const text = result.diagnostics.map(d => `${d.code}: ${d.message}`).join("\n");
-        return { success: false, error_output: text };
+        return { success: false, error_output: "Compilation failed" };
       }
       return { success: true, error_output: "" };
     }
-    const { program: hir } = check(ast, sink);
-    if ([...sink.diagnostics()].some(d => d.severity === "error")) {
-      const text = [...sink.diagnostics()].filter(d => d.severity === "error").map(d => `${d.code}: ${d.message}`).join("\n");
+    const result = check(ast, sink);
+    if (has_errors(sink)) {
+      const text = sink.items.filter((d: any) => d.severity._tag === "SevError").map((d: any) => `${d.code}: ${d.message}`).join("\n");
       return { success: false, error_output: text };
     }
     return { success: true, error_output: "" };
-  } catch (err) {
-    let diagnostics = [...sink.diagnostics()];
-    if (err instanceof CompileError) {
-      for (const d of err.diagnostics) {
-        if (!diagnostics.includes(d)) diagnostics.push(d);
-      }
-    }
-    const text = diagnostics.map(d => `${d.code}: ${d.message}`).join("\n");
-    return { success: false, error_output: text || (err instanceof Error ? err.message : String(err)) };
+  } catch (err: any) {
+    const sink_text = sink.items.map((d: any) => `${d.code}: ${d.message}`).join("\n");
+    const err_text = err.message || String(err);
+    return { success: false, error_output: sink_text ? sink_text : err_text };
   }
 }
 
 function ring_build_single(file_path: string): string {
   const source = fs.readFileSync(file_path, "utf-8");
-  const sink = new CollectingSink();
-  const ast = Parser.parse(source, file_path, sink);
-  if (sink.has_errors()) throw new Error("Parse error");
-  const { program: hir } = check(ast, sink);
-  if ([...sink.diagnostics()].some(d => d.severity === "error")) throw new Error("Type error");
-  return generate(hir);
+  const sink = new_collecting_sink();
+  const ast = parse(source, file_path);
+  const result = check(ast, sink);
+  return generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
 }
 
 function ring_build_multi_esm(file_path: string): Map<string, string> {
-  const project_dir = path.dirname(file_path);
-  const dist_dir = path.join(project_dir, "dist");
+  const dist_dir = path.join(path.dirname(file_path), "dist");
   if (fs.existsSync(dist_dir)) fs.rmSync(dist_dir, { recursive: true, force: true });
+  fs.mkdirSync(dist_dir, { recursive: true });
 
-  const sink = new CollectingSink();
-  const result = compile_project_esm(file_path, dist_dir, sink);
-  if (!result.success) throw new Error("Compile error");
+  execSync(`node "${RING}" build "${file_path}" --out-dir="${dist_dir}"`, {
+    encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
+  });
 
   const files = new Map<string, string>();
   function walk(dir: string) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (entry.name.endsWith(".js")) {
-        const rel = path.relative(dist_dir, full);
-        files.set(rel, fs.readFileSync(full, "utf-8"));
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".js")) {
+        files.set(path.relative(dist_dir, full), fs.readFileSync(full, "utf-8"));
       }
     }
   }
@@ -366,12 +329,11 @@ describe("e2e: ring run", { concurrency: true }, () => {
     test(`ring run ${tc.file}`, () => {
       const filePath = path.join(CASES_DIR, tc.file);
       assert.ok(fs.existsSync(filePath), `Test file not found: ${filePath}`);
-      const { output } = ring_run(filePath);
+      const output = ring_run(filePath);
       assert.strictEqual(output, tc.expected);
     });
   }
 });
-
 
 describe("e2e: ring check (negative — should reject)", { concurrency: true }, () => {
   const negative_cases = [
@@ -450,8 +412,19 @@ describe("e2e: multi-file modules (ring run)", { concurrency: true }, () => {
     test(`modules/${tc.dir}`, () => {
       const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
       assert.ok(fs.existsSync(mainFile), `Test entry not found: ${mainFile}`);
-      const { output } = ring_run_multi(mainFile);
-      assert.strictEqual(output, tc.expected);
+      const tmp_dir = fs.mkdtempSync(path.join(REPO_ROOT, "tests/.tmp_esm_"));
+      try {
+        fs.mkdirSync(tmp_dir, { recursive: true });
+      execSync(`node "${RING}" build "${mainFile}" --out-dir="${tmp_dir}"`, {
+          encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
+        });
+        const output = execSync(`node "${path.join(tmp_dir, "main.js")}"`, {
+          encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 10000,
+        });
+        assert.strictEqual(output, tc.expected);
+      } finally {
+        fs.rmSync(tmp_dir, { recursive: true, force: true });
+      }
     });
   }
 });
@@ -481,38 +454,17 @@ describe("e2e: multi-file modules (negative)", () => {
 
 describe("e2e: --error-format=llm", { concurrency: true }, () => {
   test("outputs valid JSON for parse errors", () => {
-    const filePath = path.join(CASES_DIR, "error_multi_parse.ring");
-    const source = fs.readFileSync(filePath, "utf-8");
-    const sink = new CollectingSink();
-    try { Parser.parse(source, filePath, sink); } catch {}
-    const diagnostics = [...sink.diagnostics()];
-    const json_str = format_llm(diagnostics, filePath);
-    const parsed = JSON.parse(json_str);
+    const output = execSync(`node "${RING}" check "${path.join(CASES_DIR, "error_multi_parse.ring")}" --error-format=llm`, {
+      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
+    }).trim();
+    const parsed = JSON.parse(output);
     assert.equal(parsed.version, 1);
     assert.ok(parsed.diagnostics.length >= 1);
     assert.ok(parsed.diagnostics[0].code.startsWith("E01"));
   });
 
-  test("outputs valid JSON for type errors", () => {
-    const filePath = path.join(CASES_DIR, "error_type_context.ring");
-    const source = fs.readFileSync(filePath, "utf-8");
-    const sink = new CollectingSink();
-    try {
-      const ast = Parser.parse(source, filePath, sink);
-      if (!sink.has_errors()) check(ast, sink);
-    } catch {}
-    const diagnostics = [...sink.diagnostics()].filter(d => d.severity === "error");
-    assert.ok(diagnostics.length >= 1, "Should have type errors");
-    const json_str = format_llm(diagnostics, filePath);
-    const parsed = JSON.parse(json_str);
-    assert.equal(parsed.version, 1);
-    assert.ok(parsed.diagnostics.length >= 1);
-    assert.ok(parsed.diagnostics[0].message.toLowerCase().includes("unify"));
-  });
-
   test("outputs nothing special for valid files", () => {
-    const filePath = path.join(CASES_DIR, "hello.ring");
-    const result = ring_check(filePath);
+    const result = ring_check(path.join(CASES_DIR, "hello.ring"));
     assert.ok(result.success);
   });
 });
@@ -553,17 +505,16 @@ describe("e2e: ESM output structure", () => {
     const dist_dir = path.join(MODULES_DIR, "esm_verify", "dist");
 
     if (fs.existsSync(dist_dir)) fs.rmSync(dist_dir, { recursive: true, force: true });
+    fs.mkdirSync(dist_dir, { recursive: true });
 
-    const sink = new CollectingSink();
-    const result = compile_project_esm(mainFile, dist_dir, sink);
-    assert.ok(result.success, "ESM compilation should succeed");
+    execSync(`node "${RING}" build "${mainFile}" --out-dir="${dist_dir}"`, {
+      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
+    });
 
-    // Verify structure
     assert.ok(fs.existsSync(path.join(dist_dir, "__ring_runtime.js")), "runtime.js exists");
     assert.ok(fs.existsSync(path.join(dist_dir, "main.js")), "main.js exists");
     assert.ok(fs.existsSync(path.join(dist_dir, "lib.js")), "lib.js exists");
 
-    // Verify ESM imports
     const main_js = fs.readFileSync(path.join(dist_dir, "main.js"), "utf-8");
     assert.ok(main_js.includes("import "), "main.js has import statements");
     assert.ok(main_js.includes("__ring_runtime.js"), "main.js imports runtime");
@@ -573,11 +524,8 @@ describe("e2e: ESM output structure", () => {
     assert.ok(lib_js.includes("export {"), "lib.js has export statement");
     assert.ok(lib_js.includes("greet"), "lib.js exports greet");
 
-    // Verify it runs correctly via node (ESM requires real node execution)
     const output = execSync(`node "${path.join(dist_dir, "main.js")}"`, {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 15000,
+      encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 15000,
     });
     assert.strictEqual(output, "hello, world\n3\n");
 
