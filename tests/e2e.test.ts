@@ -247,6 +247,7 @@ const cases: TestCase[] = [
   { file: "unary_ops.ring", expected: "-42\n5\n" },
   { file: "generic_basic.ring", expected: "42\nhello\n1\n" },
   { file: "lambda_arg.ring", expected: "42\n6\n" },
+  { file: "lambda_infer_call.ring", expected: "lambda_infer_call: all tests passed\n" },
   { file: "return_early.ring", expected: "5\n3\n" },
   { file: "struct_basic.ring", expected: "25\n" },
   { file: "struct_update_test.ring", expected: "struct update: all tests passed\n" },

@@ -956,16 +956,50 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     var s = callee_r.subst
     var effects = callee_r.effects
 
+    // Resolve callee type for lambda bidirectional inference
+    let callee_fn_type: Type? = match apply_subst(s, hexpr_type(callee_r.hexpr)) {
+        Type::FnType { .. } => some(apply_subst(s, hexpr_type(callee_r.hexpr))),
+        _ => none
+    }
+
     var hargs: List<HExpr> = []
     var arg_types: List<Type> = []
+    var ai = 0
     for arg in args {
-        let ar = infer_expr(ctx, arg, s)
+        var ar: InferResult = match arg {
+            Expr::Lambda { params: lparams, body: lbody, span: lspan, .. } => {
+                match callee_fn_type {
+                    some(cft) => match cft {
+                        Type::FnType { params: cft_params, .. } => {
+                            if ai < cft_params.len() {
+                                match cft_params.get(ai) {
+                                    some(expected_raw) => {
+                                        let expected = apply_subst(s, expected_raw)
+                                        match expected {
+                                            Type::FnType { params: exp_params, .. } => {
+                                                infer_lambda(ctx, lparams, lbody, lspan, s, some(exp_params))
+                                            },
+                                            _ => infer_expr(ctx, arg, s)
+                                        }
+                                    },
+                                    none => infer_expr(ctx, arg, s)
+                                }
+                            } else { infer_expr(ctx, arg, s) }
+                        },
+                        _ => infer_expr(ctx, arg, s)
+                    },
+                    none => infer_expr(ctx, arg, s)
+                }
+            },
+            _ => infer_expr(ctx, arg, s)
+        }
         s = ar.subst
         let me = merge_effects(ctx.env, effects, ar.effects, s)
         effects = me.0
         s = me.1
         hargs.push(ar.hexpr)
         arg_types.push(hexpr_type(ar.hexpr))
+        ai = ai + 1
     }
 
     let ret_var = ctx.env.fresh_var()
