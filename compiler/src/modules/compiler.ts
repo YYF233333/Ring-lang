@@ -144,11 +144,22 @@ export function compile_project(entry_file: string, sink: DiagnosticSink): Compi
     for (const dk of deps) {
       const dep_exports = module_exports_map.get(dk)!;
       const dep_prefix = dep_exports.module_prefix;
+      // Collect bare enum variant names for this dep
+      const bundle_bare_variants = new Set<string>();
+      for (const [, type_def] of dep_exports.types) {
+        if ("variants" in type_def) {
+          for (const v of type_def.variants) {
+            bundle_bare_variants.add(v.name);
+          }
+        }
+      }
       // Import all exported values (functions, enum constructors)
       // Extern fn names map to their raw JS name (not module-prefixed)
       for (const [name] of dep_exports.values) {
         if (dep_exports.extern_values.has(name)) {
           imports_map.set(name, safe_ident(name));
+        } else if (bundle_bare_variants.has(name) && imports_map.has(name)) {
+          // Bare variant name already mapped — skip to prevent overwrite
         } else {
           imports_map.set(name, `${dep_prefix}$${safe_ident(name)}`);
         }
@@ -363,10 +374,13 @@ export function compile_project_esm(
         if (dep_exports.extern_values.has(name)) {
           imports_map.set(name, safe_ident(name));
         } else if (bare_variant_names.has(name)) {
-          // Bare enum variant: add to imports_map for resolution but don't import
-          // (codegen uses resolved_name which maps to EnumName_VariantName)
-          const alias = `${dep_prefix}$${safe_ident(name)}`;
-          imports_map.set(name, alias);
+          // Bare enum variant: add to imports_map for resolution but don't import.
+          // Skip if already mapped — prevents variant names (e.g. HDecl::Effect)
+          // from overwriting enum type names (e.g. types::Effect).
+          if (!imports_map.has(name)) {
+            const alias = `${dep_prefix}$${safe_ident(name)}`;
+            imports_map.set(name, alias);
+          }
         } else {
           const alias = `${dep_prefix}$${safe_ident(name)}`;
           imports_map.set(name, alias);
