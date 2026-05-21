@@ -84,6 +84,7 @@ fn occurs_in_row(var_id: Int, row: EffectRow, subst: UnionFind) -> Bool {
 fn occurs_in_effect(var_id: Int, e: Effect, subst: UnionFind) -> Bool {
     match e {
         Effect::FailEffect { error_type } => occurs_in(var_id, error_type, subst),
+        Effect::MutEffect { state_type } => occurs_in(var_id, state_type, subst),
         Effect::CustomEffect { type_args, .. } =>
             type_args.any(fn(a) { occurs_in(var_id, a, subst) }),
         _ => false
@@ -97,7 +98,7 @@ fn occurs_in_effect(var_id: Int, e: Effect, subst: UnionFind) -> Bool {
 fn effects_match_kind(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
-        Effect::MutEffect => match b { Effect::MutEffect => true, _ => false },
+        Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },
         Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
         Effect::CustomEffect { name: na, .. } => match b {
             Effect::CustomEffect { name: nb, .. } => na == nb,
@@ -112,6 +113,8 @@ fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, var env: TypeEnv)
     match (a, b) {
         (Effect::FailEffect { error_type: et_a }, Effect::FailEffect { error_type: et_b }) =>
             unify(et_a, et_b, subst, env),
+        (Effect::MutEffect { state_type: sa }, Effect::MutEffect { state_type: sb }) =>
+            unify(sa, sb, subst, env),
         (Effect::CustomEffect { name, type_args: ta_a }, Effect::CustomEffect { type_args: ta_b, .. }) => {
             if ta_a.len() != ta_b.len() {
                 unify_error_msg("effect '${name}' type argument count mismatch: ${ta_a.len()} vs ${ta_b.len()}")

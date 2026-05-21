@@ -469,6 +469,11 @@ function apply_subst_effect_map(subst, e) {
       return types$Effect_FailEffect(apply_subst_map(subst, error_type));
       break __ring_match10;
     }
+    if (__ring_m10._tag === "MutEffect") {
+      const state_type = __ring_m10.state_type;
+      return types$Effect_MutEffect(apply_subst_map(subst, state_type));
+      break __ring_match10;
+    }
     if (__ring_m10._tag === "CustomEffect") {
       const name = __ring_m10.name; const type_args = __ring_m10.type_args;
       return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst_map(subst, a); })));
@@ -676,6 +681,11 @@ function apply_subst_effect(subst, e) {
     if (__ring_m19._tag === "FailEffect") {
       const error_type = __ring_m19.error_type;
       return types$Effect_FailEffect(apply_subst(subst, error_type));
+      break __ring_match19;
+    }
+    if (__ring_m19._tag === "MutEffect") {
+      const state_type = __ring_m19.state_type;
+      return types$Effect_MutEffect(apply_subst(subst, state_type));
       break __ring_match19;
     }
     if (__ring_m19._tag === "CustomEffect") {

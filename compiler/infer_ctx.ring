@@ -306,6 +306,7 @@ pub fn collect_free_vars(t: Type, result: Set<Int>) {
             for e in effects.effects {
                 match e {
                     Effect::FailEffect { error_type } => collect_free_vars(error_type, result),
+                    Effect::MutEffect { state_type } => collect_free_vars(state_type, result),
                     Effect::CustomEffect { type_args, .. } => {
                         for a in type_args { collect_free_vars(a, result) }
                     },
@@ -335,6 +336,7 @@ pub fn collect_free_vars(t: Type, result: Set<Int>) {
             for e in effects {
                 match e {
                     Effect::FailEffect { error_type } => collect_free_vars(error_type, result),
+                    Effect::MutEffect { state_type } => collect_free_vars(state_type, result),
                     Effect::CustomEffect { type_args, .. } => {
                         for a in type_args { collect_free_vars(a, result) }
                     },

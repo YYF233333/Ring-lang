@@ -378,6 +378,8 @@ fn apply_subst_effect_map(subst: Map<Int, Type>, e: Effect) -> Effect {
     match e {
         Effect::FailEffect { error_type } =>
             Effect::FailEffect { error_type: apply_subst_map(subst, error_type) },
+        Effect::MutEffect { state_type } =>
+            Effect::MutEffect { state_type: apply_subst_map(subst, state_type) },
         Effect::CustomEffect { name, type_args } =>
             Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { apply_subst_map(subst, a) }) },
         _ => e
@@ -501,6 +503,8 @@ fn apply_subst_effect(subst: UnionFind, e: Effect) -> Effect {
     match e {
         Effect::FailEffect { error_type } =>
             Effect::FailEffect { error_type: apply_subst(subst, error_type) },
+        Effect::MutEffect { state_type } =>
+            Effect::MutEffect { state_type: apply_subst(subst, state_type) },
         Effect::CustomEffect { name, type_args } =>
             Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { apply_subst(subst, a) }) },
         _ => e

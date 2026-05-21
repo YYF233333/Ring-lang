@@ -43,16 +43,17 @@ function label_effect(names, e) {
       return types$Effect_FailEffect(label_vars(names, error_type));
       break __ring_match0;
     }
+    if (__ring_m0._tag === "MutEffect") {
+      const state_type = __ring_m0.state_type;
+      return types$Effect_MutEffect(label_vars(names, state_type));
+      break __ring_match0;
+    }
     if (__ring_m0._tag === "CustomEffect") {
       const name = __ring_m0.name; const type_args = __ring_m0.type_args;
       return types$Effect_CustomEffect(name, type_args.map((function(a) { return label_vars(names, a); })));
       break __ring_match0;
     }
     if (__ring_m0._tag === "IoEffect") {
-      return e;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "MutEffect") {
       return e;
       break __ring_match0;
     }

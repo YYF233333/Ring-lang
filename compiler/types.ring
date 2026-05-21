@@ -48,7 +48,7 @@ pub enum Type {
 pub enum Effect {
     IoEffect,
     FailEffect { error_type: Type },
-    MutEffect,
+    MutEffect { state_type: Type },
     CustomEffect { name: Str, type_args: List<Type> }
 }
 
@@ -75,7 +75,7 @@ pub const EMPTY_ROW: EffectRow = EffectRow { effects: [], tail: none }
 pub fn effect_kind_name(e: Effect) -> Str {
     match e {
         Effect::IoEffect => "io",
-        Effect::MutEffect => "mut",
+        Effect::MutEffect { .. } => "mut",
         Effect::FailEffect { .. } => "fail",
         Effect::CustomEffect { name, .. } => name
     }
@@ -176,7 +176,7 @@ pub fn row_contains(row: EffectRow, eff: Effect) -> Bool {
 fn effects_same_kind(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
-        Effect::MutEffect => match b { Effect::MutEffect => true, _ => false },
+        Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },
         Effect::FailEffect { error_type: ea } => match b {
             Effect::FailEffect { error_type: eb } => types_equal(ea, eb),
             _ => false
@@ -248,7 +248,10 @@ fn optional_ids_equal(a: Int?, b: Int?) -> Bool {
 pub fn effects_equal(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
-        Effect::MutEffect => match b { Effect::MutEffect => true, _ => false },
+        Effect::MutEffect { state_type: sa } => match b {
+            Effect::MutEffect { state_type: sb } => types_equal(sa, sb),
+            _ => false
+        },
         Effect::FailEffect { error_type: et_a } => match b {
             Effect::FailEffect { error_type: et_b } => types_equal(et_a, et_b),
             _ => false
@@ -381,7 +384,7 @@ pub fn type_to_string(t: Type) -> Str {
 pub fn effect_to_string(e: Effect) -> Str {
     match e {
         Effect::IoEffect => "io",
-        Effect::MutEffect => "mut",
+        Effect::MutEffect { state_type } => "mut<${type_to_string(state_type)}>",
         Effect::FailEffect { error_type } => "fail<${type_to_string(error_type)}>",
         Effect::CustomEffect { name, type_args } => {
             if type_args.len() == 0 { name }

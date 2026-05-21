@@ -156,6 +156,11 @@ function occurs_in_effect(var_id, e, subst) {
       return occurs_in(var_id, error_type, subst);
       break __ring_match1;
     }
+    if (__ring_m1._tag === "MutEffect") {
+      const state_type = __ring_m1.state_type;
+      return occurs_in(var_id, state_type, subst);
+      break __ring_match1;
+    }
     if (__ring_m1._tag === "CustomEffect") {
       const type_args = __ring_m1.type_args;
       return type_args.some((function(a) { return occurs_in(var_id, a, subst); }));
@@ -229,6 +234,11 @@ function unify_effect_params(a, b, subst, env, __ring_ev_fail) {
     if (Array.isArray(__ring_m7) && __ring_m7.length === 2 && __ring_m7[0]._tag === "FailEffect" && __ring_m7[1]._tag === "FailEffect") {
       const et_a = __ring_m7[0].error_type; const et_b = __ring_m7[1].error_type;
       return unify(et_a, et_b, subst, env, __ring_ev_fail);
+      break __ring_match7;
+    }
+    if (Array.isArray(__ring_m7) && __ring_m7.length === 2 && __ring_m7[0]._tag === "MutEffect" && __ring_m7[1]._tag === "MutEffect") {
+      const sa = __ring_m7[0].state_type; const sb = __ring_m7[1].state_type;
+      return unify(sa, sb, subst, env, __ring_ev_fail);
       break __ring_match7;
     }
     if (Array.isArray(__ring_m7) && __ring_m7.length === 2 && __ring_m7[0]._tag === "CustomEffect" && __ring_m7[1]._tag === "CustomEffect") {

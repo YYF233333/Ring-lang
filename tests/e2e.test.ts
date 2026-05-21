@@ -379,6 +379,7 @@ const cases: TestCase[] = [
   { file: "while_nested.ring", expected: "while_nested: all tests passed\n" },
   { file: "mod_basic.ring", expected: "7\n25\n" },
   { file: "mod_struct.ring", expected: "75\n" },
+  { file: "mut_param.ring", expected: "mut_param: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -428,6 +429,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_const_reassign.ring", error_pattern: "E0205" },
     { file: "error_with_suggestion.ring", error_pattern: "E0301" },
     { file: "effect_annotation_violation.ring", error_pattern: "E0404" },
+    { file: "mut_param_mismatch.ring", error_pattern: "E0404" },
     { file: "error_missing_impl_method.ring", error_pattern: "E0502" },
     { file: "error_nested_match.ring", error_pattern: "E0601" },
     { file: "error_unexpected_token.ring", error_pattern: "E0101" },

@@ -21,10 +21,11 @@ fn label_effect(names: Map<Int, Str>, e: Effect) -> Effect {
     match e {
         Effect::FailEffect { error_type } =>
             Effect::FailEffect { error_type: label_vars(names, error_type) },
+        Effect::MutEffect { state_type } =>
+            Effect::MutEffect { state_type: label_vars(names, state_type) },
         Effect::CustomEffect { name, type_args } =>
             Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { label_vars(names, a) }) },
         Effect::IoEffect => e,
-        Effect::MutEffect => e,
     }
 }
 

@@ -507,7 +507,17 @@ fn register_impl_extern_method(
 
 pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
     if eff.name == "io" { return Effect::IoEffect }
-    if eff.name == "mut" { return Effect::MutEffect }
+    if eff.name == "mut" {
+        let mut_state = if eff.type_args.len() > 0 {
+            match eff.type_args.first() {
+                some(t) => resolve_type_expr(ctx, t),
+                none => ctx.env.fresh_var()
+            }
+        } else {
+            ctx.env.fresh_var()
+        }
+        return Effect::MutEffect { state_type: mut_state }
+    }
     if eff.name == "fail" {
         let err_type = if eff.type_args.len() > 0 {
             match eff.type_args.first() {

@@ -720,7 +720,13 @@ function resolve_effect_expr(ctx, eff) {
     return types$Effect_IoEffect;
   }
   if ((eff.name === "mut")) {
-    return types$Effect_MutEffect;
+    const mut_state = ((List_len(eff.type_args) > 0) ? (function() {
+  const __ring_m = List_first(eff.type_args);
+  if (__ring_m._tag === "some") { const t = __ring_m._0; return infer_ctx$resolve_type_expr(ctx, t); }
+  if (__ring_m._tag === "none") { return env$TypeEnv_fresh_var(ctx.env); }
+  __match_fail(__ring_m);
+})() : env$TypeEnv_fresh_var(ctx.env));
+    return types$Effect_MutEffect(mut_state);
   }
   if ((eff.name === "fail")) {
     const err_type = ((List_len(eff.type_args) > 0) ? (function() {

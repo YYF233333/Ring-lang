@@ -427,7 +427,7 @@ fn check_fn_body(var ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
 fn effects_match_kind(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
-        Effect::MutEffect => match b { Effect::MutEffect => true, _ => false },
+        Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },
         Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
         Effect::CustomEffect { name: na, .. } => match b {
             Effect::CustomEffect { name: nb, .. } => na == nb,

@@ -1487,7 +1487,7 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
                 let error_type = if hargs.len() > 0 { apply_subst(s, hexpr_type(match hargs.first() { some(h) => h, none => panic("unreachable") })) } else { UNIT }
                 eff = Effect::FailEffect { error_type: error_type }
             },
-            BuiltInKind::BkMut => { eff = Effect::MutEffect }
+            BuiltInKind::BkMut => { eff = Effect::MutEffect { state_type: ctx.env.fresh_var() } }
         },
         none => {}
     }
@@ -2148,7 +2148,7 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             Effect::IoEffect => !handled_effects.contains("io"),
             Effect::CustomEffect { name, .. } => !handled_effects.contains(name),
             Effect::FailEffect { .. } => !handled_effects.contains("fail"),
-            Effect::MutEffect => !handled_effects.contains("mut")
+            Effect::MutEffect { .. } => !handled_effects.contains("mut")
         }
         if should_keep { filtered_effects.push(e) }
     }

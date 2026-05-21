@@ -93,9 +93,9 @@ function register_cell(env) {
   const ctor_t = types$Type_TypeVar(ctor_t_id, Option_none);
   const ctor_ret = types$Type_StructType(types$BUILTIN_CELL, [ctor_t], [new types$StructField("value", ctor_t, true)]);
   env$TypeEnv_bind(env, types$BUILTIN_CELL, new env$TypeScheme(types$Type_FnType([ctor_t], ctor_ret, types$EMPTY_ROW), [ctor_t_id], [], Option_none));
-  const mut_row = new types$EffectRow([types$Effect_MutEffect], Option_none);
   const m_t_id = env$TypeEnv_fresh_var_id(env);
   const m_t = types$Type_TypeVar(m_t_id, Option_none);
+  const mut_row = new types$EffectRow([types$Effect_MutEffect(m_t)], Option_none);
   const self_type = types$Type_StructType(types$BUILTIN_CELL, [m_t], [new types$StructField("value", m_t, true)]);
   const methods = map_new();
   _Map_insert(methods, "get", new env$TypeScheme(types$Type_FnType([self_type], m_t, mut_row), [m_t_id], [], Option_none));

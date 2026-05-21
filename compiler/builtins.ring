@@ -145,10 +145,9 @@ fn register_cell(var env: TypeEnv) {
     })
 
     // Methods: get, set, update
-    let mut_row = EffectRow { effects: [Effect::MutEffect], tail: none }
-
     let m_t_id = env.fresh_var_id()
     let m_t = Type::TypeVar { id: m_t_id, name: none }
+    let mut_row = EffectRow { effects: [Effect::MutEffect { state_type: m_t }], tail: none }
     let self_type = Type::StructType {
         name: BUILTIN_CELL,
         type_params: [m_t],

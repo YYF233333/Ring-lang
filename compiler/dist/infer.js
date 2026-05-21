@@ -2034,7 +2034,7 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
           break __ring_match101;
         }
         if (__ring_m101._tag === "BkMut") {
-          eff = types$Effect_MutEffect;
+          eff = types$Effect_MutEffect(env$TypeEnv_fresh_var(ctx.env));
           break __ring_match101;
         }
         __match_fail(__ring_m101);

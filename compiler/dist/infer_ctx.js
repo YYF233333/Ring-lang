@@ -299,6 +299,11 @@ function collect_free_vars(t, result) {
             collect_free_vars(error_type, result);
             break __ring_match9;
           }
+          if (__ring_m9._tag === "MutEffect") {
+            const state_type = __ring_m9.state_type;
+            collect_free_vars(state_type, result);
+            break __ring_match9;
+          }
           if (__ring_m9._tag === "CustomEffect") {
             const type_args = __ring_m9.type_args;
             for (const a of type_args) {
@@ -379,6 +384,11 @@ function collect_free_vars(t, result) {
           if (__ring_m12._tag === "FailEffect") {
             const error_type = __ring_m12.error_type;
             collect_free_vars(error_type, result);
+            break __ring_match12;
+          }
+          if (__ring_m12._tag === "MutEffect") {
+            const state_type = __ring_m12.state_type;
+            collect_free_vars(state_type, result);
             break __ring_match12;
           }
           if (__ring_m12._tag === "CustomEffect") {

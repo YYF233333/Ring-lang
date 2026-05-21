@@ -98,7 +98,9 @@ const Effect_IoEffect = Object.freeze({ _tag: "IoEffect" });
 function Effect_FailEffect(error_type) {
   return { _tag: "FailEffect", error_type };
 }
-const Effect_MutEffect = Object.freeze({ _tag: "MutEffect" });
+function Effect_MutEffect(state_type) {
+  return { _tag: "MutEffect", state_type };
+}
 function Effect_CustomEffect(name, type_args) {
   return { _tag: "CustomEffect", name, type_args };
 }
@@ -466,10 +468,12 @@ function effects_equal(a, b) {
       break __ring_match14;
     }
     if (__ring_m14._tag === "MutEffect") {
+      const sa = __ring_m14.state_type;
       __ring_match16: {
         const __ring_m16 = b;
         if (__ring_m16._tag === "MutEffect") {
-          return true;
+          const sb = __ring_m16.state_type;
+          return types_equal(sa, sb);
           break __ring_match16;
         }
         return false;
@@ -890,7 +894,8 @@ function effect_to_string(e) {
       break __ring_match40;
     }
     if (__ring_m40._tag === "MutEffect") {
-      return "mut";
+      const state_type = __ring_m40.state_type;
+      return `mut<${type_to_string(state_type)}>`;
       break __ring_match40;
     }
     if (__ring_m40._tag === "FailEffect") {
