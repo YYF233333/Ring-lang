@@ -91,7 +91,7 @@ fn is_decl_start(k: TokenKind) -> Bool {
         TkFn => true, TkStruct => true, TkEnum => true,
         TkEffect => true, TkTrait => true, TkImpl => true,
         TkExtern => true, TkUse => true, TkPub => true, TkTest => true,
-        TkConst => true,
+        TkConst => true, TkMod => true,
         _ => false
     }
 }
@@ -167,6 +167,22 @@ impl Parser {
             })
         }
         self.tokens.get(self.pos).unwrap_or(Token {
+            kind: TokenKind::TkEof,
+            value: "",
+            span: Span { file: self.file, start: Position { line: 1, column: 0, offset: 0 }, end: Position { line: 1, column: 0, offset: 0 } }
+        })
+    }
+
+    pub fn peek_at(self, offset: Int) -> Token {
+        let idx = self.pos + offset
+        if idx >= self.tokens.len() {
+            return Token {
+                kind: TokenKind::TkEof,
+                value: "",
+                span: Span { file: self.file, start: Position { line: 1, column: 0, offset: 0 }, end: Position { line: 1, column: 0, offset: 0 } }
+            }
+        }
+        self.tokens.get(idx).unwrap_or(Token {
             kind: TokenKind::TkEof,
             value: "",
             span: Span { file: self.file, start: Position { line: 1, column: 0, offset: 0 }, end: Position { line: 1, column: 0, offset: 0 } }
@@ -566,12 +582,28 @@ impl Parser {
 
         var segments: List<Str> = []
         let path_start = self.current_span_start()
-        segments.push(self.expect(TokenKind::TkIdent).value)
+
+        // Support super / self as path first segment
+        if self.check(TokenKind::TkSuper) {
+            segments.push("super")
+            let _ = self.advance()
+        } else if self.check(TokenKind::TkIdent) && self.peek().value == "self" && token_kind_value(self.peek_at(1).kind) == "::" {
+            segments.push("self")
+            let _ = self.advance()
+        } else {
+            segments.push(self.expect(TokenKind::TkIdent).value)
+        }
 
         while self.check(TokenKind::TkColonColon) {
             self.advance()
             if self.check(TokenKind::TkLBrace) { break }
-            segments.push(self.expect(TokenKind::TkIdent).value)
+            // Intermediate segments may also be super (super::super::xxx)
+            if self.check(TokenKind::TkSuper) {
+                segments.push("super")
+                let _ = self.advance()
+            } else {
+                segments.push(self.expect(TokenKind::TkIdent).value)
+            }
         }
 
         let path_end = self.current_span_start()
@@ -621,8 +653,23 @@ impl Parser {
         self.expect(TokenKind::TkMod)
         let name = self.expect(TokenKind::TkIdent).value
         self.expect(TokenKind::TkLBrace)
+        var uses: List<UseDecl> = []
         var decls: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
+            // Parse use declarations inside mod blocks
+            if self.check(TokenKind::TkUse) {
+                let use_result: UseDecl? = some(self.parse_use_decl(false)) catch { _ => none }
+                match use_result {
+                    some(ud) => uses.push(ud),
+                    none => {
+                        while !self.at_end() {
+                            if is_decl_start(self.peek().kind) || self.check(TokenKind::TkUse) || self.check(TokenKind::TkRBrace) { break }
+                            self.advance()
+                        }
+                    }
+                }
+                continue
+            }
             let d = self.parse_decl()
             match d {
                 some(decl) => decls.push(decl),
@@ -631,7 +678,7 @@ impl Parser {
         }
         self.expect(TokenKind::TkRBrace)
         let end = self.current_span_start()
-        Decl::ModBlock { name: name, decls: decls, is_pub: is_pub, span: self.make_span(start, end) }
+        Decl::ModBlock { name: name, uses: uses, decls: decls, is_pub: is_pub, span: self.make_span(start, end) }
     }
 
     fn parse_decl(var self) -> Decl? {
@@ -1171,6 +1218,28 @@ impl Parser {
             return first
         }
 
+        // super::name — relative path expression access
+        if self.check(TokenKind::TkSuper) {
+            self.advance()
+            self.expect(TokenKind::TkColonColon)
+            // Support super::super::... chained
+            var qualifier_parts: List<Str> = ["super"]
+            while self.check(TokenKind::TkSuper) {
+                qualifier_parts.push("super")
+                self.advance()
+                self.expect(TokenKind::TkColonColon)
+            }
+            let member_tok = self.expect(TokenKind::TkIdent)
+            let member_name = member_tok.value
+            let qualifier_str = qualifier_parts.join("::")
+
+            if allow_struct_lit && is_uppercase(member_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
+                return self.parse_struct_literal(member_name, start, some(qualifier_str))
+            }
+
+            return Expr::Ident { name: member_name, qualifier: some(qualifier_str), span: self.make_span(start, member_tok.span.end) }
+        }
+
         if self.check(TokenKind::TkIdent) {
             self.advance()
             let name = tok.value
@@ -1188,6 +1257,7 @@ impl Parser {
             }
 
             // Module-qualified access: mod_name::member (lowercase qualifier)
+            // Also handles self::member for relative paths
             if !is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
                 self.advance()
                 let member_tok = self.expect(TokenKind::TkIdent)

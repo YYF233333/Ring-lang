@@ -390,8 +390,8 @@ function Decl_TypeAlias(name, type_params, type_expr, is_pub, span) {
 function Decl_Const(name, type_annotation, init, is_pub, span) {
   return { _tag: "Const", name, type_annotation, init, is_pub, span };
 }
-function Decl_ModBlock(name, decls, is_pub, span) {
-  return { _tag: "ModBlock", name, decls, is_pub, span };
+function Decl_ModBlock(name, uses, decls, is_pub, span) {
+  return { _tag: "ModBlock", name, uses, decls, is_pub, span };
 }
 
 class Program {

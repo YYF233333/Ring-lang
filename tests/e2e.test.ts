@@ -120,7 +120,7 @@ function ring_run_multi(file_path: string): string {
 
 function ring_run(file_path: string): string {
   const source = fs.readFileSync(file_path, "utf-8");
-  if (/^\s*use\s+/m.test(source)) {
+  if (/^use\s+|^pub\s+use\s+/m.test(source)) {
     return ring_run_multi(file_path);
   }
   return ring_run_single(file_path);
@@ -135,7 +135,7 @@ function ring_check(file_path: string): { success: boolean; error_output: string
       const text = sink.items.filter((d: any) => d.severity._tag === "SevError").map((d: any) => `${d.code}: ${d.message}`).join("\n");
       return { success: false, error_output: text };
     }
-    if (/^\s*use\s+/m.test(source)) {
+    if (/^use\s+|^pub\s+use\s+/m.test(source)) {
       const result = compile_project(file_path);
       if (!result.success) {
         return { success: false, error_output: "Compilation failed" };
@@ -380,6 +380,8 @@ const cases: TestCase[] = [
   { file: "mod_basic.ring", expected: "7\n25\n" },
   { file: "mod_struct.ring", expected: "75\n" },
   { file: "mut_param.ring", expected: "mut_param: all tests passed\n" },
+  { file: "mod_self_path.ring", expected: "mod_self_path: all tests passed\n" },
+  { file: "mod_relative_path.ring", expected: "mod_relative_path: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -435,6 +437,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_unexpected_token.ring", error_pattern: "E0101" },
     { file: "error_duplicate_def.ring", error_pattern: "E0207" },
     { file: "error_use_after_decl.ring", error_pattern: "E0706" },
+    { file: "errors/mod_super_out_of_scope.ring", error_pattern: "E0705" },
   ];
 
   for (const tc of negative_cases) {

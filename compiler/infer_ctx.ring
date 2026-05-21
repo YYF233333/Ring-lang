@@ -49,7 +49,9 @@ pub struct InferCtx {
     pub current_fn_return_type: Type?,
     pub current_fn_bounds: List<FnBoundsEntry>,
     pub fn_bounds_stack: List<List<FnBoundsEntry>>,
-    pub loop_depth: Int
+    pub loop_depth: Int,
+    pub mod_path_stack: List<Str>,
+    pub use_aliases: Map<Str, Str>
 }
 
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -61,7 +63,9 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         current_fn_return_type: none,
         current_fn_bounds: [],
         fn_bounds_stack: [],
-        loop_depth: 0
+        loop_depth: 0,
+        mod_path_stack: [],
+        use_aliases: map_new()
     }
 }
 
@@ -920,4 +924,54 @@ pub fn remove_specific_fail_effect(row: EffectRow, target: Type, subst: UnionFin
         }
     })
     EffectRow { effects: filtered, tail: row.tail }
+}
+
+// ============================================================
+// Relative path resolution (self::/super::)
+// ============================================================
+
+// Resolves a qualifier containing "self"/"super" relative path
+// segments against the current mod_path_stack.
+// Returns the resolved fully-qualified prefix, or none on error.
+pub fn resolve_relative_qualifier(qualifier: Str, mod_path_stack: List<Str>) -> Str? {
+    if qualifier == "self" {
+        if mod_path_stack.len() == 0 {
+            return none
+        }
+        return some(mod_path_stack.join("::"))
+    }
+    // Handle "super" and "super::super" etc.
+    let parts = qualifier.split("::")
+    var super_count = 0
+    for part in parts {
+        if part == "super" {
+            super_count = super_count + 1
+        } else {
+            break
+        }
+    }
+    if super_count == 0 {
+        return none
+    }
+    if super_count > mod_path_stack.len() {
+        return none
+    }
+    // Build resolved prefix from mod_path_stack[0..len-super_count]
+    let remaining = mod_path_stack.len() - super_count
+    var resolved_parts: List<Str> = []
+    var i = 0
+    while i < remaining {
+        resolved_parts.push(mod_path_stack.get(i).unwrap_or(""))
+        i = i + 1
+    }
+    // Append any non-super trailing parts from qualifier
+    var j = super_count
+    while j < parts.len() {
+        resolved_parts.push(parts.get(j).unwrap_or(""))
+        j = j + 1
+    }
+    if resolved_parts.len() == 0 {
+        return some("")
+    }
+    some(resolved_parts.join("::"))
 }
