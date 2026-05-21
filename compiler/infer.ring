@@ -672,8 +672,14 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
     match scheme {
         none => {
             match qualifier {
-                some(q) => { let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
-                    DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }) },
+                some(q) => {
+                    let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
+                        DiagnosticContext::UndefinedVariable { name: name, scope_locals: none })
+                    return InferResult {
+                        hexpr: HExpr::Ident { name: name, resolved_name: none, def_id: none, dict_closure_dicts: none, ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
+                        subst: subst, effects: EMPTY_ROW
+                    }
+                },
                 none => {}
             }
             let _ = type_error(ctx.sink, E0201, "Undefined variable: ${name}", span,

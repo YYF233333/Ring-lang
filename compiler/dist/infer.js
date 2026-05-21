@@ -897,6 +897,7 @@ function infer_ident(ctx, name, span, subst, qualifier) {
         if (__ring_m42._tag === "some") {
           const q = __ring_m42._0;
           const _ = infer_ctx$type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(name, Option_none));
+          return new infer_ctx$InferResult(hir$HExpr_Ident(name, Option_none, Option_none, Option_none, types$Type_ErrorType, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
           break __ring_match42;
         }
         if (__ring_m42._tag === "none") {

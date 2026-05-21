@@ -64,8 +64,8 @@ pub fn error_category(code: Str) -> Str {
     if code.starts_with("E02") { return "resolution" }
     if code.starts_with("E03") { return "type" }
     if code.starts_with("E04") { return "effect" }
-    if code.starts_with("E05") { return "pattern" }
-    if code.starts_with("E06") { return "import" }
-    if code.starts_with("E07") { return "semantic" }
+    if code.starts_with("E05") { return "trait" }
+    if code.starts_with("E06") { return "pattern" }
+    if code.starts_with("E07") { return "module" }
     "unknown"
 }

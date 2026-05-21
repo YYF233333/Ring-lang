@@ -344,6 +344,39 @@ const cases: TestCase[] = [
   { file: "stdlib_native_methods.ring", expected: "stdlib_native_methods: all tests passed\n" },
   { file: "effect_annotation.ring", expected: "Hello, Ring\n5\n3\n6\n" },
   { file: "effect_annotation_extern.ring", expected: "effect_annotation_extern: passed\n" },
+  { file: "cell_update.ring", expected: "cell_update: all tests passed\n" },
+  { file: "closure_capture.ring", expected: "closure_capture: all tests passed\n" },
+  { file: "effect_cell_method.ring", expected: "effect_cell_method: all tests passed\n" },
+  { file: "effect_custom_multi_op.ring", expected: "effect_custom_multi_op: all tests passed\n" },
+  { file: "effect_fail_or.ring", expected: "effect_fail_or: all tests passed\n" },
+  { file: "enum_single_variant.ring", expected: "enum_single_variant: all tests passed\n" },
+  { file: "expr_block.ring", expected: "expr_block: all tests passed\n" },
+  { file: "for_list_methods.ring", expected: "for_list_methods: all tests passed\n" },
+  { file: "generic_enum.ring", expected: "generic_enum: all tests passed\n" },
+  { file: "generic_struct.ring", expected: "generic_struct: all tests passed\n" },
+  { file: "handle_while_test.ring", expected: "3\n" },
+  { file: "if_expr_type.ring", expected: "if_expr_type: all tests passed\n" },
+  { file: "if_let_enum.ring", expected: "if_let_enum: all tests passed\n" },
+  { file: "lambda_closure_effect.ring", expected: "lambda_closure_effect: all tests passed\n" },
+  { file: "list_flat_map.ring", expected: "list_flat_map: all tests passed\n" },
+  { file: "list_method_chain.ring", expected: "list_method_chain: all tests passed\n" },
+  { file: "list_push_mutate.ring", expected: "list_push_mutate: all tests passed\n" },
+  { file: "map_iteration.ring", expected: "map_iteration: all tests passed\n" },
+  { file: "map_ufcs_bug.ring", expected: "ok\n" },
+  { file: "match_enum_deep.ring", expected: "match_enum_deep: all tests passed\n" },
+  { file: "match_literal.ring", expected: "match_literal: all tests passed\n" },
+  { file: "match_return.ring", expected: "match_return: all tests passed\n" },
+  { file: "match_tuple_pattern.ring", expected: "match_tuple_pattern: all tests passed\n" },
+  { file: "recursive_fn.ring", expected: "recursive_fn: all tests passed\n" },
+  { file: "set_methods.ring", expected: "set_methods: all tests passed\n" },
+  { file: "string_escape.ring", expected: "string_escape: all tests passed\n" },
+  { file: "struct_empty.ring", expected: "struct_empty: all tests passed\n" },
+  { file: "struct_multi_impl.ring", expected: "struct_multi_impl: all tests passed\n" },
+  { file: "trait_impl_method.ring", expected: "trait_impl_method: all tests passed\n" },
+  { file: "type_alias_generic.ring", expected: "type_alias_generic: all tests passed\n" },
+  { file: "ufcs_in_lambda.ring", expected: "ufcs_in_lambda: all tests passed\n" },
+  { file: "var_reassign.ring", expected: "var_reassign: all tests passed\n" },
+  { file: "while_nested.ring", expected: "while_nested: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -393,6 +426,8 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_const_reassign.ring", error_pattern: "E0205" },
     { file: "error_with_suggestion.ring", error_pattern: "E0301" },
     { file: "effect_annotation_violation.ring", error_pattern: "E0404" },
+    { file: "error_missing_impl_method.ring", error_pattern: "E0502" },
+    { file: "error_nested_match.ring", error_pattern: "E0601" },
   ];
 
   for (const tc of negative_cases) {
@@ -520,12 +555,21 @@ describe("e2e: multi-file modules (ring check)", { concurrency: true }, () => {
 });
 
 describe("e2e: multi-file modules (negative)", () => {
-  test("modules/error_not_found should fail", () => {
-    const mainFile = path.join(MODULES_DIR, "error_not_found", "main.ring");
-    assert.ok(fs.existsSync(mainFile), `Test entry not found: ${mainFile}`);
-    const result = ring_check(mainFile);
-    assert.ok(!result.success, "Expected compilation to fail");
-  });
+  const module_negative_cases = [
+    { dir: "error_not_found", desc: "missing module" },
+    { dir: "error_circular", desc: "circular dependency" },
+    { dir: "error_private_import", desc: "private symbol import" },
+    { dir: "error_symbol_not_found", desc: "symbol not found in module" },
+  ];
+
+  for (const tc of module_negative_cases) {
+    test(`modules/${tc.dir} should fail (${tc.desc})`, () => {
+      const mainFile = path.join(MODULES_DIR, tc.dir, "main.ring");
+      assert.ok(fs.existsSync(mainFile), `Test entry not found: ${mainFile}`);
+      const result = ring_check(mainFile);
+      assert.ok(!result.success, `Expected compilation to fail for ${tc.dir}`);
+    });
+  }
 });
 
 describe("e2e: --error-format=llm", { concurrency: true }, () => {

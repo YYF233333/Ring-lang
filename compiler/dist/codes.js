@@ -176,13 +176,13 @@ function error_category(code) {
     return "effect";
   }
   if (Str_starts_with(code, "E05")) {
-    return "pattern";
+    return "trait";
   }
   if (Str_starts_with(code, "E06")) {
-    return "import";
+    return "pattern";
   }
   if (Str_starts_with(code, "E07")) {
-    return "semantic";
+    return "module";
   }
   return "unknown";
 }

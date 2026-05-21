@@ -205,7 +205,7 @@ pub const RUNTIME_EXPORT_NAMES: List<Str> =
      "List_len", "List_get", "List_contains",
      "List_push", "List_concat", "List_extend", "List_slice",
      "List_reverse", "List_join", "List_sort", "List_sort_by",
-     "List_pop", "List_shift", "List_clear", "List_find_index", "List_index_of",
+     "List_set", "List_pop", "List_shift", "List_clear", "List_find_index", "List_index_of",
      "list_clone",
      "map_new", "map_from", "map_clone",
      "_Map_len", "_Map_get", "_Map_contains_key",
