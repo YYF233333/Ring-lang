@@ -237,6 +237,7 @@ const cases: TestCase[] = [
   { file: "trait_higher_order.ring", expected: "num\n" },
   { file: "option_unwrap_none.ring", expected: "99\n6\n" },
   { file: "string_interp_nested.ring", expected: "sum: 3\nab1cd\n" },
+  { file: "string_interp_fn_call.ring", expected: "string_interp_fn_call: all tests passed\n" },
   { file: "assign_compound.ring", expected: "12\n" },
   { file: "match_guard.ring", expected: "positive\nnegative\nzero\n" },
   { file: "else_if.ring", expected: "A\nB\nC\n" },
