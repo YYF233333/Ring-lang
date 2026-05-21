@@ -1,8 +1,8 @@
 # Ring 编译器技术债清单
 
 自举审计 (2026-05-21) + Phase B Wave 1 审计 (2026-05-22) 产出。三路并行审计（Claude×2 + DS V4 Pro）去重合并后的长期跟踪清单。
-已修复项以删除线标记。69 项中 33 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, #54-57, C1-C3）。
-Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-57 已修复。
+已修复项以删除线标记。69 项中 36 项已修复（#1-5, #9, #11-13, #15, #17-18, #21, #23-24, #25, #27, #31, #33, #35, #43-44, #46-50, #54-58, #60-61, C1-C3）。
+Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复。
 
 ---
 
@@ -103,10 +103,10 @@ Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-57 已修复。
 | 55 | ~~`parse_type_expr` 不支持限定类型语法 `mod::Type`~~ | ~~**Bug：函数签名不能引用 mod 内类型**~~ | Sonnet | **已修复**：`TypeExpr::Named` 增加 `qualifier: Str?` 字段，`parse_type_expr` 支持 `mod::Type` 和 `super::Type` 语法，`resolve_type_expr` 使用 qualifier 构建限定名 |
 | 56 | ~~两级限定访问 `mod::Enum::Variant` 不支持~~ | ~~**Bug：无法引用 mod 内 enum 变体**~~ | Sonnet | **已修复**：表达式和模式 parser 支持 `mod::Enum::Variant` 三级限定访问；enum 名称解析改用 `enum_def.name`（规范名）而非查找键 |
 | 57 | ~~`is_decl_start` 缺少 `TkMod`~~ | ~~**Bug：解析错误恢复跳过 mod 块**~~ | Opus+Sonnet | **已修复**：`TkMod` 已在 `is_decl_start` 中（发现时已修复） |
-| 58 | `exports.ring` + `compiler_mod.ring` 的 ModBlock 分支遗漏 Enum 导出 | Issue：多文件 pub mod 中的 enum 类型对外不可见 | Opus+Sonnet | ModBlock 导出只处理 Fn/Struct/Const，Enum 及其 variant 构造器落入 `_ => {}` |
+| 58 | ~~`exports.ring` + `compiler_mod.ring` 的 ModBlock 分支遗漏 Enum 导出~~ | ~~Issue：多文件 pub mod 中的 enum 类型对外不可见~~ | Opus+Sonnet | **已修复**：（commit 4657e0d）exports.ring 和 compiler_mod.ring 已正确处理 ModBlock Enum 及 variant 导出 |
 | 59 | 嵌套 mod 块产生错误限定名 | Concern | Opus+DS | `mod a { mod b { fn f } }` → 注册为 `b::f` 而非 `a::b::f`。`prefix_decl_name` 不处理 ModBlock，内层 mod 丢失外层前缀 |
-| 60 | `parse_mod_block` 缺少错误恢复 | Issue | Sonnet | 内部 `parse_decl()` 无 `catch` 包裹（对比 `parse_program` 有 `catch { _ => none }`），一个子声明解析失败会放弃整个 mod 块 |
-| 61 | 短名别名泄漏且可互相覆盖 | Issue | Opus+Sonnet+DS | `mod a { struct Foo {} }` + `mod b { struct Foo {} }` → 第二个覆盖第一个的 `Foo` 别名。设计文档说共享文件作用域是有意的，但无冲突检测 |
+| 60 | ~~`parse_mod_block` 缺少错误恢复~~ | ~~Issue~~ | Sonnet | **已修复**：添加 `catch { _ => none }` + 声明级恢复扫描（与 `parse_program` 一致） |
+| 61 | ~~短名别名泄漏且可互相覆盖~~ | ~~Issue~~ | Opus+Sonnet+DS | **已修复**：注册阶段别名插入前检查 `contains_key`，已有别名不覆盖（first wins）；用户通过限定名 `mod::Type` 消歧义 |
 | 62 | 短名别名插入逻辑在 3 处重复 | Concern | Opus | `register_phase1`、`register_decl`（ModBlock 分支）、`check_mod_decl` 中重复相同的 Struct/Enum 别名插入，维护风险 |
 | 63 | 无 mod 块负向测试、无 impl-in-mod 测试、无 const-in-mod 测试、无嵌套 mod 测试 | Concern | 全部 | 仅有 `mod_basic.ring`（函数）和 `mod_struct.ring`（struct）两个正向测试 |
 

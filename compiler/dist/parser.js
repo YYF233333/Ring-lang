@@ -847,16 +847,21 @@ function Parser_parse_mod_block(self, is_pub) {
       }
       continue;
     }
-    const d = Parser_parse_decl(self);
+    const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
     __ring_match8: {
-      const __ring_m8 = d;
+      const __ring_m8 = maybe_decl;
       if (__ring_m8._tag === "some") {
         const decl = __ring_m8._0;
         List_push(decls, decl);
         break __ring_match8;
       }
       if (__ring_m8._tag === "none") {
-        const _ = Parser_advance(self);
+        while ((!Parser_at_end(self))) {
+          if ((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
+            break;
+          }
+          Parser_advance(self);
+        }
         break __ring_match8;
       }
       __match_fail(__ring_m8);

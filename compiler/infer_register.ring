@@ -100,34 +100,43 @@ fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: Lis
                 }
             }
             // Add short-name aliases so mod-internal type references resolve
+            // Skip if alias already occupied by a different module (first wins)
             for d in mod_decls {
                 match d {
                     Decl::Struct { name, .. } => {
                         let qualified = "${mod_name}::${name}"
-                        match ctx.env.types.structs.get(qualified) {
-                            some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
-                            none => {}
+                        if !ctx.env.types.structs.contains_key(name) {
+                            match ctx.env.types.structs.get(qualified) {
+                                some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
+                                none => {}
+                            }
                         }
                     },
                     Decl::Enum { name, .. } => {
                         let qualified = "${mod_name}::${name}"
-                        match ctx.env.types.enums.get(qualified) {
-                            some(edef) => { ctx.env.types.enums.insert(name, edef) },
-                            none => {}
+                        if !ctx.env.types.enums.contains_key(name) {
+                            match ctx.env.types.enums.get(qualified) {
+                                some(edef) => { ctx.env.types.enums.insert(name, edef) },
+                                none => {}
+                            }
                         }
                     },
                     Decl::Trait { name, .. } => {
                         let qualified = "${mod_name}::${name}"
-                        match ctx.env.trait_reg.traits.get(qualified) {
-                            some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
-                            none => {}
+                        if !ctx.env.trait_reg.traits.contains_key(name) {
+                            match ctx.env.trait_reg.traits.get(qualified) {
+                                some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
+                                none => {}
+                            }
                         }
                     },
                     Decl::Effect { name, .. } => {
                         let qualified = "${mod_name}::${name}"
-                        match ctx.env.types.effects.get(qualified) {
-                            some(edef) => { ctx.env.types.effects.insert(name, edef) },
-                            none => {}
+                        if !ctx.env.types.effects.contains_key(name) {
+                            match ctx.env.types.effects.get(qualified) {
+                                some(edef) => { ctx.env.types.effects.insert(name, edef) },
+                                none => {}
+                            }
                         }
                     },
                     _ => {}
@@ -891,35 +900,43 @@ fn register_decl(var ctx: InferCtx, decl: Decl) {
                     _ => {}
                 }
             }
-            // Add short-name aliases
+            // Add short-name aliases (skip if already occupied)
             for d in mod_decls {
                 match d {
                     Decl::Struct { name, .. } => {
                         let qualified = "${mod_name}::${name}"
-                        match ctx.env.types.structs.get(qualified) {
-                            some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
-                            none => {}
+                        if !ctx.env.types.structs.contains_key(name) {
+                            match ctx.env.types.structs.get(qualified) {
+                                some(sdef) => { ctx.env.types.structs.insert(name, sdef) },
+                                none => {}
+                            }
                         }
                     },
                     Decl::Enum { name, .. } => {
                         let qualified = "${mod_name}::${name}"
-                        match ctx.env.types.enums.get(qualified) {
-                            some(edef) => { ctx.env.types.enums.insert(name, edef) },
-                            none => {}
+                        if !ctx.env.types.enums.contains_key(name) {
+                            match ctx.env.types.enums.get(qualified) {
+                                some(edef) => { ctx.env.types.enums.insert(name, edef) },
+                                none => {}
+                            }
                         }
                     },
                     Decl::Trait { name, .. } => {
                         let qualified = "${mod_name}::${name}"
-                        match ctx.env.trait_reg.traits.get(qualified) {
-                            some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
-                            none => {}
+                        if !ctx.env.trait_reg.traits.contains_key(name) {
+                            match ctx.env.trait_reg.traits.get(qualified) {
+                                some(tdef) => { ctx.env.trait_reg.traits.insert(name, tdef) },
+                                none => {}
+                            }
                         }
                     },
                     Decl::Effect { name, .. } => {
                         let qualified = "${mod_name}::${name}"
-                        match ctx.env.types.effects.get(qualified) {
-                            some(edef) => { ctx.env.types.effects.insert(name, edef) },
-                            none => {}
+                        if !ctx.env.types.effects.contains_key(name) {
+                            match ctx.env.types.effects.get(qualified) {
+                                some(edef) => { ctx.env.types.effects.insert(name, edef) },
+                                none => {}
+                            }
                         }
                     },
                     _ => {}

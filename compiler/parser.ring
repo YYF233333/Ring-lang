@@ -670,10 +670,15 @@ impl Parser {
                 }
                 continue
             }
-            let d = self.parse_decl()
-            match d {
+            let maybe_decl: Decl? = self.parse_decl() catch { _ => none }
+            match maybe_decl {
                 some(decl) => decls.push(decl),
-                none => { let _ = self.advance() }
+                none => {
+                    while !self.at_end() {
+                        if is_decl_start(self.peek().kind) || self.check(TokenKind::TkRBrace) { break }
+                        self.advance()
+                    }
+                }
             }
         }
         self.expect(TokenKind::TkRBrace)

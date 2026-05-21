@@ -151,68 +151,76 @@ function register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names) 
           if (__ring_m4._tag === "Struct") {
             const name = __ring_m4.name;
             const qualified = `${mod_name}::${name}`;
-            __ring_match5: {
-              const __ring_m5 = _Map_get(ctx.env.types.structs, qualified);
-              if (__ring_m5._tag === "some") {
-                const sdef = __ring_m5._0;
-                _Map_insert(ctx.env.types.structs, name, sdef);
-                break __ring_match5;
+            if ((!_Map_contains_key(ctx.env.types.structs, name))) {
+              __ring_match5: {
+                const __ring_m5 = _Map_get(ctx.env.types.structs, qualified);
+                if (__ring_m5._tag === "some") {
+                  const sdef = __ring_m5._0;
+                  _Map_insert(ctx.env.types.structs, name, sdef);
+                  break __ring_match5;
+                }
+                if (__ring_m5._tag === "none") {
+                  break __ring_match5;
+                }
+                __match_fail(__ring_m5);
               }
-              if (__ring_m5._tag === "none") {
-                break __ring_match5;
-              }
-              __match_fail(__ring_m5);
             }
             break __ring_match4;
           }
           if (__ring_m4._tag === "Enum") {
             const name = __ring_m4.name;
             const qualified = `${mod_name}::${name}`;
-            __ring_match6: {
-              const __ring_m6 = _Map_get(ctx.env.types.enums, qualified);
-              if (__ring_m6._tag === "some") {
-                const edef = __ring_m6._0;
-                _Map_insert(ctx.env.types.enums, name, edef);
-                break __ring_match6;
+            if ((!_Map_contains_key(ctx.env.types.enums, name))) {
+              __ring_match6: {
+                const __ring_m6 = _Map_get(ctx.env.types.enums, qualified);
+                if (__ring_m6._tag === "some") {
+                  const edef = __ring_m6._0;
+                  _Map_insert(ctx.env.types.enums, name, edef);
+                  break __ring_match6;
+                }
+                if (__ring_m6._tag === "none") {
+                  break __ring_match6;
+                }
+                __match_fail(__ring_m6);
               }
-              if (__ring_m6._tag === "none") {
-                break __ring_match6;
-              }
-              __match_fail(__ring_m6);
             }
             break __ring_match4;
           }
           if (__ring_m4._tag === "Trait") {
             const name = __ring_m4.name;
             const qualified = `${mod_name}::${name}`;
-            __ring_match7: {
-              const __ring_m7 = _Map_get(ctx.env.trait_reg.traits, qualified);
-              if (__ring_m7._tag === "some") {
-                const tdef = __ring_m7._0;
-                _Map_insert(ctx.env.trait_reg.traits, name, tdef);
-                break __ring_match7;
+            if ((!_Map_contains_key(ctx.env.trait_reg.traits, name))) {
+              __ring_match7: {
+                const __ring_m7 = _Map_get(ctx.env.trait_reg.traits, qualified);
+                if (__ring_m7._tag === "some") {
+                  const tdef = __ring_m7._0;
+                  _Map_insert(ctx.env.trait_reg.traits, name, tdef);
+                  break __ring_match7;
+                }
+                if (__ring_m7._tag === "none") {
+                  break __ring_match7;
+                }
+                __match_fail(__ring_m7);
               }
-              if (__ring_m7._tag === "none") {
-                break __ring_match7;
-              }
-              __match_fail(__ring_m7);
             }
             break __ring_match4;
           }
           if (__ring_m4._tag === "Effect") {
             const name = __ring_m4.name;
             const qualified = `${mod_name}::${name}`;
-            __ring_match8: {
-              const __ring_m8 = _Map_get(ctx.env.types.effects, qualified);
-              if (__ring_m8._tag === "some") {
-                const edef = __ring_m8._0;
-                _Map_insert(ctx.env.types.effects, name, edef);
-                break __ring_match8;
+            if ((!_Map_contains_key(ctx.env.types.effects, name))) {
+              __ring_match8: {
+                const __ring_m8 = _Map_get(ctx.env.types.effects, qualified);
+                if (__ring_m8._tag === "some") {
+                  const edef = __ring_m8._0;
+                  _Map_insert(ctx.env.types.effects, name, edef);
+                  break __ring_match8;
+                }
+                if (__ring_m8._tag === "none") {
+                  break __ring_match8;
+                }
+                __match_fail(__ring_m8);
               }
-              if (__ring_m8._tag === "none") {
-                break __ring_match8;
-              }
-              __match_fail(__ring_m8);
             }
             break __ring_match4;
           }
@@ -1384,68 +1392,76 @@ function register_decl(ctx, decl) {
           if (__ring_m61._tag === "Struct") {
             const name = __ring_m61.name;
             const qualified = `${mod_name}::${name}`;
-            __ring_match62: {
-              const __ring_m62 = _Map_get(ctx.env.types.structs, qualified);
-              if (__ring_m62._tag === "some") {
-                const sdef = __ring_m62._0;
-                _Map_insert(ctx.env.types.structs, name, sdef);
-                break __ring_match62;
+            if ((!_Map_contains_key(ctx.env.types.structs, name))) {
+              __ring_match62: {
+                const __ring_m62 = _Map_get(ctx.env.types.structs, qualified);
+                if (__ring_m62._tag === "some") {
+                  const sdef = __ring_m62._0;
+                  _Map_insert(ctx.env.types.structs, name, sdef);
+                  break __ring_match62;
+                }
+                if (__ring_m62._tag === "none") {
+                  break __ring_match62;
+                }
+                __match_fail(__ring_m62);
               }
-              if (__ring_m62._tag === "none") {
-                break __ring_match62;
-              }
-              __match_fail(__ring_m62);
             }
             break __ring_match61;
           }
           if (__ring_m61._tag === "Enum") {
             const name = __ring_m61.name;
             const qualified = `${mod_name}::${name}`;
-            __ring_match63: {
-              const __ring_m63 = _Map_get(ctx.env.types.enums, qualified);
-              if (__ring_m63._tag === "some") {
-                const edef = __ring_m63._0;
-                _Map_insert(ctx.env.types.enums, name, edef);
-                break __ring_match63;
+            if ((!_Map_contains_key(ctx.env.types.enums, name))) {
+              __ring_match63: {
+                const __ring_m63 = _Map_get(ctx.env.types.enums, qualified);
+                if (__ring_m63._tag === "some") {
+                  const edef = __ring_m63._0;
+                  _Map_insert(ctx.env.types.enums, name, edef);
+                  break __ring_match63;
+                }
+                if (__ring_m63._tag === "none") {
+                  break __ring_match63;
+                }
+                __match_fail(__ring_m63);
               }
-              if (__ring_m63._tag === "none") {
-                break __ring_match63;
-              }
-              __match_fail(__ring_m63);
             }
             break __ring_match61;
           }
           if (__ring_m61._tag === "Trait") {
             const name = __ring_m61.name;
             const qualified = `${mod_name}::${name}`;
-            __ring_match64: {
-              const __ring_m64 = _Map_get(ctx.env.trait_reg.traits, qualified);
-              if (__ring_m64._tag === "some") {
-                const tdef = __ring_m64._0;
-                _Map_insert(ctx.env.trait_reg.traits, name, tdef);
-                break __ring_match64;
+            if ((!_Map_contains_key(ctx.env.trait_reg.traits, name))) {
+              __ring_match64: {
+                const __ring_m64 = _Map_get(ctx.env.trait_reg.traits, qualified);
+                if (__ring_m64._tag === "some") {
+                  const tdef = __ring_m64._0;
+                  _Map_insert(ctx.env.trait_reg.traits, name, tdef);
+                  break __ring_match64;
+                }
+                if (__ring_m64._tag === "none") {
+                  break __ring_match64;
+                }
+                __match_fail(__ring_m64);
               }
-              if (__ring_m64._tag === "none") {
-                break __ring_match64;
-              }
-              __match_fail(__ring_m64);
             }
             break __ring_match61;
           }
           if (__ring_m61._tag === "Effect") {
             const name = __ring_m61.name;
             const qualified = `${mod_name}::${name}`;
-            __ring_match65: {
-              const __ring_m65 = _Map_get(ctx.env.types.effects, qualified);
-              if (__ring_m65._tag === "some") {
-                const edef = __ring_m65._0;
-                _Map_insert(ctx.env.types.effects, name, edef);
-                break __ring_match65;
+            if ((!_Map_contains_key(ctx.env.types.effects, name))) {
+              __ring_match65: {
+                const __ring_m65 = _Map_get(ctx.env.types.effects, qualified);
+                if (__ring_m65._tag === "some") {
+                  const edef = __ring_m65._0;
+                  _Map_insert(ctx.env.types.effects, name, edef);
+                  break __ring_match65;
+                }
+                if (__ring_m65._tag === "none") {
+                  break __ring_match65;
+                }
+                __match_fail(__ring_m65);
               }
-              if (__ring_m65._tag === "none") {
-                break __ring_match65;
-              }
-              __match_fail(__ring_m65);
             }
             break __ring_match61;
           }
