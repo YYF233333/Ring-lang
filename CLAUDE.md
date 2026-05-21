@@ -129,7 +129,7 @@ Ring-lang/
 
 ## 已实现功能
 
-完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/loop/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM）、FFI（extern fn/extern type）、标准库（10 个 .ring 文件，含 `Result<T,E>`/fs/path/process）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、var self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）、Checker 函数级多错误恢复、`loop` 无限循环关键字（脱糖为 `while true`）、Effect 标注语法（`fn foo() -> T with {io, fail<E>}`）、`List.set(i, v)` 原地修改、union-find 类型变量解析。开发历史详见 git log。
+完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/loop/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM/inline mod 块/`super::`/`self::` 相对路径/`sig` 接口声明）、FFI（extern fn/extern type）、标准库（10 个 .ring 文件，含 `Result<T,E>`/fs/path/process）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、var self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）、Checker 函数级多错误恢复、`loop` 无限循环关键字（脱糖为 `while true`）、Effect 标注语法（`fn foo() -> T with {io, fail<E>}`）、`mut<T>` 参数化 effect（Cell\<T\> 推断 `mut<T>`）、`List.set(i, v)` 原地修改、union-find 类型变量解析。开发历史详见 git log。
 
 ## 已知限制
 
@@ -169,7 +169,7 @@ Ring-lang/
 - **Struct literal 不能直接出现在 if/while/for/match 条件位置**：`if x == MyStruct { f: 1 } { ... }` 歧义——parser 无法区分 struct literal 和块的 `{`。需用括号 `if x == (MyStruct { f: 1 }) { ... }` 或变量绑定。Go/Rust 同有此限制。
 - `for..in` 不支持 Map 直接迭代（需 `for entry in map.entries()` + 解构）
 - 无 CI 管线（test 依赖手动执行）
-- 模块系统不支持：`sig` 签名、first-class modules、capability 限制、相对路径（`super::`/`self::`）
+- 模块系统不支持：first-class modules、`mod : SigName` 一致性检查、capability 限制、跨文件相对路径
 - Checker 多错误恢复：declaration 级（同一函数内仍停于首错）
 - Parser 声明级错误恢复：遇到语法错误时跳到下一个声明关键字继续，一次 parse 报告多个语法错误
 - **Impl 方法 effect 不传播**：impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后不回传。Workaround：parser 用 `__ring_raise_fail` extern fn 直接抛 `__EffectAbort`，codegen 的 `gen_try_catch` 已去除 `has_fail_effect` 前置检查
@@ -182,11 +182,11 @@ Ring-lang/
 - ~~Parser 错误恢复~~（已完成：声明级恢复）
 - Impl 方法 effect 传播修复（当前用 `__ring_raise_fail` workaround）
 - LSP 移植到 Ring（从 TS 归档版本翻译）
-- 技术债清理（53 项中 29 项已修复，详见 `docs/audit-report.md`）
+- 技术债清理（69 项中 33 项已修复，详见 `docs/audit-report.md`）
 
 ### 语言特性（中期）
 
-- `mut<S>` 参数化 effect（当前 `mut` 无类型参数，Cell<T> 泛型保证类型安全）
+- ~~`mut<S>` 参数化 effect~~（已完成：Cell<T> 推断 `mut<T>`，支持 `with {mut<Int>}` 标注）
 - Full algebraic effect（post-resume handler，需要 delimited continuation）
 - Refinement types（编译期验证 + 运行时检查）
 - 关联类型 + supertrait 继承
