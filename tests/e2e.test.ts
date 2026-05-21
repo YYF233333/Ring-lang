@@ -330,6 +330,7 @@ const cases: TestCase[] = [
   { file: "trait_generic_impl.ring", expected: "trait_generic_impl: all passed\n" },
   { file: "empty_list.ring", expected: "empty_list: all tests passed\n" },
   { file: "tuple_field_access.ring", expected: "tuple_field_access: all tests passed\n" },
+  { file: "result_basic.ring", expected: "result_basic: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
