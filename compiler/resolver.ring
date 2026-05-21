@@ -15,7 +15,8 @@ pub struct ModuleGraph {
     pub entry: ModuleId,
     pub modules: Map<Str, ModuleId>,
     pub dependencies: Map<Str, List<Str>>,
-    pub topo_order: List<Str>
+    pub topo_order: List<Str>,
+    pub asts: Map<Str, Program>
 }
 
 pub struct GraphError {
@@ -70,6 +71,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
 
     var modules: Map<Str, ModuleId> = map_new()
     var dependencies: Map<Str, List<Str>> = map_new()
+    var asts_map: Map<Str, Program> = map_new()
 
     modules.insert(entry_key, entry_id)
     let empty_deps: List<Str> = [""]; empty_deps.clear()
@@ -85,6 +87,8 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                         let source = read_file(current_mod.file_path)
                         let resolve_sink = new_collecting_sink()
                         let ast = parse(source, current_mod.file_path, resolve_sink)
+                        if resolve_sink.has_errors() { return none }
+                        asts_map.insert(current_key, ast)
 
                         var deps: List<Str> = [""]; deps.clear()
                         for use_decl in ast.uses {
@@ -172,6 +176,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
         entry: ModuleId { path_segments: [entry_basename], file_path: abs_entry },
         modules: modules,
         dependencies: dependencies,
-        topo_order: topo_order
+        topo_order: topo_order,
+        asts: asts_map
     })
 }

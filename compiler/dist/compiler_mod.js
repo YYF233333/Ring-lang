@@ -9,9 +9,8 @@ import { check as checker$check, check_module as checker$check_module, CheckResu
 import { generate as codegen$generate } from "./codegen.js";
 import { safe_ident as codegen_ctx$safe_ident, new_codegen_ctx as codegen_ctx$new_codegen_ctx, emit as codegen_ctx$emit, emit_raw as codegen_ctx$emit_raw, push_indent as codegen_ctx$push_indent, pop_indent as codegen_ctx$pop_indent, qualify as codegen_ctx$qualify, extract_effect_names as codegen_ctx$extract_effect_names, get_evidence_params as codegen_ctx$get_evidence_params, LIST_HOF_JS_METHOD as codegen_ctx$LIST_HOF_JS_METHOD, CodegenCtx as codegen_ctx$CodegenCtx, HTraitDeclInfo as codegen_ctx$HTraitDeclInfo } from "./codegen_ctx.js";
 import { RUNTIME_CODE as runtime$RUNTIME_CODE, RUNTIME_EXPORT_NAMES as runtime$RUNTIME_EXPORT_NAMES, runtime_esm_code as runtime$runtime_esm_code } from "./runtime.js";
-import { module_key as resolver$module_key, module_prefix as resolver$module_prefix, resolve_module_file as resolver$resolve_module_file, build_module_graph as resolver$build_module_graph, ModuleId as resolver$ModuleId, ModuleGraph as resolver$ModuleGraph, GraphError as resolver$GraphError, __ModuleId_Clone as resolver$__ModuleId_Clone, __ModuleGraph_Clone as resolver$__ModuleGraph_Clone, __GraphError_Clone as resolver$__GraphError_Clone, __ModuleId_Debug as resolver$__ModuleId_Debug, __ModuleGraph_Debug as resolver$__ModuleGraph_Debug, __GraphError_Debug as resolver$__GraphError_Debug } from "./resolver.js";
+import { module_key as resolver$module_key, module_prefix as resolver$module_prefix, resolve_module_file as resolver$resolve_module_file, build_module_graph as resolver$build_module_graph, ModuleId as resolver$ModuleId, ModuleGraph as resolver$ModuleGraph, GraphError as resolver$GraphError, __ModuleId_Clone as resolver$__ModuleId_Clone, __GraphError_Clone as resolver$__GraphError_Clone, __ModuleId_Debug as resolver$__ModuleId_Debug, __GraphError_Debug as resolver$__GraphError_Debug } from "./resolver.js";
 import { extract_exports as exports$extract_exports, ModuleExports as exports$ModuleExports, TypeDef_StructDef_ as exports$TypeDef_StructDef_, TypeDef_EnumDef_ as exports$TypeDef_EnumDef_ } from "./exports.js";
-import { PREC_NONE as parser$PREC_NONE, PREC_CATCH as parser$PREC_CATCH, PREC_LOGIC_OR as parser$PREC_LOGIC_OR, PREC_LOGIC_AND as parser$PREC_LOGIC_AND, PREC_EQUALITY as parser$PREC_EQUALITY, PREC_COMPARE as parser$PREC_COMPARE, PREC_RANGE as parser$PREC_RANGE, PREC_ADD_SUB as parser$PREC_ADD_SUB, PREC_MUL_DIV as parser$PREC_MUL_DIV, PREC_UNARY as parser$PREC_UNARY, PREC_POSTFIX as parser$PREC_POSTFIX, infix_precedence as parser$infix_precedence, expr_span as parser$expr_span, new_parser as parser$new_parser, parse as parser$parse, Parser as parser$Parser, __Parser_Clone as parser$__Parser_Clone, __Parser_Debug as parser$__Parser_Debug, Parser_peek as parser$Parser_peek, Parser_advance as parser$Parser_advance, Parser_check as parser$Parser_check, Parser_try_consume as parser$Parser_try_consume, Parser_expect as parser$Parser_expect, Parser_at_end as parser$Parser_at_end, Parser_current_span_start as parser$Parser_current_span_start, Parser_make_span as parser$Parser_make_span, Parser_report_error as parser$Parser_report_error, Parser_error as parser$Parser_error, Parser_parse_program as parser$Parser_parse_program, Parser_parse_stmt as parser$Parser_parse_stmt, Parser_parse_while_stmt as parser$Parser_parse_while_stmt, Parser_parse_loop_stmt as parser$Parser_parse_loop_stmt, Parser_parse_for_in_stmt as parser$Parser_parse_for_in_stmt, Parser_parse_break_stmt as parser$Parser_parse_break_stmt, Parser_parse_continue_stmt as parser$Parser_parse_continue_stmt, Parser_parse_if_let_stmt as parser$Parser_parse_if_let_stmt, Parser_parse_binding_stmt as parser$Parser_parse_binding_stmt, Parser_parse_return_stmt as parser$Parser_parse_return_stmt, Parser_parse_block_expr as parser$Parser_parse_block_expr, Parser_parse_use_decl as parser$Parser_parse_use_decl, Parser_parse_decl as parser$Parser_parse_decl, Parser_parse_fn_decl as parser$Parser_parse_fn_decl, Parser_parse_const_decl as parser$Parser_parse_const_decl, Parser_parse_extern_decl as parser$Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body as parser$Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body as parser$Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl as parser$Parser_parse_type_alias_decl, Parser_parse_struct_decl as parser$Parser_parse_struct_decl, Parser_parse_enum_decl as parser$Parser_parse_enum_decl, Parser_parse_impl_decl as parser$Parser_parse_impl_decl, Parser_parse_effect_decl as parser$Parser_parse_effect_decl, Parser_parse_test_decl as parser$Parser_parse_test_decl, Parser_parse_trait_decl as parser$Parser_parse_trait_decl, Parser_parse_expr as parser$Parser_parse_expr, Parser_parse_expr_no_struct as parser$Parser_parse_expr_no_struct, Parser_parse_expr_bp as parser$Parser_parse_expr_bp, Parser_parse_prefix as parser$Parser_parse_prefix, Parser_parse_dot_expr as parser$Parser_parse_dot_expr, Parser_parse_call_expr as parser$Parser_parse_call_expr, Parser_parse_arg_list as parser$Parser_parse_arg_list, Parser_parse_catch_expr as parser$Parser_parse_catch_expr, Parser_parse_string_interp as parser$Parser_parse_string_interp, Parser_parse_if_expr as parser$Parser_parse_if_expr, Parser_parse_match_expr as parser$Parser_parse_match_expr, Parser_parse_match_arm as parser$Parser_parse_match_arm, Parser_parse_pattern as parser$Parser_parse_pattern, Parser_parse_handle_expr as parser$Parser_parse_handle_expr, Parser_parse_effect_handler as parser$Parser_parse_effect_handler, Parser_parse_lambda_expr as parser$Parser_parse_lambda_expr, Parser_parse_struct_literal as parser$Parser_parse_struct_literal, Parser_try_parse_type_args as parser$Parser_try_parse_type_args, Parser_parse_type_expr as parser$Parser_parse_type_expr, Parser_parse_record_type_expr as parser$Parser_parse_record_type_expr, Parser_parse_type_params as parser$Parser_parse_type_params, Parser_parse_type_bound as parser$Parser_parse_type_bound, Parser_parse_params as parser$Parser_parse_params, Parser_parse_param as parser$Parser_parse_param } from "./parser.js";
 
 class CompileProjectResult {
   constructor(js, success) {
@@ -48,34 +47,19 @@ function compile_phases(entry_file) {
       let module_asts = map_new();
       let module_hirs = map_new();
       let module_exports_map = map_new();
-      let parse_ok = true;
       for (const key of graph.topo_order) {
-        if (parse_ok) {
-          __ring_match1: {
-            const __ring_m1 = _Map_get(graph.modules, key);
-            if (__ring_m1._tag === "some") {
-              const mod_ = __ring_m1._0;
-              const source = read_file(mod_.file_path);
-              const mod_sink = diagnostics$new_collecting_sink();
-              const ast = parser$parse(source, mod_.file_path, mod_sink);
-              if (diagnostics$CollectingSink_has_errors(mod_sink)) {
-                eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(mod_sink), source));
-                parse_ok = false;
-              } else {
-                _Map_insert(module_asts, key, ast);
-              }
-              break __ring_match1;
-            }
-            if (__ring_m1._tag === "none") {
-              parse_ok = false;
-              break __ring_match1;
-            }
-            __match_fail(__ring_m1);
+        __ring_match1: {
+          const __ring_m1 = _Map_get(graph.asts, key);
+          if (__ring_m1._tag === "some") {
+            const ast = __ring_m1._0;
+            _Map_insert(module_asts, key, ast);
+            break __ring_match1;
           }
+          if (__ring_m1._tag === "none") {
+            break __ring_match1;
+          }
+          __match_fail(__ring_m1);
         }
-      }
-      if ((parse_ok === false)) {
-        return Option_none;
       }
       let check_ok = true;
       for (const key of graph.topo_order) {
@@ -88,10 +72,10 @@ function compile_phases(entry_file) {
               const deps = (function() {
   const __ring_m = _Map_get(graph.dependencies, key);
   if (__ring_m._tag === "some") { const dk = __ring_m._0; return dk; }
-  if (__ring_m._tag === "none") { return []; }
+  if (__ring_m._tag === "none") { return empty_str_list(); }
   __match_fail(__ring_m);
 })();
-              let dep_exports = [];
+              let dep_exports = empty_module_exports_list();
               for (const dk of deps) {
                 __ring_match3: {
                   const __ring_m3 = _Map_get(module_exports_map, dk);
@@ -225,7 +209,7 @@ function compile_project_esm(entry_file, out_dir) {
             const deps = (function() {
   const __ring_m = _Map_get(phases.graph.dependencies, key);
   if (__ring_m._tag === "some") { const d = __ring_m._0; return d; }
-  if (__ring_m._tag === "none") { return []; }
+  if (__ring_m._tag === "none") { return empty_str_list(); }
   __match_fail(__ring_m);
 })();
             for (const dk of deps) {
@@ -753,6 +737,18 @@ function build_external_struct_fields(graph, exports_map, key) {
     __match_fail(__ring_m32);
   }
   return result;
+}
+
+function empty_module_exports_list() {
+  const x = [0];
+  List_clear(x);
+  return x.map((function(i) { return panic("unreachable"); }));
+}
+
+function empty_str_list() {
+  const x = [""];
+  List_clear(x);
+  return x;
 }
 
 function build_external_impl_methods(graph, exports_map, key) {
