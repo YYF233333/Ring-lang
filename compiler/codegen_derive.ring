@@ -31,12 +31,7 @@ fn emit_derived_eq(var ctx: CodegenCtx, impl_: DerivedImpl) {
     let name = qualify(ctx, impl_.type_name)
     let dict_base = trait_dict_name(name, "Eq")
     let fn_name = "${dict_base}_eq"
-    var dict_params: List<Str> = [""]; dict_params.clear()
-    for b in impl_.bounds {
-        if b.trait_name == "Eq" {
-            dict_params.push(trait_bound_param_name(b.type_param, b.trait_name))
-        }
-    }
+    let dict_params = collect_dict_params(impl_, "Eq")
     var all_params_list = ["self", "other"]
     all_params_list.extend(dict_params)
     let all_params = all_params_list.join(", ")
@@ -65,11 +60,7 @@ fn emit_derived_eq(var ctx: CodegenCtx, impl_: DerivedImpl) {
         TypeKind::EnumKind => match impl_.enum_variants {
             some(variants) => {
                 emit(ctx, "if (self.${ENUM_TAG_FIELD} !== other.${ENUM_TAG_FIELD}) return false;")
-                var has_fields = false
-                for v in variants {
-                    if v.fields.len() > 0 { has_fields = true }
-                }
-                if has_fields {
+                if variants_have_fields(variants) {
                     emit(ctx, "switch (self.${ENUM_TAG_FIELD}) {")
                     push_indent(ctx)
                     for v in variants {
@@ -78,7 +69,7 @@ fn emit_derived_eq(var ctx: CodegenCtx, impl_: DerivedImpl) {
                         } else {
                             var feqs: List<Str> = [""]; feqs.clear()
                             for f in v.fields {
-                                let accessor = if v.has_named_fields { safe_ident(f.name) } else { match f.positional_index { some(pi) => "_${pi}", none => f.name } }
+                                let accessor = field_accessor(v, f)
                                 feqs.push(gen_field_eq("self.${accessor}", "other.${accessor}", f))
                             }
                             let joined = feqs.join(" && ")
@@ -122,12 +113,7 @@ fn emit_derived_clone(var ctx: CodegenCtx, impl_: DerivedImpl) {
     let name = qualify(ctx, impl_.type_name)
     let dict_base = trait_dict_name(name, "Clone")
     let fn_name = "${dict_base}_clone"
-    var dict_params: List<Str> = [""]; dict_params.clear()
-    for b in impl_.bounds {
-        if b.trait_name == "Clone" {
-            dict_params.push(trait_bound_param_name(b.type_param, b.trait_name))
-        }
-    }
+    let dict_params = collect_dict_params(impl_, "Clone")
     var all_list = ["self"]
     all_list.extend(dict_params)
     let all_params = all_list.join(", ")
@@ -157,7 +143,7 @@ fn emit_derived_clone(var ctx: CodegenCtx, impl_: DerivedImpl) {
                     } else {
                         var args: List<Str> = [""]; args.clear()
                         for f in v.fields {
-                            let accessor = if v.has_named_fields { safe_ident(f.name) } else { match f.positional_index { some(pi) => "_${pi}", none => f.name } }
+                            let accessor = field_accessor(v, f)
                             args.push(gen_field_clone("self.${accessor}", f))
                         }
                         let joined = args.join(", ")
@@ -197,12 +183,7 @@ fn emit_derived_ord(var ctx: CodegenCtx, impl_: DerivedImpl) {
     let name = qualify(ctx, impl_.type_name)
     let dict_base = trait_dict_name(name, "Ord")
     let fn_name = "${dict_base}_cmp"
-    var dict_params: List<Str> = [""]; dict_params.clear()
-    for b in impl_.bounds {
-        if b.trait_name == "Ord" {
-            dict_params.push(trait_bound_param_name(b.type_param, b.trait_name))
-        }
-    }
+    let dict_params = collect_dict_params(impl_, "Ord")
     var all_list = ["self", "other"]
     all_list.extend(dict_params)
     let all_params = all_list.join(", ")
@@ -260,9 +241,7 @@ fn emit_derived_ord(var ctx: CodegenCtx, impl_: DerivedImpl) {
                 emit(ctx, "var t1 = __${name}_tag_order[self.${ENUM_TAG_FIELD}];")
                 emit(ctx, "var t2 = __${name}_tag_order[other.${ENUM_TAG_FIELD}];")
                 emit(ctx, "if (t1 !== t2) return (t1 < t2 ? -1 : 1);")
-                var has_fields = false
-                for v in variants { if v.fields.len() > 0 { has_fields = true } }
-                if has_fields {
+                if variants_have_fields(variants) {
                     emit(ctx, "switch (self.${ENUM_TAG_FIELD}) {")
                     push_indent(ctx)
                     for v in variants {
@@ -270,7 +249,7 @@ fn emit_derived_ord(var ctx: CodegenCtx, impl_: DerivedImpl) {
                             if v.fields.len() == 1 {
                                 match v.fields.get(0) {
                                     some(f) => {
-                                        let accessor = if v.has_named_fields { safe_ident(f.name) } else { match f.positional_index { some(pi) => "_${pi}", none => f.name } }
+                                        let accessor = field_accessor(v, f)
                                         let cmp = gen_field_cmp("self.${accessor}", "other.${accessor}", f)
                                         emit(ctx, "case \"${v.name}\": return ${cmp};")
                                     },
@@ -283,7 +262,7 @@ fn emit_derived_ord(var ctx: CodegenCtx, impl_: DerivedImpl) {
                                 for i in 0..v.fields.len() {
                                     match v.fields.get(i) {
                                         some(f) => {
-                                            let accessor = if v.has_named_fields { safe_ident(f.name) } else { match f.positional_index { some(pi) => "_${pi}", none => f.name } }
+                                            let accessor = field_accessor(v, f)
                                             let cmp = gen_field_cmp("self.${accessor}", "other.${accessor}", f)
                                             if i < v.fields.len() - 1 {
                                                 emit(ctx, "c = ${cmp};")
@@ -336,12 +315,7 @@ fn emit_derived_debug(var ctx: CodegenCtx, impl_: DerivedImpl) {
     let name = qualify(ctx, impl_.type_name)
     let dict_base = trait_dict_name(name, "Debug")
     let fn_name = "${dict_base}_debug"
-    var dict_params: List<Str> = [""]; dict_params.clear()
-    for b in impl_.bounds {
-        if b.trait_name == "Debug" {
-            dict_params.push(trait_bound_param_name(b.type_param, b.trait_name))
-        }
-    }
+    let dict_params = collect_dict_params(impl_, "Debug")
     var all_list = ["self"]
     all_list.extend(dict_params)
     let all_params = all_list.join(", ")
@@ -377,7 +351,8 @@ fn emit_derived_debug(var ctx: CodegenCtx, impl_: DerivedImpl) {
                         if v.has_named_fields {
                             var parts: List<Str> = [""]; parts.clear()
                             for f in v.fields {
-                                let val = gen_field_debug("self.${safe_ident(f.name)}", f)
+                                let accessor = field_accessor(v, f)
+                                let val = gen_field_debug("self.${accessor}", f)
                                 parts.push("\"${f.name}: \" + ${val}")
                             }
                             let joined = parts.join(" + \", \" + ")
@@ -385,7 +360,7 @@ fn emit_derived_debug(var ctx: CodegenCtx, impl_: DerivedImpl) {
                         } else {
                             var parts: List<Str> = [""]; parts.clear()
                             for f in v.fields {
-                                let accessor = match f.positional_index { some(pi) => "_${pi}", none => f.name }
+                                let accessor = field_accessor(v, f)
                                 parts.push(gen_field_debug("self.${accessor}", f))
                             }
                             let joined = parts.join(" + \", \" + ")
@@ -416,6 +391,30 @@ fn gen_field_debug(expr: Str, field: DerivedField) -> Str {
             "${dict_name}.debug(${expr}${extra})"
         },
     }
+}
+
+fn field_accessor(v: DerivedVariant, f: DerivedField) -> Str {
+    if v.has_named_fields {
+        safe_ident(f.name)
+    } else {
+        match f.positional_index { some(pi) => "_${pi}", none => f.name }
+    }
+}
+
+fn collect_dict_params(impl_: DerivedImpl, trait_name: Str) -> List<Str> {
+    var params: List<Str> = [""]; params.clear()
+    for b in impl_.bounds {
+        if b.trait_name == trait_name {
+            params.push(trait_bound_param_name(b.type_param, b.trait_name))
+        }
+    }
+    params
+}
+
+fn variants_have_fields(variants: List<DerivedVariant>) -> Bool {
+    var result = false
+    for v in variants { if v.fields.len() > 0 { result = true } }
+    result
 }
 
 fn extra_dicts_str(dicts: List<Str>) -> Str {
