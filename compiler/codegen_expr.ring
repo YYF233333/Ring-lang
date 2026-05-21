@@ -64,7 +64,11 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
             gen_call(ctx, callee, args, resolved_dicts, dict_dispatch),
         HExpr::FieldAccess { receiver, field, .. } => {
             let r = gen_expr(ctx, receiver)
-            "${r}.${field}"
+            if is_tuple_field(field) {
+                "${r}[${field}]"
+            } else {
+                "${r}.${field}"
+            }
         },
         HExpr::StructLit { name, fields, spread, .. } =>
             gen_struct_lit(ctx, name, fields, spread),
@@ -189,6 +193,15 @@ fn binop_str(op: BinOp) -> Str {
         BinOp::Eq => "===", BinOp::Neq => "!==",
         BinOp::Lt => "<", BinOp::Lte => "<=", BinOp::Gt => ">", BinOp::Gte => ">=",
         BinOp::And => "&&", BinOp::Or => "||",
+    }
+}
+
+fn is_tuple_field(s: Str) -> Bool {
+    if s.len() == 0 { return false }
+    match s.char_at(0) {
+        some(c) => c == "0" || c == "1" || c == "2" || c == "3" || c == "4" ||
+                   c == "5" || c == "6" || c == "7" || c == "8" || c == "9",
+        none => false
     }
 }
 

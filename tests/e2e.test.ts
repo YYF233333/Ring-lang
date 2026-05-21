@@ -323,6 +323,7 @@ const cases: TestCase[] = [
   { file: "nested-closure-eq.ring", expected: "nested closure eq: all passed\n" },
   { file: "trait_generic_impl.ring", expected: "trait_generic_impl: all passed\n" },
   { file: "empty_list.ring", expected: "empty_list: all tests passed\n" },
+  { file: "tuple_field_access.ring", expected: "tuple_field_access: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -366,6 +367,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "neg_let_field_assign.ring", error_pattern: "E0205" },
     { file: "error_no_eq.ring", error_pattern: "E0307" },
     { file: "error_no_ord.ring", error_pattern: "E0308" },
+    { file: "error_tuple_oob.ring", error_pattern: "E0304" },
   ];
 
   for (const tc of negative_cases) {

@@ -32,7 +32,7 @@ use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
 use exhaustive::{check_exhaustive}
 
-// Struct wrapper for merge_effects return (Ring has no .0/.1 tuple access)
+// Struct wrapper for merge_effects return
 struct MergeResult { eff: EffectRow, s: Map<Int, Type> }
 
 fn merge_eff(env: TypeEnv, a: EffectRow, b: EffectRow, s: Map<Int, Type>) -> MergeResult {
@@ -1455,6 +1455,24 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                     none => type_error(ctx.sink, E0304(),
                         "Record type has no field '${field}'",
                         span, DiagnosticContext::MissingField { field: field, ty: "record", available: none })
+                }
+            }
+        },
+        Type::TupleType { elements } => {
+            match parse_int(field) {
+                none => type_error(ctx.sink, E0304(),
+                    "Cannot access named field '${field}' on tuple type; use .0, .1, etc.",
+                    span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none }),
+                some(i) => {
+                    if i >= elements.len() {
+                        type_error(ctx.sink, E0304(),
+                            "Tuple index ${field} out of bounds; tuple has ${elements.len().to_str()} elements",
+                            span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none })
+                    }
+                    match elements.get(i) {
+                        some(t) => { field_type = t },
+                        none => panic("unreachable: tuple index bounds already checked")
+                    }
                 }
             }
         },

@@ -1109,8 +1109,26 @@ impl Parser {
 
     fn parse_dot_expr(var self, left: Expr) -> Expr {
         self.advance()
-        let name_tok = self.expect(TokenKind::TkIdent)
-        let name = name_tok.value
+        var name = ""
+        // Handle float literal after dot: e.g. `t.0.1` lexes as dot + float "0.1"
+        // Split into chained tuple field accesses
+        if self.check(TokenKind::TkFloatLit) {
+            let tok = self.advance()
+            let parts = tok.value.split(".")
+            var result = left
+            for part in parts {
+                let end = self.current_span_start()
+                result = Expr::FieldAccess { receiver: result, field: part, span: self.make_span(expr_span(left).start, end) }
+            }
+            return result
+        }
+        if self.check(TokenKind::TkIntLit) {
+            let tok = self.advance()
+            name = tok.value
+        } else {
+            let tok = self.expect(TokenKind::TkIdent)
+            name = tok.value
+        }
 
         if self.check(TokenKind::TkLParen) {
             self.advance()

@@ -1228,8 +1228,24 @@ function Parser_parse_prefix(self) {
 }
 function Parser_parse_dot_expr(self, left) {
   Parser_advance(self);
-  const name_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
-  const name = name_tok.value;
+  let name = "";
+  if (Parser_check(self, lexer$TokenKind_TkFloatLit)) {
+    const tok = Parser_advance(self);
+    const parts = Str_split(tok.value, ".");
+    let result = left;
+    for (const part of parts) {
+      const end = Parser_current_span_start(self);
+      result = ast$Expr_FieldAccess(result, part, Parser_make_span(self, expr_span(left).start, end));
+    }
+    return result;
+  }
+  if (Parser_check(self, lexer$TokenKind_TkIntLit)) {
+    const tok = Parser_advance(self);
+    name = tok.value;
+  } else {
+    const tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+    name = tok.value;
+  }
   if (Parser_check(self, lexer$TokenKind_TkLParen)) {
     Parser_advance(self);
     const args = Parser_parse_arg_list(self);
