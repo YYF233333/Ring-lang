@@ -1,299 +1,235 @@
 ---
 name: parallel-dispatch
-description: Use when user wants to execute multiple implementation tasks in parallel — "执行 Iteration N", "并行执行 A1/A2/C1", or any batch of independent tasks. Orchestrates worktree-isolated workers (Claude Agent + DS) with automatic merge.
+description: Use when user wants to execute multiple implementation tasks in parallel — "执行 Iteration N", "并行执行 A1/A2/C1", or any batch of independent tasks. Analyzes dependencies, partitions into waves, executes via worktree-isolated agents, auto-continues between waves if verification passes.
 ---
 
 # Parallel Dispatch Orchestrator
 
-你是 orchestrator。用户给你一批任务，你分类、并行派发、合并结果。
+你是 orchestrator。用户给你一份执行 spec（含任务列表），你分析依赖、划分 wave、用 worktree agent 并行执行、wave 间验证、自动推进。
 
 ## 触发条件
 
-用户说类似："执行 Iteration 1"、"并行跑 A1 A2 C1"、"把这三个任务并行做了"。
+用户说类似："执行 Iteration N"、"并行跑 A1 A2 C1"、"继续"（在已有 plan 的上下文中）、或给出一批任务要求并行完成。
+
+## 核心原则
+
+1. **Wave 间自动推进**：验证通过 → 直接启动下一波，不等用户确认
+2. **出问题才停下**：merge 冲突无法自动解决、测试失败、base commit 不对 → 停下来报告用户
+3. **Orchestrator 不实现任务**：你调度和合并，不自己写代码
 
 ## 工作流
 
-```dot
-digraph dispatch {
-    "收到任务批次" [shape=doublecircle];
-    "1. 分类任务" [shape=box];
-    "2. 依赖分析" [shape=box];
-    "3. 呈现批次计划" [shape=box];
-    "用户 approve?" [shape=diamond];
-    "4. 创建 DS worktree" [shape=box];
-    "5. 并行派发" [shape=box];
-    "6. 等待返回" [shape=box];
-    "7. 顺序 merge" [shape=box];
-    "8. 验证" [shape=box];
-    "9. 报告" [shape=doublecircle];
-
-    "收到任务批次" -> "1. 分类任务";
-    "1. 分类任务" -> "2. 依赖分析";
-    "2. 依赖分析" -> "3. 呈现批次计划";
-    "3. 呈现批次计划" -> "用户 approve?";
-    "用户 approve?" -> "1. 分类任务" [label="修改"];
-    "用户 approve?" -> "4. 创建 DS worktree" [label="批准"];
-    "4. 创建 DS worktree" -> "5. 并行派发";
-    "5. 并行派发" -> "6. 等待返回";
-    "6. 等待返回" -> "7. 顺序 merge";
-    "7. 顺序 merge" -> "8. 验证";
-    "8. 验证" -> "9. 报告";
-}
+```
+用户给出 spec/任务列表
+    ↓
+Step 1: 分析仓库状态 + 文件依赖
+    ↓
+Step 2: 划分 Wave（按文件冲突分组）
+    ↓
+Step 3: 呈现计划，等用户一次性 approve
+    ↓
+Step 4: 执行 Wave N
+    ├─ 启动 worktree agents（并行）
+    ├─ 等待全部完成
+    ├─ 验证 base commit
+    ├─ Review 源码 diff
+    ├─ 顺序 merge 回 main
+    ├─ Rebuild + 全量测试
+    ↓
+验证通过？
+    ├─ YES → 自动启动 Wave N+1（回到 Step 4）
+    └─ NO  → 停下来，报告问题，等用户决策
+    ↓
+所有 Wave 完成 → 最终报告
 ```
 
-## Step 1: 分类任务
+## Step 1: 分析仓库状态
 
-每个任务分配到 Claude 或 DS：
+```bash
+git log --oneline -1          # 记录 main HEAD（后续 agent 验证用）
+git status --short             # 确认 main 干净
+```
 
-**→ Claude Agent（语义/判断密集型）：**
-- 类型推断逻辑修改
-- 需要设计决策的新特性
-- 核心数据结构变更
-- 新语义规则
+对每个任务，列出它会修改的文件（source files only，不算 dist/）。
 
-**→ DS Worker（机械/模式固定型）：**
-- 代码搬移、文件拆分
-- Accessor 统一、代码去重
-- 模式固定的 parser/codegen 扩展（参照已有 case）
-- Boilerplate 消除
+## Step 2: 划分 Wave
 
-**判断困难时**：默认 Claude。DS 失败了要重跑，Claude 贵但成功率高。
+按文件冲突将任务分组：
 
-## Step 2: 依赖分析
+- **同一 Wave**：任务间零文件重叠，可安全并行
+- **不同 Wave**：任务间有文件重叠，必须串行（前一波 merge 后才启动下一波）
+- **Wave 内排序**：无所谓（并行执行）
+- **Wave 间排序**：有依赖的任务排后面的 Wave
 
-检查任务间是否有文件级冲突：
-- 两个任务修改同一文件的同一区域 → **不可并行**，排入同一 worker 或定先后顺序
-- 两个任务修改同一文件的不同区域 → **可并行**，但注意 merge 顺序
-- 两个任务修改不同文件 → **安全并行**
+每 Wave 最多 3 个 worktree agent（避免资源争抢）。
 
-输出 merge 顺序建议：机械重构先 merge（改动面广但逻辑简单），语义变更后 merge（改动小但逻辑关键）。
+## Step 3: 呈现计划
 
-## Step 3: 呈现批次计划
-
-向用户展示一个表格，格式：
+向用户展示：
 
 ```markdown
-## Iteration N 批次计划
+## 并行执行计划
 
-| 任务 | 类型 | Worker | 关键文件 | 冲突风险 |
-|------|------|--------|---------|---------|
-| A1   | 语义 | Claude | infer.ring | 与 C1 低冲突 |
-| A2   | 语法 | DS     | parser.ring, codegen.ring | 无 |
-| C1   | 机械 | DS     | 多文件 accessor | 与 A1 低冲突 |
+**Main HEAD**: `<commit-hash>`
 
-**Merge 顺序**：C1 → A2 → A1
-**预计并行时间**：~30min（最慢 worker 决定）
+### Wave A（3 worktrees 并行）
+| 任务 | 触碰文件 | 与其他任务冲突 |
+|------|---------|--------------|
+| X1   | a.ring, b.ring | 无 |
+| X2   | c.ring, d.ring | 无 |
+| X3   | e.ring         | 无 |
+
+### Wave B（Wave A merge 后，2 worktrees 并行）
+| 任务 | 触碰文件 | 依赖 |
+|------|---------|------|
+| X4   | a.ring, c.ring | 需要 X1+X2 的结果 |
+| X5   | f.ring         | 无直接依赖 |
 ```
 
 等用户一次性 approve。**不逐项审批。**
 
-## Step 4: 为 DS Worker 创建 Worktree
+## Step 4: 执行 Wave
 
-Claude Worker 的 worktree 由 `Agent(isolation: "worktree")` 自动管理，不需要手动创建。
+### 4a. 记录 base commit
 
-仅为 DS Worker 创建：
-
-```powershell
-# 为每个 DS 任务创建 worktree
-git worktree add ../ring-wt-<task-id> -b task/<task-id>
+```bash
+git log --oneline -1   # 记为 EXPECTED_BASE
 ```
 
-记录创建的 worktree 路径和 branch 名，后续 merge 和清理用。
+### 4b. 并行派发 worktree agents
 
-## Step 5: 并行派发
+**关键：在同一条消息中发出所有 Agent 调用，让它们并发执行。**
 
-**关键：在同一条消息中发出所有 Agent/PowerShell 调用，让它们并发执行。**
-
-### Claude Worker 派发
-
-使用 Agent 工具，每个任务一个调用：
+每个 agent 使用 `isolation: "worktree"` + `run_in_background: true`：
 
 ```
 Agent({
-  description: "Ring task <task-id>",
+  description: "WT<wave><n>: <task-id> <short-desc>",
   isolation: "worktree",
-  prompt: "<见下方 Claude Worker Prompt 模板>"
+  run_in_background: true,
+  prompt: "<agent prompt>"
 })
 ```
 
-### DS Worker 派发
-
-使用 PowerShell 工具调用 deepseek exec，每个任务一个调用：
-
-```powershell
-# run_in_background: true, timeout: 600000
-cd ../ring-wt-<task-id>
-deepseek exec --auto --json --yolo --model deepseek-v4-pro -p @'
-<见下方 DS Worker Prompt 模板>
-'@ 2>&1 | Out-File -Encoding utf8 "../ds-result-<task-id>.json"
-```
-
-注意：
-- DS 用 `--yolo` 模式（需要写文件）
-- `run_in_background: true`，不设短 timeout
-- 输出文件放在 worktree 外面，避免被 git 跟踪
-
-### 并发限制
-
-- Claude Workers: 最多 3 个（orchestrator 占 1 slot，总共 4-5）
-- DS Workers: 最多 3 个（DS API 并发限制）
-- 超出限制的任务排队，第一批完成后派发第二批
-
-## Step 6: 等待返回
-
-- Claude Agent: Agent 工具会自动等待返回
-- DS Worker: `run_in_background` 完成后会收到通知，读取 `ds-result-<task-id>.json`
-
-检查每个 worker 的返回状态：
-- 成功：有 commit，测试通过
-- 失败：无 commit 或测试未通过 → 记录失败原因，继续处理其他 worker
-
-## Step 7: 顺序 Merge
-
-按 Step 2 确定的顺序逐个 merge：
-
-```powershell
-# 对于 Claude Worker（Agent 返回 branch 名）
-git merge task/<task-id> --no-edit
-
-# 对于 DS Worker（手动管理的 worktree）
-git merge task/<task-id> --no-edit
-```
-
-每 merge 一个，立即跑快速验证（编译通过即可，不用跑全量测试）：
-
-```powershell
-node dist/ring.js self-compile
-```
-
-如果 merge 冲突：
-1. 尝试 rebase：`git rebase main task/<task-id>` 然后重试 merge
-2. Rebase 也失败 → **跳过该任务**，记录冲突详情，继续 merge 其他任务
-
-## Step 8: 全量验证
-
-所有成功 merge 的任务合并完成后：
-
-```powershell
-node dist/ring.js self-compile
-node dist/ring.js test
-```
-
-如果失败：二分定位是哪个 merge 引入的问题。Revert 有问题的 merge，将该任务标记为失败。
-
-## Step 9: 报告
-
-```markdown
-## Iteration N 执行结果
-
-| 任务 | Worker | 状态 | 备注 |
-|------|--------|------|------|
-| C1   | DS     | ✅ 成功 | merged, 12 files changed |
-| A2   | DS     | ✅ 成功 | merged, 3 files changed |
-| A1   | Claude | ❌ 冲突 | merge conflict in infer.ring L234-250 |
-
-**测试**：self-compile ✅ | E2E 320/324 ✅（+2 from baseline 318/324）
-
-**待处理**：A1 需要在 C1 基础上手动重新实现
-```
-
-## 清理
-
-```powershell
-# 清理所有 worktree 和临时 branch
-git worktree list  # 确认有哪些
-git worktree remove ../ring-wt-<task-id>  # 逐个删除
-git branch -d task/<task-id>              # 删除已 merge 的 branch
-git branch -D task/<task-id>              # 删除未 merge 的 branch（失败的任务）
-Remove-Item ../ds-result-*.json           # 清理 DS 输出文件
-```
-
----
-
-## Worker Prompt 模板
-
-### Claude Worker Prompt
+### Agent Prompt 模板
 
 ```
-你是 Ring-lang 编译器的实现 agent。以下是已批准的任务 spec，直接实现。
+你是 Ring-lang 编译器的实现 agent。你在一个隔离的 git worktree 中。
 
-## 约束
-- 这个任务已经过审批。不要调用 brainstorming、writing-plans 或任何 plan 审批流程。直接写代码。
-- 完成后运行 `node dist/ring.js self-compile` 和 `node dist/ring.js test` 确认通过
-- 测试不过不要 commit，在返回消息中报告失败原因
-- 只修改 spec 范围内的文件，不要做额外重构
-- Commit message 格式：`feat(<scope>): <简述>` 或 `refactor(<scope>): <简述>`
+**CRITICAL: 首先验证 base commit。** 执行 `git log --oneline -1`，
+确认输出为 `<EXPECTED_BASE>`。如果不是，立即停止并报告
+"Base commit mismatch: expected <EXPECTED_BASE>, got XXX"。
 
 ## 任务
-<TASK_SPEC>
-
-## 关键文件
-<FILE_LIST>
-- path/to/file.ring — 这个文件做什么、要改什么
+<TASK_SPEC — 包含完整的实现步骤、代码示例、要修改的文件>
 
 ## 项目上下文
-- Ring-lang 是自举的编译器（Ring 写 Ring），产出 JavaScript
-- 入口：`node dist/ring.js <command>`
-- self-compile：`node dist/ring.js self-compile`（编译自身到 dist/）
-- 测试：`node dist/ring.js test`（运行 tests/ 下的 .ring E2E 测试）
-- 当前 318/324 E2E 测试通过
+- Ring-lang 是自举编译器（Ring 写 Ring），产出 JavaScript
+- 编译器源码：compiler/*.ring，编译产出：compiler/dist/
+- 重编译：node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
+- 测试：cd compiler && npm test
+- <当前测试数/总数>
+- <其他相关上下文，如 TypeEnv 已拆分为子结构等>
 ```
 
-### DS Worker Prompt
+Prompt 要点：
+- **包含足够的实现细节**：文件路径、代码片段、变更模式。Agent 没有 session 上下文。
+- **base commit 验证是必须的**：Claude Code worktree 有 race condition，可能拿到旧 base。
+- **明确禁止额外重构**：只做 spec 范围内的改动。
 
+### 4c. 等待完成
+
+所有 agent 完成后会自动通知。
+
+### 4d. 验证每个 agent 结果
+
+对每个完成的 agent：
+
+1. **检查 base**：`git log --oneline -3` 确认 base commit 正确
+2. **Review diff**：`git diff HEAD~1 -- ":(exclude)compiler/dist/*"` 检查源码改动
+3. **标记结果**：✅ 通过 / ⚠️ 需清理 / ❌ 失败
+
+如果 base 错误（严重落后）：标记 ❌，该任务需要在正确 base 上重做。
+
+### 4e. 顺序 merge
+
+按冲突由少到多的顺序 merge：
+
+```bash
+# 获取 worktree 实际 HEAD（branch ref 可能没更新）
+cd <worktree-path> && git rev-parse HEAD
+
+# 回到 main 执行 merge
+cd <main-repo> && git merge <commit-hash> --no-edit
 ```
-你是代码重构 agent。在当前目录下执行以下已批准的重构任务。
 
-## 约束
-- 只修改指定的文件，不要动其他文件
-- 完成后运行 `node dist/ring.js self-compile` 确认编译通过
-- 如果编译失败，回滚修改并报告原因
-- 不要猜测，只基于你在文件中看到的内容做修改
-
-## 任务
-<TASK_SPEC>
-
-## 变更规则
-<EXPLICIT_TRANSFORMATION_RULES>
-例如：
-- 将所有 `expr_type(e)` 调用替换为 `e.type`
-- 仅在以下文件中执行：checker.ring, codegen.ring, infer.ring
-- 不要修改函数签名，只改调用方式
-
-## 验证
-修改完成后执行：
-```shell
-node dist/ring.js self-compile
-```
-如果失败，回滚所有修改并在回复中说明失败原因。
+dist/ 冲突处理：
+```bash
+git checkout --ours compiler/dist/     # 取 main 版本
+git add compiler/dist/
+git commit --no-edit
 ```
 
-**DS prompt 注意事项：**
-- 必须包含具体的变换规则（输入 → 输出），不能只说"统一 accessor"
-- 贴上相关源码片段让 DS 理解上下文，不要假设 DS 了解 Ring 语法
-- 限制变更范围到具体文件列表
+源码冲突处理：
+- **自动可解决**（如两个任务改同文件不同区域）：手动 Edit 解决 → commit
+- **语义冲突**（需要判断哪个版本正确）：停下来问用户
 
----
+### 4f. Rebuild + 全量测试
 
-## 失败重试策略
+每次 merge 后：
+```bash
+node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
+cd compiler && npm test
+```
 
-| 失败类型 | 处理 |
-|---------|------|
-| DS 测试不过 | 回滚 DS worktree，重新派发给 Claude Worker |
-| Claude 测试不过 | 返回失败报告，由 orchestrator 诊断或交给用户 |
-| Merge 冲突 | 尝试 rebase，失败则跳过，报告用户 |
-| Self-compile 失败（merge 后） | 二分 revert，定位问题 branch |
-| Worker 超时（>30min） | 终止，标记失败，考虑拆分为更小任务 |
+全部 merge 完成后，提交 dist 重建：
+```bash
+git add compiler/dist/
+git commit -m "chore: rebuild dist after Wave <X> merge (<task-list>)"
+```
 
-DS 任务失败 → 自动升级为 Claude 任务重试（最多 1 次）。
-Claude 任务失败 → 不自动重试，报告用户决定。
+### 4g. 验证通过 → 自动推进
 
----
+如果测试全绿：
+1. 报告 Wave 结果（简表）
+2. **直接启动下一个 Wave**（不等用户确认）
+
+如果测试失败：
+1. 定位问题（二分 revert 找到哪个 merge 引入的）
+2. 报告用户，等待决策
+
+## 最终报告
+
+所有 Wave 完成后：
+
+```markdown
+## 执行完成
+
+| Wave | 任务 | 状态 | 测试 |
+|------|------|------|------|
+| A | X1, X2, X3 | ✅ | 355/355 |
+| B | X4, X5 | ✅ | 358/358 |
+
+**总计**: N 个任务, M 个 Wave, 全部通过
+**测试**: 起始 353 → 最终 358 (+5 新测试)
+```
+
+## 特殊情况处理
+
+| 情况 | 处理 |
+|------|------|
+| Agent base commit 错误 | ❌ 标记失败，在正确 base 上重新派发 |
+| Agent 编译失败未能 commit | ❌ 标记失败，报告错误信息 |
+| Merge 冲突（dist/ only） | checkout --ours，rebuild 覆盖 |
+| Merge 冲突（源码，可解决） | 手动 Edit 解决，优先取 match 的新风格 |
+| Merge 冲突（源码，语义冲突） | 停下来问用户 |
+| 测试回归（merge 后） | 二分定位，revert 问题 merge，报告用户 |
+| 同一 Wave 两个任务都改 types.ring | 允许——只要改的是不同函数/区域，merge 通常自动成功 |
 
 ## 注意事项
 
-- **不要串行派发**。所有 worker 必须在同一条消息中的多个工具调用中并行发出。
-- **Orchestrator 不实现任务**。你的职责是调度和合并，不是自己写代码。
-- **每个 iteration 一次 approve**。不要逐个任务找用户确认。
-- **Worker 不走 superpowers 流程**。已在 prompt 模板中明确指示跳过。
-- **Merge 顺序很重要**。机械重构先，语义变更后。先 merge 的 branch 是 base，后 merge 的在其上 rebase。
+- **不要串行派发**。同一 Wave 的所有 agent 必须在同一条消息中并行发出。
+- **Orchestrator 不实现任务**。你调度和合并，不自己写代码。
+- **Base commit 验证是必须的**。每个 agent prompt 的第一件事。
+- **dist/ 是编译产物**。冲突一律 checkout --ours 然后 rebuild 覆盖。
+- **Wave 间自动推进是默认行为**。只在出问题时才停下来。
