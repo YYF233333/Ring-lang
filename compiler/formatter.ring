@@ -43,6 +43,9 @@ pub fn format_human(diagnostics: List<Diagnostic>, source: Str) -> Str {
             none => {}
         }
 
+        for s in d.suggestions {
+            parts.push("   = help: ${s.message}")
+        }
         parts.push("   |")
         parts.push("")
     }
@@ -95,7 +98,11 @@ pub fn format_llm(diagnostics: List<Diagnostic>, file: Str) -> Str {
                 parts.push("        \"end_col\": ${diag.span.end.column.to_str()}\n")
                 parts.push("      },\n")
                 parts.push("      \"context\": ${context_to_json(diag.context)},\n")
-                parts.push("      \"suggestions\": ${suggestions_to_json(diag.suggestions)}\n")
+                parts.push("      \"suggestions\": ${suggestions_to_json(diag.suggestions)},\n")
+                match diag.category {
+                    some(cat) => parts.push("      \"category\": ${jq(cat)}\n"),
+                    none => parts.push("      \"category\": null\n")
+                }
                 parts.push("    }")
             },
             none => {}

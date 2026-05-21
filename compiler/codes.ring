@@ -56,3 +56,14 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0706" { return "Use declaration must appear before other declarations" }
     "Unknown error"
 }
+
+pub fn error_category(code: Str) -> Str {
+    if code.starts_with("E01") { return "parse" }
+    if code.starts_with("E02") { return "resolution" }
+    if code.starts_with("E03") { return "type" }
+    if code.starts_with("E04") { return "effect" }
+    if code.starts_with("E05") { return "pattern" }
+    if code.starts_with("E06") { return "import" }
+    if code.starts_with("E07") { return "semantic" }
+    "unknown"
+}

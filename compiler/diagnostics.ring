@@ -1,4 +1,5 @@
 use ast::{Span, Position}
+use codes::{error_category}
 
 // ============================================================
 // Severity
@@ -53,7 +54,8 @@ pub struct Diagnostic {
     pub span: Span,
     pub notes: List<DiagnosticNote>,
     pub context: DiagnosticContext,
-    pub suggestions: List<Suggestion>
+    pub suggestions: List<Suggestion>,
+    pub category: Str?
 }
 
 fn dummy_span() -> Span {
@@ -155,7 +157,8 @@ pub fn make_diagnostic(
         span: span,
         notes: notes,
         context: context,
-        suggestions: []
+        suggestions: [],
+        category: some(error_category(code))
     }
 }
 

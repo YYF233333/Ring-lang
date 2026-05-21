@@ -13,7 +13,7 @@ import { parse } from "../compiler/dist/parser.js";
 import { check } from "../compiler/dist/checker.js";
 import { generate } from "../compiler/dist/codegen.js";
 import { new_collecting_sink } from "../compiler/dist/diagnostics.js";
-import { format_llm } from "../compiler/dist/formatter.js";
+import { format_llm, format_human } from "../compiler/dist/formatter.js";
 import { compile_project, compile_project_esm } from "../compiler/dist/compiler_mod.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -388,6 +388,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_tuple_oob.ring", error_pattern: "E0304" },
     { file: "error_enum_empty_parens.ring", error_pattern: "E0104" },
     { file: "error_const_reassign.ring", error_pattern: "E0205" },
+    { file: "error_with_suggestion.ring", error_pattern: "E0301" },
   ];
 
   for (const tc of negative_cases) {
@@ -402,6 +403,59 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
       );
     });
   }
+});
+
+// ============================================================
+// Diagnostic quality tests — suggestions and categories
+// ============================================================
+
+describe("e2e: diagnostic suggestions and categories", { concurrency: true }, () => {
+  test("type mismatch Str/Int produces conversion suggestion", () => {
+    const filePath = path.join(CASES_DIR, "error_with_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const diags = sink.items.filter((d: any) => d.severity._tag === "SevError");
+    assert.ok(diags.length > 0, "Expected at least one error diagnostic");
+    const d = diags[0] as any;
+    // Verify category is set
+    assert.ok(d.category._tag === "some", "Expected category to be set");
+    assert.equal(d.category._0, "type", "Expected category 'type' for E0301");
+    // Verify suggestions contain conversion hint
+    assert.ok(d.suggestions.length > 0, "Expected at least one suggestion");
+    const sugText = d.suggestions.map((s: any) => s.message).join(" ");
+    assert.ok(sugText.includes("parse_int"), `Expected suggestion about parse_int, got: ${sugText}`);
+  });
+
+  test("format_llm includes category field", () => {
+    const filePath = path.join(CASES_DIR, "error_with_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const json_output = format_llm(sink.items, filePath);
+    const parsed = JSON.parse(json_output);
+    assert.ok(parsed.diagnostics.length > 0, "Expected diagnostics in LLM output");
+    const d = parsed.diagnostics[0];
+    assert.equal(d.category, "type", "Expected category 'type' in LLM JSON output");
+    assert.ok(d.suggestions.length > 0, "Expected suggestions in LLM JSON output");
+    assert.ok(d.suggestions[0].message.includes("parse_int"), "Expected parse_int in suggestion");
+  });
+
+  test("format_human includes help line for suggestions", () => {
+    const filePath = path.join(CASES_DIR, "error_with_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const human_output = format_human(sink.items, source);
+    assert.ok(human_output.includes("help:"), `Expected 'help:' in human output, got: ${human_output.slice(0, 300)}`);
+    assert.ok(human_output.includes("parse_int"), `Expected 'parse_int' in human output, got: ${human_output.slice(0, 300)}`);
+  });
 });
 
 // ============================================================
