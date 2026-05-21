@@ -57,7 +57,7 @@ pub fn extract_exports(
             },
             Decl::Struct { name, is_pub, .. } => {
                 if is_pub {
-                    match env.structs.get(name) {
+                    match env.types.structs.get(name) {
                         some(sdef) => {
                             types.insert(name, TypeDef::StructDef_(sdef))
                             var field_names: List<Str> = [""]; field_names.clear()
@@ -70,7 +70,7 @@ pub fn extract_exports(
             },
             Decl::Enum { name, is_pub, .. } => {
                 if is_pub {
-                    match env.enums.get(name) {
+                    match env.types.enums.get(name) {
                         some(edef) => {
                             types.insert(name, TypeDef::EnumDef_(edef))
                             for v in edef.variants {
@@ -86,7 +86,7 @@ pub fn extract_exports(
             },
             Decl::Effect { name, is_pub, .. } => {
                 if is_pub {
-                    match env.effects.get(name) {
+                    match env.types.effects.get(name) {
                         some(effdef) => { effects.insert(name, effdef) },
                         none => {},
                     }
@@ -94,14 +94,14 @@ pub fn extract_exports(
             },
             Decl::Trait { name, is_pub, .. } => {
                 if is_pub {
-                    match env.traits.get(name) {
+                    match env.trait_reg.traits.get(name) {
                         some(tdef) => { traits.insert(name, tdef) },
                         none => {},
                     }
                 }
             },
             Decl::Impl { target_type, trait_name, methods, .. } => {
-                match env.impl_methods.get(target_type) {
+                match env.trait_reg.impl_methods.get(target_type) {
                     some(methods_map) => {
                         impl_methods.insert(target_type, map_clone(methods_map))
                     },
@@ -150,7 +150,7 @@ pub fn extract_exports(
             },
             Decl::ExternType { name, is_pub, .. } => {
                 if is_pub {
-                    match env.structs.get(name) {
+                    match env.types.structs.get(name) {
                         some(sdef) => { types.insert(name, TypeDef::StructDef_(sdef)) },
                         none => {},
                     }
@@ -170,7 +170,7 @@ pub fn extract_exports(
 
     // Filter trait impls
     var trait_impls: List<ImplEntry> = []
-    for impl_ in env.trait_impls {
+    for impl_ in env.trait_reg.trait_impls {
         if types.contains_key(impl_.target_type_name) || traits.contains_key(impl_.trait_name) {
             trait_impls.push(impl_)
         }
@@ -190,7 +190,7 @@ pub fn extract_exports(
                             some(scheme) => { values.insert(local_name, scheme) },
                             none => {},
                         }
-                        match env.structs.get(local_name) {
+                        match env.types.structs.get(local_name) {
                             some(sdef) => {
                                 types.insert(local_name, TypeDef::StructDef_(sdef))
                                 var fnames: List<Str> = [""]; fnames.clear()
@@ -199,15 +199,15 @@ pub fn extract_exports(
                             },
                             none => {},
                         }
-                        match env.enums.get(local_name) {
+                        match env.types.enums.get(local_name) {
                             some(edef) => { types.insert(local_name, TypeDef::EnumDef_(edef)) },
                             none => {},
                         }
-                        match env.effects.get(local_name) {
+                        match env.types.effects.get(local_name) {
                             some(effdef) => { effects.insert(local_name, effdef) },
                             none => {},
                         }
-                        match env.traits.get(local_name) {
+                        match env.trait_reg.traits.get(local_name) {
                             some(tdef) => { traits.insert(local_name, tdef) },
                             none => {},
                         }

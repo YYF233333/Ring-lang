@@ -22,11 +22,11 @@ struct OpenRow {
 // ============================================================
 
 pub fn get_or_create_methods(var env: TypeEnv, type_name: Str) -> Map<Str, TypeScheme> {
-    match env.impl_methods.get(type_name) {
+    match env.trait_reg.impl_methods.get(type_name) {
         some(m) => m,
         none => {
             let m: Map<Str, TypeScheme> = map_new()
-            env.impl_methods.insert(type_name, m)
+            env.trait_reg.impl_methods.insert(type_name, m)
             m
         }
     }
@@ -91,7 +91,7 @@ pub fn register_hof_intrinsics(var env: TypeEnv) {
 
 fn register_effects(var env: TypeEnv) {
     // io effect
-    env.effects.insert("io", EffectDef {
+    env.types.effects.insert("io", EffectDef {
         name: "io",
         type_params: [],
         ops: [
@@ -104,7 +104,7 @@ fn register_effects(var env: TypeEnv) {
     // fail effect
     let fail_t_id = env.fresh_var_id()
     let fail_t = Type::TypeVar { id: fail_t_id, name: none }
-    env.effects.insert("fail", EffectDef {
+    env.types.effects.insert("fail", EffectDef {
         name: "fail",
         type_params: ["E"],
         ops: [
@@ -122,7 +122,7 @@ fn register_cell(var env: TypeEnv) {
     // Register Cell struct definition
     let cell_t_id = env.fresh_var_id()
     let cell_t = Type::TypeVar { id: cell_t_id, name: none }
-    env.structs.insert(BUILTIN_CELL, StructDef {
+    env.types.structs.insert(BUILTIN_CELL, StructDef {
         name: BUILTIN_CELL,
         type_params: ["T"],
         type_param_vars: [cell_t_id],
@@ -182,7 +182,7 @@ fn register_cell(var env: TypeEnv) {
         def_id: none
     })
 
-    env.impl_methods.insert(BUILTIN_CELL, methods)
+    env.trait_reg.impl_methods.insert(BUILTIN_CELL, methods)
 }
 
 // ============================================================
@@ -193,7 +193,7 @@ fn register_option(var env: TypeEnv) {
     // Register Option enum definition
     let option_t_id = env.fresh_var_id()
     let option_t = Type::TypeVar { id: option_t_id, name: none }
-    env.enums.insert(BUILTIN_OPTION, EnumDef {
+    env.types.enums.insert(BUILTIN_OPTION, EnumDef {
         name: BUILTIN_OPTION,
         type_params: ["T"],
         type_param_vars: [option_t_id],
@@ -203,8 +203,8 @@ fn register_option(var env: TypeEnv) {
         ]
     })
 
-    env.variant_to_enum.insert("some", BUILTIN_OPTION)
-    env.variant_to_enum.insert("none", BUILTIN_OPTION)
+    env.types.variant_to_enum.insert("some", BUILTIN_OPTION)
+    env.types.variant_to_enum.insert("none", BUILTIN_OPTION)
 
     // some constructor: (T) -> Option<T>
     let some_t_id = env.fresh_var_id()
@@ -284,7 +284,7 @@ fn register_eq_trait(var env: TypeEnv) {
     let eq_fn = Type::FnType { params: [self_var, self_var], return_type: BOOL, effects: EMPTY_ROW }
     let ne_fn = Type::FnType { params: [self_var, self_var], return_type: BOOL, effects: EMPTY_ROW }
 
-    env.traits.insert("Eq", TraitDef {
+    env.trait_reg.traits.insert("Eq", TraitDef {
         name: "Eq",
         type_params: [],
         type_param_vars: [self_var_id],
@@ -296,7 +296,7 @@ fn register_eq_trait(var env: TypeEnv) {
 
     // Register Eq impls for primitive types
     for prim in ["Int", "Float", "Str", "Bool"] {
-        env.trait_impls.push(ImplEntry {
+        env.trait_reg.trait_impls.push(ImplEntry {
             trait_name: "Eq",
             target_type_name: prim,
             type_params: [],
@@ -332,7 +332,7 @@ fn register_option_eq(var env: TypeEnv) {
         def_id: none
     })
 
-    env.trait_impls.push(ImplEntry {
+    env.trait_reg.trait_impls.push(ImplEntry {
         trait_name: "Eq",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
@@ -350,7 +350,7 @@ fn register_clone_trait(var env: TypeEnv) {
 
     let clone_fn = Type::FnType { params: [self_var], return_type: self_var, effects: EMPTY_ROW }
 
-    env.traits.insert("Clone", TraitDef {
+    env.trait_reg.traits.insert("Clone", TraitDef {
         name: "Clone",
         type_params: [],
         type_param_vars: [self_var_id],
@@ -361,7 +361,7 @@ fn register_clone_trait(var env: TypeEnv) {
 
     // Primitive impls
     for prim in ["Int", "Float", "Str", "Bool"] {
-        env.trait_impls.push(ImplEntry {
+        env.trait_reg.trait_impls.push(ImplEntry {
             trait_name: "Clone",
             target_type_name: prim,
             type_params: [],
@@ -371,7 +371,7 @@ fn register_clone_trait(var env: TypeEnv) {
 
     // Collection impls
     for coll in ["List", "Map", "Set"] {
-        env.trait_impls.push(ImplEntry {
+        env.trait_reg.trait_impls.push(ImplEntry {
             trait_name: "Clone",
             target_type_name: coll,
             type_params: [],
@@ -398,7 +398,7 @@ fn register_option_clone(var env: TypeEnv) {
         def_id: none
     })
 
-    env.trait_impls.push(ImplEntry {
+    env.trait_reg.trait_impls.push(ImplEntry {
         trait_name: "Clone",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
@@ -416,7 +416,7 @@ fn register_ord_trait(var env: TypeEnv) {
 
     let cmp_fn = Type::FnType { params: [self_var, self_var], return_type: INT, effects: EMPTY_ROW }
 
-    env.traits.insert("Ord", TraitDef {
+    env.trait_reg.traits.insert("Ord", TraitDef {
         name: "Ord",
         type_params: [],
         type_param_vars: [self_var_id],
@@ -426,7 +426,7 @@ fn register_ord_trait(var env: TypeEnv) {
     })
 
     for prim in ["Int", "Float", "Str", "Bool"] {
-        env.trait_impls.push(ImplEntry {
+        env.trait_reg.trait_impls.push(ImplEntry {
             trait_name: "Ord",
             target_type_name: prim,
             type_params: [],
@@ -445,7 +445,7 @@ fn register_debug_trait(var env: TypeEnv) {
 
     let debug_fn = Type::FnType { params: [self_var], return_type: STR, effects: EMPTY_ROW }
 
-    env.traits.insert("Debug", TraitDef {
+    env.trait_reg.traits.insert("Debug", TraitDef {
         name: "Debug",
         type_params: [],
         type_param_vars: [self_var_id],
@@ -456,7 +456,7 @@ fn register_debug_trait(var env: TypeEnv) {
 
     // Primitive impls
     for prim in ["Int", "Float", "Str", "Bool"] {
-        env.trait_impls.push(ImplEntry {
+        env.trait_reg.trait_impls.push(ImplEntry {
             trait_name: "Debug",
             target_type_name: prim,
             type_params: [],
@@ -476,7 +476,7 @@ fn register_debug_trait(var env: TypeEnv) {
         bounds: [SchemeBound { type_var: t_id, trait_name: "Debug" }],
         def_id: none
     })
-    env.trait_impls.push(ImplEntry {
+    env.trait_reg.trait_impls.push(ImplEntry {
         trait_name: "Debug",
         target_type_name: BUILTIN_LIST,
         type_params: ["T"],
@@ -497,7 +497,7 @@ fn register_debug_trait(var env: TypeEnv) {
         bounds: [],
         def_id: none
     })
-    env.trait_impls.push(ImplEntry {
+    env.trait_reg.trait_impls.push(ImplEntry {
         trait_name: "Debug",
         target_type_name: BUILTIN_MAP,
         type_params: ["K", "V"],
@@ -516,7 +516,7 @@ fn register_debug_trait(var env: TypeEnv) {
         bounds: [],
         def_id: none
     })
-    env.trait_impls.push(ImplEntry {
+    env.trait_reg.trait_impls.push(ImplEntry {
         trait_name: "Debug",
         target_type_name: BUILTIN_SET,
         type_params: ["T"],
@@ -542,7 +542,7 @@ fn register_option_debug(var env: TypeEnv) {
         def_id: none
     })
 
-    env.trait_impls.push(ImplEntry {
+    env.trait_reg.trait_impls.push(ImplEntry {
         trait_name: "Debug",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],

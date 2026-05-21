@@ -50,13 +50,13 @@ struct UserType {
 fn collect_user_types(env: TypeEnv) -> List<UserType> {
     let builtins = BUILTIN_TYPES
     var result: List<UserType> = []
-    for entry in env.structs.entries() {
+    for entry in env.types.structs.entries() {
         let (name, def) = entry
         if builtins.contains(name) == false {
             result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none })
         }
     }
-    for entry in env.enums.entries() {
+    for entry in env.types.enums.entries() {
         let (name, def) = entry
         if builtins.contains(name) == false {
             result.push(UserType { name: name, type_kind: TypeKind::EnumKind, struct_def: none, enum_def: some(def) })
@@ -71,7 +71,7 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
 
 fn derive_trait(var env: TypeEnv, all_types: List<UserType>, trait_name: Str, var derived_impls: List<DerivedImpl>) {
     var known = set_new()
-    for imp in env.trait_impls {
+    for imp in env.trait_reg.trait_impls {
         if imp.trait_name == trait_name {
             known.insert(imp.target_type_name)
         }
@@ -104,7 +104,7 @@ fn derive_trait(var env: TypeEnv, all_types: List<UserType>, trait_name: Str, va
 }
 
 fn has_manual_impl(env: TypeEnv, type_name: Str, trait_name: Str) -> Bool {
-    for imp in env.trait_impls {
+    for imp in env.trait_reg.trait_impls {
         if imp.trait_name == trait_name {
             if imp.target_type_name == type_name {
                 return true
@@ -391,14 +391,14 @@ fn resolve_type_arg_dict(
 // ================================================================
 
 fn register_derived_impl(var env: TypeEnv, di: DerivedImpl, trait_name: Str) {
-    env.trait_impls.push(ImplEntry {
+    env.trait_reg.trait_impls.push(ImplEntry {
         trait_name: trait_name,
         target_type_name: di.type_name,
         type_params: di.type_params,
         method_names: get_method_names(trait_name)
     })
 
-    var methods = match env.impl_methods.get(di.type_name) {
+    var methods = match env.trait_reg.impl_methods.get(di.type_name) {
         some(m) => m,
         none => map_new(),
     }
@@ -422,7 +422,7 @@ fn register_derived_impl(var env: TypeEnv, di: DerivedImpl, trait_name: Str) {
     }
 
     register_trait_methods(methods, trait_name, self_type, type_var_ids, scheme_bounds)
-    env.impl_methods.insert(di.type_name, methods)
+    env.trait_reg.impl_methods.insert(di.type_name, methods)
 }
 
 fn get_method_names(trait_name: Str) -> List<Str> {
@@ -438,7 +438,7 @@ fn get_method_names(trait_name: Str) -> List<Str> {
 fn build_self_type(env: TypeEnv, type_name: Str, type_kind: TypeKind, type_params: List<Type>) -> Type {
     match type_kind {
         TypeKind::StructKind => {
-            let def = env.structs.get(type_name)
+            let def = env.types.structs.get(type_name)
             let fields = match def {
                 some(d) => d.fields.map(fn(f) { StructField { name: f.name, ty: f.ty, is_pub: f.is_pub } }),
                 none => {
@@ -449,7 +449,7 @@ fn build_self_type(env: TypeEnv, type_name: Str, type_kind: TypeKind, type_param
             Type::StructType { name: type_name, type_params: type_params, fields: fields }
         },
         TypeKind::EnumKind => {
-            let def = env.enums.get(type_name)
+            let def = env.types.enums.get(type_name)
             let variants = match def {
                 some(d) => d.variants.map(fn(v) { EnumVariant { name: v.name, fields: v.fields, field_names: v.field_names } }),
                 none => {

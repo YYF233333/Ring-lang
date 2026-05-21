@@ -156,7 +156,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: Map<Int, Type>) -> StmtR
                     match vs.def_id {
                         some(did) => {
                             ctx.env.record_def_span(did, name_span)
-                            ctx.env.mutable_vars.insert(did)
+                            ctx.env.scope.mutable_vars.insert(did)
                         },
                         none => {}
                     }
@@ -522,7 +522,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
             match scheme {
                 some(s) => match s.def_id {
                     some(did) => {
-                        if !ctx.env.mutable_vars.contains(did) {
+                        if !ctx.env.scope.mutable_vars.contains(did) {
                             let _ = type_error(ctx.sink, E0205,
                                 "Cannot assign to immutable variable '${name}' (declared with 'let'). Use 'var' for mutable bindings.",
                                 span, DiagnosticContext::OtherContext { detail: some("'${name}' is declared with 'let'") })
@@ -541,7 +541,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                     match scheme {
                         some(s) => match s.def_id {
                             some(did) => {
-                                if !ctx.env.mutable_vars.contains(did) {
+                                if !ctx.env.scope.mutable_vars.contains(did) {
                                     let _ = type_error(ctx.sink, E0205,
                                         "Cannot assign to field of immutable variable '${name}'. Use 'var' for mutable bindings.",
                                         span, DiagnosticContext::OtherContext { detail: some("'${name}' is not mutable") })
@@ -688,7 +688,7 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: Map<Int, Type>, 
             var enum_name: Str? = none
             match qualifier {
                 some(q) => {
-                    match ctx.env.enums.get(q) {
+                    match ctx.env.types.enums.get(q) {
                         some(enum_def) => {
                             if enum_def.variants.any(fn(v) { v.name == name }) {
                                 enum_name = some(q)
@@ -701,7 +701,7 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: Map<Int, Type>, 
                             DiagnosticContext::UndefinedVariable { name: name, scope_locals: none }) }
                     }
                 },
-                none => { enum_name = ctx.env.variant_to_enum.get(name) }
+                none => { enum_name = ctx.env.types.variant_to_enum.get(name) }
             }
             match enum_name {
                 some(en) => { resolved_name = some(variant_js_name(en, name)) },
@@ -841,7 +841,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
                 some(b) => { return TraitDispatch::Dict { param: trait_bound_param_name(b.type_param_name, trait_name) } },
                 none => {}
             }
-            match ctx.env.var_bounds.get(id) {
+            match ctx.env.scope.var_bounds.get(id) {
                 some(var_bounds) => {
                     if var_bounds.contains(trait_name) { return TraitDispatch::Builtin }
                 },
@@ -853,7 +853,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
             TraitDispatch::Builtin
         },
         Type::StructType { name, type_params, .. } => {
-            if ctx.env.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
                 let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
                 return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
@@ -863,7 +863,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
             TraitDispatch::Builtin
         },
         Type::EnumType { name, type_params, .. } => {
-            if ctx.env.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
                 let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
                 return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
@@ -915,12 +915,12 @@ fn resolve_type_to_trait_dict(ctx: InferCtx, t: Type, trait_name: Str) -> Str? {
             }
         },
         Type::StructType { name, .. } => {
-            if ctx.env.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
                 some(trait_dict_name(name, trait_name))
             } else { none }
         },
         Type::EnumType { name, .. } => {
-            if ctx.env.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
                 some(trait_dict_name(name, trait_name))
             } else { none }
         },
@@ -1100,12 +1100,12 @@ fn resolve_arg_dict_closure(ctx: InferCtx, harg: HExpr, s: Map<Int, Type>) -> HE
 fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, var dicts: List<Str>) {
     match concrete {
         Type::StructType { name, .. } => {
-            if ctx.env.trait_impls.any(fn(impl_) { impl_.target_type_name == name && impl_.trait_name == trait_name }) {
+            if ctx.env.trait_reg.trait_impls.any(fn(impl_) { impl_.target_type_name == name && impl_.trait_name == trait_name }) {
                 dicts.push(trait_dict_name(name, trait_name))
             }
         },
         Type::EnumType { name, .. } => {
-            if ctx.env.trait_impls.any(fn(impl_) { impl_.target_type_name == name && impl_.trait_name == trait_name }) {
+            if ctx.env.trait_reg.trait_impls.any(fn(impl_) { impl_.target_type_name == name && impl_.trait_name == trait_name }) {
                 dicts.push(trait_dict_name(name, trait_name))
             }
         },
@@ -1121,7 +1121,7 @@ fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, var di
         _ => {
             match type_to_builtin_name(concrete) {
                 some(prim_name) => {
-                    if ctx.env.trait_impls.any(fn(impl_) { impl_.target_type_name == prim_name && impl_.trait_name == trait_name }) {
+                    if ctx.env.trait_reg.trait_impls.any(fn(impl_) { impl_.target_type_name == prim_name && impl_.trait_name == trait_name }) {
                         dicts.push(trait_dict_name(prim_name, trait_name))
                     }
                 },
@@ -1139,7 +1139,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     // Check if receiver is an effect module
     match receiver {
         Expr::Ident { name: recv_name, .. } => {
-            match ctx.env.effects.get(recv_name) {
+            match ctx.env.types.effects.get(recv_name) {
                 some(_) => { return infer_effect_op(ctx, recv_name, method, args, span, subst) },
                 none => {}
             }
@@ -1204,7 +1204,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
             some(rvid) => {
                 for fb in ctx.current_fn_bounds {
                     if resolve_var_id(fb.type_param_var_id, s) == rvid {
-                        match ctx.env.traits.get(fb.trait_name) {
+                        match ctx.env.trait_reg.traits.get(fb.trait_name) {
                             some(trait_def) => {
                                 let tm = trait_def.methods.find(fn(m) { m.name == method })
                                 match tm {
@@ -1344,7 +1344,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
 }
 
 fn lookup_impl_method(var ctx: InferCtx, type_name: Str, method: Str) -> MethodLookupResult {
-    match ctx.env.impl_methods.get(type_name) {
+    match ctx.env.trait_reg.impl_methods.get(type_name) {
         some(impl_methods) => match impl_methods.get(method) {
             some(scheme) => MethodLookupResult {
                 method_type: some(ctx.env.instantiate(scheme)),
@@ -1357,9 +1357,9 @@ fn lookup_impl_method(var ctx: InferCtx, type_name: Str, method: Str) -> MethodL
 }
 
 fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str) -> Type? {
-    for impl_entry in ctx.env.trait_impls {
+    for impl_entry in ctx.env.trait_reg.trait_impls {
         if impl_entry.target_type_name == type_name {
-            match ctx.env.traits.get(impl_entry.trait_name) {
+            match ctx.env.trait_reg.traits.get(impl_entry.trait_name) {
                 some(trait_def) => {
                     let tm = trait_def.methods.find(fn(m) { m.name == method })
                     match tm {
@@ -1381,7 +1381,7 @@ fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str) -> Type? 
 // ============================================================
 
 fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List<Expr>, span: Span, subst: Map<Int, Type>) -> InferResult {
-    let effect_def = match ctx.env.effects.get(effect_name) {
+    let effect_def = match ctx.env.types.effects.get(effect_name) {
         some(ed) => ed,
         none => panic("effect_def not found: ${effect_name}")
     }
@@ -1460,7 +1460,7 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
     var field_type: Type = ctx.env.fresh_var()
     match recv_type {
         Type::StructType { name, type_params, .. } => {
-            match ctx.env.structs.get(name) {
+            match ctx.env.types.structs.get(name) {
                 some(struct_def) => {
                     let f = struct_def.fields.find(fn(f_) { f_.name == field })
                     match f {
@@ -1536,13 +1536,13 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     // Check for named enum variant
     var variant_enum: Str? = none
     match qualifier {
-        some(q) => match ctx.env.enums.get(q) {
+        some(q) => match ctx.env.types.enums.get(q) {
             some(enum_def) => {
                 if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(q) }
             },
             none => {}
         },
-        none => { variant_enum = ctx.env.variant_to_enum.get(name) }
+        none => { variant_enum = ctx.env.types.variant_to_enum.get(name) }
     }
     if variant_enum.is_none() && qualifier.is_some() {
         match qualifier {
@@ -1552,7 +1552,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         }
     }
     match variant_enum {
-        some(ve) => match ctx.env.enums.get(ve) {
+        some(ve) => match ctx.env.types.enums.get(ve) {
             some(enum_def) => {
                 let variant = enum_def.variants.find(fn(v) { v.name == name })
                 match variant {
@@ -1568,7 +1568,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         none => {}
     }
 
-    let struct_def_opt = ctx.env.structs.get(name)
+    let struct_def_opt = ctx.env.types.structs.get(name)
     match struct_def_opt {
         none => {
             let _ = type_error(ctx.sink, E0203, "Unknown struct: ${name}", span,
@@ -1761,8 +1761,8 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
             var match_pattern = arm.pattern
             match arm.pattern {
                 Pattern::Binding { name: pat_name, span: pspan } => {
-                    match ctx.env.variant_to_enum.get(pat_name) {
-                        some(ve) => match ctx.env.enums.get(ve) {
+                    match ctx.env.types.variant_to_enum.get(pat_name) {
+                        some(ve) => match ctx.env.types.enums.get(ve) {
                             some(edef) => {
                                 let v = edef.variants.find(fn(v_) { v_.name == pat_name })
                                 match v {
@@ -2016,7 +2016,7 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
     for handler in handlers {
         ctx.env.push_scope()
-        let effect_def = ctx.env.effects.get(handler.effect_name)
+        let effect_def = ctx.env.types.effects.get(handler.effect_name)
         var op_def: EffectOpDef? = none
         match effect_def {
             some(ed) => { op_def = ed.ops.find(fn(o) { o.name == handler.op_name }) },
@@ -2120,7 +2120,7 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
                 match ls.def_id {
                     some(did) => {
                         ctx.env.record_def_span(did, p.span)
-                        if p.is_mutable { ctx.env.mutable_vars.insert(did) }
+                        if p.is_mutable { ctx.env.scope.mutable_vars.insert(did) }
                     },
                     none => {}
                 }

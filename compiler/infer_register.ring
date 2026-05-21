@@ -76,11 +76,11 @@ fn preregister_struct(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
         ctx.type_param_scope.insert(tp.name, tv)
     }
     let def = StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [] }
-    ctx.env.structs.insert(name, def)
+    ctx.env.types.structs.insert(name, def)
 }
 
 fn complete_struct_fields(var ctx: InferCtx, name: Str, fields: List<StructFieldDecl>) {
-    match ctx.env.structs.get(name) {
+    match ctx.env.types.structs.get(name) {
         some(def) => {
             let saved = map_clone(ctx.type_param_scope)
             var i = 0
@@ -119,11 +119,11 @@ fn preregister_enum(var ctx: InferCtx, name: Str, type_params: List<TypeParam>) 
         ctx.type_param_scope.insert(tp.name, tv)
     }
     let def = EnumDef { name: name, type_params: tp_names, type_param_vars: tv_ids, variants: [] }
-    ctx.env.enums.insert(name, def)
+    ctx.env.types.enums.insert(name, def)
 }
 
 fn complete_enum_variants(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>) {
-    match ctx.env.enums.get(name) {
+    match ctx.env.types.enums.get(name) {
         some(def) => {
             let saved = map_clone(ctx.type_param_scope)
             var tv_types: List<Type> = []
@@ -168,7 +168,7 @@ fn complete_enum_variants(var ctx: InferCtx, name: Str, type_params: List<TypePa
             let enum_type = Type::EnumType { name: name, type_params: tv_types, variants: def.variants }
             let tv_ids = def.type_param_vars
             for variant in def.variants {
-                ctx.env.variant_to_enum.insert(variant.name, name)
+                ctx.env.types.variant_to_enum.insert(variant.name, name)
                 if variant.field_names.is_some() {
                     bind_variant_constructor(ctx, variant.name, enum_type, tv_ids)
                 } else if variant.fields.len() == 0 {
@@ -216,7 +216,7 @@ fn register_effect(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ops: 
         let ret = resolve_type_expr(ctx, op.return_type)
         effect_ops.push(EffectOpDef { name: op.name, params: param_types, return_type: ret })
     }
-    ctx.env.effects.insert(name, EffectDef { name: name, type_params: tp_names, ops: effect_ops, built_in_kind: none })
+    ctx.env.types.effects.insert(name, EffectDef { name: name, type_params: tp_names, ops: effect_ops, built_in_kind: none })
 }
 
 // ============================================================
@@ -262,7 +262,7 @@ fn register_trait(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, me
     }
 
     ctx.type_param_scope = saved
-    ctx.env.traits.insert(name, TraitDef { name: name, type_params: tp_names, type_param_vars: tp_vars, methods: trait_methods })
+    ctx.env.trait_reg.traits.insert(name, TraitDef { name: name, type_params: tp_names, type_param_vars: tp_vars, methods: trait_methods })
 }
 
 // ============================================================
@@ -270,11 +270,11 @@ fn register_trait(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, me
 // ============================================================
 
 fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) {
-    let impl_methods_map = match ctx.env.impl_methods.get(target_type) {
+    let impl_methods_map = match ctx.env.trait_reg.impl_methods.get(target_type) {
         some(m) => m,
         none => {
             let new_map: Map<Str, TypeScheme> = map_new()
-            ctx.env.impl_methods.insert(target_type, new_map)
+            ctx.env.trait_reg.impl_methods.insert(target_type, new_map)
             new_map
         }
     }
@@ -299,7 +299,7 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
 
     match trait_name {
         some(tname) => {
-            match ctx.env.traits.get(tname) {
+            match ctx.env.trait_reg.traits.get(tname) {
                 some(trait_def) => {
                     let impl_method_names: Set<Str> = set_new()
                     for m in methods {
@@ -322,7 +322,7 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
                             _ => {}
                         }
                     }
-                    ctx.env.trait_impls.push(ImplEntry {
+                    ctx.env.trait_reg.trait_impls.push(ImplEntry {
                         trait_name: tname, target_type_name: target_type,
                         type_params: tp_names, method_names: method_names
                     })
@@ -418,7 +418,7 @@ fn register_impl_extern_method(
 fn check_duplicate_def(ctx: InferCtx, name: Str, span: Span) {
     match ctx.env.lookup(name) {
         some(existing) => match existing.def_id {
-            some(did) => match ctx.env.def_spans.get(did) {
+            some(did) => match ctx.env.scope.def_spans.get(did) {
                 some(_) => { let _ = type_error(ctx.sink, E0207,
                     "Duplicate definition: '${name}' is already defined", span,
                     DiagnosticContext::TypeMismatch { expected: "unique name", actual: name, expression: none }) },
@@ -465,7 +465,7 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
     for tp in type_params {
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
-            if !ctx.env.traits.contains_key(b.trait_name) {
+            if !ctx.env.trait_reg.traits.contains_key(b.trait_name) {
                 let _ = type_error(ctx.sink, E0501,
                     "Unknown trait: ${b.trait_name}", tp.span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
@@ -479,7 +479,7 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
             }
         }
     }
-    if fn_bounds_list.len() > 0 { ctx.env.fn_bounds.insert(name, fn_bounds_list) }
+    if fn_bounds_list.len() > 0 { ctx.env.scope.fn_bounds.insert(name, fn_bounds_list) }
 
     ctx.type_param_scope = saved
 
@@ -527,7 +527,7 @@ fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
     for tp in type_params {
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
-            if !ctx.env.traits.contains_key(b.trait_name) {
+            if !ctx.env.trait_reg.traits.contains_key(b.trait_name) {
                 let _ = type_error(ctx.sink, E0501,
                     "Unknown trait: ${b.trait_name}", tp.span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
@@ -565,7 +565,7 @@ fn register_extern_type(var ctx: InferCtx, name: Str, type_params: List<TypePara
         ctx.type_param_scope.insert(tp.name, tv)
     }
     ctx.type_param_scope = saved
-    ctx.env.structs.insert(name, StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [] })
+    ctx.env.types.structs.insert(name, StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [] })
 }
 
 fn register_type_alias(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, type_expr: TypeExpr) {
@@ -580,7 +580,7 @@ fn register_type_alias(var ctx: InferCtx, name: Str, type_params: List<TypeParam
     ctx.type_param_scope = saved
     var tp_names: List<Str> = []
     for tp in type_params { tp_names.push(tp.name) }
-    ctx.env.type_aliases.insert(name, TypeAliasDef { type_params: tp_names, type_param_vars: tp_vars, ty: resolved })
+    ctx.env.types.type_aliases.insert(name, TypeAliasDef { type_params: tp_names, type_param_vars: tp_vars, ty: resolved })
 }
 
 fn register_const(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span: Span) {

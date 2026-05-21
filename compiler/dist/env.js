@@ -104,23 +104,47 @@ class Scope {
   }
 }
 
-class TypeEnv {
-  constructor(next_type_var_id, next_def_id, scopes, structs, enums, effects, impl_methods, variant_to_enum, traits, trait_impls, fn_bounds, var_bounds, def_spans, mutable_vars, type_aliases) {
-    this.next_type_var_id = next_type_var_id;
-    this.next_def_id = next_def_id;
-    this.scopes = scopes;
+class TypeRegistry {
+  constructor(structs, enums, effects, variant_to_enum, type_aliases) {
     this.structs = structs;
     this.enums = enums;
     this.effects = effects;
-    this.impl_methods = impl_methods;
     this.variant_to_enum = variant_to_enum;
+    this.type_aliases = type_aliases;
+  }
+}
+
+class TraitRegistry {
+  constructor(traits, trait_impls, impl_methods) {
     this.traits = traits;
     this.trait_impls = trait_impls;
+    this.impl_methods = impl_methods;
+  }
+}
+
+class ScopeManager {
+  constructor(scopes, fn_bounds, var_bounds, def_spans, mutable_vars) {
+    this.scopes = scopes;
     this.fn_bounds = fn_bounds;
     this.var_bounds = var_bounds;
     this.def_spans = def_spans;
     this.mutable_vars = mutable_vars;
-    this.type_aliases = type_aliases;
+  }
+}
+
+class IdGen {
+  constructor(next_type_var_id, next_def_id) {
+    this.next_type_var_id = next_type_var_id;
+    this.next_def_id = next_def_id;
+  }
+}
+
+class TypeEnv {
+  constructor(types, trait_reg, scope, ids) {
+    this.types = types;
+    this.trait_reg = trait_reg;
+    this.scope = scope;
+    this.ids = ids;
   }
 }
 
@@ -130,35 +154,35 @@ function mono(ty) {
 
 function new_type_env() {
   const initial_scope = new Scope(map_new());
-  return new TypeEnv(0, 0, [initial_scope], map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), [], map_new(), map_new(), map_new(), set_new(), map_new());
+  return new TypeEnv(new TypeRegistry(map_new(), map_new(), map_new(), map_new(), map_new()), new TraitRegistry(map_new(), [], map_new()), new ScopeManager([initial_scope], map_new(), map_new(), map_new(), set_new()), new IdGen(0, 0));
 }
 
 function TypeEnv_current_var_id(self) {
-  return self.next_type_var_id;
+  return self.ids.next_type_var_id;
 }
 function TypeEnv_fresh_var(self) {
-  const id = self.next_type_var_id;
-  self.next_type_var_id = (id + 1);
+  const id = self.ids.next_type_var_id;
+  self.ids.next_type_var_id = (id + 1);
   return types$Type_TypeVar(id, Option_none);
 }
 function TypeEnv_fresh_var_id(self) {
-  const id = self.next_type_var_id;
-  self.next_type_var_id = (id + 1);
+  const id = self.ids.next_type_var_id;
+  self.ids.next_type_var_id = (id + 1);
   return id;
 }
 function TypeEnv_fresh_def_id(self) {
-  const id = self.next_def_id;
-  self.next_def_id = (id + 1);
+  const id = self.ids.next_def_id;
+  self.ids.next_def_id = (id + 1);
   return id;
 }
 function TypeEnv_push_scope(self) {
-  return List_push(self.scopes, new Scope(map_new()));
+  return List_push(self.scope.scopes, new Scope(map_new()));
 }
 function TypeEnv_pop_scope(self) {
-  if ((List_len(self.scopes) <= 1)) {
+  if ((List_len(self.scope.scopes) <= 1)) {
     panic("Cannot pop global scope");
   }
-  return List_pop(self.scopes);
+  return List_pop(self.scope.scopes);
 }
 function TypeEnv_bind(self, name, scheme) {
   const s = (function() {
@@ -167,9 +191,9 @@ function TypeEnv_bind(self, name, scheme) {
   if (__ring_m._tag === "none") { return new TypeScheme(scheme.ty, scheme.type_vars, scheme.bounds, Option_some(TypeEnv_fresh_def_id(self))); }
   __match_fail(__ring_m);
 })();
-  const idx = (List_len(self.scopes) - 1);
+  const idx = (List_len(self.scope.scopes) - 1);
   __ring_match0: {
-    const __ring_m0 = List_get(self.scopes, idx);
+    const __ring_m0 = List_get(self.scope.scopes, idx);
     if (__ring_m0._tag === "some") {
       const scope = __ring_m0._0;
       return _Map_insert(scope.variables, name, s);
@@ -186,13 +210,13 @@ function TypeEnv_bind_mono(self, name, ty) {
   return TypeEnv_bind(self, name, mono(ty));
 }
 function TypeEnv_record_def_span(self, def_id, span) {
-  return _Map_insert(self.def_spans, def_id, span);
+  return _Map_insert(self.scope.def_spans, def_id, span);
 }
 function TypeEnv_rebind(self, name, scheme) {
-  let i = (List_len(self.scopes) - 1);
+  let i = (List_len(self.scope.scopes) - 1);
   while ((i >= 0)) {
     __ring_match1: {
-      const __ring_m1 = List_get(self.scopes, i);
+      const __ring_m1 = List_get(self.scope.scopes, i);
       if (__ring_m1._tag === "some") {
         const scope = __ring_m1._0;
         if (_Map_contains_key(scope.variables, name)) {
@@ -210,10 +234,10 @@ function TypeEnv_rebind(self, name, scheme) {
   }
 }
 function TypeEnv_lookup(self, name) {
-  let i = (List_len(self.scopes) - 1);
+  let i = (List_len(self.scope.scopes) - 1);
   while ((i >= 0)) {
     const found = (function() {
-  const __ring_m = List_get(self.scopes, i);
+  const __ring_m = List_get(self.scope.scopes, i);
   if (__ring_m._tag === "some") { const scope = __ring_m._0; return _Map_get(scope.variables, name); }
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
@@ -243,13 +267,13 @@ function TypeEnv_instantiate(self, scheme) {
           if (__ring_m3._tag === "TypeVar") {
             const id = __ring_m3.id;
             const existing = (function() {
-  const __ring_m = _Map_get(self.var_bounds, id);
+  const __ring_m = _Map_get(self.scope.var_bounds, id);
   if (__ring_m._tag === "some") { const s = __ring_m._0; return s; }
   if (__ring_m._tag === "none") { return set_new(); }
   __match_fail(__ring_m);
 })();
             _Set_insert(existing, bound.trait_name);
-            _Map_insert(self.var_bounds, id, existing);
+            _Map_insert(self.scope.var_bounds, id, existing);
             break __ring_match3;
           }
           break __ring_match3;
@@ -477,6 +501,11 @@ function __FnBound_Eq_eq(self, other) {
 }
 const __FnBound_Eq = { eq: __FnBound_Eq_eq, ne: function(self, other) { return !__FnBound_Eq_eq(self, other); } };
 
+function __IdGen_Eq_eq(self, other) {
+  return (self.next_type_var_id === other.next_type_var_id) && (self.next_def_id === other.next_def_id);
+}
+const __IdGen_Eq = { eq: __IdGen_Eq_eq, ne: function(self, other) { return !__IdGen_Eq_eq(self, other); } };
+
 function __BuiltInKind_Eq_eq(self, other) {
   if (self._tag !== other._tag) return false;
   return true;
@@ -497,6 +526,11 @@ function __FnBound_Clone_clone(self) {
   return new FnBound(self.type_param, self.trait_name);
 }
 const __FnBound_Clone = { clone: __FnBound_Clone_clone };
+
+function __IdGen_Clone_clone(self) {
+  return new IdGen(self.next_type_var_id, self.next_def_id);
+}
+const __IdGen_Clone = { clone: __IdGen_Clone_clone };
 
 function __BuiltInKind_Clone_clone(self) {
   switch (self._tag) {
@@ -524,6 +558,14 @@ function __FnBound_Ord_cmp(self, other) {
 }
 const __FnBound_Ord = { cmp: __FnBound_Ord_cmp };
 
+function __IdGen_Ord_cmp(self, other) {
+  var c;
+  c = (self.next_type_var_id < other.next_type_var_id ? -1 : self.next_type_var_id > other.next_type_var_id ? 1 : 0);
+  if (c !== 0) return c;
+  return (self.next_def_id < other.next_def_id ? -1 : self.next_def_id > other.next_def_id ? 1 : 0);
+}
+const __IdGen_Ord = { cmp: __IdGen_Ord_cmp };
+
 const __BuiltInKind_tag_order = { "BkIo": 0, "BkFail": 1, "BkMut": 2 };
 function __BuiltInKind_Ord_cmp(self, other) {
   var t1 = __BuiltInKind_tag_order[self._tag];
@@ -548,6 +590,11 @@ function __FnBound_Debug_debug(self) {
 }
 const __FnBound_Debug = { debug: __FnBound_Debug_debug };
 
+function __IdGen_Debug_debug(self) {
+  return "IdGen { " + "next_type_var_id: " + String(self.next_type_var_id) + ", " + "next_def_id: " + String(self.next_def_id) + " }";
+}
+const __IdGen_Debug = { debug: __IdGen_Debug_debug };
+
 function __BuiltInKind_Debug_debug(self) {
   switch (self._tag) {
     case "BkIo": return "BkIo";
@@ -559,4 +606,4 @@ function __BuiltInKind_Debug_debug(self) {
 const __BuiltInKind_Debug = { debug: __BuiltInKind_Debug_debug };
 
 
-export { SchemeBound, TypeScheme, StructDef, EnumDef, EffectOpDef, BuiltInKind_BkIo, BuiltInKind_BkFail, BuiltInKind_BkMut, EffectDef, TraitMethodDef, TraitDef, ImplEntry, TypeAliasDef, FnBound, Scope, TypeEnv, mono, new_type_env, apply_subst, apply_subst_row, TypeEnv_current_var_id, TypeEnv_fresh_var, TypeEnv_fresh_var_id, TypeEnv_fresh_def_id, TypeEnv_push_scope, TypeEnv_pop_scope, TypeEnv_bind, TypeEnv_bind_mono, TypeEnv_record_def_span, TypeEnv_rebind, TypeEnv_lookup, TypeEnv_instantiate, __SchemeBound_Eq, __FnBound_Eq, __BuiltInKind_Eq, __SchemeBound_Clone, __ImplEntry_Clone, __FnBound_Clone, __BuiltInKind_Clone, __SchemeBound_Ord, __FnBound_Ord, __BuiltInKind_Ord, __SchemeBound_Debug, __ImplEntry_Debug, __FnBound_Debug, __BuiltInKind_Debug };
+export { SchemeBound, TypeScheme, StructDef, EnumDef, EffectOpDef, BuiltInKind_BkIo, BuiltInKind_BkFail, BuiltInKind_BkMut, EffectDef, TraitMethodDef, TraitDef, ImplEntry, TypeAliasDef, FnBound, Scope, TypeRegistry, TraitRegistry, ScopeManager, IdGen, TypeEnv, mono, new_type_env, apply_subst, apply_subst_row, TypeEnv_current_var_id, TypeEnv_fresh_var, TypeEnv_fresh_var_id, TypeEnv_fresh_def_id, TypeEnv_push_scope, TypeEnv_pop_scope, TypeEnv_bind, TypeEnv_bind_mono, TypeEnv_record_def_span, TypeEnv_rebind, TypeEnv_lookup, TypeEnv_instantiate, __SchemeBound_Eq, __FnBound_Eq, __IdGen_Eq, __BuiltInKind_Eq, __SchemeBound_Clone, __ImplEntry_Clone, __FnBound_Clone, __IdGen_Clone, __BuiltInKind_Clone, __SchemeBound_Ord, __FnBound_Ord, __IdGen_Ord, __BuiltInKind_Ord, __SchemeBound_Debug, __ImplEntry_Debug, __FnBound_Debug, __IdGen_Debug, __BuiltInKind_Debug };

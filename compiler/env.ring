@@ -98,25 +98,45 @@ pub struct Scope {
 }
 
 // ============================================================
+// TypeEnv sub-structs
+// ============================================================
+
+pub struct TypeRegistry {
+    pub structs: Map<Str, StructDef>,
+    pub enums: Map<Str, EnumDef>,
+    pub effects: Map<Str, EffectDef>,
+    pub variant_to_enum: Map<Str, Str>,
+    pub type_aliases: Map<Str, TypeAliasDef>
+}
+
+pub struct TraitRegistry {
+    pub traits: Map<Str, TraitDef>,
+    pub trait_impls: List<ImplEntry>,
+    pub impl_methods: Map<Str, Map<Str, TypeScheme>>
+}
+
+pub struct ScopeManager {
+    pub scopes: List<Scope>,
+    pub fn_bounds: Map<Str, List<FnBound>>,
+    pub var_bounds: Map<Int, Set<Str>>,
+    pub def_spans: Map<Int, Span>,
+    pub mutable_vars: Set<Int>
+}
+
+pub struct IdGen {
+    pub next_type_var_id: Int,
+    pub next_def_id: Int
+}
+
+// ============================================================
 // TypeEnv
 // ============================================================
 
 pub struct TypeEnv {
-    pub next_type_var_id: Int,
-    pub next_def_id: Int,
-    pub scopes: List<Scope>,
-    pub structs: Map<Str, StructDef>,
-    pub enums: Map<Str, EnumDef>,
-    pub effects: Map<Str, EffectDef>,
-    pub impl_methods: Map<Str, Map<Str, TypeScheme>>,
-    pub variant_to_enum: Map<Str, Str>,
-    pub traits: Map<Str, TraitDef>,
-    pub trait_impls: List<ImplEntry>,
-    pub fn_bounds: Map<Str, List<FnBound>>,
-    pub var_bounds: Map<Int, Set<Str>>,
-    pub def_spans: Map<Int, Span>,
-    pub mutable_vars: Set<Int>,
-    pub type_aliases: Map<Str, TypeAliasDef>
+    pub types: TypeRegistry,
+    pub trait_reg: TraitRegistry,
+    pub scope: ScopeManager,
+    pub ids: IdGen
 }
 
 // ============================================================
@@ -130,21 +150,29 @@ pub fn mono(ty: Type) -> TypeScheme {
 pub fn new_type_env() -> TypeEnv {
     let initial_scope = Scope { variables: map_new() }
     TypeEnv {
-        next_type_var_id: 0,
-        next_def_id: 0,
-        scopes: [initial_scope],
-        structs: map_new(),
-        enums: map_new(),
-        effects: map_new(),
-        impl_methods: map_new(),
-        variant_to_enum: map_new(),
-        traits: map_new(),
-        trait_impls: [],
-        fn_bounds: map_new(),
-        var_bounds: map_new(),
-        def_spans: map_new(),
-        mutable_vars: set_new(),
-        type_aliases: map_new()
+        types: TypeRegistry {
+            structs: map_new(),
+            enums: map_new(),
+            effects: map_new(),
+            variant_to_enum: map_new(),
+            type_aliases: map_new()
+        },
+        trait_reg: TraitRegistry {
+            traits: map_new(),
+            trait_impls: [],
+            impl_methods: map_new()
+        },
+        scope: ScopeManager {
+            scopes: [initial_scope],
+            fn_bounds: map_new(),
+            var_bounds: map_new(),
+            def_spans: map_new(),
+            mutable_vars: set_new()
+        },
+        ids: IdGen {
+            next_type_var_id: 0,
+            next_def_id: 0
+        }
     }
 }
 
@@ -153,35 +181,35 @@ pub fn new_type_env() -> TypeEnv {
 // ============================================================
 
 impl TypeEnv {
-    pub fn current_var_id(self) -> Int { self.next_type_var_id }
+    pub fn current_var_id(self) -> Int { self.ids.next_type_var_id }
 
     pub fn fresh_var(var self) -> Type {
-        let id = self.next_type_var_id
-        self.next_type_var_id = id + 1
+        let id = self.ids.next_type_var_id
+        self.ids.next_type_var_id = id + 1
         Type::TypeVar { id: id, name: none }
     }
 
     pub fn fresh_var_id(var self) -> Int {
-        let id = self.next_type_var_id
-        self.next_type_var_id = id + 1
+        let id = self.ids.next_type_var_id
+        self.ids.next_type_var_id = id + 1
         id
     }
 
     pub fn fresh_def_id(var self) -> Int {
-        let id = self.next_def_id
-        self.next_def_id = id + 1
+        let id = self.ids.next_def_id
+        self.ids.next_def_id = id + 1
         id
     }
 
     pub fn push_scope(var self) {
-        self.scopes.push(Scope { variables: map_new() })
+        self.scope.scopes.push(Scope { variables: map_new() })
     }
 
     pub fn pop_scope(var self) {
-        if self.scopes.len() <= 1 {
+        if self.scope.scopes.len() <= 1 {
             panic("Cannot pop global scope")
         }
-        self.scopes.pop()
+        self.scope.scopes.pop()
     }
 
     pub fn bind(var self, name: Str, scheme: TypeScheme) {
@@ -189,8 +217,8 @@ impl TypeEnv {
             some(_) => scheme,
             none => TypeScheme { ..scheme, def_id: some(self.fresh_def_id()) }
         }
-        let idx = self.scopes.len() - 1
-        match self.scopes.get(idx) {
+        let idx = self.scope.scopes.len() - 1
+        match self.scope.scopes.get(idx) {
             some(scope) => scope.variables.insert(name, s),
             none => panic("no current scope")
         }
@@ -201,13 +229,13 @@ impl TypeEnv {
     }
 
     pub fn record_def_span(var self, def_id: Int, span: Span) {
-        self.def_spans.insert(def_id, span)
+        self.scope.def_spans.insert(def_id, span)
     }
 
     pub fn rebind(var self, name: Str, scheme: TypeScheme) {
-        var i = self.scopes.len() - 1
+        var i = self.scope.scopes.len() - 1
         while i >= 0 {
-            match self.scopes.get(i) {
+            match self.scope.scopes.get(i) {
                 some(scope) => {
                     if scope.variables.contains_key(name) {
                         scope.variables.insert(name, scheme)
@@ -221,9 +249,9 @@ impl TypeEnv {
     }
 
     pub fn lookup(self, name: Str) -> TypeScheme? {
-        var i = self.scopes.len() - 1
+        var i = self.scope.scopes.len() - 1
         while i >= 0 {
-            let found = match self.scopes.get(i) {
+            let found = match self.scope.scopes.get(i) {
                 some(scope) => scope.variables.get(name),
                 none => none
             }
@@ -243,12 +271,12 @@ impl TypeEnv {
             match mapping.get(bound.type_var) {
                 some(fresh) => match fresh {
                     Type::TypeVar { id, .. } => {
-                        let existing: Set<Str> = match self.var_bounds.get(id) {
+                        let existing: Set<Str> = match self.scope.var_bounds.get(id) {
                             some(s) => s,
                             none => set_new()
                         }
                         existing.insert(bound.trait_name)
-                        self.var_bounds.insert(id, existing)
+                        self.scope.var_bounds.insert(id, existing)
                     },
                     _ => {}
                 },

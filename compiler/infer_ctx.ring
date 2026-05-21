@@ -183,7 +183,7 @@ pub fn collect_free_vars(t: Type, result: Set<Int>) {
 
 pub fn free_type_vars_in_env(env: TypeEnv, subst: Map<Int, Type>) -> Set<Int> {
     let result: Set<Int> = set_new()
-    for scope in env.scopes {
+    for scope in env.scope.scopes {
         for entry in scope.variables.entries() {
             let (_, scheme) = entry
             let ftv = free_type_vars(scheme.ty, subst)
@@ -217,7 +217,7 @@ pub fn generalize(env: TypeEnv, t: Type, subst: Map<Int, Type>) -> TypeScheme {
     }
     var bounds: List<SchemeBound> = []
     for tv in type_vars {
-        match env.var_bounds.get(tv) {
+        match env.scope.var_bounds.get(tv) {
             some(traits) => {
                 for trait_name in traits {
                     bounds.push(SchemeBound { type_var: tv, trait_name: trait_name })
@@ -330,7 +330,7 @@ pub fn resolve_dicts_from_scheme(
                 let concrete = apply_subst(s, fresh_var)
                 match concrete {
                     Type::StructType { name, .. } => {
-                        if env.trait_impls.any(fn(impl_) {
+                        if env.trait_reg.trait_impls.any(fn(impl_) {
                             impl_.target_type_name == name && impl_.trait_name == bound.trait_name
                         }) {
                             resolved_dicts.push(trait_dict_name(name, bound.trait_name))
@@ -338,7 +338,7 @@ pub fn resolve_dicts_from_scheme(
                         }
                     },
                     Type::EnumType { name, .. } => {
-                        if env.trait_impls.any(fn(impl_) {
+                        if env.trait_reg.trait_impls.any(fn(impl_) {
                             impl_.target_type_name == name && impl_.trait_name == bound.trait_name
                         }) {
                             resolved_dicts.push(trait_dict_name(name, bound.trait_name))
@@ -362,7 +362,7 @@ pub fn resolve_dicts_from_scheme(
                 if !found {
                     match type_to_builtin_name(concrete) {
                         some(prim_name) => {
-                            if env.trait_impls.any(fn(impl_) {
+                            if env.trait_reg.trait_impls.any(fn(impl_) {
                                 impl_.target_type_name == prim_name && impl_.trait_name == bound.trait_name
                             }) {
                                 resolved_dicts.push(trait_dict_name(prim_name, bound.trait_name))
@@ -454,8 +454,8 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
     }
 
     // Known struct
-    if ctx.env.structs.contains_key(name) {
-        match ctx.env.structs.get(name) {
+    if ctx.env.types.structs.contains_key(name) {
+        match ctx.env.types.structs.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
                     let _ = type_error(ctx.sink, E0301,
@@ -483,8 +483,8 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
     }
 
     // Known enum
-    if ctx.env.enums.contains_key(name) {
-        match ctx.env.enums.get(name) {
+    if ctx.env.types.enums.contains_key(name) {
+        match ctx.env.types.enums.get(name) {
             some(def) => {
                 if type_args.len() > 0 && type_args.len() != def.type_params.len() {
                     let _ = type_error(ctx.sink, E0301,
@@ -512,7 +512,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
     }
 
     // Type alias
-    match ctx.env.type_aliases.get(name) {
+    match ctx.env.types.type_aliases.get(name) {
         some(alias) => {
             if type_args.len() > 0 && type_args.len() != alias.type_params.len() {
                 let _ = type_error(ctx.sink, E0301,
@@ -599,7 +599,7 @@ fn bind_constructor_pattern(
 ) {
     let enum_name = resolve_pattern_enum(ctx, name, qualifier, span)
     match enum_name {
-        some(ename) => match ctx.env.enums.get(ename) {
+        some(ename) => match ctx.env.types.enums.get(ename) {
             some(enum_def) => {
                 let variant = enum_def.variants.find(fn(v) { v.name == name })
                 match variant {
@@ -646,7 +646,7 @@ fn bind_named_constructor_pattern(
 ) {
     let enum_name = resolve_pattern_enum(ctx, name, qualifier, span)
     match enum_name {
-        some(ename) => match ctx.env.enums.get(ename) {
+        some(ename) => match ctx.env.types.enums.get(ename) {
             some(enum_def) => {
                 let variant = enum_def.variants.find(fn(v) { v.name == name })
                 match variant {
@@ -693,7 +693,7 @@ fn bind_named_constructor_pattern(
 
 fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span: Span) -> Str? {
     match qualifier {
-        some(q) => match ctx.env.enums.get(q) {
+        some(q) => match ctx.env.types.enums.get(q) {
             some(enum_def) => {
                 if enum_def.variants.any(fn(v) { v.name == variant_name }) {
                     some(q)
@@ -711,7 +711,7 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
                 none
             }
         },
-        none => ctx.env.variant_to_enum.get(variant_name)
+        none => ctx.env.types.variant_to_enum.get(variant_name)
     }
 }
 

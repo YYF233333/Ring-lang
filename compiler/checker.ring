@@ -89,30 +89,30 @@ fn inject_module_exports(var ctx: InferCtx, exports: List<ModuleExports>) {
             let (name, def) = entry
             match def {
                 TypeDef::StructDef_(sdef) => {
-                    ctx.env.structs.insert(name, sdef)
+                    ctx.env.types.structs.insert(name, sdef)
                 },
                 TypeDef::EnumDef_(edef) => {
-                    ctx.env.enums.insert(name, edef)
+                    ctx.env.types.enums.insert(name, edef)
                     for v in edef.variants {
-                        ctx.env.variant_to_enum.insert(v.name, name)
+                        ctx.env.types.variant_to_enum.insert(v.name, name)
                     }
                 },
             }
         }
         for entry in mod_.effects.entries() {
             let (name, effdef) = entry
-            ctx.env.effects.insert(name, effdef)
+            ctx.env.types.effects.insert(name, effdef)
         }
         for entry in mod_.traits.entries() {
             let (name, tdef) = entry
-            ctx.env.traits.insert(name, tdef)
+            ctx.env.trait_reg.traits.insert(name, tdef)
         }
         for impl_ in mod_.trait_impls {
-            ctx.env.trait_impls.push(impl_)
+            ctx.env.trait_reg.trait_impls.push(impl_)
         }
         for entry in mod_.impl_methods.entries() {
             let (type_name, methods) = entry
-            match ctx.env.impl_methods.get(type_name) {
+            match ctx.env.trait_reg.impl_methods.get(type_name) {
                 some(existing) => {
                     for mentry in methods.entries() {
                         let (method_name, scheme) = mentry
@@ -120,7 +120,7 @@ fn inject_module_exports(var ctx: InferCtx, exports: List<ModuleExports>) {
                     }
                 },
                 none => {
-                    ctx.env.impl_methods.insert(type_name, map_clone(methods))
+                    ctx.env.trait_reg.impl_methods.insert(type_name, map_clone(methods))
                 },
             }
         }
