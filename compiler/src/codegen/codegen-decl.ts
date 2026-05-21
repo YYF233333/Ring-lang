@@ -42,11 +42,16 @@ export function emit_fn_decl(ctx: CodegenCtx, decl: HFnDecl, prefix?: string): v
   const name = prefix ? `${prefix}_${safe_ident(decl.name)}` : ctx.qualify(decl.name);
   const param_names = decl.params.map(p => safe_ident(p.name));
   const dict_params = (decl.trait_bounds ?? []).map(b => trait_bound_param_name(b.type_param, b.trait_name));
-  const ev_params = get_evidence_params(decl.effects);
+  // Use transitive effects from local_fn_effects if available (more complete than decl.effects)
+  const effective_effects = ctx.local_fn_effects.get(decl.name) ?? decl.effects;
+  const ev_params = get_evidence_params(effective_effects);
   const all_params = [...param_names, ...dict_params, ...ev_params].join(", ");
   ctx.emit(`function ${name}(${all_params}) {`);
   ctx.push_indent();
+  const saved_fn_effects = ctx.current_fn_effects;
+  ctx.current_fn_effects = effective_effects;
   ctx.emit_block_body(decl.body);
+  ctx.current_fn_effects = saved_fn_effects;
   ctx.pop_indent();
   ctx.emit("}");
 }

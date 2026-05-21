@@ -145,9 +145,33 @@ function gen_ord_dispatch(ctx: CodegenCtx, expr: HExpr & { kind: "bin_op" }): st
 // Call expression
 // ============================================================
 
-function get_callee_evidence_args(_ctx: CodegenCtx, callee_type: Type): string {
-  if (callee_type.kind !== "fn" || callee_type.effects.effects.length === 0) return "";
-  return get_evidence_params(callee_type.effects).join(", ");
+function get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name?: string): string {
+  if (callee_type.kind === "fn" && callee_type.effects.effects.length > 0) {
+    return get_evidence_params(callee_type.effects).join(", ");
+  }
+  // Fallback: callee type may have empty effects due to registration-order inference.
+  // Check if the local function declaration has known effects, but only if
+  // evidence is available in scope (current function has effects or inside try block).
+  if (callee_name) {
+    const actual_effects = ctx.local_fn_effects.get(callee_name);
+    if (actual_effects && actual_effects.effects.length > 0) {
+      const caller_effect_names = new Set<string>();
+      if (ctx.current_fn_effects) {
+        for (const e of ctx.current_fn_effects.effects) {
+          caller_effect_names.add(e.kind === "custom" ? e.name : e.kind);
+        }
+      }
+      if (ctx.in_try_fail) caller_effect_names.add("fail");
+      const needed = actual_effects.effects.filter(e => {
+        const name = e.kind === "custom" ? e.name : e.kind;
+        return caller_effect_names.has(name);
+      });
+      if (needed.length > 0) {
+        return get_evidence_params({ effects: needed, tail: undefined }).join(", ");
+      }
+    }
+  }
+  return "";
 }
 
 function gen_call(ctx: CodegenCtx, expr: HExpr & { kind: "call" }): string {
@@ -282,9 +306,10 @@ function gen_call(ctx: CodegenCtx, expr: HExpr & { kind: "call" }): string {
 
   // Pass dictionary args + evidence args at call sites
   const callee = gen_expr(ctx, expr.callee);
+  const callee_name = expr.callee.kind === "ident" ? expr.callee.name : undefined;
   const args = expr.args.map(a => gen_expr(ctx, a)).join(", ");
   const dict_args = (expr.resolved_dicts ?? []).map(d => ctx.qualify(d)).join(", ");
-  const ev_args = get_callee_evidence_args(ctx, expr.callee.type);
+  const ev_args = get_callee_evidence_args(ctx, expr.callee.type, callee_name);
   const all_args = [args, dict_args, ev_args].filter(s => s.length > 0).join(", ");
   return `${callee}(${all_args})`;
 }
@@ -460,7 +485,10 @@ function gen_string_interp(ctx: CodegenCtx, expr: HExpr & { kind: "string_interp
 
 function gen_try_catch(ctx: CodegenCtx, expr: HExpr & { kind: "try_catch" }): string {
   const body_has_fail = expr.body.effects.effects.some(e => e.kind === "fail");
+  const saved = ctx.in_try_fail;
+  if (body_has_fail) ctx.in_try_fail = true;
   const body = gen_expr(ctx, expr.body);
+  ctx.in_try_fail = saved;
   const handler = gen_expr(ctx, expr.handler);
 
   if (!body_has_fail) {
@@ -582,7 +610,10 @@ function gen_option_or(ctx: CodegenCtx, expr: HExpr & { kind: "option_or" }): st
 }
 
 function gen_try_block(ctx: CodegenCtx, expr: HExpr & { kind: "try_block" }): string {
+  const saved = ctx.in_try_fail;
+  ctx.in_try_fail = true;
   const body = gen_expr(ctx, expr.body);
+  ctx.in_try_fail = saved;
   return `(function() { const ${evidence_param_name("fail")} = { raise: (__ring_err) => { throw new ${RUNTIME_EFFECT_ABORT}("fail", __ring_err); } }; try { return { ${ENUM_TAG_FIELD}: "${OPTION_SOME_TAG}", ${OPTION_PAYLOAD_FIELD}: ${body} }; } catch (__ring_e) { if (__ring_e instanceof ${RUNTIME_EFFECT_ABORT} && __ring_e.effect === "fail") return { ${ENUM_TAG_FIELD}: "${OPTION_NONE_TAG}" }; throw __ring_e; } })()`;
 }
 

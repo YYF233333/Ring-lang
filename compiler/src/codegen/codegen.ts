@@ -41,6 +41,9 @@ class CodeGenerator implements CodegenCtx {
   skip_preamble: boolean;
   skip_main_call: boolean;
   local_names = new Set<string>();
+  local_fn_effects = new Map<string, import("../types/index.js").EffectRow>();
+  current_fn_effects?: import("../types/index.js").EffectRow;
+  in_try_fail = false;
   module_imports?: string[];
   module_exports?: string[];
 
@@ -137,7 +140,12 @@ class CodeGenerator implements CodegenCtx {
     // Collect names declared in this module (for qualify — only these get module_prefix)
     for (const decl of program.decls) {
       switch (decl.kind) {
-        case "fn_decl": this.local_names.add(decl.name); break;
+        case "fn_decl":
+          this.local_names.add(decl.name);
+          if (decl.effects.effects.length > 0) {
+            this.local_fn_effects.set(decl.name, decl.effects);
+          }
+          break;
         case "struct_decl": this.local_names.add(decl.name); break;
         case "enum_decl":
           this.local_names.add(decl.name);
@@ -153,6 +161,42 @@ class CodeGenerator implements CodegenCtx {
         case "extern_fn_decl": break;
         case "extern_type_decl": break;
         case "type_alias_decl": break;
+      }
+    }
+
+    // Compute transitive effect closure: if fn A calls fn B which has effects,
+    // A also needs those effects (for evidence forwarding).
+    if (this.local_fn_effects.size > 0) {
+      const fn_callees = new Map<string, Set<string>>();
+      for (const decl of program.decls) {
+        if (decl.kind === "fn_decl") {
+          const callees = new Set<string>();
+          collect_local_calls(decl.body, this.local_names, callees);
+          fn_callees.set(decl.name, callees);
+        }
+      }
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const [name, callees] of fn_callees) {
+          for (const callee of callees) {
+            const callee_effects = this.local_fn_effects.get(callee);
+            if (!callee_effects) continue;
+            const current = this.local_fn_effects.get(name);
+            if (!current) {
+              this.local_fn_effects.set(name, { effects: [...callee_effects.effects], tail: undefined });
+              changed = true;
+            } else {
+              for (const e of callee_effects.effects) {
+                const ename = e.kind === "custom" ? e.name : e.kind;
+                if (!current.effects.some(ce => (ce.kind === "custom" ? ce.name : ce.kind) === ename)) {
+                  current.effects.push(e);
+                  changed = true;
+                }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -256,4 +300,128 @@ class CodeGenerator implements CodegenCtx {
 export function generate(program: HProgram, options?: import("./codegen-ctx.js").CodegenOptions): string {
   const gen = new CodeGenerator(options);
   return gen.generate(program);
+}
+
+// Walk HIR to collect local function names called from an expression tree
+function collect_local_calls(expr: HExpr, local_names: Set<string>, out: Set<string>): void {
+  switch (expr.kind) {
+    case "call":
+      if (expr.callee.kind === "ident" && local_names.has(expr.callee.name)) {
+        out.add(expr.callee.name);
+      }
+      collect_local_calls(expr.callee, local_names, out);
+      for (const a of expr.args) collect_local_calls(a, local_names, out);
+      break;
+    case "block":
+      for (const s of expr.stmts) collect_local_calls_stmt(s, local_names, out);
+      if (expr.tail) collect_local_calls(expr.tail, local_names, out);
+      break;
+    case "if_expr":
+      collect_local_calls(expr.condition, local_names, out);
+      collect_local_calls(expr.then_branch, local_names, out);
+      if (expr.else_branch) collect_local_calls(expr.else_branch, local_names, out);
+      break;
+    case "match_expr":
+      collect_local_calls(expr.scrutinee, local_names, out);
+      for (const arm of expr.arms) {
+        collect_local_calls(arm.body, local_names, out);
+        if (arm.guard) collect_local_calls(arm.guard, local_names, out);
+      }
+      break;
+    case "bin_op":
+      collect_local_calls(expr.left, local_names, out);
+      collect_local_calls(expr.right, local_names, out);
+      break;
+    case "unary_op":
+      collect_local_calls(expr.operand, local_names, out);
+      break;
+    case "field_access":
+      collect_local_calls(expr.receiver, local_names, out);
+      break;
+    case "struct_lit":
+      for (const f of expr.fields) collect_local_calls(f.value, local_names, out);
+      if (expr.spread) collect_local_calls(expr.spread, local_names, out);
+      break;
+    case "named_variant_construct":
+      for (const f of expr.fields) collect_local_calls(f.value, local_names, out);
+      if (expr.spread) collect_local_calls(expr.spread, local_names, out);
+      break;
+    case "string_interp":
+      for (const p of expr.parts) {
+        if (typeof p !== "string") collect_local_calls(p, local_names, out);
+      }
+      break;
+    case "try_catch":
+      collect_local_calls(expr.body, local_names, out);
+      collect_local_calls(expr.handler, local_names, out);
+      break;
+    case "handle_expr":
+      collect_local_calls(expr.body, local_names, out);
+      for (const h of expr.handlers) collect_local_calls(h.body, local_names, out);
+      break;
+    case "lambda":
+      collect_local_calls(expr.body, local_names, out);
+      break;
+    case "try_block":
+      collect_local_calls(expr.body, local_names, out);
+      break;
+    case "option_unwrap":
+      collect_local_calls(expr.expr, local_names, out);
+      break;
+    case "option_or":
+      collect_local_calls(expr.expr, local_names, out);
+      collect_local_calls(expr.default_value, local_names, out);
+      break;
+    case "range":
+      collect_local_calls(expr.start, local_names, out);
+      collect_local_calls(expr.end, local_names, out);
+      break;
+    case "list_lit":
+      for (const e of expr.elements) collect_local_calls(e, local_names, out);
+      break;
+    case "tuple_lit":
+      for (const e of expr.elements) collect_local_calls(e, local_names, out);
+      break;
+    case "effect_op":
+      for (const a of expr.args) collect_local_calls(a, local_names, out);
+      break;
+    default:
+      break;
+  }
+}
+
+function collect_local_calls_stmt(stmt: HStmt, local_names: Set<string>, out: Set<string>): void {
+  switch (stmt.kind) {
+    case "let_stmt": case "var_stmt":
+      collect_local_calls(stmt.init, local_names, out);
+      break;
+    case "assign_stmt":
+      collect_local_calls(stmt.target, local_names, out);
+      collect_local_calls(stmt.value, local_names, out);
+      break;
+    case "expr_stmt":
+      collect_local_calls(stmt.expr, local_names, out);
+      break;
+    case "return_stmt":
+      if (stmt.value) collect_local_calls(stmt.value, local_names, out);
+      break;
+    case "while_stmt":
+      collect_local_calls(stmt.condition, local_names, out);
+      collect_local_calls(stmt.body, local_names, out);
+      break;
+    case "for_in_stmt":
+      collect_local_calls(stmt.iterable, local_names, out);
+      collect_local_calls(stmt.body, local_names, out);
+      break;
+    case "let_destructure":
+      collect_local_calls(stmt.init, local_names, out);
+      break;
+    case "if_let":
+      collect_local_calls(stmt.expr, local_names, out);
+      collect_local_calls(stmt.then_block, local_names, out);
+      if (stmt.else_block) collect_local_calls(stmt.else_block, local_names, out);
+      break;
+    default:
+      break;
+  }
 }

@@ -65,6 +65,9 @@ export interface CodegenCtx {
   skip_preamble: boolean;
   skip_main_call: boolean;
   local_names: Set<string>;
+  local_fn_effects: Map<string, EffectRow>;
+  current_fn_effects?: EffectRow;
+  in_try_fail: boolean;
   module_imports?: string[];
   module_exports?: string[];
 
