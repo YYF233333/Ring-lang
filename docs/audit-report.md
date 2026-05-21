@@ -9,8 +9,8 @@
 
 | # | 问题 | 影响 | 备注 |
 |---|------|------|------|
-| 1 | ~300 行 `empty_xxx()` 空列表 boilerplate | 可读性 | 需语言层改进：`[]` 类型推断或 `List::new<T>()` |
-| 2 | `hexpr_type`/`expr_type`/`expr_effects` accessor 在 3 个文件重复 | 维护陷阱 | 应统一到 `hir.ring`，最高 ROI 重构 |
+| 1 | ~~`empty_xxx()` 空列表 boilerplate~~ | ~~可读性~~ | **已修复**：`[]` 类型推断 + 全量清理（Phase 3 Iter 1） |
+| 2 | ~~`hexpr_type`/`expr_type`/`expr_effects` accessor 重复~~ | ~~维护陷阱~~ | **已修复**：统一到 `hir.ring`（Phase 3 Iter 1） |
 | 3 | `types_equal` 148 行重复模式 | 可读性 | 抽象为 `list_zip_all` helper |
 | 4 | `JS_RESERVED()` 每次 `safe_ident()` 调用重建 Set | 性能 | 缓存到 CodegenCtx |
 | 5 | `BUILTIN_*()` 每次调用分配新字符串 | 性能 | 需 `const` 语言特性 |
@@ -19,7 +19,7 @@
 | 8 | `compiler_mod.ring` ESM 输出 310 行单函数 | 可维护性 | 提取 helper |
 | 9 | 嵌套 if/else 链代替 match（derive.ring, codegen_derive.ring） | 可读性 | 改为 match |
 | 10 | `token_kind_value` 字符串比较代替 Eq trait 派生 | 性能 | 为 TokenKind derive Eq |
-| 11 | `MergeResult` 等 wrapper struct | 噪音 | 需 `.0`/`.1` tuple 字段访问 |
+| 11 | ~~`MergeResult` 等 wrapper struct~~ | ~~噪音~~ | **已修复**：MergeResult 已用 `.0`/`.1` 替代（Phase 3 Iter 1） |
 | 12 | `index_of_int`/`index_of_str` 重复实现 | 小重复 | |
 | 13 | `try_eq_dispatch` 用空字符串作 sentinel | 脆弱约定 | 改用 `Option<Str>` |
 | 14 | 68 处 `panic()` 调用（约 40 处 unreachable） | 崩溃而非友好报错 | 逐步替换为 DiagnosticSink |

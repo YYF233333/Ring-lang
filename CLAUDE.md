@@ -122,7 +122,7 @@ Ring-lang/
 
 ## 已实现功能
 
-完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM）、FFI（extern fn/extern type）、标准库（6 个 .ring 文件）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 语法 / ? postfix / try block / or / typed catch）、字符串插值、enum 命名字段、struct update 语法、var self 可变方法。开发历史详见 git log。
+完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM）、FFI（extern fn/extern type）、标准库（6 个 .ring 文件）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 语法 / ? postfix / try block / or / typed catch）、字符串插值、enum 命名字段、struct update 语法、var self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）。开发历史详见 git log。
 
 ## 已知限制
 
@@ -154,7 +154,6 @@ Ring-lang/
 - **字符串插值不支持嵌套引号**：`"\{fn("arg")}"` 解析失败——内层 `"` 被视为外层字符串终止符。必须先 `let v = fn("arg")`，再 `"\{v}"`
 - **字符串无 `+` 拼接运算符**：`"a" + "b"` 报 E0303（要求数值类型）。所有字符串拼接必须用插值 `"\{a}\{b}"` 或 `List<Str>.join()`
 - **`return` 不能出现在 match arm 表达式位置**：match arm 是表达式，`return` 是语句。需要提取到独立函数用 `return`，或重构为 if-else
-- **空列表 `[]` 类型推断失败**：`let x: List<T> = []` 即使带类型标注也无法推断元素类型。必须用 `let x = [dummy]; x.clear(); x` 模式或 `empty_xxx()` helper 函数
 - **`[x].clear()` 返回 `Unit`**：`clear()` 是原地操作返回 `()`，不能链式调用 `.map()`。必须分为 `let x = [v]; x.clear(); x.map(...)` 三条语句
 - **`List.get(i)` 返回 `Option<T>`**：无直接下标访问 `list[i]`。需要 `match list.get(i) { some(v) => v, ... }` 或封装 `_at()` helper
 - **无 `List.set(i, v)` 方法**：修改列表中间元素需要重建整个列表
