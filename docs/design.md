@@ -1150,7 +1150,7 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 
 **控制流**：
 - **`return` 不能在 match arm 表达式位置**：match arm 是表达式，`return` 是语句级构造。需要提取为独立函数或改用 if-else。codegen_expr 中 eq/ord dispatch 的 early-return 模式需要完全重构
-- **`BinOp::Eq {` 解析歧义**：`op == BinOp::Eq` 后跟 `{` 块时，parser 将 `Eq {` 解析为命名字段变体构造。需加括号 `(op == BinOp::Eq)` 或改用 if-else
+- **Struct literal 不能在条件位置**：`if x == MyStruct { f: 1 } { ... }` 歧义，parser 无法区分 struct literal 和块。需用括号或变量绑定（Go/Rust 同有此限制）
 
 **类型推断**：
 - **空列表 `[]` 类型推断失败**：即使 `let x: List<T> = []` 带完整标注也无法推断。根因是 `[]` 没有元素可供推断泛型参数

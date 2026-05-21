@@ -45,6 +45,7 @@ Ring-lang/
 │   ├── exhaustive.ring                 穷尽性检查（Maranget 风格 pattern matrix）
 │   ├── derive.ring                     Auto-derive fixpoint pass（Eq/Clone/Debug/Ord 自动派生）
 │   ├── zonk.ring                       Zonk 工具（apply subst + label type var names）
+│   ├── infer_decl.ring                 声明检查（check_fn_decl/check_impl_decl 等，从 infer.ring 提取）
 │   ├── checker.ring                    主入口：check(Program) -> HProgram
 │   ├── runtime.ring                    JS 运行时辅助代码 + RUNTIME_EXPORT_NAMES + runtime_esm_code()
 │   ├── codegen_ctx.ring                CodegenCtx struct + safe_ident + 辅助函数
@@ -108,7 +109,7 @@ Ring-lang/
 - 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（Ring 编译器自动检查）
 - 每个 PR 至少包含一个 e2e 测试用例（`tests/cases/*.ring` + `e2e.test.ts` 注册）
 - PR 合入前必须通过 `npm test`（从 `compiler/` 目录运行）
-- **Worktree 隔离规则**：Agent 工具可使用 `isolation: "worktree"` 进行并行开发。worktree 完成后必须通过 `git merge` CLI 命令同步回主分支，禁止用 Edit 工具手动搬迁或同步修改。
+- **Worktree 隔离规则**：Agent 工具可使用 `isolation: "worktree"` 进行并行开发。worktree 完成后必须通过 `git merge` CLI 命令同步回主分支，禁止用 Edit 工具手动搬迁或同步修改。Worktree agent 启动后必须立即执行 `git log --oneline -1` 验证 base commit 是否为预期的 HEAD，如果落后于预期则中止并报告（Claude Code worktree 创建存在 race condition，可能拿到旧 base）。
 - **决策必须讨论**：发现问题后不得自行决定修复方案，除非问题trival且有唯一正确修复方式。所有需要判断的问题必须先列出来让用户拍板，然后一次性执行。不讨论就动手 = 错误。
 - **禁止忽略问题**：列出来的问题不能以"推迟到下阶段"、"很难触发"、"当前阶段不重要"等原因**主动**替用户忽略，必须上报用户阐明推荐理由，由用户拍板。
 - **文档时效性**：每次修改编译器功能后，必须同步更新 CLAUDE.md 和 docs/design.md 中受影响的描述（测试数量、已知限制、实现状态附录等）。过时文档比没有文档更有害。已完成的 review/plan/spec 文件应删除而非保留。
@@ -124,7 +125,7 @@ Ring-lang/
 
 ## 已实现功能
 
-完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM）、FFI（extern fn/extern type）、标准库（7 个 .ring 文件，含 `Result<T,E>`）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、var self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）。开发历史详见 git log。
+完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/loop/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM）、FFI（extern fn/extern type）、标准库（7 个 .ring 文件，含 `Result<T,E>`）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、var self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）、`loop` 无限循环关键字（脱糖为 `while true`）。开发历史详见 git log。
 
 ## 已知限制
 
@@ -161,7 +162,8 @@ Ring-lang/
 
 ### 基础设施限制
 
-- 无 `loop` 无限循环语法（`while true` 可替代），无 Range/List/Set/Map 以外的自定义迭代器
+- 无 Range/List/Set/Map 以外的自定义迭代器
+- **Struct literal 不能直接出现在 if/while/for/match 条件位置**：`if x == MyStruct { f: 1 } { ... }` 歧义——parser 无法区分 struct literal 和块的 `{`。需用括号 `if x == (MyStruct { f: 1 }) { ... }` 或变量绑定。Go/Rust 同有此限制。
 - `for..in` 不支持 Map 直接迭代（需 `for entry in map.entries()` + 解构）
 - 无 CI 管线（test 依赖手动执行）
 - 模块系统不支持：`sig` 签名、first-class modules、inline `mod` 块、capability 限制、相对路径（`super::`/`self::`）
