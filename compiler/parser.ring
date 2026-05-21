@@ -351,6 +351,9 @@ impl Parser {
         if self.check(TokenKind::TkWhile) {
             return self.parse_while_stmt()
         }
+        if self.check(TokenKind::TkLoop) {
+            return self.parse_loop_stmt()
+        }
         if self.check(TokenKind::TkFor) {
             return self.parse_for_in_stmt()
         }
@@ -390,6 +393,15 @@ impl Parser {
         let condition = self.parse_expr()
         let body = self.parse_block_expr()
         let end = self.current_span_start()
+        Stmt::While { condition: condition, body: body, span: self.make_span(start, end) }
+    }
+
+    fn parse_loop_stmt(var self) -> Stmt {
+        let start = self.current_span_start()
+        self.expect(TokenKind::TkLoop)
+        let body = self.parse_block_expr()
+        let end = self.current_span_start()
+        let condition = Expr::BoolLit { value: true, span: self.make_span(start, start) }
         Stmt::While { condition: condition, body: body, span: self.make_span(start, end) }
     }
 

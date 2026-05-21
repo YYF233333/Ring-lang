@@ -337,6 +337,7 @@ const cases: TestCase[] = [
   { file: "tuple_field_access.ring", expected: "tuple_field_access: all tests passed\n" },
   { file: "result_basic.ring", expected: "result_basic: all tests passed\n" },
   { file: "const_basic.ring", expected: "const_basic: all tests passed\n" },
+  { file: "loop_basic.ring", expected: "loop_basic: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
