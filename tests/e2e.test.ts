@@ -434,6 +434,7 @@ const cases: TestCase[] = [
   { file: "index_expr.ring", expected: "index_expr: all tests passed\n" },
   { file: "mut_param_enforcement.ring", expected: "mut_param_enforcement: all tests passed\n" },
   { file: "mod_nested_block.ring", expected: "mod_nested_block: all tests passed\n" },
+  { file: "audit_impl_prefix_nested.ring", expected: "audit_impl_prefix_nested: all tests passed\n" },
   { file: "audit_derive_tuple.ring", expected: "pass: derive tuple\n" },
   { file: "audit_safe_ident_globals.ring", expected: "pass: safe_ident globals\n" },
   { file: "audit_match_tuple_bare_variant.ring", expected: "pass: match tuple bare variant\n" },

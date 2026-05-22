@@ -81,9 +81,15 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
                          is_pub: is_pub, span: span },
         Decl::Sig { name, members, is_pub, span } =>
             Decl::Sig { name: "${mod_name}::${name}", members: members, is_pub: is_pub, span: span },
-        Decl::Impl { target_type, type_params, trait_name, methods, span } =>
-            Decl::Impl { target_type: "${mod_name}::${target_type}", type_params: type_params,
-                         trait_name: trait_name, methods: methods, span: span },
+        Decl::Impl { target_type, type_params, trait_name, methods, span } => {
+            let prefixed_target = if target_type.contains("::") {
+                target_type
+            } else {
+                "${mod_name}::${target_type}"
+            }
+            Decl::Impl { target_type: prefixed_target, type_params: type_params,
+                         trait_name: trait_name, methods: methods, span: span }
+        },
         Decl::Trait { name, type_params, supertraits, methods, is_pub, span } =>
             Decl::Trait { name: "${mod_name}::${name}", type_params: type_params, supertraits: supertraits,
                          methods: methods, is_pub: is_pub, span: span },

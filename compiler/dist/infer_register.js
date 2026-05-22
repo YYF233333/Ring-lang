@@ -188,7 +188,8 @@ function prefix_decl_name(mod_name, decl) {
     }
     if (__ring_m6._tag === "Impl") {
       const target_type = __ring_m6.target_type; const type_params = __ring_m6.type_params; const trait_name = __ring_m6.trait_name; const methods = __ring_m6.methods; const span = __ring_m6.span;
-      return ast$Decl_Impl(`${mod_name}::${target_type}`, type_params, trait_name, methods, span);
+      const prefixed_target = (Str_contains(target_type, "::") ? target_type : `${mod_name}::${target_type}`);
+      return ast$Decl_Impl(prefixed_target, type_params, trait_name, methods, span);
       break __ring_match6;
     }
     if (__ring_m6._tag === "Trait") {
