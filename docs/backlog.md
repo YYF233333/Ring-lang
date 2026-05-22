@@ -17,14 +17,14 @@
 - B-008 Default Effect Handler [M]
 
 **层 2（核心特性）**：
-- B-036 Iterator Trait [M]（依赖 B-005）
+- B-004 关联类型 [L]（依赖 B-005）
+- B-036 Iterator Trait [M]（依赖 B-005 + B-004，双 trait 方案）
 - B-010 `delegate` 关键字 [M]
-- B-004 关联类型 [L]
 - B-033 GADTs [L]
 
 **约束**：
-- B-005 必须在 B-036 之前完成（supertrait 是 Iterator 层次的前置）
-- 其余无顺序要求，Worker 按文件重叠自行分 wave
+- 依赖链：B-005 → B-004 → B-036（supertrait → 关联类型 → Iterator 完整双 trait 方案）
+- B-010、B-033 无依赖，可与链中任意步骤并行
 - 层 3（Refinement/Linear/async/LLVM）Phase C 完成后再讨论
 
 ---
@@ -60,29 +60,104 @@ design.md 1.3。类型可依赖特定值（`Vec<T, n: Nat>`），不要求完整
 - **优先级**：Phase D（研究向）
 
 ### B-004 关联类型（Associated Types）[feature] [P2] [L] [queued]
-Trait 中声明关联类型 `type Item`，impl 时指定具体类型。
+Trait 中声明关联类型 `type Item`，impl 时指定具体类型。访问语法 `T::Item`（统一路径，checker 语义区分；歧义时后续加 `<T as Trait>::Item` 消歧）。
 
 ```ring
+trait Iterator<T> {
+    type Item
+    fn next(mut self) -> Item?
+}
+
 trait Collection {
     type Item
-    type Iter: Iterator<item = Item>
+    type Iter: Iterator<Self::Item>  // 关联类型带 bound
     fn iter(self) -> Iter
 }
+
+impl Iterator<Int> for Range {
+    type Item = Int
+    fn next(mut self) -> Int? { ... }
+}
+
+// 在泛型约束中使用
+fn sum<I: Iterator<Int>>(iter: I) -> Int where I::Item == Int { ... }
+
+// 简写：直接在 bound 中约束关联类型
+fn first<I: Iterator<Item = Int>>(iter: I) -> Int { ... }
 ```
 
-- **当前状态**：未实现
-- **前置依赖**：无硬依赖
-- **优先级**：Phase C 或 D
+**当前状态**：未实现。AST/HIR/env 中无关联类型相关字段。
+
+**前置依赖**：B-005 (Supertrait)——关联类型的 bound 约束（`type Iter: Iterator`）需要 supertrait 基础设施
+
+**涉及修改**：
+1. `ast.ring`：`Decl::Trait` 的 methods 列表支持 `Decl::TypeAlias { name, bounds, span }` 成员（或新增 `assoc_types` 字段）
+2. `parser.ring`：在 trait body 内识别 `type Name` 声明（可选 `: Bound`，可选 `= Default`）；在 impl body 内识别 `type Name = ConcreteType`
+3. `env.ring`：`TraitDef` 新增 `assoc_types: List<AssocTypeDef>`（含 name + bounds）；`ImplEntry` 新增 `assoc_types: Map<Str, Type>`（name → 具体类型）
+4. `infer_register.ring`：
+   - `register_trait()`：注册关联类型声明
+   - `register_impl()`：收集 impl 中的 `type X = T` 赋值，验证 trait 声明的每个关联类型都有赋值，验证赋值类型满足 bound
+5. `infer.ring`：
+   - 路径解析（`T::Item`）：当路径前缀是类型参数时，查找该参数 bounds 中 trait 的关联类型，返回对应具体类型（或约束类型变量）
+   - Bound 匹配：`T: Iterator<Item = Int>` 在 instantiate 时将关联类型约束传播为 unification 约束
+6. `hir.ring`：`HTraitMethod` 平级新增 `HAssocType { name: Str, bounds: List<TraitBound>, concrete: Type? }`
+7. `codegen`：关联类型是纯编译期概念，不生成运行时代码。trait 字典不携带类型信息。
+
+**验收标准**：
+- `trait Foo { type Item }` + `impl Foo for Bar { type Item = Int }` 可编译
+- `T::Item` 在泛型函数体内解析为关联类型
+- `fn foo<T: Iterator<Item = Int>>()` 约束语法生效
+- 关联类型带 bound：`type Iter: Iterator<T>` → impl 中 `type Iter = X`，X 未 impl Iterator → 报错
+- 未提供关联类型赋值 → 编译错误
+- 同名歧义（多 trait 提供同名关联类型）→ 暂报"ambiguous associated type"错误（后续加消歧语法）
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ### B-005 Supertrait 继承 [feature] [P2] [M] [queued]
-Trait 之间的继承关系（`trait Ord: Eq`）。
+Trait 之间的继承关系。实现 subtrait 时必须先实现所有 supertrait。
 
-- **当前状态**：未实现
-- **前置依赖**：无硬依赖
-- **优先级**：Phase C
+```ring
+trait Eq {
+    fn eq(self, other: Self) -> Bool
+}
+
+trait Ord: Eq {  // Ord 要求 Eq
+    fn cmp(self, other: Self) -> Int
+}
+
+trait Printable: Eq + Debug {  // 多个 supertrait
+    fn pretty(self) -> Str
+}
+
+// impl Ord 时编译器要求 impl Eq 已存在
+impl Ord for MyType {
+    fn cmp(self, other: MyType) -> Int { ... }
+}
+// 若无 impl Eq for MyType → 编译错误
+```
+
+**当前状态**：AST `Decl::Trait` 已有 `supertraits: List<TypeBound>` 字段（parser.ring:1132 固定为空列表）。`TraitDef`（env.ring:65）无 supertrait 字段。
+
+**涉及修改**：
+1. `parser.ring`：在 `parse_trait_decl()` 中，type_params 解析后、`{` 之前，检查 `:` token → 调用 `parse_type_bound_list()`（用 `+` 分隔多个 bound）填充 `supertraits`
+2. `env.ring`：`TraitDef` 新增 `supertraits: List<Str>` 字段
+3. `infer_register.ring`：`register_trait()` 接收并存储 supertraits；验证 supertrait 名已注册（否则报错）
+4. `infer_decl.ring`：`check_impl_decl()` 中，当 impl 的 trait 有 supertrait 时，验证目标类型对每个 supertrait 都有 impl（遍历 `trait_reg.trait_impls` 查找匹配）——缺失时报新错误码（如 E0505 "type `X` does not implement supertrait `Y` required by `Z`"）
+5. `codegen_decl.ring`：`emit_trait_dictionary()` 中 supertrait 方法**不合并**到子 trait 字典——各 trait 独立字典，泛型函数需要 subtrait 时编译器同时传递 supertrait 字典参数
+6. `infer.ring`：trait bound 解析时，`T: Ord` 隐含 `T: Eq`——在 bound 推断/检查中自动展开 supertrait 链
+
+**验收标准**：
+- `trait Ord: Eq` 语法可解析
+- `impl Ord for X` 无 `impl Eq for X` → 报 E0505
+- `impl Ord for X` 有 `impl Eq for X` → 正常编译
+- `fn foo<T: Ord>(x: T)` 内部可调用 `.eq()` 和 `.cmp()`
+- 多级继承：`trait A: B`, `trait B: C` → impl A 要求 B 和 C 都��� impl
+- 循环继承检测：`trait A: B`, `trait B: A` → 编译错误
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ### B-033 GADTs（Generalized Algebraic Data Types）[feature] [P2] [L] [queued]
-enum 变体可指定不同的返回类型约束，match 分支内编译器自动获得类型等式约束。
+enum 变体可指定不同的返回类型约束，match 分支内编译器自动获得类型等式约束（完整方案：scoped unification）。
 
 ```ring
 enum Expr<T> {
@@ -93,17 +168,46 @@ enum Expr<T> {
 
 fn eval<T>(e: Expr<T>) -> T {
     match e {
-        Lit(n) => n,                      // T = Int
-        Add(a, b) => eval(a) + eval(b),   // T = Int
-        IsZero(x) => eval(x) == 0,        // T = Bool
+        Lit(n) => n,                      // 分支内 T = Int，n: Int 满足 -> T
+        Add(a, b) => eval(a) + eval(b),   // 分支内 T = Int
+        IsZero(x) => eval(x) == 0,        // 分支内 T = Bool
     }
+}
+
+// 类型安全的异构列表
+enum HList<T> {
+    Nil: HList<Unit>,
+    Cons(T, HList<U>): HList<(T, U)>,
 }
 ```
 
-- **当前状态**：未实现
-- **前置依赖**：无硬依赖
-- **复杂度**：大（checker 需要在 match 分支内注入类型等式约束，unification 需要支持局部约束环境）
-- **优先级**：Phase C（ML 级类型系统标配）
+**当前状态**：未实现
+
+**前置依赖**：无硬依赖（但 union-find 需要扩展 snapshot/rollback）
+
+**涉及修改**：
+1. `ast.ring`：enum 变体声明扩展——`EnumVariant` 新增可选字段 `result_type: TypeExpr?`（`: Expr<Int>` 部分）
+2. `parser.ring`：`parse_enum_variant()` 在字段列表后检查 `:` token → 解析返回类型约束。无 `:` 时为普通 enum（向后兼容）
+3. `types.ring`：`EnumType` 的 variants 信息需要携带每个变体的类型约束（`variant_constraints: Map<Str, List<(Int, Type)>>`——类型参数 → 具体类型的绑定）
+4. `infer_register.ring`：注册 enum 时，对有返回类型约束的变体，解析约束并验证——约束必须是 enum 自身的实例化（`Lit(Int): Expr<Int>` 中 `Expr<Int>` 是 `Expr<T>` 的实例化，绑定 T=Int）
+5. `union_find.ring`：新增 `snapshot() -> Snapshot` 和 `rollback(Snapshot)` 方法——记录当前状态，分支结束后恢复
+6. `infer.ring`：match 表达式推断时，若 scrutinee 类型是 GADT enum：
+   - 每个分支进入前 `snapshot()`
+   - 从变体的类型约束提取等式（如 T=Int），调用 `unify()` 注入
+   - 推断分支体
+   - 分支结束后 `rollback()` 撤回约束
+   - 各分支返回类型在原始（未约束）环境中统一
+7. `codegen`：无特殊改动——GADT 是纯编译期类型约束，JS 层面 enum 仍然是 tagged union
+
+**验收标准**：
+- `enum Expr<T> { Lit(Int): Expr<Int> }` 语法可解析
+- match 分支内类型等式自动生效——`eval` 函数可类型检查通过
+- 无返回类型约束的 enum 变体行为不变（向后兼容）
+- 类型约束与 enum 类型不匹配 → 编译错误（如 `Foo(Int): Bar<Int>`）
+- 分支约束不泄漏到分支外
+- 穷尽性检查对 GADT enum 正常工作
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ### B-006 `dyn Trait`（动态分发）[feature] [P3] [L] [queued]
 运行时多态，默认静态分发（泛型单态化），`dyn` 是主动选择动态分发的标志。
@@ -178,24 +282,38 @@ fn main() {
 
 
 ### B-034 Effect Aliases [feature] [P2] [S] [queued]
-效果组合命名，简化复杂 effect 标注。
+效果组合命名，简化复杂 effect 标注。纯语法糖——在 resolve 阶段展开为 effect 列表。
 
 ```ring
 effect alias IO = {io, fail<Str>}
 effect alias WebHandler = {io, fail<HttpError>, mut<Session>}
 
 fn handle_request(req: Request) -> Response with {WebHandler} { ... }
+// 推断签名等价于 with {io, fail<HttpError>, mut<Session>}
 ```
 
-- **当前状态**：未实现
-- **前置依赖**：B-008（Default Effect Handler）完成后更自然
-- **复杂度**：小（主要是语法糖 + effect row 展开）
-- **优先级**：Phase C
+**涉及修��**：
+1. `ast.ring`：新增 `Decl::EffectAlias { name: Str, type_params: List<TypeParam>, effects: List<EffectExpr>, is_pub: Bool, span: Span }`
+2. `parser.ring`：��� `parse_decl()` 中识别 `effect alias` 两个连续 token，调用新函数 `parse_effect_alias_decl()` 解析 `Name<T> = { effects }`
+3. `env.ring`：新增 `EffectAliasDef { name: Str, type_params: List<Str>, effects: List<Effect> }`，存储在 `TypeRegistry` 中（新字段 `effect_aliases: Map<Str, EffectAliasDef>`）
+4. `infer_register.ring`：新增 `register_effect_alias()` 在 Pass 1 注册别名定义
+5. `infer_register.ring`：修改 `resolve_effect_expr()`——当 effect name 不是 builtin（io/fail/mut）且不在 `effects` map 中时，查找 `effect_aliases` map，展开为效果列表（支持类型参数替换）
+6. `hir.ring`：HIR 不需要 EffectAlias 节点——展开发生在 resolve 阶段，HIR 只看到展开后的 effects
+7. `codegen`：无改动（alias 在 checker 阶段已消失）
+
+**验收标准**：
+- `effect alias IO = {io, fail<Str>}` 可声明
+- `fn foo() with {IO}` 等价于 `with {io, fail<Str>}`——推断结果和 catch 行为一致
+- 带类型参数：`effect alias Failable<E> = {fail<E>}` → `with {Failable<MyErr>}` 展开为 `with {fail<MyErr>}`
+- 不允许递归别名（A 引用 B 引用 A → 编译错误）
+- `pub effect alias` 在模块间可见
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ## OOP 模拟
 
 ### B-010 `delegate` 关键字 [feature] [P2] [M] [queued]
-design.md 5.3。替代继承的复用机制，将 trait 实现委托给内部字段。
+design.md 5.3。替代继承的复用机制，将 trait 实现委托给内部字段。编译器自动生成转发方法。
 
 ```ring
 struct Admin {
@@ -206,25 +324,55 @@ struct Admin {
 impl Admin {
     delegate base: Describable, Loggable, Serializable
 }
+
+// 编译器自动生成等价代码：
+// impl Describable for Admin {
+//     fn describe(self) -> Str { self.base.describe() }
+// }
+// impl Loggable for Admin { ... }
+// impl Serializable for Admin { ... }
 ```
 
-- **前置依赖**：无硬依赖
-- **复杂度**：中
-- **优先级**：Phase C
+**涉及修改**：
+1. `ast.ring`：新增 `Decl::Delegate { field: Str, traits: List<Str>, span: Span }`，作为 impl 块内的声明
+2. `parser.ring`：在 `parse_impl_body()` 中识别 `delegate` 关键字 → `parse_delegate_decl()` 解析 `field_name: Trait1, Trait2`
+3. `infer_register.ring`：处理 delegate 声明——查找字段类型、验证字段类型确实 impl 了指定 trait、为外层 struct 合成 trait impl 注册（复用 `register_impl` 逻辑）
+4. `infer_decl.ring`：delegate 合成的 impl 跳过方法体检查（方法体是自动生成的转发）
+5. `codegen_decl.ring`：delegate 生成转发方法代码——每个 trait method 生成 `fn method(self, ...) { self.field.method(...) }`
+6. `hir.ring`：可选——delegate 在 HIR 层展开为普通 impl（desugar），或保留 HDecl::Delegate 由 codegen 处理
+
+**验收标准**：
+- `delegate field: Trait` 语法可解析
+- 委托后外层类型可作为 trait bound 使用（`fn foo<T: Describable>(x: T)` 可接受 Admin）
+- 字段类型未 impl 指定 trait → 编译错误
+- 字段名不存在 → 编译错误
+- 委托 trait 方法可正常调用
+- 委托不影响外层类型自己的方法（不冲突）
+- 同一 trait 不能既 delegate 又手写 impl → 编译错误
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ## 迭代与集合
 
 ### B-036 Iterator Trait + 自定义迭代器 [feature] [P2] [M] [queued]
-定义 `Iterator<T>` trait，让用户自定义类型支持 `for..in`。当前只有 List/Map/Set 内置迭代，无法扩展。
+双 trait 方案：`Iterable<T>` 负责创建迭代器，`Iterator<T>` 负责逐步产出。`for..in` 脱糖为 Iterable 协议。
 
 ```ring
 trait Iterator<T> {
-    fn next(mut self) -> T?
+    type Item    // 关联类型（B-004）
+    fn next(mut self) -> Item?
 }
 
+trait Iterable<T> {
+    type Iter: Iterator<T>
+    fn iter(self) -> Iter
+}
+
+// 自定义 Iterator
 struct Range { start: Int, end: Int, current: Int }
 
 impl Iterator<Int> for Range {
+    type Item = Int
     fn next(mut self) -> Int? {
         if self.current < self.end {
             let v = self.current
@@ -236,16 +384,60 @@ impl Iterator<Int> for Range {
     }
 }
 
-// for..in 脱糖为 Iterator::next() 循环
-for i in Range { start: 0, end: 10, current: 0 } {
-    print(i.to_str())
+// Range 自身既是数据又是游标，直接 impl Iterable 返回自己
+impl Iterable<Int> for Range {
+    type Iter = Range
+    fn iter(self) -> Range { self }
 }
+
+// List 需要独立游标
+struct ListIterator<T> { list: List<T>, index: Int }
+
+impl<T> Iterator<T> for ListIterator<T> {
+    type Item = T
+    fn next(mut self) -> T? {
+        if self.index < self.list.len() {
+            let v = self.list.get(self.index)
+            self.index = self.index + 1
+            v
+        } else {
+            none
+        }
+    }
+}
+
+impl<T> Iterable<T> for List<T> {
+    type Iter = ListIterator<T>
+    fn iter(self) -> ListIterator<T> {
+        ListIterator { list: self, index: 0 }
+    }
+}
+
+// for..in 脱糖
+for x in collection { body }
+// → let mut __iter = collection.iter()
+//   loop { match __iter.next() { some(x) => { body }, none => break } }
 ```
 
-- **当前状态**：未实现（已知限制：无自定义迭代器）
-- **前置依赖**：无硬依赖（但 B-005 Supertrait 完成后可建立 Iterator 层次）
-- **复杂度**：中（trait 定义 + `for..in` 脱糖改造 + 标准库集合适配）
-- **优先级**：Phase C
+**前置依赖**：B-005 (Supertrait) + B-004 (关联类型)
+
+**涉及修改**：
+1. `std/iterator.ring`：新标准库文件，定义 `Iterator<T>` + `Iterable<T>` trait
+2. `std/list.ring`：新增 `ListIterator<T>` struct + impl Iterator + impl Iterable for List
+3. `std/map.ring`：新增 `MapIterator<K,V>` + impl（迭代 entries）
+4. `std/set.ring`：新增 `SetIterator<T>` + impl
+5. `compiler/infer.ring`：`for..in` 推断逻辑从硬编码 List/Map/Set 改为查找 `Iterable` trait impl，调用 `.iter()` 获取 Iterator 类型，再推断 `.next()` 返回类型
+6. `compiler/codegen_stmt.ring`：`for..in` codegen 从硬编码 JS `for` 循环改为脱糖：`let __iter = collection.iter(); while (true) { let __next = __iter.next(); if (__next === undefined) break; ... }`
+7. `runtime.ring`：可能需要为内置集合的 Iterator 提供 JS 实现（如果 Ring-native 实现性能不够）
+
+**验收标准**：
+- 自定义类型 impl Iterator → `for x in obj` 正常工作
+- `for x in [1,2,3]` 仍正常（通过 List 的 Iterable impl）
+- `for entry in map.entries()` 仍正常
+- 嵌套 `for` 遍历同一 list → 两个独立游标，结果正确
+- Iterator 自身可 `for..in`（impl Iterable for Iterator 返回 self）
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ## 性能优化
 
