@@ -2185,6 +2185,16 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
         }
     }
 
+    // Check exhaustiveness of catch arms against the error type
+    let error_type_resolved = apply_subst(s, error_type)
+    let missing = check_exhaustive(harms, error_type_resolved, s)
+    match missing {
+        some(m) => { let _ = type_error(ctx.sink, E0601,
+            "Non-exhaustive catch on error type ${type_to_string(error_type_resolved)}: missing pattern for ${m}",
+            span, DiagnosticContext::PatternError { detail: "missing: ${m}" }) },
+        none => {}
+    }
+
     // catch always fully consumes the fail effect
     effects = remove_fail_effect(effects)
 

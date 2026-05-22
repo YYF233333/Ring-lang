@@ -419,6 +419,7 @@ const cases: TestCase[] = [
   { file: "let_mut_enforcement.ring", expected: "let_mut_enforcement: all tests passed\n" },
   { file: "impl_effect_propagation.ring", expected: "impl_effect_propagation: all tests passed\n" },
   { file: "impl_effect_chain.ring", expected: "impl_effect_chain: all tests passed\n" },
+  { file: "catch_exhaustive.ring", expected: "catch exhaustive tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -477,6 +478,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_mut_method_on_let.ring", error_pattern: "E0208" },
     { file: "errors/mod_super_out_of_scope.ring", error_pattern: "E0705" },
     { file: "errors/mod_capability_violation.ring", error_pattern: "E0405" },
+    { file: "catch_non_exhaustive_fail.ring", error_pattern: "E0601" },
   ];
 
   for (const tc of negative_cases) {

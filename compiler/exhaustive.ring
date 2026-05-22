@@ -143,6 +143,61 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
                 some("true")
             }
         },
+        Type::StructType { name: sname, fields: sfields, .. } => {
+            // A struct is a single-constructor type -- if any pattern matches
+            // the struct name, the struct is covered (check sub-fields recursively)
+            let mut covered = false
+            let mut sub_patterns: List<List<Pattern>> = []
+            let mut field_names: List<Str> = []
+            let mut field_types: List<Type> = []
+            for f in sfields {
+                field_names.push(f.name)
+                field_types.push(f.ty)
+            }
+            for p in patterns {
+                match p {
+                    Pattern::NamedConstructor { name: pname, fields: nfields, .. } => {
+                        if pname == sname {
+                            covered = true
+                            let positional = named_pattern_to_positional(nfields, field_names, sfields.len())
+                            sub_patterns.push(positional)
+                        }
+                    },
+                    Pattern::Constructor { name: pname, fields: cfields, .. } => {
+                        if pname == sname {
+                            covered = true
+                            sub_patterns.push(cfields)
+                        }
+                    },
+                    _ => {},
+                }
+            }
+            if covered == false {
+                return some(sname)
+            }
+            if sfields.len() > 0 {
+                let wild = Pattern::Wildcard { span: span_zero() }
+                let mut normalized: List<List<Pattern>> = []
+                for row in sub_patterns {
+                    let mut padded = list_clone(row)
+                    while padded.len() < sfields.len() {
+                        padded.push(wild)
+                    }
+                    normalized.push(padded)
+                }
+                let mut expanding = set_new()
+                expanding.insert(type_to_string(resolved))
+                let missing_fields = check_matrix(normalized, field_types, subst, expanding)
+                match missing_fields {
+                    some(mf) => {
+                        let joined = join_strs(mf, ", ")
+                        return some("${sname}(${joined})")
+                    },
+                    none => {},
+                }
+            }
+            none
+        },
         Type::UnitType => none,
         Type::TupleType { elements } => {
             let mut matrix: List<List<Pattern>> = []
@@ -189,6 +244,17 @@ fn finite_type_ctors(ty: Type) -> List<Ctor>? {
             for v in variants {
                 result.push(Ctor { name: v.name, arity: v.fields.len(), field_types: v.fields, field_names: v.field_names, is_tuple: false })
             }
+            some(result)
+        },
+        Type::StructType { name, fields, .. } => {
+            let mut field_types: List<Type> = []
+            let mut field_names: List<Str> = []
+            for f in fields {
+                field_types.push(f.ty)
+                field_names.push(f.name)
+            }
+            let mut result: List<Ctor> = []
+            result.push(Ctor { name: name, arity: fields.len(), field_types: field_types, field_names: some(field_names), is_tuple: false })
             some(result)
         },
         Type::UnitType => {
