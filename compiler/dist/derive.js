@@ -504,17 +504,17 @@ function resolve_field_action(env, field_type, type_param_vars, type_param_names
       }
       break __ring_match12;
     }
-    if (__ring_m11._tag === "ErrorType") {
+    if (__ring_m12._tag === "ErrorType") {
       return Option_some(hir$FieldAction_Identity);
-      break __ring_match11;
+      break __ring_match12;
     }
-    if (__ring_m11._tag === "AnyType") {
+    if (__ring_m12._tag === "AnyType") {
       return Option_some(hir$FieldAction_Identity);
-      break __ring_match11;
+      break __ring_match12;
     }
-    if (__ring_m11._tag === "NeverType") {
+    if (__ring_m12._tag === "NeverType") {
       return Option_some(hir$FieldAction_Identity);
-      break __ring_match11;
+      break __ring_match12;
     }
     return Option_none;
     break __ring_match12;
