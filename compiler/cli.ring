@@ -109,6 +109,11 @@ pub fn cli_main() {
         return
     }
 
+    // Print warnings (non-error diagnostics) even on success
+    if sink.items.len() > 0 {
+        eprintln(format_human(sink.items, source))
+    }
+
     let js = generate(check_result.program, false, false, none, none, none, none, none, none)
 
     if parsed.command == "check" {

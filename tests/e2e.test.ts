@@ -441,6 +441,7 @@ const cases: TestCase[] = [
   { file: "audit_result_prelude.ring", expected: "pass: result prelude\n" },
   { file: "audit_tuple_eq_struct.ring", expected: "pass: tuple eq struct\n" },
   { file: "audit_set_contains_struct.ring", expected: "pass: set struct eq consistency\n" },
+  { file: "audit_catch_on_pure.ring", expected: "pass: catch on pure warning\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -519,6 +520,27 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
       );
     });
   }
+});
+
+// ============================================================
+// Warning tests — should pass type-check but emit warnings
+// ============================================================
+
+describe("e2e: warnings (should pass check but emit warning)", { concurrency: true }, () => {
+  test("catch on pure expression emits W0001 warning but succeeds", () => {
+    const filePath = path.join(CASES_DIR, "audit_catch_on_pure.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    const result = check(ast, sink, fail_ev);
+    // Should have no errors
+    assert.ok(!has_errors(sink), "Expected no errors");
+    // Should have at least one warning with W0001
+    const warnings = sink.items.filter((d: any) => d.severity._tag === "SevWarning");
+    assert.ok(warnings.length > 0, "Expected at least one warning");
+    assert.ok(warnings.some((w: any) => w.code === "W0001"), "Expected W0001 warning code");
+  });
 });
 
 // ============================================================
