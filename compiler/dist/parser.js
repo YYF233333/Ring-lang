@@ -291,120 +291,152 @@ function is_uppercase(ch) {
   return ((c >= 65) && (c <= 90));
 }
 
-function expr_span(e) {
+function type_expr_span(te) {
   __ring_match3: {
-    const __ring_m3 = e;
-    if (__ring_m3._tag === "IntLit") {
+    const __ring_m3 = te;
+    if (__ring_m3._tag === "Named") {
       const span = __ring_m3.span;
       return span;
       break __ring_match3;
     }
-    if (__ring_m3._tag === "FloatLit") {
+    if (__ring_m3._tag === "FnType") {
       const span = __ring_m3.span;
       return span;
       break __ring_match3;
     }
-    if (__ring_m3._tag === "StrLit") {
+    if (__ring_m3._tag === "OptionType") {
       const span = __ring_m3.span;
       return span;
       break __ring_match3;
     }
-    if (__ring_m3._tag === "BoolLit") {
+    if (__ring_m3._tag === "RecordType") {
       const span = __ring_m3.span;
       return span;
       break __ring_match3;
     }
-    if (__ring_m3._tag === "Ident") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "BinOp") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "UnaryOp") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "Call") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "MethodCall") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "FieldAccess") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "StructLit") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "MatchExpr") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "Block") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "IfExpr") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "StringInterp") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "CatchExpr") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "HandleExpr") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "Lambda") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "Range") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "ListLit") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "TupleLit") {
-      const span = __ring_m3.span;
-      return span;
-      break __ring_match3;
-    }
-    if (__ring_m3._tag === "IndexExpr") {
+    if (__ring_m3._tag === "TupleType") {
       const span = __ring_m3.span;
       return span;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
+  }
+}
+
+function expr_span(e) {
+  __ring_match4: {
+    const __ring_m4 = e;
+    if (__ring_m4._tag === "IntLit") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "FloatLit") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "StrLit") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "BoolLit") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Ident") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "BinOp") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "UnaryOp") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Call") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "MethodCall") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "FieldAccess") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "StructLit") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "MatchExpr") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Block") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "IfExpr") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "StringInterp") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "CatchExpr") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "HandleExpr") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Lambda") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Range") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "ListLit") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "TupleLit") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "IndexExpr") {
+      const span = __ring_m4.span;
+      return span;
+      break __ring_match4;
+    }
+    __match_fail(__ring_m4);
   }
 }
 
@@ -504,23 +536,23 @@ function Parser_parse_program(self) {
         Parser_report_error(self, codes$E0706, "Use declaration must appear before other declarations", Option_some(Parser_peek(self).span));
       }
       const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-      __ring_match4: {
-        const __ring_m4 = use_result;
-        if (__ring_m4._tag === "some") {
-          const ud = __ring_m4._0;
+      __ring_match5: {
+        const __ring_m5 = use_result;
+        if (__ring_m5._tag === "some") {
+          const ud = __ring_m5._0;
           List_push(uses, ud);
-          break __ring_match4;
+          break __ring_match5;
         }
-        if (__ring_m4._tag === "none") {
+        if (__ring_m5._tag === "none") {
           while ((!Parser_at_end(self))) {
             if (is_decl_start(Parser_peek(self).kind)) {
               break;
             }
             Parser_advance(self);
           }
-          break __ring_match4;
+          break __ring_match5;
         }
-        __match_fail(__ring_m4);
+        __match_fail(__ring_m5);
       }
       continue;
     }
@@ -534,23 +566,23 @@ function Parser_parse_program(self) {
           Parser_report_error(self, codes$E0706, "Use declaration must appear before other declarations", Option_some(Option_unwrap_or(List_get(self.tokens, save_pos), Parser_peek(self)).span));
         }
         const pub_use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, true)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-        __ring_match5: {
-          const __ring_m5 = pub_use_result;
-          if (__ring_m5._tag === "some") {
-            const ud = __ring_m5._0;
+        __ring_match6: {
+          const __ring_m6 = pub_use_result;
+          if (__ring_m6._tag === "some") {
+            const ud = __ring_m6._0;
             List_push(uses, ud);
-            break __ring_match5;
+            break __ring_match6;
           }
-          if (__ring_m5._tag === "none") {
+          if (__ring_m6._tag === "none") {
             while ((!Parser_at_end(self))) {
               if (is_decl_start(Parser_peek(self).kind)) {
                 break;
               }
               Parser_advance(self);
             }
-            break __ring_match5;
+            break __ring_match6;
           }
-          __match_fail(__ring_m5);
+          __match_fail(__ring_m6);
         }
         continue;
       }
@@ -560,23 +592,23 @@ function Parser_parse_program(self) {
     }
     decls_started = true;
     const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-    __ring_match6: {
-      const __ring_m6 = maybe_decl;
-      if (__ring_m6._tag === "some") {
-        const decl = __ring_m6._0;
+    __ring_match7: {
+      const __ring_m7 = maybe_decl;
+      if (__ring_m7._tag === "some") {
+        const decl = __ring_m7._0;
         List_push(decls, decl);
-        break __ring_match6;
+        break __ring_match7;
       }
-      if (__ring_m6._tag === "none") {
+      if (__ring_m7._tag === "none") {
         while ((!Parser_at_end(self))) {
           if (is_decl_start(Parser_peek(self).kind)) {
             break;
           }
           Parser_advance(self);
         }
-        break __ring_match6;
+        break __ring_match7;
       }
-      __match_fail(__ring_m6);
+      __match_fail(__ring_m7);
     }
   }
   const end = Parser_current_span_start(self);
@@ -658,16 +690,14 @@ function Parser_parse_while_stmt(self) {
   Parser_expect(self, lexer$TokenKind_TkWhile);
   const condition = Parser_parse_expr_no_struct(self);
   const body = Parser_parse_block_expr(self);
-  const end = Parser_current_span_start(self);
-  return ast$Stmt_While(condition, body, Parser_make_span(self, start, end));
+  return ast$Stmt_While(condition, body, Parser_make_span(self, start, expr_span(body).end));
 }
 function Parser_parse_loop_stmt(self) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkLoop);
   const body = Parser_parse_block_expr(self);
-  const end = Parser_current_span_start(self);
   const condition = ast$Expr_BoolLit(true, Parser_make_span(self, start, start));
-  return ast$Stmt_While(condition, body, Parser_make_span(self, start, end));
+  return ast$Stmt_While(condition, body, Parser_make_span(self, start, expr_span(body).end));
 }
 function Parser_parse_for_in_stmt(self) {
   const start = Parser_current_span_start(self);
@@ -704,8 +734,7 @@ function Parser_parse_for_in_stmt(self) {
   Parser_expect(self, lexer$TokenKind_TkIn);
   const iterable = Parser_parse_expr_no_struct(self);
   const body = Parser_parse_block_expr(self);
-  const end = Parser_current_span_start(self);
-  return ast$Stmt_ForIn(binding, binding_span, destructure, iterable, body, Parser_make_span(self, start, end));
+  return ast$Stmt_ForIn(binding, binding_span, destructure, iterable, body, Parser_make_span(self, start, expr_span(body).end));
 }
 function Parser_parse_break_stmt(self) {
   const start = Parser_current_span_start(self);
@@ -786,27 +815,26 @@ function Parser_parse_block_expr(self) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const stmt = Parser_parse_stmt(self);
     if (Parser_check(self, lexer$TokenKind_TkRBrace)) {
-      __ring_match7: {
-        const __ring_m7 = stmt;
-        if (__ring_m7._tag === "ExprStmt") {
-          const e = __ring_m7.expr; const hs = __ring_m7.has_semi;
+      __ring_match8: {
+        const __ring_m8 = stmt;
+        if (__ring_m8._tag === "ExprStmt") {
+          const e = __ring_m8.expr; const hs = __ring_m8.has_semi;
           if ((!hs)) {
             tail = Option_some(e);
           } else {
             List_push(stmts, stmt);
           }
-          break __ring_match7;
+          break __ring_match8;
         }
         List_push(stmts, stmt);
-        break __ring_match7;
+        break __ring_match8;
       }
     } else {
       List_push(stmts, stmt);
     }
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Expr_Block(stmts, tail, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Expr_Block(stmts, tail, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_use_decl(self, is_pub) {
   const start = Parser_current_span_start(self);
@@ -890,110 +918,109 @@ function Parser_parse_mod_block(self, is_pub) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     if (Parser_check(self, lexer$TokenKind_TkUse)) {
       const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-      __ring_match8: {
-        const __ring_m8 = use_result;
-        if (__ring_m8._tag === "some") {
-          const ud = __ring_m8._0;
+      __ring_match9: {
+        const __ring_m9 = use_result;
+        if (__ring_m9._tag === "some") {
+          const ud = __ring_m9._0;
           List_push(uses, ud);
-          break __ring_match8;
+          break __ring_match9;
         }
-        if (__ring_m8._tag === "none") {
+        if (__ring_m9._tag === "none") {
           while ((!Parser_at_end(self))) {
             if (((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkUse)) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
               break;
             }
             Parser_advance(self);
           }
-          break __ring_match8;
+          break __ring_match9;
         }
-        __match_fail(__ring_m8);
+        __match_fail(__ring_m9);
       }
       continue;
     }
     const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-    __ring_match9: {
-      const __ring_m9 = maybe_decl;
-      if (__ring_m9._tag === "some") {
-        const decl = __ring_m9._0;
+    __ring_match10: {
+      const __ring_m10 = maybe_decl;
+      if (__ring_m10._tag === "some") {
+        const decl = __ring_m10._0;
         List_push(decls, decl);
-        break __ring_match9;
+        break __ring_match10;
       }
-      if (__ring_m9._tag === "none") {
+      if (__ring_m10._tag === "none") {
         while ((!Parser_at_end(self))) {
           if ((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
             break;
           }
           Parser_advance(self);
         }
-        break __ring_match9;
+        break __ring_match10;
       }
-      __match_fail(__ring_m9);
+      __match_fail(__ring_m10);
     }
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_ModBlock(name, uses, decls, required_effects, is_pub, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Decl_ModBlock(name, uses, decls, required_effects, is_pub, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_decl(self) {
   const is_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
   const tok = Parser_peek(self);
-  __ring_match10: {
-    const __ring_m10 = tok.kind;
-    if (__ring_m10._tag === "TkMod") {
+  __ring_match11: {
+    const __ring_m11 = tok.kind;
+    if (__ring_m11._tag === "TkMod") {
       return Option_some(Parser_parse_mod_block(self, is_pub));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkFn") {
+    if (__ring_m11._tag === "TkFn") {
       return Option_some(Parser_parse_fn_decl(self, is_pub, false));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkStruct") {
+    if (__ring_m11._tag === "TkStruct") {
       return Option_some(Parser_parse_struct_decl(self, is_pub));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkEnum") {
+    if (__ring_m11._tag === "TkEnum") {
       return Option_some(Parser_parse_enum_decl(self, is_pub));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkImpl") {
+    if (__ring_m11._tag === "TkImpl") {
       return Option_some(Parser_parse_impl_decl(self));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkEffect") {
+    if (__ring_m11._tag === "TkEffect") {
       return Option_some(Parser_parse_effect_decl(self, is_pub));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkTest") {
+    if (__ring_m11._tag === "TkTest") {
       return Option_some(Parser_parse_test_decl(self));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkTrait") {
+    if (__ring_m11._tag === "TkTrait") {
       return Option_some(Parser_parse_trait_decl(self, is_pub));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkExtern") {
+    if (__ring_m11._tag === "TkExtern") {
       return Option_some(Parser_parse_extern_decl(self, is_pub));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkConst") {
+    if (__ring_m11._tag === "TkConst") {
       return Option_some(Parser_parse_const_decl(self, is_pub));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkSig") {
+    if (__ring_m11._tag === "TkSig") {
       return Option_some(Parser_parse_sig_block(self, is_pub));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "TkIdent") {
+    if (__ring_m11._tag === "TkIdent") {
       if ((tok.value === "type")) {
         return Option_some(Parser_parse_type_alias_decl(self, is_pub));
       }
       Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
       return Option_none;
-      break __ring_match10;
+      break __ring_match11;
     }
     Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
     return Option_none;
-    break __ring_match10;
+    break __ring_match11;
   }
 }
 function Parser_parse_effect_list(self) {
@@ -1056,8 +1083,7 @@ function Parser_parse_fn_decl(self, is_pub, body_optional) {
   } else {
     body = Parser_parse_block_expr(self);
   }
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Fn(name, type_params, params, return_type, declared_effects, body, is_pub, is_abstract_val, Parser_make_span(self, start, end));
+  return ast$Decl_Fn(name, type_params, params, return_type, declared_effects, body, is_pub, is_abstract_val, Parser_make_span(self, start, expr_span(body).end));
 }
 function Parser_parse_const_decl(self, is_pub) {
   const start = Parser_current_span_start(self);
@@ -1069,8 +1095,7 @@ function Parser_parse_const_decl(self, is_pub) {
   }
   Parser_expect(self, lexer$TokenKind_TkEq);
   const init = Parser_parse_expr(self);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Const(name, type_annotation, init, is_pub, Parser_make_span(self, start, end));
+  return ast$Decl_Const(name, type_annotation, init, is_pub, Parser_make_span(self, start, expr_span(init).end));
 }
 function Parser_parse_sig_block(self, is_pub) {
   const start = Parser_current_span_start(self);
@@ -1103,9 +1128,8 @@ function Parser_parse_sig_block(self, is_pub) {
     const mend = Parser_current_span_start(self);
     List_push(members, new ast$SigMember(mname, mtps, mparams, ret, meffects, Parser_make_span(self, mstart, mend)));
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Sig(name, members, is_pub, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Decl_Sig(name, members, is_pub, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_extern_decl(self, is_pub) {
   const start = Parser_current_span_start(self);
@@ -1121,17 +1145,20 @@ function Parser_parse_extern_fn_decl_body(self, is_pub, start) {
   const type_params = Parser_parse_type_params(self);
   Parser_expect(self, lexer$TokenKind_TkLParen);
   const params = Parser_parse_params(self);
-  Parser_expect(self, lexer$TokenKind_TkRParen);
+  const rparen = Parser_expect(self, lexer$TokenKind_TkRParen);
+  let last_end = rparen.span.end;
   let return_type = Option_none;
   if (Parser_try_consume(self, lexer$TokenKind_TkArrow)) {
-    return_type = Option_some(Parser_parse_type_expr(self));
+    const rt = Parser_parse_type_expr(self);
+    return_type = Option_some(rt);
+    last_end = type_expr_span(rt).end;
   }
   let declared_effects = Option_none;
   if (Parser_check(self, lexer$TokenKind_TkWith)) {
     declared_effects = Option_some(Parser_parse_effect_annotation(self));
+    last_end = Parser_current_span_start(self);
   }
-  const end = Parser_current_span_start(self);
-  return ast$Decl_ExternFn(name, type_params, params, return_type, declared_effects, is_pub, Parser_make_span(self, start, end));
+  return ast$Decl_ExternFn(name, type_params, params, return_type, declared_effects, is_pub, Parser_make_span(self, start, last_end));
 }
 function Parser_parse_extern_type_decl_body(self, is_pub, start) {
   Parser_advance(self);
@@ -1188,9 +1215,8 @@ function Parser_parse_struct_decl(self, is_pub) {
     List_push(fields, new ast$StructFieldDecl(field_name, type_annotation, field_pub, Parser_make_span(self, field_start, field_end)));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Struct(name, type_params, fields, is_pub, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Decl_Struct(name, type_params, fields, is_pub, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_enum_decl(self, is_pub) {
   const start = Parser_current_span_start(self);
@@ -1240,9 +1266,8 @@ function Parser_parse_enum_decl(self, is_pub) {
     List_push(variants, new ast$EnumVariantDecl(v_name, v_fields, named_fields, Parser_make_span(self, v_start, v_end)));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Enum(name, type_params, variants, is_pub, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Decl_Enum(name, type_params, variants, is_pub, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_impl_decl(self) {
   const start = Parser_current_span_start(self);
@@ -1268,9 +1293,8 @@ function Parser_parse_impl_decl(self) {
       List_push(methods, Parser_parse_fn_decl(self, m_pub, false));
     }
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Impl(target_type, type_params, trait_name, methods, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Decl_Impl(target_type, type_params, trait_name, methods, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_effect_decl(self, is_pub) {
   const start = Parser_current_span_start(self);
@@ -1293,17 +1317,15 @@ function Parser_parse_effect_decl(self, is_pub) {
     Parser_try_consume(self, lexer$TokenKind_TkComma);
     Parser_try_consume(self, lexer$TokenKind_TkSemi);
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Effect(name, type_params, ops, is_pub, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Decl_Effect(name, type_params, ops, is_pub, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_test_decl(self) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkTest);
   const desc_tok = Parser_expect(self, lexer$TokenKind_TkStringLit);
   const body = Parser_parse_block_expr(self);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Test(desc_tok.value, body, Parser_make_span(self, start, end));
+  return ast$Decl_Test(desc_tok.value, body, Parser_make_span(self, start, expr_span(body).end));
 }
 function Parser_parse_trait_decl(self, is_pub) {
   const start = Parser_current_span_start(self);
@@ -1317,9 +1339,8 @@ function Parser_parse_trait_decl(self, is_pub) {
     const m_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
     List_push(methods, Parser_parse_fn_decl(self, m_pub, true));
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Decl_Trait(name, type_params, supertraits, methods, is_pub, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Decl_Trait(name, type_params, supertraits, methods, is_pub, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_expr(self) {
   return Parser_parse_expr_bp(self, PREC_NONE, true);
@@ -1389,8 +1410,7 @@ function Parser_parse_prefix(self, allow_struct_lit) {
   if ((Parser_check(self, lexer$TokenKind_TkMinus) || Parser_check(self, lexer$TokenKind_TkBang))) {
     Parser_advance(self);
     const operand = Parser_parse_expr_bp(self, PREC_UNARY, allow_struct_lit);
-    const end = Parser_current_span_start(self);
-    return ast$Expr_UnaryOp(str_to_unaryop(tok.value), operand, Parser_make_span(self, start, end));
+    return ast$Expr_UnaryOp(str_to_unaryop(tok.value), operand, Parser_make_span(self, start, expr_span(operand).end));
   }
   if (Parser_check(self, lexer$TokenKind_TkIntLit)) {
     Parser_advance(self);
@@ -1541,32 +1561,32 @@ function Parser_parse_prefix(self, allow_struct_lit) {
 function Parser_parse_dot_expr(self, left) {
   Parser_advance(self);
   let name = "";
+  let name_end = Parser_current_span_start(self);
   if (Parser_check(self, lexer$TokenKind_TkFloatLit)) {
     const tok = Parser_advance(self);
     const parts = Str_split(tok.value, ".");
     let result = left;
     for (const part of parts) {
-      const end = Parser_current_span_start(self);
-      result = ast$Expr_FieldAccess(result, part, Parser_make_span(self, expr_span(left).start, end));
+      result = ast$Expr_FieldAccess(result, part, Parser_make_span(self, expr_span(left).start, tok.span.end));
     }
     return result;
   }
   if (Parser_check(self, lexer$TokenKind_TkIntLit)) {
     const tok = Parser_advance(self);
     name = tok.value;
+    name_end = tok.span.end;
   } else {
     const tok = Parser_expect(self, lexer$TokenKind_TkIdent);
     name = tok.value;
+    name_end = tok.span.end;
   }
   if (Parser_check(self, lexer$TokenKind_TkLParen)) {
     Parser_advance(self);
     const args = Parser_parse_arg_list(self);
-    Parser_expect(self, lexer$TokenKind_TkRParen);
-    const end = Parser_current_span_start(self);
-    return ast$Expr_MethodCall(left, name, args, [], Parser_make_span(self, expr_span(left).start, end));
+    const rparen = Parser_expect(self, lexer$TokenKind_TkRParen);
+    return ast$Expr_MethodCall(left, name, args, [], Parser_make_span(self, expr_span(left).start, rparen.span.end));
   }
-  const end = Parser_current_span_start(self);
-  return ast$Expr_FieldAccess(left, name, Parser_make_span(self, expr_span(left).start, end));
+  return ast$Expr_FieldAccess(left, name, Parser_make_span(self, expr_span(left).start, name_end));
 }
 function Parser_parse_index_expr(self, receiver) {
   Parser_advance(self);
@@ -1610,6 +1630,7 @@ function Parser_parse_catch_expr(self, left) {
 function Parser_parse_string_interp(self) {
   const start_tok = Parser_advance(self);
   let parts = [];
+  let last_end = start_tok.span.end;
   if ((Str_len(start_tok.value) > 0)) {
     List_push(parts, ast$StringInterpPart_LitPart(start_tok.value));
   }
@@ -1618,6 +1639,7 @@ function Parser_parse_string_interp(self) {
     const tok = Parser_peek(self);
     if (Parser_check(self, lexer$TokenKind_TkStringInterpMiddle)) {
       Parser_advance(self);
+      last_end = tok.span.end;
       if ((Str_len(tok.value) > 0)) {
         List_push(parts, ast$StringInterpPart_LitPart(tok.value));
       }
@@ -1625,6 +1647,7 @@ function Parser_parse_string_interp(self) {
     } else {
       if (Parser_check(self, lexer$TokenKind_TkStringInterpEnd)) {
         Parser_advance(self);
+        last_end = tok.span.end;
         if ((Str_len(tok.value) > 0)) {
           List_push(parts, ast$StringInterpPart_LitPart(tok.value));
         }
@@ -1634,8 +1657,7 @@ function Parser_parse_string_interp(self) {
       }
     }
   }
-  const end = Parser_current_span_start(self);
-  return ast$Expr_StringInterp(parts, Parser_make_span(self, start_tok.span.start, end));
+  return ast$Expr_StringInterp(parts, Parser_make_span(self, start_tok.span.start, last_end));
 }
 function Parser_parse_if_expr(self) {
   const start = Parser_current_span_start(self);
@@ -1650,8 +1672,13 @@ function Parser_parse_if_expr(self) {
       else_branch = Option_some(Parser_parse_block_expr(self));
     }
   }
-  const end = Parser_current_span_start(self);
-  return ast$Expr_IfExpr(condition, then_branch, else_branch, Parser_make_span(self, start, end));
+  const end_pos = (function() {
+  const __ring_m = else_branch;
+  if (__ring_m._tag === "some") { const eb = __ring_m._0; return expr_span(eb).end; }
+  if (__ring_m._tag === "none") { return expr_span(then_branch).end; }
+  __match_fail(__ring_m);
+})();
+  return ast$Expr_IfExpr(condition, then_branch, else_branch, Parser_make_span(self, start, end_pos));
 }
 function Parser_parse_match_expr(self) {
   const start = Parser_current_span_start(self);
@@ -1663,9 +1690,8 @@ function Parser_parse_match_expr(self) {
     List_push(arms, Parser_parse_match_arm(self));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Expr_MatchExpr(scrutinee, arms, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Expr_MatchExpr(scrutinee, arms, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_match_arm(self) {
   const start = Parser_current_span_start(self);
@@ -1677,8 +1703,7 @@ function Parser_parse_match_arm(self) {
   }
   Parser_expect(self, lexer$TokenKind_TkFatArrow);
   const body = Parser_parse_expr(self);
-  const end = Parser_current_span_start(self);
-  return new ast$MatchArm(pattern, guard, body, Parser_make_span(self, start, end));
+  return new ast$MatchArm(pattern, guard, body, Parser_make_span(self, start, expr_span(body).end));
 }
 function Parser_parse_pattern(self) {
   const tok = Parser_peek(self);
@@ -1758,9 +1783,8 @@ function Parser_parse_pattern(self) {
           List_push(fields, Parser_parse_pattern(self));
         }
       }
-      Parser_expect(self, lexer$TokenKind_TkRParen);
-      const end = Parser_current_span_start(self);
-      return ast$Pattern_Constructor(name, qualifier, fields, Parser_make_span(self, start, end));
+      const rparen = Parser_expect(self, lexer$TokenKind_TkRParen);
+      return ast$Pattern_Constructor(name, qualifier, fields, Parser_make_span(self, start, rparen.span.end));
     }
     if ((Parser_check(self, lexer$TokenKind_TkLBrace) && is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")))) {
       Parser_advance(self);
@@ -1774,8 +1798,9 @@ function Parser_parse_pattern(self) {
           break;
         }
         const f_start = Parser_current_span_start(self);
-        const f_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
-        let pat = ast$Pattern_Binding(f_name, Parser_make_span(self, f_start, Parser_current_span_start(self)));
+        const f_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+        const f_name = f_tok.value;
+        let pat = ast$Pattern_Binding(f_name, f_tok.span);
         if (Parser_try_consume(self, lexer$TokenKind_TkColon)) {
           pat = Parser_parse_pattern(self);
         }
@@ -1783,9 +1808,8 @@ function Parser_parse_pattern(self) {
         List_push(named_fields, new ast$NamedPatternField(f_name, pat, Parser_make_span(self, f_start, f_end)));
         Parser_try_consume(self, lexer$TokenKind_TkComma);
       }
-      Parser_expect(self, lexer$TokenKind_TkRBrace);
-      const end = Parser_current_span_start(self);
-      return ast$Pattern_NamedConstructor(name, qualifier, named_fields, rest, Parser_make_span(self, start, end));
+      const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+      return ast$Pattern_NamedConstructor(name, qualifier, named_fields, rest, Parser_make_span(self, start, rbrace.span.end));
     }
     if (Option_is_some(qualifier)) {
       return ast$Pattern_Constructor(name, qualifier, [], Parser_make_span(self, start, Parser_current_span_start(self)));
@@ -1825,9 +1849,8 @@ function Parser_parse_handle_expr(self) {
     List_push(handlers, Parser_parse_effect_handler(self));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Expr_HandleExpr(body, handlers, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Expr_HandleExpr(body, handlers, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_effect_handler(self) {
   const start = Parser_current_span_start(self);
@@ -1839,8 +1862,7 @@ function Parser_parse_effect_handler(self) {
   Parser_expect(self, lexer$TokenKind_TkRParen);
   Parser_expect(self, lexer$TokenKind_TkFatArrow);
   const body = Parser_parse_expr(self);
-  const end = Parser_current_span_start(self);
-  return new ast$EffectHandler(effect_name, op_name, params, Option_none, body, Parser_make_span(self, start, end));
+  return new ast$EffectHandler(effect_name, op_name, params, Option_none, body, Parser_make_span(self, start, expr_span(body).end));
 }
 function Parser_parse_lambda_expr(self) {
   const start = Parser_current_span_start(self);
@@ -1853,8 +1875,7 @@ function Parser_parse_lambda_expr(self) {
     return_type = Option_some(Parser_parse_type_expr(self));
   }
   const body = Parser_parse_block_expr(self);
-  const end = Parser_current_span_start(self);
-  return ast$Expr_Lambda(params, return_type, body, Parser_make_span(self, start, end));
+  return ast$Expr_Lambda(params, return_type, body, Parser_make_span(self, start, expr_span(body).end));
 }
 function Parser_parse_struct_literal(self, name, start, qualifier) {
   Parser_expect(self, lexer$TokenKind_TkLBrace);
@@ -1867,18 +1888,18 @@ function Parser_parse_struct_literal(self, name, start, qualifier) {
   }
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const f_start = Parser_current_span_start(self);
-    const f_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
-    let f_value = ast$Expr_Ident(f_name, Option_none, Parser_make_span(self, f_start, Parser_current_span_start(self)));
+    const f_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+    const f_name = f_tok.value;
+    let f_value = ast$Expr_Ident(f_name, Option_none, f_tok.span);
     if (Parser_try_consume(self, lexer$TokenKind_TkColon)) {
       f_value = Parser_parse_expr(self);
     }
-    const f_end = Parser_current_span_start(self);
+    const f_end = expr_span(f_value).end;
     List_push(fields, new ast$StructFieldInit(f_name, f_value, Parser_make_span(self, f_start, f_end)));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$Expr_StructLit(name, qualifier, [], fields, spread, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$Expr_StructLit(name, qualifier, [], fields, spread, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_try_parse_type_args(self) {
   if ((!Parser_check(self, lexer$TokenKind_TkLt))) {
@@ -1923,12 +1944,13 @@ function Parser_parse_type_expr(self) {
     Parser_expect(self, lexer$TokenKind_TkRParen);
     Parser_expect(self, lexer$TokenKind_TkArrow);
     const return_type = Parser_parse_type_expr(self);
+    let fn_end = type_expr_span(return_type).end;
     let fn_effects = [];
     if (Parser_check(self, lexer$TokenKind_TkWith)) {
       fn_effects = Parser_parse_effect_annotation(self);
+      fn_end = Parser_current_span_start(self);
     }
-    const end = Parser_current_span_start(self);
-    return ast$TypeExpr_FnType(params, return_type, fn_effects, Parser_make_span(self, start, end));
+    return ast$TypeExpr_FnType(params, return_type, fn_effects, Parser_make_span(self, start, fn_end));
   }
   if (Parser_check(self, lexer$TokenKind_TkLParen)) {
     Parser_advance(self);
@@ -2020,9 +2042,8 @@ function Parser_parse_record_type_expr(self) {
       break;
     }
   }
-  Parser_expect(self, lexer$TokenKind_TkRBrace);
-  const end = Parser_current_span_start(self);
-  return ast$TypeExpr_RecordType(fields, rest, Parser_make_span(self, start, end));
+  const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
+  return ast$TypeExpr_RecordType(fields, rest, Parser_make_span(self, start, rbrace.span.end));
 }
 function Parser_parse_type_params(self) {
   if ((!Parser_check(self, lexer$TokenKind_TkLt))) {
@@ -2121,4 +2142,4 @@ function __Parser_Debug_debug(self) {
 const __Parser_Debug = { debug: __Parser_Debug_debug };
 
 
-export { PREC_NONE, PREC_CATCH, PREC_LOGIC_OR, PREC_LOGIC_AND, PREC_EQUALITY, PREC_COMPARE, PREC_RANGE, PREC_ADD_SUB, PREC_MUL_DIV, PREC_UNARY, PREC_POSTFIX, infix_precedence, expr_span, Parser, new_parser, parse, Parser_peek, Parser_peek_at, Parser_advance, Parser_check, Parser_try_consume, Parser_expect, Parser_at_end, Parser_current_span_start, Parser_make_span, Parser_report_error, Parser_error, Parser_parse_program, Parser_parse_stmt, Parser_parse_while_stmt, Parser_parse_loop_stmt, Parser_parse_for_in_stmt, Parser_parse_break_stmt, Parser_parse_continue_stmt, Parser_parse_if_let_stmt, Parser_parse_binding_stmt, Parser_parse_binding_body, Parser_parse_return_stmt, Parser_parse_block_expr, Parser_parse_use_decl, Parser_parse_mod_block, Parser_parse_decl, Parser_parse_effect_list, Parser_parse_effect_annotation, Parser_parse_fn_decl, Parser_parse_const_decl, Parser_parse_sig_block, Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl, Parser_parse_struct_decl, Parser_parse_enum_decl, Parser_parse_impl_decl, Parser_parse_effect_decl, Parser_parse_test_decl, Parser_parse_trait_decl, Parser_parse_expr, Parser_parse_expr_no_struct, Parser_parse_expr_bp, Parser_parse_prefix, Parser_parse_dot_expr, Parser_parse_index_expr, Parser_parse_call_expr, Parser_parse_arg_list, Parser_parse_catch_expr, Parser_parse_string_interp, Parser_parse_if_expr, Parser_parse_match_expr, Parser_parse_match_arm, Parser_parse_pattern, Parser_parse_handle_expr, Parser_parse_effect_handler, Parser_parse_lambda_expr, Parser_parse_struct_literal, Parser_try_parse_type_args, Parser_parse_type_expr, Parser_parse_record_type_expr, Parser_parse_type_params, Parser_parse_type_bound, Parser_parse_params, Parser_parse_param, __Parser_Clone, __Parser_Debug };
+export { PREC_NONE, PREC_CATCH, PREC_LOGIC_OR, PREC_LOGIC_AND, PREC_EQUALITY, PREC_COMPARE, PREC_RANGE, PREC_ADD_SUB, PREC_MUL_DIV, PREC_UNARY, PREC_POSTFIX, infix_precedence, type_expr_span, expr_span, Parser, new_parser, parse, Parser_peek, Parser_peek_at, Parser_advance, Parser_check, Parser_try_consume, Parser_expect, Parser_at_end, Parser_current_span_start, Parser_make_span, Parser_report_error, Parser_error, Parser_parse_program, Parser_parse_stmt, Parser_parse_while_stmt, Parser_parse_loop_stmt, Parser_parse_for_in_stmt, Parser_parse_break_stmt, Parser_parse_continue_stmt, Parser_parse_if_let_stmt, Parser_parse_binding_stmt, Parser_parse_binding_body, Parser_parse_return_stmt, Parser_parse_block_expr, Parser_parse_use_decl, Parser_parse_mod_block, Parser_parse_decl, Parser_parse_effect_list, Parser_parse_effect_annotation, Parser_parse_fn_decl, Parser_parse_const_decl, Parser_parse_sig_block, Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl, Parser_parse_struct_decl, Parser_parse_enum_decl, Parser_parse_impl_decl, Parser_parse_effect_decl, Parser_parse_test_decl, Parser_parse_trait_decl, Parser_parse_expr, Parser_parse_expr_no_struct, Parser_parse_expr_bp, Parser_parse_prefix, Parser_parse_dot_expr, Parser_parse_index_expr, Parser_parse_call_expr, Parser_parse_arg_list, Parser_parse_catch_expr, Parser_parse_string_interp, Parser_parse_if_expr, Parser_parse_match_expr, Parser_parse_match_arm, Parser_parse_pattern, Parser_parse_handle_expr, Parser_parse_effect_handler, Parser_parse_lambda_expr, Parser_parse_struct_literal, Parser_try_parse_type_args, Parser_parse_type_expr, Parser_parse_record_type_expr, Parser_parse_type_params, Parser_parse_type_bound, Parser_parse_params, Parser_parse_param, __Parser_Clone, __Parser_Debug };
