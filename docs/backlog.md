@@ -173,7 +173,7 @@ impl Admin {
 ### B-011 LLVM Native Backend [feature] [P3] [XL] [queued]
 design.md 14.2。编译到 LLVM IR，桌面/服务端场景。
 
-- **前置依赖**：Linear types（Perceus RC 基础）
+- **前置依赖**：Linear types（Perceus RC 基础）；迁移正前方需完成 Str Unicode 语义统一（`len`/`char_at`/`slice` 等从 UTF-16 切到 code point 语义，消除 JS-ism）
 - **复杂度**：极大
 - **优先级**：Phase C（长期视野 [[long-term-vision]]）
 - **FFI 边界 effect 设计**（LLVM 阶段必须在设计期解决的问题）：
@@ -351,6 +351,23 @@ impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后
 
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
 - **优先级**：低
+
+### B-029 Str 方法补全（编译器急需）[feature] [P1] [S] [queued]
+编译器自举中高频 workaround 的方法。API 设计后端无关，不引入 JS-ism。
+
+**新增方法**：
+- `trim_start()` / `trim_end()` → `Str`
+- `is_empty()` → `Bool`
+- `last_index_of(s: Str)` → `Option<Int>`
+
+**涉及修改**：
+1. `std/str.ring`：4 个 `pub extern fn`
+2. `runtime.ring`：4 个 JS runtime 函数
+3. `builtins.ring`：注册到 STR_METHODS（如需）
+
+**验收标准**：
+- 方法可在 Ring 代码中调用并正确工作
+- 编译器中对应 workaround 可替换
 
 ### B-025 下标运算符 `list[i]` / `map[key]` [feature] [P1] [M] [queued]
 提供集合直接访问语法。自举时因时间压力漏掉，导致 ~40 个 `_at()` helper 散布在编译器中。
