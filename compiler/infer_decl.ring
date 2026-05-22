@@ -321,6 +321,31 @@ fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast
     HDecl::Effect { name: name, type_params: type_params, ops: hops, is_pub: is_pub, span: span }
 }
 
+fn update_impl_method_effects(ctx: InferCtx, target_type: Str, method_name: Str, effects: EffectRow) {
+    match ctx.env.trait_reg.impl_methods.get(target_type) {
+        some(methods_map) => {
+            match methods_map.get(method_name) {
+                some(scheme) => {
+                    match scheme.ty {
+                        Type::FnType { params, return_type, .. } => {
+                            let updated_ty = Type::FnType { params: params, return_type: return_type, effects: effects }
+                            methods_map.insert(method_name, TypeScheme {
+                                ty: updated_ty,
+                                type_vars: scheme.type_vars,
+                                bounds: scheme.bounds,
+                                def_id: scheme.def_id
+                            })
+                        },
+                        _ => {}
+                    }
+                },
+                none => {}
+            }
+        },
+        none => {}
+    }
+}
+
 fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
     let saved_tp_scope = map_clone(ctx.type_param_scope)
     for tp in type_params {
@@ -371,8 +396,18 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
         match method {
             Decl::ExternFn { name, type_params: mtps, params, return_type, declared_effects, is_pub, span: mspan } =>
                 hmethods.push(check_extern_fn_decl(ctx, name, mtps, params, declared_effects, is_pub, mspan)),
-            Decl::Fn { name, type_params: mtps, params, return_type, declared_effects, body, is_pub, span: mspan, .. } =>
-                hmethods.push(check_fn_decl(ctx, name, mtps, params, return_type, declared_effects, body, is_pub, mspan, some(impl_self_type))),
+            Decl::Fn { name, type_params: mtps, params, return_type, declared_effects, body, is_pub, span: mspan, .. } => {
+                let hdecl = check_fn_decl(ctx, name, mtps, params, return_type, declared_effects, body, is_pub, mspan, some(impl_self_type))
+                hmethods.push(hdecl)
+                match hdecl {
+                    HDecl::Fn { name: mname, effects: inferred_effects, .. } => {
+                        if inferred_effects.effects.len() > 0 {
+                            update_impl_method_effects(ctx, target_type, mname, inferred_effects)
+                        }
+                    },
+                    _ => {}
+                }
+            },
             _ => {}
         }
     }
