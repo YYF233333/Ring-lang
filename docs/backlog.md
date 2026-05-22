@@ -3,6 +3,7 @@
 > 活的工作看板。做完的条目删除，只在 git commit message 留记录。
 > 条目格式：`### B-xxx <标题> [类型] [优先级] [复杂度] [状态]`
 > 状态流转：`queued` → `planning` → `doing` → 删除
+> 反馈分支：`doing` → `waiting-feedback`（Worker 遇到设计问题）→ Discussion 处理后 → `queued`（重新排队）
 > 工作流规范见 `docs/workflow.md`
 
 ## 类型系统
@@ -326,7 +327,7 @@ let inc = fn() { counter = counter + 1 }  // 自动 box，闭包带 mut<Int> eff
 
 ## 已知 Bug / 技术债
 
-### B-021 Impl 方法 Effect 传播 [bugfix] [P1] [M] [queued]
+### B-021 Impl 方法 Effect 传播 [bugfix] [P1] [M] [doing]
 impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后不回传。
 
 - **当前 workaround**：parser 用 `__ring_raise_fail` extern fn 直接抛 `__EffectAbort`，codegen 的 `gen_try_catch` 已去除 `has_fail_effect` 前置检查

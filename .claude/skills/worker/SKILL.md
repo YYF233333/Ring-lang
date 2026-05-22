@@ -33,6 +33,7 @@ grep -n "\[open\]" docs/audit-report.md
 ```
 
 收集所有 `queued` (backlog) 和 `open` (audit-report) items。
+**跳过 `waiting-feedback` 状态的 item**——这些在等 Discussion agent 处理设计问题。
 
 ### Step 2: 排序与分组
 
@@ -191,7 +192,8 @@ Worker 在实现过程中可能发现新 bug、设计偏差或需要讨论的决
 **设计问题 / 待决策项（需要用户判断）**：
 - 追加到 `docs/worker_feedback.md`，按 backlog item 分组
 - 每条包含：**现状**（发现了什么）、**原因**（为什么会这样）、**待决策**（列出选项）
-- 对应 backlog item 保持当前状态（不删除、不标回 queued）——等 Discussion agent 处理
+- **更新 backlog item**：把已完成的部分写入 spec（进度不丢失），状态改为 `waiting-feedback`
+- Worker 扫描时**跳过 `waiting-feedback` 状态的 item**——等 Discussion agent 处理完重新排队
 
 **worker_feedback.md 格式**：
 ```markdown
@@ -225,6 +227,7 @@ Worker 在实现过程中可能发现新 bug、设计偏差或需要讨论的决
 - **Orchestrator 不实现任务**——你调度和合并，不自己写代码
 - **Spec 是法律**——严格按两个表的 spec 执行，不自由发挥
 - **做完即删**——完成的 item 从表中删除，保持列表精简
-- **状态及时更新**——queued → planning → doing → 删除，每步都 commit
+- **状态及时更新**——queued → planning → doing → 删除（正常流）；doing → waiting-feedback（遇设计问题），每步都 commit
+- **不碰 waiting-feedback 的 item**——这些在等 Discussion agent 决策，Worker 跳过
 - **Base commit 验证是必须的**——每个 agent prompt 第一件事
 - **每次 Wave 后清理 worktree**——`git worktree remove -f -f`
