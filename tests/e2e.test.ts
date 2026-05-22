@@ -443,6 +443,8 @@ const cases: TestCase[] = [
   { file: "audit_set_contains_struct.ring", expected: "pass: set struct eq consistency\n" },
   { file: "audit_catch_on_pure.ring", expected: "pass: catch on pure warning\n" },
   { file: "audit_set_ops_deep_eq.ring", expected: "Set ops deep equality: all passed\n" },
+  { file: "effect_alias.ring", expected: "Hello, world\nEffect alias: all passed\n" },
+  { file: "effect_alias_generic.ring", expected: "Generic effect alias: all passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -508,6 +510,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_assign_temp_field.ring", error_pattern: "E0205" },
     { file: "audit_try_reserved.ring", error_pattern: "E0101" },
     { file: "exhaustive_nonfinite_msg.ring", error_pattern: "non-finite type" },
+    { file: "effect_alias_cycle.ring", error_pattern: "E0406" },
   ];
 
   for (const tc of negative_cases) {

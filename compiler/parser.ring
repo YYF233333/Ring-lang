@@ -1105,10 +1105,29 @@ impl Parser {
         }
     }
 
+    fn parse_effect_alias_decl(mut self, is_pub: Bool, start: Position) -> Decl {
+        // 'effect alias' has been consumed; now parse: Name<T> = { effects }
+        let name = self.expect(TokenKind::TkIdent).value
+        let type_params = self.parse_type_params()
+        self.expect(TokenKind::TkEq)
+        let effects = self.parse_effect_list()
+        let end = self.current_span_start()
+        Decl::EffectAlias {
+            name: name,
+            type_params: type_params,
+            effects: effects,
+            is_pub: is_pub,
+            span: self.make_span(start, end)
+        }
+    }
+
     fn parse_effect_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkEffect)
         let name = self.expect(TokenKind::TkIdent).value
+        if name == "alias" {
+            return self.parse_effect_alias_decl(is_pub, start)
+        }
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLBrace)
         let mut ops: List<EffectOpDecl> = []

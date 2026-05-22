@@ -173,6 +173,10 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             let (name, effdef) = entry
             ctx.env.types.effects.insert(name, effdef)
         }
+        for entry in mod_.effect_aliases.entries() {
+            let (name, adef) = entry
+            ctx.env.types.effect_aliases.insert(name, adef)
+        }
         for entry in mod_.traits.entries() {
             let (name, tdef) = entry
             ctx.env.trait_reg.traits.insert(name, tdef)
@@ -265,6 +269,7 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                             }
 
                             if mod_.effects.contains_key(item.name) { found = true }
+                            if mod_.effect_aliases.contains_key(item.name) { found = true }
                             if mod_.traits.contains_key(item.name) { found = true }
 
                             if found == false {
