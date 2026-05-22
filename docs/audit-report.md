@@ -75,9 +75,11 @@ codegen_expr.ring:196-202 只检查首字符是否为数字，`"0abc"` 等非法
 
 发现者：设计决策项
 
-### #66 `register_impl_method` 接收 `declared_effects` 参数但完全不使用 [medium] [open]
+### #66 `register_impl_method` declared_effects 已使用但 Pass 2 仍不回传 [medium] [open]
 
-impl 方法 effect 注册为 `EMPTY_ROW`，显式 `with {io}` 标注被忽略。关联 #42。
+~~原报告称 declared_effects 参数完全不使用——已修复（infer_register.ring:573-577 现在 resolve 并应用 declared_effects）。~~ 但核心问题仍在：Pass 2 推断出的实际 effect 不回传到环境。关联 #42。
+
+发现者：Opus（2026-05-23 更新）
 
 ### #67 `std/io.ring` 的 `print`/`assert`/`exit` 缺少 `with {io}` 标注 [medium] [open]
 
@@ -124,6 +126,56 @@ impl 方法 effect 注册为 `EMPTY_ROW`，显式 `with {io}` 标注被忽略。
 ### #34 错误码编号有缺口（E0202/E0400/E0401 等）[low] [open]
 
 文档问题。
+
+### #87 `__ring_tuple_eq` 使用 JS `===` 而非 Eq trait [medium] [open]
+
+runtime.ring:119。`__ring_tuple_eq` 对非 tuple/array 元素使用 `a[i] !== b[i]`（JS 引用相等）。包含 struct/enum 的 tuple 比较结果错误——两个 field 值相同但不同 JS 对象的 struct 会判定不等，即使该类型实现了 Eq trait。
+
+修复方向：在 codegen 层为 tuple 比较生成 Eq-aware 的代码，或在 runtime 添加 `__ring_deep_eq` 函数按元素类型分发比较。
+
+发现者：Opus
+
+### #88 `gen_handle` abort catch 不过滤 effect name [medium] [open]
+
+codegen_expr.ring:1029-1031。`handle...with` 生成的 try-catch 只检查 `instanceof __EffectAbort`，不检查 `__ring_e.effect` 是否匹配当前处理的 effect。如果未来添加自定义 abort 语义的 effect，错误的 handler 会截获不属于它的 abort。当前安全（fail 是唯一 abort effect），但代码不正确。
+
+修复方向：添加 `&& __ring_e.effect === "effectName"` 条件，与 `gen_try_catch` 的正确实现对齐。
+
+发现者：Opus
+
+
+### #90 `Set.insert/remove` 使用 JS `===` 但 `Set.contains` 使用 Eq trait [medium] [open]
+
+runtime.ring:112-113（insert/remove 用 JS `Set.add`/`Set.delete` = 引用相等）vs std/set.ring（contains 用 Ring 实现 = Eq trait dispatch）。语义不一致：两个 Eq-equal 的 struct 会被 insert 视为不同值（都插入），但 contains 能找到它们。与 `List.contains` 修复（#已完成）同类问题。
+
+修复方向：用 Ring 实现 `Set.insert`/`Set.remove`，使用 Eq trait 比较，与 `Set.contains` 一致。
+
+发现者：Opus
+
+### #91 catch 对无 fail effect 的表达式静默接受 [medium] [open]
+
+infer.ring:2309。`error_type` 初始化为 fresh type variable。当 body 无 fail effect 时，`found_fail` 保持 false，`error_type` 成为无约束类型变量。catch arms 的 pattern 与无约束类型统一永远成功——`42 catch { e => 0 }` 类型检查通过但 handler 永远不执行（死代码）。
+
+修复方向：`found_fail` 为 false 时发出警告诊断（如 W0601 "catch on expression with no fail effect"），帮助用户发现无意义的 catch。
+
+发现者：DS + Opus
+
+
+## 代码质量 / 可维护性（续）
+
+
+### #94 Tuple 负索引无下界检查 [low] [open]
+
+infer.ring:1783-1784。`if i >= elements.len()` 只检查上界，`i < 0` 时跳过报错，`elements.get(-1)` 返回 none 触发 panic。Parser 不产生负数 field name，所以不可达——但防御性编码应加 `i < 0` 检查。
+
+发现者：DS
+
+
+### #96 `check_assign_target_mutable` wildcard 静默跳过非 Ident/FieldAccess 目标 [low] [open]
+
+infer.ring:576。`_ => {}` wildcard 对未识别的赋值目标（如 IndexExpr）不做可变性检查。当前 parser 不产生 index 赋值，不可达。但如果未来支持 `list[i] = val`，需要处理 IndexExpr 的可变性验证。
+
+发现者：Opus
 
 ## 设计-实现差距（参考，已在 backlog 跟踪）
 
