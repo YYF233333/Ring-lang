@@ -308,6 +308,9 @@ fn resolve_field_action(
                 none
             }
         },
+        Type::ErrorType => some(FieldAction::Identity),
+        Type::AnyType => some(FieldAction::Identity),
+        Type::NeverType => some(FieldAction::Identity),
         _ => none,
     }
 }

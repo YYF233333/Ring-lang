@@ -439,6 +439,18 @@ function resolve_field_action(env, field_type, type_param_vars, type_param_names
       }
       break __ring_match11;
     }
+    if (__ring_m11._tag === "ErrorType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "AnyType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "NeverType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match11;
+    }
     return Option_none;
     break __ring_match11;
   }
