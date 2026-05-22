@@ -182,11 +182,31 @@ git worktree remove -f -f <path>  # 清理每个完成的 worktree
 
 ## 发现新问题时
 
-Worker 在实现过程中可能发现新 bug 或问题。处理规则：
+Worker 在实现过程中可能发现新 bug、设计偏差或需要讨论的决策。按类型分流：
 
-- **不自行修复超出 spec 范围的问题**
+**技术 bug（明确的代码缺陷）**：
 - 追加到 `docs/audit-report.md` 作为新 `open` item
-- 在最终报告中列出新发现的 items
+- 不自行修复超出 spec 范围的问题
+
+**设计问题 / 待决策项（需要用户判断）**：
+- 追加到 `docs/worker_feedback.md`，按 backlog item 分组
+- 每条包含：**现状**（发现了什么）、**原因**（为什么会这样）、**待决策**（列出选项）
+- 对应 backlog item 保持当前状态（不删除、不标回 queued）——等 Discussion agent 处理
+
+**worker_feedback.md 格式**：
+```markdown
+## B-xxx <标题>
+
+### <序号>. <问题简述>
+
+**现状**：...
+**原因**：...
+**待决策**：
+- (A) 选项一
+- (B) 选项二
+```
+
+- 在最终报告中列出所有新发现的 items 和 feedback
 
 ## 特殊情况处理
 
