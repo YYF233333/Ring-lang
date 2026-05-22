@@ -1,10 +1,10 @@
 # Ring-lang
 
-面向大型多端应用的编程语言，转译到 JavaScript/V8 运行。
+语言演化实验——验证代数 effect system、refinement types、ML 级类型推断在大规模工程中的实用化。
 
 **核心主张**：代数 effect system + ML 级类型推断 + OOP 手感，写起来像 Python，编译器看到完整类型+副作用信息。设计目标之一是让 LLM 在零训练数据下 vibe coding 的表现超过 TypeScript。
 
-**当前状态**：自举完成。编译器由 33 个 .ring 源文件实现，编译自身，237 个 E2E 测试全部通过。
+**当前状态**：自举完成。编译器由 33 个 .ring 源文件实现，编译自身，317 个 E2E 测试全部通过。当前编译到 JS/V8（bootstrap 后端），目标后端为 LLVM native。
 
 ## Quick Start
 
@@ -170,7 +170,7 @@ print("${counter.get()}")   // 3
 | HIR | 独立数据结构，每个表达式带推断的 Type + EffectRow |
 | Codegen | 生成可读 JS，effect → evidence passing，trait → dictionary passing |
 
-编译器自身用 Ring 写成（自举），33 个源文件，编译到 JS 后运行。
+编译器自身用 Ring 写成（自举），33 个源文件，编译到 JS 后运行。当前 JS 后端为 bootstrap 用途，目标后端为 LLVM native。
 
 ## 已实现特性
 
@@ -185,18 +185,20 @@ print("${counter.get()}")   // 3
 - 字符串插值（支持嵌套 `"${fn("arg")}"`）
 - 标准库 10 个模块（io/fs/path/process/str/num/list/map/set/result）
 - FFI（extern fn / extern type）
-- 237 个 E2E 测试（正向 + 负向）
+- 317 个 E2E 测试（正向 + 负向）
 - VSCode 语法高亮插件
 
-## 尚未实现（路线图）
+## 路线图
 
-- LSP（原 TS 实现未移植，当前仅语法高亮）
-- Full algebraic effect（post-resume handler，需要 delimited continuation）
+**Phase C（当前）**：
+- Effect aliases、supertrait 继承、`mut<T>` marker effect、default effect handler
+- 关联类型、Iterator trait、`delegate` 关键字、GADTs
+
+**未来**：
+- LLVM native backend（目标后端，编译器自身也将迁移）
 - Refinement types 编译期验证（语法已支持，验证未实现）
-- 关联类型 / supertrait 继承 / `dyn Trait`
-- Dependent types lite
-- LLVM native backend
-- Formatter 自动标注
+- Linear types + Perceus 引用计数
+- LSP（从 TS 归档版本移植）
 
 ## 项目结构
 
@@ -205,7 +207,7 @@ Ring-lang/
 ├── compiler/          33 个 .ring 源文件（编译器自身）
 │   └── dist/          编译产出的 JS（可直接 node 运行）
 ├── std/               10 个标准库模块
-├── tests/cases/       237 个 E2E 测试用例
+├── tests/cases/       317 个 E2E 测试用例
 ├── examples/          示例程序
 ├── editor/vscode/     VSCode 插件（语法高亮）
 └── docs/design.md     完整语言设计文档（14 章）

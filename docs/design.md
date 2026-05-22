@@ -1,8 +1,8 @@
 # Ring-lang 设计文档
 
-一门面向大型多端应用开发的理想编程语言。追求良好的工程 scalability，内化最佳工程实践，可以轻松驾驭 Web + 移动 + 桌面的全栈场景。
+一门语言演化实验——探索代数 effect system、refinement types、ML 级类型推断能否在大规模工程中实用化。不以 TIOBE 排名为目标，以验证这些特性在真实工程场景下的可行性和人机工效为核心产出。
 
-思想实验起步，允许激进的学术设计。额外目标：让 LLM 也喜欢写这门语言——如果 LLM 在零训练数据的情况下，vibe coding 大规模代码库的表现能干掉 JS/TS，就是将玩具打磨成熟的强 argue。
+额外目标：让 LLM 也喜欢写这门语言——如果 LLM 在零训练数据的情况下，vibe coding 大规模代码库的表现能干掉 JS/TS，就是将实验打磨成熟的强 argue。
 
 ## 设计公理
 
@@ -1038,37 +1038,34 @@ try {
 // 函数签名自动注入 evidence 参数：read_config(__ev_io) 而非 generator yield
 ```
 
-### 9.4 多端覆盖
+### 9.4 后端策略
 
-JS 宿主天然覆盖全部目标平台：
-- Web：浏览器直接运行
-- 桌面：Electron / Tauri
-- 移动：React Native / Capacitor
-- 服务端：Node / Deno / Bun
-- CLI：Node 单文件
+**JS 后端定位为 bootstrap 后端**（2026-05-23 决策）：
 
-平台抽象仍然通过 trait 设计，编译时绑定具体平台模块。条件编译作为逃生舱保留：
+JS 后端的作用是支撑编译器自举和早期语言开发，不是永久的生产后端。Ring 的语言特性（linear types、Perceus RC、full delimited continuation）在 LLVM 上才能完全发挥。
 
+| 阶段 | JS 后端角色 | 说明 |
+|------|------------|------|
+| 当前 | 唯一后端 | 编译器自举跑在 Node 上，用户代码编译为 JS 执行 |
+| LLVM 打通后 | 编译器运行时 | 编译器仍跑在 Node 上，用户代码可选 native 编译 |
+| 编译器 native 化后 | 归档 | 编译器自身迁移到 LLVM native，JS 后端仅保留用于 Web playground（可由 WASM 替代） |
+
+**LLVM 是 Ring 的目标后端**。生态通过 RIIR 策略（逐步用纯 Ring 重写标准库 + 核心库）解决，而非依赖外部包管理生态（npm/crates.io）。C 库通过 FFI 提供底层原语（libcurl、libpq、OpenSSL 等）。
+
+### 9.5 FFI 设计
+
+当前 FFI（`extern fn` / `extern type`）服务于 JS 后端的标准库实现。LLVM 后端的 FFI 将面向 C ABI。
+
+```ring
+// 当前：JS 后端 FFI（标准库内部使用）
+pub extern fn read_file(path: Str) -> Str
+pub extern type List<T>
+
+// 未来：LLVM 后端 FFI（C ABI）
+extern "c" fn fread(ptr: Ptr, size: Int, count: Int, stream: FilePtr) -> Int
 ```
-fn get_data_dir() -> Str {
-    when platform {
-        node    => "${env("HOME")}/.myapp",
-        browser => "/virtual/data",
-        mobile  => app_data_dir(),
-    }
-}
-```
 
-### 9.5 JS 生态互操作
-
-npm 包是事实上的标准库扩展。通过 `extern` 声明引入 JS 函数，手动标注类型和 effect：
-
-```
-extern "npm:express" {
-    fn create_app() -> App with {io}
-    fn listen(app: App, port: Int) -> Unit with {io, async}
-}
-```
+FFI 边界是 RIIR 的退缩前线——随着更多标准库用纯 Ring 重写，extern fn 数量持续减少。纯 Ring 代码天然跨后端。
 
 ---
 
@@ -1328,7 +1325,7 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 | +LLVM | LLVM native | C 的 2-3x | Go/OCaml 同级 |
 | +Perceus | LLVM + Perceus 引用计数 | C 的 1.2-1.5x | Koka/Swift 同级 |
 
-JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体验，不是性能。LLVM 后端面向桌面/服务端场景中有真实性能需求的用户。
+JS 后端是 bootstrap 方案——支撑编译器自举和早期开发。LLVM 是 Ring 的目标后端，届时编译器自身也将迁移到 native。
 
 ### 13.3 关键技术路径
 
@@ -1385,7 +1382,7 @@ JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体
 | mod capability | `mod name requires {effects} { ... }` 语法 | 模块级 effect 限制，E0405 错误码 |
 | 多行字符串 | `"..."` 允许跨行，空白原样保留 | 减少字符串拼接需求 |
 | Raw string | `r"..."` 和 `r#"..."#`，无转义无插值 | 正则表达式/codegen 场景减少转义噪音 |
-| JS 为主后端 | JS 是核心资产，非过渡方案；LLVM 是性能补充后端 | npm 生态 = 出生即有生态；effect 通过 try/catch 天然穿透 JS FFI；Web 场景无需 WASM 中间层 |
+| JS 为 bootstrap 后端 | JS 是自举过渡方案；LLVM 是目标后端 | 编译器自举需要 JS 运行时；LLVM 才能完全发挥 linear types / Perceus RC / full AE；生态通过 RIIR 策略自建 |
 | Int/Str 语义独立于 JS | Int = 64-bit signed（JS 用 BigInt），Str = UTF-8 code point 语义 | JS 是部署目标不是设计来源；Ring 语义独立定义，JS 端付性能代价适配 |
 | LLVM FFI effect 穿透 | TLS handler stack 存储 evidence，非函数参数传递 | C 函数无需感知 evidence；与 JS try/catch 的 ambient 语义对齐；x86-64 TLS 访问接近零成本 |
 | 类型系统代价分配 | 复杂度由 LLM 承担（编译器错误循环），收益由用户享受（零 runtime surprise） | runtime error = 用户受害 = 体验降级；LLM 不是人、不领工资，编译器搏斗十轮也无所谓 |

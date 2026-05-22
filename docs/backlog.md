@@ -634,62 +634,60 @@ source-map 支持 + 断点调试。
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
 - **优先级**：低
 
-## 架构：多后端策略
+### B-039 `catch` 对纯表达式发编译警告 [feature] [P3] [S] [queued]
+`let x = 42 catch { e => 0 }` 编译通过但 catch handler 是死代码——`42` 没有 fail effect，handler 永远不执行。用户可能误以为自己写了错误处理。
 
-Ring 成熟后为双后端结构（JS + LLVM），各有主场：
+**涉及修改**：
+1. `infer.ring`：在 `catch` 表达式推断完成后，检查 body 表达式的 effect row 是否包含 `fail`。若不包含，通过 `DiagnosticSink` 发出 warning（新增 warning 级别错误码，如 W0001）
+2. `codes.ring`：新增 warning 码
+3. `diagnostics.ring`：确认 warning 级别支持（若当前只有 error，需扩展 severity）
 
-| 后端 | 主场景 | 特有约束 |
-|------|--------|---------|
-| **JS** | Web 前端、快速原型、Playground、Node CLI、全栈 | GC 托管，effect 通过 evidence passing + try/catch |
-| **LLVM** | 桌面/服务端、系统级性能 | 完整控制栈和内存，Perceus RC，delimited continuation 可行 |
+**验收标准**：
+- `42 catch { e => 0 }` 产生编译警告（不是 error）
+- 有 fail effect 的表达式 `catch` 不产生警告
+- 警告不阻止编译和执行
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-040 穷尽性检查非有限类型错误文案改进 [feature] [P3] [S] [queued]
+match Int/Float/Str 缺 wildcard 时错误信息报"missing pattern for `_`"，可能让新用户困惑（以为要字面匹配 `_`）。改为更明确的文案如"non-finite type requires a wildcard `_` or binding pattern"。
+
+**涉及修改**：
+1. `exhaustive.ring`：修改非有限类型缺少覆盖时的错误消息文案
+
+**验收标准**：
+- match Int/Str/Float 无 wildcard → 错误消息明确提示"需要 wildcard 或 binding pattern"
+- enum 类型的穷尽性检查消息不受影响
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+## 架构：后端策略（2026-05-23 更新）
+
+**JS 后端定位为 bootstrap 后端，LLVM 为目标后端。**
+
+| 后端 | 定位 | 生命周期 |
+|------|------|---------|
+| **JS (V8)** | Bootstrap | 当前唯一后端，支撑编译器自举。LLVM 后端成熟后归档，仅保留 Web playground 用途（可由 WASM 替代） |
+| **LLVM** | 目标后端 | Ring 语言特性（linear types、Perceus RC、full AE）的完整实现平台 |
+
+### 生态策略：RIIR（Rewrite It In Ring）
+
+不依赖外部包管理生态（npm/crates.io），通过逐步用纯 Ring 重写标准库和核心库建立自有生态。底层原语（syscall、crypto、压缩）通过 C FFI 接入。
+
+**FFI 边界是退缩前线**：标准库从 `extern fn` 包装 JS → 纯 Ring 实现。纯 Ring 代码天然跨后端——RIIR 进度 = 后端迁移就绪度。
+
+### LLVM 后端引入路径
+
+1. 语言特性完善（Phase C 层 1+2）
+2. Codegen 接口抽象化（从 JS 单体中提取共享 HIR 优化 pass）
+3. LLVM codegen 实现（HIR → LLVM IR）
+4. 标准库底层原语移植（extern fn JS → extern fn C ABI）
+5. 编译器自身 native 化（bootstrap 完成，JS 后端归档）
 
 ### 已排除的后端
 
-- **WasmGC**：JS 后端的卖点不是性能，Web 端追求 ~2x 性能提升投入产出比不合理。如果未来有真实需求再重新评估。
-- **QBE(Ring)**：编译器自包含是终极愿景但优先级极低，不主动规划。
-
-### 核心张力
-
-**1. Effect 实现分歧**
-
-两个后端实现 effect 的机制不同：
-- JS：evidence passing → 普通函数参数 + try/catch（当前方案）
-- LLVM：evidence passing + delimited continuation（full AE 所需）
-
-同一套 effect 语义在不同后端可能有不同的能力边界——例如 multi-resume 在 JS 后端可能无法高效实现（无法捕获栈段），但在 LLVM 后端可以。**是否允许后端间的 feature gap？** 如果允许，需要编译期按目标后端检查 effect 使用是否合法。
-
-**2. 标准库 runtime 分裂**
-
-当前标准库（`std/*.ring`）的底层实现全是 JS（`extern type List<T>` = JS Array）。LLVM 后端需要自己的 runtime 实现：
-- JS runtime：当前的 `runtime.ring` 产出
-- LLVM runtime：需要 C/Ring 实现的 List/Map/Set/Str + GC 或 RC
-
-**应对策略**：
-- 标准库**接口**（方法签名 + 语义契约）由 `std/*.ring` 定义，是跨后端的 single source of truth
-- 每个后端提供自己的 runtime 实现，通过 **同一套 E2E 测试** 验证语义一致性
-- 用 Ring 自身实现尽可能多的标准库逻辑（纯 Ring 代码自动适配所有后端），仅将最底层原语（内存分配、IO syscall）作为后端特定的 `extern fn`
-
-**3. FFI 表面积分裂**
-
-两个后端面对不同的外部世界：
-- JS：`extern fn` → JS 函数，`extern type` → JS 对象
-- LLVM：`extern fn` → C ABI 函数，`extern type` → C struct
-
-使用 FFI 的 Ring 库绑定到特定后端。需要条件编译机制（`#[backend(js)]`）或 FFI 抽象层。
-
-**4. Codegen 架构**
-
-当前 codegen 是单体 JS 代码生成。引入 LLVM 后端需要：
-- 共享的 HIR → 后端无关优化 pass（常量折叠、死代码消除、内联）
-- 后端特定的 lowering：HIR → JS / HIR → LLVM IR
-- **接口设计**：codegen 应抽象为 trait/接口，各后端实现。当前的 `codegen*.ring` 文件需要重构为 JS 后端的具体实现
-
-### 引入时机
-
-1. **Phase B-C**：JS 后端稳定，语言特性完善（Refinement types + Linear types）
-2. **Phase C-D**：LLVM 后端（需要 Linear types + Perceus RC 作为前置）
-
-引入 LLVM 前必须先完成 codegen 接口抽象化（从当前 JS 单体中提取共享 HIR 优化 pass）。**第二个后端是最痛的**——它迫使所有"隐式假设 JS"的代码显式化。
+- **WasmGC**：独立后端投入产出比不合理。Web 场景由 LLVM→WASM 路径覆盖。
+- **QBE(Ring)**：编译器自包含是远期愿景，不主动规划。
 
 ## 已取消特性
 
