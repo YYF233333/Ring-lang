@@ -29,7 +29,6 @@
 | # | 问题 | 影响 | 备注 |
 |---|------|------|------|
 | 22 | `bind_pattern` named constructor 不验证字段完整性 | 低 | 穷尽性检查兜底 |
-| 26 | `CollectingSink.report()` 非 var self 但通过引用突变 | 语义不一致 | 深不可变性强制前不会 break |
 | 45 | `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields | 设计约束 | fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16） |
 | 42 | **Impl 方法 effect 不回传**：impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获 | **中** | Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境 |
 
@@ -62,7 +61,7 @@
 | # | 设计功能 | 状态 | 优先级 |
 |---|----------|------|--------|
 | 36 | Refinement types (where 子句) | 语法解析但语义忽略 | Phase C |
-| 37 | `mut<S>` 参数化 effect | 未实现 | Phase B |
+| 37 | `mut<S>` 参数化 effect | ~~已实现~~（Cell 已移除，MutEffect 基础设施为死代码） | 清理项 |
 | 38 | Post-resume handler / Full algebraic effect | 未实现 | 未排期 |
 | 39 | `dyn Trait` 动态分发 | 未实现 | 未排期 |
 | 40 | Supertrait 继承 | AST 字段存在但空 | 未排期 |
