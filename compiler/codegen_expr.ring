@@ -697,7 +697,7 @@ fn gen_match(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
     parts.push("  const __ring_m = ${scrut};")
 
     for arm in arms {
-        let cond = gen_pattern_condition("__ring_m", arm.pattern)
+        let cond = gen_pattern_condition(ctx, "__ring_m", arm.pattern)
         let bindings = gen_pattern_bindings("__ring_m", arm.pattern)
         let body = gen_expr(ctx, arm.body)
         match arm.guard {
@@ -853,32 +853,9 @@ fn gen_string_interp(var ctx: CodegenCtx, parts: List<HStringInterpPart>) -> Str
 // ============================================================
 
 fn gen_catch_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str {
-    // For catch arms, NamedConstructor patterns for structs need instanceof checks,
-    // while enum variant patterns (Constructor/NamedConstructor) use _tag checks.
-    match pat {
-        Pattern::NamedConstructor { name, fields, .. } => {
-            // Check if this is a struct (not an enum variant) by looking at struct_field_order
-            if ctx.struct_field_order.contains_key(name) {
-                let qualified_name = qualify(ctx, safe_ident(name))
-                let inst_check = "${target} instanceof ${qualified_name}"
-                var sub_conds: List<Str> = []
-                for f in fields {
-                    let sname = safe_ident(f.name)
-                    let sub = gen_pattern_condition("${target}.${sname}", f.pattern)
-                    if sub != "true" { sub_conds.push(sub) }
-                }
-                if sub_conds.len() == 0 { inst_check }
-                else {
-                    let joined = sub_conds.join(" && ")
-                    "${inst_check} && ${joined}"
-                }
-            } else {
-                // Enum variant — use _tag check (same as gen_pattern_condition)
-                gen_pattern_condition(target, pat)
-            }
-        },
-        _ => gen_pattern_condition(target, pat)
-    }
+    // gen_pattern_condition now handles struct vs enum distinction directly,
+    // so we can delegate to it for all patterns.
+    gen_pattern_condition(ctx, target, pat)
 }
 
 fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str {

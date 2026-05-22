@@ -186,7 +186,7 @@ function emit_match_stmt(ctx, scrutinee, arms, mode) {
   const scrut_var = `__ring_m${(ctx.match_counter - 1)}`;
   codegen_ctx$emit(ctx, `const ${scrut_var} = ${scrut_js};`);
   for (const arm of arms) {
-    const cond = gen_pattern_condition(scrut_var, arm.pattern);
+    const cond = gen_pattern_condition(ctx, scrut_var, arm.pattern);
     const bindings_str = gen_pattern_bindings(scrut_var, arm.pattern);
     __ring_match9: {
       const __ring_m9 = arm.guard;
@@ -400,7 +400,7 @@ function emit_stmt(ctx, stmt) {
       codegen_ctx$push_indent(ctx);
       const scrutinee = codegen_expr$gen_expr(ctx, expr);
       codegen_ctx$emit(ctx, `const __ring_t = ${scrutinee};`);
-      const cond = gen_pattern_condition("__ring_t", pattern);
+      const cond = gen_pattern_condition(ctx, "__ring_t", pattern);
       codegen_ctx$emit(ctx, `if (${cond}) {`);
       codegen_ctx$push_indent(ctx);
       const bindings = gen_pattern_bindings("__ring_t", pattern);
@@ -508,7 +508,7 @@ function gen_stmt_inline(ctx, stmt) {
   }
 }
 
-function gen_pattern_condition(target, pat) {
+function gen_pattern_condition(ctx, target, pat) {
   __ring_match21: {
     const __ring_m21 = pat;
     if (__ring_m21._tag === "Wildcard") {
@@ -543,7 +543,7 @@ function gen_pattern_condition(target, pat) {
           const __ring_m22 = List_get(fields, i);
           if (__ring_m22._tag === "some") {
             const f = __ring_m22._0;
-            const sub = gen_pattern_condition(`${target}._${i}`, f);
+            const sub = gen_pattern_condition(ctx, `${target}._${i}`, f);
             if ((sub !== "true")) {
               List_push(sub_conds, sub);
             }
@@ -565,21 +565,41 @@ function gen_pattern_condition(target, pat) {
     }
     if (__ring_m21._tag === "NamedConstructor") {
       const name = __ring_m21.name; const fields = __ring_m21.fields;
-      const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
-      let sub_conds = [""];
-      List_clear(sub_conds);
-      for (const f of fields) {
-        const sname = codegen_ctx$safe_ident(f.name);
-        const sub = gen_pattern_condition(`${target}.${sname}`, f.pattern);
-        if ((sub !== "true")) {
-          List_push(sub_conds, sub);
+      if (_Map_contains_key(ctx.struct_field_order, name)) {
+        const qualified_name = codegen_ctx$qualify(ctx, codegen_ctx$safe_ident(name));
+        const inst_check = `${target} instanceof ${qualified_name}`;
+        let sub_conds = [""];
+        List_clear(sub_conds);
+        for (const f of fields) {
+          const sname = codegen_ctx$safe_ident(f.name);
+          const sub = gen_pattern_condition(ctx, `${target}.${sname}`, f.pattern);
+          if ((sub !== "true")) {
+            List_push(sub_conds, sub);
+          }
         }
-      }
-      if ((List_len(sub_conds) === 0)) {
-        return tag_check;
+        if ((List_len(sub_conds) === 0)) {
+          return inst_check;
+        } else {
+          const joined = List_join(sub_conds, " && ");
+          return `${inst_check} && ${joined}`;
+        }
       } else {
-        const joined = List_join(sub_conds, " && ");
-        return `${tag_check} && ${joined}`;
+        const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
+        let sub_conds = [""];
+        List_clear(sub_conds);
+        for (const f of fields) {
+          const sname = codegen_ctx$safe_ident(f.name);
+          const sub = gen_pattern_condition(ctx, `${target}.${sname}`, f.pattern);
+          if ((sub !== "true")) {
+            List_push(sub_conds, sub);
+          }
+        }
+        if ((List_len(sub_conds) === 0)) {
+          return tag_check;
+        } else {
+          const joined = List_join(sub_conds, " && ");
+          return `${tag_check} && ${joined}`;
+        }
       }
       break __ring_match21;
     }
@@ -594,7 +614,7 @@ function gen_pattern_condition(target, pat) {
           const __ring_m23 = List_get(elements, i);
           if (__ring_m23._tag === "some") {
             const e = __ring_m23._0;
-            const sub = gen_pattern_condition(`${target}[${i}]`, e);
+            const sub = gen_pattern_condition(ctx, `${target}[${i}]`, e);
             if ((sub !== "true")) {
               List_push(sub_conds, sub);
             }

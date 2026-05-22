@@ -1,5 +1,5 @@
 use ast::{Pattern, NamedPatternField, span_zero, LiteralValue}
-use types::{Type, type_to_string}
+use types::{Type, StructField, type_to_string}
 use union_find::{UnionFind}
 use env::{apply_subst}
 use hir::{HMatchArm}
@@ -143,6 +143,34 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
                 some("true")
             }
         },
+        Type::StructType { name: sname, fields: sfields, .. } => {
+            // Struct is a single-constructor type — collect sub-patterns from all matching arms
+            let field_names = sfields.map(fn(f: StructField) { f.name })
+            let field_types = sfields.map(fn(f: StructField) { f.ty })
+            var matrix: List<List<Pattern>> = []
+            for p in patterns {
+                match p {
+                    Pattern::NamedConstructor { name: pname, fields: nfields, .. } => {
+                        if pname == sname {
+                            let positional = named_pattern_to_positional(nfields, field_names, sfields.len())
+                            matrix.push(positional)
+                        }
+                    },
+                    _ => {},
+                }
+            }
+            if matrix.len() == 0 {
+                return some("${sname} { .. }")
+            }
+            let missing = check_matrix(matrix, field_types, subst, set_new())
+            match missing {
+                some(m) => {
+                    let joined = join_strs(m, ", ")
+                    some("${sname}(${joined})")
+                },
+                none => none,
+            }
+        },
         Type::UnitType => none,
         Type::TupleType { elements } => {
             var matrix: List<List<Pattern>> = []
@@ -189,6 +217,13 @@ fn finite_type_ctors(ty: Type) -> List<Ctor>? {
             for v in variants {
                 result.push(Ctor { name: v.name, arity: v.fields.len(), field_types: v.fields, field_names: v.field_names, is_tuple: false })
             }
+            some(result)
+        },
+        Type::StructType { name, fields: sfields, .. } => {
+            let field_types = sfields.map(fn(f: StructField) { f.ty })
+            let field_names = sfields.map(fn(f: StructField) { f.name })
+            var result: List<Ctor> = []
+            result.push(Ctor { name: name, arity: sfields.len(), field_types: field_types, field_names: some(field_names), is_tuple: false })
             some(result)
         },
         Type::UnitType => {
