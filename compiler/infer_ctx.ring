@@ -859,6 +859,11 @@ fn bind_constructor_pattern(
                                 span, DiagnosticContext::PatternError { detail: "constructor pattern on non-enum type" }) }
                         }
                         let inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected)
+                        if fields.len() != v.fields.len() {
+                            let _ = type_error(ctx.sink, E0301,
+                                "constructor '${name}' has ${v.fields.len().to_str()} field(s) but pattern has ${fields.len().to_str()}",
+                                span, DiagnosticContext::OtherContext { detail: some("constructor arity mismatch") })
+                        }
                         let mut i = 0
                         while i < fields.len() && i < v.fields.len() {
                             match (fields.get(i), v.fields.get(i)) {

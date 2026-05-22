@@ -573,6 +573,33 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                 }
             }
         },
+        Expr::IndexExpr { receiver, span, .. } => {
+            // Index assignment (e.g. list[i] = val) — check receiver mutability
+            let root = find_root_expr(receiver)
+            match root {
+                Expr::Ident { name, span: rspan, .. } => {
+                    let scheme = ctx.env.lookup(name)
+                    match scheme {
+                        some(s) => match s.def_id {
+                            some(did) => {
+                                if !ctx.env.scope.mutable_vars.contains(did) {
+                                    let _ = type_error(ctx.sink, E0205,
+                                        "Cannot assign to index of immutable variable '${name}'. Use 'let mut' for mutable bindings.",
+                                        span, DiagnosticContext::OtherContext { detail: some("'${name}' is not mutable") })
+                                }
+                            },
+                            none => {}
+                        },
+                        none => {}
+                    }
+                },
+                _ => {
+                    let _ = type_error(ctx.sink, E0205,
+                        "Cannot assign to index of a temporary value. Store the value in a 'let mut' variable first.",
+                        span, DiagnosticContext::OtherContext { detail: some("assignment to temporary value") })
+                }
+            }
+        },
         _ => {}
     }
 }
@@ -580,6 +607,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
 fn find_root_expr(e: Expr) -> Expr {
     match e {
         Expr::FieldAccess { receiver, .. } => find_root_expr(receiver),
+        Expr::IndexExpr { receiver, .. } => find_root_expr(receiver),
         _ => e
     }
 }
@@ -1781,7 +1809,7 @@ fn infer_field_access(mut ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                     "Cannot access named field '${field}' on tuple type; use .0, .1, etc.",
                     span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none }) },
                 some(i) => {
-                    if i >= elements.len() {
+                    if i < 0 || i >= elements.len() {
                         let _ = type_error(ctx.sink, E0304,
                             "Tuple index ${field} out of bounds; tuple has ${elements.len().to_str()} elements",
                             span, DiagnosticContext::MissingField { field: field, ty: "tuple", available: none })
@@ -2106,7 +2134,7 @@ fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
                         match v {
                             some(found_v) => {
                                 if found_v.fields.len() == 0 {
-                                    let mut _ep = [0]; _ep.clear(); let empty_pats = _ep.map(fn(i: Int) -> Pattern { panic("unreachable") })
+                                    let empty_pats: List<Pattern> = []
                                     Pattern::Constructor { name: name, qualifier: none, fields: empty_pats, span: span }
                                 } else {
                                     pattern
@@ -2253,7 +2281,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
                     ty: hexpr_type(else_if_r.hexpr), effects: else_if_r.effects, span: espan
                 })
             },
-            _ => { result_type = UNIT }
+            _ => { panic("unexpected else branch form in infer_if") }
         },
         none => {}
     }
