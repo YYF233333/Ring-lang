@@ -14,7 +14,8 @@ const JS_RESERVED: Set<Str> = set_from(
      "Object", "Array", "Map", "Set", "String", "Number", "Boolean", "Symbol",
      "Promise", "Error", "RegExp", "Date", "Math", "JSON", "Proxy", "Reflect",
      "WeakMap", "WeakSet", "WeakRef", "BigInt", "ArrayBuffer", "DataView",
-     "Int8Array", "Uint8Array", "Float32Array", "Float64Array"])
+     "Int8Array", "Uint8Array", "Float32Array", "Float64Array",
+     "NaN", "Infinity", "globalThis", "console", "process"])
 
 pub fn safe_ident(name: Str) -> Str {
     let result = if name.contains("::") { name.replace("::", "$") } else { name }
