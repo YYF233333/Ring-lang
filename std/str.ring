@@ -22,3 +22,15 @@ impl Str {
     pub extern fn is_empty(self: Str) -> Bool
     pub extern fn last_index_of(self: Str, s: Str) -> Int?
 }
+
+pub extern type StringBuilder
+
+impl StringBuilder {
+    pub extern fn add(self: StringBuilder, s: Str) -> Unit
+    pub extern fn line(self: StringBuilder, s: Str) -> Unit
+    pub extern fn add_int(self: StringBuilder, n: Int) -> Unit
+    pub extern fn to_str(self: StringBuilder) -> Str
+    pub extern fn len(self: StringBuilder) -> Int
+}
+
+pub extern fn string_builder() -> StringBuilder

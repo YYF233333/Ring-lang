@@ -4,10 +4,11 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, DerivedImpl, HStringInterpPart, HMatchArm,
     HEffectHandler, HStructFieldInit,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT,
-    BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_CELL, BUILTIN_OPTION}
+    BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_CELL, BUILTIN_OPTION,
+    BUILTIN_STRING_BUILDER}
 use builtin_methods::{CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS,
     LIST_NON_HOF_METHODS, MAP_NON_HOF_METHODS, SET_NON_HOF_METHODS,
-    OPTION_NON_HOF_METHODS}
+    OPTION_NON_HOF_METHODS, STRINGBUILDER_METHODS}
 use runtime::{RUNTIME_CODE}
 use codegen_ctx::{CodegenCtx, HTraitDeclInfo, new_codegen_ctx,
     emit, emit_raw, push_indent, pop_indent, qualify, safe_ident,
@@ -268,6 +269,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     register_builtin_methods(ctx, BUILTIN_INT, INT_METHODS)
     register_builtin_methods(ctx, BUILTIN_FLOAT, FLOAT_METHODS)
     register_builtin_methods(ctx, BUILTIN_OPTION, OPTION_NON_HOF_METHODS)
+    register_builtin_methods(ctx, BUILTIN_STRING_BUILDER, STRINGBUILDER_METHODS)
 
     // Register builtin trait methods for UFCS dispatch
     for prim in [BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL] {

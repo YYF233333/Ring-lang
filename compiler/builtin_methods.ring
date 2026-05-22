@@ -31,3 +31,5 @@ pub const SET_HOF_METHODS: List<Str> = ["filter", "fold", "any", "all"]
 
 pub const OPTION_NON_HOF_METHODS: List<Str> = ["is_some", "is_none", "unwrap_or", "unwrap", "to_fail"]
 pub const OPTION_HOF_METHODS: List<Str> = ["map", "and_then", "unwrap_or_else"]
+
+pub const STRINGBUILDER_METHODS: List<Str> = ["add", "line", "add_int", "to_str", "len"]

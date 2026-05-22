@@ -317,6 +317,7 @@ const cases: TestCase[] = [
   { file: "extern_fn_basic.ring", expected: "42\n3.14\n" },
   { file: "str_byte_at.ring", expected: "h\no\nnone\n" },
   { file: "str_extra_methods.ring", expected: "00042\nababab\n65\nnone\n" },
+  { file: "string_builder.ring", expected: "string_builder: all tests passed\n" },
   { file: "num_parse_format.ring", expected: "42\n-1\n3.14\n99\n" },
   { file: "type_alias.ring", expected: "42: hello\n" },
   { file: "for_map_destructure.ring", expected: "6\n" },

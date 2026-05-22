@@ -122,6 +122,12 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function __ring_index(arr, i) { if (i < 0 || i >= arr.length) throw new Error(\"Index out of bounds: \" + i + \", length: \" + arr.length); return arr[i]; }")
     lines.push("function __ring_map_index(map, key) { if (!map.has(key)) throw new Error(\"Key not found: \" + key); return map.get(key); }")
     lines.push("function __ring_str_index(s, i) { if (i < 0 || i >= s.length) throw new Error(\"Index out of bounds: \" + i + \", length: \" + s.length); return s[i]; }")
+    lines.push("function string_builder() { return []; }")
+    lines.push("function StringBuilder_add(self, s) { self.push(s); }")
+    lines.push("function StringBuilder_line(self, s) { self.push(s); self.push(\"\\n\"); }")
+    lines.push("function StringBuilder_add_int(self, n) { self.push(String(n)); }")
+    lines.push("function StringBuilder_to_str(self) { return self.join(\"\"); }")
+    lines.push("function StringBuilder_len(self) { return self.reduce(function(a, b) { return a + b.length; }, 0); }")
     lines.push("")
     lines.push("function json_stringify(value) { return JSON.stringify(value); }")
     lines.push("")
@@ -223,6 +229,9 @@ pub const RUNTIME_EXPORT_NAMES: List<Str> =
      "set_new", "set_from", "set_clone",
      "_Set_len", "_Set_contains", "_Set_to_list",
      "_Set_insert", "_Set_remove", "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear",
+     "string_builder",
+     "StringBuilder_add", "StringBuilder_line", "StringBuilder_add_int",
+     "StringBuilder_to_str", "StringBuilder_len",
      "read_file", "write_file", "file_exists", "delete_file",
      "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname",
      "argv", "exit_process", "eprintln", "cwd",

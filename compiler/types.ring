@@ -8,6 +8,7 @@ pub const BUILTIN_MAP: Str = "Map"
 pub const BUILTIN_SET: Str = "Set"
 pub const BUILTIN_OPTION: Str = "Option"
 pub const BUILTIN_CELL: Str = "Cell"
+pub const BUILTIN_STRING_BUILDER: Str = "StringBuilder"
 
 pub struct StructField {
     pub name: Str,
