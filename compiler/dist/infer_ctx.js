@@ -1124,6 +1124,9 @@ function bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, s
                 break __ring_match48;
               }
               const inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected);
+              if ((List_len(fields) !== List_len(v.fields))) {
+                const _ = type_error(ctx.sink, codes$E0301, `constructor '${name}' has ${Int_to_str(List_len(v.fields))} field(s) but pattern has ${Int_to_str(List_len(fields))}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some("constructor arity mismatch")));
+              }
               let i = 0;
               while (((i < List_len(fields)) && (i < List_len(v.fields)))) {
                 __ring_match49: {
