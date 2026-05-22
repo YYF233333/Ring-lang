@@ -6,6 +6,29 @@
 > 反馈分支：`doing` → `waiting-feedback`（Worker 遇到设计问题）→ Discussion 处理后 → `queued`（重新排队）
 > 工作流规范见 `docs/workflow.md`
 
+## Phase C 执行计划���2026-05-23 确定）
+
+**目标**：基础设施特性 + 中等特性全部完成，为层 3 重型特性铺路。
+
+**层 1（基础设施，优先）**：
+- B-034 Effect Aliases [S]
+- B-005 Supertrait 继承 [M]
+- B-037 `mut<T>` Marker Effect [M]
+- B-008 Default Effect Handler [M]
+
+**层 2（核心特性）**：
+- B-036 Iterator Trait [M]（依赖 B-005）
+- B-010 `delegate` 关键字 [M]
+- B-004 关联类型 [L]
+- B-033 GADTs [L]
+
+**约束**：
+- B-005 必须在 B-036 之前完成（supertrait 是 Iterator 层次的前置）
+- 其余无顺序要求，Worker 按文件重叠自行分 wave
+- 层 3（Refinement/Linear/async/LLVM）Phase C 完成后再讨论
+
+---
+
 ## 类型系统
 
 ### B-001 Refinement Types [feature] [P2] [XL] [queued]

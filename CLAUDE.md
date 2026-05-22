@@ -176,22 +176,34 @@ Ring-lang/
 - **Impl 方法 effect 不传播**：impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后不回传。Workaround：parser 用 `__ring_raise_fail` extern fn 直接抛 `__EffectAbort`，codegen 的 `gen_try_catch` 已去除 `has_fail_effect` 前置检查
 - E2E 测试通过 `cd compiler && npm test` 运行
 
-## Phase 4 路线图（未来方向）
+## Phase C 路线图（当前）
 
-### 自举编译器改进（近期）
+### 层 1：基础设施特性（优先）
 
-- ~~Parser 错误恢复~~（已完成：声明级恢复）
+- Effect Aliases（`effect alias IO = {io, fail<Str>}`）
+- Supertrait 继承（`trait Ord: Eq`）
+- `mut<T>` Marker Effect（mut self/mut 参数触发编译期 effect 追踪）
+- Default Effect Handler（op 带 body = 默认 handler）
+
+### 层 2：核心特性
+
+- Iterator Trait + 自定义迭代器（依赖 Supertrait）
+- `delegate` 关键字（trait 实现委托）
+- 关联类型（`type Item` in trait）
+- GADTs（enum 变体类型约束）
+
+### 层 3：重型特性（Phase C 完成后再展开）
+
+- Refinement types（编译期验证 + 运行时检查）
+- Linear Types（数据流分析 + Perceus RC 前置）
+- async Effect + 结构化并发
+- LLVM Native Backend
+
+### 遗留改进
+
 - Impl 方法 effect 传播修复（当前用 `__ring_raise_fail` workaround）
 - LSP 移植到 Ring（从 TS 归档版本翻译）
-- 技术债清理（72 项中 44 项已修复，详见 `docs/audit-report.md`）
-
-### 语言特性（中期）
-
-- ~~`mut<S>` 参数化 effect~~（已完成：`let mut` + 自动 boxing 替代 Cell\<T\>，Cell 已移除）
-- ~~Full algebraic effect~~（已取消：tail-resumptive + abort 覆盖实际需求，剩余用例用 async effect + defer 解决）
-- Refinement types（编译期验证 + 运行时检查）
-- 关联类型 + supertrait 继承
-- `dyn Trait` 动态分发
+- 技术债清理（详见 `docs/audit-report.md`）
 
 ### 长期目标
 
