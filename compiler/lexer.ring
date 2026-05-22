@@ -301,10 +301,12 @@ impl Lexer {
         let has_hash = self.peek() == "#"
         if has_hash {
             // r#"..."# format
+            let saved_line = self.line
             self.advance()
             if self.peek() != "\"" {
                 self.pos = self.pos - 1
                 self.column = self.column - 1
+                self.line = saved_line
                 let end = self.current_position()
                 return self.make_token(TokenKind::TkIdent, "r", start, end)
             }

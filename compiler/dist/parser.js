@@ -665,6 +665,26 @@ function Parser_parse_stmt(self) {
   if (Parser_check(self, lexer$TokenKind_TkContinue)) {
     return Parser_parse_continue_stmt(self);
   }
+  if (Parser_check(self, lexer$TokenKind_TkTry)) {
+    Parser_report_error(self, codes$E0101, "`try` is a reserved keyword; use `expr catch { pattern => handler }` for error handling", Option_some(Parser_peek(self).span));
+    Parser_advance(self);
+    if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
+      Parser_advance(self);
+      let depth = 1;
+      while (((depth > 0) && (self.pos < (List_len(self.tokens) - 1)))) {
+        if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
+          depth = (depth + 1);
+        } else {
+          if (Parser_check(self, lexer$TokenKind_TkRBrace)) {
+            depth = (depth - 1);
+          }
+        }
+        Parser_advance(self);
+      }
+    }
+    const end = Parser_current_span_start(self);
+    return ast$Stmt_ExprStmt(ast$Expr_IntLit(0, Parser_make_span(self, start, end)), false, Parser_make_span(self, start, end));
+  }
   const expr = Parser_parse_expr(self);
   if (((Parser_check(self, lexer$TokenKind_TkEq) || Parser_check(self, lexer$TokenKind_TkPlusEq)) || Parser_check(self, lexer$TokenKind_TkMinusEq))) {
     const op_tok = Parser_advance(self);
