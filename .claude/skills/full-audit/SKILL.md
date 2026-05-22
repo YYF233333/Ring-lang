@@ -1,17 +1,33 @@
 ---
 name: full-audit
-description: Use when user requests a full codebase review, code audit, cross-validation review, or says "审查", "review", "自查". Runs Claude + DS parallel audit, triages findings, and writes to rolling audit-report.md. Audit-only — fixes are a separate session via /audit-fix.
+description: Use when user requests a full codebase review, code audit, cross-validation review, or says "审查", "review", "自查". Runs Claude + DS parallel audit, triages findings, writes to audit-report.md. Audit-only — fixes go to Worker via backlog/audit-report.
 ---
 
-# Full Codebase Audit
+# Audit Agent
 
-Standardized review workflow extracted from Ring-lang development sessions. Covers code correctness, test coverage, design consistency, and least-surprise behavior.
+全代码库审计。审查当前 main 上的代码，发现 bug 和问题，写入 `docs/audit-report.md`。只审查，不修复。
 
-**审计和修复分离**：本 skill 只做审计（发现 + 记录），不做修复。修复使用 `/audit-fix` skill 在独立 session 中执行。
+**工作流规范见 `docs/workflow.md`**
 
 ## Trigger
 
-User says any of: "审查", "review", "代码审查", "自查", "全面检查", "交叉验证", or `/full-audit`.
+User says: "审查", "review", "自查", "全面检查", "交叉验证", or `/full-audit`.
+
+## 写入范围
+
+**只写 `docs/audit-report.md`**
+
+**不触碰**：其他任何文件
+
+## Race Condition 处理
+
+仓库中**可能有 Worker agent 在 worktree 中并行工作**。注意：
+
+- Worker 可能正在修改编译器代码并尚未 merge
+- 编译或测试失败可能是瞬态（Worker 的 worktree merge 过程中）→ **重试一次再判断**
+- 跳过 `tests/.tmp_*` 等临时目录
+- 如果发现的问题与 backlog 中 `planning`/`doing` 状态的 item 重合，标注"可能正在修复中"
+- 读 `docs/backlog.md` 了解当前 Worker 正在做什么，避免重复报告
 
 ## Workflow
 
@@ -31,9 +47,9 @@ Dispatch two independent review agents simultaneously:
    - Focus on: missed error handling, unsafe patterns, design-implementation gaps
    - Compare implementation against design.md specification
 
-Both agents output structured findings in this format:
+Both agents output structured findings:
 ```
-## [severity: bug|issue|concern|suggestion]
+## [severity: Critical|Important|Minor|Style]
 ### Title
 - **File**: path:line
 - **Description**: what's wrong
@@ -43,52 +59,58 @@ Both agents output structured findings in this format:
 
 ### Phase 2: Triage & Merge
 
-Wait for all agents to complete. Merge findings:
-
-1. **Deduplicate**: same finding from multiple agents → one entry, note which agents found it
-2. **Verify critical findings**: for any bug-severity finding, read the relevant code yourself to confirm
-3. **Classify** each finding:
+1. **Deduplicate**: same finding from multiple agents → one entry
+2. **Verify critical findings**: for Critical severity, read code yourself to confirm
+3. **Check backlog overlap**: if finding matches a `planning`/`doing` item → skip or note "in progress"
+4. **Classify**:
 
 | Category | Action |
 |----------|--------|
-| **Bug** (confirmed) | Record with fix suggestion |
-| **Issue** (definite but non-critical) | Record |
-| **Concern** (possible problem) | Record |
-| **Suggestion** (improvement idea) | Record |
+| **Critical** (confirmed bug) | Record with fix suggestion |
+| **Important** (definite but non-critical) | Record |
+| **Minor** (low impact) | Record |
+| **Style** (improvement idea) | Record |
 | **False positive** | Discard with explanation |
 
 ### Phase 3: Update audit-report.md
 
-`docs/audit-report.md` is a **rolling ledger** — it persists across sessions and is never deleted.
+`docs/audit-report.md` 是**活的 bug 看板**——做完即删。
 
-**增量追加规则**：
-- 新发现追加到文件末尾，以审计日期为 section header（如 `## Phase B Wave 1 审计 (2026-05-22)`）
-- 编号从上次最大编号 +1 继续（如上次到 #53，新增从 #54 开始）
+**追加规则**：
+- 新发现追加到对应分类 section 的表格中
+- 编号从现有最大编号 +1 继续
 - 每个发现标注发现者（如 `Opus+DS`）
 
-**已修复项处理**：
-- 修复后用删除线标记（`~~原文~~`）并附 `**已修复**` + 简要说明
-- 不删除已修复项（保留审计历史）
-- 文件头部更新已修复统计
+**清理规则**：
+- 检查现有 `open` 状态的 item 是否已被修复（grep 代码确认）
+- 已修复的：**从表中删除**（不是标删除线，是直接删除整行）
+- 在 commit message 中记录删除了哪些已修复的 item
 
-**不要在本 session 中修复任何问题。** 审计结束后告知用户发现摘要，修复工作留给 `/audit-fix` session。
+**条目格式**：
+
+```markdown
+### #xxx <标题> [严重度] [open]
+
+**文件**：涉及的文件路径
+**描述**：问题描述
+**建议修复**：修复方向
+```
 
 ### Phase 4: Summary
 
-End the audit with a summary to the user:
-
 ```
 ## Audit Summary
-- New findings: N total (X bugs, Y issues, Z concerns, W suggestions)
-- By agent: Opus found A, DS found B (C shared)
-- Critical items requiring attention: (list top 3)
-- audit-report.md updated: #NN - #MM added
+- 新发现: N 项（X Critical, Y Important, Z Minor, W Style）
+- 清理已修复: M 项删除
+- 当前 open 总数: K 项
+- 需要关注的 Critical: (列出)
+- audit-report.md 已更新
 ```
 
 ## Rules
 
-- **Never skip a finding silently.** Every item must be either recorded or explicitly marked as false positive with explanation.
-- **Never fix in audit session.** Audit = observe + record. Fix = `/audit-fix` in a separate session. This prevents context exhaustion and ensures user reviews findings before action.
-- **Cross-validate critical findings.** For bug-severity items, verify the code yourself before recording. If Claude and DS disagree, investigate further.
-- **Preserve audit history.** Never delete or rewrite old sections of audit-report.md. Only append and mark fixed items with strikethrough.
-- **Note agent agreement.** When multiple agents independently find the same issue, it's higher confidence. Record which agents found each item.
+- **Never skip a finding silently.** Every item must be either recorded or explicitly marked as false positive.
+- **Never fix in audit session.** Audit = observe + record.
+- **Cross-validate critical findings.** For Critical items, verify code yourself before recording.
+- **Respect Worker state.** Check backlog for `planning`/`doing` items; don't report issues that are being actively worked on.
+- **Clean as you go.** Delete fixed items from the report. The report should only contain open issues.

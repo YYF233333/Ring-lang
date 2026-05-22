@@ -1,11 +1,13 @@
-# 特性排队表（Backlog）
+# Backlog
 
-> 未纳入当前阶段的特性和改进项，按类别整理。每项标注设计来源和前置依赖。
-> 上次更新：2026-05-22，Phase B spec 制定时
+> 活的工作看板。做完的条目删除，只在 git commit message 留记录。
+> 条目格式：`### B-xxx <标题> [类型] [优先级] [复杂度] [状态]`
+> 状态流转：`queued` → `planning` → `doing` → 删除
+> 工作流规范见 `docs/workflow.md`
 
 ## 类型系统
 
-### Refinement Types
+### B-001 Refinement Types [feature] [P2] [XL] [queued]
 design.md 1.2。类型附带谓词，编译期静态验证 + 运行时检查兜底。
 
 ```ring
@@ -19,21 +21,21 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 - **复杂度**：极大（SSA 约束传播 + 可选 Z3 集成）
 - **优先级**：Phase C 首要
 
-### Linear Types（自动推断）
+### B-002 Linear Types（自动推断）[feature] [P2] [XL] [queued]
 design.md 11.2 解法 B。编译器做数据流分析，旧值无后续引用时安全就地修改。
 
 - **前置依赖**：`mut<S>` 稳定
 - **复杂度**：大（linearity checker + Perceus RC 的前置条件）
 - **优先级**：Phase C 与 refinement 穿插
 
-### Dependent Types Lite
+### B-003 Dependent Types Lite [feature] [P3] [XL] [queued]
 design.md 1.3。类型可依赖特定值（`Vec<T, n: Nat>`），不要求完整依赖类型证明。
 
 - **前置依赖**：Refinement types
 - **复杂度**：极大（约束求解可能不可判定）
 - **优先级**：Phase D（研究向）
 
-### 关联类型（Associated Types）
+### B-004 关联类型（Associated Types）[feature] [P2] [L] [queued]
 Trait 中声明关联类型 `type Item`，impl 时指定具体类型。
 
 ```ring
@@ -48,14 +50,14 @@ trait Collection {
 - **前置依赖**：无硬依赖
 - **优先级**：Phase C 或 D
 
-### Supertrait 继承
+### B-005 Supertrait 继承 [feature] [P2] [M] [queued]
 Trait 之间的继承关系（`trait Ord: Eq`）。
 
 - **当前状态**：未实现
 - **前置依赖**：无硬依赖
 - **优先级**：Phase C
 
-### `dyn Trait`（动态分发）
+### B-006 `dyn Trait`（动态分发）[feature] [P3] [L] [queued]
 运行时多态，默认静态分发（泛型单态化），`dyn` 是主动选择动态分发的标志。
 
 ```ring
@@ -68,7 +70,7 @@ fn process_all(items: List<dyn Describable>) { ... }
 
 ## Effect 系统
 
-### `async` Effect + 结构化并发
+### B-007 `async` Effect + 结构化并发 [feature] [P2] [XL] [queued]
 design.md 2.1 + 第 8 章。async 作为 effect 而非颜色标记，handler 决定执行策略。
 
 ```ring
@@ -91,7 +93,7 @@ fn fetch_data() {
 - **优先级**：Phase C 或 D
 - **宣发价值**：直接解决 function coloring 问题——async 是 effect 而非颜色标记，带 async effect 的函数可以在同步 handler 下测试。设计阶段可讲，实现前不可作为已解决的卖点
 
-### Default Effect Handler（设计已确定 2026-05-22）
+### B-008 Default Effect Handler（设计已确定 2026-05-22）[feature] [P2] [M] [queued]
 design.md 2.2。Op 带 body = 默认 handler，语法与 trait 默认方法一致。解决"每次调用都要写 handle...with"的 boilerplate 问题。
 
 ```ring
@@ -126,7 +128,7 @@ fn main() {
 - **优先级**：Phase C
 - **参考**：语法方案模仿 trait 默认方法（Ring 已有先例），中间版避免了 Snowflyt 指出的 handler 链式解析的完整复杂度
 
-### Full Algebraic Effects（Post-resume Handler + Multi-resume）
+### B-009 Full Algebraic Effects（Post-resume Handler + Multi-resume）[feature] [P3] [XL] [queued]
 design.md 2.5。当前 handler 只支持 tail-resumptive + abort，不支持 resume 后继续执行额外代码，也不支持多次 resume。
 
 ```ring
@@ -148,7 +150,7 @@ handle {
 
 ## OOP 模拟
 
-### `delegate` 关键字
+### B-010 `delegate` 关键字 [feature] [P2] [M] [queued]
 design.md 5.3。替代继承的复用机制，将 trait 实现委托给内部字段。
 
 ```ring
@@ -168,7 +170,7 @@ impl Admin {
 
 ## 性能优化
 
-### LLVM Native Backend
+### B-011 LLVM Native Backend [feature] [P3] [XL] [queued]
 design.md 14.2。编译到 LLVM IR，桌面/服务端场景。
 
 - **前置依赖**：Linear types（Perceus RC 基础）
@@ -182,28 +184,28 @@ design.md 14.2。编译到 LLVM IR，桌面/服务端场景。
   5. **跨语言资源安全**：Linear types 保证 Ring 侧资源，但 C 分配的资源（`malloc`/`fopen`）不在 RC 图中。effect handler abort 时需要类似 `Drop`/`defer` 的机制清理 FFI 资源
   - **参考**：Koka 不暴露 C FFI 给用户（monadic transformation 编译到 C）；OCaml 5 限制 effect 不能跨 C 帧；Rust `extern "C" fn` 不能是 async
 
-### Perceus 引用计数
+### B-012 Perceus 引用计数 [feature] [P3] [XL] [queued]
 design.md 14.3。精确 RC + 就地复用分析，消除 GC 停顿。
 
 - **前置依赖**：Linear types + LLVM backend
 - **复杂度**：极大
 - **优先级**：Phase C/D
 
-### 热路径单态化
+### B-013 热路径单态化 [feature] [P3] [M] [queued]
 design.md 11.3。Row-poly 函数在热循环中特化为具体类型版本。
 
 - **前置依赖**：性能 profiling 基础设施
 - **复杂度**：中
 - **优先级**：Phase D/E
 
-### 融合（Deforestation）
+### B-014 融合（Deforestation）[feature] [P3] [M] [queued]
 design.md 11.2 解法 C。消除中间集合，多次遍历合并为一次。
 
 - **前置依赖**：标准库 HOF 方法迁移到 Ring（Phase B S2）
 - **复杂度**：中
 - **优先级**：Phase D/E
 
-### 闭包合并
+### B-015 闭包合并 [feature] [P3] [M] [queued]
 design.md 11.5。管道中多个小闭包合并为单次遍历的合并函数。
 
 - **前置依赖**：融合
@@ -212,7 +214,7 @@ design.md 11.5。管道中多个小闭包合并为单次遍历的合并函数。
 
 ## 工具链
 
-### LSP 移植
+### B-016 LSP 移植 [feature] [P2] [L] [queued]
 原 TS 实现未移植到 Ring 自举编译器。需要重新实现。
 
 - **当前状态**：VSCode 插件仅提供语法高亮
@@ -220,7 +222,7 @@ design.md 11.5。管道中多个小闭包合并为单次遍历的合并函数。
 - **复杂度**：大
 - **优先级**：Phase B 之后，用户需求驱动
 
-### CI 管线
+### B-017 CI 管线 [feature] [P3] [S] [queued]
 测试全靠手动 `npm test`。
 
 - **当前状态**：无 CI
@@ -228,7 +230,7 @@ design.md 11.5。管道中多个小闭包合并为单次遍历的合并函数。
 - **复杂度**：小
 - **优先级**：按需（"仅跨平台时需要"——flywheel memory）
 
-### Debugger
+### B-018 Debugger [feature] [P3] [L] [queued]
 source-map 支持 + 断点调试。
 
 - **前置依赖**：LSP
@@ -237,7 +239,7 @@ source-map 支持 + 断点调试。
 
 ## 设计对齐：待实现变更
 
-### 可变性统一模型（`var` → `let mut`，消除 `Cell<T>`）
+### B-019 可变性统一模型（`var` → `let mut`，消除 `Cell<T>`）[design-align] [P0] [XL] [queued]
 
 设计决策 2026-05-22：Ring 的可变性由唯一关键字 `mut` 统一管理。`var` 关键字废弃，`Cell<T>` 包装类型消除。
 
@@ -322,7 +324,7 @@ let inc = fn() { counter = counter + 1 }  // 自动 box，闭包带 mut<Int> eff
 - **风险**：自举编译器迁移量大（33 个文件），但变更是机械性的（`var` → `let mut`），适合批量处理
 - **参考**：Rust `let mut`、Koka `var`（自动 scope effect）、Swift/Kotlin（闭包自动捕获 var）
 
-### `catch` 语义简化（生命周期模型对齐）
+### B-020 `catch` 语义简化（生命周期模型对齐）[design-align] [P0] [M] [queued]
 设计决策 2026-05-22：`catch` 总是消除 `fail` effect，不再区分有/无 catch-all arm 的隐式行为。
 
 **当前实现**：checker 中 `catch` 的 fail effect 消除取决于是否存在 catch-all arm（wildcard/binding 无 guard）。无 catch-all 时 fail effect 保留在签名中。
@@ -341,7 +343,7 @@ let inc = fn() { counter = counter + 1 }  // 自动 box，闭包带 mut<Int> eff
 
 ## 已知 Bug / 技术债
 
-### Impl 方法 Effect 传播
+### B-021 Impl 方法 Effect 传播 [bugfix] [P1] [M] [queued]
 impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后不回传。
 
 - **当前 workaround**：parser 用 `__ring_raise_fail` extern fn 直接抛 `__EffectAbort`，codegen 的 `gen_try_catch` 已去除 `has_fail_effect` 前置检查
@@ -349,19 +351,19 @@ impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后
 - **前置依赖**：可能受益于 F1（effect 标注语法——标注后 Pass 1 直接读取）
 - **优先级**：Phase B 期间顺势修复
 
-### 表达式位置 IIFE return 截获
+### B-022 表达式位置 IIFE return 截获 [bugfix] [P3] [M] [queued]
 `let x = { return y; 0 }` 中的 return 被 IIFE 截获。语句位置已修复。
 
 - **当前状态**：实践中极少遇到
 - **优先级**：低
 
-### 集合 `===` 引用相等
+### B-023 集合 `===` 引用相等 [bugfix] [P1] [M] [queued]
 `List.contains`/`Map.get`/`Set.contains` 使用 JS `===`。
 
 - **当前状态**：Phase B S3 计划迁移到 Eq trait
 - **优先级**：Phase B
 
-### 深层嵌套泛型 UFCS 调用
+### B-024 深层嵌套泛型 UFCS 调用 [bugfix] [P3] [L] [queued]
 `Pair<Pair<Int, Int>, Int>` 的 `.eq()` 等直接方法调用受限。
 
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
