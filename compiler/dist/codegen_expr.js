@@ -526,10 +526,10 @@ function is_tuple_field(s) {
     return false;
   }
   __ring_match16: {
-    const __ring_m16 = Str_char_at(s, 0);
+    const __ring_m16 = parse_int(s);
     if (__ring_m16._tag === "some") {
-      const c = __ring_m16._0;
-      return ((((((((((c === "0") || (c === "1")) || (c === "2")) || (c === "3")) || (c === "4")) || (c === "5")) || (c === "6")) || (c === "7")) || (c === "8")) || (c === "9"));
+      const n = __ring_m16._0;
+      return (n >= 0);
       break __ring_match16;
     }
     if (__ring_m16._tag === "none") {
@@ -742,20 +742,30 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
     const __ring_m26 = dict_dispatch;
     if (__ring_m26._tag === "some") {
       const dd = __ring_m26._0;
+      let skip_first_arg = false;
       const receiver_arg = (function() {
   const __ring_m = callee;
   if (__ring_m._tag === "FieldAccess") { const receiver = __ring_m.receiver; return gen_expr(ctx, receiver); }
   return (function() {
   const __ring_m = List_get(args, 0);
-  if (__ring_m._tag === "some") { const a = __ring_m._0; return gen_expr(ctx, a); }
+  if (__ring_m._tag === "some") { const a = __ring_m._0; return (function() {
+  skip_first_arg = true;
+  return gen_expr(ctx, a);
+})(); }
   if (__ring_m._tag === "none") { return gen_expr(ctx, callee); }
   __match_fail(__ring_m);
 })();
 })();
       let other_args = [""];
       List_clear(other_args);
+      let arg_idx = 0;
       for (const a of args) {
-        List_push(other_args, gen_expr(ctx, a));
+        if ((skip_first_arg && (arg_idx === 0))) {
+          arg_idx = (arg_idx + 1);
+        } else {
+          List_push(other_args, gen_expr(ctx, a));
+          arg_idx = (arg_idx + 1);
+        }
       }
       let all = [""];
       List_clear(all);
@@ -1586,6 +1596,8 @@ function gen_handle(ctx, body, handlers) {
   let ev_decls = [""];
   List_clear(ev_decls);
   let has_abort = false;
+  let abort_effect_names = [""];
+  List_clear(abort_effect_names);
   const q = "\"";
   for (const entry of _Map_entries(by_effect)) {
     const __ring_dt0 = entry;
@@ -1604,6 +1616,7 @@ function gen_handle(ctx, body, handlers) {
       const is_abort = ((effect_name === "fail") && (h.op_name === "raise"));
       if (is_abort) {
         has_abort = true;
+        List_push(abort_effect_names, effect_name);
         const ea = hir$RUNTIME_EFFECT_ABORT;
         let ep = [""];
         List_clear(ep);
@@ -1649,6 +1662,12 @@ function gen_handle(ctx, body, handlers) {
   const decls = List_join(ev_decls, " ");
   const ea = hir$RUNTIME_EFFECT_ABORT;
   if (has_abort) {
+    let effect_checks = [""];
+    List_clear(effect_checks);
+    for (const en of abort_effect_names) {
+      List_push(effect_checks, `__ring_e.effect === ${q}${en}${q}`);
+    }
+    const effect_cond = List_join(effect_checks, " || ");
     let p = [""];
     List_clear(p);
     List_push(p, "(function() { ");
@@ -1657,6 +1676,7 @@ function gen_handle(ctx, body, handlers) {
     List_push(p, body_code);
     List_push(p, "; } catch (__ring_e) { if (__ring_e instanceof ");
     List_push(p, ea);
+    List_push(p, ` && (${effect_cond})`);
     List_push(p, ") return __ring_e.value; throw __ring_e; } })()");
     return List_join(p, "");
   } else {

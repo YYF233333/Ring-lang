@@ -203,10 +203,9 @@ fn binop_str(op: BinOp) -> Str {
 
 fn is_tuple_field(s: Str) -> Bool {
     if s.len() == 0 { return false }
-    match s.char_at(0) {
-        some(c) => c == "0" || c == "1" || c == "2" || c == "3" || c == "4" ||
-                   c == "5" || c == "6" || c == "7" || c == "8" || c == "9",
-        none => false
+    match parse_int(s) {
+        some(n) => n >= 0,
+        none => false,
     }
 }
 
@@ -328,17 +327,29 @@ fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str
 fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<Str>, dict_dispatch: DictDispatchInfo?) -> Str {
     match dict_dispatch {
         some(dd) => {
+            let mut skip_first_arg = false
             let receiver_arg = match callee {
                 HExpr::FieldAccess { receiver, .. } => gen_expr(ctx, receiver),
                 _ => {
                     match args.get(0) {
-                        some(a) => gen_expr(ctx, a),
+                        some(a) => {
+                            skip_first_arg = true
+                            gen_expr(ctx, a)
+                        },
                         none => gen_expr(ctx, callee),
                     }
                 },
             }
             let mut other_args: List<Str> = [""]; other_args.clear()
-            for a in args { other_args.push(gen_expr(ctx, a)) }
+            let mut arg_idx = 0
+            for a in args {
+                if skip_first_arg && arg_idx == 0 {
+                    arg_idx = arg_idx + 1
+                } else {
+                    other_args.push(gen_expr(ctx, a))
+                    arg_idx = arg_idx + 1
+                }
+            }
             let mut all: List<Str> = [""]; all.clear()
             all.push(receiver_arg)
             all.extend(other_args)
@@ -965,6 +976,7 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
 
     let mut ev_decls: List<Str> = [""]; ev_decls.clear()
     let mut has_abort = false
+    let mut abort_effect_names: List<Str> = [""]; abort_effect_names.clear()
     let q = "\""
 
     for entry in by_effect.entries() {
@@ -978,6 +990,7 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
             let is_abort = effect_name == "fail" && h.op_name == "raise"
             if is_abort {
                 has_abort = true
+                abort_effect_names.push(effect_name)
                 let ea = RUNTIME_EFFECT_ABORT
                 let mut ep: List<Str> = [""]; ep.clear()
                 ep.push(h.op_name)
@@ -1021,6 +1034,12 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
     let ea = RUNTIME_EFFECT_ABORT
 
     if has_abort {
+        // Build effect name check condition
+        let mut effect_checks: List<Str> = [""]; effect_checks.clear()
+        for en in abort_effect_names {
+            effect_checks.push("__ring_e.effect === ${q}${en}${q}")
+        }
+        let effect_cond = effect_checks.join(" || ")
         let mut p: List<Str> = [""]; p.clear()
         p.push("(function() { ")
         p.push(decls)
@@ -1028,6 +1047,7 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
         p.push(body_code)
         p.push("; } catch (__ring_e) { if (__ring_e instanceof ")
         p.push(ea)
+        p.push(" && (${effect_cond})")
         p.push(") return __ring_e.value; throw __ring_e; } })()")
         p.join("")
     } else {
