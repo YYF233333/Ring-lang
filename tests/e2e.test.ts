@@ -413,6 +413,9 @@ const cases: TestCase[] = [
   { file: "effect_custom_deep_call.ring", expected: "effect_custom_deep_call: all tests passed\n" },
   { file: "effect_custom_multi_effect.ring", expected: "effect_custom_multi_effect: all tests passed\n" },
   { file: "effect_custom_nested_handle.ring", expected: "effect_custom_nested_handle: all tests passed\n" },
+  { file: "let_mut_basic.ring", expected: "let_mut_basic: all tests passed\n" },
+  { file: "let_mut_param.ring", expected: "let_mut_param: all tests passed\n" },
+  { file: "let_mut_method.ring", expected: "let_mut_method: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

@@ -24,6 +24,7 @@ function _Set_is_empty(self) {
 const TokenKind_TkFn = Object.freeze({ _tag: "TkFn" });
 const TokenKind_TkLet = Object.freeze({ _tag: "TkLet" });
 const TokenKind_TkVar = Object.freeze({ _tag: "TkVar" });
+const TokenKind_TkMut = Object.freeze({ _tag: "TkMut" });
 const TokenKind_TkConst = Object.freeze({ _tag: "TkConst" });
 const TokenKind_TkStruct = Object.freeze({ _tag: "TkStruct" });
 const TokenKind_TkEnum = Object.freeze({ _tag: "TkEnum" });
@@ -113,6 +114,10 @@ function token_kind_value(k) {
     }
     if (__ring_m0._tag === "TkVar") {
       return "var";
+      break __ring_match0;
+    }
+    if (__ring_m0._tag === "TkMut") {
+      return "mut";
       break __ring_match0;
     }
     if (__ring_m0._tag === "TkConst") {
@@ -432,6 +437,10 @@ function keyword_lookup(word) {
     }
     if (__ring_m1 === "var") {
       return Option_some(TokenKind_TkVar);
+      break __ring_match1;
+    }
+    if (__ring_m1 === "mut") {
+      return Option_some(TokenKind_TkMut);
       break __ring_match1;
     }
     if (__ring_m1 === "const") {
@@ -1019,6 +1028,7 @@ function __TokenKind_Clone_clone(self) {
     case "TkFn": return TokenKind_TkFn;
     case "TkLet": return TokenKind_TkLet;
     case "TkVar": return TokenKind_TkVar;
+    case "TkMut": return TokenKind_TkMut;
     case "TkConst": return TokenKind_TkConst;
     case "TkStruct": return TokenKind_TkStruct;
     case "TkEnum": return TokenKind_TkEnum;
@@ -1104,7 +1114,7 @@ function __Token_Clone_clone(self) {
 }
 const __Token_Clone = { clone: __Token_Clone_clone };
 
-const __TokenKind_tag_order = { "TkFn": 0, "TkLet": 1, "TkVar": 2, "TkConst": 3, "TkStruct": 4, "TkEnum": 5, "TkMatch": 6, "TkImpl": 7, "TkEffect": 8, "TkHandle": 9, "TkWith": 10, "TkIf": 11, "TkElse": 12, "TkCatch": 13, "TkTest": 14, "TkReturn": 15, "TkFor": 16, "TkIn": 17, "TkPub": 18, "TkWhere": 19, "TkTrue": 20, "TkFalse": 21, "TkTrait": 22, "TkTry": 23, "TkWhile": 24, "TkBreak": 25, "TkContinue": 26, "TkLoop": 27, "TkUse": 28, "TkAs": 29, "TkExtern": 30, "TkMod": 31, "TkSuper": 32, "TkSig": 33, "TkRequires": 34, "TkIntLit": 35, "TkFloatLit": 36, "TkStringLit": 37, "TkStringInterpStart": 38, "TkStringInterpMiddle": 39, "TkStringInterpEnd": 40, "TkRawStringLit": 41, "TkIdent": 42, "TkPlus": 43, "TkMinus": 44, "TkStar": 45, "TkSlash": 46, "TkPercent": 47, "TkEqEq": 48, "TkBangEq": 49, "TkLt": 50, "TkGt": 51, "TkLtEq": 52, "TkGtEq": 53, "TkAmpAmp": 54, "TkPipePipe": 55, "TkBang": 56, "TkEq": 57, "TkPlusEq": 58, "TkMinusEq": 59, "TkLParen": 60, "TkRParen": 61, "TkLBrace": 62, "TkRBrace": 63, "TkLBracket": 64, "TkRBracket": 65, "TkComma": 66, "TkColon": 67, "TkColonColon": 68, "TkDot": 69, "TkDotDot": 70, "TkDotDotEq": 71, "TkFatArrow": 72, "TkArrow": 73, "TkQuestion": 74, "TkSemi": 75, "TkEof": 76, "TkError": 77 };
+const __TokenKind_tag_order = { "TkFn": 0, "TkLet": 1, "TkVar": 2, "TkMut": 3, "TkConst": 4, "TkStruct": 5, "TkEnum": 6, "TkMatch": 7, "TkImpl": 8, "TkEffect": 9, "TkHandle": 10, "TkWith": 11, "TkIf": 12, "TkElse": 13, "TkCatch": 14, "TkTest": 15, "TkReturn": 16, "TkFor": 17, "TkIn": 18, "TkPub": 19, "TkWhere": 20, "TkTrue": 21, "TkFalse": 22, "TkTrait": 23, "TkTry": 24, "TkWhile": 25, "TkBreak": 26, "TkContinue": 27, "TkLoop": 28, "TkUse": 29, "TkAs": 30, "TkExtern": 31, "TkMod": 32, "TkSuper": 33, "TkSig": 34, "TkRequires": 35, "TkIntLit": 36, "TkFloatLit": 37, "TkStringLit": 38, "TkStringInterpStart": 39, "TkStringInterpMiddle": 40, "TkStringInterpEnd": 41, "TkRawStringLit": 42, "TkIdent": 43, "TkPlus": 44, "TkMinus": 45, "TkStar": 46, "TkSlash": 47, "TkPercent": 48, "TkEqEq": 49, "TkBangEq": 50, "TkLt": 51, "TkGt": 52, "TkLtEq": 53, "TkGtEq": 54, "TkAmpAmp": 55, "TkPipePipe": 56, "TkBang": 57, "TkEq": 58, "TkPlusEq": 59, "TkMinusEq": 60, "TkLParen": 61, "TkRParen": 62, "TkLBrace": 63, "TkRBrace": 64, "TkLBracket": 65, "TkRBracket": 66, "TkComma": 67, "TkColon": 68, "TkColonColon": 69, "TkDot": 70, "TkDotDot": 71, "TkDotDotEq": 72, "TkFatArrow": 73, "TkArrow": 74, "TkQuestion": 75, "TkSemi": 76, "TkEof": 77, "TkError": 78 };
 function __TokenKind_Ord_cmp(self, other) {
   var t1 = __TokenKind_tag_order[self._tag];
   var t2 = __TokenKind_tag_order[other._tag];
@@ -1133,6 +1143,7 @@ function __TokenKind_Debug_debug(self) {
     case "TkFn": return "TkFn";
     case "TkLet": return "TkLet";
     case "TkVar": return "TkVar";
+    case "TkMut": return "TkMut";
     case "TkConst": return "TkConst";
     case "TkStruct": return "TkStruct";
     case "TkEnum": return "TkEnum";
@@ -1219,4 +1230,4 @@ function __Token_Debug_debug(self) {
 const __Token_Debug = { debug: __Token_Debug_debug };
 
 
-export { TokenKind_TkFn, TokenKind_TkLet, TokenKind_TkVar, TokenKind_TkConst, TokenKind_TkStruct, TokenKind_TkEnum, TokenKind_TkMatch, TokenKind_TkImpl, TokenKind_TkEffect, TokenKind_TkHandle, TokenKind_TkWith, TokenKind_TkIf, TokenKind_TkElse, TokenKind_TkCatch, TokenKind_TkTest, TokenKind_TkReturn, TokenKind_TkFor, TokenKind_TkIn, TokenKind_TkPub, TokenKind_TkWhere, TokenKind_TkTrue, TokenKind_TkFalse, TokenKind_TkTrait, TokenKind_TkTry, TokenKind_TkWhile, TokenKind_TkBreak, TokenKind_TkContinue, TokenKind_TkLoop, TokenKind_TkUse, TokenKind_TkAs, TokenKind_TkExtern, TokenKind_TkMod, TokenKind_TkSuper, TokenKind_TkSig, TokenKind_TkRequires, TokenKind_TkIntLit, TokenKind_TkFloatLit, TokenKind_TkStringLit, TokenKind_TkStringInterpStart, TokenKind_TkStringInterpMiddle, TokenKind_TkStringInterpEnd, TokenKind_TkRawStringLit, TokenKind_TkIdent, TokenKind_TkPlus, TokenKind_TkMinus, TokenKind_TkStar, TokenKind_TkSlash, TokenKind_TkPercent, TokenKind_TkEqEq, TokenKind_TkBangEq, TokenKind_TkLt, TokenKind_TkGt, TokenKind_TkLtEq, TokenKind_TkGtEq, TokenKind_TkAmpAmp, TokenKind_TkPipePipe, TokenKind_TkBang, TokenKind_TkEq, TokenKind_TkPlusEq, TokenKind_TkMinusEq, TokenKind_TkLParen, TokenKind_TkRParen, TokenKind_TkLBrace, TokenKind_TkRBrace, TokenKind_TkLBracket, TokenKind_TkRBracket, TokenKind_TkComma, TokenKind_TkColon, TokenKind_TkColonColon, TokenKind_TkDot, TokenKind_TkDotDot, TokenKind_TkDotDotEq, TokenKind_TkFatArrow, TokenKind_TkArrow, TokenKind_TkQuestion, TokenKind_TkSemi, TokenKind_TkEof, TokenKind_TkError, token_kind_value, Token, Lexer, new_lexer, Lexer_tokenize, Lexer_next_token, Lexer_lex_string, Lexer_lex_string_continuation, Lexer_lex_string_body, Lexer_lex_raw_string, Lexer_lex_number, Lexer_lex_ident, Lexer_lex_punctuation, Lexer_skip_whitespace_and_comments, Lexer_peek, Lexer_advance, Lexer_current_position, Lexer_make_token, Lexer_inc_last_depth, Lexer_dec_last_depth, Lexer_reset_last_depth, __TokenKind_Eq, __Token_Eq, __Lexer_Clone, __TokenKind_Clone, __Token_Clone, __TokenKind_Ord, __Token_Ord, __Lexer_Debug, __TokenKind_Debug, __Token_Debug };
+export { TokenKind_TkFn, TokenKind_TkLet, TokenKind_TkVar, TokenKind_TkMut, TokenKind_TkConst, TokenKind_TkStruct, TokenKind_TkEnum, TokenKind_TkMatch, TokenKind_TkImpl, TokenKind_TkEffect, TokenKind_TkHandle, TokenKind_TkWith, TokenKind_TkIf, TokenKind_TkElse, TokenKind_TkCatch, TokenKind_TkTest, TokenKind_TkReturn, TokenKind_TkFor, TokenKind_TkIn, TokenKind_TkPub, TokenKind_TkWhere, TokenKind_TkTrue, TokenKind_TkFalse, TokenKind_TkTrait, TokenKind_TkTry, TokenKind_TkWhile, TokenKind_TkBreak, TokenKind_TkContinue, TokenKind_TkLoop, TokenKind_TkUse, TokenKind_TkAs, TokenKind_TkExtern, TokenKind_TkMod, TokenKind_TkSuper, TokenKind_TkSig, TokenKind_TkRequires, TokenKind_TkIntLit, TokenKind_TkFloatLit, TokenKind_TkStringLit, TokenKind_TkStringInterpStart, TokenKind_TkStringInterpMiddle, TokenKind_TkStringInterpEnd, TokenKind_TkRawStringLit, TokenKind_TkIdent, TokenKind_TkPlus, TokenKind_TkMinus, TokenKind_TkStar, TokenKind_TkSlash, TokenKind_TkPercent, TokenKind_TkEqEq, TokenKind_TkBangEq, TokenKind_TkLt, TokenKind_TkGt, TokenKind_TkLtEq, TokenKind_TkGtEq, TokenKind_TkAmpAmp, TokenKind_TkPipePipe, TokenKind_TkBang, TokenKind_TkEq, TokenKind_TkPlusEq, TokenKind_TkMinusEq, TokenKind_TkLParen, TokenKind_TkRParen, TokenKind_TkLBrace, TokenKind_TkRBrace, TokenKind_TkLBracket, TokenKind_TkRBracket, TokenKind_TkComma, TokenKind_TkColon, TokenKind_TkColonColon, TokenKind_TkDot, TokenKind_TkDotDot, TokenKind_TkDotDotEq, TokenKind_TkFatArrow, TokenKind_TkArrow, TokenKind_TkQuestion, TokenKind_TkSemi, TokenKind_TkEof, TokenKind_TkError, token_kind_value, Token, Lexer, new_lexer, Lexer_tokenize, Lexer_next_token, Lexer_lex_string, Lexer_lex_string_continuation, Lexer_lex_string_body, Lexer_lex_raw_string, Lexer_lex_number, Lexer_lex_ident, Lexer_lex_punctuation, Lexer_skip_whitespace_and_comments, Lexer_peek, Lexer_advance, Lexer_current_position, Lexer_make_token, Lexer_inc_last_depth, Lexer_dec_last_depth, Lexer_reset_last_depth, __TokenKind_Eq, __Token_Eq, __Lexer_Clone, __TokenKind_Clone, __Token_Clone, __TokenKind_Ord, __Token_Ord, __Lexer_Debug, __TokenKind_Debug, __Token_Debug };

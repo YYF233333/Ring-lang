@@ -337,6 +337,13 @@ impl Parser {
         let start = self.current_span_start()
 
         if self.check(TokenKind::TkLet) {
+            // Check for "let mut x = ..." pattern — parse as mutable binding
+            if self.peek_at(1).kind == TokenKind::TkMut {
+                let bind_start = self.current_span_start()
+                self.advance()  // consume 'let'
+                self.advance()  // consume 'mut'
+                return self.parse_binding_body(true, bind_start)
+            }
             let saved_pos = self.pos
             self.advance()
             if self.check(TokenKind::TkLParen) {
@@ -510,6 +517,10 @@ impl Parser {
     fn parse_binding_stmt(var self, mutable: Bool) -> Stmt {
         let start = self.current_span_start()
         if mutable { self.expect(TokenKind::TkVar) } else { self.expect(TokenKind::TkLet) }
+        self.parse_binding_body(mutable, start)
+    }
+
+    fn parse_binding_body(var self, mutable: Bool, start: Position) -> Stmt {
         let name_tok = self.expect(TokenKind::TkIdent)
         let name = name_tok.value
         let name_span = name_tok.span
@@ -728,7 +739,13 @@ impl Parser {
         var effects: List<EffectExpr> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let estart = self.current_span_start()
-            let ename = self.expect(TokenKind::TkIdent).value
+            // Accept 'mut' keyword as effect name (mut<T> parameterized effect)
+            var ename = ""
+            if self.check(TokenKind::TkMut) {
+                ename = self.advance().value
+            } else {
+                ename = self.expect(TokenKind::TkIdent).value
+            }
             var type_args: List<TypeExpr> = []
             if self.check(TokenKind::TkLt) {
                 self.advance()
@@ -1952,7 +1969,14 @@ impl Parser {
 
     pub fn parse_param(var self) -> Param {
         let start = self.current_span_start()
-        let is_mutable = self.try_consume(TokenKind::TkVar)
+        var is_mutable = false
+        if self.check(TokenKind::TkVar) {
+            self.advance()
+            is_mutable = true
+        } else if self.check(TokenKind::TkMut) {
+            self.advance()
+            is_mutable = true
+        }
         let name = self.expect(TokenKind::TkIdent).value
         var type_annotation: TypeExpr? = none
         if self.try_consume(TokenKind::TkColon) {
