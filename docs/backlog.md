@@ -324,23 +324,6 @@ let inc = fn() { counter = counter + 1 }  // 自动 box，闭包带 mut<Int> eff
 - **风险**：自举编译器迁移量大（33 个文件），但变更是机械性的（`var` → `let mut`），适合批量处理
 - **参考**：Rust `let mut`、Koka `var`（自动 scope effect）、Swift/Kotlin（闭包自动捕获 var）
 
-### B-020 `catch` 语义简化（生命周期模型对齐）[design-align] [P0] [M] [queued]
-设计决策 2026-05-22：`catch` 总是消除 `fail` effect，不再区分有/无 catch-all arm 的隐式行为。
-
-**当前实现**：checker 中 `catch` 的 fail effect 消除取决于是否存在 catch-all arm（wildcard/binding 无 guard）。无 catch-all 时 fail effect 保留在签名中。
-
-**目标实现**：`catch` 总是完全捕获 fail effect，从签名中移除。需要部分处理（只恢复某些错误、其余继续传播）时，用户在 catch body 内 `match e { ... => raise(other) }` 显式 re-raise。
-
-**涉及修改**：
-1. `infer.ring`：`catch` 表达式的 effect row 处理逻辑——移除"有无 catch-all arm"的分支判断，统一消除 fail
-2. `codegen_expr.ring`：`catch` 代码生成——确保总是生成 try-catch 包装（当前可能在无 catch-all 时不生成完整包装）
-3. 测试用例：更新/新增 `tests/cases/` 中的 catch 相关测试，覆盖：总是消除 fail、catch 内 re-raise 继续传播
-4. 文档：CLAUDE.md 已更新
-
-- **前置依赖**：无
-- **复杂度**：小-中（checker 逻辑简化，但需仔细验证 codegen 路径）
-- **优先级**：下一批修复
-
 ## 已知 Bug / 技术债
 
 ### B-021 Impl 方法 Effect 传播 [bugfix] [P1] [M] [queued]
