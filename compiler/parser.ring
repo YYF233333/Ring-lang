@@ -1441,9 +1441,8 @@ impl Parser {
     fn parse_call_expr(mut self, left: Expr) -> Expr {
         self.advance()
         let args = self.parse_arg_list()
-        self.expect(TokenKind::TkRParen)
-        let end = self.current_span_start()
-        Expr::Call { callee: left, args: args, type_args: [], span: self.make_span(expr_span(left).start, end) }
+        let rparen = self.expect(TokenKind::TkRParen)
+        Expr::Call { callee: left, args: args, type_args: [], span: self.make_span(expr_span(left).start, rparen.span.end) }
     }
 
     fn parse_arg_list(mut self) -> List<Expr> {
