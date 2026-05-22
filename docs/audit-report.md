@@ -32,8 +32,6 @@
 | 26 | `CollectingSink.report()` 非 var self 但通过引用突变 | 语义不一致 | 深不可变性强制前不会 break |
 | 45 | `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields | 设计约束 | fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16） |
 | 42 | **Impl 方法 effect 不回传**：impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获 | **中** | Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境 |
-| 71 | **未 handle 的自定义 effect 无编译错误**：E0403 已定义但 checker 中无触发点。未 handle 的自定义 effect 到达 codegen 后缺少 evidence 参数，产生运行时错误 | **Bug** | checker 需在 `main` 或模块边界检查残余的 CustomEffect 是否已 handle |
-| 72 | ~~**`impl<T: Eq>` bounded impl 方法跨类型调用冲突**~~：**已修复**。根因：`register_impl_method` 使用 `resolve_self_type` 为 self 参数创建了与 impl 类型参数无关的 fresh type var，导致 TypeScheme 的 `type_vars` 未包含 self 中的类型变量，`instantiate` 无法替换它们。修复：新增 `resolve_impl_self_type` 使用 impl 的类型参数构建 self 类型 | **已修复** | `compiler/infer_register.ring` |
 
 ## Codegen 关注项
 
