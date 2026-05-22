@@ -239,7 +239,7 @@ source-map 支持 + 断点调试。
 
 ## 设计对齐：待实现变更
 
-### B-019 可变性统一模型（`var` → `let mut`，消除 `Cell<T>`）[design-align] [P0] [XL] [queued]
+### B-019 可变性统一模型（`var` → `let mut`，消除 `Cell<T>`）[design-align] [P0] [XL] [doing]
 
 设计决策 2026-05-22：Ring 的可变性由唯一关键字 `mut` 统一管理。`var` 关键字废弃，`Cell<T>` 包装类型消除。
 
