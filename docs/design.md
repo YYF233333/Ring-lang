@@ -223,11 +223,14 @@ fn increment(mut counter: Int) {
 }
 
 let mut n = 0
-increment(mut n)             // 调用方显式标 mut
+increment(n)                 // 编译器从签名推断需要 box
 print(n)                     // 1
+
+// formatter level 2+ 自动插入 mut 标记：
+increment(mut n)             // 等价写法，可选语法，方便人阅读
 ```
 
-编译器为 `mut` 参数自动 box（`{ value }` 对象），用户无感。调用方必须写 `mut` 前缀表示授权修改。
+编译器为 `mut` 参数自动 box（`{ value }` 对象），用户无感。调用方的 `mut` 前缀是**可选标注**——编译器接受两种写法，语义相同。formatter 按标注等级决定是否插入：level 0 省略（LLM 生成），level 2+ 插入（代码审查）。
 
 **`mut self`——可变方法：**
 

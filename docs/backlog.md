@@ -244,7 +244,7 @@ source-map 支持 + 断点调试。
 **设计要点：**
 
 1. **`let mut` 替代 `var`**：`let` = 不可变，`let mut` = 可变。`let` 绑定不可重绑定，不可调用 `mut self` 方法。
-2. **`mut` 参数**：`fn foo(mut x: Int)` 表示传入可变引用，修改对调用方可见。调用方必须写 `foo(mut x)` 显式授权。
+2. **`mut` 参数**：`fn foo(mut x: Int)` 表示传入可变引用，修改对调用方可见。调用方的 `mut` 前缀是**可选标注**（编译器从函数签名推断 box），formatter level 2+ 自动插入。
 3. **`mut self` 替代 `var self`**：可变方法接收者统一为 `mut self`。`push`/`set`/`clear` 等 mutating 方法为 `mut self`，调用方需要 `let mut` 绑定。
 4. **`Cell<T>` 消除**：不再需要包装类型。闭包捕获 `let mut` 变量时编译器自动 box（`{ value }` 对象）；`mut` 参数自动 box。用户无感。
 5. **Effect 规则**：
@@ -268,7 +268,8 @@ fn increment(mut x: Int) {        // mut 参数（自动 box）
     x = x + 1
 }
 let mut n = 0
-increment(mut n)                  // 调用方显式 mut
+increment(n)                      // 编译器从签名推断 box（level 0）
+// increment(mut n)               // formatter level 2+ 自动插入 mut 标记
 print(n)                          // 1
 
 let mut counter = 0
@@ -280,7 +281,7 @@ let inc = fn() { counter = counter + 1 }  // 自动 box，闭包带 mut<Int> eff
 **阶段 A：语法层（Parser）**
 1. `parser.ring`：`let mut` 声明语法（`let` 后接可选 `mut` 关键字）
 2. `parser.ring`：`mut` 参数声明（函数参数列表中 `mut name: Type`）
-3. `parser.ring`：`mut` 调用语法（调用时 `foo(mut x)` 传递可变引用）
+3. `parser.ring`：`mut` 调用语法——调用时 `foo(mut x)` 是可选标注（编译器接受有/无两种写法，语义相同；formatter level 2+ 自动插入）
 4. `ast.ring`：`LetStmt` / `Param` 节点增加 `is_mut` 标记
 5. `lexer.ring`：确认 `mut` 是关键字（可能已在 `var` 之外注册）
 6. 兼容期：`var` 暂时保留为 `let mut` 的别名并产生 deprecation warning
