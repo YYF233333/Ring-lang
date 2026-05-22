@@ -286,6 +286,7 @@ const cases: TestCase[] = [
   { file: "match_multi_stmt.ring", expected: "1\n2\n3\n" },
   { file: "match_string.ring", expected: "match_string: all tests passed\n" },
   { file: "str_methods.ring", expected: "13\ntrue\ntrue\ntrue\nHello\nHello, World!\nABC\nxyz\na_b_c\n" },
+  { file: "str_methods_extended.ring", expected: "all str method tests passed\n" },
   { file: "str_split_index.ring", expected: "3\n2\nb\n" },
   { file: "list_basic.ring", expected: "3\nfalse\ntrue\n20\n10\n30\n" },
   { file: "list_transform.ring", expected: "4\n5\n2\n2\n" },

@@ -20,7 +20,7 @@ function _Set_is_empty(self) {
 
 const CELL_METHODS = ["get", "set", "update"];
 
-const STR_METHODS = ["len", "contains", "starts_with", "ends_with", "slice", "trim", "to_upper", "to_lower", "replace", "split", "char_at", "index_of", "pad_start", "pad_end", "repeat", "char_code_at"];
+const STR_METHODS = ["len", "contains", "starts_with", "ends_with", "slice", "trim", "to_upper", "to_lower", "replace", "split", "char_at", "index_of", "pad_start", "pad_end", "repeat", "char_code_at", "trim_start", "trim_end", "is_empty", "last_index_of"];
 
 const INT_METHODS = ["to_str"];
 

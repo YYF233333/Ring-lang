@@ -3,7 +3,8 @@ pub const CELL_METHODS: List<Str> = ["get", "set", "update"]
 pub const STR_METHODS: List<Str> =
     ["len", "contains", "starts_with", "ends_with", "slice", "trim",
      "to_upper", "to_lower", "replace", "split", "char_at", "index_of",
-     "pad_start", "pad_end", "repeat", "char_code_at"]
+     "pad_start", "pad_end", "repeat", "char_code_at",
+     "trim_start", "trim_end", "is_empty", "last_index_of"]
 
 pub const INT_METHODS: List<Str> = ["to_str"]
 pub const FLOAT_METHODS: List<Str> = ["to_str"]

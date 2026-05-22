@@ -64,6 +64,10 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function Str_pad_end(self, length, fill) { return self.padEnd(length, fill); }")
     lines.push("function Str_repeat(self, count) { return self.repeat(count); }")
     lines.push("function Str_char_code_at(self, i) { var c = self.charCodeAt(i); return isNaN(c) ? { _tag: \"none\" } : { _tag: \"some\", _0: c }; }")
+    lines.push("function Str_trim_start(self) { return self.trimStart(); }")
+    lines.push("function Str_trim_end(self) { return self.trimEnd(); }")
+    lines.push("function Str_is_empty(self) { return self.length === 0; }")
+    lines.push("function Str_last_index_of(self, s) { var i = self.lastIndexOf(s); return i >= 0 ? { _tag: \"some\", _0: i } : { _tag: \"none\" }; }")
     lines.push("")
     lines.push("function Int_to_str(self) { return String(self); }")
     lines.push("function Float_to_str(self) { return String(self); }")
@@ -201,6 +205,7 @@ pub const RUNTIME_EXPORT_NAMES: List<Str> =
      "Str_slice", "Str_trim", "Str_to_upper", "Str_to_lower", "Str_replace",
      "Str_split", "Str_char_at", "Str_index_of",
      "Str_pad_start", "Str_pad_end", "Str_repeat", "Str_char_code_at",
+     "Str_trim_start", "Str_trim_end", "Str_is_empty", "Str_last_index_of",
      "Int_to_str", "Float_to_str", "parse_int", "parse_float",
      "List_len", "List_get", "List_contains",
      "List_push", "List_concat", "List_extend", "List_slice",
