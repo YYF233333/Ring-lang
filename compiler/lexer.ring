@@ -284,7 +284,9 @@ impl Lexer {
                 else if esc == "$" { value = "${value}$" }
                 else { value = "${value}${esc}" }
             } else {
-                value = "${value}${ch}"
+                if ch != "\r" {
+                    value = "${value}${ch}"
+                }
                 self.advance()
             }
         }
@@ -316,7 +318,9 @@ impl Lexer {
                     let end = self.current_position()
                     return self.make_token(TokenKind::TkRawStringLit, value, start, end)
                 }
-                value = "${value}${ch}"
+                if ch != "\r" {
+                    value = "${value}${ch}"
+                }
                 self.advance()
             }
             let span = Span { file: self.file, start: start, end: self.current_position() }
@@ -338,7 +342,9 @@ impl Lexer {
                     let end = self.current_position()
                     return self.make_token(TokenKind::TkRawStringLit, value, start, end)
                 }
-                value = "${value}${ch}"
+                if ch != "\r" {
+                    value = "${value}${ch}"
+                }
                 self.advance()
             }
             let span = Span { file: self.file, start: start, end: self.current_position() }
