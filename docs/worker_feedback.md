@@ -9,6 +9,26 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
+## Wave A+B 审计修复（2026-05-23）
+
+### 1. #89 Result prelude 需要 load_prelude Enum 支持 [通知]
+
+修复 #89 时发现 `load_prelude()` Phase 2 只处理 `Decl::Impl` 和 `Decl::Fn`，不处理 `Decl::Enum`。即使将 `result.ring` 加入 `STD_FILES`，Result enum 构造器也不会被编译到 prelude JS。已同步修复。
+
+### 2. #90 理想修复被 checker prelude 限制阻止 [通知]
+
+Set.insert/remove 的理想修复是移到 `impl<T: Eq> Set`，用 Ring 实现（调用 self.contains()）。但 `load_prelude` 对 bounded impl (`impl<T: Eq>`) 内方法间调用会误报 E0503。已改用 runtime `__ring_deep_eq` 实现。差异：使用结构相等而非 Eq trait dispatch，对自定义 Eq 实现会有语义偏差。`Set.union/intersect/difference` 仍使用 JS `===`。
+
+### 3. #96 IndexExpr 赋值可变性检查超预期 [通知]
+
+Agent 不仅标记了 wildcard 不可达，还完整实现了 `Expr::IndexExpr` 赋值目标的可变性检查（含 `find_root_expr` 扩展）。为未来 `list[i] = val` 语法做好了准备。
+
+### 4. #89 现有测试冲突 [通知]
+
+`type_alias_generic.ring` 中有 `type Result<T> = Option<T>` 定义，与 Result prelude 化后冲突。已重命名为 `MaybeVal<T>`。
+
+---
+
 ## Audit 观察报告（2026-05-23）
 
 ### 1. [观察] 穷尽性检查对非有限类型报告 "missing pattern for `_`"

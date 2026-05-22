@@ -21,21 +21,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 发现者：Opus
 
-### #82 空 pattern 列表构造脆弱 [medium] [open]
-
-`infer_match`（infer.ring:2113-2116）用 `[0].clear().map(fn(i: Int) -> Pattern { panic("unreachable") })` 构造空 `List<Pattern>`。依赖 `List.map` 对空列表返回空列表的行为，且 `[0].clear()` 是 Ring 语言的 workaround（`clear()` 返回 `Unit` 不可链式）。应引入更清晰的空列表构造方式。
-
-发现者：DS
-
-### #86 `infer_if` else 分支 wildcard 静默默认 Unit [low] [open]
-
-`infer_if`（infer.ring:2221）else 分支 match 有三个 arm：`Block`、`IfExpr`、wildcard。Wildcard 将 result_type 设为 `UNIT` 不报错。实践中 parser 总是将 else 包装进 Block（不触发），但如果 parser 有 bug 产生裸表达式，类型推断会静默丢弃类型信息。应将 wildcard 改为 panic 标记不可达。
-
-发现者：DS
-
-### #22 `bind_pattern` named constructor 不验证字段完整性 [low] [open]
-
-穷尽性检查兜底，影响低。
 
 ### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open]
 
@@ -43,17 +28,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## Codegen
 
-### #73 `gen_call` dict_dispatch 非 FieldAccess 分支可能重复首参 [low] [open]
-
-codegen_expr.ring:317-337 中 receiver 从 `args.get(0)` 取出后，又遍历全部 args push，导致 args[0] 出现两次。当前未触发（dict_dispatch callee 总是 FieldAccess），但是潜在 codegen bug。
-
-发现者：Opus
-
-### #76 `is_tuple_field` 过于宽松 [low] [open]
-
-codegen_expr.ring:196-202 只检查首字符是否为数字，`"0abc"` 等非法名也被当作 tuple 索引处理。类型检查器通常提前拦截，但 ErrorType 传播时可能漏过。
-
-发现者：DS
 
 ### #28 HOF inline 代码在 List/Map/Set/Option 间重复 [low] [open]
 
@@ -127,31 +101,6 @@ codegen_expr.ring:196-202 只检查首字符是否为数字，`"0abc"` 等非法
 
 文档问题。
 
-### #87 `__ring_tuple_eq` 使用 JS `===` 而非 Eq trait [medium] [open]
-
-runtime.ring:119。`__ring_tuple_eq` 对非 tuple/array 元素使用 `a[i] !== b[i]`（JS 引用相等）。包含 struct/enum 的 tuple 比较结果错误——两个 field 值相同但不同 JS 对象的 struct 会判定不等，即使该类型实现了 Eq trait。
-
-修复方向：在 codegen 层为 tuple 比较生成 Eq-aware 的代码，或在 runtime 添加 `__ring_deep_eq` 函数按元素类型分发比较。
-
-发现者：Opus
-
-### #88 `gen_handle` abort catch 不过滤 effect name [medium] [open]
-
-codegen_expr.ring:1029-1031。`handle...with` 生成的 try-catch 只检查 `instanceof __EffectAbort`，不检查 `__ring_e.effect` 是否匹配当前处理的 effect。如果未来添加自定义 abort 语义的 effect，错误的 handler 会截获不属于它的 abort。当前安全（fail 是唯一 abort effect），但代码不正确。
-
-修复方向：添加 `&& __ring_e.effect === "effectName"` 条件，与 `gen_try_catch` 的正确实现对齐。
-
-发现者：Opus
-
-
-### #90 `Set.insert/remove` 使用 JS `===` 但 `Set.contains` 使用 Eq trait [medium] [open]
-
-runtime.ring:112-113（insert/remove 用 JS `Set.add`/`Set.delete` = 引用相等）vs std/set.ring（contains 用 Ring 实现 = Eq trait dispatch）。语义不一致：两个 Eq-equal 的 struct 会被 insert 视为不同值（都插入），但 contains 能找到它们。与 `List.contains` 修复（#已完成）同类问题。
-
-修复方向：用 Ring 实现 `Set.insert`/`Set.remove`，使用 Eq trait 比较，与 `Set.contains` 一致。
-
-发现者：Opus
-
 ### #91 catch 对无 fail effect 的表达式静默接受 [medium] [open]
 
 infer.ring:2309。`error_type` 初始化为 fresh type variable。当 body 无 fail effect 时，`found_fail` 保持 false，`error_type` 成为无约束类型变量。catch arms 的 pattern 与无约束类型统一永远成功——`42 catch { e => 0 }` 类型检查通过但 handler 永远不执行（死代码）。
@@ -159,23 +108,6 @@ infer.ring:2309。`error_type` 初始化为 fresh type variable。当 body 无 f
 修复方向：`found_fail` 为 false 时发出警告诊断（如 W0601 "catch on expression with no fail effect"），帮助用户发现无意义的 catch。
 
 发现者：DS + Opus
-
-
-## 代码质量 / 可维护性（续）
-
-
-### #94 Tuple 负索引无下界检查 [low] [open]
-
-infer.ring:1783-1784。`if i >= elements.len()` 只检查上界，`i < 0` 时跳过报错，`elements.get(-1)` 返回 none 触发 panic。Parser 不产生负数 field name，所以不可达——但防御性编码应加 `i < 0` 检查。
-
-发现者：DS
-
-
-### #96 `check_assign_target_mutable` wildcard 静默跳过非 Ident/FieldAccess 目标 [low] [open]
-
-infer.ring:576。`_ => {}` wildcard 对未识别的赋值目标（如 IndexExpr）不做可变性检查。当前 parser 不产生 index 赋值，不可达。但如果未来支持 `list[i] = val`，需要处理 IndexExpr 的可变性验证。
-
-发现者：Opus
 
 ## 设计-实现差距（参考，已在 backlog 跟踪）
 
