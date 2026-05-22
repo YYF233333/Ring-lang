@@ -399,6 +399,26 @@ impl Parser {
             return self.parse_continue_stmt()
         }
 
+        if self.check(TokenKind::TkTry) {
+            self.report_error(E0101, "`try` is a reserved keyword; use `expr catch { pattern => handler }` for error handling", some(self.peek().span))
+            self.advance()
+            // Skip a block body if present so recovery can continue
+            if self.check(TokenKind::TkLBrace) {
+                self.advance()
+                let mut depth = 1
+                while depth > 0 && self.pos < self.tokens.len() - 1 {
+                    if self.check(TokenKind::TkLBrace) {
+                        depth = depth + 1
+                    } else if self.check(TokenKind::TkRBrace) {
+                        depth = depth - 1
+                    }
+                    self.advance()
+                }
+            }
+            let end = self.current_span_start()
+            return Stmt::ExprStmt { expr: Expr::IntLit { value: 0, span: self.make_span(start, end) }, has_semi: false, span: self.make_span(start, end) }
+        }
+
         let expr = self.parse_expr()
 
         if self.check(TokenKind::TkEq) || self.check(TokenKind::TkPlusEq) || self.check(TokenKind::TkMinusEq) {

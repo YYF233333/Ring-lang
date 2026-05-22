@@ -804,10 +804,12 @@ function Lexer_lex_raw_string(self, start) {
   Lexer_advance(self);
   const has_hash = (Lexer_peek(self) === "#");
   if (has_hash) {
+    const saved_line = self.line;
     Lexer_advance(self);
     if ((Lexer_peek(self) !== "\"")) {
       self.pos = (self.pos - 1);
       self.column = (self.column - 1);
+      self.line = saved_line;
       const end = Lexer_current_position(self);
       return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
     }
