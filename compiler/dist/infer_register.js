@@ -598,17 +598,27 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span)
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
+  let impl_scheme_bounds = [];
+  let tp_idx = 0;
+  for (const tp of type_params) {
+    for (const b of tp.bounds) {
+      if ((tp_idx < List_len(impl_tv_ids))) {
+        List_push(impl_scheme_bounds, new env$SchemeBound(Option_unwrap(List_get(impl_tv_ids, tp_idx)), b.trait_name));
+      }
+    }
+    tp_idx = (tp_idx + 1);
+  }
   for (const method of methods) {
     __ring_match24: {
       const __ring_m24 = method;
       if (__ring_m24._tag === "Fn") {
         const mname = __ring_m24.name; const mtps = __ring_m24.type_params; const params = __ring_m24.params; const return_type = __ring_m24.return_type; const declared_effects = __ring_m24.declared_effects;
-        register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, saved);
+        register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved);
         break __ring_match24;
       }
       if (__ring_m24._tag === "ExternFn") {
         const mname = __ring_m24.name; const mtps = __ring_m24.type_params; const params = __ring_m24.params; const return_type = __ring_m24.return_type; const declared_effects = __ring_m24.declared_effects;
-        register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, saved);
+        register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved);
         break __ring_match24;
       }
       break __ring_match24;
@@ -679,7 +689,7 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span)
   ctx.type_param_scope = saved;
 }
 
-function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, outer_saved) {
+function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, outer_saved) {
   const saved_method = map_clone(ctx.type_param_scope);
   let method_tv_ids = [];
   for (const mtp of mtps) {
@@ -759,11 +769,11 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
   __match_fail(__ring_m);
 })();
   const fn_type = types$Type_FnType(param_types, ret, impl_m_effects);
-  _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, [], Option_none));
+  _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, impl_scheme_bounds, Option_none));
   ctx.type_param_scope = saved_method;
 }
 
-function register_impl_extern_method(ctx, methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, outer_saved) {
+function register_impl_extern_method(ctx, methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, outer_saved) {
   const saved_method = map_clone(ctx.type_param_scope);
   let method_tv_ids = [];
   for (const mtp of mtps) {
@@ -817,7 +827,7 @@ function register_impl_extern_method(ctx, methods_map, impl_tv_ids, target_type,
   __match_fail(__ring_m);
 })();
   const fn_type = types$Type_FnType(param_types, ret, impl_ext_effects);
-  _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, [], Option_none));
+  _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, impl_scheme_bounds, Option_none));
   ctx.type_param_scope = saved_method;
 }
 

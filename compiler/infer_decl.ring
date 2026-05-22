@@ -322,7 +322,50 @@ fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast
 }
 
 fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
-    let impl_self_type = resolve_self_type(ctx, target_type)
+    let saved_tp_scope = map_clone(ctx.type_param_scope)
+    for tp in type_params {
+        let tv = ctx.env.fresh_var()
+        ctx.type_param_scope.insert(tp.name, tv)
+    }
+
+    let impl_self_type = if type_params.len() > 0 {
+        var impl_tp_types: List<Type> = []
+        for tp in type_params {
+            match ctx.type_param_scope.get(tp.name) {
+                some(tv) => impl_tp_types.push(tv),
+                none => impl_tp_types.push(ctx.env.fresh_var())
+            }
+        }
+        match ctx.env.types.structs.get(target_type) {
+            some(def) => Type::StructType { name: def.name, type_params: impl_tp_types, fields: def.fields },
+            none => match ctx.env.types.enums.get(target_type) {
+                some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types, variants: def.variants },
+                none => resolve_self_type(ctx, target_type)
+            }
+        }
+    } else {
+        resolve_self_type(ctx, target_type)
+    }
+
+    let saved_impl_bounds = ctx.current_fn_bounds
+    var impl_bounds: List<FnBoundsEntry> = []
+    for tp in type_params {
+        match ctx.type_param_scope.get(tp.name) {
+            some(tv) => match tv {
+                Type::TypeVar { id, .. } => {
+                    for bound in tp.bounds {
+                        impl_bounds.push(FnBoundsEntry {
+                            type_param_var_id: id, trait_name: bound.trait_name, type_param_name: tp.name
+                        })
+                    }
+                },
+                _ => {}
+            },
+            none => {}
+        }
+    }
+    ctx.current_fn_bounds = impl_bounds
+
     var hmethods: List<HDecl> = []
     for method in methods {
         match method {
@@ -333,6 +376,9 @@ fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypePa
             _ => {}
         }
     }
+
+    ctx.current_fn_bounds = saved_impl_bounds
+    ctx.type_param_scope = saved_tp_scope
     HDecl::Impl { target_type: target_type, type_params: type_params, trait_name: trait_name, methods: hmethods, span: span }
 }
 
@@ -567,7 +613,9 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     }
 
     ctx.fn_bounds_stack.push(ctx.current_fn_bounds)
-    ctx.current_fn_bounds = []
+    var inherited_bounds: List<FnBoundsEntry> = []
+    for ib in ctx.current_fn_bounds { inherited_bounds.push(ib) }
+    ctx.current_fn_bounds = inherited_bounds
     for tp in type_params {
         match ctx.type_param_scope.get(tp.name) {
             some(tv) => match tv {
@@ -624,6 +672,9 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
         check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_scope, span)
     ) catch { _ => none }
 
+    // Save complete bounds (inherited + own) before pop
+    let complete_fn_bounds = ctx.current_fn_bounds
+
     // Cleanup
     ctx.current_fn_return_type = saved_fn_return
     ctx.env.pop_scope()
@@ -666,10 +717,8 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     }
 
     var trait_bounds: List<TraitBound> = []
-    for tp in type_params {
-        for bound in tp.bounds {
-            trait_bounds.push(TraitBound { type_param: tp.name, trait_name: bound.trait_name })
-        }
+    for fb in complete_fn_bounds {
+        trait_bounds.push(TraitBound { type_param: fb.type_param_name, trait_name: fb.trait_name })
     }
 
     let fn_scheme = ctx.env.lookup(name)

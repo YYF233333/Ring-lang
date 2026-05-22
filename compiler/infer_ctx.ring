@@ -7,7 +7,7 @@ use hir::{HExpr, HStmt, HParam, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
 use codes::{E0201, E0204, E0301, E0302, E0503}
-use union_find::{UnionFind, new_union_find}
+use union_find::{UnionFind, new_union_find, uf_find}
 use env::{TypeEnv, TypeScheme, SchemeBound, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map}
 use unify::{UnificationError, empty_subst, unify, occurs_in}
 
@@ -517,7 +517,7 @@ pub fn resolve_dicts_from_scheme(
                     },
                     Type::TypeVar { id, .. } => {
                         let matching = current_fn_bounds.find(fn(fb) {
-                            fb.type_param_var_id == id && fb.trait_name == bound.trait_name
+                            (fb.type_param_var_id == id || uf_find(s, fb.type_param_var_id) == id) && fb.trait_name == bound.trait_name
                         })
                         match matching {
                             some(fb) => {

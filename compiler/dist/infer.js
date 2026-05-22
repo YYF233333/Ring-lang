@@ -1226,7 +1226,7 @@ function resolve_trait_dispatch(ctx, resolved, trait_name, error_code, subst, sp
     const __ring_m55 = resolved;
     if (__ring_m55._tag === "TypeVar") {
       const id = __ring_m55.id;
-      const bound = ((__a) => { const __i = __a.findIndex((function(fb) { return ((fb.type_param_var_id === id) && (fb.trait_name === trait_name)); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(ctx.current_fn_bounds);
+      const bound = ((__a) => { const __i = __a.findIndex((function(fb) { return (((fb.type_param_var_id === id) || (union_find$uf_find(subst, fb.type_param_var_id) === id)) && (fb.trait_name === trait_name)); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(ctx.current_fn_bounds);
       __ring_match56: {
         const __ring_m56 = bound;
         if (__ring_m56._tag === "some") {

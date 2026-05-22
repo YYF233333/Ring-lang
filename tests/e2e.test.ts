@@ -405,6 +405,7 @@ const cases: TestCase[] = [
   { file: "mod_capability.ring", expected: "Hello, world!\nmod_capability: all tests passed\n" },
   { file: "fn_type_effect.ring", expected: "converting\nfn_type_effect: all tests passed\n" },
   { file: "fn_type_effect_poly.ring", expected: "fn_type_effect_poly: all tests passed\n" },
+  { file: "impl_bounds.ring", expected: "impl_bounds: all tests passed\n" },
   { file: "effect_custom_typed.ring", expected: "effect_custom_typed: all tests passed\n" },
   { file: "effect_custom_and_fail.ring", expected: "effect_custom_and_fail: all tests passed\n" },
   { file: "effect_custom_catch.ring", expected: "effect_custom_catch: all tests passed\n" },

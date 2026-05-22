@@ -432,12 +432,23 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
         ctx.type_param_scope.insert(tp.name, tv)
     }
 
+    var impl_scheme_bounds: List<SchemeBound> = []
+    var tp_idx = 0
+    for tp in type_params {
+        for b in tp.bounds {
+            if tp_idx < impl_tv_ids.len() {
+                impl_scheme_bounds.push(SchemeBound { type_var: impl_tv_ids.get(tp_idx).unwrap(), trait_name: b.trait_name })
+            }
+        }
+        tp_idx = tp_idx + 1
+    }
+
     for method in methods {
         match method {
             Decl::Fn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
-                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, saved),
+                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved),
             Decl::ExternFn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
-                register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, saved),
+                register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved),
             _ => {}
         }
     }
@@ -486,7 +497,7 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
 fn register_impl_method(
     var ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
-    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, outer_saved: Map<Str, Type>
+    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
     var method_tv_ids: List<Int> = []
@@ -528,14 +539,14 @@ fn register_impl_method(
         none => EMPTY_ROW
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_m_effects }
-    methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: [], def_id: none })
+    methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: impl_scheme_bounds, def_id: none })
     ctx.type_param_scope = saved_method
 }
 
 fn register_impl_extern_method(
     var ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
-    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, outer_saved: Map<Str, Type>
+    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
     var method_tv_ids: List<Int> = []
@@ -560,7 +571,7 @@ fn register_impl_extern_method(
         none => EMPTY_ROW
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_ext_effects }
-    methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: [], def_id: none })
+    methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: impl_scheme_bounds, def_id: none })
     ctx.type_param_scope = saved_method
 }
 

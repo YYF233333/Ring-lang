@@ -625,7 +625,7 @@ function resolve_dicts_from_scheme(sink, env, current_fn_bounds, scheme, callee_
           }
           if (__ring_m25._tag === "TypeVar") {
             const id = __ring_m25.id;
-            const matching = ((__a) => { const __i = __a.findIndex((function(fb) { return ((fb.type_param_var_id === id) && (fb.trait_name === bound.trait_name)); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(current_fn_bounds);
+            const matching = ((__a) => { const __i = __a.findIndex((function(fb) { return (((fb.type_param_var_id === id) || (union_find$uf_find(s, fb.type_param_var_id) === id)) && (fb.trait_name === bound.trait_name)); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(current_fn_bounds);
             __ring_match26: {
               const __ring_m26 = matching;
               if (__ring_m26._tag === "some") {

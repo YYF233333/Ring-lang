@@ -901,7 +901,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
     match resolved {
         Type::TypeVar { id, .. } => {
             let bound = ctx.current_fn_bounds.find(fn(fb) {
-                fb.type_param_var_id == id && fb.trait_name == trait_name
+                (fb.type_param_var_id == id || uf_find(subst, fb.type_param_var_id) == id) && fb.trait_name == trait_name
             })
             match bound {
                 some(b) => { return TraitDispatch::Dict { param: trait_bound_param_name(b.type_param_name, trait_name) } },
