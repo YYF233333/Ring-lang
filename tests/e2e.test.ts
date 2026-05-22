@@ -410,6 +410,7 @@ const cases: TestCase[] = [
   { file: "fn_type_effect_poly.ring", expected: "fn_type_effect_poly: all tests passed\n" },
   { file: "impl_bounds.ring", expected: "impl_bounds: all tests passed\n" },
   { file: "bounded_impl_cross_type.ring", expected: "bounded_impl_cross_type: all tests passed\n" },
+  { file: "collection_struct_equality.ring", expected: "collection_struct_equality: all tests passed\n" },
   { file: "effect_custom_typed.ring", expected: "effect_custom_typed: all tests passed\n" },
   { file: "effect_custom_and_fail.ring", expected: "effect_custom_and_fail: all tests passed\n" },
   { file: "effect_custom_catch.ring", expected: "effect_custom_catch: all tests passed\n" },

@@ -1,4 +1,4 @@
-import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_contains, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, List_index_of, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_contains, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
+import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
 import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Span_Eq as ast$__Span_Eq, __NamedImport_Eq as ast$__NamedImport_Eq, __LiteralValue_Eq as ast$__LiteralValue_Eq, __BinOp_Eq as ast$__BinOp_Eq, __UnaryOp_Eq as ast$__UnaryOp_Eq, __Position_Clone as ast$__Position_Clone, __Span_Clone as ast$__Span_Clone, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __UsePath_Clone as ast$__UsePath_Clone, __NamedImport_Clone as ast$__NamedImport_Clone, __LiteralValue_Clone as ast$__LiteralValue_Clone, __BinOp_Clone as ast$__BinOp_Clone, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UseImport_Clone as ast$__UseImport_Clone, __UseDecl_Clone as ast$__UseDecl_Clone, __Position_Ord as ast$__Position_Ord, __Span_Ord as ast$__Span_Ord, __LiteralValue_Ord as ast$__LiteralValue_Ord, __BinOp_Ord as ast$__BinOp_Ord, __UnaryOp_Ord as ast$__UnaryOp_Ord, __Position_Debug as ast$__Position_Debug, __Span_Debug as ast$__Span_Debug, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Debug as ast$__UsePath_Debug, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
 import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, effect_kind_name as types$effect_kind_name, effects_match_kind as types$effects_match_kind, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
 import { CELL_METHODS as builtin_methods$CELL_METHODS, STR_METHODS as builtin_methods$STR_METHODS, INT_METHODS as builtin_methods$INT_METHODS, FLOAT_METHODS as builtin_methods$FLOAT_METHODS, LIST_NON_HOF_METHODS as builtin_methods$LIST_NON_HOF_METHODS, LIST_HOF_METHODS as builtin_methods$LIST_HOF_METHODS, MAP_NON_HOF_METHODS as builtin_methods$MAP_NON_HOF_METHODS, MAP_HOF_METHODS as builtin_methods$MAP_HOF_METHODS, SET_NON_HOF_METHODS as builtin_methods$SET_NON_HOF_METHODS, SET_HOF_METHODS as builtin_methods$SET_HOF_METHODS, OPTION_NON_HOF_METHODS as builtin_methods$OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS as builtin_methods$OPTION_HOF_METHODS, STRINGBUILDER_METHODS as builtin_methods$STRINGBUILDER_METHODS } from "./builtin_methods.js";
@@ -37,12 +37,52 @@ function List_is_empty(self) {
   return (List_len(self) === 0);
 }
 
+function List_contains(self, item, __ring_T_Eq) {
+  for (const x of self) {
+    if (__ring_T_Eq.eq(x, item)) {
+      return true;
+    }
+  }
+  return false;
+}
+function List_index_of(self, item, __ring_T_Eq) {
+  let i = 0;
+  while ((i < List_len(self))) {
+    __ring_match0: {
+      const __ring_m0 = List_get(self, i);
+      if (__ring_m0._tag === "some") {
+        const v = __ring_m0._0;
+        if (__ring_T_Eq.eq(v, item)) {
+          return Option_some(i);
+        }
+        break __ring_match0;
+      }
+      if (__ring_m0._tag === "none") {
+        break __ring_match0;
+      }
+      __match_fail(__ring_m0);
+    }
+    i = (i + 1);
+  }
+  return Option_none;
+}
+
 function _Map_is_empty(self) {
   return (_Map_len(self) === 0);
 }
 
 function _Set_is_empty(self) {
   return (_Set_len(self) === 0);
+}
+
+function _Set_contains(self, item, __ring_T_Eq) {
+  const items = _Set_to_list(self);
+  for (const x of items) {
+    if (__ring_T_Eq.eq(x, item)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 class HParam {
@@ -386,368 +426,368 @@ const RUNTIME_EFFECT_ABORT = "__EffectAbort";
 const RUNTIME_MATCH_FAIL = "__match_fail";
 
 function hexpr_type(e) {
-  __ring_match0: {
-    const __ring_m0 = e;
-    if (__ring_m0._tag === "IntLit") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "FloatLit") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "StrLit") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "BoolLit") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "Ident") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "BinOp") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "UnaryOp") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "Call") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "FieldAccess") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "StructLit") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "NamedVariantConstruct") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "MatchExpr") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "Block") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "IfExpr") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "StringInterp") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "TryCatch") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "HandleExpr") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "Lambda") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "EffectOp") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "RangeExpr") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "ListLit") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "TupleLit") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    if (__ring_m0._tag === "IndexExpr") {
-      const ty = __ring_m0.ty;
-      return ty;
-      break __ring_match0;
-    }
-    __match_fail(__ring_m0);
-  }
-}
-
-function hexpr_effects(e) {
   __ring_match1: {
     const __ring_m1 = e;
     if (__ring_m1._tag === "IntLit") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "FloatLit") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "StrLit") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "BoolLit") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "Ident") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "BinOp") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "UnaryOp") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "Call") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "FieldAccess") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "StructLit") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "NamedVariantConstruct") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "MatchExpr") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "Block") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "IfExpr") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "StringInterp") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "TryCatch") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "HandleExpr") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "Lambda") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "EffectOp") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "RangeExpr") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "ListLit") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "TupleLit") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     if (__ring_m1._tag === "IndexExpr") {
-      const effects = __ring_m1.effects;
-      return effects;
+      const ty = __ring_m1.ty;
+      return ty;
       break __ring_match1;
     }
     __match_fail(__ring_m1);
   }
 }
 
-function hexpr_span(e) {
+function hexpr_effects(e) {
   __ring_match2: {
     const __ring_m2 = e;
     if (__ring_m2._tag === "IntLit") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "FloatLit") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "StrLit") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "BoolLit") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Ident") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "BinOp") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "UnaryOp") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Call") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "FieldAccess") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "StructLit") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "NamedVariantConstruct") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "MatchExpr") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Block") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "IfExpr") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "StringInterp") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "TryCatch") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "HandleExpr") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Lambda") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "EffectOp") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "RangeExpr") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "ListLit") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "TupleLit") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     if (__ring_m2._tag === "IndexExpr") {
-      const span = __ring_m2.span;
-      return span;
+      const effects = __ring_m2.effects;
+      return effects;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
+  }
+}
+
+function hexpr_span(e) {
+  __ring_match3: {
+    const __ring_m3 = e;
+    if (__ring_m3._tag === "IntLit") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "FloatLit") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "StrLit") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "BoolLit") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Ident") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "BinOp") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "UnaryOp") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Call") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "FieldAccess") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "StructLit") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "NamedVariantConstruct") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "MatchExpr") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Block") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "IfExpr") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "StringInterp") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "TryCatch") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "HandleExpr") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Lambda") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "EffectOp") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "RangeExpr") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "ListLit") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "TupleLit") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "IndexExpr") {
+      const span = __ring_m3.span;
+      return span;
+      break __ring_match3;
+    }
+    __match_fail(__ring_m3);
   }
 }
 

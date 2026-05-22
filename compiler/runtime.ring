@@ -76,7 +76,6 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("")
     lines.push("function List_len(self) { return self.length; }")
     lines.push("function List_get(self, i) { return i >= 0 && i < self.length ? { _tag: \"some\", _0: self[i] } : { _tag: \"none\" }; }")
-    lines.push("function List_contains(self, x) { return self.includes(x); }")
     lines.push("function List_push(self, x) { self.push(x); }")
     lines.push("function List_concat(self, other) { return self.concat(other); }")
     lines.push("function List_extend(self, other) { for (var i = 0; i < other.length; i++) self.push(other[i]); }")
@@ -89,7 +88,6 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function List_shift(self) { return self.length > 0 ? { _tag: \"some\", _0: self.shift() } : { _tag: \"none\" }; }")
     lines.push("function List_clear(self) { self.length = 0; }")
     lines.push("function List_find_index(self, f) { var i = self.findIndex(f); return i >= 0 ? { _tag: \"some\", _0: i } : { _tag: \"none\" }; }")
-    lines.push("function List_index_of(self, item) { var i = self.indexOf(item); return i >= 0 ? { _tag: \"some\", _0: i } : { _tag: \"none\" }; }")
     lines.push("function List_set(self, i, v) { self[i] = v; }")
     lines.push("function list_clone(l) { return l.slice(); }")
     lines.push("")
@@ -110,7 +108,6 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function set_from(items) { return new Set(items); }")
     lines.push("function set_clone(s) { return new Set(s); }")
     lines.push("function _Set_len(self) { return self.size; }")
-    lines.push("function _Set_contains(self, x) { return self.has(x); }")
     lines.push("function _Set_to_list(self) { return Array.from(self); }")
     lines.push("function _Set_insert(self, x) { self.add(x); }")
     lines.push("function _Set_remove(self, x) { self.delete(x); }")
@@ -218,16 +215,16 @@ pub const RUNTIME_EXPORT_NAMES: List<Str> =
      "Str_pad_start", "Str_pad_end", "Str_repeat", "Str_char_code_at",
      "Str_trim_start", "Str_trim_end", "Str_is_empty", "Str_last_index_of",
      "Int_to_str", "Float_to_str", "parse_int", "parse_float",
-     "List_len", "List_get", "List_contains",
+     "List_len", "List_get",
      "List_push", "List_concat", "List_extend", "List_slice",
      "List_reverse", "List_join", "List_sort", "List_sort_by",
-     "List_set", "List_pop", "List_shift", "List_clear", "List_find_index", "List_index_of",
+     "List_set", "List_pop", "List_shift", "List_clear", "List_find_index",
      "list_clone",
      "map_new", "map_from", "map_clone",
      "_Map_len", "_Map_get", "_Map_contains_key",
      "_Map_keys", "_Map_values", "_Map_entries", "_Map_insert", "_Map_remove", "_Map_clear",
      "set_new", "set_from", "set_clone",
-     "_Set_len", "_Set_contains", "_Set_to_list",
+     "_Set_len", "_Set_to_list",
      "_Set_insert", "_Set_remove", "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear",
      "string_builder",
      "StringBuilder_add", "StringBuilder_line", "StringBuilder_add_int",

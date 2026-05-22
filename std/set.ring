@@ -6,7 +6,7 @@ pub extern fn set_clone<T>(s: Set<T>) -> Set<T>
 
 impl<T> Set {
     pub extern fn len(self: Set<T>) -> Int
-    pub extern fn contains(self: Set<T>, item: T) -> Bool
+    // contains moved to impl<T: Eq> Set below
     pub fn is_empty(self: Set<T>) -> Bool { self.len() == 0 }
     pub extern fn to_list(self: Set<T>) -> List<T>
     pub extern fn insert(self: Set<T>, item: T) -> Unit
@@ -15,4 +15,14 @@ impl<T> Set {
     pub extern fn union(self: Set<T>, other: Set<T>) -> Set<T>
     pub extern fn intersect(self: Set<T>, other: Set<T>) -> Set<T>
     pub extern fn difference(self: Set<T>, other: Set<T>) -> Set<T>
+}
+
+impl<T: Eq> Set {
+    pub fn contains(self: Set<T>, item: T) -> Bool {
+        let items = self.to_list()
+        for x in items {
+            if x == item { return true }
+        }
+        false
+    }
 }
