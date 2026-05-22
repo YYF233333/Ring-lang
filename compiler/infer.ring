@@ -14,9 +14,9 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     variant_js_name, trait_dict_name, trait_bound_param_name,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
     hexpr_type, hexpr_effects, hexpr_span}
-use diagnostics::{DiagnosticContext, CollectingSink}
+use diagnostics::{DiagnosticContext, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0203, E0205, E0206, E0208, E0301, E0303, E0304, E0305, E0306,
-    E0307, E0308, E0402, E0504, E0601, E0705}
+    E0307, E0308, E0402, E0504, E0601, E0705, W0001}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
@@ -2348,6 +2348,21 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
             },
             _ => {}
         }
+    }
+
+    // Warn only when the body's effect row is closed (no open tail) and has no fail effect.
+    // An open tail means the body may have fail effects from polymorphic call sites.
+    let resolved_row = apply_subst_row(s, effects)
+    let has_open_tail = match resolved_row.tail {
+        some(_) => true,
+        none => false
+    }
+    if found_fail == false && has_open_tail == false {
+        let warn = make_diag(W0001, Severity::SevWarning,
+            "catch on expression with no fail effect; handler will never execute",
+            span,
+            DiagnosticContext::OtherContext { detail: some("body has no fail effect") })
+        ctx.sink.report(warn)
     }
 
     let result_type = ctx.env.fresh_var()

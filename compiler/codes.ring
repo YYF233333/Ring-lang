@@ -1,3 +1,14 @@
+// Error/Warning code numbering:
+// E01xx = Lexer/Parser errors
+// E02xx = Name resolution / scope errors
+// E03xx = Type errors
+// E04xx = Effect errors
+// E05xx = Trait errors
+// E06xx = Exhaustiveness errors
+// E07xx = Module errors
+// W0xxx = Warnings
+// Gaps in numbering (E0202, E0400, E0401, E0701, etc.) are from removed/merged codes.
+
 pub const E0101: Str = "E0101"
 pub const E0102: Str = "E0102"
 pub const E0103: Str = "E0103"
@@ -31,6 +42,8 @@ pub const E0703: Str = "E0703"
 pub const E0704: Str = "E0704"
 pub const E0705: Str = "E0705"
 pub const E0706: Str = "E0706"
+
+pub const W0001: Str = "W0001"
 
 pub fn error_description(code: Str) -> Str {
     if code == "E0101" { return "Unexpected token" }
@@ -66,6 +79,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0704" { return "Circular dependency detected" }
     if code == "E0705" { return "Relative path out of scope" }
     if code == "E0706" { return "Use declaration must appear before other declarations" }
+    if code == "W0001" { return "Catch on expression with no fail effect" }
     "Unknown error"
 }
 
@@ -77,5 +91,6 @@ pub fn error_category(code: Str) -> Str {
     if code.starts_with("E05") { return "trait" }
     if code.starts_with("E06") { return "pattern" }
     if code.starts_with("E07") { return "module" }
+    if code.starts_with("W") { return "warning" }
     "unknown"
 }
