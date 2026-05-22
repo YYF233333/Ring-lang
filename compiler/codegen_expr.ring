@@ -212,7 +212,10 @@ fn gen_eq_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, di
     let is_ne = op == BinOp::Neq
 
     match dispatch {
-        TraitDispatch::Builtin => if is_ne { "(${l} !== ${r})" } else { "(${l} === ${r})" },
+        TraitDispatch::Builtin => match hexpr_type(left) {
+            Type::TupleType { elements } => if is_ne { "(!__ring_tuple_eq(${l}, ${r}))" } else { "__ring_tuple_eq(${l}, ${r})" },
+            _ => if is_ne { "(${l} !== ${r})" } else { "(${l} === ${r})" },
+        },
         TraitDispatch::Direct { dict, extra_dicts } => {
             let d = qualify(ctx, dict)
             let extra = extra_dicts_str(extra_dicts)

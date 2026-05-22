@@ -351,6 +351,7 @@ const cases: TestCase[] = [
   { file: "trait_generic_impl.ring", expected: "trait_generic_impl: all passed\n" },
   { file: "empty_list.ring", expected: "empty_list: all tests passed\n" },
   { file: "tuple_field_access.ring", expected: "tuple_field_access: all tests passed\n" },
+  { file: "tuple_eq.ring", expected: "tuple_eq: all tests passed\n" },
   { file: "result_basic.ring", expected: "result_basic: all tests passed\n" },
   { file: "const_basic.ring", expected: "const_basic: all tests passed\n" },
   { file: "loop_basic.ring", expected: "loop_basic: all tests passed\n" },
