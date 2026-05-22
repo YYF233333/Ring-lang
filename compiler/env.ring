@@ -120,7 +120,8 @@ pub struct TypeRegistry {
 pub struct TraitRegistry {
     pub traits: Map<Str, TraitDef>,
     pub trait_impls: List<ImplEntry>,
-    pub impl_methods: Map<Str, Map<Str, TypeScheme>>
+    pub impl_methods: Map<Str, Map<Str, TypeScheme>>,
+    pub mut_methods: Map<Str, Set<Str>>
 }
 
 pub struct ScopeManager {
@@ -128,7 +129,8 @@ pub struct ScopeManager {
     pub fn_bounds: Map<Str, List<FnBound>>,
     pub var_bounds: Map<Int, Set<Str>>,
     pub def_spans: Map<Int, Span>,
-    pub mutable_vars: Set<Int>
+    pub mutable_vars: Set<Int>,
+    pub let_defs: Set<Int>
 }
 
 pub struct IdGen {
@@ -169,14 +171,16 @@ pub fn new_type_env() -> TypeEnv {
         trait_reg: TraitRegistry {
             traits: map_new(),
             trait_impls: [],
-            impl_methods: map_new()
+            impl_methods: map_new(),
+            mut_methods: map_new()
         },
         scope: ScopeManager {
             scopes: [initial_scope],
             fn_bounds: map_new(),
             var_bounds: map_new(),
             def_spans: map_new(),
-            mutable_vars: set_new()
+            mutable_vars: set_new(),
+            let_defs: set_new()
         },
         ids: IdGen {
             next_type_var_id: 0,
@@ -273,7 +277,7 @@ impl TypeEnv {
 
     pub fn instantiate(mut self, scheme: TypeScheme) -> Type {
         if scheme.type_vars.len() == 0 { return scheme.ty }
-        let mapping: Map<Int, Type> = map_new()
+        let mut mapping: Map<Int, Type> = map_new()
         for tv in scheme.type_vars {
             mapping.insert(tv, self.fresh_var())
         }
@@ -281,7 +285,7 @@ impl TypeEnv {
             match mapping.get(bound.type_var) {
                 some(fresh) => match fresh {
                     Type::TypeVar { id, .. } => {
-                        let existing: Set<Str> = match self.scope.var_bounds.get(id) {
+                        let mut existing: Set<Str> = match self.scope.var_bounds.get(id) {
                             some(s) => s,
                             none => set_new()
                         }
@@ -358,7 +362,7 @@ pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
                             Type::TypeVar { id: new_id, name: new_name } =>
                                 Type::RecordType { fields: mapped_fields, tail: some(new_id), tail_name: new_name },
                             Type::RecordType { fields: extra_fields, tail: extra_tail, tail_name: extra_tn } => {
-                                let all_fields = list_clone(mapped_fields)
+                                let mut all_fields = list_clone(mapped_fields)
                                 for ef in extra_fields {
                                     all_fields.push(RecordField { name: ef.name, ty: apply_subst_map(subst, ef.ty) })
                                 }
@@ -404,7 +408,7 @@ pub fn apply_subst_row_map(subst: Map<Int, Type>, row: EffectRow) -> EffectRow {
                     Type::TypeVar { id: new_id, .. } =>
                         EffectRow { effects: effects, tail: some(new_id) },
                     Type::EffectRowType { effects: extra_effs, tail: extra_tail } => {
-                        let merged = list_clone(effects)
+                        let mut merged = list_clone(effects)
                         for ee in extra_effs {
                             merged.push(apply_subst_effect_map(subst, ee))
                         }
@@ -479,7 +483,7 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
                                 Type::TypeVar { id: new_id, name: new_name } =>
                                     Type::RecordType { fields: mapped_fields, tail: some(new_id), tail_name: new_name },
                                 Type::RecordType { fields: extra_fields, tail: extra_tail, tail_name: extra_tn } => {
-                                    let all_fields = list_clone(mapped_fields)
+                                    let mut all_fields = list_clone(mapped_fields)
                                     for ef in extra_fields {
                                         all_fields.push(RecordField { name: ef.name, ty: apply_subst(subst, ef.ty) })
                                     }
@@ -531,7 +535,7 @@ pub fn apply_subst_row(subst: UnionFind, row: EffectRow) -> EffectRow {
                         Type::TypeVar { id: new_id, .. } =>
                             EffectRow { effects: effects, tail: some(new_id) },
                         Type::EffectRowType { effects: extra_effs, tail: extra_tail } => {
-                            let merged = list_clone(effects)
+                            let mut merged = list_clone(effects)
                             for ee in extra_effs {
                                 merged.push(apply_subst_effect(subst, ee))
                             }

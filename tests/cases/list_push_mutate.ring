@@ -2,27 +2,27 @@
 
 fn main() {
     // push
-    let xs = [1, 2, 3]
+    let mut xs = [1, 2, 3]
     xs.push(4)
     assert(xs.len() == 4, "push increases len")
     assert(xs.get(3).unwrap_or(0) == 4, "push adds at end")
 
     // reverse
-    let ys = [3, 1, 2]
+    let mut ys = [3, 1, 2]
     ys.reverse()
     assert(ys.get(0).unwrap_or(0) == 2, "reverse [0]")
     assert(ys.get(1).unwrap_or(0) == 1, "reverse [1]")
     assert(ys.get(2).unwrap_or(0) == 3, "reverse [2]")
 
     // sort
-    let zs = [3, 1, 4, 1, 5]
+    let mut zs = [3, 1, 4, 1, 5]
     zs.sort()
     assert(zs.get(0).unwrap_or(0) == 1, "sort [0]")
     assert(zs.get(1).unwrap_or(0) == 1, "sort [1]")
     assert(zs.get(4).unwrap_or(0) == 5, "sort [4]")
 
     // clear
-    let cs = [1, 2, 3]
+    let mut cs = [1, 2, 3]
     cs.clear()
     assert(cs.len() == 0, "clear empties")
     assert(cs.is_empty(), "clear is_empty")

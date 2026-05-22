@@ -416,6 +416,7 @@ const cases: TestCase[] = [
   { file: "let_mut_basic.ring", expected: "let_mut_basic: all tests passed\n" },
   { file: "let_mut_param.ring", expected: "let_mut_param: all tests passed\n" },
   { file: "let_mut_method.ring", expected: "let_mut_method: all tests passed\n" },
+  { file: "let_mut_enforcement.ring", expected: "let_mut_enforcement: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -471,6 +472,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_unexpected_token.ring", error_pattern: "E0101" },
     { file: "error_duplicate_def.ring", error_pattern: "E0207" },
     { file: "error_use_after_decl.ring", error_pattern: "E0706" },
+    { file: "error_mut_method_on_let.ring", error_pattern: "E0208" },
     { file: "errors/mod_super_out_of_scope.ring", error_pattern: "E0705" },
     { file: "errors/mod_capability_violation.ring", error_pattern: "E0405" },
   ];

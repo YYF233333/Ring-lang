@@ -564,7 +564,7 @@ function get_method_names(trait_name) {
   __ring_match18: {
     const __ring_m18 = trait_name;
     if (__ring_m18 === "Eq") {
-      const r = ["eq"];
+      let r = ["eq"];
       List_push(r, "ne");
       return r;
       break __ring_match18;

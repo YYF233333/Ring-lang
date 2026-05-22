@@ -563,7 +563,7 @@ fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     ctx.subst = body_result.subst
     ctx.subst = unify_at(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span)
 
-    let local_names: Map<Int, Str> = map_new()
+    let mut local_names: Map<Int, Str> = map_new()
     for tp in type_params {
         match ctx.type_param_scope.get(tp.name) {
             some(tv) => match tv {
@@ -576,7 +576,7 @@ fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
             none => {}
         }
     }
-    let declared_names: Set<Str> = set_new()
+    let mut declared_names: Set<Str> = set_new()
     for tp in type_params { declared_names.insert(tp.name) }
     for entry in ctx.type_param_scope.entries() {
         let (tpname, tv) = entry

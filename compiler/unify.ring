@@ -145,8 +145,8 @@ pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: UnionFind, mut env: 
     let ra = apply_subst_row(s, a)
     let rb = apply_subst_row(s, b)
 
-    let a_matched: Set<Int> = set_new()
-    let b_matched: Set<Int> = set_new()
+    let mut a_matched: Set<Int> = set_new()
+    let mut b_matched: Set<Int> = set_new()
     let mut ai = 0
     while ai < ra.effects.len() {
         let mut bi = 0
@@ -235,9 +235,9 @@ fn unify_record_rows(ra: Type, rb: Type, subst: UnionFind, mut env: TypeEnv) -> 
          Type::RecordType { fields: b_fields, tail: b_tail, .. }) => {
             let mut s = subst
 
-            let b_name_set: Set<Str> = set_new()
+            let mut b_name_set: Set<Str> = set_new()
             for f in b_fields { b_name_set.insert(f.name) }
-            let a_name_set: Set<Str> = set_new()
+            let mut a_name_set: Set<Str> = set_new()
             for f in a_fields { a_name_set.insert(f.name) }
 
             for af in a_fields {

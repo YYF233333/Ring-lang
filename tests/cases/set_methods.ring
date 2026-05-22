@@ -26,7 +26,7 @@ fn main() {
     assert(lst.len() == 5, "set to_list len")
 
     // insert and remove (mutation)
-    let s2 = set_new()
+    let mut s2 = set_new()
     s2.insert(10)
     s2.insert(20)
     assert(s2.len() == 2, "set insert len")

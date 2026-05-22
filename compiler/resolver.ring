@@ -75,7 +75,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
     let mut asts_map: Map<Str, Program> = map_new()
 
     modules.insert(entry_key, entry_id)
-    let empty_deps: List<Str> = [""]; empty_deps.clear()
+    let mut empty_deps: List<Str> = [""]; empty_deps.clear()
     dependencies.insert(entry_key, empty_deps)
 
     let mut queue: List<Str> = [entry_key]
@@ -110,7 +110,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                                                     file_path: abs_resolved
                                                 }
                                                 modules.insert(dep_key, dep_id)
-                                                let empty: List<Str> = [""]; empty.clear()
+                                                let mut empty: List<Str> = [""]; empty.clear()
                                                 dependencies.insert(dep_key, empty)
                                                 queue.push(dep_key)
                                             },

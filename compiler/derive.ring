@@ -423,7 +423,7 @@ fn register_derived_impl(mut env: TypeEnv, di: DerivedImpl, trait_name: Str) {
 
 fn get_method_names(trait_name: Str) -> List<Str> {
     match trait_name {
-        "Eq" => { let r = ["eq"]; r.push("ne"); r },
+        "Eq" => { let mut r = ["eq"]; r.push("ne"); r },
         "Clone" => ["clone"],
         "Debug" => ["debug"],
         "Ord" => ["cmp"],

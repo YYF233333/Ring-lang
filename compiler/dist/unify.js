@@ -219,8 +219,8 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
   let s = subst;
   const ra = env$apply_subst_row(s, a);
   const rb = env$apply_subst_row(s, b);
-  const a_matched = set_new();
-  const b_matched = set_new();
+  let a_matched = set_new();
+  let b_matched = set_new();
   let ai = 0;
   while ((ai < List_len(ra.effects))) {
     let bi = 0;
@@ -313,11 +313,11 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
     if (Array.isArray(__ring_m5) && __ring_m5.length === 2 && __ring_m5[0]._tag === "RecordType" && __ring_m5[1]._tag === "RecordType") {
       const a_fields = __ring_m5[0].fields; const a_tail = __ring_m5[0].tail; const b_fields = __ring_m5[1].fields; const b_tail = __ring_m5[1].tail;
       let s = subst;
-      const b_name_set = set_new();
+      let b_name_set = set_new();
       for (const f of b_fields) {
         _Set_insert(b_name_set, f.name);
       }
-      const a_name_set = set_new();
+      let a_name_set = set_new();
       for (const f of a_fields) {
         _Set_insert(a_name_set, f.name);
       }
