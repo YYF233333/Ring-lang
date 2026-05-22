@@ -147,7 +147,7 @@ Ring-lang/
 - Trait 系统暂不支持：关联类型、supertrait 继承、`dyn Trait` 动态分发
 - `pub` 可见性在多文件模式下强制执行，单文件模式不强制（向后兼容）
 - 穷尽性检查支持嵌套模式递归检查（含 Option<Option<T>> 等嵌套 enum）；多字段交叉组合不验证
-- `List.contains` / `List.find` / `Map` key 查找 / `Set.contains` 等仍使用 JS `===` 引用相等——`==` 运算符已解糖为 Eq trait dispatch（struct/enum 结构相等），但集合内部方法尚未升级
+- ~~`List.contains` / `Set.contains` 等仍使用 JS `===` 引用相等~~：已修复。`List.contains`/`List.index_of`/`Set.contains` 现在用 Ring 实现，使用 `==`（Eq trait dispatch）进行比较。`List.find` / `Map` key 查找仍使用 JS `===`
 - 深层嵌套泛型类型（如 `Pair<Pair<Int, Int>, Int>`）的 trait method UFCS 调用不支持——auto-derive codegen 和 operator dispatch 正常工作，但 `.eq()`/`.clone()`/`.debug()`/`.cmp()` 直接方法调用受限
 - ~~**`impl<T: Eq>` bounded impl 跨类型调用冲突**~~：已修复。`resolve_impl_self_type` 现在使用 impl 的类型参数构建 self 类型，确保 TypeScheme 中所有类型变量都被 instantiate 正确替换
 

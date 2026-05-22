@@ -7,7 +7,7 @@ impl<T> List {
     pub extern fn get(self: List<T>, index: Int) -> Option<T>
     pub fn first(self: List<T>) -> Option<T> { self.get(0) }
     pub fn last(self: List<T>) -> Option<T> { self.get(self.len() - 1) }
-    pub extern fn contains(self: List<T>, item: T) -> Bool
+    // contains and index_of moved to impl<T: Eq> List below
     pub fn is_empty(self: List<T>) -> Bool { self.len() == 0 }
     pub extern fn push(self: List<T>, item: T) -> Unit
     pub extern fn pop(self: List<T>) -> Option<T>
@@ -19,6 +19,27 @@ impl<T> List {
     pub extern fn sort(self: List<T>) -> Unit
     pub extern fn shift(self: List<T>) -> Option<T>
     pub extern fn clear(self: List<T>) -> Unit
-    pub extern fn index_of(self: List<T>, item: T) -> Option<Int>
+    // index_of moved to impl<T: Eq> List below
     pub extern fn set(self: List<T>, index: Int, value: T) -> Unit
+}
+
+impl<T: Eq> List {
+    pub fn contains(self: List<T>, item: T) -> Bool {
+        for x in self {
+            if x == item { return true }
+        }
+        false
+    }
+
+    pub fn index_of(self: List<T>, item: T) -> Option<Int> {
+        let mut i = 0
+        while i < self.len() {
+            match self.get(i) {
+                some(v) => if v == item { return some(i) },
+                none => {}
+            }
+            i = i + 1
+        }
+        none
+    }
 }

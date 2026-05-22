@@ -982,7 +982,18 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
     match resolved {
         Type::TypeVar { id, .. } => {
             let bound = ctx.current_fn_bounds.find(fn(fb) {
-                (fb.type_param_var_id == id || uf_find(subst, fb.type_param_var_id) == id) && fb.trait_name == trait_name
+                if fb.trait_name != trait_name { false } else
+                if fb.type_param_var_id == id { true } else
+                if uf_find(subst, fb.type_param_var_id) == id { true } else {
+                    // Also check through type bindings: uf_bind stores var-to-var
+                    // bindings in the types map, not the parent map, so uf_find alone
+                    // may miss them. Resolve the bound var fully via apply_subst.
+                    let bound_resolved = apply_subst(subst, Type::TypeVar { id: fb.type_param_var_id, name: none })
+                    match bound_resolved {
+                        Type::TypeVar { id: bid, .. } => bid == id,
+                        _ => false
+                    }
+                }
             })
             match bound {
                 some(b) => { return TraitDispatch::Dict { param: trait_bound_param_name(b.type_param_name, trait_name) } },

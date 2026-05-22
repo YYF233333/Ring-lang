@@ -10,9 +10,9 @@ pub const INT_METHODS: List<Str> = ["to_str"]
 pub const FLOAT_METHODS: List<Str> = ["to_str"]
 
 pub const LIST_NON_HOF_METHODS: List<Str> =
-    ["len", "get", "set", "first", "last", "contains", "is_empty",
+    ["len", "get", "set", "first", "last", "is_empty",
      "push", "pop", "concat", "extend", "slice", "reverse",
-     "join", "sort", "shift", "clear", "index_of"]
+     "join", "sort", "shift", "clear"]
 
 pub const LIST_HOF_METHODS: List<Str> =
     ["map", "filter", "flat_map", "fold", "any", "all", "find", "find_index", "sort_by"]
@@ -24,7 +24,7 @@ pub const MAP_NON_HOF_METHODS: List<Str> =
 pub const MAP_HOF_METHODS: List<Str> = ["map_values", "filter", "any", "fold"]
 
 pub const SET_NON_HOF_METHODS: List<Str> =
-    ["len", "contains", "is_empty", "to_list",
+    ["len", "is_empty", "to_list",
      "insert", "remove", "clear", "union", "intersect", "difference"]
 
 pub const SET_HOF_METHODS: List<Str> = ["filter", "fold", "any", "all"]
