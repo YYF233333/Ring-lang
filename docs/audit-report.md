@@ -32,7 +32,6 @@
 | 26 | `CollectingSink.report()` 非 var self 但通过引用突变 | 语义不一致 | 深不可变性强制前不会 break |
 | 45 | `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields | 设计约束 | fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16） |
 | 42 | **Impl 方法 effect 不回传**：impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获 | **中** | Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境 |
-| 70 | **自定义 effect 类型参数不工作**：`effect State<S> { fn get() -> S }` 中 `S` 报 E0204 Unknown type。`register_effect` 解析 op 时未将 effect 的 type_params 注入作用域。内置 `fail<E>` 靠 builtins.ring 硬编码绕过 | **Bug** | `effect State<S>` 声明可解析，但 checker 无法解析 op 中的类型参数。需在 `register_effect` 中将 type_params 注册为临时类型变量 |
 | 71 | **未 handle 的自定义 effect 无编译错误**：E0403 已定义但 checker 中无触发点。未 handle 的自定义 effect 到达 codegen 后缺少 evidence 参数，产生运行时错误 | **Bug** | checker 需在 `main` 或模块边界检查残余的 CustomEffect 是否已 handle |
 | 72 | **`impl<T: Eq>` bounded impl 方法跨类型调用冲突**：`check_impl_decl` 为 impl 类型参数创建的 fresh type var 在方法体检查后泄漏。同一作用域对不同具体类型（如 `List<Int>.has_item()` 和 `List<Str>.has_item()`）调用 bounded impl 方法时，第二次调用因 type var 已被统一为第一次的具体类型而报 "cannot unify Str with Int"。同一类型多次调用正常 | **Bug** | `check_impl_decl` 中 impl type param 的 fresh var 应在每次方法调用时独立实例化，而非在整个 impl 检查期间共享。可能需要将 type var 创建移到方法查找/实例化阶段 |
 
