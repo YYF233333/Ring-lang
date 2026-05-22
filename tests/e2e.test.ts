@@ -439,6 +439,8 @@ const cases: TestCase[] = [
   { file: "audit_safe_ident_globals.ring", expected: "pass: safe_ident globals\n" },
   { file: "audit_match_tuple_bare_variant.ring", expected: "pass: match tuple bare variant\n" },
   { file: "audit_result_prelude.ring", expected: "pass: result prelude\n" },
+  { file: "audit_tuple_eq_struct.ring", expected: "pass: tuple eq struct\n" },
+  { file: "audit_set_contains_struct.ring", expected: "pass: set struct eq consistency\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
