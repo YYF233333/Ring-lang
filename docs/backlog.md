@@ -222,6 +222,17 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
+### B-032 Review `current_span_start()` span end 误用 [bugfix] [P2] [S] [queued]
+B-025 暴露了 `parse_call_expr` 中用 `current_span_start()`（下一 token 起始位置）作为表达式 span end 的 bug（已修复为 `rparen.span.end`）。同样的模式可能存在于 parser 其他函数中。
+
+**涉及修改**：
+1. `parser.ring`：搜索所有 `current_span_start()` 调用点，逐一检查是否作为表达式/语句的 span end 使用，若是则修正为正确的闭合 token span end
+
+**验收标准**：
+- 所有 `current_span_start()` 用作 span end 的场景已修正或确认正确
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
 ### B-022 表达式位置 IIFE return 截获 [bugfix] [P3] [M] [queued]
 `let x = { return y; 0 }` 中的 return 被 IIFE 截获。语句位置已修复。
 
@@ -248,24 +259,6 @@ source-map 支持 + 断点调试。
 
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
 - **优先级**：低
-
-
-### B-031 消除 Cell\<T\>（完全移除 interior mutability）[design-align] [P1] [M] [doing]
-B-019 遗留项。Cell\<T\> 原本用于闭包捕获可变变量，`let mut` + 自动 boxing 已替代此用途。Ring 不保留 interior mutability——需要修改就用 `let mut`。
-
-**涉及修改**：
-1. `builtins.ring`：移除 Cell\<T\> 类型注册、Cell 构造函数、CELL_METHODS
-2. `runtime.ring`：移除 `Cell` / `Cell_get` / `Cell_set` / `Cell_update` runtime 代码
-3. `codegen.ring`：移除 Cell 方法 codegen 注册
-4. `compiler/*.ring`：将所有 `Cell(x)` / `.get()` / `.set()` / `.update()` 用法替换为 `let mut` + 直接赋值
-5. `tests/cases/`：改写 7 个 Cell 相关测试为 `let mut` + 闭包捕获测试
-6. 重新编译 `dist/`
-
-**验收标准**：
-- `Cell` 类型不可用（报 unknown type）
-- 原 Cell 测试改写为 `let mut` 闭包捕获测试并通过
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
 
 ### B-030 函数参数 mut enforcement + 全量迁移 [design-align] [P1] [M] [queued]
 B-019 遗留项。当前 `mut self` 方法调用检查仅针对 `let` 绑定，函数参数不受限。设计要求：不标 `mut` 的参数不可调用 `mut self` 方法。
