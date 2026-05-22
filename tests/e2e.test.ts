@@ -423,6 +423,7 @@ const cases: TestCase[] = [
   { file: "catch_exhaustive.ring", expected: "catch exhaustive tests passed\n" },
   { file: "multiline_string.ring", expected: "multiline_string: all tests passed\n" },
   { file: "raw_string.ring", expected: "raw_string: all tests passed\n" },
+  { file: "index_expr.ring", expected: "index_expr: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

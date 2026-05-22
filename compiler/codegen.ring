@@ -446,6 +446,10 @@ fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>) {
         HExpr::EffectOp { args, .. } => {
             for a in args { collect_local_calls(a, local_names, out) }
         },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_local_calls(receiver, local_names, out)
+            collect_local_calls(index, local_names, out)
+        },
         _ => {},
     }
 }

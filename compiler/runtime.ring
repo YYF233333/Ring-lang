@@ -119,6 +119,10 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function _Set_difference(self, other) { return new Set([...self].filter(function(x) { return !other.has(x); })); }")
     lines.push("function _Set_clear(self) { self.clear(); }")
     lines.push("")
+    lines.push("function __ring_index(arr, i) { if (i < 0 || i >= arr.length) throw new Error(\"Index out of bounds: \" + i + \", length: \" + arr.length); return arr[i]; }")
+    lines.push("function __ring_map_index(map, key) { if (!map.has(key)) throw new Error(\"Key not found: \" + key); return map.get(key); }")
+    lines.push("function __ring_str_index(s, i) { if (i < 0 || i >= s.length) throw new Error(\"Index out of bounds: \" + i + \", length: \" + s.length); return s[i]; }")
+    lines.push("")
     lines.push("function json_stringify(value) { return JSON.stringify(value); }")
     lines.push("")
     lines.push("var __fs = __require(\"fs\"), __path = __require(\"path\");")
@@ -198,7 +202,8 @@ pub fn RUNTIME_CODE() -> Str {
 
 pub const RUNTIME_EXPORT_NAMES: List<Str> =
     ["__EffectAbort", "__ring_raise_fail", "Cell", "Cell_get", "Cell_set", "Cell_update",
-     "__match_fail", "print", "assert", "panic", "exit", "json_stringify",
+     "__match_fail", "__ring_index", "__ring_map_index", "__ring_str_index",
+     "print", "assert", "panic", "exit", "json_stringify",
      "Option_some", "Option_none",
      "Option_is_some", "Option_is_none", "Option_unwrap_or", "Option_unwrap",
      "Str_len", "Str_contains", "Str_starts_with", "Str_ends_with",

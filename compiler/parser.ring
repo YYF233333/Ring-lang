@@ -51,6 +51,7 @@ pub fn infix_precedence(kind: TokenKind) -> Int {
         TkPercent => PREC_MUL_DIV,
         TkDot => PREC_POSTFIX,
         TkLParen => PREC_POSTFIX,
+        TkLBracket => PREC_POSTFIX,
         _ => PREC_NONE
     }
 }
@@ -123,7 +124,8 @@ pub fn expr_span(e: Expr) -> Span {
         Lambda { span, .. } => span,
         Range { span, .. } => span,
         ListLit { span, .. } => span,
-        TupleLit { span, .. } => span
+        TupleLit { span, .. } => span,
+        IndexExpr { span, .. } => span
     }
 }
 
@@ -1176,6 +1178,10 @@ impl Parser {
                 if tok.span.start.line > expr_span(left).end.line { break }
                 left = self.parse_call_expr(left)
                 last_was_comparison = false
+            } else if self.check(TokenKind::TkLBracket) {
+                if tok.span.start.line > expr_span(left).end.line { break }
+                left = self.parse_index_expr(left)
+                last_was_comparison = false
             } else if self.check(TokenKind::TkDotDot) || self.check(TokenKind::TkDotDotEq) {
                 let inclusive = self.check(TokenKind::TkDotDotEq)
                 self.advance()
@@ -1414,6 +1420,18 @@ impl Parser {
 
         let end = self.current_span_start()
         Expr::FieldAccess { receiver: left, field: name, span: self.make_span(expr_span(left).start, end) }
+    }
+
+    // ============================================================
+    // Index expression: receiver[index]
+    // ============================================================
+
+    fn parse_index_expr(mut self, receiver: Expr) -> Expr {
+        self.advance() // consume [
+        let index = self.parse_expr()
+        let end_tok = self.expect(TokenKind::TkRBracket)
+        let span = self.make_span(expr_span(receiver).start, end_tok.span.end)
+        Expr::IndexExpr { receiver: receiver, index: index, span: span }
     }
 
     // ============================================================

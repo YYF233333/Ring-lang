@@ -14,6 +14,7 @@ pub const E0302: Str = "E0302"
 pub const E0303: Str = "E0303"
 pub const E0304: Str = "E0304"
 pub const E0305: Str = "E0305"
+pub const E0306: Str = "E0306"
 pub const E0307: Str = "E0307"
 pub const E0308: Str = "E0308"
 pub const E0402: Str = "E0402"
@@ -48,6 +49,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0303" { return "Numeric type required" }
     if code == "E0304" { return "Invalid field access" }
     if code == "E0305" { return "Undefined method" }
+    if code == "E0306" { return "Type does not support indexing" }
     if code == "E0307" { return "Type does not implement Eq" }
     if code == "E0308" { return "Type does not implement Ord" }
     if code == "E0402" { return "Unknown effect operation" }

@@ -76,7 +76,8 @@ pub enum HExpr {
     EffectOp { effect_name: Str, op_name: Str, args: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
     RangeExpr { start: HExpr, end: HExpr, inclusive: Bool, ty: Type, effects: EffectRow, span: Span },
     ListLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
-    TupleLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span }
+    TupleLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
+    IndexExpr { receiver: HExpr, index: HExpr, ty: Type, effects: EffectRow, span: Span }
 }
 
 pub struct HForInDestructure {
@@ -242,7 +243,8 @@ pub fn hexpr_type(e: HExpr) -> Type {
         HExpr::EffectOp { ty, .. } => ty,
         HExpr::RangeExpr { ty, .. } => ty,
         HExpr::ListLit { ty, .. } => ty,
-        HExpr::TupleLit { ty, .. } => ty
+        HExpr::TupleLit { ty, .. } => ty,
+        HExpr::IndexExpr { ty, .. } => ty
     }
 }
 
@@ -269,7 +271,8 @@ pub fn hexpr_effects(e: HExpr) -> EffectRow {
         HExpr::EffectOp { effects, .. } => effects,
         HExpr::RangeExpr { effects, .. } => effects,
         HExpr::ListLit { effects, .. } => effects,
-        HExpr::TupleLit { effects, .. } => effects
+        HExpr::TupleLit { effects, .. } => effects,
+        HExpr::IndexExpr { effects, .. } => effects
     }
 }
 
@@ -296,6 +299,7 @@ pub fn hexpr_span(e: HExpr) -> Span {
         HExpr::EffectOp { span, .. } => span,
         HExpr::RangeExpr { span, .. } => span,
         HExpr::ListLit { span, .. } => span,
-        HExpr::TupleLit { span, .. } => span
+        HExpr::TupleLit { span, .. } => span,
+        HExpr::IndexExpr { span, .. } => span
     }
 }

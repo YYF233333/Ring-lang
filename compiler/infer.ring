@@ -15,7 +15,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
     hexpr_type, hexpr_effects, hexpr_span}
 use diagnostics::{DiagnosticContext, CollectingSink}
-use codes::{E0201, E0203, E0205, E0206, E0208, E0301, E0303, E0304, E0305,
+use codes::{E0201, E0203, E0205, E0206, E0208, E0301, E0303, E0304, E0305, E0306,
     E0307, E0308, E0402, E0504, E0601, E0705}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
@@ -672,7 +672,75 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
                 },
                 subst: s, effects: range_effects
             }
+        },
+        Expr::IndexExpr { receiver, index, span } =>
+            infer_index_expr(ctx, receiver, index, span, subst)
+    }
+}
+
+// ============================================================
+// infer_index_expr: list[i] / map[key] / str[i]
+// ============================================================
+
+fn infer_index_expr(mut ctx: InferCtx, receiver: Expr, index: Expr, span: Span, subst: UnionFind) -> InferResult {
+    let recv_r = infer_expr(ctx, receiver, subst)
+    let mut s = recv_r.subst
+    let mut combined_effects = recv_r.effects
+
+    let idx_r = infer_expr(ctx, index, s)
+    s = idx_r.subst
+    let me = merge_effects(ctx.env, combined_effects, idx_r.effects, s)
+    combined_effects = me.0
+    s = me.1
+
+    let recv_type = apply_subst(s, hexpr_type(recv_r.hexpr))
+    let idx_type = apply_subst(s, hexpr_type(idx_r.hexpr))
+
+    let mut result_ty: Type = Type::ErrorType
+
+    match recv_type {
+        Type::StructType { name, type_params, .. } => {
+            if name == BUILTIN_LIST {
+                // list[i]: index must be Int, result is element type T
+                s = unify_at(ctx.sink, ctx.env, idx_type, INT, s, span)
+                result_ty = if type_params.len() > 0 { type_params.get(0).unwrap() } else { Type::ErrorType }
+            } else if name == BUILTIN_MAP {
+                // map[key]: index must be key type K, result is value type V
+                if type_params.len() >= 2 {
+                    s = unify_at(ctx.sink, ctx.env, idx_type, type_params.get(0).unwrap(), s, span)
+                    result_ty = type_params.get(1).unwrap()
+                } else {
+                    result_ty = Type::ErrorType
+                }
+            } else {
+                let _ = type_error(ctx.sink, E0306,
+                    "Type '${type_to_string(recv_type)}' does not support indexing",
+                    span, DiagnosticContext::OtherContext { detail: some("only List, Map, and Str support subscript operator []") })
+                result_ty = Type::ErrorType
+            }
+        },
+        Type::StrType => {
+            // str[i]: index must be Int, result is Str
+            s = unify_at(ctx.sink, ctx.env, idx_type, INT, s, span)
+            result_ty = STR
+        },
+        Type::ErrorType => {
+            result_ty = Type::ErrorType
+        },
+        _ => {
+            let _ = type_error(ctx.sink, E0306,
+                "Type '${type_to_string(recv_type)}' does not support indexing",
+                span, DiagnosticContext::OtherContext { detail: some("only List, Map, and Str support subscript operator []") })
+            result_ty = Type::ErrorType
         }
+    }
+
+    InferResult {
+        hexpr: HExpr::IndexExpr {
+            receiver: recv_r.hexpr, index: idx_r.hexpr,
+            ty: result_ty, effects: combined_effects, span: span
+        },
+        subst: s, effects: combined_effects
     }
 }
 

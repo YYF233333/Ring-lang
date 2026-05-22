@@ -112,6 +112,23 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
             let joined = elems.join(", ")
             "[${joined}]"
         },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            let r = gen_expr(ctx, receiver)
+            let i = gen_expr(ctx, index)
+            let recv_ty = hexpr_type(receiver)
+            match recv_ty {
+                Type::StructType { name, .. } => {
+                    if name == BUILTIN_MAP {
+                        "__ring_map_index(${r}, ${i})"
+                    } else {
+                        // List and other array-like types
+                        "__ring_index(${r}, ${i})"
+                    }
+                },
+                Type::StrType => "__ring_str_index(${r}, ${i})",
+                _ => "__ring_index(${r}, ${i})"
+            }
+        },
     }
 }
 
@@ -970,6 +987,7 @@ fn has_fail_effect(expr: HExpr) -> Bool {
         HExpr::RangeExpr { effects, .. } => check_fail(effects),
         HExpr::ListLit { effects, .. } => check_fail(effects),
         HExpr::TupleLit { effects, .. } => check_fail(effects),
+        HExpr::IndexExpr { effects, .. } => check_fail(effects),
     }
 }
 
