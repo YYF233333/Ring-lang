@@ -11,7 +11,7 @@
 **目标**：基础设施特性 + 中等特性全部完成，为层 3 重型特性铺路。
 
 **层 1（基础设施，优先）**：
-- B-034 Effect Aliases [S]
+- ~~B-034 Effect Aliases [S]~~ ✅ 已完成（2026-05-23）
 - B-005 Supertrait 继承 [M]
 - B-037 `mut<T>` Marker Effect [M]
 - B-008 Default Effect Handler [M]
@@ -360,35 +360,6 @@ fn main() {
 - **参考**：语法方案模仿 trait 默认方法（Ring 已有先例），中间版避免了 Snowflyt 指出的 handler 链式解析的完整复杂度
 
 
-### B-034 Effect Aliases [feature] [P2] [S] [doing]
-效果组合命名，简化复杂 effect 标注。纯语法糖——在 resolve 阶段展开为 effect 列表。
-
-```ring
-effect alias IO = {io, fail<Str>}
-effect alias WebHandler = {io, fail<HttpError>, mut<Session>}
-
-fn handle_request(req: Request) -> Response with {WebHandler} { ... }
-// 推断签名等价于 with {io, fail<HttpError>, mut<Session>}
-```
-
-**涉及修��**：
-1. `ast.ring`：新增 `Decl::EffectAlias { name: Str, type_params: List<TypeParam>, effects: List<EffectExpr>, is_pub: Bool, span: Span }`
-2. `parser.ring`：��� `parse_decl()` 中识别 `effect alias` 两个连续 token，调用新函数 `parse_effect_alias_decl()` 解析 `Name<T> = { effects }`
-3. `env.ring`：新增 `EffectAliasDef { name: Str, type_params: List<Str>, effects: List<Effect> }`，存储在 `TypeRegistry` 中（新字段 `effect_aliases: Map<Str, EffectAliasDef>`）
-4. `infer_register.ring`：新增 `register_effect_alias()` 在 Pass 1 注册别名定义
-5. `infer_register.ring`：修改 `resolve_effect_expr()`——当 effect name 不是 builtin（io/fail/mut）且不在 `effects` map 中时，查找 `effect_aliases` map，展开为效果列表（支持类型参数替换）
-6. `hir.ring`：HIR 不需要 EffectAlias 节点——展开发生在 resolve 阶段，HIR 只看到展开后的 effects
-7. `codegen`：无改动（alias 在 checker 阶段已消失）
-
-**验收标准**：
-- `effect alias IO = {io, fail<Str>}` 可声明
-- `fn foo() with {IO}` 等价于 `with {io, fail<Str>}`——推断结果和 catch 行为一致
-- 带类型参数：`effect alias Failable<E> = {fail<E>}` → `with {Failable<MyErr>}` 展开为 `with {fail<MyErr>}`
-- 不允许递归别名（A 引用 B 引用 A → 编译错误）
-- `pub effect alias` 在模块间可见
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
-
 ## OOP 模拟
 
 ### B-010 `delegate` 关键字 [feature] [P2] [M] [queued]
@@ -634,17 +605,6 @@ source-map 支持 + 断点调试。
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
 - **优先级**：低
 
-### B-040 穷尽性检查非有限类型错误文案改进 [feature] [P3] [S] [doing]
-match Int/Float/Str 缺 wildcard 时错误信息报"missing pattern for `_`"，可能让新用户困惑（以为要字面匹配 `_`）。改为更明确的文案如"non-finite type requires a wildcard `_` or binding pattern"。
-
-**涉及修改**：
-1. `exhaustive.ring`：修改非有限类型缺少覆盖时的错误消息文案
-
-**验收标准**：
-- match Int/Str/Float 无 wildcard → 错误消息明确提示"需要 wildcard 或 binding pattern"
-- enum 类型的穷尽性检查消息不受影响
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
 
 ## 架构：后端策略（2026-05-23 更新）
 

@@ -125,13 +125,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 发现者：Worker B3 agent（2026-05-23）
 
-### #98 `Set.union/intersect/difference` 仍使用 JS `===` [medium] [doing]
-
-runtime.ring 的 `_Set_union`、`_Set_intersect`、`_Set_difference` 使用 JS `Set` 操作（`...spread` + `filter` + `has`），底层仍是 `===` 引用相等。与 #90（insert/remove 已修复为 `__ring_deep_eq`）和 `Set.contains`（Eq trait）语义不一致。
-
-修复方向：与 #90 相同，改用 `__ring_deep_eq` 或等 #97 修复后用 Ring 实现。
-
-发现者：Worker B3 agent（2026-05-23）
 
 ## 设计-实现差距（参考，已在 backlog 跟踪）
 

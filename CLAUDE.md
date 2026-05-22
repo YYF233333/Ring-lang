@@ -129,7 +129,7 @@ Ring-lang/
 
 ## 已实现功能
 
-完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/loop/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM/inline mod 块（含嵌套 `mod a { mod b { ... } }`，多级限定路径 `a::b::c`）/`super::`/`self::` 相对路径/`sig` 接口声明/mod 内 impl 方法/限定类型语法 `mod::Type`/三级限定访问 `mod::Enum::Variant`/`mod requires {effects}` capability 限制）、FFI（extern fn/extern type）、标准库（10 个 .ring 文件，含 `Result<T,E>`/fs/path/process）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、多行字符串（`"..."` 允许跨行，空白原样保留）、raw string（`r"..."` 和 `r#"..."#`，无转义无插值）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、mut self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）、Checker 函数级多错误恢复、`loop` 无限循环关键字（脱糖为 `while true`）、Effect 标注语法（`fn foo() -> T with {io, fail<E>}`）、fn 类型表达式 effect 标注（`fn(T) -> U with {io}`，无标注时为 open row 支持 effect 多态）、`let mut` 可变绑定 + 闭包自动 boxing、`mut` 函数参数（mutating 方法调用强制检查）、impl 类型参数 bounds（`impl<T: Eq> List { ... }`）、`List.set(i, v)` 原地修改、union-find 类型变量解析、下标运算符 `list[i]` / `map[key]` / `str[i]`（越界/key 不存在 panic，安全访问用 `.get()`）。开发历史详见 git log。
+完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/loop/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM/inline mod 块（含嵌套 `mod a { mod b { ... } }`，多级限定路径 `a::b::c`）/`super::`/`self::` 相对路径/`sig` 接口声明/mod 内 impl 方法/限定类型语法 `mod::Type`/三级限定访问 `mod::Enum::Variant`/`mod requires {effects}` capability 限制）、FFI（extern fn/extern type）、标准库（10 个 .ring 文件，含 `Result<T,E>`/fs/path/process）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、多行字符串（`"..."` 允许跨行，空白原样保留）、raw string（`r"..."` 和 `r#"..."#`，无转义无插值）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、mut self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）、Checker 函数级多错误恢复、`loop` 无限循环关键字（脱糖为 `while true`）、Effect 标注语法（`fn foo() -> T with {io, fail<E>}`）、fn 类型表达式 effect 标注（`fn(T) -> U with {io}`，无标注时为 open row 支持 effect 多态）、`let mut` 可变绑定 + 闭包自动 boxing、`mut` 函数参数（mutating 方法调用强制检查）、impl 类型参数 bounds（`impl<T: Eq> List { ... }`）、`List.set(i, v)` 原地修改、union-find 类型变量解析、下标运算符 `list[i]` / `map[key]` / `str[i]`（越界/key 不存在 panic，安全访问用 `.get()`）、`effect alias` 语法糖（`effect alias IO = {io, fail<Str>}`，含泛型参数 + 循环检测 + pub 模块导出）。开发历史详见 git log。
 
 ## 已知限制
 
@@ -180,7 +180,7 @@ Ring-lang/
 
 ### 层 1：基础设施特性（优先）
 
-- Effect Aliases（`effect alias IO = {io, fail<Str>}`）
+- ~~Effect Aliases（`effect alias IO = {io, fail<Str>}`）~~ ✅ 已完成
 - Supertrait 继承（`trait Ord: Eq`）
 - `mut<T>` Marker Effect（mut self/mut 参数触发编译期 effect 追踪）
 - Default Effect Handler（op 带 body = 默认 handler）
