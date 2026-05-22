@@ -327,14 +327,6 @@ let inc = fn() { counter = counter + 1 }  // 自动 box，闭包带 mut<Int> eff
 
 ## 已知 Bug / 技术债
 
-### B-021 Impl 方法 Effect 传播 [bugfix] [P1] [M] [doing]
-impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后不回传。
-
-- **当前 workaround**：parser 用 `__ring_raise_fail` extern fn 直接抛 `__EffectAbort`，codegen 的 `gen_try_catch` 已去除 `has_fail_effect` 前置检查
-- **正确修复**：Pass 2 推断后回传 effect 到 TypeScheme
-- **前置依赖**：可能受益于 F1（effect 标注语法——标注后 Pass 1 直接读取）
-- **优先级**：Phase B 期间顺势修复
-
 ### B-022 表达式位置 IIFE return 截获 [bugfix] [P3] [M] [queued]
 `let x = { return y; 0 }` 中的 return 被 IIFE 截获。语句位置已修复。
 
@@ -369,6 +361,39 @@ impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后
 **验收标准**：
 - 方法可在 Ring 代码中调用并正确工作
 - 编译器中对应 workaround 可替换
+
+### B-031 消除 Cell\<T\>（完全移除 interior mutability）[design-align] [P1] [M] [queued]
+B-019 遗留项。Cell\<T\> 原本用于闭包捕获可变变量，`let mut` + 自动 boxing 已替代此用途。Ring 不保留 interior mutability——需要修改就用 `let mut`。
+
+**涉及修改**：
+1. `builtins.ring`：移除 Cell\<T\> 类型注册、Cell 构造函数、CELL_METHODS
+2. `runtime.ring`：移除 `Cell` / `Cell_get` / `Cell_set` / `Cell_update` runtime 代码
+3. `codegen.ring`：移除 Cell 方法 codegen 注册
+4. `compiler/*.ring`：将所有 `Cell(x)` / `.get()` / `.set()` / `.update()` 用法替换为 `let mut` + 直接赋值
+5. `tests/cases/`：改写 7 个 Cell 相关测试为 `let mut` + 闭包捕获测试
+6. 重新编译 `dist/`
+
+**验收标准**：
+- `Cell` 类型不可用（报 unknown type）
+- 原 Cell 测试改写为 `let mut` 闭包捕获测试并通过
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-030 函数参数 mut enforcement + 全量迁移 [design-align] [P1] [M] [queued]
+B-019 遗留项。当前 `mut self` 方法调用检查仅针对 `let` 绑定，函数参数不受限。设计要求：不标 `mut` 的参数不可调用 `mut self` 方法。
+
+**涉及修改**：
+1. `infer.ring`：`check_receiver_mutability` 扩展——函数参数也纳入检查（移除 `let_defs` 的特殊豁免）
+2. `compiler/*.ring`（33 个文件）：所有接收集合类型（List/Map/Set）并调用 mutating 方法的参数加 `mut` 标记
+3. `std/*.ring`：标准库函数参数同步更新
+4. `tests/cases/`：新增负面测试（非 `mut` 参数调 `.push()` 报错）
+5. 重新编译 `dist/`
+
+**验收标准**：
+- `fn foo(list: List<Int>) { list.push(1) }` → 编译错误
+- `fn foo(mut list: List<Int>) { list.push(1) }` → 编译通过
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ### B-025 下标运算符 `list[i]` / `map[key]` [feature] [P1] [M] [queued]
 提供集合直接访问语法。自举时因时间压力漏掉，导致 ~40 个 `_at()` helper 散布在编译器中。
