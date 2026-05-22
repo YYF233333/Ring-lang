@@ -60,31 +60,118 @@ function _Set_contains(self, item, __ring_T_Eq) {
   return false;
 }
 
+function Result_Ok(_0) {
+  return { _tag: "Ok", _0 };
+}
+function Result_Err(_0) {
+  return { _tag: "Err", _0 };
+}
+
+function Result_map(self, f) {
+  __ring_match1: {
+    const __ring_m1 = self;
+    if (__ring_m1._tag === "Ok") {
+      const v = __ring_m1._0;
+      return Result_Ok(f(v));
+      break __ring_match1;
+    }
+    if (__ring_m1._tag === "Err") {
+      const e = __ring_m1._0;
+      return Result_Err(e);
+      break __ring_match1;
+    }
+    __match_fail(__ring_m1);
+  }
+}
+function Result_and_then(self, f) {
+  __ring_match2: {
+    const __ring_m2 = self;
+    if (__ring_m2._tag === "Ok") {
+      const v = __ring_m2._0;
+      return f(v);
+      break __ring_match2;
+    }
+    if (__ring_m2._tag === "Err") {
+      const e = __ring_m2._0;
+      return Result_Err(e);
+      break __ring_match2;
+    }
+    __match_fail(__ring_m2);
+  }
+}
+function Result_unwrap_or(self, _default) {
+  __ring_match3: {
+    const __ring_m3 = self;
+    if (__ring_m3._tag === "Ok") {
+      const v = __ring_m3._0;
+      return v;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Err") {
+      return _default;
+      break __ring_match3;
+    }
+    __match_fail(__ring_m3);
+  }
+}
+function Result_is_ok(self) {
+  __ring_match4: {
+    const __ring_m4 = self;
+    if (__ring_m4._tag === "Ok") {
+      return true;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Err") {
+      return false;
+      break __ring_match4;
+    }
+    __match_fail(__ring_m4);
+  }
+}
+function Result_is_err(self) {
+  __ring_match5: {
+    const __ring_m5 = self;
+    if (__ring_m5._tag === "Ok") {
+      return false;
+      break __ring_match5;
+    }
+    if (__ring_m5._tag === "Err") {
+      return true;
+      break __ring_match5;
+    }
+    __match_fail(__ring_m5);
+  }
+}
+
+function to_result(f) {
+  return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
+}
+
 const Severity_SevError = Object.freeze({ _tag: "SevError" });
 const Severity_SevWarning = Object.freeze({ _tag: "SevWarning" });
 const Severity_SevInfo = Object.freeze({ _tag: "SevInfo" });
 const Severity_SevHint = Object.freeze({ _tag: "SevHint" });
 
 function severity_to_str(s) {
-  __ring_match1: {
-    const __ring_m1 = s;
-    if (__ring_m1._tag === "SevError") {
+  __ring_match6: {
+    const __ring_m6 = s;
+    if (__ring_m6._tag === "SevError") {
       return "error";
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "SevWarning") {
+    if (__ring_m6._tag === "SevWarning") {
       return "warning";
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "SevInfo") {
+    if (__ring_m6._tag === "SevInfo") {
       return "info";
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "SevHint") {
+    if (__ring_m6._tag === "SevHint") {
       return "hint";
-      break __ring_match1;
+      break __ring_match6;
     }
-    __match_fail(__ring_m1);
+    __match_fail(__ring_m6);
   }
 }
 
@@ -217,6 +304,16 @@ function __Suggestion_Eq_eq(self, other) {
 }
 const __Suggestion_Eq = { eq: __Suggestion_Eq_eq, ne: function(self, other) { return !__Suggestion_Eq_eq(self, other); } };
 
+function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
+  if (self._tag !== other._tag) return false;
+  switch (self._tag) {
+    case "Ok": return __ring_T_Eq.eq(self._0, other._0);
+    case "Err": return __ring_E_Eq.eq(self._0, other._0);
+    default: return true;
+  }
+}
+const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
+
 function __Severity_Eq_eq(self, other) {
   if (self._tag !== other._tag) return false;
   return true;
@@ -237,6 +334,15 @@ function __Suggestion_Clone_clone(self) {
   return new Suggestion(self.message, __Option_Clone.clone(self.replacement, __Str_Clone), __Option_Clone.clone(self.span, __Span_Clone));
 }
 const __Suggestion_Clone = { clone: __Suggestion_Clone_clone };
+
+function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
+  switch (self._tag) {
+    case "Ok": return Result_Ok(__ring_T_Clone.clone(self._0));
+    case "Err": return Result_Err(__ring_E_Clone.clone(self._0));
+    default: return self;
+  }
+}
+const __Result_Clone = { clone: __Result_Clone_clone };
 
 function __Severity_Clone_clone(self) {
   switch (self._tag) {
@@ -279,6 +385,19 @@ function __StringBuilder_Ord_cmp(self, other) {
 }
 const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
 
+const __Result_tag_order = { "Ok": 0, "Err": 1 };
+function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
+  var t1 = __Result_tag_order[self._tag];
+  var t2 = __Result_tag_order[other._tag];
+  if (t1 !== t2) return (t1 < t2 ? -1 : 1);
+  switch (self._tag) {
+    case "Ok": return __ring_T_Ord.cmp(self._0, other._0);
+    case "Err": return __ring_E_Ord.cmp(self._0, other._0);
+    default: return 0;
+  }
+}
+const __Result_Ord = { cmp: __Result_Ord_cmp };
+
 const __Severity_tag_order = { "SevError": 0, "SevWarning": 1, "SevInfo": 2, "SevHint": 3 };
 function __Severity_Ord_cmp(self, other) {
   var t1 = __Severity_tag_order[self._tag];
@@ -302,6 +421,15 @@ function __Suggestion_Debug_debug(self) {
   return "Suggestion { " + "message: " + String(self.message) + ", " + "replacement: " + __Option_Debug.debug(self.replacement, __Str_Debug) + ", " + "span: " + __Option_Debug.debug(self.span, __Span_Debug) + " }";
 }
 const __Suggestion_Debug = { debug: __Suggestion_Debug_debug };
+
+function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
+  switch (self._tag) {
+    case "Ok": return "Ok(" + __ring_T_Debug.debug(self._0) + ")";
+    case "Err": return "Err(" + __ring_E_Debug.debug(self._0) + ")";
+    default: return self._tag;
+  }
+}
+const __Result_Debug = { debug: __Result_Debug_debug };
 
 function __Severity_Debug_debug(self) {
   switch (self._tag) {

@@ -19,7 +19,7 @@ pub struct CheckResult {
 }
 
 const STD_FILES: List<Str> =
-    ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "fs.ring", "path.ring", "process.ring"]
+    ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"]
 
 fn find_std_dir() -> Str? {
     let candidates = [
@@ -50,9 +50,16 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                     }
                 }
             }
-            // Phase 2: compile non-extern impl methods and top-level functions
+            // Phase 2: compile enum/struct declarations, non-extern impl methods, and top-level functions
             for decl in all_prelude_decls {
                 match decl {
+                    Decl::Enum { .. } => {
+                        let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
+                        match result {
+                            some(hd) => { prelude_hdecls.push(hd) },
+                            none => {}
+                        }
+                    },
                     Decl::Impl { target_type, type_params, trait_name, methods, span } => {
                         // Filter to only Fn methods — ExternFn methods are already handled
                         // by the runtime and cannot be looked up via check_extern_fn_decl
