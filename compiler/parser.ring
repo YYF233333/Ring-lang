@@ -102,6 +102,16 @@ fn is_uppercase(ch: Str) -> Bool {
     c >= 65 && c <= 90
 }
 
+pub fn type_expr_span(te: TypeExpr) -> Span {
+    match te {
+        Named { span, .. } => span,
+        FnType { span, .. } => span,
+        OptionType { span, .. } => span,
+        RecordType { span, .. } => span,
+        TupleType { span, .. } => span
+    }
+}
+
 pub fn expr_span(e: Expr) -> Span {
     match e {
         IntLit { span, .. } => span,
@@ -417,17 +427,15 @@ impl Parser {
         self.expect(TokenKind::TkWhile)
         let condition = self.parse_expr_no_struct()
         let body = self.parse_block_expr()
-        let end = self.current_span_start()
-        Stmt::While { condition: condition, body: body, span: self.make_span(start, end) }
+        Stmt::While { condition: condition, body: body, span: self.make_span(start, expr_span(body).end) }
     }
 
     fn parse_loop_stmt(mut self) -> Stmt {
         let start = self.current_span_start()
         self.expect(TokenKind::TkLoop)
         let body = self.parse_block_expr()
-        let end = self.current_span_start()
         let condition = Expr::BoolLit { value: true, span: self.make_span(start, start) }
-        Stmt::While { condition: condition, body: body, span: self.make_span(start, end) }
+        Stmt::While { condition: condition, body: body, span: self.make_span(start, expr_span(body).end) }
     }
 
     fn parse_for_in_stmt(mut self) -> Stmt {
@@ -466,14 +474,13 @@ impl Parser {
         self.expect(TokenKind::TkIn)
         let iterable = self.parse_expr_no_struct()
         let body = self.parse_block_expr()
-        let end = self.current_span_start()
         Stmt::ForIn {
             binding: binding,
             binding_span: binding_span,
             destructure: destructure,
             iterable: iterable,
             body: body,
-            span: self.make_span(start, end)
+            span: self.make_span(start, expr_span(body).end)
         }
     }
 
@@ -580,9 +587,8 @@ impl Parser {
             }
         }
 
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
-        Expr::Block { stmts: stmts, tail: tail, span: self.make_span(start, end) }
+        let rbrace = self.expect(TokenKind::TkRBrace)
+        Expr::Block { stmts: stmts, tail: tail, span: self.make_span(start, rbrace.span.end) }
     }
 
     // ============================================================
@@ -702,9 +708,8 @@ impl Parser {
                 }
             }
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
-        Decl::ModBlock { name: name, uses: uses, decls: decls, required_effects: required_effects, is_pub: is_pub, span: self.make_span(start, end) }
+        let rbrace = self.expect(TokenKind::TkRBrace)
+        Decl::ModBlock { name: name, uses: uses, decls: decls, required_effects: required_effects, is_pub: is_pub, span: self.make_span(start, rbrace.span.end) }
     }
 
     fn parse_decl(mut self) -> Decl? {
@@ -800,7 +805,6 @@ impl Parser {
         } else {
             body = self.parse_block_expr()
         }
-        let end = self.current_span_start()
         Decl::Fn {
             name: name,
             type_params: type_params,
@@ -810,7 +814,7 @@ impl Parser {
             body: body,
             is_pub: is_pub,
             is_abstract: is_abstract_val,
-            span: self.make_span(start, end)
+            span: self.make_span(start, expr_span(body).end)
         }
     }
 
@@ -824,8 +828,7 @@ impl Parser {
         }
         self.expect(TokenKind::TkEq)
         let init = self.parse_expr()
-        let end = self.current_span_start()
-        Decl::Const { name: name, type_annotation: type_annotation, init: init, is_pub: is_pub, span: self.make_span(start, end) }
+        Decl::Const { name: name, type_annotation: type_annotation, init: init, is_pub: is_pub, span: self.make_span(start, expr_span(init).end) }
     }
 
     fn parse_sig_block(mut self, is_pub: Bool) -> Decl {
@@ -864,9 +867,8 @@ impl Parser {
                 span: self.make_span(mstart, mend)
             })
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
-        Decl::Sig { name: name, members: members, is_pub: is_pub, span: self.make_span(start, end) }
+        let rbrace = self.expect(TokenKind::TkRBrace)
+        Decl::Sig { name: name, members: members, is_pub: is_pub, span: self.make_span(start, rbrace.span.end) }
     }
 
     fn parse_extern_decl(mut self, is_pub: Bool) -> Decl {
@@ -884,17 +886,21 @@ impl Parser {
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLParen)
         let params = self.parse_params()
-        self.expect(TokenKind::TkRParen)
+        let rparen = self.expect(TokenKind::TkRParen)
+        let mut last_end = rparen.span.end
         let mut return_type: TypeExpr? = none
         if self.try_consume(TokenKind::TkArrow) {
-            return_type = some(self.parse_type_expr())
+            let rt = self.parse_type_expr()
+            return_type = some(rt)
+            last_end = type_expr_span(rt).end
         }
         // Parse effect annotation: with { effect1, effect2<T> }
         let mut declared_effects: List<EffectExpr>? = none
         if self.check(TokenKind::TkWith) {
             declared_effects = some(self.parse_effect_annotation())
+            // parse_effect_annotation ends after consuming '}', use current_span_start as approximation
+            last_end = self.current_span_start()
         }
-        let end = self.current_span_start()
         Decl::ExternFn {
             name: name,
             type_params: type_params,
@@ -902,7 +908,7 @@ impl Parser {
             return_type: return_type,
             declared_effects: declared_effects,
             is_pub: is_pub,
-            span: self.make_span(start, end)
+            span: self.make_span(start, last_end)
         }
     }
 
@@ -978,14 +984,13 @@ impl Parser {
             })
             self.try_consume(TokenKind::TkComma)
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
+        let rbrace = self.expect(TokenKind::TkRBrace)
         Decl::Struct {
             name: name,
             type_params: type_params,
             fields: fields,
             is_pub: is_pub,
-            span: self.make_span(start, end)
+            span: self.make_span(start, rbrace.span.end)
         }
     }
 
@@ -1034,14 +1039,13 @@ impl Parser {
             variants.push(EnumVariantDecl { name: v_name, fields: v_fields, named_fields: named_fields, span: self.make_span(v_start, v_end) })
             self.try_consume(TokenKind::TkComma)
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
+        let rbrace = self.expect(TokenKind::TkRBrace)
         Decl::Enum {
             name: name,
             type_params: type_params,
             variants: variants,
             is_pub: is_pub,
-            span: self.make_span(start, end)
+            span: self.make_span(start, rbrace.span.end)
         }
     }
 
@@ -1071,14 +1075,13 @@ impl Parser {
                 methods.push(self.parse_fn_decl(m_pub, false))
             }
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
+        let rbrace = self.expect(TokenKind::TkRBrace)
         Decl::Impl {
             target_type: target_type,
             type_params: type_params,
             trait_name: trait_name,
             methods: methods,
-            span: self.make_span(start, end)
+            span: self.make_span(start, rbrace.span.end)
         }
     }
 
@@ -1103,14 +1106,13 @@ impl Parser {
             self.try_consume(TokenKind::TkComma)
             self.try_consume(TokenKind::TkSemi)
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
+        let rbrace = self.expect(TokenKind::TkRBrace)
         Decl::Effect {
             name: name,
             type_params: type_params,
             ops: ops,
             is_pub: is_pub,
-            span: self.make_span(start, end)
+            span: self.make_span(start, rbrace.span.end)
         }
     }
 
@@ -1119,8 +1121,7 @@ impl Parser {
         self.expect(TokenKind::TkTest)
         let desc_tok = self.expect(TokenKind::TkStringLit)
         let body = self.parse_block_expr()
-        let end = self.current_span_start()
-        Decl::Test { description: desc_tok.value, body: body, span: self.make_span(start, end) }
+        Decl::Test { description: desc_tok.value, body: body, span: self.make_span(start, expr_span(body).end) }
     }
 
     fn parse_trait_decl(mut self, is_pub: Bool) -> Decl {
@@ -1135,15 +1136,14 @@ impl Parser {
             let m_pub = self.try_consume(TokenKind::TkPub)
             methods.push(self.parse_fn_decl(m_pub, true))
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
+        let rbrace = self.expect(TokenKind::TkRBrace)
         Decl::Trait {
             name: name,
             type_params: type_params,
             supertraits: supertraits,
             methods: methods,
             is_pub: is_pub,
-            span: self.make_span(start, end)
+            span: self.make_span(start, rbrace.span.end)
         }
     }
 
@@ -1212,8 +1212,7 @@ impl Parser {
         if self.check(TokenKind::TkMinus) || self.check(TokenKind::TkBang) {
             self.advance()
             let operand = self.parse_expr_bp(PREC_UNARY, allow_struct_lit)
-            let end = self.current_span_start()
-            return Expr::UnaryOp { op: str_to_unaryop(tok.value), operand: operand, span: self.make_span(start, end) }
+            return Expr::UnaryOp { op: str_to_unaryop(tok.value), operand: operand, span: self.make_span(start, expr_span(operand).end) }
         }
 
         if self.check(TokenKind::TkIntLit) {
@@ -1398,6 +1397,7 @@ impl Parser {
     fn parse_dot_expr(mut self, left: Expr) -> Expr {
         self.advance()
         let mut name = ""
+        let mut name_end = self.current_span_start()
         // Handle float literal after dot: e.g. `t.0.1` lexes as dot + float "0.1"
         // Split into chained tuple field accesses
         if self.check(TokenKind::TkFloatLit) {
@@ -1405,35 +1405,34 @@ impl Parser {
             let parts = tok.value.split(".")
             let mut result = left
             for part in parts {
-                let end = self.current_span_start()
-                result = Expr::FieldAccess { receiver: result, field: part, span: self.make_span(expr_span(left).start, end) }
+                result = Expr::FieldAccess { receiver: result, field: part, span: self.make_span(expr_span(left).start, tok.span.end) }
             }
             return result
         }
         if self.check(TokenKind::TkIntLit) {
             let tok = self.advance()
             name = tok.value
+            name_end = tok.span.end
         } else {
             let tok = self.expect(TokenKind::TkIdent)
             name = tok.value
+            name_end = tok.span.end
         }
 
         if self.check(TokenKind::TkLParen) {
             self.advance()
             let args = self.parse_arg_list()
-            self.expect(TokenKind::TkRParen)
-            let end = self.current_span_start()
+            let rparen = self.expect(TokenKind::TkRParen)
             return Expr::MethodCall {
                 receiver: left,
                 method: name,
                 args: args,
                 type_args: [],
-                span: self.make_span(expr_span(left).start, end)
+                span: self.make_span(expr_span(left).start, rparen.span.end)
             }
         }
 
-        let end = self.current_span_start()
-        Expr::FieldAccess { receiver: left, field: name, span: self.make_span(expr_span(left).start, end) }
+        Expr::FieldAccess { receiver: left, field: name, span: self.make_span(expr_span(left).start, name_end) }
     }
 
     // ============================================================
@@ -1494,6 +1493,7 @@ impl Parser {
     fn parse_string_interp(mut self) -> Expr {
         let start_tok = self.advance()
         let mut parts: List<StringInterpPart> = []
+        let mut last_end = start_tok.span.end
 
         if start_tok.value.len() > 0 {
             parts.push(StringInterpPart::LitPart(start_tok.value))
@@ -1505,12 +1505,14 @@ impl Parser {
             let tok = self.peek()
             if self.check(TokenKind::TkStringInterpMiddle) {
                 self.advance()
+                last_end = tok.span.end
                 if tok.value.len() > 0 {
                     parts.push(StringInterpPart::LitPart(tok.value))
                 }
                 parts.push(StringInterpPart::ExprPart(self.parse_expr()))
             } else if self.check(TokenKind::TkStringInterpEnd) {
                 self.advance()
+                last_end = tok.span.end
                 if tok.value.len() > 0 {
                     parts.push(StringInterpPart::LitPart(tok.value))
                 }
@@ -1520,8 +1522,7 @@ impl Parser {
             }
         }
 
-        let end = self.current_span_start()
-        Expr::StringInterp { parts: parts, span: self.make_span(start_tok.span.start, end) }
+        Expr::StringInterp { parts: parts, span: self.make_span(start_tok.span.start, last_end) }
     }
 
     // ============================================================
@@ -1541,8 +1542,11 @@ impl Parser {
                 else_branch = some(self.parse_block_expr())
             }
         }
-        let end = self.current_span_start()
-        Expr::IfExpr { condition: condition, then_branch: then_branch, else_branch: else_branch, span: self.make_span(start, end) }
+        let end_pos = match else_branch {
+            some(eb) => expr_span(eb).end,
+            none => expr_span(then_branch).end
+        }
+        Expr::IfExpr { condition: condition, then_branch: then_branch, else_branch: else_branch, span: self.make_span(start, end_pos) }
     }
 
     // ============================================================
@@ -1559,9 +1563,8 @@ impl Parser {
             arms.push(self.parse_match_arm())
             self.try_consume(TokenKind::TkComma)
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
-        Expr::MatchExpr { scrutinee: scrutinee, arms: arms, span: self.make_span(start, end) }
+        let rbrace = self.expect(TokenKind::TkRBrace)
+        Expr::MatchExpr { scrutinee: scrutinee, arms: arms, span: self.make_span(start, rbrace.span.end) }
     }
 
     fn parse_match_arm(mut self) -> MatchArm {
@@ -1574,8 +1577,7 @@ impl Parser {
         }
         self.expect(TokenKind::TkFatArrow)
         let body = self.parse_expr()
-        let end = self.current_span_start()
-        MatchArm { pattern: pattern, guard: guard, body: body, span: self.make_span(start, end) }
+        MatchArm { pattern: pattern, guard: guard, body: body, span: self.make_span(start, expr_span(body).end) }
     }
 
     // ============================================================
@@ -1662,9 +1664,8 @@ impl Parser {
                         fields.push(self.parse_pattern())
                     }
                 }
-                self.expect(TokenKind::TkRParen)
-                let end = self.current_span_start()
-                return Pattern::Constructor { name: name, qualifier: qualifier, fields: fields, span: self.make_span(start, end) }
+                let rparen = self.expect(TokenKind::TkRParen)
+                return Pattern::Constructor { name: name, qualifier: qualifier, fields: fields, span: self.make_span(start, rparen.span.end) }
             }
 
             if self.check(TokenKind::TkLBrace) && is_uppercase(name.char_at(0).unwrap_or("")) {
@@ -1679,8 +1680,9 @@ impl Parser {
                         break
                     }
                     let f_start = self.current_span_start()
-                    let f_name = self.expect(TokenKind::TkIdent).value
-                    let mut pat = Pattern::Binding { name: f_name, span: self.make_span(f_start, self.current_span_start()) }
+                    let f_tok = self.expect(TokenKind::TkIdent)
+                    let f_name = f_tok.value
+                    let mut pat = Pattern::Binding { name: f_name, span: f_tok.span }
                     if self.try_consume(TokenKind::TkColon) {
                         pat = self.parse_pattern()
                     }
@@ -1688,9 +1690,8 @@ impl Parser {
                     named_fields.push(NamedPatternField { name: f_name, pattern: pat, span: self.make_span(f_start, f_end) })
                     self.try_consume(TokenKind::TkComma)
                 }
-                self.expect(TokenKind::TkRBrace)
-                let end = self.current_span_start()
-                return Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: named_fields, rest: rest, span: self.make_span(start, end) }
+                let rbrace = self.expect(TokenKind::TkRBrace)
+                return Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: named_fields, rest: rest, span: self.make_span(start, rbrace.span.end) }
             }
 
             if qualifier.is_some() {
@@ -1737,9 +1738,8 @@ impl Parser {
             handlers.push(self.parse_effect_handler())
             self.try_consume(TokenKind::TkComma)
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
-        Expr::HandleExpr { body: body, handlers: handlers, span: self.make_span(start, end) }
+        let rbrace = self.expect(TokenKind::TkRBrace)
+        Expr::HandleExpr { body: body, handlers: handlers, span: self.make_span(start, rbrace.span.end) }
     }
 
     fn parse_effect_handler(mut self) -> EffectHandler {
@@ -1752,8 +1752,7 @@ impl Parser {
         self.expect(TokenKind::TkRParen)
         self.expect(TokenKind::TkFatArrow)
         let body = self.parse_expr()
-        let end = self.current_span_start()
-        EffectHandler { effect_name: effect_name, op_name: op_name, params: params, resume_name: none, body: body, span: self.make_span(start, end) }
+        EffectHandler { effect_name: effect_name, op_name: op_name, params: params, resume_name: none, body: body, span: self.make_span(start, expr_span(body).end) }
     }
 
     // ============================================================
@@ -1771,8 +1770,7 @@ impl Parser {
             return_type = some(self.parse_type_expr())
         }
         let body = self.parse_block_expr()
-        let end = self.current_span_start()
-        Expr::Lambda { params: params, return_type: return_type, body: body, span: self.make_span(start, end) }
+        Expr::Lambda { params: params, return_type: return_type, body: body, span: self.make_span(start, expr_span(body).end) }
     }
 
     // ============================================================
@@ -1790,24 +1788,24 @@ impl Parser {
         }
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let f_start = self.current_span_start()
-            let f_name = self.expect(TokenKind::TkIdent).value
-            let mut f_value = Expr::Ident { name: f_name, qualifier: none, span: self.make_span(f_start, self.current_span_start()) }
+            let f_tok = self.expect(TokenKind::TkIdent)
+            let f_name = f_tok.value
+            let mut f_value = Expr::Ident { name: f_name, qualifier: none, span: f_tok.span }
             if self.try_consume(TokenKind::TkColon) {
                 f_value = self.parse_expr()
             }
-            let f_end = self.current_span_start()
+            let f_end = expr_span(f_value).end
             fields.push(StructFieldInit { name: f_name, value: f_value, span: self.make_span(f_start, f_end) })
             self.try_consume(TokenKind::TkComma)
         }
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
+        let rbrace = self.expect(TokenKind::TkRBrace)
         Expr::StructLit {
             name: name,
             qualifier: qualifier,
             type_args: [],
             fields: fields,
             spread: spread,
-            span: self.make_span(start, end)
+            span: self.make_span(start, rbrace.span.end)
         }
     }
 
@@ -1857,12 +1855,14 @@ impl Parser {
             self.expect(TokenKind::TkRParen)
             self.expect(TokenKind::TkArrow)
             let return_type = self.parse_type_expr()
+            let mut fn_end = type_expr_span(return_type).end
             let mut fn_effects: List<EffectExpr> = []
             if self.check(TokenKind::TkWith) {
                 fn_effects = self.parse_effect_annotation()
+                // parse_effect_annotation ends after consuming '}', use current_span_start as approximation
+                fn_end = self.current_span_start()
             }
-            let end = self.current_span_start()
-            return TypeExpr::FnType { params: params, return_type: return_type, effects: fn_effects, span: self.make_span(start, end) }
+            return TypeExpr::FnType { params: params, return_type: return_type, effects: fn_effects, span: self.make_span(start, fn_end) }
         }
 
         if self.check(TokenKind::TkLParen) {
@@ -1966,9 +1966,8 @@ impl Parser {
             if !self.try_consume(TokenKind::TkComma) { break }
         }
 
-        self.expect(TokenKind::TkRBrace)
-        let end = self.current_span_start()
-        TypeExpr::RecordType { fields: fields, rest: rest, span: self.make_span(start, end) }
+        let rbrace = self.expect(TokenKind::TkRBrace)
+        TypeExpr::RecordType { fields: fields, rest: rest, span: self.make_span(start, rbrace.span.end) }
     }
 
     // ============================================================
