@@ -566,7 +566,11 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                         none => {}
                     }
                 },
-                _ => {}
+                _ => {
+                    let _ = type_error(ctx.sink, E0205,
+                        "Cannot assign to field of a temporary value. Store the value in a 'let mut' variable first.",
+                        span, DiagnosticContext::OtherContext { detail: some("assignment to temporary value") })
+                }
             }
         },
         _ => {}

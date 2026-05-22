@@ -776,6 +776,7 @@ function check_assign_target_mutable(ctx, target) {
           }
           break __ring_match36;
         }
+        const _ = infer_ctx$type_error(ctx.sink, codes$E0205, "Cannot assign to field of a temporary value. Store the value in a 'let mut' variable first.", span, diagnostics$DiagnosticContext_OtherContext(Option_some("assignment to temporary value")));
         break __ring_match36;
       }
       break __ring_match33;
