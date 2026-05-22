@@ -442,6 +442,7 @@ const cases: TestCase[] = [
   { file: "audit_tuple_eq_struct.ring", expected: "pass: tuple eq struct\n" },
   { file: "audit_set_contains_struct.ring", expected: "pass: set struct eq consistency\n" },
   { file: "audit_catch_on_pure.ring", expected: "pass: catch on pure warning\n" },
+  { file: "audit_set_ops_deep_eq.ring", expected: "Set ops deep equality: all passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
