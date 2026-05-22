@@ -311,6 +311,8 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             HExpr::ListLit { elements: elements.map(fn(e) { zonk_expr(ctx, e) }), ty: z_ty, effects: z_eff, span: z_span },
         HExpr::TupleLit { elements, .. } =>
             HExpr::TupleLit { elements: elements.map(fn(e) { zonk_expr(ctx, e) }), ty: z_ty, effects: z_eff, span: z_span },
+        HExpr::IndexExpr { receiver, index, .. } =>
+            HExpr::IndexExpr { receiver: zonk_expr(ctx, receiver), index: zonk_expr(ctx, index), ty: z_ty, effects: z_eff, span: z_span },
     }
 }
 

@@ -1348,7 +1348,7 @@ JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体
 - **`$\{` 与 JS template literal 冲突**：Ring 的 `${...}` 与 JS 的 `${...}` 语法相同，codegen 生成 JS template literal 时需要 `escape_for_template_literal()` 逐字符构建
 
 **集合与索引**：
-- **`List.get(i)` 返回 `Option<T>`，无直接下标**：安全但冗长，翻译大型 switch/case 分发逻辑时每次索引需要 `match list.get(i) { some(v) => ..., none => ... }`。实际做法是封装 `_at(list, i)` helper（panic on out-of-bounds），但每个类型需要独立 helper（无泛型 helper 跨类型复用）
+- **下标运算符 `list[i]` / `map[key]` / `str[i]`**：越界或 key 不存在时 panic。安全访问用 `.get()` 返回 `Option<T>`
 - **`[x].clear()` 返回 `Unit` 不可链式**：空列表构造必须三条语句 `let x = [dummy]; x.clear(); x`，封装为 `empty_xxx()` 但每种元素类型需独立函数。31 个源文件中共定义了约 40 个 `empty_xxx()` helper
 - **无 `List.set(i, v)`**：修改列表中间元素需重建整个列表
 

@@ -158,7 +158,8 @@ pub enum Expr {
     Lambda { params: List<Param>, return_type: TypeExpr?, body: Expr, span: Span },
     Range { start: Expr, end: Expr, inclusive: Bool, span: Span },
     ListLit { elements: List<Expr>, span: Span },
-    TupleLit { elements: List<Expr>, span: Span }
+    TupleLit { elements: List<Expr>, span: Span },
+    IndexExpr { receiver: Expr, index: Expr, span: Span }
 }
 
 // ============================================================
