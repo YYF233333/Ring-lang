@@ -360,7 +360,7 @@ fn main() {
 - **参考**：语法方案模仿 trait 默认方法（Ring 已有先例），中间版避免了 Snowflyt 指出的 handler 链式解析的完整复杂度
 
 
-### B-034 Effect Aliases [feature] [P2] [S] [queued]
+### B-034 Effect Aliases [feature] [P2] [S] [doing]
 效果组合命名，简化复杂 effect 标注。纯语法糖——在 resolve 阶段展开为 effect 列表。
 
 ```ring
@@ -634,7 +634,7 @@ source-map 支持 + 断点调试。
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
 - **优先级**：低
 
-### B-040 穷尽性检查非有限类型错误文案改进 [feature] [P3] [S] [queued]
+### B-040 穷尽性检查非有限类型错误文案改进 [feature] [P3] [S] [doing]
 match Int/Float/Str 缺 wildcard 时错误信息报"missing pattern for `_`"，可能让新用户困惑（以为要字面匹配 `_`）。改为更明确的文案如"non-finite type requires a wildcard `_` or binding pattern"。
 
 **涉及修改**：

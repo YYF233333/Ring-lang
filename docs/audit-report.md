@@ -9,11 +9,13 @@
 
 ## Checker
 
-### #42 Impl 方法 effect 不回传 [medium] [open]
+### #42 Impl 方法 effect 不回传 [medium] [open] [blocked: B-005]
 
 Impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获。
 
 Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境。
+
+**决策（2026-05-23）**：推迟到 B-005 supertrait 重构时统一处理——supertrait 会大改 trait/impl 注册流程，届时一并修复 effect 回传。workaround 暂留。关联 #66、#67 随此推迟。
 
 ### #77 `infer_numeric_op` 无条件将 TypeVar 统一为 Int [low] [open]
 
@@ -22,9 +24,11 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 发现者：Opus
 
 
-### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open]
+### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open] [deferred: LLVM]
 
 设计约束：fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16）。
+
+**决策（2026-05-23）**：长期容忍。当前方案正确且无性能问题，改动大（L-XL）收益主要在未来后端。等 LLVM 后端需要时与 #16 一并重构。
 
 ## Codegen
 
@@ -40,25 +44,45 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## Effect 标注
 
-### #64 `effects_match_kind` 只做 kind 级匹配，忽略 fail 错误类型 [medium] [open]
+### #64 `effects_match_kind` 只做 kind 级匹配，忽略 fail 错误类型 [medium] [open] [after: B-034]
 
 `with {fail<Str>}` 匹配 `fail<Int>` 不报错。标注中的错误类型是装饰性的。若标注作为公共契约，应验证类型参数。
 
+**决策（2026-05-23）**：应验证类型参数。排在 B-034 Effect Aliases 之后修复——effect alias 可能改变标注的解析逻辑，先稳定再加精确匹配。
+
 发现者：设计决策项
 
-### #66 `register_impl_method` declared_effects 已使用但 Pass 2 仍不回传 [medium] [open]
+### #66 `register_impl_method` declared_effects 已使用但 Pass 2 仍不回传 [medium] [open] [blocked: B-005]
 
 ~~原报告称 declared_effects 参数完全不使用——已修复（infer_register.ring:573-577 现在 resolve 并应用 declared_effects）。~~ 但核心问题仍在：Pass 2 推断出的实际 effect 不回传到环境。关联 #42。
 
+**决策（2026-05-23）**：随 #42 推迟到 B-005 supertrait 重构时统一处理。
+
 发现者：Opus（2026-05-23 更新）
 
-### #67 `std/io.ring` 的 `print`/`assert`/`exit` 缺少 `with {io}` 标注 [medium] [open]
+### #67 `std/io.ring` 的 `print`/`assert`/`exit` 缺少 `with {io}` 标注 [medium] [open] [blocked: #42]
 
 纯函数 `with {}` 内调用 `print()` 不报 E0404——extern fn 无标注时注册为 EMPTY_ROW。
 
-### #68 `resolve_effect_expr` 不验证 effect 名是否存在 [low] [open]
+**决策（2026-05-23）**：依赖 #42（impl effect 回传）修复后才能正确处理 extern fn effect 标注。随 #42 推迟。
 
-`with {typo}` 静默创建 CustomEffect，不报错。因为标注是上界，不使用的 effect 合法，但拼写错误无法捕获。
+### #68 `resolve_effect_expr` 不验证 effect 名是否存在 [medium] [open]
+
+`with {typo}` 静默创建 CustomEffect，不报错。未声明的 effect 无对应 handler，属于类型系统漏洞。
+
+**修复方向**：`resolve_effect_expr` 中，effect 名必须是内置（io/fail/mut）或已声明的自定义 effect / effect alias，否则报 error（新错误码，如 E0505 "unknown effect `typo`"）。
+
+### #99 `remove_specific_fail_effect` dead code [low] [open]
+
+`infer_ctx.ring:1070` 定义了 `remove_specific_fail_effect`，`infer.ring:29` import 但从未调用。当前设计 catch 总是消除全部 fail effect，该函数为遗留 dead code。应删除定义和 import。
+
+发现者：Auditor（2026-05-23）
+
+### #100 `List.last()` 空列表时依赖 JS 负索引行为 [low] [open]
+
+`std/list.ring` 的 `last()` 实现 `self.get(self.len() - 1)`，空列表时变为 `self.get(-1)`。JS runtime 对负索引返回 `undefined` → 映射为 `none`，结果恰好正确但依赖 JS 实现细节。LLVM 后端可能 panic。应加 `if self.is_empty() { return none }` 前置检查。
+
+发现者：Auditor（2026-05-23）
 
 ## 代码质量 / 可维护性
 
@@ -77,9 +101,11 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## 架构债
 
-### #16 StructType/EnumType 携带冗余 fields/variants 数据 [low] [open]
+### #16 StructType/EnumType 携带冗余 fields/variants 数据 [low] [open] [deferred: LLVM]
 
 类型表示不一致。应改为 nominal 表示。
+
+**决策（2026-05-23）**：长期容忍，与 #45 一并推迟到 LLVM 后端阶段。
 
 ### #19 Ring 编译器缺少 `assertNever` 等效编译期保护 [low] [open]
 
@@ -91,13 +117,15 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## 模块/诊断
 
-### #97 `load_prelude` 对 bounded impl 内方法间调用误报 E0503 [medium] [open]
+### #97 `load_prelude` 对 bounded impl 内方法间调用误报 E0503 [medium] [open] [after: B-005]
 
 `impl<T: Eq> Set` 中 `insert` 调用同 impl 的 `contains` 时，prelude 编译报 E0503（"Type does not satisfy trait bound 'Eq'"）。`load_prelude` 设置了 type_param_scope 但 bounded impl 上下文的 bounds 不传播到方法间调用。导致 #90 的理想修复（Ring 层 Eq-aware Set.insert）无法实现，只能用 runtime `__ring_deep_eq` 替代。
 
+**决策（2026-05-23）**：应修复。排在 B-005 supertrait 之后——共享 trait 注册逻辑，修完后 Set 方法可改为 Ring 实现（Eq trait dispatch），删除 `__ring_deep_eq` hack。
+
 发现者：Worker B3 agent（2026-05-23）
 
-### #98 `Set.union/intersect/difference` 仍使用 JS `===` [medium] [open]
+### #98 `Set.union/intersect/difference` 仍使用 JS `===` [medium] [doing]
 
 runtime.ring 的 `_Set_union`、`_Set_intersect`、`_Set_difference` 使用 JS `Set` 操作（`...spread` + `filter` + `has`），底层仍是 `===` 引用相等。与 #90（insert/remove 已修复为 `__ring_deep_eq`）和 `Set.contains`（Eq trait）语义不一致。
 
