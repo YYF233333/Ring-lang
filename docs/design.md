@@ -15,7 +15,7 @@
 
 | 维度 | 倾向 |
 |------|------|
-| 范式 | 过程式 + 函数式，零 OOP 语义（但模拟 OOP 手感） |
+| 范式 | 过程式 + 函数式；struct/trait/impl 提供 OOP 常见手感，底层为 typeclass + 组合 |
 | 命名 | snake_case，ALL_CAPS 常量 |
 | 不可变 | 默认不可变，`let mut` 显式声明可变，`mut` 是唯一的可变性关键字 |
 | 错误 | 错误即 effect，自动冒泡；需持久化时物化为 Result 数据 |

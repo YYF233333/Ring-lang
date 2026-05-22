@@ -352,6 +352,114 @@ impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
 - **优先级**：低
 
+### B-025 下标运算符 `list[i]` / `map[key]` [feature] [P1] [M] [queued]
+提供集合直接访问语法。自举时因时间压力漏掉，导致 ~40 个 `_at()` helper 散布在编译器中。
+
+**语义**：
+- `list[i]` → 越界 panic（等价于 `list.get(i).unwrap()`）
+- `map[key]` → key 不存在 panic（等价于 `map.get(key).unwrap()`）
+- 安全访问仍用 `.get()` 返回 `Option<T>` — 两个操作，两种语义，不违反"一种事一种写法"
+
+**涉及修改**：
+1. `parser.ring`：后缀 `[expr]` 解析为 `Expr::IndexExpr { receiver, index, span }`
+2. `ast.ring`：新增 `IndexExpr` 节点
+3. `hir.ring`：新增 `HExpr::IndexExpr` 或脱糖为 `HExpr::MethodCall`（`.get().unwrap()`）
+4. `infer.ring`：类型检查——receiver 必须是 `List<T>` / `Map<K,V>` / `Str`，推断结果类型
+5. `codegen_expr.ring`：生成 JS 下标访问（List/Str → `[i]`，Map → `.get(key)`）+ 越界检查
+6. `tests/cases/`：正面测试 + 越界 panic 负面测试
+
+**验收标准**：
+- `list[0]` 编译通过，运行时返回元素或越界 panic
+- `map["key"]` 编译通过，运行时返回值或 key 不存在 panic
+- `.get()` 仍正常工作
+- 自举编译器中 `_at()` helper 可替换为下标语法
+
+### B-026 `catch` arm 穷尽性检查 [bugfix] [P1] [S] [queued]
+`catch` 总是消除 `fail` effect（B-020 语义），但 checker 未验证 catch arms 是否穷尽覆盖错误类型。非穷尽 catch 导致类型层面声称"fail 已消除"，运行时却有未处理的错误路径。
+
+**当前状态**：`infer_catch`（`infer.ring:2119`）直接调用 `remove_fail_effect(effects)`，不检查 arms 穷尽性。`check_exhaustive` 已在 match 语句中使用，catch 可直接复用。
+
+**涉及修改**：
+1. `infer.ring`：`infer_catch` 中 arms 循环结束后、`remove_fail_effect` 之前，插入 `check_exhaustive(harms, apply_subst(s, error_type), s)`，非穷尽时报 E0601
+2. `tests/cases/`：新增正面测试（穷尽 catch 编译通过）+ 负面测试（非穷尽 catch 报 E0601）
+
+**验收标准**：
+- 非穷尽 catch 报 E0601，错误信息含缺失的 pattern 描述
+- 穷尽 catch（含 wildcard/binding catch-all）正常编译
+- 现有 E2E 测试全部通过
+
+### B-027 多行字符串 + Raw String [feature] [P1] [M] [queued]
+两个独立的字符串增强，解决不同问题。
+
+**A. 多行字符串：`"..."` 允许跨行**
+
+去掉"字符串必须单行"的限制。转义和插值照常工作。不做缩进 strip——前导空白是内容的一部分。
+
+```ring
+let code = "
+function ${name}() {
+    return ${expr};
+}
+"
+```
+
+解决 codegen 痛点：`runtime.ring` 几百行 `.push()` 可重构为多行字符串 + 插值。
+
+**B. Raw string：`r"..."`**
+
+无转义、无插值。用于正则、Windows 路径、嵌入含 `${` 的 JS 模板字面量。
+
+```ring
+let re = r"\d+\.\d+"                    // 字面 \d，不是转义
+let js = r"const tpl = `hi ${name}`"    // ${name} 不触发 Ring 插值
+let nested = r#"contains "quotes""#     // Rust 风格可变分隔符
+```
+
+- `r"..."` — 无转义、无插值、允许多行
+- `r#"..."#` — 内容含 `"` 时的嵌套方案
+
+**涉及修改**：
+1. `lexer.ring`：允许普通字符串 token 跨行（当前遇到换行可能报错或截断）
+2. `lexer.ring`：识别 `r"` 和 `r#"` 前缀，进入 raw 词法模式
+3. `codegen_expr.ring`：含换行的字符串生成 JS 模板字面量（backtick）或 `\n` 拼接
+4. `tests/cases/`：多行插值、raw 无转义、raw 含 `${` 字面文本、`r#"..."#` 嵌套
+
+**验收标准**：
+- 普通 `"..."` 可跨行，插值和转义正常，空白原样保留
+- `r"..."` 中 `\n` 是字面 `\` + `n`，`${x}` 是字面文本
+- `r#"..."#` 支持内容含双引号
+- 现有单行字符串测试不受影响
+
+### B-028 StringBuilder [feature] [P1] [S] [queued]
+标准库 string builder，替代 `List<Str>` + `.push()` + `.join()` 的 codegen 模式。
+
+**API**：
+```ring
+let mut sb = string_builder()
+sb.add("hello")              // 追加字符串
+sb.line("world")             // 追加字符串 + 换行
+sb.add_int(42)               // 追加数字（避免 .to_str() 样板）
+let result = sb.to_str()     // 最终化
+```
+
+- `string_builder()` → 新建 builder
+- `.add(s: Str)` → 追加（`mut self`）
+- `.line(s: Str)` → 追加 + `\n`（`mut self`）
+- `.add_int(n: Int)` → 追加整数（`mut self`）
+- `.to_str()` → 生成最终字符串（`self`，非消耗）
+- `.len()` → 当前长度
+
+**涉及修改**：
+1. `std/str.ring`：新增 `extern type StringBuilder` + 方法 impl + `string_builder()` 构造函数
+2. `runtime.ring`：StringBuilder JS runtime（内部用数组收集，`to_str` 时 `.join("")`）
+3. `builtins.ring`：注册 StringBuilder 类型 + 方法
+4. `tests/cases/`：基本使用 + 链式构建 + 空 builder
+
+**验收标准**：
+- `string_builder()` + `.add()` + `.to_str()` 基本流程工作
+- `.line()` 自动追加换行
+- 可用于替代 codegen 中的 `List<Str>` + `.push()` + `.join("\n")` 模式
+
 ## 架构：多后端策略
 
 Ring 成熟后为双后端结构（JS + LLVM），各有主场：
