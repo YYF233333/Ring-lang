@@ -91,7 +91,19 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## 模块/诊断
 
+### #97 `load_prelude` 对 bounded impl 内方法间调用误报 E0503 [medium] [open]
 
+`impl<T: Eq> Set` 中 `insert` 调用同 impl 的 `contains` 时，prelude 编译报 E0503（"Type does not satisfy trait bound 'Eq'"）。`load_prelude` 设置了 type_param_scope 但 bounded impl 上下文的 bounds 不传播到方法间调用。导致 #90 的理想修复（Ring 层 Eq-aware Set.insert）无法实现，只能用 runtime `__ring_deep_eq` 替代。
+
+发现者：Worker B3 agent（2026-05-23）
+
+### #98 `Set.union/intersect/difference` 仍使用 JS `===` [medium] [open]
+
+runtime.ring 的 `_Set_union`、`_Set_intersect`、`_Set_difference` 使用 JS `Set` 操作（`...spread` + `filter` + `has`），底层仍是 `===` 引用相等。与 #90（insert/remove 已修复为 `__ring_deep_eq`）和 `Set.contains`（Eq trait）语义不一致。
+
+修复方向：与 #90 相同，改用 `__ring_deep_eq` 或等 #97 修复后用 Ring 实现。
+
+发现者：Worker B3 agent（2026-05-23）
 
 ## 设计-实现差距（参考，已在 backlog 跟踪）
 
