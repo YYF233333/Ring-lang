@@ -82,18 +82,23 @@ Agent({
   description: "WT<wave><n>: <item-id> <short-desc>",
   isolation: "worktree",
   run_in_background: true,
+  model: "<根据复杂度选择>",
   prompt: "<agent prompt>"
 })
 ```
 
-**Agent Prompt 模板**：
+**Model 选择规则**：
+- **S 复杂度**（< 1h 的简单改动）→ `model: "sonnet"`（成本低，S 任务够用）
+- **M / L / XL 复杂度** → `model: "opus"`（需要深度推理）
+- Audit-report 的 bug fix 按 spec 复杂度判断：单文件简单修复 = S，跨文件/需要设计 = M+
+
+**Agent Prompt 模板**（精简版——agent 会自己读 CLAUDE.md，不重复项目上下文）：
 
 ```
-你是 Ring-lang 编译器的实现 agent。你在一个隔离的 git worktree 中。
+你在一个隔离的 git worktree 中实现以下任务。
 
-**CRITICAL: 首先验证 base commit。** 执行 `git log --oneline -1`，
-确认输出为 `<EXPECTED_BASE>`。如果不是，立即停止并报告
-"Base commit mismatch: expected <EXPECTED_BASE>, got XXX"。
+**首先验证 base commit：** `git log --oneline -1`，
+确认为 `<EXPECTED_BASE>`。不匹配则停止报告。
 
 ## 任务
 <TASK_SPEC — 从 plan 中提取的完整实现步骤>
@@ -101,13 +106,11 @@ Agent({
 ## 验收标准
 <从 backlog/audit-report spec 中复制>
 
-## 项目上下文
-- Ring-lang 是自举编译器（Ring 写 Ring），产出 JavaScript
-- 编译器源码：compiler/*.ring，编译产出：compiler/dist/
-- 重编译：node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
-- 测试：cd compiler && npm test
-- 只做 spec 范围内的改动，不做额外重构
-- 发现新 bug → 记录在 commit message 中，不自行修复
+## 完成检查
+1. 重编译：node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
+2. 测试：cd compiler && npm test
+3. 只做 spec 范围内的改动，不做额外重构
+4. 发现新 bug → 记录在 commit message 中，不自行修复
 ```
 
 #### 3e. 等待完成 + 验证
