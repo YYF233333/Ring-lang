@@ -67,11 +67,16 @@ commit message 格式：`docs: <描述>` 或 `docs(<scope>): <描述>`
 
 Discussion agent 在每次对话开始时检查 `docs/worker_feedback.md`：
 
-1. **有未处理的 feedback** → 向用户展示，逐条讨论，收集决策
-2. **用户拍板后** → 将决策更新回对应 backlog item 的 spec
-3. **状态转换**：将 item 从 `waiting-feedback` 改为 `queued`（重新排队，Worker 可再次拾取）
-4. **已处理的 feedback** → 从 `worker_feedback.md` 中删除（决策已落入 backlog spec 或 design.md）
-5. **Backlog item 不删除** — feedback 不代表 item 失败，只代表需要设计补充
+**`[决策]` 类型**（阻塞性，需要用户判断）：
+1. 向用户展示，逐条讨论，收集决策
+2. 用户拍板后 → 将决策更新回对应 backlog item 的 spec
+3. 状态转换：将 item 从 `waiting-feedback` 改为 `queued`（重新排队）
+4. 已处理的条目从 `worker_feedback.md` 中删除
+
+**`[通知]` 类型**（非阻塞，worker 的 session 摘要）：
+1. 向用户呈现，简要说明每条内容
+2. 用户确认已读后 → 从 `worker_feedback.md` 中删除
+3. 如果通知内容引发了新的设计讨论 → 正常走讨论流程，必要时写 backlog
 
 ## 列表维护职责
 

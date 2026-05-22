@@ -135,7 +135,7 @@ Ring-lang/
 
 ### Effect / Codegen 限制
 
-- **Handler 支持 tail-resumptive + abort 两种语义**：非 abort effect（io/custom）的 handler 返回值即 resume 值，计算继续；`fail.raise` 为 abort 语义。不支持 post-resume handler（resume 后继续执行额外代码）
+- **Handler 支持 tail-resumptive + abort 两种语义**：非 abort effect（io/custom）的 handler 返回值即 resume 值，计算继续；`fail.raise` 为 abort 语义。Full AE（post-resume / multi-resume）已取消，不计划实现
 - **Trait dictionary dispatch 不转发 evidence**：trait 方法带 effect 时缺少 evidence 参数（trait dict closure 已支持高阶传递）
 - **`catch` 总是消除 fail effect**：`expr catch { pattern => handler, ... }` 是完整捕获点，catch arms 经穷尽性检查（非穷尽报 E0601）。内部用模式匹配分派错误类型；需要部分处理时在 catch 内部 match + re-raise（显式）。错误处理遵循生命周期模型：fail effect 为主（诞生/流动），`catch` 就地恢复，`to_result()` 物化为数据
 - **表达式位置的 block/if 包含 `return` 时 IIFE 仍会截获**：语句位置（函数体、expr_stmt）已修复（C10），但 `let x = { return y; 0 }` 这类表达式位置的 return 仍被 IIFE 截获。实践中极少遇到。
@@ -188,7 +188,7 @@ Ring-lang/
 ### 语言特性（中期）
 
 - ~~`mut<S>` 参数化 effect~~（已完成：Cell<T> 推断 `mut<T>`，支持 `with {mut<Int>}` 标注）
-- Full algebraic effect（post-resume handler，需要 delimited continuation）
+- ~~Full algebraic effect~~（已取消：tail-resumptive + abort 覆盖实际需求，剩余用例用 async effect + defer 解决）
 - Refinement types（编译期验证 + 运行时检查）
 - 关联类型 + supertrait 继承
 - `dyn Trait` 动态分发

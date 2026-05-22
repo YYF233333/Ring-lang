@@ -190,22 +190,32 @@ Worker 在实现过程中可能发现新 bug、设计偏差或需要讨论的决
 - 不自行修复超出 spec 范围的问题
 
 **设计问题 / 待决策项（需要用户判断）**：
-- 追加到 `docs/worker_feedback.md`，按 backlog item 分组
+- 追加到 `docs/worker_feedback.md`，标记 `[决策]`，按 backlog item 分组
 - 每条包含：**现状**（发现了什么）、**原因**（为什么会这样）、**待决策**（列出选项）
 - **更新 backlog item**：把已完成的部分写入 spec（进度不丢失），状态改为 `waiting-feedback`
 - Worker 扫描时**跳过 `waiting-feedback` 状态的 item**——等 Discussion agent 处理完重新排队
+
+**值得用户了解的信息（不阻塞工作）**：
+- 追加到 `docs/worker_feedback.md`，标记 `[通知]`
+- 不改变 item 状态，worker 照常完成工作
+- 典型场景：实现中的取舍说明、跳过 plan 某步骤的原因、发现的潜在改进点、影响范围比预期大/小的情况
+- **原则**：worker session 很长，用户无法回看全部过程。凡是值得用户知道但不紧急决策的信息都应推送，由 Discussion agent 在下次对话时呈现
 
 **worker_feedback.md 格式**：
 ```markdown
 ## B-xxx <标题>
 
-### <序号>. <问题简述>
+### <序号>. <问题简述> [决策]
 
 **现状**：...
 **原因**：...
 **待决策**：
 - (A) 选项一
 - (B) 选项二
+
+### <序号>. <信息简述> [通知]
+
+<简要说明>
 ```
 
 - 在最终报告中列出所有新发现的 items 和 feedback

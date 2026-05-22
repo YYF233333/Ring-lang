@@ -1028,7 +1028,6 @@ extern "npm:express" {
 - `fn`/`let`/`var`/`struct`/`enum`/`match`/`trait`/`impl` 全部来自 Rust
 - `"${x}"` 字符串插值来自 JS/Kotlin；多行字符串（`"..."` 允许跨行）；`r"..."` 和 `r#"..."#` raw string（无转义无插值）来自 Rust
 - `//` 行注释来自 C/JS/Rust（最大化 LLM 已有知识迁移）
-- `or` 来自 Python
 - 不发明新关键字，除非语义确实是新的（如 `handle...with`）
 
 **一种事只有一种写法：** TS 里定义数据结构有 interface/type/class/literal 四种写法，LLM 每次选不同的导致大型代码库风格混乱。本语言只有 `struct`，错误触发只有 `raise`，错误恢复只有 `catch`，effect 替换只有 `handle...with`，异步只有 `spawn/await`，方法调用只有 `.method()` 链式风格（无管道运算符）。LLM 的输出天然一致。错误处理看似有多种机制，但它们对应错误生命周期的不同阶段（流动/恢复/物化/替换），不是同一件事的不同写法。
@@ -1060,6 +1059,16 @@ extern "npm:express" {
 | 大库一致性 | 100+ 文件代码库中风格/模式的一致性评分 |
 
 核心赌注：首次编译通过率可能低于 TS（编译器更严格），但运行时错误率和总迭代轮数远低于 TS。
+
+### 10.3.1 代价分配原则
+
+类型系统复杂度增加的是语言的上限，不抬高下限。LLM 友好性的设计分三层：
+
+- **推断能解决的，自动推断**：effect 推断、泛型参数推断。LLM 不需要学，编译器自动处理
+- **安全性相关的，编译器强制**：linear types（资源必须消费）、exhaustive match。LLM 不学就编译不过，编译器错误信息就是教程
+- **表达力增强的，opt-in**：refinement types、associated types。LLM/用户可以不用，不影响代码正确性；用了可以获得更强的编译期保证
+
+代价分配逻辑：**类型系统的复杂度由 LLM 承担（编译器错误循环迭代），收益由终端用户享受（零 runtime surprise）。** runtime error = 用户介入 = 体验降级；LLM 与编译器搏斗十轮的代价远低于一个 runtime panic 到达用户面前的代价。
 
 ### 10.4 控制论视角：无人回路
 
@@ -1306,7 +1315,7 @@ JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体
 
 | 设计点 | 决策 | 理由 |
 |--------|------|------|
-| Effect handler 语义 | tail-resumptive + abort（非 full algebraic） | evidence passing 天然支持 tail-resume；post-resume 需 delimited continuation |
+| Effect handler 语义 | tail-resumptive + abort（full AE 已取消） | evidence passing 天然支持 tail-resume；full AE 工程价值不足（95%+ 场景已覆盖），剩余用例用 async effect + bracket 解决 |
 | `or`/`try`/`?` 运算符 | 已移除，使用 `unwrap`/`to_fail`/`to_result()`/`catch` | 简化语法面，减少歧义 |
 | catch 语义 | 总是消除 fail effect；部分处理用 catch 内部 match + re-raise（显式） | 消除隐式行为（原设计中有/无 catch-all arm 决定不同类型行为），降低概念数 |
 | 错误模型 | 生命周期模型：fail effect 为主（诞生/流动），to_result 物化为数据（落地） | effect 是运动形态，Result 是静止形态；双模型各有地盘而非竞争 |
@@ -1318,6 +1327,10 @@ JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体
 | mod capability | `mod name requires {effects} { ... }` 语法 | 模块级 effect 限制，E0405 错误码 |
 | 多行字符串 | `"..."` 允许跨行，空白原样保留 | 减少字符串拼接需求 |
 | Raw string | `r"..."` 和 `r#"..."#`，无转义无插值 | 正则表达式/codegen 场景减少转义噪音 |
+| JS 为主后端 | JS 是核心资产，非过渡方案；LLVM 是性能补充后端 | npm 生态 = 出生即有生态；effect 通过 try/catch 天然穿透 JS FFI；Web 场景无需 WASM 中间层 |
+| Int/Str 语义独立于 JS | Int = 64-bit signed（JS 用 BigInt），Str = UTF-8 code point 语义 | JS 是部署目标不是设计来源；Ring 语义独立定义，JS 端付性能代价适配 |
+| LLVM FFI effect 穿透 | TLS handler stack 存储 evidence，非函数参数传递 | C 函数无需感知 evidence；与 JS try/catch 的 ambient 语义对齐；x86-64 TLS 访问接近零成本 |
+| 类型系统代价分配 | 复杂度由 LLM 承担（编译器错误循环），收益由用户享受（零 runtime surprise） | runtime error = 用户受害 = 体验降级；LLM 不是人、不领工资，编译器搏斗十轮也无所谓 |
 
 ### 幽灵功能（已解析但无语义效果）
 
@@ -1327,7 +1340,7 @@ JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体
 |------|---------|----------|
 | `where` 精化子句 | 消费 tokens 后丢弃 | refinement types |
 | Supertrait | AST 字段存在，始终为空 | 后续 trait 增强 |
-| Resume 参数名 | AST/HIR 字段存在，无语法触达 | full algebraic effects |
+| Resume 参数名 | AST/HIR 字段存在，无语法触达 | 已无计划（full AE 取消），可清理 |
 
 ### 实现偏差备忘
 

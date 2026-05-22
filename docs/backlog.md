@@ -129,25 +129,6 @@ fn main() {
 - **优先级**：Phase C
 - **参考**：语法方案模仿 trait 默认方法（Ring 已有先例），中间版避免了 Snowflyt 指出的 handler 链式解析的完整复杂度
 
-### B-009 Full Algebraic Effects（Post-resume Handler + Multi-resume）[feature] [P3] [XL] [queued]
-design.md 2.5。当前 handler 只支持 tail-resumptive + abort，不支持 resume 后继续执行额外代码，也不支持多次 resume。
-
-```ring
-handle {
-    let result = complex_pipeline()
-} with {
-    fail(e: ValidationError) => {
-        log(e)
-        resume(default_value)  // resume 后继续执行
-        log("recovered")       // post-resume 代码
-    }
-}
-```
-
-- **前置依赖**：需要 delimited continuation + Linear types（多次 resume 的资源安全保证）
-- **复杂度**：极大
-- **优先级**：Phase D
-- **资源安全设计**：多次 resume 会 fork 执行路径，导致锁释放/文件操作等资源问题。Linear types 保证 Ring 侧资源在 fork 时正确 move/clone，但跨 FFI 边界的外部资源（C `malloc`/`fopen`）不受 linear type 保护——需配合 FFI 边界 effect 策略（见下方 LLVM 条目）
 
 ## OOP 模拟
 
@@ -178,12 +159,11 @@ design.md 14.2。编译到 LLVM IR，桌面/服务端场景。
 - **复杂度**：极大
 - **优先级**：Phase C（长期视野 [[long-term-vision]]）
 - **FFI 边界 effect 设计**（LLVM 阶段必须在设计期解决的问题）：
-  1. **ABI 不可见参数**：带 effect 的 Ring 函数编译后有额外的 evidence 参数，C 调用者无法感知。effect-free 的 Ring 函数应保证干净的 C ABI（无 evidence 参数），零成本互调
-  2. **`extern fn` effect 策略**：Ring → C 暴露的函数和 C → Ring 调用的函数是否必须 effect-free？最安全的方案（Rust 路线：`extern "C" fn` 不能是 async），但限制表达力
-  3. **C 回调中的 effect 边界**：传给 C 的回调函数内 perform effect 时，effect handler 链需跨越 C 栈帧。选项：a) 编译期禁止（最安全）；b) 入口安装 trampoline 恢复 handler 链（复杂但可行）
-  4. **栈管理冲突（Full Algebraic Effects）**：tail-resumptive 无问题（纯参数传递），但 delimited continuation（multi-resume/post-resume）需要捕获/复制栈段，与 C 线性调用栈模型冲突——C 栈帧中的指针可能悬空
-  5. **跨语言资源安全**：Linear types 保证 Ring 侧资源，但 C 分配的资源（`malloc`/`fopen`）不在 RC 图中。effect handler abort 时需要类似 `Drop`/`defer` 的机制清理 FFI 资源
+  1. **Evidence 传递方案**：LLVM 端使用 TLS（Thread-Local Storage）handler stack 存储 evidence，而非函数参数传递。C 函数无需感知 evidence 存在，Ring→C→Ring callback 中 effect 自然穿透（与 JS 端 try/catch 的 ambient 语义对齐）
+  2. **Effect-free 的 Ring 函数保证干净 C ABI**（无 evidence 参数），零成本互调
+  3. **跨语言资源安全**：Linear types 保证 Ring 侧资源，但 C 分配的资源（`malloc`/`fopen`）不在 RC 图中。effect handler abort 时需要 `defer` 机制清理 FFI 资源
   - **参考**：Koka 不暴露 C FFI 给用户（monadic transformation 编译到 C）；OCaml 5 限制 effect 不能跨 C 帧；Rust `extern "C" fn` 不能是 async
+  - **已排除**：full AE 跨 C 帧（B-009 已取消，不需要 delimited continuation）
 
 ### B-012 Perceus 引用计数 [feature] [P3] [XL] [queued]
 design.md 14.3。精确 RC + 就地复用分析，消除 GC 停顿。
@@ -270,7 +250,7 @@ source-map 支持 + 断点调试。
 - **优先级**：低
 
 
-### B-031 消除 Cell\<T\>（完全移除 interior mutability）[design-align] [P1] [M] [queued]
+### B-031 消除 Cell\<T\>（完全移除 interior mutability）[design-align] [P1] [M] [doing]
 B-019 遗留项。Cell\<T\> 原本用于闭包捕获可变变量，`let mut` + 自动 boxing 已替代此用途。Ring 不保留 interior mutability——需要修改就用 `let mut`。
 
 **涉及修改**：
@@ -365,6 +345,9 @@ Ring 成熟后为双后端结构（JS + LLVM），各有主场：
 
 ### `or` 兜底表达式
 design.md 2.3 层级 1。已被 Option 方法（`unwrap_or` / `unwrap_or_else`）取代，不再实现。
+
+### Full Algebraic Effects（B-009）
+Post-resume handler + multi-resume。取消原因：tail-resumptive + abort 覆盖 95%+ 实际需求，剩余用例用 async effect + defer 解决更好。实现复杂度（delimited continuation + 资源安全）与工程价值不成比例。
 
 ---
 
