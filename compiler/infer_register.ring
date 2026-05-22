@@ -96,6 +96,9 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
         Decl::TypeAlias { name, type_params, type_expr, is_pub, span } =>
             Decl::TypeAlias { name: "${mod_name}::${name}", type_params: type_params, type_expr: type_expr,
                              is_pub: is_pub, span: span },
+        Decl::ModBlock { name, uses, decls, required_effects, is_pub, span } =>
+            Decl::ModBlock { name: "${mod_name}::${name}", uses: uses, decls: decls,
+                            required_effects: required_effects, is_pub: is_pub, span: span },
         _ => decl
     }
 }

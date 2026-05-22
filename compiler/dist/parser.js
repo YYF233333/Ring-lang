@@ -1502,23 +1502,34 @@ function Parser_parse_prefix(self, allow_struct_lit) {
       return ast$Expr_Ident(variant_name, Option_some(name), Parser_make_span(self, start, variant_tok.span.end));
     }
     if (((!is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
-      Parser_advance(self);
-      const member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
-      const member_name = member_tok.value;
+      let qualifier_parts = [name];
+      let member_tok = tok;
+      let member_name = name;
+      while (Parser_check(self, lexer$TokenKind_TkColonColon)) {
+        Parser_advance(self);
+        member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+        member_name = member_tok.value;
+        if (((!is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+          List_push(qualifier_parts, member_name);
+        } else {
+          break;
+        }
+      }
+      const qualifier_str = List_join(qualifier_parts, "::");
       if ((is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
         Parser_advance(self);
         const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
         const variant_name = variant_tok.value;
-        const full_qualifier = `${name}::${member_name}`;
+        const full_qualifier = `${qualifier_str}::${member_name}`;
         if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(variant_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
           return Parser_parse_struct_literal(self, variant_name, start, Option_some(full_qualifier));
         }
         return ast$Expr_Ident(variant_name, Option_some(full_qualifier), Parser_make_span(self, start, variant_tok.span.end));
       }
       if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
-        return Parser_parse_struct_literal(self, member_name, start, Option_some(name));
+        return Parser_parse_struct_literal(self, member_name, start, Option_some(qualifier_str));
       }
-      return ast$Expr_Ident(member_name, Option_some(name), Parser_make_span(self, start, member_tok.span.end));
+      return ast$Expr_Ident(member_name, Option_some(qualifier_str), Parser_make_span(self, start, member_tok.span.end));
     }
     if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
       return Parser_parse_struct_literal(self, name, start, Option_none);
@@ -1701,17 +1712,27 @@ function Parser_parse_pattern(self) {
     let name = tok.value;
     let qualifier = Option_none;
     if (((!is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
-      Parser_advance(self);
-      const enum_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
-      const enum_name = enum_tok.value;
-      if ((is_uppercase(Option_unwrap_or(Str_char_at(enum_name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+      let qual_parts = [name];
+      let next_name = name;
+      while (Parser_check(self, lexer$TokenKind_TkColonColon)) {
+        Parser_advance(self);
+        const next_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+        next_name = next_tok.value;
+        if (((!is_uppercase(Option_unwrap_or(Str_char_at(next_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+          List_push(qual_parts, next_name);
+        } else {
+          break;
+        }
+      }
+      const qual_str = List_join(qual_parts, "::");
+      if ((is_uppercase(Option_unwrap_or(Str_char_at(next_name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
         Parser_advance(self);
         const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
-        qualifier = Option_some(`${name}::${enum_name}`);
+        qualifier = Option_some(`${qual_str}::${next_name}`);
         name = variant_tok.value;
       } else {
-        qualifier = Option_some(name);
-        name = enum_name;
+        qualifier = Option_some(qual_str);
+        name = next_name;
       }
     }
     if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
@@ -1954,10 +1975,19 @@ function Parser_parse_type_expr(self) {
   let qualifier = Option_none;
   let actual_name = name;
   if (Parser_check(self, lexer$TokenKind_TkColonColon)) {
-    Parser_advance(self);
-    const member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
-    qualifier = Option_some(name);
-    actual_name = member_tok.value;
+    let qual_parts = [name];
+    while (Parser_check(self, lexer$TokenKind_TkColonColon)) {
+      Parser_advance(self);
+      const member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
+      const member_name = member_tok.value;
+      if (((!is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+        List_push(qual_parts, member_name);
+      } else {
+        actual_name = member_name;
+        break;
+      }
+    }
+    qualifier = Option_some(List_join(qual_parts, "::"));
   }
   const type_args = Parser_try_parse_type_args(self);
   const end = Parser_current_span_start(self);

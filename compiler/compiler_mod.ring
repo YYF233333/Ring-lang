@@ -327,6 +327,27 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                                                     }
                                                 },
                                                 Decl::Const { name: cname, is_pub: cpub, .. } => { if cpub { export_names.push(safe_ident(cname)) } },
+                                                Decl::ModBlock { name: sub_mod_name, decls: sub_mod_decls, is_pub: sub_mpub, .. } => {
+                                                    if sub_mpub {
+                                                        for sub_subdecl in sub_mod_decls {
+                                                            let sub_prefixed = prefix_decl_name(sub_mod_name, sub_subdecl)
+                                                            match sub_prefixed {
+                                                                Decl::Fn { name: fname2, is_pub: fpub2, .. } => { if fpub2 { export_names.push(safe_ident(fname2)) } },
+                                                                Decl::Struct { name: sname2, is_pub: spub2, .. } => { if spub2 { export_names.push(safe_ident(sname2)) } },
+                                                                Decl::Enum { name: ename2, is_pub: epub2, variants: vars2, .. } => {
+                                                                    if epub2 {
+                                                                        for v in vars2 {
+                                                                            let sn2 = safe_ident(ename2)
+                                                                            export_names.push("${sn2}_${v.name}")
+                                                                        }
+                                                                    }
+                                                                },
+                                                                Decl::Const { name: cname2, is_pub: cpub2, .. } => { if cpub2 { export_names.push(safe_ident(cname2)) } },
+                                                                _ => {},
+                                                            }
+                                                        }
+                                                    }
+                                                },
                                                 _ => {},
                                             }
                                         }

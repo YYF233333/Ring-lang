@@ -215,6 +215,61 @@ pub fn extract_exports(
                                     }
                                 }
                             },
+                            Decl::ModBlock { name: sub_mod_name, decls: sub_mod_decls, is_pub: sub_mpub, .. } => {
+                                if sub_mpub {
+                                    for sub_subdecl in sub_mod_decls {
+                                        let sub_prefixed = prefix_decl_name(sub_mod_name, sub_subdecl)
+                                        match sub_prefixed {
+                                            Decl::Fn { name: fname2, is_pub: fpub2, .. } => {
+                                                if fpub2 {
+                                                    match env.lookup(fname2) {
+                                                        some(scheme) => { values.insert(fname2, scheme) },
+                                                        none => {},
+                                                    }
+                                                }
+                                            },
+                                            Decl::Struct { name: sname2, is_pub: spub2, .. } => {
+                                                if spub2 {
+                                                    match env.types.structs.get(sname2) {
+                                                        some(sdef) => {
+                                                            types.insert(sname2, TypeDef::StructDef_(sdef))
+                                                            let mut fns2: List<Str> = [""]; fns2.clear()
+                                                            for f in sdef.fields { fns2.push(f.name) }
+                                                            struct_field_orders.insert(sname2, fns2)
+                                                        },
+                                                        none => {},
+                                                    }
+                                                }
+                                            },
+                                            Decl::Enum { name: ename2, is_pub: epub2, .. } => {
+                                                if epub2 {
+                                                    match env.types.enums.get(ename2) {
+                                                        some(edef) => {
+                                                            types.insert(ename2, TypeDef::EnumDef_(edef))
+                                                            for v in edef.variants {
+                                                                match env.lookup(v.name) {
+                                                                    some(vscheme) => { values.insert(v.name, vscheme) },
+                                                                    none => {},
+                                                                }
+                                                            }
+                                                        },
+                                                        none => {},
+                                                    }
+                                                }
+                                            },
+                                            Decl::Const { name: cname2, is_pub: cpub2, .. } => {
+                                                if cpub2 {
+                                                    match env.lookup(cname2) {
+                                                        some(scheme) => { values.insert(cname2, scheme) },
+                                                        none => {},
+                                                    }
+                                                }
+                                            },
+                                            _ => {},
+                                        }
+                                    }
+                                }
+                            },
                             _ => {},
                         }
                     }

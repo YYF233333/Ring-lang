@@ -59,7 +59,11 @@ fn check_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
 }
 
 fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: List<Decl>, required_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
-    ctx.mod_path_stack.push(mod_name)
+    // Push only the last segment onto mod_path_stack for self::/super:: resolution.
+    // mod_name may be fully qualified (e.g. "a::b") when nested mods are prefixed.
+    let segments = mod_name.split("::")
+    let simple_name = segments.get(segments.len() - 1).unwrap_or(mod_name)
+    ctx.mod_path_stack.push(simple_name)
 
     // Register short-name aliases for mod-internal types so that
     // type annotations like `c: Circle` resolve to `shapes::Circle`.

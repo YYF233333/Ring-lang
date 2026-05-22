@@ -742,7 +742,22 @@ function resolve_type_expr(ctx, texpr) {
           if ((resolved_q === "")) {
             return resolve_named_type(ctx, name, type_args, span);
           } else {
-            return resolve_named_type(ctx, `${resolved_q}::${name}`, type_args, span);
+            const qualified_type_name = `${resolved_q}::${name}`;
+            if (((_Map_contains_key(ctx.env.types.structs, qualified_type_name) || _Map_contains_key(ctx.env.types.enums, qualified_type_name)) || _Map_contains_key(ctx.env.types.type_aliases, qualified_type_name))) {
+              return resolve_named_type(ctx, qualified_type_name, type_args, span);
+            } else {
+              if ((List_len(ctx.mod_path_stack) > 0)) {
+                const mod_prefix = List_join(ctx.mod_path_stack, "::");
+                const full_type_name = `${mod_prefix}::${qualified_type_name}`;
+                if (((_Map_contains_key(ctx.env.types.structs, full_type_name) || _Map_contains_key(ctx.env.types.enums, full_type_name)) || _Map_contains_key(ctx.env.types.type_aliases, full_type_name))) {
+                  return resolve_named_type(ctx, full_type_name, type_args, span);
+                } else {
+                  return resolve_named_type(ctx, qualified_type_name, type_args, span);
+                }
+              } else {
+                return resolve_named_type(ctx, qualified_type_name, type_args, span);
+              }
+            }
           }
           break __ring_match30;
         }
@@ -1241,25 +1256,44 @@ function resolve_pattern_enum(ctx, variant_name, qualifier, span) {
     const __ring_m57 = qualifier;
     if (__ring_m57._tag === "some") {
       const q = __ring_m57._0;
+      const direct = _Map_get(ctx.env.types.enums, q);
       __ring_match58: {
-        const __ring_m58 = _Map_get(ctx.env.types.enums, q);
+        const __ring_m58 = direct;
         if (__ring_m58._tag === "some") {
           const enum_def = __ring_m58._0;
           if (enum_def.variants.some((function(v) { return (v.name === variant_name); }))) {
             return Option_some(enum_def.name);
-          } else {
-            type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none));
-            return Option_none;
           }
+          const _ = type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none));
+          return Option_none;
           break __ring_match58;
         }
         if (__ring_m58._tag === "none") {
-          type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none));
-          return Option_none;
           break __ring_match58;
         }
         __match_fail(__ring_m58);
       }
+      if ((List_len(ctx.mod_path_stack) > 0)) {
+        const mod_prefix = List_join(ctx.mod_path_stack, "::");
+        const full_q = `${mod_prefix}::${q}`;
+        const fallback = _Map_get(ctx.env.types.enums, full_q);
+        __ring_match59: {
+          const __ring_m59 = fallback;
+          if (__ring_m59._tag === "some") {
+            const enum_def2 = __ring_m59._0;
+            if (enum_def2.variants.some((function(v) { return (v.name === variant_name); }))) {
+              return Option_some(enum_def2.name);
+            }
+            break __ring_match59;
+          }
+          if (__ring_m59._tag === "none") {
+            break __ring_match59;
+          }
+          __match_fail(__ring_m59);
+        }
+      }
+      const _ = type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none));
+      return Option_none;
       break __ring_match57;
     }
     if (__ring_m57._tag === "none") {
@@ -1272,26 +1306,26 @@ function resolve_pattern_enum(ctx, variant_name, qualifier, span) {
 
 function build_instantiation_map(type_param_vars, resolved_expected) {
   let inst_map = map_new();
-  __ring_match59: {
-    const __ring_m59 = resolved_expected;
-    if (__ring_m59._tag === "EnumType") {
-      const type_params = __ring_m59.type_params;
+  __ring_match60: {
+    const __ring_m60 = resolved_expected;
+    if (__ring_m60._tag === "EnumType") {
+      const type_params = __ring_m60.type_params;
       let i = 0;
       while (((i < List_len(type_param_vars)) && (i < List_len(type_params)))) {
-        __ring_match60: {
-          const __ring_m60 = [List_get(type_param_vars, i), List_get(type_params, i)];
-          if (Array.isArray(__ring_m60) && __ring_m60.length === 2 && __ring_m60[0]._tag === "some" && __ring_m60[1]._tag === "some") {
-            const var_id = __ring_m60[0]._0; const tp = __ring_m60[1]._0;
+        __ring_match61: {
+          const __ring_m61 = [List_get(type_param_vars, i), List_get(type_params, i)];
+          if (Array.isArray(__ring_m61) && __ring_m61.length === 2 && __ring_m61[0]._tag === "some" && __ring_m61[1]._tag === "some") {
+            const var_id = __ring_m61[0]._0; const tp = __ring_m61[1]._0;
             _Map_insert(inst_map, var_id, tp);
-            break __ring_match60;
+            break __ring_match61;
           }
-          break __ring_match60;
+          break __ring_match61;
         }
         i = (i + 1);
       }
-      break __ring_match59;
+      break __ring_match60;
     }
-    break __ring_match59;
+    break __ring_match60;
   }
   return inst_map;
 }

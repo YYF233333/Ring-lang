@@ -791,7 +791,25 @@ fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
                         subst: subst, effects: EMPTY_ROW
                     }
                 },
-                none => {}
+                none => {
+                    // Fallback: try prepending current mod path for relative references
+                    // e.g., inside mod outer, "inner::f" should resolve to "outer::inner::f"
+                    if ctx.mod_path_stack.len() > 0 {
+                        let mod_prefix = ctx.mod_path_stack.join("::")
+                        let full_qualified = "${mod_prefix}::${qualified_name}"
+                        let full_scheme = ctx.env.lookup(full_qualified)
+                        match full_scheme {
+                            some(fs) => {
+                                let t = ctx.env.instantiate(fs)
+                                return InferResult {
+                                    hexpr: HExpr::Ident { name: full_qualified, resolved_name: none, def_id: fs.def_id, dict_closure_dicts: none, ty: t, effects: EMPTY_ROW, span: span },
+                                    subst: subst, effects: EMPTY_ROW
+                                }
+                            },
+                            none => {}
+                        }
+                    }
+                }
             }
         },
         none => {}
@@ -1825,7 +1843,20 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
                 some(_) => {
                     return infer_struct_lit(ctx, qualified_name, fields, spread, span, subst, none)
                 },
-                none => {}
+                none => {
+                    // Fallback: try prepending current mod path for relative references
+                    if ctx.mod_path_stack.len() > 0 {
+                        let mod_prefix = ctx.mod_path_stack.join("::")
+                        let full_qualified = "${mod_prefix}::${qualified_name}"
+                        let full_struct = ctx.env.types.structs.get(full_qualified)
+                        match full_struct {
+                            some(_) => {
+                                return infer_struct_lit(ctx, full_qualified, fields, spread, span, subst, none)
+                            },
+                            none => {}
+                        }
+                    }
+                }
             }
         },
         none => {}
@@ -1834,11 +1865,25 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     // Check for named enum variant
     let mut variant_enum: Str? = none
     match resolved_qualifier {
-        some(q) => match ctx.env.types.enums.get(q) {
-            some(enum_def) => {
-                if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(enum_def.name) }
-            },
-            none => {}
+        some(q) => {
+            match ctx.env.types.enums.get(q) {
+                some(enum_def) => {
+                    if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(enum_def.name) }
+                },
+                none => {
+                    // Fallback: try prepending current mod path
+                    if ctx.mod_path_stack.len() > 0 {
+                        let mod_prefix = ctx.mod_path_stack.join("::")
+                        let full_q = "${mod_prefix}::${q}"
+                        match ctx.env.types.enums.get(full_q) {
+                            some(enum_def) => {
+                                if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(enum_def.name) }
+                            },
+                            none => {}
+                        }
+                    }
+                }
+            }
         },
         none => { variant_enum = ctx.env.types.variant_to_enum.get(name) }
     }

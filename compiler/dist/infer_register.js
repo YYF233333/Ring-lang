@@ -211,6 +211,11 @@ function prefix_decl_name(mod_name, decl) {
       return ast$Decl_TypeAlias(`${mod_name}::${name}`, type_params, type_expr, is_pub, span);
       break __ring_match6;
     }
+    if (__ring_m6._tag === "ModBlock") {
+      const name = __ring_m6.name; const uses = __ring_m6.uses; const decls = __ring_m6.decls; const required_effects = __ring_m6.required_effects; const is_pub = __ring_m6.is_pub; const span = __ring_m6.span;
+      return ast$Decl_ModBlock(`${mod_name}::${name}`, uses, decls, required_effects, is_pub, span);
+      break __ring_match6;
+    }
     return decl;
     break __ring_match6;
   }

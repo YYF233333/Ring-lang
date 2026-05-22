@@ -1339,19 +1339,33 @@ impl Parser {
                 return Expr::Ident { name: variant_name, qualifier: some(name), span: self.make_span(start, variant_tok.span.end) }
             }
 
-            // Module-qualified access: mod_name::member (lowercase qualifier)
+            // Module-qualified access: mod::submod::...::member (lowercase qualifier chain)
             // Also handles self::member for relative paths
             if !is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
-                self.advance()
-                let member_tok = self.expect(TokenKind::TkIdent)
-                let member_name = member_tok.value
+                let mut qualifier_parts: List<Str> = [name]
+                let mut member_tok = tok
+                let mut member_name = name
+                // Consume chains of lowercase::lowercase::... to build the qualifier
+                while self.check(TokenKind::TkColonColon) {
+                    self.advance()
+                    member_tok = self.expect(TokenKind::TkIdent)
+                    member_name = member_tok.value
+                    if !is_uppercase(member_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
+                        // Another mod segment, continue building qualifier
+                        qualifier_parts.push(member_name)
+                    } else {
+                        // Final member (uppercase type/enum or lowercase function/const)
+                        break
+                    }
+                }
+                let qualifier_str = qualifier_parts.join("::")
 
-                // Two-level qualified: mod::Enum::Variant
+                // Check for Enum::Variant pattern: qualifier::Enum::Variant
                 if is_uppercase(member_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
                     self.advance()
                     let variant_tok = self.expect(TokenKind::TkIdent)
                     let variant_name = variant_tok.value
-                    let full_qualifier = "${name}::${member_name}"
+                    let full_qualifier = "${qualifier_str}::${member_name}"
 
                     if allow_struct_lit && is_uppercase(variant_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
                         return self.parse_struct_literal(variant_name, start, some(full_qualifier))
@@ -1361,10 +1375,10 @@ impl Parser {
                 }
 
                 if allow_struct_lit && is_uppercase(member_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
-                    return self.parse_struct_literal(member_name, start, some(name))
+                    return self.parse_struct_literal(member_name, start, some(qualifier_str))
                 }
 
-                return Expr::Ident { name: member_name, qualifier: some(name), span: self.make_span(start, member_tok.span.end) }
+                return Expr::Ident { name: member_name, qualifier: some(qualifier_str), span: self.make_span(start, member_tok.span.end) }
             }
 
             if allow_struct_lit && is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
@@ -1603,19 +1617,30 @@ impl Parser {
             let mut name = tok.value
             let mut qualifier: Str? = none
 
-            // Module-qualified enum pattern: mod::Enum::Variant(...)
+            // Module-qualified enum pattern: mod::submod::...::Enum::Variant(...)
             if !is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
-                self.advance()
-                let enum_tok = self.expect(TokenKind::TkIdent)
-                let enum_name = enum_tok.value
-                if is_uppercase(enum_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
+                let mut qual_parts: List<Str> = [name]
+                let mut next_name = name
+                // Consume chains of lowercase segments
+                while self.check(TokenKind::TkColonColon) {
+                    self.advance()
+                    let next_tok = self.expect(TokenKind::TkIdent)
+                    next_name = next_tok.value
+                    if !is_uppercase(next_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
+                        qual_parts.push(next_name)
+                    } else {
+                        break
+                    }
+                }
+                let qual_str = qual_parts.join("::")
+                if is_uppercase(next_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
                     self.advance()
                     let variant_tok = self.expect(TokenKind::TkIdent)
-                    qualifier = some("${name}::${enum_name}")
+                    qualifier = some("${qual_str}::${next_name}")
                     name = variant_tok.value
                 } else {
-                    qualifier = some(name)
-                    name = enum_name
+                    qualifier = some(qual_str)
+                    name = next_name
                 }
             }
 
@@ -1886,10 +1911,22 @@ impl Parser {
         let mut actual_name = name
 
         if self.check(TokenKind::TkColonColon) {
-            self.advance()
-            let member_tok = self.expect(TokenKind::TkIdent)
-            qualifier = some(name)
-            actual_name = member_tok.value
+            // Support multi-level: mod::submod::...::Type
+            let mut qual_parts: List<Str> = [name]
+            while self.check(TokenKind::TkColonColon) {
+                self.advance()
+                let member_tok = self.expect(TokenKind::TkIdent)
+                let member_name = member_tok.value
+                if !is_uppercase(member_name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
+                    // Another lowercase mod segment
+                    qual_parts.push(member_name)
+                } else {
+                    // Final segment (the type name)
+                    actual_name = member_name
+                    break
+                }
+            }
+            qualifier = some(qual_parts.join("::"))
         }
 
         let type_args = self.try_parse_type_args()

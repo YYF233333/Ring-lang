@@ -149,7 +149,9 @@ function check_decl(ctx, decl, __ring_ev_fail) {
 }
 
 function check_mod_decl(ctx, mod_name, uses, decls, required_effects, is_pub, span, __ring_ev_fail) {
-  List_push(ctx.mod_path_stack, mod_name);
+  const segments = Str_split(mod_name, "::");
+  const simple_name = Option_unwrap_or(List_get(segments, (List_len(segments) - 1)), mod_name);
+  List_push(ctx.mod_path_stack, simple_name);
   infer_register$insert_mod_aliases(ctx, mod_name, decls, false);
   resolve_mod_uses(ctx, uses);
   let cap_row = Option_none;

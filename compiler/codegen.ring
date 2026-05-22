@@ -110,6 +110,29 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                             }
                         },
                         HDecl::Const { name: cname, .. } => { ctx.local_names.insert(cname) },
+                        HDecl::ModBlock { name: sub_mname, decls: sub_mod_decls, .. } => {
+                            ctx.local_names.insert(sub_mname)
+                            for sub_subdecl in sub_mod_decls {
+                                match sub_subdecl {
+                                    HDecl::Fn { name: fname2, effects: eff2, .. } => {
+                                        ctx.local_names.insert(fname2)
+                                        if eff2.effects.len() > 0 {
+                                            ctx.local_fn_effects.insert(fname2, eff2)
+                                        }
+                                    },
+                                    HDecl::Struct { name: sname2, .. } => { ctx.local_names.insert(sname2) },
+                                    HDecl::Enum { name: ename2, variants: vars2, .. } => {
+                                        ctx.local_names.insert(ename2)
+                                        for v in vars2 {
+                                            ctx.local_names.insert(v.name)
+                                            ctx.local_names.insert("${ename2}_${v.name}")
+                                        }
+                                    },
+                                    HDecl::Const { name: cname2, .. } => { ctx.local_names.insert(cname2) },
+                                    _ => {}
+                                }
+                            }
+                        },
                         _ => {}
                     }
                 }
@@ -135,6 +158,18 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                                 let mut callees = set_new()
                                 collect_local_calls(body, ctx.local_names, callees)
                                 fn_callees.insert(fname, callees)
+                            },
+                            HDecl::ModBlock { decls: sub_mod_decls, .. } => {
+                                for sub_subdecl in sub_mod_decls {
+                                    match sub_subdecl {
+                                        HDecl::Fn { name: fname2, body: body2, .. } => {
+                                            let mut callees2 = set_new()
+                                            collect_local_calls(body2, ctx.local_names, callees2)
+                                            fn_callees.insert(fname2, callees2)
+                                        },
+                                        _ => {}
+                                    }
+                                }
                             },
                             _ => {}
                         }
@@ -251,6 +286,46 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                         },
                         HDecl::Trait { name: tname, methods: tmethods, .. } => {
                             ctx.trait_decls.insert(tname, HTraitDeclInfo { name: tname, methods: tmethods })
+                        },
+                        HDecl::ModBlock { decls: sub_mod_decls, .. } => {
+                            for sub_subdecl in sub_mod_decls {
+                                match sub_subdecl {
+                                    HDecl::Struct { name: sname2, fields: fields2, .. } => {
+                                        let qname2 = qualify(ctx, sname2)
+                                        let mut fnames2: List<Str> = [""]; fnames2.clear()
+                                        for f in fields2 { fnames2.push(f.name) }
+                                        ctx.struct_field_order.insert(qname2, fnames2)
+                                    },
+                                    HDecl::Impl { target_type: tt2, trait_name: ttn2, methods: mm2, .. } => {
+                                        for m in mm2 {
+                                            match m {
+                                                HDecl::Fn { name: mn2, .. } => {
+                                                    let key2 = "${qualify(ctx, tt2)}.${mn2}"
+                                                    match ttn2 {
+                                                        none => {
+                                                            match ctx.impl_methods.get(key2) {
+                                                                none => { ctx.impl_methods.insert(key2, none) },
+                                                                some(_) => {},
+                                                            }
+                                                        },
+                                                        some(tn2) => {
+                                                            match ctx.impl_methods.get(key2) {
+                                                                none => { ctx.impl_methods.insert(key2, some(tn2)) },
+                                                                some(_) => {},
+                                                            }
+                                                        },
+                                                    }
+                                                },
+                                                _ => {},
+                                            }
+                                        }
+                                    },
+                                    HDecl::Trait { name: tname2, methods: tmethods2, .. } => {
+                                        ctx.trait_decls.insert(tname2, HTraitDeclInfo { name: tname2, methods: tmethods2 })
+                                    },
+                                    _ => {}
+                                }
+                            }
                         },
                         _ => {}
                     }

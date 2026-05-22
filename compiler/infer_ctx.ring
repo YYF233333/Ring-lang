@@ -573,7 +573,22 @@ pub fn resolve_type_expr(mut ctx: InferCtx, texpr: TypeExpr) -> Type {
                     if resolved_q == "" {
                         resolve_named_type(ctx, name, type_args, span)
                     } else {
-                        resolve_named_type(ctx, "${resolved_q}::${name}", type_args, span)
+                        let qualified_type_name = "${resolved_q}::${name}"
+                        // Try direct lookup first
+                        if ctx.env.types.structs.contains_key(qualified_type_name) || ctx.env.types.enums.contains_key(qualified_type_name) || ctx.env.types.type_aliases.contains_key(qualified_type_name) {
+                            resolve_named_type(ctx, qualified_type_name, type_args, span)
+                        } else if ctx.mod_path_stack.len() > 0 {
+                            // Fallback: try prepending current mod path for relative references
+                            let mod_prefix = ctx.mod_path_stack.join("::")
+                            let full_type_name = "${mod_prefix}::${qualified_type_name}"
+                            if ctx.env.types.structs.contains_key(full_type_name) || ctx.env.types.enums.contains_key(full_type_name) || ctx.env.types.type_aliases.contains_key(full_type_name) {
+                                resolve_named_type(ctx, full_type_name, type_args, span)
+                            } else {
+                                resolve_named_type(ctx, qualified_type_name, type_args, span)
+                            }
+                        } else {
+                            resolve_named_type(ctx, qualified_type_name, type_args, span)
+                        }
                     }
                 },
                 none => resolve_named_type(ctx, name, type_args, span)
@@ -918,23 +933,39 @@ fn bind_named_constructor_pattern(
 
 fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span: Span) -> Str? {
     match qualifier {
-        some(q) => match ctx.env.types.enums.get(q) {
-            some(enum_def) => {
-                if enum_def.variants.any(fn(v) { v.name == variant_name }) {
-                    some(enum_def.name)
-                } else {
-                    type_error(ctx.sink, E0201,
+        some(q) => {
+            // Try direct qualifier first
+            let direct = ctx.env.types.enums.get(q)
+            match direct {
+                some(enum_def) => {
+                    if enum_def.variants.any(fn(v) { v.name == variant_name }) {
+                        return some(enum_def.name)
+                    }
+                    let _ = type_error(ctx.sink, E0201,
                         "'${q}' has no variant '${variant_name}'",
                         span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
-                    none
-                }
-            },
-            none => {
-                type_error(ctx.sink, E0201,
-                    "'${q}' has no variant '${variant_name}'",
-                    span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
-                none
+                    return none
+                },
+                none => {}
             }
+            // Fallback: try prepending current mod path
+            if ctx.mod_path_stack.len() > 0 {
+                let mod_prefix = ctx.mod_path_stack.join("::")
+                let full_q = "${mod_prefix}::${q}"
+                let fallback = ctx.env.types.enums.get(full_q)
+                match fallback {
+                    some(enum_def2) => {
+                        if enum_def2.variants.any(fn(v) { v.name == variant_name }) {
+                            return some(enum_def2.name)
+                        }
+                    },
+                    none => {}
+                }
+            }
+            let _ = type_error(ctx.sink, E0201,
+                "'${q}' has no variant '${variant_name}'",
+                span, DiagnosticContext::UndefinedVariable { name: variant_name, scope_locals: none })
+            none
         },
         none => ctx.env.types.variant_to_enum.get(variant_name)
     }
