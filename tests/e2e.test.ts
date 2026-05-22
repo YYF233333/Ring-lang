@@ -506,6 +506,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_unhandled_effect.ring", error_pattern: "E0403" },
     { file: "error_assign_temp_field.ring", error_pattern: "E0205" },
     { file: "audit_try_reserved.ring", error_pattern: "E0101" },
+    { file: "exhaustive_nonfinite_msg.ring", error_pattern: "non-finite type" },
   ];
 
   for (const tc of negative_cases) {

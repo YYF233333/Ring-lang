@@ -3102,7 +3102,8 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
     const __ring_m157 = missing;
     if (__ring_m157._tag === "some") {
       const m = __ring_m157._0;
-      const _ = infer_ctx$type_error(ctx.sink, codes$E0601, `Non-exhaustive match on type ${types$type_to_string(scrut_type_resolved)}: missing pattern for ${m}`, span, diagnostics$DiagnosticContext_PatternError(`missing: ${m}`));
+      const msg = ((m === "_") ? `Non-exhaustive match: non-finite type '${types$type_to_string(scrut_type_resolved)}' requires a wildcard '_' or binding pattern` : `Non-exhaustive match on type ${types$type_to_string(scrut_type_resolved)}: missing pattern for ${m}`);
+      const _ = infer_ctx$type_error(ctx.sink, codes$E0601, msg, span, diagnostics$DiagnosticContext_PatternError(`missing: ${m}`));
       break __ring_match157;
     }
     if (__ring_m157._tag === "none") {
@@ -3280,7 +3281,8 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
     const __ring_m164 = missing;
     if (__ring_m164._tag === "some") {
       const m = __ring_m164._0;
-      const _ = infer_ctx$type_error(ctx.sink, codes$E0601, `Non-exhaustive catch on error type ${types$type_to_string(error_type_resolved)}: missing pattern for ${m}`, span, diagnostics$DiagnosticContext_PatternError(`missing: ${m}`));
+      const msg = ((m === "_") ? `Non-exhaustive catch: non-finite error type '${types$type_to_string(error_type_resolved)}' requires a wildcard '_' or binding pattern` : `Non-exhaustive catch on error type ${types$type_to_string(error_type_resolved)}: missing pattern for ${m}`);
+      const _ = infer_ctx$type_error(ctx.sink, codes$E0601, msg, span, diagnostics$DiagnosticContext_PatternError(`missing: ${m}`));
       break __ring_match164;
     }
     if (__ring_m164._tag === "none") {
