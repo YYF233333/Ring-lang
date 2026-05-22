@@ -34,6 +34,12 @@ User says: "审查", "review", "自查", "全面检查", "交叉验证", or `/fu
 
 ### Phase 1: Parallel Audit
 
+**必须派发两个独立 agent 并行审计——这是不可跳过的步骤。**
+
+交叉验证是本审计流程的核心价值：不同模型的知识盲区不同，Claude 擅长类型系统和语义正确性，DS 擅长边界条件和模式匹配遗漏。单模型审计会有系统性盲点，双模型交叉才能覆盖。历史数据表明 DS 独立发现了约 30% 的 critical bug（如 #71、#75、#76）是 Claude 未发现的。
+
+**禁止省略 DS agent。** 即使时间紧张、即使觉得"这次改动很小不需要"、即使 DS 上次没发现什么——都必须派发。审计的价值在于独立视角，不在于每次都有发现。
+
 Dispatch two independent review agents simultaneously:
 
 1. **Claude Agent** (subagent_type: general-purpose, model: opus):
@@ -43,14 +49,15 @@ Dispatch two independent review agents simultaneously:
    - Test least-surprise principle: would a user be confused by any behavior?
    - Write e2e test cases for suspicious code paths and run them
 
-2. **DS Agent** (via deepseek-dispatch skill):
+2. **DS Agent** (via deepseek-dispatch skill, **必须派发**):
    - Independent read-only audit
    - Focus on: missed error handling, unsafe patterns, design-implementation gaps
    - Compare implementation against design.md specification
+   - DS 视角独特：更关注具体执行路径、边界条件、模式遗漏，与 Claude 的类型/语义视角互补
 
-Both agents output structured findings:
+Both agents output structured findings (严重度只允许 `critical` / `medium` / `low`):
 ```
-## [severity: Critical|Important|Minor|Style]
+## [severity: critical|medium|low]
 ### Title
 - **File**: path:line
 - **Description**: what's wrong
@@ -65,38 +72,51 @@ Both agents output structured findings:
 3. **Check backlog overlap**: if finding matches a `planning`/`doing` item → skip or note "in progress"
 4. **Classify**:
 
-| Category | Action | 写入位置 |
-|----------|--------|---------|
-| **Critical** (confirmed bug) | Record with fix suggestion | audit-report.md |
-| **Important** (definite but non-critical) | Record | audit-report.md |
-| **Minor** (low impact) | Record | audit-report.md |
-| **Style** (improvement idea) | Record | audit-report.md |
-| **Observation** (不算 bug 但值得注意的现象) | Record as `[观察]` | worker_feedback.md |
-| **False positive** | Discard with explanation | — |
+| Category | 严重度标记 | 写入位置 |
+|----------|-----------|---------|
+| **Critical** (confirmed bug, 运行时错误/类型不安全) | `[critical]` | audit-report.md |
+| **Medium** (definite issue, 非致命但影响正确性/健壮性) | `[medium]` | audit-report.md |
+| **Low** (low impact, 代码质量/可维护性/潜在问题) | `[low]` | audit-report.md |
+| **Observation** (不算 bug 但值得注意的现象) | — | worker_feedback.md |
+| **False positive** | — | 丢弃并说明原因 |
+
+**严重度只允许三级**：`critical` / `medium` / `low`。不使用 Important/Minor/Style 等其他词汇。
 
 ### Phase 3: Update audit-report.md
 
 `docs/audit-report.md` 是**活的 bug 看板**——做完即删。
 
-**追加规则**：
-- 新发现追加到对应分类 section 的表格中
-- 编号从现有最大编号 +1 继续
-- 每个发现标注发现者（如 `Opus+DS`）
+**格式规则（CRITICAL——Worker 依赖 `grep "\[open\]"` 扫描条目，格式不对 = Worker 看不见）**：
 
-**清理规则**：
-- 检查现有 `open` 状态的 item 是否已被修复（grep 代码确认）
-- 已修复的：**从表中删除**（不是标删除线，是直接删除整行）
-- 在 commit message 中记录删除了哪些已修复的 item
-
-**条目格式**：
-
+每个条目**必须**是 heading 格式：
 ```markdown
 ### #xxx <标题> [严重度] [open]
 
-**文件**：涉及的文件路径
-**描述**：问题描述
-**建议修复**：修复方向
+<问题描述，含文件路径、行号、影响、建议修复方向>
+
+发现者：<agent 名>
 ```
+
+- **`[open]` 标记不可省略**——没有 `[open]` 的条目 Worker 扫描不到
+- **严重度只能是 `critical` / `medium` / `low`**
+- **禁止使用表格格式**——必须用 `###` heading
+
+**追加规则**：
+- 新发现追加到对应分类 section 末尾
+- 编号从现有最大编号 +1 继续
+- 每个发现标注发现者（如 `Opus`、`DS`、`Opus+DS`）
+
+**清理规则**：
+- 检查现有 `[open]` 状态的 item 是否已被修复（grep 代码确认）
+- 已修复的：**直接删除整个 heading + body**（不是标删除线）
+- 在 commit message 中记录删除了哪些已修复的 item
+
+**格式验证（写入后自检）**：
+```bash
+# 写入完成后执行，确认所有新条目都能被 Worker 扫描到
+grep -n "\[open\]" docs/audit-report.md
+```
+如果新写入的条目不在输出中，说明格式错误，必须立即修正。
 
 ### Phase 3.5: Write Observations to Feedback
 
@@ -121,12 +141,13 @@ Both agents output structured findings:
 
 ```
 ## Audit Summary
-- 新发现: N 项（X Critical, Y Important, Z Minor, W Style）
+- 新发现: N 项（X critical, Y medium, Z low）
 - 观察: O 项（写入 worker_feedback.md）
 - 清理已修复: M 项删除
 - 当前 open 总数: K 项
-- 需要关注的 Critical: (列出)
+- 需要关注的 critical: (列出)
 - audit-report.md 已更新
+- 格式验证: grep "\[open\]" 命中 K 项 ✓
 ```
 
 ## Rules
