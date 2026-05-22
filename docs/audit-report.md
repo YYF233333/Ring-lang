@@ -33,7 +33,7 @@
 | 45 | `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields | 设计约束 | fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16） |
 | 42 | **Impl 方法 effect 不回传**：impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获 | **中** | Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境 |
 | 71 | **未 handle 的自定义 effect 无编译错误**：E0403 已定义但 checker 中无触发点。未 handle 的自定义 effect 到达 codegen 后缺少 evidence 参数，产生运行时错误 | **Bug** | checker 需在 `main` 或模块边界检查残余的 CustomEffect 是否已 handle |
-| 72 | **`impl<T: Eq>` bounded impl 方法跨类型调用冲突**：`check_impl_decl` 为 impl 类型参数创建的 fresh type var 在方法体检查后泄漏。同一作用域对不同具体类型（如 `List<Int>.has_item()` 和 `List<Str>.has_item()`）调用 bounded impl 方法时，第二次调用因 type var 已被统一为第一次的具体类型而报 "cannot unify Str with Int"。同一类型多次调用正常 | **Bug** | `check_impl_decl` 中 impl type param 的 fresh var 应在每次方法调用时独立实例化，而非在整个 impl 检查期间共享。可能需要将 type var 创建移到方法查找/实例化阶段 |
+| 72 | ~~**`impl<T: Eq>` bounded impl 方法跨类型调用冲突**~~：**已修复**。根因：`register_impl_method` 使用 `resolve_self_type` 为 self 参数创建了与 impl 类型参数无关的 fresh type var，导致 TypeScheme 的 `type_vars` 未包含 self 中的类型变量，`instantiate` 无法替换它们。修复：新增 `resolve_impl_self_type` 使用 impl 的类型参数构建 self 类型 | **已修复** | `compiler/infer_register.ring` |
 
 ## Codegen 关注项
 
