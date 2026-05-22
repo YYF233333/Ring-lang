@@ -17,7 +17,7 @@
 |------|------|
 | 范式 | 过程式 + 函数式，零 OOP 语义（但模拟 OOP 手感） |
 | 命名 | snake_case，ALL_CAPS 常量 |
-| 不可变 | 默认不可变，`var` 显式声明可变 |
+| 不可变 | 默认不可变，`let mut` 显式声明可变，`mut` 是唯一的可变性关键字 |
 | 错误 | 错误即 effect，自动冒泡；需持久化时物化为 Result 数据 |
 | 抽象 | 扁平 > 嵌套，中间变量 > 链式调用 |
 | 数据结构 | struct + enum + trait，不造 class 层级 |
@@ -196,38 +196,72 @@ let result: Result<Config, Str> = to_result(fn() { load_config(path) })
 
 设计原则：**错误在 effect 世界诞生和流动（零开销），只在需要持久化时物化为数据。大多数代码不需要物化。**
 
-### 1.6 闭包捕获
+### 1.6 可变性模型
 
-默认不可变值捕获。共享可变状态通过 `Cell<T>` 显式标记：
+Ring 的可变性由唯一关键字 `mut` 统一管理。设计原则：**局部 mutation 不是 side effect，共享 mutation 才是。**
+
+**`let` vs `let mut`：**
 
 ```
-// 不可变捕获（默认，安全）
-let x = 10
-let f = fn() { x + 1 }          // 捕获 x 的副本
+let x = 10                   // 不可变——不可重绑定，不可调用 mut self 方法
+let mut counter = 0          // 可变——可重绑定，可调用 mut self 方法
 
-// 共享可变状态用 Cell
-let counter = Cell(0)
-let inc = fn() { counter.update(fn(n) { n + 1 }) }
-let get = fn() { counter.get() }
+let list = [1, 2, 3]
+list.push(4)                 // ERROR — push 是 mut self 方法，需要 let mut
+list.len()                   // ok — len 是只读方法
+
+let mut list = [1, 2, 3]
+list.push(4)                 // ok
+list = [5, 6]                // ok — 重绑定
+```
+
+**`mut` 参数——传入可变引用：**
+
+```
+fn increment(mut counter: Int) {
+    counter = counter + 1    // 直接赋值，修改调用方的变量
+}
+
+let mut n = 0
+increment(mut n)             // 调用方显式标 mut
+print(n)                     // 1
+```
+
+编译器为 `mut` 参数自动 box（`{ value }` 对象），用户无感。调用方必须写 `mut` 前缀表示授权修改。
+
+**`mut self`——可变方法：**
+
+```
+impl List<T> {
+    fn len(self) -> Int { ... }           // 只读
+    fn push(mut self, value: T) { ... }   // 可变——调用方需要 let mut 绑定
+    fn clear(mut self) { ... }            // 可变
+}
+```
+
+**闭包捕获——编译器透明 box：**
+
+```
+let mut counter = 0
+let inc = fn() { counter = counter + 1 }  // 闭包捕获 mut 绑定
+let get = fn() { counter }
 
 inc(); inc(); inc()
 get()  // 3
 ```
 
-Cell 的操作带 `mut` effect，自动被推断和追踪：
+编译器检测到 `counter` 被闭包捕获且为 `let mut`，自动 box 为 `{ value: 0 }`。闭包和外层作用域共享同一个 box。用户写的是直觉代码，编译器干脏活。
 
-```
-impl Cell<T> {
-    fn get(self) -> T with {mut}
-    fn set(self, val: T) -> Unit with {mut}
-    fn update(self, f: fn(T) -> T) -> Unit with {mut}
-}
+**Effect 追踪规则：**
 
-// 用了 Cell 的代码自动带 mut effect
-// IDE 幽灵标注会显示
-```
+| 场景 | 是否 box | `mut<T>` effect | 理由 |
+|------|---------|-----------------|------|
+| `let mut x` 纯局部使用 | 不 box（JS `let`） | 不出现 | 局部 mutation 不是 side effect |
+| `let mut x` 被闭包捕获 | 自动 box | 出现在闭包签名 | 共享 mutation 是 side effect |
+| `mut` 参数传递 | 调用方 box | 出现在函数签名 | 修改外部状态是 side effect |
+| struct 字段修改（`let mut s; s.f = v`） | 不 box | 不出现 | 局部持有的 struct 修改是局部行为 |
 
-闭包本身无特殊规则——它就是捕获值的函数。可变性在 Cell 上，不在闭包上。GC 兜底意味着不需要 borrow checker，Cell.update 接受函数而非暴露引用，不会有 RefCell 式的运行时 panic。
+**不再需要 `Cell<T>` / `Ref<T>` 等包装类型。** 所有可变性通过 `let mut` + `mut` 参数 + 编译器自动 box 处理。词汇量：一个关键字 `mut`。
 
 **闭包内的 `return` 语义**：闭包内的 `return` 返回闭包本身，不影响外层函数。这与 Rust/Kotlin 一致，与 Ruby/Smalltalk 不同。当闭包作为 HOF 回调传入时（如 `list.map(fn(x) { return x * 2 })`），`return` 仅影响该回调。当前编译器通过 IIFE 实现 block expression，表达式位置的 block/if 包含 `return` 时可能被 IIFE 截获（已知限制 C10）。
 
@@ -1202,7 +1236,7 @@ JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体
 | `or`/`try`/`?` 运算符 | 已移除，使用 `unwrap`/`to_fail`/`to_result()`/`catch` | 简化语法面，减少歧义 |
 | catch 语义 | 总是消除 fail effect；部分处理用 catch 内部 match + re-raise（显式） | 消除隐式行为（原设计中有/无 catch-all arm 决定不同类型行为），降低概念数 |
 | 错误模型 | 生命周期模型：fail effect 为主（诞生/流动），to_result 物化为数据（落地） | effect 是运动形态，Result 是静止形态；双模型各有地盘而非竞争 |
-| `mut<S>` 参数化 | 保持无参数 `mut` | Cell<T> 泛型已保证类型安全 |
+| 可变性统一模型 | `var` → `let mut`，`Cell<T>` 消除，`mut` 为唯一可变关键字 | 局部 mutation 不 box 不追踪（非 side effect）；闭包捕获/mut 参数自动 box + `mut<T>` effect |
 | `++` 拼接运算符 | 不实现，使用字符串插值 | "一种事一种写法"原则 |
 | Lambda 双向类型传播 | receiver 统一提前 + lambda 接受 expected param types | 支持 `==` 在嵌套 closure 中正确推断 |
 | fn 类型 effect 标注 | `fn(T) -> U with {io}` 语法，无标注时 open row | 支持 HOF callback 的 effect 多态 |
