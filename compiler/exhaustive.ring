@@ -32,6 +32,54 @@ fn ctor_at(list: List<Ctor>, i: Int) -> Ctor {
     match list.get(i) { some(v) => v, none => panic("ctor_at: out of bounds") }
 }
 
+// Check if a type recursively contains itself (used to decide expanding set)
+fn type_is_recursive(ty: Type, key: Str) -> Bool {
+    match ty {
+        Type::EnumType { variants, .. } => {
+            for v in variants {
+                for ft in v.fields {
+                    if type_contains_key(ft, key) { return true }
+                }
+            }
+            false
+        },
+        _ => false,
+    }
+}
+
+fn type_contains_key(ty: Type, key: Str) -> Bool {
+    if type_to_string(ty) == key { return true }
+    match ty {
+        Type::EnumType { variants, .. } => {
+            for v in variants {
+                for ft in v.fields {
+                    if type_contains_key(ft, key) { return true }
+                }
+            }
+            false
+        },
+        Type::StructType { fields, .. } => {
+            for f in fields {
+                if type_contains_key(f.ty, key) { return true }
+            }
+            false
+        },
+        Type::TupleType { elements } => {
+            for e in elements {
+                if type_contains_key(e, key) { return true }
+            }
+            false
+        },
+        Type::FnType { params, return_type, .. } => {
+            for p in params {
+                if type_contains_key(p, key) { return true }
+            }
+            type_contains_key(return_type, key)
+        },
+        _ => false,
+    }
+}
+
 pub fn check_exhaustive(arms: List<HMatchArm>, scrutinee_type: Type, subst: UnionFind) -> Str? {
     let mut patterns: List<Pattern> = []
     for arm in arms {
@@ -417,7 +465,11 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFi
     match ctors {
         some(ctor_list) => {
             let mut new_expanding = set_clone(expanding)
-            if type_key != "" { new_expanding.insert(type_key) }
+            if type_key != "" {
+                if type_is_recursive(first_type, type_key) {
+                    new_expanding.insert(type_key)
+                }
+            }
             for ctor in ctor_list {
                 let mut specialized: List<List<Pattern>> = []
                 for row in rows {

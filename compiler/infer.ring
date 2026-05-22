@@ -2088,6 +2088,60 @@ fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name
 }
 
 // ============================================================
+// rewrite_bare_enum_bindings — recursively convert Binding→Constructor
+// for zero-field enum variants inside nested patterns (#79)
+// ============================================================
+
+fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
+    match pattern {
+        Pattern::Binding { name, span } => {
+            match env.types.variant_to_enum.get(name) {
+                some(ve) => match env.types.enums.get(ve) {
+                    some(edef) => {
+                        let v = edef.variants.find(fn(v_) { v_.name == name })
+                        match v {
+                            some(found_v) => {
+                                if found_v.fields.len() == 0 {
+                                    let mut _ep = [0]; _ep.clear(); let empty_pats = _ep.map(fn(i: Int) -> Pattern { panic("unreachable") })
+                                    Pattern::Constructor { name: name, qualifier: none, fields: empty_pats, span: span }
+                                } else {
+                                    pattern
+                                }
+                            },
+                            none => pattern,
+                        }
+                    },
+                    none => pattern,
+                },
+                none => pattern,
+            }
+        },
+        Pattern::TuplePattern { elements, span } => {
+            let mut new_elems: List<Pattern> = []
+            for elem in elements {
+                new_elems.push(rewrite_bare_enum_bindings(env, elem))
+            }
+            Pattern::TuplePattern { elements: new_elems, span: span }
+        },
+        Pattern::Constructor { name, qualifier, fields, span } => {
+            let mut new_fields: List<Pattern> = []
+            for f in fields {
+                new_fields.push(rewrite_bare_enum_bindings(env, f))
+            }
+            Pattern::Constructor { name: name, qualifier: qualifier, fields: new_fields, span: span }
+        },
+        Pattern::NamedConstructor { name, qualifier, fields, rest, span } => {
+            let mut new_fields: List<NamedPatternField> = []
+            for f in fields {
+                new_fields.push(NamedPatternField { name: f.name, pattern: rewrite_bare_enum_bindings(env, f.pattern), span: f.span })
+            }
+            Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: new_fields, rest: rest, span: span }
+        },
+        _ => pattern,
+    }
+}
+
+// ============================================================
 // infer_match
 // ============================================================
 
@@ -2101,30 +2155,7 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
     for arm in arms {
         ctx.env.push_scope()
         let arm_result = some({
-            let mut match_pattern = arm.pattern
-            match arm.pattern {
-                Pattern::Binding { name: pat_name, span: pspan } => {
-                    match ctx.env.types.variant_to_enum.get(pat_name) {
-                        some(ve) => match ctx.env.types.enums.get(ve) {
-                            some(edef) => {
-                                let v = edef.variants.find(fn(v_) { v_.name == pat_name })
-                                match v {
-                                    some(found_v) => {
-                                        if found_v.fields.len() == 0 {
-                                            let mut _ep = [0]; _ep.clear(); let empty_pats = _ep.map(fn(i: Int) -> Pattern { panic("unreachable") })
-                                            match_pattern = Pattern::Constructor { name: pat_name, qualifier: none, fields: empty_pats, span: pspan }
-                                        }
-                                    },
-                                    none => {}
-                                }
-                            },
-                            none => {}
-                        },
-                        none => {}
-                    }
-                },
-                _ => {}
-            }
+            let match_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern)
             bind_pattern(ctx, match_pattern, hexpr_type(scrut_r.hexpr), s)
 
             let mut guard_hexpr: HExpr? = none

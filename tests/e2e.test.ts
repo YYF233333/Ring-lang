@@ -436,6 +436,7 @@ const cases: TestCase[] = [
   { file: "mod_nested_block.ring", expected: "mod_nested_block: all tests passed\n" },
   { file: "audit_derive_tuple.ring", expected: "pass: derive tuple\n" },
   { file: "audit_safe_ident_globals.ring", expected: "pass: safe_ident globals\n" },
+  { file: "audit_match_tuple_bare_variant.ring", expected: "pass: match tuple bare variant\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

@@ -2832,6 +2832,90 @@ function infer_named_variant_construct(ctx, enum_name, variant_name, variant, en
   return new infer_ctx$InferResult(hir$HExpr_NamedVariantConstruct(enum_name, variant_name, hfields, hspread, enum_type, effects, span), s, effects);
 }
 
+function rewrite_bare_enum_bindings(env, pattern) {
+  __ring_match143: {
+    const __ring_m143 = pattern;
+    if (__ring_m143._tag === "Binding") {
+      const name = __ring_m143.name; const span = __ring_m143.span;
+      __ring_match144: {
+        const __ring_m144 = _Map_get(env.types.variant_to_enum, name);
+        if (__ring_m144._tag === "some") {
+          const ve = __ring_m144._0;
+          __ring_match145: {
+            const __ring_m145 = _Map_get(env.types.enums, ve);
+            if (__ring_m145._tag === "some") {
+              const edef = __ring_m145._0;
+              const v = ((__a) => { const __i = __a.findIndex((function(v_) { return (v_.name === name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(edef.variants);
+              __ring_match146: {
+                const __ring_m146 = v;
+                if (__ring_m146._tag === "some") {
+                  const found_v = __ring_m146._0;
+                  if ((List_len(found_v.fields) === 0)) {
+                    let _ep = [0];
+                    List_clear(_ep);
+                    const empty_pats = _ep.map((function(i) { return panic("unreachable"); }));
+                    return ast$Pattern_Constructor(name, Option_none, empty_pats, span);
+                  } else {
+                    return pattern;
+                  }
+                  break __ring_match146;
+                }
+                if (__ring_m146._tag === "none") {
+                  return pattern;
+                  break __ring_match146;
+                }
+                __match_fail(__ring_m146);
+              }
+              break __ring_match145;
+            }
+            if (__ring_m145._tag === "none") {
+              return pattern;
+              break __ring_match145;
+            }
+            __match_fail(__ring_m145);
+          }
+          break __ring_match144;
+        }
+        if (__ring_m144._tag === "none") {
+          return pattern;
+          break __ring_match144;
+        }
+        __match_fail(__ring_m144);
+      }
+      break __ring_match143;
+    }
+    if (__ring_m143._tag === "TuplePattern") {
+      const elements = __ring_m143.elements; const span = __ring_m143.span;
+      let new_elems = [];
+      for (const elem of elements) {
+        List_push(new_elems, rewrite_bare_enum_bindings(env, elem));
+      }
+      return ast$Pattern_TuplePattern(new_elems, span);
+      break __ring_match143;
+    }
+    if (__ring_m143._tag === "Constructor") {
+      const name = __ring_m143.name; const qualifier = __ring_m143.qualifier; const fields = __ring_m143.fields; const span = __ring_m143.span;
+      let new_fields = [];
+      for (const f of fields) {
+        List_push(new_fields, rewrite_bare_enum_bindings(env, f));
+      }
+      return ast$Pattern_Constructor(name, qualifier, new_fields, span);
+      break __ring_match143;
+    }
+    if (__ring_m143._tag === "NamedConstructor") {
+      const name = __ring_m143.name; const qualifier = __ring_m143.qualifier; const fields = __ring_m143.fields; const rest = __ring_m143.rest; const span = __ring_m143.span;
+      let new_fields = [];
+      for (const f of fields) {
+        List_push(new_fields, new ast$NamedPatternField(f.name, rewrite_bare_enum_bindings(env, f.pattern), f.span));
+      }
+      return ast$Pattern_NamedConstructor(name, qualifier, new_fields, rest, span);
+      break __ring_match143;
+    }
+    return pattern;
+    break __ring_match143;
+  }
+}
+
 function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
   const scrut_r = infer_expr(ctx, scrutinee, subst, __ring_ev_fail);
   let s = scrut_r.subst;
@@ -2841,55 +2925,7 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
   for (const arm of arms) {
     env$TypeEnv_push_scope(ctx.env);
     const arm_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some((function() {
-  let match_pattern = arm.pattern;
-  __ring_match143: {
-    const __ring_m143 = arm.pattern;
-    if (__ring_m143._tag === "Binding") {
-      const pat_name = __ring_m143.name; const pspan = __ring_m143.span;
-      __ring_match144: {
-        const __ring_m144 = _Map_get(ctx.env.types.variant_to_enum, pat_name);
-        if (__ring_m144._tag === "some") {
-          const ve = __ring_m144._0;
-          __ring_match145: {
-            const __ring_m145 = _Map_get(ctx.env.types.enums, ve);
-            if (__ring_m145._tag === "some") {
-              const edef = __ring_m145._0;
-              const v = ((__a) => { const __i = __a.findIndex((function(v_) { return (v_.name === pat_name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(edef.variants);
-              __ring_match146: {
-                const __ring_m146 = v;
-                if (__ring_m146._tag === "some") {
-                  const found_v = __ring_m146._0;
-                  if ((List_len(found_v.fields) === 0)) {
-                    let _ep = [0];
-                    List_clear(_ep);
-                    const empty_pats = _ep.map((function(i) { return panic("unreachable"); }));
-                    match_pattern = ast$Pattern_Constructor(pat_name, Option_none, empty_pats, pspan);
-                  }
-                  break __ring_match146;
-                }
-                if (__ring_m146._tag === "none") {
-                  break __ring_match146;
-                }
-                __match_fail(__ring_m146);
-              }
-              break __ring_match145;
-            }
-            if (__ring_m145._tag === "none") {
-              break __ring_match145;
-            }
-            __match_fail(__ring_m145);
-          }
-          break __ring_match144;
-        }
-        if (__ring_m144._tag === "none") {
-          break __ring_match144;
-        }
-        __match_fail(__ring_m144);
-      }
-      break __ring_match143;
-    }
-    break __ring_match143;
-  }
+  const match_pattern = rewrite_bare_enum_bindings(ctx.env, arm.pattern);
   infer_ctx$bind_pattern(ctx, match_pattern, hir$hexpr_type(scrut_r.hexpr), s);
   let guard_hexpr = Option_none;
   __ring_match147: {
