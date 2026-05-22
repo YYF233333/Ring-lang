@@ -9,14 +9,6 @@
 
 ## Critical Bugs
 
-### #78 Range 变量 `for..in` 运行时崩溃 [critical] [open]
-
-**运行时错误**：`let r = 0..5; for i in r { ... }` 产生 `TypeError: r is not iterable`。Range 表达式 codegen（codegen_expr.ring:98-101）生成 `{ start: s, end: e }`（普通 JS 对象，非 iterable）。`ForIn` codegen（codegen_stmt.ring:209-220）只特殊处理 `HExpr::RangeExpr` 直接出现在 iterable 位置的情况，生成 `for (let i = start; i < end; i++)`。当 Range 存储到变量后，codegen 走 generic `for..of` 路径，JS 对象无 `Symbol.iterator` → crash。此外 Range 对象丢失 `inclusive` 标志。
-
-测试复现：`let r = 0..5; for i in r { total = total + i }` → `TypeError: r is not iterable`
-
-发现者：Opus
-
 ### #79 嵌套 tuple 模式中裸 enum variant 生成重复 const 声明 [critical] [open]
 
 **编译产物 SyntaxError**：`match (a, b) { (none, none) => 0, ... }` 产生 `SyntaxError: Identifier 'none' has already been declared`。`infer_match`（infer.ring:2104-2127）的 Binding→Constructor 转换只处理 match arm 顶级 pattern。嵌套在 `TuplePattern` 内的裸 enum variant 名（如 `none`）不被转换，仍为 `Pattern::Binding`，codegen 对每个 `Binding` 生成 `const none = target[i]`，同名多次声明 → JS SyntaxError。
@@ -85,12 +77,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## Codegen
 
-### #72 Auto-derive 对 TupleType 使用 `FieldAction::Identity` [medium] [open]
-
-关联 #69。derive.ring:301 将 TupleType 映射为 Identity：Eq 用 `===`（引用比较）、Clone 浅拷贝（共享引用）、Ord 用 JS 字符串转换比较。struct 含 tuple 字段时 derive 全部错误。
-
-发现者：Opus
-
 ### #73 `gen_call` dict_dispatch 非 FieldAccess 分支可能重复首参 [low] [open]
 
 codegen_expr.ring:317-337 中 receiver 从 `args.get(0)` 取出后，又遍历全部 args push，导致 args[0] 出现两次。当前未触发（dict_dispatch callee 总是 FieldAccess），但是潜在 codegen bug。
@@ -114,12 +100,6 @@ codegen_expr.ring:196-202 只检查首字符是否为数字，`"0abc"` 等非法
 `resolve_field_action`（derive.ring:309）的 wildcard `_ => none` 对 `GenericType`、`NeverType`、`AnyType`、`ErrorType` 等统一返回 none，导致含这些类型字段的 struct 的 trait derive 静默失败。编译通过但无实际 trait 实现——后续对该类型的 `.eq()`/`.clone()` 调用在运行时因缺少 trait dict 而失败。至少 `ErrorType` 应返回 `FieldAction::Identity`（与 unify 的 absorb 语义一致）。
 
 发现者：DS
-
-### #85 `safe_ident` 缺少 NaN/Infinity 等 JS 全局标识符 [medium] [open]
-
-`JS_RESERVED`（codegen_ctx.ring:3-16）缺少 JS 全局标识符：`NaN`、`Infinity`、`globalThis`、`console`、`process`（运行时使用）。Ring 用户将变量命名为 `NaN` 或 `Infinity` 会 shadow JS 全局，导致运行时语义错误（`NaN !== NaN` 变为 `42 !== 42`）。优先级：`NaN`、`Infinity`（影响数值语义）、`process`（运行时依赖）。
-
-发现者：Opus
 
 ### #28 HOF inline 代码在 List/Map/Set/Option 间重复 [low] [open]
 
