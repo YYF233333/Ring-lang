@@ -128,6 +128,9 @@ pub fn emit_block_body(mut ctx: CodegenCtx, block: HExpr) {
 // Match statement (statement-mode)
 // ============================================================
 
+// Match codegen uses a JS labeled block (`__ring_matchN: { ... break __ring_matchN; }`) to
+// exit early when a pattern matches. User `break` (to exit a loop) compiles to plain `break;`,
+// which targets the enclosing loop — not the labeled block — so they do not conflict.
 fn emit_match_stmt(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>, mode: Str) {
     let label = "__ring_match${ctx.match_counter}"
     ctx.match_counter = ctx.match_counter + 1
