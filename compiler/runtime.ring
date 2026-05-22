@@ -109,14 +109,15 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function set_clone(s) { return new Set(s); }")
     lines.push("function _Set_len(self) { return self.size; }")
     lines.push("function _Set_to_list(self) { return Array.from(self); }")
-    lines.push("function _Set_insert(self, x) { self.add(x); }")
-    lines.push("function _Set_remove(self, x) { self.delete(x); }")
+    lines.push("function _Set_insert(self, x) { for (var __v of self) { if (__ring_deep_eq(__v, x)) return; } self.add(x); }")
+    lines.push("function _Set_remove(self, x) { for (var __v of self) { if (__ring_deep_eq(__v, x)) { self.delete(__v); return; } } }")
     lines.push("function _Set_union(self, other) { return new Set([...self, ...other]); }")
     lines.push("function _Set_intersect(self, other) { return new Set([...self].filter(function(x) { return other.has(x); })); }")
     lines.push("function _Set_difference(self, other) { return new Set([...self].filter(function(x) { return !other.has(x); })); }")
     lines.push("function _Set_clear(self) { self.clear(); }")
     lines.push("")
-    lines.push("function __ring_tuple_eq(a, b) { if (a.length !== b.length) return false; for (var i = 0; i < a.length; i++) { if (Array.isArray(a[i]) && Array.isArray(b[i])) { if (!__ring_tuple_eq(a[i], b[i])) return false; } else if (a[i] !== b[i]) return false; } return true; }")
+    lines.push("function __ring_deep_eq(a, b) { if (a === b) return true; if (Array.isArray(a) && Array.isArray(b)) return __ring_tuple_eq(a, b); if (typeof a === \"object\" && a !== null && typeof b === \"object\" && b !== null) { var ka = Object.keys(a), kb = Object.keys(b); if (ka.length !== kb.length) return false; for (var j = 0; j < ka.length; j++) { if (!__ring_deep_eq(a[ka[j]], b[ka[j]])) return false; } return true; } return false; }")
+    lines.push("function __ring_tuple_eq(a, b) { if (a.length !== b.length) return false; for (var i = 0; i < a.length; i++) { if (!__ring_deep_eq(a[i], b[i])) return false; } return true; }")
     lines.push("function __ring_index(arr, i) { if (i < 0 || i >= arr.length) throw new Error(\"Index out of bounds: \" + i + \", length: \" + arr.length); return arr[i]; }")
     lines.push("function __ring_map_index(map, key) { if (!map.has(key)) throw new Error(\"Key not found: \" + key); return map.get(key); }")
     lines.push("function __ring_str_index(s, i) { if (i < 0 || i >= s.length) throw new Error(\"Index out of bounds: \" + i + \", length: \" + s.length); return s[i]; }")
@@ -206,7 +207,7 @@ pub fn RUNTIME_CODE() -> Str {
 
 pub const RUNTIME_EXPORT_NAMES: List<Str> =
     ["__EffectAbort", "__ring_raise_fail", "Cell", "Cell_get", "Cell_set", "Cell_update",
-     "__match_fail", "__ring_tuple_eq", "__ring_index", "__ring_map_index", "__ring_str_index",
+     "__match_fail", "__ring_deep_eq", "__ring_tuple_eq", "__ring_index", "__ring_map_index", "__ring_str_index",
      "print", "assert", "panic", "exit", "json_stringify",
      "Option_some", "Option_none",
      "Option_is_some", "Option_is_none", "Option_unwrap_or", "Option_unwrap",
@@ -226,7 +227,8 @@ pub const RUNTIME_EXPORT_NAMES: List<Str> =
      "_Map_keys", "_Map_values", "_Map_entries", "_Map_insert", "_Map_remove", "_Map_clear",
      "set_new", "set_from", "set_clone",
      "_Set_len", "_Set_to_list",
-     "_Set_insert", "_Set_remove", "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear",
+     "_Set_insert", "_Set_remove",
+     "_Set_union", "_Set_intersect", "_Set_difference", "_Set_clear",
      "string_builder",
      "StringBuilder_add", "StringBuilder_line", "StringBuilder_add_int",
      "StringBuilder_to_str", "StringBuilder_len",
