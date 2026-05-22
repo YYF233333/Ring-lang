@@ -927,7 +927,64 @@ fn bind_named_constructor_pattern(
             },
             none => {}
         },
-        none => {}
+        none => {
+            // Not an enum variant — try struct lookup
+            let struct_name = match qualifier {
+                some(q) => q,
+                none => name
+            }
+            bind_struct_pattern_fields(ctx, struct_name, name, fields, expected_type, subst, span)
+        }
+    }
+}
+
+fn bind_struct_pattern_fields(
+    ctx: InferCtx, struct_name: Str, display_name: Str, fields: List<NamedPatternField>,
+    expected_type: Type, subst: UnionFind, span: Span
+) {
+    match ctx.env.types.structs.get(struct_name) {
+        some(struct_def) => {
+            let resolved_expected = apply_subst(subst, expected_type)
+            let inst_map = build_instantiation_map(struct_def.type_param_vars, resolved_expected)
+            for field in fields {
+                let found = struct_def.fields.find(fn(sf) { sf.name == field.name })
+                match found {
+                    some(sf) => {
+                        let field_type = if inst_map.len() > 0 { apply_subst_map(inst_map, sf.ty) } else { sf.ty }
+                        bind_pattern(ctx, field.pattern, field_type, subst)
+                    },
+                    none => {
+                        let _ = type_error(ctx.sink, E0301,
+                            "struct '${display_name}' has no field '${field.name}'",
+                            field.span, DiagnosticContext::OtherContext { detail: some("unknown field '${field.name}'") })
+                    }
+                }
+            }
+        },
+        none => {
+            // Try with mod path prefix
+            if ctx.mod_path_stack.len() > 0 {
+                let mod_prefix = ctx.mod_path_stack.join("::")
+                let full_name = "${mod_prefix}::${struct_name}"
+                match ctx.env.types.structs.get(full_name) {
+                    some(sdef) => {
+                        let resolved_expected = apply_subst(subst, expected_type)
+                        let inst_map = build_instantiation_map(sdef.type_param_vars, resolved_expected)
+                        for field in fields {
+                            let found = sdef.fields.find(fn(sf) { sf.name == field.name })
+                            match found {
+                                some(sf) => {
+                                    let field_type = if inst_map.len() > 0 { apply_subst_map(inst_map, sf.ty) } else { sf.ty }
+                                    bind_pattern(ctx, field.pattern, field_type, subst)
+                                },
+                                none => {}
+                            }
+                        }
+                    },
+                    none => {}
+                }
+            }
+        }
     }
 }
 
@@ -976,6 +1033,16 @@ fn build_instantiation_map(type_param_vars: List<Int>, resolved_expected: Type) 
     match resolved_expected {
         Type::EnumType { type_params, .. } => {
             let mut i = 0
+            while i < type_param_vars.len() && i < type_params.len() {
+                match (type_param_vars.get(i), type_params.get(i)) {
+                    (some(var_id), some(tp)) => { inst_map.insert(var_id, tp) },
+                    _ => {}
+                }
+                i = i + 1
+            }
+        },
+        Type::StructType { type_params, .. } => {
+            var i = 0
             while i < type_param_vars.len() && i < type_params.len() {
                 match (type_param_vars.get(i), type_params.get(i)) {
                     (some(var_id), some(tp)) => { inst_map.insert(var_id, tp) },

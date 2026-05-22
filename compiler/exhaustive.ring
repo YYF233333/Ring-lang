@@ -1,5 +1,5 @@
 use ast::{Pattern, NamedPatternField, span_zero, LiteralValue}
-use types::{Type, type_to_string}
+use types::{Type, StructField, type_to_string}
 use union_find::{UnionFind}
 use env::{apply_subst}
 use hir::{HMatchArm}
@@ -144,8 +144,6 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
             }
         },
         Type::StructType { name: sname, fields: sfields, .. } => {
-            // A struct is a single-constructor type -- if any pattern matches
-            // the struct name, the struct is covered (check sub-fields recursively)
             let mut covered = false
             let mut sub_patterns: List<List<Pattern>> = []
             let mut field_names: List<Str> = []

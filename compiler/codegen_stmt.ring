@@ -1,7 +1,7 @@
 use ast::{Pattern, NamedPatternField, LiteralValue}
 use hir::{HExpr, HStmt, HMatchArm, HLetDestructureBinding,
     ENUM_TAG_FIELD, RUNTIME_MATCH_FAIL}
-use codegen_ctx::{CodegenCtx, emit, push_indent, pop_indent, safe_ident}
+use codegen_ctx::{CodegenCtx, emit, push_indent, pop_indent, safe_ident, qualify}
 
 // Forward declarations — these will be provided by codegen_expr
 // In Ring, we pass gen_expr as a function parameter or use a separate module import
@@ -137,7 +137,7 @@ fn emit_match_stmt(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
     emit(ctx, "const ${scrut_var} = ${scrut_js};")
 
     for arm in arms {
-        let cond = gen_pattern_condition(scrut_var, arm.pattern)
+        let cond = gen_pattern_condition(ctx, scrut_var, arm.pattern)
         let bindings_str = gen_pattern_bindings(scrut_var, arm.pattern)
         match arm.guard {
             none => {
@@ -268,7 +268,7 @@ pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
             push_indent(ctx)
             let scrutinee = gen_expr(ctx, expr)
             emit(ctx, "const __ring_t = ${scrutinee};")
-            let cond = gen_pattern_condition("__ring_t", pattern)
+            let cond = gen_pattern_condition(ctx, "__ring_t", pattern)
             emit(ctx, "if (${cond}) {")
             push_indent(ctx)
             let bindings = gen_pattern_bindings("__ring_t", pattern)
@@ -346,7 +346,7 @@ pub fn gen_stmt_inline(mut ctx: CodegenCtx, stmt: HStmt) -> Str {
 // Pattern condition generation
 // ============================================================
 
-pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
+pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str {
     match pat {
         Pattern::Wildcard { .. } => "true",
         Pattern::Binding { .. } => "true",
@@ -365,7 +365,7 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
             for i in 0..fields.len() {
                 match fields.get(i) {
                     some(f) => {
-                        let sub = gen_pattern_condition("${target}._${i}", f)
+                        let sub = gen_pattern_condition(ctx, "${target}._${i}", f)
                         if sub != "true" { sub_conds.push(sub) }
                     },
                     none => {},
@@ -378,17 +378,33 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
             }
         },
         Pattern::NamedConstructor { name, fields, .. } => {
-            let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
-            let mut sub_conds: List<Str> = [""]; sub_conds.clear()
-            for f in fields {
-                let sname = safe_ident(f.name)
-                let sub = gen_pattern_condition("${target}.${sname}", f.pattern)
-                if sub != "true" { sub_conds.push(sub) }
-            }
-            if sub_conds.len() == 0 { tag_check }
-            else {
-                let joined = sub_conds.join(" && ")
-                "${tag_check} && ${joined}"
+            if ctx.struct_field_order.contains_key(name) {
+                let qualified_name = qualify(ctx, safe_ident(name))
+                let inst_check = "${target} instanceof ${qualified_name}"
+                let mut sub_conds: List<Str> = [""]; sub_conds.clear()
+                for f in fields {
+                    let sname = safe_ident(f.name)
+                    let sub = gen_pattern_condition(ctx, "${target}.${sname}", f.pattern)
+                    if sub != "true" { sub_conds.push(sub) }
+                }
+                if sub_conds.len() == 0 { inst_check }
+                else {
+                    let joined = sub_conds.join(" && ")
+                    "${inst_check} && ${joined}"
+                }
+            } else {
+                let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
+                let mut sub_conds: List<Str> = [""]; sub_conds.clear()
+                for f in fields {
+                    let sname = safe_ident(f.name)
+                    let sub = gen_pattern_condition(ctx, "${target}.${sname}", f.pattern)
+                    if sub != "true" { sub_conds.push(sub) }
+                }
+                if sub_conds.len() == 0 { tag_check }
+                else {
+                    let joined = sub_conds.join(" && ")
+                    "${tag_check} && ${joined}"
+                }
             }
         },
         Pattern::TuplePattern { elements, .. } => {
@@ -397,7 +413,7 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(e) => {
-                        let sub = gen_pattern_condition("${target}[${i}]", e)
+                        let sub = gen_pattern_condition(ctx, "${target}[${i}]", e)
                         if sub != "true" { sub_conds.push(sub) }
                     },
                     none => {},
