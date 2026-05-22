@@ -538,43 +538,114 @@ fn process(items) {
 // 推断: items: List<{age: Int, name: Str, ..rest}>
 ```
 
-### 3.2 标注等级由 Formatter 维护
+### 3.2 Formatter：标注密度管理器
 
-配置 `lang.toml`：
+Ring 的 formatter 不只是语法格式化工具（缩进/空白/换行），它同时管理**标注密度**——基于编译器的类型推断结果，在源码上增删类型和 effect 标注。源码是规范形式，标注是可增减的文档层。
+
+#### 3.2.1 标注等级
+
+配置 `.ringfmt.toml`：
 
 ```toml
 [annotations]
-level = 2
-# 0 = 裸奔
-# 1 = pub 函数签名
+level = 1
+# 0 = 零标注（只格式化语法）
+# 1 = pub 函数签名（返回类型 + effect）
 # 2 = 所有函数签名 + 模块边界 effect
 # 3 = 所有签名 + 所有 effect + 复杂表达式
-# 4 = 全标注
-
-[annotations.effects]
-ide_display = "inline"          # inline | gutter | highlight | none
-materialize_as = "comment"      # comment | annotation | none
+# 4 = 全标注（let 类型、lambda 参数、mut 标记）
 ```
 
-工作流：你手写 level 0 代码，`lang fmt` 按配置等级自动插入/更新标注。改了逻辑，标注自动跟着变。
+同一份代码在不同等级下的表现：
 
-```
-// 你写的（level 0）：
+```ring
+// Level 0 — 人类偏好，零噪音
 fn process(items) {
     items.filter(fn(x) { x.age > 18 }).map(fn(x) { x.name })
 }
 
-// lang fmt 后（level 2）：
-fn process(items: List<User>) -> List<Str> {
-    items.filter(fn(x) { x.age > 18 }).map(fn(x) { x.name })
+// Level 2 — LLM / 新人 / code review
+fn process(items: List<User>) -> List<Str> with {io} {
+    items.filter(fn(x: User) -> Bool { x.age > 18 }).map(fn(x: User) -> Str { x.name })
 }
 ```
 
-降级/升级标注只需要一个命令：
+降级/升级标注只需一个命令：
 
 ```bash
-lang fmt --annotation-level 4    # code review 时全展开
-lang fmt --annotation-level 1    # 日常开发最简洁
+ring fmt --level=4    # code review 时全展开
+ring fmt --level=0    # 日常开发最简洁
+ring fmt              # 使用 .ringfmt.toml 配置的默认等级
+ring fmt --check      # CI 检查：是否符合配置等级（不修改文件）
+```
+
+#### 3.2.2 标注语义：pub 契约 vs. 内部文档
+
+标注在两种位置有不同的语义强度：
+
+| 位置 | 语义 | 编译器行为 | 理由 |
+|------|------|-----------|------|
+| `pub fn` 签名（返回类型 + effect） | **契约** | 不匹配 = 编译错误 | 调用方依赖此签名，是 API 边界 |
+| 内部（let 类型、lambda 参数、局部 fn） | **文档** | 不匹配 = 编译错误 | 引导开发者运行 formatter 刷新 |
+
+两者都在编译时检查，但 formatter 对它们的处理策略不同：
+
+| 标注状态 | 内部标注 | pub 签名标注 |
+|----------|---------|-------------|
+| 缺失 | 按 level 补上 | 按 level 补上 |
+| 正确（匹配推断） | 保持 | 保持 |
+| **错误（不匹配推断）** | **直接更新** | **不动，报 warning** |
+
+关键区别：内部标注是 formatter 管辖范围，过期了直接刷新；pub 签名是 API 契约，可能是有意的 breaking change，也可能是无意的 body 改动，formatter 不替人做判断。
+
+#### 3.2.3 工作流
+
+```
+编辑代码
+  → ring fmt        # 内部标注自动刷新；pub 不一致的报 warning
+  → ring check      # pub 标注仍不一致 → 编译错误
+  → 人决定是否更新 pub 签名
+  → ring fmt        # 确认一致
+```
+
+**Intentional breaking change**：改了 pub fn 的 body 后，编译器报"标注 Int，推断 Option\<Int\>"。开发者主动修改标注 → 这个改标注的动作本身就是 breaking change 的显式声明。
+
+**Force mode**（绕过 pub 保护）：`ring fmt --level=0` 去掉所有标注 → `ring fmt --level=N` 重新生成 → pub 签名被重置为推断结果。两步操作 = 显式意图，不需要额外 flag。
+
+**不想管标注的人**：工作在 Level 0，没标注就没不一致的问题。需要时一键 `ring fmt --level=4` 全量生成。
+
+#### 3.2.4 机械约束
+
+三层保证标注与推断的一致性：
+
+**1. 编译器**：标注存在就检查。不匹配 = 编译错误。不区分 pub/内部——统一的信号："标注过期了"。
+
+**2. Formatter 性质**：
+- **幂等性**：`fmt(fmt(code)) == fmt(code)` — 格式化两次 = 格式化一次
+- **Round-trip**：`fmt(level=0, fmt(level=N, code)) == fmt(level=0, code)` — 升级再降级 = 降级
+- **语义不变**：`compile(fmt(level=0, code)) == compile(fmt(level=N, code))` — 任何 level 编译到相同结果
+- **规范化**：effect 排序、类型表示、空白 — formatter 输出唯一确定
+
+**3. CI**：`ring fmt --check` 验证文件是否符合配置等级，不符合 → 非零退出码。
+
+#### 3.2.5 架构：Formatter 是 Checker 的下游
+
+Formatter 需要类型推断结果才能生成标注，因此它在编译管线中的位置是 checker 之后：
+
+```
+源码 → Parser → AST → Checker → HIR（含完整类型 + effect）
+                                   ↓
+                             Formatter（读 HIR，按 level 回写标注到源码）
+                                   ↓
+                             格式化后的源码
+```
+
+纯语法格式化（`ring fmt` 不带 `--level`）只需要 AST，不需要 checker。标注密度调整需要 checker 结果。Formatter 与 LSP 共享 checker 基础设施。
+
+```toml
+[annotations.effects]
+ide_display = "inline"          # inline | gutter | highlight | none
+materialize_as = "comment"      # comment | annotation | none
 ```
 
 ---
