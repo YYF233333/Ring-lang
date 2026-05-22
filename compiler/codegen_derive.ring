@@ -9,7 +9,7 @@ pub fn get_derived_method_names(trait_name: Str) -> List<Str> {
         "Clone" => ["clone"],
         "Debug" => ["debug"],
         "Ord" => ["cmp"],
-        _ => { let e: List<Str> = [""]; e.clear(); e },
+        _ => { let mut e: List<Str> = [""]; e.clear(); e },
     }
 }
 

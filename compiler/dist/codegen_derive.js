@@ -39,7 +39,7 @@ function get_derived_method_names(trait_name) {
       return ["cmp"];
       break __ring_match0;
     }
-    const e = [""];
+    let e = [""];
     List_clear(e);
     return e;
     break __ring_match0;

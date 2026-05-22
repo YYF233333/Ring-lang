@@ -175,7 +175,7 @@ function compile_project(entry_file) {
           if (Array.isArray(__ring_m6) && __ring_m6.length === 2 && __ring_m6[0]._tag === "some" && __ring_m6[1]._tag === "some") {
             const mod_ = __ring_m6[0]._0; const hir = __ring_m6[1]._0;
             const prefix = resolver$module_prefix(mod_.path_segments);
-            const imports_map = build_imports_map(phases.graph, phases.module_exports_map, key);
+            let imports_map = build_imports_map(phases.graph, phases.module_exports_map, key);
             const esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key);
             const eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key);
             const skip_preamble = (is_first === false);
@@ -217,7 +217,7 @@ function compile_project_esm(entry_file, out_dir) {
             const mod_ = __ring_m8[0]._0; const hir = __ring_m8[1]._0; const ast = __ring_m8[2]._0;
             const mod_relative = Str_replace(mod_.file_path, ".ring", ".js");
             const mod_out_path = path_join(out_dir, path_basename(mod_relative));
-            const imports_map = build_imports_map(phases.graph, phases.module_exports_map, key);
+            let imports_map = build_imports_map(phases.graph, phases.module_exports_map, key);
             const esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key);
             const eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key);
             let import_lines = [""];
@@ -803,13 +803,13 @@ function build_external_struct_fields(graph, exports_map, key) {
 }
 
 function empty_module_exports_list() {
-  const x = [0];
+  let x = [0];
   List_clear(x);
   return x.map((function(i) { return panic("unreachable"); }));
 }
 
 function empty_str_list() {
-  const x = [""];
+  let x = [""];
   List_clear(x);
   return x;
 }

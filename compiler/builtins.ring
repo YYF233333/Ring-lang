@@ -75,6 +75,31 @@ pub fn register_builtins(mut env: TypeEnv) {
     register_ord_trait(env)
     register_debug_trait(env)
     register_option_debug(env)
+    register_mut_methods(env)
+}
+
+// ============================================================
+// Register built-in mut methods (mutating method names per type)
+// ============================================================
+
+fn register_mut_methods(mut env: TypeEnv) {
+    let mut list_mut: Set<Str> = set_new()
+    for m in ["push", "pop", "set", "extend", "reverse", "sort", "shift", "clear", "sort_by"] {
+        list_mut.insert(m)
+    }
+    env.trait_reg.mut_methods.insert("List", list_mut)
+
+    let mut map_mut: Set<Str> = set_new()
+    for m in ["insert", "remove", "clear"] {
+        map_mut.insert(m)
+    }
+    env.trait_reg.mut_methods.insert("Map", map_mut)
+
+    let mut set_mut: Set<Str> = set_new()
+    for m in ["insert", "remove", "clear"] {
+        set_mut.insert(m)
+    }
+    env.trait_reg.mut_methods.insert("Set", set_mut)
 }
 
 // Main entry point: register all HOF intrinsics
@@ -154,7 +179,7 @@ fn register_cell(mut env: TypeEnv) {
         fields: [StructField { name: "value", ty: m_t, is_pub: true }]
     }
 
-    let methods: Map<Str, TypeScheme> = map_new()
+    let mut methods: Map<Str, TypeScheme> = map_new()
 
     // get: (Cell<T>) -> T / mut
     methods.insert("get", TypeScheme {
@@ -226,7 +251,7 @@ fn register_option(mut env: TypeEnv) {
     })
 
     // Option methods: is_some, is_none, unwrap_or
-    let methods = get_or_create_methods(env, BUILTIN_OPTION)
+    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
 
     let t_id = env.fresh_var_id()
     let t = Type::TypeVar { id: t_id, name: none }
@@ -313,7 +338,7 @@ fn register_option_eq(mut env: TypeEnv) {
     let t = Type::TypeVar { id: t_id, name: none }
     let opt = make_option_type(t)
 
-    let methods = get_or_create_methods(env, BUILTIN_OPTION)
+    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
 
     let eq_bounds = [SchemeBound { type_var: t_id, trait_name: "Eq" }]
 
@@ -388,7 +413,7 @@ fn register_option_clone(mut env: TypeEnv) {
     let t = Type::TypeVar { id: t_id, name: none }
     let opt = make_option_type(t)
 
-    let methods = get_or_create_methods(env, BUILTIN_OPTION)
+    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
 
     methods.insert("clone", TypeScheme {
         ty: Type::FnType { params: [opt], return_type: opt, effects: EMPTY_ROW },
@@ -468,7 +493,7 @@ fn register_debug_trait(mut env: TypeEnv) {
     let mut t = Type::TypeVar { id: t_id, name: none }
     let list_self = Type::StructType { name: BUILTIN_LIST, type_params: [t], fields: [] }
     let list_debug_fn = Type::FnType { params: [list_self], return_type: STR, effects: EMPTY_ROW }
-    let list_methods = get_or_create_methods(env, BUILTIN_LIST)
+    let mut list_methods = get_or_create_methods(env, BUILTIN_LIST)
     list_methods.insert("debug", TypeScheme {
         ty: list_debug_fn,
         type_vars: [t_id],
@@ -489,7 +514,7 @@ fn register_debug_trait(mut env: TypeEnv) {
     let v = Type::TypeVar { id: v_id, name: none }
     let map_self = make_map_type(k, v)
     let map_debug_fn = Type::FnType { params: [map_self], return_type: STR, effects: EMPTY_ROW }
-    let map_methods = get_or_create_methods(env, BUILTIN_MAP)
+    let mut map_methods = get_or_create_methods(env, BUILTIN_MAP)
     map_methods.insert("debug", TypeScheme {
         ty: map_debug_fn,
         type_vars: [k_id, v_id],
@@ -508,7 +533,7 @@ fn register_debug_trait(mut env: TypeEnv) {
     t = Type::TypeVar { id: t_id, name: none }
     let set_self = Type::StructType { name: BUILTIN_SET, type_params: [t], fields: [] }
     let set_debug_fn = Type::FnType { params: [set_self], return_type: STR, effects: EMPTY_ROW }
-    let set_methods = get_or_create_methods(env, BUILTIN_SET)
+    let mut set_methods = get_or_create_methods(env, BUILTIN_SET)
     set_methods.insert("debug", TypeScheme {
         ty: set_debug_fn,
         type_vars: [t_id],
@@ -532,7 +557,7 @@ fn register_option_debug(mut env: TypeEnv) {
     let t = Type::TypeVar { id: t_id, name: none }
     let opt = make_option_type(t)
 
-    let methods = get_or_create_methods(env, BUILTIN_OPTION)
+    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
 
     methods.insert("debug", TypeScheme {
         ty: Type::FnType { params: [opt], return_type: STR, effects: EMPTY_ROW },
@@ -554,7 +579,7 @@ fn register_option_debug(mut env: TypeEnv) {
 // ============================================================
 
 fn register_list_hof(mut env: TypeEnv) {
-    let methods = get_or_create_methods(env, BUILTIN_LIST)
+    let mut methods = get_or_create_methods(env, BUILTIN_LIST)
 
     // map: (List<T>, (T) -> U / e) -> List<U> / e
     let mut t_id = env.fresh_var_id()
@@ -676,7 +701,7 @@ fn register_list_hof(mut env: TypeEnv) {
 // ============================================================
 
 fn register_map_hof(mut env: TypeEnv) {
-    let methods = get_or_create_methods(env, BUILTIN_MAP)
+    let mut methods = get_or_create_methods(env, BUILTIN_MAP)
 
     // map_values: (Map<K,V>, (V) -> U / e) -> Map<K,U> / e
     let mut k_id = env.fresh_var_id()
@@ -744,7 +769,7 @@ fn register_map_hof(mut env: TypeEnv) {
 // ============================================================
 
 fn register_set_hof(mut env: TypeEnv) {
-    let methods = get_or_create_methods(env, BUILTIN_SET)
+    let mut methods = get_or_create_methods(env, BUILTIN_SET)
 
     // filter: (Set<T>, (T) -> Bool / e) -> Set<T> / e
     let mut t_id = env.fresh_var_id()
@@ -802,7 +827,7 @@ fn register_set_hof(mut env: TypeEnv) {
 // ============================================================
 
 fn register_option_hof(mut env: TypeEnv) {
-    let methods = get_or_create_methods(env, BUILTIN_OPTION)
+    let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
 
     // map: (Option<T>, (T) -> U / e) -> Option<U> / e
     let mut t_id = env.fresh_var_id()

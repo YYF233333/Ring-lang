@@ -117,7 +117,7 @@ pub fn compile_project(entry_file: Str) -> CompileProjectResult {
                 match (phases.graph.modules.get(key), phases.module_hirs.get(key)) {
                     (some(mod_), some(hir)) => {
                         let prefix = module_prefix(mod_.path_segments)
-                        let imports_map = build_imports_map(phases.graph, phases.module_exports_map, key)
+                        let mut imports_map = build_imports_map(phases.graph, phases.module_exports_map, key)
                         let esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key)
                         let eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key)
                         let skip_preamble = is_first == false
@@ -163,7 +163,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         let mod_out_path = path_join(out_dir, path_basename(mod_relative))
 
                         // Build imports
-                        let imports_map = build_imports_map(phases.graph, phases.module_exports_map, key)
+                        let mut imports_map = build_imports_map(phases.graph, phases.module_exports_map, key)
                         let esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key)
                         let eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key)
 
@@ -575,11 +575,11 @@ fn build_external_struct_fields(graph: ModuleGraph, exports_map: Map<Str, Module
 }
 
 fn empty_module_exports_list() -> List<ModuleExports> {
-    let x = [0]; x.clear(); x.map(fn(i: Int) -> ModuleExports { panic("unreachable") })
+    let mut x = [0]; x.clear(); x.map(fn(i: Int) -> ModuleExports { panic("unreachable") })
 }
 
 fn empty_str_list() -> List<Str> {
-    let x = [""]; x.clear(); x
+    let mut x = [""]; x.clear(); x
 }
 
 fn build_external_impl_methods(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, Str?> {

@@ -143,20 +143,22 @@ class TypeRegistry {
 }
 
 class TraitRegistry {
-  constructor(traits, trait_impls, impl_methods) {
+  constructor(traits, trait_impls, impl_methods, mut_methods) {
     this.traits = traits;
     this.trait_impls = trait_impls;
     this.impl_methods = impl_methods;
+    this.mut_methods = mut_methods;
   }
 }
 
 class ScopeManager {
-  constructor(scopes, fn_bounds, var_bounds, def_spans, mutable_vars) {
+  constructor(scopes, fn_bounds, var_bounds, def_spans, mutable_vars, let_defs) {
     this.scopes = scopes;
     this.fn_bounds = fn_bounds;
     this.var_bounds = var_bounds;
     this.def_spans = def_spans;
     this.mutable_vars = mutable_vars;
+    this.let_defs = let_defs;
   }
 }
 
@@ -182,7 +184,7 @@ function mono(ty) {
 
 function new_type_env() {
   const initial_scope = new Scope(map_new());
-  return new TypeEnv(new TypeRegistry(map_new(), map_new(), map_new(), map_new(), map_new(), map_new()), new TraitRegistry(map_new(), [], map_new()), new ScopeManager([initial_scope], map_new(), map_new(), map_new(), set_new()), new IdGen(0, 0));
+  return new TypeEnv(new TypeRegistry(map_new(), map_new(), map_new(), map_new(), map_new(), map_new()), new TraitRegistry(map_new(), [], map_new(), map_new()), new ScopeManager([initial_scope], map_new(), map_new(), map_new(), set_new(), set_new()), new IdGen(0, 0));
 }
 
 function TypeEnv_current_var_id(self) {
@@ -282,7 +284,7 @@ function TypeEnv_instantiate(self, scheme) {
   if ((List_len(scheme.type_vars) === 0)) {
     return scheme.ty;
   }
-  const mapping = map_new();
+  let mapping = map_new();
   for (const tv of scheme.type_vars) {
     _Map_insert(mapping, tv, TypeEnv_fresh_var(self));
   }
@@ -295,7 +297,7 @@ function TypeEnv_instantiate(self, scheme) {
           const __ring_m3 = fresh;
           if (__ring_m3._tag === "TypeVar") {
             const id = __ring_m3.id;
-            const existing = (function() {
+            let existing = (function() {
   const __ring_m = _Map_get(self.scope.var_bounds, id);
   if (__ring_m._tag === "some") { const s = __ring_m._0; return s; }
   if (__ring_m._tag === "none") { return set_new(); }
@@ -423,7 +425,7 @@ function apply_subst_map(subst, t) {
                 }
                 if (__ring_m9._tag === "RecordType") {
                   const extra_fields = __ring_m9.fields; const extra_tail = __ring_m9.tail; const extra_tn = __ring_m9.tail_name;
-                  const all_fields = list_clone(mapped_fields);
+                  let all_fields = list_clone(mapped_fields);
                   for (const ef of extra_fields) {
                     List_push(all_fields, new types$RecordField(ef.name, apply_subst_map(subst, ef.ty)));
                   }
@@ -513,7 +515,7 @@ function apply_subst_row_map(subst, row) {
             }
             if (__ring_m13._tag === "EffectRowType") {
               const extra_effs = __ring_m13.effects; const extra_tail = __ring_m13.tail;
-              const merged = list_clone(effects);
+              let merged = list_clone(effects);
               for (const ee of extra_effs) {
                 List_push(merged, apply_subst_effect_map(subst, ee));
               }
@@ -636,7 +638,7 @@ function apply_subst(subst, t) {
                 }
                 if (__ring_m18._tag === "RecordType") {
                   const extra_fields = __ring_m18.fields; const extra_tail = __ring_m18.tail; const extra_tn = __ring_m18.tail_name;
-                  const all_fields = list_clone(mapped_fields);
+                  let all_fields = list_clone(mapped_fields);
                   for (const ef of extra_fields) {
                     List_push(all_fields, new types$RecordField(ef.name, apply_subst(subst, ef.ty)));
                   }
@@ -728,7 +730,7 @@ function apply_subst_row(subst, row) {
             }
             if (__ring_m22._tag === "EffectRowType") {
               const extra_effs = __ring_m22.effects; const extra_tail = __ring_m22.tail;
-              const merged = list_clone(effects);
+              let merged = list_clone(effects);
               for (const ee of extra_effs) {
                 List_push(merged, apply_subst_effect(subst, ee));
               }

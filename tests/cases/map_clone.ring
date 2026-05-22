@@ -2,7 +2,7 @@
 
 fn main() {
     let original = map_from([(1, "one"), (2, "two"), (3, "three")])
-    let cloned = map_clone(original)
+    let mut cloned = map_clone(original)
 
     // Clone has same content
     assert(cloned.len() == 3, "clone len")

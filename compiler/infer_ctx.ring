@@ -284,7 +284,7 @@ pub fn unify_at(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: Union
 
 pub fn free_type_vars(t: Type, subst: UnionFind) -> Set<Int> {
     let resolved = apply_subst(subst, t)
-    let result: Set<Int> = set_new()
+    let mut result: Set<Int> = set_new()
     collect_free_vars(resolved, result)
     result
 }
@@ -352,12 +352,12 @@ pub fn collect_free_vars(t: Type, result: Set<Int>) {
 }
 
 pub fn free_type_vars_in_env(env: TypeEnv, subst: UnionFind) -> Set<Int> {
-    let result: Set<Int> = set_new()
+    let mut result: Set<Int> = set_new()
     for scope in env.scope.scopes {
         for entry in scope.variables.entries() {
             let (_, scheme) = entry
             let ftv = free_type_vars(scheme.ty, subst)
-            let quantified: Set<Int> = set_new()
+            let mut quantified: Set<Int> = set_new()
             for v in scheme.type_vars {
                 let resolved = apply_subst(subst, Type::TypeVar { id: v, name: none })
                 match resolved {
@@ -421,7 +421,7 @@ pub fn update_fn_effects(env: TypeEnv, name: Str, effects: EffectRow) {
 // ============================================================
 
 pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<Int, Type> {
-    let result: Map<Int, Type> = map_new()
+    let mut result: Map<Int, Type> = map_new()
     match (scheme.ty, instantiated_type) {
         (Type::FnType { params: sp, return_type: sr, .. },
          Type::FnType { params: ip, return_type: ir, .. }) => {
@@ -751,7 +751,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
             if alias.type_param_vars.len() == 0 { return alias.ty }
             let mut resolved_args: List<Type> = []
             for a in type_args { resolved_args.push(resolve_type_expr(ctx, a)) }
-            let mapping: Map<Int, Type> = map_new()
+            let mut mapping: Map<Int, Type> = map_new()
             let mut i = 0
             let limit = if alias.type_param_vars.len() < resolved_args.len() { alias.type_param_vars.len() } else { resolved_args.len() }
             while i < limit {
@@ -941,7 +941,7 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
 }
 
 fn build_instantiation_map(type_param_vars: List<Int>, resolved_expected: Type) -> Map<Int, Type> {
-    let inst_map: Map<Int, Type> = map_new()
+    let mut inst_map: Map<Int, Type> = map_new()
     match resolved_expected {
         Type::EnumType { type_params, .. } => {
             let mut i = 0

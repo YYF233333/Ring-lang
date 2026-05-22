@@ -8,6 +8,7 @@ pub const E0204: Str = "E0204"
 pub const E0205: Str = "E0205"
 pub const E0206: Str = "E0206"
 pub const E0207: Str = "E0207"
+pub const E0208: Str = "E0208"
 pub const E0301: Str = "E0301"
 pub const E0302: Str = "E0302"
 pub const E0303: Str = "E0303"
@@ -41,6 +42,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0205" { return "Assignment to immutable variable" }
     if code == "E0206" { return "Break/continue outside loop" }
     if code == "E0207" { return "Duplicate definition" }
+    if code == "E0208" { return "Mutating method on immutable binding" }
     if code == "E0301" { return "Type mismatch" }
     if code == "E0302" { return "Infinite type (occurs check)" }
     if code == "E0303" { return "Numeric type required" }

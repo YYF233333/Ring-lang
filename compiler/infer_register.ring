@@ -415,10 +415,10 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, me
 // ============================================================
 
 fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) {
-    let impl_methods_map = match ctx.env.trait_reg.impl_methods.get(target_type) {
+    let mut impl_methods_map = match ctx.env.trait_reg.impl_methods.get(target_type) {
         some(m) => m,
         none => {
-            let new_map: Map<Str, TypeScheme> = map_new()
+            let mut new_map: Map<Str, TypeScheme> = map_new()
             ctx.env.trait_reg.impl_methods.insert(target_type, new_map)
             new_map
         }
@@ -457,7 +457,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
         some(tname) => {
             match ctx.env.trait_reg.traits.get(tname) {
                 some(trait_def) => {
-                    let impl_method_names: Set<Str> = set_new()
+                    let mut impl_method_names: Set<Str> = set_new()
                     for m in methods {
                         match m { Decl::Fn { name: mn, .. } => { impl_method_names.insert(mn) }, _ => {} }
                     }
@@ -520,7 +520,7 @@ fn register_impl_method(
     let mut all_tvs = list_clone(impl_tv_ids)
     for mtv in method_tv_ids { all_tvs.push(mtv) }
 
-    let declared_names: Set<Str> = set_new()
+    let mut declared_names: Set<Str> = set_new()
     for entry in ctx.type_param_scope.entries() {
         let (tpname, _) = entry
         if outer_saved.contains_key(tpname) { declared_names.insert(tpname) }
@@ -540,6 +540,27 @@ fn register_impl_method(
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_m_effects }
     methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: impl_scheme_bounds, def_id: none })
+
+    // Track mut self methods
+    if params.len() > 0 {
+        match params.first() {
+            some(first_p) => {
+                if first_p.name == "self" && first_p.is_mutable {
+                    let mut mut_set = match ctx.env.trait_reg.mut_methods.get(target_type) {
+                        some(s) => s,
+                        none => {
+                            let mut new_set: Set<Str> = set_new()
+                            ctx.env.trait_reg.mut_methods.insert(target_type, new_set)
+                            new_set
+                        }
+                    }
+                    mut_set.insert(mname)
+                }
+            },
+            none => {}
+        }
+    }
+
     ctx.type_param_scope = saved_method
 }
 
@@ -572,6 +593,27 @@ fn register_impl_extern_method(
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_ext_effects }
     methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: impl_scheme_bounds, def_id: none })
+
+    // Track mut self methods
+    if params.len() > 0 {
+        match params.first() {
+            some(first_p) => {
+                if first_p.name == "self" && first_p.is_mutable {
+                    let mut mut_set = match ctx.env.trait_reg.mut_methods.get(target_type) {
+                        some(s) => s,
+                        none => {
+                            let mut new_set: Set<Str> = set_new()
+                            ctx.env.trait_reg.mut_methods.insert(target_type, new_set)
+                            new_set
+                        }
+                    }
+                    mut_set.insert(mname)
+                }
+            },
+            none => {}
+        }
+    }
+
     ctx.type_param_scope = saved_method
 }
 
@@ -657,7 +699,7 @@ fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
     }
     let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
 
-    let declared_names: Set<Str> = set_new()
+    let mut declared_names: Set<Str> = set_new()
     for tp in type_params { declared_names.insert(tp.name) }
     for entry in ctx.type_param_scope.entries() {
         let (tpname, tv) = entry
@@ -724,7 +766,7 @@ fn register_extern_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>
     }
     let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
 
-    let declared_names: Set<Str> = set_new()
+    let mut declared_names: Set<Str> = set_new()
     for tp in type_params { declared_names.insert(tp.name) }
     for entry in ctx.type_param_scope.entries() {
         let (tpname, tv) = entry
@@ -819,7 +861,7 @@ fn register_const(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span
 
 fn register_sig(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool) {
     let saved = map_clone(ctx.type_param_scope)
-    let sig_members: Map<Str, TypeScheme> = map_new()
+    let mut sig_members: Map<Str, TypeScheme> = map_new()
     for m in members {
         let mut type_vars: List<Int> = []
         let msaved = map_clone(ctx.type_param_scope)

@@ -15,7 +15,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
     hexpr_type, hexpr_effects, hexpr_span}
 use diagnostics::{DiagnosticContext, CollectingSink}
-use codes::{E0201, E0203, E0205, E0206, E0301, E0303, E0304, E0305,
+use codes::{E0201, E0203, E0205, E0206, E0208, E0301, E0303, E0304, E0305,
     E0307, E0308, E0402, E0504, E0601, E0705}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
@@ -128,12 +128,22 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             let resolved = apply_subst(s, var_type)
             let scheme = generalize(ctx.env, resolved, s)
             ctx.env.bind(name, scheme)
-            match scheme.def_id {
-                some(did) => ctx.env.record_def_span(did, name_span),
-                none => {}
+            let bound_scheme = ctx.env.lookup(name)
+            let bound_def_id: Int? = match bound_scheme {
+                some(bs) => {
+                    match bs.def_id {
+                        some(did) => {
+                            ctx.env.record_def_span(did, name_span)
+                            ctx.env.scope.let_defs.insert(did)
+                            some(did)
+                        },
+                        none => none
+                    }
+                },
+                none => none
             }
             StmtResult {
-                hstmt: HStmt::Let { name: name, name_span: name_span, def_id: scheme.def_id, ty: resolved, init: init_r.hexpr, span: span },
+                hstmt: HStmt::Let { name: name, name_span: name_span, def_id: bound_def_id, ty: resolved, init: init_r.hexpr, span: span },
                 subst: s,
                 effects: init_r.effects
             }
@@ -420,7 +430,10 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                                         match bscheme {
                                             some(bs) => {
                                                 match bs.def_id {
-                                                    some(did) => ctx.env.record_def_span(did, pspan),
+                                                    some(did) => {
+                                                        ctx.env.record_def_span(did, pspan)
+                                                        ctx.env.scope.let_defs.insert(did)
+                                                    },
                                                     none => {}
                                                 }
                                                 bindings.push(HLetDestructureBinding { name: name, def_id: bs.def_id, ty: elem_type })
@@ -1198,6 +1211,59 @@ fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, mut di
 }
 
 // ============================================================
+// Mutability check for method calls
+// ============================================================
+
+fn check_expr_is_let_def(ctx: InferCtx, expr: Expr) -> Bool {
+    match expr {
+        Expr::Ident { name, .. } => {
+            match ctx.env.lookup(name) {
+                some(s) => match s.def_id {
+                    some(did) => ctx.env.scope.let_defs.contains(did),
+                    none => false
+                },
+                none => false
+            }
+        },
+        Expr::FieldAccess { receiver: inner, .. } => check_expr_is_let_def(ctx, inner),
+        _ => false
+    }
+}
+
+fn check_receiver_mutability(mut ctx: InferCtx, receiver: Expr, recv_type: Type, method: Str, span: Span) {
+    let mut type_name: Str? = none
+    match recv_type {
+        Type::StructType { name, .. } => { type_name = some(name) },
+        Type::EnumType { name, .. } => { type_name = some(name) },
+        _ => {
+            match type_to_builtin_name(recv_type) {
+                some(n) => { type_name = some(n) },
+                none => {}
+            }
+        }
+    }
+
+    match type_name {
+        some(tname) => {
+            match ctx.env.trait_reg.mut_methods.get(tname) {
+                some(mut_set) => {
+                    if mut_set.contains(method) {
+                        let is_let_def = check_expr_is_let_def(ctx, receiver)
+                        if is_let_def {
+                            let _ = type_error(ctx.sink, E0208,
+                                "Cannot call mutating method '${method}' on immutable binding. Use 'let mut' to make it mutable.",
+                                span, DiagnosticContext::OtherContext { detail: some("'${method}' requires a mutable receiver") })
+                        }
+                    }
+                },
+                none => {}
+            }
+        },
+        none => {}
+    }
+}
+
+// ============================================================
 // infer_method_call
 // ============================================================
 
@@ -1217,6 +1283,9 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
     let mut s = recv_r.subst
     let mut effects = recv_r.effects
     let recv_type = apply_subst(s, hexpr_type(recv_r.hexpr))
+
+    // Check receiver mutability for mut self methods
+    check_receiver_mutability(ctx, receiver, recv_type, method, span)
 
     let mut method_type: Type? = none
     let mut method_scheme: TypeScheme? = none
@@ -1554,7 +1623,7 @@ fn infer_field_access(mut ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                     let f = struct_def.fields.find(fn(f_) { f_.name == field })
                     match f {
                         some(found_field) => {
-                            let inst_map: Map<Int, Type> = map_new()
+                            let mut inst_map: Map<Int, Type> = map_new()
                             let mut fi = 0
                             while fi < struct_def.type_param_vars.len() && fi < type_params.len() {
                                 match (struct_def.type_param_vars.get(fi), type_params.get(fi)) {
@@ -1714,7 +1783,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
     let struct_def = match struct_def_opt { some(sd) => sd, none => panic("unreachable") }
 
-    let inst_map: Map<Int, Type> = map_new()
+    let mut inst_map: Map<Int, Type> = map_new()
     let mut type_param_types: List<Type> = []
     let mut tpi = 0
     while tpi < struct_def.type_param_vars.len() {
@@ -1772,7 +1841,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
 
     if spread.is_none() {
-        let provided: Set<Str> = set_new()
+        let mut provided: Set<Str> = set_new()
         for f in fields { provided.insert(f.name) }
         for df in struct_def.fields {
             if !provided.contains(df.name) {
@@ -1797,7 +1866,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
 fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name: Str, variant: EnumVariant, enum_def: EnumDef, fields: List<StructFieldInit>, spread: Expr?, span: Span, subst: UnionFind) -> InferResult {
     let field_names = match variant.field_names { some(fn_) => fn_, none => [] }
 
-    let inst_map: Map<Int, Type> = map_new()
+    let mut inst_map: Map<Int, Type> = map_new()
     let mut type_param_types: List<Type> = []
     let mut tpi = 0
     while tpi < enum_def.type_param_vars.len() {
@@ -1854,7 +1923,7 @@ fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name
     }
 
     if spread.is_none() {
-        let provided: Set<Str> = set_new()
+        let mut provided: Set<Str> = set_new()
         for f in fields { provided.insert(f.name) }
         for fn_name in field_names {
             if !provided.contains(fn_name) {
@@ -1900,7 +1969,7 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
                                 match v {
                                     some(found_v) => {
                                         if found_v.fields.len() == 0 {
-                                            let _ep = [0]; _ep.clear(); let empty_pats = _ep.map(fn(i: Int) -> Pattern { panic("unreachable") })
+                                            let mut _ep = [0]; _ep.clear(); let empty_pats = _ep.map(fn(i: Int) -> Pattern { panic("unreachable") })
                                             match_pattern = Pattern::Constructor { name: pat_name, qualifier: none, fields: empty_pats, span: pspan }
                                         }
                                     },
@@ -2136,7 +2205,7 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     let mut effects = body_r.effects
 
     let mut hhandlers: List<HEffectHandler> = []
-    let handled_effects: Set<Str> = set_new()
+    let mut handled_effects: Set<Str> = set_new()
 
     for handler in handlers {
         ctx.env.push_scope()

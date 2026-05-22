@@ -1,5 +1,5 @@
 fn main() {
-    let xs = [10, 20, 30]
+    let mut xs = [10, 20, 30]
 
     // pop returns last element
     if let some(last) = xs.pop() {

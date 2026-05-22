@@ -68,7 +68,26 @@ function register_builtins(env) {
   register_option_clone(env);
   register_ord_trait(env);
   register_debug_trait(env);
-  return register_option_debug(env);
+  register_option_debug(env);
+  return register_mut_methods(env);
+}
+
+function register_mut_methods(env) {
+  let list_mut = set_new();
+  for (const m of ["push", "pop", "set", "extend", "reverse", "sort", "shift", "clear", "sort_by"]) {
+    _Set_insert(list_mut, m);
+  }
+  _Map_insert(env.trait_reg.mut_methods, "List", list_mut);
+  let map_mut = set_new();
+  for (const m of ["insert", "remove", "clear"]) {
+    _Set_insert(map_mut, m);
+  }
+  _Map_insert(env.trait_reg.mut_methods, "Map", map_mut);
+  let set_mut = set_new();
+  for (const m of ["insert", "remove", "clear"]) {
+    _Set_insert(set_mut, m);
+  }
+  return _Map_insert(env.trait_reg.mut_methods, "Set", set_mut);
 }
 
 function register_hof_intrinsics(env) {
@@ -97,7 +116,7 @@ function register_cell(env) {
   const m_t = types$Type_TypeVar(m_t_id, Option_none);
   const mut_row = new types$EffectRow([types$Effect_MutEffect(m_t)], Option_none);
   const self_type = types$Type_StructType(types$BUILTIN_CELL, [m_t], [new types$StructField("value", m_t, true)]);
-  const methods = map_new();
+  let methods = map_new();
   _Map_insert(methods, "get", new env$TypeScheme(types$Type_FnType([self_type], m_t, mut_row), [m_t_id], [], Option_none));
   _Map_insert(methods, "set", new env$TypeScheme(types$Type_FnType([self_type, m_t], types$UNIT, mut_row), [m_t_id], [], Option_none));
   const update_cb = types$Type_FnType([m_t], m_t, types$EMPTY_ROW);
@@ -117,7 +136,7 @@ function register_option(env) {
   const none_t_id = env$TypeEnv_fresh_var_id(env);
   const none_t = types$Type_TypeVar(none_t_id, Option_none);
   env$TypeEnv_bind(env, "none", new env$TypeScheme(types$make_option_type(none_t), [none_t_id], [], Option_none));
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   const t_id = env$TypeEnv_fresh_var_id(env);
   const t = types$Type_TypeVar(t_id, Option_none);
   const self_type = types$make_option_type(t);
@@ -147,7 +166,7 @@ function register_option_eq(env) {
   const t_id = env$TypeEnv_fresh_var_id(env);
   const t = types$Type_TypeVar(t_id, Option_none);
   const opt = types$make_option_type(t);
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   const eq_bounds = [new env$SchemeBound(t_id, "Eq")];
   _Map_insert(methods, "eq", new env$TypeScheme(types$Type_FnType([opt, opt], types$BOOL, types$EMPTY_ROW), [t_id], eq_bounds, Option_none));
   _Map_insert(methods, "ne", new env$TypeScheme(types$Type_FnType([opt, opt], types$BOOL, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Eq")], Option_none));
@@ -171,7 +190,7 @@ function register_option_clone(env) {
   const t_id = env$TypeEnv_fresh_var_id(env);
   const t = types$Type_TypeVar(t_id, Option_none);
   const opt = types$make_option_type(t);
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   _Map_insert(methods, "clone", new env$TypeScheme(types$Type_FnType([opt], opt, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Clone")], Option_none));
   return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Clone", types$BUILTIN_OPTION, ["T"], ["clone"]));
 }
@@ -198,7 +217,7 @@ function register_debug_trait(env) {
   let t = types$Type_TypeVar(t_id, Option_none);
   const list_self = types$Type_StructType(types$BUILTIN_LIST, [t], []);
   const list_debug_fn = types$Type_FnType([list_self], types$STR, types$EMPTY_ROW);
-  const list_methods = get_or_create_methods(env, types$BUILTIN_LIST);
+  let list_methods = get_or_create_methods(env, types$BUILTIN_LIST);
   _Map_insert(list_methods, "debug", new env$TypeScheme(list_debug_fn, [t_id], [new env$SchemeBound(t_id, "Debug")], Option_none));
   List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_LIST, ["T"], ["debug"]));
   const k_id = env$TypeEnv_fresh_var_id(env);
@@ -207,14 +226,14 @@ function register_debug_trait(env) {
   const v = types$Type_TypeVar(v_id, Option_none);
   const map_self = types$make_map_type(k, v);
   const map_debug_fn = types$Type_FnType([map_self], types$STR, types$EMPTY_ROW);
-  const map_methods = get_or_create_methods(env, types$BUILTIN_MAP);
+  let map_methods = get_or_create_methods(env, types$BUILTIN_MAP);
   _Map_insert(map_methods, "debug", new env$TypeScheme(map_debug_fn, [k_id, v_id], [], Option_none));
   List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_MAP, ["K", "V"], ["debug"]));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   const set_self = types$Type_StructType(types$BUILTIN_SET, [t], []);
   const set_debug_fn = types$Type_FnType([set_self], types$STR, types$EMPTY_ROW);
-  const set_methods = get_or_create_methods(env, types$BUILTIN_SET);
+  let set_methods = get_or_create_methods(env, types$BUILTIN_SET);
   _Map_insert(set_methods, "debug", new env$TypeScheme(set_debug_fn, [t_id], [], Option_none));
   return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_SET, ["T"], ["debug"]));
 }
@@ -223,13 +242,13 @@ function register_option_debug(env) {
   const t_id = env$TypeEnv_fresh_var_id(env);
   const t = types$Type_TypeVar(t_id, Option_none);
   const opt = types$make_option_type(t);
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   _Map_insert(methods, "debug", new env$TypeScheme(types$Type_FnType([opt], types$STR, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Debug")], Option_none));
   return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_OPTION, ["T"], ["debug"]));
 }
 
 function register_list_hof(env) {
-  const methods = get_or_create_methods(env, types$BUILTIN_LIST);
+  let methods = get_or_create_methods(env, types$BUILTIN_LIST);
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
   let u_id = env$TypeEnv_fresh_var_id(env);
@@ -284,7 +303,7 @@ function register_list_hof(env) {
 }
 
 function register_map_hof(env) {
-  const methods = get_or_create_methods(env, types$BUILTIN_MAP);
+  let methods = get_or_create_methods(env, types$BUILTIN_MAP);
   let k_id = env$TypeEnv_fresh_var_id(env);
   let k = types$Type_TypeVar(k_id, Option_none);
   let v_id = env$TypeEnv_fresh_var_id(env);
@@ -320,7 +339,7 @@ function register_map_hof(env) {
 }
 
 function register_set_hof(env) {
-  const methods = get_or_create_methods(env, types$BUILTIN_SET);
+  let methods = get_or_create_methods(env, types$BUILTIN_SET);
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
   let orow = open_row(env);
@@ -346,7 +365,7 @@ function register_set_hof(env) {
 }
 
 function register_option_hof(env) {
-  const methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
   let u_id = env$TypeEnv_fresh_var_id(env);
