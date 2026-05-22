@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string, effects_match_kind}
+use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string, effects_match_kind, effect_kind_name}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl, EffectExpr,
     UseDecl, UseImport, NamedImport, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
@@ -7,7 +7,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0201, E0204, E0402, E0404, E0501, E0705}
+use codes::{E0201, E0204, E0402, E0404, E0405, E0501, E0705}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error,
     unify_at, update_fn_effects,
@@ -51,14 +51,14 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
         },
         Decl::Const { name, type_annotation, init, is_pub, span } =>
             check_const_decl(ctx, name, type_annotation, init, is_pub, span),
-        Decl::ModBlock { name, uses, decls, is_pub, span } =>
-            check_mod_decl(ctx, name, uses, decls, is_pub, span),
+        Decl::ModBlock { name, uses, decls, required_effects, is_pub, span } =>
+            check_mod_decl(ctx, name, uses, decls, required_effects, is_pub, span),
         Decl::Sig { name, members, is_pub, span } =>
             check_sig_decl(ctx, name, members, is_pub, span)
     }
 }
 
-fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: List<Decl>, is_pub: Bool, span: Span) -> HDecl {
+fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: List<Decl>, required_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
     ctx.mod_path_stack.push(mod_name)
 
     // Register short-name aliases for mod-internal types so that
@@ -70,17 +70,51 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     // Resolve use declarations with relative paths (self::/super::)
     resolve_mod_uses(ctx, uses)
 
+    // Resolve required effects if present
+    var cap_row: EffectRow? = none
+    match required_effects {
+        some(req_effs) => {
+            cap_row = some(resolve_declared_effects(ctx, req_effs))
+        },
+        none => {}
+    }
+
     var hdecls: List<HDecl> = []
     for decl in decls {
         let prefixed = prefix_decl_name(mod_name, decl)
         let result = some(check_decl(ctx, prefixed)) catch { _ => none }
         match result {
-            some(hd) => hdecls.push(hd),
+            some(hd) => {
+                // Check capability restriction on function declarations
+                match cap_row {
+                    some(cap) => check_capability(ctx, hd, cap, span),
+                    none => {}
+                }
+                hdecls.push(hd)
+            },
             none => {}
         }
     }
     ctx.mod_path_stack.pop()
     HDecl::ModBlock { name: mod_name, decls: hdecls, is_pub: is_pub, span: span }
+}
+
+fn check_capability(var ctx: InferCtx, decl: HDecl, cap: EffectRow, mod_span: Span) {
+    match decl {
+        HDecl::Fn { name, effects, span, .. } => {
+            for eff in effects.effects {
+                let kind = effect_kind_name(eff)
+                let in_cap = cap.effects.any(fn(c) { effects_match_kind(eff, c) })
+                if !in_cap {
+                    let _ = type_error(ctx.sink, E0405,
+                        "Function '${name}' uses effect '${kind}' which is not in the module's requires set",
+                        span,
+                        DiagnosticContext::OtherContext { detail: some("capability violation") })
+                }
+            }
+        },
+        _ => {}
+    }
 }
 
 fn check_sig_decl(var ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool, span: Span) -> HDecl {

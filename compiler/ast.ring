@@ -276,7 +276,7 @@ pub enum Decl {
     ExternType { name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span },
     TypeAlias { name: Str, type_params: List<TypeParam>, type_expr: TypeExpr, is_pub: Bool, span: Span },
     Const { name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span },
-    ModBlock { name: Str, uses: List<UseDecl>, decls: List<Decl>, is_pub: Bool, span: Span },
+    ModBlock { name: Str, uses: List<UseDecl>, decls: List<Decl>, required_effects: List<EffectExpr>?, is_pub: Bool, span: Span },
     Sig { name: Str, members: List<SigMember>, is_pub: Bool, span: Span }
 }
 

@@ -402,6 +402,7 @@ const cases: TestCase[] = [
   { file: "mod_relative_path.ring", expected: "mod_relative_path: all tests passed\n" },
   { file: "sig_basic.ring", expected: "sig_basic: all tests passed\n" },
   { file: "sig_with_effects.ring", expected: "sig_with_effects: all tests passed\n" },
+  { file: "mod_capability.ring", expected: "Hello, world!\nmod_capability: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -458,6 +459,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_duplicate_def.ring", error_pattern: "E0207" },
     { file: "error_use_after_decl.ring", error_pattern: "E0706" },
     { file: "errors/mod_super_out_of_scope.ring", error_pattern: "E0705" },
+    { file: "errors/mod_capability_violation.ring", error_pattern: "E0405" },
   ];
 
   for (const tc of negative_cases) {

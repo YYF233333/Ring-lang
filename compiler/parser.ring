@@ -652,6 +652,14 @@ impl Parser {
         let start = self.current_span_start()
         self.expect(TokenKind::TkMod)
         let name = self.expect(TokenKind::TkIdent).value
+
+        // Parse optional requires clause: mod name requires { effects } { ... }
+        var required_effects: List<EffectExpr>? = none
+        if self.check(TokenKind::TkRequires) {
+            self.advance()
+            required_effects = some(self.parse_effect_list())
+        }
+
         self.expect(TokenKind::TkLBrace)
         var uses: List<UseDecl> = []
         var decls: List<Decl> = []
@@ -683,7 +691,7 @@ impl Parser {
         }
         self.expect(TokenKind::TkRBrace)
         let end = self.current_span_start()
-        Decl::ModBlock { name: name, uses: uses, decls: decls, is_pub: is_pub, span: self.make_span(start, end) }
+        Decl::ModBlock { name: name, uses: uses, decls: decls, required_effects: required_effects, is_pub: is_pub, span: self.make_span(start, end) }
     }
 
     fn parse_decl(var self) -> Decl? {
@@ -714,8 +722,8 @@ impl Parser {
         }
     }
 
-    fn parse_effect_annotation(var self) -> List<EffectExpr> {
-        self.expect(TokenKind::TkWith)
+    // Parse a braced effect list: { effect1, effect2<T>, ... }
+    fn parse_effect_list(var self) -> List<EffectExpr> {
         self.expect(TokenKind::TkLBrace)
         var effects: List<EffectExpr> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
@@ -740,6 +748,11 @@ impl Parser {
         }
         self.expect(TokenKind::TkRBrace)
         effects
+    }
+
+    fn parse_effect_annotation(var self) -> List<EffectExpr> {
+        self.expect(TokenKind::TkWith)
+        self.parse_effect_list()
     }
 
     fn parse_fn_decl(var self, is_pub: Bool, body_optional: Bool) -> Decl {
