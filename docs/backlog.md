@@ -240,91 +240,6 @@ source-map 支持 + 断点调试。
 
 ## 设计对齐：待实现变更
 
-### B-019 可变性统一模型（`var` → `let mut`，消除 `Cell<T>`）[design-align] [P0] [XL] [doing]
-
-设计决策 2026-05-22：Ring 的可变性由唯一关键字 `mut` 统一管理。`var` 关键字废弃，`Cell<T>` 包装类型消除。
-
-**设计要点：**
-
-1. **`let mut` 替代 `var`**：`let` = 不可变，`let mut` = 可变。`let` 绑定不可重绑定，不可调用 `mut self` 方法。
-2. **`mut` 参数**：`fn foo(mut x: Int)` 表示传入可变引用，修改对调用方可见。调用方的 `mut` 前缀是**可选标注**（编译器从函数签名推断 box），formatter level 2+ 自动插入。
-3. **`mut self` 替代 `var self`**：可变方法接收者统一为 `mut self`。`push`/`set`/`clear` 等 mutating 方法为 `mut self`，调用方需要 `let mut` 绑定。
-4. **`Cell<T>` 消除**：不再需要包装类型。闭包捕获 `let mut` 变量时编译器自动 box（`{ value }` 对象）；`mut` 参数自动 box。用户无感。
-5. **Effect 规则**：
-   - `let mut` 纯局部使用 → 不 box，不产生 effect，编译为 JS `let`（零开销）
-   - `let mut` 被闭包捕获 → 自动 box，闭包签名含 `mut<T>` effect
-   - `mut` 参数 → box 传递，函数签名含 `mut<T>` effect
-   - struct 字段修改（`let mut s; s.f = v`）→ 不 box，不产生 effect（局部行为）
-6. **`let` 绑定禁止调用 `mut self` 方法**：`let list = []; list.push(1)` → 编译错误。封堵 JS 引用语义的隐式 mutation 通道。
-
-**语法总结：**
-
-```ring
-let x = 1                        // 不可变
-let mut counter = 0               // 局部可变（JS let，零开销）
-counter = counter + 1             // ok
-
-let mut list = [1, 2, 3]
-list.push(4)                      // ok — push 是 mut self 方法
-
-fn increment(mut x: Int) {        // mut 参数（自动 box）
-    x = x + 1
-}
-let mut n = 0
-increment(n)                      // 编译器从签名推断 box（level 0）
-// increment(mut n)               // formatter level 2+ 自动插入 mut 标记
-print(n)                          // 1
-
-let mut counter = 0
-let inc = fn() { counter = counter + 1 }  // 自动 box，闭包带 mut<Int> effect
-```
-
-**涉及修改（按阶段）：**
-
-**阶段 A：语法层（Parser）**
-1. `parser.ring`：`let mut` 声明语法（`let` 后接可选 `mut` 关键字）
-2. `parser.ring`：`mut` 参数声明（函数参数列表中 `mut name: Type`）
-3. `parser.ring`：`mut` 调用语法——调用时 `foo(mut x)` 是可选标注（编译器接受有/无两种写法，语义相同；formatter level 2+ 自动插入）
-4. `ast.ring`：`LetStmt` / `Param` 节点增加 `is_mut` 标记
-5. `lexer.ring`：确认 `mut` 是关键字（可能已在 `var` 之外注册）
-6. 兼容期：`var` 暂时保留为 `let mut` 的别名并产生 deprecation warning
-
-**阶段 B：类型检查层（Checker）**
-7. `infer.ring` / `infer_ctx.ring`：`let mut` 替代 `var` 的 `mutable_vars` 逻辑
-8. `infer.ring`：`mut self` 方法调用检查——receiver 必须是 `let mut` 绑定
-9. `builtins.ring`：标记内置类型的 mutating 方法（`List.push`/`set`/`clear`/`pop`/`remove`/`sort`/`reverse`, `Map.set`/`remove`/`clear`, `Set.add`/`remove`/`clear`）为 `mut self`
-10. `infer.ring`：`mut` 参数的类型推断——参数类型标记为"按引用传递"
-11. `infer.ring`：闭包捕获分析——检测 `let mut` 变量被闭包捕获，标记需要 box + 产生 `mut<T>` effect
-12. `builtins.ring`：移除 `Cell<T>` 注册（struct、impl_methods、constructor）
-
-**阶段 C：代码生成层（Codegen）**
-13. `codegen_stmt.ring`：`let mut` 编译——纯局部 → JS `let`；被捕获 → JS `const name = { value: init }`
-14. `codegen_expr.ring`：`mut` 参数的 box/unbox——调用时 wrap `{ value: x }`，函数内读写转为 `.value` 访问
-15. `codegen_expr.ring`：闭包内对 boxed 变量的访问——`counter` → `counter.value`
-16. `codegen_expr.ring`：`mut self` 方法调用——与当前行为一致（方法内部修改 receiver）
-17. `runtime.ring`：移除 `Cell` / `Cell_get` / `Cell_set` / `Cell_update` runtime 代码
-18. `codegen.ring`：移除 `CELL_METHODS` 注册
-
-**阶段 D：自举编译器迁移**
-19. 全部 33 个 `compiler/*.ring` 文件：`var` → `let mut`
-20. 全部 `compiler/*.ring`：`var self` → `mut self`
-21. 移除所有 `Cell(x)` / `.get()` / `.set()` / `.update()` 用法，改为 `let mut` + 闭包自动捕获
-22. `let list = []; list.push(x)` 模式 → `let mut list = []; list.push(x)`
-23. 重新编译 `dist/`
-
-**阶段 E：标准库和测试**
-24. `std/*.ring`：更新可变性语法
-25. `tests/cases/`：更新所有 `var` → `let mut`，Cell 相关测试改写
-26. 新增测试：`let` 绑定调用 `mut self` 方法的负面测试
-27. 新增测试：`mut` 参数传递、闭包自动 box、effect 推断
-28. `examples/*.ring`：更新
-
-- **前置依赖**：无
-- **复杂度**：大（语法变更 + 类型检查 + codegen + 全量代码迁移）
-- **优先级**：高——可变性是使用最广泛的语言特性，越早统一越好
-- **风险**：自举编译器迁移量大（33 个文件），但变更是机械性的（`var` → `let mut`），适合批量处理
-- **参考**：Rust `let mut`、Koka `var`（自动 scope effect）、Swift/Kotlin（闭包自动捕获 var）
-
 ## 已知 Bug / 技术债
 
 ### B-022 表达式位置 IIFE return 截获 [bugfix] [P3] [M] [queued]
@@ -333,11 +248,20 @@ let inc = fn() { counter = counter + 1 }  // 自动 box，闭包带 mut<Int> eff
 - **当前状态**：实践中极少遇到
 - **优先级**：低
 
-### B-023 集合 `===` 引用相等 [bugfix] [P1] [M] [queued]
-`List.contains`/`Map.get`/`Set.contains` 使用 JS `===`。
+### B-023 集合 `===` 引用相等 [bugfix] [P2] [L] [queued]
+`List.contains`/`List.find`/`Map.get`/`Set.contains` 使用 JS `===` 引用相等，对 struct/enum 值无法正确匹配。
 
-- **当前状态**：Phase B S3 计划迁移到 Eq trait
-- **优先级**：Phase B
+**方案**：用 Ring 重写（方案 C）——将 contains/find 等从 JS runtime 移到 `std/*.ring`，用 `get(i)` + 长度循环实现，自动走 `==`（Eq trait dispatch）。最干净、后端无关。
+
+**涉及修改**：
+1. `std/list.ring`：Ring 实现 `contains`/`find`/`index_of_elem`（需要 `get(i)` + `len()` 底层原语）
+2. `std/set.ring`：Ring 实现 `contains`（需要迭代原语）
+3. `runtime.ring`：移除对应 JS 实现
+4. `builtins.ring`：更新方法注册
+5. `tests/cases/`：struct 值的 contains/find 测试
+
+**前置依赖**：B-025（下标运算符）完成后实现更自然
+- **优先级**：推迟执行，不急
 
 ### B-024 深层嵌套泛型 UFCS 调用 [bugfix] [P3] [L] [queued]
 `Pair<Pair<Int, Int>, Int>` 的 `.eq()` 等直接方法调用受限。
