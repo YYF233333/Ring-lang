@@ -15,9 +15,10 @@ User says: "审查", "review", "自查", "全面检查", "交叉验证", or `/fu
 
 ## 写入范围
 
-**只写 `docs/audit-report.md`**
+- **Bug / 问题** → `docs/audit-report.md`
+- **观察 / 非 bug 现象** → `docs/worker_feedback.md`（`[观察]` 类型条目）
 
-**不触碰**：其他任何文件
+**不触碰**：编译器代码、测试、CLAUDE.md、design.md
 
 ## Race Condition 处理
 
@@ -64,13 +65,14 @@ Both agents output structured findings:
 3. **Check backlog overlap**: if finding matches a `planning`/`doing` item → skip or note "in progress"
 4. **Classify**:
 
-| Category | Action |
-|----------|--------|
-| **Critical** (confirmed bug) | Record with fix suggestion |
-| **Important** (definite but non-critical) | Record |
-| **Minor** (low impact) | Record |
-| **Style** (improvement idea) | Record |
-| **False positive** | Discard with explanation |
+| Category | Action | 写入位置 |
+|----------|--------|---------|
+| **Critical** (confirmed bug) | Record with fix suggestion | audit-report.md |
+| **Important** (definite but non-critical) | Record | audit-report.md |
+| **Minor** (low impact) | Record | audit-report.md |
+| **Style** (improvement idea) | Record | audit-report.md |
+| **Observation** (不算 bug 但值得注意的现象) | Record as `[观察]` | worker_feedback.md |
+| **False positive** | Discard with explanation | — |
 
 ### Phase 3: Update audit-report.md
 
@@ -96,11 +98,31 @@ Both agents output structured findings:
 **建议修复**：修复方向
 ```
 
+### Phase 3.5: Write Observations to Feedback
+
+不算 bug 但值得注意的现象写入 `docs/worker_feedback.md`：
+- 代码异味（不违反规范但不符合直觉）
+- 设计-实现微妙不一致（不影响正确性但可能误导读者）
+- 潜在改进方向（不是当前阶段的优先事项但值得记录）
+- 令人困惑的行为（用户可能被绊倒但编译器行为"技术上正确"）
+
+格式：
+
+```markdown
+## Audit 观察报告（日期）
+
+### N. [观察] 标题
+
+**现状**：描述观察到的现象
+**为什么值得注意**：为什么不是 bug 但值得关注
+```
+
 ### Phase 4: Summary
 
 ```
 ## Audit Summary
 - 新发现: N 项（X Critical, Y Important, Z Minor, W Style）
+- 观察: O 项（写入 worker_feedback.md）
 - 清理已修复: M 项删除
 - 当前 open 总数: K 项
 - 需要关注的 Critical: (列出)

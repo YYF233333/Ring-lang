@@ -294,6 +294,38 @@ source-map 支持 + 断点调试。
 
 ## 设计对齐：待实现变更
 
+### B-037 `mut<T>` Marker Effect 接入统一 mut 系统 [design-align] [P2] [M] [queued]
+当前 `mut self` / `mut` 参数的检查是纯编译期，不经过 effect system。`mut<T>` effect 基础设施（推断/unification/codegen）在编译器中已存在（原 Cell\<T\> 遗留），但无触发源。
+
+**设计**：将 `mut<T>` 作为 marker effect（与 `io` 同类——纯编译期追踪，零运行时成本），由 `mut self` 方法调用和 `mut` 参数传递触发：
+
+| 操作 | 产生的 effect | 理由 |
+|------|--------------|------|
+| `let mut` 局部变量赋值 | 无 | 调用方不可观测 |
+| `mut self` 方法调用 | `mut<Self>` | 修改调用方持有的对象 |
+| `mut` 参数传递 | `mut<T>` | 修改调用方传入的数据 |
+
+**Effect 分类**：
+
+| 类别 | 代表 | 运行时 | 用途 |
+|------|------|--------|------|
+| Runtime effect | `fail<E>`, 自定义 effect | 有 evidence / handler | 控制流改变 |
+| Marker effect | `io`, `mut<T>` | 零成本，纯编译期 | 签名可见性、模块 capability、formatter 标注 |
+
+类比 Rust `Send`/`Sync` trait：标记能力，不产生代码。Ring 的优势是自动推断 + 自动传播。
+
+**涉及修改**：
+1. `infer.ring`：`mut self` 方法调用和 `mut` 参数传递时向当前 effect row 注入 `mut<T>`
+2. `codegen*.ring`：确认 `mut<T>` effect 不生成 evidence 参数（与 `io` 一致）
+3. `tests/cases/`：验证 `mut<T>` 在签名中正确推断和传播
+
+**验收标准**：
+- `fn foo(mut list: List<Int>) { list.push(1) }` 推断出 `with {mut<List<Int>>}`
+- `let mut x = 0; x = 1` 不产生 effect（纯局部）
+- `mod pure requires {}` 内调用 mutating 函数报错
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
 ## 已知 Bug / 技术债
 
 ### B-022 表达式位置 IIFE return 截获 [bugfix] [P3] [M] [queued]
