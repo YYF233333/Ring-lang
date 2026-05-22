@@ -1026,7 +1026,7 @@ extern "npm:express" {
 
 **语法借用——最大化知识迁移：**
 - `fn`/`let`/`var`/`struct`/`enum`/`match`/`trait`/`impl` 全部来自 Rust
-- `"${x}"` 字符串插值来自 JS/Kotlin
+- `"${x}"` 字符串插值来自 JS/Kotlin；多行字符串（`"..."` 允许跨行）；`r"..."` 和 `r#"..."#` raw string（无转义无插值）来自 Rust
 - `//` 行注释来自 C/JS/Rust（最大化 LLM 已有知识迁移）
 - `or` 来自 Python
 - 不发明新关键字，除非语义确实是新的（如 `handle...with`）
@@ -1316,6 +1316,8 @@ JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体
 | fn 类型 effect 标注 | `fn(T) -> U with {io}` 语法，无标注时 open row | 支持 HOF callback 的 effect 多态 |
 | impl bounds | `impl<T: Eq> List { ... }` 语法 | 前置条件：Eq trait 约束迁移到 impl 方法 |
 | mod capability | `mod name requires {effects} { ... }` 语法 | 模块级 effect 限制，E0405 错误码 |
+| 多行字符串 | `"..."` 允许跨行，空白原样保留 | 减少字符串拼接需求 |
+| Raw string | `r"..."` 和 `r#"..."#`，无转义无插值 | 正则表达式/codegen 场景减少转义噪音 |
 
 ### 幽灵功能（已解析但无语义效果）
 

@@ -663,8 +663,11 @@ function Lexer_next_token(self) {
   }
   const start = Lexer_current_position(self);
   const ch = Lexer_peek(self);
-  if ((((ch === "r") && ((self.pos + 1) < Str_len(self.source))) && (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "#"))) {
-    return Lexer_lex_raw_string(self, start);
+  if (((ch === "r") && ((self.pos + 1) < Str_len(self.source)))) {
+    const next_ch = Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "");
+    if (((next_ch === "#") || (next_ch === "\""))) {
+      return Lexer_lex_raw_string(self, start);
+    }
   }
   if ((ch === "\"")) {
     return Lexer_lex_string(self, start);
@@ -757,34 +760,54 @@ function Lexer_lex_string_body(self, start, is_new) {
 }
 function Lexer_lex_raw_string(self, start) {
   Lexer_advance(self);
-  if ((Lexer_peek(self) !== "#")) {
-    const end = Lexer_current_position(self);
-    return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
-  }
-  Lexer_advance(self);
-  if ((Lexer_peek(self) !== "\"")) {
-    self.pos = (self.pos - 1);
-    self.column = (self.column - 1);
-    const end = Lexer_current_position(self);
-    return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
-  }
-  Lexer_advance(self);
-  let value = "";
-  while ((self.pos < Str_len(self.source))) {
-    const ch = Lexer_peek(self);
-    if ((((ch === "\"") && ((self.pos + 1) < Str_len(self.source))) && (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "#"))) {
-      Lexer_advance(self);
-      Lexer_advance(self);
-      const end = Lexer_current_position(self);
-      return Lexer_make_token(self, TokenKind_TkRawStringLit, value, start, end);
-    }
-    value = `${value}${ch}`;
+  const has_hash = (Lexer_peek(self) === "#");
+  if (has_hash) {
     Lexer_advance(self);
+    if ((Lexer_peek(self) !== "\"")) {
+      self.pos = (self.pos - 1);
+      self.column = (self.column - 1);
+      const end = Lexer_current_position(self);
+      return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
+    }
+    Lexer_advance(self);
+    let value = "";
+    while ((self.pos < Str_len(self.source))) {
+      const ch = Lexer_peek(self);
+      if ((((ch === "\"") && ((self.pos + 1) < Str_len(self.source))) && (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "#"))) {
+        Lexer_advance(self);
+        Lexer_advance(self);
+        const end = Lexer_current_position(self);
+        return Lexer_make_token(self, TokenKind_TkRawStringLit, value, start, end);
+      }
+      value = `${value}${ch}`;
+      Lexer_advance(self);
+    }
+    const span = new ast$Span(self.file, start, Lexer_current_position(self));
+    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
+    const end = Lexer_current_position(self);
+    return Lexer_make_token(self, TokenKind_TkError, value, start, end);
+  } else {
+    if ((Lexer_peek(self) !== "\"")) {
+      const end = Lexer_current_position(self);
+      return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
+    }
+    Lexer_advance(self);
+    let value = "";
+    while ((self.pos < Str_len(self.source))) {
+      const ch = Lexer_peek(self);
+      if ((ch === "\"")) {
+        Lexer_advance(self);
+        const end = Lexer_current_position(self);
+        return Lexer_make_token(self, TokenKind_TkRawStringLit, value, start, end);
+      }
+      value = `${value}${ch}`;
+      Lexer_advance(self);
+    }
+    const span = new ast$Span(self.file, start, Lexer_current_position(self));
+    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
+    const end = Lexer_current_position(self);
+    return Lexer_make_token(self, TokenKind_TkError, value, start, end);
   }
-  const span = new ast$Span(self.file, start, Lexer_current_position(self));
-  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
-  const end = Lexer_current_position(self);
-  return Lexer_make_token(self, TokenKind_TkError, value, start, end);
 }
 function Lexer_lex_number(self, start) {
   let value = "";
