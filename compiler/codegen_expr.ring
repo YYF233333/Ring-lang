@@ -95,10 +95,11 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
             let joined = arg_strs.join(", ")
             "${ev_name}.${op_name}(${joined})"
         },
-        HExpr::RangeExpr { start, end, .. } => {
+        HExpr::RangeExpr { start, end, inclusive, .. } => {
             let s = gen_expr(ctx, start)
             let e = gen_expr(ctx, end)
-            "{ start: ${s}, end: ${e} }"
+            let incl = if inclusive { "true" } else { "false" }
+            "{ start: ${s}, end: ${e}, inclusive: ${incl} }"
         },
         HExpr::ListLit { elements, .. } => {
             let mut elems: List<Str> = [""]; elems.clear()

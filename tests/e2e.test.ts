@@ -284,6 +284,8 @@ const cases: TestCase[] = [
   { file: "for_range_nested.ring", expected: "9\n" },
   { file: "for_range_break.ring", expected: "10\n" },
   { file: "for_range_inclusive.ring", expected: "15\n1\n" },
+  { file: "audit_range_as_value.ring", expected: "pass: range as value\n" },
+  { file: "audit_range_inclusive_var.ring", expected: "pass: inclusive range var\n" },
   { file: "match_multi_stmt.ring", expected: "1\n2\n3\n" },
   { file: "match_string.ring", expected: "match_string: all tests passed\n" },
   { file: "str_methods.ring", expected: "13\ntrue\ntrue\ntrue\nHello\nHello, World!\nABC\nxyz\na_b_c\n" },

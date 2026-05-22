@@ -1,6 +1,7 @@
 use ast::{Pattern, NamedPatternField, LiteralValue}
 use hir::{HExpr, HStmt, HMatchArm, HLetDestructureBinding,
-    ENUM_TAG_FIELD, RUNTIME_MATCH_FAIL}
+    ENUM_TAG_FIELD, RUNTIME_MATCH_FAIL, hexpr_type}
+use types::{Type, BUILTIN_RANGE}
 use codegen_ctx::{CodegenCtx, emit, push_indent, pop_indent, safe_ident, qualify}
 
 // Forward declarations — these will be provided by codegen_expr
@@ -218,25 +219,42 @@ pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
                     let cmp = if inclusive { "<=" } else { "<" }
                     emit(ctx, "for (let ${b} = ${start_js}; ${b} ${cmp} ${end_var}; ${b}++) {")
                 },
-                _ => match destructure {
-                    some(ds) => {
-                        if ds.len() > 0 {
-                            let iter = gen_expr(ctx, iterable)
-                            let mut names: List<Str> = [""]; names.clear()
-                            for d in ds { names.push(safe_ident(d.name)) }
-                            let joined = names.join(", ")
-                            emit(ctx, "for (const [${joined}] of ${iter}) {")
-                        } else {
-                            let iter = gen_expr(ctx, iterable)
-                            let b = safe_ident(binding)
-                            emit(ctx, "for (const ${b} of ${iter}) {")
-                        }
-                    },
-                    none => {
+                _ => {
+                    // Check if the iterable has Range type (e.g. variable holding a range)
+                    let iter_type = hexpr_type(iterable)
+                    let is_range = match iter_type {
+                        Type::EnumType { name, .. } => name == BUILTIN_RANGE,
+                        _ => false,
+                    }
+                    if is_range {
+                        let rng_var = "__ring_rng${ctx.loop_counter}"
+                        ctx.loop_counter = ctx.loop_counter + 1
                         let iter = gen_expr(ctx, iterable)
                         let b = safe_ident(binding)
-                        emit(ctx, "for (const ${b} of ${iter}) {")
-                    },
+                        emit(ctx, "const ${rng_var} = ${iter};")
+                        emit(ctx, "for (let ${b} = ${rng_var}.start; ${rng_var}.inclusive ? ${b} <= ${rng_var}.end : ${b} < ${rng_var}.end; ${b}++) {")
+                    } else {
+                        match destructure {
+                            some(ds) => {
+                                if ds.len() > 0 {
+                                    let iter = gen_expr(ctx, iterable)
+                                    let mut names: List<Str> = [""]; names.clear()
+                                    for d in ds { names.push(safe_ident(d.name)) }
+                                    let joined = names.join(", ")
+                                    emit(ctx, "for (const [${joined}] of ${iter}) {")
+                                } else {
+                                    let iter = gen_expr(ctx, iterable)
+                                    let b = safe_ident(binding)
+                                    emit(ctx, "for (const ${b} of ${iter}) {")
+                                }
+                            },
+                            none => {
+                                let iter = gen_expr(ctx, iterable)
+                                let b = safe_ident(binding)
+                                emit(ctx, "for (const ${b} of ${iter}) {")
+                            },
+                        }
+                    }
                 },
             }
             push_indent(ctx)

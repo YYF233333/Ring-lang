@@ -233,10 +233,11 @@ function gen_expr(ctx, expr) {
       break __ring_match1;
     }
     if (__ring_m1._tag === "RangeExpr") {
-      const start = __ring_m1.start; const end = __ring_m1.end;
+      const start = __ring_m1.start; const end = __ring_m1.end; const inclusive = __ring_m1.inclusive;
       const s = gen_expr(ctx, start);
       const e = gen_expr(ctx, end);
-      return `{ start: ${s}, end: ${e} }`;
+      const incl = (inclusive ? "true" : "false");
+      return `{ start: ${s}, end: ${e}, inclusive: ${incl} }`;
       break __ring_match1;
     }
     if (__ring_m1._tag === "ListLit") {
