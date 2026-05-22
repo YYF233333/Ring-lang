@@ -1031,6 +1031,19 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   if (__ring_m._tag === "none") { return inferred_effects; }
   __match_fail(__ring_m);
 })();
+  if ((name === "main")) {
+    for (const eff of final_effects.effects) {
+      __ring_match40: {
+        const __ring_m40 = eff;
+        if (__ring_m40._tag === "CustomEffect") {
+          const eff_name = __ring_m40.name;
+          const _ = infer_ctx$type_error(ctx.sink, codes$E0403, `Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main`, span, diagnostics$DiagnosticContext_EffectUnhandled(eff_name, Option_some("main")));
+          break __ring_match40;
+        }
+        break __ring_match40;
+      }
+    }
+  }
   let trait_bounds = [];
   for (const fb of complete_fn_bounds) {
     List_push(trait_bounds, new hir$TraitBound(fb.type_param_name, fb.trait_name));
@@ -1042,17 +1055,17 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-  __ring_match40: {
-    const __ring_m40 = fn_def_id;
-    if (__ring_m40._tag === "some") {
-      const did = __ring_m40._0;
+  __ring_match41: {
+    const __ring_m41 = fn_def_id;
+    if (__ring_m41._tag === "some") {
+      const did = __ring_m41._0;
       env$TypeEnv_record_def_span(ctx.env, did, span);
-      break __ring_match40;
+      break __ring_match41;
     }
-    if (__ring_m40._tag === "none") {
-      break __ring_match40;
+    if (__ring_m41._tag === "none") {
+      break __ring_match41;
     }
-    __match_fail(__ring_m40);
+    __match_fail(__ring_m41);
   }
   return hir$HDecl_Fn(name, fn_def_id, type_params, final_params, final_ret, final_effects, final_body, is_pub, trait_bounds, span);
 }
@@ -1084,16 +1097,16 @@ function check_test_decl(ctx, description, body, span, __ring_ev_fail) {
 function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
   const hd = check_decl(ctx, decl, __ring_ev_fail);
   List_push(hdecls, hd);
-  __ring_match41: {
-    const __ring_m41 = hd;
-    if (__ring_m41._tag === "Fn") {
-      const name = __ring_m41.name; const effects = __ring_m41.effects;
+  __ring_match42: {
+    const __ring_m42 = hd;
+    if (__ring_m42._tag === "Fn") {
+      const name = __ring_m42.name; const effects = __ring_m42.effects;
       if ((List_len(effects.effects) > 0)) {
         return infer_ctx$update_fn_effects(ctx.env, name, effects);
       }
-      break __ring_match41;
+      break __ring_match42;
     }
-    break __ring_match41;
+    break __ring_match42;
   }
 }
 

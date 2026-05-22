@@ -7,7 +7,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0201, E0204, E0402, E0404, E0405, E0501, E0705}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0501, E0705}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error,
     unify_at, update_fn_effects,
@@ -749,6 +749,23 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
             declared_row
         },
         none => inferred_effects
+    }
+
+    // Check: main function must not have unhandled custom effects.
+    // io/fail/mut are allowed (io is implicit, fail has default handler, mut is Cell-based),
+    // but CustomEffect requires an explicit handler and cannot propagate past main.
+    if name == "main" {
+        for eff in final_effects.effects {
+            match eff {
+                Effect::CustomEffect { name: eff_name, .. } => {
+                    let _ = type_error(ctx.sink, E0403,
+                        "Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main",
+                        span,
+                        DiagnosticContext::EffectUnhandled { eff: eff_name, in_function: some("main") })
+                },
+                _ => {}
+            }
+        }
     }
 
     let mut trait_bounds: List<TraitBound> = []
