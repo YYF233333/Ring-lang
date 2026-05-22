@@ -248,6 +248,7 @@ const cases: TestCase[] = [
   { file: "option_unwrap_method.ring", expected: "42\nhello\n" },
   { file: "catch_typed.ring", expected: "99\n" },
   { file: "catch_multi_arm.ring", expected: "catch_multi_arm: all tests passed\n" },
+  { file: "catch_always_consumes.ring", expected: "catch_always_consumes: all tests passed\n" },
   { file: "match_wildcard.ring", expected: "yes\nno\nother\n" },
   { file: "try_nested.ring", expected: "-1\n6\n" },
   { file: "trait_higher_order.ring", expected: "num\n" },

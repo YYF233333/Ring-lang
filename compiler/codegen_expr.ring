@@ -894,7 +894,6 @@ fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
 
     // Generate arm code
     var arm_js: List<Str> = []
-    var has_catch_all = false
     for arm in arms {
         let cond = gen_catch_pattern_condition(ctx, "__ring_err", arm.pattern)
         let bindings = gen_pattern_bindings("__ring_err", arm.pattern)
@@ -905,19 +904,6 @@ fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
         match arm.guard {
             some(g) => { guard_js = " && (${gen_expr(ctx, g)})" },
             none => {}
-        }
-
-        // Check if catch-all
-        match arm.pattern {
-            Pattern::Wildcard { .. } => match arm.guard {
-                none => { has_catch_all = true },
-                _ => {}
-            },
-            Pattern::Binding { .. } => match arm.guard {
-                none => { has_catch_all = true },
-                _ => {}
-            },
-            _ => {}
         }
 
         arm_js.push("if (${cond}${guard_js}) { ${bindings}return ${arm_body_js}; }")
@@ -949,13 +935,11 @@ fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
         else { p.push(" else ${aj}") }
     }
 
-    // If no catch-all, re-throw
-    if has_catch_all == false {
-        if arm_js.len() > 0 {
-            p.push(" else { throw __ring_e; }")
-        } else {
-            p.push("throw __ring_e;")
-        }
+    // Always re-throw unmatched errors as runtime safety net
+    if arm_js.len() > 0 {
+        p.push(" else { throw __ring_e; }")
+    } else {
+        p.push("throw __ring_e;")
     }
 
     p.push(" } throw __ring_e; } })()")

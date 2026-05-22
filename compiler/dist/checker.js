@@ -93,7 +93,7 @@ function load_prelude(ctx) {
                 _Map_insert(ctx.type_param_scope, tp.name, tv);
               }
               const filtered_decl = ast$Decl_Impl(target_type, type_params, trait_name, fn_methods, span);
-              const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, filtered_decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+              const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, filtered_decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
               __ring_match3: {
                 const __ring_m3 = result;
                 if (__ring_m3._tag === "some") {
@@ -111,7 +111,7 @@ function load_prelude(ctx) {
             break __ring_match1;
           }
           if (__ring_m1._tag === "Fn") {
-            const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+            const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
             __ring_match4: {
               const __ring_m4 = result;
               if (__ring_m4._tag === "some") {

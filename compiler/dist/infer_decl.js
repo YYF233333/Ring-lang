@@ -128,7 +128,7 @@ function check_mod_decl(ctx, mod_name, uses, decls, required_effects, is_pub, sp
   let hdecls = [];
   for (const decl of decls) {
     const prefixed = infer_register$prefix_decl_name(mod_name, decl);
-    const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_decl(ctx, prefixed, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+    const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_decl(ctx, prefixed, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
     __ring_match2: {
       const __ring_m2 = result;
       if (__ring_m2._tag === "some") {
@@ -692,7 +692,7 @@ function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
       }
     }
   }
-  const body_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer$infer_block(ctx, body, Option_none, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+  const body_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer$infer_block(ctx, body, Option_none, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
   env$TypeEnv_pop_scope(ctx.env);
   ctx.current_fn_bounds = (function() {
   const __ring_m = List_pop(ctx.fn_bounds_stack);
@@ -942,7 +942,7 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   __match_fail(__ring_m);
 })();
   ctx.current_fn_return_type = Option_some(expected_ret);
-  const try_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_scope, span, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+  const try_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_scope, span, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
   const complete_fn_bounds = ctx.current_fn_bounds;
   ctx.current_fn_return_type = saved_fn_return;
   env$TypeEnv_pop_scope(ctx.env);
@@ -1014,7 +1014,7 @@ function check_test_decl(ctx, description, body, span, __ring_ev_fail) {
   const saved_subst = ctx.subst;
   ctx.subst = unify$empty_subst();
   env$TypeEnv_push_scope(ctx.env);
-  const body_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer$infer_block(ctx, body, Option_none, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+  const body_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer$infer_block(ctx, body, Option_none, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
   env$TypeEnv_pop_scope(ctx.env);
   const final_body = (function() {
   const __ring_m = body_result;
@@ -1055,7 +1055,7 @@ function check(ctx, program, __ring_ev_fail) {
   const derived_impls = derive$run_derive_pass(ctx.env);
   let hdecls = [];
   for (const decl of program.decls) {
-    const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_one_decl(ctx, decl, hdecls, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+    const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_one_decl(ctx, decl, hdecls, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
   }
   return new hir$HProgram(hdecls, derived_impls);
 }

@@ -2079,7 +2079,6 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
     let result_type = ctx.env.fresh_var()
     s = unify_at(ctx.sink, ctx.env, hexpr_type(expr_r.hexpr), result_type, s, span)
     var harms: List<HMatchArm> = []
-    var has_catch_all = false
 
     for arm in arms {
         ctx.env.push_scope()
@@ -2107,19 +2106,6 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
             s = me.1
             s = unify_at(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span)
 
-            // Check if this arm is a catch-all (wildcard or binding without guard)
-            match arm.pattern {
-                Pattern::Wildcard { .. } => match arm.guard {
-                    none => { has_catch_all = true },
-                    _ => {}
-                },
-                Pattern::Binding { .. } => match arm.guard {
-                    none => { has_catch_all = true },
-                    _ => {}
-                },
-                _ => {}
-            }
-
             harms.push(HMatchArm { pattern: arm.pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
             true
         }) catch { _ => none }
@@ -2130,10 +2116,8 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
         }
     }
 
-    // If catch-all exists, remove fail effect; otherwise fail propagates
-    if has_catch_all {
-        effects = remove_fail_effect(effects)
-    }
+    // catch always fully consumes the fail effect
+    effects = remove_fail_effect(effects)
 
     let final_type = apply_subst(s, result_type)
     InferResult {

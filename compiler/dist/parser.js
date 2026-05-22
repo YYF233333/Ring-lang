@@ -454,7 +454,7 @@ function Parser_parse_program(self) {
       if (decls_started) {
         Parser_report_error(self, codes$E0706, "Use declaration must appear before other declarations", Option_some(Parser_peek(self).span));
       }
-      const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+      const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
       __ring_match3: {
         const __ring_m3 = use_result;
         if (__ring_m3._tag === "some") {
@@ -484,7 +484,7 @@ function Parser_parse_program(self) {
         if (decls_started) {
           Parser_report_error(self, codes$E0706, "Use declaration must appear before other declarations", Option_some(Option_unwrap_or(List_get(self.tokens, save_pos), Parser_peek(self)).span));
         }
-        const pub_use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, true)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+        const pub_use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, true)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
         __ring_match4: {
           const __ring_m4 = pub_use_result;
           if (__ring_m4._tag === "some") {
@@ -510,7 +510,7 @@ function Parser_parse_program(self) {
       diagnostics$CollectingSink_restore(self.sink, sink_checkpoint);
     }
     decls_started = true;
-    const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+    const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
     __ring_match5: {
       const __ring_m5 = maybe_decl;
       if (__ring_m5._tag === "some") {
@@ -831,7 +831,7 @@ function Parser_parse_mod_block(self, is_pub) {
   let decls = [];
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     if (Parser_check(self, lexer$TokenKind_TkUse)) {
-      const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+      const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
       __ring_match7: {
         const __ring_m7 = use_result;
         if (__ring_m7._tag === "some") {
@@ -852,7 +852,7 @@ function Parser_parse_mod_block(self, is_pub) {
       }
       continue;
     }
-    const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } } throw __ring_e; } })();
+    const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
     __ring_match8: {
       const __ring_m8 = maybe_decl;
       if (__ring_m8._tag === "some") {

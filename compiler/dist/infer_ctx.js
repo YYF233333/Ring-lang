@@ -233,7 +233,7 @@ function unify_at(sink, env, t1, t2, s, span) {
   const code = (e.is_occurs_check ? codes$E0302 : codes$E0301);
   const _ = type_error(sink, code, e.message, span, diagnostics$DiagnosticContext_TypeMismatch(types$type_to_string(env$apply_subst(s, t1)), types$type_to_string(env$apply_subst(s, t2)), Option_none));
   return s;
-})(); } } throw __ring_e; } })();
+})(); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
 function free_type_vars(t, subst) {
