@@ -454,9 +454,9 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
     for method in methods {
         match method {
             Decl::Fn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
-                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved),
+                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params),
             Decl::ExternFn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
-                register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved),
+                register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params),
             _ => {}
         }
     }
@@ -502,10 +502,35 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
     ctx.type_param_scope = saved
 }
 
+// Construct the self type for an impl method, using the impl's type params
+// from type_param_scope instead of creating unrelated fresh vars.
+// This ensures the self type shares the same type variables as the rest of
+// the method signature, so instantiation correctly replaces all occurrences.
+fn resolve_impl_self_type(mut ctx: InferCtx, target_type: Str, impl_type_params: List<TypeParam>) -> Type {
+    if impl_type_params.len() == 0 {
+        return resolve_self_type(ctx, target_type)
+    }
+    let mut impl_tp_types: List<Type> = []
+    for tp in impl_type_params {
+        match ctx.type_param_scope.get(tp.name) {
+            some(tv) => impl_tp_types.push(tv),
+            none => impl_tp_types.push(ctx.env.fresh_var())
+        }
+    }
+    match ctx.env.types.structs.get(target_type) {
+        some(def) => Type::StructType { name: def.name, type_params: impl_tp_types, fields: def.fields },
+        none => match ctx.env.types.enums.get(target_type) {
+            some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types, variants: def.variants },
+            none => resolve_self_type(ctx, target_type)
+        }
+    }
+}
+
 fn register_impl_method(
     mut ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
-    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>
+    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>,
+    impl_type_params: List<TypeParam>
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
     let mut method_tv_ids: List<Int> = []
@@ -515,7 +540,7 @@ fn register_impl_method(
         ctx.type_param_scope.insert(mtp.name, tv)
     }
 
-    let self_type = resolve_self_type(ctx, target_type)
+    let self_type = resolve_impl_self_type(ctx, target_type, impl_type_params)
     let mut param_types: List<Type> = []
     for p in params {
         match p.type_annotation {
@@ -575,7 +600,8 @@ fn register_impl_method(
 fn register_impl_extern_method(
     mut ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
-    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>
+    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>,
+    impl_type_params: List<TypeParam>
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
     let mut method_tv_ids: List<Int> = []
@@ -584,7 +610,7 @@ fn register_impl_extern_method(
         match tv { Type::TypeVar { id, .. } => { method_tv_ids.push(id) }, _ => {} }
         ctx.type_param_scope.insert(mtp.name, tv)
     }
-    let self_type = resolve_self_type(ctx, target_type)
+    let self_type = resolve_impl_self_type(ctx, target_type, impl_type_params)
     let mut param_types: List<Type> = []
     for p in params {
         match p.type_annotation {
