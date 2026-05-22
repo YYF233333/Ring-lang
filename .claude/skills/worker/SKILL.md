@@ -1,9 +1,9 @@
 ---
-name: parallel-dispatch
-description: Use when user wants to execute implementation tasks — "执行", "开始工作", "下一个 wave", "worker", or any request to implement backlog/audit items. Reads from backlog + audit-report, generates plans, dispatches worktree subagents, maintains table status.
+name: worker
+description: Use when user wants to execute implementation tasks — "执行", "开始工作", "下一个 wave", "worker", "修 audit", "fix", or any request to implement backlog/audit items. Reads from backlog + audit-report, generates plans, dispatches worktree subagents, maintains table status.
 ---
 
-# Worker Agent (Parallel Dispatch Orchestrator)
+# Worker Agent
 
 从 backlog + audit-report 读取待做 items，生成实现 plan，用 worktree subagent 并行执行，维护表状态。
 
@@ -12,7 +12,7 @@ description: Use when user wants to execute implementation tasks — "执行", "
 
 ## Trigger
 
-User says: "执行", "开始工作", "下一个 wave", "worker", "并行执行", or `/parallel-dispatch`.
+User says: "执行", "开始工作", "下一个 wave", "worker", "并行执行", "修 audit", "fix audit", "处理审计项", or `/worker`.
 
 ## 写入范围
 
