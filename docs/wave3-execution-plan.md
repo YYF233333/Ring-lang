@@ -1,8 +1,18 @@
 # Wave 3 并行执行计划
 
 > 基于 phase-b-spec.md Wave 3 + 前置条件修复
-> Main HEAD: `45fa7d3`
-> 测试基线: 454/454
+> Main HEAD: `953d246`（P2 完成后）
+> 测试基线: 487/487
+
+## 执行进度 (2026-05-22)
+
+| Wave | 任务 | 状态 | 测试 | 备注 |
+|------|------|------|------|------|
+| A | M5 (capability 限制) | ✅ 完成 | 469 | worktree agent 完成 |
+| A | P1 (fn type effect 标注) | ✅ 完成 | 485 | worktree 失败，直接在 main 实现 |
+| B | P2 (impl bounds) | ✅ 完成 | 487 | 直接在 main 实现。已知 bug #72：bounded impl 方法跨类型调用冲突 |
+| B | S2 (HOF 迁移) | ⏳ 待做 | — | 下个 session |
+| C | S3 (Eq trait 约束迁移) | ⏳ 待做 | — | 依赖 P2 ✅ |
 
 ## 总览
 

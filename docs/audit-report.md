@@ -1,8 +1,10 @@
 # Ring 编译器技术债清单
 
 自举审计 (2026-05-21) + Phase B Wave 1 审计 (2026-05-22) 产出。三路并行审计（Claude×2 + DS V4 Pro）去重合并后的长期跟踪清单。
-已修复项以删除线标记。69 项中 44 项已修复（#1-5, #9-13, #15, #17-18, #21, #23-24, #25, #27, #31-33, #35, #43-44, #46-50, #52-58, #60-63, #65, #69, C1-C3）。
+已修复项以删除线标记。71 项中 44 项已修复（#1-5, #9-13, #15, #17-18, #21, #23-24, #25, #27, #31-33, #35, #43-44, #46-50, #52-58, #60-63, #65, #69, C1-C3）。
 Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复。
+自定义 effect 测试补全时发现 2 项新 bug（#70-71）。
+Wave 3 实现中发现 1 项新 bug（#72）。
 
 ---
 
@@ -77,6 +79,10 @@ Phase B Wave 1 审计新增 16 项（#54-69），其中 #54-58, #60-61 已修复
 | 51 | ~~4 个错误码缺负向测试覆盖~~ | ~~回归保护不完整~~ | **部分修复**：E0101/E0207/E0706 已补充负向测试；E0403 定义但未实现（无触发点），待 effect 检查完善后补充 |
 | 52 | ~~effect 标注语法（F1）测试覆盖薄~~ | ~~回归保护不充分~~ | **已修复**：新增 `effect_annotation_multi.ring` 覆盖多 effect 组合、fail 传播、catch 交互、无标注后向兼容 |
 | 53 | ~~模块负向测试不验证具体错误码~~ | ~~测试精度不足~~ | **已修复**：（commit 4657e0d）模块负向测试已验证具体错误码（E0702/E0703/E0704） |
+
+| 70 | **自定义 effect 类型参数不工作**：`effect State<S> { fn get() -> S }` 中 `S` 报 E0204 Unknown type。`register_effect` 解析 op 时未将 effect 的 type_params 注入作用域。内置 `fail<E>` 靠 builtins.ring 硬编码绕过 | **Bug** | `effect State<S>` 声明可解析，但 checker 无法解析 op 中的类型参数。需在 `register_effect` 中将 type_params 注册为临时类型变量 |
+| 71 | **未 handle 的自定义 effect 无编译错误**：E0403 已定义但 checker 中无触发点。未 handle 的自定义 effect 到达 codegen 后缺少 evidence 参数，产生运行时错误 | **Bug** | checker 需在 `main` 或模块边界检查残余的 CustomEffect 是否已 handle |
+| 72 | **`impl<T: Eq>` bounded impl 方法跨类型调用冲突**：`check_impl_decl` 为 impl 类型参数创建的 fresh type var 在方法体检查后泄漏。同一作用域对不同具体类型（如 `List<Int>.has_item()` 和 `List<Str>.has_item()`）调用 bounded impl 方法时，第二次调用因 type var 已被统一为第一次的具体类型而报 "cannot unify Str with Int"。同一类型多次调用正常 | **Bug** | `check_impl_decl` 中 impl type param 的 fresh var 应在每次方法调用时独立实例化，而非在整个 impl 检查期间共享。可能需要将 type var 创建移到方法查找/实例化阶段 |
 
 ## 设计-实现差距（未实现特性）
 

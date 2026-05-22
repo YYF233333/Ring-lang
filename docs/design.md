@@ -249,7 +249,61 @@ effect mut<S> {
 }
 ```
 
-### 2.2 Effect 推断
+### 2.2 Default Handler（默认处理器）
+
+Effect 的 op 可以带 body，语法与 trait 默认方法一致——有 body = 有默认 handler，无 body = 必须显式 handle：
+
+```
+effect Logger {
+    fn log(msg: Str) -> Unit {       // 有默认 handler
+        print(msg)
+    }
+}
+
+effect Storage {
+    fn read(key: Str) -> Str         // 无默认，必须 handle
+    fn write(key: Str, val: Str) -> Unit  // 无默认，必须 handle
+    fn log(msg: Str) -> Unit {       // 有默认，可选 handle
+        print("storage: ${msg}")
+    }
+}
+```
+
+**语义规则：**
+
+1. **签名透明**：有默认的 effect 仍出现在函数签名中（`fn work() -> Unit with {Logger}`）。"效果即可见性"——默认 handler 消除的是 boilerplate，不是可见性。
+
+2. **部分默认**：`handle...with` 中显式 handle 的 op 覆盖默认，未写的 op 走默认。如果一个 op **没有默认且未 handle → 编译错误**。
+
+3. **全默认可省略 handle**：如果一个 effect 的所有 op 都有默认，调用者可以完全不写 `handle...with`，编译器自动注入默认 evidence。
+
+```
+// Logger 全部 op 有默认，无需 handle
+fn main() {
+    do_work()  // Logger.log 自动走 print(msg)
+}
+
+// Storage 部分 op 无默认，只 handle 无默认的
+handle {
+    work()
+} with {
+    Storage.read(k) => read_from_disk(k),
+    Storage.write(k, v) => write_to_disk(k, v),
+    // Storage.log 不写 → 走默认的 print
+}
+```
+
+**Default handler 的 effect 约束（中间版设计）：**
+
+Default handler body 可以使用：
+- 内置 effect（io / fail / mut）
+- 已有 default handler 的自定义 effect
+
+不允许使用无默认 handler 的自定义 effect（会产生无法解析的依赖）。编译器对 default handler 间的依赖做拓扑排序，检测循环时报编译错误。
+
+⚠️ 设计已确定（2026-05-22），尚未实现。
+
+### 2.3 Effect 推断
 
 你不写 effect 标注，编译器全推断：
 
@@ -267,7 +321,7 @@ fn load_portfolio(path: Str) -> Portfolio {
 //     with {io, fail<ParseError | ValidationError>}
 ```
 
-### 2.3 错误处理
+### 2.4 错误处理
 
 **传播——免费冒泡，零语法**
 
@@ -314,7 +368,7 @@ handle {
 }
 ```
 
-### 2.4 Effect Handler 用于测试 Mock
+### 2.5 Effect Handler 用于测试 Mock
 
 ```
 test "load_portfolio parses correctly" {
@@ -330,7 +384,7 @@ test "load_portfolio parses correctly" {
 }
 ```
 
-### 2.5 Effect 多态
+### 2.6 Effect 多态
 
 当前 handler 支持两种语义：
 
@@ -366,7 +420,7 @@ handle {
 > }
 > ```
 
-### 2.6 Effect 冒泡可见性
+### 2.7 Effect 冒泡可见性
 
 冒泡点是人的需求，不是编译器的需求。由 IDE 层解决：
 
@@ -649,7 +703,7 @@ pub use config
 - 一等模块（模块作为值传递）
 - ~~`inline mod` 块~~ ✅ 已实现（`pub mod name { ... }` 嵌套命名空间，声明自动加前缀 `mod_name::decl_name`）
 - 相对路径导入（`super::`/`self::`）
-- Capability 限制
+- ~~Capability 限制~~ ✅ 已实现（`mod name requires {effects} { ... }` 语法，E0405 检查函数推断 effect 是否在 requires 集合内）
 
 ---
 
@@ -1060,13 +1114,13 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 | 阶段 | 后端 | 性能水平 | 对标 |
 |------|------|---------|------|
 | 当前 | JS (V8) | V8 水平 | TypeScript 同级 |
-| +WasmGC | WasmGC (所有主流浏览器已支持) | JS 的 ~2x | Dart/Kotlin-WASM 同级 |
 | +LLVM | LLVM native | C 的 2-3x | Go/OCaml 同级 |
 | +Perceus | LLVM + Perceus 引用计数 | C 的 1.2-1.5x | Koka/Swift 同级 |
 
+JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体验，不是性能。LLVM 后端面向桌面/服务端场景中有真实性能需求的用户。
+
 ### 13.3 关键技术路径
 
-- **WasmGC** 已成为 W3C 标准（2025），Google Sheets 实测 2x 于 JS。Dart/Kotlin/Java 已有后端。这是最优先的升级——替换 JS 后端即可获得 Web 端的实质性能提升。
 - **LLVM native** 用于桌面/服务端。Koka 编译到 C 再 gcc/clang，Kotlin/Native 直接用 LLVM。已证明可行。
 - **Perceus 引用计数** 替换 GC。无停顿、确定性析构、函数式代码可就地复用已死对象的内存。语言设计无需修改——Perceus 是编译器优化，用户代码不感知。
 - **Evidence passing** 替换 generator effect handler。同样是编译器优化，用户代码不感知。
@@ -1102,7 +1156,7 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 | LLM 友好的严格编译器 | 首次编译通过率可能低于 TS |
 | 一种事一种写法 | 老手可能觉得缺乏灵活性 |
 
-## 附录：实现状态（2026-05-21 更新）
+## 附录：实现状态（2026-05-22 更新）
 
 ### 已落地的设计决策
 
@@ -1114,6 +1168,9 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 | `mut<S>` 参数化 | 保持无参数 `mut` | Cell<T> 泛型已保证类型安全 |
 | `++` 拼接运算符 | 不实现，使用字符串插值 | "一种事一种写法"原则 |
 | Lambda 双向类型传播 | receiver 统一提前 + lambda 接受 expected param types | 支持 `==` 在嵌套 closure 中正确推断 |
+| fn 类型 effect 标注 | `fn(T) -> U with {io}` 语法，无标注时 open row | 支持 HOF callback 的 effect 多态 |
+| impl bounds | `impl<T: Eq> List { ... }` 语法 | 前置条件：Eq trait 约束迁移到 impl 方法 |
+| mod capability | `mod name requires {effects} { ... }` 语法 | 模块级 effect 限制，E0405 错误码 |
 
 ### 幽灵功能（已解析但无语义效果）
 
@@ -1153,7 +1210,7 @@ Koka（微软研究院）通过两项技术达到 C 性能的 75-85%：
 - **Struct literal 不能在条件位置**：`if x == MyStruct { f: 1 } { ... }` 歧义，parser 无法区分 struct literal 和块。需用括号或变量绑定（Go/Rust 同有此限制）
 
 **类型推断**：
-- **空列表 `[]` 类型推断失败**：即使 `let x: List<T> = []` 带完整标注也无法推断。根因是 `[]` 没有元素可供推断泛型参数
+- ~~**空列表 `[]` 类型推断失败**~~：已修复（Phase 3）。`let x: List<T> = []` 和上下文推断均正常
 - **`.map()` 闭包不能捕获 `var` 变量**：HOF 闭包内引用 `var ctx` 会报错，需改用 `for` 循环 + `push`
 
 ### 未实现特性优先级
