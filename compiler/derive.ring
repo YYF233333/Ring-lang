@@ -298,7 +298,24 @@ fn resolve_field_action(
                 }
             }
         },
-        Type::TupleType { .. } => some(FieldAction::Identity),
+        Type::TupleType { elements } => {
+            let mut elem_actions: List<FieldAction> = []
+            let mut ok = true
+            for elem_ty in elements {
+                if ok {
+                    let elem_action = resolve_field_action(env, elem_ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
+                    match elem_action {
+                        some(a) => elem_actions.push(a),
+                        none => { ok = false },
+                    }
+                }
+            }
+            if ok {
+                some(FieldAction::Tuple { element_actions: elem_actions })
+            } else {
+                none
+            }
+        },
         Type::FnType { .. } => {
             if trait_name == "Debug" {
                 some(FieldAction::Identity)

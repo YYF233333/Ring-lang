@@ -432,6 +432,7 @@ const cases: TestCase[] = [
   { file: "index_expr.ring", expected: "index_expr: all tests passed\n" },
   { file: "mut_param_enforcement.ring", expected: "mut_param_enforcement: all tests passed\n" },
   { file: "mod_nested_block.ring", expected: "mod_nested_block: all tests passed\n" },
+  { file: "audit_derive_tuple.ring", expected: "pass: derive tuple\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

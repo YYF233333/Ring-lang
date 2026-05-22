@@ -96,11 +96,33 @@ fn emit_derived_eq(mut ctx: CodegenCtx, impl_: DerivedImpl) {
 }
 
 fn gen_field_eq(left: Str, right: Str, field: DerivedField) -> Str {
-    match field.action {
+    gen_action_eq(left, right, field.action)
+}
+
+fn gen_action_eq(left: Str, right: Str, action: FieldAction) -> Str {
+    match action {
         FieldAction::Identity => "(${left} === ${right})",
         FieldAction::Call { dict_name, extra_dicts } => {
             let extra = extra_dicts_str(extra_dicts)
             "${dict_name}.eq(${left}, ${right}${extra})"
+        },
+        FieldAction::Tuple { element_actions } => {
+            if element_actions.len() == 0 {
+                "true"
+            } else {
+                let mut parts: List<Str> = []
+                for i in 0..element_actions.len() {
+                    match element_actions.get(i) {
+                        some(ea) => {
+                            let el = "${left}[${i}]"
+                            let er = "${right}[${i}]"
+                            parts.push(gen_action_eq(el, er, ea))
+                        },
+                        none => {},
+                    }
+                }
+                "(${parts.join(" && ")})"
+            }
         },
     }
 }
@@ -166,11 +188,25 @@ fn emit_derived_clone(mut ctx: CodegenCtx, impl_: DerivedImpl) {
 }
 
 fn gen_field_clone(expr: Str, field: DerivedField) -> Str {
-    match field.action {
+    gen_action_clone(expr, field.action)
+}
+
+fn gen_action_clone(expr: Str, action: FieldAction) -> Str {
+    match action {
         FieldAction::Identity => expr,
         FieldAction::Call { dict_name, extra_dicts } => {
             let extra = extra_dicts_str(extra_dicts)
             "${dict_name}.clone(${expr}${extra})"
+        },
+        FieldAction::Tuple { element_actions } => {
+            let mut parts: List<Str> = []
+            for i in 0..element_actions.len() {
+                match element_actions.get(i) {
+                    some(ea) => parts.push(gen_action_clone("${expr}[${i}]", ea)),
+                    none => {},
+                }
+            }
+            "[${parts.join(", ")}]"
         },
     }
 }
@@ -298,11 +334,43 @@ fn emit_derived_ord(mut ctx: CodegenCtx, impl_: DerivedImpl) {
 }
 
 fn gen_field_cmp(left: Str, right: Str, field: DerivedField) -> Str {
-    match field.action {
+    gen_action_cmp(left, right, field.action)
+}
+
+fn gen_action_cmp(left: Str, right: Str, action: FieldAction) -> Str {
+    match action {
         FieldAction::Identity => "(${left} < ${right} ? -1 : ${left} > ${right} ? 1 : 0)",
         FieldAction::Call { dict_name, extra_dicts } => {
             let extra = extra_dicts_str(extra_dicts)
             "${dict_name}.cmp(${left}, ${right}${extra})"
+        },
+        FieldAction::Tuple { element_actions } => {
+            if element_actions.len() == 0 {
+                "0"
+            } else {
+                if element_actions.len() == 1 {
+                    match element_actions.get(0) {
+                        some(ea) => gen_action_cmp("${left}[0]", "${right}[0]", ea),
+                        none => "0",
+                    }
+                } else {
+                    let mut body_parts: List<Str> = []
+                    for i in 0..element_actions.len() {
+                        match element_actions.get(i) {
+                            some(ea) => {
+                                let cmp = gen_action_cmp("${left}[${i}]", "${right}[${i}]", ea)
+                                if i < element_actions.len() - 1 {
+                                    body_parts.push("c = ${cmp}; if (c !== 0) return c;")
+                                } else {
+                                    body_parts.push("return ${cmp};")
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                    "(function() { var c; ${body_parts.join(" ")} })()"
+                }
+            }
         },
     }
 }
@@ -384,11 +452,29 @@ fn emit_derived_debug(mut ctx: CodegenCtx, impl_: DerivedImpl) {
 }
 
 fn gen_field_debug(expr: Str, field: DerivedField) -> Str {
-    match field.action {
+    gen_action_debug(expr, field.action)
+}
+
+fn gen_action_debug(expr: Str, action: FieldAction) -> Str {
+    match action {
         FieldAction::Identity => "String(${expr})",
         FieldAction::Call { dict_name, extra_dicts } => {
             let extra = extra_dicts_str(extra_dicts)
             "${dict_name}.debug(${expr}${extra})"
+        },
+        FieldAction::Tuple { element_actions } => {
+            if element_actions.len() == 0 {
+                "\"()\""
+            } else {
+                let mut parts: List<Str> = []
+                for i in 0..element_actions.len() {
+                    match element_actions.get(i) {
+                        some(ea) => parts.push(gen_action_debug("${expr}[${i}]", ea)),
+                        none => {},
+                    }
+                }
+                "\"(\" + ${parts.join(" + \", \" + ")} + \")\""
+            }
         },
     }
 }

@@ -354,6 +354,9 @@ const FieldAction_Identity = Object.freeze({ _tag: "Identity" });
 function FieldAction_Call(dict_name, extra_dicts) {
   return { _tag: "Call", dict_name, extra_dicts };
 }
+function FieldAction_Tuple(element_actions) {
+  return { _tag: "Tuple", element_actions };
+}
 
 class DerivedField {
   constructor(name, positional_index, action) {
@@ -851,6 +854,7 @@ function __FieldAction_Clone_clone(self) {
   switch (self._tag) {
     case "Identity": return FieldAction_Identity;
     case "Call": return FieldAction_Call(self.dict_name, __List_Clone.clone(self.extra_dicts, __Str_Clone));
+    case "Tuple": return FieldAction_Tuple(__List_Clone.clone(self.element_actions, __FieldAction_Clone));
     default: return self;
   }
 }
@@ -944,6 +948,7 @@ function __FieldAction_Debug_debug(self) {
   switch (self._tag) {
     case "Identity": return "Identity";
     case "Call": return "Call { " + "dict_name: " + String(self.dict_name) + ", " + "extra_dicts: " + __List_Debug.debug(self.extra_dicts, __Str_Debug) + " }";
+    case "Tuple": return "Tuple { " + "element_actions: " + __List_Debug.debug(self.element_actions, __FieldAction_Debug) + " }";
     default: return self._tag;
   }
 }
@@ -974,4 +979,4 @@ function __DerivedImpl_Debug_debug(self) {
 const __DerivedImpl_Debug = { debug: __DerivedImpl_Debug_debug };
 
 
-export { HParam, TraitDispatch_Builtin, TraitDispatch_Direct, TraitDispatch_Dict, DictDispatchInfo, HStructFieldInit, HMatchArm, HEffectHandler, HStringInterpPart_Literal, HStringInterpPart_Expression, HExpr_IntLit, HExpr_FloatLit, HExpr_StrLit, HExpr_BoolLit, HExpr_Ident, HExpr_BinOp, HExpr_UnaryOp, HExpr_Call, HExpr_FieldAccess, HExpr_StructLit, HExpr_NamedVariantConstruct, HExpr_MatchExpr, HExpr_Block, HExpr_IfExpr, HExpr_StringInterp, HExpr_TryCatch, HExpr_HandleExpr, HExpr_Lambda, HExpr_EffectOp, HExpr_RangeExpr, HExpr_ListLit, HExpr_TupleLit, HExpr_IndexExpr, HForInDestructure, HLetDestructureBinding, HStmt_Let, HStmt_Var, HStmt_Assign, HStmt_ExprStmt, HStmt_Return, HStmt_While, HStmt_ForIn, HStmt_Break, HStmt_Continue, HStmt_LetDestructure, HStmt_IfLet, HStructField, HEnumVariant, HEffectOp, HTraitMethod, TraitBound, HSigMember, HDecl_Fn, HDecl_Struct, HDecl_Enum, HDecl_Impl, HDecl_Effect, HDecl_Test, HDecl_Trait, HDecl_ExternFn, HDecl_ExternType, HDecl_TypeAlias, HDecl_Const, HDecl_ModBlock, HDecl_Sig, FieldAction_Identity, FieldAction_Call, DerivedField, DerivedVariant, TypeKind_StructKind, TypeKind_EnumKind, DerivedImpl, HProgram, variant_js_name, trait_dict_name, evidence_param_name, trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL, hexpr_type, hexpr_effects, hexpr_span, __DictDispatchInfo_Eq, __HForInDestructure_Eq, __TraitBound_Eq, __TypeKind_Eq, __DictDispatchInfo_Clone, __HForInDestructure_Clone, __TraitBound_Clone, __TraitDispatch_Clone, __FieldAction_Clone, __TypeKind_Clone, __DerivedField_Clone, __DerivedVariant_Clone, __DerivedImpl_Clone, __DictDispatchInfo_Ord, __TraitBound_Ord, __TypeKind_Ord, __DictDispatchInfo_Debug, __HForInDestructure_Debug, __TraitBound_Debug, __TraitDispatch_Debug, __FieldAction_Debug, __TypeKind_Debug, __DerivedField_Debug, __DerivedVariant_Debug, __DerivedImpl_Debug, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS, MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS, OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS, STRINGBUILDER_METHODS };
+export { HParam, TraitDispatch_Builtin, TraitDispatch_Direct, TraitDispatch_Dict, DictDispatchInfo, HStructFieldInit, HMatchArm, HEffectHandler, HStringInterpPart_Literal, HStringInterpPart_Expression, HExpr_IntLit, HExpr_FloatLit, HExpr_StrLit, HExpr_BoolLit, HExpr_Ident, HExpr_BinOp, HExpr_UnaryOp, HExpr_Call, HExpr_FieldAccess, HExpr_StructLit, HExpr_NamedVariantConstruct, HExpr_MatchExpr, HExpr_Block, HExpr_IfExpr, HExpr_StringInterp, HExpr_TryCatch, HExpr_HandleExpr, HExpr_Lambda, HExpr_EffectOp, HExpr_RangeExpr, HExpr_ListLit, HExpr_TupleLit, HExpr_IndexExpr, HForInDestructure, HLetDestructureBinding, HStmt_Let, HStmt_Var, HStmt_Assign, HStmt_ExprStmt, HStmt_Return, HStmt_While, HStmt_ForIn, HStmt_Break, HStmt_Continue, HStmt_LetDestructure, HStmt_IfLet, HStructField, HEnumVariant, HEffectOp, HTraitMethod, TraitBound, HSigMember, HDecl_Fn, HDecl_Struct, HDecl_Enum, HDecl_Impl, HDecl_Effect, HDecl_Test, HDecl_Trait, HDecl_ExternFn, HDecl_ExternType, HDecl_TypeAlias, HDecl_Const, HDecl_ModBlock, HDecl_Sig, FieldAction_Identity, FieldAction_Call, FieldAction_Tuple, DerivedField, DerivedVariant, TypeKind_StructKind, TypeKind_EnumKind, DerivedImpl, HProgram, variant_js_name, trait_dict_name, evidence_param_name, trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL, hexpr_type, hexpr_effects, hexpr_span, __DictDispatchInfo_Eq, __HForInDestructure_Eq, __TraitBound_Eq, __TypeKind_Eq, __DictDispatchInfo_Clone, __HForInDestructure_Clone, __TraitBound_Clone, __TraitDispatch_Clone, __FieldAction_Clone, __TypeKind_Clone, __DerivedField_Clone, __DerivedVariant_Clone, __DerivedImpl_Clone, __DictDispatchInfo_Ord, __TraitBound_Ord, __TypeKind_Ord, __DictDispatchInfo_Debug, __HForInDestructure_Debug, __TraitBound_Debug, __TraitDispatch_Debug, __FieldAction_Debug, __TypeKind_Debug, __DerivedField_Debug, __DerivedVariant_Debug, __DerivedImpl_Debug, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS, MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS, OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS, STRINGBUILDER_METHODS };

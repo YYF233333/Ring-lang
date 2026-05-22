@@ -161,7 +161,8 @@ pub enum HDecl {
 
 pub enum FieldAction {
     Identity,
-    Call { dict_name: Str, extra_dicts: List<Str> }
+    Call { dict_name: Str, extra_dicts: List<Str> },
+    Tuple { element_actions: List<FieldAction> }
 }
 
 pub struct DerivedField {
