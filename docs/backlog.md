@@ -91,27 +91,40 @@ fn fetch_data() {
 - **优先级**：Phase C 或 D
 - **宣发价值**：直接解决 function coloring 问题——async 是 effect 而非颜色标记，带 async effect 的函数可以在同步 handler 下测试。设计阶段可讲，实现前不可作为已解决的卖点
 
-### Default Effect Handler
-用户自定义 effect 的默认 handler，解决"每次执行程序都需要带一坨 handler"的问题。内置 effect（io/fail/mut）已有隐式 handler，但用户自定义 effect 目前必须显式 handle。
+### Default Effect Handler（设计已确定 2026-05-22）
+design.md 2.2。Op 带 body = 默认 handler，语法与 trait 默认方法一致。解决"每次调用都要写 handle...with"的 boilerplate 问题。
 
 ```ring
-// 想法：在 effect 声明时提供 default handler
-effect log {
-    fn log(msg: Str) -> Unit
-} default {
-    log(msg) => print(msg)  // 默认行为：打印到 stdout
+effect Logger {
+    fn log(msg: Str) -> Unit {    // 有 body = 有默认 handler
+        print(msg)
+    }
 }
 
-// 调用者可以不写 handler，自动使用 default
+effect Storage {
+    fn read(key: Str) -> Str              // 无 body = 必须 handle
+    fn log(msg: Str) -> Unit { print(msg) } // 有 body = 可选 handle
+}
+
 fn main() {
-    do_work()  // do_work 内部 perform log，自动用 default handler
+    do_work()  // Logger 全部 op 有默认，无需 handle...with
 }
 ```
 
-- **前置依赖**：无硬依赖（但 handler 可能抛出其他 effect，需考虑 effect 链的默认解析顺序）
-- **复杂度**：中（语法设计简单，但 default handler 抛出其他 effect 时的语义需仔细设计）
+**已确定的语义：**
+1. 签名透明：有默认的 effect 仍出现在推断签名中（`with {Logger}`）
+2. 部分默认：显式 handle 覆盖默认，无默认且未 handle → 编译错误
+3. 全默认可省略 handle：编译器自动注入默认 evidence
+
+**Effect 约束（中间版）：**
+- Default handler body 可用内置 effect（io/fail/mut）和已有 default 的自定义 effect
+- 不可用无默认的自定义 effect
+- 编译器拓扑排序 default handler 依赖，循环 → 编译错误
+
+- **前置依赖**：无硬依赖
+- **复杂度**：中
 - **优先级**：Phase C
-- **参考**：Unison 仅 IO 有内置 handler；Snowflyt 指出"默认 Effect handler 看起来是个很容易解决的问题，但考虑到 handler 还可能抛出其他 Effect，实现上的复杂性就显著增加了"
+- **参考**：语法方案模仿 trait 默认方法（Ring 已有先例），中间版避免了 Snowflyt 指出的 handler 链式解析的完整复杂度
 
 ### Full Algebraic Effects（Post-resume Handler + Multi-resume）
 design.md 2.5。当前 handler 只支持 tail-resumptive + abort，不支持 resume 后继续执行额外代码，也不支持多次 resume。
@@ -169,13 +182,6 @@ design.md 14.2。编译到 LLVM IR，桌面/服务端场景。
   5. **跨语言资源安全**：Linear types 保证 Ring 侧资源，但 C 分配的资源（`malloc`/`fopen`）不在 RC 图中。effect handler abort 时需要类似 `Drop`/`defer` 的机制清理 FFI 资源
   - **参考**：Koka 不暴露 C FFI 给用户（monadic transformation 编译到 C）；OCaml 5 限制 effect 不能跨 C 帧；Rust `extern "C" fn` 不能是 async
 
-### WasmGC Backend
-design.md 14.2。编译到 WasmGC，Web 端 ~2x JS 性能。
-
-- **前置依赖**：语言特性基本稳定
-- **复杂度**：大
-- **优先级**：Phase C（比 LLVM 更优先——W3C 标准已落地，投入产出比高）
-
 ### Perceus 引用计数
 design.md 14.3。精确 RC + 就地复用分析，消除 GC 停顿。
 
@@ -229,6 +235,25 @@ source-map 支持 + 断点调试。
 - **复杂度**：大
 - **优先级**：Phase D/E
 
+## 设计对齐：待实现变更
+
+### `catch` 语义简化（生命周期模型对齐）
+设计决策 2026-05-22：`catch` 总是消除 `fail` effect，不再区分有/无 catch-all arm 的隐式行为。
+
+**当前实现**：checker 中 `catch` 的 fail effect 消除取决于是否存在 catch-all arm（wildcard/binding 无 guard）。无 catch-all 时 fail effect 保留在签名中。
+
+**目标实现**：`catch` 总是完全捕获 fail effect，从签名中移除。需要部分处理（只恢复某些错误、其余继续传播）时，用户在 catch body 内 `match e { ... => raise(other) }` 显式 re-raise。
+
+**涉及修改**：
+1. `infer.ring`：`catch` 表达式的 effect row 处理逻辑——移除"有无 catch-all arm"的分支判断，统一消除 fail
+2. `codegen_expr.ring`：`catch` 代码生成——确保总是生成 try-catch 包装（当前可能在无 catch-all 时不生成完整包装）
+3. 测试用例：更新/新增 `tests/cases/` 中的 catch 相关测试，覆盖：总是消除 fail、catch 内 re-raise 继续传播
+4. 文档：CLAUDE.md 已更新
+
+- **前置依赖**：无
+- **复杂度**：小-中（checker 逻辑简化，但需仔细验证 codegen 路径）
+- **优先级**：下一批修复
+
 ## 已知 Bug / 技术债
 
 ### Impl 方法 Effect 传播
@@ -259,72 +284,60 @@ impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后
 
 ## 架构：多后端策略
 
-Ring 成熟后为多后端结构，各后端长期共存，各有主场：
+Ring 成熟后为双后端结构（JS + LLVM），各有主场：
 
 | 后端 | 主场景 | 特有约束 |
 |------|--------|---------|
-| **JS** | Web 前端、快速原型、Playground、Node CLI | GC 托管，无 linear type 收益，effect 通过 evidence passing + try/catch |
-| **WasmGC** | Web 高性能（~2x JS）、沙箱环境 | WasmGC stack switching 提案尚未稳定，effect 实现受限 |
+| **JS** | Web 前端、快速原型、Playground、Node CLI、全栈 | GC 托管，effect 通过 evidence passing + try/catch |
 | **LLVM** | 桌面/服务端、系统级性能 | 完整控制栈和内存，Perceus RC，delimited continuation 可行 |
-| **QBE(Ring)** | 自包含编译器（零外部依赖）、嵌入式 | QBE 级后端用 Ring 自身实现，优化能力弱于 LLVM 但编译速度极快 |
+
+### 已排除的后端
+
+- **WasmGC**：JS 后端的卖点不是性能，Web 端追求 ~2x 性能提升投入产出比不合理。如果未来有真实需求再重新评估。
+- **QBE(Ring)**：编译器自包含是终极愿景但优先级极低，不主动规划。
 
 ### 核心张力
 
 **1. Effect 实现分歧**
 
-各后端实现 effect 的机制不同：
+两个后端实现 effect 的机制不同：
 - JS：evidence passing → 普通函数参数 + try/catch（当前方案）
 - LLVM：evidence passing + delimited continuation（full AE 所需）
-- WasmGC：等待 stack switching 提案落地，否则需 CPS 变换
-- QBE(Ring)：setjmp/longjmp 或轻量级栈切换
 
 同一套 effect 语义在不同后端可能有不同的能力边界——例如 multi-resume 在 JS 后端可能无法高效实现（无法捕获栈段），但在 LLVM 后端可以。**是否允许后端间的 feature gap？** 如果允许，需要编译期按目标后端检查 effect 使用是否合法。
 
 **2. 标准库 runtime 分裂**
 
-当前标准库（`std/*.ring`）的底层实现全是 JS（`extern type List<T>` = JS Array）。多后端意味着每个后端需要自己的 runtime 实现：
+当前标准库（`std/*.ring`）的底层实现全是 JS（`extern type List<T>` = JS Array）。LLVM 后端需要自己的 runtime 实现：
 - JS runtime：当前的 `runtime.ring` 产出
 - LLVM runtime：需要 C/Ring 实现的 List/Map/Set/Str + GC 或 RC
-- WasmGC runtime：WasmGC 原生 struct/array
-- QBE runtime：Ring 自实现的数据结构
 
-**维护倍增器**：N 个后端 × M 个 runtime 函数 = N×M 实现需要保持语义一致。应对策略：
+**应对策略**：
 - 标准库**接口**（方法签名 + 语义契约）由 `std/*.ring` 定义，是跨后端的 single source of truth
 - 每个后端提供自己的 runtime 实现，通过 **同一套 E2E 测试** 验证语义一致性
-- 考虑用 Ring 自身实现尽可能多的标准库逻辑（纯 Ring 代码自动适配所有后端），仅将最底层原语（内存分配、IO syscall）作为后端特定的 `extern fn`
+- 用 Ring 自身实现尽可能多的标准库逻辑（纯 Ring 代码自动适配所有后端），仅将最底层原语（内存分配、IO syscall）作为后端特定的 `extern fn`
 
 **3. FFI 表面积分裂**
 
-每个后端面对不同的外部世界：
+两个后端面对不同的外部世界：
 - JS：`extern fn` → JS 函数，`extern type` → JS 对象
 - LLVM：`extern fn` → C ABI 函数，`extern type` → C struct
-- WasmGC：`extern fn` → WASM import/export
-- QBE：同 LLVM（C ABI）
 
-**问题**：一个使用 FFI 的 Ring 库是否只能跑在单一后端上？如果是，需要条件编译机制（`#[backend(js)]`）。如果想跨后端，需要 FFI 抽象层。
+使用 FFI 的 Ring 库绑定到特定后端。需要条件编译机制（`#[backend(js)]`）或 FFI 抽象层。
 
 **4. Codegen 架构**
 
-当前 codegen 是单体 JS 代码生成。多后端需要：
+当前 codegen 是单体 JS 代码生成。引入 LLVM 后端需要：
 - 共享的 HIR → 后端无关优化 pass（常量折叠、死代码消除、内联）
-- 后端特定的 lowering：HIR → JS / HIR → LLVM IR / HIR → WasmGC / HIR → QBE IR
+- 后端特定的 lowering：HIR → JS / HIR → LLVM IR
 - **接口设计**：codegen 应抽象为 trait/接口，各后端实现。当前的 `codegen*.ring` 文件需要重构为 JS 后端的具体实现
 
-**5. 测试矩阵爆炸**
+### 引入时机
 
-N 个后端 × M 个语言特性 = N×M 测试配置。应对策略：
-- E2E 测试（`tests/cases/*.ring`）是后端无关的——同一份测试用例，分别跑各后端产出
-- 后端特定测试仅覆盖 FFI、runtime 实现、性能基准
-- CI 按后端维度并行
+1. **Phase B-C**：JS 后端稳定，语言特性完善（Refinement types + Linear types）
+2. **Phase C-D**：LLVM 后端（需要 Linear types + Perceus RC 作为前置）
 
-### 引入顺序建议
-
-1. **Phase B-C**：JS 后端稳定，语言特性完善
-2. **Phase C**：WasmGC 后端（投入产出比最高——W3C 标准已落地，与 JS 生态互补）
-3. **Phase C-D**：LLVM 后端（需要 linear types + Perceus RC 作为前置）
-4. **Phase D+**：QBE(Ring) 后端（编译器完全自包含的终极目标）
-
-每引入一个新后端前，必须先完成 codegen 接口抽象化（从当前 JS 单体中提取共享 HIR 优化 pass）。**第二个后端是最痛的**——它迫使所有"隐式假设 JS"的代码显式化。
+引入 LLVM 前必须先完成 codegen 接口抽象化（从当前 JS 单体中提取共享 HIR 优化 pass）。**第二个后端是最痛的**——它迫使所有"隐式假设 JS"的代码显式化。
 
 ## 已取消特性
 

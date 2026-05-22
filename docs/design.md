@@ -18,7 +18,7 @@
 | 范式 | 过程式 + 函数式，零 OOP 语义（但模拟 OOP 手感） |
 | 命名 | snake_case，ALL_CAPS 常量 |
 | 不可变 | 默认不可变，`var` 显式声明可变 |
-| 错误 | 错误即类型，effect 自动冒泡，4 层甜度分级 |
+| 错误 | 错误即 effect，自动冒泡；需持久化时物化为 Result 数据 |
 | 抽象 | 扁平 > 嵌套，中间变量 > 链式调用 |
 | 数据结构 | struct + enum + trait，不造 class 层级 |
 | 内存 | GC，开发者零心智负担 |
@@ -147,9 +147,14 @@ greet(Company { ... })    // ✓
 // }
 ```
 
-### 1.5 Option 与 fail 的桥接
+### 1.5 错误的生命周期模型
 
-`Option<T>` 作为数据类型存在（struct 字段需要它），与 fail effect 通过方法调用桥接。
+Ring 的错误处理基于一个核心洞察：**错误有生命周期——诞生（raise）、流动（propagate）、有时落地（materialize）。** effect 是错误的运动形态，Result 是错误的静止形态。两者不是竞争关系，是同一个错误在不同阶段的表现。
+
+- **`fail<E>` effect 是主模型** —— 错误默认以 effect 形式存在和流动，零语法自动传播
+- **`to_result()` 是"物化"操作** —— 当需要存储、序列化、收集多个错误时，将 effect 转为数据
+- **`catch` 是就地恢复** —— 捕获 fail effect 并提供替代值，总是消除 fail effect
+- **`Option<T>` 是独立的数据类型** —— 表达"有或没有"，通过 `to_fail()` 进入 effect 世界
 
 ```
 // Option 是数据类型，T? 是 Option<T> 的糖
@@ -165,22 +170,31 @@ let nick = user.nickname.unwrap()              // none → panic
 let nick = user.nickname.unwrap_or("匿名")     // none → 默认值
 let nick = user.nickname.unwrap_or_else(fn() { compute_default() })
 
-// Option → fail effect：to_fail 方法
+// Option → fail effect：to_fail 方法（从数据进入 effect 世界）
 fn get_nickname(user: User) -> Str {
     user.nickname.to_fail()       // none → raise(Unit)，自动冒泡
 }
 
-// fail effect → Result<T,E>：to_result 函数
-let result = to_result(fn() { find_user(42) })  // fail → Result::err
-
-// fail effect → 捕获：catch match-arm 语法
+// fail effect → 就地恢复：catch 表达式（总是消除 fail）
 let config = load_config(path) catch {
     IoError(e) => default_config(),
     _          => panic("unexpected error"),
 }
+
+// fail effect → 物化为数据：to_result（当需要错误作为持久数据时）
+let result: Result<Config, Str> = to_result(fn() { load_config(path) })
 ```
 
-设计原则：**Option 是数据，fail 是计算。`to_fail()` 从数据进入计算，`to_result()` 从计算回到数据，`catch` 捕获并匹配错误类型。**
+**什么时候用哪个：**
+
+| 场景 | 机制 | 理由 |
+|------|------|------|
+| 不关心错误，让上层处理 | 零语法（自由传播） | 错误在流动，不需要干预 |
+| 在调用点就地恢复 | `catch { ... }` | 错误到此为止，提供替代值 |
+| 需要错误作为数据（收集/序列化/测试断言） | `to_result()` | 错误需要落地成持久值 |
+| 拦截/替换 effect 实现（mock/DI） | `handle...with` | 不只是错误，是 effect 语义替换 |
+
+设计原则：**错误在 effect 世界诞生和流动（零开销），只在需要持久化时物化为数据。大多数代码不需要物化。**
 
 ### 1.6 闭包捕获
 
@@ -321,9 +335,11 @@ fn load_portfolio(path: Str) -> Portfolio {
 //     with {io, fail<ParseError | ValidationError>}
 ```
 
-### 2.4 错误处理
+### 2.4 错误处理——生命周期模型
 
-**传播——免费冒泡，零语法**
+错误有生命周期：诞生（raise）→ 流动（propagate）→ 落地（materialize 或 catch）。大多数代码只涉及前两个阶段。
+
+**阶段 1：诞生与流动——零语法**
 
 ```
 fn load_portfolio(path: Str) -> Portfolio {
@@ -333,7 +349,9 @@ fn load_portfolio(path: Str) -> Portfolio {
 }
 ```
 
-**捕获——`catch` match-arm 表达式**
+80% 的错误处理到此结束。函数签名自动推断出 `with {io, fail<...>}`，调用方继续传播。
+
+**阶段 2：就地恢复——`catch` 表达式**
 
 ```
 let config = load_config(path) catch {
@@ -343,28 +361,46 @@ let config = load_config(path) catch {
 }
 ```
 
-有 catch-all arm（wildcard/binding 无 guard）时移除 fail effect，否则 fail 继续传播。支持 enum variant 多 arm 匹配、struct 解构、guard 表达式。
+`catch` 总是消除 `fail` effect——它是一个完整捕获点。内部用模式匹配分派不同错误类型。如果需要选择性处理（只处理部分错误、其余继续传播），在 catch 内部 match + re-raise：
 
-**Result 桥接——`to_result()` 函数**
+```
+let config = load_config(path) catch { e =>
+    match e {
+        IoError(io_err) => default_config(),
+        other           => raise(other),    // 显式重新抛出
+    }
+}
+```
+
+这样"部分处理"是显式的（re-raise），而非隐式的（有没有 catch-all arm）。
+
+**阶段 3a：物化为数据——`to_result()`**
+
+当需要错误作为持久数据时（收集多个错误、序列化、测试断言、跨 API 边界传递）：
 
 ```
 let result: Result<Config, Str> = to_result(fn() { load_config(path) })
 match result {
     ok(config) => use_config(config),
-    err(e)     => log("failed: \{e}"),
+    err(e)     => log("failed: ${e}"),
 }
+
+// 典型场景：验证收集
+let results = fields.map(fn(f) { to_result(fn() { validate_field(f) }) })
+let errors = results.filter(fn(r) { r.is_err() })
 ```
 
-**完整 handler——复杂场景**
+**阶段 3b：effect 替换——`handle...with`（高级）**
+
+用于拦截和替换 effect 实现，不限于错误处理（mock、DI、自定义 effect）：
 
 ```
 handle {
     let result = complex_pipeline()
     save(result)
 } with {
+    io => perform,                          // 透传 io
     fail(e: ValidationError) => log_and_skip(e),
-    fail(e: IoError)         => default_result(),
-    io                       => perform,
 }
 ```
 
@@ -804,7 +840,7 @@ fn producer_consumer() {
 | row poly | 直接属性访问（JS 天然鸭子类型，零翻译成本） |
 | fail 冒泡（90%场景） | 直接就是 JS 的正常调用（无额外开销） |
 | fail effect | throw / try-catch |
-| or / catch 表达式 | try-catch 包装 |
+| catch 表达式 | try-catch 包装 |
 | 完整 effect handler | evidence passing + EffectAbort try/catch |
 | async effect | async/await 透传 |
 | refinement 运行时检查 | if (!pred) throw |
@@ -887,7 +923,7 @@ extern "npm:express" {
 - `or` 来自 Python
 - 不发明新关键字，除非语义确实是新的（如 `handle...with`）
 
-**一种事只有一种写法：** TS 里定义数据结构有 interface/type/class/literal 四种写法，LLM 每次选不同的导致大型代码库风格混乱。本语言只有 `struct`，错误只有 `raise`，异步只有 `spawn/await`，方法调用只有 `.method()` 链式风格（无管道运算符）。LLM 的输出天然一致。
+**一种事只有一种写法：** TS 里定义数据结构有 interface/type/class/literal 四种写法，LLM 每次选不同的导致大型代码库风格混乱。本语言只有 `struct`，错误触发只有 `raise`，错误恢复只有 `catch`，effect 替换只有 `handle...with`，异步只有 `spawn/await`，方法调用只有 `.method()` 链式风格（无管道运算符）。LLM 的输出天然一致。错误处理看似有多种机制，但它们对应错误生命周期的不同阶段（流动/恢复/物化/替换），不是同一件事的不同写法。
 
 **模块签名 = LLM 的完美上下文压缩：** LLM 上下文窗口有限。TS 要读完实现才知道函数会抛什么异常；本语言的模块签名包含完整契约（类型+效果），一行顶 TS 几十行，LLM 用更少 token 获得更多 API 信息。
 
@@ -1164,7 +1200,8 @@ JS 后端是 Web/全栈的长期方案——其卖点是生态覆盖和开发体
 |--------|------|------|
 | Effect handler 语义 | tail-resumptive + abort（非 full algebraic） | evidence passing 天然支持 tail-resume；post-resume 需 delimited continuation |
 | `or`/`try`/`?` 运算符 | 已移除，使用 `unwrap`/`to_fail`/`to_result()`/`catch` | 简化语法面，减少歧义 |
-| catch 语法 | match-arm 风格 `catch { pattern => handler }` | 统一使用模式匹配，类型安全 |
+| catch 语义 | 总是消除 fail effect；部分处理用 catch 内部 match + re-raise（显式） | 消除隐式行为（原设计中有/无 catch-all arm 决定不同类型行为），降低概念数 |
+| 错误模型 | 生命周期模型：fail effect 为主（诞生/流动），to_result 物化为数据（落地） | effect 是运动形态，Result 是静止形态；双模型各有地盘而非竞争 |
 | `mut<S>` 参数化 | 保持无参数 `mut` | Cell<T> 泛型已保证类型安全 |
 | `++` 拼接运算符 | 不实现，使用字符串插值 | "一种事一种写法"原则 |
 | Lambda 双向类型传播 | receiver 统一提前 + lambda 接受 expected param types | 支持 `==` 在嵌套 closure 中正确推断 |
