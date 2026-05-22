@@ -158,9 +158,11 @@ function type_is_recursive(ty, key) {
     const __ring_m6 = ty;
     if (__ring_m6._tag === "EnumType") {
       const variants = __ring_m6.variants;
+      let visited = set_new();
+      _Set_insert(visited, key);
       for (const v of variants) {
         for (const ft of v.fields) {
-          if (type_contains_key(ft, key)) {
+          if (type_contains_key(ft, key, visited)) {
             return true;
           }
         }
@@ -173,17 +175,22 @@ function type_is_recursive(ty, key) {
   }
 }
 
-function type_contains_key(ty, key) {
-  if ((types$type_to_string(ty) === key)) {
+function type_contains_key(ty, key, visited) {
+  const ty_str = types$type_to_string(ty);
+  if ((ty_str === key)) {
     return true;
   }
+  if (_Set_contains(visited, ty_str, __Str_Eq)) {
+    return false;
+  }
+  _Set_insert(visited, ty_str);
   __ring_match7: {
     const __ring_m7 = ty;
     if (__ring_m7._tag === "EnumType") {
       const variants = __ring_m7.variants;
       for (const v of variants) {
         for (const ft of v.fields) {
-          if (type_contains_key(ft, key)) {
+          if (type_contains_key(ft, key, visited)) {
             return true;
           }
         }
@@ -194,7 +201,7 @@ function type_contains_key(ty, key) {
     if (__ring_m7._tag === "StructType") {
       const fields = __ring_m7.fields;
       for (const f of fields) {
-        if (type_contains_key(f.ty, key)) {
+        if (type_contains_key(f.ty, key, visited)) {
           return true;
         }
       }
@@ -204,7 +211,7 @@ function type_contains_key(ty, key) {
     if (__ring_m7._tag === "TupleType") {
       const elements = __ring_m7.elements;
       for (const e of elements) {
-        if (type_contains_key(e, key)) {
+        if (type_contains_key(e, key, visited)) {
           return true;
         }
       }
@@ -214,11 +221,11 @@ function type_contains_key(ty, key) {
     if (__ring_m7._tag === "FnType") {
       const params = __ring_m7.params; const return_type = __ring_m7.return_type;
       for (const p of params) {
-        if (type_contains_key(p, key)) {
+        if (type_contains_key(p, key, visited)) {
           return true;
         }
       }
-      return type_contains_key(return_type, key);
+      return type_contains_key(return_type, key, visited);
       break __ring_match7;
     }
     return false;

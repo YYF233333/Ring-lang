@@ -36,9 +36,11 @@ fn ctor_at(list: List<Ctor>, i: Int) -> Ctor {
 fn type_is_recursive(ty: Type, key: Str) -> Bool {
     match ty {
         Type::EnumType { variants, .. } => {
+            let mut visited: Set<Str> = set_new()
+            visited.insert(key)
             for v in variants {
                 for ft in v.fields {
-                    if type_contains_key(ft, key) { return true }
+                    if type_contains_key(ft, key, visited) { return true }
                 }
             }
             false
@@ -47,34 +49,37 @@ fn type_is_recursive(ty: Type, key: Str) -> Bool {
     }
 }
 
-fn type_contains_key(ty: Type, key: Str) -> Bool {
-    if type_to_string(ty) == key { return true }
+fn type_contains_key(ty: Type, key: Str, mut visited: Set<Str>) -> Bool {
+    let ty_str = type_to_string(ty)
+    if ty_str == key { return true }
+    if visited.contains(ty_str) { return false }
+    visited.insert(ty_str)
     match ty {
         Type::EnumType { variants, .. } => {
             for v in variants {
                 for ft in v.fields {
-                    if type_contains_key(ft, key) { return true }
+                    if type_contains_key(ft, key, visited) { return true }
                 }
             }
             false
         },
         Type::StructType { fields, .. } => {
             for f in fields {
-                if type_contains_key(f.ty, key) { return true }
+                if type_contains_key(f.ty, key, visited) { return true }
             }
             false
         },
         Type::TupleType { elements } => {
             for e in elements {
-                if type_contains_key(e, key) { return true }
+                if type_contains_key(e, key, visited) { return true }
             }
             false
         },
         Type::FnType { params, return_type, .. } => {
             for p in params {
-                if type_contains_key(p, key) { return true }
+                if type_contains_key(p, key, visited) { return true }
             }
-            type_contains_key(return_type, key)
+            type_contains_key(return_type, key, visited)
         },
         _ => false,
     }
