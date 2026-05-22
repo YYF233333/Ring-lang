@@ -72,7 +72,7 @@ Ring-lang/
 │   ├── list.ring                       标准库：extern type List<T> + 17 非 HOF 方法 + list_clone
 │   ├── map.ring                        标准库：extern type Map<K,V> + 10 方法 + map_new/map_from/map_clone
 │   ├── set.ring                        标准库：extern type Set<T> + 10 方法 + set_new/set_from/set_clone
-│   ├── str.ring                        标准库：impl Str 16 方法
+│   ├── str.ring                        标准库：impl Str 20 方法
 │   ├── num.ring                        标准库：Int::to_str, Float::to_str, parse_int, parse_float
 │   ├── result.ring                     标准库：Result<T,E> enum + impl（map/and_then/unwrap_or/is_ok/is_err）+ to_result
 │   ├── fs.ring                         标准库：read_file/write_file/file_exists/delete_file
@@ -137,7 +137,7 @@ Ring-lang/
 
 - **Handler 支持 tail-resumptive + abort 两种语义**：非 abort effect（io/custom）的 handler 返回值即 resume 值，计算继续；`fail.raise` 为 abort 语义。不支持 post-resume handler（resume 后继续执行额外代码）
 - **Trait dictionary dispatch 不转发 evidence**：trait 方法带 effect 时缺少 evidence 参数（trait dict closure 已支持高阶传递）
-- **`catch` 总是消除 fail effect**：`expr catch { pattern => handler, ... }` 是完整捕获点。内部用模式匹配分派错误类型；需要部分处理时在 catch 内部 match + re-raise（显式）。错误处理遵循生命周期模型：fail effect 为主（诞生/流动），`catch` 就地恢复，`to_result()` 物化为数据
+- **`catch` 总是消除 fail effect**：`expr catch { pattern => handler, ... }` 是完整捕获点，catch arms 经穷尽性检查（非穷尽报 E0601）。内部用模式匹配分派错误类型；需要部分处理时在 catch 内部 match + re-raise（显式）。错误处理遵循生命周期模型：fail effect 为主（诞生/流动），`catch` 就地恢复，`to_result()` 物化为数据
 - **表达式位置的 block/if 包含 `return` 时 IIFE 仍会截获**：语句位置（函数体、expr_stmt）已修复（C10），但 `let x = { return y; 0 }` 这类表达式位置的 return 仍被 IIFE 截获。实践中极少遇到。
 
 ### 类型系统限制
