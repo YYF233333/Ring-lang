@@ -9,31 +9,19 @@
 
 ## Wave A+B 执行报告（2026-05-23）
 
-### 1. [通知] B-028 StringBuilder `mut self` 偏离
+### 1. [通知] B-031 移除 Cell 后 `mut<T>` effect 基础设施成为死代码
 
-**现状**：B-028 spec 指定 `.add()`/`.line()`/`.add_int()` 为 `mut self` 方法。实现 agent 使用了 plain `self`，与现有 List/Map/Set extern type 的惯例一致（extern type 通过 JS 引用变异，不需要 Ring 层面的 `mut self` 追踪）。
-**原因**：extern type 的 mutating 方法在 Ring 类型系统中一直使用 plain `self`（JS runtime 负责变异），`mut self` 仅用于 Ring-native struct。
-**影响**：如果 B-030（mut enforcement）落地后 extern type 也要纳入 mut 检查，需要回过头给所有 extern type mutating methods 加 `mut self`。当前实现与现有惯例一致，无功能问题。
+**现状**：B-031 移除了 Cell\<T\> 类型，但 `mut<T>` effect 的推断/unification/codegen 基础设施（MutEffect variant、相关匹配分支等）仍保留在编译器中。
+**原因**：移除 Cell 时不扩大 scope，这些代码虽然不再被触发，但不影响正确性。
+**建议**：如果确认 `mut<T>` effect 不再需要（Cell 已移除，`let mut` 替代），可以作为未来清理项移除相关代码。
 
-### 2. [通知] B-025 暴露了 `parse_call_expr` 的 span end bug
+### 2. [通知] B-030 将 `DiagnosticSink::report` 改为 `mut self`
 
-**现状**：`parse_call_expr` 使用 `current_span_start()`（下一 token 的起始位置）作为 Call 表达式的 span end，而非 `)` token 本身的 end。B-025 的 postfix `[` 处理依赖 newline guard（`tok.line > left.end.line`），错误的 span end 导致 guard 失效（`foo()\n[1,2,3]` 中 Call span end 指向 `[` 的行号，与 `[` 同行）。
-**修复**：已改为使用 `rparen.span.end`。测试全绿。
-**影响**：这是 pre-existing bug，B-025 只是暴露了它。类似的 span end 问题可能存在于其他使用 `current_span_start()` 的 parser 函数中——建议未来 review 其他 `current_span_start()` 使用点。
+**现状**：为了使 `CollectingSink.report()` 通过 mut enforcement（内部调用 `items.push()`），trait 方法签名改为 `fn report(mut self, d: Diagnostic)`。
+**影响**：所有 `DiagnosticSink` 的实现者和调用者需要持有可变引用。当前只有 `CollectingSink` 一个实现，影响范围有限。
 
-### 3. [通知] WTB1 worktree base drift
+### 3. [通知] B-023 发现并修复了 `resolve_trait_dispatch` 的 pre-existing bug
 
-**现状**：B-028 的 worktree agent 拿到了错误的 base commit（历史中没有 `b6c8ab3`）。
-**原因**：Claude Code worktree 创建的 race condition（已知问题，CLAUDE.md 有记录）。
-**处理**：改用 cherry-pick 合并，手动解决 `runtime.ring` 源码冲突和 dist 冲突，重建 dist 后测试全绿。
-**建议**：下次派发 worktree 前可考虑加入短延迟（50-100ms），减少 race condition 概率。
-
-### 4. [通知] 未追踪 effect_custom_* 测试文件已补提交
-
-**现状**：5 个 `effect_custom_*.ring` 测试文件在 e2e.test.ts 中注册但从未 commit，导致 worktree agent 报告 12 个 pre-existing failures。
-**修复**：已提交。后续 worktree agent 不再受此影响。
-
-### 5. [通知] B-025 的 `str[i]` 下标语义
-
-**现状**：B-025 实现了 `str[i]` 下标，返回第 i 位的 `Str`（单字符）。越界时 panic。
-**注意**：这使用了 JS 的 UTF-16 code unit 索引。LLVM backend 阶段如果 Str 语义统一到 code point 索引（B-011 提到），`str[i]` 的语义需要跟着变。当前 JS backend 下行为正确。
+**现状**：`resolve_trait_dispatch` 在匹配类型变量与 trait bounds 时，只用 `uf_find`（遍历 parent map）检查等价性。但 `uf_bind` 将类型绑定存在 types map 中，`uf_find` 无法遍历到。
+**修复**：添加 `apply_subst` fallback，通过 types map 解析类型变量。
+**影响**：此 bug 阻塞了 bounded impl 方法中使用 `==` 运算符的场景（B-023 的核心需求）。修复后 `impl<T: Eq> List` 等 bounded impl 可以正常调用 trait 方法。
