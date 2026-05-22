@@ -82,15 +82,9 @@ Agent({
   description: "WT<wave><n>: <item-id> <short-desc>",
   isolation: "worktree",
   run_in_background: true,
-  model: "<根据复杂度选择>",
   prompt: "<agent prompt>"
 })
 ```
-
-**Model 选择规则**：
-- **S 复杂度**（< 1h 的简单改动）→ `model: "sonnet"`（成本低，S 任务够用）
-- **M / L / XL 复杂度** → `model: "opus"`（需要深度推理）
-- Audit-report 的 bug fix 按 spec 复杂度判断：单文件简单修复 = S，跨文件/需要设计 = M+
 
 **Agent Prompt 模板**（精简版——agent 会自己读 CLAUDE.md，不重复项目上下文）：
 
