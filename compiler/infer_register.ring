@@ -3,9 +3,9 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
-    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, mono, apply_subst}
+    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, mono, apply_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0207, E0501, E0502}
+use codes::{E0207, E0406, E0501, E0502}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
 
 // ============================================================
@@ -51,6 +51,15 @@ pub fn insert_mod_aliases(mut ctx: InferCtx, mod_name: Str, decls: List<Decl>, g
                 if !guard || !ctx.env.types.effects.contains_key(name) {
                     match ctx.env.types.effects.get(qualified) {
                         some(edef) => { ctx.env.types.effects.insert(name, edef) },
+                        none => {}
+                    }
+                }
+            },
+            Decl::EffectAlias { name, .. } => {
+                let qualified = "${mod_name}::${name}"
+                if !guard || !ctx.env.types.effect_aliases.contains_key(name) {
+                    match ctx.env.types.effect_aliases.get(qualified) {
+                        some(adef) => { ctx.env.types.effect_aliases.insert(name, adef) },
                         none => {}
                     }
                 }
@@ -102,6 +111,9 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
         Decl::TypeAlias { name, type_params, type_expr, is_pub, span } =>
             Decl::TypeAlias { name: "${mod_name}::${name}", type_params: type_params, type_expr: type_expr,
                              is_pub: is_pub, span: span },
+        Decl::EffectAlias { name, type_params, effects, is_pub, span } =>
+            Decl::EffectAlias { name: "${mod_name}::${name}", type_params: type_params, effects: effects,
+                               is_pub: is_pub, span: span },
         Decl::ModBlock { name, uses, decls, required_effects, is_pub, span } =>
             Decl::ModBlock { name: "${mod_name}::${name}", uses: uses, decls: decls,
                             required_effects: required_effects, is_pub: is_pub, span: span },
@@ -134,7 +146,7 @@ fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: Lis
                     _ => {}
                 }
             }
-            // Pass 1b: register trait/effect/extern-type before impl
+            // Pass 1b: register trait/effect/effect-alias/extern-type before impl
             for d in mod_decls {
                 match d {
                     Decl::Trait { .. } => {
@@ -142,6 +154,10 @@ fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: Lis
                         register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
                     },
                     Decl::Effect { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                    },
+                    Decl::EffectAlias { .. } => {
                         let prefixed = prefix_decl_name(mod_name, d)
                         register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
                     },
@@ -160,6 +176,7 @@ fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: Lis
                     Decl::Enum { .. } => {},
                     Decl::Trait { .. } => {},
                     Decl::Effect { .. } => {},
+                    Decl::EffectAlias { .. } => {},
                     Decl::ExternType { .. } => {},
                     _ => {
                         let prefixed = prefix_decl_name(mod_name, d)
@@ -696,11 +713,85 @@ pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
     Effect::CustomEffect { name: eff.name, type_args: resolved_args }
 }
 
-pub fn resolve_declared_effects(ctx: InferCtx, decl_effects: List<EffectExpr>) -> EffectRow {
+fn expand_effect_exprs(ctx: InferCtx, decl_effects: List<EffectExpr>, mut expanding: Set<Str>) -> List<Effect> {
     let mut effects: List<Effect> = []
     for eff in decl_effects {
-        effects.push(resolve_effect_expr(ctx, eff))
+        match ctx.env.types.effect_aliases.get(eff.name) {
+            some(alias_def) => {
+                // Cycle detection
+                if expanding.contains(eff.name) {
+                    let _ = type_error(ctx.sink, E0406,
+                        "Cyclic effect alias: '${eff.name}' references itself", eff.span,
+                        DiagnosticContext::OtherContext { detail: some("cyclic effect alias") })
+                } else {
+                    expanding.insert(eff.name)
+                    // Build substitution map: alias type params -> call-site type args
+                    let mut subst_map: Map<Str, TypeExpr> = map_new()
+                    let mut i = 0
+                    while i < alias_def.type_params.len() && i < eff.type_args.len() {
+                        match alias_def.type_params.get(i) {
+                            some(tp_name) => match eff.type_args.get(i) {
+                                some(ta) => { subst_map.insert(tp_name, ta) },
+                                none => {}
+                            },
+                            none => {}
+                        }
+                        i = i + 1
+                    }
+                    // Substitute type params in alias body effects and recursively expand
+                    let substituted = subst_effect_exprs(alias_def.effects, subst_map)
+                    let expanded = expand_effect_exprs(ctx, substituted, expanding)
+                    for e in expanded {
+                        effects.push(e)
+                    }
+                    expanding.remove(eff.name)
+                }
+            },
+            none => {
+                effects.push(resolve_effect_expr(ctx, eff))
+            }
+        }
     }
+    effects
+}
+
+fn subst_effect_exprs(effects: List<EffectExpr>, subst_map: Map<Str, TypeExpr>) -> List<EffectExpr> {
+    if subst_map.len() == 0 { return effects }
+    let mut result: List<EffectExpr> = []
+    for eff in effects {
+        let mut new_type_args: List<TypeExpr> = []
+        for ta in eff.type_args {
+            new_type_args.push(subst_type_expr(ta, subst_map))
+        }
+        result.push(EffectExpr { name: eff.name, type_args: new_type_args, span: eff.span })
+    }
+    result
+}
+
+fn subst_type_expr(te: TypeExpr, subst_map: Map<Str, TypeExpr>) -> TypeExpr {
+    match te {
+        TypeExpr::Named { name, type_args, span, .. } => {
+            // If this is a bare type param name with no type_args, substitute
+            if type_args.len() == 0 {
+                match subst_map.get(name) {
+                    some(replacement) => replacement,
+                    none => te
+                }
+            } else {
+                let mut new_args: List<TypeExpr> = []
+                for a in type_args {
+                    new_args.push(subst_type_expr(a, subst_map))
+                }
+                TypeExpr::Named { name: name, qualifier: none, type_args: new_args, span: span }
+            }
+        },
+        _ => te
+    }
+}
+
+pub fn resolve_declared_effects(ctx: InferCtx, decl_effects: List<EffectExpr>) -> EffectRow {
+    let mut expanding: Set<Str> = set_new()
+    let effects = expand_effect_exprs(ctx, decl_effects, expanding)
     EffectRow { effects: effects, tail: none }
 }
 
@@ -933,6 +1024,29 @@ fn register_sig(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: 
 }
 
 // ============================================================
+// Effect alias registration
+// ============================================================
+
+fn register_effect_alias(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, effects: List<EffectExpr>, span: Span) {
+    if ctx.env.types.effect_aliases.contains_key(name) {
+        let _ = type_error(ctx.sink, E0207,
+            "Duplicate definition: effect alias '${name}' is already defined", span,
+            DiagnosticContext::OtherContext { detail: some("duplicate effect alias") })
+    } else {
+        let mut tp_names: List<Str> = []
+        for tp in type_params {
+            tp_names.push(tp.name)
+        }
+        ctx.env.types.effect_aliases.insert(name, EffectAliasDef {
+            name: name,
+            type_params: tp_names,
+            effects: effects,
+            span: span
+        })
+    }
+}
+
+// ============================================================
 // Dispatch: register individual declaration
 // ============================================================
 
@@ -965,6 +1079,8 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
             register_const(ctx, name, type_annotation, span),
         Decl::Sig { name, members, is_pub, .. } =>
             register_sig(ctx, name, members, is_pub),
+        Decl::EffectAlias { name, type_params, effects, span, .. } =>
+            register_effect_alias(ctx, name, type_params, effects, span),
         Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
             // Register struct/enum types first
             for d in mod_decls {
@@ -980,7 +1096,7 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
                     _ => {}
                 }
             }
-            // Register trait/effect/extern-type before impl
+            // Register trait/effect/effect-alias/extern-type before impl
             for d in mod_decls {
                 match d {
                     Decl::Trait { .. } => {
@@ -988,6 +1104,10 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
                         register_decl(ctx, prefixed)
                     },
                     Decl::Effect { .. } => {
+                        let prefixed = prefix_decl_name(mod_name, d)
+                        register_decl(ctx, prefixed)
+                    },
+                    Decl::EffectAlias { .. } => {
                         let prefixed = prefix_decl_name(mod_name, d)
                         register_decl(ctx, prefixed)
                     },
@@ -1006,6 +1126,7 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
                     Decl::Enum { .. } => {},
                     Decl::Trait { .. } => {},
                     Decl::Effect { .. } => {},
+                    Decl::EffectAlias { .. } => {},
                     Decl::ExternType { .. } => {},
                     _ => {
                         let prefixed = prefix_decl_name(mod_name, d)

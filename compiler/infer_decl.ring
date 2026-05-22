@@ -54,7 +54,9 @@ fn check_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
         Decl::ModBlock { name, uses, decls, required_effects, is_pub, span } =>
             check_mod_decl(ctx, name, uses, decls, required_effects, is_pub, span),
         Decl::Sig { name, members, is_pub, span } =>
-            check_sig_decl(ctx, name, members, is_pub, span)
+            check_sig_decl(ctx, name, members, is_pub, span),
+        Decl::EffectAlias { name, is_pub, span, .. } =>
+            HDecl::TypeAlias { name: name, ty: UNIT, is_pub: is_pub, span: span }
     }
 }
 

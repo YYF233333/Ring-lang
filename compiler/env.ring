@@ -1,6 +1,6 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT}
 use union_find::{UnionFind, uf_find, uf_lookup}
-use ast::{Span}
+use ast::{Span, EffectExpr}
 
 // ============================================================
 // Type Scheme (for let-polymorphism)
@@ -86,6 +86,13 @@ pub struct TypeAliasDef {
     pub ty: Type
 }
 
+pub struct EffectAliasDef {
+    pub name: Str,
+    pub type_params: List<Str>,
+    pub effects: List<EffectExpr>,
+    pub span: Span
+}
+
 pub struct FnBound {
     pub type_param: Str,
     pub trait_name: Str
@@ -115,7 +122,8 @@ pub struct TypeRegistry {
     pub effects: Map<Str, EffectDef>,
     pub variant_to_enum: Map<Str, Str>,
     pub type_aliases: Map<Str, TypeAliasDef>,
-    pub sigs: Map<Str, SigDef>
+    pub sigs: Map<Str, SigDef>,
+    pub effect_aliases: Map<Str, EffectAliasDef>
 }
 
 pub struct TraitRegistry {
@@ -167,7 +175,8 @@ pub fn new_type_env() -> TypeEnv {
             effects: map_new(),
             variant_to_enum: map_new(),
             type_aliases: map_new(),
-            sigs: map_new()
+            sigs: map_new(),
+            effect_aliases: map_new()
         },
         trait_reg: TraitRegistry {
             traits: map_new(),

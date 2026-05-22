@@ -1,7 +1,7 @@
 use types::{Type}
 use ast::{Program, Decl, UseImport, NamedImport}
 use hir::{HProgram, HDecl}
-use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry}
+use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, EffectAliasDef}
 use infer_register::{prefix_decl_name}
 
 // ============================================================
@@ -14,6 +14,7 @@ pub struct ModuleExports {
     pub values: Map<Str, TypeScheme>,
     pub types: Map<Str, TypeDef>,
     pub effects: Map<Str, EffectDef>,
+    pub effect_aliases: Map<Str, EffectAliasDef>,
     pub traits: Map<Str, TraitDef>,
     pub trait_impls: List<ImplEntry>,
     pub impl_methods: Map<Str, Map<Str, TypeScheme>>,
@@ -41,6 +42,7 @@ pub fn extract_exports(
     let mut values: Map<Str, TypeScheme> = map_new()
     let mut types: Map<Str, TypeDef> = map_new()
     let mut effects: Map<Str, EffectDef> = map_new()
+    let mut effect_aliases: Map<Str, EffectAliasDef> = map_new()
     let mut traits: Map<Str, TraitDef> = map_new()
     let mut impl_methods: Map<Str, Map<Str, TypeScheme>> = map_new()
     let mut inherent_methods: Map<Str, List<Str>> = map_new()
@@ -89,6 +91,14 @@ pub fn extract_exports(
                 if is_pub {
                     match env.types.effects.get(name) {
                         some(effdef) => { effects.insert(name, effdef) },
+                        none => {},
+                    }
+                }
+            },
+            Decl::EffectAlias { name, is_pub, .. } => {
+                if is_pub {
+                    match env.types.effect_aliases.get(name) {
+                        some(adef) => { effect_aliases.insert(name, adef) },
                         none => {},
                     }
                 }
@@ -335,6 +345,7 @@ pub fn extract_exports(
         values: values,
         types: types,
         effects: effects,
+        effect_aliases: effect_aliases,
         traits: traits,
         trait_impls: trait_impls,
         impl_methods: impl_methods,
