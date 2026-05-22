@@ -206,8 +206,11 @@ impl Lexer {
         let start = self.current_position()
         let ch = self.peek()
 
-        if ch == "r" && self.pos + 1 < self.source.len() && self.source.char_at(self.pos + 1).unwrap_or("") == "#" {
-            return self.lex_raw_string(start)
+        if ch == "r" && self.pos + 1 < self.source.len() {
+            let next_ch = self.source.char_at(self.pos + 1).unwrap_or("")
+            if next_ch == "#" || next_ch == "\"" {
+                return self.lex_raw_string(start)
+            }
         }
 
         if ch == "\"" {
@@ -293,34 +296,56 @@ impl Lexer {
 
     fn lex_raw_string(mut self, start: Position) -> Token {
         self.advance()
-        if self.peek() != "#" {
-            let end = self.current_position()
-            return self.make_token(TokenKind::TkIdent, "r", start, end)
-        }
-        self.advance()
-        if self.peek() != "\"" {
-            self.pos = self.pos - 1
-            self.column = self.column - 1
-            let end = self.current_position()
-            return self.make_token(TokenKind::TkIdent, "r", start, end)
-        }
-        self.advance()
-        let mut value = ""
-        while self.pos < self.source.len() {
-            let ch = self.peek()
-            if ch == "\"" && self.pos + 1 < self.source.len() && self.source.char_at(self.pos + 1).unwrap_or("") == "#" {
-                self.advance()
-                self.advance()
-                let end = self.current_position()
-                return self.make_token(TokenKind::TkRawStringLit, value, start, end)
-            }
-            value = "${value}${ch}"
+        let has_hash = self.peek() == "#"
+        if has_hash {
+            // r#"..."# format
             self.advance()
+            if self.peek() != "\"" {
+                self.pos = self.pos - 1
+                self.column = self.column - 1
+                let end = self.current_position()
+                return self.make_token(TokenKind::TkIdent, "r", start, end)
+            }
+            self.advance()
+            let mut value = ""
+            while self.pos < self.source.len() {
+                let ch = self.peek()
+                if ch == "\"" && self.pos + 1 < self.source.len() && self.source.char_at(self.pos + 1).unwrap_or("") == "#" {
+                    self.advance()
+                    self.advance()
+                    let end = self.current_position()
+                    return self.make_token(TokenKind::TkRawStringLit, value, start, end)
+                }
+                value = "${value}${ch}"
+                self.advance()
+            }
+            let span = Span { file: self.file, start: start, end: self.current_position() }
+            self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated raw string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
+            let end = self.current_position()
+            self.make_token(TokenKind::TkError, value, start, end)
+        } else {
+            // r"..." format (no hash delimiter)
+            if self.peek() != "\"" {
+                let end = self.current_position()
+                return self.make_token(TokenKind::TkIdent, "r", start, end)
+            }
+            self.advance()
+            let mut value = ""
+            while self.pos < self.source.len() {
+                let ch = self.peek()
+                if ch == "\"" {
+                    self.advance()
+                    let end = self.current_position()
+                    return self.make_token(TokenKind::TkRawStringLit, value, start, end)
+                }
+                value = "${value}${ch}"
+                self.advance()
+            }
+            let span = Span { file: self.file, start: start, end: self.current_position() }
+            self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated raw string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
+            let end = self.current_position()
+            self.make_token(TokenKind::TkError, value, start, end)
         }
-        let span = Span { file: self.file, start: start, end: self.current_position() }
-        self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated raw string literal", span, DiagnosticContext::ParseError { token: value, expected: none }))
-        let end = self.current_position()
-        self.make_token(TokenKind::TkError, value, start, end)
     }
 
     // ============================================================
