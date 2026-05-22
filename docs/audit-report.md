@@ -37,9 +37,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 可移植性问题。
 
-### #30 Codegen match labeled break 与用户 break 语义交互 [low] [open]
-
-需文档说明。
 
 ## Effect 标注
 
@@ -73,9 +70,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 应拆分为 infer_stmt/infer_expr/infer。
 
-### #8 `compiler_mod.ring` ESM 输出 310 行单函数 [low] [open]
-
-应提取 helper。
 
 ### #14 68 处 `panic()` 调用（约 40 处 unreachable）[low] [open]
 
@@ -97,17 +91,7 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## 模块/诊断
 
-### #34 错误码编号有缺口（E0202/E0400/E0401 等）[low] [open]
 
-文档问题。
-
-### #91 catch 对无 fail effect 的表达式静默接受 [medium] [open]
-
-infer.ring:2309。`error_type` 初始化为 fresh type variable。当 body 无 fail effect 时，`found_fail` 保持 false，`error_type` 成为无约束类型变量。catch arms 的 pattern 与无约束类型统一永远成功——`42 catch { e => 0 }` 类型检查通过但 handler 永远不执行（死代码）。
-
-修复方向：`found_fail` 为 false 时发出警告诊断（如 W0601 "catch on expression with no fail effect"），帮助用户发现无意义的 catch。
-
-发现者：DS + Opus
 
 ## 设计-实现差距（参考，已在 backlog 跟踪）
 

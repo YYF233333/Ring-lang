@@ -634,21 +634,6 @@ source-map 支持 + 断点调试。
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
 - **优先级**：低
 
-### B-039 `catch` 对纯表达式发编译警告 [feature] [P3] [S] [queued]
-`let x = 42 catch { e => 0 }` 编译通过但 catch handler 是死代码——`42` 没有 fail effect，handler 永远不执行。用户可能误以为自己写了错误处理。
-
-**涉及修改**：
-1. `infer.ring`：在 `catch` 表达式推断完成后，检查 body 表达式的 effect row 是否包含 `fail`。若不包含，通过 `DiagnosticSink` 发出 warning（新增 warning 级别错误码，如 W0001）
-2. `codes.ring`：新增 warning 码
-3. `diagnostics.ring`：确认 warning 级别支持（若当前只有 error，需扩展 severity）
-
-**验收标准**：
-- `42 catch { e => 0 }` 产生编译警告（不是 error）
-- 有 fail effect 的表达式 `catch` 不产生警告
-- 警告不阻止编译和执行
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
-
 ### B-040 穷尽性检查非有限类型错误文案改进 [feature] [P3] [S] [queued]
 match Int/Float/Str 缺 wildcard 时错误信息报"missing pattern for `_`"，可能让新用户困惑（以为要字面匹配 `_`）。改为更明确的文案如"non-finite type requires a wildcard `_` or binding pattern"。
 
