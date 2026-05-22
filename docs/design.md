@@ -928,21 +928,48 @@ fn fetch_portfolio_data() -> PortfolioData {
 
 ### 8.2 async 是 effect，不是颜色
 
-async 和 sync 代码无缝组合。handler 决定执行策略：
+async 和 sync 代码无缝组合。handler 决定执行策略（设计已确定 2026-05-23）：
 
 ```
-handle {
-    let r = fetch_portfolio_data()
-    process(r)
-} with {
-    async => runtime.multi_thread,   // 或 runtime.single（WASM）
+effect async {
+    fn spawn<T>(task: fn() -> T with {async}) -> Future<T>
+    fn await<T>(f: Future<T>) -> T
+}
+
+fn fetch_both() -> (Data, Data) with {async} {
+    scope {
+        let a = spawn { fetch_stocks() }
+        let b = spawn { fetch_bonds() }
+        (await(a), await(b))
+    }
+}
+
+// 生产环境：默认 async handler 驱动
+fn main() with {io, async} {
+    let result = fetch_both()
+    print(result.debug())
+}
+
+// 测试环境：sync handler 直接执行
+fn test_fetch() {
+    let result = handle fetch_both() with {
+        async.spawn(task) => task(),
+        async.await(f) => f,
+    }
+    assert(result.0 == expected)
 }
 ```
+
+**实现策略**：Generator-based。async 函数编译为 JS `function*`，handler 作为 driver 驱动 generator。默认 handler 异步驱动（外层 await yield 出的 Promise），自定义 handler 可同步驱动（直接传 mock 值）。模块导出自动包装为 JS `async function`。
+
+**结构化并发**：spawn 必须在 `scope { }` 内。scope 结束等待所有子任务；scope 提前退出取消未完成子任务。
+
+**取消机制**：被取消的任务在下一个 `await` 点收到 `Cancelled` fail effect。两个 await 之间的同步代码一定完整执行。`Cancelled` 可 `catch` 做补偿（如回滚事务）。
 
 ### 8.3 Channel 通信
 
 ```
-fn producer_consumer() {
+fn producer_consumer() with {async} {
     let ch = channel<Int>(buffer: 16)
     scope {
         spawn { for i in 0..100 { ch.send(i) }; ch.close() }

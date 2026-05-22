@@ -220,30 +220,109 @@ fn process_all(items: List<dyn Describable>) { ... }
 - **前置依赖**：无硬依赖
 - **优先级**：Phase C 或 D
 
+### B-038 GATs（Generic Associated Types）[feature] [P3] [L] [queued]
+关联类型可带自己的泛型参数，本质是 HKT-lite（类型构造器作为关联类型）。
+
+```ring
+trait StreamingIterator {
+    type Item<'a>                    // Rust 风格（带 lifetime）
+    fn next(mut self) -> Item<Self>? // Ring 不需要 lifetime，用 Self 参数化
+}
+
+// Ring 版本（无 lifetime，用类型参数替代）：
+trait Lending<T> {
+    type Output<U>                   // 关联类型带泛型参数
+    fn lend(self, x: T) -> Output<T>
+}
+
+// HKT-lite：Functor
+trait Functor {
+    type F<A>                        // F 是类型构造器
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>
+}
+```
+
+- **当前状态**：未实现
+- **前置依赖**：B-004（关联类型）
+- **复杂度**：大（关联类型的泛型化 + kind 检查）
+- **优先级**：Phase D（研究向）。Ring 的 effect system 覆盖了 Monad 主要用例，GATs 紧迫度低
+
 ## Effect 系统
 
-### B-007 `async` Effect + 结构化并发 [feature] [P2] [XL] [queued]
-design.md 2.1 + 第 8 章。async 作为 effect 而非颜色标记，handler 决定执行策略。
+### B-007 `async` Effect + 结构化并发（设计已确定 2026-05-23）[feature] [P2] [XL] [queued]
+async 作为 effect，handler 决定执行策略。Generator-based 实现，支持 sync handler（测试场景）。
 
 ```ring
 effect async {
-    fn spawn<T>(task: fn() -> T) -> Future<T>
+    fn spawn<T>(task: fn() -> T with {async}) -> Future<T>
     fn await<T>(f: Future<T>) -> T
 }
 
-fn fetch_data() {
+// 结构化并发：spawn 必须在 scope 内
+fn fetch_both() -> (Data, Data) with {async} {
     scope {
         let a = spawn { fetch_stocks() }
         let b = spawn { fetch_bonds() }
         (await(a), await(b))
+    }  // scope 结束：等待所有子任务完成，未完成的自动取消
+}
+
+// 取消 = await 点注入 Cancelled fail，可 catch 补偿
+fn transfer(from: Account, to: Account, amount: Int) with {async} {
+    from.debit(amount)
+    await(to.credit_async(amount))
+} catch {
+    Cancelled => from.refund(amount)  // 补偿逻辑
+}
+
+// Sync handler（测试）：
+fn test_fetch() {
+    let data = handle fetch_both() with {
+        async.spawn(task) => task(),          // 立即执行
+        async.await(f) => f,                  // 直接返回（已 resolved）
     }
+    assert(data.0 == expected_stocks)
 }
 ```
 
-- **前置依赖**：`mut<S>` 参数化完成（effect 系统成熟度）
-- **复杂度**：大（结构化并发 + JS async/await 映射；LLVM backend 需 native async runtime）
-- **优先级**：Phase C 或 D
-- **宣发价值**：直接解决 function coloring 问题——async 是 effect 而非颜色标记，带 async effect 的函数可以在同步 handler 下测试。设计阶段可讲，实现前不可作为已解决的卖点
+**已确定的设计决策（2026-05-23）：**
+
+1. **实现策略：Generator-based**
+   - async-effected 函数编译为 JS `function*`（generator）
+   - Handler = driver，决定同步/异步驱动 generator
+   - 默认 handler（生产）：async driver（`yield` Promise → 外层 `await`）
+   - 自定义 handler（测试）：sync driver（`yield` mock value → 立即 `.next()`）
+   - 模块导出自动包装为 JS `async function`（对 JS 消费者透明）
+   - 后续优化选项：方案 C 双模编译（默认 handler → native async，仅需性能时再引入）
+
+2. **强制结构化并发**
+   - `spawn` 必须在 `scope { }` 内
+   - scope 结束时：等待所有子任务完成
+   - scope 提前退出（error/return）：取消所有未完成子任务
+   - 无 `detach()`——所有任务生命周期由 scope 管理
+   - 未来如需长命任务，在顶层 scope 或独立 handler 中 spawn
+
+3. **取消机制：await 点 fail 注入**
+   - Scope 退出触发子任务取消
+   - 被取消的任务在下一个 `await` 点收到 `Cancelled` fail effect
+   - 两个 await 之间的同步代码一定完整执行（不中断原子操作）
+   - `Cancelled` 可被 `catch` 捕获做清理/补偿
+   - 未 catch 的 `Cancelled` 向上传播直到 scope 捕获
+
+**与 Rust 的差异（避坑）：**
+- ❌ Rust：drop Future = 静默取消，任务不知道被取消了
+- ✅ Ring：Cancelled fail = 显式通知，可 catch 补偿
+- ❌ Rust：Pin/Unpin 复杂度（自引用 state machine）
+- ✅ Ring：GC 托管，无 Pin 问题
+- ❌ Rust：async trait 需要 boxing（直到 RPITIT）
+- ✅ Ring：effect + 推断，trait 中 async 方法自然支持
+- ❌ Rust：runtime 碎片化（tokio vs async-std）
+- ✅ Ring：一种标准 handler/runtime
+
+**前置依赖**：B-037（mut<T> marker effect）+ B-008（Default Effect Handler）
+**复杂度**：极大（generator codegen + scope 管理 + 取消传播 + 标准库 async 原语）
+**优先级**：层 3（Phase C 层 1+2 完成后启动）
+**宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
 
 ### B-008 Default Effect Handler（设计已确定 2026-05-22）[feature] [P2] [M] [queued]
 design.md 2.2。Op 带 body = 默认 handler，语法与 trait 默认方法一致。解决"每次调用都要写 handle...with"的 boilerplate 问题。
