@@ -2224,9 +2224,16 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
     let scrut_type_resolved = apply_subst(s, hexpr_type(scrut_r.hexpr))
     let missing = check_exhaustive(harms, scrut_type_resolved, s)
     match missing {
-        some(m) => { let _ = type_error(ctx.sink, E0601,
-            "Non-exhaustive match on type ${type_to_string(scrut_type_resolved)}: missing pattern for ${m}",
-            span, DiagnosticContext::PatternError { detail: "missing: ${m}" }) },
+        some(m) => {
+            let msg = if m == "_" {
+                "Non-exhaustive match: non-finite type '${type_to_string(scrut_type_resolved)}' requires a wildcard '_' or binding pattern"
+            } else {
+                "Non-exhaustive match on type ${type_to_string(scrut_type_resolved)}: missing pattern for ${m}"
+            }
+            let _ = type_error(ctx.sink, E0601,
+                msg,
+                span, DiagnosticContext::PatternError { detail: "missing: ${m}" })
+        },
         none => {}
     }
 
@@ -2409,9 +2416,16 @@ fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
     let error_type_resolved = apply_subst(s, error_type)
     let missing = check_exhaustive(harms, error_type_resolved, s)
     match missing {
-        some(m) => { let _ = type_error(ctx.sink, E0601,
-            "Non-exhaustive catch on error type ${type_to_string(error_type_resolved)}: missing pattern for ${m}",
-            span, DiagnosticContext::PatternError { detail: "missing: ${m}" }) },
+        some(m) => {
+            let msg = if m == "_" {
+                "Non-exhaustive catch: non-finite error type '${type_to_string(error_type_resolved)}' requires a wildcard '_' or binding pattern"
+            } else {
+                "Non-exhaustive catch on error type ${type_to_string(error_type_resolved)}: missing pattern for ${m}"
+            }
+            let _ = type_error(ctx.sink, E0601,
+                msg,
+                span, DiagnosticContext::PatternError { detail: "missing: ${m}" })
+        },
         none => {}
     }
 
