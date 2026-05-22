@@ -148,13 +148,20 @@ fn gen_binop(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispa
         none => {},
     }
     // Fallback: plain JS operator
+    let l = gen_expr(ctx, left)
+    let r = gen_expr(ctx, right)
+    // Int division: JS `/` always yields float, so wrap in Math.trunc for IntType
+    if op == BinOp::Div {
+        match hexpr_type(left) {
+            Type::IntType => { return "Math.trunc(${l} / ${r})" },
+            _ => {},
+        }
+    }
     let js_op = match op {
         BinOp::Eq => "===",
         BinOp::Neq => "!==",
         _ => binop_str(op),
     }
-    let l = gen_expr(ctx, left)
-    let r = gen_expr(ctx, right)
     "(${l} ${js_op} ${r})"
 }
 
