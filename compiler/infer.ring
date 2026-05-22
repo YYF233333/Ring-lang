@@ -1558,10 +1558,28 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     }
     let op = match op_opt { some(o) => o, none => panic("unreachable") }
 
-    if args.len() != op.params.len() {
+    // Instantiate effect type params with fresh variables
+    let mut inst_map: Map<Int, Type> = map_new()
+    let mut inst_type_args: List<Type> = []
+    let mut tpi = 0
+    for tpv in effect_def.type_param_vars {
+        let fresh = ctx.env.fresh_var()
+        inst_map.insert(tpv, fresh)
+        inst_type_args.push(fresh)
+        tpi = tpi + 1
+    }
+
+    // Apply instantiation to op param types and return type
+    let mut inst_params: List<Type> = []
+    for pt in op.params {
+        inst_params.push(apply_subst_map(inst_map, pt))
+    }
+    let inst_ret = apply_subst_map(inst_map, op.return_type)
+
+    if args.len() != inst_params.len() {
         let _ = type_error(ctx.sink, E0301,
-            "Effect operation '${effect_name}.${op_name}' expects ${op.params.len().to_str()} argument(s), got ${args.len().to_str()}",
-            span, DiagnosticContext::TypeMismatch { expected: "${op.params.len().to_str()} args", actual: "${args.len().to_str()} args", expression: none })
+            "Effect operation '${effect_name}.${op_name}' expects ${inst_params.len().to_str()} argument(s), got ${args.len().to_str()}",
+            span, DiagnosticContext::TypeMismatch { expected: "${inst_params.len().to_str()} args", actual: "${args.len().to_str()} args", expression: none })
     }
 
     let mut s = subst
@@ -1576,14 +1594,14 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         effects = me.0
         s = me.1
         hargs.push(ar.hexpr)
-        match op.params.get(i) {
+        match inst_params.get(i) {
             some(param_type) => { s = unify_at(ctx.sink, ctx.env, hexpr_type(ar.hexpr), param_type, s, span) },
             none => {}
         }
         i = i + 1
     }
 
-    let mut eff: Effect = Effect::CustomEffect { name: effect_name, type_args: [] }
+    let mut eff: Effect = Effect::CustomEffect { name: effect_name, type_args: inst_type_args }
     match effect_def.built_in_kind {
         some(bik) => match bik {
             BuiltInKind::BkIo => { eff = Effect::IoEffect },
@@ -1601,7 +1619,7 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     s = me.1
 
     InferResult {
-        hexpr: HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: hargs, ty: op.return_type, effects: effects, span: span },
+        hexpr: HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: hargs, ty: inst_ret, effects: effects, span: span },
         subst: s, effects: effects
     }
 }
@@ -2220,6 +2238,19 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     for handler in handlers {
         ctx.env.push_scope()
         let effect_def = ctx.env.types.effects.get(handler.effect_name)
+
+        // Instantiate effect type params with fresh variables for handler
+        let mut handler_inst_map: Map<Int, Type> = map_new()
+        match effect_def {
+            some(ed) => {
+                for tpv in ed.type_param_vars {
+                    let fresh = ctx.env.fresh_var()
+                    handler_inst_map.insert(tpv, fresh)
+                }
+            },
+            none => {}
+        }
+
         let mut op_def: EffectOpDef? = none
         match effect_def {
             some(ed) => { op_def = ed.ops.find(fn(o) { o.name == handler.op_name }) },
@@ -2232,7 +2263,10 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
             let pt = match p.type_annotation {
                 some(ta) => resolve_type_expr(ctx, ta),
                 none => match op_def {
-                    some(od) => match od.params.get(hi) { some(odt) => odt, none => ctx.env.fresh_var() },
+                    some(od) => match od.params.get(hi) {
+                        some(odt) => apply_subst_map(handler_inst_map, odt),
+                        none => ctx.env.fresh_var()
+                    },
                     none => ctx.env.fresh_var()
                 }
             }
@@ -2243,7 +2277,10 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
         match handler.resume_name {
             some(rn) => {
-                let resume_param = match op_def { some(od) => od.return_type, none => ctx.env.fresh_var() }
+                let resume_param = match op_def {
+                    some(od) => apply_subst_map(handler_inst_map, od.return_type),
+                    none => ctx.env.fresh_var()
+                }
                 let resume_ret = ctx.env.fresh_var()
                 ctx.env.bind_mono(rn, Type::FnType { params: [resume_param], return_type: resume_ret, effects: EMPTY_ROW })
             },

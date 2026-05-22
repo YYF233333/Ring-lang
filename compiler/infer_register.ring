@@ -346,9 +346,16 @@ fn bind_variant_constructor(ctx: InferCtx, variant_name: Str, enum_type: Type, t
 // Effect registration
 // ============================================================
 
-fn register_effect(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ops: List<EffectOpDecl>) {
+fn register_effect(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, ops: List<EffectOpDecl>) {
+    let saved = map_clone(ctx.type_param_scope)
     let mut tp_names: List<Str> = []
-    for tp in type_params { tp_names.push(tp.name) }
+    let mut tp_vars: List<Int> = []
+    for tp in type_params {
+        tp_names.push(tp.name)
+        let tv = ctx.env.fresh_var()
+        match tv { Type::TypeVar { id, .. } => { tp_vars.push(id) }, _ => {} }
+        ctx.type_param_scope.insert(tp.name, tv)
+    }
     let mut effect_ops: List<EffectOpDef> = []
     for op in ops {
         let mut param_types: List<Type> = []
@@ -361,7 +368,8 @@ fn register_effect(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ops: 
         let ret = resolve_type_expr(ctx, op.return_type)
         effect_ops.push(EffectOpDef { name: op.name, params: param_types, return_type: ret })
     }
-    ctx.env.types.effects.insert(name, EffectDef { name: name, type_params: tp_names, ops: effect_ops, built_in_kind: none })
+    ctx.type_param_scope = saved
+    ctx.env.types.effects.insert(name, EffectDef { name: name, type_params: tp_names, type_param_vars: tp_vars, ops: effect_ops, built_in_kind: none })
 }
 
 // ============================================================

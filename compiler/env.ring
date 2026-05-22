@@ -47,6 +47,7 @@ pub enum BuiltInKind { BkIo, BkFail, BkMut }
 pub struct EffectDef {
     pub name: Str,
     pub type_params: List<Str>,
+    pub type_param_vars: List<Int>,
     pub ops: List<EffectOpDef>,
     pub built_in_kind: BuiltInKind?
 }

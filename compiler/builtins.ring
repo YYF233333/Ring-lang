@@ -119,6 +119,7 @@ fn register_effects(mut env: TypeEnv) {
     env.types.effects.insert("io", EffectDef {
         name: "io",
         type_params: [],
+        type_param_vars: [],
         ops: [
             EffectOpDef { name: "read", params: [STR], return_type: STR },
             EffectOpDef { name: "write", params: [STR, STR], return_type: UNIT }
@@ -132,6 +133,7 @@ fn register_effects(mut env: TypeEnv) {
     env.types.effects.insert("fail", EffectDef {
         name: "fail",
         type_params: ["E"],
+        type_param_vars: [fail_t_id],
         ops: [
             EffectOpDef { name: "raise", params: [fail_t], return_type: NEVER }
         ],

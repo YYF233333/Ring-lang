@@ -68,9 +68,10 @@ const BuiltInKind_BkFail = Object.freeze({ _tag: "BkFail" });
 const BuiltInKind_BkMut = Object.freeze({ _tag: "BkMut" });
 
 class EffectDef {
-  constructor(name, type_params, ops, built_in_kind) {
+  constructor(name, type_params, type_param_vars, ops, built_in_kind) {
     this.name = name;
     this.type_params = type_params;
+    this.type_param_vars = type_param_vars;
     this.ops = ops;
     this.built_in_kind = built_in_kind;
   }
