@@ -3179,6 +3179,8 @@ function infer_lambda(ctx, params, body, span, subst, expected_param_types, __ri
             env$TypeEnv_record_def_span(ctx.env, did, p.span);
             if (p.is_mutable) {
               _Set_insert(ctx.env.scope.mutable_vars, did);
+            } else {
+              _Set_insert(ctx.env.scope.let_defs, did);
             }
             break __ring_match159;
           }

@@ -686,7 +686,11 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
                 match ps.def_id {
                     some(did) => {
                         ctx.env.record_def_span(did, p.span)
-                        if p.is_mutable { ctx.env.scope.mutable_vars.insert(did) }
+                        if p.is_mutable {
+                            ctx.env.scope.mutable_vars.insert(did)
+                        } else {
+                            ctx.env.scope.let_defs.insert(did)
+                        }
                     },
                     none => {}
                 }

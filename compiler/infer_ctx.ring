@@ -289,7 +289,7 @@ pub fn free_type_vars(t: Type, subst: UnionFind) -> Set<Int> {
     result
 }
 
-pub fn collect_free_vars(t: Type, result: Set<Int>) {
+pub fn collect_free_vars(t: Type, mut result: Set<Int>) {
     match t {
         Type::IntType => {},
         Type::FloatType => {},
@@ -442,7 +442,7 @@ pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<
     result
 }
 
-fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: List<Int>, result: Map<Int, Type>) {
+fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: List<Int>, mut result: Map<Int, Type>) {
     match scheme_type {
         Type::TypeVar { id, .. } => {
             if type_vars.contains(id) {
@@ -558,7 +558,7 @@ pub fn resolve_dicts_from_scheme(
 // Type expression resolution
 // ============================================================
 
-pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
+pub fn resolve_type_expr(mut ctx: InferCtx, texpr: TypeExpr) -> Type {
     match texpr {
         TypeExpr::Named { name, qualifier, type_args, span } =>
             match qualifier {

@@ -22,7 +22,7 @@ pub fn new_union_find() -> UnionFind {
 // Find the root representative for a type variable id.
 // Performs path compression for amortized O(alpha(n)) performance.
 // Note: path compression mutates parent map (reference type) in-place.
-pub fn uf_find(uf: UnionFind, id: Int) -> Int {
+pub fn uf_find(mut uf: UnionFind, id: Int) -> Int {
     match uf.parent.get(id) {
         none => id,
         some(p) => {
@@ -36,7 +36,7 @@ pub fn uf_find(uf: UnionFind, id: Int) -> Int {
 }
 
 // Bind a type variable to a type. Binds at the root representative.
-pub fn uf_bind(uf: UnionFind, id: Int, ty: Type) {
+pub fn uf_bind(mut uf: UnionFind, id: Int, ty: Type) {
     let root = uf_find(uf, id)
     uf.types.insert(root, ty)
 }
@@ -48,7 +48,7 @@ pub fn uf_lookup(uf: UnionFind, id: Int) -> Type? {
 }
 
 // Union two type variable equivalence classes by rank.
-pub fn uf_union(uf: UnionFind, a: Int, b: Int) {
+pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
     let ra = uf_find(uf, a)
     let rb = uf_find(uf, b)
     if ra == rb { return }
@@ -82,7 +82,7 @@ pub fn uf_union(uf: UnionFind, a: Int, b: Int) {
 
 // Insert a binding directly (for row variable bindings, effect row bindings, etc.)
 // This performs find first, then inserts at the root.
-pub fn uf_insert(uf: UnionFind, id: Int, ty: Type) {
+pub fn uf_insert(mut uf: UnionFind, id: Int, ty: Type) {
     let root = uf_find(uf, id)
     uf.types.insert(root, ty)
 }

@@ -71,7 +71,7 @@ fn dummy_span() -> Span {
 // ============================================================
 
 pub trait DiagnosticSink {
-    fn report(self, d: Diagnostic)
+    fn report(mut self, d: Diagnostic)
     fn has_errors(self) -> Bool
     fn get_diagnostics(self) -> List<Diagnostic>
 }
@@ -89,7 +89,7 @@ pub fn new_collecting_sink() -> CollectingSink {
 }
 
 impl CollectingSink {
-    pub fn report(self, d: Diagnostic) {
+    pub fn report(mut self, d: Diagnostic) {
         self.items.push(d)
     }
 
@@ -106,7 +106,7 @@ impl CollectingSink {
         self.items
     }
 
-    pub fn clear(self) {
+    pub fn clear(mut self) {
         self.items.clear()
     }
 
@@ -120,7 +120,7 @@ impl CollectingSink {
 }
 
 impl DiagnosticSink for CollectingSink {
-    fn report(self, d: Diagnostic) {
+    fn report(mut self, d: Diagnostic) {
         self.items.push(d)
     }
 

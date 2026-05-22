@@ -426,6 +426,7 @@ const cases: TestCase[] = [
   { file: "multiline_string.ring", expected: "multiline_string: all tests passed\n" },
   { file: "raw_string.ring", expected: "raw_string: all tests passed\n" },
   { file: "index_expr.ring", expected: "index_expr: all tests passed\n" },
+  { file: "mut_param_enforcement.ring", expected: "mut_param_enforcement: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -482,6 +483,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_duplicate_def.ring", error_pattern: "E0207" },
     { file: "error_use_after_decl.ring", error_pattern: "E0706" },
     { file: "error_mut_method_on_let.ring", error_pattern: "E0208" },
+    { file: "error_mut_param_enforcement.ring", error_pattern: "E0208" },
     { file: "errors/mod_super_out_of_scope.ring", error_pattern: "E0705" },
     { file: "errors/mod_capability_violation.ring", error_pattern: "E0405" },
     { file: "catch_non_exhaustive_fail.ring", error_pattern: "E0601" },
