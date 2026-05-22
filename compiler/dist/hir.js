@@ -85,6 +85,93 @@ function _Set_contains(self, item, __ring_T_Eq) {
   return false;
 }
 
+function Result_Ok(_0) {
+  return { _tag: "Ok", _0 };
+}
+function Result_Err(_0) {
+  return { _tag: "Err", _0 };
+}
+
+function Result_map(self, f) {
+  __ring_match1: {
+    const __ring_m1 = self;
+    if (__ring_m1._tag === "Ok") {
+      const v = __ring_m1._0;
+      return Result_Ok(f(v));
+      break __ring_match1;
+    }
+    if (__ring_m1._tag === "Err") {
+      const e = __ring_m1._0;
+      return Result_Err(e);
+      break __ring_match1;
+    }
+    __match_fail(__ring_m1);
+  }
+}
+function Result_and_then(self, f) {
+  __ring_match2: {
+    const __ring_m2 = self;
+    if (__ring_m2._tag === "Ok") {
+      const v = __ring_m2._0;
+      return f(v);
+      break __ring_match2;
+    }
+    if (__ring_m2._tag === "Err") {
+      const e = __ring_m2._0;
+      return Result_Err(e);
+      break __ring_match2;
+    }
+    __match_fail(__ring_m2);
+  }
+}
+function Result_unwrap_or(self, _default) {
+  __ring_match3: {
+    const __ring_m3 = self;
+    if (__ring_m3._tag === "Ok") {
+      const v = __ring_m3._0;
+      return v;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Err") {
+      return _default;
+      break __ring_match3;
+    }
+    __match_fail(__ring_m3);
+  }
+}
+function Result_is_ok(self) {
+  __ring_match4: {
+    const __ring_m4 = self;
+    if (__ring_m4._tag === "Ok") {
+      return true;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Err") {
+      return false;
+      break __ring_match4;
+    }
+    __match_fail(__ring_m4);
+  }
+}
+function Result_is_err(self) {
+  __ring_match5: {
+    const __ring_m5 = self;
+    if (__ring_m5._tag === "Ok") {
+      return false;
+      break __ring_match5;
+    }
+    if (__ring_m5._tag === "Err") {
+      return true;
+      break __ring_match5;
+    }
+    __match_fail(__ring_m5);
+  }
+}
+
+function to_result(f) {
+  return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
+}
+
 class HParam {
   constructor(name, ty, def_id, is_mutable) {
     this.name = name;
@@ -429,368 +516,368 @@ const RUNTIME_EFFECT_ABORT = "__EffectAbort";
 const RUNTIME_MATCH_FAIL = "__match_fail";
 
 function hexpr_type(e) {
-  __ring_match1: {
-    const __ring_m1 = e;
-    if (__ring_m1._tag === "IntLit") {
-      const ty = __ring_m1.ty;
+  __ring_match6: {
+    const __ring_m6 = e;
+    if (__ring_m6._tag === "IntLit") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "FloatLit") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "FloatLit") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "StrLit") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "StrLit") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "BoolLit") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "BoolLit") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "Ident") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "Ident") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "BinOp") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "BinOp") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "UnaryOp") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "UnaryOp") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "Call") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "Call") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "FieldAccess") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "FieldAccess") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "StructLit") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "StructLit") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "NamedVariantConstruct") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "NamedVariantConstruct") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "MatchExpr") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "MatchExpr") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "Block") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "Block") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "IfExpr") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "IfExpr") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "StringInterp") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "StringInterp") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TryCatch") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "TryCatch") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "HandleExpr") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "HandleExpr") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "Lambda") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "Lambda") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "EffectOp") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "EffectOp") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "RangeExpr") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "RangeExpr") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "ListLit") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "ListLit") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TupleLit") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "TupleLit") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "IndexExpr") {
-      const ty = __ring_m1.ty;
+    if (__ring_m6._tag === "IndexExpr") {
+      const ty = __ring_m6.ty;
       return ty;
-      break __ring_match1;
+      break __ring_match6;
     }
-    __match_fail(__ring_m1);
+    __match_fail(__ring_m6);
   }
 }
 
 function hexpr_effects(e) {
-  __ring_match2: {
-    const __ring_m2 = e;
-    if (__ring_m2._tag === "IntLit") {
-      const effects = __ring_m2.effects;
+  __ring_match7: {
+    const __ring_m7 = e;
+    if (__ring_m7._tag === "IntLit") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "FloatLit") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "FloatLit") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "StrLit") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "StrLit") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "BoolLit") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "BoolLit") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "Ident") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "Ident") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "BinOp") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "BinOp") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "UnaryOp") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "UnaryOp") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "Call") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "Call") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "FieldAccess") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "FieldAccess") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "StructLit") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "StructLit") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "NamedVariantConstruct") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "NamedVariantConstruct") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "MatchExpr") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "MatchExpr") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "Block") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "Block") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "IfExpr") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "IfExpr") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "StringInterp") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "StringInterp") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TryCatch") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "TryCatch") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "HandleExpr") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "HandleExpr") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "Lambda") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "Lambda") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "EffectOp") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "EffectOp") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "RangeExpr") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "RangeExpr") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "ListLit") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "ListLit") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TupleLit") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "TupleLit") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "IndexExpr") {
-      const effects = __ring_m2.effects;
+    if (__ring_m7._tag === "IndexExpr") {
+      const effects = __ring_m7.effects;
       return effects;
-      break __ring_match2;
+      break __ring_match7;
     }
-    __match_fail(__ring_m2);
+    __match_fail(__ring_m7);
   }
 }
 
 function hexpr_span(e) {
-  __ring_match3: {
-    const __ring_m3 = e;
-    if (__ring_m3._tag === "IntLit") {
-      const span = __ring_m3.span;
+  __ring_match8: {
+    const __ring_m8 = e;
+    if (__ring_m8._tag === "IntLit") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "FloatLit") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "FloatLit") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "StrLit") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "StrLit") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "BoolLit") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "BoolLit") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "Ident") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "Ident") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "BinOp") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "BinOp") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "UnaryOp") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "UnaryOp") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "Call") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "Call") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "FieldAccess") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "FieldAccess") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "StructLit") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "StructLit") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "NamedVariantConstruct") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "NamedVariantConstruct") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "MatchExpr") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "MatchExpr") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "Block") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "Block") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "IfExpr") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "IfExpr") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "StringInterp") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "StringInterp") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "TryCatch") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "TryCatch") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "HandleExpr") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "HandleExpr") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "Lambda") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "Lambda") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "EffectOp") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "EffectOp") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "RangeExpr") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "RangeExpr") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "ListLit") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "ListLit") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "TupleLit") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "TupleLit") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "IndexExpr") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "IndexExpr") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    __match_fail(__ring_m3);
+    __match_fail(__ring_m8);
   }
 }
 
@@ -813,6 +900,16 @@ function __TraitBound_Eq_eq(self, other) {
   return (self.type_param === other.type_param) && (self.trait_name === other.trait_name);
 }
 const __TraitBound_Eq = { eq: __TraitBound_Eq_eq, ne: function(self, other) { return !__TraitBound_Eq_eq(self, other); } };
+
+function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
+  if (self._tag !== other._tag) return false;
+  switch (self._tag) {
+    case "Ok": return __ring_T_Eq.eq(self._0, other._0);
+    case "Err": return __ring_E_Eq.eq(self._0, other._0);
+    default: return true;
+  }
+}
+const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
 
 function __TypeKind_Eq_eq(self, other) {
   if (self._tag !== other._tag) return false;
@@ -839,6 +936,15 @@ function __TraitBound_Clone_clone(self) {
   return new TraitBound(self.type_param, self.trait_name);
 }
 const __TraitBound_Clone = { clone: __TraitBound_Clone_clone };
+
+function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
+  switch (self._tag) {
+    case "Ok": return Result_Ok(__ring_T_Clone.clone(self._0));
+    case "Err": return Result_Err(__ring_E_Clone.clone(self._0));
+    default: return self;
+  }
+}
+const __Result_Clone = { clone: __Result_Clone_clone };
 
 function __TraitDispatch_Clone_clone(self) {
   switch (self._tag) {
@@ -905,6 +1011,19 @@ function __TraitBound_Ord_cmp(self, other) {
 }
 const __TraitBound_Ord = { cmp: __TraitBound_Ord_cmp };
 
+const __Result_tag_order = { "Ok": 0, "Err": 1 };
+function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
+  var t1 = __Result_tag_order[self._tag];
+  var t2 = __Result_tag_order[other._tag];
+  if (t1 !== t2) return (t1 < t2 ? -1 : 1);
+  switch (self._tag) {
+    case "Ok": return __ring_T_Ord.cmp(self._0, other._0);
+    case "Err": return __ring_E_Ord.cmp(self._0, other._0);
+    default: return 0;
+  }
+}
+const __Result_Ord = { cmp: __Result_Ord_cmp };
+
 const __TypeKind_tag_order = { "StructKind": 0, "EnumKind": 1 };
 function __TypeKind_Ord_cmp(self, other) {
   var t1 = __TypeKind_tag_order[self._tag];
@@ -933,6 +1052,15 @@ function __TraitBound_Debug_debug(self) {
   return "TraitBound { " + "type_param: " + String(self.type_param) + ", " + "trait_name: " + String(self.trait_name) + " }";
 }
 const __TraitBound_Debug = { debug: __TraitBound_Debug_debug };
+
+function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
+  switch (self._tag) {
+    case "Ok": return "Ok(" + __ring_T_Debug.debug(self._0) + ")";
+    case "Err": return "Err(" + __ring_E_Debug.debug(self._0) + ")";
+    default: return self._tag;
+  }
+}
+const __Result_Debug = { debug: __Result_Debug_debug };
 
 function __TraitDispatch_Debug_debug(self) {
   switch (self._tag) {

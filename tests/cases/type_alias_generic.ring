@@ -1,8 +1,8 @@
 // Test: type alias with generic parameters
 
-type Result<T> = Option<T>
+type MaybeVal<T> = Option<T>
 
-fn parse_num(s: Str) -> Result<Int> {
+fn parse_num(s: Str) -> MaybeVal<Int> {
     parse_int(s)
 }
 
@@ -14,7 +14,7 @@ fn main() {
     assert(r2.is_none(), "parse fail")
 
     // Type alias in let binding annotation
-    let x: Result<Str> = some("hello")
+    let x: MaybeVal<Str> = some("hello")
     assert(x.unwrap_or("") == "hello", "alias in annotation")
 
     print("type_alias_generic: all tests passed")

@@ -62,6 +62,93 @@ function _Set_contains(self, item, __ring_T_Eq) {
   return false;
 }
 
+function Result_Ok(_0) {
+  return { _tag: "Ok", _0 };
+}
+function Result_Err(_0) {
+  return { _tag: "Err", _0 };
+}
+
+function Result_map(self, f) {
+  __ring_match1: {
+    const __ring_m1 = self;
+    if (__ring_m1._tag === "Ok") {
+      const v = __ring_m1._0;
+      return Result_Ok(f(v));
+      break __ring_match1;
+    }
+    if (__ring_m1._tag === "Err") {
+      const e = __ring_m1._0;
+      return Result_Err(e);
+      break __ring_match1;
+    }
+    __match_fail(__ring_m1);
+  }
+}
+function Result_and_then(self, f) {
+  __ring_match2: {
+    const __ring_m2 = self;
+    if (__ring_m2._tag === "Ok") {
+      const v = __ring_m2._0;
+      return f(v);
+      break __ring_match2;
+    }
+    if (__ring_m2._tag === "Err") {
+      const e = __ring_m2._0;
+      return Result_Err(e);
+      break __ring_match2;
+    }
+    __match_fail(__ring_m2);
+  }
+}
+function Result_unwrap_or(self, _default) {
+  __ring_match3: {
+    const __ring_m3 = self;
+    if (__ring_m3._tag === "Ok") {
+      const v = __ring_m3._0;
+      return v;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Err") {
+      return _default;
+      break __ring_match3;
+    }
+    __match_fail(__ring_m3);
+  }
+}
+function Result_is_ok(self) {
+  __ring_match4: {
+    const __ring_m4 = self;
+    if (__ring_m4._tag === "Ok") {
+      return true;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Err") {
+      return false;
+      break __ring_match4;
+    }
+    __match_fail(__ring_m4);
+  }
+}
+function Result_is_err(self) {
+  __ring_match5: {
+    const __ring_m5 = self;
+    if (__ring_m5._tag === "Ok") {
+      return false;
+      break __ring_match5;
+    }
+    if (__ring_m5._tag === "Err") {
+      return true;
+      break __ring_match5;
+    }
+    __match_fail(__ring_m5);
+  }
+}
+
+function to_result(f) {
+  return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
+}
+
 
 const PREC_NONE = 0;
 
@@ -86,86 +173,86 @@ const PREC_UNARY = 9;
 const PREC_POSTFIX = 10;
 
 function infix_precedence(kind) {
-  __ring_match1: {
-    const __ring_m1 = kind;
-    if (__ring_m1._tag === "TkCatch") {
+  __ring_match6: {
+    const __ring_m6 = kind;
+    if (__ring_m6._tag === "TkCatch") {
       return PREC_CATCH;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkPipePipe") {
+    if (__ring_m6._tag === "TkPipePipe") {
       return PREC_LOGIC_OR;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkAmpAmp") {
+    if (__ring_m6._tag === "TkAmpAmp") {
       return PREC_LOGIC_AND;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkEqEq") {
+    if (__ring_m6._tag === "TkEqEq") {
       return PREC_EQUALITY;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkBangEq") {
+    if (__ring_m6._tag === "TkBangEq") {
       return PREC_EQUALITY;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkLt") {
+    if (__ring_m6._tag === "TkLt") {
       return PREC_COMPARE;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkGt") {
+    if (__ring_m6._tag === "TkGt") {
       return PREC_COMPARE;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkLtEq") {
+    if (__ring_m6._tag === "TkLtEq") {
       return PREC_COMPARE;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkGtEq") {
+    if (__ring_m6._tag === "TkGtEq") {
       return PREC_COMPARE;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkDotDot") {
+    if (__ring_m6._tag === "TkDotDot") {
       return PREC_RANGE;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkDotDotEq") {
+    if (__ring_m6._tag === "TkDotDotEq") {
       return PREC_RANGE;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkPlus") {
+    if (__ring_m6._tag === "TkPlus") {
       return PREC_ADD_SUB;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkMinus") {
+    if (__ring_m6._tag === "TkMinus") {
       return PREC_ADD_SUB;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkStar") {
+    if (__ring_m6._tag === "TkStar") {
       return PREC_MUL_DIV;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkSlash") {
+    if (__ring_m6._tag === "TkSlash") {
       return PREC_MUL_DIV;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkPercent") {
+    if (__ring_m6._tag === "TkPercent") {
       return PREC_MUL_DIV;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkDot") {
+    if (__ring_m6._tag === "TkDot") {
       return PREC_POSTFIX;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkLParen") {
+    if (__ring_m6._tag === "TkLParen") {
       return PREC_POSTFIX;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TkLBracket") {
+    if (__ring_m6._tag === "TkLBracket") {
       return PREC_POSTFIX;
-      break __ring_match1;
+      break __ring_match6;
     }
     return PREC_NONE;
-    break __ring_match1;
+    break __ring_match6;
   }
 }
 
@@ -227,62 +314,62 @@ function dummy_type_expr() {
 }
 
 function is_decl_start(k) {
-  __ring_match2: {
-    const __ring_m2 = k;
-    if (__ring_m2._tag === "TkFn") {
+  __ring_match7: {
+    const __ring_m7 = k;
+    if (__ring_m7._tag === "TkFn") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkStruct") {
+    if (__ring_m7._tag === "TkStruct") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkEnum") {
+    if (__ring_m7._tag === "TkEnum") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkEffect") {
+    if (__ring_m7._tag === "TkEffect") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkTrait") {
+    if (__ring_m7._tag === "TkTrait") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkImpl") {
+    if (__ring_m7._tag === "TkImpl") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkExtern") {
+    if (__ring_m7._tag === "TkExtern") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkUse") {
+    if (__ring_m7._tag === "TkUse") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkPub") {
+    if (__ring_m7._tag === "TkPub") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkTest") {
+    if (__ring_m7._tag === "TkTest") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkConst") {
+    if (__ring_m7._tag === "TkConst") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkMod") {
+    if (__ring_m7._tag === "TkMod") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "TkSig") {
+    if (__ring_m7._tag === "TkSig") {
       return true;
-      break __ring_match2;
+      break __ring_match7;
     }
     return false;
-    break __ring_match2;
+    break __ring_match7;
   }
 }
 
@@ -292,151 +379,151 @@ function is_uppercase(ch) {
 }
 
 function type_expr_span(te) {
-  __ring_match3: {
-    const __ring_m3 = te;
-    if (__ring_m3._tag === "Named") {
-      const span = __ring_m3.span;
+  __ring_match8: {
+    const __ring_m8 = te;
+    if (__ring_m8._tag === "Named") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "FnType") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "FnType") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "OptionType") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "OptionType") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "RecordType") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "RecordType") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (__ring_m3._tag === "TupleType") {
-      const span = __ring_m3.span;
+    if (__ring_m8._tag === "TupleType") {
+      const span = __ring_m8.span;
       return span;
-      break __ring_match3;
+      break __ring_match8;
     }
-    __match_fail(__ring_m3);
+    __match_fail(__ring_m8);
   }
 }
 
 function expr_span(e) {
-  __ring_match4: {
-    const __ring_m4 = e;
-    if (__ring_m4._tag === "IntLit") {
-      const span = __ring_m4.span;
+  __ring_match9: {
+    const __ring_m9 = e;
+    if (__ring_m9._tag === "IntLit") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "FloatLit") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "FloatLit") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "StrLit") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "StrLit") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "BoolLit") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "BoolLit") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "Ident") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "Ident") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "BinOp") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "BinOp") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "UnaryOp") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "UnaryOp") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "Call") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "Call") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "MethodCall") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "MethodCall") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "FieldAccess") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "FieldAccess") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "StructLit") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "StructLit") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "MatchExpr") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "MatchExpr") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "Block") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "Block") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "IfExpr") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "IfExpr") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "StringInterp") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "StringInterp") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "CatchExpr") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "CatchExpr") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "HandleExpr") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "HandleExpr") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "Lambda") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "Lambda") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "Range") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "Range") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "ListLit") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "ListLit") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "TupleLit") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "TupleLit") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    if (__ring_m4._tag === "IndexExpr") {
-      const span = __ring_m4.span;
+    if (__ring_m9._tag === "IndexExpr") {
+      const span = __ring_m9.span;
       return span;
-      break __ring_match4;
+      break __ring_match9;
     }
-    __match_fail(__ring_m4);
+    __match_fail(__ring_m9);
   }
 }
 
@@ -536,23 +623,23 @@ function Parser_parse_program(self) {
         Parser_report_error(self, codes$E0706, "Use declaration must appear before other declarations", Option_some(Parser_peek(self).span));
       }
       const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-      __ring_match5: {
-        const __ring_m5 = use_result;
-        if (__ring_m5._tag === "some") {
-          const ud = __ring_m5._0;
+      __ring_match10: {
+        const __ring_m10 = use_result;
+        if (__ring_m10._tag === "some") {
+          const ud = __ring_m10._0;
           List_push(uses, ud);
-          break __ring_match5;
+          break __ring_match10;
         }
-        if (__ring_m5._tag === "none") {
+        if (__ring_m10._tag === "none") {
           while ((!Parser_at_end(self))) {
             if (is_decl_start(Parser_peek(self).kind)) {
               break;
             }
             Parser_advance(self);
           }
-          break __ring_match5;
+          break __ring_match10;
         }
-        __match_fail(__ring_m5);
+        __match_fail(__ring_m10);
       }
       continue;
     }
@@ -566,23 +653,23 @@ function Parser_parse_program(self) {
           Parser_report_error(self, codes$E0706, "Use declaration must appear before other declarations", Option_some(Option_unwrap_or(List_get(self.tokens, save_pos), Parser_peek(self)).span));
         }
         const pub_use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, true)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-        __ring_match6: {
-          const __ring_m6 = pub_use_result;
-          if (__ring_m6._tag === "some") {
-            const ud = __ring_m6._0;
+        __ring_match11: {
+          const __ring_m11 = pub_use_result;
+          if (__ring_m11._tag === "some") {
+            const ud = __ring_m11._0;
             List_push(uses, ud);
-            break __ring_match6;
+            break __ring_match11;
           }
-          if (__ring_m6._tag === "none") {
+          if (__ring_m11._tag === "none") {
             while ((!Parser_at_end(self))) {
               if (is_decl_start(Parser_peek(self).kind)) {
                 break;
               }
               Parser_advance(self);
             }
-            break __ring_match6;
+            break __ring_match11;
           }
-          __match_fail(__ring_m6);
+          __match_fail(__ring_m11);
         }
         continue;
       }
@@ -592,23 +679,23 @@ function Parser_parse_program(self) {
     }
     decls_started = true;
     const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-    __ring_match7: {
-      const __ring_m7 = maybe_decl;
-      if (__ring_m7._tag === "some") {
-        const decl = __ring_m7._0;
+    __ring_match12: {
+      const __ring_m12 = maybe_decl;
+      if (__ring_m12._tag === "some") {
+        const decl = __ring_m12._0;
         List_push(decls, decl);
-        break __ring_match7;
+        break __ring_match12;
       }
-      if (__ring_m7._tag === "none") {
+      if (__ring_m12._tag === "none") {
         while ((!Parser_at_end(self))) {
           if (is_decl_start(Parser_peek(self).kind)) {
             break;
           }
           Parser_advance(self);
         }
-        break __ring_match7;
+        break __ring_match12;
       }
-      __match_fail(__ring_m7);
+      __match_fail(__ring_m12);
     }
   }
   const end = Parser_current_span_start(self);
@@ -835,19 +922,19 @@ function Parser_parse_block_expr(self) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const stmt = Parser_parse_stmt(self);
     if (Parser_check(self, lexer$TokenKind_TkRBrace)) {
-      __ring_match8: {
-        const __ring_m8 = stmt;
-        if (__ring_m8._tag === "ExprStmt") {
-          const e = __ring_m8.expr; const hs = __ring_m8.has_semi;
+      __ring_match13: {
+        const __ring_m13 = stmt;
+        if (__ring_m13._tag === "ExprStmt") {
+          const e = __ring_m13.expr; const hs = __ring_m13.has_semi;
           if ((!hs)) {
             tail = Option_some(e);
           } else {
             List_push(stmts, stmt);
           }
-          break __ring_match8;
+          break __ring_match13;
         }
         List_push(stmts, stmt);
-        break __ring_match8;
+        break __ring_match13;
       }
     } else {
       List_push(stmts, stmt);
@@ -938,44 +1025,44 @@ function Parser_parse_mod_block(self, is_pub) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     if (Parser_check(self, lexer$TokenKind_TkUse)) {
       const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-      __ring_match9: {
-        const __ring_m9 = use_result;
-        if (__ring_m9._tag === "some") {
-          const ud = __ring_m9._0;
+      __ring_match14: {
+        const __ring_m14 = use_result;
+        if (__ring_m14._tag === "some") {
+          const ud = __ring_m14._0;
           List_push(uses, ud);
-          break __ring_match9;
+          break __ring_match14;
         }
-        if (__ring_m9._tag === "none") {
+        if (__ring_m14._tag === "none") {
           while ((!Parser_at_end(self))) {
             if (((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkUse)) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
               break;
             }
             Parser_advance(self);
           }
-          break __ring_match9;
+          break __ring_match14;
         }
-        __match_fail(__ring_m9);
+        __match_fail(__ring_m14);
       }
       continue;
     }
     const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-    __ring_match10: {
-      const __ring_m10 = maybe_decl;
-      if (__ring_m10._tag === "some") {
-        const decl = __ring_m10._0;
+    __ring_match15: {
+      const __ring_m15 = maybe_decl;
+      if (__ring_m15._tag === "some") {
+        const decl = __ring_m15._0;
         List_push(decls, decl);
-        break __ring_match10;
+        break __ring_match15;
       }
-      if (__ring_m10._tag === "none") {
+      if (__ring_m15._tag === "none") {
         while ((!Parser_at_end(self))) {
           if ((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
             break;
           }
           Parser_advance(self);
         }
-        break __ring_match10;
+        break __ring_match15;
       }
-      __match_fail(__ring_m10);
+      __match_fail(__ring_m15);
     }
   }
   const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
@@ -984,63 +1071,63 @@ function Parser_parse_mod_block(self, is_pub) {
 function Parser_parse_decl(self) {
   const is_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
   const tok = Parser_peek(self);
-  __ring_match11: {
-    const __ring_m11 = tok.kind;
-    if (__ring_m11._tag === "TkMod") {
+  __ring_match16: {
+    const __ring_m16 = tok.kind;
+    if (__ring_m16._tag === "TkMod") {
       return Option_some(Parser_parse_mod_block(self, is_pub));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkFn") {
+    if (__ring_m16._tag === "TkFn") {
       return Option_some(Parser_parse_fn_decl(self, is_pub, false));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkStruct") {
+    if (__ring_m16._tag === "TkStruct") {
       return Option_some(Parser_parse_struct_decl(self, is_pub));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkEnum") {
+    if (__ring_m16._tag === "TkEnum") {
       return Option_some(Parser_parse_enum_decl(self, is_pub));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkImpl") {
+    if (__ring_m16._tag === "TkImpl") {
       return Option_some(Parser_parse_impl_decl(self));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkEffect") {
+    if (__ring_m16._tag === "TkEffect") {
       return Option_some(Parser_parse_effect_decl(self, is_pub));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkTest") {
+    if (__ring_m16._tag === "TkTest") {
       return Option_some(Parser_parse_test_decl(self));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkTrait") {
+    if (__ring_m16._tag === "TkTrait") {
       return Option_some(Parser_parse_trait_decl(self, is_pub));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkExtern") {
+    if (__ring_m16._tag === "TkExtern") {
       return Option_some(Parser_parse_extern_decl(self, is_pub));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkConst") {
+    if (__ring_m16._tag === "TkConst") {
       return Option_some(Parser_parse_const_decl(self, is_pub));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkSig") {
+    if (__ring_m16._tag === "TkSig") {
       return Option_some(Parser_parse_sig_block(self, is_pub));
-      break __ring_match11;
+      break __ring_match16;
     }
-    if (__ring_m11._tag === "TkIdent") {
+    if (__ring_m16._tag === "TkIdent") {
       if ((tok.value === "type")) {
         return Option_some(Parser_parse_type_alias_decl(self, is_pub));
       }
       Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
       return Option_none;
-      break __ring_match11;
+      break __ring_match16;
     }
     Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
     return Option_none;
-    break __ring_match11;
+    break __ring_match16;
   }
 }
 function Parser_parse_effect_list(self) {
@@ -2136,6 +2223,16 @@ function __StringBuilder_Eq_eq(self, other) {
 }
 const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
 
+function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
+  if (self._tag !== other._tag) return false;
+  switch (self._tag) {
+    case "Ok": return __ring_T_Eq.eq(self._0, other._0);
+    case "Err": return __ring_E_Eq.eq(self._0, other._0);
+    default: return true;
+  }
+}
+const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
+
 function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
 }
@@ -2146,10 +2243,32 @@ function __Parser_Clone_clone(self) {
 }
 const __Parser_Clone = { clone: __Parser_Clone_clone };
 
+function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
+  switch (self._tag) {
+    case "Ok": return Result_Ok(__ring_T_Clone.clone(self._0));
+    case "Err": return Result_Err(__ring_E_Clone.clone(self._0));
+    default: return self;
+  }
+}
+const __Result_Clone = { clone: __Result_Clone_clone };
+
 function __StringBuilder_Ord_cmp(self, other) {
   return 0;
 }
 const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
+
+const __Result_tag_order = { "Ok": 0, "Err": 1 };
+function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
+  var t1 = __Result_tag_order[self._tag];
+  var t2 = __Result_tag_order[other._tag];
+  if (t1 !== t2) return (t1 < t2 ? -1 : 1);
+  switch (self._tag) {
+    case "Ok": return __ring_T_Ord.cmp(self._0, other._0);
+    case "Err": return __ring_E_Ord.cmp(self._0, other._0);
+    default: return 0;
+  }
+}
+const __Result_Ord = { cmp: __Result_Ord_cmp };
 
 function __StringBuilder_Debug_debug(self) {
   return "StringBuilder";
@@ -2160,6 +2279,15 @@ function __Parser_Debug_debug(self) {
   return "Parser { " + "tokens: " + __List_Debug.debug(self.tokens, __Token_Debug) + ", " + "pos: " + String(self.pos) + ", " + "file: " + String(self.file) + ", " + "sink: " + __CollectingSink_Debug.debug(self.sink) + ", " + "error_count: " + String(self.error_count) + " }";
 }
 const __Parser_Debug = { debug: __Parser_Debug_debug };
+
+function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
+  switch (self._tag) {
+    case "Ok": return "Ok(" + __ring_T_Debug.debug(self._0) + ")";
+    case "Err": return "Err(" + __ring_E_Debug.debug(self._0) + ")";
+    default: return self._tag;
+  }
+}
+const __Result_Debug = { debug: __Result_Debug_debug };
 
 
 export { PREC_NONE, PREC_CATCH, PREC_LOGIC_OR, PREC_LOGIC_AND, PREC_EQUALITY, PREC_COMPARE, PREC_RANGE, PREC_ADD_SUB, PREC_MUL_DIV, PREC_UNARY, PREC_POSTFIX, infix_precedence, type_expr_span, expr_span, Parser, new_parser, parse, Parser_peek, Parser_peek_at, Parser_advance, Parser_check, Parser_try_consume, Parser_expect, Parser_at_end, Parser_current_span_start, Parser_make_span, Parser_report_error, Parser_error, Parser_parse_program, Parser_parse_stmt, Parser_parse_while_stmt, Parser_parse_loop_stmt, Parser_parse_for_in_stmt, Parser_parse_break_stmt, Parser_parse_continue_stmt, Parser_parse_if_let_stmt, Parser_parse_binding_stmt, Parser_parse_binding_body, Parser_parse_return_stmt, Parser_parse_block_expr, Parser_parse_use_decl, Parser_parse_mod_block, Parser_parse_decl, Parser_parse_effect_list, Parser_parse_effect_annotation, Parser_parse_fn_decl, Parser_parse_const_decl, Parser_parse_sig_block, Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl, Parser_parse_struct_decl, Parser_parse_enum_decl, Parser_parse_impl_decl, Parser_parse_effect_decl, Parser_parse_test_decl, Parser_parse_trait_decl, Parser_parse_expr, Parser_parse_expr_no_struct, Parser_parse_expr_bp, Parser_parse_prefix, Parser_parse_dot_expr, Parser_parse_index_expr, Parser_parse_call_expr, Parser_parse_arg_list, Parser_parse_catch_expr, Parser_parse_string_interp, Parser_parse_if_expr, Parser_parse_match_expr, Parser_parse_match_arm, Parser_parse_pattern, Parser_parse_handle_expr, Parser_parse_effect_handler, Parser_parse_lambda_expr, Parser_parse_struct_literal, Parser_try_parse_type_args, Parser_parse_type_expr, Parser_parse_record_type_expr, Parser_parse_type_params, Parser_parse_type_bound, Parser_parse_params, Parser_parse_param, __Parser_Clone, __Parser_Debug };

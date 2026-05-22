@@ -61,6 +61,93 @@ function _Set_contains(self, item, __ring_T_Eq) {
   return false;
 }
 
+function Result_Ok(_0) {
+  return { _tag: "Ok", _0 };
+}
+function Result_Err(_0) {
+  return { _tag: "Err", _0 };
+}
+
+function Result_map(self, f) {
+  __ring_match1: {
+    const __ring_m1 = self;
+    if (__ring_m1._tag === "Ok") {
+      const v = __ring_m1._0;
+      return Result_Ok(f(v));
+      break __ring_match1;
+    }
+    if (__ring_m1._tag === "Err") {
+      const e = __ring_m1._0;
+      return Result_Err(e);
+      break __ring_match1;
+    }
+    __match_fail(__ring_m1);
+  }
+}
+function Result_and_then(self, f) {
+  __ring_match2: {
+    const __ring_m2 = self;
+    if (__ring_m2._tag === "Ok") {
+      const v = __ring_m2._0;
+      return f(v);
+      break __ring_match2;
+    }
+    if (__ring_m2._tag === "Err") {
+      const e = __ring_m2._0;
+      return Result_Err(e);
+      break __ring_match2;
+    }
+    __match_fail(__ring_m2);
+  }
+}
+function Result_unwrap_or(self, _default) {
+  __ring_match3: {
+    const __ring_m3 = self;
+    if (__ring_m3._tag === "Ok") {
+      const v = __ring_m3._0;
+      return v;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Err") {
+      return _default;
+      break __ring_match3;
+    }
+    __match_fail(__ring_m3);
+  }
+}
+function Result_is_ok(self) {
+  __ring_match4: {
+    const __ring_m4 = self;
+    if (__ring_m4._tag === "Ok") {
+      return true;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Err") {
+      return false;
+      break __ring_match4;
+    }
+    __match_fail(__ring_m4);
+  }
+}
+function Result_is_err(self) {
+  __ring_match5: {
+    const __ring_m5 = self;
+    if (__ring_m5._tag === "Ok") {
+      return false;
+      break __ring_match5;
+    }
+    if (__ring_m5._tag === "Err") {
+      return true;
+      break __ring_match5;
+    }
+    __match_fail(__ring_m5);
+  }
+}
+
+function to_result(f) {
+  return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
+}
+
 class UnificationError {
   constructor(message, is_occurs_check) {
     this.message = message;
@@ -94,67 +181,67 @@ function unify_error_msg(detail, __ring_ev_fail) {
 
 function occurs_in(var_id, t, subst) {
   const resolved = env$apply_subst(subst, t);
-  __ring_match1: {
-    const __ring_m1 = resolved;
-    if (__ring_m1._tag === "IntType") {
+  __ring_match6: {
+    const __ring_m6 = resolved;
+    if (__ring_m6._tag === "IntType") {
       return false;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "FloatType") {
+    if (__ring_m6._tag === "FloatType") {
       return false;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "StrType") {
+    if (__ring_m6._tag === "StrType") {
       return false;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "BoolType") {
+    if (__ring_m6._tag === "BoolType") {
       return false;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "UnitType") {
+    if (__ring_m6._tag === "UnitType") {
       return false;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "NeverType") {
+    if (__ring_m6._tag === "NeverType") {
       return false;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "AnyType") {
+    if (__ring_m6._tag === "AnyType") {
       return false;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "ErrorType") {
+    if (__ring_m6._tag === "ErrorType") {
       return false;
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TypeVar") {
-      const id = __ring_m1.id;
+    if (__ring_m6._tag === "TypeVar") {
+      const id = __ring_m6.id;
       return (id === var_id);
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "FnType") {
-      const params = __ring_m1.params; const return_type = __ring_m1.return_type; const effects = __ring_m1.effects;
+    if (__ring_m6._tag === "FnType") {
+      const params = __ring_m6.params; const return_type = __ring_m6.return_type; const effects = __ring_m6.effects;
       return ((params.some((function(p) { return occurs_in(var_id, p, subst); })) || occurs_in(var_id, return_type, subst)) || occurs_in_row(var_id, effects, subst));
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "StructType") {
-      const type_params = __ring_m1.type_params;
+    if (__ring_m6._tag === "StructType") {
+      const type_params = __ring_m6.type_params;
       return type_params.some((function(p) { return occurs_in(var_id, p, subst); }));
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "EnumType") {
-      const type_params = __ring_m1.type_params;
+    if (__ring_m6._tag === "EnumType") {
+      const type_params = __ring_m6.type_params;
       return type_params.some((function(p) { return occurs_in(var_id, p, subst); }));
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "GenericType") {
-      const base = __ring_m1.base; const args = __ring_m1.args;
+    if (__ring_m6._tag === "GenericType") {
+      const base = __ring_m6.base; const args = __ring_m6.args;
       return (occurs_in(var_id, base, subst) || args.some((function(a) { return occurs_in(var_id, a, subst); })));
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "RecordType") {
-      const fields = __ring_m1.fields; const tail = __ring_m1.tail;
+    if (__ring_m6._tag === "RecordType") {
+      const fields = __ring_m6.fields; const tail = __ring_m6.tail;
       const in_tail = (function() {
   const __ring_m = tail;
   if (__ring_m._tag === "some") { const t_id = __ring_m._0; return occurs_in(var_id, types$Type_TypeVar(t_id, Option_none), subst); }
@@ -162,19 +249,19 @@ function occurs_in(var_id, t, subst) {
   __match_fail(__ring_m);
 })();
       return (in_tail || fields.some((function(f) { return occurs_in(var_id, f.ty, subst); })));
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "EffectRowType") {
-      const effects = __ring_m1.effects; const tail = __ring_m1.tail;
+    if (__ring_m6._tag === "EffectRowType") {
+      const effects = __ring_m6.effects; const tail = __ring_m6.tail;
       return occurs_in_row(var_id, new types$EffectRow(effects, tail), subst);
-      break __ring_match1;
+      break __ring_match6;
     }
-    if (__ring_m1._tag === "TupleType") {
-      const elements = __ring_m1.elements;
+    if (__ring_m6._tag === "TupleType") {
+      const elements = __ring_m6.elements;
       return elements.some((function(e) { return occurs_in(var_id, e, subst); }));
-      break __ring_match1;
+      break __ring_match6;
     }
-    __match_fail(__ring_m1);
+    __match_fail(__ring_m6);
   }
 }
 
@@ -189,43 +276,43 @@ function occurs_in_row(var_id, row, subst) {
 }
 
 function occurs_in_effect(var_id, e, subst) {
-  __ring_match2: {
-    const __ring_m2 = e;
-    if (__ring_m2._tag === "FailEffect") {
-      const error_type = __ring_m2.error_type;
+  __ring_match7: {
+    const __ring_m7 = e;
+    if (__ring_m7._tag === "FailEffect") {
+      const error_type = __ring_m7.error_type;
       return occurs_in(var_id, error_type, subst);
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "MutEffect") {
-      const state_type = __ring_m2.state_type;
+    if (__ring_m7._tag === "MutEffect") {
+      const state_type = __ring_m7.state_type;
       return occurs_in(var_id, state_type, subst);
-      break __ring_match2;
+      break __ring_match7;
     }
-    if (__ring_m2._tag === "CustomEffect") {
-      const type_args = __ring_m2.type_args;
+    if (__ring_m7._tag === "CustomEffect") {
+      const type_args = __ring_m7.type_args;
       return type_args.some((function(a) { return occurs_in(var_id, a, subst); }));
-      break __ring_match2;
+      break __ring_match7;
     }
     return false;
-    break __ring_match2;
+    break __ring_match7;
   }
 }
 
 function unify_effect_params(a, b, subst, env, __ring_ev_fail) {
-  __ring_match3: {
-    const __ring_m3 = [a, b];
-    if (Array.isArray(__ring_m3) && __ring_m3.length === 2 && __ring_m3[0]._tag === "FailEffect" && __ring_m3[1]._tag === "FailEffect") {
-      const et_a = __ring_m3[0].error_type; const et_b = __ring_m3[1].error_type;
+  __ring_match8: {
+    const __ring_m8 = [a, b];
+    if (Array.isArray(__ring_m8) && __ring_m8.length === 2 && __ring_m8[0]._tag === "FailEffect" && __ring_m8[1]._tag === "FailEffect") {
+      const et_a = __ring_m8[0].error_type; const et_b = __ring_m8[1].error_type;
       return unify(et_a, et_b, subst, env, __ring_ev_fail);
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (Array.isArray(__ring_m3) && __ring_m3.length === 2 && __ring_m3[0]._tag === "MutEffect" && __ring_m3[1]._tag === "MutEffect") {
-      const sa = __ring_m3[0].state_type; const sb = __ring_m3[1].state_type;
+    if (Array.isArray(__ring_m8) && __ring_m8.length === 2 && __ring_m8[0]._tag === "MutEffect" && __ring_m8[1]._tag === "MutEffect") {
+      const sa = __ring_m8[0].state_type; const sb = __ring_m8[1].state_type;
       return unify(sa, sb, subst, env, __ring_ev_fail);
-      break __ring_match3;
+      break __ring_match8;
     }
-    if (Array.isArray(__ring_m3) && __ring_m3.length === 2 && __ring_m3[0]._tag === "CustomEffect" && __ring_m3[1]._tag === "CustomEffect") {
-      const name = __ring_m3[0].name; const ta_a = __ring_m3[0].type_args; const ta_b = __ring_m3[1].type_args;
+    if (Array.isArray(__ring_m8) && __ring_m8.length === 2 && __ring_m8[0]._tag === "CustomEffect" && __ring_m8[1]._tag === "CustomEffect") {
+      const name = __ring_m8[0].name; const ta_a = __ring_m8[0].type_args; const ta_b = __ring_m8[1].type_args;
       if ((List_len(ta_a) !== List_len(ta_b))) {
         unify_error_msg(`effect '${name}' type argument count mismatch: ${List_len(ta_a)} vs ${List_len(ta_b)}`, __ring_ev_fail);
       }
@@ -236,10 +323,10 @@ function unify_effect_params(a, b, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match3;
+      break __ring_match8;
     }
     return subst;
-    break __ring_match3;
+    break __ring_match8;
   }
 }
 
@@ -266,19 +353,19 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
     let bi = 0;
     while ((bi < List_len(rb.effects))) {
       if ((!_Set_contains(b_matched, bi, __Int_Eq))) {
-        __ring_match4: {
-          const __ring_m4 = [List_get(ra.effects, ai), List_get(rb.effects, bi)];
-          if (Array.isArray(__ring_m4) && __ring_m4.length === 2 && __ring_m4[0]._tag === "some" && __ring_m4[1]._tag === "some") {
-            const eff_a = __ring_m4[0]._0; const eff_b = __ring_m4[1]._0;
+        __ring_match9: {
+          const __ring_m9 = [List_get(ra.effects, ai), List_get(rb.effects, bi)];
+          if (Array.isArray(__ring_m9) && __ring_m9.length === 2 && __ring_m9[0]._tag === "some" && __ring_m9[1]._tag === "some") {
+            const eff_a = __ring_m9[0]._0; const eff_b = __ring_m9[1]._0;
             if (types$effects_match_kind(eff_a, eff_b)) {
               s = unify_effect_params(eff_a, eff_b, s, env, __ring_ev_fail);
               _Set_insert(a_matched, ai);
               _Set_insert(b_matched, bi);
               break;
             }
-            break __ring_match4;
+            break __ring_match9;
           }
-          break __ring_match4;
+          break __ring_match9;
         }
       }
       bi = (bi + 1);
@@ -295,10 +382,10 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
     const names = List_join(b_unmatched.map((function(e) { return types$effect_kind_name(e); })), ", ");
     unify_error_msg(`effect mismatch: effects [${names}] not allowed in pure context`, __ring_ev_fail);
   }
-  __ring_match5: {
-    const __ring_m5 = [ra.tail, rb.tail];
-    if (Array.isArray(__ring_m5) && __ring_m5.length === 2 && __ring_m5[0]._tag === "some" && __ring_m5[1]._tag === "some") {
-      const ta = __ring_m5[0]._0; const tb = __ring_m5[1]._0;
+  __ring_match10: {
+    const __ring_m10 = [ra.tail, rb.tail];
+    if (Array.isArray(__ring_m10) && __ring_m10.length === 2 && __ring_m10[0]._tag === "some" && __ring_m10[1]._tag === "some") {
+      const ta = __ring_m10[0]._0; const tb = __ring_m10[1]._0;
       if ((ta === tb)) {
         if (((List_len(a_unmatched) > 0) || (List_len(b_unmatched) > 0))) {
           const fresh = env$TypeEnv_fresh_var_id(env);
@@ -340,18 +427,18 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
           }
         }
       }
-      break __ring_match5;
+      break __ring_match10;
     }
-    break __ring_match5;
+    break __ring_match10;
   }
   return s;
 }
 
 function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
-  __ring_match6: {
-    const __ring_m6 = [ra, rb];
-    if (Array.isArray(__ring_m6) && __ring_m6.length === 2 && __ring_m6[0]._tag === "RecordType" && __ring_m6[1]._tag === "RecordType") {
-      const a_fields = __ring_m6[0].fields; const a_tail = __ring_m6[0].tail; const b_fields = __ring_m6[1].fields; const b_tail = __ring_m6[1].tail;
+  __ring_match11: {
+    const __ring_m11 = [ra, rb];
+    if (Array.isArray(__ring_m11) && __ring_m11.length === 2 && __ring_m11[0]._tag === "RecordType" && __ring_m11[1]._tag === "RecordType") {
+      const a_fields = __ring_m11[0].fields; const a_tail = __ring_m11[0].tail; const b_fields = __ring_m11[1].fields; const b_tail = __ring_m11[1].tail;
       let s = subst;
       let b_name_set = set_new();
       for (const f of b_fields) {
@@ -363,17 +450,17 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
       }
       for (const af of a_fields) {
         const bf = ((__a) => { const __i = __a.findIndex((function(f) { return (f.name === af.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(b_fields);
-        __ring_match7: {
-          const __ring_m7 = bf;
-          if (__ring_m7._tag === "some") {
-            const matched = __ring_m7._0;
+        __ring_match12: {
+          const __ring_m12 = bf;
+          if (__ring_m12._tag === "some") {
+            const matched = __ring_m12._0;
             s = unify(af.ty, matched.ty, s, env, __ring_ev_fail);
-            break __ring_match7;
+            break __ring_match12;
           }
-          if (__ring_m7._tag === "none") {
-            break __ring_match7;
+          if (__ring_m12._tag === "none") {
+            break __ring_match12;
           }
-          __match_fail(__ring_m7);
+          __match_fail(__ring_m12);
         }
       }
       const a_only = a_fields.filter((function(f) { return (!_Set_contains(b_name_set, f.name, __Str_Eq)); }));
@@ -387,10 +474,10 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
         unify_error(ra, rb, Option_some(`record missing fields: ${missing}`), __ring_ev_fail);
       }
       if (((((List_len(a_only) > 0) && (List_len(b_only) > 0)) && Option_is_some(a_tail)) && Option_is_some(b_tail))) {
-        __ring_match8: {
-          const __ring_m8 = [a_tail, b_tail];
-          if (Array.isArray(__ring_m8) && __ring_m8.length === 2 && __ring_m8[0]._tag === "some" && __ring_m8[1]._tag === "some") {
-            const ta = __ring_m8[0]._0; const tb = __ring_m8[1]._0;
+        __ring_match13: {
+          const __ring_m13 = [a_tail, b_tail];
+          if (Array.isArray(__ring_m13) && __ring_m13.length === 2 && __ring_m13[0]._tag === "some" && __ring_m13[1]._tag === "some") {
+            const ta = __ring_m13[0]._0; const tb = __ring_m13[1]._0;
             const fresh_tail = env$TypeEnv_fresh_var_id(env);
             const a_tail_record = types$Type_RecordType(b_only, Option_some(fresh_tail), Option_none);
             const b_tail_record = types$Type_RecordType(a_only, Option_some(fresh_tail), Option_none);
@@ -402,15 +489,15 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
             }
             union_find$uf_insert(s, ta, a_tail_record);
             union_find$uf_insert(s, tb, b_tail_record);
-            break __ring_match8;
+            break __ring_match13;
           }
-          break __ring_match8;
+          break __ring_match13;
         }
       } else {
-        __ring_match9: {
-          const __ring_m9 = a_tail;
-          if (__ring_m9._tag === "some") {
-            const ta = __ring_m9._0;
+        __ring_match14: {
+          const __ring_m14 = a_tail;
+          if (__ring_m14._tag === "some") {
+            const ta = __ring_m14._0;
             if ((List_len(b_only) > 0)) {
               const record_for_tail = types$Type_RecordType(b_only, Option_none, Option_none);
               if (occurs_in(ta, record_for_tail, s)) {
@@ -418,17 +505,17 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
               }
               union_find$uf_insert(s, ta, record_for_tail);
             }
-            break __ring_match9;
+            break __ring_match14;
           }
-          if (__ring_m9._tag === "none") {
-            break __ring_match9;
+          if (__ring_m14._tag === "none") {
+            break __ring_match14;
           }
-          __match_fail(__ring_m9);
+          __match_fail(__ring_m14);
         }
-        __ring_match10: {
-          const __ring_m10 = b_tail;
-          if (__ring_m10._tag === "some") {
-            const tb = __ring_m10._0;
+        __ring_match15: {
+          const __ring_m15 = b_tail;
+          if (__ring_m15._tag === "some") {
+            const tb = __ring_m15._0;
             if ((List_len(a_only) > 0)) {
               const record_for_tail = types$Type_RecordType(a_only, Option_none, Option_none);
               if (occurs_in(tb, record_for_tail, s)) {
@@ -436,60 +523,60 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
               }
               union_find$uf_insert(s, tb, record_for_tail);
             }
-            break __ring_match10;
+            break __ring_match15;
           }
-          if (__ring_m10._tag === "none") {
-            break __ring_match10;
+          if (__ring_m15._tag === "none") {
+            break __ring_match15;
           }
-          __match_fail(__ring_m10);
+          __match_fail(__ring_m15);
         }
-        __ring_match11: {
-          const __ring_m11 = [a_tail, b_tail];
-          if (Array.isArray(__ring_m11) && __ring_m11.length === 2 && __ring_m11[0]._tag === "some" && __ring_m11[1]._tag === "some") {
-            const ta = __ring_m11[0]._0; const tb = __ring_m11[1]._0;
+        __ring_match16: {
+          const __ring_m16 = [a_tail, b_tail];
+          if (Array.isArray(__ring_m16) && __ring_m16.length === 2 && __ring_m16[0]._tag === "some" && __ring_m16[1]._tag === "some") {
+            const ta = __ring_m16[0]._0; const tb = __ring_m16[1]._0;
             if ((((List_len(a_only) === 0) && (List_len(b_only) === 0)) && (ta !== tb))) {
               s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(tb, Option_none), s, env, __ring_ev_fail);
             }
-            break __ring_match11;
+            break __ring_match16;
           }
-          break __ring_match11;
+          break __ring_match16;
         }
       }
       return s;
-      break __ring_match6;
+      break __ring_match11;
     }
     return panic("unify_record_rows: expected RecordType");
-    break __ring_match6;
+    break __ring_match11;
   }
 }
 
 function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {
-  __ring_match12: {
-    const __ring_m12 = [st, rt];
-    if (Array.isArray(__ring_m12) && __ring_m12.length === 2 && __ring_m12[0]._tag === "StructType" && __ring_m12[1]._tag === "RecordType") {
-      const name = __ring_m12[0].name; const struct_fields = __ring_m12[0].fields; const record_fields = __ring_m12[1].fields; const record_tail = __ring_m12[1].tail;
+  __ring_match17: {
+    const __ring_m17 = [st, rt];
+    if (Array.isArray(__ring_m17) && __ring_m17.length === 2 && __ring_m17[0]._tag === "StructType" && __ring_m17[1]._tag === "RecordType") {
+      const name = __ring_m17[0].name; const struct_fields = __ring_m17[0].fields; const record_fields = __ring_m17[1].fields; const record_tail = __ring_m17[1].tail;
       let s = subst;
       for (const rf of record_fields) {
         const sf = ((__a) => { const __i = __a.findIndex((function(f) { return (f.name === rf.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(struct_fields);
-        __ring_match13: {
-          const __ring_m13 = sf;
-          if (__ring_m13._tag === "some") {
-            const matched = __ring_m13._0;
+        __ring_match18: {
+          const __ring_m18 = sf;
+          if (__ring_m18._tag === "some") {
+            const matched = __ring_m18._0;
             s = unify(matched.ty, rf.ty, s, env, __ring_ev_fail);
-            break __ring_match13;
+            break __ring_match18;
           }
-          if (__ring_m13._tag === "none") {
+          if (__ring_m18._tag === "none") {
             const field_names = List_join(record_fields.map((function(f) { return f.name; })), ", ");
             unify_error(st, rt, Option_some(`type '${name}' does not satisfy {${field_names}, ..} — missing field '${rf.name}'`), __ring_ev_fail);
-            break __ring_match13;
+            break __ring_match18;
           }
-          __match_fail(__ring_m13);
+          __match_fail(__ring_m18);
         }
       }
-      __ring_match14: {
-        const __ring_m14 = record_tail;
-        if (__ring_m14._tag === "some") {
-          const tail_id = __ring_m14._0;
+      __ring_match19: {
+        const __ring_m19 = record_tail;
+        if (__ring_m19._tag === "some") {
+          const tail_id = __ring_m19._0;
           const remaining = struct_fields.filter((function(sf) { return (!record_fields.some((function(rf) { return (rf.name === sf.name); }))); }));
           const remaining_mapped = remaining.map((function(f) { return new types$RecordField(f.name, env$apply_subst(s, f.ty)); }));
           const tail_record = types$Type_RecordType(remaining_mapped, Option_none, Option_none);
@@ -497,55 +584,55 @@ function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {
             unify_error(st, rt, Option_some("infinite type in row variable"), __ring_ev_fail);
           }
           union_find$uf_insert(s, tail_id, tail_record);
-          break __ring_match14;
+          break __ring_match19;
         }
-        if (__ring_m14._tag === "none") {
-          break __ring_match14;
+        if (__ring_m19._tag === "none") {
+          break __ring_match19;
         }
-        __match_fail(__ring_m14);
+        __match_fail(__ring_m19);
       }
       return s;
-      break __ring_match12;
+      break __ring_match17;
     }
     return panic("unify_struct_with_record: expected StructType and RecordType");
-    break __ring_match12;
+    break __ring_match17;
   }
 }
 
 function is_any(t) {
-  __ring_match15: {
-    const __ring_m15 = t;
-    if (__ring_m15._tag === "AnyType") {
+  __ring_match20: {
+    const __ring_m20 = t;
+    if (__ring_m20._tag === "AnyType") {
       return true;
-      break __ring_match15;
+      break __ring_match20;
     }
     return false;
-    break __ring_match15;
+    break __ring_match20;
   }
 }
 
 function is_never(t) {
-  __ring_match16: {
-    const __ring_m16 = t;
-    if (__ring_m16._tag === "NeverType") {
+  __ring_match21: {
+    const __ring_m21 = t;
+    if (__ring_m21._tag === "NeverType") {
       return true;
-      break __ring_match16;
+      break __ring_match21;
     }
     return false;
-    break __ring_match16;
+    break __ring_match21;
   }
 }
 
 function var_id(t) {
-  __ring_match17: {
-    const __ring_m17 = t;
-    if (__ring_m17._tag === "TypeVar") {
-      const id = __ring_m17.id;
+  __ring_match22: {
+    const __ring_m22 = t;
+    if (__ring_m22._tag === "TypeVar") {
+      const id = __ring_m22.id;
       return Option_some(id);
-      break __ring_match17;
+      break __ring_match22;
     }
     return Option_none;
-    break __ring_match17;
+    break __ring_match22;
   }
 }
 
@@ -560,89 +647,89 @@ function bind_var(id, target, t1, t2, subst, __ring_ev_fail) {
 function unify(t1, t2, subst, env, __ring_ev_fail) {
   const a = env$apply_subst(subst, t1);
   const b = env$apply_subst(subst, t2);
-  __ring_match18: {
-    const __ring_m18 = a;
-    if (__ring_m18._tag === "ErrorType") {
+  __ring_match23: {
+    const __ring_m23 = a;
+    if (__ring_m23._tag === "ErrorType") {
       return subst;
-      break __ring_match18;
+      break __ring_match23;
     }
-    break __ring_match18;
+    break __ring_match23;
   }
-  __ring_match19: {
-    const __ring_m19 = b;
-    if (__ring_m19._tag === "ErrorType") {
+  __ring_match24: {
+    const __ring_m24 = b;
+    if (__ring_m24._tag === "ErrorType") {
       return subst;
-      break __ring_match19;
+      break __ring_match24;
     }
-    break __ring_match19;
+    break __ring_match24;
   }
   if ((is_any(a) || is_any(b))) {
     return subst;
   }
   const va = var_id(a);
   const vb = var_id(b);
-  __ring_match20: {
-    const __ring_m20 = [va, vb];
-    if (Array.isArray(__ring_m20) && __ring_m20.length === 2 && __ring_m20[0]._tag === "some" && __ring_m20[1]._tag === "some") {
-      const ia = __ring_m20[0]._0; const ib = __ring_m20[1]._0;
+  __ring_match25: {
+    const __ring_m25 = [va, vb];
+    if (Array.isArray(__ring_m25) && __ring_m25.length === 2 && __ring_m25[0]._tag === "some" && __ring_m25[1]._tag === "some") {
+      const ia = __ring_m25[0]._0; const ib = __ring_m25[1]._0;
       if ((ia === ib)) {
         return subst;
       }
-      break __ring_match20;
+      break __ring_match25;
     }
-    break __ring_match20;
+    break __ring_match25;
   }
-  __ring_match21: {
-    const __ring_m21 = va;
-    if (__ring_m21._tag === "some") {
-      const id = __ring_m21._0;
+  __ring_match26: {
+    const __ring_m26 = va;
+    if (__ring_m26._tag === "some") {
+      const id = __ring_m26._0;
       return bind_var(id, b, t1, t2, subst, __ring_ev_fail);
-      break __ring_match21;
+      break __ring_match26;
     }
-    if (__ring_m21._tag === "none") {
-      break __ring_match21;
+    if (__ring_m26._tag === "none") {
+      break __ring_match26;
     }
-    __match_fail(__ring_m21);
+    __match_fail(__ring_m26);
   }
-  __ring_match22: {
-    const __ring_m22 = vb;
-    if (__ring_m22._tag === "some") {
-      const id = __ring_m22._0;
+  __ring_match27: {
+    const __ring_m27 = vb;
+    if (__ring_m27._tag === "some") {
+      const id = __ring_m27._0;
       return bind_var(id, a, t1, t2, subst, __ring_ev_fail);
-      break __ring_match22;
+      break __ring_match27;
     }
-    if (__ring_m22._tag === "none") {
-      break __ring_match22;
+    if (__ring_m27._tag === "none") {
+      break __ring_match27;
     }
-    __match_fail(__ring_m22);
+    __match_fail(__ring_m27);
   }
   if ((is_never(a) || is_never(b))) {
     return subst;
   }
-  __ring_match23: {
-    const __ring_m23 = [a, b];
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "IntType" && __ring_m23[1]._tag === "IntType") {
+  __ring_match28: {
+    const __ring_m28 = [a, b];
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "IntType" && __ring_m28[1]._tag === "IntType") {
       return subst;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "FloatType" && __ring_m23[1]._tag === "FloatType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "FloatType" && __ring_m28[1]._tag === "FloatType") {
       return subst;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "StrType" && __ring_m23[1]._tag === "StrType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "StrType" && __ring_m28[1]._tag === "StrType") {
       return subst;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "BoolType" && __ring_m23[1]._tag === "BoolType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "BoolType" && __ring_m28[1]._tag === "BoolType") {
       return subst;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "UnitType" && __ring_m23[1]._tag === "UnitType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "UnitType" && __ring_m28[1]._tag === "UnitType") {
       return subst;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "FnType" && __ring_m23[1]._tag === "FnType") {
-      const pa = __ring_m23[0].params; const ra = __ring_m23[0].return_type; const ea = __ring_m23[0].effects; const pb = __ring_m23[1].params; const rb = __ring_m23[1].return_type; const eb = __ring_m23[1].effects;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "FnType" && __ring_m28[1]._tag === "FnType") {
+      const pa = __ring_m28[0].params; const ra = __ring_m28[0].return_type; const ea = __ring_m28[0].effects; const pb = __ring_m28[1].params; const rb = __ring_m28[1].return_type; const eb = __ring_m28[1].effects;
       if ((List_len(pa) !== List_len(pb))) {
         unify_error(t1, t2, Option_some(`parameter count mismatch: ${List_len(pa)} vs ${List_len(pb)}`), __ring_ev_fail);
       }
@@ -655,10 +742,10 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       s = unify(ra, rb, s, env, __ring_ev_fail);
       s = unify_effect_rows(ea, eb, s, env, __ring_ev_fail);
       return s;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "StructType" && __ring_m23[1]._tag === "StructType") {
-      const na = __ring_m23[0].name; const tpa = __ring_m23[0].type_params; const nb = __ring_m23[1].name; const tpb = __ring_m23[1].type_params;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "StructType" && __ring_m28[1]._tag === "StructType") {
+      const na = __ring_m28[0].name; const tpa = __ring_m28[0].type_params; const nb = __ring_m28[1].name; const tpb = __ring_m28[1].type_params;
       if ((na !== nb)) {
         unify_error(t1, t2, Option_some("different struct types"), __ring_ev_fail);
       }
@@ -672,10 +759,10 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "EnumType" && __ring_m23[1]._tag === "EnumType") {
-      const na = __ring_m23[0].name; const tpa = __ring_m23[0].type_params; const nb = __ring_m23[1].name; const tpb = __ring_m23[1].type_params;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "EnumType" && __ring_m28[1]._tag === "EnumType") {
+      const na = __ring_m28[0].name; const tpa = __ring_m28[0].type_params; const nb = __ring_m28[1].name; const tpb = __ring_m28[1].type_params;
       if ((na !== nb)) {
         unify_error(t1, t2, Option_some("different enum types"), __ring_ev_fail);
       }
@@ -689,10 +776,10 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "GenericType" && __ring_m23[1]._tag === "GenericType") {
-      const ba = __ring_m23[0].base; const aa = __ring_m23[0].args; const bb = __ring_m23[1].base; const ab = __ring_m23[1].args;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "GenericType" && __ring_m28[1]._tag === "GenericType") {
+      const ba = __ring_m28[0].base; const aa = __ring_m28[0].args; const bb = __ring_m28[1].base; const ab = __ring_m28[1].args;
       let s = unify(ba, bb, subst, env, __ring_ev_fail);
       if ((List_len(aa) !== List_len(ab))) {
         unify_error(t1, t2, Option_some("different type argument counts"), __ring_ev_fail);
@@ -703,19 +790,19 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "RecordType" && __ring_m23[1]._tag === "RecordType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "RecordType" && __ring_m28[1]._tag === "RecordType") {
       return unify_record_rows(a, b, subst, env, __ring_ev_fail);
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "EffectRowType" && __ring_m23[1]._tag === "EffectRowType") {
-      const ea = __ring_m23[0].effects; const ta = __ring_m23[0].tail; const eb = __ring_m23[1].effects; const tb = __ring_m23[1].tail;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "EffectRowType" && __ring_m28[1]._tag === "EffectRowType") {
+      const ea = __ring_m28[0].effects; const ta = __ring_m28[0].tail; const eb = __ring_m28[1].effects; const tb = __ring_m28[1].tail;
       return unify_effect_rows(new types$EffectRow(ea, ta), new types$EffectRow(eb, tb), subst, env, __ring_ev_fail);
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "TupleType" && __ring_m23[1]._tag === "TupleType") {
-      const ea = __ring_m23[0].elements; const eb = __ring_m23[1].elements;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "TupleType" && __ring_m28[1]._tag === "TupleType") {
+      const ea = __ring_m28[0].elements; const eb = __ring_m28[1].elements;
       if ((List_len(ea) !== List_len(eb))) {
         unify_error(t1, t2, Option_some(`tuple arity mismatch: ${List_len(ea)} vs ${List_len(eb)}`), __ring_ev_fail);
       }
@@ -726,18 +813,18 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "StructType" && __ring_m23[1]._tag === "RecordType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "StructType" && __ring_m28[1]._tag === "RecordType") {
       return unify_struct_with_record(a, b, subst, env, __ring_ev_fail);
-      break __ring_match23;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "RecordType" && __ring_m23[1]._tag === "StructType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "RecordType" && __ring_m28[1]._tag === "StructType") {
       return unify_struct_with_record(b, a, subst, env, __ring_ev_fail);
-      break __ring_match23;
+      break __ring_match28;
     }
     return unify_error(t1, t2, Option_none, __ring_ev_fail);
-    break __ring_match23;
+    break __ring_match28;
   }
 }
 
@@ -751,6 +838,16 @@ function __UnificationError_Eq_eq(self, other) {
 }
 const __UnificationError_Eq = { eq: __UnificationError_Eq_eq, ne: function(self, other) { return !__UnificationError_Eq_eq(self, other); } };
 
+function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
+  if (self._tag !== other._tag) return false;
+  switch (self._tag) {
+    case "Ok": return __ring_T_Eq.eq(self._0, other._0);
+    case "Err": return __ring_E_Eq.eq(self._0, other._0);
+    default: return true;
+  }
+}
+const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
+
 function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
 }
@@ -760,6 +857,15 @@ function __UnificationError_Clone_clone(self) {
   return new UnificationError(self.message, self.is_occurs_check);
 }
 const __UnificationError_Clone = { clone: __UnificationError_Clone_clone };
+
+function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
+  switch (self._tag) {
+    case "Ok": return Result_Ok(__ring_T_Clone.clone(self._0));
+    case "Err": return Result_Err(__ring_E_Clone.clone(self._0));
+    default: return self;
+  }
+}
+const __Result_Clone = { clone: __Result_Clone_clone };
 
 function __StringBuilder_Ord_cmp(self, other) {
   return 0;
@@ -774,6 +880,19 @@ function __UnificationError_Ord_cmp(self, other) {
 }
 const __UnificationError_Ord = { cmp: __UnificationError_Ord_cmp };
 
+const __Result_tag_order = { "Ok": 0, "Err": 1 };
+function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
+  var t1 = __Result_tag_order[self._tag];
+  var t2 = __Result_tag_order[other._tag];
+  if (t1 !== t2) return (t1 < t2 ? -1 : 1);
+  switch (self._tag) {
+    case "Ok": return __ring_T_Ord.cmp(self._0, other._0);
+    case "Err": return __ring_E_Ord.cmp(self._0, other._0);
+    default: return 0;
+  }
+}
+const __Result_Ord = { cmp: __Result_Ord_cmp };
+
 function __StringBuilder_Debug_debug(self) {
   return "StringBuilder";
 }
@@ -783,6 +902,15 @@ function __UnificationError_Debug_debug(self) {
   return "UnificationError { " + "message: " + String(self.message) + ", " + "is_occurs_check: " + String(self.is_occurs_check) + " }";
 }
 const __UnificationError_Debug = { debug: __UnificationError_Debug_debug };
+
+function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
+  switch (self._tag) {
+    case "Ok": return "Ok(" + __ring_T_Debug.debug(self._0) + ")";
+    case "Err": return "Err(" + __ring_E_Debug.debug(self._0) + ")";
+    default: return self._tag;
+  }
+}
+const __Result_Debug = { debug: __Result_Debug_debug };
 
 
 export { UnificationError, empty_subst, occurs_in, unify_effect_rows, unify, __UnificationError_Eq, __UnificationError_Clone, __UnificationError_Ord, __UnificationError_Debug };
