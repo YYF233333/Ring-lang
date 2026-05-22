@@ -106,18 +106,32 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
 fn check_capability(mut ctx: InferCtx, decl: HDecl, cap: EffectRow, mod_span: Span) {
     match decl {
         HDecl::Fn { name, effects, span, .. } => {
-            for eff in effects.effects {
-                let kind = effect_kind_name(eff)
-                let in_cap = cap.effects.any(fn(c) { effects_match_kind(eff, c) })
-                if !in_cap {
-                    let _ = type_error(ctx.sink, E0405,
-                        "Function '${name}' uses effect '${kind}' which is not in the module's requires set",
-                        span,
-                        DiagnosticContext::OtherContext { detail: some("capability violation") })
+            check_effects_capability(ctx, name, effects, cap, span)
+        },
+        HDecl::Impl { methods, .. } => {
+            for method in methods {
+                match method {
+                    HDecl::Fn { name, effects, span, .. } => {
+                        check_effects_capability(ctx, name, effects, cap, span)
+                    },
+                    _ => {}
                 }
             }
         },
         _ => {}
+    }
+}
+
+fn check_effects_capability(mut ctx: InferCtx, name: Str, effects: EffectRow, cap: EffectRow, span: Span) {
+    for eff in effects.effects {
+        let kind = effect_kind_name(eff)
+        let in_cap = cap.effects.any(fn(c) { effects_match_kind(eff, c) })
+        if !in_cap {
+            let _ = type_error(ctx.sink, E0405,
+                "'${name}' uses effect '${kind}' which is not in the module's requires set",
+                span,
+                DiagnosticContext::OtherContext { detail: some("capability violation") })
+        }
     }
 }
 

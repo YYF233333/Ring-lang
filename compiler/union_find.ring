@@ -42,7 +42,7 @@ pub fn uf_bind(mut uf: UnionFind, id: Int, ty: Type) {
 }
 
 // Look up the type bound to a type variable. Returns the type at the root representative.
-pub fn uf_lookup(uf: UnionFind, id: Int) -> Type? {
+pub fn uf_lookup(mut uf: UnionFind, id: Int) -> Type? {
     let root = uf_find(uf, id)
     uf.types.get(root)
 }
@@ -60,7 +60,9 @@ pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
         match uf.types.get(ra) {
             some(ty) => match uf.types.get(rb) {
                 none => { uf.types.insert(rb, ty) },
-                some(_) => {}
+                some(existing) => {
+                    panic("uf_union: both nodes have type bindings")
+                }
             },
             none => {}
         }
@@ -70,7 +72,9 @@ pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
         match uf.types.get(rb) {
             some(ty) => match uf.types.get(ra) {
                 none => { uf.types.insert(ra, ty) },
-                some(_) => {}
+                some(existing) => {
+                    panic("uf_union: both nodes have type bindings")
+                }
             },
             none => {}
         }

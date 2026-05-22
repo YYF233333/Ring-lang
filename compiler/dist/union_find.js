@@ -133,6 +133,8 @@ function uf_union(uf, a, b) {
             break __ring_match3;
           }
           if (__ring_m3._tag === "some") {
+            const existing = __ring_m3._0;
+            return panic("uf_union: both nodes have type bindings");
             break __ring_match3;
           }
           __match_fail(__ring_m3);
@@ -157,6 +159,8 @@ function uf_union(uf, a, b) {
             break __ring_match5;
           }
           if (__ring_m5._tag === "some") {
+            const existing = __ring_m5._0;
+            panic("uf_union: both nodes have type bindings");
             break __ring_match5;
           }
           __match_fail(__ring_m5);
