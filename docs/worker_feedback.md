@@ -7,6 +7,23 @@
 > Worker session 很长，用户无法回看全部过程。这里是 worker → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
+## Wave C 执行报告（2026-05-23）
+
+### 1. [通知] B-032 worktree base drift（已用 cherry-pick 解决）
+
+**现状**：B-032 worktree agent 拿到了错误 base（`953d246` 而非 `ffd6399`）。
+**处理**：cherry-pick 到 main，手动解决 6 个 parser.ring 冲突（`var` → `let mut` 转换）+ dist/ 用 `--ours` + rebuild。测试全绿。
+
+### 2. [通知] B-032 发现 B-025 修复被 B-019 回退
+
+**现状**：B-025 修复的 `parse_call_expr` span end bug（`current_span_start()` → `rparen.span.end`）在 B-019 的批量 `var→mut` 迁移中被意外回退。
+**修复**：B-032 重新应用了此修复。
+
+### 3. [通知] #59 修复范围比预期大
+
+**现状**：#59（嵌套 mod 块限定名）涉及 7 个编译器源文件，不仅修复了 `prefix_decl_name`，还扩展了 parser（支持多级限定路径 `a::b::c`）、checker（mod 路径回退查找）、codegen（嵌套 ModBlock 处理）、exports（嵌套导出）。
+**影响**：嵌套 mod 块现在是完整支持的特性，不仅仅是 bug fix。
+
 ## Wave A+B 执行报告（2026-05-23）
 
 ### 1. [通知] B-031 移除 Cell 后 `mut<T>` effect 基础设施成为死代码
