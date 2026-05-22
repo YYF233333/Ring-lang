@@ -715,13 +715,23 @@ function resolve_type_expr(ctx, texpr) {
       break __ring_match28;
     }
     if (__ring_m28._tag === "FnType") {
-      const params = __ring_m28.params; const return_type = __ring_m28.return_type;
+      const params = __ring_m28.params; const return_type = __ring_m28.return_type; const effects = __ring_m28.effects;
       let resolved_params = [];
       for (const p of params) {
         List_push(resolved_params, resolve_type_expr(ctx, p));
       }
       const ret = resolve_type_expr(ctx, return_type);
-      return types$Type_FnType(resolved_params, ret, types$EMPTY_ROW);
+      const eff_row = ((List_len(effects) > 0) ? (function() {
+  let resolved_effects = [];
+  for (const e of effects) {
+    List_push(resolved_effects, resolve_fn_type_effect(ctx, e));
+  }
+  return new types$EffectRow(resolved_effects, Option_none);
+})() : (function() {
+  const tail_id = env$TypeEnv_fresh_var_id(ctx.env);
+  return new types$EffectRow([], Option_some(tail_id));
+})());
+      return types$Type_FnType(resolved_params, ret, eff_row);
       break __ring_match28;
     }
     if (__ring_m28._tag === "OptionType") {
@@ -772,6 +782,35 @@ function resolve_type_expr(ctx, texpr) {
     }
     __match_fail(__ring_m28);
   }
+}
+
+function resolve_fn_type_effect(ctx, eff) {
+  if ((eff.name === "io")) {
+    return types$Effect_IoEffect;
+  }
+  if ((eff.name === "mut")) {
+    const mut_state = ((List_len(eff.type_args) > 0) ? (function() {
+  const __ring_m = List_first(eff.type_args);
+  if (__ring_m._tag === "some") { const t = __ring_m._0; return resolve_type_expr(ctx, t); }
+  if (__ring_m._tag === "none") { return env$TypeEnv_fresh_var(ctx.env); }
+  __match_fail(__ring_m);
+})() : env$TypeEnv_fresh_var(ctx.env));
+    return types$Effect_MutEffect(mut_state);
+  }
+  if ((eff.name === "fail")) {
+    const err_type = ((List_len(eff.type_args) > 0) ? (function() {
+  const __ring_m = List_first(eff.type_args);
+  if (__ring_m._tag === "some") { const t = __ring_m._0; return resolve_type_expr(ctx, t); }
+  if (__ring_m._tag === "none") { return env$TypeEnv_fresh_var(ctx.env); }
+  __match_fail(__ring_m);
+})() : env$TypeEnv_fresh_var(ctx.env));
+    return types$Effect_FailEffect(err_type);
+  }
+  let resolved_args = [];
+  for (const ta of eff.type_args) {
+    List_push(resolved_args, resolve_type_expr(ctx, ta));
+  }
+  return types$Effect_CustomEffect(eff.name, resolved_args);
 }
 
 function resolve_self_type(ctx, name) {

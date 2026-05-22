@@ -37,7 +37,7 @@ pub struct RecordTypeField {
 
 pub enum TypeExpr {
     Named { name: Str, qualifier: Str?, type_args: List<TypeExpr>, span: Span },
-    FnType { params: List<TypeExpr>, return_type: TypeExpr, span: Span },
+    FnType { params: List<TypeExpr>, return_type: TypeExpr, effects: List<EffectExpr>, span: Span },
     OptionType { inner: TypeExpr, span: Span },
     RecordType { fields: List<RecordTypeField>, rest: Str?, span: Span },
     TupleType { elements: List<TypeExpr>, span: Span }

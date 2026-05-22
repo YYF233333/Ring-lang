@@ -403,6 +403,14 @@ const cases: TestCase[] = [
   { file: "sig_basic.ring", expected: "sig_basic: all tests passed\n" },
   { file: "sig_with_effects.ring", expected: "sig_with_effects: all tests passed\n" },
   { file: "mod_capability.ring", expected: "Hello, world!\nmod_capability: all tests passed\n" },
+  { file: "fn_type_effect.ring", expected: "converting\nfn_type_effect: all tests passed\n" },
+  { file: "fn_type_effect_poly.ring", expected: "fn_type_effect_poly: all tests passed\n" },
+  { file: "effect_custom_typed.ring", expected: "effect_custom_typed: all tests passed\n" },
+  { file: "effect_custom_and_fail.ring", expected: "effect_custom_and_fail: all tests passed\n" },
+  { file: "effect_custom_catch.ring", expected: "effect_custom_catch: all tests passed\n" },
+  { file: "effect_custom_deep_call.ring", expected: "effect_custom_deep_call: all tests passed\n" },
+  { file: "effect_custom_multi_effect.ring", expected: "effect_custom_multi_effect: all tests passed\n" },
+  { file: "effect_custom_nested_handle.ring", expected: "effect_custom_nested_handle: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

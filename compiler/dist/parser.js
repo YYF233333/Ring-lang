@@ -1825,8 +1825,12 @@ function Parser_parse_type_expr(self) {
     Parser_expect(self, lexer$TokenKind_TkRParen);
     Parser_expect(self, lexer$TokenKind_TkArrow);
     const return_type = Parser_parse_type_expr(self);
+    let fn_effects = [];
+    if (Parser_check(self, lexer$TokenKind_TkWith)) {
+      fn_effects = Parser_parse_effect_annotation(self);
+    }
     const end = Parser_current_span_start(self);
-    return ast$TypeExpr_FnType(params, return_type, Parser_make_span(self, start, end));
+    return ast$TypeExpr_FnType(params, return_type, fn_effects, Parser_make_span(self, start, end));
   }
   if (Parser_check(self, lexer$TokenKind_TkLParen)) {
     Parser_advance(self);

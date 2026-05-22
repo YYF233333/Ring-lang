@@ -1798,8 +1798,12 @@ impl Parser {
             self.expect(TokenKind::TkRParen)
             self.expect(TokenKind::TkArrow)
             let return_type = self.parse_type_expr()
+            var fn_effects: List<EffectExpr> = []
+            if self.check(TokenKind::TkWith) {
+                fn_effects = self.parse_effect_annotation()
+            }
             let end = self.current_span_start()
-            return TypeExpr::FnType { params: params, return_type: return_type, span: self.make_span(start, end) }
+            return TypeExpr::FnType { params: params, return_type: return_type, effects: fn_effects, span: self.make_span(start, end) }
         }
 
         if self.check(TokenKind::TkLParen) {

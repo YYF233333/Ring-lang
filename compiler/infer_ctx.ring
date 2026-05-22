@@ -2,7 +2,7 @@ use types::{Type, Effect, EffectRow, RecordField, StructField,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
     type_to_string, types_equal, make_option_type, type_to_builtin_name,
     row_merge}
-use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero}
+use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr}
 use hir::{HExpr, HStmt, HParam, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
@@ -578,11 +578,21 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
                 },
                 none => resolve_named_type(ctx, name, type_args, span)
             },
-        TypeExpr::FnType { params, return_type, .. } => {
+        TypeExpr::FnType { params, return_type, effects, .. } => {
             var resolved_params: List<Type> = []
             for p in params { resolved_params.push(resolve_type_expr(ctx, p)) }
             let ret = resolve_type_expr(ctx, return_type)
-            Type::FnType { params: resolved_params, return_type: ret, effects: EMPTY_ROW }
+            let eff_row = if effects.len() > 0 {
+                var resolved_effects: List<Effect> = []
+                for e in effects {
+                    resolved_effects.push(resolve_fn_type_effect(ctx, e))
+                }
+                EffectRow { effects: resolved_effects, tail: none }
+            } else {
+                let tail_id = ctx.env.fresh_var_id()
+                EffectRow { effects: [], tail: some(tail_id) }
+            }
+            Type::FnType { params: resolved_params, return_type: ret, effects: eff_row }
         },
         TypeExpr::OptionType { inner, .. } =>
             make_option_type(resolve_type_expr(ctx, inner)),
@@ -611,6 +621,35 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
             Type::TupleType { elements: resolved_elems }
         }
     }
+}
+
+fn resolve_fn_type_effect(ctx: InferCtx, eff: EffectExpr) -> Effect {
+    if eff.name == "io" { return Effect::IoEffect }
+    if eff.name == "mut" {
+        let mut_state = if eff.type_args.len() > 0 {
+            match eff.type_args.first() {
+                some(t) => resolve_type_expr(ctx, t),
+                none => ctx.env.fresh_var()
+            }
+        } else {
+            ctx.env.fresh_var()
+        }
+        return Effect::MutEffect { state_type: mut_state }
+    }
+    if eff.name == "fail" {
+        let err_type = if eff.type_args.len() > 0 {
+            match eff.type_args.first() {
+                some(t) => resolve_type_expr(ctx, t),
+                none => ctx.env.fresh_var()
+            }
+        } else {
+            ctx.env.fresh_var()
+        }
+        return Effect::FailEffect { error_type: err_type }
+    }
+    var resolved_args: List<Type> = []
+    for ta in eff.type_args { resolved_args.push(resolve_type_expr(ctx, ta)) }
+    Effect::CustomEffect { name: eff.name, type_args: resolved_args }
 }
 
 pub fn resolve_self_type(ctx: InferCtx, name: Str) -> Type {

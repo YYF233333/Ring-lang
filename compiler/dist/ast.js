@@ -49,8 +49,8 @@ class RecordTypeField {
 function TypeExpr_Named(name, qualifier, type_args, span) {
   return { _tag: "Named", name, qualifier, type_args, span };
 }
-function TypeExpr_FnType(params, return_type, span) {
-  return { _tag: "FnType", params, return_type, span };
+function TypeExpr_FnType(params, return_type, effects, span) {
+  return { _tag: "FnType", params, return_type, effects, span };
 }
 function TypeExpr_OptionType(inner, span) {
   return { _tag: "OptionType", inner, span };
