@@ -94,7 +94,7 @@ fn occurs_in_effect(var_id: Int, e: Effect, subst: UnionFind) -> Bool {
 // ============================================================
 
 
-fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, var env: TypeEnv) -> UnionFind {
+fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, mut env: TypeEnv) -> UnionFind {
     match (a, b) {
         (Effect::FailEffect { error_type: et_a }, Effect::FailEffect { error_type: et_b }) =>
             unify(et_a, et_b, subst, env),
@@ -104,8 +104,8 @@ fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, var env: TypeEnv)
             if ta_a.len() != ta_b.len() {
                 unify_error_msg("effect '${name}' type argument count mismatch: ${ta_a.len()} vs ${ta_b.len()}")
             }
-            var s = subst
-            var i = 0
+            let mut s = subst
+            let mut i = 0
             while i < ta_a.len() {
                 s = unify(
                     ta_a.get(i).unwrap_or(UNIT),
@@ -125,8 +125,8 @@ fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, var env: TypeEnv)
 // ============================================================
 
 fn filter_by_index_not_in(effects: List<Effect>, excluded: Set<Int>) -> List<Effect> {
-    var result: List<Effect> = []
-    var idx = 0
+    let mut result: List<Effect> = []
+    let mut idx = 0
     for e in effects {
         if !excluded.contains(idx) {
             result.push(e)
@@ -140,16 +140,16 @@ fn filter_by_index_not_in(effects: List<Effect>, excluded: Set<Int>) -> List<Eff
 // Unify effect rows (Koka-style row variable solving)
 // ============================================================
 
-pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: UnionFind, var env: TypeEnv) -> UnionFind {
-    var s = subst
+pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: UnionFind, mut env: TypeEnv) -> UnionFind {
+    let mut s = subst
     let ra = apply_subst_row(s, a)
     let rb = apply_subst_row(s, b)
 
     let a_matched: Set<Int> = set_new()
     let b_matched: Set<Int> = set_new()
-    var ai = 0
+    let mut ai = 0
     while ai < ra.effects.len() {
-        var bi = 0
+        let mut bi = 0
         while bi < rb.effects.len() {
             if !b_matched.contains(bi) {
                 match (ra.effects.get(ai), rb.effects.get(bi)) {
@@ -186,7 +186,7 @@ pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: UnionFind, var env: 
             if ta == tb {
                 if a_unmatched.len() > 0 || b_unmatched.len() > 0 {
                     let fresh = env.fresh_var_id()
-                    var all_unmatched: List<Effect> = []
+                    let mut all_unmatched: List<Effect> = []
                     for e in a_unmatched { all_unmatched.push(e) }
                     for e in b_unmatched { all_unmatched.push(e) }
                     let extended_row = Type::EffectRowType { effects: all_unmatched, tail: some(fresh) }
@@ -229,11 +229,11 @@ pub fn unify_effect_rows(a: EffectRow, b: EffectRow, subst: UnionFind, var env: 
 // Record row unification
 // ============================================================
 
-fn unify_record_rows(ra: Type, rb: Type, subst: UnionFind, var env: TypeEnv) -> UnionFind {
+fn unify_record_rows(ra: Type, rb: Type, subst: UnionFind, mut env: TypeEnv) -> UnionFind {
     match (ra, rb) {
         (Type::RecordType { fields: a_fields, tail: a_tail, .. },
          Type::RecordType { fields: b_fields, tail: b_tail, .. }) => {
-            var s = subst
+            let mut s = subst
 
             let b_name_set: Set<Str> = set_new()
             for f in b_fields { b_name_set.insert(f.name) }
@@ -326,11 +326,11 @@ fn unify_record_rows(ra: Type, rb: Type, subst: UnionFind, var env: TypeEnv) -> 
 // Struct -> Record coercion
 // ============================================================
 
-fn unify_struct_with_record(st: Type, rt: Type, subst: UnionFind, var env: TypeEnv) -> UnionFind {
+fn unify_struct_with_record(st: Type, rt: Type, subst: UnionFind, mut env: TypeEnv) -> UnionFind {
     match (st, rt) {
         (Type::StructType { name, fields: struct_fields, .. },
          Type::RecordType { fields: record_fields, tail: record_tail, .. }) => {
-            var s = subst
+            let mut s = subst
 
             for rf in record_fields {
                 let sf = struct_fields.find(fn(f) { f.name == rf.name })
@@ -390,7 +390,7 @@ fn bind_var(id: Int, target: Type, t1: Type, t2: Type, subst: UnionFind) -> Unio
 // Main unification
 // ============================================================
 
-pub fn unify(t1: Type, t2: Type, subst: UnionFind, var env: TypeEnv) -> UnionFind {
+pub fn unify(t1: Type, t2: Type, subst: UnionFind, mut env: TypeEnv) -> UnionFind {
     let a = apply_subst(subst, t1)
     let b = apply_subst(subst, t2)
 
@@ -437,8 +437,8 @@ pub fn unify(t1: Type, t2: Type, subst: UnionFind, var env: TypeEnv) -> UnionFin
             if pa.len() != pb.len() {
                 unify_error(t1, t2, some("parameter count mismatch: ${pa.len()} vs ${pb.len()}"))
             }
-            var s = subst
-            var i = 0
+            let mut s = subst
+            let mut i = 0
             while i < pa.len() {
                 s = unify(
                     pa.get(i).unwrap_or(UNIT),
@@ -461,8 +461,8 @@ pub fn unify(t1: Type, t2: Type, subst: UnionFind, var env: TypeEnv) -> UnionFin
             if tpa.len() != tpb.len() {
                 unify_error(t1, t2, some("different type parameter counts for struct '${na}'"))
             }
-            var s = subst
-            var i = 0
+            let mut s = subst
+            let mut i = 0
             while i < tpa.len() {
                 s = unify(
                     tpa.get(i).unwrap_or(UNIT),
@@ -483,8 +483,8 @@ pub fn unify(t1: Type, t2: Type, subst: UnionFind, var env: TypeEnv) -> UnionFin
             if tpa.len() != tpb.len() {
                 unify_error(t1, t2, some("different type parameter counts for enum '${na}'"))
             }
-            var s = subst
-            var i = 0
+            let mut s = subst
+            let mut i = 0
             while i < tpa.len() {
                 s = unify(
                     tpa.get(i).unwrap_or(UNIT),
@@ -499,11 +499,11 @@ pub fn unify(t1: Type, t2: Type, subst: UnionFind, var env: TypeEnv) -> UnionFin
         // Generic types
         (Type::GenericType { base: ba, args: aa },
          Type::GenericType { base: bb, args: ab }) => {
-            var s = unify(ba, bb, subst, env)
+            let mut s = unify(ba, bb, subst, env)
             if aa.len() != ab.len() {
                 unify_error(t1, t2, some("different type argument counts"))
             }
-            var i = 0
+            let mut i = 0
             while i < aa.len() {
                 s = unify(
                     aa.get(i).unwrap_or(UNIT),
@@ -533,8 +533,8 @@ pub fn unify(t1: Type, t2: Type, subst: UnionFind, var env: TypeEnv) -> UnionFin
             if ea.len() != eb.len() {
                 unify_error(t1, t2, some("tuple arity mismatch: ${ea.len()} vs ${eb.len()}"))
             }
-            var s = subst
-            var i = 0
+            let mut s = subst
+            let mut i = 0
             while i < ea.len() {
                 s = unify(
                     ea.get(i).unwrap_or(UNIT),

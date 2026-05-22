@@ -1,4 +1,4 @@
-// Test: Cell used in struct impl methods (var self + Cell interaction)
+// Test: Cell used in struct impl methods (mut self + Cell interaction)
 
 struct State {
     counter: Cell<Int>,

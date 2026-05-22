@@ -26,8 +26,8 @@ const BUILTIN_TYPES: Set<Str> = set_from(["Option", "Cell", "List", "Map", "Set"
 // Public entry point
 // ================================================================
 
-pub fn run_derive_pass(var env: TypeEnv) -> List<DerivedImpl> {
-    var derived_impls: List<DerivedImpl> = []
+pub fn run_derive_pass(mut env: TypeEnv) -> List<DerivedImpl> {
+    let mut derived_impls: List<DerivedImpl> = []
     let all_types = collect_user_types(env)
     derive_trait(env, all_types, "Eq", derived_impls)
     derive_trait(env, all_types, "Clone", derived_impls)
@@ -49,7 +49,7 @@ struct UserType {
 
 fn collect_user_types(env: TypeEnv) -> List<UserType> {
     let builtins = BUILTIN_TYPES
-    var result: List<UserType> = []
+    let mut result: List<UserType> = []
     for entry in env.types.structs.entries() {
         let (name, def) = entry
         if builtins.contains(name) == false {
@@ -69,8 +69,8 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
 // Fixpoint derivation for a single trait
 // ================================================================
 
-fn derive_trait(var env: TypeEnv, all_types: List<UserType>, trait_name: Str, var derived_impls: List<DerivedImpl>) {
-    var known = set_new()
+fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mut derived_impls: List<DerivedImpl>) {
+    let mut known = set_new()
     for imp in env.trait_reg.trait_impls {
         if imp.trait_name == trait_name {
             known.insert(imp.target_type_name)
@@ -81,7 +81,7 @@ fn derive_trait(var env: TypeEnv, all_types: List<UserType>, trait_name: Str, va
     known.insert("Str")
     known.insert("Bool")
 
-    var changed = true
+    let mut changed = true
     while changed {
         changed = false
         for ut in all_types {
@@ -119,7 +119,7 @@ fn has_manual_impl(env: TypeEnv, type_name: Str, trait_name: Str) -> Bool {
 // ================================================================
 
 fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> DerivedImpl? {
-    var bounds: List<TraitBound> = []
+    let mut bounds: List<TraitBound> = []
 
     match ut.type_kind {
         TypeKind::StructKind => match ut.struct_def {
@@ -143,15 +143,15 @@ fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> D
         },
         TypeKind::EnumKind => match ut.enum_def {
             some(def) => {
-                var variants: List<DerivedVariant> = []
-                var ok = true
+                let mut variants: List<DerivedVariant> = []
+                let mut ok = true
                 for v in def.variants {
                     if ok {
                         let has_named_fields = match v.field_names {
                             some(fns) => fns.len() > 0,
                             none => false,
                         }
-                        var field_entries: List<FieldEntry> = []
+                        let mut field_entries: List<FieldEntry> = []
                         for i in 0..v.fields.len() {
                             let fname = if has_named_fields {
                                 match v.field_names {
@@ -166,9 +166,9 @@ fn try_derive(env: TypeEnv, ut: UserType, trait_name: Str, known: Set<Str>) -> D
                         let fields = try_derive_fields(env, field_entries, def.type_param_vars, def.type_params, trait_name, known, ut.name, bounds)
                         match fields {
                             some(fs) => {
-                                var final_fields = fs
+                                let mut final_fields = fs
                                 if has_named_fields == false {
-                                    var updated: List<DerivedField> = []
+                                    let mut updated: List<DerivedField> = []
                                     for j in 0..fs.len() {
                                         let f = df_at(fs, j)
                                         updated.push(DerivedField { name: f.name, positional_index: some(j), action: f.action })
@@ -216,10 +216,9 @@ fn try_derive_fields(
     type_param_names: List<Str>,
     trait_name: Str,
     known: Set<Str>,
-    self_type_name: Str,
-    var bounds: List<TraitBound>
+    self_type_name: Str, mut bounds: List<TraitBound>
 ) -> List<DerivedField>? {
-    var result: List<DerivedField> = []
+    let mut result: List<DerivedField> = []
     for field in fields {
         let action = resolve_field_action(env, field.ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
         match action {
@@ -241,8 +240,7 @@ fn resolve_field_action(
     type_param_names: List<Str>,
     trait_name: Str,
     known: Set<Str>,
-    self_type_name: Str,
-    var bounds: List<TraitBound>
+    self_type_name: Str, mut bounds: List<TraitBound>
 ) -> FieldAction? {
     match field_type {
         Type::IntType => some(FieldAction::Identity),
@@ -322,10 +320,9 @@ fn resolve_extra_dicts(
     type_param_names: List<Str>,
     trait_name: Str,
     known: Set<Str>,
-    self_type_name: Str,
-    var bounds: List<TraitBound>
+    self_type_name: Str, mut bounds: List<TraitBound>
 ) -> List<Str>? {
-    var dicts: List<Str> = []
+    let mut dicts: List<Str> = []
     for arg in type_args {
         let dict = resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds)
         match dict {
@@ -342,8 +339,7 @@ fn resolve_type_arg_dict(
     type_param_names: List<Str>,
     trait_name: Str,
     known: Set<Str>,
-    self_type_name: Str,
-    var bounds: List<TraitBound>
+    self_type_name: Str, mut bounds: List<TraitBound>
 ) -> Str? {
     match arg {
         Type::IntType => some(trait_dict_name("Int", trait_name)),
@@ -390,7 +386,7 @@ fn resolve_type_arg_dict(
 // Register derived impl
 // ================================================================
 
-fn register_derived_impl(var env: TypeEnv, di: DerivedImpl, trait_name: Str) {
+fn register_derived_impl(mut env: TypeEnv, di: DerivedImpl, trait_name: Str) {
     env.trait_reg.trait_impls.push(ImplEntry {
         trait_name: trait_name,
         target_type_name: di.type_name,
@@ -398,13 +394,13 @@ fn register_derived_impl(var env: TypeEnv, di: DerivedImpl, trait_name: Str) {
         method_names: get_method_names(trait_name)
     })
 
-    var methods = match env.trait_reg.impl_methods.get(di.type_name) {
+    let mut methods = match env.trait_reg.impl_methods.get(di.type_name) {
         some(m) => m,
         none => map_new(),
     }
 
-    var type_var_ids: List<Int> = []
-    var self_type_params: List<Type> = []
+    let mut type_var_ids: List<Int> = []
+    let mut self_type_params: List<Type> = []
     for i in 0..di.type_params.len() {
         let var_id = env.fresh_var_id()
         type_var_ids.push(var_id)
@@ -413,7 +409,7 @@ fn register_derived_impl(var env: TypeEnv, di: DerivedImpl, trait_name: Str) {
 
     let self_type = build_self_type(env, di.type_name, di.type_kind, self_type_params)
 
-    var scheme_bounds: List<SchemeBound> = []
+    let mut scheme_bounds: List<SchemeBound> = []
     for b in di.bounds {
         let param_idx = index_of_str(di.type_params, b.type_param)
         if param_idx >= 0 {
@@ -463,7 +459,7 @@ fn build_self_type(env: TypeEnv, type_name: Str, type_kind: TypeKind, type_param
 }
 
 fn register_trait_methods(
-    var methods: Map<Str, TypeScheme>,
+    mut methods: Map<Str, TypeScheme>,
     trait_name: Str,
     self_type: Type,
     type_var_ids: List<Int>,

@@ -1,6 +1,6 @@
 fn main() {
-    var sum = 0
-    var i = 0
+    let mut sum = 0
+    let mut i = 0
     while true {
         if i == 5 {
             break

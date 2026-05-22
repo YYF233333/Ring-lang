@@ -15,7 +15,7 @@ fn main() {
   let empty: Map<Int, Str> = map_new()
   print(empty.is_empty())
 
-  var built: Map<Int, Str> = map_new()
+  let mut built: Map<Int, Str> = map_new()
   built.insert(10, "ten")
   built.insert(20, "twenty")
   print(built.len())

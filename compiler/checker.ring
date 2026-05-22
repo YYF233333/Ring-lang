@@ -32,12 +32,12 @@ fn find_std_dir() -> Str? {
     none
 }
 
-fn load_prelude(var ctx: InferCtx) -> List<HDecl> {
-    var prelude_hdecls: List<HDecl> = []
+fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
+    let mut prelude_hdecls: List<HDecl> = []
     match find_std_dir() {
         some(std_dir) => {
             // Phase 1: collect and register all prelude declarations
-            var all_prelude_decls: List<Decl> = []
+            let mut all_prelude_decls: List<Decl> = []
             for file in (STD_FILES) {
                 let file_path = path_join(std_dir, file)
                 if file_exists(file_path) {
@@ -57,7 +57,7 @@ fn load_prelude(var ctx: InferCtx) -> List<HDecl> {
                         // Filter to only Fn methods — ExternFn methods are already handled
                         // by the runtime and cannot be looked up via check_extern_fn_decl
                         // because they're registered in impl_methods_map, not the main scope.
-                        var fn_methods: List<Decl> = []
+                        let mut fn_methods: List<Decl> = []
                         for m in methods {
                             match m { Decl::Fn { .. } => { fn_methods.push(m) }, _ => {} }
                         }
@@ -100,7 +100,7 @@ fn load_prelude(var ctx: InferCtx) -> List<HDecl> {
 }
 
 fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
-    var env = new_type_env()
+    let mut env = new_type_env()
     register_builtins(env)
     register_hof_intrinsics(env)
 
@@ -119,11 +119,11 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
 }
 
 pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
-    var ctx = new_infer_ctx(sink)
+    let mut ctx = new_infer_ctx(sink)
     let prelude_hdecls = load_prelude(ctx)
     let hprogram = infer_check(ctx, program)
     // Prepend prelude hdecls to the program's decls
-    var all_decls = list_clone(prelude_hdecls)
+    let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
     CheckResult {
         program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls },
@@ -132,13 +132,13 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
 }
 
 pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink: CollectingSink) -> CheckResult {
-    var ctx = new_infer_ctx(sink)
+    let mut ctx = new_infer_ctx(sink)
     let prelude_hdecls = load_prelude(ctx)
     inject_module_exports(ctx, module_exports)
     resolve_uses(ctx, program.uses, module_exports)
     let hprogram = infer_check(ctx, program)
     // Prepend prelude hdecls to the program's decls
-    var all_decls = list_clone(prelude_hdecls)
+    let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
     CheckResult {
         program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls },
@@ -146,7 +146,7 @@ pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink:
     }
 }
 
-fn inject_module_exports(var ctx: InferCtx, exports: List<ModuleExports>) {
+fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
     for mod_ in exports {
         for entry in mod_.types.entries() {
             let (name, def) = entry
@@ -190,8 +190,8 @@ fn inject_module_exports(var ctx: InferCtx, exports: List<ModuleExports>) {
     }
 }
 
-fn resolve_uses(var ctx: InferCtx, uses: List<UseDecl>, available_modules: List<ModuleExports>) {
-    var module_map: Map<Str, ModuleExports> = map_new()
+fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<ModuleExports>) {
+    let mut module_map: Map<Str, ModuleExports> = map_new()
     for mod_ in available_modules {
         module_map.insert(mod_.module_key, mod_)
     }
@@ -229,7 +229,7 @@ fn resolve_uses(var ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                 some(a) => a,
                                 none => item.name,
                             }
-                            var found = false
+                            let mut found = false
 
                             match mod_.values.get(item.name) {
                                 some(scheme) => {

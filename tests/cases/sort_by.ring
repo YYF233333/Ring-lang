@@ -1,6 +1,6 @@
 fn main() {
     // sort_by ascending
-    var xs = [3, 1, 4, 1, 5]
+    let mut xs = [3, 1, 4, 1, 5]
     xs.sort_by(fn(a, b) { a - b })
     match xs.get(0) {
         some(v) => assert(v == 1, "asc first"),
@@ -12,7 +12,7 @@ fn main() {
     }
 
     // sort_by descending
-    var ys = [3, 1, 4, 1, 5]
+    let mut ys = [3, 1, 4, 1, 5]
     ys.sort_by(fn(a, b) { b - a })
     match ys.get(0) {
         some(v) => assert(v == 5, "desc first"),
@@ -24,7 +24,7 @@ fn main() {
     }
 
     // sort_by strings by length
-    var words = ["hi", "hello", "hey"]
+    let mut words = ["hi", "hello", "hey"]
     words.sort_by(fn(a, b) { a.len() - b.len() })
     match words.get(0) {
         some(v) => assert(v == "hi", "shortest first"),

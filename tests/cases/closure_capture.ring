@@ -5,7 +5,7 @@ fn make_adder(n: Int) -> fn(Int) -> Int {
 }
 
 fn make_counter() -> fn() -> Int {
-    var count = 0
+    let mut count = 0
     fn() -> Int {
         count = count + 1
         count
@@ -24,8 +24,8 @@ fn main() {
     assert(counter() == 2, "counter call 2")
     assert(counter() == 3, "counter call 3")
 
-    // Multiple closures sharing captured var
-    var shared = 0
+    // Multiple closures sharing captured mutable variable
+    let mut shared = 0
     let inc = fn() { shared = shared + 1 }
     let get = fn() -> Int { shared }
     inc()

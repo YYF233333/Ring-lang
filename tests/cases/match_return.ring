@@ -1,7 +1,7 @@
 // Test: return from various positions — for loop, while loop, nested if
 
 fn find_in_list(xs: List<Int>, target: Int) -> Int {
-    var idx = 0
+    let mut idx = 0
     for x in xs {
         if x == target { return idx }
         idx = idx + 1
@@ -10,7 +10,7 @@ fn find_in_list(xs: List<Int>, target: Int) -> Int {
 }
 
 fn find_in_while(xs: List<Int>, target: Int) -> Int {
-    var i = 0
+    let mut i = 0
     while i < xs.len() {
         let val = xs.get(i)
         match val {

@@ -12,11 +12,11 @@ use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_s
 // Public entry points
 // ============================================================
 
-pub fn register_decl_public(var ctx: InferCtx, decl: Decl) {
+pub fn register_decl_public(mut ctx: InferCtx, decl: Decl) {
     register_decl(ctx, decl)
 }
 
-pub fn insert_mod_aliases(var ctx: InferCtx, mod_name: Str, decls: List<Decl>, guard: Bool) {
+pub fn insert_mod_aliases(mut ctx: InferCtx, mod_name: Str, decls: List<Decl>, guard: Bool) {
     for d in decls {
         match d {
             Decl::Struct { name, .. } => {
@@ -100,7 +100,7 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
     }
 }
 
-fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: List<Str>, var deferred_enum_names: List<Str>) {
+fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: List<Str>, mut deferred_enum_names: List<Str>) {
     match decl {
         Decl::Struct { name, type_params, fields, span, .. } => {
             preregister_struct(ctx, name, type_params)
@@ -163,7 +163,7 @@ fn register_phase1(var ctx: InferCtx, decl: Decl, var deferred_struct_names: Lis
     }
 }
 
-fn register_phase2_struct(var ctx: InferCtx, decl: Decl) {
+fn register_phase2_struct(mut ctx: InferCtx, decl: Decl) {
     match decl {
         Decl::Struct { name, type_params, fields, span, .. } =>
             complete_struct_fields(ctx, name, fields),
@@ -177,7 +177,7 @@ fn register_phase2_struct(var ctx: InferCtx, decl: Decl) {
     }
 }
 
-fn register_phase2_enum(var ctx: InferCtx, decl: Decl) {
+fn register_phase2_enum(mut ctx: InferCtx, decl: Decl) {
     match decl {
         Decl::Enum { name, type_params, variants, span, .. } =>
             complete_enum_variants(ctx, name, type_params, variants),
@@ -191,9 +191,9 @@ fn register_phase2_enum(var ctx: InferCtx, decl: Decl) {
     }
 }
 
-pub fn register_decls_two_phase(var ctx: InferCtx, decls: List<Decl>) {
-    var deferred_struct_names: List<Str> = []
-    var deferred_enum_names: List<Str> = []
+pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
+    let mut deferred_struct_names: List<Str> = []
+    let mut deferred_enum_names: List<Str> = []
 
     for decl in decls {
         let result = some(register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names)) catch { _ => none }
@@ -211,9 +211,9 @@ pub fn register_decls_two_phase(var ctx: InferCtx, decls: List<Decl>) {
 // Struct registration
 // ============================================================
 
-fn preregister_struct(var ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
-    var tp_names: List<Str> = []
-    var tp_vars: List<Int> = []
+fn preregister_struct(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
+    let mut tp_names: List<Str> = []
+    let mut tp_vars: List<Int> = []
     for tp in type_params {
         tp_names.push(tp.name)
         let tv = ctx.env.fresh_var()
@@ -224,11 +224,11 @@ fn preregister_struct(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
     ctx.env.types.structs.insert(name, def)
 }
 
-fn complete_struct_fields(var ctx: InferCtx, name: Str, fields: List<StructFieldDecl>) {
+fn complete_struct_fields(mut ctx: InferCtx, name: Str, fields: List<StructFieldDecl>) {
     match ctx.env.types.structs.get(name) {
         some(def) => {
             let saved = map_clone(ctx.type_param_scope)
-            var i = 0
+            let mut i = 0
             while i < def.type_params.len() {
                 match (def.type_params.get(i), def.type_param_vars.get(i)) {
                     (some(tp_name), some(tp_var)) =>
@@ -254,9 +254,9 @@ fn complete_struct_fields(var ctx: InferCtx, name: Str, fields: List<StructField
 // Enum registration
 // ============================================================
 
-fn preregister_enum(var ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
-    var tp_names: List<Str> = []
-    var tv_ids: List<Int> = []
+fn preregister_enum(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
+    let mut tp_names: List<Str> = []
+    let mut tv_ids: List<Int> = []
     for tp in type_params {
         tp_names.push(tp.name)
         let tv = ctx.env.fresh_var()
@@ -267,12 +267,12 @@ fn preregister_enum(var ctx: InferCtx, name: Str, type_params: List<TypeParam>) 
     ctx.env.types.enums.insert(name, def)
 }
 
-fn complete_enum_variants(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>) {
+fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, variants: List<EnumVariantDecl>) {
     match ctx.env.types.enums.get(name) {
         some(def) => {
             let saved = map_clone(ctx.type_param_scope)
-            var tv_types: List<Type> = []
-            var i = 0
+            let mut tv_types: List<Type> = []
+            let mut i = 0
             while i < def.type_params.len() {
                 match (def.type_params.get(i), def.type_param_vars.get(i)) {
                     (some(tp_name), some(tp_var)) => {
@@ -289,21 +289,21 @@ fn complete_enum_variants(var ctx: InferCtx, name: Str, type_params: List<TypePa
                 match v.named_fields {
                     some(nf) => {
                         if nf.len() > 0 {
-                            var field_types: List<Type> = []
-                            var field_names: List<Str> = []
+                            let mut field_types: List<Type> = []
+                            let mut field_names: List<Str> = []
                             for f in nf {
                                 field_types.push(resolve_type_expr(ctx, f.type_expr))
                                 field_names.push(f.name)
                             }
                             def.variants.push(EnumVariant { name: v.name, fields: field_types, field_names: some(field_names) })
                         } else {
-                            var field_types: List<Type> = []
+                            let mut field_types: List<Type> = []
                             for f in v.fields { field_types.push(resolve_type_expr(ctx, f)) }
                             def.variants.push(EnumVariant { name: v.name, fields: field_types, field_names: none })
                         }
                     },
                     none => {
-                        var field_types: List<Type> = []
+                        let mut field_types: List<Type> = []
                         for f in v.fields { field_types.push(resolve_type_expr(ctx, f)) }
                         def.variants.push(EnumVariant { name: v.name, fields: field_types, field_names: none })
                     }
@@ -347,11 +347,11 @@ fn bind_variant_constructor(ctx: InferCtx, variant_name: Str, enum_type: Type, t
 // ============================================================
 
 fn register_effect(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ops: List<EffectOpDecl>) {
-    var tp_names: List<Str> = []
+    let mut tp_names: List<Str> = []
     for tp in type_params { tp_names.push(tp.name) }
-    var effect_ops: List<EffectOpDef> = []
+    let mut effect_ops: List<EffectOpDef> = []
     for op in ops {
-        var param_types: List<Type> = []
+        let mut param_types: List<Type> = []
         for p in op.params {
             match p.type_annotation {
                 some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
@@ -368,10 +368,10 @@ fn register_effect(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ops: 
 // Trait registration
 // ============================================================
 
-fn register_trait(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, methods: List<Decl>) {
+fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, methods: List<Decl>) {
     let saved = map_clone(ctx.type_param_scope)
-    var tp_names: List<Str> = []
-    var tp_vars: List<Int> = []
+    let mut tp_names: List<Str> = []
+    let mut tp_vars: List<Int> = []
     for tp in type_params {
         tp_names.push(tp.name)
         let tv = ctx.env.fresh_var()
@@ -380,11 +380,11 @@ fn register_trait(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, me
     }
 
     let self_var = ctx.env.fresh_var()
-    var trait_methods: List<TraitMethodDef> = []
+    let mut trait_methods: List<TraitMethodDef> = []
     for method in methods {
         match method {
             Decl::Fn { name: mname, params, return_type, is_abstract, .. } => {
-                var param_types: List<Type> = []
+                let mut param_types: List<Type> = []
                 for p in params {
                     if p.name == "self" {
                         param_types.push(self_var)
@@ -414,7 +414,7 @@ fn register_trait(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, me
 // Impl registration
 // ============================================================
 
-fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) {
+fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) {
     let impl_methods_map = match ctx.env.trait_reg.impl_methods.get(target_type) {
         some(m) => m,
         none => {
@@ -425,15 +425,15 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
     }
 
     let saved = map_clone(ctx.type_param_scope)
-    var impl_tv_ids: List<Int> = []
+    let mut impl_tv_ids: List<Int> = []
     for tp in type_params {
         let tv = ctx.env.fresh_var()
         match tv { Type::TypeVar { id, .. } => { impl_tv_ids.push(id) }, _ => {} }
         ctx.type_param_scope.insert(tp.name, tv)
     }
 
-    var impl_scheme_bounds: List<SchemeBound> = []
-    var tp_idx = 0
+    let mut impl_scheme_bounds: List<SchemeBound> = []
+    let mut tp_idx = 0
     for tp in type_params {
         for b in tp.bounds {
             if tp_idx < impl_tv_ids.len() {
@@ -468,9 +468,9 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
                                 span, DiagnosticContext::TraitError { detail: "missing method '${tm.name}'" })
                         }
                     }
-                    var tp_names: List<Str> = []
+                    let mut tp_names: List<Str> = []
                     for tp in type_params { tp_names.push(tp.name) }
-                    var method_names: List<Str> = []
+                    let mut method_names: List<Str> = []
                     for m in methods {
                         match m {
                             Decl::Fn { name: mn, .. } => { method_names.push(mn) },
@@ -495,12 +495,12 @@ fn register_impl(var ctx: InferCtx, target_type: Str, type_params: List<TypePara
 }
 
 fn register_impl_method(
-    var ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
+    mut ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
     return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
-    var method_tv_ids: List<Int> = []
+    let mut method_tv_ids: List<Int> = []
     for mtp in mtps {
         let tv = ctx.env.fresh_var()
         match tv { Type::TypeVar { id, .. } => { method_tv_ids.push(id) }, _ => {} }
@@ -508,7 +508,7 @@ fn register_impl_method(
     }
 
     let self_type = resolve_self_type(ctx, target_type)
-    var param_types: List<Type> = []
+    let mut param_types: List<Type> = []
     for p in params {
         match p.type_annotation {
             some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
@@ -517,7 +517,7 @@ fn register_impl_method(
     }
     let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
 
-    var all_tvs = list_clone(impl_tv_ids)
+    let mut all_tvs = list_clone(impl_tv_ids)
     for mtv in method_tv_ids { all_tvs.push(mtv) }
 
     let declared_names: Set<Str> = set_new()
@@ -544,19 +544,19 @@ fn register_impl_method(
 }
 
 fn register_impl_extern_method(
-    var ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
+    mut ctx: InferCtx, methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
     return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
-    var method_tv_ids: List<Int> = []
+    let mut method_tv_ids: List<Int> = []
     for mtp in mtps {
         let tv = ctx.env.fresh_var()
         match tv { Type::TypeVar { id, .. } => { method_tv_ids.push(id) }, _ => {} }
         ctx.type_param_scope.insert(mtp.name, tv)
     }
     let self_type = resolve_self_type(ctx, target_type)
-    var param_types: List<Type> = []
+    let mut param_types: List<Type> = []
     for p in params {
         match p.type_annotation {
             some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
@@ -564,7 +564,7 @@ fn register_impl_extern_method(
         }
     }
     let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
-    var all_tvs = list_clone(impl_tv_ids)
+    let mut all_tvs = list_clone(impl_tv_ids)
     for mtv in method_tv_ids { all_tvs.push(mtv) }
     let impl_ext_effects = match declared_effects {
         some(de) => resolve_declared_effects(ctx, de),
@@ -604,7 +604,7 @@ pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
         return Effect::FailEffect { error_type: err_type }
     }
     // Custom effects
-    var resolved_args: List<Type> = []
+    let mut resolved_args: List<Type> = []
     for ta in eff.type_args {
         resolved_args.push(resolve_type_expr(ctx, ta))
     }
@@ -612,7 +612,7 @@ pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
 }
 
 pub fn resolve_declared_effects(ctx: InferCtx, decl_effects: List<EffectExpr>) -> EffectRow {
-    var effects: List<Effect> = []
+    let mut effects: List<Effect> = []
     for eff in decl_effects {
         effects.push(resolve_effect_expr(ctx, eff))
     }
@@ -638,9 +638,9 @@ fn check_duplicate_def(ctx: InferCtx, name: Str, span: Span) {
     }
 }
 
-fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
+fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
     check_duplicate_def(ctx, name, span)
-    var type_vars: List<Int> = []
+    let mut type_vars: List<Int> = []
     let saved = map_clone(ctx.type_param_scope)
     for tp in type_params {
         let tv = ctx.env.fresh_var()
@@ -648,7 +648,7 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
         ctx.type_param_scope.insert(tp.name, tv)
     }
 
-    var param_types: List<Type> = []
+    let mut param_types: List<Type> = []
     for p in params {
         match p.type_annotation {
             some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
@@ -672,8 +672,8 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: effects }
 
-    var fn_bounds_list: List<FnBound> = []
-    var scheme_bounds: List<SchemeBound> = []
+    let mut fn_bounds_list: List<FnBound> = []
+    let mut scheme_bounds: List<SchemeBound> = []
     for tp in type_params {
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
@@ -706,8 +706,8 @@ fn register_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
     }
 }
 
-fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
-    var type_vars: List<Int> = []
+fn register_extern_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
+    let mut type_vars: List<Int> = []
     let saved = map_clone(ctx.type_param_scope)
     for tp in type_params {
         let tv = ctx.env.fresh_var()
@@ -715,7 +715,7 @@ fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
         ctx.type_param_scope.insert(tp.name, tv)
     }
 
-    var param_types: List<Type> = []
+    let mut param_types: List<Type> = []
     for p in params {
         match p.type_annotation {
             some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
@@ -739,7 +739,7 @@ fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: reg_effects }
 
-    var scheme_bounds: List<SchemeBound> = []
+    let mut scheme_bounds: List<SchemeBound> = []
     for tp in type_params {
         let tv = ctx.type_param_scope.get(tp.name)
         for b in tp.bounds {
@@ -770,10 +770,10 @@ fn register_extern_fn(var ctx: InferCtx, name: Str, type_params: List<TypeParam>
     }
 }
 
-fn register_extern_type(var ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
-    var tp_names: List<Str> = []
+fn register_extern_type(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
+    let mut tp_names: List<Str> = []
     let saved = map_clone(ctx.type_param_scope)
-    var tp_vars: List<Int> = []
+    let mut tp_vars: List<Int> = []
     for tp in type_params {
         tp_names.push(tp.name)
         let tv = ctx.env.fresh_var()
@@ -784,9 +784,9 @@ fn register_extern_type(var ctx: InferCtx, name: Str, type_params: List<TypePara
     ctx.env.types.structs.insert(name, StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [] })
 }
 
-fn register_type_alias(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, type_expr: TypeExpr) {
+fn register_type_alias(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, type_expr: TypeExpr) {
     let saved = map_clone(ctx.type_param_scope)
-    var tp_vars: List<Int> = []
+    let mut tp_vars: List<Int> = []
     for tp in type_params {
         let tv = ctx.env.fresh_var()
         match tv { Type::TypeVar { id, .. } => { tp_vars.push(id) }, _ => {} }
@@ -794,12 +794,12 @@ fn register_type_alias(var ctx: InferCtx, name: Str, type_params: List<TypeParam
     }
     let resolved = resolve_type_expr(ctx, type_expr)
     ctx.type_param_scope = saved
-    var tp_names: List<Str> = []
+    let mut tp_names: List<Str> = []
     for tp in type_params { tp_names.push(tp.name) }
     ctx.env.types.type_aliases.insert(name, TypeAliasDef { type_params: tp_names, type_param_vars: tp_vars, ty: resolved })
 }
 
-fn register_const(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span: Span) {
+fn register_const(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span: Span) {
     check_duplicate_def(ctx, name, span)
     match type_annotation {
         some(texpr) => {
@@ -817,18 +817,18 @@ fn register_const(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, span
     }
 }
 
-fn register_sig(var ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool) {
+fn register_sig(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool) {
     let saved = map_clone(ctx.type_param_scope)
     let sig_members: Map<Str, TypeScheme> = map_new()
     for m in members {
-        var type_vars: List<Int> = []
+        let mut type_vars: List<Int> = []
         let msaved = map_clone(ctx.type_param_scope)
         for tp in m.type_params {
             let tv = ctx.env.fresh_var()
             match tv { Type::TypeVar { id, .. } => { type_vars.push(id) }, _ => {} }
             ctx.type_param_scope.insert(tp.name, tv)
         }
-        var param_types: List<Type> = []
+        let mut param_types: List<Type> = []
         for p in m.params {
             match p.type_annotation {
                 some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
@@ -851,7 +851,7 @@ fn register_sig(var ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: 
 // Dispatch: register individual declaration
 // ============================================================
 
-fn register_decl(var ctx: InferCtx, decl: Decl) {
+fn register_decl(mut ctx: InferCtx, decl: Decl) {
     match decl {
         Decl::Struct { name, type_params, fields, span, .. } => {
             preregister_struct(ctx, name, type_params)

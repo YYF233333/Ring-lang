@@ -1,5 +1,5 @@
 fn transform<T, U>(items: List<T>, f: fn(T) -> U) -> List<U> {
-    var result: List<U> = []
+    let mut result: List<U> = []
     for item in items {
         result.push(f(item))
     }

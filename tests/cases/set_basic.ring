@@ -1,5 +1,5 @@
 fn main() {
-  var s = set_from([1, 2, 3, 2, 1])
+  let mut s = set_from([1, 2, 3, 2, 1])
   print(s.len())
   print(s.contains(2))
   print(s.is_empty())

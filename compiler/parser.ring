@@ -146,9 +146,9 @@ pub fn new_parser(tokens: List<Token>, file: Str, sink: CollectingSink) -> Parse
 }
 
 pub fn parse(source: Str, file: Str, sink: CollectingSink) -> Program {
-    var lexer = new_lexer(source, file, sink)
+    let mut lexer = new_lexer(source, file, sink)
     let tokens = lexer.tokenize()
-    var parser = new_parser(tokens, file, sink)
+    let mut parser = new_parser(tokens, file, sink)
     parser.parse_program()
 }
 
@@ -189,7 +189,7 @@ impl Parser {
         })
     }
 
-    pub fn advance(var self) -> Token {
+    pub fn advance(mut self) -> Token {
         let tok = self.peek()
         self.pos = self.pos + 1
         tok
@@ -199,7 +199,7 @@ impl Parser {
         self.peek().kind == kind
     }
 
-    pub fn try_consume(var self, kind: TokenKind) -> Bool {
+    pub fn try_consume(mut self, kind: TokenKind) -> Bool {
         if self.check(kind) {
             self.advance()
             return true
@@ -207,7 +207,7 @@ impl Parser {
         false
     }
 
-    pub fn expect(var self, kind: TokenKind) -> Token {
+    pub fn expect(mut self, kind: TokenKind) -> Token {
         let tok = self.peek()
         if tok.kind != kind {
             self.error("Expected '${token_kind_value(kind)}', got '${tok.value}' (${token_kind_value(tok.kind)})")
@@ -235,7 +235,7 @@ impl Parser {
     // Error helpers
     // ============================================================
 
-    pub fn report_error(var self, code: Str, msg: Str, span: Span?) {
+    pub fn report_error(mut self, code: Str, msg: Str, span: Span?) {
         let tok = self.peek()
         let error_span = span.unwrap_or(tok.span)
         self.sink.report(make_diag(
@@ -251,7 +251,7 @@ impl Parser {
         }
     }
 
-    fn error(var self, msg: Str) -> Never {
+    fn error(mut self, msg: Str) -> Never {
         let tok = self.peek()
         self.report_error(E0103, msg, some(tok.span))
         __ring_raise_fail(msg)
@@ -261,11 +261,11 @@ impl Parser {
     // Program
     // ============================================================
 
-    pub fn parse_program(var self) -> Program {
+    pub fn parse_program(mut self) -> Program {
         let start = self.current_span_start()
-        var uses: List<UseDecl> = []
-        var decls: List<Decl> = []
-        var decls_started = false
+        let mut uses: List<UseDecl> = []
+        let mut decls: List<Decl> = []
+        let mut decls_started = false
 
         while !self.at_end() {
             if self.check(TokenKind::TkError) { self.advance(); continue }
@@ -333,7 +333,7 @@ impl Parser {
     // Statements
     // ============================================================
 
-    pub fn parse_stmt(var self) -> Stmt {
+    pub fn parse_stmt(mut self) -> Stmt {
         let start = self.current_span_start()
 
         if self.check(TokenKind::TkLet) {
@@ -395,7 +395,7 @@ impl Parser {
             self.try_consume(TokenKind::TkSemi)
             let end = self.current_span_start()
 
-            var value = value_expr
+            let mut value = value_expr
             if op_tok.kind == TokenKind::TkPlusEq {
                 value = Expr::BinOp { op: BinOp::Add, left: expr, right: value_expr, span: expr_span(value_expr) }
             } else if op_tok.kind == TokenKind::TkMinusEq {
@@ -410,7 +410,7 @@ impl Parser {
         Stmt::ExprStmt { expr: expr, has_semi: has_semi, span: self.make_span(start, end) }
     }
 
-    fn parse_while_stmt(var self) -> Stmt {
+    fn parse_while_stmt(mut self) -> Stmt {
         let start = self.current_span_start()
         self.expect(TokenKind::TkWhile)
         let condition = self.parse_expr_no_struct()
@@ -419,7 +419,7 @@ impl Parser {
         Stmt::While { condition: condition, body: body, span: self.make_span(start, end) }
     }
 
-    fn parse_loop_stmt(var self) -> Stmt {
+    fn parse_loop_stmt(mut self) -> Stmt {
         let start = self.current_span_start()
         self.expect(TokenKind::TkLoop)
         let body = self.parse_block_expr()
@@ -428,18 +428,18 @@ impl Parser {
         Stmt::While { condition: condition, body: body, span: self.make_span(start, end) }
     }
 
-    fn parse_for_in_stmt(var self) -> Stmt {
+    fn parse_for_in_stmt(mut self) -> Stmt {
         let start = self.current_span_start()
         self.expect(TokenKind::TkFor)
 
-        var binding = ""
-        var binding_span = span_zero()
-        var destructure: DestructureBinding? = none
+        let mut binding = ""
+        let mut binding_span = span_zero()
+        let mut destructure: DestructureBinding? = none
 
         if self.check(TokenKind::TkLParen) {
             self.advance()
-            var names: List<Str> = []
-            var spans: List<Span> = []
+            let mut names: List<Str> = []
+            let mut spans: List<Span> = []
             let first = self.expect(TokenKind::TkIdent)
             names.push(first.value)
             spans.push(first.span)
@@ -475,7 +475,7 @@ impl Parser {
         }
     }
 
-    fn parse_break_stmt(var self) -> Stmt {
+    fn parse_break_stmt(mut self) -> Stmt {
         let start = self.current_span_start()
         self.expect(TokenKind::TkBreak)
         self.try_consume(TokenKind::TkSemi)
@@ -483,7 +483,7 @@ impl Parser {
         Stmt::Break { span: self.make_span(start, end) }
     }
 
-    fn parse_continue_stmt(var self) -> Stmt {
+    fn parse_continue_stmt(mut self) -> Stmt {
         let start = self.current_span_start()
         self.expect(TokenKind::TkContinue)
         self.try_consume(TokenKind::TkSemi)
@@ -491,13 +491,13 @@ impl Parser {
         Stmt::Continue { span: self.make_span(start, end) }
     }
 
-    fn parse_if_let_stmt(var self, start: Position) -> Stmt {
+    fn parse_if_let_stmt(mut self, start: Position) -> Stmt {
         self.expect(TokenKind::TkLet)
         let pattern = self.parse_pattern()
         self.expect(TokenKind::TkEq)
         let expr = self.parse_expr()
         let then_block = self.parse_block_expr()
-        var else_block: Expr? = none
+        let mut else_block: Expr? = none
         if self.try_consume(TokenKind::TkElse) {
             else_block = some(self.parse_block_expr())
         }
@@ -514,17 +514,17 @@ impl Parser {
         }
     }
 
-    fn parse_binding_stmt(var self, mutable: Bool) -> Stmt {
+    fn parse_binding_stmt(mut self, mutable: Bool) -> Stmt {
         let start = self.current_span_start()
         if mutable { self.expect(TokenKind::TkVar) } else { self.expect(TokenKind::TkLet) }
         self.parse_binding_body(mutable, start)
     }
 
-    fn parse_binding_body(var self, mutable: Bool, start: Position) -> Stmt {
+    fn parse_binding_body(mut self, mutable: Bool, start: Position) -> Stmt {
         let name_tok = self.expect(TokenKind::TkIdent)
         let name = name_tok.value
         let name_span = name_tok.span
-        var type_annotation: TypeExpr? = none
+        let mut type_annotation: TypeExpr? = none
         if self.try_consume(TokenKind::TkColon) {
             type_annotation = some(self.parse_type_expr())
         }
@@ -540,10 +540,10 @@ impl Parser {
         }
     }
 
-    fn parse_return_stmt(var self) -> Stmt {
+    fn parse_return_stmt(mut self) -> Stmt {
         let start = self.current_span_start()
         self.expect(TokenKind::TkReturn)
-        var value: Expr? = none
+        let mut value: Expr? = none
         if !self.check(TokenKind::TkSemi) && !self.check(TokenKind::TkRBrace) && !self.at_end() {
             value = some(self.parse_expr())
         }
@@ -556,11 +556,11 @@ impl Parser {
     // Block expression
     // ============================================================
 
-    pub fn parse_block_expr(var self) -> Expr {
+    pub fn parse_block_expr(mut self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkLBrace)
-        var stmts: List<Stmt> = []
-        var tail: Expr? = none
+        let mut stmts: List<Stmt> = []
+        let mut tail: Expr? = none
 
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let stmt = self.parse_stmt()
@@ -587,11 +587,11 @@ impl Parser {
     // Declarations
     // ============================================================
 
-    fn parse_use_decl(var self, is_pub: Bool) -> UseDecl {
+    fn parse_use_decl(mut self, is_pub: Bool) -> UseDecl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkUse)
 
-        var segments: List<Str> = []
+        let mut segments: List<Str> = []
         let path_start = self.current_span_start()
 
         // Support super / self as path first segment
@@ -618,17 +618,17 @@ impl Parser {
         }
 
         let path_end = self.current_span_start()
-        var path = UsePath { segments: segments, span: self.make_span(path_start, path_end) }
-        var imports = UseImport::Module
-        var alias: Str? = none
+        let mut path = UsePath { segments: segments, span: self.make_span(path_start, path_end) }
+        let mut imports = UseImport::Module
+        let mut alias: Str? = none
 
         if self.check(TokenKind::TkLBrace) {
             self.advance()
-            var names: List<NamedImport> = []
+            let mut names: List<NamedImport> = []
             while !self.check(TokenKind::TkRBrace) && !self.at_end() {
                 let name_start = self.current_span_start()
                 let name = self.expect(TokenKind::TkIdent).value
-                var name_alias: Str? = none
+                let mut name_alias: Str? = none
                 if self.try_consume(TokenKind::TkAs) {
                     name_alias = some(self.expect(TokenKind::TkIdent).value)
                 }
@@ -659,21 +659,21 @@ impl Parser {
         }
     }
 
-    fn parse_mod_block(var self, is_pub: Bool) -> Decl {
+    fn parse_mod_block(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkMod)
         let name = self.expect(TokenKind::TkIdent).value
 
         // Parse optional requires clause: mod name requires { effects } { ... }
-        var required_effects: List<EffectExpr>? = none
+        let mut required_effects: List<EffectExpr>? = none
         if self.check(TokenKind::TkRequires) {
             self.advance()
             required_effects = some(self.parse_effect_list())
         }
 
         self.expect(TokenKind::TkLBrace)
-        var uses: List<UseDecl> = []
-        var decls: List<Decl> = []
+        let mut uses: List<UseDecl> = []
+        let mut decls: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             // Parse use declarations inside mod blocks
             if self.check(TokenKind::TkUse) {
@@ -705,7 +705,7 @@ impl Parser {
         Decl::ModBlock { name: name, uses: uses, decls: decls, required_effects: required_effects, is_pub: is_pub, span: self.make_span(start, end) }
     }
 
-    fn parse_decl(var self) -> Decl? {
+    fn parse_decl(mut self) -> Decl? {
         let is_pub = self.try_consume(TokenKind::TkPub)
         let tok = self.peek()
 
@@ -734,19 +734,19 @@ impl Parser {
     }
 
     // Parse a braced effect list: { effect1, effect2<T>, ... }
-    fn parse_effect_list(var self) -> List<EffectExpr> {
+    fn parse_effect_list(mut self) -> List<EffectExpr> {
         self.expect(TokenKind::TkLBrace)
-        var effects: List<EffectExpr> = []
+        let mut effects: List<EffectExpr> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let estart = self.current_span_start()
             // Accept 'mut' keyword as effect name (mut<T> parameterized effect)
-            var ename = ""
+            let mut ename = ""
             if self.check(TokenKind::TkMut) {
                 ename = self.advance().value
             } else {
                 ename = self.expect(TokenKind::TkIdent).value
             }
-            var type_args: List<TypeExpr> = []
+            let mut type_args: List<TypeExpr> = []
             if self.check(TokenKind::TkLt) {
                 self.advance()
                 while !self.check(TokenKind::TkGt) && !self.at_end() {
@@ -767,12 +767,12 @@ impl Parser {
         effects
     }
 
-    fn parse_effect_annotation(var self) -> List<EffectExpr> {
+    fn parse_effect_annotation(mut self) -> List<EffectExpr> {
         self.expect(TokenKind::TkWith)
         self.parse_effect_list()
     }
 
-    fn parse_fn_decl(var self, is_pub: Bool, body_optional: Bool) -> Decl {
+    fn parse_fn_decl(mut self, is_pub: Bool, body_optional: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkFn)
         let name = self.expect(TokenKind::TkIdent).value
@@ -780,17 +780,17 @@ impl Parser {
         self.expect(TokenKind::TkLParen)
         let params = self.parse_params()
         self.expect(TokenKind::TkRParen)
-        var return_type: TypeExpr? = none
+        let mut return_type: TypeExpr? = none
         if self.try_consume(TokenKind::TkArrow) {
             return_type = some(self.parse_type_expr())
         }
         // Parse effect annotation: with { effect1, effect2<T> }
-        var declared_effects: List<EffectExpr>? = none
+        let mut declared_effects: List<EffectExpr>? = none
         if self.check(TokenKind::TkWith) {
             declared_effects = some(self.parse_effect_annotation())
         }
-        var body = Expr::Block { stmts: [], tail: none, span: span_zero() }
-        var is_abstract_val = false
+        let mut body = Expr::Block { stmts: [], tail: none, span: span_zero() }
+        let mut is_abstract_val = false
         if body_optional && !self.check(TokenKind::TkLBrace) {
             let pos = self.current_span_start()
             body = Expr::Block { stmts: [], tail: none, span: self.make_span(pos, pos) }
@@ -812,11 +812,11 @@ impl Parser {
         }
     }
 
-    fn parse_const_decl(var self, is_pub: Bool) -> Decl {
+    fn parse_const_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkConst)
         let name = self.expect(TokenKind::TkIdent).value
-        var type_annotation: TypeExpr? = none
+        let mut type_annotation: TypeExpr? = none
         if self.try_consume(TokenKind::TkColon) {
             type_annotation = some(self.parse_type_expr())
         }
@@ -826,13 +826,13 @@ impl Parser {
         Decl::Const { name: name, type_annotation: type_annotation, init: init, is_pub: is_pub, span: self.make_span(start, end) }
     }
 
-    fn parse_sig_block(var self, is_pub: Bool) -> Decl {
+    fn parse_sig_block(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkSig)
         let name = self.expect(TokenKind::TkIdent).value
         self.expect(TokenKind::TkLBrace)
 
-        var members: List<SigMember> = []
+        let mut members: List<SigMember> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let mstart = self.current_span_start()
             self.expect(TokenKind::TkFn)
@@ -841,11 +841,11 @@ impl Parser {
             self.expect(TokenKind::TkLParen)
             let mparams = self.parse_params()
             self.expect(TokenKind::TkRParen)
-            var ret: TypeExpr? = none
+            let mut ret: TypeExpr? = none
             if self.try_consume(TokenKind::TkArrow) {
                 ret = some(self.parse_type_expr())
             }
-            var meffects: List<TypeExpr> = []
+            let mut meffects: List<TypeExpr> = []
             if self.try_consume(TokenKind::TkWith) {
                 self.expect(TokenKind::TkLBrace)
                 while !self.check(TokenKind::TkRBrace) && !self.at_end() {
@@ -867,7 +867,7 @@ impl Parser {
         Decl::Sig { name: name, members: members, is_pub: is_pub, span: self.make_span(start, end) }
     }
 
-    fn parse_extern_decl(var self, is_pub: Bool) -> Decl {
+    fn parse_extern_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkExtern)
         if self.check(TokenKind::TkIdent) && self.peek().value == "type" {
@@ -876,19 +876,19 @@ impl Parser {
         self.parse_extern_fn_decl_body(is_pub, start)
     }
 
-    fn parse_extern_fn_decl_body(var self, is_pub: Bool, start: Position) -> Decl {
+    fn parse_extern_fn_decl_body(mut self, is_pub: Bool, start: Position) -> Decl {
         self.expect(TokenKind::TkFn)
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLParen)
         let params = self.parse_params()
         self.expect(TokenKind::TkRParen)
-        var return_type: TypeExpr? = none
+        let mut return_type: TypeExpr? = none
         if self.try_consume(TokenKind::TkArrow) {
             return_type = some(self.parse_type_expr())
         }
         // Parse effect annotation: with { effect1, effect2<T> }
-        var declared_effects: List<EffectExpr>? = none
+        let mut declared_effects: List<EffectExpr>? = none
         if self.check(TokenKind::TkWith) {
             declared_effects = some(self.parse_effect_annotation())
         }
@@ -904,7 +904,7 @@ impl Parser {
         }
     }
 
-    fn parse_extern_type_decl_body(var self, is_pub: Bool, start: Position) -> Decl {
+    fn parse_extern_type_decl_body(mut self, is_pub: Bool, start: Position) -> Decl {
         self.advance()
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
@@ -917,7 +917,7 @@ impl Parser {
         }
     }
 
-    fn parse_type_alias_decl(var self, is_pub: Bool) -> Decl {
+    fn parse_type_alias_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.advance()
         let name = self.expect(TokenKind::TkIdent).value
@@ -934,13 +934,13 @@ impl Parser {
         }
     }
 
-    fn parse_struct_decl(var self, is_pub: Bool) -> Decl {
+    fn parse_struct_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkStruct)
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLBrace)
-        var fields: List<StructFieldDecl> = []
+        let mut fields: List<StructFieldDecl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let field_start = self.current_span_start()
             let field_pub = self.try_consume(TokenKind::TkPub)
@@ -954,7 +954,7 @@ impl Parser {
                     where_span,
                     DiagnosticContext::OtherContext { detail: some("where clause parsed but not enforced") }))
                 self.advance()
-                var depth = 0
+                let mut depth = 0
                 while !self.at_end() {
                     if depth == 0 && (self.check(TokenKind::TkComma) || self.check(TokenKind::TkRBrace)) { break }
                     if self.check(TokenKind::TkLParen) || self.check(TokenKind::TkLBrace) || self.check(TokenKind::TkLBracket) {
@@ -987,18 +987,18 @@ impl Parser {
         }
     }
 
-    fn parse_enum_decl(var self, is_pub: Bool) -> Decl {
+    fn parse_enum_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkEnum)
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLBrace)
-        var variants: List<EnumVariantDecl> = []
+        let mut variants: List<EnumVariantDecl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let v_start = self.current_span_start()
             let v_name = self.expect(TokenKind::TkIdent).value
-            var v_fields: List<TypeExpr> = []
-            var named_fields: List<NamedEnumField>? = none
+            let mut v_fields: List<TypeExpr> = []
+            let mut named_fields: List<NamedEnumField>? = none
             if self.try_consume(TokenKind::TkLParen) {
                 if self.check(TokenKind::TkRParen) {
                     // Reject empty parentheses — use bare name instead
@@ -1015,7 +1015,7 @@ impl Parser {
                 }
             } else if self.check(TokenKind::TkLBrace) {
                 self.advance()
-                var nf: List<NamedEnumField> = []
+                let mut nf: List<NamedEnumField> = []
                 while !self.check(TokenKind::TkRBrace) && !self.at_end() {
                     let f_start = self.current_span_start()
                     let f_name = self.expect(TokenKind::TkIdent).value
@@ -1043,14 +1043,14 @@ impl Parser {
         }
     }
 
-    fn parse_impl_decl(var self) -> Decl {
+    fn parse_impl_decl(mut self) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkImpl)
         let type_params = self.parse_type_params()
         let first_name = self.expect(TokenKind::TkIdent).value
 
-        var target_type = first_name
-        var trait_name: Str? = none
+        let mut target_type = first_name
+        let mut trait_name: Str? = none
         if self.check(TokenKind::TkFor) {
             self.advance()
             trait_name = some(first_name)
@@ -1058,7 +1058,7 @@ impl Parser {
         }
 
         self.expect(TokenKind::TkLBrace)
-        var methods: List<Decl> = []
+        let mut methods: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let m_pub = self.try_consume(TokenKind::TkPub)
             if self.check(TokenKind::TkExtern) {
@@ -1080,13 +1080,13 @@ impl Parser {
         }
     }
 
-    fn parse_effect_decl(var self, is_pub: Bool) -> Decl {
+    fn parse_effect_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkEffect)
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
         self.expect(TokenKind::TkLBrace)
-        var ops: List<EffectOpDecl> = []
+        let mut ops: List<EffectOpDecl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let op_start = self.current_span_start()
             self.expect(TokenKind::TkFn)
@@ -1112,7 +1112,7 @@ impl Parser {
         }
     }
 
-    fn parse_test_decl(var self) -> Decl {
+    fn parse_test_decl(mut self) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkTest)
         let desc_tok = self.expect(TokenKind::TkStringLit)
@@ -1121,14 +1121,14 @@ impl Parser {
         Decl::Test { description: desc_tok.value, body: body, span: self.make_span(start, end) }
     }
 
-    fn parse_trait_decl(var self, is_pub: Bool) -> Decl {
+    fn parse_trait_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkTrait)
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
         let supertraits: List<TypeBound> = []
         self.expect(TokenKind::TkLBrace)
-        var methods: List<Decl> = []
+        let mut methods: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let m_pub = self.try_consume(TokenKind::TkPub)
             methods.push(self.parse_fn_decl(m_pub, true))
@@ -1149,17 +1149,17 @@ impl Parser {
     // Expressions — Pratt Parsing
     // ============================================================
 
-    pub fn parse_expr(var self) -> Expr {
+    pub fn parse_expr(mut self) -> Expr {
         self.parse_expr_bp(PREC_NONE, true)
     }
 
-    fn parse_expr_no_struct(var self) -> Expr {
+    fn parse_expr_no_struct(mut self) -> Expr {
         self.parse_expr_bp(PREC_NONE, false)
     }
 
-    pub fn parse_expr_bp(var self, min_prec: Int, allow_struct_lit: Bool) -> Expr {
-        var left = self.parse_prefix(allow_struct_lit)
-        var last_was_comparison = false
+    pub fn parse_expr_bp(mut self, min_prec: Int, allow_struct_lit: Bool) -> Expr {
+        let mut left = self.parse_prefix(allow_struct_lit)
+        let mut last_was_comparison = false
 
         while true {
             let tok = self.peek()
@@ -1199,7 +1199,7 @@ impl Parser {
         left
     }
 
-    fn parse_prefix(var self, allow_struct_lit: Bool) -> Expr {
+    fn parse_prefix(mut self, allow_struct_lit: Bool) -> Expr {
         let tok = self.peek()
         let start = self.current_span_start()
 
@@ -1261,7 +1261,7 @@ impl Parser {
 
         if self.check(TokenKind::TkLBracket) {
             self.advance()
-            var elements: List<Expr> = []
+            let mut elements: List<Expr> = []
             if !self.check(TokenKind::TkRBracket) {
                 elements.push(self.parse_expr())
                 while self.check(TokenKind::TkComma) {
@@ -1279,7 +1279,7 @@ impl Parser {
             let first = self.parse_expr()
             if self.check(TokenKind::TkComma) {
                 self.advance()
-                var elements = [first]
+                let mut elements = [first]
                 if !self.check(TokenKind::TkRParen) {
                     elements.push(self.parse_expr())
                     while self.check(TokenKind::TkComma) {
@@ -1300,7 +1300,7 @@ impl Parser {
             self.advance()
             self.expect(TokenKind::TkColonColon)
             // Support super::super::... chained
-            var qualifier_parts: List<Str> = ["super"]
+            let mut qualifier_parts: List<Str> = ["super"]
             while self.check(TokenKind::TkSuper) {
                 qualifier_parts.push("super")
                 self.advance()
@@ -1375,15 +1375,15 @@ impl Parser {
     // Postfix: dot (field access / method call)
     // ============================================================
 
-    fn parse_dot_expr(var self, left: Expr) -> Expr {
+    fn parse_dot_expr(mut self, left: Expr) -> Expr {
         self.advance()
-        var name = ""
+        let mut name = ""
         // Handle float literal after dot: e.g. `t.0.1` lexes as dot + float "0.1"
         // Split into chained tuple field accesses
         if self.check(TokenKind::TkFloatLit) {
             let tok = self.advance()
             let parts = tok.value.split(".")
-            var result = left
+            let mut result = left
             for part in parts {
                 let end = self.current_span_start()
                 result = Expr::FieldAccess { receiver: result, field: part, span: self.make_span(expr_span(left).start, end) }
@@ -1420,7 +1420,7 @@ impl Parser {
     // Call expression
     // ============================================================
 
-    fn parse_call_expr(var self, left: Expr) -> Expr {
+    fn parse_call_expr(mut self, left: Expr) -> Expr {
         self.advance()
         let args = self.parse_arg_list()
         self.expect(TokenKind::TkRParen)
@@ -1428,8 +1428,8 @@ impl Parser {
         Expr::Call { callee: left, args: args, type_args: [], span: self.make_span(expr_span(left).start, end) }
     }
 
-    fn parse_arg_list(var self) -> List<Expr> {
-        var args: List<Expr> = []
+    fn parse_arg_list(mut self) -> List<Expr> {
+        let mut args: List<Expr> = []
         if self.check(TokenKind::TkRParen) { return args }
         args.push(self.parse_expr())
         while self.try_consume(TokenKind::TkComma) {
@@ -1443,10 +1443,10 @@ impl Parser {
     // Catch expression
     // ============================================================
 
-    fn parse_catch_expr(var self, left: Expr) -> Expr {
+    fn parse_catch_expr(mut self, left: Expr) -> Expr {
         self.advance()
         self.expect(TokenKind::TkLBrace)
-        var arms: List<MatchArm> = []
+        let mut arms: List<MatchArm> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             arms.push(self.parse_match_arm())
             self.try_consume(TokenKind::TkComma)
@@ -1460,9 +1460,9 @@ impl Parser {
     // String interpolation
     // ============================================================
 
-    fn parse_string_interp(var self) -> Expr {
+    fn parse_string_interp(mut self) -> Expr {
         let start_tok = self.advance()
-        var parts: List<StringInterpPart> = []
+        let mut parts: List<StringInterpPart> = []
 
         if start_tok.value.len() > 0 {
             parts.push(StringInterpPart::LitPart(start_tok.value))
@@ -1497,12 +1497,12 @@ impl Parser {
     // If expression
     // ============================================================
 
-    pub fn parse_if_expr(var self) -> Expr {
+    pub fn parse_if_expr(mut self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkIf)
         let condition = self.parse_expr_no_struct()
         let then_branch = self.parse_block_expr()
-        var else_branch: Expr? = none
+        let mut else_branch: Expr? = none
         if self.try_consume(TokenKind::TkElse) {
             if self.check(TokenKind::TkIf) {
                 else_branch = some(self.parse_if_expr())
@@ -1518,12 +1518,12 @@ impl Parser {
     // Match expression
     // ============================================================
 
-    fn parse_match_expr(var self) -> Expr {
+    fn parse_match_expr(mut self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkMatch)
         let scrutinee = self.parse_expr_no_struct()
         self.expect(TokenKind::TkLBrace)
-        var arms: List<MatchArm> = []
+        let mut arms: List<MatchArm> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             arms.push(self.parse_match_arm())
             self.try_consume(TokenKind::TkComma)
@@ -1533,10 +1533,10 @@ impl Parser {
         Expr::MatchExpr { scrutinee: scrutinee, arms: arms, span: self.make_span(start, end) }
     }
 
-    fn parse_match_arm(var self) -> MatchArm {
+    fn parse_match_arm(mut self) -> MatchArm {
         let start = self.current_span_start()
         let pattern = self.parse_pattern()
-        var guard: Expr? = none
+        let mut guard: Expr? = none
         if self.check(TokenKind::TkIf) {
             self.advance()
             guard = some(self.parse_expr())
@@ -1551,7 +1551,7 @@ impl Parser {
     // Patterns
     // ============================================================
 
-    pub fn parse_pattern(var self) -> Pattern {
+    pub fn parse_pattern(mut self) -> Pattern {
         let tok = self.peek()
         let start = self.current_span_start()
 
@@ -1583,8 +1583,8 @@ impl Parser {
 
         if self.check(TokenKind::TkIdent) {
             self.advance()
-            var name = tok.value
-            var qualifier: Str? = none
+            let mut name = tok.value
+            let mut qualifier: Str? = none
 
             // Module-qualified enum pattern: mod::Enum::Variant(...)
             if !is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
@@ -1612,7 +1612,7 @@ impl Parser {
 
             if self.check(TokenKind::TkLParen) {
                 self.advance()
-                var fields: List<Pattern> = []
+                let mut fields: List<Pattern> = []
                 if !self.check(TokenKind::TkRParen) {
                     fields.push(self.parse_pattern())
                     while self.try_consume(TokenKind::TkComma) {
@@ -1627,8 +1627,8 @@ impl Parser {
 
             if self.check(TokenKind::TkLBrace) && is_uppercase(name.char_at(0).unwrap_or("")) {
                 self.advance()
-                var named_fields: List<NamedPatternField> = []
-                var rest = false
+                let mut named_fields: List<NamedPatternField> = []
+                let mut rest = false
                 while !self.check(TokenKind::TkRBrace) && !self.at_end() {
                     if self.check(TokenKind::TkDotDot) {
                         self.advance()
@@ -1638,7 +1638,7 @@ impl Parser {
                     }
                     let f_start = self.current_span_start()
                     let f_name = self.expect(TokenKind::TkIdent).value
-                    var pat = Pattern::Binding { name: f_name, span: self.make_span(f_start, self.current_span_start()) }
+                    let mut pat = Pattern::Binding { name: f_name, span: self.make_span(f_start, self.current_span_start()) }
                     if self.try_consume(TokenKind::TkColon) {
                         pat = self.parse_pattern()
                     }
@@ -1665,7 +1665,7 @@ impl Parser {
                 self.error("Expected ',' in tuple pattern - single-element tuple patterns not supported")
             }
             self.advance()
-            var elements = [first]
+            let mut elements = [first]
             if !self.check(TokenKind::TkRParen) {
                 elements.push(self.parse_pattern())
                 while self.try_consume(TokenKind::TkComma) {
@@ -1684,13 +1684,13 @@ impl Parser {
     // Handle expression
     // ============================================================
 
-    fn parse_handle_expr(var self) -> Expr {
+    fn parse_handle_expr(mut self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkHandle)
         let body = self.parse_block_expr()
         self.expect(TokenKind::TkWith)
         self.expect(TokenKind::TkLBrace)
-        var handlers: List<EffectHandler> = []
+        let mut handlers: List<EffectHandler> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             handlers.push(self.parse_effect_handler())
             self.try_consume(TokenKind::TkComma)
@@ -1700,7 +1700,7 @@ impl Parser {
         Expr::HandleExpr { body: body, handlers: handlers, span: self.make_span(start, end) }
     }
 
-    fn parse_effect_handler(var self) -> EffectHandler {
+    fn parse_effect_handler(mut self) -> EffectHandler {
         let start = self.current_span_start()
         let effect_name = self.expect(TokenKind::TkIdent).value
         self.expect(TokenKind::TkDot)
@@ -1718,13 +1718,13 @@ impl Parser {
     // Lambda expression
     // ============================================================
 
-    fn parse_lambda_expr(var self) -> Expr {
+    fn parse_lambda_expr(mut self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkFn)
         self.expect(TokenKind::TkLParen)
         let params = self.parse_params()
         self.expect(TokenKind::TkRParen)
-        var return_type: TypeExpr? = none
+        let mut return_type: TypeExpr? = none
         if self.try_consume(TokenKind::TkArrow) {
             return_type = some(self.parse_type_expr())
         }
@@ -1737,10 +1737,10 @@ impl Parser {
     // Struct literal
     // ============================================================
 
-    fn parse_struct_literal(var self, name: Str, start: Position, qualifier: Str?) -> Expr {
+    fn parse_struct_literal(mut self, name: Str, start: Position, qualifier: Str?) -> Expr {
         self.expect(TokenKind::TkLBrace)
-        var fields: List<StructFieldInit> = []
-        var spread: Expr? = none
+        let mut fields: List<StructFieldInit> = []
+        let mut spread: Expr? = none
         if self.check(TokenKind::TkDotDot) {
             self.advance()
             spread = some(self.parse_expr())
@@ -1749,7 +1749,7 @@ impl Parser {
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let f_start = self.current_span_start()
             let f_name = self.expect(TokenKind::TkIdent).value
-            var f_value = Expr::Ident { name: f_name, qualifier: none, span: self.make_span(f_start, self.current_span_start()) }
+            let mut f_value = Expr::Ident { name: f_name, qualifier: none, span: self.make_span(f_start, self.current_span_start()) }
             if self.try_consume(TokenKind::TkColon) {
                 f_value = self.parse_expr()
             }
@@ -1773,13 +1773,13 @@ impl Parser {
     // Type Expressions
     // ============================================================
 
-    pub fn try_parse_type_args(var self) -> List<TypeExpr> {
+    pub fn try_parse_type_args(mut self) -> List<TypeExpr> {
         if !self.check(TokenKind::TkLt) { return [] }
         let save_pos = self.pos
         let save_errors = self.error_count
         let sink_checkpoint = self.sink.save()
         self.advance()
-        var args: List<TypeExpr> = []
+        let mut args: List<TypeExpr> = []
         args.push(self.parse_type_expr())
         while self.try_consume(TokenKind::TkComma) {
             args.push(self.parse_type_expr())
@@ -1794,7 +1794,7 @@ impl Parser {
         args
     }
 
-    pub fn parse_type_expr(var self) -> TypeExpr {
+    pub fn parse_type_expr(mut self) -> TypeExpr {
         let start = self.current_span_start()
 
         if self.check(TokenKind::TkLBrace) {
@@ -1804,7 +1804,7 @@ impl Parser {
         if self.check(TokenKind::TkFn) {
             self.advance()
             self.expect(TokenKind::TkLParen)
-            var params: List<TypeExpr> = []
+            let mut params: List<TypeExpr> = []
             if !self.check(TokenKind::TkRParen) {
                 params.push(self.parse_type_expr())
                 while self.try_consume(TokenKind::TkComma) {
@@ -1815,7 +1815,7 @@ impl Parser {
             self.expect(TokenKind::TkRParen)
             self.expect(TokenKind::TkArrow)
             let return_type = self.parse_type_expr()
-            var fn_effects: List<EffectExpr> = []
+            let mut fn_effects: List<EffectExpr> = []
             if self.check(TokenKind::TkWith) {
                 fn_effects = self.parse_effect_annotation()
             }
@@ -1828,7 +1828,7 @@ impl Parser {
             let first = self.parse_type_expr()
             if self.check(TokenKind::TkComma) {
                 self.advance()
-                var elements = [first]
+                let mut elements = [first]
                 if !self.check(TokenKind::TkRParen) {
                     elements.push(self.parse_type_expr())
                     while self.check(TokenKind::TkComma) {
@@ -1847,7 +1847,7 @@ impl Parser {
         if self.check(TokenKind::TkSuper) {
             self.advance()
             self.expect(TokenKind::TkColonColon)
-            var qualifier_parts: List<Str> = ["super"]
+            let mut qualifier_parts: List<Str> = ["super"]
             while self.check(TokenKind::TkSuper) {
                 qualifier_parts.push("super")
                 self.advance()
@@ -1856,7 +1856,7 @@ impl Parser {
             let type_name = self.expect(TokenKind::TkIdent).value
             let type_args = self.try_parse_type_args()
             let end = self.current_span_start()
-            var result: TypeExpr = TypeExpr::Named { name: type_name, qualifier: some(qualifier_parts.join("::")), type_args: type_args, span: self.make_span(start, end) }
+            let mut result: TypeExpr = TypeExpr::Named { name: type_name, qualifier: some(qualifier_parts.join("::")), type_args: type_args, span: self.make_span(start, end) }
             if self.try_consume(TokenKind::TkQuestion) {
                 let opt_end = self.current_span_start()
                 result = TypeExpr::OptionType { inner: result, span: self.make_span(start, opt_end) }
@@ -1865,8 +1865,8 @@ impl Parser {
         }
 
         let name = self.expect(TokenKind::TkIdent).value
-        var qualifier: Str? = none
-        var actual_name = name
+        let mut qualifier: Str? = none
+        let mut actual_name = name
 
         if self.check(TokenKind::TkColonColon) {
             self.advance()
@@ -1878,7 +1878,7 @@ impl Parser {
         let type_args = self.try_parse_type_args()
 
         let end = self.current_span_start()
-        var result: TypeExpr = TypeExpr::Named { name: actual_name, qualifier: qualifier, type_args: type_args, span: self.make_span(start, end) }
+        let mut result: TypeExpr = TypeExpr::Named { name: actual_name, qualifier: qualifier, type_args: type_args, span: self.make_span(start, end) }
 
         if self.try_consume(TokenKind::TkQuestion) {
             let opt_end = self.current_span_start()
@@ -1888,11 +1888,11 @@ impl Parser {
         result
     }
 
-    fn parse_record_type_expr(var self) -> TypeExpr {
+    fn parse_record_type_expr(mut self) -> TypeExpr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkLBrace)
-        var fields: List<RecordTypeField> = []
-        var rest: Str? = none
+        let mut fields: List<RecordTypeField> = []
+        let mut rest: Str? = none
 
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             if self.check(TokenKind::TkDotDot) {
@@ -1921,14 +1921,14 @@ impl Parser {
     // Type Params: <T, U: Constraint>
     // ============================================================
 
-    pub fn parse_type_params(var self) -> List<TypeParam> {
+    pub fn parse_type_params(mut self) -> List<TypeParam> {
         if !self.check(TokenKind::TkLt) { return [] }
         self.advance()
-        var params: List<TypeParam> = []
+        let mut params: List<TypeParam> = []
         while !self.check(TokenKind::TkGt) && !self.at_end() {
             let tp_start = self.current_span_start()
             let name = self.expect(TokenKind::TkIdent).value
-            var bounds: List<TypeBound> = []
+            let mut bounds: List<TypeBound> = []
             if self.try_consume(TokenKind::TkColon) {
                 bounds.push(self.parse_type_bound())
                 while self.check(TokenKind::TkPlus) {
@@ -1944,7 +1944,7 @@ impl Parser {
         params
     }
 
-    pub fn parse_type_bound(var self) -> TypeBound {
+    pub fn parse_type_bound(mut self) -> TypeBound {
         let start = self.current_span_start()
         let trait_name = self.expect(TokenKind::TkIdent).value
         let type_args = self.try_parse_type_args()
@@ -1956,8 +1956,8 @@ impl Parser {
     // Parameters
     // ============================================================
 
-    pub fn parse_params(var self) -> List<Param> {
-        var params: List<Param> = []
+    pub fn parse_params(mut self) -> List<Param> {
+        let mut params: List<Param> = []
         if self.check(TokenKind::TkRParen) { return params }
         params.push(self.parse_param())
         while self.try_consume(TokenKind::TkComma) {
@@ -1967,9 +1967,9 @@ impl Parser {
         params
     }
 
-    pub fn parse_param(var self) -> Param {
+    pub fn parse_param(mut self) -> Param {
         let start = self.current_span_start()
-        var is_mutable = false
+        let mut is_mutable = false
         if self.check(TokenKind::TkVar) {
             self.advance()
             is_mutable = true
@@ -1978,7 +1978,7 @@ impl Parser {
             is_mutable = true
         }
         let name = self.expect(TokenKind::TkIdent).value
-        var type_annotation: TypeExpr? = none
+        let mut type_annotation: TypeExpr? = none
         if self.try_consume(TokenKind::TkColon) {
             type_annotation = some(self.parse_type_expr())
         }

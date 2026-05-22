@@ -114,7 +114,7 @@ impl CollectingSink {
         self.items.len()
     }
 
-    pub fn restore(var self, checkpoint: Int) {
+    pub fn restore(mut self, checkpoint: Int) {
         self.items = self.items.slice(0, checkpoint)
     }
 }

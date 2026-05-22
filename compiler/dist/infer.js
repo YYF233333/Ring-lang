@@ -678,7 +678,7 @@ function check_assign_target_mutable(ctx, target) {
             if (__ring_m35._tag === "some") {
               const did = __ring_m35._0;
               if ((!_Set_contains(ctx.env.scope.mutable_vars, did))) {
-                const _ = infer_ctx$type_error(ctx.sink, codes$E0205, `Cannot assign to immutable variable '${name}' (declared with 'let'). Use 'var' for mutable bindings.`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`'${name}' is declared with 'let'`)));
+                const _ = infer_ctx$type_error(ctx.sink, codes$E0205, `Cannot assign to immutable variable '${name}' (declared with 'let'). Use 'let mut' for mutable bindings.`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`'${name}' is declared with 'let'`)));
               }
               break __ring_match35;
             }
@@ -713,7 +713,7 @@ function check_assign_target_mutable(ctx, target) {
                 if (__ring_m38._tag === "some") {
                   const did = __ring_m38._0;
                   if ((!_Set_contains(ctx.env.scope.mutable_vars, did))) {
-                    const _ = infer_ctx$type_error(ctx.sink, codes$E0205, `Cannot assign to field of immutable variable '${name}'. Use 'var' for mutable bindings.`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`'${name}' is not mutable`)));
+                    const _ = infer_ctx$type_error(ctx.sink, codes$E0205, `Cannot assign to field of immutable variable '${name}'. Use 'let mut' for mutable bindings.`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`'${name}' is not mutable`)));
                   }
                   break __ring_match38;
                 }

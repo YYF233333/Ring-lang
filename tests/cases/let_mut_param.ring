@@ -15,13 +15,13 @@ fn main() {
     assert(result == 10, "mut param allows local reassignment")
 
     // mut list param — list is reference type, caller sees changes
-    var items: List<Int> = []
+    let mut items: List<Int> = []
     accumulate(items, 42)
     assert(items.len() == 1, "mut list param modifies caller list")
     assert(items.get(0).unwrap_or(-1) == 42, "mut list param has correct value")
 
     // var param still works (backward compat)
-    var n = 100
+    let mut n = 100
     let r2 = double_in_place(n)
     assert(r2 == 200, "var param still works")
 

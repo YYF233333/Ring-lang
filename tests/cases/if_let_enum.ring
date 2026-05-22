@@ -34,7 +34,7 @@ fn main() {
 
     // Nested option with if-let
     let opt: Option<Int> = some(42)
-    var found = 0
+    let mut found = 0
     if let some(v) = opt {
         found = v
     }

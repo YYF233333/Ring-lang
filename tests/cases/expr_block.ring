@@ -31,9 +31,9 @@ fn main() {
     }
     assert(nested == 60, "nested blocks")
 
-    // Block with var mutation
+    // Block with let mut mutation
     let counted = {
-        var c = 0
+        let mut c = 0
         c = c + 1
         c = c + 1
         c = c + 1

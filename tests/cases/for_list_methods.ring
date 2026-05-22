@@ -3,7 +3,7 @@
 fn main() {
     // for..in over list
     let xs = [10, 20, 30]
-    var sum = 0
+    let mut sum = 0
     for x in xs {
         sum = sum + x
     }
@@ -11,7 +11,7 @@ fn main() {
 
     // for..in with break
     let ys = [1, 2, 3, 4, 5]
-    var first_gt3 = 0
+    let mut first_gt3 = 0
     for y in ys {
         if y > 3 {
             first_gt3 = y
@@ -21,7 +21,7 @@ fn main() {
     assert(first_gt3 == 4, "for in list with break")
 
     // for..in with continue
-    var even_sum = 0
+    let mut even_sum = 0
     for z in [1, 2, 3, 4, 5, 6] {
         if z % 2 != 0 { continue }
         even_sum = even_sum + z
@@ -30,7 +30,7 @@ fn main() {
 
     // for..in over Set
     let s = set_from([10, 20, 30])
-    var set_sum = 0
+    let mut set_sum = 0
     for item in s {
         set_sum = set_sum + item
     }
@@ -38,7 +38,7 @@ fn main() {
 
     // Nested for..in
     let grid = [[1, 2], [3, 4]]
-    var total = 0
+    let mut total = 0
     for row in grid {
         for val in row {
             total = total + val

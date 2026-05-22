@@ -146,10 +146,10 @@ struct CliArgs {
 }
 
 fn parse_cli_args(args: List<Str>) -> CliArgs {
-    var debug = false
-    var error_format = "human"
-    var out_dir = "dist"
-    var positional: List<Str> = [""]; positional.clear()
+    let mut debug = false
+    let mut error_format = "human"
+    let mut out_dir = "dist"
+    let mut positional: List<Str> = [""]; positional.clear()
 
     for arg in args {
         if arg == "--debug" {

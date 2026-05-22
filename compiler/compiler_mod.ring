@@ -38,9 +38,9 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
     match build_module_graph(entry_file) {
         none => none,
         some(graph) => {
-            var module_asts: Map<Str, Program> = map_new()
-            var module_hirs: Map<Str, HProgram> = map_new()
-            var module_exports_map: Map<Str, ModuleExports> = map_new()
+            let mut module_asts: Map<Str, Program> = map_new()
+            let mut module_hirs: Map<Str, HProgram> = map_new()
+            let mut module_exports_map: Map<Str, ModuleExports> = map_new()
 
             // Use cached ASTs from resolver (already parsed during graph construction)
             for key in graph.topo_order {
@@ -51,7 +51,7 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
             }
 
             // Check all modules in topological order
-            var check_ok = true
+            let mut check_ok = true
             for key in graph.topo_order {
                 if check_ok {
                     match module_asts.get(key) {
@@ -61,7 +61,7 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
                                 some(dk) => dk,
                                 none => empty_str_list(),
                             }
-                            var dep_exports: List<ModuleExports> = empty_module_exports_list()
+                            let mut dep_exports: List<ModuleExports> = empty_module_exports_list()
                             for dk in deps {
                                 match module_exports_map.get(dk) {
                                     some(e) => dep_exports.push(e),
@@ -110,8 +110,8 @@ pub fn compile_project(entry_file: Str) -> CompileProjectResult {
         none => CompileProjectResult { js: "", success: false },
         some(phases) => {
             let entry_key = module_key(phases.graph.entry.path_segments)
-            var js_parts: List<Str> = [""]; js_parts.clear()
-            var is_first = true
+            let mut js_parts: List<Str> = [""]; js_parts.clear()
+            let mut is_first = true
 
             for key in phases.graph.topo_order {
                 match (phases.graph.modules.get(key), phases.module_hirs.get(key)) {
@@ -154,7 +154,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
             let runtime_path = path_join(out_dir, "__ring_runtime.js")
             write_file(runtime_path, runtime_esm_code())
 
-            var entry_js_path = ""
+            let mut entry_js_path = ""
 
             for key in phases.graph.topo_order {
                 match (phases.graph.modules.get(key), phases.module_hirs.get(key), phases.module_asts.get(key)) {
@@ -168,7 +168,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         let eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key)
 
                         // Build import lines (runtime + cross-module)
-                        var import_lines: List<Str> = [""]; import_lines.clear()
+                        let mut import_lines: List<Str> = [""]; import_lines.clear()
                         let runtime_names = RUNTIME_EXPORT_NAMES
                         let rnames_joined = runtime_names.join(", ")
                         import_lines.push("import { ${rnames_joined} } from \"./__ring_runtime.js\";")
@@ -180,10 +180,10 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                                 (some(dep_exports), some(dep_mod)) => {
                                     let dep_prefix = dep_exports.module_prefix
                                     let dep_js = path_basename(dep_mod.file_path.replace(".ring", ".js"))
-                                    var import_pairs: List<Str> = [""]; import_pairs.clear()
+                                    let mut import_pairs: List<Str> = [""]; import_pairs.clear()
 
                                     // Collect bare variant names (no JS declaration)
-                                    var bare_variants: Set<Str> = set_new()
+                                    let mut bare_variants: Set<Str> = set_new()
                                     for tentry in dep_exports.types.entries() {
                                         let (_, tdef) = tentry
                                         match tdef {
@@ -296,7 +296,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         }
 
                         // Build export names
-                        var export_names: List<Str> = [""]; export_names.clear()
+                        let mut export_names: List<Str> = [""]; export_names.clear()
                         // Pass 1: pub fn/struct/enum/const declarations
                         for decl in ast.decls {
                             match decl {
@@ -339,7 +339,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         for decl in ast.decls {
                             match decl {
                                 Decl::Impl { target_type, trait_name: impl_trait, methods, .. } => {
-                                    var is_pub_type = false
+                                    let mut is_pub_type = false
                                     for d in ast.decls {
                                         match d {
                                             Decl::Struct { name: dn, is_pub: dp, .. } => { if dn == target_type && dp { is_pub_type = true } },
@@ -369,7 +369,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
 
                         // Auto-derive dict exports
                         for di in hir.derived_impls {
-                            var is_pub_type2 = false
+                            let mut is_pub_type2 = false
                             for d in ast.decls {
                                 match d {
                                     Decl::Struct { name: dn, is_pub: dp, .. } => { if dn == di.type_name && dp { is_pub_type2 = true } },
@@ -383,7 +383,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         }
 
                         // Pub use re-exports
-                        var reexport_aliases: List<Str> = [""]; reexport_aliases.clear()
+                        let mut reexport_aliases: List<Str> = [""]; reexport_aliases.clear()
                         for use_decl in ast.uses {
                             if use_decl.is_pub {
                                 let src_key = use_decl.path.segments.join("::")
@@ -488,7 +488,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
 // ============================================================
 
 fn build_imports_map(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, Str> {
-    var imports_map: Map<Str, Str> = map_new()
+    let mut imports_map: Map<Str, Str> = map_new()
     match graph.dependencies.get(key) {
         some(deps) => {
             for dk in deps {
@@ -497,7 +497,7 @@ fn build_imports_map(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, k
                         let dep_prefix = dep_exports.module_prefix
 
                         // Collect bare variant names (no JS declaration)
-                        var bare_variants: Set<Str> = set_new()
+                        let mut bare_variants: Set<Str> = set_new()
                         for tentry in dep_exports.types.entries() {
                             let (_, tdef) = tentry
                             match tdef {
@@ -552,7 +552,7 @@ fn build_imports_map(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, k
 }
 
 fn build_external_struct_fields(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, List<Str>> {
-    var result: Map<Str, List<Str>> = map_new()
+    let mut result: Map<Str, List<Str>> = map_new()
     match graph.dependencies.get(key) {
         some(deps) => {
             for dk in deps {
@@ -583,7 +583,7 @@ fn empty_str_list() -> List<Str> {
 }
 
 fn build_external_impl_methods(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, Str?> {
-    var result: Map<Str, Str?> = map_new()
+    let mut result: Map<Str, Str?> = map_new()
     match graph.dependencies.get(key) {
         some(deps) => {
             for dk in deps {

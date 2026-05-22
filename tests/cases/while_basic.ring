@@ -1,6 +1,6 @@
 fn main() {
-    var i = 0
-    var sum = 0
+    let mut i = 0
+    let mut sum = 0
     while i < 5 {
         sum += i
         i += 1

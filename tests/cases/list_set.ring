@@ -1,5 +1,5 @@
 fn main() {
-    var xs = [10, 20, 30]
+    let mut xs = [10, 20, 30]
     xs.set(1, 99)
     assert(xs.get(1) == some(99), "set middle element")
 

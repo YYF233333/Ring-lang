@@ -177,8 +177,8 @@ pub fn new_lexer(source: Str, file: Str, sink: CollectingSink) -> Lexer {
 }
 
 impl Lexer {
-    pub fn tokenize(var self) -> List<Token> {
-        var tokens: List<Token> = []
+    pub fn tokenize(mut self) -> List<Token> {
+        let mut tokens: List<Token> = []
         while true {
             let tok = self.next_token()
             let is_eof = match tok.kind { TkEof => true, _ => false }
@@ -188,7 +188,7 @@ impl Lexer {
         tokens
     }
 
-    pub fn next_token(var self) -> Token {
+    pub fn next_token(mut self) -> Token {
         self.skip_whitespace_and_comments()
 
         if self.pos >= self.source.len() {
@@ -229,18 +229,18 @@ impl Lexer {
     // String lexing
     // ============================================================
 
-    fn lex_string(var self, start: Position) -> Token {
+    fn lex_string(mut self, start: Position) -> Token {
         self.advance()
         self.lex_string_body(start, true)
     }
 
-    fn lex_string_continuation(var self) -> Token {
+    fn lex_string_continuation(mut self) -> Token {
         let start = self.current_position()
         self.lex_string_body(start, false)
     }
 
-    fn lex_string_body(var self, start: Position, is_new: Bool) -> Token {
-        var value = ""
+    fn lex_string_body(mut self, start: Position, is_new: Bool) -> Token {
+        let mut value = ""
         while self.pos < self.source.len() {
             let ch = self.peek()
             if ch == "\"" {
@@ -291,7 +291,7 @@ impl Lexer {
         self.make_token(TokenKind::TkError, value, start, end)
     }
 
-    fn lex_raw_string(var self, start: Position) -> Token {
+    fn lex_raw_string(mut self, start: Position) -> Token {
         self.advance()
         if self.peek() != "#" {
             let end = self.current_position()
@@ -305,7 +305,7 @@ impl Lexer {
             return self.make_token(TokenKind::TkIdent, "r", start, end)
         }
         self.advance()
-        var value = ""
+        let mut value = ""
         while self.pos < self.source.len() {
             let ch = self.peek()
             if ch == "\"" && self.pos + 1 < self.source.len() && self.source.char_at(self.pos + 1).unwrap_or("") == "#" {
@@ -327,9 +327,9 @@ impl Lexer {
     // Number lexing
     // ============================================================
 
-    fn lex_number(var self, start: Position) -> Token {
-        var value = ""
-        var is_float = false
+    fn lex_number(mut self, start: Position) -> Token {
+        let mut value = ""
+        let mut is_float = false
 
         while self.pos < self.source.len() && is_digit(self.peek()) {
             value = "${value}${self.peek()}"
@@ -358,8 +358,8 @@ impl Lexer {
     // Identifier / Keyword lexing
     // ============================================================
 
-    fn lex_ident(var self, start: Position) -> Token {
-        var value = ""
+    fn lex_ident(mut self, start: Position) -> Token {
+        let mut value = ""
         while self.pos < self.source.len() && is_ident_continue(self.peek()) {
             value = "${value}${self.peek()}"
             self.advance()
@@ -373,7 +373,7 @@ impl Lexer {
     // Punctuation / Operators
     // ============================================================
 
-    fn lex_punctuation(var self, start: Position) -> Token {
+    fn lex_punctuation(mut self, start: Position) -> Token {
         let ch = self.peek()
         self.advance()
 
@@ -459,7 +459,7 @@ impl Lexer {
     // Helpers
     // ============================================================
 
-    fn skip_whitespace_and_comments(var self) {
+    fn skip_whitespace_and_comments(mut self) {
         while self.pos < self.source.len() {
             let ch = self.peek()
             if ch == " " || ch == "\t" || ch == "\r" {
@@ -480,7 +480,7 @@ impl Lexer {
         self.source.char_at(self.pos).unwrap_or("")
     }
 
-    fn advance(var self) {
+    fn advance(mut self) {
         if self.pos < self.source.len() {
             if self.source.char_at(self.pos).unwrap_or("") == "\n" {
                 self.line = self.line + 1
@@ -504,17 +504,17 @@ impl Lexer {
         }
     }
 
-    fn inc_last_depth(var self) {
+    fn inc_last_depth(mut self) {
         let val = self.interp_brace_depth.pop().unwrap_or(0)
         self.interp_brace_depth.push(val + 1)
     }
 
-    fn dec_last_depth(var self) {
+    fn dec_last_depth(mut self) {
         let val = self.interp_brace_depth.pop().unwrap_or(0)
         self.interp_brace_depth.push(val - 1)
     }
 
-    fn reset_last_depth(var self) {
+    fn reset_last_depth(mut self) {
         self.interp_brace_depth.pop()
         self.interp_brace_depth.push(0)
     }

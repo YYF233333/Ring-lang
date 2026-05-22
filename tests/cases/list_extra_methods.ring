@@ -8,12 +8,12 @@ fn main() {
     assert(["a", "b"].join("") == "ab", "join empty sep")
 
     // sort (in-place, default JS lexicographic)
-    var nums = ["c", "a", "b"]
+    let mut nums = ["c", "a", "b"]
     nums.sort()
     assert(nums.join(",") == "a,b,c", "sort strings")
 
     // sort numeric (must NOT do lexicographic)
-    var ints = [10, 2, 1, 20, 3]
+    let mut ints = [10, 2, 1, 20, 3]
     ints.sort()
     match ints.get(0) {
         some(v) => assert(v == 1, "sort ints first"),
@@ -25,7 +25,7 @@ fn main() {
     }
 
     // shift (remove first element)
-    var queue = [10, 20, 30]
+    let mut queue = [10, 20, 30]
     let first = queue.shift()
     match first {
         some(v) => assert(v == 10, "shift returns first"),

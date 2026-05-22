@@ -6,7 +6,7 @@ fn main() {
     assert(b.len() == 5, "concat result has all")
 
     // extend mutates in-place
-    var c = [1, 2, 3]
+    let mut c = [1, 2, 3]
     c.extend([4, 5])
     assert(c.len() == 5, "extend mutated")
 

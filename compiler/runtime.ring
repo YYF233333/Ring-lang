@@ -1,5 +1,5 @@
 pub fn RUNTIME_CODE() -> Str {
-    var lines: List<Str> = [""]
+    let mut lines: List<Str> = [""]
     lines.clear()
     lines.push("import { createRequire as __cr } from \"node:module\";")
     lines.push("const __require = __cr(import.meta.url);")

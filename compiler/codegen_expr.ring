@@ -16,7 +16,7 @@ use codegen_stmt::{gen_pattern_condition, gen_pattern_bindings,
 // Main expression dispatch
 // ============================================================
 
-pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
+pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
     match expr {
         HExpr::IntLit { value, .. } => value.to_str(),
         HExpr::FloatLit { value, .. } => value.to_str(),
@@ -32,11 +32,11 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
                     if dicts.len() > 0 {
                         match ty {
                             Type::FnType { params, effects, .. } => {
-                                var p_names: List<Str> = [""]; p_names.clear()
+                                let mut p_names: List<Str> = [""]; p_names.clear()
                                 for i in 0..params.len() { p_names.push("__ring_a${i}") }
                                 let dict_args = dicts.join(", ")
                                 let ev_args = get_callee_evidence_args(ctx, ty, none)
-                                var all_call: List<Str> = [""]; all_call.clear()
+                                let mut all_call: List<Str> = [""]; all_call.clear()
                                 all_call.extend(p_names)
                                 all_call.push(dict_args)
                                 if ev_args.len() > 0 { all_call.push(ev_args) }
@@ -90,7 +90,7 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
             gen_lambda(ctx, params, body, ty),
         HExpr::EffectOp { effect_name, op_name, args, .. } => {
             let ev_name = evidence_param_name(effect_name)
-            var arg_strs: List<Str> = [""]; arg_strs.clear()
+            let mut arg_strs: List<Str> = [""]; arg_strs.clear()
             for a in args { arg_strs.push(gen_expr(ctx, a)) }
             let joined = arg_strs.join(", ")
             "${ev_name}.${op_name}(${joined})"
@@ -101,13 +101,13 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
             "{ start: ${s}, end: ${e} }"
         },
         HExpr::ListLit { elements, .. } => {
-            var elems: List<Str> = [""]; elems.clear()
+            let mut elems: List<Str> = [""]; elems.clear()
             for e in elements { elems.push(gen_expr(ctx, e)) }
             let joined = elems.join(", ")
             "[${joined}]"
         },
         HExpr::TupleLit { elements, .. } => {
-            var elems: List<Str> = [""]; elems.clear()
+            let mut elems: List<Str> = [""]; elems.clear()
             for e in elements { elems.push(gen_expr(ctx, e)) }
             let joined = elems.join(", ")
             "[${joined}]"
@@ -119,7 +119,7 @@ pub fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str {
 // BinOp — eq/ord dispatch extracted before fallback
 // ============================================================
 
-fn gen_binop(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?, ord_dispatch: TraitDispatch?) -> Str {
+fn gen_binop(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?, ord_dispatch: TraitDispatch?) -> Str {
     // Check eq dispatch: unwrap option, check op, early return
     match try_eq_dispatch(ctx, op, left, right, eq_dispatch) {
         some(result) => { return result },
@@ -141,7 +141,7 @@ fn gen_binop(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispa
     "(${l} ${js_op} ${r})"
 }
 
-fn try_eq_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?) -> Str? {
+fn try_eq_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?) -> Str? {
     match eq_dispatch {
         some(dispatch) => {
             let is_eq_op = op == BinOp::Eq || op == BinOp::Neq
@@ -154,7 +154,7 @@ fn try_eq_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, eq
     none
 }
 
-fn try_ord_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, ord_dispatch: TraitDispatch?) -> Str? {
+fn try_ord_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, ord_dispatch: TraitDispatch?) -> Str? {
     match ord_dispatch {
         some(dispatch) => {
             let is_ord_op = op == BinOp::Lt || op == BinOp::Gt || op == BinOp::Lte || op == BinOp::Gte
@@ -189,7 +189,7 @@ fn is_tuple_field(s: Str) -> Bool {
 // Eq / Ord dispatch
 // ============================================================
 
-fn gen_eq_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {
+fn gen_eq_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {
     let l = gen_expr(ctx, left)
     let r = gen_expr(ctx, right)
     let is_ne = op == BinOp::Neq
@@ -209,7 +209,7 @@ fn gen_eq_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, di
     }
 }
 
-fn gen_ord_dispatch(var ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {
+fn gen_ord_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> Str {
     let l = gen_expr(ctx, left)
     let r = gen_expr(ctx, right)
 
@@ -268,7 +268,7 @@ fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str
             match ctx.local_fn_effects.get(cn) {
                 some(actual_effects) => {
                     if actual_effects.effects.len() > 0 {
-                        var caller_effect_names = set_new()
+                        let mut caller_effect_names = set_new()
                         match ctx.current_fn_effects {
                             some(cfe) => {
                                 for e in cfe.effects {
@@ -278,7 +278,7 @@ fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str
                             none => {},
                         }
                         if ctx.in_try_fail { caller_effect_names.insert("fail") }
-                        var needed: List<Effect> = [Effect::IoEffect]; needed.clear()
+                        let mut needed: List<Effect> = [Effect::IoEffect]; needed.clear()
                         for e in actual_effects.effects {
                             if caller_effect_names.contains(effect_kind_name(e)) {
                                 needed.push(e)
@@ -297,7 +297,7 @@ fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str
     ""
 }
 
-fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<Str>, dict_dispatch: DictDispatchInfo?) -> Str {
+fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<Str>, dict_dispatch: DictDispatchInfo?) -> Str {
     match dict_dispatch {
         some(dd) => {
             let receiver_arg = match callee {
@@ -309,9 +309,9 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                     }
                 },
             }
-            var other_args: List<Str> = [""]; other_args.clear()
+            let mut other_args: List<Str> = [""]; other_args.clear()
             for a in args { other_args.push(gen_expr(ctx, a)) }
-            var all: List<Str> = [""]; all.clear()
+            let mut all: List<Str> = [""]; all.clear()
             all.push(receiver_arg)
             all.extend(other_args)
             let all_str = all.join(", ")
@@ -457,17 +457,17 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                                 none => "${qualify(ctx, tn)}_${safe_ident(method)}",
                             }
                             let r = gen_expr(ctx, receiver)
-                            var arg_strs: List<Str> = [""]; arg_strs.clear()
+                            let mut arg_strs: List<Str> = [""]; arg_strs.clear()
                             for a in args { arg_strs.push(gen_expr(ctx, a)) }
                             let all_args = if arg_strs.len() > 0 {
                                 let joined = arg_strs.join(", ")
                                 "${r}, ${joined}"
                             } else { r }
-                            var dict_parts: List<Str> = [""]; dict_parts.clear()
+                            let mut dict_parts: List<Str> = [""]; dict_parts.clear()
                             for d in resolved_dicts { dict_parts.push(qualify(ctx, d)) }
                             let dict_str = dict_parts.join(", ")
                             let ev_args = get_callee_evidence_args(ctx, callee_type, none)
-                            var parts: List<Str> = [""]; parts.clear()
+                            let mut parts: List<Str> = [""]; parts.clear()
                             parts.push(all_args)
                             if dict_str.len() > 0 { parts.push(dict_str) }
                             if ev_args.len() > 0 { parts.push(ev_args) }
@@ -489,14 +489,14 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
         HExpr::Ident { name, .. } => some(name),
         _ => none,
     }
-    var arg_strs: List<Str> = [""]; arg_strs.clear()
+    let mut arg_strs: List<Str> = [""]; arg_strs.clear()
     for a in args { arg_strs.push(gen_expr(ctx, a)) }
     let args_str = arg_strs.join(", ")
-    var dict_parts: List<Str> = [""]; dict_parts.clear()
+    let mut dict_parts: List<Str> = [""]; dict_parts.clear()
     for d in resolved_dicts { dict_parts.push(qualify(ctx, d)) }
     let dict_str = dict_parts.join(", ")
     let ev_args = get_callee_evidence_args(ctx, hexpr_type(callee), cn)
-    var all_parts: List<Str> = [""]; all_parts.clear()
+    let mut all_parts: List<Str> = [""]; all_parts.clear()
     if args_str.len() > 0 { all_parts.push(args_str) }
     if dict_str.len() > 0 { all_parts.push(dict_str) }
     if ev_args.len() > 0 { all_parts.push(ev_args) }
@@ -506,7 +506,7 @@ fn gen_call(var ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
 
 // Helper: generate find expression with option wrapping
 fn gen_find_expr(receiver: Str, cb: Str) -> Str {
-    var p: List<Str> = [""]; p.clear()
+    let mut p: List<Str> = [""]; p.clear()
     p.push("((__a) => { const __i = __a.findIndex(")
     p.push(cb)
     p.push("); return __i >= 0 ? { _tag: \"some\", _0: __a[__i] } : { _tag: \"none\" }; })(")
@@ -517,7 +517,7 @@ fn gen_find_expr(receiver: Str, cb: Str) -> Str {
 
 // Helper: generate find_index expression with option wrapping
 fn gen_find_index_expr(receiver: Str, cb: Str) -> Str {
-    var p: List<Str> = [""]; p.clear()
+    let mut p: List<Str> = [""]; p.clear()
     p.push("((__a) => { const __i = __a.findIndex(")
     p.push(cb)
     p.push("); return __i >= 0 ? { _tag: \"some\", _0: __i } : { _tag: \"none\" }; })(")
@@ -528,7 +528,7 @@ fn gen_find_index_expr(receiver: Str, cb: Str) -> Str {
 
 // Helper: Option.map codegen
 fn gen_option_map_expr(receiver: Str, cb: Str) -> Str {
-    var p: List<Str> = [""]; p.clear()
+    let mut p: List<Str> = [""]; p.clear()
     p.push("((__o, __f) => __o._tag === \"some\" ? { _tag: \"some\", _0: __f(__o._0) } : __o)(")
     p.push(receiver)
     p.push(", ")
@@ -539,7 +539,7 @@ fn gen_option_map_expr(receiver: Str, cb: Str) -> Str {
 
 // Helper: Option.and_then codegen
 fn gen_option_and_then_expr(receiver: Str, cb: Str) -> Str {
-    var p: List<Str> = [""]; p.clear()
+    let mut p: List<Str> = [""]; p.clear()
     p.push("((__o, __f) => __o._tag === \"some\" ? __f(__o._0) : __o)(")
     p.push(receiver)
     p.push(", ")
@@ -550,7 +550,7 @@ fn gen_option_and_then_expr(receiver: Str, cb: Str) -> Str {
 
 // Helper: Option.unwrap_or_else codegen
 fn gen_option_unwrap_or_else_expr(receiver: Str, cb: Str) -> Str {
-    var p: List<Str> = [""]; p.clear()
+    let mut p: List<Str> = [""]; p.clear()
     p.push("((__o, __f) => __o._tag === \"some\" ? __o._0 : __f())(")
     p.push(receiver)
     p.push(", ")
@@ -563,16 +563,16 @@ fn gen_option_unwrap_or_else_expr(receiver: Str, cb: Str) -> Str {
 // Struct literal
 // ============================================================
 
-fn gen_struct_lit(var ctx: CodegenCtx, name: Str, fields: List<HStructFieldInit>, spread: HExpr?) -> Str {
+fn gen_struct_lit(mut ctx: CodegenCtx, name: Str, fields: List<HStructFieldInit>, spread: HExpr?) -> Str {
     let qname = qualify(ctx, name)
     match ctx.struct_field_order.get(qname) {
         some(declared_order) => {
-            var field_map: Map<Str, HExpr> = map_new()
+            let mut field_map: Map<Str, HExpr> = map_new()
             for f in fields { field_map.insert(f.name, f.value) }
             match spread {
                 some(sp) => gen_spread_struct(ctx, sp, qname, declared_order, field_map, true),
                 none => {
-                    var args: List<Str> = [""]; args.clear()
+                    let mut args: List<Str> = [""]; args.clear()
                     for fn_ in declared_order {
                         match field_map.get(fn_) {
                             some(v) => args.push(gen_expr(ctx, v)),
@@ -587,14 +587,14 @@ fn gen_struct_lit(var ctx: CodegenCtx, name: Str, fields: List<HStructFieldInit>
         none => {
             match spread {
                 some(sp) => {
-                    var field_map: Map<Str, HExpr> = map_new()
+                    let mut field_map: Map<Str, HExpr> = map_new()
                     for f in fields { field_map.insert(f.name, f.value) }
-                    var order: List<Str> = [""]; order.clear()
+                    let mut order: List<Str> = [""]; order.clear()
                     for f in fields { order.push(f.name) }
                     gen_spread_struct(ctx, sp, qname, order, field_map, true)
                 },
                 none => {
-                    var args: List<Str> = [""]; args.clear()
+                    let mut args: List<Str> = [""]; args.clear()
                     for f in fields { args.push(gen_expr(ctx, f.value)) }
                     let joined = args.join(", ")
                     "new ${qname}(${joined})"
@@ -604,7 +604,7 @@ fn gen_struct_lit(var ctx: CodegenCtx, name: Str, fields: List<HStructFieldInit>
     }
 }
 
-fn gen_spread_struct(var ctx: CodegenCtx, spread: HExpr, ctor_name: Str, field_order: List<Str>, field_map: Map<Str, HExpr>, use_new: Bool) -> Str {
+fn gen_spread_struct(mut ctx: CodegenCtx, spread: HExpr, ctor_name: Str, field_order: List<Str>, field_map: Map<Str, HExpr>, use_new: Bool) -> Str {
     let is_simple = match spread {
         HExpr::Ident { .. } => true,
         HExpr::FieldAccess { .. } => true,
@@ -612,7 +612,7 @@ fn gen_spread_struct(var ctx: CodegenCtx, spread: HExpr, ctor_name: Str, field_o
     }
     if is_simple {
         let base = gen_expr(ctx, spread)
-        var args: List<Str> = [""]; args.clear()
+        let mut args: List<Str> = [""]; args.clear()
         for fn_ in field_order {
             match field_map.get(fn_) {
                 some(v) => args.push(gen_expr(ctx, v)),
@@ -625,7 +625,7 @@ fn gen_spread_struct(var ctx: CodegenCtx, spread: HExpr, ctor_name: Str, field_o
         let joined = args.join(", ")
         if use_new { "new ${ctor_name}(${joined})" } else { "${ctor_name}(${joined})" }
     } else {
-        var args: List<Str> = [""]; args.clear()
+        let mut args: List<Str> = [""]; args.clear()
         for fn_ in field_order {
             match field_map.get(fn_) {
                 some(v) => args.push(gen_expr(ctx, v)),
@@ -646,9 +646,9 @@ fn gen_spread_struct(var ctx: CodegenCtx, spread: HExpr, ctor_name: Str, field_o
 // Named variant construct
 // ============================================================
 
-fn gen_named_variant_construct(var ctx: CodegenCtx, enum_name: Str, variant_name: Str, fields: List<HStructFieldInit>, spread: HExpr?, ty: Type) -> Str {
+fn gen_named_variant_construct(mut ctx: CodegenCtx, enum_name: Str, variant_name: Str, fields: List<HStructFieldInit>, spread: HExpr?, ty: Type) -> Str {
     let js_name = "${qualify(ctx, enum_name)}_${variant_name}"
-    var field_map: Map<Str, HExpr> = map_new()
+    let mut field_map: Map<Str, HExpr> = map_new()
     for f in fields { field_map.insert(f.name, f.value) }
 
     match ty {
@@ -660,7 +660,7 @@ fn gen_named_variant_construct(var ctx: CodegenCtx, enum_name: Str, variant_name
                             match spread {
                                 some(sp) => { return gen_spread_struct(ctx, sp, js_name, fnames, field_map, false) },
                                 none => {
-                                    var args: List<Str> = [""]; args.clear()
+                                    let mut args: List<Str> = [""]; args.clear()
                                     for n in fnames {
                                         match field_map.get(n) {
                                             some(v_) => args.push(gen_expr(ctx, v_)),
@@ -680,7 +680,7 @@ fn gen_named_variant_construct(var ctx: CodegenCtx, enum_name: Str, variant_name
         _ => {},
     }
 
-    var args: List<Str> = [""]; args.clear()
+    let mut args: List<Str> = [""]; args.clear()
     for f in fields { args.push(gen_expr(ctx, f.value)) }
     let joined = args.join(", ")
     "${js_name}(${joined})"
@@ -690,9 +690,9 @@ fn gen_named_variant_construct(var ctx: CodegenCtx, enum_name: Str, variant_name
 // Match expression (expression-mode — IIFE)
 // ============================================================
 
-fn gen_match(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> Str {
+fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> Str {
     let scrut = gen_expr(ctx, scrutinee)
-    var parts: List<Str> = [""]; parts.clear()
+    let mut parts: List<Str> = [""]; parts.clear()
     parts.push("(function() {")
     parts.push("  const __ring_m = ${scrut};")
 
@@ -715,7 +715,7 @@ fn gen_match(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
         }
     }
 
-    var has_catchall = false
+    let mut has_catchall = false
     for a in arms {
         match a.pattern {
             Pattern::Wildcard { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
@@ -736,7 +736,7 @@ fn gen_match(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
 // Block expression (expression-mode — IIFE)
 // ============================================================
 
-fn gen_block_expr(var ctx: CodegenCtx, stmts: List<HStmt>, tail: HExpr?, block: HExpr) -> Str {
+fn gen_block_expr(mut ctx: CodegenCtx, stmts: List<HStmt>, tail: HExpr?, block: HExpr) -> Str {
     match tail {
         some(t) => {
             if stmts.len() == 0 {
@@ -753,7 +753,7 @@ fn gen_block_expr(var ctx: CodegenCtx, stmts: List<HStmt>, tail: HExpr?, block: 
     let body_lines = ctx.lines
     ctx.lines = saved_lines
     ctx.indent_level = saved_indent
-    var result: List<Str> = [""]; result.clear()
+    let mut result: List<Str> = [""]; result.clear()
     result.push("(function() {")
     result.extend(body_lines)
     result.push("})()")
@@ -764,7 +764,7 @@ fn gen_block_expr(var ctx: CodegenCtx, stmts: List<HStmt>, tail: HExpr?, block: 
 // If expression (expression-mode — ternary)
 // ============================================================
 
-fn gen_if(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?) -> Str {
+fn gen_if(mut ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?) -> Str {
     let cond = gen_expr(ctx, condition)
     let then_val = gen_block_as_value(ctx, then_branch)
     match else_branch {
@@ -782,7 +782,7 @@ fn gen_if(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch
     }
 }
 
-fn gen_block_as_value(var ctx: CodegenCtx, block: HExpr) -> Str {
+fn gen_block_as_value(mut ctx: CodegenCtx, block: HExpr) -> Str {
     match block {
         HExpr::Block { stmts, tail, .. } => {
             match tail {
@@ -802,8 +802,8 @@ fn gen_block_as_value(var ctx: CodegenCtx, block: HExpr) -> Str {
 // ============================================================
 
 fn escape_for_template_literal(s: Str) -> Str {
-    var result: List<Str> = [""]; result.clear()
-    var i = 0
+    let mut result: List<Str> = [""]; result.clear()
+    let mut i = 0
     while i < s.len() {
         let ch = s.char_at(i).unwrap_or("")
         if ch == "\\" {
@@ -827,8 +827,8 @@ fn escape_for_template_literal(s: Str) -> Str {
     result.join("")
 }
 
-fn gen_string_interp(var ctx: CodegenCtx, parts: List<HStringInterpPart>) -> Str {
-    var result: List<Str> = [""]; result.clear()
+fn gen_string_interp(mut ctx: CodegenCtx, parts: List<HStringInterpPart>) -> Str {
+    let mut result: List<Str> = [""]; result.clear()
     result.push("`")
     for p in parts {
         match p {
@@ -861,7 +861,7 @@ fn gen_catch_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> St
             if ctx.struct_field_order.contains_key(name) {
                 let qualified_name = qualify(ctx, safe_ident(name))
                 let inst_check = "${target} instanceof ${qualified_name}"
-                var sub_conds: List<Str> = []
+                let mut sub_conds: List<Str> = []
                 for f in fields {
                     let sname = safe_ident(f.name)
                     let sub = gen_pattern_condition("${target}.${sname}", f.pattern)
@@ -881,7 +881,7 @@ fn gen_catch_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> St
     }
 }
 
-fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str {
+fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str {
     let body_has_fail = has_fail_effect(body)
     let saved_in_try = ctx.in_try_fail
     ctx.in_try_fail = true
@@ -893,14 +893,14 @@ fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
     let q = "\""
 
     // Generate arm code
-    var arm_js: List<Str> = []
+    let mut arm_js: List<Str> = []
     for arm in arms {
         let cond = gen_catch_pattern_condition(ctx, "__ring_err", arm.pattern)
         let bindings = gen_pattern_bindings("__ring_err", arm.pattern)
         let arm_body_js = gen_expr(ctx, arm.body)
 
         // Check for guard
-        var guard_js = ""
+        let mut guard_js = ""
         match arm.guard {
             some(g) => { guard_js = " && (${gen_expr(ctx, g)})" },
             none => {}
@@ -909,7 +909,7 @@ fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
         arm_js.push("if (${cond}${guard_js}) { ${bindings}return ${arm_body_js}; }")
     }
 
-    var p: List<Str> = []
+    let mut p: List<Str> = []
     p.push("(function() { const ")
     p.push(ev)
     p.push(" = { raise: (__ring_err) => { throw new ")
@@ -929,7 +929,7 @@ fn gen_try_catch(var ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
     p.push(") { const __ring_err = __ring_e.value; ")
 
     // Emit arm chain
-    var first = true
+    let mut first = true
     for aj in arm_js {
         if first { p.push(aj); first = false }
         else { p.push(" else ${aj}") }
@@ -987,8 +987,8 @@ fn check_fail(effects: EffectRow) -> Bool {
 // Handle expression
 // ============================================================
 
-fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) -> Str {
-    var by_effect: Map<Str, List<HEffectHandler>> = map_new()
+fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) -> Str {
+    let mut by_effect: Map<Str, List<HEffectHandler>> = map_new()
     for h in handlers {
         match by_effect.get(h.effect_name) {
             some(existing) => existing.push(h),
@@ -998,15 +998,15 @@ fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
         }
     }
 
-    var ev_decls: List<Str> = [""]; ev_decls.clear()
-    var has_abort = false
+    let mut ev_decls: List<Str> = [""]; ev_decls.clear()
+    let mut has_abort = false
     let q = "\""
 
     for entry in by_effect.entries() {
         let (effect_name, hs) = entry
-        var entries: List<Str> = [""]; entries.clear()
+        let mut entries: List<Str> = [""]; entries.clear()
         for h in hs {
-            var params: List<Str> = [""]; params.clear()
+            let mut params: List<Str> = [""]; params.clear()
             for p in h.params { params.push(safe_ident(p.name)) }
             let params_str = params.join(", ")
             let b = gen_expr(ctx, h.body)
@@ -1014,7 +1014,7 @@ fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
             if is_abort {
                 has_abort = true
                 let ea = RUNTIME_EFFECT_ABORT
-                var ep: List<Str> = [""]; ep.clear()
+                let mut ep: List<Str> = [""]; ep.clear()
                 ep.push(h.op_name)
                 ep.push(": (")
                 ep.push(params_str)
@@ -1029,7 +1029,7 @@ fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
                 ep.push("); }")
                 entries.push(ep.join(""))
             } else {
-                var ep: List<Str> = [""]; ep.clear()
+                let mut ep: List<Str> = [""]; ep.clear()
                 ep.push(h.op_name)
                 ep.push(": (")
                 ep.push(params_str)
@@ -1044,7 +1044,7 @@ fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
         ev_decls.push("const ${ev_name} = { ${entries_str} };")
     }
 
-    var ev_param_names: List<Str> = [""]; ev_param_names.clear()
+    let mut ev_param_names: List<Str> = [""]; ev_param_names.clear()
     for entry in by_effect.entries() {
         let (ename, _) = entry
         ev_param_names.push(evidence_param_name(ename))
@@ -1056,7 +1056,7 @@ fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
     let ea = RUNTIME_EFFECT_ABORT
 
     if has_abort {
-        var p: List<Str> = [""]; p.clear()
+        let mut p: List<Str> = [""]; p.clear()
         p.push("(function() { ")
         p.push(decls)
         p.push(" try { return ")
@@ -1070,7 +1070,7 @@ fn gen_handle(var ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
     }
 }
 
-fn gen_handle_body(var ctx: CodegenCtx, expr: HExpr, ev_params: Str) -> Str {
+fn gen_handle_body(mut ctx: CodegenCtx, expr: HExpr, ev_params: Str) -> Str {
     match expr {
         HExpr::Block { stmts, tail, .. } => {
             match tail {
@@ -1090,7 +1090,7 @@ fn gen_handle_body(var ctx: CodegenCtx, expr: HExpr, ev_params: Str) -> Str {
             let body_lines = ctx.lines
             ctx.lines = saved_lines
             ctx.indent_level = saved_indent
-            var result: List<Str> = [""]; result.clear()
+            let mut result: List<Str> = [""]; result.clear()
             result.push("(function(${ev_params}) {")
             result.extend(body_lines)
             result.push("})(${ev_params})")
@@ -1107,15 +1107,15 @@ fn gen_handle_body(var ctx: CodegenCtx, expr: HExpr, ev_params: Str) -> Str {
 // Lambda
 // ============================================================
 
-fn gen_lambda(var ctx: CodegenCtx, params: List<HParam>, body: HExpr, ty: Type) -> Str {
-    var p_names: List<Str> = [""]; p_names.clear()
+fn gen_lambda(mut ctx: CodegenCtx, params: List<HParam>, body: HExpr, ty: Type) -> Str {
+    let mut p_names: List<Str> = [""]; p_names.clear()
     for p in params { p_names.push(safe_ident(p.name)) }
-    var ev_params: List<Str> = [""]; ev_params.clear()
+    let mut ev_params: List<Str> = [""]; ev_params.clear()
     match ty {
         Type::FnType { effects, .. } => { ev_params = get_evidence_params(effects) },
         _ => {},
     }
-    var all: List<Str> = [""]; all.clear()
+    let mut all: List<Str> = [""]; all.clear()
     all.extend(p_names)
     all.extend(ev_params)
     let all_str = all.join(", ")
@@ -1123,11 +1123,11 @@ fn gen_lambda(var ctx: CodegenCtx, params: List<HParam>, body: HExpr, ty: Type) 
     "(function(${all_str}) { return ${b}; })"
 }
 
-fn gen_lambda_capture_evidence(var ctx: CodegenCtx, args: List<HExpr>, idx: Int) -> Str {
+fn gen_lambda_capture_evidence(mut ctx: CodegenCtx, args: List<HExpr>, idx: Int) -> Str {
     match args.get(idx) {
         some(arg) => match arg {
             HExpr::Lambda { params, body, .. } => {
-                var p_names: List<Str> = [""]; p_names.clear()
+                let mut p_names: List<Str> = [""]; p_names.clear()
                 for p in params { p_names.push(safe_ident(p.name)) }
                 let params_str = p_names.join(", ")
                 let b = gen_expr(ctx, body)
@@ -1139,10 +1139,10 @@ fn gen_lambda_capture_evidence(var ctx: CodegenCtx, args: List<HExpr>, idx: Int)
                 match arg_type {
                     Type::FnType { params, .. } => {
                         let arity = params.len()
-                        var p_names: List<Str> = [""]; p_names.clear()
+                        let mut p_names: List<Str> = [""]; p_names.clear()
                         for i in 0..arity { p_names.push("__ring_a${i}") }
                         let ev_args = get_callee_evidence_args(ctx, arg_type, none)
-                        var all: List<Str> = [""]; all.clear()
+                        let mut all: List<Str> = [""]; all.clear()
                         all.extend(p_names)
                         if ev_args.len() > 0 { all.push(ev_args) }
                         let all_str = all.join(", ")

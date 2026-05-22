@@ -21,7 +21,7 @@ struct OpenRow {
 // Helper: get or create a method map for a type in impl_methods
 // ============================================================
 
-pub fn get_or_create_methods(var env: TypeEnv, type_name: Str) -> Map<Str, TypeScheme> {
+pub fn get_or_create_methods(mut env: TypeEnv, type_name: Str) -> Map<Str, TypeScheme> {
     match env.trait_reg.impl_methods.get(type_name) {
         some(m) => m,
         none => {
@@ -36,7 +36,7 @@ pub fn get_or_create_methods(var env: TypeEnv, type_name: Str) -> Map<Str, TypeS
 // Helper: create an open effect row (for HOF effect polymorphism)
 // ============================================================
 
-fn open_row(var env: TypeEnv) -> OpenRow {
+fn open_row(mut env: TypeEnv) -> OpenRow {
     let tail_id = env.fresh_var_id()
     OpenRow {
         eff: EffectRow { effects: [], tail: some(tail_id) },
@@ -64,7 +64,7 @@ fn make_set_struct(t: Type) -> Type {
 // Main entry point: register all builtins
 // ============================================================
 
-pub fn register_builtins(var env: TypeEnv) {
+pub fn register_builtins(mut env: TypeEnv) {
     register_effects(env)
     register_cell(env)
     register_option(env)
@@ -78,7 +78,7 @@ pub fn register_builtins(var env: TypeEnv) {
 }
 
 // Main entry point: register all HOF intrinsics
-pub fn register_hof_intrinsics(var env: TypeEnv) {
+pub fn register_hof_intrinsics(mut env: TypeEnv) {
     register_list_hof(env)
     register_map_hof(env)
     register_set_hof(env)
@@ -89,7 +89,7 @@ pub fn register_hof_intrinsics(var env: TypeEnv) {
 // register_effects: "io" and "fail" built-in effects
 // ============================================================
 
-fn register_effects(var env: TypeEnv) {
+fn register_effects(mut env: TypeEnv) {
     // io effect
     env.types.effects.insert("io", EffectDef {
         name: "io",
@@ -118,7 +118,7 @@ fn register_effects(var env: TypeEnv) {
 // register_cell: Cell<T> struct + get/set/update methods
 // ============================================================
 
-fn register_cell(var env: TypeEnv) {
+fn register_cell(mut env: TypeEnv) {
     // Register Cell struct definition
     let cell_t_id = env.fresh_var_id()
     let cell_t = Type::TypeVar { id: cell_t_id, name: none }
@@ -188,7 +188,7 @@ fn register_cell(var env: TypeEnv) {
 // register_option: Option<T> enum + some/none constructors + methods
 // ============================================================
 
-fn register_option(var env: TypeEnv) {
+fn register_option(mut env: TypeEnv) {
     // Register Option enum definition
     let option_t_id = env.fresh_var_id()
     let option_t = Type::TypeVar { id: option_t_id, name: none }
@@ -276,7 +276,7 @@ fn register_option(var env: TypeEnv) {
 // register_eq_trait: Eq trait + primitive impls
 // ============================================================
 
-fn register_eq_trait(var env: TypeEnv) {
+fn register_eq_trait(mut env: TypeEnv) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -308,7 +308,7 @@ fn register_eq_trait(var env: TypeEnv) {
 // register_option_eq: Option<T: Eq> Eq impl
 // ============================================================
 
-fn register_option_eq(var env: TypeEnv) {
+fn register_option_eq(mut env: TypeEnv) {
     let t_id = env.fresh_var_id()
     let t = Type::TypeVar { id: t_id, name: none }
     let opt = make_option_type(t)
@@ -343,7 +343,7 @@ fn register_option_eq(var env: TypeEnv) {
 // register_clone_trait: Clone trait + primitive + collection impls
 // ============================================================
 
-fn register_clone_trait(var env: TypeEnv) {
+fn register_clone_trait(mut env: TypeEnv) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -383,7 +383,7 @@ fn register_clone_trait(var env: TypeEnv) {
 // register_option_clone: Option<T: Clone> Clone impl
 // ============================================================
 
-fn register_option_clone(var env: TypeEnv) {
+fn register_option_clone(mut env: TypeEnv) {
     let t_id = env.fresh_var_id()
     let t = Type::TypeVar { id: t_id, name: none }
     let opt = make_option_type(t)
@@ -409,7 +409,7 @@ fn register_option_clone(var env: TypeEnv) {
 // register_ord_trait: Ord trait + primitive impls
 // ============================================================
 
-fn register_ord_trait(var env: TypeEnv) {
+fn register_ord_trait(mut env: TypeEnv) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -438,7 +438,7 @@ fn register_ord_trait(var env: TypeEnv) {
 // register_debug_trait: Debug trait + primitive + collection impls
 // ============================================================
 
-fn register_debug_trait(var env: TypeEnv) {
+fn register_debug_trait(mut env: TypeEnv) {
     let self_var_id = env.fresh_var_id()
     let self_var = Type::TypeVar { id: self_var_id, name: none }
 
@@ -464,8 +464,8 @@ fn register_debug_trait(var env: TypeEnv) {
     }
 
     // List<T: Debug> Debug impl
-    var t_id = env.fresh_var_id()
-    var t = Type::TypeVar { id: t_id, name: none }
+    let mut t_id = env.fresh_var_id()
+    let mut t = Type::TypeVar { id: t_id, name: none }
     let list_self = Type::StructType { name: BUILTIN_LIST, type_params: [t], fields: [] }
     let list_debug_fn = Type::FnType { params: [list_self], return_type: STR, effects: EMPTY_ROW }
     let list_methods = get_or_create_methods(env, BUILTIN_LIST)
@@ -527,7 +527,7 @@ fn register_debug_trait(var env: TypeEnv) {
 // register_option_debug: Option<T: Debug> Debug impl
 // ============================================================
 
-fn register_option_debug(var env: TypeEnv) {
+fn register_option_debug(mut env: TypeEnv) {
     let t_id = env.fresh_var_id()
     let t = Type::TypeVar { id: t_id, name: none }
     let opt = make_option_type(t)
@@ -553,16 +553,16 @@ fn register_option_debug(var env: TypeEnv) {
 // HOF: register_list_hof
 // ============================================================
 
-fn register_list_hof(var env: TypeEnv) {
+fn register_list_hof(mut env: TypeEnv) {
     let methods = get_or_create_methods(env, BUILTIN_LIST)
 
     // map: (List<T>, (T) -> U / e) -> List<U> / e
-    var t_id = env.fresh_var_id()
-    var t = Type::TypeVar { id: t_id, name: none }
-    var u_id = env.fresh_var_id()
-    var u = Type::TypeVar { id: u_id, name: none }
-    var orow = open_row(env)
-    var cb = Type::FnType { params: [t], return_type: u, effects: orow.eff }
+    let mut t_id = env.fresh_var_id()
+    let mut t = Type::TypeVar { id: t_id, name: none }
+    let mut u_id = env.fresh_var_id()
+    let mut u = Type::TypeVar { id: u_id, name: none }
+    let mut orow = open_row(env)
+    let mut cb = Type::FnType { params: [t], return_type: u, effects: orow.eff }
     methods.insert("map", TypeScheme {
         ty: Type::FnType { params: [make_list_struct(t), cb], return_type: make_list_struct(u), effects: orow.eff },
         type_vars: [t_id, u_id, orow.tail_id],
@@ -675,18 +675,18 @@ fn register_list_hof(var env: TypeEnv) {
 // HOF: register_map_hof
 // ============================================================
 
-fn register_map_hof(var env: TypeEnv) {
+fn register_map_hof(mut env: TypeEnv) {
     let methods = get_or_create_methods(env, BUILTIN_MAP)
 
     // map_values: (Map<K,V>, (V) -> U / e) -> Map<K,U> / e
-    var k_id = env.fresh_var_id()
-    var k = Type::TypeVar { id: k_id, name: none }
-    var v_id = env.fresh_var_id()
-    var v = Type::TypeVar { id: v_id, name: none }
-    var u_id = env.fresh_var_id()
-    var u = Type::TypeVar { id: u_id, name: none }
-    var orow = open_row(env)
-    var cb = Type::FnType { params: [v], return_type: u, effects: orow.eff }
+    let mut k_id = env.fresh_var_id()
+    let mut k = Type::TypeVar { id: k_id, name: none }
+    let mut v_id = env.fresh_var_id()
+    let mut v = Type::TypeVar { id: v_id, name: none }
+    let mut u_id = env.fresh_var_id()
+    let mut u = Type::TypeVar { id: u_id, name: none }
+    let mut orow = open_row(env)
+    let mut cb = Type::FnType { params: [v], return_type: u, effects: orow.eff }
     methods.insert("map_values", TypeScheme {
         ty: Type::FnType { params: [make_map_type(k, v), cb], return_type: make_map_type(k, u), effects: orow.eff },
         type_vars: [k_id, v_id, u_id, orow.tail_id],
@@ -743,14 +743,14 @@ fn register_map_hof(var env: TypeEnv) {
 // HOF: register_set_hof
 // ============================================================
 
-fn register_set_hof(var env: TypeEnv) {
+fn register_set_hof(mut env: TypeEnv) {
     let methods = get_or_create_methods(env, BUILTIN_SET)
 
     // filter: (Set<T>, (T) -> Bool / e) -> Set<T> / e
-    var t_id = env.fresh_var_id()
-    var t = Type::TypeVar { id: t_id, name: none }
-    var orow = open_row(env)
-    var cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
+    let mut t_id = env.fresh_var_id()
+    let mut t = Type::TypeVar { id: t_id, name: none }
+    let mut orow = open_row(env)
+    let mut cb = Type::FnType { params: [t], return_type: BOOL, effects: orow.eff }
     methods.insert("filter", TypeScheme {
         ty: Type::FnType { params: [make_set_struct(t), cb], return_type: make_set_struct(t), effects: orow.eff },
         type_vars: [t_id, orow.tail_id],
@@ -801,16 +801,16 @@ fn register_set_hof(var env: TypeEnv) {
 // HOF: register_option_hof
 // ============================================================
 
-fn register_option_hof(var env: TypeEnv) {
+fn register_option_hof(mut env: TypeEnv) {
     let methods = get_or_create_methods(env, BUILTIN_OPTION)
 
     // map: (Option<T>, (T) -> U / e) -> Option<U> / e
-    var t_id = env.fresh_var_id()
-    var t = Type::TypeVar { id: t_id, name: none }
-    var u_id = env.fresh_var_id()
-    var u = Type::TypeVar { id: u_id, name: none }
-    var orow = open_row(env)
-    var cb = Type::FnType { params: [t], return_type: u, effects: orow.eff }
+    let mut t_id = env.fresh_var_id()
+    let mut t = Type::TypeVar { id: t_id, name: none }
+    let mut u_id = env.fresh_var_id()
+    let mut u = Type::TypeVar { id: u_id, name: none }
+    let mut orow = open_row(env)
+    let mut cb = Type::FnType { params: [t], return_type: u, effects: orow.eff }
     methods.insert("map", TypeScheme {
         ty: Type::FnType { params: [make_option_type(t), cb], return_type: make_option_type(u), effects: orow.eff },
         type_vars: [t_id, u_id, orow.tail_id],

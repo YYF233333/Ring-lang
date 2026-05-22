@@ -35,7 +35,7 @@ fn main() {
 
     // entries iteration via for
     let m2 = map_from([("a", 1), ("b", 2)])
-    var key_sum = 0
+    let mut key_sum = 0
     for (k, v) in m2 {
         key_sum = key_sum + v
     }

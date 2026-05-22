@@ -192,36 +192,36 @@ pub fn new_type_env() -> TypeEnv {
 impl TypeEnv {
     pub fn current_var_id(self) -> Int { self.ids.next_type_var_id }
 
-    pub fn fresh_var(var self) -> Type {
+    pub fn fresh_var(mut self) -> Type {
         let id = self.ids.next_type_var_id
         self.ids.next_type_var_id = id + 1
         Type::TypeVar { id: id, name: none }
     }
 
-    pub fn fresh_var_id(var self) -> Int {
+    pub fn fresh_var_id(mut self) -> Int {
         let id = self.ids.next_type_var_id
         self.ids.next_type_var_id = id + 1
         id
     }
 
-    pub fn fresh_def_id(var self) -> Int {
+    pub fn fresh_def_id(mut self) -> Int {
         let id = self.ids.next_def_id
         self.ids.next_def_id = id + 1
         id
     }
 
-    pub fn push_scope(var self) {
+    pub fn push_scope(mut self) {
         self.scope.scopes.push(Scope { variables: map_new() })
     }
 
-    pub fn pop_scope(var self) {
+    pub fn pop_scope(mut self) {
         if self.scope.scopes.len() <= 1 {
             panic("Cannot pop global scope")
         }
         self.scope.scopes.pop()
     }
 
-    pub fn bind(var self, name: Str, scheme: TypeScheme) {
+    pub fn bind(mut self, name: Str, scheme: TypeScheme) {
         let s = match scheme.def_id {
             some(_) => scheme,
             none => TypeScheme { ..scheme, def_id: some(self.fresh_def_id()) }
@@ -233,16 +233,16 @@ impl TypeEnv {
         }
     }
 
-    pub fn bind_mono(var self, name: Str, ty: Type) {
+    pub fn bind_mono(mut self, name: Str, ty: Type) {
         self.bind(name, mono(ty))
     }
 
-    pub fn record_def_span(var self, def_id: Int, span: Span) {
+    pub fn record_def_span(mut self, def_id: Int, span: Span) {
         self.scope.def_spans.insert(def_id, span)
     }
 
-    pub fn rebind(var self, name: Str, scheme: TypeScheme) {
-        var i = self.scope.scopes.len() - 1
+    pub fn rebind(mut self, name: Str, scheme: TypeScheme) {
+        let mut i = self.scope.scopes.len() - 1
         while i >= 0 {
             match self.scope.scopes.get(i) {
                 some(scope) => {
@@ -259,7 +259,7 @@ impl TypeEnv {
     }
 
     pub fn lookup(self, name: Str) -> TypeScheme? {
-        var i = self.scope.scopes.len() - 1
+        let mut i = self.scope.scopes.len() - 1
         while i >= 0 {
             let found = match self.scope.scopes.get(i) {
                 some(scope) => scope.variables.get(name),
@@ -271,7 +271,7 @@ impl TypeEnv {
         none
     }
 
-    pub fn instantiate(var self, scheme: TypeScheme) -> Type {
+    pub fn instantiate(mut self, scheme: TypeScheme) -> Type {
         if scheme.type_vars.len() == 0 { return scheme.ty }
         let mapping: Map<Int, Type> = map_new()
         for tv in scheme.type_vars {

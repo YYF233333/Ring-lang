@@ -71,27 +71,27 @@ pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx 
 }
 
 fn indent_str(level: Int) -> Str {
-    var result = ""
+    let mut result = ""
     for i in 0..level {
         result = "${result}  "
     }
     result
 }
 
-pub fn emit(var ctx: CodegenCtx, line: Str) {
+pub fn emit(mut ctx: CodegenCtx, line: Str) {
     let prefix = indent_str(ctx.indent_level)
     ctx.lines.push("${prefix}${line}")
 }
 
-pub fn emit_raw(var ctx: CodegenCtx, text: Str) {
+pub fn emit_raw(mut ctx: CodegenCtx, text: Str) {
     ctx.lines.push(text)
 }
 
-pub fn push_indent(var ctx: CodegenCtx) {
+pub fn push_indent(mut ctx: CodegenCtx) {
     ctx.indent_level = ctx.indent_level + 1
 }
 
-pub fn pop_indent(var ctx: CodegenCtx) {
+pub fn pop_indent(mut ctx: CodegenCtx) {
     ctx.indent_level = ctx.indent_level - 1
 }
 
@@ -120,7 +120,7 @@ pub fn qualify(ctx: CodegenCtx, name: Str) -> Str {
 }
 
 pub fn extract_effect_names(effects: EffectRow) -> List<Str> {
-    var names: List<Str> = []
+    let mut names: List<Str> = []
     for e in effects.effects {
         let n = effect_kind_name(e)
         if names.contains(n) == false {

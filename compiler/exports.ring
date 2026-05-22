@@ -38,14 +38,14 @@ pub fn extract_exports(
     hprogram: HProgram,
     env: TypeEnv
 ) -> ModuleExports {
-    var values: Map<Str, TypeScheme> = map_new()
-    var types: Map<Str, TypeDef> = map_new()
-    var effects: Map<Str, EffectDef> = map_new()
-    var traits: Map<Str, TraitDef> = map_new()
-    var impl_methods: Map<Str, Map<Str, TypeScheme>> = map_new()
-    var inherent_methods: Map<Str, List<Str>> = map_new()
-    var struct_field_orders: Map<Str, List<Str>> = map_new()
-    var extern_values: Set<Str> = set_new()
+    let mut values: Map<Str, TypeScheme> = map_new()
+    let mut types: Map<Str, TypeDef> = map_new()
+    let mut effects: Map<Str, EffectDef> = map_new()
+    let mut traits: Map<Str, TraitDef> = map_new()
+    let mut impl_methods: Map<Str, Map<Str, TypeScheme>> = map_new()
+    let mut inherent_methods: Map<Str, List<Str>> = map_new()
+    let mut struct_field_orders: Map<Str, List<Str>> = map_new()
+    let mut extern_values: Set<Str> = set_new()
     for decl in program.decls {
         match decl {
             Decl::Fn { name, is_pub, .. } => {
@@ -61,7 +61,7 @@ pub fn extract_exports(
                     match env.types.structs.get(name) {
                         some(sdef) => {
                             types.insert(name, TypeDef::StructDef_(sdef))
-                            var field_names: List<Str> = [""]; field_names.clear()
+                            let mut field_names: List<Str> = [""]; field_names.clear()
                             for f in sdef.fields { field_names.push(f.name) }
                             struct_field_orders.insert(name, field_names)
                         },
@@ -111,7 +111,7 @@ pub fn extract_exports(
                 match trait_name {
                     none => {
                         // Inherent methods
-                        var is_pub_type = false
+                        let mut is_pub_type = false
                         for d in program.decls {
                             match d {
                                 Decl::Struct { name, is_pub, .. } => {
@@ -124,7 +124,7 @@ pub fn extract_exports(
                             }
                         }
                         if is_pub_type {
-                            var method_names: List<Str> = [""]; method_names.clear()
+                            let mut method_names: List<Str> = [""]; method_names.clear()
                             for m in methods {
                                 match m {
                                     Decl::Fn { name, .. } => method_names.push(name),
@@ -183,7 +183,7 @@ pub fn extract_exports(
                                     match env.types.structs.get(sname) {
                                         some(sdef) => {
                                             types.insert(sname, TypeDef::StructDef_(sdef))
-                                            var field_names: List<Str> = [""]; field_names.clear()
+                                            let mut field_names: List<Str> = [""]; field_names.clear()
                                             for f in sdef.fields { field_names.push(f.name) }
                                             struct_field_orders.insert(sname, field_names)
                                         },
@@ -225,7 +225,7 @@ pub fn extract_exports(
     }
 
     // Filter trait impls
-    var trait_impls: List<ImplEntry> = []
+    let mut trait_impls: List<ImplEntry> = []
     for impl_ in env.trait_reg.trait_impls {
         if types.contains_key(impl_.target_type_name) || traits.contains_key(impl_.trait_name) {
             trait_impls.push(impl_)
@@ -249,7 +249,7 @@ pub fn extract_exports(
                         match env.types.structs.get(local_name) {
                             some(sdef) => {
                                 types.insert(local_name, TypeDef::StructDef_(sdef))
-                                var fnames: List<Str> = [""]; fnames.clear()
+                                let mut fnames: List<Str> = [""]; fnames.clear()
                                 for f in sdef.fields { fnames.push(f.name) }
                                 struct_field_orders.insert(local_name, fnames)
                             },

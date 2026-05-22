@@ -74,7 +74,7 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
 // ============================================================
 
 fn infer_suggestion(code: Str, message: Str, context: DiagnosticContext) -> List<Suggestion> {
-    var suggestions: List<Suggestion> = []
+    let mut suggestions: List<Suggestion> = []
 
     // Type mismatch suggestions
     if code == "E0301" {
@@ -181,7 +181,7 @@ fn infer_suggestion(code: Str, message: Str, context: DiagnosticContext) -> List
     // Immutable assignment
     if code == "E0205" {
         suggestions.push(Suggestion {
-            message: "Declare the variable with 'var' instead of 'let' to allow reassignment",
+            message: "Declare the variable with 'let mut' instead of 'let' to allow reassignment",
             replacement: none,
             span: none
         })
@@ -202,11 +202,11 @@ fn infer_suggestion(code: Str, message: Str, context: DiagnosticContext) -> List
 fn find_similar_name(target: Str, candidates: List<Str>) -> Str? {
     // Simple similarity: find a candidate that starts with the same first 2 chars,
     // or where one is a prefix of the other, or they differ by only 1-2 characters in length
-    var best: Str? = none
-    var best_score = 0
+    let mut best: Str? = none
+    let mut best_score = 0
 
     for candidate in candidates {
-        var score = 0
+        let mut score = 0
         // Exact prefix match (one is prefix of the other)
         if candidate.starts_with(target) || target.starts_with(candidate) {
             score = 3
@@ -233,7 +233,7 @@ fn find_similar_name(target: Str, candidates: List<Str>) -> Str? {
 }
 
 pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, context: DiagnosticContext) -> Type {
-    var diag = make_diag(code, Severity::SevError, message, span, context)
+    let mut diag = make_diag(code, Severity::SevError, message, span, context)
     let suggestions = infer_suggestion(code, message, context)
     if suggestions.len() > 0 {
         diag = Diagnostic { ..diag, suggestions: suggestions }
@@ -248,7 +248,7 @@ pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, con
 
 pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: UnionFind) -> (EffectRow, UnionFind) {
     let m = row_merge(a, b)
-    var result_s = s
+    let mut result_s = s
     match m.tails_to_unify {
         some(pair) => {
             let (ta, tb) = pair
@@ -381,11 +381,11 @@ pub fn generalize(env: TypeEnv, t: Type, subst: UnionFind) -> TypeScheme {
     let resolved = apply_subst(subst, t)
     let ftv_type = free_type_vars(resolved, empty_subst())
     let ftv_env = free_type_vars_in_env(env, subst)
-    var type_vars: List<Int> = []
+    let mut type_vars: List<Int> = []
     for v in ftv_type {
         if !ftv_env.contains(v) { type_vars.push(v) }
     }
-    var bounds: List<SchemeBound> = []
+    let mut bounds: List<SchemeBound> = []
     for tv in type_vars {
         match env.scope.var_bounds.get(tv) {
             some(traits) => {
@@ -425,7 +425,7 @@ pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<
     match (scheme.ty, instantiated_type) {
         (Type::FnType { params: sp, return_type: sr, .. },
          Type::FnType { params: ip, return_type: ir, .. }) => {
-            var i = 0
+            let mut i = 0
             let limit = if sp.len() < ip.len() { sp.len() } else { ip.len() }
             while i < limit {
                 match (sp.get(i), ip.get(i)) {
@@ -452,7 +452,7 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: List<Int>
         Type::StructType { name: sn, type_params: stp, .. } => match inst_type {
             Type::StructType { name: in_, type_params: itp, .. } => {
                 if sn == in_ {
-                    var i = 0
+                    let mut i = 0
                     let limit = if stp.len() < itp.len() { stp.len() } else { itp.len() }
                     while i < limit {
                         match (stp.get(i), itp.get(i)) {
@@ -468,7 +468,7 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: List<Int>
         Type::EnumType { name: sn, type_params: stp, .. } => match inst_type {
             Type::EnumType { name: in_, type_params: itp, .. } => {
                 if sn == in_ {
-                    var i = 0
+                    let mut i = 0
                     let limit = if stp.len() < itp.len() { stp.len() } else { itp.len() }
                     while i < limit {
                         match (stp.get(i), itp.get(i)) {
@@ -492,9 +492,9 @@ pub fn resolve_dicts_from_scheme(
 ) -> List<Str> {
     if scheme.bounds.len() == 0 { return [] }
     let var_map = build_scheme_var_map(scheme, callee_type)
-    var resolved_dicts: List<Str> = []
+    let mut resolved_dicts: List<Str> = []
     for bound in scheme.bounds {
-        var found = false
+        let mut found = false
         match var_map.get(bound.type_var) {
             some(fresh_var) => {
                 let concrete = apply_subst(s, fresh_var)
@@ -563,7 +563,7 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
         TypeExpr::Named { name, qualifier, type_args, span } =>
             match qualifier {
                 some(q) => {
-                    var resolved_q = q
+                    let mut resolved_q = q
                     if q == "self" || q.starts_with("super") {
                         match resolve_relative_qualifier(q, ctx.mod_path_stack) {
                             some(prefix) => { resolved_q = prefix },
@@ -579,11 +579,11 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
                 none => resolve_named_type(ctx, name, type_args, span)
             },
         TypeExpr::FnType { params, return_type, effects, .. } => {
-            var resolved_params: List<Type> = []
+            let mut resolved_params: List<Type> = []
             for p in params { resolved_params.push(resolve_type_expr(ctx, p)) }
             let ret = resolve_type_expr(ctx, return_type)
             let eff_row = if effects.len() > 0 {
-                var resolved_effects: List<Effect> = []
+                let mut resolved_effects: List<Effect> = []
                 for e in effects {
                     resolved_effects.push(resolve_fn_type_effect(ctx, e))
                 }
@@ -597,7 +597,7 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
         TypeExpr::OptionType { inner, .. } =>
             make_option_type(resolve_type_expr(ctx, inner)),
         TypeExpr::RecordType { fields, rest, .. } => {
-            var resolved_fields: List<RecordField> = []
+            let mut resolved_fields: List<RecordField> = []
             for f in fields {
                 resolved_fields.push(RecordField { name: f.name, ty: resolve_type_expr(ctx, f.ty) })
             }
@@ -616,7 +616,7 @@ pub fn resolve_type_expr(ctx: InferCtx, texpr: TypeExpr) -> Type {
             }
         },
         TypeExpr::TupleType { elements, .. } => {
-            var resolved_elems: List<Type> = []
+            let mut resolved_elems: List<Type> = []
             for e in elements { resolved_elems.push(resolve_type_expr(ctx, e)) }
             Type::TupleType { elements: resolved_elems }
         }
@@ -647,7 +647,7 @@ fn resolve_fn_type_effect(ctx: InferCtx, eff: EffectExpr) -> Effect {
         }
         return Effect::FailEffect { error_type: err_type }
     }
-    var resolved_args: List<Type> = []
+    let mut resolved_args: List<Type> = []
     for ta in eff.type_args { resolved_args.push(resolve_type_expr(ctx, ta)) }
     Effect::CustomEffect { name: eff.name, type_args: resolved_args }
 }
@@ -691,7 +691,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                             expression: none
                         })
                 }
-                var resolved_params: List<Type> = []
+                let mut resolved_params: List<Type> = []
                 if type_args.len() > 0 {
                     for a in type_args { resolved_params.push(resolve_type_expr(ctx, a)) }
                 } else {
@@ -720,7 +720,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                             expression: none
                         })
                 }
-                var resolved_params: List<Type> = []
+                let mut resolved_params: List<Type> = []
                 if type_args.len() > 0 {
                     for a in type_args { resolved_params.push(resolve_type_expr(ctx, a)) }
                 } else {
@@ -749,10 +749,10 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
                     })
             }
             if alias.type_param_vars.len() == 0 { return alias.ty }
-            var resolved_args: List<Type> = []
+            let mut resolved_args: List<Type> = []
             for a in type_args { resolved_args.push(resolve_type_expr(ctx, a)) }
             let mapping: Map<Int, Type> = map_new()
-            var i = 0
+            let mut i = 0
             let limit = if alias.type_param_vars.len() < resolved_args.len() { alias.type_param_vars.len() } else { resolved_args.len() }
             while i < limit {
                 match (alias.type_param_vars.get(i), resolved_args.get(i)) {
@@ -801,7 +801,7 @@ pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst:
                             "Tuple pattern has ${elements.len().to_str()} elements but type has ${type_elems.len().to_str()}",
                             span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                     }
-                    var i = 0
+                    let mut i = 0
                     while i < elements.len() {
                         match (elements.get(i), type_elems.get(i)) {
                             (some(pat), some(ty)) => bind_pattern(ctx, pat, ty, subst),
@@ -844,7 +844,7 @@ fn bind_constructor_pattern(
                                 span, DiagnosticContext::PatternError { detail: "constructor pattern on non-enum type" }) }
                         }
                         let inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected)
-                        var i = 0
+                        let mut i = 0
                         while i < fields.len() && i < v.fields.len() {
                             match (fields.get(i), v.fields.get(i)) {
                                 (some(fpat), some(ftype)) => {
@@ -944,7 +944,7 @@ fn build_instantiation_map(type_param_vars: List<Int>, resolved_expected: Type) 
     let inst_map: Map<Int, Type> = map_new()
     match resolved_expected {
         Type::EnumType { type_params, .. } => {
-            var i = 0
+            let mut i = 0
             while i < type_param_vars.len() && i < type_params.len() {
                 match (type_param_vars.get(i), type_params.get(i)) {
                     (some(var_id), some(tp)) => { inst_map.insert(var_id, tp) },
@@ -997,7 +997,7 @@ pub fn resolve_relative_qualifier(qualifier: Str, mod_path_stack: List<Str>) -> 
     }
     // Handle "super" and "super::super" etc.
     let parts = qualifier.split("::")
-    var super_count = 0
+    let mut super_count = 0
     for part in parts {
         if part == "super" {
             super_count = super_count + 1
@@ -1013,14 +1013,14 @@ pub fn resolve_relative_qualifier(qualifier: Str, mod_path_stack: List<Str>) -> 
     }
     // Build resolved prefix from mod_path_stack[0..len-super_count]
     let remaining = mod_path_stack.len() - super_count
-    var resolved_parts: List<Str> = []
-    var i = 0
+    let mut resolved_parts: List<Str> = []
+    let mut i = 0
     while i < remaining {
         resolved_parts.push(mod_path_stack.get(i).unwrap_or(""))
         i = i + 1
     }
     // Append any non-super trailing parts from qualifier
-    var j = super_count
+    let mut j = super_count
     while j < parts.len() {
         resolved_parts.push(parts.get(j).unwrap_or(""))
         j = j + 1

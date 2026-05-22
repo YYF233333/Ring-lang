@@ -2,8 +2,8 @@
 fn main() {
     // while in block expr
     let sum_while = {
-        var sum = 0
-        var i = 0
+        let mut sum = 0
+        let mut i = 0
         while i < 5 {
             sum = sum + i
             i = i + 1
@@ -14,7 +14,7 @@ fn main() {
 
     // for..in in block expr
     let sum_for = {
-        var total = 0
+        let mut total = 0
         for i in 0..5 {
             total = total + i
         }
@@ -32,7 +32,7 @@ fn main() {
     // if-let in block expr
     let if_let_result = {
         let opt = some(42)
-        var result = 0
+        let mut result = 0
         if let some(v) = opt {
             result = v
         }
@@ -42,7 +42,7 @@ fn main() {
 
     // break/continue in loop inside block expr
     let break_result = {
-        var found = -1
+        let mut found = -1
         for i in 0..10 {
             if i == 7 {
                 found = i

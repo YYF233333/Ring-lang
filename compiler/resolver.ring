@@ -40,7 +40,7 @@ pub fn module_prefix(segments: List<Str>) -> Str {
 }
 
 pub fn resolve_module_file(use_path_segments: List<Str>, project_root: Str) -> Str? {
-    var path_part = ""
+    let mut path_part = ""
     for i in 0..use_path_segments.len() {
         match use_path_segments.get(i) {
             some(seg) => {
@@ -70,15 +70,15 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
     }
     let entry_key = module_key(entry_id.path_segments)
 
-    var modules: Map<Str, ModuleId> = map_new()
-    var dependencies: Map<Str, List<Str>> = map_new()
-    var asts_map: Map<Str, Program> = map_new()
+    let mut modules: Map<Str, ModuleId> = map_new()
+    let mut dependencies: Map<Str, List<Str>> = map_new()
+    let mut asts_map: Map<Str, Program> = map_new()
 
     modules.insert(entry_key, entry_id)
     let empty_deps: List<Str> = [""]; empty_deps.clear()
     dependencies.insert(entry_key, empty_deps)
 
-    var queue: List<Str> = [entry_key]
+    let mut queue: List<Str> = [entry_key]
 
     while queue.len() > 0 {
         match queue.shift() {
@@ -94,7 +94,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                         }
                         asts_map.insert(current_key, ast)
 
-                        var deps: List<Str> = [""]; deps.clear()
+                        let mut deps: List<Str> = [""]; deps.clear()
                         for use_decl in ast.uses {
                             let segments = use_decl.path.segments
                             let dep_key = module_key(segments)
@@ -145,14 +145,14 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
     }
 
     // Topological sort (Kahn's algorithm)
-    var dep_count: Map<Str, Int> = map_new()
+    let mut dep_count: Map<Str, Int> = map_new()
     for entry in dependencies.entries() {
         let (key, deps) = entry
         dep_count.insert(key, deps.len())
     }
 
-    var topo_order: List<Str> = [""]; topo_order.clear()
-    var ready: List<Str> = [""]; ready.clear()
+    let mut topo_order: List<Str> = [""]; topo_order.clear()
+    let mut ready: List<Str> = [""]; ready.clear()
 
     for entry in dep_count.entries() {
         let (key, count) = entry
@@ -183,7 +183,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
 
     if topo_order.len() != modules.len() {
         // Cycle detected — find and report the cycle path
-        var cycle_nodes: List<Str> = [""]; cycle_nodes.clear()
+        let mut cycle_nodes: List<Str> = [""]; cycle_nodes.clear()
         for entry in modules.entries() {
             let (key, _) = entry
             if !topo_order.contains(key) {
@@ -230,17 +230,17 @@ fn find_cycle_path(cycle_nodes: List<Str>, dependencies: Map<Str, List<Str>>) ->
     // Try each cycle node as a potential cycle start.
     // Follow a single path through cycle-member deps; if we return to start, that's the cycle.
     for start_node in cycle_nodes {
-        var path: List<Str> = [start_node]
-        var current = start_node
-        var visited: Set<Str> = set_new()
+        let mut path: List<Str> = [start_node]
+        let mut current = start_node
+        let mut visited: Set<Str> = set_new()
         visited.insert(current)
-        var found_cycle = false
+        let mut found_cycle = false
 
         while !found_cycle {
             let maybe_deps = dependencies.get(current)
             if maybe_deps.is_none() { break }
             let deps = maybe_deps.unwrap()
-            var advanced = false
+            let mut advanced = false
             for dep in deps {
                 if cycle_set.contains(dep) {
                     if dep == start_node {
@@ -265,7 +265,7 @@ fn find_cycle_path(cycle_nodes: List<Str>, dependencies: Map<Str, List<Str>>) ->
     }
 
     // Fallback: just list the cycle nodes
-    var fallback: List<Str> = [""]; fallback.clear()
+    let mut fallback: List<Str> = [""]; fallback.clear()
     for n in cycle_nodes { fallback.push(n) }
     match cycle_nodes.get(0) {
         some(first) => fallback.push(first),

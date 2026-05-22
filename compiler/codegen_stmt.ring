@@ -7,13 +7,13 @@ use codegen_ctx::{CodegenCtx, emit, push_indent, pop_indent, safe_ident}
 // In Ring, we pass gen_expr as a function parameter or use a separate module import
 // For now we declare the cross-module functions
 
-extern fn gen_expr(var ctx: CodegenCtx, expr: HExpr) -> Str
+extern fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str
 
 // ============================================================
 // Statement-mode expression emission
 // ============================================================
 
-pub fn emit_in_stmt_context(var ctx: CodegenCtx, expr: HExpr, mode: Str) {
+pub fn emit_in_stmt_context(mut ctx: CodegenCtx, expr: HExpr, mode: Str) {
     match expr {
         HExpr::IfExpr { condition, then_branch, else_branch, .. } =>
             emit_if_stmt(ctx, condition, then_branch, else_branch, mode),
@@ -36,7 +36,7 @@ pub fn emit_in_stmt_context(var ctx: CodegenCtx, expr: HExpr, mode: Str) {
 // If statement (statement-mode)
 // ============================================================
 
-fn emit_if_stmt(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, mode: Str) {
+fn emit_if_stmt(mut ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, mode: Str) {
     let cond = gen_expr(ctx, condition)
     emit(ctx, "if (${cond}) {")
     push_indent(ctx)
@@ -59,7 +59,7 @@ fn emit_if_stmt(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_
     }
 }
 
-fn emit_else_if(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, mode: Str) {
+fn emit_else_if(mut ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, mode: Str) {
     let cond = gen_expr(ctx, condition)
     emit(ctx, "} else if (${cond}) {")
     push_indent(ctx)
@@ -86,7 +86,7 @@ fn emit_else_if(var ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_
 // Block in statement context
 // ============================================================
 
-pub fn emit_block_in_stmt_context(var ctx: CodegenCtx, block: HExpr, mode: Str) {
+pub fn emit_block_in_stmt_context(mut ctx: CodegenCtx, block: HExpr, mode: Str) {
     match block {
         HExpr::Block { stmts, tail, .. } =>
             emit_block_in_stmt_context_inner(ctx, stmts, tail, mode),
@@ -94,7 +94,7 @@ pub fn emit_block_in_stmt_context(var ctx: CodegenCtx, block: HExpr, mode: Str) 
     }
 }
 
-fn emit_block_in_stmt_context_inner(var ctx: CodegenCtx, stmts: List<HStmt>, tail: HExpr?, mode: Str) {
+fn emit_block_in_stmt_context_inner(mut ctx: CodegenCtx, stmts: List<HStmt>, tail: HExpr?, mode: Str) {
     for stmt in stmts {
         emit_stmt(ctx, stmt)
     }
@@ -108,7 +108,7 @@ fn emit_block_in_stmt_context_inner(var ctx: CodegenCtx, stmts: List<HStmt>, tai
 // Block body (shared between functions and IIFE blocks)
 // ============================================================
 
-pub fn emit_block_body(var ctx: CodegenCtx, block: HExpr) {
+pub fn emit_block_body(mut ctx: CodegenCtx, block: HExpr) {
     match block {
         HExpr::Block { stmts, tail, .. } => {
             for stmt in stmts {
@@ -127,7 +127,7 @@ pub fn emit_block_body(var ctx: CodegenCtx, block: HExpr) {
 // Match statement (statement-mode)
 // ============================================================
 
-fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>, mode: Str) {
+fn emit_match_stmt(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>, mode: Str) {
     let label = "__ring_match${ctx.match_counter}"
     ctx.match_counter = ctx.match_counter + 1
     let scrut_js = gen_expr(ctx, scrutinee)
@@ -172,7 +172,7 @@ fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
         }
     }
 
-    var has_catchall = false
+    let mut has_catchall = false
     for a in arms {
         match a.pattern {
             Pattern::Wildcard { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
@@ -191,7 +191,7 @@ fn emit_match_stmt(var ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
 // Statements
 // ============================================================
 
-pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
+pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
     match stmt {
         HStmt::ExprStmt { expr, .. } => emit_in_stmt_context(ctx, expr, "discard"),
         HStmt::Return { value, .. } => match value {
@@ -222,7 +222,7 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
                     some(ds) => {
                         if ds.len() > 0 {
                             let iter = gen_expr(ctx, iterable)
-                            var names: List<Str> = [""]; names.clear()
+                            let mut names: List<Str> = [""]; names.clear()
                             for d in ds { names.push(safe_ident(d.name)) }
                             let joined = names.join(", ")
                             emit(ctx, "for (const [${joined}] of ${iter}) {")
@@ -310,7 +310,7 @@ pub fn emit_stmt(var ctx: CodegenCtx, stmt: HStmt) {
 // Inline statement generation (for IIFE bodies)
 // ============================================================
 
-pub fn gen_stmt_inline(var ctx: CodegenCtx, stmt: HStmt) -> Str {
+pub fn gen_stmt_inline(mut ctx: CodegenCtx, stmt: HStmt) -> Str {
     match stmt {
         HStmt::Let { name, init, .. } => {
             let sname = safe_ident(name)
@@ -361,7 +361,7 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
         },
         Pattern::Constructor { name, fields, .. } => {
             let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
-            var sub_conds: List<Str> = [""]; sub_conds.clear()
+            let mut sub_conds: List<Str> = [""]; sub_conds.clear()
             for i in 0..fields.len() {
                 match fields.get(i) {
                     some(f) => {
@@ -379,7 +379,7 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
         },
         Pattern::NamedConstructor { name, fields, .. } => {
             let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
-            var sub_conds: List<Str> = [""]; sub_conds.clear()
+            let mut sub_conds: List<Str> = [""]; sub_conds.clear()
             for f in fields {
                 let sname = safe_ident(f.name)
                 let sub = gen_pattern_condition("${target}.${sname}", f.pattern)
@@ -393,7 +393,7 @@ pub fn gen_pattern_condition(target: Str, pat: Pattern) -> Str {
         },
         Pattern::TuplePattern { elements, .. } => {
             let len_check = "Array.isArray(${target}) && ${target}.length === ${elements.len()}"
-            var sub_conds: List<Str> = [""]; sub_conds.clear()
+            let mut sub_conds: List<Str> = [""]; sub_conds.clear()
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(e) => {
@@ -425,7 +425,7 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
             "const ${sname} = ${target}; "
         },
         Pattern::Constructor { fields, .. } => {
-            var result = ""
+            let mut result = ""
             for i in 0..fields.len() {
                 match fields.get(i) {
                     some(f) => {
@@ -438,7 +438,7 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
             result
         },
         Pattern::NamedConstructor { fields, .. } => {
-            var result = ""
+            let mut result = ""
             for f in fields {
                 let sname = safe_ident(f.name)
                 let sub = gen_pattern_bindings("${target}.${sname}", f.pattern)
@@ -447,7 +447,7 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
             result
         },
         Pattern::TuplePattern { elements, .. } => {
-            var result = ""
+            let mut result = ""
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(e) => {

@@ -9,7 +9,7 @@ fn main() {
     assert(list.len() == 2, "let mut list allows push")
 
     // var still works
-    var y = 10
+    let mut y = 10
     y = y + 1
     assert(y == 11, "var still works as alias")
 

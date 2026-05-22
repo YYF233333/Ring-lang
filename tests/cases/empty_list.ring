@@ -2,7 +2,7 @@ fn main() {
     let xs: List<Int> = []
     assert(xs.len() == 0, "empty with annotation")
 
-    var ys: List<Str> = []
+    let mut ys: List<Str> = []
     ys.push("hello")
     assert(ys.len() == 1, "push after empty")
     assert(ys.get(0) == some("hello"), "get after push")

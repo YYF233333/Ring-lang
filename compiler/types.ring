@@ -201,7 +201,7 @@ fn effects_same_kind(a: Effect, b: Effect) -> Bool {
 }
 
 pub fn row_merge(a: EffectRow, b: EffectRow) -> RowMergeResult {
-    var merged = list_clone(a.effects)
+    let mut merged = list_clone(a.effects)
     for eff in b.effects {
         if !merged.any(fn(e) { effects_same_kind(e, eff) }) {
             merged.push(eff)
@@ -224,7 +224,7 @@ pub fn row_merge(a: EffectRow, b: EffectRow) -> RowMergeResult {
 
 fn type_lists_equal(a: List<Type>, b: List<Type>) -> Bool {
     if a.len() != b.len() { return false }
-    var i = 0
+    let mut i = 0
     while i < a.len() {
         if let some(x) = a.get(i) {
             if let some(y) = b.get(i) {
@@ -238,7 +238,7 @@ fn type_lists_equal(a: List<Type>, b: List<Type>) -> Bool {
 
 fn effects_list_equal(a: List<Effect>, b: List<Effect>) -> Bool {
     if a.len() != b.len() { return false }
-    var i = 0
+    let mut i = 0
     while i < a.len() {
         if let some(x) = a.get(i) {
             if let some(y) = b.get(i) {
@@ -407,7 +407,7 @@ pub fn effect_to_string(e: Effect) -> Str {
 
 pub fn effect_row_to_string(row: EffectRow) -> Str {
     if row.effects.len() == 0 && row.tail.is_none() { return "" }
-    var parts = row.effects.map(fn(e) { effect_to_string(e) })
+    let mut parts = row.effects.map(fn(e) { effect_to_string(e) })
     match row.tail {
         some(t) => parts.push("?${t.to_str()}"),
         none => {}

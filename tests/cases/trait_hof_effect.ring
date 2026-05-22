@@ -2,7 +2,7 @@ fn main() {
     let nums = [1, 2, 3]
     
     // map with side effect callback (io effect propagated through HOF)
-    var count = 0
+    let mut count = 0
     let doubled = nums.map(fn(x) {
         count = count + 1
         x * 2
@@ -11,7 +11,7 @@ fn main() {
     assert(count == 3, "side effect in map callback")
     
     // filter with side effect callback
-    var checked = 0
+    let mut checked = 0
     let evens = [1, 2, 3, 4].filter(fn(x) {
         checked = checked + 1
         x % 2 == 0
@@ -20,7 +20,7 @@ fn main() {
     assert(checked == 4, "side effect in filter callback")
     
     // fold with side effect callback
-    var steps = 0
+    let mut steps = 0
     let sum = [10, 20, 30].fold(0, fn(acc, x) {
         steps = steps + 1
         acc + x

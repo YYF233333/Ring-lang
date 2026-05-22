@@ -25,7 +25,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                 external_struct_fields: Map<Str, List<Str>>?,
                 external_impl_methods: Map<Str, Str?>?,
                 module_imports: List<Str>?, module_exports: List<Str>?) -> Str {
-    var ctx = new_codegen_ctx(skip_preamble, skip_main_call)
+    let mut ctx = new_codegen_ctx(skip_preamble, skip_main_call)
     ctx.module_prefix = module_prefix
     ctx.imports_map = imports_map
     ctx.module_imports = module_imports
@@ -119,11 +119,11 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
 
     // Compute transitive effect closure
     if ctx.local_fn_effects.len() > 0 {
-        var fn_callees: Map<Str, Set<Str>> = map_new()
+        let mut fn_callees: Map<Str, Set<Str>> = map_new()
         for decl in program.decls {
             match decl {
                 HDecl::Fn { name, body, .. } => {
-                    var callees = set_new()
+                    let mut callees = set_new()
                     collect_local_calls(body, ctx.local_names, callees)
                     fn_callees.insert(name, callees)
                 },
@@ -131,7 +131,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                     for subdecl in mod_decls {
                         match subdecl {
                             HDecl::Fn { name: fname, body, .. } => {
-                                var callees = set_new()
+                                let mut callees = set_new()
                                 collect_local_calls(body, ctx.local_names, callees)
                                 fn_callees.insert(fname, callees)
                             },
@@ -142,7 +142,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                 _ => {},
             }
         }
-        var changed = true
+        let mut changed = true
         while changed {
             changed = false
             for entry in fn_callees.entries() {
@@ -152,7 +152,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                         some(callee_effects) => {
                             match ctx.local_fn_effects.get(name) {
                                 none => {
-                                    var effs: List<Effect> = [Effect::IoEffect]; effs.clear()
+                                    let mut effs: List<Effect> = [Effect::IoEffect]; effs.clear()
                                     for e in callee_effects.effects { effs.push(e) }
                                     ctx.local_fn_effects.insert(name, EffectRow { effects: effs, tail: none })
                                     changed = true
@@ -160,7 +160,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                                 some(current) => {
                                     for e in callee_effects.effects {
                                         let ename = effect_kind_name(e)
-                                        var found = false
+                                        let mut found = false
                                         for ce in current.effects {
                                             if effect_kind_name(ce) == ename { found = true }
                                         }
@@ -184,7 +184,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
         match decl {
             HDecl::Struct { name, fields, .. } => {
                 let qname = qualify(ctx, name)
-                var field_names: List<Str> = [""]; field_names.clear()
+                let mut field_names: List<Str> = [""]; field_names.clear()
                 for f in fields { field_names.push(f.name) }
                 ctx.struct_field_order.insert(qname, field_names)
             },
@@ -220,7 +220,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                     match subdecl {
                         HDecl::Struct { name: sname, fields, .. } => {
                             let qname = qualify(ctx, sname)
-                            var field_names: List<Str> = [""]; field_names.clear()
+                            let mut field_names: List<Str> = [""]; field_names.clear()
                             for f in fields { field_names.push(f.name) }
                             ctx.struct_field_order.insert(qname, field_names)
                         },
@@ -345,7 +345,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     ctx.lines.join("\n")
 }
 
-fn register_builtin_methods(var ctx: CodegenCtx, type_name: Str, methods: List<Str>) {
+fn register_builtin_methods(mut ctx: CodegenCtx, type_name: Str, methods: List<Str>) {
     let sn = safe_ident(type_name)
     for m in methods {
         let key = "${sn}.${m}"
@@ -353,7 +353,7 @@ fn register_builtin_methods(var ctx: CodegenCtx, type_name: Str, methods: List<S
     }
 }
 
-fn collect_local_calls(expr: HExpr, local_names: Set<Str>, var out: Set<Str>) {
+fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>) {
     match expr {
         HExpr::Call { callee, args, .. } => {
             match callee {
@@ -450,7 +450,7 @@ fn collect_local_calls(expr: HExpr, local_names: Set<Str>, var out: Set<Str>) {
     }
 }
 
-fn collect_local_calls_stmt(stmt: HStmt, local_names: Set<Str>, var out: Set<Str>) {
+fn collect_local_calls_stmt(stmt: HStmt, local_names: Set<Str>, mut out: Set<Str>) {
     match stmt {
         HStmt::Let { init, .. } => collect_local_calls(init, local_names, out),
         HStmt::Var { init, .. } => collect_local_calls(init, local_names, out),

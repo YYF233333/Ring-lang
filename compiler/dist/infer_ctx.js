@@ -159,7 +159,7 @@ function infer_suggestion(code, message, context) {
     List_push(suggestions, new diagnostics$Suggestion("Check available methods using the type's impl block or trait implementations", Option_none, Option_none));
   }
   if ((code === "E0205")) {
-    List_push(suggestions, new diagnostics$Suggestion("Declare the variable with 'var' instead of 'let' to allow reassignment", Option_none, Option_none));
+    List_push(suggestions, new diagnostics$Suggestion("Declare the variable with 'let mut' instead of 'let' to allow reassignment", Option_none, Option_none));
   }
   if ((code === "E0601")) {
     List_push(suggestions, new diagnostics$Suggestion("Add a wildcard pattern '_ => ...' or cover all missing variants", Option_none, Option_none));

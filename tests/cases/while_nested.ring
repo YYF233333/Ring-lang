@@ -2,11 +2,11 @@
 
 fn main() {
     // Nested loops — break only exits inner loop
-    var outer_count = 0
-    var inner_total = 0
-    var i = 0
+    let mut outer_count = 0
+    let mut inner_total = 0
+    let mut i = 0
     while i < 3 {
-        var j = 0
+        let mut j = 0
         while j < 10 {
             if j == 3 { break }
             inner_total = inner_total + 1
@@ -19,12 +19,12 @@ fn main() {
     assert(inner_total == 9, "inner break at 3, 3 outer iterations")
 
     // Continue in outer, break in inner
-    var sum = 0
-    var x = 0
+    let mut sum = 0
+    let mut x = 0
     while x < 5 {
         x = x + 1
         if x == 3 { continue }
-        var y = 0
+        let mut y = 0
         while y < 3 {
             y = y + 1
             sum = sum + 1

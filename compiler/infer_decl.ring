@@ -22,7 +22,7 @@ use derive::{run_derive_pass}
 // Pass 2: Check declarations (from infer.ts)
 // ============================================================
 
-fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
+fn check_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
     match decl {
         Decl::Struct { name, type_params, is_pub, span, .. } =>
             check_struct_decl(ctx, name, type_params, is_pub, span),
@@ -58,7 +58,7 @@ fn check_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
     }
 }
 
-fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: List<Decl>, required_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
+fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: List<Decl>, required_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
     ctx.mod_path_stack.push(mod_name)
 
     // Register short-name aliases for mod-internal types so that
@@ -71,7 +71,7 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     resolve_mod_uses(ctx, uses)
 
     // Resolve required effects if present
-    var cap_row: EffectRow? = none
+    let mut cap_row: EffectRow? = none
     match required_effects {
         some(req_effs) => {
             cap_row = some(resolve_declared_effects(ctx, req_effs))
@@ -79,7 +79,7 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
         none => {}
     }
 
-    var hdecls: List<HDecl> = []
+    let mut hdecls: List<HDecl> = []
     for decl in decls {
         let prefixed = prefix_decl_name(mod_name, decl)
         let result = some(check_decl(ctx, prefixed)) catch { _ => none }
@@ -99,7 +99,7 @@ fn check_mod_decl(var ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
     HDecl::ModBlock { name: mod_name, decls: hdecls, is_pub: is_pub, span: span }
 }
 
-fn check_capability(var ctx: InferCtx, decl: HDecl, cap: EffectRow, mod_span: Span) {
+fn check_capability(mut ctx: InferCtx, decl: HDecl, cap: EffectRow, mod_span: Span) {
     match decl {
         HDecl::Fn { name, effects, span, .. } => {
             for eff in effects.effects {
@@ -117,8 +117,8 @@ fn check_capability(var ctx: InferCtx, decl: HDecl, cap: EffectRow, mod_span: Sp
     }
 }
 
-fn check_sig_decl(var ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool, span: Span) -> HDecl {
-    var hmembers: List<HSigMember> = []
+fn check_sig_decl(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool, span: Span) -> HDecl {
+    let mut hmembers: List<HSigMember> = []
     match ctx.env.types.sigs.get(name) {
         some(sig_def) => {
             for m in members {
@@ -137,7 +137,7 @@ fn check_sig_decl(var ctx: InferCtx, name: Str, members: List<SigMember>, is_pub
     HDecl::Sig { name: name, members: hmembers, is_pub: is_pub, span: span }
 }
 
-fn resolve_mod_uses(var ctx: InferCtx, uses: List<UseDecl>) {
+fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>) {
     for use_decl in uses {
         let segments = use_decl.path.segments
         if segments.len() == 0 { continue }
@@ -147,9 +147,9 @@ fn resolve_mod_uses(var ctx: InferCtx, uses: List<UseDecl>) {
         if first != "self" && first != "super" { continue }
 
         // Build qualifier from relative segments
-        var qualifier = first
-        var name_start_idx = 1
-        var i = 1
+        let mut qualifier = first
+        let mut name_start_idx = 1
+        let mut i = 1
         while i < segments.len() {
             let seg = segments.get(i).unwrap_or("")
             if seg == "super" {
@@ -226,7 +226,7 @@ fn resolve_mod_uses(var ctx: InferCtx, uses: List<UseDecl>) {
     }
 }
 
-fn check_const_decl(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {
+fn check_const_decl(mut ctx: InferCtx, name: Str, type_annotation: TypeExpr?, init: Expr, is_pub: Bool, span: Span) -> HDecl {
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     // Retrieve the def_id assigned during registration
@@ -234,14 +234,14 @@ fn check_const_decl(var ctx: InferCtx, name: Str, type_annotation: TypeExpr?, in
         some(sc) => sc.def_id,
         none => none
     }
-    var expected_ty: Type? = none
+    let mut expected_ty: Type? = none
     match type_annotation {
         some(texpr) => { expected_ty = some(resolve_type_expr(ctx, texpr)) },
         none => {}
     }
     let init_r = infer_expr(ctx, init, ctx.subst)
-    var s = init_r.subst
-    var init_ty = hexpr_type(init_r.hexpr)
+    let mut s = init_r.subst
+    let mut init_ty = hexpr_type(init_r.hexpr)
     match expected_ty {
         some(ann_ty) => {
             s = unify_at(ctx.sink, ctx.env, init_ty, ann_ty, s, span)
@@ -267,7 +267,7 @@ fn check_struct_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_
             fail.raise(CompileError {})
         }
     }
-    var hfields: List<HStructField> = []
+    let mut hfields: List<HStructField> = []
     for f in def.fields {
         hfields.push(HStructField { name: f.name, ty: f.ty, is_pub: f.is_pub })
     }
@@ -283,7 +283,7 @@ fn check_enum_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pu
             fail.raise(CompileError {})
         }
     }
-    var hvariants: List<HEnumVariant> = []
+    let mut hvariants: List<HEnumVariant> = []
     for v in def.variants {
         hvariants.push(HEnumVariant { name: v.name, fields: v.fields, field_names: v.field_names })
     }
@@ -299,11 +299,11 @@ fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast
             fail.raise(CompileError {})
         }
     }
-    var hops: List<HEffectOp> = []
-    var oi = 0
+    let mut hops: List<HEffectOp> = []
+    let mut oi = 0
     for op in def.ops {
-        var op_params: List<HParam> = []
-        var pi = 0
+        let mut op_params: List<HParam> = []
+        let mut pi = 0
         for pt in op.params {
             let p_name = match ast_ops.get(oi) {
                 some(ast_op) => match ast_op.params.get(pi) {
@@ -321,7 +321,7 @@ fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast
     HDecl::Effect { name: name, type_params: type_params, ops: hops, is_pub: is_pub, span: span }
 }
 
-fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
+fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
     let saved_tp_scope = map_clone(ctx.type_param_scope)
     for tp in type_params {
         let tv = ctx.env.fresh_var()
@@ -329,7 +329,7 @@ fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypePa
     }
 
     let impl_self_type = if type_params.len() > 0 {
-        var impl_tp_types: List<Type> = []
+        let mut impl_tp_types: List<Type> = []
         for tp in type_params {
             match ctx.type_param_scope.get(tp.name) {
                 some(tv) => impl_tp_types.push(tv),
@@ -348,7 +348,7 @@ fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypePa
     }
 
     let saved_impl_bounds = ctx.current_fn_bounds
-    var impl_bounds: List<FnBoundsEntry> = []
+    let mut impl_bounds: List<FnBoundsEntry> = []
     for tp in type_params {
         match ctx.type_param_scope.get(tp.name) {
             some(tv) => match tv {
@@ -366,7 +366,7 @@ fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypePa
     }
     ctx.current_fn_bounds = impl_bounds
 
-    var hmethods: List<HDecl> = []
+    let mut hmethods: List<HDecl> = []
     for method in methods {
         match method {
             Decl::ExternFn { name, type_params: mtps, params, return_type, declared_effects, is_pub, span: mspan } =>
@@ -382,7 +382,7 @@ fn check_impl_decl(var ctx: InferCtx, target_type: Str, type_params: List<TypePa
     HDecl::Impl { target_type: target_type, type_params: type_params, trait_name: trait_name, methods: hmethods, span: span }
 }
 
-fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast_methods: List<Decl>, is_pub: Bool, span: Span) -> HDecl {
+fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast_methods: List<Decl>, is_pub: Bool, span: Span) -> HDecl {
     let trait_def = match ctx.env.trait_reg.traits.get(name) {
         some(d) => d,
         none => {
@@ -392,7 +392,7 @@ fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         }
     }
 
-    var self_var: Type = ctx.env.fresh_var()
+    let mut self_var: Type = ctx.env.fresh_var()
     if trait_def.methods.len() > 0 {
         match trait_def.methods.first() {
             some(first_method) => match first_method.ty {
@@ -407,7 +407,7 @@ fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         }
     }
 
-    var hmethods: List<HTraitMethod> = []
+    let mut hmethods: List<HTraitMethod> = []
     for m in trait_def.methods {
         let ast_method = find_ast_fn_by_name(ast_methods, m.name)
         let fn_params: List<Type> = match m.ty {
@@ -423,8 +423,8 @@ fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
             none => none
         }
 
-        var hparams: List<HParam> = []
-        var pi = 0
+        let mut hparams: List<HParam> = []
+        let mut pi = 0
         for param_type in fn_params {
             let p_name = match ast_params {
                 some(aps) => match aps.get(pi) { some(ap) => ap.name, none => "p${pi.to_str()}" },
@@ -438,7 +438,7 @@ fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
             pi = pi + 1
         }
 
-        var method_body: HExpr? = none
+        let mut method_body: HExpr? = none
         if m.has_default {
             match ast_method {
                 some(am) => match am {
@@ -463,7 +463,7 @@ fn check_trait_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
     HDecl::Trait { name: name, type_params: type_params, methods: hmethods, is_pub: is_pub, span: span }
 }
 
-fn check_trait_default_body(var ctx: InferCtx, trait_name: Str, self_var: Type, hparams: List<HParam>, body: Expr) -> HExpr? {
+fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, hparams: List<HParam>, body: Expr) -> HExpr? {
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
@@ -533,8 +533,8 @@ fn check_extern_fn_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         Type::FnType { return_type, .. } => return_type,
         _ => UNIT
     }
-    var hparams: List<HParam> = []
-    var i = 0
+    let mut hparams: List<HParam> = []
+    let mut i = 0
     for p in params {
         let ptype = match fn_params.get(i) { some(t) => t, none => UNIT }
         hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: false })
@@ -558,7 +558,7 @@ struct FnBodyResult {
     body: HExpr
 }
 
-fn check_fn_body(var ctx: InferCtx, type_params: List<TypeParam>, hparams: List<HParam>, expected_ret: Type, body: Expr, saved_tp_scope: Map<Str, Type>, span: Span) -> FnBodyResult {
+fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<HParam>, expected_ret: Type, body: Expr, saved_tp_scope: Map<Str, Type>, span: Span) -> FnBodyResult {
     let body_result = infer_block(ctx, body, some(ctx.subst))
     ctx.subst = body_result.subst
     ctx.subst = unify_at(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span)
@@ -592,7 +592,7 @@ fn check_fn_body(var ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     }
 
     let zctx = ZonkCtx { subst: ctx.subst, names: local_names }
-    var final_params: List<HParam> = []
+    let mut final_params: List<HParam> = []
     for hp in hparams { final_params.push(zonk_param(zctx, hp)) }
     let final_ret = zonk_type(zctx, expected_ret)
     let eff = zonk_row(zctx, body_result.effects)
@@ -600,7 +600,7 @@ fn check_fn_body(var ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     FnBodyResult { params: final_params, ret: final_ret, eff: eff, body: final_body }
 }
 
-fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {
+fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
@@ -613,7 +613,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     }
 
     ctx.fn_bounds_stack.push(ctx.current_fn_bounds)
-    var inherited_bounds: List<FnBoundsEntry> = []
+    let mut inherited_bounds: List<FnBoundsEntry> = []
     for ib in ctx.current_fn_bounds { inherited_bounds.push(ib) }
     ctx.current_fn_bounds = inherited_bounds
     for tp in type_params {
@@ -632,7 +632,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
         }
     }
 
-    var hparams: List<HParam> = []
+    let mut hparams: List<HParam> = []
     for p in params {
         let ptype = match p.type_annotation {
             some(ta) => resolve_type_expr(ctx, ta),
@@ -697,7 +697,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
             let declared_row = resolve_declared_effects(ctx, de)
             // Check each inferred effect is in declared set
             for inferred_eff in inferred_effects.effects {
-                var found = false
+                let mut found = false
                 for declared_eff in declared_row.effects {
                     if effects_match_kind(inferred_eff, declared_eff) {
                         found = true
@@ -716,7 +716,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
         none => inferred_effects
     }
 
-    var trait_bounds: List<TraitBound> = []
+    let mut trait_bounds: List<TraitBound> = []
     for fb in complete_fn_bounds {
         trait_bounds.push(TraitBound { type_param: fb.type_param_name, trait_name: fb.trait_name })
     }
@@ -735,7 +735,7 @@ fn check_fn_decl(var ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     }
 }
 
-fn check_test_decl(var ctx: InferCtx, description: Str, body: Expr, span: Span) -> HDecl {
+fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) -> HDecl {
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
@@ -760,7 +760,7 @@ fn check_test_decl(var ctx: InferCtx, description: Str, body: Expr, span: Span) 
 // Public entry point
 // ============================================================
 
-fn check_one_decl(var ctx: InferCtx, decl: Decl, var hdecls: List<HDecl>) {
+fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
     let hd = check_decl(ctx, decl)
     hdecls.push(hd)
     match hd {
@@ -773,11 +773,11 @@ fn check_one_decl(var ctx: InferCtx, decl: Decl, var hdecls: List<HDecl>) {
     }
 }
 
-pub fn check(var ctx: InferCtx, program: Program) -> HProgram {
+pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     register_decls_two_phase(ctx, program.decls)
     let derived_impls = run_derive_pass(ctx.env)
 
-    var hdecls: List<HDecl> = []
+    let mut hdecls: List<HDecl> = []
     for decl in program.decls {
         let result = some(check_one_decl(ctx, decl, hdecls)) catch { _ => none }
     }
@@ -785,11 +785,11 @@ pub fn check(var ctx: InferCtx, program: Program) -> HProgram {
     HProgram { decls: hdecls, derived_impls: derived_impls }
 }
 
-pub fn resolve_type_expr_public(var ctx: InferCtx, texpr: TypeExpr) -> Type {
+pub fn resolve_type_expr_public(mut ctx: InferCtx, texpr: TypeExpr) -> Type {
     resolve_type_expr(ctx, texpr)
 }
 
-pub fn check_prelude_decl(var ctx: InferCtx, decl: Decl) -> HDecl {
+pub fn check_prelude_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
     // Note: check_decl uses fail.raise internally. Due to the known limitation
     // where cross-module effect propagation doesn't work (effects registered as
     // EMPTY_ROW in Pass 1), we must explicitly surface the fail effect here so

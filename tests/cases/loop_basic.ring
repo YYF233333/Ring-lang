@@ -1,13 +1,13 @@
 fn main() {
-    var count = 0
+    let mut count = 0
     loop {
         count = count + 1
         if count == 5 { break }
     }
     assert(count == 5, "loop with break")
 
-    var sum = 0
-    var i = 0
+    let mut sum = 0
+    let mut i = 0
     loop {
         i = i + 1
         if i > 10 { break }

@@ -4,8 +4,8 @@ effect counter {
 
 fn main() {
     let result = handle {
-        var sum = 0
-        var i = 0
+        let mut sum = 0
+        let mut i = 0
         while i < 3 {
             sum = sum + counter.tick()
             i = i + 1

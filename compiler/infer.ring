@@ -55,12 +55,12 @@ fn resolve_var_id(id: Int, sub: UnionFind) -> Int {
 // Block inference (from infer-stmt.ts)
 // ============================================================
 
-pub fn infer_block(var ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> InferResult {
+pub fn infer_block(mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> InferResult {
     match body {
         Expr::Block { stmts, tail, span } => {
-            var subst = match initial_subst { some(s) => s, none => ctx.subst }
-            var effects: EffectRow = EMPTY_ROW
-            var hstmts: List<HStmt> = []
+            let mut subst = match initial_subst { some(s) => s, none => ctx.subst }
+            let mut effects: EffectRow = EMPTY_ROW
+            let mut hstmts: List<HStmt> = []
 
             for stmt in stmts {
                 let sr = infer_stmt(ctx, stmt, subst)
@@ -71,8 +71,8 @@ pub fn infer_block(var ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> 
                 hstmts.push(sr.hstmt)
             }
 
-            var tail_hexpr: HExpr? = none
-            var block_type: Type = UNIT
+            let mut tail_hexpr: HExpr? = none
+            let mut block_type: Type = UNIT
 
             match tail {
                 some(t) => {
@@ -111,12 +111,12 @@ struct StmtResult {
 // Statement inference (from infer-stmt.ts)
 // ============================================================
 
-pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult {
+pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult {
     match stmt {
         Stmt::Let { name, name_span, type_annotation, init, span } => {
             let init_r = infer_expr(ctx, init, subst)
-            var s = init_r.subst
-            var var_type = hexpr_type(init_r.hexpr)
+            let mut s = init_r.subst
+            let mut var_type = hexpr_type(init_r.hexpr)
             match type_annotation {
                 some(ta) => {
                     let annotated = resolve_type_expr(ctx, ta)
@@ -140,8 +140,8 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
         },
         Stmt::Var { name, name_span, type_annotation, init, span } => {
             let init_r = infer_expr(ctx, init, subst)
-            var s = init_r.subst
-            var var_type = hexpr_type(init_r.hexpr)
+            let mut s = init_r.subst
+            let mut var_type = hexpr_type(init_r.hexpr)
             match type_annotation {
                 some(ta) => {
                     let annotated = resolve_type_expr(ctx, ta)
@@ -174,7 +174,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             check_assign_target_mutable(ctx, target)
             let target_r = infer_expr(ctx, target, subst)
             let value_r = infer_expr(ctx, value, target_r.subst)
-            var s = unify_at(ctx.sink, ctx.env, hexpr_type(target_r.hexpr), hexpr_type(value_r.hexpr), value_r.subst, span)
+            let mut s = unify_at(ctx.sink, ctx.env, hexpr_type(target_r.hexpr), hexpr_type(value_r.hexpr), value_r.subst, span)
             let me = merge_effects(ctx.env, target_r.effects, value_r.effects, s)
             s = me.1
             StmtResult {
@@ -194,7 +194,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
         Stmt::Return { value, span } => match value {
             some(v) => {
                 let r = infer_expr(ctx, v, subst)
-                var s = r.subst
+                let mut s = r.subst
                 match ctx.current_fn_return_type {
                     some(ret_type) => {
                         s = unify_at(ctx.sink, ctx.env, hexpr_type(r.hexpr), ret_type, s, span)
@@ -208,7 +208,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                 }
             },
             none => {
-                var s = subst
+                let mut s = subst
                 match ctx.current_fn_return_type {
                     some(ret_type) => {
                         s = unify_at(ctx.sink, ctx.env, UNIT, ret_type, s, span)
@@ -224,7 +224,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
         },
         Stmt::While { condition, body, span } => {
             let cond_r = infer_expr(ctx, condition, subst)
-            var s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL, cond_r.subst, span)
+            let mut s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL, cond_r.subst, span)
             ctx.env.push_scope()
             ctx.loop_depth = ctx.loop_depth + 1
             let body_result = some(infer_block(ctx, body, some(s))) catch { _ => none }
@@ -245,10 +245,10 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
         },
         Stmt::ForIn { binding, binding_span, destructure, iterable, body, span } => {
             let iter_r = infer_expr(ctx, iterable, subst)
-            var s = iter_r.subst
+            let mut s = iter_r.subst
             let iter_type = apply_subst(s, hexpr_type(iter_r.hexpr))
             let is_destructure = destructure.is_some()
-            var element_type: Type = ctx.env.fresh_var()
+            let mut element_type: Type = ctx.env.fresh_var()
             match iter_type {
                 Type::EnumType { name, type_params, .. } => {
                     if name == BUILTIN_RANGE && type_params.len() > 0 {
@@ -290,7 +290,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             }
 
             ctx.env.push_scope()
-            var hdestructure: List<HForInDestructure>? = none
+            let mut hdestructure: List<HForInDestructure>? = none
             match destructure {
                 some(destr) => {
                     match element_type {
@@ -307,8 +307,8 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                                 span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                         }
                     }
-                    var hd: List<HForInDestructure> = []
-                    var di = 0
+                    let mut hd: List<HForInDestructure> = []
+                    let mut di = 0
                     while di < destr.names.len() {
                         match destr.names.get(di) {
                             some(dname) => {
@@ -388,7 +388,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
         },
         Stmt::LetDestructure { pattern, init, span } => {
             let init_r = infer_expr(ctx, init, subst)
-            var s = init_r.subst
+            let mut s = init_r.subst
             let init_type = apply_subst(s, hexpr_type(init_r.hexpr))
             match init_type {
                 Type::TupleType { .. } => {},
@@ -407,8 +407,8 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                             "Tuple has ${tuple_elements.len().to_str()} elements but pattern has ${pat_elements.len().to_str()}",
                             span, DiagnosticContext::OtherContext { detail: some("tuple arity mismatch") })
                     }
-                    var bindings: List<HLetDestructureBinding> = []
-                    var bi = 0
+                    let mut bindings: List<HLetDestructureBinding> = []
+                    let mut bi = 0
                     while bi < pat_elements.len() {
                         match pat_elements.get(bi) {
                             some(p) => {
@@ -464,7 +464,7 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
         },
         Stmt::IfLet { pattern, expr, then_block, else_block, span } => {
             let expr_r = infer_expr(ctx, expr, subst)
-            var s = expr_r.subst
+            let mut s = expr_r.subst
             let expr_type = apply_subst(s, hexpr_type(expr_r.hexpr))
 
             ctx.env.push_scope()
@@ -477,11 +477,11 @@ pub fn infer_stmt(var ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             match then_result {
                 some(then_r) => {
                     s = then_r.subst
-                    var combined = merge_effects(ctx.env, expr_r.effects, then_r.effects, s)
-                    var combined_effects = combined.0
+                    let mut combined = merge_effects(ctx.env, expr_r.effects, then_r.effects, s)
+                    let mut combined_effects = combined.0
                     s = combined.1
 
-                    var else_hblock: HExpr? = none
+                    let mut else_hblock: HExpr? = none
                     match else_block {
                         some(eb) => {
                             ctx.env.push_scope()
@@ -525,7 +525,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                     some(did) => {
                         if !ctx.env.scope.mutable_vars.contains(did) {
                             let _ = type_error(ctx.sink, E0205,
-                                "Cannot assign to immutable variable '${name}' (declared with 'let'). Use 'var' for mutable bindings.",
+                                "Cannot assign to immutable variable '${name}' (declared with 'let'). Use 'let mut' for mutable bindings.",
                                 span, DiagnosticContext::OtherContext { detail: some("'${name}' is declared with 'let'") })
                         }
                     },
@@ -544,7 +544,7 @@ fn check_assign_target_mutable(ctx: InferCtx, target: Expr) {
                             some(did) => {
                                 if !ctx.env.scope.mutable_vars.contains(did) {
                                     let _ = type_error(ctx.sink, E0205,
-                                        "Cannot assign to field of immutable variable '${name}'. Use 'var' for mutable bindings.",
+                                        "Cannot assign to field of immutable variable '${name}'. Use 'let mut' for mutable bindings.",
                                         span, DiagnosticContext::OtherContext { detail: some("'${name}' is not mutable") })
                                 }
                             },
@@ -571,7 +571,7 @@ fn find_root_expr(e: Expr) -> Expr {
 // Expression inference dispatch (from infer.ts)
 // ============================================================
 
-pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResult {
+pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResult {
     match expr {
         Expr::IntLit { value, span } =>
             InferResult {
@@ -624,9 +624,9 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
         Expr::ListLit { elements, span } =>
             infer_list_literal(ctx, elements, span, subst),
         Expr::TupleLit { elements, span } => {
-            var s = subst
-            var helements: List<HExpr> = []
-            var combined_effects: EffectRow = EMPTY_ROW
+            let mut s = subst
+            let mut helements: List<HExpr> = []
+            let mut combined_effects: EffectRow = EMPTY_ROW
             for el in elements {
                 let r = infer_expr(ctx, el, s)
                 s = r.subst
@@ -635,7 +635,7 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
                 combined_effects = me.0
                 s = me.1
             }
-            var elem_types: List<Type> = []
+            let mut elem_types: List<Type> = []
             for he in helements { elem_types.push(apply_subst(s, hexpr_type(he))) }
             let tuple_type = Type::TupleType { elements: elem_types }
             InferResult {
@@ -645,11 +645,11 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
         },
         Expr::Range { start, end, inclusive, span } => {
             let start_r = infer_expr(ctx, start, subst)
-            var s = unify_at(ctx.sink, ctx.env, hexpr_type(start_r.hexpr), INT, start_r.subst, span)
+            let mut s = unify_at(ctx.sink, ctx.env, hexpr_type(start_r.hexpr), INT, start_r.subst, span)
             let end_r = infer_expr(ctx, end, s)
             s = unify_at(ctx.sink, ctx.env, hexpr_type(end_r.hexpr), INT, end_r.subst, span)
             let me = merge_effects(ctx.env, start_r.effects, end_r.effects, s)
-            var range_effects = me.0
+            let mut range_effects = me.0
             s = me.1
             let range_type = Type::EnumType { name: BUILTIN_RANGE, type_params: [INT], variants: [] }
             InferResult {
@@ -667,9 +667,9 @@ pub fn infer_expr(var ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
 // infer_ident (from infer-expr.ts)
 // ============================================================
 
-fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
+fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
     // Resolve relative paths (self::/super::) to actual qualified names
-    var resolved_qualifier = qualifier
+    let mut resolved_qualifier = qualifier
     match qualifier {
         some(q) => {
             if q == "self" || q.starts_with("super") {
@@ -739,8 +739,8 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
         },
         some(s) => {
             let t = ctx.env.instantiate(s)
-            var resolved_name: Str? = none
-            var enum_name: Str? = none
+            let mut resolved_name: Str? = none
+            let mut enum_name: Str? = none
             // Check if this name was imported via use alias (e.g. use super::value)
             // If so, use the qualified name in HIR for correct codegen
             let actual_name = match ctx.use_aliases.get(name) {
@@ -780,13 +780,13 @@ fn infer_ident(var ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
 // infer_bin_op (from infer-expr.ts)
 // ============================================================
 
-fn infer_bin_op(var ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Span, subst: UnionFind) -> InferResult {
+fn infer_bin_op(mut ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Span, subst: UnionFind) -> InferResult {
     let lr = infer_expr(ctx, left, subst)
     let rr = infer_expr(ctx, right, lr.subst)
-    var s = rr.subst
-    var result_type: Type = UNIT
-    var eq_dispatch: TraitDispatch? = none
-    var ord_dispatch: TraitDispatch? = none
+    let mut s = rr.subst
+    let mut result_type: Type = UNIT
+    let mut eq_dispatch: TraitDispatch? = none
+    let mut ord_dispatch: TraitDispatch? = none
 
     match op {
         BinOp::Add => { result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "+"); s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span) },
@@ -845,7 +845,7 @@ fn infer_bin_op(var ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
     }
 
     let me = merge_effects(ctx.env, lr.effects, rr.effects, s)
-    var effects = me.0
+    let mut effects = me.0
     s = me.1
     InferResult {
         hexpr: HExpr::BinOp { op: op, left: lr.hexpr, right: rr.hexpr, eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch, ty: result_type, effects: effects, span: span },
@@ -949,7 +949,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
 
 fn resolve_trait_extra_dicts(ctx: InferCtx, type_args: List<Type>, subst: UnionFind, trait_name: Str) -> List<Str>? {
     if type_args.len() == 0 { return none }
-    var dicts: List<Str> = []
+    let mut dicts: List<Str> = []
     for arg in type_args {
         let resolved = apply_subst(subst, arg)
         let dict = resolve_type_to_trait_dict(ctx, resolved, trait_name)
@@ -998,10 +998,10 @@ fn resolve_type_to_trait_dict(ctx: InferCtx, t: Type, trait_name: Str) -> Str? {
 // infer_unary_op
 // ============================================================
 
-fn infer_unary_op(var ctx: InferCtx, op: UnaryOp, operand: Expr, span: Span, subst: UnionFind) -> InferResult {
+fn infer_unary_op(mut ctx: InferCtx, op: UnaryOp, operand: Expr, span: Span, subst: UnionFind) -> InferResult {
     let r = infer_expr(ctx, operand, subst)
-    var s = r.subst
-    var result_type: Type = UNIT
+    let mut s = r.subst
+    let mut result_type: Type = UNIT
     match op {
         UnaryOp::Neg => {
             let resolved = apply_subst(s, hexpr_type(r.hexpr))
@@ -1029,10 +1029,10 @@ fn infer_unary_op(var ctx: InferCtx, op: UnaryOp, operand: Expr, span: Span, sub
 // infer_call
 // ============================================================
 
-fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
+fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     let callee_r = infer_expr(ctx, callee, subst)
-    var s = callee_r.subst
-    var effects = callee_r.effects
+    let mut s = callee_r.subst
+    let mut effects = callee_r.effects
 
     // Resolve callee type for lambda bidirectional inference
     let callee_fn_type: Type? = match apply_subst(s, hexpr_type(callee_r.hexpr)) {
@@ -1040,11 +1040,11 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
         _ => none
     }
 
-    var hargs: List<HExpr> = []
-    var arg_types: List<Type> = []
-    var ai = 0
+    let mut hargs: List<HExpr> = []
+    let mut arg_types: List<Type> = []
+    let mut ai = 0
     for arg in args {
-        var ar: InferResult = match arg {
+        let mut ar: InferResult = match arg {
             Expr::Lambda { params: lparams, body: lbody, span: lspan, .. } => {
                 match callee_fn_type {
                     some(cft) => match cft {
@@ -1102,7 +1102,7 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
 
     let result_type = apply_subst(s, ret_var)
 
-    var resolved_dicts: List<Str> = []
+    let mut resolved_dicts: List<Str> = []
     match callee {
         Expr::Ident { name: callee_name, .. } => {
             match ctx.env.lookup(callee_name) {
@@ -1118,7 +1118,7 @@ fn infer_call(var ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     }
 
     // Post-process: resolve dict_closure_dicts for ident args
-    var final_hargs: List<HExpr> = []
+    let mut final_hargs: List<HExpr> = []
     for harg in hargs {
         final_hargs.push(resolve_arg_dict_closure(ctx, harg, s))
     }
@@ -1141,7 +1141,7 @@ fn resolve_arg_dict_closure(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
                 some(as_) => {
                     if as_.bounds.len() == 0 { return harg }
                     let var_map = build_scheme_var_map(as_, ty)
-                    var dicts: List<Str> = []
+                    let mut dicts: List<Str> = []
                     for bound in as_.bounds {
                         match var_map.get(bound.type_var) {
                             some(fresh_var) => {
@@ -1163,7 +1163,7 @@ fn resolve_arg_dict_closure(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
     }
 }
 
-fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, var dicts: List<Str>) {
+fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, mut dicts: List<Str>) {
     match concrete {
         Type::StructType { name, .. } => {
             if ctx.env.trait_reg.trait_impls.any(fn(impl_) { impl_.target_type_name == name && impl_.trait_name == trait_name }) {
@@ -1201,7 +1201,7 @@ fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, var di
 // infer_method_call
 // ============================================================
 
-fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
+fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     // Check if receiver is an effect module
     match receiver {
         Expr::Ident { name: recv_name, .. } => {
@@ -1214,12 +1214,12 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     }
 
     let recv_r = infer_expr(ctx, receiver, subst)
-    var s = recv_r.subst
-    var effects = recv_r.effects
+    let mut s = recv_r.subst
+    let mut effects = recv_r.effects
     let recv_type = apply_subst(s, hexpr_type(recv_r.hexpr))
 
-    var method_type: Type? = none
-    var method_scheme: TypeScheme? = none
+    let mut method_type: Type? = none
+    let mut method_scheme: TypeScheme? = none
 
     // Look up method in impl for struct/enum
     match recv_type {
@@ -1259,7 +1259,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     }
 
     // Check fn bounds for type variable receivers
-    var dict_dispatch: DictDispatchInfo? = none
+    let mut dict_dispatch: DictDispatchInfo? = none
     let recv_raw_type = hexpr_type(recv_r.hexpr)
     let recv_var_id = match recv_raw_type {
         Type::TypeVar { id, .. } => some(resolve_var_id(id, s)),
@@ -1307,10 +1307,10 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     }
 
     // Infer arguments with lambda type propagation
-    var hargs: List<HExpr> = []
-    var ai = 0
+    let mut hargs: List<HExpr> = []
+    let mut ai = 0
     for arg in args {
-        var ar: InferResult = match arg {
+        let mut ar: InferResult = match arg {
             Expr::Lambda { params: lparams, body: lbody, span: lspan, .. } => {
                 match method_type {
                     some(mt) => match mt {
@@ -1345,11 +1345,11 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
         ai = ai + 1
     }
 
-    var result_type: Type = ctx.env.fresh_var()
+    let mut result_type: Type = ctx.env.fresh_var()
     match method_type {
         some(mt) => match mt {
             Type::FnType { params: mt_params, return_type: mt_ret, effects: mt_effects, .. } => {
-                var i = 0
+                let mut i = 0
                 for harg in hargs {
                     if i + 1 < mt_params.len() {
                         match mt_params.get(i + 1) {
@@ -1383,7 +1383,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
         }
     }
 
-    var resolved_dicts: List<Str> = []
+    let mut resolved_dicts: List<Str> = []
     match method_scheme {
         some(ms) => {
             if ms.bounds.len() > 0 {
@@ -1409,7 +1409,7 @@ fn infer_method_call(var ctx: InferCtx, receiver: Expr, method: Str, args: List<
     }
 }
 
-fn lookup_impl_method(var ctx: InferCtx, type_name: Str, method: Str) -> MethodLookupResult {
+fn lookup_impl_method(mut ctx: InferCtx, type_name: Str, method: Str) -> MethodLookupResult {
     match ctx.env.trait_reg.impl_methods.get(type_name) {
         some(impl_methods) => match impl_methods.get(method) {
             some(scheme) => MethodLookupResult {
@@ -1422,9 +1422,9 @@ fn lookup_impl_method(var ctx: InferCtx, type_name: Str, method: Str) -> MethodL
     }
 }
 
-fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str, span: Span) -> Type? {
-    var found_type: Type? = none
-    var found_trait_name: Str? = none
+fn lookup_trait_method(mut ctx: InferCtx, type_name: Str, method: Str, span: Span) -> Type? {
+    let mut found_type: Type? = none
+    let mut found_trait_name: Str? = none
     for impl_entry in ctx.env.trait_reg.trait_impls {
         if impl_entry.target_type_name == type_name {
             match ctx.env.trait_reg.traits.get(impl_entry.trait_name) {
@@ -1459,7 +1459,7 @@ fn lookup_trait_method(var ctx: InferCtx, type_name: Str, method: Str, span: Spa
 // infer_effect_op
 // ============================================================
 
-fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
+fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     let effect_def_opt = ctx.env.types.effects.get(effect_name)
     match effect_def_opt {
         none => {
@@ -1495,11 +1495,11 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
             span, DiagnosticContext::TypeMismatch { expected: "${op.params.len().to_str()} args", actual: "${args.len().to_str()} args", expression: none })
     }
 
-    var s = subst
-    var effects: EffectRow = EMPTY_ROW
-    var hargs: List<HExpr> = []
+    let mut s = subst
+    let mut effects: EffectRow = EMPTY_ROW
+    let mut hargs: List<HExpr> = []
 
-    var i = 0
+    let mut i = 0
     for arg in args {
         let ar = infer_expr(ctx, arg, s)
         s = ar.subst
@@ -1514,7 +1514,7 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         i = i + 1
     }
 
-    var eff: Effect = Effect::CustomEffect { name: effect_name, type_args: [] }
+    let mut eff: Effect = Effect::CustomEffect { name: effect_name, type_args: [] }
     match effect_def.built_in_kind {
         some(bik) => match bik {
             BuiltInKind::BkIo => { eff = Effect::IoEffect },
@@ -1541,12 +1541,12 @@ fn infer_effect_op(var ctx: InferCtx, effect_name: Str, op_name: Str, args: List
 // infer_field_access
 // ============================================================
 
-fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span, subst: UnionFind) -> InferResult {
+fn infer_field_access(mut ctx: InferCtx, receiver: Expr, field: Str, span: Span, subst: UnionFind) -> InferResult {
     let recv_r = infer_expr(ctx, receiver, subst)
     let s = recv_r.subst
     let recv_type = apply_subst(s, hexpr_type(recv_r.hexpr))
 
-    var field_type: Type = ctx.env.fresh_var()
+    let mut field_type: Type = ctx.env.fresh_var()
     match recv_type {
         Type::StructType { name, type_params, .. } => {
             match ctx.env.types.structs.get(name) {
@@ -1555,7 +1555,7 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
                     match f {
                         some(found_field) => {
                             let inst_map: Map<Int, Type> = map_new()
-                            var fi = 0
+                            let mut fi = 0
                             while fi < struct_def.type_param_vars.len() && fi < type_params.len() {
                                 match (struct_def.type_param_vars.get(fi), type_params.get(fi)) {
                                     (some(var_id), some(tp)) => inst_map.insert(var_id, tp),
@@ -1621,9 +1621,9 @@ fn infer_field_access(var ctx: InferCtx, receiver: Expr, field: Str, span: Span,
 // infer_struct_lit
 // ============================================================
 
-fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>, spread: Expr?, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
+fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>, spread: Expr?, span: Span, subst: UnionFind, qualifier: Str?) -> InferResult {
     // Resolve relative paths (self::/super::)
-    var resolved_qualifier = qualifier
+    let mut resolved_qualifier = qualifier
     match qualifier {
         some(q) => {
             if q == "self" || q.starts_with("super") {
@@ -1666,7 +1666,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
 
     // Check for named enum variant
-    var variant_enum: Str? = none
+    let mut variant_enum: Str? = none
     match resolved_qualifier {
         some(q) => match ctx.env.types.enums.get(q) {
             some(enum_def) => {
@@ -1715,8 +1715,8 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     let struct_def = match struct_def_opt { some(sd) => sd, none => panic("unreachable") }
 
     let inst_map: Map<Int, Type> = map_new()
-    var type_param_types: List<Type> = []
-    var tpi = 0
+    let mut type_param_types: List<Type> = []
+    let mut tpi = 0
     while tpi < struct_def.type_param_vars.len() {
         match struct_def.type_param_vars.get(tpi) {
             some(var_id) => {
@@ -1729,11 +1729,11 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         tpi = tpi + 1
     }
 
-    var s = subst
-    var effects: EffectRow = EMPTY_ROW
-    var hfields: List<HStructFieldInit> = []
+    let mut s = subst
+    let mut effects: EffectRow = EMPTY_ROW
+    let mut hfields: List<HStructFieldInit> = []
 
-    var hspread: HExpr? = none
+    let mut hspread: HExpr? = none
     match spread {
         some(sp) => {
             let sr = infer_expr(ctx, sp, s)
@@ -1741,7 +1741,7 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
             let me = merge_effects(ctx.env, effects, sr.effects, s)
             effects = me.0
             s = me.1
-            var spread_fields: List<StructField> = []
+            let mut spread_fields: List<StructField> = []
             for f in struct_def.fields {
                 spread_fields.push(StructField { name: f.name, ty: apply_subst_map(inst_map, f.ty), is_pub: f.is_pub })
             }
@@ -1794,12 +1794,12 @@ fn infer_struct_lit(var ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
 }
 
-fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name: Str, variant: EnumVariant, enum_def: EnumDef, fields: List<StructFieldInit>, spread: Expr?, span: Span, subst: UnionFind) -> InferResult {
+fn infer_named_variant_construct(mut ctx: InferCtx, enum_name: Str, variant_name: Str, variant: EnumVariant, enum_def: EnumDef, fields: List<StructFieldInit>, spread: Expr?, span: Span, subst: UnionFind) -> InferResult {
     let field_names = match variant.field_names { some(fn_) => fn_, none => [] }
 
     let inst_map: Map<Int, Type> = map_new()
-    var type_param_types: List<Type> = []
-    var tpi = 0
+    let mut type_param_types: List<Type> = []
+    let mut tpi = 0
     while tpi < enum_def.type_param_vars.len() {
         match enum_def.type_param_vars.get(tpi) {
             some(var_id) => {
@@ -1812,11 +1812,11 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
         tpi = tpi + 1
     }
 
-    var s = subst
-    var effects: EffectRow = EMPTY_ROW
-    var hfields: List<HStructFieldInit> = []
+    let mut s = subst
+    let mut effects: EffectRow = EMPTY_ROW
+    let mut hfields: List<HStructFieldInit> = []
 
-    var hspread: HExpr? = none
+    let mut hspread: HExpr? = none
     match spread {
         some(sp) => {
             let sr = infer_expr(ctx, sp, s)
@@ -1880,17 +1880,17 @@ fn infer_named_variant_construct(var ctx: InferCtx, enum_name: Str, variant_name
 // infer_match
 // ============================================================
 
-fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: Span, subst: UnionFind) -> InferResult {
+fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: Span, subst: UnionFind) -> InferResult {
     let scrut_r = infer_expr(ctx, scrutinee, subst)
-    var s = scrut_r.subst
-    var effects = scrut_r.effects
+    let mut s = scrut_r.subst
+    let mut effects = scrut_r.effects
     let result_type = ctx.env.fresh_var()
-    var harms: List<HMatchArm> = []
+    let mut harms: List<HMatchArm> = []
 
     for arm in arms {
         ctx.env.push_scope()
         let arm_result = some({
-            var match_pattern = arm.pattern
+            let mut match_pattern = arm.pattern
             match arm.pattern {
                 Pattern::Binding { name: pat_name, span: pspan } => {
                     match ctx.env.types.variant_to_enum.get(pat_name) {
@@ -1916,7 +1916,7 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
             }
             bind_pattern(ctx, match_pattern, hexpr_type(scrut_r.hexpr), s)
 
-            var guard_hexpr: HExpr? = none
+            let mut guard_hexpr: HExpr? = none
             match arm.guard {
                 some(g) => {
                     let gr = infer_expr(ctx, g, s)
@@ -1967,11 +1967,11 @@ fn infer_match(var ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
 // infer_if
 // ============================================================
 
-fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: Expr?, span: Span, subst: UnionFind) -> InferResult {
+fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: Expr?, span: Span, subst: UnionFind) -> InferResult {
     let cond_r = infer_expr(ctx, condition, subst)
-    var s = cond_r.subst
+    let mut s = cond_r.subst
     s = unify_at(ctx.sink, ctx.env, hexpr_type(cond_r.hexpr), BOOL, s, span)
-    var effects = cond_r.effects
+    let mut effects = cond_r.effects
 
     let then_r = infer_block(ctx, then_branch, some(s))
     s = then_r.subst
@@ -1979,8 +1979,8 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
     effects = me.0
     s = me.1
 
-    var else_hexpr: HExpr? = none
-    var result_type: Type = UNIT
+    let mut else_hexpr: HExpr? = none
+    let mut result_type: Type = UNIT
 
     match else_branch {
         some(eb) => match eb {
@@ -2025,10 +2025,10 @@ fn infer_if(var ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
 // infer_string_interp
 // ============================================================
 
-fn infer_string_interp(var ctx: InferCtx, parts: List<StringInterpPart>, span: Span, subst: UnionFind) -> InferResult {
-    var s = subst
-    var effects: EffectRow = EMPTY_ROW
-    var hparts: List<HStringInterpPart> = []
+fn infer_string_interp(mut ctx: InferCtx, parts: List<StringInterpPart>, span: Span, subst: UnionFind) -> InferResult {
+    let mut s = subst
+    let mut effects: EffectRow = EMPTY_ROW
+    let mut hparts: List<HStringInterpPart> = []
 
     for part in parts {
         match part {
@@ -2054,14 +2054,14 @@ fn infer_string_interp(var ctx: InferCtx, parts: List<StringInterpPart>, span: S
 // infer_catch
 // ============================================================
 
-fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, subst: UnionFind) -> InferResult {
+fn infer_catch(mut ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, subst: UnionFind) -> InferResult {
     let expr_r = infer_expr(ctx, expr, subst)
-    var s = expr_r.subst
-    var effects = expr_r.effects
+    let mut s = expr_r.subst
+    let mut effects = expr_r.effects
 
     // Extract error type from the body's fail effects, unifying if multiple
-    var error_type: Type = ctx.env.fresh_var()
-    var found_fail = false
+    let mut error_type: Type = ctx.env.fresh_var()
+    let mut found_fail = false
     for eff in effects.effects {
         match eff {
             Effect::FailEffect { error_type: et } => {
@@ -2078,14 +2078,14 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
 
     let result_type = ctx.env.fresh_var()
     s = unify_at(ctx.sink, ctx.env, hexpr_type(expr_r.hexpr), result_type, s, span)
-    var harms: List<HMatchArm> = []
+    let mut harms: List<HMatchArm> = []
 
     for arm in arms {
         ctx.env.push_scope()
         let arm_result = some({
             bind_pattern(ctx, arm.pattern, error_type, s)
 
-            var guard_hexpr: HExpr? = none
+            let mut guard_hexpr: HExpr? = none
             match arm.guard {
                 some(g) => {
                     let gr = infer_expr(ctx, g, s)
@@ -2130,25 +2130,25 @@ fn infer_catch(var ctx: InferCtx, expr: Expr, arms: List<MatchArm>, span: Span, 
 // infer_handle
 // ============================================================
 
-fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, span: Span, subst: UnionFind) -> InferResult {
+fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, span: Span, subst: UnionFind) -> InferResult {
     let body_r = infer_expr(ctx, body, subst)
-    var s = body_r.subst
-    var effects = body_r.effects
+    let mut s = body_r.subst
+    let mut effects = body_r.effects
 
-    var hhandlers: List<HEffectHandler> = []
+    let mut hhandlers: List<HEffectHandler> = []
     let handled_effects: Set<Str> = set_new()
 
     for handler in handlers {
         ctx.env.push_scope()
         let effect_def = ctx.env.types.effects.get(handler.effect_name)
-        var op_def: EffectOpDef? = none
+        let mut op_def: EffectOpDef? = none
         match effect_def {
             some(ed) => { op_def = ed.ops.find(fn(o) { o.name == handler.op_name }) },
             none => {}
         }
 
-        var hparams: List<HParam> = []
-        var hi = 0
+        let mut hparams: List<HParam> = []
+        let mut hi = 0
         for p in handler.params {
             let pt = match p.type_annotation {
                 some(ta) => resolve_type_expr(ctx, ta),
@@ -2189,7 +2189,7 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
     }
 
     let resolved_effects = apply_subst_row(s, effects)
-    var filtered_effects: List<Effect> = []
+    let mut filtered_effects: List<Effect> = []
     for e in resolved_effects.effects {
         let should_keep = match e {
             Effect::IoEffect => !handled_effects.contains("io"),
@@ -2214,13 +2214,13 @@ fn infer_handle(var ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 // infer_lambda
 // ============================================================
 
-fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, subst: UnionFind, expected_param_types: List<Type>?) -> InferResult {
+fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, subst: UnionFind, expected_param_types: List<Type>?) -> InferResult {
     ctx.env.push_scope()
-    var s = subst
-    var hparams: List<HParam> = []
-    var param_types: List<Type> = []
+    let mut s = subst
+    let mut hparams: List<HParam> = []
+    let mut param_types: List<Type> = []
 
-    var pi = 0
+    let mut pi = 0
     for p in params {
         let pt = match p.type_annotation {
             some(ta) => resolve_type_expr(ctx, ta),
@@ -2264,13 +2264,13 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
     match body_result {
         some(body_r) => {
             s = body_r.subst
-            var applied_params: List<Type> = []
+            let mut applied_params: List<Type> = []
             for pt in param_types { applied_params.push(apply_subst(s, pt)) }
             let applied_ret = apply_subst(s, hexpr_type(body_r.hexpr))
 
             let fn_type = Type::FnType { params: applied_params, return_type: applied_ret, effects: body_r.effects }
 
-            var final_hparams: List<HParam> = []
+            let mut final_hparams: List<HParam> = []
             for hp in hparams {
                 final_hparams.push(HParam { name: hp.name, ty: apply_subst(s, hp.ty), def_id: hp.def_id, is_mutable: hp.is_mutable })
             }
@@ -2291,7 +2291,7 @@ fn infer_lambda(var ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
 // infer_list_literal
 // ============================================================
 
-fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
+fn infer_list_literal(mut ctx: InferCtx, elements: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     if elements.len() == 0 {
         let elem_type = ctx.env.fresh_var()
         let list_type = Type::StructType { name: BUILTIN_LIST, type_params: [elem_type], fields: [] }
@@ -2300,10 +2300,10 @@ fn infer_list_literal(var ctx: InferCtx, elements: List<Expr>, span: Span, subst
             subst: subst, effects: EMPTY_ROW
         }
     }
-    var s = subst
-    var helements: List<HExpr> = []
-    var elem_type: Type = ctx.env.fresh_var()
-    var combined_effects: EffectRow = EMPTY_ROW
+    let mut s = subst
+    let mut helements: List<HExpr> = []
+    let mut elem_type: Type = ctx.env.fresh_var()
+    let mut combined_effects: EffectRow = EMPTY_ROW
     for el in elements {
         let r = infer_expr(ctx, el, s)
         s = r.subst

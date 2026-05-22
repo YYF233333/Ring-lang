@@ -1,4 +1,4 @@
-// Test: mut self in impl methods (alias for var self)
+// Test: mut self in impl methods (alias for mut self)
 
 struct Counter { value: Int }
 
@@ -17,10 +17,10 @@ fn main() {
     c.add(10)
     assert(c.get() == 12, "mut self add method works")
 
-    // var self still works (backward compat)
-    var c2 = Counter { value: 100 }
+    // mut self still works (backward compat)
+    let mut c2 = Counter { value: 100 }
     c2.increment()
-    assert(c2.get() == 101, "var self still works")
+    assert(c2.get() == 101, "mut self still works")
 
     print("let_mut_method: all tests passed")
 }

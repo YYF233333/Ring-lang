@@ -1,5 +1,5 @@
 fn main() {
-  var m = map_from([(1, "one"), (2, "two"), (3, "three")])
+  let mut m = map_from([(1, "one"), (2, "two"), (3, "three")])
   print(m.len())
   print(m.contains_key(2))
   print(m.is_empty())

@@ -33,7 +33,7 @@ fn main() {
 
     // Bare variant comparison + block
     let c = Color::Red
-    var found = false
+    let mut found = false
     if c == Color::Red {
         found = true
     }
@@ -46,7 +46,7 @@ fn main() {
     let g2 = Color::Green { shade: 100 }
 
     // while with enum comparison
-    var count = 0
+    let mut count = 0
     let target = Op::Eq
     while target == Op::Eq {
         count = count + 1

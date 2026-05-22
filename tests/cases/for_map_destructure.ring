@@ -1,7 +1,7 @@
 // Test: for (k, v) in map — Map destructuring iteration
 fn main() {
     let m = map_from([(1, "one"), (2, "two"), (3, "three")])
-    var total = 0
+    let mut total = 0
     for (k, v) in m {
         total = total + k
     }
