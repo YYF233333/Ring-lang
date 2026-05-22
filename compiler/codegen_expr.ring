@@ -885,7 +885,6 @@ fn gen_catch_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> St
 }
 
 fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str {
-    let body_has_fail = has_fail_effect(body)
     let saved_in_try = ctx.in_try_fail
     ctx.in_try_fail = true
     let body_js = gen_expr(ctx, body)
@@ -947,44 +946,6 @@ fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
 
     p.push(" } throw __ring_e; } })()")
     p.join("")
-}
-
-fn has_fail_effect(expr: HExpr) -> Bool {
-    match expr {
-        HExpr::IntLit { effects, .. } => check_fail(effects),
-        HExpr::FloatLit { effects, .. } => check_fail(effects),
-        HExpr::StrLit { effects, .. } => check_fail(effects),
-        HExpr::BoolLit { effects, .. } => check_fail(effects),
-        HExpr::Ident { effects, .. } => check_fail(effects),
-        HExpr::BinOp { effects, .. } => check_fail(effects),
-        HExpr::UnaryOp { effects, .. } => check_fail(effects),
-        HExpr::Call { effects, .. } => check_fail(effects),
-        HExpr::FieldAccess { effects, .. } => check_fail(effects),
-        HExpr::StructLit { effects, .. } => check_fail(effects),
-        HExpr::NamedVariantConstruct { effects, .. } => check_fail(effects),
-        HExpr::MatchExpr { effects, .. } => check_fail(effects),
-        HExpr::Block { effects, .. } => check_fail(effects),
-        HExpr::IfExpr { effects, .. } => check_fail(effects),
-        HExpr::StringInterp { effects, .. } => check_fail(effects),
-        HExpr::TryCatch { effects, .. } => check_fail(effects),
-        HExpr::HandleExpr { effects, .. } => check_fail(effects),
-        HExpr::Lambda { effects, .. } => check_fail(effects),
-        HExpr::EffectOp { effects, .. } => check_fail(effects),
-        HExpr::RangeExpr { effects, .. } => check_fail(effects),
-        HExpr::ListLit { effects, .. } => check_fail(effects),
-        HExpr::TupleLit { effects, .. } => check_fail(effects),
-        HExpr::IndexExpr { effects, .. } => check_fail(effects),
-    }
-}
-
-fn check_fail(effects: EffectRow) -> Bool {
-    for e in effects.effects {
-        match e {
-            Effect::FailEffect { .. } => { return true },
-            _ => {},
-        }
-    }
-    false
 }
 
 // ============================================================
