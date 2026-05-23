@@ -243,17 +243,26 @@ function dummy_span() {
 
 
 class CollectingSink {
-  constructor(items) {
+  constructor(items, seen) {
     this.items = items;
+    this.seen = seen;
   }
 }
 
+function diag_key(d) {
+  return `${d.code}@${d.span.file}:${d.span.start.offset}`;
+}
+
 function new_collecting_sink() {
-  return new CollectingSink([]);
+  return new CollectingSink([], map_new());
 }
 
 function CollectingSink_report(self, d) {
-  return List_push(self.items, d);
+  const key = diag_key(d);
+  if ((!_Map_contains_key(self.seen, key))) {
+    _Map_insert(self.seen, key, true);
+    return List_push(self.items, d);
+  }
 }
 function CollectingSink_has_errors(self) {
   return self.items.some((function(d) { return (function() {
@@ -266,17 +275,26 @@ function CollectingSink_diagnostics(self) {
   return self.items;
 }
 function CollectingSink_clear(self) {
-  return List_clear(self.items);
+  List_clear(self.items);
+  return _Map_clear(self.seen);
 }
 function CollectingSink_save(self) {
   return List_len(self.items);
 }
 function CollectingSink_restore(self, checkpoint) {
   self.items = List_slice(self.items, 0, checkpoint);
+  self.seen = map_new();
+  for (const d of self.items) {
+    _Map_insert(self.seen, diag_key(d), true);
+  }
 }
 
 function __CollectingSink_DiagnosticSink_report(self, d) {
-  return List_push(self.items, d);
+  const key = diag_key(d);
+  if ((!_Map_contains_key(self.seen, key))) {
+    _Map_insert(self.seen, key, true);
+    return List_push(self.items, d);
+  }
 }
 function __CollectingSink_DiagnosticSink_has_errors(self) {
   return self.items.some((function(d) { return (function() {
@@ -385,7 +403,7 @@ function __Diagnostic_Clone_clone(self) {
 const __Diagnostic_Clone = { clone: __Diagnostic_Clone_clone };
 
 function __CollectingSink_Clone_clone(self) {
-  return new CollectingSink(__List_Clone.clone(self.items, __Diagnostic_Clone));
+  return new CollectingSink(__List_Clone.clone(self.items, __Diagnostic_Clone), __Map_Clone.clone(self.seen, __Str_Clone, __Bool_Clone));
 }
 const __CollectingSink_Clone = { clone: __CollectingSink_Clone_clone };
 
@@ -472,7 +490,7 @@ function __Diagnostic_Debug_debug(self) {
 const __Diagnostic_Debug = { debug: __Diagnostic_Debug_debug };
 
 function __CollectingSink_Debug_debug(self) {
-  return "CollectingSink { " + "items: " + __List_Debug.debug(self.items, __Diagnostic_Debug) + " }";
+  return "CollectingSink { " + "items: " + __List_Debug.debug(self.items, __Diagnostic_Debug) + ", " + "seen: " + __Map_Debug.debug(self.seen, __Str_Debug, __Bool_Debug) + " }";
 }
 const __CollectingSink_Debug = { debug: __CollectingSink_Debug_debug };
 

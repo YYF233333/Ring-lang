@@ -81,16 +81,25 @@ pub trait DiagnosticSink {
 // ============================================================
 
 pub struct CollectingSink {
-    pub items: List<Diagnostic>
+    pub items: List<Diagnostic>,
+    seen: Map<Str, Bool>
+}
+
+fn diag_key(d: Diagnostic) -> Str {
+    "${d.code}@${d.span.file}:${d.span.start.offset}"
 }
 
 pub fn new_collecting_sink() -> CollectingSink {
-    CollectingSink { items: [] }
+    CollectingSink { items: [], seen: map_new() }
 }
 
 impl CollectingSink {
     pub fn report(mut self, d: Diagnostic) {
-        self.items.push(d)
+        let key = diag_key(d)
+        if !self.seen.contains_key(key) {
+            self.seen.insert(key, true)
+            self.items.push(d)
+        }
     }
 
     pub fn has_errors(self) -> Bool {
@@ -108,6 +117,7 @@ impl CollectingSink {
 
     pub fn clear(mut self) {
         self.items.clear()
+        self.seen.clear()
     }
 
     pub fn save(self) -> Int {
@@ -116,12 +126,20 @@ impl CollectingSink {
 
     pub fn restore(mut self, checkpoint: Int) {
         self.items = self.items.slice(0, checkpoint)
+        self.seen = map_new()
+        for d in self.items {
+            self.seen.insert(diag_key(d), true)
+        }
     }
 }
 
 impl DiagnosticSink for CollectingSink {
     fn report(mut self, d: Diagnostic) {
-        self.items.push(d)
+        let key = diag_key(d)
+        if !self.seen.contains_key(key) {
+            self.seen.insert(key, true)
+            self.items.push(d)
+        }
     }
 
     fn has_errors(self) -> Bool {
