@@ -477,6 +477,7 @@ const cases: TestCase[] = [
   { file: "mod_derive_no_dup.ring", expected: "mod derive no dup: ok\n" },
   { file: "mod_effect_qualified.ring", expected: "mod effect qualified: ok\n" },
   { file: "trait_default_ufcs.ring", expected: "trait default ufcs: ok\n" },
+  { file: "default_effect_body_io.ring", expected: "TAG\nLOG: hello tagged\ndefault effect body io: ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

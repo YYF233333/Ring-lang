@@ -54,6 +54,12 @@ Dispatch two independent review agents simultaneously:
    - Focus on: missed error handling, unsafe patterns, design-implementation gaps
    - Compare implementation against design.md specification
    - DS 视角独特：更关注具体执行路径、边界条件、模式遗漏，与 Claude 的类型/语义视角互补
+   - **必须加 `--disable subagents`**：审计是长任务，sub-agent 会把单长 session 碎片化成多个短 session，破坏 DeepSeek 前缀缓存积累（75-80% → 90%+）。派发示例：
+     ```powershell
+     deepseek exec --auto --json --disable subagents --model deepseek-v4-pro -p @'
+     <audit prompt>
+     '@ 2>&1 | Out-File -Encoding utf8 "ds-audit.json"
+     ```
 
 Both agents output structured findings (严重度只允许 `critical` / `medium` / `low`):
 ```

@@ -42,6 +42,7 @@ pub struct CodegenCtx {
     pub module_imports: List<Str>?,
     pub module_exports: List<Str>?,
     pub default_evidence_effects: Set<Str>,
+    pub default_evidence_params: Map<Str, List<Str>>,
     pub effect_ops: Map<Str, List<HEffectOp>>
 }
 
@@ -72,6 +73,7 @@ pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx 
         module_imports: none,
         module_exports: none,
         default_evidence_effects: set_new(),
+        default_evidence_params: map_new(),
         effect_ops: map_new()
     }
 }

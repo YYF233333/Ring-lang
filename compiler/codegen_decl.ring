@@ -1,10 +1,11 @@
-use types::{Type, EffectRow}
+use types::{Type, Effect, EffectRow}
 use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     HEffectOp, HTraitMethod, TraitBound,
     trait_dict_name, evidence_param_name, default_evidence_name,
     trait_bound_param_name,
-    default_method_self_name, ENUM_TAG_FIELD}
+    default_method_self_name, ENUM_TAG_FIELD,
+    hexpr_effects}
 use codegen_ctx::{CodegenCtx, HTraitDeclInfo, emit, emit_raw, push_indent, pop_indent,
     qualify, safe_ident, extract_effect_names, get_evidence_params}
 use codegen_stmt::{emit_block_body}
@@ -348,20 +349,65 @@ fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
     if !all_have_defaults { return }
     if ops.len() == 0 { return }
 
-    let def_ev_name = default_evidence_name(name)
-    // Use let + sequential field assignment to avoid TDZ when
-    // a default body references sibling ops on the same evidence object (#80)
-    emit(ctx, "let ${def_ev_name} = {};")
+    // Collect effects used by default bodies (excluding io which is always global)
+    let mut body_effect_names: List<Str> = [""]; body_effect_names.clear()
+    let mut body_effect_set: Set<Str> = set_new()
     for op in ops {
         match op.default_body {
             some(body) => {
-                let mut params: List<Str> = [""]; params.clear()
-                for p in op.params { params.push(safe_ident(p.name)) }
-                let params_str = params.join(", ")
-                let b = gen_expr(ctx, body)
-                emit(ctx, "${def_ev_name}.${safe_ident(op.name)} = (${params_str}) => (${b});")
+                let body_effs = hexpr_effects(body)
+                let eff_names = extract_effect_names(body_effs)
+                for en in eff_names {
+                    if en != "io" && en != name && !body_effect_set.contains(en) {
+                        body_effect_set.insert(en)
+                        body_effect_names.push(en)
+                    }
+                }
             },
-            none => {}
+            none => {},
+        }
+    }
+    body_effect_names.sort()
+    let body_ev_params = body_effect_names.map(fn(n) { evidence_param_name(n) })
+
+    let def_ev_name = default_evidence_name(name)
+    if body_ev_params.len() > 0 {
+        // Factory function: accepts evidence params, returns evidence object (#89)
+        // Uses sequential assignment inside factory to avoid TDZ (#80)
+        let ev_params_str = body_ev_params.join(", ")
+        emit(ctx, "function ${def_ev_name}(${ev_params_str}) {")
+        push_indent(ctx)
+        emit(ctx, "let __ev = {};")
+        for op in ops {
+            match op.default_body {
+                some(body) => {
+                    let mut params: List<Str> = [""]; params.clear()
+                    for p in op.params { params.push(safe_ident(p.name)) }
+                    let params_str = params.join(", ")
+                    let b = gen_expr(ctx, body)
+                    emit(ctx, "__ev.${safe_ident(op.name)} = (${params_str}) => (${b});")
+                },
+                none => {}
+            }
+        }
+        emit(ctx, "return __ev;")
+        pop_indent(ctx)
+        emit(ctx, "}")
+        ctx.default_evidence_params.insert(name, body_ev_params)
+    } else {
+        // No non-io effects: sequential assignment at module level (#80)
+        emit(ctx, "let ${def_ev_name} = {};")
+        for op in ops {
+            match op.default_body {
+                some(body) => {
+                    let mut params: List<Str> = [""]; params.clear()
+                    for p in op.params { params.push(safe_ident(p.name)) }
+                    let params_str = params.join(", ")
+                    let b = gen_expr(ctx, body)
+                    emit(ctx, "${def_ev_name}.${safe_ident(op.name)} = (${params_str}) => (${b});")
+                },
+                none => {}
+            }
         }
     }
     ctx.default_evidence_effects.insert(name)
@@ -373,22 +419,54 @@ fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
 
 pub fn emit_toplevel_evidence(mut ctx: CodegenCtx, effects: EffectRow) {
     let effect_names = extract_effect_names(effects)
+
+    // Pass 1: emit evidence for non-default effects (io/fail/empty)
+    let mut emitted: Set<Str> = set_new()
+    let mut deferred_defaults: List<Str> = [""]; deferred_defaults.clear()
     for name in effect_names {
         let ev_name = evidence_param_name(name)
-        // io evidence is already defined in the runtime preamble
         if name == "io" {
+            emitted.insert(name)
         } else {
             if name == "fail" {
                 emit(ctx, "const ${ev_name} = { raise: (error) => { throw error; } };")
+                emitted.insert(name)
             } else {
-                // For effects with default evidence, reference the pre-generated constant
                 if ctx.default_evidence_effects.contains(name) {
-                    let def_ev = default_evidence_name(name)
-                    emit(ctx, "const ${ev_name} = ${def_ev};")
+                    deferred_defaults.push(name)
                 } else {
                     emit(ctx, "const ${ev_name} = {};")
+                    emitted.insert(name)
                 }
             }
         }
+    }
+
+    // Pass 2: emit evidence for default-evidence effects (may need factory calls)
+    for name in deferred_defaults {
+        let ev_name = evidence_param_name(name)
+        let def_ev = default_evidence_name(name)
+        match ctx.default_evidence_params.get(name) {
+            some(factory_params) => {
+                for dp in factory_params {
+                    let dep_name = dp.slice(10, dp.len())
+                    if !emitted.contains(dep_name) {
+                        let dep_ev_name = evidence_param_name(dep_name)
+                        if dep_name == "fail" {
+                            emit(ctx, "const ${dep_ev_name} = { raise: (error) => { throw error; } };")
+                        } else {
+                            emit(ctx, "const ${dep_ev_name} = {};")
+                        }
+                        emitted.insert(dep_name)
+                    }
+                }
+                let args = factory_params.join(", ")
+                emit(ctx, "const ${ev_name} = ${def_ev}(${args});")
+            },
+            none => {
+                emit(ctx, "const ${ev_name} = ${def_ev};")
+            },
+        }
+        emitted.insert(name)
     }
 }

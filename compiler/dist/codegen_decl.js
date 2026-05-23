@@ -586,21 +586,22 @@ function emit_effect_decl(ctx, name, ops) {
   if ((List_len(ops) === 0)) {
     return;
   }
-  const def_ev_name = hir$default_evidence_name(name);
-  codegen_ctx$emit(ctx, `let ${def_ev_name} = {};`);
+  let body_effect_names = [""];
+  List_clear(body_effect_names);
+  let body_effect_set = set_new();
   for (const op of ops) {
     __ring_match18: {
       const __ring_m18 = op.default_body;
       if (__ring_m18._tag === "some") {
         const body = __ring_m18._0;
-        let params = [""];
-        List_clear(params);
-        for (const p of op.params) {
-          List_push(params, codegen_ctx$safe_ident(p.name));
+        const body_effs = hir$hexpr_effects(body);
+        const eff_names = codegen_ctx$extract_effect_names(body_effs);
+        for (const en of eff_names) {
+          if ((((en !== "io") && (en !== name)) && (!_Set_contains(body_effect_set, en, __Str_Eq)))) {
+            _Set_insert(body_effect_set, en);
+            List_push(body_effect_names, en);
+          }
         }
-        const params_str = List_join(params, ", ");
-        const b = codegen_expr$gen_expr(ctx, body);
-        codegen_ctx$emit(ctx, `${def_ev_name}.${codegen_ctx$safe_ident(op.name)} = (${params_str}) => (${b});`);
         break __ring_match18;
       }
       if (__ring_m18._tag === "none") {
@@ -609,26 +610,119 @@ function emit_effect_decl(ctx, name, ops) {
       __match_fail(__ring_m18);
     }
   }
+  List_sort(body_effect_names);
+  const body_ev_params = body_effect_names.map((function(n) { return hir$evidence_param_name(n); }));
+  const def_ev_name = hir$default_evidence_name(name);
+  if ((List_len(body_ev_params) > 0)) {
+    const ev_params_str = List_join(body_ev_params, ", ");
+    codegen_ctx$emit(ctx, `function ${def_ev_name}(${ev_params_str}) {`);
+    codegen_ctx$push_indent(ctx);
+    codegen_ctx$emit(ctx, "let __ev = {};");
+    for (const op of ops) {
+      __ring_match19: {
+        const __ring_m19 = op.default_body;
+        if (__ring_m19._tag === "some") {
+          const body = __ring_m19._0;
+          let params = [""];
+          List_clear(params);
+          for (const p of op.params) {
+            List_push(params, codegen_ctx$safe_ident(p.name));
+          }
+          const params_str = List_join(params, ", ");
+          const b = codegen_expr$gen_expr(ctx, body);
+          codegen_ctx$emit(ctx, `__ev.${codegen_ctx$safe_ident(op.name)} = (${params_str}) => (${b});`);
+          break __ring_match19;
+        }
+        if (__ring_m19._tag === "none") {
+          break __ring_match19;
+        }
+        __match_fail(__ring_m19);
+      }
+    }
+    codegen_ctx$emit(ctx, "return __ev;");
+    codegen_ctx$pop_indent(ctx);
+    codegen_ctx$emit(ctx, "}");
+    _Map_insert(ctx.default_evidence_params, name, body_ev_params);
+  } else {
+    codegen_ctx$emit(ctx, `let ${def_ev_name} = {};`);
+    for (const op of ops) {
+      __ring_match20: {
+        const __ring_m20 = op.default_body;
+        if (__ring_m20._tag === "some") {
+          const body = __ring_m20._0;
+          let params = [""];
+          List_clear(params);
+          for (const p of op.params) {
+            List_push(params, codegen_ctx$safe_ident(p.name));
+          }
+          const params_str = List_join(params, ", ");
+          const b = codegen_expr$gen_expr(ctx, body);
+          codegen_ctx$emit(ctx, `${def_ev_name}.${codegen_ctx$safe_ident(op.name)} = (${params_str}) => (${b});`);
+          break __ring_match20;
+        }
+        if (__ring_m20._tag === "none") {
+          break __ring_match20;
+        }
+        __match_fail(__ring_m20);
+      }
+    }
+  }
   return _Set_insert(ctx.default_evidence_effects, name);
 }
 
 function emit_toplevel_evidence(ctx, effects) {
   const effect_names = codegen_ctx$extract_effect_names(effects);
+  let emitted = set_new();
+  let deferred_defaults = [""];
+  List_clear(deferred_defaults);
   for (const name of effect_names) {
     const ev_name = hir$evidence_param_name(name);
     if ((name === "io")) {
+      _Set_insert(emitted, name);
     } else {
       if ((name === "fail")) {
         codegen_ctx$emit(ctx, `const ${ev_name} = { raise: (error) => { throw error; } };`);
+        _Set_insert(emitted, name);
       } else {
         if (_Set_contains(ctx.default_evidence_effects, name, __Str_Eq)) {
-          const def_ev = hir$default_evidence_name(name);
-          codegen_ctx$emit(ctx, `const ${ev_name} = ${def_ev};`);
+          List_push(deferred_defaults, name);
         } else {
           codegen_ctx$emit(ctx, `const ${ev_name} = {};`);
+          _Set_insert(emitted, name);
         }
       }
     }
+  }
+  for (const name of deferred_defaults) {
+    const ev_name = hir$evidence_param_name(name);
+    const def_ev = hir$default_evidence_name(name);
+    __ring_match21: {
+      const __ring_m21 = _Map_get(ctx.default_evidence_params, name);
+      if (__ring_m21._tag === "some") {
+        const factory_params = __ring_m21._0;
+        for (const dp of factory_params) {
+          const dep_name = Str_slice(dp, 10, Str_len(dp));
+          if ((!_Set_contains(emitted, dep_name, __Str_Eq))) {
+            const dep_ev_name = hir$evidence_param_name(dep_name);
+            if ((dep_name === "fail")) {
+              codegen_ctx$emit(ctx, `const ${dep_ev_name} = { raise: (error) => { throw error; } };`);
+            } else {
+              codegen_ctx$emit(ctx, `const ${dep_ev_name} = {};`);
+            }
+            _Set_insert(emitted, dep_name);
+          }
+        }
+        const args = List_join(factory_params, ", ");
+        codegen_ctx$emit(ctx, `const ${ev_name} = ${def_ev}(${args});`);
+        break __ring_match21;
+      }
+      if (__ring_m21._tag === "none") {
+        codegen_ctx$emit(ctx, `const ${ev_name} = ${def_ev};`);
+        break __ring_match21;
+      }
+      __match_fail(__ring_m21);
+    }
+    _Set_insert(emitted, name);
   }
 }
 
