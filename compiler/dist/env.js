@@ -219,11 +219,12 @@ class TraitMethodDef {
 }
 
 class TraitDef {
-  constructor(name, type_params, type_param_vars, methods) {
+  constructor(name, type_params, type_param_vars, methods, supertraits) {
     this.name = name;
     this.type_params = type_params;
     this.type_param_vars = type_param_vars;
     this.methods = methods;
+    this.supertraits = supertraits;
   }
 }
 

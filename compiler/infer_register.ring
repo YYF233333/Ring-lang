@@ -5,7 +5,7 @@ use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, mono, apply_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0207, E0406, E0501, E0502}
+use codes::{E0207, E0406, E0501, E0502, E0505, E0506}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
 
 // ============================================================
@@ -402,7 +402,36 @@ fn register_effect(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, o
 // Trait registration
 // ============================================================
 
-fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, methods: List<Decl>) {
+// Recursively collect all supertraits (transitive closure).
+// For example, if Top: Mid, Mid: Base, then collect_all_supertraits(_, "Top") = ["Mid", "Base"]
+pub fn collect_all_supertraits(ctx: InferCtx, trait_name: Str) -> List<Str> {
+    let mut result: List<Str> = []
+    let mut visited: Set<Str> = set_new()
+    let mut stack: List<Str> = []
+    match ctx.env.trait_reg.traits.get(trait_name) {
+        some(tdef) => {
+            for st in tdef.supertraits { stack.push(st) }
+        },
+        none => {}
+    }
+    while stack.len() > 0 {
+        let current = stack.pop().unwrap()
+        if visited.contains(current) { continue }
+        visited.insert(current)
+        result.push(current)
+        match ctx.env.trait_reg.traits.get(current) {
+            some(parent_def) => {
+                for parent_st in parent_def.supertraits {
+                    stack.push(parent_st)
+                }
+            },
+            none => {}
+        }
+    }
+    result
+}
+
+fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, supertraits: List<TypeBound>, methods: List<Decl>, span: Span) {
     let saved = map_clone(ctx.type_param_scope)
     let mut tp_names: List<Str> = []
     let mut tp_vars: List<Int> = []
@@ -411,6 +440,43 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, me
         let tv = ctx.env.fresh_var()
         match tv { Type::TypeVar { id, .. } => { tp_vars.push(id) }, _ => {} }
         ctx.type_param_scope.insert(tp.name, tv)
+    }
+
+    // Validate and collect supertrait names
+    let mut supertrait_names: List<Str> = []
+    for st in supertraits {
+        if !ctx.env.trait_reg.traits.contains_key(st.trait_name) {
+            let _ = type_error(ctx.sink, E0501,
+                "Unknown supertrait: ${st.trait_name}", span,
+                DiagnosticContext::TraitError { detail: "unknown supertrait '${st.trait_name}'" })
+        } else {
+            supertrait_names.push(st.trait_name)
+        }
+    }
+
+    // Detect cyclic supertrait inheritance via DFS
+    for st_name in supertrait_names {
+        let mut visited: Set<Str> = set_new()
+        visited.insert(name)
+        let mut stack: List<Str> = [st_name]
+        while stack.len() > 0 {
+            let current = stack.pop().unwrap()
+            if visited.contains(current) {
+                let _ = type_error(ctx.sink, E0506,
+                    "Cyclic supertrait inheritance: '${name}' -> '${current}'", span,
+                    DiagnosticContext::TraitError { detail: "cyclic supertrait inheritance" })
+                break
+            }
+            visited.insert(current)
+            match ctx.env.trait_reg.traits.get(current) {
+                some(parent_def) => {
+                    for parent_st in parent_def.supertraits {
+                        stack.push(parent_st)
+                    }
+                },
+                none => {}
+            }
+        }
     }
 
     let self_var = ctx.env.fresh_var()
@@ -441,7 +507,7 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, me
     }
 
     ctx.type_param_scope = saved
-    ctx.env.trait_reg.traits.insert(name, TraitDef { name: name, type_params: tp_names, type_param_vars: tp_vars, methods: trait_methods })
+    ctx.env.trait_reg.traits.insert(name, TraitDef { name: name, type_params: tp_names, type_param_vars: tp_vars, methods: trait_methods, supertraits: supertrait_names })
 }
 
 // ============================================================
@@ -471,7 +537,13 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
     for tp in type_params {
         for b in tp.bounds {
             if tp_idx < impl_tv_ids.len() {
-                impl_scheme_bounds.push(SchemeBound { type_var: impl_tv_ids.get(tp_idx).unwrap(), trait_name: b.trait_name })
+                let tv_id = impl_tv_ids.get(tp_idx).unwrap()
+                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: b.trait_name })
+                // Expand supertrait bounds
+                let supers = collect_all_supertraits(ctx, b.trait_name)
+                for st_name in supers {
+                    impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name })
+                }
             }
         }
         tp_idx = tp_idx + 1
@@ -502,6 +574,22 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                                 span, DiagnosticContext::TraitError { detail: "missing method '${tm.name}'" })
                         }
                     }
+                    // Validate supertrait impls exist (recursively)
+                    let all_supertraits = collect_all_supertraits(ctx, tname)
+                    for required_st in all_supertraits {
+                        let mut has_st_impl = false
+                        for impl_ in ctx.env.trait_reg.trait_impls {
+                            if impl_.trait_name == required_st && impl_.target_type_name == target_type {
+                                has_st_impl = true
+                            }
+                        }
+                        if !has_st_impl {
+                            let _ = type_error(ctx.sink, E0505,
+                                "Type '${target_type}' does not implement supertrait '${required_st}' required by '${tname}'",
+                                span, DiagnosticContext::TraitError { detail: "missing supertrait impl '${required_st}'" })
+                        }
+                    }
+
                     let mut tp_names: List<Str> = []
                     for tp in type_params { tp_names.push(tp.name) }
                     let mut method_names: List<Str> = []
@@ -865,6 +953,17 @@ fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
                 }, _ => {} },
                 none => {}
             }
+            // Expand supertrait bounds: if T: Ord and Ord: Eq, add T: Eq too
+            let supers = collect_all_supertraits(ctx, b.trait_name)
+            for st_name in supers {
+                fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: st_name })
+                match tv {
+                    some(t) => match t { Type::TypeVar { id, .. } => {
+                        scheme_bounds.push(SchemeBound { type_var: id, trait_name: st_name })
+                    }, _ => {} },
+                    none => {}
+                }
+            }
         }
     }
     if fn_bounds_list.len() > 0 { ctx.env.scope.fn_bounds.insert(name, fn_bounds_list) }
@@ -927,6 +1026,11 @@ fn register_extern_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>
             match tv {
                 some(t) => match t { Type::TypeVar { id, .. } => {
                     scheme_bounds.push(SchemeBound { type_var: id, trait_name: b.trait_name })
+                    // Expand supertrait bounds
+                    let supers = collect_all_supertraits(ctx, b.trait_name)
+                    for st_name in supers {
+                        scheme_bounds.push(SchemeBound { type_var: id, trait_name: st_name })
+                    }
                 }, _ => {} },
                 none => {}
             }
@@ -1067,8 +1171,8 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
         Decl::Fn { name, type_params, params, return_type, declared_effects, span, .. } =>
             register_fn(ctx, name, type_params, params, return_type, declared_effects, span),
         Decl::Test { .. } => {},
-        Decl::Trait { name, type_params, methods, .. } =>
-            register_trait(ctx, name, type_params, methods),
+        Decl::Trait { name, type_params, supertraits, methods, span, .. } =>
+            register_trait(ctx, name, type_params, supertraits, methods, span),
         Decl::ExternFn { name, type_params, params, return_type, declared_effects, span, .. } =>
             register_extern_fn(ctx, name, type_params, params, return_type, declared_effects, span),
         Decl::ExternType { name, type_params, .. } =>

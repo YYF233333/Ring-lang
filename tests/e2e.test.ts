@@ -446,6 +446,8 @@ const cases: TestCase[] = [
   { file: "audit_list_first_last_empty.ring", expected: "List first/last empty: all passed\n" },
   { file: "effect_alias.ring", expected: "Hello, world\nEffect alias: all passed\n" },
   { file: "effect_alias_generic.ring", expected: "Generic effect alias: all passed\n" },
+  { file: "supertrait_basic.ring", expected: "Supertrait basic: all passed\n" },
+  { file: "supertrait_multi_level.ring", expected: "Supertrait multi-level: all passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -512,6 +514,8 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "audit_try_reserved.ring", error_pattern: "E0101" },
     { file: "exhaustive_nonfinite_msg.ring", error_pattern: "non-finite type" },
     { file: "effect_alias_cycle.ring", error_pattern: "E0406" },
+    { file: "error_supertrait_missing_impl.ring", error_pattern: "E0505" },
+    { file: "error_supertrait_cycle.ring", error_pattern: "E0501" },
   ];
 
   for (const tc of negative_cases) {

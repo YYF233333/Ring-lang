@@ -1168,7 +1168,14 @@ impl Parser {
         self.expect(TokenKind::TkTrait)
         let name = self.expect(TokenKind::TkIdent).value
         let type_params = self.parse_type_params()
-        let supertraits: List<TypeBound> = []
+        let mut supertraits: List<TypeBound> = []
+        if self.try_consume(TokenKind::TkColon) {
+            supertraits.push(self.parse_type_bound())
+            while self.check(TokenKind::TkPlus) {
+                self.advance()
+                supertraits.push(self.parse_type_bound())
+            }
+        }
         self.expect(TokenKind::TkLBrace)
         let mut methods: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {

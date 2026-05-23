@@ -37,6 +37,8 @@ pub const E0503: Str = "E0503"
 pub const E0405: Str = "E0405"
 pub const E0406: Str = "E0406"
 pub const E0504: Str = "E0504"
+pub const E0505: Str = "E0505"
+pub const E0506: Str = "E0506"
 pub const E0601: Str = "E0601"
 pub const E0702: Str = "E0702"
 pub const E0703: Str = "E0703"
@@ -75,6 +77,8 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0502" { return "Missing trait method implementation" }
     if code == "E0503" { return "Unsatisfied trait bound" }
     if code == "E0504" { return "Ambiguous trait method" }
+    if code == "E0505" { return "Missing supertrait implementation" }
+    if code == "E0506" { return "Cyclic supertrait inheritance" }
     if code == "E0601" { return "Non-exhaustive pattern match" }
     if code == "E0702" { return "Module not found" }
     if code == "E0703" { return "Symbol not found in module" }

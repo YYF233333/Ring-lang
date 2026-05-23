@@ -207,6 +207,10 @@ const E0406 = "E0406";
 
 const E0504 = "E0504";
 
+const E0505 = "E0505";
+
+const E0506 = "E0506";
+
 const E0601 = "E0601";
 
 const E0702 = "E0702";
@@ -305,6 +309,12 @@ function error_description(code) {
   }
   if ((code === "E0504")) {
     return "Ambiguous trait method";
+  }
+  if ((code === "E0505")) {
+    return "Missing supertrait implementation";
+  }
+  if ((code === "E0506")) {
+    return "Cyclic supertrait inheritance";
   }
   if ((code === "E0601")) {
     return "Non-exhaustive pattern match";
@@ -420,4 +430,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0208, E0301, E0302, E0303, E0304, E0305, E0306, E0307, E0308, E0402, E0403, E0404, E0501, E0502, E0503, E0405, E0406, E0504, E0601, E0702, E0703, E0704, E0705, E0706, W0001, error_description, error_category };
+export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0208, E0301, E0302, E0303, E0304, E0305, E0306, E0307, E0308, E0402, E0403, E0404, E0501, E0502, E0503, E0405, E0406, E0504, E0505, E0506, E0601, E0702, E0703, E0704, E0705, E0706, W0001, error_description, error_category };
