@@ -142,7 +142,8 @@ pub struct ScopeManager {
     pub var_bounds: Map<Int, Set<Str>>,
     pub def_spans: Map<Int, Span>,
     pub mutable_vars: Set<Int>,
-    pub let_defs: Set<Int>
+    pub let_defs: Set<Int>,
+    pub mut_param_defs: Set<Int>
 }
 
 pub struct IdGen {
@@ -193,7 +194,8 @@ pub fn new_type_env() -> TypeEnv {
             var_bounds: map_new(),
             def_spans: map_new(),
             mutable_vars: set_new(),
-            let_defs: set_new()
+            let_defs: set_new(),
+            mut_param_defs: set_new()
         },
         ids: IdGen {
             next_type_var_id: 0,

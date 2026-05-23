@@ -1166,6 +1166,7 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
             env$TypeEnv_record_def_span(ctx.env, did, p.span);
             if (p.is_mutable) {
               _Set_insert(ctx.env.scope.mutable_vars, did);
+              _Set_insert(ctx.env.scope.mut_param_defs, did);
             } else {
               _Set_insert(ctx.env.scope.let_defs, did);
             }
@@ -1360,7 +1361,7 @@ function check(ctx, program, __ring_ev_fail) {
   const derived_impls = derive$run_derive_pass(ctx.env);
   let hdecls = [];
   for (const decl of program.decls) {
-    const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_one_decl(ctx, decl, hdecls, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
+    const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_one_decl(ctx, decl, hdecls)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
   }
   return new hir$HProgram(hdecls, derived_impls);
 }

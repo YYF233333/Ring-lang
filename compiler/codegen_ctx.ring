@@ -125,9 +125,15 @@ pub fn qualify(ctx: CodegenCtx, name: Str) -> Str {
 pub fn extract_effect_names(effects: EffectRow) -> List<Str> {
     let mut names: List<Str> = []
     for e in effects.effects {
-        let n = effect_kind_name(e)
-        if names.contains(n) == false {
-            names.push(n)
+        // Skip MutEffect — it is a compile-time marker with zero runtime cost
+        match e {
+            Effect::MutEffect { .. } => {},
+            _ => {
+                let n = effect_kind_name(e)
+                if names.contains(n) == false {
+                    names.push(n)
+                }
+            }
         }
     }
     names.sort()
