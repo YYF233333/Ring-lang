@@ -318,7 +318,7 @@ fn unify_record_rows(ra: Type, rb: Type, subst: UnionFind, mut env: TypeEnv) -> 
 
             s
         },
-        _ => panic("unify_record_rows: expected RecordType")
+        _ => panic("unreachable: unify_record_rows expected RecordType")
     }
 }
 
@@ -362,7 +362,7 @@ fn unify_struct_with_record(st: Type, rt: Type, subst: UnionFind, mut env: TypeE
 
             s
         },
-        _ => panic("unify_struct_with_record: expected StructType and RecordType")
+        _ => panic("unreachable: unify_struct_with_record expected StructType and RecordType")
     }
 }
 

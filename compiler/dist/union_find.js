@@ -230,7 +230,7 @@ function uf_union(uf, a, b) {
           }
           if (__ring_m8._tag === "some") {
             const existing = __ring_m8._0;
-            return panic("uf_union: both nodes have type bindings");
+            return panic("unreachable: uf_union both nodes have type bindings");
             break __ring_match8;
           }
           __match_fail(__ring_m8);
@@ -256,7 +256,7 @@ function uf_union(uf, a, b) {
           }
           if (__ring_m10._tag === "some") {
             const existing = __ring_m10._0;
-            panic("uf_union: both nodes have type bindings");
+            panic("unreachable: uf_union both nodes have type bindings");
             break __ring_match10;
           }
           __match_fail(__ring_m10);

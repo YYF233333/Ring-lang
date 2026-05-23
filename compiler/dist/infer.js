@@ -265,7 +265,7 @@ function infer_block(ctx, body, initial_subst, __ring_ev_fail) {
       return new infer_ctx$InferResult(hblock, subst, effects);
       break __ring_match9;
     }
-    return panic("infer_block called with non-block expression");
+    return panic("unreachable: infer_block called with non-block expression");
     break __ring_match9;
   }
 }
@@ -366,7 +366,7 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
           break __ring_match14;
         }
         if (__ring_m14._tag === "none") {
-          return panic("var_stmt: lookup failed");
+          return panic("unreachable: var_stmt lookup failed after bind");
           break __ring_match14;
         }
         __match_fail(__ring_m14);
@@ -2622,7 +2622,7 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
   const effect_def = (function() {
   const __ring_m = effect_def_opt;
   if (__ring_m._tag === "some") { const ed = __ring_m._0; return ed; }
-  if (__ring_m._tag === "none") { return panic("unreachable"); }
+  if (__ring_m._tag === "none") { return panic("unreachable: effect_def_opt after none early return"); }
   __match_fail(__ring_m);
 })();
   const canonical_effect_name = effect_def.name;
@@ -2639,7 +2639,7 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
   const op = (function() {
   const __ring_m = op_opt;
   if (__ring_m._tag === "some") { const o = __ring_m._0; return o; }
-  if (__ring_m._tag === "none") { return panic("unreachable"); }
+  if (__ring_m._tag === "none") { return panic("unreachable: op_opt after none early return"); }
   __match_fail(__ring_m);
 })();
   let inst_map = map_new();
@@ -2699,7 +2699,7 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
           const error_type = ((List_len(hargs) > 0) ? env$apply_subst(s, hir$hexpr_type((function() {
   const __ring_m = List_first(hargs);
   if (__ring_m._tag === "some") { const h = __ring_m._0; return h; }
-  if (__ring_m._tag === "none") { return panic("unreachable"); }
+  if (__ring_m._tag === "none") { return panic("unreachable: hargs.first() after len > 0 check"); }
   __match_fail(__ring_m);
 })())) : types$UNIT);
           eff = types$Effect_FailEffect(error_type);
@@ -3034,7 +3034,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
   const struct_def = (function() {
   const __ring_m = struct_def_opt;
   if (__ring_m._tag === "some") { const sd = __ring_m._0; return sd; }
-  if (__ring_m._tag === "none") { return panic("unreachable"); }
+  if (__ring_m._tag === "none") { return panic("unreachable: struct_def_opt after none early return"); }
   __match_fail(__ring_m);
 })();
   let inst_map = map_new();
@@ -3412,7 +3412,7 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
           else_hexpr = Option_some(hir$HExpr_Block([], Option_some(else_if_r.hexpr), hir$hexpr_type(else_if_r.hexpr), else_if_r.effects, espan));
           break __ring_match176;
         }
-        panic("unexpected else branch form in infer_if");
+        panic("unreachable: unexpected else branch form in infer_if");
         break __ring_match176;
       }
       break __ring_match175;

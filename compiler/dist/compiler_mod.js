@@ -971,7 +971,7 @@ function build_external_struct_fields(graph, exports_map, key) {
 function empty_module_exports_list() {
   let x = [0];
   List_clear(x);
-  return x.map((function(i) { return panic("unreachable"); }));
+  return x.map((function(i) { return panic("unreachable: empty_module_exports_list map callback"); }));
 }
 
 function empty_str_list() {

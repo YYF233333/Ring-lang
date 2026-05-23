@@ -5,19 +5,19 @@ use hir::{DerivedImpl, DerivedField, DerivedVariant, FieldAction,
     TraitBound, TypeKind, trait_dict_name, trait_bound_param_name}
 
 fn str_at(list: List<Str>, i: Int) -> Str {
-    match list.get(i) { some(v) => v, none => panic("str_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: str_at out of bounds") }
 }
 
 fn int_at(list: List<Int>, i: Int) -> Int {
-    match list.get(i) { some(v) => v, none => panic("int_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: int_at out of bounds") }
 }
 
 fn type_at(list: List<Type>, i: Int) -> Type {
-    match list.get(i) { some(v) => v, none => panic("type_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: type_at out of bounds") }
 }
 
 fn df_at(list: List<DerivedField>, i: Int) -> DerivedField {
-    match list.get(i) { some(v) => v, none => panic("df_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: df_at out of bounds") }
 }
 
 const BUILTIN_TYPES: Set<Str> = set_from(["Option", "Cell", "List", "Map", "Set", "Range"])

@@ -74,13 +74,13 @@ fn str_to_binop(s: Str) -> BinOp {
     if s == ">=" { return BinOp::Gte }
     if s == "&&" { return BinOp::And }
     if s == "||" { return BinOp::Or }
-    panic("Unknown binary operator: ${s}")
+    panic("unreachable: unknown binary operator '${s}'")
 }
 
 fn str_to_unaryop(s: Str) -> UnaryOp {
     if s == "-" { return UnaryOp::Neg }
     if s == "!" { return UnaryOp::Not }
-    panic("Unknown unary operator: ${s}")
+    panic("unreachable: unknown unary operator '${s}'")
 }
 
 fn dummy_type_expr() -> TypeExpr {

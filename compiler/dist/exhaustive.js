@@ -178,7 +178,7 @@ function pat_at(list, i) {
       break __ring_match6;
     }
     if (__ring_m6._tag === "none") {
-      return panic("pat_at: out of bounds");
+      return panic("unreachable: pat_at out of bounds");
       break __ring_match6;
     }
     __match_fail(__ring_m6);
@@ -194,7 +194,7 @@ function type_at(list, i) {
       break __ring_match7;
     }
     if (__ring_m7._tag === "none") {
-      return panic("type_at: out of bounds");
+      return panic("unreachable: type_at out of bounds");
       break __ring_match7;
     }
     __match_fail(__ring_m7);
@@ -210,7 +210,7 @@ function str_at(list, i) {
       break __ring_match8;
     }
     if (__ring_m8._tag === "none") {
-      return panic("str_at: out of bounds");
+      return panic("unreachable: str_at out of bounds");
       break __ring_match8;
     }
     __match_fail(__ring_m8);
@@ -226,7 +226,7 @@ function row_at(list, i) {
       break __ring_match9;
     }
     if (__ring_m9._tag === "none") {
-      return panic("row_at: out of bounds");
+      return panic("unreachable: row_at out of bounds");
       break __ring_match9;
     }
     __match_fail(__ring_m9);
@@ -242,7 +242,7 @@ function ctor_at(list, i) {
       break __ring_match10;
     }
     if (__ring_m10._tag === "none") {
-      return panic("ctor_at: out of bounds");
+      return panic("unreachable: ctor_at out of bounds");
       break __ring_match10;
     }
     __match_fail(__ring_m10);

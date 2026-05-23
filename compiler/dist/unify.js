@@ -554,7 +554,7 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
       return s;
       break __ring_match11;
     }
-    return panic("unify_record_rows: expected RecordType");
+    return panic("unreachable: unify_record_rows expected RecordType");
     break __ring_match11;
   }
 }
@@ -603,7 +603,7 @@ function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {
       return s.value;
       break __ring_match17;
     }
-    return panic("unify_struct_with_record: expected StructType and RecordType");
+    return panic("unreachable: unify_struct_with_record expected StructType and RecordType");
     break __ring_match17;
   }
 }

@@ -236,7 +236,7 @@ impl TypeEnv {
 
     pub fn pop_scope(mut self) {
         if self.scope.scopes.len() <= 1 {
-            panic("Cannot pop global scope")
+            panic("unreachable: cannot pop global scope")
         }
         self.scope.scopes.pop()
     }
@@ -249,7 +249,7 @@ impl TypeEnv {
         let idx = self.scope.scopes.len() - 1
         match self.scope.scopes.get(idx) {
             some(scope) => scope.variables.insert(name, s),
-            none => panic("no current scope")
+            none => panic("unreachable: no current scope")
         }
     }
 
@@ -275,7 +275,7 @@ impl TypeEnv {
             }
             i = i - 1
         }
-        panic("internal: rebind failed — variable '${name}' not found in any scope")
+        panic("unreachable: rebind failed — variable '${name}' not found in any scope")
     }
 
     pub fn lookup(self, name: Str) -> TypeScheme? {

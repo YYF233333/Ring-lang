@@ -107,7 +107,7 @@ pub fn infer_block(mut ctx: InferCtx, body: Expr, initial_subst: UnionFind?) -> 
             }
             InferResult { hexpr: hblock, subst: subst, effects: effects }
         },
-        _ => panic("infer_block called with non-block expression")
+        _ => panic("unreachable: infer_block called with non-block expression")
     }
 }
 
@@ -193,7 +193,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                         effects: init_r.effects
                     }
                 },
-                none => panic("var_stmt: lookup failed")
+                none => panic("unreachable: var_stmt lookup failed after bind")
             }
         },
         Stmt::Assign { target, value, span } => {
@@ -1832,7 +1832,7 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         },
         _ => {}
     }
-    let effect_def = match effect_def_opt { some(ed) => ed, none => panic("unreachable") }
+    let effect_def = match effect_def_opt { some(ed) => ed, none => panic("unreachable: effect_def_opt after none early return") }
     // Use canonical name from EffectDef so mod-internal unqualified references
     // (e.g. "Greeter") resolve to the declaration name (e.g. "fx::Greeter")
     let canonical_effect_name = effect_def.name
@@ -1849,7 +1849,7 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         },
         _ => {}
     }
-    let op = match op_opt { some(o) => o, none => panic("unreachable") }
+    let op = match op_opt { some(o) => o, none => panic("unreachable: op_opt after none early return") }
 
     // Instantiate effect type params with fresh variables
     let mut inst_map: Map<Int, Type> = map_new()
@@ -1899,7 +1899,7 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         some(bik) => match bik {
             BuiltInKind::BkIo => { eff = Effect::IoEffect },
             BuiltInKind::BkFail => {
-                let error_type = if hargs.len() > 0 { apply_subst(s, hexpr_type(match hargs.first() { some(h) => h, none => panic("unreachable") })) } else { UNIT }
+                let error_type = if hargs.len() > 0 { apply_subst(s, hexpr_type(match hargs.first() { some(h) => h, none => panic("unreachable: hargs.first() after len > 0 check") })) } else { UNIT }
                 eff = Effect::FailEffect { error_type: error_type }
             },
             BuiltInKind::BkMut => { eff = Effect::MutEffect { state_type: ctx.env.fresh_var() } }
@@ -2119,7 +2119,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         },
         _ => {}
     }
-    let struct_def = match struct_def_opt { some(sd) => sd, none => panic("unreachable") }
+    let struct_def = match struct_def_opt { some(sd) => sd, none => panic("unreachable: struct_def_opt after none early return") }
 
     let mut inst_map: Map<Int, Type> = map_new()
     let mut type_param_types: List<Type> = []
@@ -2452,7 +2452,7 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
                     ty: hexpr_type(else_if_r.hexpr), effects: else_if_r.effects, span: espan
                 })
             },
-            _ => { panic("unexpected else branch form in infer_if") }
+            _ => { panic("unreachable: unexpected else branch form in infer_if") }
         },
         none => {}
     }

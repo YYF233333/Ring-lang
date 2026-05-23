@@ -61,7 +61,7 @@ pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
             some(ty) => match uf.types.get(rb) {
                 none => { uf.types.insert(rb, ty) },
                 some(existing) => {
-                    panic("uf_union: both nodes have type bindings")
+                    panic("unreachable: uf_union both nodes have type bindings")
                 }
             },
             none => {}
@@ -73,7 +73,7 @@ pub fn uf_union(mut uf: UnionFind, a: Int, b: Int) {
             some(ty) => match uf.types.get(ra) {
                 none => { uf.types.insert(ra, ty) },
                 some(existing) => {
-                    panic("uf_union: both nodes have type bindings")
+                    panic("unreachable: uf_union both nodes have type bindings")
                 }
             },
             none => {}

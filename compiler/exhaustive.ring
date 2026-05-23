@@ -13,23 +13,23 @@ struct Ctor {
 }
 
 fn pat_at(list: List<Pattern>, i: Int) -> Pattern {
-    match list.get(i) { some(v) => v, none => panic("pat_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: pat_at out of bounds") }
 }
 
 fn type_at(list: List<Type>, i: Int) -> Type {
-    match list.get(i) { some(v) => v, none => panic("type_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: type_at out of bounds") }
 }
 
 fn str_at(list: List<Str>, i: Int) -> Str {
-    match list.get(i) { some(v) => v, none => panic("str_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: str_at out of bounds") }
 }
 
 fn row_at(list: List<List<Pattern>>, i: Int) -> List<Pattern> {
-    match list.get(i) { some(v) => v, none => panic("row_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: row_at out of bounds") }
 }
 
 fn ctor_at(list: List<Ctor>, i: Int) -> Ctor {
-    match list.get(i) { some(v) => v, none => panic("ctor_at: out of bounds") }
+    match list.get(i) { some(v) => v, none => panic("unreachable: ctor_at out of bounds") }
 }
 
 // Check if a type recursively contains itself (used to decide expanding set)

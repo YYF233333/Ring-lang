@@ -166,7 +166,7 @@ function str_at(list, i) {
       break __ring_match6;
     }
     if (__ring_m6._tag === "none") {
-      return panic("str_at: out of bounds");
+      return panic("unreachable: str_at out of bounds");
       break __ring_match6;
     }
     __match_fail(__ring_m6);
@@ -182,7 +182,7 @@ function int_at(list, i) {
       break __ring_match7;
     }
     if (__ring_m7._tag === "none") {
-      return panic("int_at: out of bounds");
+      return panic("unreachable: int_at out of bounds");
       break __ring_match7;
     }
     __match_fail(__ring_m7);
@@ -198,7 +198,7 @@ function type_at(list, i) {
       break __ring_match8;
     }
     if (__ring_m8._tag === "none") {
-      return panic("type_at: out of bounds");
+      return panic("unreachable: type_at out of bounds");
       break __ring_match8;
     }
     __match_fail(__ring_m8);
@@ -214,7 +214,7 @@ function df_at(list, i) {
       break __ring_match9;
     }
     if (__ring_m9._tag === "none") {
-      return panic("df_at: out of bounds");
+      return panic("unreachable: df_at out of bounds");
       break __ring_match9;
     }
     __match_fail(__ring_m9);

@@ -305,7 +305,7 @@ function str_to_binop(s) {
   if ((s === "||")) {
     return ast$BinOp_Or;
   }
-  return panic(`Unknown binary operator: ${s}`);
+  return panic(`unreachable: unknown binary operator '${s}'`);
 }
 
 function str_to_unaryop(s) {
@@ -315,7 +315,7 @@ function str_to_unaryop(s) {
   if ((s === "!")) {
     return ast$UnaryOp_Not;
   }
-  return panic(`Unknown unary operator: ${s}`);
+  return panic(`unreachable: unknown unary operator '${s}'`);
 }
 
 function dummy_type_expr() {

@@ -123,7 +123,7 @@ pub fn zonk_block(ctx: ZonkCtx, block: HExpr) -> HExpr {
                 span: span
             }
         },
-        _ => panic("zonk_block: expected Block"),
+        _ => panic("unreachable: zonk_block expected Block"),
     }
 }
 

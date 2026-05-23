@@ -362,7 +362,7 @@ function TypeEnv_push_scope(self) {
 }
 function TypeEnv_pop_scope(self) {
   if ((List_len(self.scope.scopes) <= 1)) {
-    panic("Cannot pop global scope");
+    panic("unreachable: cannot pop global scope");
   }
   return List_pop(self.scope.scopes);
 }
@@ -382,7 +382,7 @@ function TypeEnv_bind(self, name, scheme) {
       break __ring_match6;
     }
     if (__ring_m6._tag === "none") {
-      return panic("no current scope");
+      return panic("unreachable: no current scope");
       break __ring_match6;
     }
     __match_fail(__ring_m6);
@@ -414,7 +414,7 @@ function TypeEnv_rebind(self, name, scheme) {
     }
     i = (i - 1);
   }
-  return panic(`internal: rebind failed — variable '${name}' not found in any scope`);
+  return panic(`unreachable: rebind failed — variable '${name}' not found in any scope`);
 }
 function TypeEnv_lookup(self, name) {
   let i = (List_len(self.scope.scopes) - 1);

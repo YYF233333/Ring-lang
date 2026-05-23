@@ -658,7 +658,7 @@ fn build_external_struct_fields(graph: ModuleGraph, exports_map: Map<Str, Module
 }
 
 fn empty_module_exports_list() -> List<ModuleExports> {
-    let mut x = [0]; x.clear(); x.map(fn(i: Int) -> ModuleExports { panic("unreachable") })
+    let mut x = [0]; x.clear(); x.map(fn(i: Int) -> ModuleExports { panic("unreachable: empty_module_exports_list map callback") })
 }
 
 fn empty_str_list() -> List<Str> {
