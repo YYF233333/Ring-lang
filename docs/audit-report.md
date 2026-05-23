@@ -64,17 +64,6 @@
 
 ## 模块系统交互 Bug（2026-05-23 审计发现）
 
-### #83 Supertrait 查找在 mod 内使用未限定名 [critical] [doing]
-
-`register_trait`（infer_register.ring:524-528）用 `ctx.env.trait_reg.traits.contains_key(st.trait_name)` 检查 supertrait 存在性。`prefix_decl_name` 仅前缀 trait 自身 name，不修改 supertraits 列表中的引用名。在 mod 内 `trait Printable: HasArea` 经 prefix 后变为 `{ name: "shapes::Printable", supertraits: [{ trait_name: "HasArea" }] }`，但 `HasArea` 被注册为 `shapes::HasArea`。`insert_mod_aliases` 在 pass 1b **之后**才运行（line 171），因此查找时短名 alias 尚不存在。
-
-**复现**：`mod shapes { pub trait HasArea { fn area(self) -> Int } pub trait Printable: HasArea { fn describe(self) -> Str } }` → `error[E0501]: Unknown supertrait: HasArea`
-
-**文件**：`compiler/infer_register.ring:524-528`
-**修复方向**：(a) 在 `register_trait` 中当 raw name 未找到时尝试添加当前 mod 前缀查找；或 (b) 将 `insert_mod_aliases` 提前到 pass 1b 之前（需拆分注册顺序）。
-
-发现者：Opus
-
 ### #91 `impl` 目标类型不支持限定路径 [low] [open]
 
 Parser 的 `impl Trait for mod::Type` 不支持——解析到 `::` 时报错。用户必须将 impl 放在 mod 块内部。

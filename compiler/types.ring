@@ -82,10 +82,17 @@ pub fn effect_kind_name(e: Effect) -> Str {
     }
 }
 
+fn is_type_var(t: Type) -> Bool {
+    match t { Type::TypeVar { .. } => true, _ => false }
+}
+
 pub fn effects_match_kind(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
-        Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },
+        Effect::MutEffect { state_type: sa } => match b {
+            Effect::MutEffect { state_type: sb } => is_type_var(sa) || is_type_var(sb) || types_equal(sa, sb),
+            _ => false
+        },
         Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
         Effect::CustomEffect { name: na, .. } => match b {
             Effect::CustomEffect { name: nb, .. } => na == nb,

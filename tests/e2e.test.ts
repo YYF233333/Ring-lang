@@ -463,6 +463,7 @@ const cases: TestCase[] = [
   { file: "default_effect_sibling_op.ring", expected: "default effect sibling op: ok\n" },
   { file: "mut_effect_basic.ring", expected: "mut_effect_basic: all tests passed\n" },
   { file: "mut_effect_multi_type.ring", expected: "mut_effect_multi_type: all tests passed\n" },
+  { file: "mut_effect_multi_match.ring", expected: "mut effect multi match: ok\n" },
   { file: "delegate_basic.ring", expected: "delegate_basic: all tests passed\n" },
   { file: "delegate_multi_trait.ring", expected: "delegate_multi_trait: all tests passed\n" },
   { file: "delegate_with_args.ring", expected: "delegate_with_args: all tests passed\n" },
