@@ -5,7 +5,7 @@ use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, mono, apply_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508}
+use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
 
 // ============================================================
@@ -924,6 +924,19 @@ fn register_delegate_traits(
                         "type '${field_type_name}' (field '${field}') does not implement trait '${tname}'",
                         span, DiagnosticContext::TraitError { detail: "delegate field type missing trait impl" })
                 } else {
+                    // Check for conflict: same trait already implemented (hand-written) for this type
+                    let mut conflict = false
+                    for existing in ctx.env.trait_reg.trait_impls {
+                        if existing.trait_name == tname && existing.target_type_name == target_type {
+                            conflict = true
+                        }
+                    }
+                    if conflict {
+                        let _ = type_error(ctx.sink, E0509,
+                            "trait '${tname}' is already implemented for '${target_type}'; cannot delegate the same trait",
+                            span, DiagnosticContext::TraitError { detail: "delegate conflicts with existing impl" })
+                        continue
+                    }
                     // Register ImplEntry for target_type implementing tname
                     let mut tp_names: List<Str> = []
                     for tp in impl_type_params { tp_names.push(tp.name) }
