@@ -37,5 +37,5 @@ fn main() {
     let r = geo::shapes::Rect { w: 5, h: 6 }
     assert(r.area() == 30, "impl in nested mod")
 
-    print("audit_impl_prefix_nested: all tests passed")
+    print("mod_nested_impl: all tests passed")
 }
