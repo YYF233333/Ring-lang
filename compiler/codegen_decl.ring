@@ -336,8 +336,8 @@ pub fn emit_toplevel_evidence(mut ctx: CodegenCtx, effects: EffectRow) {
     let effect_names = extract_effect_names(effects)
     for name in effect_names {
         let ev_name = evidence_param_name(name)
+        // io evidence is already defined in the runtime preamble
         if name == "io" {
-            emit(ctx, "const ${ev_name} = { read: (p) => __require(\"fs\").readFileSync(p, \"utf-8\"), write: (p, d) => __require(\"fs\").writeFileSync(p, d, \"utf-8\") };")
         } else {
             if name == "fail" {
                 emit(ctx, "const ${ev_name} = { raise: (error) => { throw error; } };")
