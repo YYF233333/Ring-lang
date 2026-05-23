@@ -192,10 +192,11 @@ class EnumDef {
 }
 
 class EffectOpDef {
-  constructor(name, params, return_type) {
+  constructor(name, params, return_type, has_default) {
     this.name = name;
     this.params = params;
     this.return_type = return_type;
+    this.has_default = has_default;
   }
 }
 
@@ -204,12 +205,13 @@ const BuiltInKind_BkFail = Object.freeze({ _tag: "BkFail" });
 const BuiltInKind_BkMut = Object.freeze({ _tag: "BkMut" });
 
 class EffectDef {
-  constructor(name, type_params, type_param_vars, ops, built_in_kind) {
+  constructor(name, type_params, type_param_vars, ops, built_in_kind, all_have_defaults) {
     this.name = name;
     this.type_params = type_params;
     this.type_param_vars = type_param_vars;
     this.ops = ops;
     this.built_in_kind = built_in_kind;
+    this.all_have_defaults = all_have_defaults;
   }
 }
 

@@ -488,10 +488,11 @@ class EnumVariantDecl {
 }
 
 class EffectOpDecl {
-  constructor(name, params, return_type, span) {
+  constructor(name, params, return_type, body, span) {
     this.name = name;
     this.params = params;
     this.return_type = return_type;
+    this.body = body;
     this.span = span;
   }
 }

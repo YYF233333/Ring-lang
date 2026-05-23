@@ -450,6 +450,10 @@ const cases: TestCase[] = [
   { file: "supertrait_multi_level.ring", expected: "Supertrait multi-level: all passed\n" },
   { file: "effect_annot_fail_type_match.ring", expected: "0\n" },
   { file: "prelude_bounded_impl_call.ring", expected: "ok\n" },
+  { file: "default_effect_handler.ring", expected: "Hello, World!\nHello, deep!\n" },
+  { file: "default_effect_override.ring", expected: "DEFAULT: Hello, default!\nCUSTOM: Hello, override!\n" },
+  { file: "default_effect_partial.ring", expected: "LOG: config\ndefault_effect_partial: all tests passed\n" },
+  { file: "default_effect_multi_op.ring", expected: "Name? \ndefault_effect_multi_op: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -521,6 +525,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_supertrait_missing_impl.ring", error_pattern: "E0505" },
     { file: "error_supertrait_cycle.ring", error_pattern: "E0501" },
     { file: "error_generic_numeric_op.ring", error_pattern: "E0303" },
+    { file: "error_default_effect_partial_unhandled.ring", error_pattern: "E0403" },
   ];
 
   for (const tc of negative_cases) {

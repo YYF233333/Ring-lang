@@ -2,7 +2,8 @@ use types::{Type, EffectRow}
 use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     HEffectOp, HTraitMethod, TraitBound,
-    trait_dict_name, evidence_param_name, trait_bound_param_name,
+    trait_dict_name, evidence_param_name, default_evidence_name,
+    trait_bound_param_name,
     default_method_self_name, ENUM_TAG_FIELD}
 use codegen_ctx::{CodegenCtx, HTraitDeclInfo, emit, emit_raw, push_indent, pop_indent,
     qualify, safe_ident, extract_effect_names, get_evidence_params}
@@ -23,7 +24,7 @@ pub fn emit_decl(mut ctx: CodegenCtx, decl: HDecl) {
             emit_enum_decl(ctx, name, variants),
         HDecl::Impl { target_type, trait_name, methods, .. } =>
             emit_impl_decl(ctx, target_type, trait_name, methods),
-        HDecl::Effect { .. } => {},
+        HDecl::Effect { name, ops, .. } => emit_effect_decl(ctx, name, ops),
         HDecl::Test { description, body, .. } =>
             emit_test_decl(ctx, description, body),
         HDecl::Trait { name, methods, .. } =>
@@ -289,6 +290,45 @@ fn emit_test_decl(mut ctx: CodegenCtx, description: Str, body: HExpr) {
 }
 
 // ============================================================
+// Effect declaration codegen (default evidence)
+// ============================================================
+
+fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
+    // Only emit a default evidence constant if all ops have default bodies
+    let mut all_have_defaults = true
+    for op in ops {
+        if !op.has_default { all_have_defaults = false }
+    }
+    if !all_have_defaults { return }
+    if ops.len() == 0 { return }
+
+    let def_ev_name = default_evidence_name(name)
+    let mut entries: List<Str> = [""]; entries.clear()
+    for op in ops {
+        match op.default_body {
+            some(body) => {
+                let mut params: List<Str> = [""]; params.clear()
+                for p in op.params { params.push(safe_ident(p.name)) }
+                let params_str = params.join(", ")
+                let b = gen_expr(ctx, body)
+                let mut ep: List<Str> = [""]; ep.clear()
+                ep.push(safe_ident(op.name))
+                ep.push(": (")
+                ep.push(params_str)
+                ep.push(") => (")
+                ep.push(b)
+                ep.push(")")
+                entries.push(ep.join(""))
+            },
+            none => {}
+        }
+    }
+    let entries_str = entries.join(", ")
+    emit(ctx, "const ${def_ev_name} = { ${entries_str} };")
+    ctx.default_evidence_effects.insert(name)
+}
+
+// ============================================================
 // Top-level evidence emission (for main() auto-call)
 // ============================================================
 
@@ -302,7 +342,13 @@ pub fn emit_toplevel_evidence(mut ctx: CodegenCtx, effects: EffectRow) {
             if name == "fail" {
                 emit(ctx, "const ${ev_name} = { raise: (error) => { throw error; } };")
             } else {
-                emit(ctx, "const ${ev_name} = {};")
+                // For effects with default evidence, reference the pre-generated constant
+                if ctx.default_evidence_effects.contains(name) {
+                    let def_ev = default_evidence_name(name)
+                    emit(ctx, "const ${ev_name} = ${def_ev};")
+                } else {
+                    emit(ctx, "const ${ev_name} = {};")
+                }
             }
         }
     }

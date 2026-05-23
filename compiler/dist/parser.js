@@ -1439,8 +1439,12 @@ function Parser_parse_effect_decl(self, is_pub) {
     Parser_expect(self, lexer$TokenKind_TkRParen);
     Parser_expect(self, lexer$TokenKind_TkArrow);
     const return_type = Parser_parse_type_expr(self);
+    let op_body = Option_none;
+    if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
+      op_body = Option_some(Parser_parse_block_expr(self));
+    }
     const op_end = Parser_current_span_start(self);
-    List_push(ops, new ast$EffectOpDecl(op_name, params, return_type, Parser_make_span(self, op_start, op_end)));
+    List_push(ops, new ast$EffectOpDecl(op_name, params, return_type, op_body, Parser_make_span(self, op_start, op_end)));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
     Parser_try_consume(self, lexer$TokenKind_TkSemi);
   }

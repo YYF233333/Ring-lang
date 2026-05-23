@@ -310,7 +310,7 @@ fn check_enum_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, is_pu
     HDecl::Enum { name: name, type_params: type_params, variants: hvariants, is_pub: is_pub, span: span }
 }
 
-fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast_ops: List<EffectOpDecl>, is_pub: Bool, span: Span) -> HDecl {
+fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast_ops: List<EffectOpDecl>, is_pub: Bool, span: Span) -> HDecl {
     let def = match ctx.env.types.effects.get(name) {
         some(d) => d,
         none => {
@@ -335,7 +335,28 @@ fn check_effect_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast
             op_params.push(HParam { name: p_name, ty: pt, def_id: none, is_mutable: false })
             pi = pi + 1
         }
-        hops.push(HEffectOp { name: op.name, params: op_params, return_type: op.return_type })
+        // Type-check default body if present
+        let ast_op = match ast_ops.get(oi) { some(a) => a, none => ast_ops.get(0).unwrap() }
+        let mut default_body: HExpr? = none
+        match ast_op.body {
+            some(body_expr) => {
+                // Bind op params in a new scope for type checking the default body
+                ctx.env.push_scope()
+                for p in op_params {
+                    ctx.env.bind_mono(p.name, p.ty)
+                }
+                let body_result = infer_block(ctx, body_expr, none)
+                ctx.subst = body_result.subst
+                let body_type = hexpr_type(body_result.hexpr)
+                ctx.subst = unify_at(ctx.sink, ctx.env, body_type, op.return_type, ctx.subst, span)
+                // Zonk the default body
+                let zctx = ZonkCtx { subst: ctx.subst, names: map_new() }
+                default_body = some(zonk_block(zctx, body_result.hexpr))
+                ctx.env.pop_scope()
+            },
+            none => {}
+        }
+        hops.push(HEffectOp { name: op.name, params: op_params, return_type: op.return_type, has_default: op.has_default, default_body: default_body })
         oi = oi + 1
     }
     HDecl::Effect { name: name, type_params: type_params, ops: hops, is_pub: is_pub, span: span }
@@ -815,14 +836,24 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     // Check: main function must not have unhandled custom effects.
     // io/fail/mut are allowed (io is implicit, fail has default handler, mut is Cell-based),
     // but CustomEffect requires an explicit handler and cannot propagate past main.
+    // Exception: effects where all ops have default handlers are allowed (auto-injected evidence).
     if name == "main" {
         for eff in final_effects.effects {
             match eff {
                 Effect::CustomEffect { name: eff_name, .. } => {
-                    let _ = type_error(ctx.sink, E0403,
-                        "Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main",
-                        span,
-                        DiagnosticContext::EffectUnhandled { eff: eff_name, in_function: some("main") })
+                    let mut skip = false
+                    match ctx.env.types.effects.get(eff_name) {
+                        some(edef) => {
+                            if edef.all_have_defaults { skip = true }
+                        },
+                        none => {}
+                    }
+                    if !skip {
+                        let _ = type_error(ctx.sink, E0403,
+                            "Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main",
+                            span,
+                            DiagnosticContext::EffectUnhandled { eff: eff_name, in_function: some("main") })
+                    }
                 },
                 _ => {}
             }
