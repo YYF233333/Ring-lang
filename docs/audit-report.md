@@ -26,7 +26,7 @@
 
 发现者：DS，Opus 交叉验证
 
-### #105 `check_effect_decl` 中 `ast_ops.get(0).unwrap()` 潜在 panic [medium] [open]
+### #105 `check_effect_decl` 中 `ast_ops.get(0).unwrap()` 潜在 panic [medium] [doing]
 
 当 processing effect op 的 default body 时，若 `oi >= ast_ops.len()`，fallback 代码 `ast_ops.get(0).unwrap()` 会 panic。虽然正常路径下 oi 应小于 ast_ops 长度，但注册/代码不匹配时（effect def.ops 比 AST ops 多条目）会导致编译器崩溃。
 
@@ -55,7 +55,7 @@
 
 发现者：Opus
 
-### #109 `collect_var_mappings` 缺失 FnType/TupleType/GenericType arm [medium] [open]
+### #109 `collect_var_mappings` 缺失 FnType/TupleType/GenericType arm [medium] [doing]
 
 `collect_var_mappings`（`infer_ctx.ring:456-497`）仅处理 `TypeVar`/`StructType`/`EnumType`，缺失 `FnType`、`TupleType`、`GenericType` 分支。当 bounded type param 仅出现在函数类型参数（如 `fn<T: Eq>(f: fn(T) -> Bool)`）或嵌套泛型中，type variable 映射不完整，`resolve_dicts_from_scheme` 无法正确解析 trait dict。
 
@@ -91,7 +91,7 @@
 
 
 
-### #110 Mod block 内 struct pattern 匹配完全不工作（名字限定不一致）[critical] [open]
+### #110 Mod block 内 struct pattern 匹配完全不工作（名字限定不一致）[critical] [doing]
 
 **三处独立失败，同源问题**：mod block 内 struct 的名字在不同 pass 间不一致——注册用 qualified 名（`inner$Pair`），pattern 用 raw 名（`Pair`）。
 

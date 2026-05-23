@@ -594,6 +594,73 @@ match opt {
 
 ## 已知 Bug / 技术债
 
+### B-052 `mod requires` 内纯函数被保守拒绝 [bugfix] [P3] [S] [queued]
+`check_effects_capability`（`infer_decl.ring`）对任何 open tail 的 effect row 报 E0408，导致 `mod requires {io}` 内无法定义未标注 effect 的纯函数。应仅对实际携带 capability 外 effect 的函数拒绝，纯函数（空 effect row）应放行。
+
+**涉及修改**：
+1. `infer_decl.ring`：`check_effects_capability` 在检查前先 zonk effect row，区分 "open but empty"（纯函数）和 "open with concrete effects"
+
+**验收标准**：
+- `mod requires {io}` 内定义纯函数 `fn id(x: Int) -> Int { x }` 编译通过
+- 携带 capability 外 effect 的函数仍报 E0408
+- 全部 E2E 测试通过
+
+### B-053 Debug derive 对 FnType 输出改为 `"<fn>"` [bugfix] [P3] [S] [queued]
+`derive.ring` 对函数类型字段使用 `FieldAction::Identity`，codegen 生成 `String(expr)` 导致输出整个函数源码。应改为固定字符串 `"<fn>"`。
+
+**涉及修改**：
+1. `derive.ring` 或 `codegen_derive.ring`：FnType 字段的 Debug 输出改为 `"<fn>"` 字面量
+
+**验收标准**：
+- 含函数字段的 struct Debug 输出显示 `<fn>` 而非函数源码
+- 全部 E2E 测试通过
+
+### B-054 Parser expression-level 错误恢复 [feature] [P3] [M] [queued]
+Parser 有声明级错误恢复，但 `handle...with` 等复合表达式无恢复机制，单个 malformed 表达式会 poison 整个声明的解析。
+
+**涉及修改**：
+1. `parser.ring`：在 `handle`/`match`/`if` 等复合表达式解析失败时，尝试跳到 `}`/`)` 等闭合 token 恢复
+
+**验收标准**：
+- malformed `handle` 表达式不阻止后续声明的解析
+- 错误报告质量不下降
+- 全部 E2E 测试通过
+
+### B-055 Match 表达式统一 labeled block 替代 IIFE [refactor] [P3] [S] [queued]
+不含 `return` 的 match 表达式用 IIFE `(function() { ... })()`，含 `return` 的已用 labeled block + temp variable。统一为后者，避免闭包分配。
+
+**涉及修改**：
+1. `codegen_stmt.ring` / `codegen_expr.ring`：match 表达式统一使用 `__ring_blkN` temp variable 方案
+
+**验收标准**：
+- 生成的 JS 中 match 表达式不再出现 IIFE
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-056 闭包捕获 `let mut` 变量时注入 `mut<T>` effect [feature] [P3] [M] [queued]
+B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<T>` effect，使 effect 追踪完整。核心的 local effect cancellation 已在 B-048 完成。
+
+**涉及修改**：
+1. `infer.ring`：lambda 推断时分析捕获列表，对捕获的 `let mut` 变量注入 `mut<T>` effect
+
+**验收标准**：
+- 闭包捕获 `let mut` 变量 → 闭包类型携带 `mut<T>` effect
+- 闭包内修改捕获的 mut 变量 → `mut` effect 正确传播到调用者
+- local cancellation 规则仍生效（局部变量 mutation 不传播）
+- 全部 E2E 测试通过
+
+### B-057 occurs check + apply_subst fields 遍历互锁修复 [bugfix] [P3] [M] [queued]
+`occurs_in`（`unify.ring`）不检查 StructType/EnumType 的 fields/variants 中的类型；`apply_subst`（#45）同样不替换 fields 中的类型。两者互锁——当前安全但不完备。需同时修复。
+
+**涉及修改**：
+1. `unify.ring`：`occurs_in` 递归检查 fields/variants 中的类型
+2. `unify.ring`：`apply_subst` 递归替换 fields/variants 中的类型
+
+**验收标准**：
+- 涉及 struct/enum 字段类型变量的统一场景正确处理
+- 不引入无限类型（occurs check 正确拒绝）
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 
 ## 架构：后端策略（2026-05-23 更新）

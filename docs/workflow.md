@@ -42,10 +42,10 @@
   3. 分析依赖，组成 wave（独立 items 并行，有依赖串行）
   4. 每个 wave：
      a. 将 items 标为 `planning`
-     b. 用 superpowers:writing-plans 生成实现 plan
-     c. **验证 plan 与仓库现状一致**——如果 spec 描述的代码/API/结构与仓库不符，STOP + 告警，不继续
-     d. Plan 通过后将 items 标为 `doing`
-     e. Dispatch subagent 到 worktree 执行
+     b. **S 复杂度快速通道**（见下方规则）：跳过 c-e，直接在 main 上执行
+     c. M/L/XL：用 superpowers:writing-plans 生成实现 plan
+     d. **验证 plan 与仓库现状一致**——如果 spec 描述的代码/API/结构与仓库不符，STOP + 告警，不继续
+     e. Plan 通过后将 items 标为 `doing`，dispatch subagent 到 worktree 执行
      f. 验证：编译通过 + `npm test` 全过
      g. Merge 回 main
      h. 将 items 标为 `done`，然后从表中删除
@@ -116,3 +116,14 @@
 唯一的写入交叉点：**两个表的状态字段**。Discussion 写新条目，Worker 改状态/删除。由于是不同行的修改，git merge 不会冲突。
 
 Worker 在 worktree 中工作，每个 wave 开始前 rebase 到最新 main（拿到最新的 backlog/audit 状态）。
+
+### S 复杂度快速通道
+
+复杂度标为 `S`（< 1h）的 item 走快速路径，省掉 plan 生成和 worktree 隔离：
+
+1. 跳过 `superpowers:writing-plans`——直接从 backlog spec 执行
+2. 不开 worktree——直接在 main 分支上修改
+3. 状态直接从 `queued` → `doing` → 删除（跳过 `planning`）
+4. 其余规则不变：编译通过 + `npm test` 全过 + rebuild dist/ + 更新 CLAUDE.md
+
+**适用条件**：仅限 `S` 复杂度。如果执行中发现实际复杂度超出 S，停止快速通道，回退到标准流程（开 worktree + 写 plan）。
