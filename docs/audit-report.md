@@ -44,13 +44,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## Effect 标注
 
-### #64 `effects_match_kind` 只做 kind 级匹配，忽略 fail 错误类型 [medium] [open] [after: B-034]
-
-`with {fail<Str>}` 匹配 `fail<Int>` 不报错。标注中的错误类型是装饰性的。若标注作为公共契约，应验证类型参数。
-
-**决策（2026-05-23）**：应验证类型参数。排在 B-034 Effect Aliases 之后修复——effect alias 可能改变标注的解析逻辑，先稳定再加精确匹配。
-
-发现者：设计决策项
 
 ### #66 `register_impl_method` declared_effects 已使用但 Pass 2 仍不回传 [medium] [open] [blocked: B-005]
 
@@ -66,17 +59,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 **决策（2026-05-23）**：依赖 #42（impl effect 回传）修复后才能正确处理 extern fn effect 标注。随 #42 推迟。
 
-### #68 `resolve_effect_expr` 不验证 effect 名是否存在 [medium] [open]
-
-`with {typo}` 静默创建 CustomEffect，不报错。未声明的 effect 无对应 handler，属于类型系统漏洞。
-
-**修复方向**：`resolve_effect_expr` 中，effect 名必须是内置（io/fail/mut）或已声明的自定义 effect / effect alias，否则报 error（新错误码，如 E0505 "unknown effect `typo`"）。
-
-### #99 `remove_specific_fail_effect` dead code [low] [open]
-
-`infer_ctx.ring:1070` 定义了 `remove_specific_fail_effect`，`infer.ring:29` import 但从未调用。当前设计 catch 总是消除全部 fail effect，该函数为遗留 dead code。应删除定义和 import。
-
-发现者：Auditor（2026-05-23）
 
 
 ## 代码质量 / 可维护性
