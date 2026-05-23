@@ -486,6 +486,7 @@ const cases: TestCase[] = [
   { file: "auto_boxing_local.ring", expected: "auto_boxing_local: all tests passed\n" },
   { file: "mod_effect_qualified_op.ring", expected: "hello\nworld\n" },
   { file: "default_effect_topo.ring", expected: "default_effect_topo: ok\n" },
+  { file: "impl_qualified_path.ring", expected: "ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
