@@ -1079,14 +1079,14 @@ impl Parser {
         let start = self.current_span_start()
         self.expect(TokenKind::TkImpl)
         let type_params = self.parse_type_params()
-        let first_name = self.expect(TokenKind::TkIdent).value
+        let first_name = self.parse_qualified_ident()
 
         let mut target_type = first_name
         let mut trait_name: Str? = none
         if self.check(TokenKind::TkFor) {
             self.advance()
             trait_name = some(first_name)
-            target_type = self.expect(TokenKind::TkIdent).value
+            target_type = self.parse_qualified_ident()
         }
 
         self.expect(TokenKind::TkLBrace)
@@ -2045,6 +2045,30 @@ impl Parser {
 
         let rbrace = self.expect(TokenKind::TkRBrace)
         TypeExpr::RecordType { fields: fields, rest: rest, span: self.make_span(start, rbrace.span.end) }
+    }
+
+    // ============================================================
+    // Qualified ident: parses "Ident" or "mod::submod::Ident"
+    // ============================================================
+
+    fn parse_qualified_ident(mut self) -> Str {
+        let name = self.expect(TokenKind::TkIdent).value
+        if !self.check(TokenKind::TkColonColon) {
+            return name
+        }
+        // Build qualified path: first_segment::...::FinalSegment
+        let mut parts: List<Str> = [name]
+        while self.check(TokenKind::TkColonColon) {
+            self.advance()
+            let segment = self.expect(TokenKind::TkIdent).value
+            parts.push(segment)
+            // If the segment starts uppercase, it's the final type/trait name
+            if is_uppercase(segment.char_at(0).unwrap_or("")) {
+                break
+            }
+            // lowercase segment: could be another mod level, continue if :: follows
+        }
+        parts.join("::")
     }
 
     // ============================================================
