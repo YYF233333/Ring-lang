@@ -626,7 +626,12 @@ fn expand_delegate_impls(
                                             // Build HParam list: first is self, rest are synthetic params
                                             let mut hparams: List<HParam> = []
                                             let def_id_self = ctx.env.fresh_def_id()
-                                            hparams.push(HParam { name: "self", ty: self_type, def_id: some(def_id_self), is_mutable: false })
+                                            // #77: Read self mutability from trait method declaration
+                                            let self_is_mut = match tm.param_mutabilities.get(0) {
+                                                some(m) => m,
+                                                none => false
+                                            }
+                                            hparams.push(HParam { name: "self", ty: self_type, def_id: some(def_id_self), is_mutable: self_is_mut })
 
                                             // Determine the trait's Self type (first param) for binary method detection
                                             let trait_self_type = match trait_params.first() {
@@ -644,7 +649,12 @@ fn expand_delegate_impls(
                                                     none => UNIT
                                                 }
                                                 let pid = ctx.env.fresh_def_id()
-                                                hparams.push(HParam { name: pname, ty: pty, def_id: some(pid), is_mutable: false })
+                                                // #77: Read param mutability from trait method declaration
+                                                let p_is_mut = match tm.param_mutabilities.get(pi) {
+                                                    some(m) => m,
+                                                    none => false
+                                                }
+                                                hparams.push(HParam { name: pname, ty: pty, def_id: some(pid), is_mutable: p_is_mut })
 
                                                 // #79: For binary trait methods (e.g. eq(self, other: Self)),
                                                 // if the param type is the trait's Self type, forward arg.field
@@ -769,7 +779,8 @@ fn expand_delegate_impls(
                                             trait_hmethods.push(HDecl::Fn {
                                                 name: tm.name,
                                                 def_id: some(ctx.env.fresh_def_id()),
-                                                type_params: [],
+                                                // #77: Copy method type_params from trait method declaration
+                                                type_params: tm.method_type_params,
                                                 params: hparams,
                                                 return_type: ret_ty,
                                                 effects: eff,

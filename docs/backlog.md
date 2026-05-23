@@ -20,18 +20,17 @@
 - B-004 关联类型 [L]（依赖 B-005）
 - B-036 Iterator Trait [M]（依赖 B-005 + B-004，双 trait 方案）
 - ~~B-010 `delegate` 关键字 [M]~~ ✅ 已完成（2026-05-23）
-- B-033 GADTs [L]
 
 **设计验证（Stabilize 前置，阻塞层 3）**：
 - B-042 Perceus 循环引用策略 [M]（阻塞 B-012）
 - ~~B-043 Refinement × Linear × Effects 交互矩阵 [M]~~ ✅ 已完成（2026-05-24）
-- B-044 Ring 语义规范 [M]（阻塞 B-011）
+- B-044 Ring 语义规范 [M]（阻塞 B-011 LLVM）
 
-**约束**：
-- 依赖链：B-005 → B-004 → B-036（supertrait → 关联类型 → Iterator 完整双 trait 方案）
-- B-010、B-033 无依赖，可与链中任意步骤并行
-- 层 3 前置：B-042/B-044 必须在对应 XL 特性开工前完成（B-043 ✅）
-- 层 3（Refinement/Linear/async/LLVM）Phase C 层 1+2 + 设计验证完成后启动
+**关键路径（2026-05-24 更新）**：
+- B-004 → B-036 → B-044 → B-011 LLVM（关联类型 → Iterator → 语义规范 → LLVM 基础后端）
+- B-042 与关键路径并行，阻塞 B-012 Perceus 但不阻塞 LLVM 基础
+- B-033 GADTs 移出层 2，推迟至 LLVM 之后（无下游依赖，非编译器自举需求）
+- 层 3（Refinement/Linear/async）在 LLVM 基础后端可用后启动
 
 ---
 
@@ -50,7 +49,7 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 - **前置依赖**：Phase B 模块系统稳定后启动
 - **复杂度**：极大（SSA 约束传播 + 可选 Z3 集成）
 - **优先级**：Phase C 首要
-- **交互规则（B-043 决策）**：refinement 是值级谓词，不允许引用可变绑定；跨 effect/await 边界恒成立；handler resume 值须满足 refinement 约束。详见 design.md 1.5
+- **交互规则（B-043 决策）**：refinement 是值级谓词，不允许引用可变绑定；跨 effect/await 边界恒成立；handler resume 值须满足 refinement 约束；`mut` 参数带 refinement 时每次赋值重新验证（SSA 流分析，复杂度归入本 item）。详见 design.md 1.5
 
 ### B-002 Linear Types（自动推断）[feature] [P2] [XL] [queued]
 design.md 11.2 解法 B。编译器做数据流分析，旧值无后续引用时安全就地修改。
@@ -58,7 +57,7 @@ design.md 11.2 解法 B。编译器做数据流分析，旧值无后续引用时
 - **前置依赖**：`mut<S>` 稳定
 - **复杂度**：大（linearity checker + Perceus RC 的前置条件）
 - **优先级**：Phase C 与 refinement 穿插
-- **交互规则（B-043 决策）**：RAII 模型——linear 值通过 Drop trait 在 abort/cancel 路径自动释放；Drop::drop 禁止 fail effect（允许 io）；spawn 为 move 语义，不可跨任务共享 linear 值。详见 design.md 1.5
+- **交互规则（B-043 决策）**：RAII 模型——linear 值通过 Drop trait 在 abort/cancel 路径自动释放；Drop::drop 禁止 fail effect（允许 io）；spawn 为 move 语义，不可跨任务共享 linear 值；`mut self` 调用 linear 值 = 隐式借用（不消耗），scope 结束时仍需显式消耗。详见 design.md 1.5
 
 ### B-003 Dependent Types Lite [feature] [P3] [XL] [queued]
 design.md 1.3。类型可依赖特定值（`Vec<T, n: Nat>`），不要求完整依赖类型证明。
@@ -111,6 +110,10 @@ fn first<I: Iterator<Item = Int>>(iter: I) -> Int { ... }
 6. `hir.ring`：`HTraitMethod` 平级新增 `HAssocType { name: Str, bounds: List<TraitBound>, concrete: Type? }`
 7. `codegen`：关联类型是纯编译期概念，不生成运行时代码。trait 字典不携带类型信息。
 
+**交互规则（design.md 1.5）**：
+- Associated Types × Supertrait：`T: SubTrait` 蕴含 supertrait 的关联类型可用（`T::Item`），bound 展开时自动带上
+- delegate × Associated Types：delegate 创建完整 trait impl，关联类型绑定从 inner 字段的 impl 自动推导继承
+
 **验收标准**：
 - `trait Foo { type Item }` + `impl Foo for Bar { type Item = Int }` 可编译
 - `T::Item` 在泛型函数体内解析为关联类型
@@ -118,11 +121,14 @@ fn first<I: Iterator<Item = Int>>(iter: I) -> Int { ... }
 - 关联类型带 bound：`type Iter: Iterator<T>` → impl 中 `type Iter = X`，X 未 impl Iterator → 报错
 - 未提供关联类型赋值 → 编译错误
 - 同名歧义（多 trait 提供同名关联类型）→ 暂报"ambiguous associated type"错误（后续加消歧语法）
+- `T: SubTrait` 约束下 `T::SuperItem`（supertrait 关联类型）可用
+- `delegate inner: TraitWithAssocType` 自动继承关联类型绑定
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
 
-### B-033 GADTs（Generalized Algebraic Data Types）[feature] [P2] [L] [queued]
+### B-033 GADTs（Generalized Algebraic Data Types）[feature] [P3] [L] [queued]
+> 2026-05-24 从层 2 移出：无下游依赖，编译器自身不需要，推迟至 LLVM 之后。
 enum 变体可指定不同的返回类型约束，match 分支内编译器自动获得类型等式约束（完整方案：scoped unification）。
 
 ```ring
@@ -165,6 +171,10 @@ enum HList<T> {
    - 各分支返回类型在原始（未约束）环境中统一
 7. `codegen`：无特殊改动——GADT 是纯编译期类型约束，JS 层面 enum 仍然是 tagged union
 
+**交互规则（design.md 1.5）**：
+- GADTs × Or-Pattern：or-pattern 合并的 GADT 变体必须携带兼容的类型等式，不兼容则编译错误
+- GADTs × Effects：正交，无需特殊规则（scoped type equality 是编译期，evidence 是运行时）
+
 **验收标准**：
 - `enum Expr<T> { Lit(Int): Expr<Int> }` 语法可解析
 - match 分支内类型等式自动生效——`eval` 函数可类型检查通过
@@ -172,6 +182,7 @@ enum HList<T> {
 - 类型约束与 enum 类型不匹配 → 编译错误（如 `Foo(Int): Bar<Int>`）
 - 分支约束不泄漏到分支外
 - 穷尽性检查对 GADT enum 正常工作
+- or-pattern 合并不兼容 GADT 约束的变体 → 编译错误
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
@@ -604,10 +615,14 @@ match opt {
 4. `exhaustive.ring`：穷尽性检查支持 or-pattern（展开为独立行）
 5. `codegen_stmt.ring`：or-pattern 生成多条件 `||` 链，bindings 取自首个匹配分支
 
+**交互规则（design.md 1.5）**：
+- Or-Pattern × GADTs：合并的 GADT 变体必须携带兼容的类型等式，不兼容则编译错误（如 `Lit(n) | IsZero(e)` 中 T=Int vs T=Bool 冲突）
+
 **验收标准**：
 - `A | B => expr` 语法可解析、可编译
 - 绑定变量名不一致 → 编译错误
 - 绑定变量类型不一致 → 编译错误
+- GADT 变体合并时类型等式不兼容 → 编译错误
 - 穷尽性检查正确处理 or-pattern
 - 编译器自身可使用 or-pattern 消除重复分支
 - 全部 E2E 测试通过
@@ -615,13 +630,7 @@ match opt {
 
 ## 已知 Bug / 技术债
 
-### B-022 表达式位置 IIFE return 截获 [bugfix] [P3] [M] [doing]
-`let x = { return y; 0 }` 中的 return 被 IIFE 截获。语句位置已修复。
-
-- **当前状态**：实践中极少遇到
-- **优先级**：低
-
-### B-024 深层嵌套泛型 UFCS 调用 [bugfix] [P3] [L] [queued]
+### B-024 深层嵌套泛型 UFCS 调用 [bugfix] [P3] [L] [doing-waveB]
 `Pair<Pair<Int, Int>, Int>` 的 `.eq()` 等直接方法调用受限。
 
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限

@@ -905,9 +905,11 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
     __ring_match37: {
       const __ring_m37 = method;
       if (__ring_m37._tag === "Fn") {
-        const mname = __ring_m37.name; const params = __ring_m37.params; const return_type = __ring_m37.return_type; const is_abstract = __ring_m37.is_abstract;
+        const mname = __ring_m37.name; const method_tps = __ring_m37.type_params; const params = __ring_m37.params; const return_type = __ring_m37.return_type; const is_abstract = __ring_m37.is_abstract;
         let param_types = [];
+        let param_muts = [];
         for (const p of params) {
+          List_push(param_muts, p.is_mutable);
           if ((p.name === "self")) {
             List_push(param_types, self_var);
           } else {
@@ -933,7 +935,7 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
   __match_fail(__ring_m);
 })();
         const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW);
-        List_push(trait_methods, new env$TraitMethodDef(mname, fn_type, (!is_abstract)));
+        List_push(trait_methods, new env$TraitMethodDef(mname, fn_type, (!is_abstract), param_muts, method_tps));
         break __ring_match37;
       }
       break __ring_match37;

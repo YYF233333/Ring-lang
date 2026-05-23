@@ -1,6 +1,6 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT}
 use union_find::{UnionFind, uf_find, uf_lookup}
-use ast::{Span, EffectExpr}
+use ast::{Span, EffectExpr, TypeParam}
 
 // ============================================================
 // Type Scheme (for let-polymorphism)
@@ -61,7 +61,9 @@ pub struct EffectDef {
 pub struct TraitMethodDef {
     pub name: Str,
     pub ty: Type,
-    pub has_default: Bool
+    pub has_default: Bool,
+    pub param_mutabilities: List<Bool>,
+    pub method_type_params: List<TypeParam>
 }
 
 pub struct TraitDef {

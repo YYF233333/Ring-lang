@@ -572,9 +572,11 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
     let mut trait_methods: List<TraitMethodDef> = []
     for method in methods {
         match method {
-            Decl::Fn { name: mname, params, return_type, is_abstract, .. } => {
+            Decl::Fn { name: mname, type_params: method_tps, params, return_type, is_abstract, .. } => {
                 let mut param_types: List<Type> = []
+                let mut param_muts: List<Bool> = []
                 for p in params {
+                    param_muts.push(p.is_mutable)
                     if p.name == "self" {
                         param_types.push(self_var)
                     } else {
@@ -589,7 +591,7 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
                     none => ctx.env.fresh_var()
                 }
                 let fn_type = Type::FnType { params: param_types, return_type: ret, effects: EMPTY_ROW }
-                trait_methods.push(TraitMethodDef { name: mname, ty: fn_type, has_default: !is_abstract })
+                trait_methods.push(TraitMethodDef { name: mname, ty: fn_type, has_default: !is_abstract, param_mutabilities: param_muts, method_type_params: method_tps })
             },
             _ => {}
         }

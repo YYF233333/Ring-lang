@@ -292,7 +292,7 @@ function register_eq_trait(env) {
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const eq_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
   const ne_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Eq", new env$TraitDef("Eq", [], [self_var_id], [new env$TraitMethodDef("eq", eq_fn, false), new env$TraitMethodDef("ne", ne_fn, true)], []));
+  _Map_insert(env.trait_reg.traits, "Eq", new env$TraitDef("Eq", [], [self_var_id], [new env$TraitMethodDef("eq", eq_fn, false, [false, false], []), new env$TraitMethodDef("ne", ne_fn, true, [false, false], [])], []));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
     List_push(env.trait_reg.trait_impls, new env$ImplEntry("Eq", prim, [], ["eq", "ne"]));
   }
@@ -313,7 +313,7 @@ function register_clone_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const clone_fn = types$Type_FnType([self_var], self_var, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Clone", new env$TraitDef("Clone", [], [self_var_id], [new env$TraitMethodDef("clone", clone_fn, false)], []));
+  _Map_insert(env.trait_reg.traits, "Clone", new env$TraitDef("Clone", [], [self_var_id], [new env$TraitMethodDef("clone", clone_fn, false, [false], [])], []));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
     List_push(env.trait_reg.trait_impls, new env$ImplEntry("Clone", prim, [], ["clone"]));
   }
@@ -335,7 +335,7 @@ function register_ord_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const cmp_fn = types$Type_FnType([self_var, self_var], types$INT, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Ord", new env$TraitDef("Ord", [], [self_var_id], [new env$TraitMethodDef("cmp", cmp_fn, false)], []));
+  _Map_insert(env.trait_reg.traits, "Ord", new env$TraitDef("Ord", [], [self_var_id], [new env$TraitMethodDef("cmp", cmp_fn, false, [false, false], [])], []));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
     List_push(env.trait_reg.trait_impls, new env$ImplEntry("Ord", prim, [], ["cmp"]));
   }
@@ -345,7 +345,7 @@ function register_debug_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const debug_fn = types$Type_FnType([self_var], types$STR, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Debug", new env$TraitDef("Debug", [], [self_var_id], [new env$TraitMethodDef("debug", debug_fn, false)], []));
+  _Map_insert(env.trait_reg.traits, "Debug", new env$TraitDef("Debug", [], [self_var_id], [new env$TraitMethodDef("debug", debug_fn, false, [false], [])], []));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
     List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", prim, [], ["debug"]));
   }

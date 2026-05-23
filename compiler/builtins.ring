@@ -317,8 +317,8 @@ fn register_eq_trait(mut env: TypeEnv) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "eq", ty: eq_fn, has_default: false },
-            TraitMethodDef { name: "ne", ty: ne_fn, has_default: true }
+            TraitMethodDef { name: "eq", ty: eq_fn, has_default: false, param_mutabilities: [false, false], method_type_params: [] },
+            TraitMethodDef { name: "ne", ty: ne_fn, has_default: true, param_mutabilities: [false, false], method_type_params: [] }
         ],
         supertraits: []
     })
@@ -384,7 +384,7 @@ fn register_clone_trait(mut env: TypeEnv) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "clone", ty: clone_fn, has_default: false }
+            TraitMethodDef { name: "clone", ty: clone_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
         ],
         supertraits: []
     })
@@ -451,7 +451,7 @@ fn register_ord_trait(mut env: TypeEnv) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "cmp", ty: cmp_fn, has_default: false }
+            TraitMethodDef { name: "cmp", ty: cmp_fn, has_default: false, param_mutabilities: [false, false], method_type_params: [] }
         ],
         supertraits: []
     })
@@ -481,7 +481,7 @@ fn register_debug_trait(mut env: TypeEnv) {
         type_params: [],
         type_param_vars: [self_var_id],
         methods: [
-            TraitMethodDef { name: "debug", ty: debug_fn, has_default: false }
+            TraitMethodDef { name: "debug", ty: debug_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
         ],
         supertraits: []
     })

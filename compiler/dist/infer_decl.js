@@ -968,7 +968,13 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
                       const trait_params = __ring_m44.params; const ret_ty = __ring_m44.return_type; const eff = __ring_m44.effects;
                       let hparams = [];
                       const def_id_self = env$TypeEnv_fresh_def_id(ctx.env);
-                      List_push(hparams, new hir$HParam("self", self_type, Option_some(def_id_self), false));
+                      const self_is_mut = (function() {
+  const __ring_m = List_get(tm.param_mutabilities, 0);
+  if (__ring_m._tag === "some") { const m = __ring_m._0; return m; }
+  if (__ring_m._tag === "none") { return false; }
+  __match_fail(__ring_m);
+})();
+                      List_push(hparams, new hir$HParam("self", self_type, Option_some(def_id_self), self_is_mut));
                       const trait_self_type = (function() {
   const __ring_m = List_first(trait_params);
   if (__ring_m._tag === "some") { const t = __ring_m._0; return t; }
@@ -986,7 +992,13 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
   __match_fail(__ring_m);
 })();
                         const pid = env$TypeEnv_fresh_def_id(ctx.env);
-                        List_push(hparams, new hir$HParam(pname, pty, Option_some(pid), false));
+                        const p_is_mut = (function() {
+  const __ring_m = List_get(tm.param_mutabilities, pi);
+  if (__ring_m._tag === "some") { const m = __ring_m._0; return m; }
+  if (__ring_m._tag === "none") { return false; }
+  __match_fail(__ring_m);
+})();
+                        List_push(hparams, new hir$HParam(pname, pty, Option_some(pid), p_is_mut));
                         const is_self_typed = (function() {
   const __ring_m = [pty, trait_self_type];
   if (Array.isArray(__ring_m) && __ring_m.length === 2 && __ring_m[0]._tag === "TypeVar" && __ring_m[1]._tag === "TypeVar") { const a = __ring_m[0].id; const b = __ring_m[1].id; return (a === b); }
@@ -1053,7 +1065,7 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
   const method_access = hir$HExpr_FieldAccess(field_access, tm.name, tm.ty, types$EMPTY_ROW, span);
   return hir$HExpr_Call(method_access, forward_args, [], [], Option_none, ret_ty, eff, span);
 })());
-                      List_push(trait_hmethods, hir$HDecl_Fn(tm.name, Option_some(env$TypeEnv_fresh_def_id(ctx.env)), [], hparams, ret_ty, eff, call_expr, false, [], span));
+                      List_push(trait_hmethods, hir$HDecl_Fn(tm.name, Option_some(env$TypeEnv_fresh_def_id(ctx.env)), tm.method_type_params, hparams, ret_ty, eff, call_expr, false, [], span));
                       break __ring_match44;
                     }
                     break __ring_match44;

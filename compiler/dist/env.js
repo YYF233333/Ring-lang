@@ -216,10 +216,12 @@ class EffectDef {
 }
 
 class TraitMethodDef {
-  constructor(name, ty, has_default) {
+  constructor(name, ty, has_default, param_mutabilities, method_type_params) {
     this.name = name;
     this.ty = ty;
     this.has_default = has_default;
+    this.param_mutabilities = param_mutabilities;
+    this.method_type_params = method_type_params;
   }
 }
 
