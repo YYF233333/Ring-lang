@@ -1037,20 +1037,23 @@ pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
         return Effect::FailEffect { error_type: err_type }
     }
     // Custom effects
-    // Check custom effect exists
-    match ctx.env.types.effects.get(eff.name) {
-        some(_) => {},
+    // Check custom effect exists; use the canonical (qualified) name from EffectDef
+    // so that mod-internal unqualified references (e.g. "Greeter") resolve to the
+    // same name as the declaration (e.g. "fx::Greeter") for evidence matching.
+    let canonical_name = match ctx.env.types.effects.get(eff.name) {
+        some(edef) => edef.name,
         none => {
             let _ = type_error(ctx.sink, E0407,
                 "Unknown effect '${eff.name}'", eff.span,
                 DiagnosticContext::OtherContext { detail: some("unknown effect") })
+            eff.name
         }
     }
     let mut resolved_args: List<Type> = []
     for ta in eff.type_args {
         resolved_args.push(resolve_type_expr(ctx, ta))
     }
-    Effect::CustomEffect { name: eff.name, type_args: resolved_args }
+    Effect::CustomEffect { name: canonical_name, type_args: resolved_args }
 }
 
 fn expand_effect_exprs(ctx: InferCtx, decl_effects: List<EffectExpr>, mut expanding: Set<Str>) -> List<Effect> {
