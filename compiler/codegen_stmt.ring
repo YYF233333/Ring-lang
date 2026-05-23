@@ -314,10 +314,15 @@ pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
             let init_js = gen_expr(ctx, init)
             emit(ctx, "const ${sname} = ${init_js};")
         },
-        HStmt::Var { name, init, .. } => {
+        HStmt::Var { name, def_id, init, .. } => {
             let sname = safe_ident(name)
             let init_js = gen_expr(ctx, init)
-            emit(ctx, "let ${sname} = ${init_js};")
+            let is_boxed = match def_id { some(did) => ctx.boxed_vars.contains(did), none => false }
+            if is_boxed {
+                emit(ctx, "let ${sname} = {value: ${init_js}};")
+            } else {
+                emit(ctx, "let ${sname} = ${init_js};")
+            }
         },
         HStmt::Assign { target, value, .. } => {
             let t = gen_expr(ctx, target)
@@ -338,10 +343,15 @@ pub fn gen_stmt_inline(mut ctx: CodegenCtx, stmt: HStmt) -> Str {
             let init_js = gen_expr(ctx, init)
             "const ${sname} = ${init_js};"
         },
-        HStmt::Var { name, init, .. } => {
+        HStmt::Var { name, def_id, init, .. } => {
             let sname = safe_ident(name)
             let init_js = gen_expr(ctx, init)
-            "let ${sname} = ${init_js};"
+            let is_boxed = match def_id { some(did) => ctx.boxed_vars.contains(did), none => false }
+            if is_boxed {
+                "let ${sname} = {value: ${init_js}};"
+            } else {
+                "let ${sname} = ${init_js};"
+            }
         },
         HStmt::Assign { target, value, .. } => {
             let t = gen_expr(ctx, target)

@@ -193,7 +193,8 @@ pub struct DerivedImpl {
 
 pub struct HProgram {
     pub decls: List<HDecl>,
-    pub derived_impls: List<DerivedImpl>
+    pub derived_impls: List<DerivedImpl>,
+    pub boxed_vars: Set<Int>
 }
 
 // JS codegen naming conventions

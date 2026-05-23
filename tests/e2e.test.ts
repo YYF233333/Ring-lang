@@ -480,6 +480,9 @@ const cases: TestCase[] = [
   { file: "trait_default_ufcs.ring", expected: "trait default ufcs: ok\n" },
   { file: "default_effect_body_io.ring", expected: "TAG\nLOG: hello tagged\ndefault effect body io: ok\n" },
   { file: "mod_supertrait_incremental.ring", expected: "mod supertrait incremental: ok\n" },
+  { file: "auto_boxing_closure.ring", expected: "auto_boxing_closure: all tests passed\n" },
+  { file: "auto_boxing_mut_param.ring", expected: "auto_boxing_mut_param: all tests passed\n" },
+  { file: "auto_boxing_local.ring", expected: "auto_boxing_local: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

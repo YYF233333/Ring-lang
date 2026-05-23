@@ -22,10 +22,15 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
         HExpr::FloatLit { value, .. } => value.to_str(),
         HExpr::StrLit { value, .. } => json_stringify(value),
         HExpr::BoolLit { value, .. } => if value { "true" } else { "false" },
-        HExpr::Ident { name, resolved_name, ty, dict_closure_dicts, .. } => {
+        HExpr::Ident { name, resolved_name, def_id, ty, dict_closure_dicts, .. } => {
             let qname = match resolved_name {
                 some(rn) => qualify(ctx, rn),
                 none => qualify(ctx, name),
+            }
+            // Auto-boxing: access .value for boxed variables
+            let boxed_qname = match def_id {
+                some(did) => if ctx.boxed_vars.contains(did) { "${qname}.value" } else { qname },
+                none => qname
             }
             match dict_closure_dicts {
                 some(dicts) => {
@@ -42,15 +47,15 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
                                 if ev_args.len() > 0 { all_call.push(ev_args) }
                                 let call_str = all_call.join(", ")
                                 let params_str = p_names.join(", ")
-                                "((${params_str}) => ${qname}(${call_str}))"
+                                "((${params_str}) => ${boxed_qname}(${call_str}))"
                             },
-                            _ => qname,
+                            _ => boxed_qname,
                         }
                     } else {
-                        qname
+                        boxed_qname
                     }
                 },
-                none => qname,
+                none => boxed_qname,
             }
         },
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, .. } =>
@@ -130,6 +135,43 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
                 _ => "__ring_index(${r}, ${i})"
             }
         },
+    }
+}
+
+// ============================================================
+// Auto-boxing: generate a mut param argument
+// ============================================================
+
+// For mut value-type params at call sites:
+// - If arg is a boxed Ident, pass the box itself (not .value)
+// - Otherwise, wrap in {value: expr}
+fn gen_mut_arg(mut ctx: CodegenCtx, arg: HExpr) -> Str {
+    match arg {
+        HExpr::Ident { name, resolved_name, def_id, .. } => {
+            match def_id {
+                some(did) => {
+                    if ctx.boxed_vars.contains(did) {
+                        // Already boxed — pass the box itself (raw name, no .value)
+                        match resolved_name {
+                            some(rn) => qualify(ctx, rn),
+                            none => qualify(ctx, name)
+                        }
+                    } else {
+                        // Not boxed — wrap in temporary box
+                        let v = gen_expr(ctx, arg)
+                        "{value: ${v}}"
+                    }
+                },
+                none => {
+                    let v = gen_expr(ctx, arg)
+                    "{value: ${v}}"
+                }
+            }
+        },
+        _ => {
+            let v = gen_expr(ctx, arg)
+            "{value: ${v}}"
+        }
     }
 }
 
@@ -498,8 +540,25 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                                 none => "${qualify(ctx, tn)}_${safe_ident(method)}",
                             }
                             let r = gen_expr(ctx, receiver)
+                            // UFCS: lookup mut param flags; args[0] in fn_mut_params is self (always false),
+                            // subsequent params correspond to args[1..]
+                            let ufcs_fn_name = "${qualify(ctx, tn)}_${safe_ident(method)}"
+                            let ufcs_mut_flags = ctx.fn_mut_params.get(ufcs_fn_name)
                             let mut arg_strs: List<Str> = [""]; arg_strs.clear()
-                            for a in args { arg_strs.push(gen_expr(ctx, a)) }
+                            let mut ufcs_ai = 0
+                            for a in args {
+                                // ufcs_ai+1 because fn_mut_params[0] is self
+                                let is_mut_p = match ufcs_mut_flags {
+                                    some(flags) => match flags.get(ufcs_ai + 1) { some(f) => f, none => false },
+                                    none => false
+                                }
+                                if is_mut_p {
+                                    arg_strs.push(gen_mut_arg(ctx, a))
+                                } else {
+                                    arg_strs.push(gen_expr(ctx, a))
+                                }
+                                ufcs_ai = ufcs_ai + 1
+                            }
                             let all_args = if arg_strs.len() > 0 {
                                 let joined = arg_strs.join(", ")
                                 "${r}, ${joined}"
@@ -530,8 +589,25 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
         HExpr::Ident { name, .. } => some(name),
         _ => none,
     }
+    // Lookup mut param flags for call-site boxing
+    let mut_flags: List<Bool>? = match cn {
+        some(cname) => ctx.fn_mut_params.get(cname),
+        none => none
+    }
     let mut arg_strs: List<Str> = [""]; arg_strs.clear()
-    for a in args { arg_strs.push(gen_expr(ctx, a)) }
+    let mut argi = 0
+    for a in args {
+        let is_mut_param = match mut_flags {
+            some(flags) => match flags.get(argi) { some(f) => f, none => false },
+            none => false
+        }
+        if is_mut_param {
+            arg_strs.push(gen_mut_arg(ctx, a))
+        } else {
+            arg_strs.push(gen_expr(ctx, a))
+        }
+        argi = argi + 1
+    }
     let args_str = arg_strs.join(", ")
     let mut dict_parts: List<Str> = [""]; dict_parts.clear()
     for d in resolved_dicts { dict_parts.push(qualify(ctx, d)) }

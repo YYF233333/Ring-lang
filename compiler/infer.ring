@@ -38,6 +38,20 @@ struct MethodLookupResult {
 
 
 // ============================================================
+// Value type check (for auto-boxing)
+// ============================================================
+
+fn is_value_type(t: Type) -> Bool {
+    match t {
+        Type::IntType => true,
+        Type::FloatType => true,
+        Type::BoolType => true,
+        Type::StrType => true,
+        _ => false
+    }
+}
+
+// ============================================================
 // Resolve substitution var chain
 // ============================================================
 
@@ -135,6 +149,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                         some(did) => {
                             ctx.env.record_def_span(did, name_span)
                             ctx.env.scope.let_defs.insert(did)
+                            ctx.var_lambda_depth.insert(did, ctx.lambda_depth)
                             some(did)
                         },
                         none => none
@@ -168,6 +183,7 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                         some(did) => {
                             ctx.env.record_def_span(did, name_span)
                             ctx.env.scope.mutable_vars.insert(did)
+                            ctx.var_lambda_depth.insert(did, ctx.lambda_depth)
                         },
                         none => {}
                     }
@@ -334,7 +350,10 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                                 match dscheme {
                                     some(ds) => {
                                         match (ds.def_id, destr.spans.get(di)) {
-                                            (some(did), some(dspan)) => ctx.env.record_def_span(did, dspan),
+                                            (some(did), some(dspan)) => {
+                                                ctx.env.record_def_span(did, dspan)
+                                                ctx.var_lambda_depth.insert(did, ctx.lambda_depth)
+                                            },
                                             _ => {}
                                         }
                                         hd.push(HForInDestructure { name: dname, def_id: ds.def_id })
@@ -355,7 +374,10 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             let binding_scheme = ctx.env.lookup(binding)
             match binding_scheme {
                 some(bs) => match bs.def_id {
-                    some(did) => ctx.env.record_def_span(did, binding_span),
+                    some(did) => {
+                        ctx.env.record_def_span(did, binding_span)
+                        ctx.var_lambda_depth.insert(did, ctx.lambda_depth)
+                    },
                     none => {}
                 },
                 none => {}
@@ -870,6 +892,22 @@ fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
         },
         some(s) => {
             let t = ctx.env.instantiate(s)
+            // Auto-boxing: mark mutable vars captured by closures
+            match s.def_id {
+                some(did) => {
+                    if ctx.env.scope.mutable_vars.contains(did) {
+                        match ctx.var_lambda_depth.get(did) {
+                            some(def_depth) => {
+                                if ctx.lambda_depth > def_depth {
+                                    ctx.boxed_vars.insert(did)
+                                }
+                            },
+                            none => {}
+                        }
+                    }
+                },
+                none => {}
+            }
             let mut resolved_name: Str? = none
             let mut enum_name: Str? = none
             // Check if this name was imported via use alias (e.g. use super::value)
@@ -1272,6 +1310,52 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
                 some(callee_scheme) => {
                     if callee_scheme.bounds.len() > 0 {
                         resolved_dicts = resolve_dicts_from_scheme(ctx.sink, ctx.env, ctx.current_fn_bounds, callee_scheme, hexpr_type(callee_r.hexpr), s, span)
+                    }
+                },
+                none => {}
+            }
+        },
+        _ => {}
+    }
+
+    // Call-site pre-boxing: if callee has mut value-type params, mark mutable var args as boxed
+    match callee {
+        Expr::Ident { name: callee_name, .. } => {
+            match ctx.fn_mut_params.get(callee_name) {
+                some(mut_flags) => {
+                    let mut mi = 0
+                    while mi < mut_flags.len() && mi < args.len() {
+                        match (mut_flags.get(mi), hargs.get(mi)) {
+                            (some(is_mut), some(harg)) => {
+                                if is_mut {
+                                    // Check if the arg is a mutable variable Ident
+                                    match harg {
+                                        HExpr::Ident { def_id: some(arg_did), .. } => {
+                                            if ctx.env.scope.mutable_vars.contains(arg_did) {
+                                                // Check if the param type is a value type
+                                                match resolved_callee_type {
+                                                    Type::FnType { params: fn_params, .. } => {
+                                                        match fn_params.get(mi) {
+                                                            some(pt) => {
+                                                                let resolved_pt = apply_subst(s, pt)
+                                                                if is_value_type(resolved_pt) {
+                                                                    ctx.boxed_vars.insert(arg_did)
+                                                                }
+                                                            },
+                                                            none => {}
+                                                        }
+                                                    },
+                                                    _ => {}
+                                                }
+                                            }
+                                        },
+                                        _ => {}
+                                    }
+                                }
+                            },
+                            _ => {}
+                        }
+                        mi = mi + 1
                     }
                 },
                 none => {}
@@ -2628,6 +2712,7 @@ fn infer_handle(mut ctx: InferCtx, body: Expr, handlers: List<EffectHandler>, sp
 
 fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, subst: UnionFind, expected_param_types: List<Type>?) -> InferResult {
     ctx.env.push_scope()
+    ctx.lambda_depth = ctx.lambda_depth + 1
     let mut s = subst
     let mut hparams: List<HParam> = []
     let mut param_types: List<Type> = []
@@ -2656,6 +2741,7 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
                 match ls.def_id {
                     some(did) => {
                         ctx.env.record_def_span(did, p.span)
+                        ctx.var_lambda_depth.insert(did, ctx.lambda_depth)
                         if p.is_mutable {
                             ctx.env.scope.mutable_vars.insert(did)
                             ctx.env.scope.mut_param_defs.insert(did)
@@ -2676,6 +2762,7 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
     }
 
     let body_result = some(infer_expr(ctx, body, s)) catch { _ => none }
+    ctx.lambda_depth = ctx.lambda_depth - 1
     ctx.env.pop_scope()
 
     match body_result {

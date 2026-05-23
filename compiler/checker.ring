@@ -114,7 +114,11 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         fn_bounds_stack: [],
         loop_depth: 0,
         mod_path_stack: [],
-        use_aliases: map_new()
+        use_aliases: map_new(),
+        boxed_vars: set_new(),
+        lambda_depth: 0,
+        var_lambda_depth: map_new(),
+        fn_mut_params: map_new()
     }
 }
 
@@ -126,7 +130,7 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
     CheckResult {
-        program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls },
+        program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars },
         env: ctx.env
     }
 }
@@ -141,7 +145,7 @@ pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink:
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
     CheckResult {
-        program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls },
+        program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars },
         env: ctx.env
     }
 }

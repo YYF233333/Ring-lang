@@ -590,10 +590,20 @@ function emit_stmt(ctx, stmt) {
       break __ring_match19;
     }
     if (__ring_m19._tag === "Var") {
-      const name = __ring_m19.name; const init = __ring_m19.init;
+      const name = __ring_m19.name; const def_id = __ring_m19.def_id; const init = __ring_m19.init;
       const sname = codegen_ctx$safe_ident(name);
       const init_js = codegen_expr$gen_expr(ctx, init);
-      return codegen_ctx$emit(ctx, `let ${sname} = ${init_js};`);
+      const is_boxed = (function() {
+  const __ring_m = def_id;
+  if (__ring_m._tag === "some") { const did = __ring_m._0; return _Set_contains(ctx.boxed_vars, did, __Int_Eq); }
+  if (__ring_m._tag === "none") { return false; }
+  __match_fail(__ring_m);
+})();
+      if (is_boxed) {
+        return codegen_ctx$emit(ctx, `let ${sname} = {value: ${init_js}};`);
+      } else {
+        return codegen_ctx$emit(ctx, `let ${sname} = ${init_js};`);
+      }
       break __ring_match19;
     }
     if (__ring_m19._tag === "Assign") {
@@ -618,10 +628,20 @@ function gen_stmt_inline(ctx, stmt) {
       break __ring_match25;
     }
     if (__ring_m25._tag === "Var") {
-      const name = __ring_m25.name; const init = __ring_m25.init;
+      const name = __ring_m25.name; const def_id = __ring_m25.def_id; const init = __ring_m25.init;
       const sname = codegen_ctx$safe_ident(name);
       const init_js = codegen_expr$gen_expr(ctx, init);
-      return `let ${sname} = ${init_js};`;
+      const is_boxed = (function() {
+  const __ring_m = def_id;
+  if (__ring_m._tag === "some") { const did = __ring_m._0; return _Set_contains(ctx.boxed_vars, did, __Int_Eq); }
+  if (__ring_m._tag === "none") { return false; }
+  __match_fail(__ring_m);
+})();
+      if (is_boxed) {
+        return `let ${sname} = {value: ${init_js}};`;
+      } else {
+        return `let ${sname} = ${init_js};`;
+      }
       break __ring_match25;
     }
     if (__ring_m25._tag === "Assign") {
