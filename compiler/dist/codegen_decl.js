@@ -520,6 +520,7 @@ function emit_test_decl(ctx, description, body) {
 }
 
 function emit_effect_decl(ctx, name, ops) {
+  _Map_insert(ctx.effect_ops, name, ops);
   let all_have_defaults = true;
   for (const op of ops) {
     if ((!op.has_default)) {

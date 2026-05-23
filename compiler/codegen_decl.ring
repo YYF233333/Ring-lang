@@ -294,6 +294,9 @@ fn emit_test_decl(mut ctx: CodegenCtx, description: Str, body: HExpr) {
 // ============================================================
 
 fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
+    // Always register effect ops so gen_handle can merge default bodies
+    ctx.effect_ops.insert(name, ops)
+
     // Only emit a default evidence constant if all ops have default bodies
     let mut all_have_defaults = true
     for op in ops {
