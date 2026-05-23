@@ -24,8 +24,8 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("  throw new Error(\"Non-exhaustive match: \" + JSON.stringify(value));")
     lines.push("}")
     lines.push("")
-    lines.push("function print(...args) {")
-    lines.push("  console.log(...args);")
+    lines.push("function print(value) {")
+    lines.push("  console.log(value);")
     lines.push("}")
     lines.push("")
     lines.push("function assert(cond, msg) {")
@@ -41,6 +41,10 @@ pub fn RUNTIME_CODE() -> Str {
     lines.push("function exit(code) {")
     lines.push("  process.exit(code);")
     lines.push("}")
+    lines.push("")
+    // io evidence is always available at module scope — it represents
+    // real-world I/O capabilities which every program inherently has.
+    lines.push("const __ring_ev_io = { read: (p) => __require(\"fs\").readFileSync(p, \"utf-8\"), write: (p, d) => __require(\"fs\").writeFileSync(p, d, \"utf-8\") };")
     lines.push("")
     lines.push("function Option_is_some(self) { return self._tag === \"some\"; }")
     lines.push("function Option_is_none(self) { return self._tag === \"none\"; }")
@@ -209,7 +213,7 @@ pub fn RUNTIME_CODE() -> Str {
 pub const RUNTIME_EXPORT_NAMES: List<Str> =
     ["__EffectAbort", "__ring_raise_fail", "Cell", "Cell_get", "Cell_set", "Cell_update",
      "__match_fail", "__ring_deep_eq", "__ring_tuple_eq", "__ring_set_has", "__ring_index", "__ring_map_index", "__ring_str_index",
-     "print", "assert", "panic", "exit", "json_stringify",
+     "print", "assert", "panic", "exit", "json_stringify", "__ring_ev_io",
      "Option_some", "Option_none",
      "Option_is_some", "Option_is_none", "Option_unwrap_or", "Option_unwrap",
      "Str_len", "Str_contains", "Str_starts_with", "Str_ends_with",
