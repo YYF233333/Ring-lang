@@ -487,6 +487,7 @@ const cases: TestCase[] = [
   { file: "mod_effect_qualified_op.ring", expected: "hello\nworld\n" },
   { file: "default_effect_topo.ring", expected: "default_effect_topo: ok\n" },
   { file: "impl_qualified_path.ring", expected: "ok\n" },
+  { file: "return_in_expr_block.ring", expected: "return_in_expr_block: ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

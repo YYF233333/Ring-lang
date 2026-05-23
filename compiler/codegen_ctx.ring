@@ -45,7 +45,8 @@ pub struct CodegenCtx {
     pub default_evidence_params: Map<Str, List<Str>>,
     pub effect_ops: Map<Str, List<HEffectOp>>,
     pub boxed_vars: Set<Int>,
-    pub fn_mut_params: Map<Str, List<Bool>>
+    pub fn_mut_params: Map<Str, List<Bool>>,
+    pub block_counter: Int
 }
 
 pub struct HTraitDeclInfo {
@@ -78,7 +79,8 @@ pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx 
         default_evidence_params: map_new(),
         effect_ops: map_new(),
         boxed_vars: set_new(),
-        fn_mut_params: map_new()
+        fn_mut_params: map_new(),
+        block_counter: 0
     }
 }
 

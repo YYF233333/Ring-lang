@@ -138,7 +138,7 @@ Ring-lang/
 - **Handler 支持 tail-resumptive + abort 两种语义**：非 abort effect（io/custom）的 handler 返回值即 resume 值，计算继续；`fail.raise` 为 abort 语义。Full AE（post-resume / multi-resume）已取消，不计划实现
 - **Trait dictionary dispatch 不转发 evidence**：trait 方法带 effect 时缺少 evidence 参数（trait dict closure 已支持高阶传递）
 - **`catch` 总是消除 fail effect**：`expr catch { pattern => handler, ... }` 是完整捕获点，catch arms 经穷尽性检查（非穷尽报 E0601）。内部用模式匹配分派错误类型；需要部分处理时在 catch 内部 match + re-raise（显式）。错误处理遵循生命周期模型：fail effect 为主（诞生/流动），`catch` 就地恢复，`to_result()` 物化为数据
-- **表达式位置的 block/if 包含 `return` 时 IIFE 仍会截获**：语句位置（函数体、expr_stmt）已修复（C10），但 `let x = { return y; 0 }` 这类表达式位置的 return 仍被 IIFE 截获。实践中极少遇到。
+- ~~**表达式位置的 block/if 包含 `return` 时 IIFE 仍会截获**~~：已修复。`gen_block_expr`/`gen_if`/`gen_match` 检测到 return 时改用临时变量方案（inline emit + `__ring_blkN` 赋值），避免 IIFE 截获 return。无 return 的 block 仍使用 IIFE（行为不变）。
 
 ### 类型系统限制
 
