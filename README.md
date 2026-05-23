@@ -4,7 +4,7 @@
 
 **核心主张**：代数 effect system + ML 级类型推断 + OOP 手感，写起来像 Python，编译器看到完整类型+副作用信息。设计目标之一是让 LLM 在零训练数据下 vibe coding 的表现超过 TypeScript。
 
-**当前状态**：自举完成。编译器由 33 个 .ring 源文件实现，编译自身，317 个 E2E 测试全部通过。当前编译到 JS/V8（bootstrap 后端），目标后端为 LLVM native。
+**当前状态**：自举完成。编译器由 33 个 .ring 源文件实现，编译自身，578 个 E2E 测试全部通过。当前编译到 JS/V8（bootstrap 后端），目标后端为 LLVM native。
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ node compiler/dist/main.js build examples/hello.ring
 node compiler/dist/main.js check examples/hello.ring
 
 # 运行测试
-cd compiler && npm test
+npm test           # 从 compiler/ 目录
 ```
 
 无外部依赖，只需 Node.js。
@@ -138,17 +138,22 @@ fn find_user(id: Int) -> User {
 let result = to_result(fn() { find_user(42) })   // fail → Result::err
 ```
 
-### 可变状态：Cell + mut effect
+### 可变状态：`let mut` + 编译器追踪
 
 ```ring
-let counter = Cell(0)
-let inc = fn() { counter.update(fn(n) { n + 1 }) }
+fn main() {
+    let mut counter = 0
+    counter += 1
+    counter += 1
+    print("${counter}")   // 2
 
-inc(); inc(); inc()
-print("${counter.get()}")   // 3
-
-// Cell 操作自动带 mut effect，编译器全追踪
+    let mut items = [1, 2, 3]
+    items.push(4)           // mut 方法，编译器检查 items 是 let mut
+    print("${items.len()}")  // 4
+}
 ```
+
+`let` 不可变（赋值报错），`let mut` 可变。Mut 方法只能在 `let mut` 绑定上调用。
 
 ## 设计公理
 
@@ -174,30 +179,36 @@ print("${counter.get()}")   // 3
 
 ## 已实现特性
 
-- 完整 HM 类型推断 + effect 推断
-- 代数 effect system（tail-resumptive + abort handler）
-- Trait system + auto-derive（Eq/Clone/Debug/Ord）
+- 完整 HM 类型推断 + effect 推断 + effect 标注验证
+- 代数 effect system（tail-resumptive + abort handler）+ effect alias 语法糖
+- Trait system + auto-derive（Eq/Clone/Debug/Ord）+ supertrait 继承
 - Row polymorphism（结构化参数多态）
-- 模式匹配 + 穷尽性检查（Maranget 算法）
-- 集合类型：List / Map / Set / Tuple
-- 模块系统：多文件 ESM 编译、pub/use、inline mod
+- 模式匹配 + 穷尽性检查（Maranget 算法，含 catch arm 穷尽性）
+- 集合类型：List / Map / Set / Tuple + 下标运算符 `list[i]` / `map[key]` / `str[i]`
+- 模块系统：多文件 ESM 编译、pub/use、inline mod（含嵌套）、`super::`/`self::` 路径、`mod requires` capability
 - Option\<T\>（`T?` 语法糖）+ Result\<T,E\> + fail 桥接
-- 字符串插值（支持嵌套 `"${fn("arg")}"`）
+- `let mut` 可变绑定 + `mut self` 方法 + compound assign（`+=`/`-=`/`*=`/`/=`）
+- 字符串插值（支持嵌套）+ 多行字符串 + raw string（`r"..."` / `r#"..."#`）
+- `const` 顶级声明 + `loop` 关键字
 - 标准库 10 个模块（io/fs/path/process/str/num/list/map/set/result）
 - FFI（extern fn / extern type）
-- 317 个 E2E 测试（正向 + 负向）
+- Parser 声明级错误恢复 + Checker 函数级多错误恢复
+- 578 个 E2E 测试（正向 + 负向）
 - VSCode 语法高亮插件
 
 ## 路线图
 
-**Phase C（当前）**：
-- Effect aliases、supertrait 继承、`mut<T>` marker effect、default effect handler
+**Phase C 层 1（基础设施，进行中）**：
+- ~~Effect aliases~~ ✅、~~supertrait 继承~~ ✅、`mut<T>` marker effect、default effect handler
+
+**Phase C 层 2（核心特性）**：
 - 关联类型、Iterator trait、`delegate` 关键字、GADTs
 
 **未来**：
 - LLVM native backend（目标后端，编译器自身也将迁移）
 - Refinement types 编译期验证（语法已支持，验证未实现）
 - Linear types + Perceus 引用计数
+- async effect + 结构化并发（设计已确定）
 - LSP（从 TS 归档版本移植）
 
 ## 项目结构
@@ -207,7 +218,7 @@ Ring-lang/
 ├── compiler/          33 个 .ring 源文件（编译器自身）
 │   └── dist/          编译产出的 JS（可直接 node 运行）
 ├── std/               10 个标准库模块
-├── tests/cases/       317 个 E2E 测试用例
+├── tests/cases/       288 个 E2E 测试文件（578 个测试用例）
 ├── examples/          示例程序
 ├── editor/vscode/     VSCode 插件（语法高亮）
 └── docs/design.md     完整语言设计文档（14 章）
