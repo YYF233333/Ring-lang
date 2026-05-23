@@ -1525,16 +1525,6 @@ function remove_fail_effect(row) {
   return new types$EffectRow(filtered, row.tail);
 }
 
-function remove_specific_fail_effect(row, target, subst) {
-  const resolved_target = env$apply_subst(subst, target);
-  const filtered = row.effects.filter((function(e) { return (function() {
-  const __ring_m = e;
-  if (__ring_m._tag === "FailEffect") { const error_type = __ring_m.error_type; return (!types$types_equal(env$apply_subst(subst, error_type), resolved_target)); }
-  return true;
-})(); }));
-  return new types$EffectRow(filtered, row.tail);
-}
-
 function resolve_relative_qualifier(qualifier, mod_path_stack) {
   if ((qualifier === "self")) {
     if ((List_len(mod_path_stack) === 0)) {
@@ -1682,4 +1672,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { InferResult, FnBoundsEntry, CompileError, InferCtx, new_infer_ctx, type_error, merge_effects, unify_at, free_type_vars, collect_free_vars, free_type_vars_in_env, generalize, update_fn_effects, build_scheme_var_map, resolve_dicts_from_scheme, resolve_type_expr, resolve_self_type, resolve_named_type, bind_pattern, remove_fail_effect, remove_specific_fail_effect, resolve_relative_qualifier, __FnBoundsEntry_Eq, __CompileError_Eq, __FnBoundsEntry_Clone, __CompileError_Clone, __FnBoundsEntry_Ord, __CompileError_Ord, __FnBoundsEntry_Debug, __CompileError_Debug };
+export { InferResult, FnBoundsEntry, CompileError, InferCtx, new_infer_ctx, type_error, merge_effects, unify_at, free_type_vars, collect_free_vars, free_type_vars_in_env, generalize, update_fn_effects, build_scheme_var_map, resolve_dicts_from_scheme, resolve_type_expr, resolve_self_type, resolve_named_type, bind_pattern, remove_fail_effect, resolve_relative_qualifier, __FnBoundsEntry_Eq, __CompileError_Eq, __FnBoundsEntry_Clone, __CompileError_Clone, __FnBoundsEntry_Ord, __CompileError_Ord, __FnBoundsEntry_Debug, __CompileError_Debug };

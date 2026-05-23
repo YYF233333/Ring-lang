@@ -1072,18 +1072,6 @@ pub fn remove_fail_effect(row: EffectRow) -> EffectRow {
     EffectRow { effects: filtered, tail: row.tail }
 }
 
-pub fn remove_specific_fail_effect(row: EffectRow, target: Type, subst: UnionFind) -> EffectRow {
-    let resolved_target = apply_subst(subst, target)
-    let filtered = row.effects.filter(fn(e) {
-        match e {
-            Effect::FailEffect { error_type } =>
-                !types_equal(apply_subst(subst, error_type), resolved_target),
-            _ => true
-        }
-    })
-    EffectRow { effects: filtered, tail: row.tail }
-}
-
 // ============================================================
 // Relative path resolution (self::/super::)
 // ============================================================
