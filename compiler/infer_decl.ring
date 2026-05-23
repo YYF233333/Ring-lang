@@ -3,6 +3,7 @@ use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl, E
     UseDecl, UseImport, NamedImport, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
+    DictDispatchInfo, trait_dict_name,
     hexpr_type}
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
@@ -94,6 +95,15 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
         let result = some(check_decl(ctx, prefixed)) catch { _ => none }
         match result {
             some(hd) => {
+                // Update fn effects (same as check_one_decl)
+                match hd {
+                    HDecl::Fn { name, effects, .. } => {
+                        if effects.effects.len() > 0 {
+                            update_fn_effects(ctx.env, name, effects)
+                        }
+                    },
+                    _ => {}
+                }
                 // Check capability restriction on function declarations
                 match cap_row {
                     some(cap) => check_capability(ctx, hd, cap, span),
@@ -102,6 +112,29 @@ fn check_mod_decl(mut ctx: InferCtx, mod_name: Str, uses: List<UseDecl>, decls: 
                 hdecls.push(hd)
             },
             none => {}
+        }
+
+        // Expand delegates inside mod-scoped impl blocks (same as check_one_decl)
+        match prefixed {
+            Decl::Impl { target_type, type_params: impl_tps, methods, span: impl_span, .. } => {
+                for m in methods {
+                    match m {
+                        Decl::Delegate { field, trait_names, span: dspan } => {
+                            let delegate_impls = expand_delegate_impls(ctx, target_type, impl_tps, field, trait_names, dspan)
+                            for di in delegate_impls {
+                                // Check capability on delegate-generated impls too
+                                match cap_row {
+                                    some(cap) => check_capability(ctx, di, cap, span),
+                                    none => {}
+                                }
+                                hdecls.push(di)
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+            },
+            _ => {}
         }
     }
     ctx.mod_path_stack.pop()
@@ -522,6 +555,12 @@ fn expand_delegate_impls(
                                             let def_id_self = ctx.env.fresh_def_id()
                                             hparams.push(HParam { name: "self", ty: self_type, def_id: some(def_id_self), is_mutable: false })
 
+                                            // Determine the trait's Self type (first param) for binary method detection
+                                            let trait_self_type = match trait_params.first() {
+                                                some(t) => t,
+                                                none => UNIT
+                                            }
+
                                             // Build args for the forwarding call (beyond self)
                                             let mut forward_args: List<HExpr> = []
                                             let mut pi = 1
@@ -533,11 +572,35 @@ fn expand_delegate_impls(
                                                 }
                                                 let pid = ctx.env.fresh_def_id()
                                                 hparams.push(HParam { name: pname, ty: pty, def_id: some(pid), is_mutable: false })
-                                                forward_args.push(HExpr::Ident {
-                                                    name: pname, resolved_name: none, def_id: some(pid),
-                                                    dict_closure_dicts: none,
-                                                    ty: pty, effects: EMPTY_ROW, span: span
-                                                })
+
+                                                // #79: For binary trait methods (e.g. eq(self, other: Self)),
+                                                // if the param type is the trait's Self type, forward arg.field
+                                                // instead of arg so the field type's method receives the right value.
+                                                let is_self_typed = match (pty, trait_self_type) {
+                                                    (Type::TypeVar { id: a, .. }, Type::TypeVar { id: b, .. }) => a == b,
+                                                    _ => false
+                                                }
+                                                if is_self_typed {
+                                                    // Forward: __p0.field (access the delegated field from the arg)
+                                                    let arg_ident = HExpr::Ident {
+                                                        name: pname, resolved_name: none, def_id: some(pid),
+                                                        dict_closure_dicts: none,
+                                                        ty: self_type, effects: EMPTY_ROW, span: span
+                                                    }
+                                                    forward_args.push(HExpr::FieldAccess {
+                                                        receiver: arg_ident,
+                                                        field: field,
+                                                        ty: ft,
+                                                        effects: EMPTY_ROW,
+                                                        span: span
+                                                    })
+                                                } else {
+                                                    forward_args.push(HExpr::Ident {
+                                                        name: pname, resolved_name: none, def_id: some(pid),
+                                                        dict_closure_dicts: none,
+                                                        ty: pty, effects: EMPTY_ROW, span: span
+                                                    })
+                                                }
                                                 pi = pi + 1
                                             }
 
@@ -554,25 +617,80 @@ fn expand_delegate_impls(
                                                 span: span
                                             }
 
-                                            // Build: self.field.method — as FieldAccess for UFCS dispatch
-                                            let method_access = HExpr::FieldAccess {
-                                                receiver: field_access,
-                                                field: tm.name,
-                                                ty: tm.ty,
-                                                effects: EMPTY_ROW,
-                                                span: span
+                                            // #68: Check if this method is a default method without explicit impl
+                                            // on the field type. If so, use trait dict dispatch instead of UFCS.
+                                            let mut use_dict_dispatch = false
+                                            if tm.has_default {
+                                                // Get the field type name
+                                                let ftn = match ft {
+                                                    Type::StructType { name: n, .. } => some(n),
+                                                    Type::EnumType { name: n, .. } => some(n),
+                                                    _ => none
+                                                }
+                                                match ftn {
+                                                    some(field_tn) => {
+                                                        // Check if the field type has an explicit impl for this method
+                                                        let mut has_explicit = false
+                                                        match ctx.env.trait_reg.impl_methods.get(field_tn) {
+                                                            some(methods_map) => {
+                                                                has_explicit = methods_map.contains_key(tm.name)
+                                                            },
+                                                            none => {}
+                                                        }
+                                                        if !has_explicit {
+                                                            use_dict_dispatch = true
+                                                        }
+                                                    },
+                                                    none => {}
+                                                }
                                             }
 
-                                            // Build: self.field.method(args...) — as Call with UFCS callee
-                                            let call_expr = HExpr::Call {
-                                                callee: method_access,
-                                                args: forward_args,
-                                                type_args: [],
-                                                resolved_dicts: [],
-                                                dict_dispatch: none,
-                                                ty: ret_ty,
-                                                effects: eff,
-                                                span: span
+                                            let call_expr = if use_dict_dispatch {
+                                                // Generate dict dispatch: __FieldType_Trait.method(self.field, args...)
+                                                let ftn = match ft {
+                                                    Type::StructType { name: n, .. } => n,
+                                                    Type::EnumType { name: n, .. } => n,
+                                                    _ => ""
+                                                }
+                                                let dict_name = trait_dict_name(ftn, tname)
+                                                let mut dict_args: List<HExpr> = []
+                                                dict_args.push(field_access)
+                                                dict_args.extend(forward_args)
+                                                HExpr::Call {
+                                                    callee: HExpr::Ident {
+                                                        name: dict_name, resolved_name: none, def_id: none,
+                                                        dict_closure_dicts: none,
+                                                        ty: tm.ty, effects: EMPTY_ROW, span: span
+                                                    },
+                                                    args: dict_args,
+                                                    type_args: [],
+                                                    resolved_dicts: [],
+                                                    dict_dispatch: some(DictDispatchInfo { dict_param: dict_name, method: tm.name }),
+                                                    ty: ret_ty,
+                                                    effects: eff,
+                                                    span: span
+                                                }
+                                            } else {
+                                                // Build: self.field.method — as FieldAccess for UFCS dispatch
+                                                let method_access = HExpr::FieldAccess {
+                                                    receiver: field_access,
+                                                    field: tm.name,
+                                                    ty: tm.ty,
+                                                    effects: EMPTY_ROW,
+                                                    span: span
+                                                }
+
+                                                // Build: self.field.method(args...) — as Call with UFCS callee
+                                                HExpr::Call {
+                                                    callee: method_access,
+                                                    args: forward_args,
+                                                    type_args: [],
+                                                    resolved_dicts: [],
+                                                    dict_dispatch: none,
+                                                    ty: ret_ty,
+                                                    effects: eff,
+                                                    span: span
+                                                }
                                             }
 
                                             trait_hmethods.push(HDecl::Fn {
