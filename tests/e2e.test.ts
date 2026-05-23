@@ -460,6 +460,7 @@ const cases: TestCase[] = [
   { file: "delegate_basic.ring", expected: "delegate_basic: all tests passed\n" },
   { file: "delegate_multi_trait.ring", expected: "delegate_multi_trait: all tests passed\n" },
   { file: "delegate_with_args.ring", expected: "delegate_with_args: all tests passed\n" },
+  { file: "delegate_generic.ring", expected: "delegate_generic: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -535,6 +536,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_mut_effect_in_pure_mod.ring", error_pattern: "E0405" },
     { file: "error_delegate_no_field.ring", error_pattern: "E0507" },
     { file: "error_delegate_no_impl.ring", error_pattern: "E0508" },
+    { file: "delegate_conflict.ring", error_pattern: "E0509" },
   ];
 
   for (const tc of negative_cases) {
