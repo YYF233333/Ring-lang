@@ -27,8 +27,8 @@ pub fn emit_decl(mut ctx: CodegenCtx, decl: HDecl) {
         HDecl::Effect { name, ops, .. } => emit_effect_decl(ctx, name, ops),
         HDecl::Test { description, body, .. } =>
             emit_test_decl(ctx, description, body),
-        HDecl::Trait { name, methods, .. } =>
-            emit_trait_decl(ctx, name, methods),
+        HDecl::Trait { name, methods, supertraits, .. } =>
+            emit_trait_decl(ctx, name, methods, supertraits),
         HDecl::ExternFn { name, .. } =>
             emit_extern_fn_decl(ctx, name),
         HDecl::ExternType { .. } => {},
@@ -220,6 +220,9 @@ fn emit_trait_dictionary(mut ctx: CodegenCtx, target_type: Str, trait_name: Str,
 
     match ctx.trait_decls.get(trait_name) {
         some(trait_decl) => {
+            // Collect all transitive supertraits for passing dicts to default methods
+            let all_supers = collect_all_supertraits_codegen(ctx, trait_name)
+
             for tm in trait_decl.methods {
                 if tm.has_default {
                     if impl_method_names.contains(tm.name) == false {
@@ -231,6 +234,10 @@ fn emit_trait_dictionary(mut ctx: CodegenCtx, target_type: Str, trait_name: Str,
                         let params_str = param_names.join(", ")
                         let mut call_args: List<Str> = [""]; call_args.clear()
                         call_args.push(dict_name)
+                        // Pass supertrait dicts for the concrete type
+                        for st in all_supers {
+                            call_args.push(trait_dict_name(qt, safe_ident(st)))
+                        }
                         call_args.extend(param_names)
                         let call_str = call_args.join(", ")
                         entries.push("${smn}: function(${params_str}) { return ${default_fn}(${call_str}); }")
@@ -249,7 +256,39 @@ fn emit_trait_dictionary(mut ctx: CodegenCtx, target_type: Str, trait_name: Str,
 // Trait declarations
 // ============================================================
 
-fn emit_trait_decl(mut ctx: CodegenCtx, name: Str, methods: List<HTraitMethod>) {
+// Collect all transitive supertraits from ctx.trait_decls.
+// For example, if Top: Mid and Mid: Base, returns ["Mid", "Base"] for "Top".
+fn collect_all_supertraits_codegen(ctx: CodegenCtx, trait_name: Str) -> List<Str> {
+    let mut result: List<Str> = [""]; result.clear()
+    let mut visited: Set<Str> = set_new()
+    let mut stack: List<Str> = [""]; stack.clear()
+    match ctx.trait_decls.get(trait_name) {
+        some(tinfo) => {
+            for st in tinfo.supertraits { stack.push(st) }
+        },
+        none => {}
+    }
+    while stack.len() > 0 {
+        let current = stack.pop().unwrap()
+        if visited.contains(current) { continue }
+        visited.insert(current)
+        result.push(current)
+        match ctx.trait_decls.get(current) {
+            some(parent_info) => {
+                for parent_st in parent_info.supertraits {
+                    stack.push(parent_st)
+                }
+            },
+            none => {}
+        }
+    }
+    result
+}
+
+fn emit_trait_decl(mut ctx: CodegenCtx, name: Str, methods: List<HTraitMethod>, supertraits: List<Str>) {
+    // Collect all transitive supertraits for default method parameters
+    let all_supers = collect_all_supertraits_codegen(ctx, name)
+
     for method in methods {
         match method.body {
             some(body) => {
@@ -262,6 +301,10 @@ fn emit_trait_decl(mut ctx: CodegenCtx, name: Str, methods: List<HTraitMethod>) 
                     let self_name = default_method_self_name(safe_ident(name))
                     let mut all: List<Str> = [""]; all.clear()
                     all.push(self_name)
+                    // Add supertrait dict params so body can reference them
+                    for st in all_supers {
+                        all.push(default_method_self_name(safe_ident(st)))
+                    }
                     all.extend(param_names)
                     let all_str = all.join(", ")
                     emit(ctx, "function ${fn_name}(${all_str}) {")

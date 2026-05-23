@@ -152,7 +152,7 @@ pub enum HDecl {
     Impl { target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<HDecl>, span: Span },
     Effect { name: Str, type_params: List<TypeParam>, ops: List<HEffectOp>, is_pub: Bool, span: Span },
     Test { description: Str, body: HExpr, span: Span },
-    Trait { name: Str, type_params: List<TypeParam>, methods: List<HTraitMethod>, is_pub: Bool, span: Span },
+    Trait { name: Str, type_params: List<TypeParam>, methods: List<HTraitMethod>, supertraits: List<Str>, is_pub: Bool, span: Span },
     ExternFn { name: Str, def_id: Int?, type_params: List<TypeParam>, params: List<HParam>, return_type: Type, effects: EffectRow, is_pub: Bool, span: Span },
     ExternType { name: Str, type_params: List<TypeParam>, is_pub: Bool, span: Span },
     TypeAlias { name: Str, ty: Type, is_pub: Bool, span: Span },

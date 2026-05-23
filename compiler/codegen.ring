@@ -248,8 +248,8 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                     }
                 }
             },
-            HDecl::Trait { name, methods, .. } => {
-                ctx.trait_decls.insert(name, HTraitDeclInfo { name: name, methods: methods })
+            HDecl::Trait { name, methods, supertraits, .. } => {
+                ctx.trait_decls.insert(name, HTraitDeclInfo { name: name, methods: methods, supertraits: supertraits })
             },
             HDecl::ModBlock { decls: mod_decls, .. } => {
                 for subdecl in mod_decls {
@@ -284,8 +284,8 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                                 }
                             }
                         },
-                        HDecl::Trait { name: tname, methods: tmethods, .. } => {
-                            ctx.trait_decls.insert(tname, HTraitDeclInfo { name: tname, methods: tmethods })
+                        HDecl::Trait { name: tname, methods: tmethods, supertraits: tst, .. } => {
+                            ctx.trait_decls.insert(tname, HTraitDeclInfo { name: tname, methods: tmethods, supertraits: tst })
                         },
                         HDecl::ModBlock { decls: sub_mod_decls, .. } => {
                             for sub_subdecl in sub_mod_decls {
@@ -320,8 +320,8 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                                             }
                                         }
                                     },
-                                    HDecl::Trait { name: tname2, methods: tmethods2, .. } => {
-                                        ctx.trait_decls.insert(tname2, HTraitDeclInfo { name: tname2, methods: tmethods2 })
+                                    HDecl::Trait { name: tname2, methods: tmethods2, supertraits: tst2, .. } => {
+                                        ctx.trait_decls.insert(tname2, HTraitDeclInfo { name: tname2, methods: tmethods2, supertraits: tst2 })
                                     },
                                     _ => {}
                                 }

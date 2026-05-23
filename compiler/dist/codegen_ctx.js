@@ -192,9 +192,10 @@ class CodegenCtx {
 }
 
 class HTraitDeclInfo {
-  constructor(name, methods) {
+  constructor(name, methods, supertraits) {
     this.name = name;
     this.methods = methods;
+    this.supertraits = supertraits;
   }
 }
 

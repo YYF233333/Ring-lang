@@ -426,8 +426,8 @@ function HDecl_Effect(name, type_params, ops, is_pub, span) {
 function HDecl_Test(description, body, span) {
   return { _tag: "Test", description, body, span };
 }
-function HDecl_Trait(name, type_params, methods, is_pub, span) {
-  return { _tag: "Trait", name, type_params, methods, is_pub, span };
+function HDecl_Trait(name, type_params, methods, supertraits, is_pub, span) {
+  return { _tag: "Trait", name, type_params, methods, supertraits, is_pub, span };
 }
 function HDecl_ExternFn(name, def_id, type_params, params, return_type, effects, is_pub, span) {
   return { _tag: "ExternFn", name, def_id, type_params, params, return_type, effects, is_pub, span };
