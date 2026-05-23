@@ -493,6 +493,54 @@ AOT native 基础上，运行时 JIT 重编译热路径。利用运行时 profil
 - **优先级**：远期愿景（Phase D/E）
 - **独特优势**：Ring 的 effect/refinement/linear 信息给 JIT 提供其他语言没有的优化燃料
 
+### 类型系统驱动的控制力（远期愿景）
+
+> 设计原则：控制力通过类型系统表达，不通过 `unsafe` 逃逸口。程序员声明意图，编译器保证正确性。
+> 等性能优化阶段（LLVM backend 稳定后）再逐项实现。
+
+**Region Effect（内存分配策略）**
+
+`region<R>` 作为 effect，handler 决定分配策略（arena / pool / bump）。块内分配零 RC 开销，块结束一次性释放。Linear types 保证引用不逃逸 region 生命周期。
+
+```ring
+handle {
+    let tmp = entities.map(|e| alloc(e.pos))
+    process(tmp)
+} with region { arena(64 * 1024) }
+```
+
+应用场景：游戏帧循环、HTTP 请求处理、批处理管道。
+
+**Value Types（unboxed 内联存储）**
+
+`@value struct Point { x: Float, y: Float }` — 保证无 RC、按值传递、内联存储。编译器验证 value type 不含引用类型字段（或所有字段也是 value type）。
+
+应用场景：数学向量/矩阵、颜色、坐标、小型不可变数据。
+
+**Refinement 驱动的检查消除**
+
+`fn get_unchecked(list: List<T>, i: Int where i >= 0 && i < list.len()) -> T` — refinement 证明已涵盖安全条件，编译器跳过运行时 bounds check。不需要 `unsafe`，类型系统保证安全。
+
+应用场景：HPC 紧循环、图像像素遍历、矩阵运算。
+
+**声明式优化 Hint**
+
+| Hint | 作用 |
+|------|------|
+| `@align(N)` / `@packed` | 内存布局控制（cache line 对齐、紧凑存储） |
+| `@specialize(T = Int)` | 强制泛型函数单态化 |
+| `@vectorize` | 结合 effect purity 安全自动向量化 |
+| `@inline` / `@noinline` | 内联控制 |
+
+**不做的控制力**
+
+| 机制 | 不做的原因 |
+|------|-----------|
+| 原始指针 / 手动 malloc | 破坏 RC/linear 保证 |
+| 手动 SIMD intrinsics | 不可移植，由编译器 + hint 处理 |
+| `unsafe` 块（Rust 风格） | Ring 用类型系统消除 unsafe 的需求 |
+| 无 RC 模式 | 和 Perceus 架构冲突 |
+
 ## 工具链
 
 ### B-016 LSP 移植 [feature] [P2] [L] [queued]
