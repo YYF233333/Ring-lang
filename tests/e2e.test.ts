@@ -483,6 +483,7 @@ const cases: TestCase[] = [
   { file: "auto_boxing_closure.ring", expected: "auto_boxing_closure: all tests passed\n" },
   { file: "auto_boxing_mut_param.ring", expected: "auto_boxing_mut_param: all tests passed\n" },
   { file: "auto_boxing_local.ring", expected: "auto_boxing_local: all tests passed\n" },
+  { file: "mod_effect_qualified_op.ring", expected: "hello\nworld\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
