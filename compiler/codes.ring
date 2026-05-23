@@ -43,6 +43,8 @@ pub const E0505: Str = "E0505"
 pub const E0506: Str = "E0506"
 pub const E0507: Str = "E0507"
 pub const E0508: Str = "E0508"
+pub const E0409: Str = "E0409"
+pub const E0410: Str = "E0410"
 pub const E0509: Str = "E0509"
 pub const E0601: Str = "E0601"
 pub const E0702: Str = "E0702"
@@ -80,6 +82,8 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0406" { return "Cyclic effect alias" }
     if code == "E0407" { return "Unknown effect" }
     if code == "E0408" { return "Open effect row in capability-restricted module" }
+    if code == "E0409" { return "Default handler body uses effect without default handler" }
+    if code == "E0410" { return "Cyclic default effect handler dependency" }
     if code == "E0501" { return "Unknown trait" }
     if code == "E0502" { return "Missing trait method implementation" }
     if code == "E0503" { return "Unsatisfied trait bound" }

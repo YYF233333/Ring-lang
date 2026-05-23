@@ -55,7 +55,9 @@ pub struct InferCtx {
     pub boxed_vars: Set<Int>,
     pub lambda_depth: Int,
     pub var_lambda_depth: Map<Int, Int>,
-    pub fn_mut_params: Map<Str, List<Bool>>
+    pub fn_mut_params: Map<Str, List<Bool>>,
+    // Default effect handler dependency graph: effect name -> list of effect names it depends on
+    pub effect_default_deps: Map<Str, List<Str>>
 }
 
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -73,7 +75,8 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         boxed_vars: set_new(),
         lambda_depth: 0,
         var_lambda_depth: map_new(),
-        fn_mut_params: map_new()
+        fn_mut_params: map_new(),
+        effect_default_deps: map_new()
     }
 }
 

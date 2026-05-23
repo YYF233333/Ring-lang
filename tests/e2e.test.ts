@@ -485,6 +485,7 @@ const cases: TestCase[] = [
   { file: "auto_boxing_mut_param.ring", expected: "auto_boxing_mut_param: all tests passed\n" },
   { file: "auto_boxing_local.ring", expected: "auto_boxing_local: all tests passed\n" },
   { file: "mod_effect_qualified_op.ring", expected: "hello\nworld\n" },
+  { file: "default_effect_topo.ring", expected: "default_effect_topo: ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -562,6 +563,8 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_delegate_no_field.ring", error_pattern: "E0507" },
     { file: "error_delegate_no_impl.ring", error_pattern: "E0508" },
     { file: "delegate_conflict.ring", error_pattern: "E0509" },
+    { file: "error_default_effect_cycle.ring", error_pattern: "E0410" },
+    { file: "error_default_effect_no_default.ring", error_pattern: "E0409" },
   ];
 
   for (const tc of negative_cases) {

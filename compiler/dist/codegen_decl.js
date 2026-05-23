@@ -693,7 +693,8 @@ function emit_toplevel_evidence(ctx, effects) {
       }
     }
   }
-  for (const name of deferred_defaults) {
+  const sorted_defaults = topo_sort_defaults(ctx, deferred_defaults);
+  for (const name of sorted_defaults) {
     const ev_name = hir$evidence_param_name(name);
     const def_ev = hir$default_evidence_name(name);
     __ring_match21: {
@@ -703,13 +704,7 @@ function emit_toplevel_evidence(ctx, effects) {
         for (const dp of factory_params) {
           const dep_name = Str_slice(dp, 10, Str_len(dp));
           if ((!_Set_contains(emitted, dep_name, __Str_Eq))) {
-            const dep_ev_name = hir$evidence_param_name(dep_name);
-            if ((dep_name === "fail")) {
-              codegen_ctx$emit(ctx, `const ${dep_ev_name} = { raise: (error) => { throw error; } };`);
-            } else {
-              codegen_ctx$emit(ctx, `const ${dep_ev_name} = {};`);
-            }
-            _Set_insert(emitted, dep_name);
+            emit_single_evidence(ctx, dep_name, emitted);
           }
         }
         const args = List_join(factory_params, ", ");
@@ -724,6 +719,161 @@ function emit_toplevel_evidence(ctx, effects) {
     }
     _Set_insert(emitted, name);
   }
+}
+
+function emit_single_evidence(ctx, name, emitted) {
+  if (_Set_contains(emitted, name, __Str_Eq)) {
+    return;
+  }
+  const ev_name = hir$evidence_param_name(name);
+  if ((name === "io")) {
+    _Set_insert(emitted, name);
+    return;
+  }
+  if ((name === "fail")) {
+    codegen_ctx$emit(ctx, `const ${ev_name} = { raise: (error) => { throw error; } };`);
+    _Set_insert(emitted, name);
+    return;
+  }
+  if (_Set_contains(ctx.default_evidence_effects, name, __Str_Eq)) {
+    const def_ev = hir$default_evidence_name(name);
+    __ring_match22: {
+      const __ring_m22 = _Map_get(ctx.default_evidence_params, name);
+      if (__ring_m22._tag === "some") {
+        const factory_params = __ring_m22._0;
+        for (const dp of factory_params) {
+          const dep_name = Str_slice(dp, 10, Str_len(dp));
+          if ((!_Set_contains(emitted, dep_name, __Str_Eq))) {
+            emit_single_evidence(ctx, dep_name, emitted);
+          }
+        }
+        const args = List_join(factory_params, ", ");
+        codegen_ctx$emit(ctx, `const ${ev_name} = ${def_ev}(${args});`);
+        break __ring_match22;
+      }
+      if (__ring_m22._tag === "none") {
+        codegen_ctx$emit(ctx, `const ${ev_name} = ${def_ev};`);
+        break __ring_match22;
+      }
+      __match_fail(__ring_m22);
+    }
+  } else {
+    codegen_ctx$emit(ctx, `const ${ev_name} = {};`);
+  }
+  return _Set_insert(emitted, name);
+}
+
+function topo_sort_defaults(ctx, defaults) {
+  let default_set = set_new();
+  for (const d of defaults) {
+    _Set_insert(default_set, d);
+  }
+  let deps = map_new();
+  for (const name of defaults) {
+    let my_deps = [""];
+    List_clear(my_deps);
+    __ring_match23: {
+      const __ring_m23 = _Map_get(ctx.default_evidence_params, name);
+      if (__ring_m23._tag === "some") {
+        const factory_params = __ring_m23._0;
+        for (const dp of factory_params) {
+          const dep_name = Str_slice(dp, 10, Str_len(dp));
+          if (_Set_contains(default_set, dep_name, __Str_Eq)) {
+            List_push(my_deps, dep_name);
+          }
+        }
+        break __ring_match23;
+      }
+      if (__ring_m23._tag === "none") {
+        break __ring_match23;
+      }
+      __match_fail(__ring_m23);
+    }
+    _Map_insert(deps, name, my_deps);
+  }
+  let rev_deps = map_new();
+  let in_deg = map_new();
+  for (const name of defaults) {
+    _Map_insert(in_deg, name, 0);
+    _Map_insert(rev_deps, name, (function() {
+  let l = [""];
+  List_clear(l);
+  return l;
+})());
+  }
+  for (const entry of _Map_entries(deps)) {
+    const __ring_dt0 = entry;
+    const name = __ring_dt0[0];
+    const dep_list = __ring_dt0[1];
+    _Map_insert(in_deg, name, List_len(dep_list));
+    for (const dep of dep_list) {
+      __ring_match24: {
+        const __ring_m24 = _Map_get(rev_deps, dep);
+        if (__ring_m24._tag === "some") {
+          const rev_list = __ring_m24._0;
+          List_push(rev_list, name);
+          break __ring_match24;
+        }
+        if (__ring_m24._tag === "none") {
+          let new_list = [""];
+          List_clear(new_list);
+          List_push(new_list, name);
+          _Map_insert(rev_deps, dep, new_list);
+          break __ring_match24;
+        }
+        __match_fail(__ring_m24);
+      }
+    }
+  }
+  let queue = [""];
+  List_clear(queue);
+  for (const entry of _Map_entries(in_deg)) {
+    const __ring_dt1 = entry;
+    const name = __ring_dt1[0];
+    const deg = __ring_dt1[1];
+    if ((deg === 0)) {
+      List_push(queue, name);
+    }
+  }
+  List_sort(queue);
+  let sorted = [""];
+  List_clear(sorted);
+  while ((List_len(queue) > 0)) {
+    const cur = Option_unwrap(List_shift(queue));
+    List_push(sorted, cur);
+    __ring_match25: {
+      const __ring_m25 = _Map_get(rev_deps, cur);
+      if (__ring_m25._tag === "some") {
+        const dependents = __ring_m25._0;
+        for (const dependent of dependents) {
+          const old_deg = (function() {
+  const __ring_m = _Map_get(in_deg, dependent);
+  if (__ring_m._tag === "some") { const v = __ring_m._0; return v; }
+  if (__ring_m._tag === "none") { return 0; }
+  __match_fail(__ring_m);
+})();
+          _Map_insert(in_deg, dependent, (old_deg - 1));
+          if (((old_deg - 1) === 0)) {
+            List_push(queue, dependent);
+            List_sort(queue);
+          }
+        }
+        break __ring_match25;
+      }
+      if (__ring_m25._tag === "none") {
+        break __ring_match25;
+      }
+      __match_fail(__ring_m25);
+    }
+  }
+  if ((List_len(sorted) < List_len(defaults))) {
+    for (const name of defaults) {
+      if ((!List_contains(sorted, name, __Str_Eq))) {
+        List_push(sorted, name);
+      }
+    }
+  }
+  return sorted;
 }
 
 function __StringBuilder_Eq_eq(self, other) {

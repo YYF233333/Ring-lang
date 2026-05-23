@@ -1,14 +1,14 @@
 use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string, effects_match_kind, effect_kind_name}
-use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, EffectOpDecl, EffectExpr,
+use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
     UseDecl, UseImport, NamedImport, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
-    hexpr_type}
+    hexpr_type, hexpr_effects}
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0408, E0501, E0507, E0705}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0408, E0409, E0410, E0501, E0507, E0705}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error,
     unify_at, update_fn_effects,
@@ -407,6 +407,54 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
         hops.push(HEffectOp { name: op.name, params: op_params, return_type: op.return_type, has_default: op.has_default, default_body: default_body })
         oi = oi + 1
     }
+
+    // Validate default handler body effect dependencies:
+    // Collect all custom effects used by default bodies and verify each has all_have_defaults.
+    // Also record the dependency graph for cycle detection.
+    let mut all_defaults = true
+    for op in def.ops {
+        if !op.has_default { all_defaults = false }
+    }
+    if all_defaults && def.ops.len() > 0 {
+        let mut deps: List<Str> = []
+        let mut dep_set: Set<Str> = set_new()
+        for hop in hops {
+            match hop.default_body {
+                some(body) => {
+                    let body_effs = hexpr_effects(body)
+                    for eff in body_effs.effects {
+                        let eff_name = effect_kind_name(eff)
+                        // Skip: io (builtin), fail (builtin), mut (marker), self (same effect)
+                        if eff_name == "io" || eff_name == "fail" || eff_name == "mut" || eff_name == name {
+                            continue
+                        }
+                        // Check if the referenced effect has all defaults
+                        match ctx.env.types.effects.get(eff_name) {
+                            some(dep_def) => {
+                                if !dep_def.all_have_defaults {
+                                    let _ = type_error(ctx.sink, E0409,
+                                        "Default handler body of effect '${name}' uses effect '${eff_name}' which has no default handler; all-default effects cannot depend on effects without defaults",
+                                        span,
+                                        DiagnosticContext::OtherContext { detail: some("default effect dependency violation") })
+                                } else {
+                                    if !dep_set.contains(eff_name) {
+                                        dep_set.insert(eff_name)
+                                        deps.push(eff_name)
+                                    }
+                                }
+                            },
+                            none => {}
+                        }
+                    }
+                },
+                none => {}
+            }
+        }
+        if deps.len() > 0 {
+            ctx.effect_default_deps.insert(name, deps)
+        }
+    }
+
     HDecl::Effect { name: name, type_params: type_params, ops: hops, is_pub: is_pub, span: span }
 }
 
@@ -1259,6 +1307,86 @@ fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
     }
 }
 
+// ============================================================
+// Default effect handler cycle detection
+// ============================================================
+
+fn check_default_effect_cycles(mut ctx: InferCtx, decls: List<Decl>) {
+    // Build span lookup for error reporting
+    let mut effect_spans: Map<Str, Span> = map_new()
+    collect_effect_spans(decls, effect_spans)
+
+    // DFS-based cycle detection on effect_default_deps graph
+    // States: 0 = unvisited, 1 = in-progress (on stack), 2 = done
+    let mut state: Map<Str, Int> = map_new()
+    let mut path: List<Str> = []
+
+    for entry in ctx.effect_default_deps.entries() {
+        let (eff_name, _) = entry
+        if !state.contains_key(eff_name) {
+            dfs_detect_cycle(ctx, eff_name, state, path, effect_spans)
+        }
+    }
+}
+
+fn collect_effect_spans(decls: List<Decl>, mut spans: Map<Str, Span>) {
+    for decl in decls {
+        match decl {
+            Decl::Effect { name, span, .. } => {
+                spans.insert(name, span)
+            },
+            Decl::ModBlock { decls: mod_decls, .. } => {
+                collect_effect_spans(mod_decls, spans)
+            },
+            _ => {}
+        }
+    }
+}
+
+fn dfs_detect_cycle(mut ctx: InferCtx, name: Str, mut state: Map<Str, Int>, mut path: List<Str>, effect_spans: Map<Str, Span>) {
+    state.insert(name, 1)  // mark as in-progress
+    path.push(name)
+
+    match ctx.effect_default_deps.get(name) {
+        some(deps) => {
+            for dep in deps {
+                match state.get(dep) {
+                    some(s) => {
+                        if s == 1 {
+                            // Found a cycle: build cycle path description
+                            let mut cycle_parts: List<Str> = []
+                            let mut found_start = false
+                            for p in path {
+                                if p == dep { found_start = true }
+                                if found_start { cycle_parts.push(p) }
+                            }
+                            cycle_parts.push(dep)
+                            let cycle_str = cycle_parts.join(" -> ")
+                            let err_span = match effect_spans.get(name) {
+                                some(sp) => sp,
+                                none => Span { file: "", start: Position { line: 0, column: 0, offset: 0 }, end: Position { line: 0, column: 0, offset: 0 } }
+                            }
+                            let _ = type_error(ctx.sink, E0410,
+                                "Cyclic dependency in default effect handlers: ${cycle_str}",
+                                err_span,
+                                DiagnosticContext::OtherContext { detail: some("cyclic default effect dependency") })
+                        }
+                        // s == 2 means already processed, no cycle through this node
+                    },
+                    none => {
+                        // Unvisited: recurse
+                        dfs_detect_cycle(ctx, dep, state, path, effect_spans)
+                    }
+                }
+            }
+        },
+        none => {}
+    }
+
+    path.pop()
+    state.insert(name, 2)  // mark as done
+}
+
 pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     register_decls_two_phase(ctx, program.decls)
     let derived_impls = run_derive_pass(ctx.env)
@@ -1280,6 +1408,9 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     for decl in program.decls {
         let result = some(check_one_decl(ctx, decl, hdecls)) catch { _ => none }
     }
+
+    // Check for cyclic dependencies in default effect handlers
+    check_default_effect_cycles(ctx, program.decls)
 
     HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars }
 }

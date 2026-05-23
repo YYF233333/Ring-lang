@@ -118,7 +118,8 @@ fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         boxed_vars: set_new(),
         lambda_depth: 0,
         var_lambda_depth: map_new(),
-        fn_mut_params: map_new()
+        fn_mut_params: map_new(),
+        effect_default_deps: map_new()
     }
 }
 
