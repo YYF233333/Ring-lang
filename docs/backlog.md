@@ -51,13 +51,25 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 - **优先级**：Phase C 首要
 - **交互规则（B-043 决策）**：refinement 是值级谓词，不允许引用可变绑定；跨 effect/await 边界恒成立；handler resume 值须满足 refinement 约束；`mut` 参数带 refinement 时每次赋值重新验证（SSA 流分析，复杂度归入本 item）。详见 design.md 1.5
 
-### B-002 Linear Types（自动推断）[feature] [P2] [XL] [queued]
-design.md 11.2 解法 B。编译器做数据流分析，旧值无后续引用时安全就地修改。
+### B-002 Ownership + Drop（Rust 风格 RAII，无 borrow checker）[feature] [P2] [XL] [queued]
+Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪值的所有权，确保 Drop 恰好执行一次。
+
+**模型**：
+- 所有值 scope 结束自动 drop（RAII，正常路径 + abort 路径均自动）
+- Move 语义：赋值/传参 = move，move 后原变量不可用
+- `impl Drop` 的类型禁止 `impl Clone`（编译器拒绝，资源不可复制）
+- `drop(x)` 提前释放，`leak(x)` 显式逃逸（不触发 Drop）
+- `mut self` 方法 = 隐式借用（不消耗所有权）
+- 共享访问 → `Rc<T>`（Ring 等价物），Rc 可 Clone，内部资源 Drop 在 Rc 归零时触发
+- 无 `linear` 关键字——`impl Drop` 是唯一的 ownership 入口
+- 容器持有 Drop 类型值 → 容器 Drop 自动 drop 所有元素，容器自身不因此获得 Drop 约束
+
+**LLM 友好性**：本质是 Rust move/drop/RAII 语义，LLM 从 Rust 训练数据天然理解。自动浮现路径：LLM 正常写代码 → move 后使用原变量 → 编译器报 "value moved" → LLM 修。无新概念。
 
 - **前置依赖**：`mut<S>` 稳定
-- **复杂度**：大（linearity checker + Perceus RC 的前置条件）
+- **复杂度**：大（ownership checker + Perceus RC 的前置条件）
 - **优先级**：Phase C 与 refinement 穿插
-- **交互规则（B-043 决策）**：RAII 模型——linear 值通过 Drop trait 在 abort/cancel 路径自动释放；Drop::drop 禁止 fail effect（允许 io）；spawn 为 move 语义，不可跨任务共享 linear 值；`mut self` 调用 linear 值 = 隐式借用（不消耗），scope 结束时仍需显式消耗。详见 design.md 1.5
+- **交互规则（B-043 决策）**：RAII 模型——Drop 值在 abort/cancel 路径自动释放；Drop::drop 禁止 fail effect（允许 io）；spawn 为 move 语义，不可跨任务共享 Drop 值；`mut self` 调用 = 隐式借用（不消耗）。详见 design.md 1.5
 
 ### B-003 Dependent Types Lite [feature] [P3] [XL] [queued]
 design.md 1.3。类型可依赖特定值（`Vec<T, n: Nat>`），不要求完整依赖类型证明。
@@ -629,12 +641,6 @@ match opt {
 - 自举编译器正常编译自身
 
 ## 已知 Bug / 技术债
-
-### B-024 深层嵌套泛型 UFCS 调用 [bugfix] [P3] [L] [doing-waveB]
-`Pair<Pair<Int, Int>, Int>` 的 `.eq()` 等直接方法调用受限。
-
-- **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
-- **优先级**：低
 
 
 
