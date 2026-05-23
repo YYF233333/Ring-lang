@@ -189,7 +189,7 @@ pub fn row_contains(row: EffectRow, eff: Effect) -> Bool {
 fn effects_same_kind(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
-        Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },
+        Effect::MutEffect { state_type: sa } => match b { Effect::MutEffect { state_type: sb } => types_equal(sa, sb), _ => false },
         Effect::FailEffect { error_type: ea } => match b {
             Effect::FailEffect { error_type: eb } => types_equal(ea, eb),
             _ => false

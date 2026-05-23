@@ -450,6 +450,7 @@ const cases: TestCase[] = [
   { file: "supertrait_multi_level.ring", expected: "Supertrait multi-level: all passed\n" },
   { file: "effect_annot_fail_type_match.ring", expected: "0\n" },
   { file: "prelude_bounded_impl_call.ring", expected: "ok\n" },
+  { file: "mut_effect_multi_type.ring", expected: "mut_effect_multi_type: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
