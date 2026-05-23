@@ -10,6 +10,25 @@ use codegen_ctx::{CodegenCtx, emit, push_indent, pop_indent, safe_ident, qualify
 
 extern fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str
 
+// Resolve a raw pattern name (e.g. "Pair") to a qualified struct key
+// in struct_field_order (e.g. "inner$Pair"). Returns qualified name if found, none otherwise.
+fn resolve_struct_name(ctx: CodegenCtx, raw_name: Str) -> Str? {
+    let safe = safe_ident(raw_name)
+    let qualified = qualify(ctx, safe)
+    if ctx.struct_field_order.contains_key(qualified) {
+        return some(qualified)
+    }
+    // Fallback: search for a key ending with "$raw_name" (mod-qualified struct)
+    let suffix = "\$${safe}"
+    for entry in ctx.struct_field_order.entries() {
+        let (k, _v) = entry
+        if k.ends_with(suffix) {
+            return some(k)
+        }
+    }
+    none
+}
+
 // ============================================================
 // Statement-mode expression emission
 // ============================================================
@@ -409,8 +428,9 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
             }
         },
         Pattern::NamedConstructor { name, fields, .. } => {
-            if ctx.struct_field_order.contains_key(name) {
-                let qualified_name = qualify(ctx, safe_ident(name))
+            let resolved = resolve_struct_name(ctx, name)
+            match resolved {
+            some(qualified_name) => {
                 let inst_check = "${target} instanceof ${qualified_name}"
                 let mut sub_conds: List<Str> = []
                 for f in fields {
@@ -423,7 +443,8 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
                     let joined = sub_conds.join(" && ")
                     "${inst_check} && ${joined}"
                 }
-            } else {
+            },
+            none => {
                 let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
                 let mut sub_conds: List<Str> = []
                 for f in fields {
@@ -436,6 +457,7 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
                     let joined = sub_conds.join(" && ")
                     "${tag_check} && ${joined}"
                 }
+            },
             }
         },
         Pattern::TuplePattern { elements, .. } => {

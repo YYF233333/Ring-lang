@@ -160,6 +160,24 @@ function to_result(f) {
 }
 
 
+function resolve_struct_name(ctx, raw_name) {
+  const safe = codegen_ctx$safe_ident(raw_name);
+  const qualified = codegen_ctx$qualify(ctx, safe);
+  if (_Map_contains_key(ctx.struct_field_order, qualified)) {
+    return Option_some(qualified);
+  }
+  const suffix = `$${safe}`;
+  for (const entry of _Map_entries(ctx.struct_field_order)) {
+    const __ring_dt0 = entry;
+    const k = __ring_dt0[0];
+    const _v = __ring_dt0[1];
+    if (Str_ends_with(k, suffix)) {
+      return Option_some(k);
+    }
+  }
+  return Option_none;
+}
+
 function emit_in_stmt_context(ctx, expr, mode) {
   __ring_match6: {
     const __ring_m6 = expr;
@@ -735,39 +753,47 @@ function gen_pattern_condition(ctx, target, pat) {
     }
     if (__ring_m27._tag === "NamedConstructor") {
       const name = __ring_m27.name; const fields = __ring_m27.fields;
-      if (_Map_contains_key(ctx.struct_field_order, name)) {
-        const qualified_name = codegen_ctx$qualify(ctx, codegen_ctx$safe_ident(name));
-        const inst_check = `${target} instanceof ${qualified_name}`;
-        let sub_conds = [];
-        for (const f of fields) {
-          const sname = codegen_ctx$safe_ident(f.name);
-          const sub = gen_pattern_condition(ctx, `${target}.${sname}`, f.pattern);
-          if ((sub !== "true")) {
-            List_push(sub_conds, sub);
+      const resolved = resolve_struct_name(ctx, name);
+      __ring_match29: {
+        const __ring_m29 = resolved;
+        if (__ring_m29._tag === "some") {
+          const qualified_name = __ring_m29._0;
+          const inst_check = `${target} instanceof ${qualified_name}`;
+          let sub_conds = [];
+          for (const f of fields) {
+            const sname = codegen_ctx$safe_ident(f.name);
+            const sub = gen_pattern_condition(ctx, `${target}.${sname}`, f.pattern);
+            if ((sub !== "true")) {
+              List_push(sub_conds, sub);
+            }
           }
-        }
-        if ((List_len(sub_conds) === 0)) {
-          return inst_check;
-        } else {
-          const joined = List_join(sub_conds, " && ");
-          return `${inst_check} && ${joined}`;
-        }
-      } else {
-        const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
-        let sub_conds = [];
-        for (const f of fields) {
-          const sname = codegen_ctx$safe_ident(f.name);
-          const sub = gen_pattern_condition(ctx, `${target}.${sname}`, f.pattern);
-          if ((sub !== "true")) {
-            List_push(sub_conds, sub);
+          if ((List_len(sub_conds) === 0)) {
+            return inst_check;
+          } else {
+            const joined = List_join(sub_conds, " && ");
+            return `${inst_check} && ${joined}`;
           }
+          break __ring_match29;
         }
-        if ((List_len(sub_conds) === 0)) {
-          return tag_check;
-        } else {
-          const joined = List_join(sub_conds, " && ");
-          return `${tag_check} && ${joined}`;
+        if (__ring_m29._tag === "none") {
+          const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
+          let sub_conds = [];
+          for (const f of fields) {
+            const sname = codegen_ctx$safe_ident(f.name);
+            const sub = gen_pattern_condition(ctx, `${target}.${sname}`, f.pattern);
+            if ((sub !== "true")) {
+              List_push(sub_conds, sub);
+            }
+          }
+          if ((List_len(sub_conds) === 0)) {
+            return tag_check;
+          } else {
+            const joined = List_join(sub_conds, " && ");
+            return `${tag_check} && ${joined}`;
+          }
+          break __ring_match29;
         }
+        __match_fail(__ring_m29);
       }
       break __ring_match27;
     }
@@ -777,20 +803,20 @@ function gen_pattern_condition(ctx, target, pat) {
       let sub_conds = [];
       const __ring_end2 = List_len(elements);
       for (let i = 0; i < __ring_end2; i++) {
-        __ring_match29: {
-          const __ring_m29 = List_get(elements, i);
-          if (__ring_m29._tag === "some") {
-            const e = __ring_m29._0;
+        __ring_match30: {
+          const __ring_m30 = List_get(elements, i);
+          if (__ring_m30._tag === "some") {
+            const e = __ring_m30._0;
             const sub = gen_pattern_condition(ctx, `${target}[${i}]`, e);
             if ((sub !== "true")) {
               List_push(sub_conds, sub);
             }
-            break __ring_match29;
+            break __ring_match30;
           }
-          if (__ring_m29._tag === "none") {
-            break __ring_match29;
+          if (__ring_m30._tag === "none") {
+            break __ring_match30;
           }
-          __match_fail(__ring_m29);
+          __match_fail(__ring_m30);
         }
       }
       if ((List_len(sub_conds) === 0)) {
@@ -806,65 +832,32 @@ function gen_pattern_condition(ctx, target, pat) {
 }
 
 function gen_pattern_bindings(target, pat) {
-  __ring_match30: {
-    const __ring_m30 = pat;
-    if (__ring_m30._tag === "Wildcard") {
+  __ring_match31: {
+    const __ring_m31 = pat;
+    if (__ring_m31._tag === "Wildcard") {
       return "";
-      break __ring_match30;
+      break __ring_match31;
     }
-    if (__ring_m30._tag === "Literal") {
+    if (__ring_m31._tag === "Literal") {
       return "";
-      break __ring_match30;
+      break __ring_match31;
     }
-    if (__ring_m30._tag === "Binding") {
-      const name = __ring_m30.name;
+    if (__ring_m31._tag === "Binding") {
+      const name = __ring_m31.name;
       const sname = codegen_ctx$safe_ident(name);
       return `const ${sname} = ${target}; `;
-      break __ring_match30;
+      break __ring_match31;
     }
-    if (__ring_m30._tag === "Constructor") {
-      const fields = __ring_m30.fields;
+    if (__ring_m31._tag === "Constructor") {
+      const fields = __ring_m31.fields;
       let result = "";
       const __ring_end3 = List_len(fields);
       for (let i = 0; i < __ring_end3; i++) {
-        __ring_match31: {
-          const __ring_m31 = List_get(fields, i);
-          if (__ring_m31._tag === "some") {
-            const f = __ring_m31._0;
-            const sub = gen_pattern_bindings(`${target}._${i}`, f);
-            result = `${result}${sub}`;
-            break __ring_match31;
-          }
-          if (__ring_m31._tag === "none") {
-            break __ring_match31;
-          }
-          __match_fail(__ring_m31);
-        }
-      }
-      return result;
-      break __ring_match30;
-    }
-    if (__ring_m30._tag === "NamedConstructor") {
-      const fields = __ring_m30.fields;
-      let result = "";
-      for (const f of fields) {
-        const sname = codegen_ctx$safe_ident(f.name);
-        const sub = gen_pattern_bindings(`${target}.${sname}`, f.pattern);
-        result = `${result}${sub}`;
-      }
-      return result;
-      break __ring_match30;
-    }
-    if (__ring_m30._tag === "TuplePattern") {
-      const elements = __ring_m30.elements;
-      let result = "";
-      const __ring_end4 = List_len(elements);
-      for (let i = 0; i < __ring_end4; i++) {
         __ring_match32: {
-          const __ring_m32 = List_get(elements, i);
+          const __ring_m32 = List_get(fields, i);
           if (__ring_m32._tag === "some") {
-            const e = __ring_m32._0;
-            const sub = gen_pattern_bindings(`${target}[${i}]`, e);
+            const f = __ring_m32._0;
+            const sub = gen_pattern_bindings(`${target}._${i}`, f);
             result = `${result}${sub}`;
             break __ring_match32;
           }
@@ -875,9 +868,42 @@ function gen_pattern_bindings(target, pat) {
         }
       }
       return result;
-      break __ring_match30;
+      break __ring_match31;
     }
-    __match_fail(__ring_m30);
+    if (__ring_m31._tag === "NamedConstructor") {
+      const fields = __ring_m31.fields;
+      let result = "";
+      for (const f of fields) {
+        const sname = codegen_ctx$safe_ident(f.name);
+        const sub = gen_pattern_bindings(`${target}.${sname}`, f.pattern);
+        result = `${result}${sub}`;
+      }
+      return result;
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "TuplePattern") {
+      const elements = __ring_m31.elements;
+      let result = "";
+      const __ring_end4 = List_len(elements);
+      for (let i = 0; i < __ring_end4; i++) {
+        __ring_match33: {
+          const __ring_m33 = List_get(elements, i);
+          if (__ring_m33._tag === "some") {
+            const e = __ring_m33._0;
+            const sub = gen_pattern_bindings(`${target}[${i}]`, e);
+            result = `${result}${sub}`;
+            break __ring_match33;
+          }
+          if (__ring_m33._tag === "none") {
+            break __ring_match33;
+          }
+          __match_fail(__ring_m33);
+        }
+      }
+      return result;
+      break __ring_match31;
+    }
+    __match_fail(__ring_m31);
   }
 }
 

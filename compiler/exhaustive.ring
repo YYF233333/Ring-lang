@@ -208,14 +208,14 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
             for p in patterns {
                 match p {
                     Pattern::NamedConstructor { name: pname, fields: nfields, .. } => {
-                        if pname == sname {
+                        if names_match_struct(pname, sname) {
                             covered = true
                             let positional = named_pattern_to_positional(nfields, field_names, sfields.len())
                             sub_patterns.push(positional)
                         }
                     },
                     Pattern::Constructor { name: pname, fields: cfields, .. } => {
-                        if pname == sname {
+                        if names_match_struct(pname, sname) {
                             covered = true
                             sub_patterns.push(cfields)
                         }
@@ -400,7 +400,7 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
             }
         },
         Pattern::Constructor { name, fields, .. } => {
-            if name == ctor.name {
+            if names_match_struct(name, ctor.name) {
                 let mut sub = list_clone(fields)
                 let wild = wild_pattern()
                 while sub.len() < ctor.arity {
@@ -413,7 +413,7 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
             }
         },
         Pattern::NamedConstructor { name, fields: nfields, .. } => {
-            if name == ctor.name {
+            if names_match_struct(name, ctor.name) {
                 let field_names = match ctor.field_names {
                     some(fns) => fns,
                     none => {
@@ -553,6 +553,13 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFi
             }
         },
     }
+}
+
+// Compare pattern name (raw, e.g. "Pair") against type name (possibly qualified, e.g. "inner::Pair").
+// Returns true if they are equal or if type_name ends with "::pattern_name" (mod-qualified).
+fn names_match_struct(pattern_name: Str, type_name: Str) -> Bool {
+    if pattern_name == type_name { return true }
+    type_name.ends_with("::${pattern_name}")
 }
 
 fn join_strs(parts: List<Str>, sep: Str) -> Str {
