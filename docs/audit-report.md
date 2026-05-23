@@ -78,11 +78,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 发现者：Auditor（2026-05-23）
 
-### #100 `List.last()` 空列表时依赖 JS 负索引行为 [low] [open]
-
-`std/list.ring` 的 `last()` 实现 `self.get(self.len() - 1)`，空列表时变为 `self.get(-1)`。JS runtime 对负索引返回 `undefined` → 映射为 `none`，结果恰好正确但依赖 JS 实现细节。LLVM 后端可能 panic。应加 `if self.is_empty() { return none }` 前置检查。
-
-发现者：Auditor（2026-05-23）
 
 ## 代码质量 / 可维护性
 
@@ -95,9 +90,11 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 应拆分为 infer_stmt/infer_expr/infer。
 
 
-### #14 68 处 `panic()` 调用（约 40 处 unreachable）[low] [open]
+### #14 68 处 `panic()` 调用（约 40 处 unreachable）[medium] [open]
 
 崩溃而非友好报错。应逐步替换为 DiagnosticSink。
+
+**修复方向**：分两类处理——(1) unreachable panic（match 兜底、不应到达的分支）：保留或改为 `panic("unreachable: ...")`，这些是内部断言；(2) 用户输入触发的 panic（文件找不到、类型错误兜底等）：替换为 `sink.emit()` 诊断 + 继续编译。优先处理第 2 类。
 
 ## 架构债
 

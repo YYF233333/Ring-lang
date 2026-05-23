@@ -1,4 +1,4 @@
-# Backlog
+﻿# Backlog
 
 > 活的工作看板。做完的条目删除，只在 git commit message 留记录。
 > 条目格式：`### B-xxx <标题> [类型] [优先级] [复杂度] [状态]`
@@ -12,7 +12,7 @@
 
 **层 1（基础设施，优先）**：
 - ~~B-034 Effect Aliases [S]~~ ✅ 已完成（2026-05-23）
-- B-005 Supertrait 继承 [M]
+- ~~B-005 Supertrait 继承 [M]~~ ✅ 已完成（2026-05-23）
 - B-037 `mut<T>` Marker Effect [M]
 - B-008 Default Effect Handler [M]
 
@@ -113,48 +113,6 @@ fn first<I: Iterator<Item = Int>>(iter: I) -> Int { ... }
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
-### B-005 Supertrait 继承 [feature] [P2] [M] [queued]
-Trait 之间的继承关系。实现 subtrait 时必须先实现所有 supertrait。
-
-```ring
-trait Eq {
-    fn eq(self, other: Self) -> Bool
-}
-
-trait Ord: Eq {  // Ord 要求 Eq
-    fn cmp(self, other: Self) -> Int
-}
-
-trait Printable: Eq + Debug {  // 多个 supertrait
-    fn pretty(self) -> Str
-}
-
-// impl Ord 时编译器要求 impl Eq 已存在
-impl Ord for MyType {
-    fn cmp(self, other: MyType) -> Int { ... }
-}
-// 若无 impl Eq for MyType → 编译错误
-```
-
-**当前状态**：AST `Decl::Trait` 已有 `supertraits: List<TypeBound>` 字段（parser.ring:1132 固定为空列表）。`TraitDef`（env.ring:65）无 supertrait 字段。
-
-**涉及修改**：
-1. `parser.ring`：在 `parse_trait_decl()` 中，type_params 解析后、`{` 之前，检查 `:` token → 调用 `parse_type_bound_list()`（用 `+` 分隔多个 bound）填充 `supertraits`
-2. `env.ring`：`TraitDef` 新增 `supertraits: List<Str>` 字段
-3. `infer_register.ring`：`register_trait()` 接收并存储 supertraits；验证 supertrait 名已注册（否则报错）
-4. `infer_decl.ring`：`check_impl_decl()` 中，当 impl 的 trait 有 supertrait 时，验证目标类型对每个 supertrait 都有 impl（遍历 `trait_reg.trait_impls` 查找匹配）——缺失时报新错误码（如 E0505 "type `X` does not implement supertrait `Y` required by `Z`"）
-5. `codegen_decl.ring`：`emit_trait_dictionary()` 中 supertrait 方法**不合并**到子 trait 字典——各 trait 独立字典，泛型函数需要 subtrait 时编译器同时传递 supertrait 字典参数
-6. `infer.ring`：trait bound 解析时，`T: Ord` 隐含 `T: Eq`——在 bound 推断/检查中自动展开 supertrait 链
-
-**验收标准**：
-- `trait Ord: Eq` 语法可解析
-- `impl Ord for X` 无 `impl Eq for X` → 报 E0505
-- `impl Ord for X` 有 `impl Eq for X` → 正常编译
-- `fn foo<T: Ord>(x: T)` 内部可调用 `.eq()` 和 `.cmp()`
-- 多级继承：`trait A: B`, `trait B: C` → impl A 要求 B 和 C 都��� impl
-- 循环继承检测：`trait A: B`, `trait B: A` → 编译错误
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
 
 ### B-033 GADTs（Generalized Algebraic Data Types）[feature] [P2] [L] [queued]
 enum 变体可指定不同的返回类型约束，match 分支内编译器自动获得类型等式约束（完整方案：scoped unification）。
