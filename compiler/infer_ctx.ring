@@ -492,6 +492,50 @@ fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: List<Int>
             },
             _ => {}
         },
+        Type::FnType { params: sp, return_type: sr, .. } => match inst_type {
+            Type::FnType { params: ip, return_type: ir, .. } => {
+                let mut i = 0
+                let limit = if sp.len() < ip.len() { sp.len() } else { ip.len() }
+                while i < limit {
+                    match (sp.get(i), ip.get(i)) {
+                        (some(s), some(inst)) => collect_var_mappings(s, inst, type_vars, result),
+                        _ => {}
+                    }
+                    i = i + 1
+                }
+                collect_var_mappings(sr, ir, type_vars, result)
+            },
+            _ => {}
+        },
+        Type::TupleType { elements: se, .. } => match inst_type {
+            Type::TupleType { elements: ie, .. } => {
+                let mut i = 0
+                let limit = if se.len() < ie.len() { se.len() } else { ie.len() }
+                while i < limit {
+                    match (se.get(i), ie.get(i)) {
+                        (some(s), some(inst)) => collect_var_mappings(s, inst, type_vars, result),
+                        _ => {}
+                    }
+                    i = i + 1
+                }
+            },
+            _ => {}
+        },
+        Type::GenericType { base: sb, args: sa, .. } => match inst_type {
+            Type::GenericType { base: ib, args: ia, .. } => {
+                collect_var_mappings(sb, ib, type_vars, result)
+                let mut i = 0
+                let limit = if sa.len() < ia.len() { sa.len() } else { ia.len() }
+                while i < limit {
+                    match (sa.get(i), ia.get(i)) {
+                        (some(s), some(inst)) => collect_var_mappings(s, inst, type_vars, result),
+                        _ => {}
+                    }
+                    i = i + 1
+                }
+            },
+            _ => {}
+        },
         _ => {}
     }
 }

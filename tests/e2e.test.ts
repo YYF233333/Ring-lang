@@ -491,6 +491,7 @@ const cases: TestCase[] = [
   { file: "default_effect_topo.ring", expected: "default_effect_topo: ok\n" },
   { file: "impl_qualified_path.ring", expected: "ok\n" },
   { file: "return_in_expr_block.ring", expected: "return_in_expr_block: ok\n" },
+  { file: "trait_fn_param.ring", expected: "trait fn param: ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
