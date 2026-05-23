@@ -167,9 +167,37 @@ Steve Klabnik（Rust 核心团队）用 Claude 在 ~2 周内完成。~100k 行 R
 
 ---
 
-## 战略判断（2026-05-22）
+## Koka——最近的学术对标（2026-05-23 新增）
 
-### Ring-lang 的位置
+Koka（Daan Leijen，Microsoft Research）是 Ring effect system 的直接理论来源。编译器代码参考 Koka 的 Haskell 实现翻译。
+
+**核心重叠**：代数 effect system、evidence passing、effect 推断、Perceus RC（Ring 计划中）、ML 风类型系统。
+
+**Ring vs Koka 差异化**：
+
+| 维度 | Koka | Ring | 差异强度 |
+|------|------|------|---------|
+| Effect 完整度 | Full AE（multi-shot continuation） | Tail-resumptive + abort | Ring 是子集 |
+| Mutation 追踪 | state effect（有 handler，有运行时成本） | mut\<T\> marker effect（零成本编译期追踪） | **设计创新** |
+| OOP 手感 | 纯函数式 | struct + impl + trait | 中 |
+| Refinement types | 无 | 核心特性（计划） | **品类差异** |
+| 编译优化 | C backend，无 JIT | LLVM AOT + JIT 愿景，语义驱动优化 | **架构差异** |
+| LLM 友好 | 无此设计目标 | 核心设计目标 | 中 |
+| 自举 | Haskell 实现 | Ring 自举 | 中 |
+
+**诚实评估**：当前差异化不够——类型系统维度 Ring 是 Koka 的严格子集。Phase C 的三个关键特性（refinement types / async effect / mut\<T\>）+ 语义驱动编译优化是拉开距离的窗口。Refinement types 是唯一能让 Ring 自成品类的特性。
+
+---
+
+## 战略判断（2026-05-23 更新）
+
+### Ring-lang 的核心卖点
+
+**三个核心卖点**（路线图完成后）：
+
+1. **追踪一切**：数据类型 + 副作用类型 + 值约束（refinement），签名即完整契约
+2. **语义驱动性能**：类型系统信息（effect purity / refinement bounds / linear uniqueness）直接转化为编译优化——bounds check 消除、RC 省略、纯函数自动并行化。目标：特定场景超越 C++/Rust
+3. **LLM 原生**：模块签名信息密度最大化，LLM 需要最少上下文即可正确使用 API
 
 **已领先的维度**：
 - 类型系统理论深度（完整 effect + row poly，所有竞品都没有）
@@ -177,12 +205,11 @@ Steve Klabnik（Rust 核心团队）用 Claude 在 ~2 周内完成。~100k 行 R
 - 人效比（7 天 1 人 vs MoonBit 3 年数十人）
 
 **落后但可追的维度**：
-- LSP（2-3 天可做基础版）
+- LSP（等 Phase C 层 1+2 稳定后启动）
 - 包管理（可延后）
 - 公众可见度（Zero 同龄但 1.5k stars，需要公开发布）
 
 **不应追的维度**：
-- 多后端（WASM/Native）——人力战
 - 包生态——需要用户基数
 - MoonBit 的 3 年工程打磨——时间不可压缩
 

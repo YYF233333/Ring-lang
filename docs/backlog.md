@@ -6,7 +6,7 @@
 > 反馈分支：`doing` → `waiting-feedback`（Worker 遇到设计问题）→ Discussion 处理后 → `queued`（重新排队）
 > 工作流规范见 `docs/workflow.md`
 
-## Phase C 执行计划���2026-05-23 确定）
+## Phase C 执行计划 （2026-05-23 确定）
 
 **目标**：基础设施特性 + 中等特性全部完成，为层 3 重型特性铺路。
 
@@ -447,48 +447,51 @@ for x in collection { body }
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
-## 性能优化
+## 性能优化（愿景：语义驱动的编译优化）
+
+> **核心论点**：Ring 的类型系统（effect + refinement + linear）不仅用于安全性，还为编译器提供其他语言没有的优化信息。性能是 Ring 的核心卖点之一——目标不是"接近 C++/Rust"而是在特定场景**超越**。
+>
+> 优化分两层：AOT（LLVM 编译期）和 JIT（运行时 PGO），很多优化两层都可以做。
+> 前置依赖链：LLVM backend → Perceus RC → 各项优化 pass → JIT（远期）。
 
 ### B-011 LLVM Native Backend [feature] [P3] [XL] [queued]
-design.md 14.2。编译到 LLVM IR，桌面/服务端场景。
+编译到 LLVM IR，所有后续优化的基础。
 
-- **前置依赖**：Linear types（Perceus RC 基础）；迁移正前方需完成 Str Unicode 语义统一（`len`/`char_at`/`slice` 等从 UTF-16 切到 code point 语义，消除 JS-ism）
-- **复杂度**：极大
-- **优先级**：Phase C（长期视野 [[long-term-vision]]）
-- **FFI 边界 effect 设计**（LLVM 阶段必须在设计期解决的问题）：
-  1. **Evidence 传递方案**：LLVM 端使用 TLS（Thread-Local Storage）handler stack 存储 evidence，而非函数参数传递。C 函数无需感知 evidence 存在，Ring→C→Ring callback 中 effect 自然穿透（与 JS 端 try/catch 的 ambient 语义对齐）
-  2. **Effect-free 的 Ring 函数保证干净 C ABI**（无 evidence 参数），零成本互调
-  3. **跨语言资源安全**：Linear types 保证 Ring 侧资源，但 C 分配的资源（`malloc`/`fopen`）不在 RC 图中。effect handler abort 时需要 `defer` 机制清理 FFI 资源
-  - **参考**：Koka 不暴露 C FFI 给用户（monadic transformation 编译到 C）；OCaml 5 限制 effect 不能跨 C 帧；Rust `extern "C" fn` 不能是 async
-  - **已排除**：full AE 跨 C 帧（B-009 已取消，不需要 delimited continuation）
+- **前置依赖**：Linear types（Perceus RC 基础）；Str Unicode 语义统一（消除 JS-ism）
+- **FFI 边界 effect 设计**：
+  1. Evidence 传递：LLVM 端用 TLS handler stack，C 函数无需感知
+  2. Effect-free 函数保证干净 C ABI，零成本互调
+  3. 跨语言资源安全：Linear types + `defer` 清理 FFI 资源
 
 ### B-012 Perceus 引用计数 [feature] [P3] [XL] [queued]
-design.md 14.3。精确 RC + 就地复用分析，消除 GC 停顿。
+精确 RC + 就地复用分析（reuse analysis），消除 GC。
 
-- **前置依赖**：Linear types + LLVM backend
-- **复杂度**：极大
-- **优先级**：Phase C/D
+- **前置依赖**：Linear types + B-011
 
-### B-013 热路径单态化 [feature] [P3] [M] [queued]
-design.md 11.3。Row-poly 函数在热循环中特化为具体类型版本。
+### 语义驱动优化（AOT + JIT 共享）
 
-- **前置依赖**：性能 profiling 基础设施
-- **复杂度**：中
-- **优先级**：Phase D/E
+以下优化利用 Ring 类型系统提供的**独有语义信息**，是 C++/Rust 编译器做不到或需要手动标注才能做到的：
 
-### B-014 融合（Deforestation）[feature] [P3] [M] [queued]
-design.md 11.2 解法 C。消除中间集合，多次遍历合并为一次。
+| 优化 | 依赖的语义信息 | AOT | JIT | C++/Rust 对等物 |
+|------|--------------|-----|-----|---------------|
+| **Bounds check 消除** | Refinement types（编译器已证明 `i < len`） | ✓ | — | 无（需 unsafe） |
+| **RC 省略** | Linear types（证明唯一持有） | ✓ | ✓ | Rust `&mut`（手动标注） |
+| **就地修改保证** | Linear types + Perceus reuse analysis | ✓ | — | Rust `&mut`（手动标注） |
+| **纯函数优化** | Effect purity（`with {}`） | ✓ CSE/DCE/重排 | ✓ 自动并行 | `constexpr`（有限） |
+| **Evidence 特化** | Effect 单态调用点 | ✓ | ✓ | N/A |
+| **Dictionary 反虚化** | Trait dispatch 热路径 | ✓ | ✓ speculative | Rust 单态化（编译期全量） |
+| **融合（Deforestation）** | 纯函数管道 + Effect purity | ✓ | — | 手动循环合并 |
+| **逃逸分析 → 栈分配** | 数据流分析 | ✓ | ✓ 更精确 | 手动控制 |
+| **热路径单态化** | 泛型 + row-poly 函数 | 部分 | ✓ profile 驱动 | C++ 模板（编译期全量） |
+| **闭包合并** | 管道中多个小闭包 | ✓ | — | 手动合并 |
 
-- **前置依赖**：标准库 HOF 方法迁移到 Ring（Phase B S2）
-- **复杂度**：中
-- **优先级**：Phase D/E
+### B-041 JIT 编译（LLVM ORC）[feature] [P3] [XL] [queued]
+AOT native 基础上，运行时 JIT 重编译热路径。利用运行时 profile 做 AOT 无法做的优化。
 
-### B-015 闭包合并 [feature] [P3] [M] [queued]
-design.md 11.5。管道中多个小闭包合并为单次遍历的合并函数。
-
-- **前置依赖**：融合
-- **复杂度**：中
-- **优先级**：Phase E
+- **先例**：Julia（LLVM ORC JIT）；Java HotSpot（服务端追平 C++）；Cling（C++ 解释器）
+- **前置依赖**：B-011 + 基础 AOT 优化 pass 稳定
+- **优先级**：远期愿景（Phase D/E）
+- **独特优势**：Ring 的 effect/refinement/linear 信息给 JIT 提供其他语言没有的优化燃料
 
 ## 工具链
 

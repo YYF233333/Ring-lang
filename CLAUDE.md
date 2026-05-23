@@ -208,7 +208,8 @@ Ring-lang/
 ### 长期目标
 
 - Dependent types lite
-- LLVM native backend
+- 语义驱动编译优化（利用 effect/refinement/linear 类型信息做 bounds check 消除、RC 省略、纯函数自动并行化等——AOT 和 JIT 两层）
+- JIT 编译（LLVM ORC，在 AOT native 基础上运行时 PGO 优化热路径）
 - Formatter 自动标注等级系统
 
 ## 常用命令
