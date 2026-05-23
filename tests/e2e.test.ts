@@ -451,6 +451,7 @@ const cases: TestCase[] = [
   { file: "effect_alias_generic.ring", expected: "Generic effect alias: all passed\n" },
   { file: "supertrait_basic.ring", expected: "Supertrait basic: all passed\n" },
   { file: "supertrait_multi_level.ring", expected: "Supertrait multi-level: all passed\n" },
+  { file: "supertrait_default_method.ring", expected: "Supertrait default method: passed\n" },
   { file: "effect_annot_fail_type_match.ring", expected: "0\n" },
   { file: "prelude_bounded_impl_call.ring", expected: "ok\n" },
   { file: "default_effect_handler.ring", expected: "Hello, World!\nHello, deep!\n" },

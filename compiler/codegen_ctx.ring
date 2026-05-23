@@ -46,7 +46,8 @@ pub struct CodegenCtx {
 
 pub struct HTraitDeclInfo {
     pub name: Str,
-    pub methods: List<HTraitMethod>
+    pub methods: List<HTraitMethod>,
+    pub supertraits: List<Str>
 }
 
 pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx {

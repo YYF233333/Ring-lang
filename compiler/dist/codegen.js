@@ -517,8 +517,8 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
         break __ring_match17;
       }
       if (__ring_m17._tag === "Trait") {
-        const name = __ring_m17.name; const methods = __ring_m17.methods;
-        _Map_insert(ctx.trait_decls, name, new codegen_ctx$HTraitDeclInfo(name, methods));
+        const name = __ring_m17.name; const methods = __ring_m17.methods; const supertraits = __ring_m17.supertraits;
+        _Map_insert(ctx.trait_decls, name, new codegen_ctx$HTraitDeclInfo(name, methods, supertraits));
         break __ring_match17;
       }
       if (__ring_m17._tag === "ModBlock") {
@@ -586,8 +586,8 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
               break __ring_match22;
             }
             if (__ring_m22._tag === "Trait") {
-              const tname = __ring_m22.name; const tmethods = __ring_m22.methods;
-              _Map_insert(ctx.trait_decls, tname, new codegen_ctx$HTraitDeclInfo(tname, tmethods));
+              const tname = __ring_m22.name; const tmethods = __ring_m22.methods; const tst = __ring_m22.supertraits;
+              _Map_insert(ctx.trait_decls, tname, new codegen_ctx$HTraitDeclInfo(tname, tmethods, tst));
               break __ring_match22;
             }
             if (__ring_m22._tag === "ModBlock") {
@@ -655,8 +655,8 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
                     break __ring_match27;
                   }
                   if (__ring_m27._tag === "Trait") {
-                    const tname2 = __ring_m27.name; const tmethods2 = __ring_m27.methods;
-                    _Map_insert(ctx.trait_decls, tname2, new codegen_ctx$HTraitDeclInfo(tname2, tmethods2));
+                    const tname2 = __ring_m27.name; const tmethods2 = __ring_m27.methods; const tst2 = __ring_m27.supertraits;
+                    _Map_insert(ctx.trait_decls, tname2, new codegen_ctx$HTraitDeclInfo(tname2, tmethods2, tst2));
                     break __ring_match27;
                   }
                   break __ring_match27;

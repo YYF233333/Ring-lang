@@ -1021,7 +1021,7 @@ function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __r
     }
     List_push(hmethods, new hir$HTraitMethod(m.name, hparams, fn_ret, m.has_default, method_body));
   }
-  return hir$HDecl_Trait(name, type_params, hmethods, is_pub, span);
+  return hir$HDecl_Trait(name, type_params, hmethods, trait_def.supertraits, is_pub, span);
 }
 
 function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
