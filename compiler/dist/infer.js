@@ -2498,12 +2498,13 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
   if (__ring_m._tag === "none") { return panic("unreachable"); }
   __match_fail(__ring_m);
 })();
+  const canonical_effect_name = effect_def.name;
   const op_opt = ((__a) => { const __i = __a.findIndex((function(o) { return (o.name === op_name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(effect_def.ops);
   __ring_match126: {
     const __ring_m126 = op_opt;
     if (__ring_m126._tag === "none") {
-      const _ = infer_ctx$type_error(ctx.sink, codes$E0402, `Effect ${effect_name} has no operation ${op_name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`no operation '${op_name}' on effect '${effect_name}'`)));
-      return new infer_ctx$InferResult(hir$HExpr_EffectOp(effect_name, op_name, [], types$Type_ErrorType, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
+      const _ = infer_ctx$type_error(ctx.sink, codes$E0402, `Effect ${canonical_effect_name} has no operation ${op_name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`no operation '${op_name}' on effect '${canonical_effect_name}'`)));
+      return new infer_ctx$InferResult(hir$HExpr_EffectOp(canonical_effect_name, op_name, [], types$Type_ErrorType, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
       break __ring_match126;
     }
     break __ring_match126;
@@ -2556,7 +2557,7 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
     }
     i = (i + 1);
   }
-  let eff = types$Effect_CustomEffect(effect_name, inst_type_args);
+  let eff = types$Effect_CustomEffect(canonical_effect_name, inst_type_args);
   __ring_match128: {
     const __ring_m128 = effect_def.built_in_kind;
     if (__ring_m128._tag === "some") {
@@ -2593,7 +2594,7 @@ function infer_effect_op(ctx, effect_name, op_name, args, span, subst, __ring_ev
   const me = infer_ctx$merge_effects(ctx.env, effects, types$effect_row([eff]), s, __ring_ev_fail);
   effects = me[0];
   s = me[1];
-  return new infer_ctx$InferResult(hir$HExpr_EffectOp(effect_name, op_name, hargs, inst_ret, effects, span), s, effects);
+  return new infer_ctx$InferResult(hir$HExpr_EffectOp(canonical_effect_name, op_name, hargs, inst_ret, effects, span), s, effects);
 }
 
 function infer_field_access(ctx, receiver, field, span, subst, __ring_ev_fail) {

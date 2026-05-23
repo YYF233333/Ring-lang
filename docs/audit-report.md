@@ -64,30 +64,6 @@
 
 ## 模块系统交互 Bug（2026-05-23 审计发现）
 
-### #81 Struct literal 在 mod 内使用原始查找 key 而非 canonical name [critical] [doing]
-
-`infer_struct_lit`（infer.ring:2102-2103）构建 `StructType` 时使用 `name: name`（查找 key，如 `"Vec2"`）而非 `name: struct_def.name`（canonical name，如 `"geo::Vec2"`）。在 mod 块内创建 struct literal 时：
-1. 返回类型注解通过 `resolve_named_type` 解析为 `geo::Vec2`，但 struct literal 的类型是 `Vec2` → unification 报 "cannot unify Vec2 with geo::Vec2"
-2. UFCS 方法查找失败：`impl_methods` 以 canonical name 为 key，但 `type_to_builtin_name` 返回短名
-
-**复现**：`mod geo { pub struct Vec2 { pub x: Int, pub y: Int } impl Vec2 { pub fn magnitude(self) -> Int { self.x + self.y } } pub fn create() -> Vec2 { let v = Vec2 { x: 3, y: 4 }; v } }` → `error[E0301]: Type mismatch: cannot unify Vec2 with geo::Vec2`
-
-**文件**：`compiler/infer.ring:2102-2103`（同时影响 line 2064、2108）
-**修复方向**：将 `name: name` 改为 `name: struct_def.name`。审计所有使用原始查找 key 而非 `struct_def.name` 的位置。
-
-发现者：Opus
-
-### #82 `evidence_param_name`/`default_evidence_name` 不转义 `::` [critical] [doing]
-
-`evidence_param_name` 和 `default_evidence_name`（hir.ring:210-215）直接嵌入 effect name 而不转义 `::` 为 `$`。对比 `trait_dict_name`（hir.ring:204-208）已正确转义。mod 内定义的 effect（如 `fx::Greeter`）生成的 JS 包含非法标识符：`const __ring_default_ev_fx::Greeter = { ... }`，运行时报 `SyntaxError`。
-
-**复现**：`mod fx { pub effect Greeter { fn greet(name: Str) -> Str { "Hello, ${name}" } } }` → 生成 `const __ring_default_ev_fx::Greeter = ...`（非法 JS）
-
-**文件**：`compiler/hir.ring:210-215`
-**修复方向**：与 `trait_dict_name` 一致，添加 `::` → `$` 转义。同时审查 `codegen_ctx.ring` 中 `extract_effect_names` 是否也有此问题。
-
-发现者：Opus
-
 ### #83 Supertrait 查找在 mod 内使用未限定名 [critical] [open]
 
 `register_trait`（infer_register.ring:524-528）用 `ctx.env.trait_reg.traits.contains_key(st.trait_name)` 检查 supertrait 存在性。`prefix_decl_name` 仅前缀 trait 自身 name，不修改 supertraits 列表中的引用名。在 mod 内 `trait Printable: HasArea` 经 prefix 后变为 `{ name: "shapes::Printable", supertraits: [{ trait_name: "HasArea" }] }`，但 `HasArea` 被注册为 `shapes::HasArea`。`insert_mod_aliases` 在 pass 1b **之后**才运行（line 171），因此查找时短名 alias 尚不存在。

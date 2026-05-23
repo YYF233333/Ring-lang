@@ -208,15 +208,18 @@ pub fn trait_dict_name(type_name: Str, trait_name: Str) -> Str {
 }
 
 pub fn evidence_param_name(effect_name: Str) -> Str {
-    "__ring_ev_${effect_name}"
+    let safe = if effect_name.contains("::") { effect_name.replace("::", "$") } else { effect_name }
+    "__ring_ev_${safe}"
 }
 
 pub fn default_evidence_name(effect_name: Str) -> Str {
-    "__ring_default_ev_${effect_name}"
+    let safe = if effect_name.contains("::") { effect_name.replace("::", "$") } else { effect_name }
+    "__ring_default_ev_${safe}"
 }
 
 pub fn trait_bound_param_name(type_param: Str, trait_name: Str) -> Str {
-    "__ring_${type_param}_${trait_name}"
+    let safe_trait = if trait_name.contains("::") { trait_name.replace("::", "$") } else { trait_name }
+    "__ring_${type_param}_${safe_trait}"
 }
 
 pub fn default_method_self_name(type_name: Str) -> Str {

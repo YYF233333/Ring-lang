@@ -505,15 +505,18 @@ function trait_dict_name(type_name, trait_name) {
 }
 
 function evidence_param_name(effect_name) {
-  return `__ring_ev_${effect_name}`;
+  const safe = (Str_contains(effect_name, "::") ? Str_replace(effect_name, "::", "$") : effect_name);
+  return `__ring_ev_${safe}`;
 }
 
 function default_evidence_name(effect_name) {
-  return `__ring_default_ev_${effect_name}`;
+  const safe = (Str_contains(effect_name, "::") ? Str_replace(effect_name, "::", "$") : effect_name);
+  return `__ring_default_ev_${safe}`;
 }
 
 function trait_bound_param_name(type_param, trait_name) {
-  return `__ring_${type_param}_${trait_name}`;
+  const safe_trait = (Str_contains(trait_name, "::") ? Str_replace(trait_name, "::", "$") : trait_name);
+  return `__ring_${type_param}_${safe_trait}`;
 }
 
 function default_method_self_name(type_name) {

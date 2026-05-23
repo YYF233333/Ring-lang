@@ -1745,14 +1745,17 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         _ => {}
     }
     let effect_def = match effect_def_opt { some(ed) => ed, none => panic("unreachable") }
+    // Use canonical name from EffectDef so mod-internal unqualified references
+    // (e.g. "Greeter") resolve to the declaration name (e.g. "fx::Greeter")
+    let canonical_effect_name = effect_def.name
     let op_opt = effect_def.ops.find(fn(o) { o.name == op_name })
     match op_opt {
         none => {
             let _ = type_error(ctx.sink, E0402,
-                "Effect ${effect_name} has no operation ${op_name}",
-                span, DiagnosticContext::OtherContext { detail: some("no operation '${op_name}' on effect '${effect_name}'") })
+                "Effect ${canonical_effect_name} has no operation ${op_name}",
+                span, DiagnosticContext::OtherContext { detail: some("no operation '${op_name}' on effect '${canonical_effect_name}'") })
             return InferResult {
-                hexpr: HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: [], ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
+                hexpr: HExpr::EffectOp { effect_name: canonical_effect_name, op_name: op_name, args: [], ty: Type::ErrorType, effects: EMPTY_ROW, span: span },
                 subst: subst, effects: EMPTY_ROW
             }
         },
@@ -1803,7 +1806,7 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
         i = i + 1
     }
 
-    let mut eff: Effect = Effect::CustomEffect { name: effect_name, type_args: inst_type_args }
+    let mut eff: Effect = Effect::CustomEffect { name: canonical_effect_name, type_args: inst_type_args }
     match effect_def.built_in_kind {
         some(bik) => match bik {
             BuiltInKind::BkIo => { eff = Effect::IoEffect },
@@ -1821,7 +1824,7 @@ fn infer_effect_op(mut ctx: InferCtx, effect_name: Str, op_name: Str, args: List
     s = me.1
 
     InferResult {
-        hexpr: HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: hargs, ty: inst_ret, effects: effects, span: span },
+        hexpr: HExpr::EffectOp { effect_name: canonical_effect_name, op_name: op_name, args: hargs, ty: inst_ret, effects: effects, span: span },
         subst: s, effects: effects
     }
 }
