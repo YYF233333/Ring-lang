@@ -290,7 +290,7 @@ fn test_fetch() {
 
 ## OOP 模拟
 
-### B-010 `delegate` 关键字 [feature] [P2] [M] [queued]
+### B-010 `delegate` 关键字 [feature] [P2] [M] [doing]
 design.md 5.3。替代继承的复用机制，将 trait 实现委托给内部字段。编译器自动生成转发方法。
 
 ```ring
@@ -535,6 +535,78 @@ source-map 支持 + 断点调试。
 - **前置依赖**：LSP
 - **复杂度**：大
 - **优先级**：Phase D/E
+
+### B-047 Auto-Boxing（`mut` 参数 + 闭包捕获 `let mut`）[feature] [P1] [M] [queued]
+design.md 1.4。编译器为 `mut` 参数和闭包捕获的 `let mut` 变量自动生成 `{ value }` 包装，使 mutation 跨调用/闭包边界可观测。无 boxing 时，`mut` 参数对原值类型（Int/Bool/Str）运行时不工作。
+
+**前置依赖**：B-037（`mut<T>` marker effect 追踪）
+
+**待决项（本 item 实现时一并决策）**：
+- FieldAccess chain 递归追溯：`self.field.push()` 是否追溯根变量注入 effect？B-037 实现时未递归（自举风险：编译器 `mut ctx` 的 field chain 会导致几乎所有函数获得 `mut<...>` effect）。Auto-boxing 改变了 codegen 层面的 mutation 语义，需在本 item 实现时重新评估递归策略。
+
+**场景 1：`mut` 参数传递**
+```ring
+fn increment(mut counter: Int) {
+    counter = counter + 1
+}
+let mut n = 0
+increment(n)   // 调用方 box: increment({value: n}); 调用后 n = {value}.value
+print(n)       // 1
+```
+
+**场景 2：闭包捕获 `let mut`**
+```ring
+let mut counter = 0
+let inc = fn() { counter = counter + 1 }
+inc(); inc(); inc()
+print(counter)  // 3
+// 编译器自动 box: let counter = {value: 0}
+// 闭包和外层共享同一个 box
+```
+
+**不 box 的场景**：
+- `let mut x` 纯局部使用（无闭包捕获）→ 普通 JS `let`
+- struct/List/Map 等引用类型的 `mut self` 方法调用 → JS 天然按引用传递，不需要 box
+
+**涉及修改**：
+1. `infer.ring`：检测 `let mut` 变量是否被闭包捕获，标记需要 boxing（新增 `boxed_vars: Set<Int>` 或类似机制）
+2. `infer.ring`：闭包捕获 `let mut` 时，`mut<T>` effect 出现在**闭包签名**（补充 B-037 未覆盖的 effect 追踪场景）
+3. `codegen_stmt.ring`：`let mut` 变量如需 box → 生成 `let x = {value: init}`；赋值 → `x.value = rhs`；读取 → `x.value`
+4. `codegen_expr.ring`：`mut` 参数调用点 → 调用方传 `{value: arg}`，返回后回写 `arg = {value}.value`
+5. `codegen_decl.ring`：`mut` 参数的函数体内，参数访问 → `param.value`，赋值 → `param.value = rhs`
+
+**验收标准**：
+- `fn increment(mut n: Int) { n = n + 1 }` + `let mut x = 0; increment(x); assert(x == 1)` → 通过
+- 闭包捕获 `let mut counter` + 多次调用 → counter 正确累加
+- `let mut x = 0; x = 1; assert(x == 1)` → 纯局部，无 box，仍正常工作
+- `mut self` 方法调用 List/Map 等引用类型 → 不 box，行为不变
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-048 Local Effect Cancellation [feature] [P2] [S] [queued]
+局部变量引起的 `mut<T>` effect 应在调用点消除，避免假阳性传播。
+
+**问题**：
+```ring
+fn bar() {
+    let mut local = []
+    push_item(local)  // push_item 有 mut<List<Int>> effect → 传播到 bar
+}
+```
+`local` 是局部变量，对它的 mutation 不是 `bar` 的可观测副作用，但 `push_item` 的 `mut<List<Int>>` effect 仍然传播到 `bar` 的签名。
+
+**前置依赖**：B-037（`mut<T>` marker effect）+ B-047（auto-boxing）
+
+**涉及修改**：
+1. `infer.ring`：函数调用推断完成后，检查 `mut<T>` effect 的实际 receiver——如果对应的实参是局部变量（不在 `mut_param_defs` 中），从函数的 effect row 中移除该 `mut<T>`
+2. 需要在 effect unification 之后、函数签名 generalize 之前执行消除
+
+**验收标准**：
+- `fn bar() { let mut local = []; local.push(1) }` → bar 无 `mut` effect
+- `fn bar(mut list: List<Int>) { list.push(1) }` → bar 有 `mut<List<Int>>` effect（参数 mutation，不消除）
+- 间接调用：`fn bar() { let mut local = []; push_item(local) }` → bar 无 `mut` effect
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ## 设计验证（Stabilize 前置）
 

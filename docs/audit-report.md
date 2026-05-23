@@ -9,13 +9,13 @@
 
 ## Checker
 
-### #42 Impl 方法 effect 不回传 [medium] [open] [blocked: B-005]
+### #42 Impl 方法 effect 不回传 [high] [open] [P1]
 
 Impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获。
 
 Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境。
 
-**决策（2026-05-23）**：推迟到 B-005 supertrait 重构时统一处理——supertrait 会大改 trait/impl 注册流程，届时一并修复 effect 回传。workaround 暂留。关联 #66、#67 随此推迟。
+**决策更新（2026-05-23）**：B-005 supertrait 已完成，阻塞解除。提升为 P1——delegate（B-010）完成后、关联类型（B-004）开始前修复。不修会导致 delegate 转发方法 effect 签名错误、Iterator `mut self` effect 传播失败、auto-boxing（B-047）依赖链断裂。关联 #66、#67 随此解除阻塞。
 
 
 ### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open] [deferred: LLVM]
@@ -39,11 +39,11 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 ## Effect 标注
 
 
-### #66 `register_impl_method` declared_effects 已使用但 Pass 2 仍不回传 [medium] [open] [blocked: B-005]
+### #66 `register_impl_method` declared_effects 已使用但 Pass 2 仍不回传 [medium] [open] [blocked: #42]
 
 ~~原报告称 declared_effects 参数完全不使用——已修复（infer_register.ring:573-577 现在 resolve 并应用 declared_effects）。~~ 但核心问题仍在：Pass 2 推断出的实际 effect 不回传到环境。关联 #42。
 
-**决策（2026-05-23）**：随 #42 推迟到 B-005 supertrait 重构时统一处理。
+**决策更新（2026-05-23）**：B-005 已完成，阻塞解除。随 #42 一并修复。
 
 发现者：Opus（2026-05-23 更新）
 
@@ -51,7 +51,7 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 纯函数 `with {}` 内调用 `print()` 不报 E0404——extern fn 无标注时注册为 EMPTY_ROW。
 
-**决策（2026-05-23）**：依赖 #42（impl effect 回传）修复后才能正确处理 extern fn effect 标注。随 #42 推迟。
+**决策更新（2026-05-23）**：B-005 已完成，#42 阻塞解除。#42 修复后此项可进行。
 
 
 
@@ -99,8 +99,8 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 | # | 设计功能 | Backlog 对应 | 状态 |
 |---|----------|--------------|------|
 | 36 | Refinement types (where 子句) | B-001 | 语法解析但语义忽略 |
-| 37 | `mut<S>` 参数化 effect | B-037 | Cell 已移除，MutEffect 基础设施为死代码 |
+| 37 | `mut<S>` 参数化 effect | B-037 | ✅ 已实现（调用点注入） |
 | 38 | Post-resume handler / Full AE | 已取消 (B-009) | 不实现 |
 | 39 | `dyn Trait` 动态分发 | B-006 | 未实现 |
-| 40 | Supertrait 继承 | B-005 | AST 字段存在但空 |
+| 40 | Supertrait 继承 | B-005 | ✅ 已实现 |
 | 41 | 关联类型 | B-004 | 未实现 |
