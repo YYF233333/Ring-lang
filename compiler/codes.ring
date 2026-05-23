@@ -37,6 +37,7 @@ pub const E0503: Str = "E0503"
 pub const E0405: Str = "E0405"
 pub const E0406: Str = "E0406"
 pub const E0407: Str = "E0407"
+pub const E0408: Str = "E0408"
 pub const E0504: Str = "E0504"
 pub const E0505: Str = "E0505"
 pub const E0506: Str = "E0506"
@@ -78,6 +79,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0405" { return "Capability violation" }
     if code == "E0406" { return "Cyclic effect alias" }
     if code == "E0407" { return "Unknown effect" }
+    if code == "E0408" { return "Open effect row in capability-restricted module" }
     if code == "E0501" { return "Unknown trait" }
     if code == "E0502" { return "Missing trait method implementation" }
     if code == "E0503" { return "Unsatisfied trait bound" }

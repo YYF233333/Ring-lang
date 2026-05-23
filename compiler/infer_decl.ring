@@ -8,7 +8,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0501, E0507, E0705}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0408, E0501, E0507, E0705}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error,
     unify_at, update_fn_effects,
@@ -170,6 +170,18 @@ fn check_effects_capability(mut ctx: InferCtx, name: Str, effects: EffectRow, ca
                 span,
                 DiagnosticContext::OtherContext { detail: some("capability violation") })
         }
+    }
+    // An open effect row (tail is a type variable) means the function has
+    // polymorphic effects that cannot be statically verified against the
+    // module's capability set. Reject conservatively.
+    match effects.tail {
+        some(_) => {
+            let _ = type_error(ctx.sink, E0408,
+                "'${name}' has polymorphic effects (open effect row) which cannot be verified against mod requires constraints",
+                span,
+                DiagnosticContext::OtherContext { detail: some("capability violation: open effect row") })
+        },
+        none => {}
     }
 }
 
