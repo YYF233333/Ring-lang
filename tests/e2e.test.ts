@@ -514,6 +514,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "audit_try_reserved.ring", error_pattern: "E0101" },
     { file: "exhaustive_nonfinite_msg.ring", error_pattern: "non-finite type" },
     { file: "effect_alias_cycle.ring", error_pattern: "E0406" },
+    { file: "unknown_effect.ring", error_pattern: "E0407" },
     { file: "error_supertrait_missing_impl.ring", error_pattern: "E0505" },
     { file: "error_supertrait_cycle.ring", error_pattern: "E0501" },
   ];

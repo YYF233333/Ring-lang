@@ -5,7 +5,7 @@ use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, mono, apply_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0207, E0406, E0501, E0502, E0505, E0506}
+use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
 
 // ============================================================
@@ -794,6 +794,15 @@ pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
         return Effect::FailEffect { error_type: err_type }
     }
     // Custom effects
+    // Check custom effect exists
+    match ctx.env.types.effects.get(eff.name) {
+        some(_) => {},
+        none => {
+            let _ = type_error(ctx.sink, E0407,
+                "Unknown effect '${eff.name}'", eff.span,
+                DiagnosticContext::OtherContext { detail: some("unknown effect") })
+        }
+    }
     let mut resolved_args: List<Type> = []
     for ta in eff.type_args {
         resolved_args.push(resolve_type_expr(ctx, ta))
