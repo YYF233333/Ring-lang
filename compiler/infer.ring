@@ -26,7 +26,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, merge_effects, unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_named_type,
     bind_pattern, build_scheme_var_map, resolve_dicts_from_scheme,
-    remove_fail_effect, remove_specific_fail_effect,
+    remove_fail_effect,
     generalize, resolve_relative_qualifier}
 use exhaustive::{check_exhaustive}
 
