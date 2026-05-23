@@ -114,7 +114,9 @@ Agent 完成后：
 2. Review diff（`git diff HEAD~1 -- ":(exclude)compiler/dist/*"`）
 3. 标记：✅ 通过 / ❌ 失败
 
-#### 3f. 顺序 Merge
+#### 3f. 顺序 Merge + Amend（无 broken state）
+
+**原则**：merge commit 必须包含完整可工作的状态——dist/ 已重编译、tracking 已更新。不允许 broken intermediate state 作为独立 commit 存在。
 
 按冲突由少到多 merge：
 ```bash
@@ -126,32 +128,32 @@ dist/ 冲突：`git checkout --ours compiler/dist/` → rebuild 覆盖
 源码冲突（可解决）：手动 Edit 解决
 源码冲突（语义冲突）：停下来问用户
 
-#### 3g. Rebuild + 测试
+**Merge 后立即执行（全部 amend 进 merge commit）**：
 
 ```bash
+# 1. Rebuild dist
 node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
+git add compiler/dist/
+
+# 2. 更新 tracking（删除已完成 item）
+# Edit audit-report.md / backlog.md 删除对应条目
+
+# 3. 更新 CLAUDE.md（如功能变更影响了描述）
+
+# 4. Amend 全部进 merge commit
+git add docs/audit-report.md docs/backlog.md CLAUDE.md
+git commit --amend --no-edit
+```
+
+**测试**：
+```bash
 cd compiler && npm test
 ```
 
-测试全绿 → 提交 dist rebuild → 继续
+测试全绿 → 继续下一个 merge 或下一个 wave
+测试失败 → 二分定位，报告用户
 
-#### 3h. 状态更新：`doing` → 删除
-
-从 backlog/audit-report 中**删除已完成的 item**（不是标 done，是直接删除）。commit message 记录：
-
-```
-chore: complete B-xxx, B-yyy; remove from backlog
-
-Completed items:
-- B-xxx: <title>
-- B-yyy: <title>
-```
-
-#### 3i. 更新 CLAUDE.md
-
-如果功能变更影响了 CLAUDE.md 中的描述（已实现功能、已知限制等），更新并 commit。
-
-#### 3j. 清理 Worktree
+#### 3g. 清理 Worktree
 
 ```bash
 git worktree list    # 检查残留

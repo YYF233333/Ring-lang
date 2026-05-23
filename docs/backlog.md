@@ -22,10 +22,16 @@
 - B-010 `delegate` 关键字 [M]
 - B-033 GADTs [L]
 
+**设计验证（Stabilize 前置，阻塞层 3）**：
+- B-042 Perceus 循环引用策略 [M]（阻塞 B-012）
+- B-043 Refinement × Linear × Effects 交互矩阵 [M]（阻塞 B-001、B-002）
+- B-044 Ring 语义规范 [M]（阻塞 B-011）
+
 **约束**：
 - 依赖链：B-005 → B-004 → B-036（supertrait → 关联类型 → Iterator 完整双 trait 方案）
 - B-010、B-033 无依赖，可与链中任意步骤并行
-- 层 3（Refinement/Linear/async/LLVM）Phase C 完成后再讨论
+- 层 3 前置：B-042/B-043/B-044 必须在对应 XL 特性开工前完成
+- 层 3（Refinement/Linear/async/LLVM）Phase C 层 1+2 + 设计验证完成后启动
 
 ---
 
@@ -600,6 +606,83 @@ source-map 支持 + 断点调试。
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
+## 设计验证（Stabilize 前置）
+
+> 非实现任务，而是设计探针。在对应 XL 特性实现前完成，防止特性交互导致事后 breaking change。
+
+### B-042 Perceus RC + 循环引用策略 [design] [P1] [M] [queued]
+Perceus RC 不处理循环引用。Ring 有 OOP 手感（struct + impl + delegate），用户会写循环引用模式（观察者、树 + parent 指针、双向链表、图结构）。需要在 B-012 实现前确定逃逸方案。
+
+**需要决策的选项**：
+1. Weak reference 语法（`weak T`）— 显式标注，用户负责打断循环
+2. Cycle collector 备选层 — RC 为主 + 可选 tracing GC 回收循环（Python/Swift 方案）
+3. 类型系统禁止循环 — linear types 保证无循环（限制性强，可能影响 OOP 模式）
+4. 混合方案 — 默认禁止 + `@cyclic` 标注允许（编译器自动插入 weak/cycle-collect）
+
+**验证方式**：
+- 列出 5-10 个典型 OOP 模式（观察者、树+parent、双向链表、图邻接、事件系统）
+- 对每个模式验证选定方案是否可写、是否自然
+- 确认方案不与 linear types / effect system 冲突
+
+**验收标准**：
+- 决策文档写入 design.md（含选定方案 + 否决理由）
+- B-012 Perceus 的 spec 更新为包含循环处理
+
+**前置依赖**：无
+**阻塞**：B-012 Perceus RC
+
+### B-043 Refinement × Linear × Effects 交互矩阵 [design] [P1] [M] [queued]
+三个类型系统特性单独设计优雅，但组合后存在未探索的语义交互。需要在三者实现前确认无根本矛盾。
+
+**需要验证的交互场景**：
+
+| 交互 | 场景 | 问题 |
+|------|------|------|
+| Refinement × Linear | `x: Int where x > 0` 是 linear 的，消耗后谓词状态如何？ | 谓词是否附着于值的生命周期？ |
+| Refinement × Effect | `fail.raise` 中断时，已验证的 refinement 值是否需要清理？ | handler 边界的 refinement 保持/失效规则 |
+| Linear × Effect | linear 值在 effect handler 中被 abort，资源释放路径？ | `catch` 是否隐含 linear 值的 drop？ |
+| Refinement × Linear × Effect | 带 refinement 的 linear 值跨 handler 传递 | 三系统同时作用时的类型检查算法 |
+| Linear × async | linear 值在 `spawn` 的子任务中使用 | 跨任务的 ownership 转移规则 |
+| Refinement × async | refinement 约束跨 `await` 点是否保持？ | 异步恢复后约束是否需要重新验证 |
+
+**验证方式**：
+- 为每个交互场景写伪代码示例
+- 确定语义规则（保持 / 失效 / 报错）
+- 验证规则之间无矛盾
+
+**验收标准**：
+- 交互矩阵文档写入 design.md
+- B-001 / B-002 的 spec 更新为包含交互规则
+- 无"待定"项——每个交互必须有明确决策
+
+**前置依赖**：无
+**阻塞**：B-001 Refinement Types、B-002 Linear Types
+
+### B-044 Ring 语义规范（后端无关）[design] [P1] [M] [queued]
+JS 后端和 LLVM 后端存在语义鸿沟（Int 溢出、字符串编码、数组越界行为）。需要在 LLVM 实现前钉死 Ring 语言自身的语义规范，两个后端都必须符合。
+
+**需要规范的语义**：
+
+| 维度 | 需要决定 | JS 现状 | LLVM 预期 |
+|------|---------|---------|-----------|
+| Int 溢出 | 回绕 / panic / 自动 BigInt？ | 静默变 Float（f64） | 二补数回绕（i64） |
+| Int 范围 | 固定 i64 / 平台依赖 / BigInt？ | 安全整数 ±2^53 | i64 ±2^63 |
+| Float 精度 | IEEE 754 double？ | 是 | 是 |
+| 字符串编码 | UTF-8 / UTF-16 / 抽象 Unicode？ | UTF-16（JS 内部） | UTF-8（通常选择） |
+| `str[i]` 语义 | 字节 / code unit / code point / grapheme？ | UTF-16 code unit | 取决于编码决策 |
+| `str.len()` | 字节 / code unit / code point / grapheme？ | UTF-16 code unit 数 | 取决于编码决策 |
+| 数组越界 | panic / 返回 Option / UB？ | 返回 undefined（已改为 panic） | panic |
+| 整数除零 | panic / Infinity / 编译错误？ | Infinity（JS） | panic 或 refinement 排除 |
+| 栈溢出 | panic / UB？ | RangeError | 取决于平台 |
+
+**验收标准**：
+- 语义规范文档写入 design.md 新章节
+- JS 后端的不符合项列出 + 计划（哪些需要修正，哪些可以容忍到 LLVM）
+- LLVM 后端 codegen 设计时直接引用本规范
+
+**前置依赖**：无
+**阻塞**：B-011 LLVM Backend
+
 ## 已知 Bug / 技术债
 
 ### B-022 表达式位置 IIFE return 截获 [bugfix] [P3] [M] [queued]
@@ -613,6 +696,21 @@ source-map 支持 + 断点调试。
 
 - **当前状态**：auto-derive 和 operator dispatch 正常，直接方法调用受限
 - **优先级**：低
+
+### B-045 DiagnosticSink 错误去重 [refactor] [P3] [S] [queued]
+多 pass 架构下同一错误可能在 Pass 1（注册）和 Pass 2（检查）各报一次（如 E0407 unknown effect）。应在 DiagnosticSink 层面加去重逻辑（按错误码 + span 去重）。
+
+- **发现来源**：#68 修复后观察到
+- **复杂度**：小（DiagnosticSink 加 seen set）
+- **优先级**：低（不影响正确性，仅影响用户体验）
+
+**涉及修改**：
+1. `diagnostics.ring`：`CollectingSink` 的 `emit` 方法在添加前检查 `(code, span)` 是否已存在
+
+**验收标准**：
+- 同一位置的同一错误码只报告一次
+- 不同位置的相同错误码仍分别报告
+- 全部 E2E 测试通过
 
 
 ## 架构：后端策略（2026-05-23 更新）

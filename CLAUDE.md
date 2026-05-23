@@ -104,7 +104,7 @@ Ring-lang/
 
 - 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
 - 编译器各阶段共享约定放 `hir.ring`（如 `variant_js_name`），不允许跨阶段硬编码字符串契约
-- **修改编译器后必须重新编译 dist/**：`node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist`，并提交更新后的 dist/ 文件
+- **修改编译器后必须重新编译 dist/**：`node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist`，并提交更新后的 dist/ 文件。**Worktree merge 后的 rebuild 必须 amend 进 merge commit**——不允许 broken intermediate state（dist/ 失配）作为独立 commit 存在。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。
 - Ring-lang 注释语法：`//`（非 `--`），与 Rust/JS 一致，LLM 更友好
 - 无 pipe 运算符：UFCS `.method()` 是唯一的链式调用方式（"一种事一种写法"）
 - 编译器必须编译速度快（亚秒级增量编译），因为 IDE 耦合
