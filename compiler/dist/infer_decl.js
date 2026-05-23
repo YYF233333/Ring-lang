@@ -1514,6 +1514,17 @@ function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
 function check(ctx, program, __ring_ev_fail) {
   infer_register$register_decls_two_phase(ctx, program.decls);
   const derived_impls = derive$run_derive_pass(ctx.env);
+  for (const decl of program.decls) {
+    __ring_match62: {
+      const __ring_m62 = decl;
+      if (__ring_m62._tag === "Impl") {
+        const target_type = __ring_m62.target_type; const type_params = __ring_m62.type_params; const trait_name = __ring_m62.trait_name; const methods = __ring_m62.methods; const span = __ring_m62.span;
+        const _ = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_impl_decl(ctx, target_type, type_params, trait_name, methods, span, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
+        break __ring_match62;
+      }
+      break __ring_match62;
+    }
+  }
   let hdecls = [];
   for (const decl of program.decls) {
     const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_one_decl(ctx, decl, hdecls)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();

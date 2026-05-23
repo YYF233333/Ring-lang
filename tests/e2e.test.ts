@@ -428,6 +428,8 @@ const cases: TestCase[] = [
   { file: "let_mut_enforcement.ring", expected: "let_mut_enforcement: all tests passed\n" },
   { file: "impl_effect_propagation.ring", expected: "impl_effect_propagation: all tests passed\n" },
   { file: "impl_effect_chain.ring", expected: "impl_effect_chain: all tests passed\n" },
+  { file: "impl_effect_order.ring", expected: "impl_effect_order: all tests passed\n" },
+  { file: "impl_effect_intra.ring", expected: "impl_effect_intra: all tests passed\n" },
   { file: "catch_exhaustive.ring", expected: "catch exhaustive tests passed\n" },
   { file: "multiline_string.ring", expected: "multiline_string: all tests passed\n" },
   { file: "raw_string.ring", expected: "raw_string: all tests passed\n" },

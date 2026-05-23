@@ -173,7 +173,7 @@ Ring-lang/
 - 模块系统不支持：first-class modules、`mod : SigName` 一致性检查、跨文件相对路径
 - Checker 多错误恢复：declaration 级（同一函数内仍停于首错）
 - Parser 声明级错误恢复：遇到语法错误时跳到下一个声明关键字继续，一次 parse 报告多个语法错误
-- **Impl 方法 effect 不传播**：impl 方法的 `fail` effect 在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断后不回传。Workaround：parser 用 `__ring_raise_fail` extern fn 直接抛 `__EffectAbort`，codegen 的 `gen_try_catch` 已去除 `has_fail_effect` 前置检查
+- **~~Impl 方法 effect 不传播~~**：已修复。`check()` 增加 effect pre-pass，在主 pass 前先检查所有 impl 块填充 `impl_methods` 中的 effect。Parser 的 `__ring_raise_fail` workaround 仍保留（跨模块 effect 传播的独立问题）
 - E2E 测试通过 `cd compiler && npm test` 运行
 
 ## Phase C 路线图（当前）

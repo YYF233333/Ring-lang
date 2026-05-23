@@ -1083,6 +1083,19 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     register_decls_two_phase(ctx, program.decls)
     let derived_impls = run_derive_pass(ctx.env)
 
+    // Effect pre-pass: check impl blocks to populate impl_methods with inferred effects.
+    // Without this, callers defined before impl blocks see EMPTY_ROW effects from Pass 1.
+    // The main pass re-checks with correct effects visible.
+    // DiagnosticSink deduplication (by code+span) prevents double error reporting.
+    for decl in program.decls {
+        match decl {
+            Decl::Impl { target_type, type_params, trait_name, methods, span } => {
+                let _ = some(check_impl_decl(ctx, target_type, type_params, trait_name, methods, span)) catch { _ => none }
+            },
+            _ => {}
+        }
+    }
+
     let mut hdecls: List<HDecl> = []
     for decl in program.decls {
         let result = some(check_one_decl(ctx, decl, hdecls)) catch { _ => none }

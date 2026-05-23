@@ -9,15 +9,6 @@
 
 ## Checker
 
-### #42 Impl 方法 effect 不回传 [high] [open] [P1]
-
-Impl 方法在 Pass 1 注册为 `EMPTY_ROW`，Pass 2 推断出实际 effect 后不更新环境。导致 `fail.raise()` 在 impl 方法中无法通过 `catch` 正确捕获。
-
-Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；codegen `gen_try_catch` 已去除 `has_fail_effect` 前置检查。正式修复需在 impl 方法检查后回传 effect 到环境。
-
-**决策更新（2026-05-23）**：B-005 supertrait 已完成，阻塞解除。提升为 P1——delegate（B-010）完成后、关联类型（B-004）开始前修复。不修会导致 delegate 转发方法 effect 签名错误、Iterator `mut self` effect 传播失败、auto-boxing（B-047）依赖链断裂。关联 #66、#67 随此解除阻塞。
-
-
 ### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open] [deferred: LLVM]
 
 设计约束：fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16）。
@@ -39,19 +30,11 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 ## Effect 标注
 
 
-### #66 `register_impl_method` declared_effects 已使用但 Pass 2 仍不回传 [medium] [open] [blocked: #42]
-
-~~原报告称 declared_effects 参数完全不使用——已修复（infer_register.ring:573-577 现在 resolve 并应用 declared_effects）。~~ 但核心问题仍在：Pass 2 推断出的实际 effect 不回传到环境。关联 #42。
-
-**决策更新（2026-05-23）**：B-005 已完成，阻塞解除。随 #42 一并修复。
-
-发现者：Opus（2026-05-23 更新）
-
-### #67 `std/io.ring` 的 `print`/`assert`/`exit` 缺少 `with {io}` 标注 [medium] [open] [blocked: #42]
+### #67 `std/io.ring` 的 `print`/`assert`/`exit` 缺少 `with {io}` 标注 [medium] [open]
 
 纯函数 `with {}` 内调用 `print()` 不报 E0404——extern fn 无标注时注册为 EMPTY_ROW。
 
-**决策更新（2026-05-23）**：B-005 已完成，#42 阻塞解除。#42 修复后此项可进行。
+**决策更新（2026-05-23）**：#42 已修复，阻塞解除。
 
 
 
