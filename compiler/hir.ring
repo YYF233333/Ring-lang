@@ -202,7 +202,9 @@ pub fn variant_js_name(enum_name: Str, variant_name: Str) -> Str {
 }
 
 pub fn trait_dict_name(type_name: Str, trait_name: Str) -> Str {
-    "__${type_name}_${trait_name}"
+    let safe_type = if type_name.contains("::") { type_name.replace("::", "$") } else { type_name }
+    let safe_trait = if trait_name.contains("::") { trait_name.replace("::", "$") } else { trait_name }
+    "__${safe_type}_${safe_trait}"
 }
 
 pub fn evidence_param_name(effect_name: Str) -> Str {

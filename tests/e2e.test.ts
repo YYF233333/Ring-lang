@@ -438,6 +438,7 @@ const cases: TestCase[] = [
   { file: "mod_nested_block.ring", expected: "mod_nested_block: all tests passed\n" },
   { file: "mod_nested_impl.ring", expected: "mod_nested_impl: all tests passed\n" },
   { file: "derive_tuple_fields.ring", expected: "pass: derive tuple\n" },
+  { file: "derive_mod_qualified.ring", expected: "ok\n" },
   { file: "safe_ident_globals.ring", expected: "pass: safe_ident globals\n" },
   { file: "match_tuple_option.ring", expected: "pass: match tuple bare variant\n" },
   { file: "result_prelude.ring", expected: "pass: result prelude\n" },

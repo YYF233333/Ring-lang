@@ -499,7 +499,9 @@ function variant_js_name(enum_name, variant_name) {
 }
 
 function trait_dict_name(type_name, trait_name) {
-  return `__${type_name}_${trait_name}`;
+  const safe_type = (Str_contains(type_name, "::") ? Str_replace(type_name, "::", "$") : type_name);
+  const safe_trait = (Str_contains(trait_name, "::") ? Str_replace(trait_name, "::", "$") : trait_name);
+  return `__${safe_type}_${safe_trait}`;
 }
 
 function evidence_param_name(effect_name) {
