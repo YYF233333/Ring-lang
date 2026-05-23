@@ -74,25 +74,6 @@
 
 发现者：Opus
 
-### #69 Supertrait default method body 引用未定义的 dict 变量 [critical] [open]
-
-当 trait 有 supertrait（`trait Greeter: Named`）且 default method 调用 supertrait 方法时，生成的 JS 函数 `__Greeter_greet(__ring_self_Greeter, self)` 中 body 引用 `__ring_self_Named.name(self)`——但 `__ring_self_Named` 不在函数参数列表中。运行时触发 `ReferenceError: __ring_self_Named is not defined`。
-
-**文件**：`compiler/codegen_decl.ring:252-277`（emit_trait_decl）
-**测试复现**：`tests/cases/audit_supertrait_default.ring` → build + run → ReferenceError at line 360
-**修复方向**：default method 函数签名需要包含所有 supertrait 的 dict 参数。codegen emit_trait_decl 中遍历 trait 的 supertrait 链，为每个 supertrait 添加 `__ring_self_SuperTrait` 参数。trait dict 构建时传入对应的 supertrait dict。
-
-发现者：Opus
-
-### #70 Auto-derive 为 mod 限定字段类型生成无效 JS 标识符 [critical] [open]
-
-当 struct 有 mod 限定类型的字段（如 `shape: shapes::Circle`），auto-derive 生成的 `FieldAction::Call` 中 dict_name 未经 `safe_ident` 处理。derive.ring 生成 `trait_dict_name("shapes::Circle", "Eq")` = `"__shapes::Circle_Eq"`（含 `::`），而 codegen_derive.ring 声明时用 `qualify()` 生成 `__shapes$Circle_Eq`（用 `$`）。引用名与声明名不匹配，且 `::` 在 JS 中是语法错误。
-
-**文件**：`compiler/derive.ring:263-295`（resolve_field_action）中 `trait_dict_name(name, trait_name)` 的 `name` 未经 safe_ident
-**测试复现**：`tests/cases/audit_derive_in_mod_nested.ring` → build + run → `SyntaxError: Unexpected token ':'`
-**修复方向**：在 derive.ring 的 `resolve_field_action` 和 `resolve_type_arg_dict` 中，对 type name 调用 safe_ident（`name.replace("::", "$")`）后再传入 `trait_dict_name`。
-
-发现者：Opus
 
 ### #71 Delegate 在 mod 块内：check 阶段跳过展开 [critical] [open]
 
@@ -103,15 +84,6 @@
 
 发现者：DS
 
-### #72 `handle...with` 部分 handle 时丢失 default op 的 evidence [critical] [open]
-
-当 effect 有多个 op 且部分有 default body 时，`handle { ... } with { Effect.op1(...) => ... }` 只为显式 handle 的 op 生成 evidence 对象。handle body 内调用未显式 handle 但有 default 的 op 时，evidence 对象中找不到该 op，触发 `TypeError: __ring_ev_Effect.op2 is not a function`。类型检查器按 effect kind 整体消除 effect row（正确），但 codegen 只生成 per-op evidence（不完整）。
-
-**文件**：`compiler/codegen_expr.ring:966-1056`（gen_handle 只遍历 handlers 列表构建 evidence）
-**测试复现**：`tests/cases/audit_partial_handle_default.ring` → build + run → TypeError at `__ring_ev_Counter.get_count()`
-**修复方向**：gen_handle 构建 evidence 对象时，查找 `ctx.env.types.effects` 中对应 effect 的所有 op，为未被显式 handle 的 op 合并 default body 到 evidence 对象。
-
-发现者：DS
 
 ## 类型系统健壮性（2026-05-23 审计发现）
 

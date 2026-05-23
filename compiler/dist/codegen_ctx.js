@@ -168,7 +168,7 @@ function safe_ident(name) {
 }
 
 class CodegenCtx {
-  constructor(lines, indent_level, impl_methods, struct_field_order, trait_decls, match_counter, dt_counter, loop_counter, module_prefix, imports_map, skip_preamble, skip_main_call, local_names, local_fn_effects, current_fn_effects, in_try_fail, module_imports, module_exports, default_evidence_effects) {
+  constructor(lines, indent_level, impl_methods, struct_field_order, trait_decls, match_counter, dt_counter, loop_counter, module_prefix, imports_map, skip_preamble, skip_main_call, local_names, local_fn_effects, current_fn_effects, in_try_fail, module_imports, module_exports, default_evidence_effects, effect_ops) {
     this.lines = lines;
     this.indent_level = indent_level;
     this.impl_methods = impl_methods;
@@ -188,6 +188,7 @@ class CodegenCtx {
     this.module_imports = module_imports;
     this.module_exports = module_exports;
     this.default_evidence_effects = default_evidence_effects;
+    this.effect_ops = effect_ops;
   }
 }
 
@@ -200,7 +201,7 @@ class HTraitDeclInfo {
 }
 
 function new_codegen_ctx(skip_preamble, skip_main_call) {
-  return new CodegenCtx([], 0, map_new(), map_new(), map_new(), 0, 0, 0, Option_none, Option_none, skip_preamble, skip_main_call, set_new(), map_new(), Option_none, false, Option_none, Option_none, set_new());
+  return new CodegenCtx([], 0, map_new(), map_new(), map_new(), 0, 0, 0, Option_none, Option_none, skip_preamble, skip_main_call, set_new(), map_new(), Option_none, false, Option_none, Option_none, set_new(), map_new());
 }
 
 function indent_str(level) {

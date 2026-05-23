@@ -982,7 +982,9 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
     for entry in by_effect.entries() {
         let (effect_name, hs) = entry
         let mut entries: List<Str> = [""]; entries.clear()
+        let mut handled_op_names: Set<Str> = set_new()
         for h in hs {
+            handled_op_names.insert(h.op_name)
             let mut params: List<Str> = [""]; params.clear()
             for p in h.params { params.push(safe_ident(p.name)) }
             let params_str = params.join(", ")
@@ -1016,6 +1018,33 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
                 ep.push(")")
                 entries.push(ep.join(""))
             }
+        }
+        // Merge default bodies for unhandled ops (#72)
+        match ctx.effect_ops.get(effect_name) {
+            some(all_ops) => {
+                for op in all_ops {
+                    if op.has_default && !handled_op_names.contains(op.name) {
+                        match op.default_body {
+                            some(dbody) => {
+                                let mut dparams: List<Str> = [""]; dparams.clear()
+                                for p in op.params { dparams.push(safe_ident(p.name)) }
+                                let dparams_str = dparams.join(", ")
+                                let db = gen_expr(ctx, dbody)
+                                let mut dep: List<Str> = [""]; dep.clear()
+                                dep.push(safe_ident(op.name))
+                                dep.push(": (")
+                                dep.push(dparams_str)
+                                dep.push(") => (")
+                                dep.push(db)
+                                dep.push(")")
+                                entries.push(dep.join(""))
+                            },
+                            none => {},
+                        }
+                    }
+                }
+            },
+            none => {},
         }
         let ev_name = evidence_param_name(effect_name)
         let entries_str = entries.join(", ")
