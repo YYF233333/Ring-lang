@@ -375,57 +375,65 @@ function register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names) 
           break __ring_match14;
         }
       }
+      insert_mod_aliases(ctx, mod_name, mod_decls, true);
       for (const d of mod_decls) {
         __ring_match15: {
           const __ring_m15 = d;
           if (__ring_m15._tag === "Trait") {
             const prefixed = prefix_decl_name(mod_name, d);
             register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names);
-            break __ring_match15;
-          }
-          if (__ring_m15._tag === "Effect") {
-            const prefixed = prefix_decl_name(mod_name, d);
-            register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names);
-            break __ring_match15;
-          }
-          if (__ring_m15._tag === "EffectAlias") {
-            const prefixed = prefix_decl_name(mod_name, d);
-            register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names);
-            break __ring_match15;
-          }
-          if (__ring_m15._tag === "ExternType") {
-            const prefixed = prefix_decl_name(mod_name, d);
-            register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names);
+            insert_mod_aliases(ctx, mod_name, mod_decls, true);
             break __ring_match15;
           }
           break __ring_match15;
         }
       }
-      insert_mod_aliases(ctx, mod_name, mod_decls, true);
       for (const d of mod_decls) {
         __ring_match16: {
           const __ring_m16 = d;
-          if (__ring_m16._tag === "Struct") {
-            break __ring_match16;
-          }
-          if (__ring_m16._tag === "Enum") {
-            break __ring_match16;
-          }
-          if (__ring_m16._tag === "Trait") {
-            break __ring_match16;
-          }
           if (__ring_m16._tag === "Effect") {
+            const prefixed = prefix_decl_name(mod_name, d);
+            register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names);
             break __ring_match16;
           }
           if (__ring_m16._tag === "EffectAlias") {
+            const prefixed = prefix_decl_name(mod_name, d);
+            register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names);
             break __ring_match16;
           }
           if (__ring_m16._tag === "ExternType") {
+            const prefixed = prefix_decl_name(mod_name, d);
+            register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names);
             break __ring_match16;
+          }
+          break __ring_match16;
+        }
+      }
+      insert_mod_aliases(ctx, mod_name, mod_decls, true);
+      for (const d of mod_decls) {
+        __ring_match17: {
+          const __ring_m17 = d;
+          if (__ring_m17._tag === "Struct") {
+            break __ring_match17;
+          }
+          if (__ring_m17._tag === "Enum") {
+            break __ring_match17;
+          }
+          if (__ring_m17._tag === "Trait") {
+            break __ring_match17;
+          }
+          if (__ring_m17._tag === "Effect") {
+            break __ring_match17;
+          }
+          if (__ring_m17._tag === "EffectAlias") {
+            break __ring_match17;
+          }
+          if (__ring_m17._tag === "ExternType") {
+            break __ring_match17;
           }
           const prefixed = prefix_decl_name(mod_name, d);
           register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names);
-          break __ring_match16;
+          break __ring_match17;
         }
       }
       break __ring_match13;
@@ -436,42 +444,42 @@ function register_phase1(ctx, decl, deferred_struct_names, deferred_enum_names) 
 }
 
 function register_phase2_struct(ctx, decl) {
-  __ring_match17: {
-    const __ring_m17 = decl;
-    if (__ring_m17._tag === "Struct") {
-      const name = __ring_m17.name; const type_params = __ring_m17.type_params; const fields = __ring_m17.fields; const span = __ring_m17.span;
-      return complete_struct_fields(ctx, name, fields);
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "ModBlock") {
-      const mod_name = __ring_m17.name; const mod_decls = __ring_m17.decls;
-      for (const d of mod_decls) {
-        const prefixed = prefix_decl_name(mod_name, d);
-        register_phase2_struct(ctx, prefixed);
-      }
-      break __ring_match17;
-    }
-    break __ring_match17;
-  }
-}
-
-function register_phase2_enum(ctx, decl) {
   __ring_match18: {
     const __ring_m18 = decl;
-    if (__ring_m18._tag === "Enum") {
-      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const variants = __ring_m18.variants; const span = __ring_m18.span;
-      return complete_enum_variants(ctx, name, type_params, variants);
+    if (__ring_m18._tag === "Struct") {
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const fields = __ring_m18.fields; const span = __ring_m18.span;
+      return complete_struct_fields(ctx, name, fields);
       break __ring_match18;
     }
     if (__ring_m18._tag === "ModBlock") {
       const mod_name = __ring_m18.name; const mod_decls = __ring_m18.decls;
       for (const d of mod_decls) {
         const prefixed = prefix_decl_name(mod_name, d);
-        register_phase2_enum(ctx, prefixed);
+        register_phase2_struct(ctx, prefixed);
       }
       break __ring_match18;
     }
     break __ring_match18;
+  }
+}
+
+function register_phase2_enum(ctx, decl) {
+  __ring_match19: {
+    const __ring_m19 = decl;
+    if (__ring_m19._tag === "Enum") {
+      const name = __ring_m19.name; const type_params = __ring_m19.type_params; const variants = __ring_m19.variants; const span = __ring_m19.span;
+      return complete_enum_variants(ctx, name, type_params, variants);
+      break __ring_match19;
+    }
+    if (__ring_m19._tag === "ModBlock") {
+      const mod_name = __ring_m19.name; const mod_decls = __ring_m19.decls;
+      for (const d of mod_decls) {
+        const prefixed = prefix_decl_name(mod_name, d);
+        register_phase2_enum(ctx, prefixed);
+      }
+      break __ring_match19;
+    }
+    break __ring_match19;
   }
 }
 
@@ -493,19 +501,19 @@ function register_decls_two_phase(ctx, decls) {
 }
 
 function register_phase3_delegate(ctx, decl) {
-  __ring_match19: {
-    const __ring_m19 = decl;
-    if (__ring_m19._tag === "Impl") {
-      const target_type = __ring_m19.target_type; const type_params = __ring_m19.type_params; const methods = __ring_m19.methods; const span = __ring_m19.span;
+  __ring_match20: {
+    const __ring_m20 = decl;
+    if (__ring_m20._tag === "Impl") {
+      const target_type = __ring_m20.target_type; const type_params = __ring_m20.type_params; const methods = __ring_m20.methods; const span = __ring_m20.span;
       let has_delegates = false;
       for (const m of methods) {
-        __ring_match20: {
-          const __ring_m20 = m;
-          if (__ring_m20._tag === "Delegate") {
+        __ring_match21: {
+          const __ring_m21 = m;
+          if (__ring_m21._tag === "Delegate") {
             has_delegates = true;
-            break __ring_match20;
+            break __ring_match21;
           }
-          break __ring_match20;
+          break __ring_match21;
         }
       }
       if (has_delegates) {
@@ -513,14 +521,14 @@ function register_phase3_delegate(ctx, decl) {
         let impl_tv_ids = [];
         for (const tp of type_params) {
           const tv = env$TypeEnv_fresh_var(ctx.env);
-          __ring_match21: {
-            const __ring_m21 = tv;
-            if (__ring_m21._tag === "TypeVar") {
-              const id = __ring_m21.id;
+          __ring_match22: {
+            const __ring_m22 = tv;
+            if (__ring_m22._tag === "TypeVar") {
+              const id = __ring_m22.id;
               List_push(impl_tv_ids, id);
-              break __ring_match21;
+              break __ring_match22;
             }
-            break __ring_match21;
+            break __ring_match22;
           }
           _Map_insert(ctx.type_param_scope, tp.name, tv);
         }
@@ -550,29 +558,29 @@ function register_phase3_delegate(ctx, decl) {
   __match_fail(__ring_m);
 })();
         for (const m of methods) {
-          __ring_match22: {
-            const __ring_m22 = m;
-            if (__ring_m22._tag === "Delegate") {
-              const field = __ring_m22.field; const trait_names = __ring_m22.trait_names; const dspan = __ring_m22.span;
+          __ring_match23: {
+            const __ring_m23 = m;
+            if (__ring_m23._tag === "Delegate") {
+              const field = __ring_m23.field; const trait_names = __ring_m23.trait_names; const dspan = __ring_m23.span;
               register_delegate(ctx, impl_methods_map, impl_tv_ids, target_type, field, trait_names, dspan, impl_scheme_bounds, saved, type_params);
-              break __ring_match22;
+              break __ring_match23;
             }
-            break __ring_match22;
+            break __ring_match23;
           }
         }
         ctx.type_param_scope = saved;
       }
-      break __ring_match19;
+      break __ring_match20;
     }
-    if (__ring_m19._tag === "ModBlock") {
-      const mod_name = __ring_m19.name; const mod_decls = __ring_m19.decls;
+    if (__ring_m20._tag === "ModBlock") {
+      const mod_name = __ring_m20.name; const mod_decls = __ring_m20.decls;
       for (const d of mod_decls) {
         const prefixed = prefix_decl_name(mod_name, d);
         register_phase3_delegate(ctx, prefixed);
       }
-      break __ring_match19;
+      break __ring_match20;
     }
-    break __ring_match19;
+    break __ring_match20;
   }
 }
 
@@ -582,14 +590,14 @@ function preregister_struct(ctx, name, type_params) {
   for (const tp of type_params) {
     List_push(tp_names, tp.name);
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match23: {
-      const __ring_m23 = tv;
-      if (__ring_m23._tag === "TypeVar") {
-        const id = __ring_m23.id;
+    __ring_match24: {
+      const __ring_m24 = tv;
+      if (__ring_m24._tag === "TypeVar") {
+        const id = __ring_m24.id;
         List_push(tp_vars, id);
-        break __ring_match23;
+        break __ring_match24;
       }
-      break __ring_match23;
+      break __ring_match24;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -598,21 +606,21 @@ function preregister_struct(ctx, name, type_params) {
 }
 
 function complete_struct_fields(ctx, name, fields) {
-  __ring_match24: {
-    const __ring_m24 = _Map_get(ctx.env.types.structs, name);
-    if (__ring_m24._tag === "some") {
-      const def = __ring_m24._0;
+  __ring_match25: {
+    const __ring_m25 = _Map_get(ctx.env.types.structs, name);
+    if (__ring_m25._tag === "some") {
+      const def = __ring_m25._0;
       const saved = map_clone(ctx.type_param_scope);
       let i = 0;
       while ((i < List_len(def.type_params))) {
-        __ring_match25: {
-          const __ring_m25 = [List_get(def.type_params, i), List_get(def.type_param_vars, i)];
-          if (Array.isArray(__ring_m25) && __ring_m25.length === 2 && __ring_m25[0]._tag === "some" && __ring_m25[1]._tag === "some") {
-            const tp_name = __ring_m25[0]._0; const tp_var = __ring_m25[1]._0;
+        __ring_match26: {
+          const __ring_m26 = [List_get(def.type_params, i), List_get(def.type_param_vars, i)];
+          if (Array.isArray(__ring_m26) && __ring_m26.length === 2 && __ring_m26[0]._tag === "some" && __ring_m26[1]._tag === "some") {
+            const tp_name = __ring_m26[0]._0; const tp_var = __ring_m26[1]._0;
             _Map_insert(ctx.type_param_scope, tp_name, types$Type_TypeVar(tp_var, Option_none));
-            break __ring_match25;
+            break __ring_match26;
           }
-          break __ring_match25;
+          break __ring_match26;
         }
         i = (i + 1);
       }
@@ -620,12 +628,12 @@ function complete_struct_fields(ctx, name, fields) {
         List_push(def.fields, new types$StructField(f.name, infer_ctx$resolve_type_expr(ctx, f.type_annotation), f.is_pub));
       }
       ctx.type_param_scope = saved;
-      break __ring_match24;
+      break __ring_match25;
     }
-    if (__ring_m24._tag === "none") {
-      break __ring_match24;
+    if (__ring_m25._tag === "none") {
+      break __ring_match25;
     }
-    __match_fail(__ring_m24);
+    __match_fail(__ring_m25);
   }
 }
 
@@ -635,14 +643,14 @@ function preregister_enum(ctx, name, type_params) {
   for (const tp of type_params) {
     List_push(tp_names, tp.name);
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match26: {
-      const __ring_m26 = tv;
-      if (__ring_m26._tag === "TypeVar") {
-        const id = __ring_m26.id;
+    __ring_match27: {
+      const __ring_m27 = tv;
+      if (__ring_m27._tag === "TypeVar") {
+        const id = __ring_m27.id;
         List_push(tv_ids, id);
-        break __ring_match26;
+        break __ring_match27;
       }
-      break __ring_match26;
+      break __ring_match27;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -651,32 +659,32 @@ function preregister_enum(ctx, name, type_params) {
 }
 
 function complete_enum_variants(ctx, name, type_params, variants) {
-  __ring_match27: {
-    const __ring_m27 = _Map_get(ctx.env.types.enums, name);
-    if (__ring_m27._tag === "some") {
-      const def = __ring_m27._0;
+  __ring_match28: {
+    const __ring_m28 = _Map_get(ctx.env.types.enums, name);
+    if (__ring_m28._tag === "some") {
+      const def = __ring_m28._0;
       const saved = map_clone(ctx.type_param_scope);
       let tv_types = [];
       let i = 0;
       while ((i < List_len(def.type_params))) {
-        __ring_match28: {
-          const __ring_m28 = [List_get(def.type_params, i), List_get(def.type_param_vars, i)];
-          if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "some" && __ring_m28[1]._tag === "some") {
-            const tp_name = __ring_m28[0]._0; const tp_var = __ring_m28[1]._0;
+        __ring_match29: {
+          const __ring_m29 = [List_get(def.type_params, i), List_get(def.type_param_vars, i)];
+          if (Array.isArray(__ring_m29) && __ring_m29.length === 2 && __ring_m29[0]._tag === "some" && __ring_m29[1]._tag === "some") {
+            const tp_name = __ring_m29[0]._0; const tp_var = __ring_m29[1]._0;
             const tv = types$Type_TypeVar(tp_var, Option_none);
             _Map_insert(ctx.type_param_scope, tp_name, tv);
             List_push(tv_types, tv);
-            break __ring_match28;
+            break __ring_match29;
           }
-          break __ring_match28;
+          break __ring_match29;
         }
         i = (i + 1);
       }
       for (const v of variants) {
-        __ring_match29: {
-          const __ring_m29 = v.named_fields;
-          if (__ring_m29._tag === "some") {
-            const nf = __ring_m29._0;
+        __ring_match30: {
+          const __ring_m30 = v.named_fields;
+          if (__ring_m30._tag === "some") {
+            const nf = __ring_m30._0;
             if ((List_len(nf) > 0)) {
               let field_types = [];
               let field_names = [];
@@ -692,17 +700,17 @@ function complete_enum_variants(ctx, name, type_params, variants) {
               }
               List_push(def.variants, new types$EnumVariant(v.name, field_types, Option_none));
             }
-            break __ring_match29;
+            break __ring_match30;
           }
-          if (__ring_m29._tag === "none") {
+          if (__ring_m30._tag === "none") {
             let field_types = [];
             for (const f of v.fields) {
               List_push(field_types, infer_ctx$resolve_type_expr(ctx, f));
             }
             List_push(def.variants, new types$EnumVariant(v.name, field_types, Option_none));
-            break __ring_match29;
+            break __ring_match30;
           }
-          __match_fail(__ring_m29);
+          __match_fail(__ring_m30);
         }
       }
       const enum_type = types$Type_EnumType(name, tv_types, def.variants);
@@ -725,12 +733,12 @@ function complete_enum_variants(ctx, name, type_params, variants) {
         }
       }
       ctx.type_param_scope = saved;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (__ring_m27._tag === "none") {
-      break __ring_match27;
+    if (__ring_m28._tag === "none") {
+      break __ring_match28;
     }
-    __match_fail(__ring_m27);
+    __match_fail(__ring_m28);
   }
 }
 
@@ -749,14 +757,14 @@ function register_effect(ctx, name, type_params, ops) {
   for (const tp of type_params) {
     List_push(tp_names, tp.name);
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match30: {
-      const __ring_m30 = tv;
-      if (__ring_m30._tag === "TypeVar") {
-        const id = __ring_m30.id;
+    __ring_match31: {
+      const __ring_m31 = tv;
+      if (__ring_m31._tag === "TypeVar") {
+        const id = __ring_m31.id;
         List_push(tp_vars, id);
-        break __ring_match30;
+        break __ring_match31;
       }
-      break __ring_match30;
+      break __ring_match31;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -764,18 +772,18 @@ function register_effect(ctx, name, type_params, ops) {
   for (const op of ops) {
     let param_types = [];
     for (const p of op.params) {
-      __ring_match31: {
-        const __ring_m31 = p.type_annotation;
-        if (__ring_m31._tag === "some") {
-          const ta = __ring_m31._0;
+      __ring_match32: {
+        const __ring_m32 = p.type_annotation;
+        if (__ring_m32._tag === "some") {
+          const ta = __ring_m32._0;
           List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-          break __ring_match31;
+          break __ring_match32;
         }
-        if (__ring_m31._tag === "none") {
+        if (__ring_m32._tag === "none") {
           List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-          break __ring_match31;
+          break __ring_match32;
         }
-        __match_fail(__ring_m31);
+        __match_fail(__ring_m32);
       }
     }
     const ret = infer_ctx$resolve_type_expr(ctx, op.return_type);
@@ -799,19 +807,19 @@ function collect_all_supertraits(ctx, trait_name) {
   let result = [];
   let visited = set_new();
   let stack = [];
-  __ring_match32: {
-    const __ring_m32 = _Map_get(ctx.env.trait_reg.traits, trait_name);
-    if (__ring_m32._tag === "some") {
-      const tdef = __ring_m32._0;
+  __ring_match33: {
+    const __ring_m33 = _Map_get(ctx.env.trait_reg.traits, trait_name);
+    if (__ring_m33._tag === "some") {
+      const tdef = __ring_m33._0;
       for (const st of tdef.supertraits) {
         List_push(stack, st);
       }
-      break __ring_match32;
+      break __ring_match33;
     }
-    if (__ring_m32._tag === "none") {
-      break __ring_match32;
+    if (__ring_m33._tag === "none") {
+      break __ring_match33;
     }
-    __match_fail(__ring_m32);
+    __match_fail(__ring_m33);
   }
   while ((List_len(stack) > 0)) {
     const current = Option_unwrap(List_pop(stack));
@@ -820,19 +828,19 @@ function collect_all_supertraits(ctx, trait_name) {
     }
     _Set_insert(visited, current);
     List_push(result, current);
-    __ring_match33: {
-      const __ring_m33 = _Map_get(ctx.env.trait_reg.traits, current);
-      if (__ring_m33._tag === "some") {
-        const parent_def = __ring_m33._0;
+    __ring_match34: {
+      const __ring_m34 = _Map_get(ctx.env.trait_reg.traits, current);
+      if (__ring_m34._tag === "some") {
+        const parent_def = __ring_m34._0;
         for (const parent_st of parent_def.supertraits) {
           List_push(stack, parent_st);
         }
-        break __ring_match33;
+        break __ring_match34;
       }
-      if (__ring_m33._tag === "none") {
-        break __ring_match33;
+      if (__ring_m34._tag === "none") {
+        break __ring_match34;
       }
-      __match_fail(__ring_m33);
+      __match_fail(__ring_m34);
     }
   }
   return result;
@@ -845,14 +853,14 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
   for (const tp of type_params) {
     List_push(tp_names, tp.name);
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match34: {
-      const __ring_m34 = tv;
-      if (__ring_m34._tag === "TypeVar") {
-        const id = __ring_m34.id;
+    __ring_match35: {
+      const __ring_m35 = tv;
+      if (__ring_m35._tag === "TypeVar") {
+        const id = __ring_m35.id;
         List_push(tp_vars, id);
-        break __ring_match34;
+        break __ring_match35;
       }
-      break __ring_match34;
+      break __ring_match35;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -875,46 +883,46 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
         break;
       }
       _Set_insert(visited, current);
-      __ring_match35: {
-        const __ring_m35 = _Map_get(ctx.env.trait_reg.traits, current);
-        if (__ring_m35._tag === "some") {
-          const parent_def = __ring_m35._0;
+      __ring_match36: {
+        const __ring_m36 = _Map_get(ctx.env.trait_reg.traits, current);
+        if (__ring_m36._tag === "some") {
+          const parent_def = __ring_m36._0;
           for (const parent_st of parent_def.supertraits) {
             List_push(stack, parent_st);
           }
-          break __ring_match35;
+          break __ring_match36;
         }
-        if (__ring_m35._tag === "none") {
-          break __ring_match35;
+        if (__ring_m36._tag === "none") {
+          break __ring_match36;
         }
-        __match_fail(__ring_m35);
+        __match_fail(__ring_m36);
       }
     }
   }
   const self_var = env$TypeEnv_fresh_var(ctx.env);
   let trait_methods = [];
   for (const method of methods) {
-    __ring_match36: {
-      const __ring_m36 = method;
-      if (__ring_m36._tag === "Fn") {
-        const mname = __ring_m36.name; const params = __ring_m36.params; const return_type = __ring_m36.return_type; const is_abstract = __ring_m36.is_abstract;
+    __ring_match37: {
+      const __ring_m37 = method;
+      if (__ring_m37._tag === "Fn") {
+        const mname = __ring_m37.name; const params = __ring_m37.params; const return_type = __ring_m37.return_type; const is_abstract = __ring_m37.is_abstract;
         let param_types = [];
         for (const p of params) {
           if ((p.name === "self")) {
             List_push(param_types, self_var);
           } else {
-            __ring_match37: {
-              const __ring_m37 = p.type_annotation;
-              if (__ring_m37._tag === "some") {
-                const ta = __ring_m37._0;
+            __ring_match38: {
+              const __ring_m38 = p.type_annotation;
+              if (__ring_m38._tag === "some") {
+                const ta = __ring_m38._0;
                 List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-                break __ring_match37;
+                break __ring_match38;
               }
-              if (__ring_m37._tag === "none") {
+              if (__ring_m38._tag === "none") {
                 List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-                break __ring_match37;
+                break __ring_match38;
               }
-              __match_fail(__ring_m37);
+              __match_fail(__ring_m38);
             }
           }
         }
@@ -926,9 +934,9 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
 })();
         const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW);
         List_push(trait_methods, new env$TraitMethodDef(mname, fn_type, (!is_abstract)));
-        break __ring_match36;
+        break __ring_match37;
       }
-      break __ring_match36;
+      break __ring_match37;
     }
   }
   ctx.type_param_scope = saved;
@@ -950,14 +958,14 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span)
   let impl_tv_ids = [];
   for (const tp of type_params) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match38: {
-      const __ring_m38 = tv;
-      if (__ring_m38._tag === "TypeVar") {
-        const id = __ring_m38.id;
+    __ring_match39: {
+      const __ring_m39 = tv;
+      if (__ring_m39._tag === "TypeVar") {
+        const id = __ring_m39.id;
         List_push(impl_tv_ids, id);
-        break __ring_match38;
+        break __ring_match39;
       }
-      break __ring_match38;
+      break __ring_match39;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -977,42 +985,42 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span)
     tp_idx = (tp_idx + 1);
   }
   for (const method of methods) {
-    __ring_match39: {
-      const __ring_m39 = method;
-      if (__ring_m39._tag === "Fn") {
-        const mname = __ring_m39.name; const mtps = __ring_m39.type_params; const params = __ring_m39.params; const return_type = __ring_m39.return_type; const declared_effects = __ring_m39.declared_effects;
+    __ring_match40: {
+      const __ring_m40 = method;
+      if (__ring_m40._tag === "Fn") {
+        const mname = __ring_m40.name; const mtps = __ring_m40.type_params; const params = __ring_m40.params; const return_type = __ring_m40.return_type; const declared_effects = __ring_m40.declared_effects;
         register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params);
-        break __ring_match39;
+        break __ring_match40;
       }
-      if (__ring_m39._tag === "ExternFn") {
-        const mname = __ring_m39.name; const mtps = __ring_m39.type_params; const params = __ring_m39.params; const return_type = __ring_m39.return_type; const declared_effects = __ring_m39.declared_effects;
+      if (__ring_m40._tag === "ExternFn") {
+        const mname = __ring_m40.name; const mtps = __ring_m40.type_params; const params = __ring_m40.params; const return_type = __ring_m40.return_type; const declared_effects = __ring_m40.declared_effects;
         register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params);
-        break __ring_match39;
+        break __ring_match40;
       }
-      if (__ring_m39._tag === "Delegate") {
-        break __ring_match39;
+      if (__ring_m40._tag === "Delegate") {
+        break __ring_match40;
       }
-      break __ring_match39;
+      break __ring_match40;
     }
   }
-  __ring_match40: {
-    const __ring_m40 = trait_name;
-    if (__ring_m40._tag === "some") {
-      const tname = __ring_m40._0;
-      __ring_match41: {
-        const __ring_m41 = _Map_get(ctx.env.trait_reg.traits, tname);
-        if (__ring_m41._tag === "some") {
-          const trait_def = __ring_m41._0;
+  __ring_match41: {
+    const __ring_m41 = trait_name;
+    if (__ring_m41._tag === "some") {
+      const tname = __ring_m41._0;
+      __ring_match42: {
+        const __ring_m42 = _Map_get(ctx.env.trait_reg.traits, tname);
+        if (__ring_m42._tag === "some") {
+          const trait_def = __ring_m42._0;
           let impl_method_names = set_new();
           for (const m of methods) {
-            __ring_match42: {
-              const __ring_m42 = m;
-              if (__ring_m42._tag === "Fn") {
-                const mn = __ring_m42.name;
+            __ring_match43: {
+              const __ring_m43 = m;
+              if (__ring_m43._tag === "Fn") {
+                const mn = __ring_m43.name;
                 _Set_insert(impl_method_names, mn);
-                break __ring_match42;
+                break __ring_match43;
               }
-              break __ring_match42;
+              break __ring_match43;
             }
           }
           for (const tm of trait_def.methods) {
@@ -1038,36 +1046,36 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span)
           }
           let method_names = [];
           for (const m of methods) {
-            __ring_match43: {
-              const __ring_m43 = m;
-              if (__ring_m43._tag === "Fn") {
-                const mn = __ring_m43.name;
+            __ring_match44: {
+              const __ring_m44 = m;
+              if (__ring_m44._tag === "Fn") {
+                const mn = __ring_m44.name;
                 List_push(method_names, mn);
-                break __ring_match43;
+                break __ring_match44;
               }
-              if (__ring_m43._tag === "ExternFn") {
-                const mn = __ring_m43.name;
+              if (__ring_m44._tag === "ExternFn") {
+                const mn = __ring_m44.name;
                 List_push(method_names, mn);
-                break __ring_match43;
+                break __ring_match44;
               }
-              break __ring_match43;
+              break __ring_match44;
             }
           }
           List_push(ctx.env.trait_reg.trait_impls, new env$ImplEntry(tname, target_type, tp_names, method_names));
-          break __ring_match41;
+          break __ring_match42;
         }
-        if (__ring_m41._tag === "none") {
+        if (__ring_m42._tag === "none") {
           const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${tname}`, span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${tname}'`));
-          break __ring_match41;
+          break __ring_match42;
         }
-        __match_fail(__ring_m41);
+        __match_fail(__ring_m42);
       }
-      break __ring_match40;
+      break __ring_match41;
     }
-    if (__ring_m40._tag === "none") {
-      break __ring_match40;
+    if (__ring_m41._tag === "none") {
+      break __ring_match41;
     }
-    __match_fail(__ring_m40);
+    __match_fail(__ring_m41);
   }
   ctx.type_param_scope = saved;
 }
@@ -1078,44 +1086,44 @@ function resolve_impl_self_type(ctx, target_type, impl_type_params) {
   }
   let impl_tp_types = [];
   for (const tp of impl_type_params) {
-    __ring_match44: {
-      const __ring_m44 = _Map_get(ctx.type_param_scope, tp.name);
-      if (__ring_m44._tag === "some") {
-        const tv = __ring_m44._0;
+    __ring_match45: {
+      const __ring_m45 = _Map_get(ctx.type_param_scope, tp.name);
+      if (__ring_m45._tag === "some") {
+        const tv = __ring_m45._0;
         List_push(impl_tp_types, tv);
-        break __ring_match44;
+        break __ring_match45;
       }
-      if (__ring_m44._tag === "none") {
+      if (__ring_m45._tag === "none") {
         List_push(impl_tp_types, env$TypeEnv_fresh_var(ctx.env));
-        break __ring_match44;
+        break __ring_match45;
       }
-      __match_fail(__ring_m44);
+      __match_fail(__ring_m45);
     }
   }
-  __ring_match45: {
-    const __ring_m45 = _Map_get(ctx.env.types.structs, target_type);
-    if (__ring_m45._tag === "some") {
-      const def = __ring_m45._0;
+  __ring_match46: {
+    const __ring_m46 = _Map_get(ctx.env.types.structs, target_type);
+    if (__ring_m46._tag === "some") {
+      const def = __ring_m46._0;
       return types$Type_StructType(def.name, impl_tp_types, def.fields);
-      break __ring_match45;
+      break __ring_match46;
     }
-    if (__ring_m45._tag === "none") {
-      __ring_match46: {
-        const __ring_m46 = _Map_get(ctx.env.types.enums, target_type);
-        if (__ring_m46._tag === "some") {
-          const def = __ring_m46._0;
+    if (__ring_m46._tag === "none") {
+      __ring_match47: {
+        const __ring_m47 = _Map_get(ctx.env.types.enums, target_type);
+        if (__ring_m47._tag === "some") {
+          const def = __ring_m47._0;
           return types$Type_EnumType(def.name, impl_tp_types, def.variants);
-          break __ring_match46;
+          break __ring_match47;
         }
-        if (__ring_m46._tag === "none") {
+        if (__ring_m47._tag === "none") {
           return infer_ctx$resolve_self_type(ctx, target_type);
-          break __ring_match46;
+          break __ring_match47;
         }
-        __match_fail(__ring_m46);
+        __match_fail(__ring_m47);
       }
-      break __ring_match45;
+      break __ring_match46;
     }
-    __match_fail(__ring_m45);
+    __match_fail(__ring_m46);
   }
 }
 
@@ -1124,36 +1132,36 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
   let method_tv_ids = [];
   for (const mtp of mtps) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match47: {
-      const __ring_m47 = tv;
-      if (__ring_m47._tag === "TypeVar") {
-        const id = __ring_m47.id;
+    __ring_match48: {
+      const __ring_m48 = tv;
+      if (__ring_m48._tag === "TypeVar") {
+        const id = __ring_m48.id;
         List_push(method_tv_ids, id);
-        break __ring_match47;
+        break __ring_match48;
       }
-      break __ring_match47;
+      break __ring_match48;
     }
     _Map_insert(ctx.type_param_scope, mtp.name, tv);
   }
   const self_type = resolve_impl_self_type(ctx, target_type, impl_type_params);
   let param_types = [];
   for (const p of params) {
-    __ring_match48: {
-      const __ring_m48 = p.type_annotation;
-      if (__ring_m48._tag === "some") {
-        const ta = __ring_m48._0;
+    __ring_match49: {
+      const __ring_m49 = p.type_annotation;
+      if (__ring_m49._tag === "some") {
+        const ta = __ring_m49._0;
         List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-        break __ring_match48;
+        break __ring_match49;
       }
-      if (__ring_m48._tag === "none") {
+      if (__ring_m49._tag === "none") {
         if ((p.name === "self")) {
           List_push(param_types, self_type);
         } else {
           List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
         }
-        break __ring_match48;
+        break __ring_match49;
       }
-      __match_fail(__ring_m48);
+      __match_fail(__ring_m49);
     }
   }
   const ret = (function() {
@@ -1179,16 +1187,16 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
     const tpname = __ring_dt1[0];
     const tv = __ring_dt1[1];
     if (((!_Map_contains_key(outer_saved, tpname)) && (!_Set_contains(declared_names, tpname, __Str_Eq)))) {
-      __ring_match49: {
-        const __ring_m49 = tv;
-        if (__ring_m49._tag === "TypeVar") {
-          const id = __ring_m49.id;
+      __ring_match50: {
+        const __ring_m50 = tv;
+        if (__ring_m50._tag === "TypeVar") {
+          const id = __ring_m50.id;
           if ((!List_contains(all_tvs, id, __Int_Eq))) {
             List_push(all_tvs, id);
           }
-          break __ring_match49;
+          break __ring_match50;
         }
-        break __ring_match49;
+        break __ring_match50;
       }
     }
   }
@@ -1201,10 +1209,10 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
   const fn_type = types$Type_FnType(param_types, ret, impl_m_effects);
   _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, impl_scheme_bounds, Option_none));
   if ((List_len(params) > 0)) {
-    __ring_match50: {
-      const __ring_m50 = List_first(params);
-      if (__ring_m50._tag === "some") {
-        const first_p = __ring_m50._0;
+    __ring_match51: {
+      const __ring_m51 = List_first(params);
+      if (__ring_m51._tag === "some") {
+        const first_p = __ring_m51._0;
         if (((first_p.name === "self") && first_p.is_mutable)) {
           let mut_set = (function() {
   const __ring_m = _Map_get(ctx.env.trait_reg.mut_methods, target_type);
@@ -1218,12 +1226,12 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
 })();
           _Set_insert(mut_set, mname);
         }
-        break __ring_match50;
+        break __ring_match51;
       }
-      if (__ring_m50._tag === "none") {
-        break __ring_match50;
+      if (__ring_m51._tag === "none") {
+        break __ring_match51;
       }
-      __match_fail(__ring_m50);
+      __match_fail(__ring_m51);
     }
   }
   ctx.type_param_scope = saved_method;
@@ -1234,36 +1242,36 @@ function register_impl_extern_method(ctx, methods_map, impl_tv_ids, target_type,
   let method_tv_ids = [];
   for (const mtp of mtps) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match51: {
-      const __ring_m51 = tv;
-      if (__ring_m51._tag === "TypeVar") {
-        const id = __ring_m51.id;
+    __ring_match52: {
+      const __ring_m52 = tv;
+      if (__ring_m52._tag === "TypeVar") {
+        const id = __ring_m52.id;
         List_push(method_tv_ids, id);
-        break __ring_match51;
+        break __ring_match52;
       }
-      break __ring_match51;
+      break __ring_match52;
     }
     _Map_insert(ctx.type_param_scope, mtp.name, tv);
   }
   const self_type = resolve_impl_self_type(ctx, target_type, impl_type_params);
   let param_types = [];
   for (const p of params) {
-    __ring_match52: {
-      const __ring_m52 = p.type_annotation;
-      if (__ring_m52._tag === "some") {
-        const ta = __ring_m52._0;
+    __ring_match53: {
+      const __ring_m53 = p.type_annotation;
+      if (__ring_m53._tag === "some") {
+        const ta = __ring_m53._0;
         List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-        break __ring_match52;
+        break __ring_match53;
       }
-      if (__ring_m52._tag === "none") {
+      if (__ring_m53._tag === "none") {
         if ((p.name === "self")) {
           List_push(param_types, self_type);
         } else {
           List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
         }
-        break __ring_match52;
+        break __ring_match53;
       }
-      __match_fail(__ring_m52);
+      __match_fail(__ring_m53);
     }
   }
   const ret = (function() {
@@ -1285,10 +1293,10 @@ function register_impl_extern_method(ctx, methods_map, impl_tv_ids, target_type,
   const fn_type = types$Type_FnType(param_types, ret, impl_ext_effects);
   _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, impl_scheme_bounds, Option_none));
   if ((List_len(params) > 0)) {
-    __ring_match53: {
-      const __ring_m53 = List_first(params);
-      if (__ring_m53._tag === "some") {
-        const first_p = __ring_m53._0;
+    __ring_match54: {
+      const __ring_m54 = List_first(params);
+      if (__ring_m54._tag === "some") {
+        const first_p = __ring_m54._0;
         if (((first_p.name === "self") && first_p.is_mutable)) {
           let mut_set = (function() {
   const __ring_m = _Map_get(ctx.env.trait_reg.mut_methods, target_type);
@@ -1302,88 +1310,88 @@ function register_impl_extern_method(ctx, methods_map, impl_tv_ids, target_type,
 })();
           _Set_insert(mut_set, mname);
         }
-        break __ring_match53;
+        break __ring_match54;
       }
-      if (__ring_m53._tag === "none") {
-        break __ring_match53;
+      if (__ring_m54._tag === "none") {
+        break __ring_match54;
       }
-      __match_fail(__ring_m53);
+      __match_fail(__ring_m54);
     }
   }
   ctx.type_param_scope = saved_method;
 }
 
 function register_delegate(ctx, methods_map, impl_tv_ids, target_type, field, trait_names, span, impl_scheme_bounds, outer_saved, impl_type_params) {
-  __ring_match54: {
-    const __ring_m54 = _Map_get(ctx.env.types.structs, target_type);
-    if (__ring_m54._tag === "none") {
+  __ring_match55: {
+    const __ring_m55 = _Map_get(ctx.env.types.structs, target_type);
+    if (__ring_m55._tag === "none") {
       const _ = infer_ctx$type_error(ctx.sink, codes$E0507, `delegate can only be used on struct types, '${target_type}' is not a struct`, span, diagnostics$DiagnosticContext_TraitError("delegate on non-struct type"));
-      break __ring_match54;
+      break __ring_match55;
     }
-    if (__ring_m54._tag === "some") {
-      const struct_def = __ring_m54._0;
+    if (__ring_m55._tag === "some") {
+      const struct_def = __ring_m55._0;
       let field_type = Option_none;
       for (const f of struct_def.fields) {
         if ((f.name === field)) {
           field_type = Option_some(f.ty);
         }
       }
-      __ring_match55: {
-        const __ring_m55 = field_type;
-        if (__ring_m55._tag === "none") {
+      __ring_match56: {
+        const __ring_m56 = field_type;
+        if (__ring_m56._tag === "none") {
           const _ = infer_ctx$type_error(ctx.sink, codes$E0507, `field '${field}' not found in struct '${target_type}'`, span, diagnostics$DiagnosticContext_TraitError("delegate field not found"));
-          break __ring_match55;
+          break __ring_match56;
         }
-        if (__ring_m55._tag === "some") {
-          const ft = __ring_m55._0;
+        if (__ring_m56._tag === "some") {
+          const ft = __ring_m56._0;
           let field_type_name = Option_none;
-          __ring_match56: {
-            const __ring_m56 = ft;
-            if (__ring_m56._tag === "StructType") {
-              const name = __ring_m56.name;
+          __ring_match57: {
+            const __ring_m57 = ft;
+            if (__ring_m57._tag === "StructType") {
+              const name = __ring_m57.name;
               field_type_name = Option_some(name);
-              break __ring_match56;
+              break __ring_match57;
             }
-            if (__ring_m56._tag === "EnumType") {
-              const name = __ring_m56.name;
+            if (__ring_m57._tag === "EnumType") {
+              const name = __ring_m57.name;
               field_type_name = Option_some(name);
-              break __ring_match56;
+              break __ring_match57;
             }
             const _ = infer_ctx$type_error(ctx.sink, codes$E0507, `delegate field '${field}' must have a named type (struct or enum)`, span, diagnostics$DiagnosticContext_TraitError("delegate field has unnamed type"));
-            break __ring_match56;
+            break __ring_match57;
           }
-          __ring_match57: {
-            const __ring_m57 = field_type_name;
-            if (__ring_m57._tag === "none") {
-              break __ring_match57;
+          __ring_match58: {
+            const __ring_m58 = field_type_name;
+            if (__ring_m58._tag === "none") {
+              break __ring_match58;
             }
-            if (__ring_m57._tag === "some") {
-              const ftn = __ring_m57._0;
+            if (__ring_m58._tag === "some") {
+              const ftn = __ring_m58._0;
               return register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type, field, trait_names, span, impl_scheme_bounds, impl_type_params, ftn, ft);
-              break __ring_match57;
+              break __ring_match58;
             }
-            __match_fail(__ring_m57);
+            __match_fail(__ring_m58);
           }
-          break __ring_match55;
+          break __ring_match56;
         }
-        __match_fail(__ring_m55);
+        __match_fail(__ring_m56);
       }
-      break __ring_match54;
+      break __ring_match55;
     }
-    __match_fail(__ring_m54);
+    __match_fail(__ring_m55);
   }
 }
 
 function register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type, field, trait_names, span, impl_scheme_bounds, impl_type_params, field_type_name, ft) {
   for (const tname of trait_names) {
-    __ring_match58: {
-      const __ring_m58 = _Map_get(ctx.env.trait_reg.traits, tname);
-      if (__ring_m58._tag === "none") {
+    __ring_match59: {
+      const __ring_m59 = _Map_get(ctx.env.trait_reg.traits, tname);
+      if (__ring_m59._tag === "none") {
         const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${tname}`, span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${tname}'`));
-        break __ring_match58;
+        break __ring_match59;
       }
-      if (__ring_m58._tag === "some") {
-        const trait_def = __ring_m58._0;
+      if (__ring_m59._tag === "some") {
+        const trait_def = __ring_m59._0;
         let has_impl = false;
         for (const impl_ of ctx.env.trait_reg.trait_impls) {
           if (((impl_.trait_name === tname) && (impl_.target_type_name === field_type_name))) {
@@ -1428,13 +1436,13 @@ function register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type, fi
             if ((!field_has_impl)) {
               continue;
             }
-            __ring_match59: {
-              const __ring_m59 = _Map_get(ctx.env.trait_reg.traits, reg_tname);
-              if (__ring_m59._tag === "none") {
-                break __ring_match59;
+            __ring_match60: {
+              const __ring_m60 = _Map_get(ctx.env.trait_reg.traits, reg_tname);
+              if (__ring_m60._tag === "none") {
+                break __ring_match60;
               }
-              if (__ring_m59._tag === "some") {
-                const reg_trait_def = __ring_m59._0;
+              if (__ring_m60._tag === "some") {
+                const reg_trait_def = __ring_m60._0;
                 let tp_names = [];
                 for (const tp of impl_type_params) {
                   List_push(tp_names, tp.name);
@@ -1445,10 +1453,10 @@ function register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type, fi
                 }
                 List_push(ctx.env.trait_reg.trait_impls, new env$ImplEntry(reg_tname, target_type, tp_names, method_names));
                 for (const tm of reg_trait_def.methods) {
-                  __ring_match60: {
-                    const __ring_m60 = tm.ty;
-                    if (__ring_m60._tag === "FnType") {
-                      const trait_params = __ring_m60.params; const ret_ty = __ring_m60.return_type; const eff = __ring_m60.effects;
+                  __ring_match61: {
+                    const __ring_m61 = tm.ty;
+                    if (__ring_m61._tag === "FnType") {
+                      const trait_params = __ring_m61.params; const ret_ty = __ring_m61.return_type; const eff = __ring_m61.effects;
                       let param_types = [];
                       let first = true;
                       for (const tp of trait_params) {
@@ -1461,20 +1469,20 @@ function register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type, fi
                       }
                       const fn_type = types$Type_FnType(param_types, ret_ty, eff);
                       _Map_insert(methods_map, tm.name, new env$TypeScheme(fn_type, list_clone(impl_tv_ids), impl_scheme_bounds, Option_none));
-                      break __ring_match60;
+                      break __ring_match61;
                     }
-                    break __ring_match60;
+                    break __ring_match61;
                   }
                 }
-                break __ring_match59;
+                break __ring_match60;
               }
-              __match_fail(__ring_m59);
+              __match_fail(__ring_m60);
             }
           }
         }
-        break __ring_match58;
+        break __ring_match59;
       }
-      __match_fail(__ring_m58);
+      __match_fail(__ring_m59);
     }
   }
 }
@@ -1520,10 +1528,10 @@ function resolve_effect_expr(ctx, eff) {
 function expand_effect_exprs(ctx, decl_effects, expanding) {
   let effects = [];
   for (const eff of decl_effects) {
-    __ring_match61: {
-      const __ring_m61 = _Map_get(ctx.env.types.effect_aliases, eff.name);
-      if (__ring_m61._tag === "some") {
-        const alias_def = __ring_m61._0;
+    __ring_match62: {
+      const __ring_m62 = _Map_get(ctx.env.types.effect_aliases, eff.name);
+      if (__ring_m62._tag === "some") {
+        const alias_def = __ring_m62._0;
         if (_Set_contains(expanding, eff.name, __Str_Eq)) {
           const _ = infer_ctx$type_error(ctx.sink, codes$E0406, `Cyclic effect alias: '${eff.name}' references itself`, eff.span, diagnostics$DiagnosticContext_OtherContext(Option_some("cyclic effect alias")));
         } else {
@@ -1531,28 +1539,28 @@ function expand_effect_exprs(ctx, decl_effects, expanding) {
           let subst_map = map_new();
           let i = 0;
           while (((i < List_len(alias_def.type_params)) && (i < List_len(eff.type_args)))) {
-            __ring_match62: {
-              const __ring_m62 = List_get(alias_def.type_params, i);
-              if (__ring_m62._tag === "some") {
-                const tp_name = __ring_m62._0;
-                __ring_match63: {
-                  const __ring_m63 = List_get(eff.type_args, i);
-                  if (__ring_m63._tag === "some") {
-                    const ta = __ring_m63._0;
+            __ring_match63: {
+              const __ring_m63 = List_get(alias_def.type_params, i);
+              if (__ring_m63._tag === "some") {
+                const tp_name = __ring_m63._0;
+                __ring_match64: {
+                  const __ring_m64 = List_get(eff.type_args, i);
+                  if (__ring_m64._tag === "some") {
+                    const ta = __ring_m64._0;
                     _Map_insert(subst_map, tp_name, ta);
-                    break __ring_match63;
+                    break __ring_match64;
                   }
-                  if (__ring_m63._tag === "none") {
-                    break __ring_match63;
+                  if (__ring_m64._tag === "none") {
+                    break __ring_match64;
                   }
-                  __match_fail(__ring_m63);
+                  __match_fail(__ring_m64);
                 }
-                break __ring_match62;
+                break __ring_match63;
               }
-              if (__ring_m62._tag === "none") {
-                break __ring_match62;
+              if (__ring_m63._tag === "none") {
+                break __ring_match63;
               }
-              __match_fail(__ring_m62);
+              __match_fail(__ring_m63);
             }
             i = (i + 1);
           }
@@ -1563,13 +1571,13 @@ function expand_effect_exprs(ctx, decl_effects, expanding) {
           }
           _Set_remove(expanding, eff.name);
         }
-        break __ring_match61;
+        break __ring_match62;
       }
-      if (__ring_m61._tag === "none") {
+      if (__ring_m62._tag === "none") {
         List_push(effects, resolve_effect_expr(ctx, eff));
-        break __ring_match61;
+        break __ring_match62;
       }
-      __match_fail(__ring_m61);
+      __match_fail(__ring_m62);
     }
   }
   return effects;
@@ -1591,23 +1599,23 @@ function subst_effect_exprs(effects, subst_map) {
 }
 
 function subst_type_expr(te, subst_map) {
-  __ring_match64: {
-    const __ring_m64 = te;
-    if (__ring_m64._tag === "Named") {
-      const name = __ring_m64.name; const type_args = __ring_m64.type_args; const span = __ring_m64.span;
+  __ring_match65: {
+    const __ring_m65 = te;
+    if (__ring_m65._tag === "Named") {
+      const name = __ring_m65.name; const type_args = __ring_m65.type_args; const span = __ring_m65.span;
       if ((List_len(type_args) === 0)) {
-        __ring_match65: {
-          const __ring_m65 = _Map_get(subst_map, name);
-          if (__ring_m65._tag === "some") {
-            const replacement = __ring_m65._0;
+        __ring_match66: {
+          const __ring_m66 = _Map_get(subst_map, name);
+          if (__ring_m66._tag === "some") {
+            const replacement = __ring_m66._0;
             return replacement;
-            break __ring_match65;
+            break __ring_match66;
           }
-          if (__ring_m65._tag === "none") {
+          if (__ring_m66._tag === "none") {
             return te;
-            break __ring_match65;
+            break __ring_match66;
           }
-          __match_fail(__ring_m65);
+          __match_fail(__ring_m66);
         }
       } else {
         let new_args = [];
@@ -1616,10 +1624,10 @@ function subst_type_expr(te, subst_map) {
         }
         return ast$TypeExpr_Named(name, Option_none, new_args, span);
       }
-      break __ring_match64;
+      break __ring_match65;
     }
     return te;
-    break __ring_match64;
+    break __ring_match65;
   }
 }
 
@@ -1642,38 +1650,38 @@ function resolve_declared_effects(ctx, decl_effects) {
 }
 
 function check_duplicate_def(ctx, name, span) {
-  __ring_match66: {
-    const __ring_m66 = env$TypeEnv_lookup(ctx.env, name);
-    if (__ring_m66._tag === "some") {
-      const existing = __ring_m66._0;
-      __ring_match67: {
-        const __ring_m67 = existing.def_id;
-        if (__ring_m67._tag === "some") {
-          const did = __ring_m67._0;
-          __ring_match68: {
-            const __ring_m68 = _Map_get(ctx.env.scope.def_spans, did);
-            if (__ring_m68._tag === "some") {
+  __ring_match67: {
+    const __ring_m67 = env$TypeEnv_lookup(ctx.env, name);
+    if (__ring_m67._tag === "some") {
+      const existing = __ring_m67._0;
+      __ring_match68: {
+        const __ring_m68 = existing.def_id;
+        if (__ring_m68._tag === "some") {
+          const did = __ring_m68._0;
+          __ring_match69: {
+            const __ring_m69 = _Map_get(ctx.env.scope.def_spans, did);
+            if (__ring_m69._tag === "some") {
               const _ = infer_ctx$type_error(ctx.sink, codes$E0207, `Duplicate definition: '${name}' is already defined`, span, diagnostics$DiagnosticContext_TypeMismatch("unique name", name, Option_none));
-              break __ring_match68;
+              break __ring_match69;
             }
-            if (__ring_m68._tag === "none") {
-              break __ring_match68;
+            if (__ring_m69._tag === "none") {
+              break __ring_match69;
             }
-            __match_fail(__ring_m68);
+            __match_fail(__ring_m69);
           }
-          break __ring_match67;
+          break __ring_match68;
         }
-        if (__ring_m67._tag === "none") {
-          break __ring_match67;
+        if (__ring_m68._tag === "none") {
+          break __ring_match68;
         }
-        __match_fail(__ring_m67);
+        __match_fail(__ring_m68);
       }
-      break __ring_match66;
+      break __ring_match67;
     }
-    if (__ring_m66._tag === "none") {
-      break __ring_match66;
+    if (__ring_m67._tag === "none") {
+      break __ring_match67;
     }
-    __match_fail(__ring_m66);
+    __match_fail(__ring_m67);
   }
 }
 
@@ -1683,31 +1691,31 @@ function register_fn(ctx, name, type_params, params, return_type, declared_effec
   const saved = map_clone(ctx.type_param_scope);
   for (const tp of type_params) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match69: {
-      const __ring_m69 = tv;
-      if (__ring_m69._tag === "TypeVar") {
-        const id = __ring_m69.id;
+    __ring_match70: {
+      const __ring_m70 = tv;
+      if (__ring_m70._tag === "TypeVar") {
+        const id = __ring_m70.id;
         List_push(type_vars, id);
-        break __ring_match69;
+        break __ring_match70;
       }
-      break __ring_match69;
+      break __ring_match70;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
   let param_types = [];
   for (const p of params) {
-    __ring_match70: {
-      const __ring_m70 = p.type_annotation;
-      if (__ring_m70._tag === "some") {
-        const ta = __ring_m70._0;
+    __ring_match71: {
+      const __ring_m71 = p.type_annotation;
+      if (__ring_m71._tag === "some") {
+        const ta = __ring_m71._0;
         List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-        break __ring_match70;
+        break __ring_match71;
       }
-      if (__ring_m70._tag === "none") {
+      if (__ring_m71._tag === "none") {
         List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-        break __ring_match70;
+        break __ring_match71;
       }
-      __match_fail(__ring_m70);
+      __match_fail(__ring_m71);
     }
   }
   const ret = (function() {
@@ -1725,14 +1733,14 @@ function register_fn(ctx, name, type_params, params, return_type, declared_effec
     const tpname = __ring_dt2[0];
     const tv = __ring_dt2[1];
     if (((!_Map_contains_key(saved, tpname)) && (!_Set_contains(declared_names, tpname, __Str_Eq)))) {
-      __ring_match71: {
-        const __ring_m71 = tv;
-        if (__ring_m71._tag === "TypeVar") {
-          const id = __ring_m71.id;
+      __ring_match72: {
+        const __ring_m72 = tv;
+        if (__ring_m72._tag === "TypeVar") {
+          const id = __ring_m72.id;
           List_push(type_vars, id);
-          break __ring_match71;
+          break __ring_match72;
         }
-        break __ring_match71;
+        break __ring_match72;
       }
     }
   }
@@ -1752,48 +1760,48 @@ function register_fn(ctx, name, type_params, params, return_type, declared_effec
         const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${b.trait_name}`, tp.span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${b.trait_name}'`));
       }
       List_push(fn_bounds_list, new env$FnBound(tp.name, b.trait_name));
-      __ring_match72: {
-        const __ring_m72 = tv;
-        if (__ring_m72._tag === "some") {
-          const t = __ring_m72._0;
-          __ring_match73: {
-            const __ring_m73 = t;
-            if (__ring_m73._tag === "TypeVar") {
-              const id = __ring_m73.id;
+      __ring_match73: {
+        const __ring_m73 = tv;
+        if (__ring_m73._tag === "some") {
+          const t = __ring_m73._0;
+          __ring_match74: {
+            const __ring_m74 = t;
+            if (__ring_m74._tag === "TypeVar") {
+              const id = __ring_m74.id;
               List_push(scheme_bounds, new env$SchemeBound(id, b.trait_name));
-              break __ring_match73;
+              break __ring_match74;
             }
-            break __ring_match73;
+            break __ring_match74;
           }
-          break __ring_match72;
+          break __ring_match73;
         }
-        if (__ring_m72._tag === "none") {
-          break __ring_match72;
+        if (__ring_m73._tag === "none") {
+          break __ring_match73;
         }
-        __match_fail(__ring_m72);
+        __match_fail(__ring_m73);
       }
       const supers = collect_all_supertraits(ctx, b.trait_name);
       for (const st_name of supers) {
         List_push(fn_bounds_list, new env$FnBound(tp.name, st_name));
-        __ring_match74: {
-          const __ring_m74 = tv;
-          if (__ring_m74._tag === "some") {
-            const t = __ring_m74._0;
-            __ring_match75: {
-              const __ring_m75 = t;
-              if (__ring_m75._tag === "TypeVar") {
-                const id = __ring_m75.id;
+        __ring_match75: {
+          const __ring_m75 = tv;
+          if (__ring_m75._tag === "some") {
+            const t = __ring_m75._0;
+            __ring_match76: {
+              const __ring_m76 = t;
+              if (__ring_m76._tag === "TypeVar") {
+                const id = __ring_m76.id;
                 List_push(scheme_bounds, new env$SchemeBound(id, st_name));
-                break __ring_match75;
+                break __ring_match76;
               }
-              break __ring_match75;
+              break __ring_match76;
             }
-            break __ring_match74;
+            break __ring_match75;
           }
-          if (__ring_m74._tag === "none") {
-            break __ring_match74;
+          if (__ring_m75._tag === "none") {
+            break __ring_match75;
           }
-          __match_fail(__ring_m74);
+          __match_fail(__ring_m75);
         }
       }
     }
@@ -1807,28 +1815,28 @@ function register_fn(ctx, name, type_params, params, return_type, declared_effec
   } else {
     env$TypeEnv_bind_mono(ctx.env, name, fn_type);
   }
-  __ring_match76: {
-    const __ring_m76 = env$TypeEnv_lookup(ctx.env, name);
-    if (__ring_m76._tag === "some") {
-      const s = __ring_m76._0;
-      __ring_match77: {
-        const __ring_m77 = s.def_id;
-        if (__ring_m77._tag === "some") {
-          const did = __ring_m77._0;
+  __ring_match77: {
+    const __ring_m77 = env$TypeEnv_lookup(ctx.env, name);
+    if (__ring_m77._tag === "some") {
+      const s = __ring_m77._0;
+      __ring_match78: {
+        const __ring_m78 = s.def_id;
+        if (__ring_m78._tag === "some") {
+          const did = __ring_m78._0;
           return env$TypeEnv_record_def_span(ctx.env, did, span);
-          break __ring_match77;
+          break __ring_match78;
         }
-        if (__ring_m77._tag === "none") {
-          break __ring_match77;
+        if (__ring_m78._tag === "none") {
+          break __ring_match78;
         }
-        __match_fail(__ring_m77);
+        __match_fail(__ring_m78);
       }
-      break __ring_match76;
+      break __ring_match77;
     }
-    if (__ring_m76._tag === "none") {
-      break __ring_match76;
+    if (__ring_m77._tag === "none") {
+      break __ring_match77;
     }
-    __match_fail(__ring_m76);
+    __match_fail(__ring_m77);
   }
 }
 
@@ -1837,31 +1845,31 @@ function register_extern_fn(ctx, name, type_params, params, return_type, declare
   const saved = map_clone(ctx.type_param_scope);
   for (const tp of type_params) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match78: {
-      const __ring_m78 = tv;
-      if (__ring_m78._tag === "TypeVar") {
-        const id = __ring_m78.id;
+    __ring_match79: {
+      const __ring_m79 = tv;
+      if (__ring_m79._tag === "TypeVar") {
+        const id = __ring_m79.id;
         List_push(type_vars, id);
-        break __ring_match78;
+        break __ring_match79;
       }
-      break __ring_match78;
+      break __ring_match79;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
   let param_types = [];
   for (const p of params) {
-    __ring_match79: {
-      const __ring_m79 = p.type_annotation;
-      if (__ring_m79._tag === "some") {
-        const ta = __ring_m79._0;
+    __ring_match80: {
+      const __ring_m80 = p.type_annotation;
+      if (__ring_m80._tag === "some") {
+        const ta = __ring_m80._0;
         List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-        break __ring_match79;
+        break __ring_match80;
       }
-      if (__ring_m79._tag === "none") {
+      if (__ring_m80._tag === "none") {
         List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-        break __ring_match79;
+        break __ring_match80;
       }
-      __match_fail(__ring_m79);
+      __match_fail(__ring_m80);
     }
   }
   const ret = (function() {
@@ -1879,14 +1887,14 @@ function register_extern_fn(ctx, name, type_params, params, return_type, declare
     const tpname = __ring_dt3[0];
     const tv = __ring_dt3[1];
     if (((!_Map_contains_key(saved, tpname)) && (!_Set_contains(declared_names, tpname, __Str_Eq)))) {
-      __ring_match80: {
-        const __ring_m80 = tv;
-        if (__ring_m80._tag === "TypeVar") {
-          const id = __ring_m80.id;
+      __ring_match81: {
+        const __ring_m81 = tv;
+        if (__ring_m81._tag === "TypeVar") {
+          const id = __ring_m81.id;
           List_push(type_vars, id);
-          break __ring_match80;
+          break __ring_match81;
         }
-        break __ring_match80;
+        break __ring_match81;
       }
     }
   }
@@ -1904,29 +1912,29 @@ function register_extern_fn(ctx, name, type_params, params, return_type, declare
       if ((!_Map_contains_key(ctx.env.trait_reg.traits, b.trait_name))) {
         const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${b.trait_name}`, tp.span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${b.trait_name}'`));
       }
-      __ring_match81: {
-        const __ring_m81 = tv;
-        if (__ring_m81._tag === "some") {
-          const t = __ring_m81._0;
-          __ring_match82: {
-            const __ring_m82 = t;
-            if (__ring_m82._tag === "TypeVar") {
-              const id = __ring_m82.id;
+      __ring_match82: {
+        const __ring_m82 = tv;
+        if (__ring_m82._tag === "some") {
+          const t = __ring_m82._0;
+          __ring_match83: {
+            const __ring_m83 = t;
+            if (__ring_m83._tag === "TypeVar") {
+              const id = __ring_m83.id;
               List_push(scheme_bounds, new env$SchemeBound(id, b.trait_name));
               const supers = collect_all_supertraits(ctx, b.trait_name);
               for (const st_name of supers) {
                 List_push(scheme_bounds, new env$SchemeBound(id, st_name));
               }
-              break __ring_match82;
+              break __ring_match83;
             }
-            break __ring_match82;
+            break __ring_match83;
           }
-          break __ring_match81;
+          break __ring_match82;
         }
-        if (__ring_m81._tag === "none") {
-          break __ring_match81;
+        if (__ring_m82._tag === "none") {
+          break __ring_match82;
         }
-        __match_fail(__ring_m81);
+        __match_fail(__ring_m82);
       }
     }
   }
@@ -1936,28 +1944,28 @@ function register_extern_fn(ctx, name, type_params, params, return_type, declare
   } else {
     env$TypeEnv_bind_mono(ctx.env, name, fn_type);
   }
-  __ring_match83: {
-    const __ring_m83 = env$TypeEnv_lookup(ctx.env, name);
-    if (__ring_m83._tag === "some") {
-      const s = __ring_m83._0;
-      __ring_match84: {
-        const __ring_m84 = s.def_id;
-        if (__ring_m84._tag === "some") {
-          const did = __ring_m84._0;
+  __ring_match84: {
+    const __ring_m84 = env$TypeEnv_lookup(ctx.env, name);
+    if (__ring_m84._tag === "some") {
+      const s = __ring_m84._0;
+      __ring_match85: {
+        const __ring_m85 = s.def_id;
+        if (__ring_m85._tag === "some") {
+          const did = __ring_m85._0;
           return env$TypeEnv_record_def_span(ctx.env, did, span);
-          break __ring_match84;
+          break __ring_match85;
         }
-        if (__ring_m84._tag === "none") {
-          break __ring_match84;
+        if (__ring_m85._tag === "none") {
+          break __ring_match85;
         }
-        __match_fail(__ring_m84);
+        __match_fail(__ring_m85);
       }
-      break __ring_match83;
+      break __ring_match84;
     }
-    if (__ring_m83._tag === "none") {
-      break __ring_match83;
+    if (__ring_m84._tag === "none") {
+      break __ring_match84;
     }
-    __match_fail(__ring_m83);
+    __match_fail(__ring_m84);
   }
 }
 
@@ -1968,14 +1976,14 @@ function register_extern_type(ctx, name, type_params) {
   for (const tp of type_params) {
     List_push(tp_names, tp.name);
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match85: {
-      const __ring_m85 = tv;
-      if (__ring_m85._tag === "TypeVar") {
-        const id = __ring_m85.id;
+    __ring_match86: {
+      const __ring_m86 = tv;
+      if (__ring_m86._tag === "TypeVar") {
+        const id = __ring_m86.id;
         List_push(tp_vars, id);
-        break __ring_match85;
+        break __ring_match86;
       }
-      break __ring_match85;
+      break __ring_match86;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -1988,14 +1996,14 @@ function register_type_alias(ctx, name, type_params, type_expr) {
   let tp_vars = [];
   for (const tp of type_params) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match86: {
-      const __ring_m86 = tv;
-      if (__ring_m86._tag === "TypeVar") {
-        const id = __ring_m86.id;
+    __ring_match87: {
+      const __ring_m87 = tv;
+      if (__ring_m87._tag === "TypeVar") {
+        const id = __ring_m87.id;
         List_push(tp_vars, id);
-        break __ring_match86;
+        break __ring_match87;
       }
-      break __ring_match86;
+      break __ring_match87;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -2010,43 +2018,43 @@ function register_type_alias(ctx, name, type_params, type_expr) {
 
 function register_const(ctx, name, type_annotation, span) {
   check_duplicate_def(ctx, name, span);
-  __ring_match87: {
-    const __ring_m87 = type_annotation;
-    if (__ring_m87._tag === "some") {
-      const texpr = __ring_m87._0;
+  __ring_match88: {
+    const __ring_m88 = type_annotation;
+    if (__ring_m88._tag === "some") {
+      const texpr = __ring_m88._0;
       const ty = infer_ctx$resolve_type_expr(ctx, texpr);
       env$TypeEnv_bind_mono(ctx.env, name, ty);
-      break __ring_match87;
-    }
-    if (__ring_m87._tag === "none") {
-      const tv = env$TypeEnv_fresh_var(ctx.env);
-      env$TypeEnv_bind_mono(ctx.env, name, tv);
-      break __ring_match87;
-    }
-    __match_fail(__ring_m87);
-  }
-  __ring_match88: {
-    const __ring_m88 = env$TypeEnv_lookup(ctx.env, name);
-    if (__ring_m88._tag === "some") {
-      const s = __ring_m88._0;
-      __ring_match89: {
-        const __ring_m89 = s.def_id;
-        if (__ring_m89._tag === "some") {
-          const did = __ring_m89._0;
-          return env$TypeEnv_record_def_span(ctx.env, did, span);
-          break __ring_match89;
-        }
-        if (__ring_m89._tag === "none") {
-          break __ring_match89;
-        }
-        __match_fail(__ring_m89);
-      }
       break __ring_match88;
     }
     if (__ring_m88._tag === "none") {
+      const tv = env$TypeEnv_fresh_var(ctx.env);
+      env$TypeEnv_bind_mono(ctx.env, name, tv);
       break __ring_match88;
     }
     __match_fail(__ring_m88);
+  }
+  __ring_match89: {
+    const __ring_m89 = env$TypeEnv_lookup(ctx.env, name);
+    if (__ring_m89._tag === "some") {
+      const s = __ring_m89._0;
+      __ring_match90: {
+        const __ring_m90 = s.def_id;
+        if (__ring_m90._tag === "some") {
+          const did = __ring_m90._0;
+          return env$TypeEnv_record_def_span(ctx.env, did, span);
+          break __ring_match90;
+        }
+        if (__ring_m90._tag === "none") {
+          break __ring_match90;
+        }
+        __match_fail(__ring_m90);
+      }
+      break __ring_match89;
+    }
+    if (__ring_m89._tag === "none") {
+      break __ring_match89;
+    }
+    __match_fail(__ring_m89);
   }
 }
 
@@ -2058,31 +2066,31 @@ function register_sig(ctx, name, members, is_pub) {
     const msaved = map_clone(ctx.type_param_scope);
     for (const tp of m.type_params) {
       const tv = env$TypeEnv_fresh_var(ctx.env);
-      __ring_match90: {
-        const __ring_m90 = tv;
-        if (__ring_m90._tag === "TypeVar") {
-          const id = __ring_m90.id;
+      __ring_match91: {
+        const __ring_m91 = tv;
+        if (__ring_m91._tag === "TypeVar") {
+          const id = __ring_m91.id;
           List_push(type_vars, id);
-          break __ring_match90;
+          break __ring_match91;
         }
-        break __ring_match90;
+        break __ring_match91;
       }
       _Map_insert(ctx.type_param_scope, tp.name, tv);
     }
     let param_types = [];
     for (const p of m.params) {
-      __ring_match91: {
-        const __ring_m91 = p.type_annotation;
-        if (__ring_m91._tag === "some") {
-          const ta = __ring_m91._0;
+      __ring_match92: {
+        const __ring_m92 = p.type_annotation;
+        if (__ring_m92._tag === "some") {
+          const ta = __ring_m92._0;
           List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-          break __ring_match91;
+          break __ring_match92;
         }
-        if (__ring_m91._tag === "none") {
+        if (__ring_m92._tag === "none") {
           List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-          break __ring_match91;
+          break __ring_match92;
         }
-        __match_fail(__ring_m91);
+        __match_fail(__ring_m92);
       }
     }
     const ret = (function() {
@@ -2112,113 +2120,87 @@ function register_effect_alias(ctx, name, type_params, effects, span) {
 }
 
 function register_decl(ctx, decl) {
-  __ring_match92: {
-    const __ring_m92 = decl;
-    if (__ring_m92._tag === "Struct") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params; const fields = __ring_m92.fields; const span = __ring_m92.span;
+  __ring_match93: {
+    const __ring_m93 = decl;
+    if (__ring_m93._tag === "Struct") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params; const fields = __ring_m93.fields; const span = __ring_m93.span;
       preregister_struct(ctx, name, type_params);
       return complete_struct_fields(ctx, name, fields);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Enum") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params; const variants = __ring_m92.variants; const span = __ring_m92.span;
+    if (__ring_m93._tag === "Enum") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params; const variants = __ring_m93.variants; const span = __ring_m93.span;
       preregister_enum(ctx, name, type_params);
       return complete_enum_variants(ctx, name, type_params, variants);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Effect") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params; const ops = __ring_m92.ops;
+    if (__ring_m93._tag === "Effect") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params; const ops = __ring_m93.ops;
       return register_effect(ctx, name, type_params, ops);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Impl") {
-      const target_type = __ring_m92.target_type; const type_params = __ring_m92.type_params; const trait_name = __ring_m92.trait_name; const methods = __ring_m92.methods; const span = __ring_m92.span;
+    if (__ring_m93._tag === "Impl") {
+      const target_type = __ring_m93.target_type; const type_params = __ring_m93.type_params; const trait_name = __ring_m93.trait_name; const methods = __ring_m93.methods; const span = __ring_m93.span;
       return register_impl(ctx, target_type, type_params, trait_name, methods, span);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Fn") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params; const params = __ring_m92.params; const return_type = __ring_m92.return_type; const declared_effects = __ring_m92.declared_effects; const span = __ring_m92.span;
+    if (__ring_m93._tag === "Fn") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params; const params = __ring_m93.params; const return_type = __ring_m93.return_type; const declared_effects = __ring_m93.declared_effects; const span = __ring_m93.span;
       return register_fn(ctx, name, type_params, params, return_type, declared_effects, span);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Test") {
-      break __ring_match92;
+    if (__ring_m93._tag === "Test") {
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Trait") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params; const supertraits = __ring_m92.supertraits; const methods = __ring_m92.methods; const span = __ring_m92.span;
+    if (__ring_m93._tag === "Trait") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params; const supertraits = __ring_m93.supertraits; const methods = __ring_m93.methods; const span = __ring_m93.span;
       return register_trait(ctx, name, type_params, supertraits, methods, span);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "ExternFn") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params; const params = __ring_m92.params; const return_type = __ring_m92.return_type; const declared_effects = __ring_m92.declared_effects; const span = __ring_m92.span;
+    if (__ring_m93._tag === "ExternFn") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params; const params = __ring_m93.params; const return_type = __ring_m93.return_type; const declared_effects = __ring_m93.declared_effects; const span = __ring_m93.span;
       return register_extern_fn(ctx, name, type_params, params, return_type, declared_effects, span);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "ExternType") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params;
+    if (__ring_m93._tag === "ExternType") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params;
       return register_extern_type(ctx, name, type_params);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "TypeAlias") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params; const type_expr = __ring_m92.type_expr;
+    if (__ring_m93._tag === "TypeAlias") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params; const type_expr = __ring_m93.type_expr;
       return register_type_alias(ctx, name, type_params, type_expr);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Const") {
-      const name = __ring_m92.name; const type_annotation = __ring_m92.type_annotation; const span = __ring_m92.span;
+    if (__ring_m93._tag === "Const") {
+      const name = __ring_m93.name; const type_annotation = __ring_m93.type_annotation; const span = __ring_m93.span;
       return register_const(ctx, name, type_annotation, span);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Sig") {
-      const name = __ring_m92.name; const members = __ring_m92.members; const is_pub = __ring_m92.is_pub;
+    if (__ring_m93._tag === "Sig") {
+      const name = __ring_m93.name; const members = __ring_m93.members; const is_pub = __ring_m93.is_pub;
       return register_sig(ctx, name, members, is_pub);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "EffectAlias") {
-      const name = __ring_m92.name; const type_params = __ring_m92.type_params; const effects = __ring_m92.effects; const span = __ring_m92.span;
+    if (__ring_m93._tag === "EffectAlias") {
+      const name = __ring_m93.name; const type_params = __ring_m93.type_params; const effects = __ring_m93.effects; const span = __ring_m93.span;
       return register_effect_alias(ctx, name, type_params, effects, span);
-      break __ring_match92;
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "Delegate") {
-      break __ring_match92;
+    if (__ring_m93._tag === "Delegate") {
+      break __ring_match93;
     }
-    if (__ring_m92._tag === "ModBlock") {
-      const mod_name = __ring_m92.name; const mod_decls = __ring_m92.decls;
-      for (const d of mod_decls) {
-        __ring_match93: {
-          const __ring_m93 = d;
-          if (__ring_m93._tag === "Struct") {
-            const prefixed = prefix_decl_name(mod_name, d);
-            register_decl(ctx, prefixed);
-            break __ring_match93;
-          }
-          if (__ring_m93._tag === "Enum") {
-            const prefixed = prefix_decl_name(mod_name, d);
-            register_decl(ctx, prefixed);
-            break __ring_match93;
-          }
-          break __ring_match93;
-        }
-      }
+    if (__ring_m93._tag === "ModBlock") {
+      const mod_name = __ring_m93.name; const mod_decls = __ring_m93.decls;
       for (const d of mod_decls) {
         __ring_match94: {
           const __ring_m94 = d;
-          if (__ring_m94._tag === "Trait") {
+          if (__ring_m94._tag === "Struct") {
             const prefixed = prefix_decl_name(mod_name, d);
             register_decl(ctx, prefixed);
             break __ring_match94;
           }
-          if (__ring_m94._tag === "Effect") {
-            const prefixed = prefix_decl_name(mod_name, d);
-            register_decl(ctx, prefixed);
-            break __ring_match94;
-          }
-          if (__ring_m94._tag === "EffectAlias") {
-            const prefixed = prefix_decl_name(mod_name, d);
-            register_decl(ctx, prefixed);
-            break __ring_match94;
-          }
-          if (__ring_m94._tag === "ExternType") {
+          if (__ring_m94._tag === "Enum") {
             const prefixed = prefix_decl_name(mod_name, d);
             register_decl(ctx, prefixed);
             break __ring_match94;
@@ -2230,32 +2212,66 @@ function register_decl(ctx, decl) {
       for (const d of mod_decls) {
         __ring_match95: {
           const __ring_m95 = d;
-          if (__ring_m95._tag === "Struct") {
-            break __ring_match95;
-          }
-          if (__ring_m95._tag === "Enum") {
-            break __ring_match95;
-          }
           if (__ring_m95._tag === "Trait") {
+            const prefixed = prefix_decl_name(mod_name, d);
+            register_decl(ctx, prefixed);
+            insert_mod_aliases(ctx, mod_name, mod_decls, true);
             break __ring_match95;
           }
-          if (__ring_m95._tag === "Effect") {
-            break __ring_match95;
-          }
-          if (__ring_m95._tag === "EffectAlias") {
-            break __ring_match95;
-          }
-          if (__ring_m95._tag === "ExternType") {
-            break __ring_match95;
-          }
-          const prefixed = prefix_decl_name(mod_name, d);
-          register_decl(ctx, prefixed);
           break __ring_match95;
         }
       }
-      break __ring_match92;
+      for (const d of mod_decls) {
+        __ring_match96: {
+          const __ring_m96 = d;
+          if (__ring_m96._tag === "Effect") {
+            const prefixed = prefix_decl_name(mod_name, d);
+            register_decl(ctx, prefixed);
+            break __ring_match96;
+          }
+          if (__ring_m96._tag === "EffectAlias") {
+            const prefixed = prefix_decl_name(mod_name, d);
+            register_decl(ctx, prefixed);
+            break __ring_match96;
+          }
+          if (__ring_m96._tag === "ExternType") {
+            const prefixed = prefix_decl_name(mod_name, d);
+            register_decl(ctx, prefixed);
+            break __ring_match96;
+          }
+          break __ring_match96;
+        }
+      }
+      insert_mod_aliases(ctx, mod_name, mod_decls, true);
+      for (const d of mod_decls) {
+        __ring_match97: {
+          const __ring_m97 = d;
+          if (__ring_m97._tag === "Struct") {
+            break __ring_match97;
+          }
+          if (__ring_m97._tag === "Enum") {
+            break __ring_match97;
+          }
+          if (__ring_m97._tag === "Trait") {
+            break __ring_match97;
+          }
+          if (__ring_m97._tag === "Effect") {
+            break __ring_match97;
+          }
+          if (__ring_m97._tag === "EffectAlias") {
+            break __ring_match97;
+          }
+          if (__ring_m97._tag === "ExternType") {
+            break __ring_match97;
+          }
+          const prefixed = prefix_decl_name(mod_name, d);
+          register_decl(ctx, prefixed);
+          break __ring_match97;
+        }
+      }
+      break __ring_match93;
     }
-    __match_fail(__ring_m92);
+    __match_fail(__ring_m93);
   }
 }
 

@@ -132,7 +132,7 @@ fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: Lis
             deferred_enum_names.push(name)
         },
         Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
-            // Pass 1: register struct/enum types first (preregister)
+            // Pass 1a: register struct/enum types first (preregister)
             for d in mod_decls {
                 match d {
                     Decl::Struct { .. } => {
@@ -146,13 +146,24 @@ fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: Lis
                     _ => {}
                 }
             }
-            // Pass 1b: register trait/effect/effect-alias/extern-type before impl
+            // Incremental aliases: struct/enum short names available for trait bounds
+            insert_mod_aliases(ctx, mod_name, mod_decls, true)
+            // Pass 1b-1: traits — alias after each so supertraits resolve by short name (#83)
             for d in mod_decls {
                 match d {
                     Decl::Trait { .. } => {
                         let prefixed = prefix_decl_name(mod_name, d)
                         register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                        // Incremental alias: makes this trait's short name available
+                        // for subsequent traits' supertrait lookup (#83)
+                        insert_mod_aliases(ctx, mod_name, mod_decls, true)
                     },
+                    _ => {}
+                }
+            }
+            // Pass 1b-2: effects, effect aliases, extern types
+            for d in mod_decls {
+                match d {
                     Decl::Effect { .. } => {
                         let prefixed = prefix_decl_name(mod_name, d)
                         register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
@@ -168,6 +179,7 @@ fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: Lis
                     _ => {}
                 }
             }
+            // Final aliases: all names available for phase 2
             insert_mod_aliases(ctx, mod_name, mod_decls, true)
             // Pass 2: register everything else (functions, impls, consts, etc.)
             for d in mod_decls {
@@ -1469,13 +1481,24 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
                     _ => {}
                 }
             }
-            // Register trait/effect/effect-alias/extern-type before impl
+            // Incremental aliases: struct/enum short names available for trait bounds
+            insert_mod_aliases(ctx, mod_name, mod_decls, true)
+            // Register traits — alias after each so supertraits resolve by short name (#83)
             for d in mod_decls {
                 match d {
                     Decl::Trait { .. } => {
                         let prefixed = prefix_decl_name(mod_name, d)
                         register_decl(ctx, prefixed)
+                        // Incremental alias: makes this trait's short name available
+                        // for subsequent traits' supertrait lookup (#83)
+                        insert_mod_aliases(ctx, mod_name, mod_decls, true)
                     },
+                    _ => {}
+                }
+            }
+            // Register effects, effect aliases, extern types
+            for d in mod_decls {
+                match d {
                     Decl::Effect { .. } => {
                         let prefixed = prefix_decl_name(mod_name, d)
                         register_decl(ctx, prefixed)
@@ -1491,6 +1514,7 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
                     _ => {}
                 }
             }
+            // Final aliases: all names available for remaining declarations
             insert_mod_aliases(ctx, mod_name, mod_decls, true)
             // Register everything else (functions, impls, consts, etc.)
             for d in mod_decls {
