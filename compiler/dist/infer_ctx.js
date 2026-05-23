@@ -184,7 +184,7 @@ class CompileError {
 }
 
 class InferCtx {
-  constructor(env, subst, sink, type_param_scope, current_fn_return_type, current_fn_bounds, fn_bounds_stack, loop_depth, mod_path_stack, use_aliases) {
+  constructor(env, subst, sink, type_param_scope, current_fn_return_type, current_fn_bounds, fn_bounds_stack, loop_depth, mod_path_stack, use_aliases, boxed_vars, lambda_depth, var_lambda_depth, fn_mut_params) {
     this.env = env;
     this.subst = subst;
     this.sink = sink;
@@ -195,11 +195,15 @@ class InferCtx {
     this.loop_depth = loop_depth;
     this.mod_path_stack = mod_path_stack;
     this.use_aliases = use_aliases;
+    this.boxed_vars = boxed_vars;
+    this.lambda_depth = lambda_depth;
+    this.var_lambda_depth = var_lambda_depth;
+    this.fn_mut_params = fn_mut_params;
   }
 }
 
 function new_infer_ctx(sink) {
-  return new InferCtx(env$new_type_env(), unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new());
+  return new InferCtx(env$new_type_env(), unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new(), set_new(), 0, map_new(), map_new());
 }
 
 function infer_suggestion(code, message, context) {

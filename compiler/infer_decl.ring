@@ -977,6 +977,16 @@ fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     FnBodyResult { params: final_params, ret: final_ret, eff: eff, body: final_body }
 }
 
+fn is_value_type(t: Type) -> Bool {
+    match t {
+        Type::IntType => true,
+        Type::FloatType => true,
+        Type::BoolType => true,
+        Type::StrType => true,
+        _ => false
+    }
+}
+
 fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
@@ -1035,9 +1045,17 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
                 match ps.def_id {
                     some(did) => {
                         ctx.env.record_def_span(did, p.span)
+                        ctx.var_lambda_depth.insert(did, ctx.lambda_depth)
                         if p.is_mutable {
                             ctx.env.scope.mutable_vars.insert(did)
                             ctx.env.scope.mut_param_defs.insert(did)
+                            // Auto-box mut value-type parameters (not self)
+                            if p.name != "self" {
+                                let resolved_pt = apply_subst(ctx.subst, ptype)
+                                if is_value_type(resolved_pt) {
+                                    ctx.boxed_vars.insert(did)
+                                }
+                            }
                         } else {
                             ctx.env.scope.let_defs.insert(did)
                         }
@@ -1160,6 +1178,25 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
         none => {}
     }
 
+    // Register fn_mut_params for call-site pre-boxing analysis
+    // Only flag params that are mut AND value-type (Int/Float/Bool/Str).
+    // self params and reference-type params are never boxed.
+    let mut mut_flags: List<Bool> = []
+    let mut fi = 0
+    for p in params {
+        if p.name == "self" || !p.is_mutable {
+            mut_flags.push(false)
+        } else {
+            // Check if the param's resolved type is a value type
+            match final_params.get(fi) {
+                some(fp) => mut_flags.push(is_value_type(fp.ty)),
+                none => mut_flags.push(false)
+            }
+        }
+        fi = fi + 1
+    }
+    ctx.fn_mut_params.insert(name, mut_flags)
+
     HDecl::Fn {
         name: name, def_id: fn_def_id, type_params: type_params,
         params: final_params, return_type: final_ret, effects: final_effects,
@@ -1244,7 +1281,7 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
         let result = some(check_one_decl(ctx, decl, hdecls)) catch { _ => none }
     }
 
-    HProgram { decls: hdecls, derived_impls: derived_impls }
+    HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars }
 }
 
 pub fn resolve_type_expr_public(mut ctx: InferCtx, texpr: TypeExpr) -> Type {

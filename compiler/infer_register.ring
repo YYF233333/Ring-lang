@@ -1182,6 +1182,16 @@ fn check_duplicate_def(ctx: InferCtx, name: Str, span: Span) {
     }
 }
 
+fn is_register_value_type(t: Type) -> Bool {
+    match t {
+        Type::IntType => true,
+        Type::FloatType => true,
+        Type::BoolType => true,
+        Type::StrType => true,
+        _ => false
+    }
+}
+
 fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
     check_duplicate_def(ctx, name, span)
     let mut type_vars: List<Int> = []
@@ -1193,12 +1203,21 @@ fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
     }
 
     let mut param_types: List<Type> = []
+    let mut mut_flags: List<Bool> = []
     for p in params {
-        match p.type_annotation {
-            some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
-            none => param_types.push(ctx.env.fresh_var())
+        let pt = match p.type_annotation {
+            some(ta) => resolve_type_expr(ctx, ta),
+            none => ctx.env.fresh_var()
+        }
+        param_types.push(pt)
+        // Register fn_mut_params: only flag mut value-type params (not self)
+        if p.name == "self" || !p.is_mutable {
+            mut_flags.push(false)
+        } else {
+            mut_flags.push(is_register_value_type(pt))
         }
     }
+    ctx.fn_mut_params.insert(name, mut_flags)
     let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
 
     let mut declared_names: Set<Str> = set_new()

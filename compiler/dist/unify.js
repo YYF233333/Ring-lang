@@ -449,13 +449,13 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
     if (Array.isArray(__ring_m11) && __ring_m11.length === 2 && __ring_m11[0]._tag === "RecordType" && __ring_m11[1]._tag === "RecordType") {
       const a_fields = __ring_m11[0].fields; const a_tail = __ring_m11[0].tail; const b_fields = __ring_m11[1].fields; const b_tail = __ring_m11[1].tail;
       let s = subst;
-      let b_name_set = set_new();
+      let b_name_set = {value: set_new()};
       for (const f of b_fields) {
-        _Set_insert(b_name_set, f.name);
+        _Set_insert(b_name_set.value, f.name);
       }
-      let a_name_set = set_new();
+      let a_name_set = {value: set_new()};
       for (const f of a_fields) {
-        _Set_insert(a_name_set, f.name);
+        _Set_insert(a_name_set.value, f.name);
       }
       for (const af of a_fields) {
         const bf = ((__a) => { const __i = __a.findIndex((function(f) { return (f.name === af.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(b_fields);
@@ -472,8 +472,8 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
           __match_fail(__ring_m12);
         }
       }
-      const a_only = a_fields.filter((function(f) { return (!_Set_contains(b_name_set, f.name, __Str_Eq)); }));
-      const b_only = b_fields.filter((function(f) { return (!_Set_contains(a_name_set, f.name, __Str_Eq)); }));
+      const a_only = a_fields.filter((function(f) { return (!_Set_contains(b_name_set.value, f.name, __Str_Eq)); }));
+      const b_only = b_fields.filter((function(f) { return (!_Set_contains(a_name_set.value, f.name, __Str_Eq)); }));
       if (((List_len(a_only) > 0) && Option_is_none(b_tail))) {
         const missing = List_join(a_only.map((function(f) { return f.name; })), ", ");
         unify_error(ra, rb, Option_some(`record missing fields: ${missing}`), __ring_ev_fail);
@@ -564,14 +564,14 @@ function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {
     const __ring_m17 = [st, rt];
     if (Array.isArray(__ring_m17) && __ring_m17.length === 2 && __ring_m17[0]._tag === "StructType" && __ring_m17[1]._tag === "RecordType") {
       const name = __ring_m17[0].name; const struct_fields = __ring_m17[0].fields; const record_fields = __ring_m17[1].fields; const record_tail = __ring_m17[1].tail;
-      let s = subst;
+      let s = {value: subst};
       for (const rf of record_fields) {
         const sf = ((__a) => { const __i = __a.findIndex((function(f) { return (f.name === rf.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(struct_fields);
         __ring_match18: {
           const __ring_m18 = sf;
           if (__ring_m18._tag === "some") {
             const matched = __ring_m18._0;
-            s = unify(matched.ty, rf.ty, s, env, __ring_ev_fail);
+            s.value = unify(matched.ty, rf.ty, s.value, env, __ring_ev_fail);
             break __ring_match18;
           }
           if (__ring_m18._tag === "none") {
@@ -587,12 +587,12 @@ function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {
         if (__ring_m19._tag === "some") {
           const tail_id = __ring_m19._0;
           const remaining = struct_fields.filter((function(sf) { return (!record_fields.some((function(rf) { return (rf.name === sf.name); }))); }));
-          const remaining_mapped = remaining.map((function(f) { return new types$RecordField(f.name, env$apply_subst(s, f.ty)); }));
+          const remaining_mapped = remaining.map((function(f) { return new types$RecordField(f.name, env$apply_subst(s.value, f.ty)); }));
           const tail_record = types$Type_RecordType(remaining_mapped, Option_none, Option_none);
-          if (occurs_in(tail_id, tail_record, s)) {
+          if (occurs_in(tail_id, tail_record, s.value)) {
             unify_error(st, rt, Option_some("infinite type in row variable"), __ring_ev_fail);
           }
-          union_find$uf_insert(s, tail_id, tail_record);
+          union_find$uf_insert(s.value, tail_id, tail_record);
           break __ring_match19;
         }
         if (__ring_m19._tag === "none") {
@@ -600,7 +600,7 @@ function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {
         }
         __match_fail(__ring_m19);
       }
-      return s;
+      return s.value;
       break __ring_match17;
     }
     return panic("unify_struct_with_record: expected StructType and RecordType");

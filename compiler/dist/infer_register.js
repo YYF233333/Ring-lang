@@ -1685,39 +1685,64 @@ function check_duplicate_def(ctx, name, span) {
   }
 }
 
+function is_register_value_type(t) {
+  __ring_match70: {
+    const __ring_m70 = t;
+    if (__ring_m70._tag === "IntType") {
+      return true;
+      break __ring_match70;
+    }
+    if (__ring_m70._tag === "FloatType") {
+      return true;
+      break __ring_match70;
+    }
+    if (__ring_m70._tag === "BoolType") {
+      return true;
+      break __ring_match70;
+    }
+    if (__ring_m70._tag === "StrType") {
+      return true;
+      break __ring_match70;
+    }
+    return false;
+    break __ring_match70;
+  }
+}
+
 function register_fn(ctx, name, type_params, params, return_type, declared_effects, span) {
   check_duplicate_def(ctx, name, span);
   let type_vars = [];
   const saved = map_clone(ctx.type_param_scope);
   for (const tp of type_params) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match70: {
-      const __ring_m70 = tv;
-      if (__ring_m70._tag === "TypeVar") {
-        const id = __ring_m70.id;
+    __ring_match71: {
+      const __ring_m71 = tv;
+      if (__ring_m71._tag === "TypeVar") {
+        const id = __ring_m71.id;
         List_push(type_vars, id);
-        break __ring_match70;
+        break __ring_match71;
       }
-      break __ring_match70;
+      break __ring_match71;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
   let param_types = [];
+  let mut_flags = [];
   for (const p of params) {
-    __ring_match71: {
-      const __ring_m71 = p.type_annotation;
-      if (__ring_m71._tag === "some") {
-        const ta = __ring_m71._0;
-        List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-        break __ring_match71;
-      }
-      if (__ring_m71._tag === "none") {
-        List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-        break __ring_match71;
-      }
-      __match_fail(__ring_m71);
+    const pt = (function() {
+  const __ring_m = p.type_annotation;
+  if (__ring_m._tag === "some") { const ta = __ring_m._0; return infer_ctx$resolve_type_expr(ctx, ta); }
+  if (__ring_m._tag === "none") { return env$TypeEnv_fresh_var(ctx.env); }
+  __match_fail(__ring_m);
+})();
+    List_push(param_types, pt);
+    if (((p.name === "self") || (!p.is_mutable))) {
+      List_push(mut_flags, false);
+    } else {
+      List_push(mut_flags, is_register_value_type(pt));
     }
   }
+  _Map_insert(ctx.fn_mut_params, name, mut_flags);
   const ret = (function() {
   const __ring_m = return_type;
   if (__ring_m._tag === "some") { const rt = __ring_m._0; return infer_ctx$resolve_type_expr(ctx, rt); }

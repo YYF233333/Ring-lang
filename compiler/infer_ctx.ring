@@ -51,7 +51,11 @@ pub struct InferCtx {
     pub fn_bounds_stack: List<List<FnBoundsEntry>>,
     pub loop_depth: Int,
     pub mod_path_stack: List<Str>,
-    pub use_aliases: Map<Str, Str>
+    pub use_aliases: Map<Str, Str>,
+    pub boxed_vars: Set<Int>,
+    pub lambda_depth: Int,
+    pub var_lambda_depth: Map<Int, Int>,
+    pub fn_mut_params: Map<Str, List<Bool>>
 }
 
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -65,7 +69,11 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         fn_bounds_stack: [],
         loop_depth: 0,
         mod_path_stack: [],
-        use_aliases: map_new()
+        use_aliases: map_new(),
+        boxed_vars: set_new(),
+        lambda_depth: 0,
+        var_lambda_depth: map_new(),
+        fn_mut_params: map_new()
     }
 }
 

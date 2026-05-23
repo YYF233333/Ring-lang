@@ -169,6 +169,8 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
   ctx.imports_map = imports_map;
   ctx.module_imports = module_imports;
   ctx.module_exports = module_exports;
+  ctx.boxed_vars = program.boxed_vars;
+  scan_fn_mut_params(program.decls, ctx);
   __ring_match6: {
     const __ring_m6 = external_struct_fields;
     if (__ring_m6._tag === "some") {
@@ -776,82 +778,161 @@ function collect_local_calls(expr, local_names, out) {
   }
 }
 
-function collect_local_calls_stmt(stmt, local_names, out) {
+function is_codegen_value_type(t) {
   __ring_match32: {
-    const __ring_m32 = stmt;
-    if (__ring_m32._tag === "Let") {
-      const init = __ring_m32.init;
-      return collect_local_calls(init, local_names, out);
+    const __ring_m32 = t;
+    if (__ring_m32._tag === "IntType") {
+      return true;
       break __ring_match32;
     }
-    if (__ring_m32._tag === "Var") {
-      const init = __ring_m32.init;
-      return collect_local_calls(init, local_names, out);
+    if (__ring_m32._tag === "FloatType") {
+      return true;
       break __ring_match32;
     }
-    if (__ring_m32._tag === "Assign") {
-      const target = __ring_m32.target; const value = __ring_m32.value;
+    if (__ring_m32._tag === "BoolType") {
+      return true;
+      break __ring_match32;
+    }
+    if (__ring_m32._tag === "StrType") {
+      return true;
+      break __ring_match32;
+    }
+    return false;
+    break __ring_match32;
+  }
+}
+
+function scan_fn_mut_params(decls, ctx) {
+  for (const decl of decls) {
+    __ring_match33: {
+      const __ring_m33 = decl;
+      if (__ring_m33._tag === "Fn") {
+        const name = __ring_m33.name; const params = __ring_m33.params;
+        let flags = [];
+        for (const p of params) {
+          if (((p.name === "self") || (!p.is_mutable))) {
+            List_push(flags, false);
+          } else {
+            List_push(flags, is_codegen_value_type(p.ty));
+          }
+        }
+        _Map_insert(ctx.fn_mut_params, name, flags);
+        const qname = codegen_ctx$qualify(ctx, name);
+        if ((qname !== name)) {
+          _Map_insert(ctx.fn_mut_params, qname, flags);
+        }
+        break __ring_match33;
+      }
+      if (__ring_m33._tag === "Impl") {
+        const target_type = __ring_m33.target_type; const methods = __ring_m33.methods;
+        for (const m of methods) {
+          __ring_match34: {
+            const __ring_m34 = m;
+            if (__ring_m34._tag === "Fn") {
+              const mn = __ring_m34.name; const mp = __ring_m34.params;
+              let flags = [];
+              for (const p of mp) {
+                if (((p.name === "self") || (!p.is_mutable))) {
+                  List_push(flags, false);
+                } else {
+                  List_push(flags, is_codegen_value_type(p.ty));
+                }
+              }
+              const ufcs_name = `${codegen_ctx$qualify(ctx, target_type)}_${codegen_ctx$safe_ident(mn)}`;
+              _Map_insert(ctx.fn_mut_params, ufcs_name, flags);
+              break __ring_match34;
+            }
+            break __ring_match34;
+          }
+        }
+        break __ring_match33;
+      }
+      if (__ring_m33._tag === "ModBlock") {
+        const mod_decls = __ring_m33.decls;
+        scan_fn_mut_params(mod_decls, ctx);
+        break __ring_match33;
+      }
+      break __ring_match33;
+    }
+  }
+}
+
+function collect_local_calls_stmt(stmt, local_names, out) {
+  __ring_match35: {
+    const __ring_m35 = stmt;
+    if (__ring_m35._tag === "Let") {
+      const init = __ring_m35.init;
+      return collect_local_calls(init, local_names, out);
+      break __ring_match35;
+    }
+    if (__ring_m35._tag === "Var") {
+      const init = __ring_m35.init;
+      return collect_local_calls(init, local_names, out);
+      break __ring_match35;
+    }
+    if (__ring_m35._tag === "Assign") {
+      const target = __ring_m35.target; const value = __ring_m35.value;
       collect_local_calls(target, local_names, out);
       return collect_local_calls(value, local_names, out);
-      break __ring_match32;
+      break __ring_match35;
     }
-    if (__ring_m32._tag === "ExprStmt") {
-      const expr = __ring_m32.expr;
+    if (__ring_m35._tag === "ExprStmt") {
+      const expr = __ring_m35.expr;
       return collect_local_calls(expr, local_names, out);
-      break __ring_match32;
+      break __ring_match35;
     }
-    if (__ring_m32._tag === "Return") {
-      const value = __ring_m32.value;
-      __ring_match33: {
-        const __ring_m33 = value;
-        if (__ring_m33._tag === "some") {
-          const v = __ring_m33._0;
+    if (__ring_m35._tag === "Return") {
+      const value = __ring_m35.value;
+      __ring_match36: {
+        const __ring_m36 = value;
+        if (__ring_m36._tag === "some") {
+          const v = __ring_m36._0;
           return collect_local_calls(v, local_names, out);
-          break __ring_match33;
+          break __ring_match36;
         }
-        if (__ring_m33._tag === "none") {
-          break __ring_match33;
+        if (__ring_m36._tag === "none") {
+          break __ring_match36;
         }
-        __match_fail(__ring_m33);
+        __match_fail(__ring_m36);
       }
-      break __ring_match32;
+      break __ring_match35;
     }
-    if (__ring_m32._tag === "While") {
-      const condition = __ring_m32.condition; const body = __ring_m32.body;
+    if (__ring_m35._tag === "While") {
+      const condition = __ring_m35.condition; const body = __ring_m35.body;
       collect_local_calls(condition, local_names, out);
       return collect_local_calls(body, local_names, out);
-      break __ring_match32;
+      break __ring_match35;
     }
-    if (__ring_m32._tag === "ForIn") {
-      const iterable = __ring_m32.iterable; const body = __ring_m32.body;
+    if (__ring_m35._tag === "ForIn") {
+      const iterable = __ring_m35.iterable; const body = __ring_m35.body;
       collect_local_calls(iterable, local_names, out);
       return collect_local_calls(body, local_names, out);
-      break __ring_match32;
+      break __ring_match35;
     }
-    if (__ring_m32._tag === "LetDestructure") {
-      const init = __ring_m32.init;
+    if (__ring_m35._tag === "LetDestructure") {
+      const init = __ring_m35.init;
       return collect_local_calls(init, local_names, out);
-      break __ring_match32;
+      break __ring_match35;
     }
-    if (__ring_m32._tag === "IfLet") {
-      const expr = __ring_m32.expr; const then_block = __ring_m32.then_block; const else_block = __ring_m32.else_block;
+    if (__ring_m35._tag === "IfLet") {
+      const expr = __ring_m35.expr; const then_block = __ring_m35.then_block; const else_block = __ring_m35.else_block;
       collect_local_calls(expr, local_names, out);
       collect_local_calls(then_block, local_names, out);
-      __ring_match34: {
-        const __ring_m34 = else_block;
-        if (__ring_m34._tag === "some") {
-          const eb = __ring_m34._0;
+      __ring_match37: {
+        const __ring_m37 = else_block;
+        if (__ring_m37._tag === "some") {
+          const eb = __ring_m37._0;
           return collect_local_calls(eb, local_names, out);
-          break __ring_match34;
+          break __ring_match37;
         }
-        if (__ring_m34._tag === "none") {
-          break __ring_match34;
+        if (__ring_m37._tag === "none") {
+          break __ring_match37;
         }
-        __match_fail(__ring_m34);
+        __match_fail(__ring_m37);
       }
-      break __ring_match32;
+      break __ring_match35;
     }
-    break __ring_match32;
+    break __ring_match35;
   }
 }
 

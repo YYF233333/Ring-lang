@@ -31,6 +31,10 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     ctx.imports_map = imports_map
     ctx.module_imports = module_imports
     ctx.module_exports = module_exports
+    ctx.boxed_vars = program.boxed_vars
+
+    // Pre-scan fn_mut_params from HDecl::Fn and HDecl::Impl methods
+    scan_fn_mut_params(program.decls, ctx)
 
     // Load external struct fields
     match external_struct_fields {
@@ -424,6 +428,67 @@ fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>) {
             collect_local_calls(index, local_names, out)
         },
         _ => {},
+    }
+}
+
+// Pre-scan fn_mut_params: build a map from function name → list of param mutability flags.
+// Used by codegen to wrap/unwrap mut value-type parameters at call sites.
+// Check if an HParam type is a value type (Int/Float/Bool/Str) for auto-boxing
+fn is_codegen_value_type(t: Type) -> Bool {
+    match t {
+        Type::IntType => true,
+        Type::FloatType => true,
+        Type::BoolType => true,
+        Type::StrType => true,
+        _ => false
+    }
+}
+
+fn scan_fn_mut_params(decls: List<HDecl>, mut ctx: CodegenCtx) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, params, .. } => {
+                let mut flags: List<Bool> = []
+                for p in params {
+                    // Only flag params that are mut AND value-type.
+                    // self params and reference-type params are never boxed.
+                    if p.name == "self" || !p.is_mutable {
+                        flags.push(false)
+                    } else {
+                        flags.push(is_codegen_value_type(p.ty))
+                    }
+                }
+                ctx.fn_mut_params.insert(name, flags)
+                // Also register with qualify(ctx, name) for module-prefixed lookup
+                let qname = qualify(ctx, name)
+                if qname != name {
+                    ctx.fn_mut_params.insert(qname, flags)
+                }
+            },
+            HDecl::Impl { target_type, methods, .. } => {
+                for m in methods {
+                    match m {
+                        HDecl::Fn { name: mn, params: mp, .. } => {
+                            let mut flags: List<Bool> = []
+                            for p in mp {
+                                if p.name == "self" || !p.is_mutable {
+                                    flags.push(false)
+                                } else {
+                                    flags.push(is_codegen_value_type(p.ty))
+                                }
+                            }
+                            let ufcs_name = "${qualify(ctx, target_type)}_${safe_ident(mn)}"
+                            ctx.fn_mut_params.insert(ufcs_name, flags)
+                        },
+                        _ => {}
+                    }
+                }
+            },
+            HDecl::ModBlock { decls: mod_decls, .. } => {
+                scan_fn_mut_params(mod_decls, ctx)
+            },
+            _ => {}
+        }
     }
 }
 

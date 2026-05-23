@@ -488,9 +488,10 @@ class DerivedImpl {
 }
 
 class HProgram {
-  constructor(decls, derived_impls) {
+  constructor(decls, derived_impls, boxed_vars) {
     this.decls = decls;
     this.derived_impls = derived_impls;
+    this.boxed_vars = boxed_vars;
   }
 }
 

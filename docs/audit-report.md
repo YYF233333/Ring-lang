@@ -35,16 +35,54 @@
 
 应改用 raw string 或外部 .js 文件。
 
-### #7 `infer.ring` 2763 行单文件 [low] [open]
+### #7 `infer.ring` 2826 行单文件 [low] [open]
 
-应拆分为 infer_stmt/infer_expr/infer。
+编译器最大单文件，从 2565→2763→2826 行持续增长。应拆分为 infer_stmt/infer_expr/infer。
 
 
-### #14 68 处 `panic()` 调用（约 40 处 unreachable）[medium] [open]
+### #14 28 处 `panic()` 调用 [medium] [open]
 
-崩溃而非友好报错。应逐步替换为 DiagnosticSink。
+已从 68 处减少到 28 处（2026-05-24 审计确认）。分布：infer(8), exhaustive(5), derive(4), env(3), parser(2), unify(2), union_find(2), compiler_mod(1), zonk(1)。多数为内部一致性断言（unreachable），但部分可能被畸形输入触发。
 
 **修复方向**：分两类处理——(1) unreachable panic（match 兜底、不应到达的分支）：保留或改为 `panic("unreachable: ...")`，这些是内部断言；(2) 用户输入触发的 panic（文件找不到、类型错误兜底等）：替换为 `sink.emit()` 诊断 + 继续编译。优先处理第 2 类。
+
+## 技术债 / DRY 违反（2026-05-24 审计发现）
+
+### #99 `register_impl_method` 与 `register_impl_extern_method` 近乎相同 [medium] [open]
+
+两函数共 ~130 行，仅差 13 行（`register_impl_method` 多一段 `outer_saved` 类型参数作用域检查）。其余逻辑——类型参数作用域设置、self_type 解析、参数类型构建、effect 解析、methods_map 插入、mut self 追踪——完全重复。
+
+**文件**：`compiler/infer_register.ring:733-856`
+**修复方向**：合并为一个函数，用 `Bool` 参数控制 `outer_saved` 检查。可节省 ~65 行。
+
+发现者：Opus
+
+### #100 `register_fn` 与 `register_extern_fn` 近乎相同 [medium] [open]
+
+两函数共 ~150 行，共享 ~90% 逻辑：类型参数作用域、参数类型解析、declared_names 过滤、effect 解析、scheme bounds + supertrait 展开。差异仅在 `register_fn` 多了 `check_duplicate_def`、`fn_bounds_list`、`fn_mut_params` 追踪。
+
+**文件**：`compiler/infer_register.ring:1195-1350`
+**修复方向**：抽取共享注册逻辑为 helper，`register_fn` 在其上增加 fn_bounds + duplicate check。
+
+发现者：Opus
+
+### #101 ModBlock 注册逻辑在 `register_phase1` 和 `register_decl` 中重复 [medium] [open]
+
+ModBlock 的 5-pass 注册策略（struct/enum → aliases → traits+aliases → effects/extern → 其余）在两处完整重复，各 ~65 行。注释结构、`insert_mod_aliases` 调用、pass 顺序完全相同。如果注册顺序需要变更，必须同步两处，维护风险高。
+
+**文件**：`compiler/infer_register.ring:134-199` 和 `compiler/infer_register.ring:1488-1555`
+**修复方向**：抽取 `register_mod_block_inner(ctx, mod_name, mod_decls, register_fn)` helper，接受 per-item 注册函数作为参数。
+
+发现者：Opus
+
+### #102 `[""]` + `.clear()` 空列表 workaround 96 处 [low] [open]
+
+`let mut x: List<Str> = [""]; x.clear()` 模式在 codegen 文件中出现 96 次（codegen_expr:43, codegen_decl:18, codegen_derive:10 等），作为空列表类型推断的 workaround。同项目中 `let mut x: List<Str> = []` 已有 230 处正常使用（因有类型标注），该 workaround 不必要。
+
+**文件**：codegen_expr.ring(43), codegen_decl.ring(18), codegen_derive.ring(10), resolver.ring(7), compiler_mod.ring(6), exports.ring(5), codegen_stmt.ring(5), codegen.ring(1), cli.ring(1)
+**修复方向**：全局替换为 `let mut x: List<Str> = []`。机械性修改，低风险。
+
+发现者：Opus
 
 ## 架构债
 
