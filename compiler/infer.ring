@@ -52,6 +52,84 @@ fn is_value_type(t: Type) -> Bool {
 }
 
 // ============================================================
+// Local mut effect cancellation
+// ============================================================
+
+// When calling a function that has mut<T> effects, if the argument
+// corresponding to the mut parameter is a local variable (not a
+// mut function parameter), the mutation is not observable outside
+// the current function, so the mut<T> effect should be cancelled.
+//
+// callee_params: the callee's FnType parameter types
+// callee_effects: the callee's FnType effect row
+// hargs: inferred argument HExprs (same length as callee_params for regular calls;
+//        for method calls, hargs[i] corresponds to callee_params[param_offset + i])
+// param_offset: 0 for regular calls, 1 for method calls (skip self)
+fn cancel_local_mut_effects(
+    ctx: InferCtx,
+    effects: EffectRow,
+    callee_params: List<Type>,
+    callee_effects: EffectRow,
+    hargs: List<HExpr>,
+    param_offset: Int,
+    s: UnionFind
+) -> EffectRow {
+    // Collect mut effect state_types that should be cancelled
+    let mut cancel_types: List<Type> = []
+    for eff in callee_effects.effects {
+        match eff {
+            Effect::MutEffect { state_type } => {
+                let resolved_st = apply_subst(s, state_type)
+                // Find which param index has a matching type
+                let mut pi = param_offset
+                let mut ai = 0
+                while ai < hargs.len() {
+                    match callee_params.get(pi) {
+                        some(pt) => {
+                            let resolved_pt = apply_subst(s, pt)
+                            if types_equal(resolved_pt, resolved_st) {
+                                // Check if the argument is a local variable
+                                match hargs.get(ai) {
+                                    some(harg) => match harg {
+                                        HExpr::Ident { def_id: some(did), .. } => {
+                                            if !ctx.env.scope.mut_param_defs.contains(did) {
+                                                cancel_types.push(resolved_st)
+                                            }
+                                        },
+                                        _ => {}
+                                    },
+                                    none => {}
+                                }
+                            }
+                        },
+                        none => {}
+                    }
+                    pi = pi + 1
+                    ai = ai + 1
+                }
+            },
+            _ => {}
+        }
+    }
+
+    if cancel_types.len() == 0 {
+        return effects
+    }
+
+    // Filter out cancelled mut effects
+    let filtered = effects.effects.filter(fn(e) {
+        match e {
+            Effect::MutEffect { state_type } => {
+                let resolved_st = apply_subst(s, state_type)
+                !cancel_types.any(fn(ct) { types_equal(ct, resolved_st) })
+            },
+            _ => true
+        }
+    })
+    EffectRow { effects: filtered, tail: effects.tail }
+}
+
+// ============================================================
 // Resolve substitution var chain
 // ============================================================
 
@@ -1317,10 +1395,12 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     let resolved_callee_type = apply_subst(s, hexpr_type(callee_r.hexpr))
 
     match resolved_callee_type {
-        Type::FnType { effects: fn_effects, .. } => {
+        Type::FnType { params: callee_params, effects: fn_effects, .. } => {
             let me = merge_effects(ctx.env, effects, fn_effects, s)
             effects = me.0
             s = me.1
+            // Cancel mut<T> effects for arguments that are local variables
+            effects = cancel_local_mut_effects(ctx, effects, callee_params, fn_effects, hargs, 0, s)
         },
         _ => {}
     }
@@ -1746,6 +1826,9 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
                 let me = merge_effects(ctx.env, effects, mt_effects, s)
                 effects = me.0
                 s = me.1
+                // Cancel mut<T> effects for method arguments that are local variables
+                // param_offset=1 because mt_params[0] is self
+                effects = cancel_local_mut_effects(ctx, effects, mt_params, mt_effects, hargs, 1, s)
             },
             _ => {
                 match recv_type {

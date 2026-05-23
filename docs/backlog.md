@@ -24,13 +24,16 @@
 **设计验证（Stabilize 前置，阻塞层 3）**：
 - B-042 Perceus 循环引用策略 [M]（阻塞 B-012）
 - ~~B-043 Refinement × Linear × Effects 交互矩阵 [M]~~ ✅ 已完成（2026-05-24）
-- B-044 Ring 语义规范 [M]（阻塞 B-011 LLVM）
+- ~~B-044 Ring 语义规范 [M]~~ ✅ 已完成（2026-05-24）
 
 **关键路径（2026-05-24 更新）**：
-- B-004 → B-036 → B-044 → B-011 LLVM（关联类型 → Iterator → 语义规范 → LLVM 基础后端）
+- B-004 → B-036 → B-011 LLVM（关联类型 → Iterator → LLVM 基础后端）
+- B-004/B-036 阻塞 LLVM 原因：编译器自身需要这些语法糖
+- Linear types 不阻塞基础 LLVM，是 Perceus RC 的前置
 - B-042 与关键路径并行，阻塞 B-012 Perceus 但不阻塞 LLVM 基础
 - B-033 GADTs 移出层 2，推迟至 LLVM 之后（无下游依赖，非编译器自举需求）
 - 层 3（Refinement/Linear/async）在 LLVM 基础后端可用后启动
+- **LLVM 落地后 JS 后端废弃**
 
 ---
 
@@ -407,14 +410,15 @@ for x in collection { body }
 > 优化分两层：AOT（LLVM 编译期）和 JIT（运行时 PGO），很多优化两层都可以做。
 > 前置依赖链：LLVM backend → Perceus RC → 各项优化 pass → JIT（远期）。
 
-### B-011 LLVM Native Backend [feature] [P3] [XL] [queued]
-编译到 LLVM IR，所有后续优化的基础。
+### B-011 LLVM Native Backend [feature] [P1] [XL] [queued]
+编译到 LLVM IR，所有后续优化的基础。**LLVM 落地后 JS 后端废弃。**
 
-- **前置依赖**：Linear types（Perceus RC 基础）；Str Unicode 语义统一（消除 JS-ism）
+- **前置依赖**：B-004（关联类型）+ B-036（Iterator）——编译器自身需要这些语法糖。~~B-044 语义规范~~ ✅ 已完成
+- **不阻塞基础 LLVM**：Linear types / Perceus RC（后续增量添加）
 - **FFI 边界 effect 设计**：
   1. Evidence 传递：LLVM 端用 TLS handler stack，C 函数无需感知
   2. Effect-free 函数保证干净 C ABI，零成本互调
-  3. 跨语言资源安全：Linear types + `defer` 清理 FFI 资源
+  3. 跨语言资源安全：Linear types + `defer` 清理 FFI 资源（Perceus RC 阶段实现）
 
 ### B-012 Perceus 引用计数 [feature] [P3] [XL] [queued]
 精确 RC + 就地复用分析（reuse analysis），消除 GC。
@@ -519,33 +523,6 @@ source-map 支持 + 断点调试。
 - **复杂度**：大
 - **优先级**：Phase D/E
 
-### B-048 Local Effect Cancellation [feature] [P2] [S] [queued]
-局部变量引起的 `mut<T>` effect 应在调用点消除，避免假阳性传播。
-
-**问题**：
-```ring
-fn bar() {
-    let mut local = []
-    push_item(local)  // push_item 有 mut<List<Int>> effect → 传播到 bar
-}
-```
-`local` 是局部变量，对它的 mutation 不是 `bar` 的可观测副作用，但 `push_item` 的 `mut<List<Int>>` effect 仍然传播到 `bar` 的签名。
-
-**前置依赖**：B-037（`mut<T>` marker effect）+ B-047（auto-boxing）
-
-**涉及修改**：
-1. `infer.ring`：函数调用推断完成后，检查 `mut<T>` effect 的实际 receiver——如果对应的实参是局部变量（不在 `mut_param_defs` 中），从函数的 effect row 中移除该 `mut<T>`
-2. 需要在 effect unification 之后、函数签名 generalize 之前执行消除
-3. `infer.ring`：闭包捕获 `let mut` 变量时，在闭包签名注入 `mut<T>` effect（B-047 遗留，Worker 通知 #11）
-
-**验收标准**：
-- `fn bar() { let mut local = []; local.push(1) }` → bar 无 `mut` effect
-- `fn bar(mut list: List<Int>) { list.push(1) }` → bar 有 `mut<List<Int>>` effect（参数 mutation，不消除）
-- 间接调用：`fn bar() { let mut local = []; push_item(local) }` → bar 无 `mut` effect
-- 闭包捕获 `let mut x`：闭包签名包含 `mut<T>` effect
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
-
 ## 设计验证（Stabilize 前置）
 
 > 非实现任务，而是设计探针。在对应 XL 特性实现前完成，防止特性交互导致事后 breaking change。
@@ -571,31 +548,6 @@ Perceus RC 不处理循环引用。Ring 有 OOP 手感（struct + impl + delegat
 **前置依赖**：无
 **阻塞**：B-012 Perceus RC
 
-
-### B-044 Ring 语义规范（后端无关）[design] [P1] [M] [queued]
-JS 后端和 LLVM 后端存在语义鸿沟（Int 溢出、字符串编码、数组越界行为）。需要在 LLVM 实现前钉死 Ring 语言自身的语义规范，两个后端都必须符合。
-
-**需要规范的语义**：
-
-| 维度 | 需要决定 | JS 现状 | LLVM 预期 |
-|------|---------|---------|-----------|
-| Int 溢出 | 回绕 / panic / 自动 BigInt？ | 静默变 Float（f64） | 二补数回绕（i64） |
-| Int 范围 | 固定 i64 / 平台依赖 / BigInt？ | 安全整数 ±2^53 | i64 ±2^63 |
-| Float 精度 | IEEE 754 double？ | 是 | 是 |
-| 字符串编码 | UTF-8 / UTF-16 / 抽象 Unicode？ | UTF-16（JS 内部） | UTF-8（通常选择） |
-| `str[i]` 语义 | 字节 / code unit / code point / grapheme？ | UTF-16 code unit | 取决于编码决策 |
-| `str.len()` | 字节 / code unit / code point / grapheme？ | UTF-16 code unit 数 | 取决于编码决策 |
-| 数组越界 | panic / 返回 Option / UB？ | 返回 undefined（已改为 panic） | panic |
-| 整数除零 | panic / Infinity / 编译错误？ | Infinity（JS） | panic 或 refinement 排除 |
-| 栈溢出 | panic / UB？ | RangeError | 取决于平台 |
-
-**验收标准**：
-- 语义规范文档写入 design.md 新章节
-- JS 后端的不符合项列出 + 计划（哪些需要修正，哪些可以容忍到 LLVM）
-- LLVM 后端 codegen 设计时直接引用本规范
-
-**前置依赖**：无
-**阻塞**：B-011 LLVM Backend
 
 ## 架构改进
 
