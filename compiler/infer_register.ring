@@ -5,7 +5,7 @@ use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, mono, apply_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506}
+use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
 
 // ============================================================
@@ -230,6 +230,77 @@ pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
     }
     for decl in decls {
         let result = some(register_phase2_enum(ctx, decl)) catch { _ => none }
+    }
+
+    // Phase 3: process delegates (after struct/enum fields are complete)
+    for decl in decls {
+        let result = some(register_phase3_delegate(ctx, decl)) catch { _ => none }
+    }
+}
+
+fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
+    match decl {
+        Decl::Impl { target_type, type_params, methods, span, .. } => {
+            // Check if any methods are delegates
+            let mut has_delegates = false
+            for m in methods {
+                match m { Decl::Delegate { .. } => { has_delegates = true }, _ => {} }
+            }
+            if has_delegates {
+                // Reconstruct type param scope and impl_methods_map for registration
+                let saved = map_clone(ctx.type_param_scope)
+                let mut impl_tv_ids: List<Int> = []
+                for tp in type_params {
+                    let tv = ctx.env.fresh_var()
+                    match tv { Type::TypeVar { id, .. } => { impl_tv_ids.push(id) }, _ => {} }
+                    ctx.type_param_scope.insert(tp.name, tv)
+                }
+
+                let mut impl_scheme_bounds: List<SchemeBound> = []
+                let mut tp_idx = 0
+                for tp in type_params {
+                    for b in tp.bounds {
+                        if tp_idx < impl_tv_ids.len() {
+                            let tv_id = impl_tv_ids.get(tp_idx).unwrap()
+                            impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: b.trait_name })
+                            let supers = collect_all_supertraits(ctx, b.trait_name)
+                            for st_name in supers {
+                                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name })
+                            }
+                        }
+                    }
+                    tp_idx = tp_idx + 1
+                }
+
+                let mut impl_methods_map = match ctx.env.trait_reg.impl_methods.get(target_type) {
+                    some(m) => m,
+                    none => {
+                        let mut new_map: Map<Str, TypeScheme> = map_new()
+                        ctx.env.trait_reg.impl_methods.insert(target_type, new_map)
+                        new_map
+                    }
+                }
+
+                for m in methods {
+                    match m {
+                        Decl::Delegate { field, trait_names, span: dspan } => {
+                            register_delegate(ctx, impl_methods_map, impl_tv_ids, target_type,
+                                field, trait_names, dspan, impl_scheme_bounds, saved, type_params)
+                        },
+                        _ => {}
+                    }
+                }
+
+                ctx.type_param_scope = saved
+            }
+        },
+        Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
+            for d in mod_decls {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_phase3_delegate(ctx, prefixed)
+            }
+        },
+        _ => {}
     }
 }
 
@@ -561,6 +632,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                 register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params),
             Decl::ExternFn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
                 register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params),
+            Decl::Delegate { .. } => {},  // Deferred to register_phase3_delegate (needs complete struct fields)
             _ => {}
         }
     }
@@ -769,6 +841,125 @@ fn register_impl_extern_method(
     }
 
     ctx.type_param_scope = saved_method
+}
+
+// ============================================================
+// Delegate registration
+// ============================================================
+
+fn register_delegate(
+    mut ctx: InferCtx, mut methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
+    target_type: Str, field: Str, trait_names: List<Str>, span: Span,
+    impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>,
+    impl_type_params: List<TypeParam>
+) {
+    // 1. Validate field exists on target struct
+    match ctx.env.types.structs.get(target_type) {
+        none => {
+            let _ = type_error(ctx.sink, E0507,
+                "delegate can only be used on struct types, '${target_type}' is not a struct",
+                span, DiagnosticContext::TraitError { detail: "delegate on non-struct type" })
+        },
+        some(struct_def) => {
+            let mut field_type: Type? = none
+            for f in struct_def.fields {
+                if f.name == field {
+                    field_type = some(f.ty)
+                }
+            }
+            match field_type {
+                none => {
+                    let _ = type_error(ctx.sink, E0507,
+                        "field '${field}' not found in struct '${target_type}'",
+                        span, DiagnosticContext::TraitError { detail: "delegate field not found" })
+                },
+                some(ft) => {
+                    // Get the field type name for looking up trait impls
+                    let mut field_type_name: Str? = none
+                    match ft {
+                        Type::StructType { name, .. } => { field_type_name = some(name) },
+                        Type::EnumType { name, .. } => { field_type_name = some(name) },
+                        _ => {
+                            let _ = type_error(ctx.sink, E0507,
+                                "delegate field '${field}' must have a named type (struct or enum)",
+                                span, DiagnosticContext::TraitError { detail: "delegate field has unnamed type" })
+                        }
+                    }
+                    match field_type_name {
+                        none => {},
+                        some(ftn) => {
+                            register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type,
+                                field, trait_names, span, impl_scheme_bounds, impl_type_params, ftn, ft)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn register_delegate_traits(
+    mut ctx: InferCtx, mut methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
+    target_type: Str, field: Str, trait_names: List<Str>, span: Span,
+    impl_scheme_bounds: List<SchemeBound>, impl_type_params: List<TypeParam>,
+    field_type_name: Str, ft: Type
+) {
+    for tname in trait_names {
+        match ctx.env.trait_reg.traits.get(tname) {
+            none => {
+                let _ = type_error(ctx.sink, E0501,
+                    "Unknown trait: ${tname}",
+                    span, DiagnosticContext::TraitError { detail: "unknown trait '${tname}'" })
+            },
+            some(trait_def) => {
+                // Validate that the field type implements the trait
+                let mut has_impl = false
+                for impl_ in ctx.env.trait_reg.trait_impls {
+                    if impl_.trait_name == tname && impl_.target_type_name == field_type_name {
+                        has_impl = true
+                    }
+                }
+                if !has_impl {
+                    let _ = type_error(ctx.sink, E0508,
+                        "type '${field_type_name}' (field '${field}') does not implement trait '${tname}'",
+                        span, DiagnosticContext::TraitError { detail: "delegate field type missing trait impl" })
+                } else {
+                    // Register ImplEntry for target_type implementing tname
+                    let mut tp_names: List<Str> = []
+                    for tp in impl_type_params { tp_names.push(tp.name) }
+                    let mut method_names: List<Str> = []
+                    for tm in trait_def.methods { method_names.push(tm.name) }
+                    ctx.env.trait_reg.trait_impls.push(ImplEntry {
+                        trait_name: tname, target_type_name: target_type,
+                        type_params: tp_names, method_names: method_names
+                    })
+
+                    // Register forwarding methods for each trait method
+                    let self_type = resolve_impl_self_type(ctx, target_type, impl_type_params)
+                    for tm in trait_def.methods {
+                        match tm.ty {
+                            Type::FnType { params: trait_params, return_type: ret_ty, effects: eff } => {
+                                // Build param types: replace first param (Self) with target_type
+                                let mut param_types: List<Type> = []
+                                let mut first = true
+                                for tp in trait_params {
+                                    if first {
+                                        param_types.push(self_type)
+                                        first = false
+                                    } else {
+                                        param_types.push(tp)
+                                    }
+                                }
+                                let fn_type = Type::FnType { params: param_types, return_type: ret_ty, effects: eff }
+                                methods_map.insert(tm.name, TypeScheme { ty: fn_type, type_vars: list_clone(impl_tv_ids), bounds: impl_scheme_bounds, def_id: none })
+                            },
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ============================================================
@@ -1200,6 +1391,7 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
             register_sig(ctx, name, members, is_pub),
         Decl::EffectAlias { name, type_params, effects, span, .. } =>
             register_effect_alias(ctx, name, type_params, effects, span),
+        Decl::Delegate { .. } => {},  // Only valid inside impl blocks, handled by register_impl
         Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
             // Register struct/enum types first
             for d in mod_decls {
