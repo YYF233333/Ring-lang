@@ -2061,7 +2061,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
             for f in struct_def.fields {
                 spread_fields.push(StructField { name: f.name, ty: apply_subst_map(inst_map, f.ty), is_pub: f.is_pub })
             }
-            let spread_type = Type::StructType { name: name, type_params: type_param_types, fields: spread_fields }
+            let spread_type = Type::StructType { name: struct_def.name, type_params: type_param_types, fields: spread_fields }
             s = unify_at(ctx.sink, ctx.env, hexpr_type(sr.hexpr), spread_type, s, span)
             hspread = some(sr.hexpr)
         },
@@ -2100,12 +2100,12 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     }
 
     let struct_type = Type::StructType {
-        name: name, type_params: type_param_types,
+        name: struct_def.name, type_params: type_param_types,
         fields: struct_def.fields
     }
 
     InferResult {
-        hexpr: HExpr::StructLit { name: name, type_args: [], fields: hfields, spread: hspread, ty: struct_type, effects: effects, span: span },
+        hexpr: HExpr::StructLit { name: struct_def.name, type_args: [], fields: hfields, spread: hspread, ty: struct_type, effects: effects, span: span },
         subst: s, effects: effects
     }
 }

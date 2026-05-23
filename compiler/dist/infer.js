@@ -2946,7 +2946,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
       for (const f of struct_def.fields) {
         List_push(spread_fields, new types$StructField(f.name, env$apply_subst_map(inst_map, f.ty), f.is_pub));
       }
-      const spread_type = types$Type_StructType(name, type_param_types, spread_fields);
+      const spread_type = types$Type_StructType(struct_def.name, type_param_types, spread_fields);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(sr.hexpr), spread_type, s, span);
       hspread = Option_some(sr.hexpr);
       break __ring_match153;
@@ -2990,8 +2990,8 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
       }
     }
   }
-  const struct_type = types$Type_StructType(name, type_param_types, struct_def.fields);
-  return new infer_ctx$InferResult(hir$HExpr_StructLit(name, [], hfields, hspread, struct_type, effects, span), s, effects);
+  const struct_type = types$Type_StructType(struct_def.name, type_param_types, struct_def.fields);
+  return new infer_ctx$InferResult(hir$HExpr_StructLit(struct_def.name, [], hfields, hspread, struct_type, effects, span), s, effects);
 }
 
 function infer_named_variant_construct(ctx, enum_name, variant_name, variant, enum_def, fields, spread, span, subst, __ring_ev_fail) {
