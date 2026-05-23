@@ -66,7 +66,8 @@ pub struct TraitDef {
     pub name: Str,
     pub type_params: List<Str>,
     pub type_param_vars: List<Int>,
-    pub methods: List<TraitMethodDef>
+    pub methods: List<TraitMethodDef>,
+    pub supertraits: List<Str>
 }
 
 pub struct ImplEntry {

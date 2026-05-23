@@ -13,7 +13,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type,
     generalize, resolve_relative_qualifier}
-use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases}
+use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases, collect_all_supertraits}
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
@@ -402,6 +402,13 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
                         impl_bounds.push(FnBoundsEntry {
                             type_param_var_id: id, trait_name: bound.trait_name, type_param_name: tp.name
                         })
+                        // Expand supertrait bounds
+                        let supers = collect_all_supertraits(ctx, bound.trait_name)
+                        for st_name in supers {
+                            impl_bounds.push(FnBoundsEntry {
+                                type_param_var_id: id, trait_name: st_name, type_param_name: tp.name
+                            })
+                        }
                     }
                 },
                 _ => {}
@@ -530,6 +537,13 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
             ctx.current_fn_bounds.push(FnBoundsEntry {
                 type_param_var_id: id, trait_name: trait_name, type_param_name: "self"
             })
+            // Expand supertrait bounds for trait default body
+            let supers = collect_all_supertraits(ctx, trait_name)
+            for st_name in supers {
+                ctx.current_fn_bounds.push(FnBoundsEntry {
+                    type_param_var_id: id, trait_name: st_name, type_param_name: "self"
+                })
+            }
         },
         _ => {}
     }
@@ -679,6 +693,13 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
                         ctx.current_fn_bounds.push(FnBoundsEntry {
                             type_param_var_id: id, trait_name: bound.trait_name, type_param_name: tp.name
                         })
+                        // Expand supertrait bounds: if T: Ord and Ord: Eq, add T: Eq too
+                        let supers = collect_all_supertraits(ctx, bound.trait_name)
+                        for st_name in supers {
+                            ctx.current_fn_bounds.push(FnBoundsEntry {
+                                type_param_var_id: id, trait_name: st_name, type_param_name: tp.name
+                            })
+                        }
                     }
                 },
                 _ => {}
