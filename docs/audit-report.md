@@ -75,7 +75,7 @@
 
 发现者：Opus
 
-### #86 Parser 不支持 effect 标注/handler 中的限定路径 [medium] [open]
+### #86 Parser 不支持 effect 标注/handler 中的限定路径 [medium] [doing]
 
 effect list 解析器（parser.ring:764-794）只接受 `TkIdent` 作为 effect 名。无法解析 `with { defs::IO }` 或 handler 中的 `fx::Greeter.greet(name) => ...`。mod 内定义的 effect/effect alias 从外部无法在 effect 标注和 handler 语法中引用。
 
@@ -84,7 +84,7 @@ effect list 解析器（parser.ring:764-794）只接受 `TkIdent` 作为 effect 
 
 发现者：Opus
 
-### #88 `exports.ring` 不导出 mod 块内的 effect/trait/effect alias [medium] [open]
+### #88 `exports.ring` 不导出 mod 块内的 effect/trait/effect alias [medium] [doing]
 
 `extract_exports`（exports.ring:178-286）处理 `Decl::ModBlock` 时只匹配 `Decl::Fn`、`Decl::Struct`、`Decl::Enum`、`Decl::Const` 和嵌套 `Decl::ModBlock`。`Decl::Effect`、`Decl::EffectAlias`、`Decl::Trait`、`Decl::Impl` 被 `_ => {}` 静默丢弃。多文件编译时，消费模块无法使用另一文件 pub mod 内定义的 effect、trait 或 effect alias。
 
@@ -115,7 +115,7 @@ Trait 有 default 方法（如 `describe`）且类型 impl 未显式覆盖时，
 
 发现者：Opus
 
-### #85 Auto-derive 为 mod alias 类型生成重复代码 [medium] [open]
+### #85 Auto-derive 为 mod alias 类型生成重复代码 [medium] [doing]
 
 `collect_user_types`（derive.ring:50-66）遍历 `env.types.structs.entries()`，包含 canonical name（`geo::Point`）和 `insert_mod_aliases` 插入的短名 alias（`Point`），两者指向同一 StructDef。derive pass 为两个 key 分别生成 trait impl（如 `__geo$Point_Eq_eq` 和 `__Point_Eq_eq`），产生重复函数。
 

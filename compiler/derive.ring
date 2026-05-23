@@ -52,12 +52,16 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
     let mut result: List<UserType> = []
     for entry in env.types.structs.entries() {
         let (name, def) = entry
+        // Skip mod aliases (e.g. "Point" aliasing "geo::Point") to avoid duplicate derives
+        if name != def.name { continue }
         if builtins.contains(name) == false {
             result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none })
         }
     }
     for entry in env.types.enums.entries() {
         let (name, def) = entry
+        // Skip mod aliases to avoid duplicate derives
+        if name != def.name { continue }
         if builtins.contains(name) == false {
             result.push(UserType { name: name, type_kind: TypeKind::EnumKind, struct_def: none, enum_def: some(def) })
         }

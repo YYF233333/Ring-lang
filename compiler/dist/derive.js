@@ -249,6 +249,9 @@ function collect_user_types(env) {
     const __ring_dt0 = entry;
     const name = __ring_dt0[0];
     const def = __ring_dt0[1];
+    if ((name !== def.name)) {
+      continue;
+    }
     if ((_Set_contains(builtins, name, __Str_Eq) === false)) {
       List_push(result, new UserType(name, hir$TypeKind_StructKind, Option_some(def), Option_none));
     }
@@ -257,6 +260,9 @@ function collect_user_types(env) {
     const __ring_dt1 = entry;
     const name = __ring_dt1[0];
     const def = __ring_dt1[1];
+    if ((name !== def.name)) {
+      continue;
+    }
     if ((_Set_contains(builtins, name, __Str_Eq) === false)) {
       List_push(result, new UserType(name, hir$TypeKind_EnumKind, Option_none, Option_some(def)));
     }
