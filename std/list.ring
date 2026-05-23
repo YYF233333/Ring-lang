@@ -5,8 +5,14 @@ pub extern fn list_clone<T>(l: List<T>) -> List<T>
 impl<T> List {
     pub extern fn len(self: List<T>) -> Int
     pub extern fn get(self: List<T>, index: Int) -> Option<T>
-    pub fn first(self: List<T>) -> Option<T> { self.get(0) }
-    pub fn last(self: List<T>) -> Option<T> { self.get(self.len() - 1) }
+    pub fn first(self: List<T>) -> Option<T> {
+        if self.is_empty() { return none }
+        self.get(0)
+    }
+    pub fn last(self: List<T>) -> Option<T> {
+        if self.is_empty() { return none }
+        self.get(self.len() - 1)
+    }
     // contains and index_of moved to impl<T: Eq> List below
     pub fn is_empty(self: List<T>) -> Bool { self.len() == 0 }
     pub extern fn push(self: List<T>, item: T) -> Unit

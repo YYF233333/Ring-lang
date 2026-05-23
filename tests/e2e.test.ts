@@ -443,6 +443,7 @@ const cases: TestCase[] = [
   { file: "audit_set_contains_struct.ring", expected: "pass: set struct eq consistency\n" },
   { file: "audit_catch_on_pure.ring", expected: "pass: catch on pure warning\n" },
   { file: "audit_set_ops_deep_eq.ring", expected: "Set ops deep equality: all passed\n" },
+  { file: "audit_list_first_last_empty.ring", expected: "List first/last empty: all passed\n" },
   { file: "effect_alias.ring", expected: "Hello, world\nEffect alias: all passed\n" },
   { file: "effect_alias_generic.ring", expected: "Generic effect alias: all passed\n" },
 ];
