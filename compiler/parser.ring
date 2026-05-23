@@ -1086,6 +1086,21 @@ impl Parser {
         self.expect(TokenKind::TkLBrace)
         let mut methods: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
+            // Check for delegate before consuming pub
+            if self.check(TokenKind::TkIdent) && self.peek().value == "delegate" {
+                let d_start = self.current_span_start()
+                self.advance()   // consume "delegate"
+                let d_field = self.expect(TokenKind::TkIdent).value
+                self.expect(TokenKind::TkColon)
+                let mut d_traits: List<Str> = []
+                d_traits.push(self.expect(TokenKind::TkIdent).value)
+                while self.try_consume(TokenKind::TkComma) {
+                    d_traits.push(self.expect(TokenKind::TkIdent).value)
+                }
+                let d_end = self.current_span_start()
+                methods.push(Decl::Delegate { field: d_field, trait_names: d_traits, span: self.make_span(d_start, d_end) })
+                continue
+            }
             let m_pub = self.try_consume(TokenKind::TkPub)
             if self.check(TokenKind::TkExtern) {
                 let m_start = self.current_span_start()

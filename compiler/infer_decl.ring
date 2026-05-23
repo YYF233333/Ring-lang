@@ -7,7 +7,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0501, E0705}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0501, E0507, E0705}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error,
     unify_at, update_fn_effects,
@@ -56,7 +56,10 @@ fn check_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
         Decl::Sig { name, members, is_pub, span } =>
             check_sig_decl(ctx, name, members, is_pub, span),
         Decl::EffectAlias { name, is_pub, span, .. } =>
-            HDecl::TypeAlias { name: name, ty: UNIT, is_pub: is_pub, span: span }
+            HDecl::TypeAlias { name: name, ty: UNIT, is_pub: is_pub, span: span },
+        Decl::Delegate { span, .. } =>
+            // Delegate is only valid inside impl blocks; handled by check_impl_decl
+            HDecl::TypeAlias { name: "<delegate>", ty: UNIT, is_pub: false, span: span }
     }
 }
 
@@ -456,6 +459,7 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
                     _ => {}
                 }
             },
+            Decl::Delegate { .. } => {},  // Handled at check_one_decl level
             _ => {}
         }
     }
@@ -463,6 +467,146 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
     ctx.current_fn_bounds = saved_impl_bounds
     ctx.type_param_scope = saved_tp_scope
     HDecl::Impl { target_type: target_type, type_params: type_params, trait_name: trait_name, methods: hmethods, span: span }
+}
+
+fn expand_delegate_impls(
+    mut ctx: InferCtx,
+    target_type: Str, type_params: List<TypeParam>,
+    field: Str, trait_names: List<Str>, span: Span
+) -> List<HDecl> {
+    let mut result: List<HDecl> = []
+
+    // Look up the field type from the struct definition
+    match ctx.env.types.structs.get(target_type) {
+        none => { result },  // Error already reported in Pass 1
+        some(struct_def) => {
+            let mut field_type: Type? = none
+            for f in struct_def.fields {
+                if f.name == field {
+                    field_type = some(f.ty)
+                }
+            }
+            match field_type {
+                none => { result },  // Error already reported in Pass 1
+                some(ft) => {
+                    // Build self_type (same logic as check_impl_decl)
+                    let self_type = if type_params.len() > 0 {
+                        let mut impl_tp_types: List<Type> = []
+                        for tp in type_params {
+                            match ctx.type_param_scope.get(tp.name) {
+                                some(tv) => impl_tp_types.push(tv),
+                                none => impl_tp_types.push(ctx.env.fresh_var())
+                            }
+                        }
+                        match ctx.env.types.structs.get(target_type) {
+                            some(def) => Type::StructType { name: def.name, type_params: impl_tp_types, fields: def.fields },
+                            none => match ctx.env.types.enums.get(target_type) {
+                                some(def) => Type::EnumType { name: def.name, type_params: impl_tp_types, variants: def.variants },
+                                none => resolve_self_type(ctx, target_type)
+                            }
+                        }
+                    } else {
+                        resolve_self_type(ctx, target_type)
+                    }
+
+                    for tname in trait_names {
+                        match ctx.env.trait_reg.traits.get(tname) {
+                            none => {},  // Error already reported in Pass 1
+                            some(trait_def) => {
+                                let mut trait_hmethods: List<HDecl> = []
+                                for tm in trait_def.methods {
+                                    match tm.ty {
+                                        Type::FnType { params: trait_params, return_type: ret_ty, effects: eff } => {
+                                            // Build HParam list: first is self, rest are synthetic params
+                                            let mut hparams: List<HParam> = []
+                                            let def_id_self = ctx.env.fresh_def_id()
+                                            hparams.push(HParam { name: "self", ty: self_type, def_id: some(def_id_self), is_mutable: false })
+
+                                            // Build args for the forwarding call (beyond self)
+                                            let mut forward_args: List<HExpr> = []
+                                            let mut pi = 1
+                                            while pi < trait_params.len() {
+                                                let pname = "__p${pi - 1}"
+                                                let pty = match trait_params.get(pi) {
+                                                    some(t) => t,
+                                                    none => UNIT
+                                                }
+                                                let pid = ctx.env.fresh_def_id()
+                                                hparams.push(HParam { name: pname, ty: pty, def_id: some(pid), is_mutable: false })
+                                                forward_args.push(HExpr::Ident {
+                                                    name: pname, resolved_name: none, def_id: some(pid),
+                                                    dict_closure_dicts: none,
+                                                    ty: pty, effects: EMPTY_ROW, span: span
+                                                })
+                                                pi = pi + 1
+                                            }
+
+                                            // Build: self.field
+                                            let field_access = HExpr::FieldAccess {
+                                                receiver: HExpr::Ident {
+                                                    name: "self", resolved_name: none, def_id: some(def_id_self),
+                                                    dict_closure_dicts: none,
+                                                    ty: self_type, effects: EMPTY_ROW, span: span
+                                                },
+                                                field: field,
+                                                ty: ft,
+                                                effects: EMPTY_ROW,
+                                                span: span
+                                            }
+
+                                            // Build: self.field.method — as FieldAccess for UFCS dispatch
+                                            let method_access = HExpr::FieldAccess {
+                                                receiver: field_access,
+                                                field: tm.name,
+                                                ty: tm.ty,
+                                                effects: EMPTY_ROW,
+                                                span: span
+                                            }
+
+                                            // Build: self.field.method(args...) — as Call with UFCS callee
+                                            let call_expr = HExpr::Call {
+                                                callee: method_access,
+                                                args: forward_args,
+                                                type_args: [],
+                                                resolved_dicts: [],
+                                                dict_dispatch: none,
+                                                ty: ret_ty,
+                                                effects: eff,
+                                                span: span
+                                            }
+
+                                            trait_hmethods.push(HDecl::Fn {
+                                                name: tm.name,
+                                                def_id: some(ctx.env.fresh_def_id()),
+                                                type_params: [],
+                                                params: hparams,
+                                                return_type: ret_ty,
+                                                effects: eff,
+                                                body: call_expr,
+                                                is_pub: false,
+                                                trait_bounds: [],
+                                                span: span
+                                            })
+                                        },
+                                        _ => {}
+                                    }
+                                }
+
+                                result.push(HDecl::Impl {
+                                    target_type: target_type,
+                                    type_params: type_params,
+                                    trait_name: some(tname),
+                                    methods: trait_hmethods,
+                                    span: span
+                                })
+                            }
+                        }
+                    }
+                    result
+                }
+            }
+        }
+    }
 }
 
 fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, ast_methods: List<Decl>, is_pub: Bool, span: Span) -> HDecl {
@@ -912,6 +1056,23 @@ fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
         HDecl::Fn { name, effects, .. } => {
             if effects.effects.len() > 0 {
                 update_fn_effects(ctx.env, name, effects)
+            }
+        },
+        _ => {}
+    }
+
+    // Expand delegates: an Impl with Delegate children generates additional
+    // HDecl::Impl nodes (one per delegated trait) with forwarding methods
+    match decl {
+        Decl::Impl { target_type, type_params, methods, span, .. } => {
+            for m in methods {
+                match m {
+                    Decl::Delegate { field, trait_names, span: dspan } => {
+                        let delegate_impls = expand_delegate_impls(ctx, target_type, type_params, field, trait_names, dspan)
+                        for di in delegate_impls { hdecls.push(di) }
+                    },
+                    _ => {}
+                }
             }
         },
         _ => {}
