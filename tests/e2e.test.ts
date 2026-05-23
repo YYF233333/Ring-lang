@@ -476,6 +476,7 @@ const cases: TestCase[] = [
   { file: "mod_effect_evidence.ring", expected: "mod effect evidence: ok\n" },
   { file: "mod_derive_no_dup.ring", expected: "mod derive no dup: ok\n" },
   { file: "mod_effect_qualified.ring", expected: "mod effect qualified: ok\n" },
+  { file: "trait_default_ufcs.ring", expected: "trait default ufcs: ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

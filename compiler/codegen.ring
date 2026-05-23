@@ -70,114 +70,13 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
         emit_raw(ctx, empty)
     }
 
-    // Collect local names and fn effects
-    for decl in program.decls {
-        match decl {
-            HDecl::Fn { name, effects, .. } => {
-                ctx.local_names.insert(name)
-                if effects.effects.len() > 0 {
-                    ctx.local_fn_effects.insert(name, effects)
-                }
-            },
-            HDecl::Struct { name, .. } => { ctx.local_names.insert(name) },
-            HDecl::Enum { name, variants, .. } => {
-                ctx.local_names.insert(name)
-                for v in variants {
-                    ctx.local_names.insert(v.name)
-                    ctx.local_names.insert("${name}_${v.name}")
-                }
-            },
-            HDecl::Impl { target_type, .. } => { ctx.local_names.insert(target_type) },
-            HDecl::Trait { name, .. } => { ctx.local_names.insert(name) },
-            HDecl::Effect { name, .. } => { ctx.local_names.insert(name) },
-            HDecl::Const { name, .. } => { ctx.local_names.insert(name) },
-            HDecl::ModBlock { name: mname, decls: mod_decls, .. } => {
-                ctx.local_names.insert(mname)
-                for subdecl in mod_decls {
-                    match subdecl {
-                        HDecl::Fn { name: fname, effects, .. } => {
-                            ctx.local_names.insert(fname)
-                            if effects.effects.len() > 0 {
-                                ctx.local_fn_effects.insert(fname, effects)
-                            }
-                        },
-                        HDecl::Struct { name: sname, .. } => { ctx.local_names.insert(sname) },
-                        HDecl::Enum { name: ename, variants, .. } => {
-                            ctx.local_names.insert(ename)
-                            for v in variants {
-                                ctx.local_names.insert(v.name)
-                                ctx.local_names.insert("${ename}_${v.name}")
-                            }
-                        },
-                        HDecl::Const { name: cname, .. } => { ctx.local_names.insert(cname) },
-                        HDecl::ModBlock { name: sub_mname, decls: sub_mod_decls, .. } => {
-                            ctx.local_names.insert(sub_mname)
-                            for sub_subdecl in sub_mod_decls {
-                                match sub_subdecl {
-                                    HDecl::Fn { name: fname2, effects: eff2, .. } => {
-                                        ctx.local_names.insert(fname2)
-                                        if eff2.effects.len() > 0 {
-                                            ctx.local_fn_effects.insert(fname2, eff2)
-                                        }
-                                    },
-                                    HDecl::Struct { name: sname2, .. } => { ctx.local_names.insert(sname2) },
-                                    HDecl::Enum { name: ename2, variants: vars2, .. } => {
-                                        ctx.local_names.insert(ename2)
-                                        for v in vars2 {
-                                            ctx.local_names.insert(v.name)
-                                            ctx.local_names.insert("${ename2}_${v.name}")
-                                        }
-                                    },
-                                    HDecl::Const { name: cname2, .. } => { ctx.local_names.insert(cname2) },
-                                    _ => {}
-                                }
-                            }
-                        },
-                        _ => {}
-                    }
-                }
-            },
-            _ => {},
-        }
-    }
+    // Collect local names, fn effects, struct field orders, trait decls, impl methods
+    register_decl_info(program.decls, ctx)
 
     // Compute transitive effect closure
     if ctx.local_fn_effects.len() > 0 {
         let mut fn_callees: Map<Str, Set<Str>> = map_new()
-        for decl in program.decls {
-            match decl {
-                HDecl::Fn { name, body, .. } => {
-                    let mut callees = set_new()
-                    collect_local_calls(body, ctx.local_names, callees)
-                    fn_callees.insert(name, callees)
-                },
-                HDecl::ModBlock { decls: mod_decls, .. } => {
-                    for subdecl in mod_decls {
-                        match subdecl {
-                            HDecl::Fn { name: fname, body, .. } => {
-                                let mut callees = set_new()
-                                collect_local_calls(body, ctx.local_names, callees)
-                                fn_callees.insert(fname, callees)
-                            },
-                            HDecl::ModBlock { decls: sub_mod_decls, .. } => {
-                                for sub_subdecl in sub_mod_decls {
-                                    match sub_subdecl {
-                                        HDecl::Fn { name: fname2, body: body2, .. } => {
-                                            let mut callees2 = set_new()
-                                            collect_local_calls(body2, ctx.local_names, callees2)
-                                            fn_callees.insert(fname2, callees2)
-                                        },
-                                        _ => {}
-                                    }
-                                }
-                            },
-                            _ => {}
-                        }
-                    }
-                },
-                _ => {},
-            }
-        }
+        collect_fn_callees(program.decls, ctx.local_names, fn_callees)
         let mut changed = true
         while changed {
             changed = false
@@ -212,126 +111,6 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                     }
                 }
             }
-        }
-    }
-
-    // Collect struct field orders and impl methods
-    for decl in program.decls {
-        match decl {
-            HDecl::Struct { name, fields, .. } => {
-                let qname = qualify(ctx, name)
-                let mut field_names: List<Str> = [""]; field_names.clear()
-                for f in fields { field_names.push(f.name) }
-                ctx.struct_field_order.insert(qname, field_names)
-            },
-            HDecl::Impl { target_type, trait_name, methods, .. } => {
-                for method in methods {
-                    match method {
-                        HDecl::Fn { name, .. } => {
-                            let key = "${qualify(ctx, target_type)}.${name}"
-                            match trait_name {
-                                none => {
-                                    match ctx.impl_methods.get(key) {
-                                        none => { ctx.impl_methods.insert(key, none) },
-                                        some(_) => {},
-                                    }
-                                },
-                                some(tn) => {
-                                    match ctx.impl_methods.get(key) {
-                                        none => { ctx.impl_methods.insert(key, some(tn)) },
-                                        some(_) => {},
-                                    }
-                                },
-                            }
-                        },
-                        _ => {},
-                    }
-                }
-            },
-            HDecl::Trait { name, methods, supertraits, .. } => {
-                ctx.trait_decls.insert(name, HTraitDeclInfo { name: name, methods: methods, supertraits: supertraits })
-            },
-            HDecl::ModBlock { decls: mod_decls, .. } => {
-                for subdecl in mod_decls {
-                    match subdecl {
-                        HDecl::Struct { name: sname, fields, .. } => {
-                            let qname = qualify(ctx, sname)
-                            let mut field_names: List<Str> = [""]; field_names.clear()
-                            for f in fields { field_names.push(f.name) }
-                            ctx.struct_field_order.insert(qname, field_names)
-                        },
-                        HDecl::Impl { target_type: tt, trait_name: ttn, methods: mm, .. } => {
-                            for m in mm {
-                                match m {
-                                    HDecl::Fn { name: mn, .. } => {
-                                        let key = "${qualify(ctx, tt)}.${mn}"
-                                        match ttn {
-                                            none => {
-                                                match ctx.impl_methods.get(key) {
-                                                    none => { ctx.impl_methods.insert(key, none) },
-                                                    some(_) => {},
-                                                }
-                                            },
-                                            some(tn) => {
-                                                match ctx.impl_methods.get(key) {
-                                                    none => { ctx.impl_methods.insert(key, some(tn)) },
-                                                    some(_) => {},
-                                                }
-                                            },
-                                        }
-                                    },
-                                    _ => {},
-                                }
-                            }
-                        },
-                        HDecl::Trait { name: tname, methods: tmethods, supertraits: tst, .. } => {
-                            ctx.trait_decls.insert(tname, HTraitDeclInfo { name: tname, methods: tmethods, supertraits: tst })
-                        },
-                        HDecl::ModBlock { decls: sub_mod_decls, .. } => {
-                            for sub_subdecl in sub_mod_decls {
-                                match sub_subdecl {
-                                    HDecl::Struct { name: sname2, fields: fields2, .. } => {
-                                        let qname2 = qualify(ctx, sname2)
-                                        let mut fnames2: List<Str> = [""]; fnames2.clear()
-                                        for f in fields2 { fnames2.push(f.name) }
-                                        ctx.struct_field_order.insert(qname2, fnames2)
-                                    },
-                                    HDecl::Impl { target_type: tt2, trait_name: ttn2, methods: mm2, .. } => {
-                                        for m in mm2 {
-                                            match m {
-                                                HDecl::Fn { name: mn2, .. } => {
-                                                    let key2 = "${qualify(ctx, tt2)}.${mn2}"
-                                                    match ttn2 {
-                                                        none => {
-                                                            match ctx.impl_methods.get(key2) {
-                                                                none => { ctx.impl_methods.insert(key2, none) },
-                                                                some(_) => {},
-                                                            }
-                                                        },
-                                                        some(tn2) => {
-                                                            match ctx.impl_methods.get(key2) {
-                                                                none => { ctx.impl_methods.insert(key2, some(tn2)) },
-                                                                some(_) => {},
-                                                            }
-                                                        },
-                                                    }
-                                                },
-                                                _ => {},
-                                            }
-                                        }
-                                    },
-                                    HDecl::Trait { name: tname2, methods: tmethods2, supertraits: tst2, .. } => {
-                                        ctx.trait_decls.insert(tname2, HTraitDeclInfo { name: tname2, methods: tmethods2, supertraits: tst2 })
-                                    },
-                                    _ => {}
-                                }
-                            }
-                        },
-                        _ => {}
-                    }
-                }
-            },
-            _ => {},
         }
     }
 
@@ -427,6 +206,123 @@ fn register_builtin_methods(mut ctx: CodegenCtx, type_name: Str, methods: List<S
     for m in methods {
         let key = "${sn}.${m}"
         ctx.impl_methods.insert(key, none)
+    }
+}
+
+// Recursively collect local names, fn effects, struct field orders, trait decls, and impl methods.
+// Replaces 3 separate hand-unrolled 3-level-nested match loops (B-049).
+fn register_decl_info(decls: List<HDecl>, mut ctx: CodegenCtx) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, effects, .. } => {
+                ctx.local_names.insert(name)
+                if effects.effects.len() > 0 {
+                    ctx.local_fn_effects.insert(name, effects)
+                }
+            },
+            HDecl::Struct { name, fields, .. } => {
+                ctx.local_names.insert(name)
+                let qname = qualify(ctx, name)
+                let mut field_names: List<Str> = [""]; field_names.clear()
+                for f in fields { field_names.push(f.name) }
+                ctx.struct_field_order.insert(qname, field_names)
+            },
+            HDecl::Enum { name, variants, .. } => {
+                ctx.local_names.insert(name)
+                for v in variants {
+                    ctx.local_names.insert(v.name)
+                    ctx.local_names.insert("${name}_${v.name}")
+                }
+            },
+            HDecl::Trait { name, methods, supertraits, .. } => {
+                ctx.local_names.insert(name)
+                ctx.trait_decls.insert(name, HTraitDeclInfo { name: name, methods: methods, supertraits: supertraits })
+            },
+            HDecl::Impl { target_type, trait_name, methods, .. } => {
+                ctx.local_names.insert(target_type)
+                // Collect explicitly declared method names
+                let mut explicit_methods: Set<Str> = set_new()
+                for method in methods {
+                    match method {
+                        HDecl::Fn { name, .. } => {
+                            explicit_methods.insert(name)
+                            let key = "${qualify(ctx, target_type)}.${name}"
+                            match trait_name {
+                                none => {
+                                    match ctx.impl_methods.get(key) {
+                                        none => { ctx.impl_methods.insert(key, none) },
+                                        some(_) => {},
+                                    }
+                                },
+                                some(tn) => {
+                                    match ctx.impl_methods.get(key) {
+                                        none => { ctx.impl_methods.insert(key, some(tn)) },
+                                        some(_) => {},
+                                    }
+                                },
+                            }
+                        },
+                        _ => {},
+                    }
+                }
+                // #84: Register un-overridden default methods from the trait
+                match trait_name {
+                    some(tn) => {
+                        match ctx.trait_decls.get(tn) {
+                            some(trait_info) => {
+                                for tm in trait_info.methods {
+                                    if tm.has_default && !explicit_methods.contains(tm.name) {
+                                        let key = "${qualify(ctx, target_type)}.${tm.name}"
+                                        match ctx.impl_methods.get(key) {
+                                            none => { ctx.impl_methods.insert(key, some(tn)) },
+                                            some(_) => {},
+                                        }
+                                    }
+                                }
+                            },
+                            none => {},
+                        }
+                    },
+                    none => {},
+                }
+            },
+            HDecl::Effect { name, .. } => { ctx.local_names.insert(name) },
+            HDecl::Const { name, .. } => { ctx.local_names.insert(name) },
+            HDecl::ModBlock { name, decls: mod_decls, .. } => {
+                ctx.local_names.insert(name)
+                register_decl_info(mod_decls, ctx)
+            },
+            _ => {},
+        }
+    }
+}
+
+// Recursively collect fn callees for transitive effect closure computation (B-049).
+fn collect_fn_callees(decls: List<HDecl>, local_names: Set<Str>, mut fn_callees: Map<Str, Set<Str>>) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, body, .. } => {
+                let mut callees = set_new()
+                collect_local_calls(body, local_names, callees)
+                fn_callees.insert(name, callees)
+            },
+            HDecl::Impl { methods, .. } => {
+                for m in methods {
+                    match m {
+                        HDecl::Fn { name: mn, body: mb, .. } => {
+                            let mut callees = set_new()
+                            collect_local_calls(mb, local_names, callees)
+                            fn_callees.insert(mn, callees)
+                        },
+                        _ => {},
+                    }
+                }
+            },
+            HDecl::ModBlock { decls: mod_decls, .. } => {
+                collect_fn_callees(mod_decls, local_names, fn_callees)
+            },
+            _ => {},
+        }
     }
 }
 

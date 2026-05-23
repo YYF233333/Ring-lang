@@ -490,8 +490,10 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                         some(trait_opt) => {
                             let fn_name = match trait_opt {
                                 some(trait_name) => {
+                                    // Use dict-based dispatch: dict.method(...)
+                                    // This handles both explicit and default trait methods (#84)
                                     let dict = trait_dict_name(qualify(ctx, tn), safe_ident(trait_name))
-                                    "${dict}_${safe_ident(method)}"
+                                    "${dict}.${safe_ident(method)}"
                                 },
                                 none => "${qualify(ctx, tn)}_${safe_ident(method)}",
                             }

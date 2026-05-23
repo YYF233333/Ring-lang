@@ -951,7 +951,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
   const __ring_m = trait_opt;
   if (__ring_m._tag === "some") { const trait_name = __ring_m._0; return (function() {
   const dict = hir$trait_dict_name(codegen_ctx$qualify(ctx, tn), codegen_ctx$safe_ident(trait_name));
-  return `${dict}_${codegen_ctx$safe_ident(method)}`;
+  return `${dict}.${codegen_ctx$safe_ident(method)}`;
 })(); }
   if (__ring_m._tag === "none") { return `${codegen_ctx$qualify(ctx, tn)}_${codegen_ctx$safe_ident(method)}`; }
   __match_fail(__ring_m);
