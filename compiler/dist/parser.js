@@ -1149,6 +1149,11 @@ function Parser_parse_effect_list(self) {
       ename = Parser_advance(self).value;
     } else {
       ename = Parser_expect(self, lexer$TokenKind_TkIdent).value;
+      while (Parser_check(self, lexer$TokenKind_TkColonColon)) {
+        Parser_advance(self);
+        const next = Parser_expect(self, lexer$TokenKind_TkIdent).value;
+        ename = `${ename}::${next}`;
+      }
     }
     let type_args = [];
     if (Parser_check(self, lexer$TokenKind_TkLt)) {
@@ -2006,7 +2011,12 @@ function Parser_parse_handle_expr(self) {
 }
 function Parser_parse_effect_handler(self) {
   const start = Parser_current_span_start(self);
-  const effect_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
+  let effect_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
+  while (Parser_check(self, lexer$TokenKind_TkColonColon)) {
+    Parser_advance(self);
+    const next = Parser_expect(self, lexer$TokenKind_TkIdent).value;
+    effect_name = `${effect_name}::${next}`;
+  }
   Parser_expect(self, lexer$TokenKind_TkDot);
   const op_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
   Parser_expect(self, lexer$TokenKind_TkLParen);

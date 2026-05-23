@@ -115,15 +115,6 @@ Trait 有 default 方法（如 `describe`）且类型 impl 未显式覆盖时，
 
 发现者：Opus
 
-### #85 Auto-derive 为 mod alias 类型生成重复代码 [medium] [doing]
-
-`collect_user_types`（derive.ring:50-66）遍历 `env.types.structs.entries()`，包含 canonical name（`geo::Point`）和 `insert_mod_aliases` 插入的短名 alias（`Point`），两者指向同一 StructDef。derive pass 为两个 key 分别生成 trait impl（如 `__geo$Point_Eq_eq` 和 `__Point_Eq_eq`），产生重复函数。
-
-**文件**：`compiler/derive.ring:50-66`
-**修复方向**：在 `collect_user_types` 中跳过 `name != def.name` 的 alias 条目。
-
-发现者：Opus
-
 ## 类型系统健壮性（2026-05-23 审计发现）
 
 

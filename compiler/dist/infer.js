@@ -2099,11 +2099,17 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
   __ring_match100: {
     const __ring_m100 = receiver;
     if (__ring_m100._tag === "Ident") {
-      const recv_name = __ring_m100.name;
+      const recv_name = __ring_m100.name; const qualifier = __ring_m100.qualifier;
+      const full_effect_name = (function() {
+  const __ring_m = qualifier;
+  if (__ring_m._tag === "some") { const q = __ring_m._0; return `${q}::${recv_name}`; }
+  if (__ring_m._tag === "none") { return recv_name; }
+  __match_fail(__ring_m);
+})();
       __ring_match101: {
-        const __ring_m101 = _Map_get(ctx.env.types.effects, recv_name);
+        const __ring_m101 = _Map_get(ctx.env.types.effects, full_effect_name);
         if (__ring_m101._tag === "some") {
-          return infer_effect_op(ctx, recv_name, method, args, span, subst, __ring_ev_fail);
+          return infer_effect_op(ctx, full_effect_name, method, args, span, subst, __ring_ev_fail);
           break __ring_match101;
         }
         if (__ring_m101._tag === "none") {

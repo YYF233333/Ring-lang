@@ -772,6 +772,12 @@ impl Parser {
                 ename = self.advance().value
             } else {
                 ename = self.expect(TokenKind::TkIdent).value
+                // Support qualified paths: mod::effect or mod::submod::effect
+                while self.check(TokenKind::TkColonColon) {
+                    self.advance()
+                    let next = self.expect(TokenKind::TkIdent).value
+                    ename = "${ename}::${next}"
+                }
             }
             let mut type_args: List<TypeExpr> = []
             if self.check(TokenKind::TkLt) {
@@ -1809,7 +1815,13 @@ impl Parser {
 
     fn parse_effect_handler(mut self) -> EffectHandler {
         let start = self.current_span_start()
-        let effect_name = self.expect(TokenKind::TkIdent).value
+        let mut effect_name = self.expect(TokenKind::TkIdent).value
+        // Support qualified paths: mod::effect or mod::submod::effect
+        while self.check(TokenKind::TkColonColon) {
+            self.advance()
+            let next = self.expect(TokenKind::TkIdent).value
+            effect_name = "${effect_name}::${next}"
+        }
         self.expect(TokenKind::TkDot)
         let op_name = self.expect(TokenKind::TkIdent).value
         self.expect(TokenKind::TkLParen)

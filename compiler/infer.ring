@@ -1457,9 +1457,13 @@ fn check_receiver_mutability(mut ctx: InferCtx, receiver: Expr, recv_type: Type,
 fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<Expr>, span: Span, subst: UnionFind) -> InferResult {
     // Check if receiver is an effect module
     match receiver {
-        Expr::Ident { name: recv_name, .. } => {
-            match ctx.env.types.effects.get(recv_name) {
-                some(_) => { return infer_effect_op(ctx, recv_name, method, args, span, subst) },
+        Expr::Ident { name: recv_name, qualifier, .. } => {
+            let full_effect_name = match qualifier {
+                some(q) => "${q}::${recv_name}",
+                none => recv_name
+            }
+            match ctx.env.types.effects.get(full_effect_name) {
+                some(_) => { return infer_effect_op(ctx, full_effect_name, method, args, span, subst) },
                 none => {}
             }
         },

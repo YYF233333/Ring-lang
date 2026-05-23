@@ -474,6 +474,7 @@ const cases: TestCase[] = [
   { file: "delegate_default_method.ring", expected: "delegate_default_method: all tests passed\n" },
   { file: "mod_effect_evidence.ring", expected: "mod effect evidence: ok\n" },
   { file: "mod_derive_no_dup.ring", expected: "mod derive no dup: ok\n" },
+  { file: "mod_effect_qualified.ring", expected: "mod effect qualified: ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
