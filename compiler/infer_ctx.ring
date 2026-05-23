@@ -3,7 +3,7 @@ use types::{Type, Effect, EffectRow, RecordField, StructField,
     type_to_string, types_equal, make_option_type, type_to_builtin_name,
     row_merge}
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr}
-use hir::{HExpr, HStmt, HParam, trait_dict_name, trait_bound_param_name,
+use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
 use codes::{E0201, E0204, E0301, E0302, E0503}
@@ -500,29 +500,47 @@ pub fn resolve_dicts_from_scheme(
     sink: CollectingSink, env: TypeEnv,
     current_fn_bounds: List<FnBoundsEntry>,
     scheme: TypeScheme, callee_type: Type, s: UnionFind, span: Span
-) -> List<Str> {
+) -> List<DictRef> {
     if scheme.bounds.len() == 0 { return [] }
     let var_map = build_scheme_var_map(scheme, callee_type)
-    let mut resolved_dicts: List<Str> = []
+    let mut resolved_dicts: List<DictRef> = []
     for bound in scheme.bounds {
         let mut found = false
         match var_map.get(bound.type_var) {
             some(fresh_var) => {
                 let concrete = apply_subst(s, fresh_var)
                 match concrete {
-                    Type::StructType { name, .. } => {
+                    Type::StructType { name, type_params, .. } => {
                         if env.trait_reg.trait_impls.any(fn(impl_) {
                             impl_.target_type_name == name && impl_.trait_name == bound.trait_name
                         }) {
-                            resolved_dicts.push(trait_dict_name(name, bound.trait_name))
+                            if type_params.len() > 0 {
+                                let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, bound.trait_name)
+                                resolved_dicts.push(DictRef::Wrapped {
+                                    dict: trait_dict_name(name, bound.trait_name),
+                                    trait_name: bound.trait_name,
+                                    inner_dicts: inner
+                                })
+                            } else {
+                                resolved_dicts.push(DictRef::Simple(trait_dict_name(name, bound.trait_name)))
+                            }
                             found = true
                         }
                     },
-                    Type::EnumType { name, .. } => {
+                    Type::EnumType { name, type_params, .. } => {
                         if env.trait_reg.trait_impls.any(fn(impl_) {
                             impl_.target_type_name == name && impl_.trait_name == bound.trait_name
                         }) {
-                            resolved_dicts.push(trait_dict_name(name, bound.trait_name))
+                            if type_params.len() > 0 {
+                                let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, bound.trait_name)
+                                resolved_dicts.push(DictRef::Wrapped {
+                                    dict: trait_dict_name(name, bound.trait_name),
+                                    trait_name: bound.trait_name,
+                                    inner_dicts: inner
+                                })
+                            } else {
+                                resolved_dicts.push(DictRef::Simple(trait_dict_name(name, bound.trait_name)))
+                            }
                             found = true
                         }
                     },
@@ -534,7 +552,7 @@ pub fn resolve_dicts_from_scheme(
                         })
                         match matching {
                             some(fb) => {
-                                resolved_dicts.push(trait_bound_param_name(fb.type_param_name, fb.trait_name))
+                                resolved_dicts.push(DictRef::Simple(trait_bound_param_name(fb.type_param_name, fb.trait_name)))
                                 found = true
                             },
                             none => {}
@@ -548,7 +566,7 @@ pub fn resolve_dicts_from_scheme(
                             if env.trait_reg.trait_impls.any(fn(impl_) {
                                 impl_.target_type_name == prim_name && impl_.trait_name == bound.trait_name
                             }) {
-                                resolved_dicts.push(trait_dict_name(prim_name, bound.trait_name))
+                                resolved_dicts.push(DictRef::Simple(trait_dict_name(prim_name, bound.trait_name)))
                                 found = true
                             }
                         },
@@ -565,6 +583,82 @@ pub fn resolve_dicts_from_scheme(
         }
     }
     resolved_dicts
+}
+
+fn resolve_inner_dicts_from_type_params(
+    env: TypeEnv,
+    current_fn_bounds: List<FnBoundsEntry>,
+    type_params: List<Type>,
+    s: UnionFind,
+    trait_name: Str
+) -> List<DictRef> {
+    let mut result: List<DictRef> = []
+    for param in type_params {
+        let concrete = apply_subst(s, param)
+        result.push(resolve_concrete_type_to_dict_ref(env, current_fn_bounds, concrete, s, trait_name))
+    }
+    result
+}
+
+fn resolve_concrete_type_to_dict_ref(
+    env: TypeEnv,
+    current_fn_bounds: List<FnBoundsEntry>,
+    t: Type,
+    s: UnionFind,
+    trait_name: Str
+) -> DictRef {
+    match type_to_builtin_name(t) {
+        some(builtin_name) => match t {
+            Type::StructType { .. } => {},
+            Type::EnumType { .. } => {},
+            _ => { return DictRef::Simple(trait_dict_name(builtin_name, trait_name)) }
+        },
+        none => {}
+    }
+    match t {
+        Type::TypeVar { id, .. } => {
+            let bound = current_fn_bounds.find(fn(fb) {
+                fb.type_param_var_id == id && fb.trait_name == trait_name
+            })
+            match bound {
+                some(b) => DictRef::Simple(trait_bound_param_name(b.type_param_name, trait_name)),
+                none => DictRef::Simple(trait_dict_name("__unknown", trait_name))
+            }
+        },
+        Type::StructType { name, type_params, .. } => {
+            if env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+                if type_params.len() > 0 {
+                    let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name)
+                    DictRef::Wrapped {
+                        dict: trait_dict_name(name, trait_name),
+                        trait_name: trait_name,
+                        inner_dicts: inner
+                    }
+                } else {
+                    DictRef::Simple(trait_dict_name(name, trait_name))
+                }
+            } else {
+                DictRef::Simple(trait_dict_name(name, trait_name))
+            }
+        },
+        Type::EnumType { name, type_params, .. } => {
+            if env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+                if type_params.len() > 0 {
+                    let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name)
+                    DictRef::Wrapped {
+                        dict: trait_dict_name(name, trait_name),
+                        trait_name: trait_name,
+                        inner_dicts: inner
+                    }
+                } else {
+                    DictRef::Simple(trait_dict_name(name, trait_name))
+                }
+            } else {
+                DictRef::Simple(trait_dict_name(name, trait_name))
+            }
+        },
+        _ => DictRef::Simple(trait_dict_name("__unknown", trait_name))
+    }
 }
 
 // ============================================================
