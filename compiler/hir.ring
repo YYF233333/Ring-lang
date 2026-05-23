@@ -121,7 +121,9 @@ pub struct HEnumVariant {
 pub struct HEffectOp {
     pub name: Str,
     pub params: List<HParam>,
-    pub return_type: Type
+    pub return_type: Type,
+    pub has_default: Bool,
+    pub default_body: HExpr?
 }
 
 pub struct HTraitMethod {
@@ -205,6 +207,10 @@ pub fn trait_dict_name(type_name: Str, trait_name: Str) -> Str {
 
 pub fn evidence_param_name(effect_name: Str) -> Str {
     "__ring_ev_${effect_name}"
+}
+
+pub fn default_evidence_name(effect_name: Str) -> Str {
+    "__ring_default_ev_${effect_name}"
 }
 
 pub fn trait_bound_param_name(type_param: Str, trait_name: Str) -> Str {

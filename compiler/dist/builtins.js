@@ -234,10 +234,10 @@ function register_hof_intrinsics(env) {
 }
 
 function register_effects(env) {
-  _Map_insert(env.types.effects, "io", new env$EffectDef("io", [], [], [new env$EffectOpDef("read", [types$STR], types$STR), new env$EffectOpDef("write", [types$STR, types$STR], types$UNIT)], Option_some(env$BuiltInKind_BkIo)));
+  _Map_insert(env.types.effects, "io", new env$EffectDef("io", [], [], [new env$EffectOpDef("read", [types$STR], types$STR, false), new env$EffectOpDef("write", [types$STR, types$STR], types$UNIT, false)], Option_some(env$BuiltInKind_BkIo), false));
   const fail_t_id = env$TypeEnv_fresh_var_id(env);
   const fail_t = types$Type_TypeVar(fail_t_id, Option_none);
-  return _Map_insert(env.types.effects, "fail", new env$EffectDef("fail", ["E"], [fail_t_id], [new env$EffectOpDef("raise", [fail_t], types$NEVER)], Option_some(env$BuiltInKind_BkFail)));
+  return _Map_insert(env.types.effects, "fail", new env$EffectDef("fail", ["E"], [fail_t_id], [new env$EffectOpDef("raise", [fail_t], types$NEVER, false)], Option_some(env$BuiltInKind_BkFail), false));
 }
 
 function register_cell(env) {

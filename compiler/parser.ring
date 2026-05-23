@@ -1140,8 +1140,12 @@ impl Parser {
             self.expect(TokenKind::TkRParen)
             self.expect(TokenKind::TkArrow)
             let return_type = self.parse_type_expr()
+            let mut op_body: Expr? = none
+            if self.check(TokenKind::TkLBrace) {
+                op_body = some(self.parse_block_expr())
+            }
             let op_end = self.current_span_start()
-            ops.push(EffectOpDecl { name: op_name, params: params, return_type: return_type, span: self.make_span(op_start, op_end) })
+            ops.push(EffectOpDecl { name: op_name, params: params, return_type: return_type, body: op_body, span: self.make_span(op_start, op_end) })
             self.try_consume(TokenKind::TkComma)
             self.try_consume(TokenKind::TkSemi)
         }

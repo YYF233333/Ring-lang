@@ -121,10 +121,11 @@ fn register_effects(mut env: TypeEnv) {
         type_params: [],
         type_param_vars: [],
         ops: [
-            EffectOpDef { name: "read", params: [STR], return_type: STR },
-            EffectOpDef { name: "write", params: [STR, STR], return_type: UNIT }
+            EffectOpDef { name: "read", params: [STR], return_type: STR, has_default: false },
+            EffectOpDef { name: "write", params: [STR, STR], return_type: UNIT, has_default: false }
         ],
-        built_in_kind: some(BuiltInKind::BkIo)
+        built_in_kind: some(BuiltInKind::BkIo),
+        all_have_defaults: false
     })
 
     // fail effect
@@ -135,9 +136,10 @@ fn register_effects(mut env: TypeEnv) {
         type_params: ["E"],
         type_param_vars: [fail_t_id],
         ops: [
-            EffectOpDef { name: "raise", params: [fail_t], return_type: NEVER }
+            EffectOpDef { name: "raise", params: [fail_t], return_type: NEVER, has_default: false }
         ],
-        built_in_kind: some(BuiltInKind::BkFail)
+        built_in_kind: some(BuiltInKind::BkFail),
+        all_have_defaults: false
     })
 }
 

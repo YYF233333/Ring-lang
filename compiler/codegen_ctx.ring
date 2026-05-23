@@ -40,7 +40,8 @@ pub struct CodegenCtx {
     pub current_fn_effects: EffectRow?,
     pub in_try_fail: Bool,
     pub module_imports: List<Str>?,
-    pub module_exports: List<Str>?
+    pub module_exports: List<Str>?,
+    pub default_evidence_effects: Set<Str>
 }
 
 pub struct HTraitDeclInfo {
@@ -67,7 +68,8 @@ pub fn new_codegen_ctx(skip_preamble: Bool, skip_main_call: Bool) -> CodegenCtx 
         current_fn_effects: none,
         in_try_fail: false,
         module_imports: none,
-        module_exports: none
+        module_exports: none,
+        default_evidence_effects: set_new()
     }
 }
 

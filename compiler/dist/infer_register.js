@@ -692,10 +692,20 @@ function register_effect(ctx, name, type_params, ops) {
       }
     }
     const ret = infer_ctx$resolve_type_expr(ctx, op.return_type);
-    List_push(effect_ops, new env$EffectOpDef(op.name, param_types, ret));
+    const op_has_default = Option_is_some(op.body);
+    List_push(effect_ops, new env$EffectOpDef(op.name, param_types, ret, op_has_default));
+  }
+  let all_defaults = true;
+  for (const eop of effect_ops) {
+    if ((!eop.has_default)) {
+      all_defaults = false;
+    }
+  }
+  if ((List_len(effect_ops) === 0)) {
+    all_defaults = false;
   }
   ctx.type_param_scope = saved;
-  return _Map_insert(ctx.env.types.effects, name, new env$EffectDef(name, tp_names, tp_vars, effect_ops, Option_none));
+  return _Map_insert(ctx.env.types.effects, name, new env$EffectDef(name, tp_names, tp_vars, effect_ops, Option_none, all_defaults));
 }
 
 function collect_all_supertraits(ctx, trait_name) {

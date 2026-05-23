@@ -392,10 +392,16 @@ fn register_effect(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, o
             }
         }
         let ret = resolve_type_expr(ctx, op.return_type)
-        effect_ops.push(EffectOpDef { name: op.name, params: param_types, return_type: ret })
+        let op_has_default = op.body.is_some()
+        effect_ops.push(EffectOpDef { name: op.name, params: param_types, return_type: ret, has_default: op_has_default })
     }
+    let mut all_defaults = true
+    for eop in effect_ops {
+        if !eop.has_default { all_defaults = false }
+    }
+    if effect_ops.len() == 0 { all_defaults = false }
     ctx.type_param_scope = saved
-    ctx.env.types.effects.insert(name, EffectDef { name: name, type_params: tp_names, type_param_vars: tp_vars, ops: effect_ops, built_in_kind: none })
+    ctx.env.types.effects.insert(name, EffectDef { name: name, type_params: tp_names, type_param_vars: tp_vars, ops: effect_ops, built_in_kind: none, all_have_defaults: all_defaults })
 }
 
 // ============================================================

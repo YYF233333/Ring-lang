@@ -14,7 +14,7 @@
 - ~~B-034 Effect Aliases [S]~~ ✅ 已完成（2026-05-23）
 - ~~B-005 Supertrait 继承 [M]~~ ✅ 已完成（2026-05-23）
 - B-037 `mut<T>` Marker Effect [M]
-- B-008 Default Effect Handler [M]
+- ~~B-008 Default Effect Handler [M]~~ ✅ 已完成（2026-05-23）
 
 **层 2（核心特性）**：
 - B-004 关联类型 [L]（依赖 B-005）
@@ -287,42 +287,6 @@ fn test_fetch() {
 **复杂度**：极大（generator codegen + scope 管理 + 取消传播 + 标准库 async 原语）
 **优先级**：层 3（Phase C 层 1+2 完成后启动）
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
-
-### B-008 Default Effect Handler（设计已确定 2026-05-22）[feature] [P2] [M] [doing]
-design.md 2.2。Op 带 body = 默认 handler，语法与 trait 默认方法一致。解决"每次调用都要写 handle...with"的 boilerplate 问题。
-
-```ring
-effect Logger {
-    fn log(msg: Str) -> Unit {    // 有 body = 有默认 handler
-        print(msg)
-    }
-}
-
-effect Storage {
-    fn read(key: Str) -> Str              // 无 body = 必须 handle
-    fn log(msg: Str) -> Unit { print(msg) } // 有 body = 可选 handle
-}
-
-fn main() {
-    do_work()  // Logger 全部 op 有默认，无需 handle...with
-}
-```
-
-**已确定的语义：**
-1. 签名透明：有默认的 effect 仍出现在推断签名中（`with {Logger}`）
-2. 部分默认：显式 handle 覆盖默认，无默认且未 handle → 编译错误
-3. 全默认可省略 handle：编译器自动注入默认 evidence
-
-**Effect 约束（中间版）：**
-- Default handler body 可用内置 effect（io/fail/mut）和已有 default 的自定义 effect
-- 不可用无默认的自定义 effect
-- 编译器拓扑排序 default handler 依赖，循环 → 编译错误
-
-- **前置依赖**：无硬依赖
-- **复杂度**：中
-- **优先级**：Phase C
-- **参考**：语法方案模仿 trait 默认方法（Ring 已有先例），中间版避免了 Snowflyt 指出的 handler 链式解析的完整复杂度
-
 
 ## OOP 模拟
 
