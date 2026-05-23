@@ -268,7 +268,7 @@ get()  // 3
 
 **不再需要 `Cell<T>` / `Ref<T>` 等包装类型。** 所有可变性通过 `let mut` + `mut` 参数 + 编译器自动 box 处理。词汇量：一个关键字 `mut`。
 
-**闭包内的 `return` 语义**：闭包内的 `return` 返回闭包本身，不影响外层函数。这与 Rust/Kotlin 一致，与 Ruby/Smalltalk 不同。当闭包作为 HOF 回调传入时（如 `list.map(fn(x) { return x * 2 })`），`return` 仅影响该回调。当前编译器通过 IIFE 实现 block expression，表达式位置的 block/if 包含 `return` 时可能被 IIFE 截获（已知限制 C10）。
+**闭包内的 `return` 语义**：闭包内的 `return` 返回闭包本身，不影响外层函数。这与 Rust/Kotlin 一致，与 Ruby/Smalltalk 不同。当闭包作为 HOF 回调传入时（如 `list.map(fn(x) { return x * 2 })`），`return` 仅影响该回调。当前编译器通过 IIFE 实现 block expression；当检测到 block/if/match 表达式包含 `return` 时，改用临时变量方案（inline emit + 赋值），避免 IIFE 截获 return（B-022 修复）。
 
 ### 1.5 类型系统特性交互矩阵（2026-05-24 确定）
 

@@ -10,7 +10,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
 use codegen_ctx::{CodegenCtx, emit, emit_raw, push_indent, pop_indent,
     qualify, safe_ident, get_evidence_params, LIST_HOF_JS_METHOD}
 use codegen_stmt::{gen_pattern_condition, gen_pattern_bindings,
-    emit_block_body, emit_block_in_stmt_context}
+    emit_block_body, emit_block_in_stmt_context, emit_stmt, emit_in_stmt_context}
 
 // ============================================================
 // Main expression dispatch
@@ -807,7 +807,82 @@ fn gen_named_variant_construct(mut ctx: CodegenCtx, enum_name: Str, variant_name
 // Match expression (expression-mode — IIFE)
 // ============================================================
 
+fn match_contains_return(arms: List<HMatchArm>) -> Bool {
+    for arm in arms {
+        if expr_contains_return(arm.body) { return true }
+    }
+    false
+}
+
 fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> Str {
+    // When any arm body contains `return`, use labeled-block + temp variable
+    // instead of IIFE, to avoid capturing the return.
+    if match_contains_return(arms) {
+        let tmp = "__ring_blk${ctx.block_counter}"
+        ctx.block_counter = ctx.block_counter + 1
+        let label = "__ring_match${ctx.match_counter}"
+        ctx.match_counter = ctx.match_counter + 1
+        let scrut_js = gen_expr(ctx, scrutinee)
+        emit(ctx, "let ${tmp};")
+        emit(ctx, "${label}: {")
+        push_indent(ctx)
+        let scrut_var = "__ring_m${ctx.match_counter - 1}"
+        emit(ctx, "const ${scrut_var} = ${scrut_js};")
+
+        for arm in arms {
+            let cond = gen_pattern_condition(ctx, scrut_var, arm.pattern)
+            let bindings_str = gen_pattern_bindings(scrut_var, arm.pattern)
+            match arm.guard {
+                none => {
+                    if cond == "true" {
+                        if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
+                        emit_branch_as_assign(ctx, arm.body, tmp)
+                        emit(ctx, "break ${label};")
+                    } else {
+                        emit(ctx, "if (${cond}) {")
+                        push_indent(ctx)
+                        if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
+                        emit_branch_as_assign(ctx, arm.body, tmp)
+                        emit(ctx, "break ${label};")
+                        pop_indent(ctx)
+                        emit(ctx, "}")
+                    }
+                },
+                some(guard) => {
+                    emit(ctx, "if (${cond}) {")
+                    push_indent(ctx)
+                    if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
+                    let guard_js = gen_expr(ctx, guard)
+                    emit(ctx, "if (${guard_js}) {")
+                    push_indent(ctx)
+                    emit_branch_as_assign(ctx, arm.body, tmp)
+                    emit(ctx, "break ${label};")
+                    pop_indent(ctx)
+                    emit(ctx, "}")
+                    pop_indent(ctx)
+                    emit(ctx, "}")
+                },
+            }
+        }
+
+        let mut has_catchall = false
+        for a in arms {
+            match a.pattern {
+                Pattern::Wildcard { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
+                Pattern::Binding { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
+                _ => {},
+            }
+        }
+        if has_catchall == false {
+            let mf = RUNTIME_MATCH_FAIL
+            emit(ctx, "${mf}(${scrut_var});")
+        }
+
+        pop_indent(ctx)
+        emit(ctx, "}")
+        return tmp
+    }
+
     let scrut = gen_expr(ctx, scrutinee)
     let mut parts: List<Str> = [""]; parts.clear()
     parts.push("(function() {")
@@ -850,6 +925,85 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
 }
 
 // ============================================================
+// Return detection helpers
+// ============================================================
+
+// Check if an expression tree contains a return statement.
+// Does NOT descend into lambda bodies (they have their own return context).
+fn expr_contains_return(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Block { stmts, tail, .. } => {
+            if stmts_contain_return(stmts) { return true }
+            match tail {
+                some(t) => expr_contains_return(t),
+                none => false,
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            if expr_contains_return(condition) { return true }
+            if expr_contains_return(then_branch) { return true }
+            match else_branch {
+                some(eb) => expr_contains_return(eb),
+                none => false,
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            if expr_contains_return(scrutinee) { return true }
+            for arm in arms {
+                if expr_contains_return(arm.body) { return true }
+            }
+            false
+        },
+        // Lambda has its own return context — do NOT recurse into it
+        HExpr::Lambda { .. } => false,
+        _ => false,
+    }
+}
+
+// Check if any statement in the list contains a return (including nested blocks).
+// Does NOT descend into lambda bodies.
+fn stmts_contain_return(stmts: List<HStmt>) -> Bool {
+    for stmt in stmts {
+        match stmt {
+            HStmt::Return { .. } => { return true },
+            HStmt::While { body, .. } => {
+                if expr_contains_return(body) { return true }
+            },
+            HStmt::ForIn { body, .. } => {
+                if expr_contains_return(body) { return true }
+            },
+            HStmt::ExprStmt { expr, .. } => {
+                if expr_contains_return(expr) { return true }
+            },
+            HStmt::Let { init, .. } => {
+                if expr_contains_return(init) { return true }
+            },
+            HStmt::Var { init, .. } => {
+                if expr_contains_return(init) { return true }
+            },
+            HStmt::IfLet { then_block, else_block, .. } => {
+                if expr_contains_return(then_block) { return true }
+                match else_block {
+                    some(eb) => { if expr_contains_return(eb) { return true } },
+                    none => {},
+                }
+            },
+            _ => {},
+        }
+    }
+    false
+}
+
+// Check if a block expression (or if/match expression) contains return at any depth.
+fn block_expr_contains_return(stmts: List<HStmt>, tail: HExpr?) -> Bool {
+    if stmts_contain_return(stmts) { return true }
+    match tail {
+        some(t) => expr_contains_return(t),
+        none => false,
+    }
+}
+
+// ============================================================
 // Block expression (expression-mode — IIFE)
 // ============================================================
 
@@ -861,6 +1015,25 @@ fn gen_block_expr(mut ctx: CodegenCtx, stmts: List<HStmt>, tail: HExpr?, block: 
             }
         },
         none => {},
+    }
+    // When the block contains a `return`, avoid IIFE wrapping — emit
+    // statements inline and assign the tail expression to a temp variable.
+    if block_expr_contains_return(stmts, tail) {
+        for stmt in stmts {
+            emit_stmt(ctx, stmt)
+        }
+        match tail {
+            some(t) => {
+                let tmp = "__ring_blk${ctx.block_counter}"
+                ctx.block_counter = ctx.block_counter + 1
+                let tail_val = gen_expr(ctx, t)
+                emit(ctx, "let ${tmp} = ${tail_val};")
+                return tmp
+            },
+            none => {
+                return "undefined"
+            },
+        }
     }
     let saved_lines = ctx.lines
     let saved_indent = ctx.indent_level
@@ -881,7 +1054,87 @@ fn gen_block_expr(mut ctx: CodegenCtx, stmts: List<HStmt>, tail: HExpr?, block: 
 // If expression (expression-mode — ternary)
 // ============================================================
 
+fn if_expr_contains_return(then_branch: HExpr, else_branch: HExpr?) -> Bool {
+    if expr_contains_return(then_branch) { return true }
+    match else_branch {
+        some(eb) => expr_contains_return(eb),
+        none => false,
+    }
+}
+
+fn emit_if_as_assign(mut ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, tmp: Str) {
+    let cond = gen_expr(ctx, condition)
+    emit(ctx, "} else if (${cond}) {")
+    push_indent(ctx)
+    emit_branch_as_assign(ctx, then_branch, tmp)
+    pop_indent(ctx)
+    match else_branch {
+        none => emit(ctx, "}"),
+        some(eb) => match eb {
+            HExpr::IfExpr { condition: ec, then_branch: et, else_branch: ee, .. } => {
+                emit_if_as_assign(ctx, ec, et, ee, tmp)
+            },
+            _ => {
+                emit(ctx, "} else {")
+                push_indent(ctx)
+                emit_branch_as_assign(ctx, eb, tmp)
+                pop_indent(ctx)
+                emit(ctx, "}")
+            },
+        },
+    }
+}
+
+fn emit_branch_as_assign(mut ctx: CodegenCtx, branch: HExpr, tmp: Str) {
+    match branch {
+        HExpr::Block { stmts, tail, .. } => {
+            for stmt in stmts {
+                emit_stmt(ctx, stmt)
+            }
+            match tail {
+                some(t) => {
+                    let v = gen_expr(ctx, t)
+                    emit(ctx, "${tmp} = ${v};")
+                },
+                none => {},
+            }
+        },
+        _ => {
+            let v = gen_expr(ctx, branch)
+            emit(ctx, "${tmp} = ${v};")
+        },
+    }
+}
+
 fn gen_if(mut ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?) -> Str {
+    // When any branch contains `return`, use statement-mode if with a temp variable
+    // instead of ternary, to avoid IIFE capturing the return.
+    if if_expr_contains_return(then_branch, else_branch) {
+        let tmp = "__ring_blk${ctx.block_counter}"
+        ctx.block_counter = ctx.block_counter + 1
+        emit(ctx, "let ${tmp};")
+        let cond = gen_expr(ctx, condition)
+        emit(ctx, "if (${cond}) {")
+        push_indent(ctx)
+        emit_branch_as_assign(ctx, then_branch, tmp)
+        pop_indent(ctx)
+        match else_branch {
+            none => emit(ctx, "}"),
+            some(eb) => match eb {
+                HExpr::IfExpr { condition: ec, then_branch: et, else_branch: ee, .. } => {
+                    emit_if_as_assign(ctx, ec, et, ee, tmp)
+                },
+                _ => {
+                    emit(ctx, "} else {")
+                    push_indent(ctx)
+                    emit_branch_as_assign(ctx, eb, tmp)
+                    pop_indent(ctx)
+                    emit(ctx, "}")
+                },
+            },
+        }
+        return tmp
+    }
     let cond = gen_expr(ctx, condition)
     let then_val = gen_block_as_value(ctx, then_branch)
     match else_branch {
