@@ -185,19 +185,23 @@ Koka（Daan Leijen，Microsoft Research）是 Ring effect system 的直接理论
 | LLM 友好 | 无此设计目标 | 核心设计目标 | 中 |
 | 自举 | Haskell 实现 | Ring 自举 | 中 |
 
-**诚实评估**：当前差异化不够——类型系统维度 Ring 是 Koka 的严格子集。Phase C 的三个关键特性（refinement types / async effect / mut\<T\>）+ 语义驱动编译优化是拉开距离的窗口。Refinement types 是唯一能让 Ring 自成品类的特性。
+**诚实评估**：Ring 的 effect system 源于 Koka，但定位完全不同。Koka 是学术研究语言（纯函数式，无 OOP 手感），Ring 是面向工程的应用语言（Rust 语法 + ML 推断 + Koka effects）。核心差异化不在 effect 系统本身，而在三支柱的组合——推断一切（零标注）+ 追踪一切（签名即契约）+ 语义驱动性能（LLVM + 类型信息驱动优化）。Refinement types 是实验赌注（Z3 集成编译器路径未经充分验证），成了是品类创新，不成前三支柱自洽。
 
 ---
 
 ## 战略判断（2026-05-23 更新）
 
-### Ring-lang 的核心卖点
+### Ring-lang 的核心定位（2026-05-24 更新）
 
-**三个核心卖点**（路线图完成后）：
+**Rust 的安全性 + Python 的书写体验 + 效果系统让编译器知道一切，然后用这些信息优化性能。**
 
-1. **追踪一切**：数据类型 + 副作用类型 + 值约束（refinement），签名即完整契约
-2. **语义驱动性能**：类型系统信息（effect purity / refinement bounds / linear uniqueness）直接转化为编译优化——bounds check 消除、RC 省略、纯函数自动并行化。目标：特定场景超越 C++/Rust
-3. **LLM 原生**：模块签名信息密度最大化，LLM 需要最少上下文即可正确使用 API
+**三支柱**：
+
+1. **推断一切**：类型 + effect + 可变性 + 所有权，全推断。写起来像 Python，安全性像 Rust。Rust 的标注负担（lifetime、turbofish、trait bound）由编译器承担，不由人承担
+2. **追踪一切**：签名即完整行为契约（io/fail/mut/async）。LLM 和人都能从签名读出全部副作用。模块签名信息密度最大化，LLM 只需签名即可正确使用 API
+3. **语义驱动性能**：LLVM 后端 + effect purity / linearity 信息直接转化为编译优化——bounds check 消除、RC 省略、纯函数重排/并行化。前两个支柱产生的类型信息是优化燃料
+
+**实验赌注**：Refinement types（Z3 集成编译器，类型层值级谓词）。成了在第三支柱上再加一层（refinement proof → 消除运行时检查，消灭 `unsafe`），不成前三支柱自洽
 
 **已领先的维度**：
 - 类型系统理论深度（完整 effect + row poly，所有竞品都没有）
@@ -213,17 +217,19 @@ Koka（Daan Leijen，Microsoft Research）是 Ring effect system 的直接理论
 - 包生态——需要用户基数
 - MoonBit 的 3 年工程打磨——时间不可压缩
 
-### 按当前速度的预测
+### 里程碑（2026-05-24 更新）
 
-以实际观测到的节奏（Phase 3 = 1 天，Phase B 预计 = 2 天，新功能 ~2h/个零返工）：
-
-| 里程碑 | 预计完成 | 天数 |
-|--------|---------|------|
-| Phase B（mut\<S\> + 模块完善） | 5/24 | 2天 |
-| LSP 基础版（hover + goto-def） | 5/26 | 2天 |
-| Refinement types 原型 | 5/28 | 2天 |
-| 公开发布准备 | 5/30 | 2天 |
-| **从零到可公开发布** | **~5/30** | **从首 commit 起 14 天** |
+| 里程碑 | 状态 | 备注 |
+|--------|------|------|
+| Phase 3（语法修订 + 多错误恢复） | ✅ 完成 | 1 天 |
+| 自举（TS → Ring） | ✅ 完成 | ~9 小时 |
+| Phase B（mut\<S\> + 模块完善） | ✅ 完成 | 2 天 |
+| Phase C 层 1（effect alias / supertrait / mut\<T\> / default handler / delegate） | ✅ 完成 | 1 天 |
+| Phase C 层 2（关联类型 + Iterator） | 进行中 | — |
+| B-044 语义规范 | 排队 | 阻塞 LLVM |
+| LLVM 基础后端 | 确定交付 | 语义规范完成后启动 |
+| Ownership + Perceus RC | 确定交付 | LLVM 后启动 |
+| Refinement types | 实验赌注 | Z3 集成路径未验证 |
 
 ### "死亡螺旋"风险
 

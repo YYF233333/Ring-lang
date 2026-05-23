@@ -185,19 +185,20 @@ Ring-lang/
 - ~~`mut<T>` Marker Effect（mut self/mut 参数触发编译期 effect 追踪）~~ ✅ 已完成
 - ~~Default Effect Handler（op 带 body = 默认 handler）~~ ✅ 已完成
 
-### 层 2：核心特性
+### 层 2：核心特性 → LLVM 关键路径
 
-- Iterator Trait + 自定义迭代器（依赖 Supertrait）
+- 关联类型（`type Item` in trait）→ 编译器自身需要
+- Iterator Trait + 自定义迭代器（依赖关联类型）→ 编译器自身需要
 - ~~`delegate` 关键字（trait 实现委托）~~ ✅ 已完成
-- 关联类型（`type Item` in trait）
-- GADTs（enum 变体类型约束）
+- ~~B-044 语义规范~~ ✅ 已完成（design.md 1.7）
+- **LLVM Native Backend**（层 2 完成后启动，落地后 JS 后端废弃）
 
-### 层 3：重型特性（Phase C 完成后再展开）
+### 层 3：重型特性（LLVM 后端可用后启动）
 
-- Refinement types（编译期验证 + 运行时检查）
-- Linear Types（数据流分析 + Perceus RC 前置）
+- Ownership + Perceus RC（LLVM 上实现）
 - async Effect + 结构化并发
-- LLVM Native Backend
+- Refinement types（实验赌注，Z3 集成）
+- GADTs（无下游依赖，推迟至 LLVM 之后）
 
 ### 遗留改进
 
