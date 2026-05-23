@@ -781,6 +781,22 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
                 for declared_eff in declared_row.effects {
                     if effects_match_kind(inferred_eff, declared_eff) {
                         found = true
+                        match (inferred_eff, declared_eff) {
+                            (Effect::FailEffect { error_type: ie }, Effect::FailEffect { error_type: de }) => {
+                                ctx.subst = unify_at(ctx.sink, ctx.env, ie, de, ctx.subst, span)
+                            },
+                            (Effect::MutEffect { state_type: is }, Effect::MutEffect { state_type: ds }) => {
+                                ctx.subst = unify_at(ctx.sink, ctx.env, is, ds, ctx.subst, span)
+                            },
+                            (Effect::CustomEffect { type_args: ia, .. }, Effect::CustomEffect { type_args: da, .. }) => {
+                                let mut i = 0
+                                while i < ia.len() && i < da.len() {
+                                    ctx.subst = unify_at(ctx.sink, ctx.env, ia.get(i).unwrap_or(UNIT), da.get(i).unwrap_or(UNIT), ctx.subst, span)
+                                    i = i + 1
+                                }
+                            },
+                            _ => {}
+                        }
                     }
                 }
                 if !found {

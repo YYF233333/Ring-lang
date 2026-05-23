@@ -448,6 +448,7 @@ const cases: TestCase[] = [
   { file: "effect_alias_generic.ring", expected: "Generic effect alias: all passed\n" },
   { file: "supertrait_basic.ring", expected: "Supertrait basic: all passed\n" },
   { file: "supertrait_multi_level.ring", expected: "Supertrait multi-level: all passed\n" },
+  { file: "effect_annot_fail_type_match.ring", expected: "0\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -515,6 +516,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "exhaustive_nonfinite_msg.ring", error_pattern: "non-finite type" },
     { file: "effect_alias_cycle.ring", error_pattern: "E0406" },
     { file: "unknown_effect.ring", error_pattern: "E0407" },
+    { file: "effect_annot_fail_type_mismatch.ring", error_pattern: "E0301" },
     { file: "error_supertrait_missing_impl.ring", error_pattern: "E0505" },
     { file: "error_supertrait_cycle.ring", error_pattern: "E0501" },
   ];
