@@ -17,12 +17,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 **决策（2026-05-23）**：推迟到 B-005 supertrait 重构时统一处理——supertrait 会大改 trait/impl 注册流程，届时一并修复 effect 回传。workaround 暂留。关联 #66、#67 随此推迟。
 
-### #77 `infer_numeric_op` 无条件将 TypeVar 统一为 Int [low] [open]
-
-`fn add<T>(a: T, b: T) -> T { a + b }` 静默约束 T=Int（infer.ring:937-949）。无 Num trait 前合理但可能令人困惑。
-
-发现者：Opus
-
 
 ### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open] [deferred: LLVM]
 
@@ -96,13 +90,6 @@ Workaround：parser 用 `__ring_raise_fail` extern fn 绕过 evidence passing；
 
 ## 模块/诊断
 
-### #97 `load_prelude` 对 bounded impl 内方法间调用误报 E0503 [medium] [open] [after: B-005]
-
-`impl<T: Eq> Set` 中 `insert` 调用同 impl 的 `contains` 时，prelude 编译报 E0503（"Type does not satisfy trait bound 'Eq'"）。`load_prelude` 设置了 type_param_scope 但 bounded impl 上下文的 bounds 不传播到方法间调用。导致 #90 的理想修复（Ring 层 Eq-aware Set.insert）无法实现，只能用 runtime `__ring_deep_eq` 替代。
-
-**决策（2026-05-23）**：应修复。排在 B-005 supertrait 之后——共享 trait 注册逻辑，修完后 Set 方法可改为 Ring 实现（Eq trait dispatch），删除 `__ring_deep_eq` hack。
-
-发现者：Worker B3 agent（2026-05-23）
 
 
 ## 设计-实现差距（参考，已在 backlog 跟踪）
