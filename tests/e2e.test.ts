@@ -464,6 +464,8 @@ const cases: TestCase[] = [
   { file: "delegate_multi_trait.ring", expected: "delegate_multi_trait: all tests passed\n" },
   { file: "delegate_with_args.ring", expected: "delegate_with_args: all tests passed\n" },
   { file: "delegate_generic.ring", expected: "delegate_generic: all tests passed\n" },
+  { file: "delegate_supertrait_bound.ring", expected: "Alice\nHello, Alice!\ndelegate_supertrait_bound: all tests passed\n" },
+  { file: "effect_alias_dedup.ring", expected: "hello\neffect_alias_dedup: all tests passed\n" },
   { file: "io_effect_annotation.ring", expected: "hello world\nhello ring\nio_effect_annotation: all tests passed\n" },
 ];
 

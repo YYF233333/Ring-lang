@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
-    EMPTY_ROW}
+    EMPTY_ROW, effects_same_kind}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
@@ -234,7 +234,7 @@ pub fn register_decls_two_phase(mut ctx: InferCtx, decls: List<Decl>) {
 
     // Phase 3: process delegates (after struct/enum fields are complete)
     for decl in decls {
-        let result = some(register_phase3_delegate(ctx, decl)) catch { _ => none }
+        register_phase3_delegate(ctx, decl)
     }
 }
 
@@ -937,36 +937,69 @@ fn register_delegate_traits(
                             span, DiagnosticContext::TraitError { detail: "delegate conflicts with existing impl" })
                         continue
                     }
-                    // Register ImplEntry for target_type implementing tname
-                    let mut tp_names: List<Str> = []
-                    for tp in impl_type_params { tp_names.push(tp.name) }
-                    let mut method_names: List<Str> = []
-                    for tm in trait_def.methods { method_names.push(tm.name) }
-                    ctx.env.trait_reg.trait_impls.push(ImplEntry {
-                        trait_name: tname, target_type_name: target_type,
-                        type_params: tp_names, method_names: method_names
-                    })
+                    // Collect all traits to register: the explicit trait + its supertraits
+                    let mut all_traits_to_register: List<Str> = [tname]
+                    let supers = collect_all_supertraits(ctx, tname)
+                    for st_name in supers {
+                        all_traits_to_register.push(st_name)
+                    }
 
-                    // Register forwarding methods for each trait method
                     let self_type = resolve_impl_self_type(ctx, target_type, impl_type_params)
-                    for tm in trait_def.methods {
-                        match tm.ty {
-                            Type::FnType { params: trait_params, return_type: ret_ty, effects: eff } => {
-                                // Build param types: replace first param (Self) with target_type
-                                let mut param_types: List<Type> = []
-                                let mut first = true
-                                for tp in trait_params {
-                                    if first {
-                                        param_types.push(self_type)
-                                        first = false
-                                    } else {
-                                        param_types.push(tp)
+
+                    for reg_tname in all_traits_to_register {
+                        // Check if this trait (or supertrait) is already implemented
+                        let mut already_impl = false
+                        for existing in ctx.env.trait_reg.trait_impls {
+                            if existing.trait_name == reg_tname && existing.target_type_name == target_type {
+                                already_impl = true
+                            }
+                        }
+                        if already_impl { continue }
+
+                        // Validate that the field type implements this trait
+                        let mut field_has_impl = false
+                        for impl_ in ctx.env.trait_reg.trait_impls {
+                            if impl_.trait_name == reg_tname && impl_.target_type_name == field_type_name {
+                                field_has_impl = true
+                            }
+                        }
+                        if !field_has_impl { continue }
+
+                        match ctx.env.trait_reg.traits.get(reg_tname) {
+                            none => {},
+                            some(reg_trait_def) => {
+                                // Register ImplEntry
+                                let mut tp_names: List<Str> = []
+                                for tp in impl_type_params { tp_names.push(tp.name) }
+                                let mut method_names: List<Str> = []
+                                for tm in reg_trait_def.methods { method_names.push(tm.name) }
+                                ctx.env.trait_reg.trait_impls.push(ImplEntry {
+                                    trait_name: reg_tname, target_type_name: target_type,
+                                    type_params: tp_names, method_names: method_names
+                                })
+
+                                // Register forwarding methods for each trait method
+                                for tm in reg_trait_def.methods {
+                                    match tm.ty {
+                                        Type::FnType { params: trait_params, return_type: ret_ty, effects: eff } => {
+                                            // Build param types: replace first param (Self) with target_type
+                                            let mut param_types: List<Type> = []
+                                            let mut first = true
+                                            for tp in trait_params {
+                                                if first {
+                                                    param_types.push(self_type)
+                                                    first = false
+                                                } else {
+                                                    param_types.push(tp)
+                                                }
+                                            }
+                                            let fn_type = Type::FnType { params: param_types, return_type: ret_ty, effects: eff }
+                                            methods_map.insert(tm.name, TypeScheme { ty: fn_type, type_vars: list_clone(impl_tv_ids), bounds: impl_scheme_bounds, def_id: none })
+                                        },
+                                        _ => {}
                                     }
                                 }
-                                let fn_type = Type::FnType { params: param_types, return_type: ret_ty, effects: eff }
-                                methods_map.insert(tm.name, TypeScheme { ty: fn_type, type_vars: list_clone(impl_tv_ids), bounds: impl_scheme_bounds, def_id: none })
-                            },
-                            _ => {}
+                            }
                         }
                     }
                 }
@@ -1099,7 +1132,20 @@ fn subst_type_expr(te: TypeExpr, subst_map: Map<Str, TypeExpr>) -> TypeExpr {
 pub fn resolve_declared_effects(ctx: InferCtx, decl_effects: List<EffectExpr>) -> EffectRow {
     let mut expanding: Set<Str> = set_new()
     let effects = expand_effect_exprs(ctx, decl_effects, expanding)
-    EffectRow { effects: effects, tail: none }
+    // Deduplicate effects after alias expansion (e.g. {IO, io} -> [io, fail<Str>, io] -> [io, fail<Str>])
+    let mut deduped: List<Effect> = []
+    for eff in effects {
+        let mut is_dup = false
+        for existing in deduped {
+            if effects_same_kind(eff, existing) {
+                is_dup = true
+            }
+        }
+        if !is_dup {
+            deduped.push(eff)
+        }
+    }
+    EffectRow { effects: deduped, tail: none }
 }
 
 // ============================================================

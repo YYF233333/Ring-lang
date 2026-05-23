@@ -186,7 +186,7 @@ pub fn row_contains(row: EffectRow, eff: Effect) -> Bool {
     row.effects.any(fn(e) { effects_equal(e, eff) })
 }
 
-fn effects_same_kind(a: Effect, b: Effect) -> Bool {
+pub fn effects_same_kind(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
         Effect::MutEffect { .. } => match b { Effect::MutEffect { .. } => true, _ => false },

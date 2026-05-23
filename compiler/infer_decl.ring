@@ -509,7 +509,20 @@ fn expand_delegate_impls(
                         resolve_self_type(ctx, target_type)
                     }
 
+                    // Collect all traits to generate: explicit traits + their supertraits
+                    let mut all_traits: List<Str> = []
                     for tname in trait_names {
+                        all_traits.push(tname)
+                        let supers = collect_all_supertraits(ctx, tname)
+                        for st_name in supers {
+                            // Avoid duplicates
+                            if !all_traits.contains(st_name) {
+                                all_traits.push(st_name)
+                            }
+                        }
+                    }
+
+                    for tname in all_traits {
                         match ctx.env.trait_reg.traits.get(tname) {
                             none => {},  // Error already reported in Pass 1
                             some(trait_def) => {
