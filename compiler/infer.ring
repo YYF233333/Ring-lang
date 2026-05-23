@@ -987,9 +987,30 @@ fn infer_bin_op(mut ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
 fn infer_numeric_op(ctx: InferCtx, left: HExpr, right: HExpr, s: UnionFind, span: Span, op_str: Str) -> Type {
     let resolved = apply_subst(s, hexpr_type(left))
     match resolved {
-        Type::TypeVar { .. } => {
-            let _ = unify_at(ctx.sink, ctx.env, resolved, INT, s, span)
-            INT
+        Type::TypeVar { id: tv_id, .. } => {
+            // Check if this TypeVar is a rigid type parameter (from fn<T> etc.)
+            // Rigid type params should not silently unify to Int — report E0303.
+            // Fresh inference variables (e.g. from fold callback) can unify to Int.
+            let mut is_rigid = false
+            for entry in ctx.type_param_scope.entries() {
+                let tp_type = entry.1
+                match tp_type {
+                    Type::TypeVar { id: tp_id, .. } => {
+                        if resolve_var_id(tp_id, s) == resolve_var_id(tv_id, s) {
+                            is_rigid = true
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            if is_rigid {
+                type_error(ctx.sink, E0303,
+                    "Operator ${op_str} requires numeric types (Int or Float), got unresolved type",
+                    span, DiagnosticContext::TypeMismatch { expected: "Int or Float", actual: "unresolved type", expression: none })
+            } else {
+                let _ = unify_at(ctx.sink, ctx.env, resolved, INT, s, span)
+                INT
+            }
         },
         Type::IntType => INT,
         Type::FloatType => FLOAT,

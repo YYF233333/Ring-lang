@@ -519,6 +519,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "effect_annot_fail_type_mismatch.ring", error_pattern: "E0301" },
     { file: "error_supertrait_missing_impl.ring", error_pattern: "E0505" },
     { file: "error_supertrait_cycle.ring", error_pattern: "E0501" },
+    { file: "error_generic_numeric_op.ring", error_pattern: "E0303" },
   ];
 
   for (const tc of negative_cases) {
