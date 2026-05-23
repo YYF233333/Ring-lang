@@ -116,14 +116,6 @@ Parser 的 `impl Trait for mod::Type` 不支持——解析到 `::` 时报错。
 ## 类型系统健壮性（2026-05-23 审计发现）
 
 
-### #76 `EffectAliasDef` 缺少 `type_param_vars` [medium] [open]
-
-`EffectAliasDef`（env.ring:92-97）存储 `type_params: List<Str>` 但没有 `type_param_vars: List<Int>`（type variable IDs）。对比 `EffectDef`（env.ring:54）和 `TypeAliasDef`（env.ring:88）都有此字段。alias 展开时（expand_effect_exprs）用字符串名匹配做 substitution，未使用 fresh type variables。当 alias type param 与 call-site type var 重名时可能产生 shadowing 混淆。
-
-**文件**：`compiler/env.ring:92-97`
-**修复方向**：添加 `type_param_vars: List<Int>` 字段，在 `register_effect_alias` 时生成 fresh type vars。
-
-发现者：DS
 
 ### #92 `effects_match_kind` 与 `effects_same_kind` 对 MutEffect 行为不一致 [low] [open]
 

@@ -3,7 +3,7 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
-    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, mono, apply_subst}
+    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, mono, apply_subst, apply_subst_effect_map}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
@@ -1068,7 +1068,7 @@ pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
     Effect::CustomEffect { name: canonical_name, type_args: resolved_args }
 }
 
-fn expand_effect_exprs(ctx: InferCtx, decl_effects: List<EffectExpr>, mut expanding: Set<Str>) -> List<Effect> {
+fn expand_effect_exprs(mut ctx: InferCtx, decl_effects: List<EffectExpr>, mut expanding: Set<Str>) -> List<Effect> {
     let mut effects: List<Effect> = []
     for eff in decl_effects {
         match ctx.env.types.effect_aliases.get(eff.name) {
@@ -1080,25 +1080,51 @@ fn expand_effect_exprs(ctx: InferCtx, decl_effects: List<EffectExpr>, mut expand
                         DiagnosticContext::OtherContext { detail: some("cyclic effect alias") })
                 } else {
                     expanding.insert(eff.name)
-                    // Build substitution map: alias type params -> call-site type args
-                    let mut subst_map: Map<Str, TypeExpr> = map_new()
-                    let mut i = 0
-                    while i < alias_def.type_params.len() && i < eff.type_args.len() {
-                        match alias_def.type_params.get(i) {
-                            some(tp_name) => match eff.type_args.get(i) {
-                                some(ta) => { subst_map.insert(tp_name, ta) },
-                                none => {}
+
+                    // Save any existing type_param_scope entries that alias type params might shadow
+                    let mut saved_scope: List<(Str, Type?)> = []
+                    let mut vi = 0
+                    for tp_name in alias_def.type_params {
+                        saved_scope.push((tp_name, ctx.type_param_scope.get(tp_name)))
+                        // Install alias's fresh type vars into type_param_scope
+                        match alias_def.type_param_vars.get(vi) {
+                            some(var_id) => {
+                                ctx.type_param_scope.insert(tp_name, Type::TypeVar { id: var_id, name: none })
                             },
                             none => {}
                         }
-                        i = i + 1
+                        vi = vi + 1
                     }
-                    // Substitute type params in alias body effects and recursively expand
-                    let substituted = subst_effect_exprs(alias_def.effects, subst_map)
-                    let expanded = expand_effect_exprs(ctx, substituted, expanding)
+
+                    // Recursively expand the alias body effects using the fresh type vars in scope
+                    let expanded = expand_effect_exprs(ctx, alias_def.effects, expanding)
+
+                    // Restore saved type_param_scope entries
+                    for entry in saved_scope {
+                        match entry {
+                            (name, some(prev_type)) => { ctx.type_param_scope.insert(name, prev_type) },
+                            (name, none) => { ctx.type_param_scope.remove(name) }
+                        }
+                    }
+
+                    // Build substitution map: alias type_param_vars -> resolved call-site type args
+                    let mut subst_map: Map<Int, Type> = map_new()
+                    let mut si = 0
+                    while si < alias_def.type_param_vars.len() && si < eff.type_args.len() {
+                        match (alias_def.type_param_vars.get(si), eff.type_args.get(si)) {
+                            (some(var_id), some(ta)) => {
+                                subst_map.insert(var_id, resolve_type_expr(ctx, ta))
+                            },
+                            _ => {}
+                        }
+                        si = si + 1
+                    }
+
+                    // Apply type var substitution to each expanded effect
                     for e in expanded {
-                        effects.push(e)
+                        effects.push(apply_subst_effect_map(subst_map, e))
                     }
+
                     expanding.remove(eff.name)
                 }
             },
@@ -1110,41 +1136,7 @@ fn expand_effect_exprs(ctx: InferCtx, decl_effects: List<EffectExpr>, mut expand
     effects
 }
 
-fn subst_effect_exprs(effects: List<EffectExpr>, subst_map: Map<Str, TypeExpr>) -> List<EffectExpr> {
-    if subst_map.len() == 0 { return effects }
-    let mut result: List<EffectExpr> = []
-    for eff in effects {
-        let mut new_type_args: List<TypeExpr> = []
-        for ta in eff.type_args {
-            new_type_args.push(subst_type_expr(ta, subst_map))
-        }
-        result.push(EffectExpr { name: eff.name, type_args: new_type_args, span: eff.span })
-    }
-    result
-}
-
-fn subst_type_expr(te: TypeExpr, subst_map: Map<Str, TypeExpr>) -> TypeExpr {
-    match te {
-        TypeExpr::Named { name, type_args, span, .. } => {
-            // If this is a bare type param name with no type_args, substitute
-            if type_args.len() == 0 {
-                match subst_map.get(name) {
-                    some(replacement) => replacement,
-                    none => te
-                }
-            } else {
-                let mut new_args: List<TypeExpr> = []
-                for a in type_args {
-                    new_args.push(subst_type_expr(a, subst_map))
-                }
-                TypeExpr::Named { name: name, qualifier: none, type_args: new_args, span: span }
-            }
-        },
-        _ => te
-    }
-}
-
-pub fn resolve_declared_effects(ctx: InferCtx, decl_effects: List<EffectExpr>) -> EffectRow {
+pub fn resolve_declared_effects(mut ctx: InferCtx, decl_effects: List<EffectExpr>) -> EffectRow {
     let mut expanding: Set<Str> = set_new()
     let effects = expand_effect_exprs(ctx, decl_effects, expanding)
     // Deduplicate effects after alias expansion (e.g. {IO, io} -> [io, fail<Str>, io] -> [io, fail<Str>])
@@ -1437,12 +1429,16 @@ fn register_effect_alias(mut ctx: InferCtx, name: Str, type_params: List<TypePar
             DiagnosticContext::OtherContext { detail: some("duplicate effect alias") })
     } else {
         let mut tp_names: List<Str> = []
+        let mut tp_vars: List<Int> = []
         for tp in type_params {
             tp_names.push(tp.name)
+            let tv = ctx.env.fresh_var()
+            match tv { Type::TypeVar { id, .. } => { tp_vars.push(id) }, _ => {} }
         }
         ctx.env.types.effect_aliases.insert(name, EffectAliasDef {
             name: name,
             type_params: tp_names,
+            type_param_vars: tp_vars,
             effects: effects,
             span: span
         })

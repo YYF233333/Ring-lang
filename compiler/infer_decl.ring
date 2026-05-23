@@ -893,7 +893,7 @@ fn find_ast_fn_by_name(methods: List<Decl>, name: Str) -> Decl? {
     })
 }
 
-fn check_extern_fn_decl(ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, declared_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
+fn check_extern_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, declared_effects: List<EffectExpr>?, is_pub: Bool, span: Span) -> HDecl {
     let scheme = match ctx.env.lookup(name) {
         some(s) => s,
         none => {

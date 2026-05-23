@@ -450,6 +450,7 @@ const cases: TestCase[] = [
   { file: "list_first_last.ring", expected: "List first/last empty: all passed\n" },
   { file: "effect_alias.ring", expected: "Hello, world\nEffect alias: all passed\n" },
   { file: "effect_alias_generic.ring", expected: "Generic effect alias: all passed\n" },
+  { file: "effect_alias_shadowing.ring", expected: "hello world\nEffect alias shadowing: all passed\n" },
   { file: "supertrait_basic.ring", expected: "Supertrait basic: all passed\n" },
   { file: "supertrait_multi_level.ring", expected: "Supertrait multi-level: all passed\n" },
   { file: "supertrait_default_method.ring", expected: "Supertrait default method: passed\n" },

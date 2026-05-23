@@ -92,6 +92,7 @@ pub struct TypeAliasDef {
 pub struct EffectAliasDef {
     pub name: Str,
     pub type_params: List<Str>,
+    pub type_param_vars: List<Int>,
     pub effects: List<EffectExpr>,
     pub span: Span
 }
@@ -401,7 +402,7 @@ pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
     }
 }
 
-fn apply_subst_effect_map(subst: Map<Int, Type>, e: Effect) -> Effect {
+pub fn apply_subst_effect_map(subst: Map<Int, Type>, e: Effect) -> Effect {
     match e {
         Effect::FailEffect { error_type } =>
             Effect::FailEffect { error_type: apply_subst_map(subst, error_type) },
