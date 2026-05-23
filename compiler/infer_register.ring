@@ -643,9 +643,9 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
     for method in methods {
         match method {
             Decl::Fn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
-                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params),
+                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params, false),
             Decl::ExternFn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
-                register_impl_extern_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params),
+                register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params, true),
             Decl::Delegate { .. } => {},  // Deferred to register_phase3_delegate (needs complete struct fields)
             _ => {}
         }
@@ -736,7 +736,7 @@ fn register_impl_method(
     mut ctx: InferCtx, mut methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
     target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
     return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>,
-    impl_type_params: List<TypeParam>
+    impl_type_params: List<TypeParam>, is_extern: Bool
 ) {
     let saved_method = map_clone(ctx.type_param_scope)
     let mut method_tv_ids: List<Int> = []
@@ -759,17 +759,20 @@ fn register_impl_method(
     let mut all_tvs = list_clone(impl_tv_ids)
     for mtv in method_tv_ids { all_tvs.push(mtv) }
 
-    let mut declared_names: Set<Str> = set_new()
-    for entry in ctx.type_param_scope.entries() {
-        let (tpname, _) = entry
-        if outer_saved.contains_key(tpname) { declared_names.insert(tpname) }
-    }
-    for entry in ctx.type_param_scope.entries() {
-        let (tpname, tv) = entry
-        if !outer_saved.contains_key(tpname) && !declared_names.contains(tpname) {
-            match tv { Type::TypeVar { id, .. } => {
-                if !all_tvs.contains(id) { all_tvs.push(id) }
-            }, _ => {} }
+    // Non-extern methods: filter unused type variables from outer scope
+    if !is_extern {
+        let mut declared_names: Set<Str> = set_new()
+        for entry in ctx.type_param_scope.entries() {
+            let (tpname, _) = entry
+            if outer_saved.contains_key(tpname) { declared_names.insert(tpname) }
+        }
+        for entry in ctx.type_param_scope.entries() {
+            let (tpname, tv) = entry
+            if !outer_saved.contains_key(tpname) && !declared_names.contains(tpname) {
+                match tv { Type::TypeVar { id, .. } => {
+                    if !all_tvs.contains(id) { all_tvs.push(id) }
+                }, _ => {} }
+            }
         }
     }
 
@@ -778,60 +781,6 @@ fn register_impl_method(
         none => EMPTY_ROW
     }
     let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_m_effects }
-    methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: impl_scheme_bounds, def_id: none })
-
-    // Track mut self methods
-    if params.len() > 0 {
-        match params.first() {
-            some(first_p) => {
-                if first_p.name == "self" && first_p.is_mutable {
-                    let mut mut_set = match ctx.env.trait_reg.mut_methods.get(target_type) {
-                        some(s) => s,
-                        none => {
-                            let mut new_set: Set<Str> = set_new()
-                            ctx.env.trait_reg.mut_methods.insert(target_type, new_set)
-                            new_set
-                        }
-                    }
-                    mut_set.insert(mname)
-                }
-            },
-            none => {}
-        }
-    }
-
-    ctx.type_param_scope = saved_method
-}
-
-fn register_impl_extern_method(
-    mut ctx: InferCtx, mut methods_map: Map<Str, TypeScheme>, impl_tv_ids: List<Int>,
-    target_type: Str, mname: Str, mtps: List<TypeParam>, params: List<Param>,
-    return_type: TypeExpr?, declared_effects: List<EffectExpr>?, impl_scheme_bounds: List<SchemeBound>, outer_saved: Map<Str, Type>,
-    impl_type_params: List<TypeParam>
-) {
-    let saved_method = map_clone(ctx.type_param_scope)
-    let mut method_tv_ids: List<Int> = []
-    for mtp in mtps {
-        let tv = ctx.env.fresh_var()
-        match tv { Type::TypeVar { id, .. } => { method_tv_ids.push(id) }, _ => {} }
-        ctx.type_param_scope.insert(mtp.name, tv)
-    }
-    let self_type = resolve_impl_self_type(ctx, target_type, impl_type_params)
-    let mut param_types: List<Type> = []
-    for p in params {
-        match p.type_annotation {
-            some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
-            none => if p.name == "self" { param_types.push(self_type) } else { param_types.push(ctx.env.fresh_var()) }
-        }
-    }
-    let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
-    let mut all_tvs = list_clone(impl_tv_ids)
-    for mtv in method_tv_ids { all_tvs.push(mtv) }
-    let impl_ext_effects = match declared_effects {
-        some(de) => resolve_declared_effects(ctx, de),
-        none => EMPTY_ROW
-    }
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: impl_ext_effects }
     methods_map.insert(mname, TypeScheme { ty: fn_type, type_vars: all_tvs, bounds: impl_scheme_bounds, def_id: none })
 
     // Track mut self methods
