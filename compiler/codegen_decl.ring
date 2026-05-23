@@ -442,22 +442,23 @@ pub fn emit_toplevel_evidence(mut ctx: CodegenCtx, effects: EffectRow) {
         }
     }
 
-    // Pass 2: emit evidence for default-evidence effects (may need factory calls)
-    for name in deferred_defaults {
+    // Pass 2: topologically sort deferred_defaults so dependencies are emitted first.
+    // Build dependency graph from default_evidence_params: if effect A's factory
+    // takes __ring_ev_B, then A depends on B (B must be emitted before A).
+    let sorted_defaults = topo_sort_defaults(ctx, deferred_defaults)
+
+    // Pass 3: emit evidence for default-evidence effects in topological order
+    for name in sorted_defaults {
         let ev_name = evidence_param_name(name)
         let def_ev = default_evidence_name(name)
         match ctx.default_evidence_params.get(name) {
             some(factory_params) => {
+                // Emit any dependencies that haven't been emitted yet.
+                // Dependencies may themselves be default-evidence effects (needs recursive resolution).
                 for dp in factory_params {
                     let dep_name = dp.slice(10, dp.len())
                     if !emitted.contains(dep_name) {
-                        let dep_ev_name = evidence_param_name(dep_name)
-                        if dep_name == "fail" {
-                            emit(ctx, "const ${dep_ev_name} = { raise: (error) => { throw error; } };")
-                        } else {
-                            emit(ctx, "const ${dep_ev_name} = {};")
-                        }
-                        emitted.insert(dep_name)
+                        emit_single_evidence(ctx, dep_name, emitted)
                     }
                 }
                 let args = factory_params.join(", ")
@@ -469,4 +470,131 @@ pub fn emit_toplevel_evidence(mut ctx: CodegenCtx, effects: EffectRow) {
         }
         emitted.insert(name)
     }
+}
+
+// Emit evidence for a single effect, recursively resolving default-evidence dependencies.
+fn emit_single_evidence(mut ctx: CodegenCtx, name: Str, mut emitted: Set<Str>) {
+    if emitted.contains(name) { return }
+    let ev_name = evidence_param_name(name)
+    if name == "io" {
+        // io evidence is a global ambient — no const needed
+        emitted.insert(name)
+        return
+    }
+    if name == "fail" {
+        emit(ctx, "const ${ev_name} = { raise: (error) => { throw error; } };")
+        emitted.insert(name)
+        return
+    }
+    if ctx.default_evidence_effects.contains(name) {
+        let def_ev = default_evidence_name(name)
+        match ctx.default_evidence_params.get(name) {
+            some(factory_params) => {
+                // This default effect has dependencies — recursively emit them first
+                for dp in factory_params {
+                    let dep_name = dp.slice(10, dp.len())
+                    if !emitted.contains(dep_name) {
+                        emit_single_evidence(ctx, dep_name, emitted)
+                    }
+                }
+                let args = factory_params.join(", ")
+                emit(ctx, "const ${ev_name} = ${def_ev}(${args});")
+            },
+            none => {
+                emit(ctx, "const ${ev_name} = ${def_ev};")
+            }
+        }
+    } else {
+        emit(ctx, "const ${ev_name} = {};")
+    }
+    emitted.insert(name)
+}
+
+// Topological sort for default evidence emission order.
+// Ensures that if effect A depends on effect B (both with all-default handlers),
+// B is emitted before A so that B's evidence is available when A's factory is called.
+fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
+    let mut default_set: Set<Str> = set_new()
+    for d in defaults { default_set.insert(d) }
+
+    // Build adjacency: deps[A] = [B, C] means A depends on B and C
+    let mut deps: Map<Str, List<Str>> = map_new()
+    for name in defaults {
+        let mut my_deps: List<Str> = [""]; my_deps.clear()
+        match ctx.default_evidence_params.get(name) {
+            some(factory_params) => {
+                for dp in factory_params {
+                    let dep_name = dp.slice(10, dp.len())
+                    if default_set.contains(dep_name) {
+                        my_deps.push(dep_name)
+                    }
+                }
+            },
+            none => {}
+        }
+        deps.insert(name, my_deps)
+    }
+
+    // Kahn's algorithm: build reverse edges and in-degree map.
+    // rev_deps[B] = [A, C] means A and C depend on B.
+    // in_deg[A] = number of dependencies A has (must be emitted before A).
+    let mut rev_deps: Map<Str, List<Str>> = map_new()
+    let mut in_deg: Map<Str, Int> = map_new()
+    for name in defaults {
+        in_deg.insert(name, 0)
+        rev_deps.insert(name, { let mut l: List<Str> = [""]; l.clear(); l })
+    }
+    for entry in deps.entries() {
+        let (name, dep_list) = entry
+        in_deg.insert(name, dep_list.len())
+        for dep in dep_list {
+            match rev_deps.get(dep) {
+                some(rev_list) => { rev_list.push(name) },
+                none => {
+                    let mut new_list: List<Str> = [""]; new_list.clear()
+                    new_list.push(name)
+                    rev_deps.insert(dep, new_list)
+                }
+            }
+        }
+    }
+
+    // Start with effects that have no dependencies (in_deg == 0)
+    let mut queue: List<Str> = [""]; queue.clear()
+    for entry in in_deg.entries() {
+        let (name, deg) = entry
+        if deg == 0 { queue.push(name) }
+    }
+    queue.sort()  // deterministic order
+
+    let mut sorted: List<Str> = [""]; sorted.clear()
+    while queue.len() > 0 {
+        let cur = queue.shift().unwrap()
+        sorted.push(cur)
+        match rev_deps.get(cur) {
+            some(dependents) => {
+                for dependent in dependents {
+                    let old_deg = match in_deg.get(dependent) { some(v) => v, none => 0 }
+                    in_deg.insert(dependent, old_deg - 1)
+                    if old_deg - 1 == 0 {
+                        queue.push(dependent)
+                        queue.sort()  // maintain deterministic order
+                    }
+                }
+            },
+            none => {}
+        }
+    }
+
+    // If sorted.len() < defaults.len(), there's a cycle (already caught by checker).
+    // Append remaining in original order as fallback.
+    if sorted.len() < defaults.len() {
+        for name in defaults {
+            if !sorted.contains(name) {
+                sorted.push(name)
+            }
+        }
+    }
+
+    sorted
 }
