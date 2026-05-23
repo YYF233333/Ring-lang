@@ -1612,9 +1612,9 @@ function gen_handle(ctx, body, handlers) {
     const __ring_dt0 = entry;
     const effect_name = __ring_dt0[0];
     const hs = __ring_dt0[1];
-    let entries = [""];
-    List_clear(entries);
+    const ev_name = hir$evidence_param_name(effect_name);
     let handled_op_names = set_new();
+    List_push(ev_decls, `let ${ev_name} = {};`);
     for (const h of hs) {
       _Set_insert(handled_op_names, h.op_name);
       let params = [""];
@@ -1629,31 +1629,9 @@ function gen_handle(ctx, body, handlers) {
         has_abort = true;
         List_push(abort_effect_names, effect_name);
         const ea = hir$RUNTIME_EFFECT_ABORT;
-        let ep = [""];
-        List_clear(ep);
-        List_push(ep, h.op_name);
-        List_push(ep, ": (");
-        List_push(ep, params_str);
-        List_push(ep, ") => { throw new ");
-        List_push(ep, ea);
-        List_push(ep, "(");
-        List_push(ep, q);
-        List_push(ep, effect_name);
-        List_push(ep, q);
-        List_push(ep, ", ");
-        List_push(ep, b);
-        List_push(ep, "); }");
-        List_push(entries, List_join(ep, ""));
+        List_push(ev_decls, `${ev_name}.${h.op_name} = (${params_str}) => { throw new ${ea}(${q}${effect_name}${q}, ${b}); };`);
       } else {
-        let ep = [""];
-        List_clear(ep);
-        List_push(ep, h.op_name);
-        List_push(ep, ": (");
-        List_push(ep, params_str);
-        List_push(ep, ") => (");
-        List_push(ep, b);
-        List_push(ep, ")");
-        List_push(entries, List_join(ep, ""));
+        List_push(ev_decls, `${ev_name}.${h.op_name} = (${params_str}) => (${b});`);
       }
     }
     __ring_match54: {
@@ -1673,15 +1651,7 @@ function gen_handle(ctx, body, handlers) {
                 }
                 const dparams_str = List_join(dparams, ", ");
                 const db = gen_expr(ctx, dbody);
-                let dep = [""];
-                List_clear(dep);
-                List_push(dep, codegen_ctx$safe_ident(op.name));
-                List_push(dep, ": (");
-                List_push(dep, dparams_str);
-                List_push(dep, ") => (");
-                List_push(dep, db);
-                List_push(dep, ")");
-                List_push(entries, List_join(dep, ""));
+                List_push(ev_decls, `${ev_name}.${codegen_ctx$safe_ident(op.name)} = (${dparams_str}) => (${db});`);
                 break __ring_match55;
               }
               if (__ring_m55._tag === "none") {
@@ -1698,9 +1668,6 @@ function gen_handle(ctx, body, handlers) {
       }
       __match_fail(__ring_m54);
     }
-    const ev_name = hir$evidence_param_name(effect_name);
-    const entries_str = List_join(entries, ", ");
-    List_push(ev_decls, `const ${ev_name} = { ${entries_str} };`);
   }
   let ev_param_names = [""];
   List_clear(ev_param_names);

@@ -587,8 +587,7 @@ function emit_effect_decl(ctx, name, ops) {
     return;
   }
   const def_ev_name = hir$default_evidence_name(name);
-  let entries = [""];
-  List_clear(entries);
+  codegen_ctx$emit(ctx, `let ${def_ev_name} = {};`);
   for (const op of ops) {
     __ring_match18: {
       const __ring_m18 = op.default_body;
@@ -601,15 +600,7 @@ function emit_effect_decl(ctx, name, ops) {
         }
         const params_str = List_join(params, ", ");
         const b = codegen_expr$gen_expr(ctx, body);
-        let ep = [""];
-        List_clear(ep);
-        List_push(ep, codegen_ctx$safe_ident(op.name));
-        List_push(ep, ": (");
-        List_push(ep, params_str);
-        List_push(ep, ") => (");
-        List_push(ep, b);
-        List_push(ep, ")");
-        List_push(entries, List_join(ep, ""));
+        codegen_ctx$emit(ctx, `${def_ev_name}.${codegen_ctx$safe_ident(op.name)} = (${params_str}) => (${b});`);
         break __ring_match18;
       }
       if (__ring_m18._tag === "none") {
@@ -618,8 +609,6 @@ function emit_effect_decl(ctx, name, ops) {
       __match_fail(__ring_m18);
     }
   }
-  const entries_str = List_join(entries, ", ");
-  codegen_ctx$emit(ctx, `const ${def_ev_name} = { ${entries_str} };`);
   return _Set_insert(ctx.default_evidence_effects, name);
 }
 

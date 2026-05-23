@@ -981,8 +981,11 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
 
     for entry in by_effect.entries() {
         let (effect_name, hs) = entry
-        let mut entries: List<Str> = [""]; entries.clear()
+        let ev_name = evidence_param_name(effect_name)
         let mut handled_op_names: Set<Str> = set_new()
+        // Use let + sequential field assignment to avoid TDZ when
+        // a default body references sibling ops on the same evidence object (#80)
+        ev_decls.push("let ${ev_name} = {};")
         for h in hs {
             handled_op_names.insert(h.op_name)
             let mut params: List<Str> = [""]; params.clear()
@@ -994,29 +997,9 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
                 has_abort = true
                 abort_effect_names.push(effect_name)
                 let ea = RUNTIME_EFFECT_ABORT
-                let mut ep: List<Str> = [""]; ep.clear()
-                ep.push(h.op_name)
-                ep.push(": (")
-                ep.push(params_str)
-                ep.push(") => { throw new ")
-                ep.push(ea)
-                ep.push("(")
-                ep.push(q)
-                ep.push(effect_name)
-                ep.push(q)
-                ep.push(", ")
-                ep.push(b)
-                ep.push("); }")
-                entries.push(ep.join(""))
+                ev_decls.push("${ev_name}.${h.op_name} = (${params_str}) => { throw new ${ea}(${q}${effect_name}${q}, ${b}); };")
             } else {
-                let mut ep: List<Str> = [""]; ep.clear()
-                ep.push(h.op_name)
-                ep.push(": (")
-                ep.push(params_str)
-                ep.push(") => (")
-                ep.push(b)
-                ep.push(")")
-                entries.push(ep.join(""))
+                ev_decls.push("${ev_name}.${h.op_name} = (${params_str}) => (${b});")
             }
         }
         // Merge default bodies for unhandled ops (#72)
@@ -1030,14 +1013,7 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
                                 for p in op.params { dparams.push(safe_ident(p.name)) }
                                 let dparams_str = dparams.join(", ")
                                 let db = gen_expr(ctx, dbody)
-                                let mut dep: List<Str> = [""]; dep.clear()
-                                dep.push(safe_ident(op.name))
-                                dep.push(": (")
-                                dep.push(dparams_str)
-                                dep.push(") => (")
-                                dep.push(db)
-                                dep.push(")")
-                                entries.push(dep.join(""))
+                                ev_decls.push("${ev_name}.${safe_ident(op.name)} = (${dparams_str}) => (${db});")
                             },
                             none => {},
                         }
@@ -1046,9 +1022,6 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
             },
             none => {},
         }
-        let ev_name = evidence_param_name(effect_name)
-        let entries_str = entries.join(", ")
-        ev_decls.push("const ${ev_name} = { ${entries_str} };")
     }
 
     let mut ev_param_names: List<Str> = [""]; ev_param_names.clear()

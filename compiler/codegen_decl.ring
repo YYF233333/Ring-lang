@@ -349,7 +349,9 @@ fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
     if ops.len() == 0 { return }
 
     let def_ev_name = default_evidence_name(name)
-    let mut entries: List<Str> = [""]; entries.clear()
+    // Use let + sequential field assignment to avoid TDZ when
+    // a default body references sibling ops on the same evidence object (#80)
+    emit(ctx, "let ${def_ev_name} = {};")
     for op in ops {
         match op.default_body {
             some(body) => {
@@ -357,20 +359,11 @@ fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
                 for p in op.params { params.push(safe_ident(p.name)) }
                 let params_str = params.join(", ")
                 let b = gen_expr(ctx, body)
-                let mut ep: List<Str> = [""]; ep.clear()
-                ep.push(safe_ident(op.name))
-                ep.push(": (")
-                ep.push(params_str)
-                ep.push(") => (")
-                ep.push(b)
-                ep.push(")")
-                entries.push(ep.join(""))
+                emit(ctx, "${def_ev_name}.${safe_ident(op.name)} = (${params_str}) => (${b});")
             },
             none => {}
         }
     }
-    let entries_str = entries.join(", ")
-    emit(ctx, "const ${def_ev_name} = { ${entries_str} };")
     ctx.default_evidence_effects.insert(name)
 }
 
