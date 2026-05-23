@@ -518,10 +518,12 @@ function effects_same_kind(a, b) {
       break __ring_match19;
     }
     if (__ring_m19._tag === "MutEffect") {
+      const sa = __ring_m19.state_type;
       __ring_match21: {
         const __ring_m21 = b;
         if (__ring_m21._tag === "MutEffect") {
-          return true;
+          const sb = __ring_m21.state_type;
+          return types_equal(sa, sb);
           break __ring_match21;
         }
         return false;

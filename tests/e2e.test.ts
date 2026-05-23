@@ -460,6 +460,7 @@ const cases: TestCase[] = [
   { file: "audit_partial_handle_default.ring", expected: "accessed: config\naudit_partial_handle_default: all tests passed\n" },
   { file: "default_effect_multi_op.ring", expected: "Name? \ndefault_effect_multi_op: all tests passed\n" },
   { file: "mut_effect_basic.ring", expected: "mut_effect_basic: all tests passed\n" },
+  { file: "mut_effect_multi_type.ring", expected: "mut_effect_multi_type: all tests passed\n" },
   { file: "delegate_basic.ring", expected: "delegate_basic: all tests passed\n" },
   { file: "delegate_multi_trait.ring", expected: "delegate_multi_trait: all tests passed\n" },
   { file: "delegate_with_args.ring", expected: "delegate_with_args: all tests passed\n" },

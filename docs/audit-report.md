@@ -87,32 +87,6 @@
 
 ## 类型系统健壮性（2026-05-23 审计发现）
 
-### #73 `effects_same_kind` 对 MutEffect 忽略 state_type [medium] [open]
-
-`effects_same_kind`（types.ring:189-202）对 `MutEffect` 使用通配符匹配——`mut<Int>` 和 `mut<Str>` 被视为同一 kind。`row_merge`（types.ring:204-224）使用此函数去重，导致同一函数同时有 `mut<Int>` 和 `mut<Str>` 时，第二个被静默丢弃。`row_merge` 在 33 处被调用（if/match/block/while/for 等复合表达式的 effect 合并），影响所有 `mut<T>` effect 追踪的精度。
-
-**文件**：`compiler/types.ring:189-202`（effects_same_kind 第 192 行 MutEffect 通配匹配）
-**修复方向**：`MutEffect { state_type: sa }` 应与 `FailEffect` 一致，比较 `state_type`：`types_equal(sa, sb)`。
-
-发现者：DS
-
-### #74 Delegate 注册不展开 supertrait ImplEntries [medium] [open]
-
-`register_delegate_traits`（infer_register.ring:932-935）只为显式指定的 trait push `ImplEntry`，不调用 `collect_all_supertraits` 展开 supertrait。对比 `register_impl`（line 656-668）会展开 supertrait 并验证。如果 delegate 的 trait 有 supertrait（如 `Ord: Eq`），只注册 `Ord` 的 ImplEntry，缺少 `Eq` 的。在 trait bound 检查（`T: Eq`）时会找不到 impl。
-
-**文件**：`compiler/infer_register.ring:901-963`（register_delegate_traits 缺少 collect_all_supertraits 调用）
-**修复方向**：在 push ImplEntry 后调用 `collect_all_supertraits(ctx, tname)` 展开，为每个 supertrait 也 push ImplEntry。同时验证 field type 也实现了 supertrait。
-
-发现者：DS
-
-### #75 Effect alias 展开不去重 [medium] [open]
-
-`expand_effect_exprs`（infer_register.ring:1010-1049）将 alias 体展开后直接 concat 到效果列表，不做去重。`{IO, io}` 展开为 `[io, fail<Str>, io]`——`io` 重复。虽然 `row_merge` 下游会去重，但直接用于 `types_equal` 比较时重复会影响相等性判断，且与 `EffectRow` 的语义约定（效果唯一）不一致。
-
-**文件**：`compiler/infer_register.ring:1037-1040`（展开后直接 push，无去重）
-**修复方向**：在 `expand_effect_exprs` 返回前或 `resolve_declared_effects` 中加一次去重 pass。
-
-发现者：DS
 
 ### #76 `EffectAliasDef` 缺少 `type_param_vars` [medium] [open]
 
