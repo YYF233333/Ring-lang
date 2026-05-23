@@ -1380,6 +1380,43 @@ fn check_expr_is_let_def(ctx: InferCtx, expr: Expr) -> Bool {
     }
 }
 
+fn get_expr_def_id(ctx: InferCtx, expr: Expr) -> Int? {
+    match expr {
+        Expr::Ident { name, .. } => {
+            match ctx.env.lookup(name) {
+                some(s) => s.def_id,
+                none => none
+            }
+        },
+        // Do not recurse through FieldAccess: only direct ident receivers
+        // qualify for mut<T> injection (e.g. list.push, not ctx.field.push)
+        _ => none
+    }
+}
+
+fn is_mut_method_call(ctx: InferCtx, recv_type: Type, method: Str) -> Bool {
+    let mut type_name: Str? = none
+    match recv_type {
+        Type::StructType { name, .. } => { type_name = some(name) },
+        Type::EnumType { name, .. } => { type_name = some(name) },
+        _ => {
+            match type_to_builtin_name(recv_type) {
+                some(n) => { type_name = some(n) },
+                none => {}
+            }
+        }
+    }
+    match type_name {
+        some(tname) => {
+            match ctx.env.trait_reg.mut_methods.get(tname) {
+                some(mut_set) => mut_set.contains(method),
+                none => false
+            }
+        },
+        none => false
+    }
+}
+
 fn check_receiver_mutability(mut ctx: InferCtx, receiver: Expr, recv_type: Type, method: Str, span: Span) {
     let mut type_name: Str? = none
     match recv_type {
@@ -1436,6 +1473,21 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
 
     // Check receiver mutability for mut self methods
     check_receiver_mutability(ctx, receiver, recv_type, method, span)
+
+    // Inject mut<T> effect when calling mut method on a mut function parameter
+    if is_mut_method_call(ctx, recv_type, method) {
+        match get_expr_def_id(ctx, receiver) {
+            some(did) => {
+                if ctx.env.scope.mut_param_defs.contains(did) {
+                    let mut_eff = Effect::MutEffect { state_type: recv_type }
+                    let me = merge_effects(ctx.env, effects, effect_row([mut_eff]), s)
+                    effects = me.0
+                    s = me.1
+                }
+            },
+            none => {}
+        }
+    }
 
     let mut method_type: Type? = none
     let mut method_scheme: TypeScheme? = none
@@ -2599,6 +2651,7 @@ fn infer_lambda(mut ctx: InferCtx, params: List<Param>, body: Expr, span: Span, 
                         ctx.env.record_def_span(did, p.span)
                         if p.is_mutable {
                             ctx.env.scope.mutable_vars.insert(did)
+                            ctx.env.scope.mut_param_defs.insert(did)
                         } else {
                             ctx.env.scope.let_defs.insert(did)
                         }

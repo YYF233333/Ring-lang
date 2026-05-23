@@ -274,9 +274,16 @@ function qualify(ctx, name) {
 function extract_effect_names(effects) {
   let names = [];
   for (const e of effects.effects) {
-    const n = types$effect_kind_name(e);
-    if ((List_contains(names, n, __Str_Eq) === false)) {
-      List_push(names, n);
+    __ring_match9: {
+      const __ring_m9 = e;
+      if (__ring_m9._tag === "MutEffect") {
+        break __ring_match9;
+      }
+      const n = types$effect_kind_name(e);
+      if ((List_contains(names, n, __Str_Eq) === false)) {
+        List_push(names, n);
+      }
+      break __ring_match9;
     }
   }
   List_sort(names);

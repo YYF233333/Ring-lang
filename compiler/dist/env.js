@@ -300,13 +300,14 @@ class TraitRegistry {
 }
 
 class ScopeManager {
-  constructor(scopes, fn_bounds, var_bounds, def_spans, mutable_vars, let_defs) {
+  constructor(scopes, fn_bounds, var_bounds, def_spans, mutable_vars, let_defs, mut_param_defs) {
     this.scopes = scopes;
     this.fn_bounds = fn_bounds;
     this.var_bounds = var_bounds;
     this.def_spans = def_spans;
     this.mutable_vars = mutable_vars;
     this.let_defs = let_defs;
+    this.mut_param_defs = mut_param_defs;
   }
 }
 
@@ -332,7 +333,7 @@ function mono(ty) {
 
 function new_type_env() {
   const initial_scope = new Scope(map_new());
-  return new TypeEnv(new TypeRegistry(map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new()), new TraitRegistry(map_new(), [], map_new(), map_new()), new ScopeManager([initial_scope], map_new(), map_new(), map_new(), set_new(), set_new()), new IdGen(0, 0));
+  return new TypeEnv(new TypeRegistry(map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new()), new TraitRegistry(map_new(), [], map_new(), map_new()), new ScopeManager([initial_scope], map_new(), map_new(), map_new(), set_new(), set_new(), set_new()), new IdGen(0, 0));
 }
 
 function TypeEnv_current_var_id(self) {

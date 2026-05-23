@@ -729,6 +729,7 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
                         ctx.env.record_def_span(did, p.span)
                         if p.is_mutable {
                             ctx.env.scope.mutable_vars.insert(did)
+                            ctx.env.scope.mut_param_defs.insert(did)
                         } else {
                             ctx.env.scope.let_defs.insert(did)
                         }

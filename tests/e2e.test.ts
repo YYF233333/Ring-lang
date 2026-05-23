@@ -450,6 +450,7 @@ const cases: TestCase[] = [
   { file: "supertrait_multi_level.ring", expected: "Supertrait multi-level: all passed\n" },
   { file: "effect_annot_fail_type_match.ring", expected: "0\n" },
   { file: "prelude_bounded_impl_call.ring", expected: "ok\n" },
+  { file: "mut_effect_basic.ring", expected: "mut_effect_basic: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -521,6 +522,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_supertrait_missing_impl.ring", error_pattern: "E0505" },
     { file: "error_supertrait_cycle.ring", error_pattern: "E0501" },
     { file: "error_generic_numeric_op.ring", error_pattern: "E0303" },
+    { file: "error_mut_effect_in_pure_mod.ring", error_pattern: "E0405" },
   ];
 
   for (const tc of negative_cases) {
