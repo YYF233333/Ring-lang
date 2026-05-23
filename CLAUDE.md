@@ -31,7 +31,7 @@ Ring-lang/
 │   ├── types.ring                      Type、Effect、EffectRow 表示 + BUILTIN_* 常量 + type_to_builtin_name + effect_kind_name
 │   ├── hir.ring                        HIR 节点定义 + 共享约定（variant_js_name, trait_dict_name, evidence_param_name）
 │   ├── builtin_methods.ring            内置方法名注册表（*_METHODS 常量，checker + codegen 共享）
-│   ├── codes.ring                      错误码目录（E0101-E0706 + E0504）
+│   ├── codes.ring                      错误码目录（E0101-E0706 + E0408 + E0504）
 │   ├── diagnostics.ring                DiagnosticSink trait、CollectingSink、Diagnostic 类型
 │   ├── formatter.ring                  format_human + format_llm 输出格式化
 │   ├── lexer.ring                      手写词法分析器
