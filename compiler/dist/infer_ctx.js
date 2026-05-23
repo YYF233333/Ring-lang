@@ -71,6 +71,9 @@ function _Set_contains(self, item, __ring_T_Eq) {
   }
   return false;
 }
+function _Set_has(self, item, __ring_T_Eq) {
+  return _Set_contains(self, item, __ring_T_Eq);
+}
 
 function Result_Ok(_0) {
   return { _tag: "Ok", _0 };
@@ -758,7 +761,15 @@ function resolve_dicts_from_scheme(sink, env, current_fn_bounds, scheme, callee_
           }
           if (__ring_m31._tag === "TypeVar") {
             const id = __ring_m31.id;
-            const matching = ((__a) => { const __i = __a.findIndex((function(fb) { return (((fb.type_param_var_id === id) || (union_find$uf_find(s, fb.type_param_var_id) === id)) && (fb.trait_name === bound.trait_name)); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(current_fn_bounds);
+            const matching = ((__a) => { const __i = __a.findIndex((function(fb) { return (function() {
+  const resolved_fb = env$apply_subst(s, types$Type_TypeVar(fb.type_param_var_id, Option_none));
+  const resolved_match = (function() {
+  const __ring_m = resolved_fb;
+  if (__ring_m._tag === "TypeVar") { const rid = __ring_m.id; return (rid === id); }
+  return false;
+})();
+  return ((((fb.type_param_var_id === id) || (union_find$uf_find(s, fb.type_param_var_id) === id)) || resolved_match) && (fb.trait_name === bound.trait_name));
+})(); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(current_fn_bounds);
             __ring_match32: {
               const __ring_m32 = matching;
               if (__ring_m32._tag === "some") {

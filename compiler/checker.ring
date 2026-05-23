@@ -69,12 +69,6 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                             match m { Decl::Fn { .. } => { fn_methods.push(m) }, _ => {} }
                         }
                         if fn_methods.len() > 0 {
-                            // Set up impl type params in scope so method type annotations resolve
-                            let saved_tp_scope = map_clone(ctx.type_param_scope)
-                            for tp in type_params {
-                                let tv = ctx.env.fresh_var()
-                                ctx.type_param_scope.insert(tp.name, tv)
-                            }
                             let filtered_decl = Decl::Impl {
                                 target_type: target_type,
                                 type_params: type_params,
@@ -87,7 +81,6 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                                 some(hd) => { prelude_hdecls.push(hd) },
                                 none => {}
                             }
-                            ctx.type_param_scope = saved_tp_scope
                         }
                     },
                     Decl::Fn { .. } => {

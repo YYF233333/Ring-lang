@@ -65,6 +65,9 @@ function _Set_contains(self, item, __ring_T_Eq) {
   }
   return false;
 }
+function _Set_has(self, item, __ring_T_Eq) {
+  return _Set_contains(self, item, __ring_T_Eq);
+}
 
 function Result_Ok(_0) {
   return { _tag: "Ok", _0 };

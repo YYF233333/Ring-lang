@@ -517,7 +517,9 @@ pub fn resolve_dicts_from_scheme(
                     },
                     Type::TypeVar { id, .. } => {
                         let matching = current_fn_bounds.find(fn(fb) {
-                            (fb.type_param_var_id == id || uf_find(s, fb.type_param_var_id) == id) && fb.trait_name == bound.trait_name
+                            let resolved_fb = apply_subst(s, Type::TypeVar { id: fb.type_param_var_id, name: none })
+                            let resolved_match = match resolved_fb { Type::TypeVar { id: rid, .. } => rid == id, _ => false }
+                            (fb.type_param_var_id == id || uf_find(s, fb.type_param_var_id) == id || resolved_match) && fb.trait_name == bound.trait_name
                         })
                         match matching {
                             some(fb) => {

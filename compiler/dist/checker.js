@@ -77,6 +77,9 @@ function _Set_contains(self, item, __ring_T_Eq) {
   }
   return false;
 }
+function _Set_has(self, item, __ring_T_Eq) {
+  return _Set_contains(self, item, __ring_T_Eq);
+}
 
 function Result_Ok(_0) {
   return { _tag: "Ok", _0 };
@@ -236,11 +239,6 @@ function load_prelude(ctx) {
               }
             }
             if ((List_len(fn_methods) > 0)) {
-              const saved_tp_scope = map_clone(ctx.type_param_scope);
-              for (const tp of type_params) {
-                const tv = env$TypeEnv_fresh_var(ctx.env);
-                _Map_insert(ctx.type_param_scope, tp.name, tv);
-              }
               const filtered_decl = ast$Decl_Impl(target_type, type_params, trait_name, fn_methods, span);
               const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, filtered_decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
               __ring_match10: {
@@ -255,7 +253,6 @@ function load_prelude(ctx) {
                 }
                 __match_fail(__ring_m10);
               }
-              ctx.type_param_scope = saved_tp_scope;
             }
             break __ring_match7;
           }

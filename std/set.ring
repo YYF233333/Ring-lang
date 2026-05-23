@@ -25,4 +25,8 @@ impl<T: Eq> Set {
         }
         false
     }
+
+    pub fn has(self: Set<T>, item: T) -> Bool {
+        self.contains(item)
+    }
 }
