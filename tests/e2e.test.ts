@@ -468,6 +468,9 @@ const cases: TestCase[] = [
   { file: "delegate_supertrait_bound.ring", expected: "Alice\nHello, Alice!\ndelegate_supertrait_bound: all tests passed\n" },
   { file: "effect_alias_dedup.ring", expected: "hello\neffect_alias_dedup: all tests passed\n" },
   { file: "io_effect_annotation.ring", expected: "hello world\nhello ring\nio_effect_annotation: all tests passed\n" },
+  { file: "delegate_in_mod.ring", expected: "delegate_in_mod: all tests passed\n" },
+  { file: "delegate_eq.ring", expected: "delegate_eq: all tests passed\n" },
+  { file: "delegate_default_method.ring", expected: "delegate_default_method: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
