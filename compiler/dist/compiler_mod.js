@@ -302,8 +302,7 @@ function compile_project(entry_file) {
     if (__ring_m11._tag === "some") {
       const phases = __ring_m11._0;
       const entry_key = resolver$module_key(phases.graph.entry.path_segments);
-      let js_parts = [""];
-      List_clear(js_parts);
+      let js_parts = [];
       let is_first = true;
       for (const key of phases.graph.topo_order) {
         __ring_match12: {
@@ -383,8 +382,7 @@ function compile_project_esm(entry_file, out_dir) {
 }
 
 function build_esm_import_lines(graph, exports_map, key) {
-  let import_lines = [""];
-  List_clear(import_lines);
+  let import_lines = [];
   const runtime_names = runtime$RUNTIME_EXPORT_NAMES;
   const rnames_joined = List_join(runtime_names, ", ");
   List_push(import_lines, `import { ${rnames_joined} } from "./__ring_runtime.js";`);
@@ -415,8 +413,7 @@ function build_esm_import_lines(graph, exports_map, key) {
 }
 
 function build_dep_import_pairs(dep_exports, dep_prefix) {
-  let import_pairs = [""];
-  List_clear(import_pairs);
+  let import_pairs = [];
   let bare_variants = set_new();
   for (const tentry of _Map_entries(dep_exports.types)) {
     const __ring_dt0 = tentry;
@@ -561,8 +558,7 @@ function resolve_extern_fn_imports(ast, key, graph, exports_map, imports_map, im
 }
 
 function build_esm_export_names(ast, hir) {
-  let export_names = [""];
-  List_clear(export_names);
+  let export_names = [];
   for (const decl of ast.decls) {
     collect_pub_decl_exports(decl, export_names);
   }
@@ -724,8 +720,7 @@ function collect_impl_exports(decl, all_decls, export_names) {
 }
 
 function build_pub_use_reexports(ast, exports_map, export_names) {
-  let reexport_aliases = [""];
-  List_clear(reexport_aliases);
+  let reexport_aliases = [];
   for (const use_decl of ast.uses) {
     if (use_decl.is_pub) {
       const src_key = List_join(use_decl.path.segments, "::");
@@ -969,14 +964,12 @@ function build_external_struct_fields(graph, exports_map, key) {
 }
 
 function empty_module_exports_list() {
-  let x = [0];
-  List_clear(x);
-  return x.map((function(i) { return panic("unreachable: empty_module_exports_list map callback"); }));
+  let x = [];
+  return x;
 }
 
 function empty_str_list() {
-  let x = [""];
-  List_clear(x);
+  let x = [];
   return x;
 }
 

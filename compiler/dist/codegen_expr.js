@@ -209,16 +209,14 @@ function gen_expr(ctx, expr) {
               const __ring_m8 = ty;
               if (__ring_m8._tag === "FnType") {
                 const params = __ring_m8.params; const effects = __ring_m8.effects;
-                let p_names = [""];
-                List_clear(p_names);
+                let p_names = [];
                 const __ring_end0 = List_len(params);
                 for (let i = 0; i < __ring_end0; i++) {
                   List_push(p_names, `__ring_a${i}`);
                 }
                 const dict_args = List_join(dicts, ", ");
                 const ev_args = get_callee_evidence_args(ctx, ty, Option_none);
-                let all_call = [""];
-                List_clear(all_call);
+                let all_call = [];
                 List_extend(all_call, p_names);
                 List_push(all_call, dict_args);
                 if ((Str_len(ev_args) > 0)) {
@@ -325,8 +323,7 @@ function gen_expr(ctx, expr) {
     if (__ring_m6._tag === "EffectOp") {
       const effect_name = __ring_m6.effect_name; const op_name = __ring_m6.op_name; const args = __ring_m6.args;
       const ev_name = hir$evidence_param_name(effect_name);
-      let arg_strs = [""];
-      List_clear(arg_strs);
+      let arg_strs = [];
       for (const a of args) {
         List_push(arg_strs, gen_expr(ctx, a));
       }
@@ -344,8 +341,7 @@ function gen_expr(ctx, expr) {
     }
     if (__ring_m6._tag === "ListLit") {
       const elements = __ring_m6.elements;
-      let elems = [""];
-      List_clear(elems);
+      let elems = [];
       for (const e of elements) {
         List_push(elems, gen_expr(ctx, e));
       }
@@ -355,8 +351,7 @@ function gen_expr(ctx, expr) {
     }
     if (__ring_m6._tag === "TupleLit") {
       const elements = __ring_m6.elements;
-      let elems = [""];
-      List_clear(elems);
+      let elems = [];
       for (const e of elements) {
         List_push(elems, gen_expr(ctx, e));
       }
@@ -815,8 +810,7 @@ function get_callee_evidence_args(ctx, callee_type, callee_name) {
             if (ctx.in_try_fail) {
               _Set_insert(caller_effect_names, "fail");
             }
-            let needed = [types$Effect_IoEffect];
-            List_clear(needed);
+            let needed = [];
             for (const e of actual_effects.effects) {
               if (_Set_contains(caller_effect_names, types$effect_kind_name(e), __Str_Eq)) {
                 List_push(needed, e);
@@ -862,8 +856,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
   __match_fail(__ring_m);
 })();
 })();
-      let other_args = [""];
-      List_clear(other_args);
+      let other_args = [];
       let arg_idx = 0;
       for (const a of args) {
         if ((skip_first_arg && (arg_idx === 0))) {
@@ -873,8 +866,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
           arg_idx = (arg_idx + 1);
         }
       }
-      let all = [""];
-      List_clear(all);
+      let all = [];
       List_push(all, receiver_arg);
       List_extend(all, other_args);
       const all_str = List_join(all, ", ");
@@ -1056,8 +1048,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
               const r = gen_expr(ctx, receiver);
               const ufcs_fn_name = `${codegen_ctx$qualify(ctx, tn)}_${codegen_ctx$safe_ident(method)}`;
               const ufcs_mut_flags = _Map_get(ctx.fn_mut_params, ufcs_fn_name);
-              let arg_strs = [""];
-              List_clear(arg_strs);
+              let arg_strs = [];
               let ufcs_ai = 0;
               for (const a of args) {
                 const is_mut_p = (function() {
@@ -1082,15 +1073,13 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
   const joined = List_join(arg_strs, ", ");
   return `${r}, ${joined}`;
 })() : r);
-              let dict_parts = [""];
-              List_clear(dict_parts);
+              let dict_parts = [];
               for (const d of resolved_dicts) {
                 List_push(dict_parts, dict_ref_to_js(ctx, d));
               }
               const dict_str = List_join(dict_parts, ", ");
               const ev_args = get_callee_evidence_args(ctx, callee_type, Option_none);
-              let parts = [""];
-              List_clear(parts);
+              let parts = [];
               List_push(parts, all_args);
               if ((Str_len(dict_str) > 0)) {
                 List_push(parts, dict_str);
@@ -1130,8 +1119,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-  let arg_strs = [""];
-  List_clear(arg_strs);
+  let arg_strs = [];
   let argi = 0;
   for (const a of args) {
     const is_mut_param = (function() {
@@ -1153,15 +1141,13 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
     argi = (argi + 1);
   }
   const args_str = List_join(arg_strs, ", ");
-  let dict_parts = [""];
-  List_clear(dict_parts);
+  let dict_parts = [];
   for (const d of resolved_dicts) {
     List_push(dict_parts, dict_ref_to_js(ctx, d));
   }
   const dict_str = List_join(dict_parts, ", ");
   const ev_args = get_callee_evidence_args(ctx, hir$hexpr_type(callee), cn);
-  let all_parts = [""];
-  List_clear(all_parts);
+  let all_parts = [];
   if ((Str_len(args_str) > 0)) {
     List_push(all_parts, args_str);
   }
@@ -1176,8 +1162,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
 }
 
 function gen_find_expr(receiver, cb) {
-  let p = [""];
-  List_clear(p);
+  let p = [];
   List_push(p, "((__a) => { const __i = __a.findIndex(");
   List_push(p, cb);
   List_push(p, "); return __i >= 0 ? { _tag: \"some\", _0: __a[__i] } : { _tag: \"none\" }; })(");
@@ -1187,8 +1172,7 @@ function gen_find_expr(receiver, cb) {
 }
 
 function gen_find_index_expr(receiver, cb) {
-  let p = [""];
-  List_clear(p);
+  let p = [];
   List_push(p, "((__a) => { const __i = __a.findIndex(");
   List_push(p, cb);
   List_push(p, "); return __i >= 0 ? { _tag: \"some\", _0: __i } : { _tag: \"none\" }; })(");
@@ -1198,8 +1182,7 @@ function gen_find_index_expr(receiver, cb) {
 }
 
 function gen_option_map_expr(receiver, cb) {
-  let p = [""];
-  List_clear(p);
+  let p = [];
   List_push(p, "((__o, __f) => __o._tag === \"some\" ? { _tag: \"some\", _0: __f(__o._0) } : __o)(");
   List_push(p, receiver);
   List_push(p, ", ");
@@ -1209,8 +1192,7 @@ function gen_option_map_expr(receiver, cb) {
 }
 
 function gen_option_and_then_expr(receiver, cb) {
-  let p = [""];
-  List_clear(p);
+  let p = [];
   List_push(p, "((__o, __f) => __o._tag === \"some\" ? __f(__o._0) : __o)(");
   List_push(p, receiver);
   List_push(p, ", ");
@@ -1220,8 +1202,7 @@ function gen_option_and_then_expr(receiver, cb) {
 }
 
 function gen_option_unwrap_or_else_expr(receiver, cb) {
-  let p = [""];
-  List_clear(p);
+  let p = [];
   List_push(p, "((__o, __f) => __o._tag === \"some\" ? __o._0 : __f())(");
   List_push(p, receiver);
   List_push(p, ", ");
@@ -1248,8 +1229,7 @@ function gen_struct_lit(ctx, name, fields, spread) {
           break __ring_match38;
         }
         if (__ring_m38._tag === "none") {
-          let args = [""];
-          List_clear(args);
+          let args = [];
           for (const fn_ of declared_order) {
             __ring_match39: {
               const __ring_m39 = _Map_get(field_map, fn_);
@@ -1282,8 +1262,7 @@ function gen_struct_lit(ctx, name, fields, spread) {
           for (const f of fields) {
             _Map_insert(field_map, f.name, f.value);
           }
-          let order = [""];
-          List_clear(order);
+          let order = [];
           for (const f of fields) {
             List_push(order, f.name);
           }
@@ -1291,8 +1270,7 @@ function gen_struct_lit(ctx, name, fields, spread) {
           break __ring_match40;
         }
         if (__ring_m40._tag === "none") {
-          let args = [""];
-          List_clear(args);
+          let args = [];
           for (const f of fields) {
             List_push(args, gen_expr(ctx, f.value));
           }
@@ -1317,8 +1295,7 @@ function gen_spread_struct(ctx, spread, ctor_name, field_order, field_map, use_n
 })();
   if (is_simple) {
     const base = gen_expr(ctx, spread);
-    let args = [""];
-    List_clear(args);
+    let args = [];
     for (const fn_ of field_order) {
       __ring_match41: {
         const __ring_m41 = _Map_get(field_map, fn_);
@@ -1342,8 +1319,7 @@ function gen_spread_struct(ctx, spread, ctor_name, field_order, field_map, use_n
       return `${ctor_name}(${joined})`;
     }
   } else {
-    let args = [""];
-    List_clear(args);
+    let args = [];
     for (const fn_ of field_order) {
       __ring_match42: {
         const __ring_m42 = _Map_get(field_map, fn_);
@@ -1391,8 +1367,7 @@ function gen_named_variant_construct(ctx, enum_name, variant_name, fields, sprea
                   break __ring_match45;
                 }
                 if (__ring_m45._tag === "none") {
-                  let args = [""];
-                  List_clear(args);
+                  let args = [];
                   for (const n of fnames) {
                     __ring_match46: {
                       const __ring_m46 = _Map_get(field_map, n);
@@ -1427,8 +1402,7 @@ function gen_named_variant_construct(ctx, enum_name, variant_name, fields, sprea
     }
     break __ring_match43;
   }
-  let args = [""];
-  List_clear(args);
+  let args = [];
   for (const f of fields) {
     List_push(args, gen_expr(ctx, f.value));
   }
@@ -1547,8 +1521,7 @@ function gen_match(ctx, scrutinee, arms) {
     return tmp;
   }
   const scrut = gen_expr(ctx, scrutinee);
-  let parts = [""];
-  List_clear(parts);
+  let parts = [];
   List_push(parts, "(function() {");
   List_push(parts, `  const __ring_m = ${scrut};`);
   for (const arm of arms) {
@@ -1813,15 +1786,13 @@ function gen_block_expr(ctx, stmts, tail, block) {
   }
   const saved_lines = ctx.lines;
   const saved_indent = ctx.indent_level;
-  ctx.lines = [""];
-  List_clear(ctx.lines);
+  ctx.lines = [];
   ctx.indent_level = 1;
   codegen_stmt$emit_block_body(ctx, block);
   const body_lines = ctx.lines;
   ctx.lines = saved_lines;
   ctx.indent_level = saved_indent;
-  let result = [""];
-  List_clear(result);
+  let result = [];
   List_push(result, "(function() {");
   List_extend(result, body_lines);
   List_push(result, "})()");
@@ -2004,8 +1975,7 @@ function gen_block_as_value(ctx, block) {
 }
 
 function escape_for_template_literal(s) {
-  let result = [""];
-  List_clear(result);
+  let result = [];
   let i = 0;
   while ((i < Str_len(s))) {
     const ch = Option_unwrap_or(Str_char_at(s, i), "");
@@ -2037,8 +2007,7 @@ function escape_for_template_literal(s) {
 }
 
 function gen_string_interp(ctx, parts) {
-  let result = [""];
-  List_clear(result);
+  let result = [];
   List_push(result, "`");
   for (const p of parts) {
     __ring_match74: {
@@ -2148,11 +2117,9 @@ function gen_handle(ctx, body, handlers) {
       __match_fail(__ring_m76);
     }
   }
-  let ev_decls = [""];
-  List_clear(ev_decls);
+  let ev_decls = [];
   let has_abort = false;
-  let abort_effect_names = [""];
-  List_clear(abort_effect_names);
+  let abort_effect_names = [];
   const q = "\"";
   for (const entry of _Map_entries(by_effect)) {
     const __ring_dt0 = entry;
@@ -2163,8 +2130,7 @@ function gen_handle(ctx, body, handlers) {
     List_push(ev_decls, `let ${ev_name} = {};`);
     for (const h of hs) {
       _Set_insert(handled_op_names, h.op_name);
-      let params = [""];
-      List_clear(params);
+      let params = [];
       for (const p of h.params) {
         List_push(params, codegen_ctx$safe_ident(p.name));
       }
@@ -2190,8 +2156,7 @@ function gen_handle(ctx, body, handlers) {
               const __ring_m78 = op.default_body;
               if (__ring_m78._tag === "some") {
                 const dbody = __ring_m78._0;
-                let dparams = [""];
-                List_clear(dparams);
+                let dparams = [];
                 for (const p of op.params) {
                   List_push(dparams, codegen_ctx$safe_ident(p.name));
                 }
@@ -2215,8 +2180,7 @@ function gen_handle(ctx, body, handlers) {
       __match_fail(__ring_m77);
     }
   }
-  let ev_param_names = [""];
-  List_clear(ev_param_names);
+  let ev_param_names = [];
   for (const entry of _Map_entries(by_effect)) {
     const __ring_dt1 = entry;
     const ename = __ring_dt1[0];
@@ -2228,14 +2192,12 @@ function gen_handle(ctx, body, handlers) {
   const decls = List_join(ev_decls, " ");
   const ea = hir$RUNTIME_EFFECT_ABORT;
   if (has_abort) {
-    let effect_checks = [""];
-    List_clear(effect_checks);
+    let effect_checks = [];
     for (const en of abort_effect_names) {
       List_push(effect_checks, `__ring_e.effect === ${q}${en}${q}`);
     }
     const effect_cond = List_join(effect_checks, " || ");
-    let p = [""];
-    List_clear(p);
+    let p = [];
     List_push(p, "(function() { ");
     List_push(p, decls);
     List_push(p, " try { return ");
@@ -2272,15 +2234,13 @@ function gen_handle_body(ctx, expr, ev_params) {
       }
       const saved_lines = ctx.lines;
       const saved_indent = ctx.indent_level;
-      ctx.lines = [""];
-      List_clear(ctx.lines);
+      ctx.lines = [];
       ctx.indent_level = 1;
       codegen_stmt$emit_block_body(ctx, expr);
       const body_lines = ctx.lines;
       ctx.lines = saved_lines;
       ctx.indent_level = saved_indent;
-      let result = [""];
-      List_clear(result);
+      let result = [];
       List_push(result, `(function(${ev_params}) {`);
       List_extend(result, body_lines);
       List_push(result, `})(${ev_params})`);
@@ -2294,13 +2254,11 @@ function gen_handle_body(ctx, expr, ev_params) {
 }
 
 function gen_lambda(ctx, params, body, ty) {
-  let p_names = [""];
-  List_clear(p_names);
+  let p_names = [];
   for (const p of params) {
     List_push(p_names, codegen_ctx$safe_ident(p.name));
   }
-  let ev_params = [""];
-  List_clear(ev_params);
+  let ev_params = [];
   __ring_match81: {
     const __ring_m81 = ty;
     if (__ring_m81._tag === "FnType") {
@@ -2310,8 +2268,7 @@ function gen_lambda(ctx, params, body, ty) {
     }
     break __ring_match81;
   }
-  let all = [""];
-  List_clear(all);
+  let all = [];
   List_extend(all, p_names);
   List_extend(all, ev_params);
   const all_str = List_join(all, ", ");
@@ -2328,8 +2285,7 @@ function gen_lambda_capture_evidence(ctx, args, idx) {
         const __ring_m83 = arg;
         if (__ring_m83._tag === "Lambda") {
           const params = __ring_m83.params; const body = __ring_m83.body;
-          let p_names = [""];
-          List_clear(p_names);
+          let p_names = [];
           for (const p of params) {
             List_push(p_names, codegen_ctx$safe_ident(p.name));
           }
@@ -2345,15 +2301,13 @@ function gen_lambda_capture_evidence(ctx, args, idx) {
           if (__ring_m84._tag === "FnType") {
             const params = __ring_m84.params;
             const arity = List_len(params);
-            let p_names = [""];
-            List_clear(p_names);
+            let p_names = [];
             const __ring_end1 = arity;
             for (let i = 0; i < __ring_end1; i++) {
               List_push(p_names, `__ring_a${i}`);
             }
             const ev_args = get_callee_evidence_args(ctx, arg_type, Option_none);
-            let all = [""];
-            List_clear(all);
+            let all = [];
             List_extend(all, p_names);
             if ((Str_len(ev_args) > 0)) {
               List_push(all, ev_args);

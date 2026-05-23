@@ -481,8 +481,7 @@ function emit_stmt(ctx, stmt) {
               const ds = __ring_m22._0;
               if ((List_len(ds) > 0)) {
                 const iter = codegen_expr$gen_expr(ctx, iterable);
-                let names = [""];
-                List_clear(names);
+                let names = [];
                 for (const d of ds) {
                   List_push(names, codegen_ctx$safe_ident(d.name));
                 }
@@ -707,8 +706,7 @@ function gen_pattern_condition(ctx, target, pat) {
     if (__ring_m27._tag === "Constructor") {
       const name = __ring_m27.name; const fields = __ring_m27.fields;
       const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
-      let sub_conds = [""];
-      List_clear(sub_conds);
+      let sub_conds = [];
       const __ring_end1 = List_len(fields);
       for (let i = 0; i < __ring_end1; i++) {
         __ring_match28: {
@@ -740,8 +738,7 @@ function gen_pattern_condition(ctx, target, pat) {
       if (_Map_contains_key(ctx.struct_field_order, name)) {
         const qualified_name = codegen_ctx$qualify(ctx, codegen_ctx$safe_ident(name));
         const inst_check = `${target} instanceof ${qualified_name}`;
-        let sub_conds = [""];
-        List_clear(sub_conds);
+        let sub_conds = [];
         for (const f of fields) {
           const sname = codegen_ctx$safe_ident(f.name);
           const sub = gen_pattern_condition(ctx, `${target}.${sname}`, f.pattern);
@@ -757,8 +754,7 @@ function gen_pattern_condition(ctx, target, pat) {
         }
       } else {
         const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
-        let sub_conds = [""];
-        List_clear(sub_conds);
+        let sub_conds = [];
         for (const f of fields) {
           const sname = codegen_ctx$safe_ident(f.name);
           const sub = gen_pattern_condition(ctx, `${target}.${sname}`, f.pattern);
@@ -778,8 +774,7 @@ function gen_pattern_condition(ctx, target, pat) {
     if (__ring_m27._tag === "TuplePattern") {
       const elements = __ring_m27.elements;
       const len_check = `Array.isArray(${target}) && ${target}.length === ${List_len(elements)}`;
-      let sub_conds = [""];
-      List_clear(sub_conds);
+      let sub_conds = [];
       const __ring_end2 = List_len(elements);
       for (let i = 0; i < __ring_end2; i++) {
         __ring_match29: {

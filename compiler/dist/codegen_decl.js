@@ -238,13 +238,11 @@ function emit_fn_decl(ctx, name, params, effects, body, trait_bounds, prefix) {
   if (__ring_m._tag === "none") { return codegen_ctx$qualify(ctx, name); }
   __match_fail(__ring_m);
 })();
-  let param_names = [""];
-  List_clear(param_names);
+  let param_names = [];
   for (const p of params) {
     List_push(param_names, codegen_ctx$safe_ident(p.name));
   }
-  let dict_params = [""];
-  List_clear(dict_params);
+  let dict_params = [];
   for (const b of trait_bounds) {
     List_push(dict_params, hir$trait_bound_param_name(b.type_param, b.trait_name));
   }
@@ -255,8 +253,7 @@ function emit_fn_decl(ctx, name, params, effects, body, trait_bounds, prefix) {
   __match_fail(__ring_m);
 })();
   const ev_params = codegen_ctx$get_evidence_params(effective_effects);
-  let all = [""];
-  List_clear(all);
+  let all = [];
   List_extend(all, param_names);
   List_extend(all, dict_params);
   List_extend(all, ev_params);
@@ -295,10 +292,8 @@ function emit_const_decl(ctx, name, init) {
 }
 
 function emit_struct_decl(ctx, name, fields) {
-  let raw_fields = [""];
-  List_clear(raw_fields);
-  let safe_fields = [""];
-  List_clear(safe_fields);
+  let raw_fields = [];
+  let safe_fields = [];
   for (const f of fields) {
     List_push(raw_fields, f.name);
     List_push(safe_fields, codegen_ctx$safe_ident(f.name));
@@ -338,8 +333,7 @@ function emit_enum_decl(ctx, name, variants) {
         const __ring_m9 = v.field_names;
         if (__ring_m9._tag === "some") {
           const fnames = __ring_m9._0;
-          let sparams = [""];
-          List_clear(sparams);
+          let sparams = [];
           for (const n of fnames) {
             List_push(sparams, codegen_ctx$safe_ident(n));
           }
@@ -352,8 +346,7 @@ function emit_enum_decl(ctx, name, variants) {
           break __ring_match9;
         }
         if (__ring_m9._tag === "none") {
-          let sparams = [""];
-          List_clear(sparams);
+          let sparams = [];
           const __ring_end1 = List_len(v.fields);
           for (let i = 0; i < __ring_end1; i++) {
             List_push(sparams, `_${i}`);
@@ -422,8 +415,7 @@ function emit_trait_dictionary(ctx, target_type, trait_name, methods) {
       break __ring_match12;
     }
   }
-  let entries = [""];
-  List_clear(entries);
+  let entries = [];
   for (const m of methods) {
     __ring_match13: {
       const __ring_m13 = m;
@@ -448,14 +440,12 @@ function emit_trait_dictionary(ctx, target_type, trait_name, methods) {
             const stn = codegen_ctx$safe_ident(trait_name);
             const smn = codegen_ctx$safe_ident(tm.name);
             const default_fn = `__${stn}_${smn}`;
-            let param_names = [""];
-            List_clear(param_names);
+            let param_names = [];
             for (const p of tm.params) {
               List_push(param_names, codegen_ctx$safe_ident(p.name));
             }
             const params_str = List_join(param_names, ", ");
-            let call_args = [""];
-            List_clear(call_args);
+            let call_args = [];
             List_push(call_args, dict_name);
             for (const st of all_supers) {
               List_push(call_args, hir$trait_dict_name(qt, codegen_ctx$safe_ident(st)));
@@ -478,11 +468,9 @@ function emit_trait_dictionary(ctx, target_type, trait_name, methods) {
 }
 
 function collect_all_supertraits_codegen(ctx, trait_name) {
-  let result = [""];
-  List_clear(result);
+  let result = [];
   let visited = set_new();
-  let stack = [""];
-  List_clear(stack);
+  let stack = [];
   __ring_match15: {
     const __ring_m15 = _Map_get(ctx.trait_decls, trait_name);
     if (__ring_m15._tag === "some") {
@@ -533,14 +521,12 @@ function emit_trait_decl(ctx, name, methods, supertraits) {
           const sn = codegen_ctx$safe_ident(name);
           const smn = codegen_ctx$safe_ident(method.name);
           const fn_name = `__${sn}_${smn}`;
-          let param_names = [""];
-          List_clear(param_names);
+          let param_names = [];
           for (const p of method.params) {
             List_push(param_names, codegen_ctx$safe_ident(p.name));
           }
           const self_name = hir$default_method_self_name(codegen_ctx$safe_ident(name));
-          let all = [""];
-          List_clear(all);
+          let all = [];
           List_push(all, self_name);
           for (const st of all_supers) {
             List_push(all, hir$default_method_self_name(codegen_ctx$safe_ident(st)));
@@ -586,8 +572,7 @@ function emit_effect_decl(ctx, name, ops) {
   if ((List_len(ops) === 0)) {
     return;
   }
-  let body_effect_names = [""];
-  List_clear(body_effect_names);
+  let body_effect_names = [];
   let body_effect_set = set_new();
   for (const op of ops) {
     __ring_match18: {
@@ -623,8 +608,7 @@ function emit_effect_decl(ctx, name, ops) {
         const __ring_m19 = op.default_body;
         if (__ring_m19._tag === "some") {
           const body = __ring_m19._0;
-          let params = [""];
-          List_clear(params);
+          let params = [];
           for (const p of op.params) {
             List_push(params, codegen_ctx$safe_ident(p.name));
           }
@@ -650,8 +634,7 @@ function emit_effect_decl(ctx, name, ops) {
         const __ring_m20 = op.default_body;
         if (__ring_m20._tag === "some") {
           const body = __ring_m20._0;
-          let params = [""];
-          List_clear(params);
+          let params = [];
           for (const p of op.params) {
             List_push(params, codegen_ctx$safe_ident(p.name));
           }
@@ -673,8 +656,7 @@ function emit_effect_decl(ctx, name, ops) {
 function emit_toplevel_evidence(ctx, effects) {
   const effect_names = codegen_ctx$extract_effect_names(effects);
   let emitted = set_new();
-  let deferred_defaults = [""];
-  List_clear(deferred_defaults);
+  let deferred_defaults = [];
   for (const name of effect_names) {
     const ev_name = hir$evidence_param_name(name);
     if ((name === "io")) {
@@ -770,8 +752,7 @@ function topo_sort_defaults(ctx, defaults) {
   }
   let deps = map_new();
   for (const name of defaults) {
-    let my_deps = [""];
-    List_clear(my_deps);
+    let my_deps = [];
     __ring_match23: {
       const __ring_m23 = _Map_get(ctx.default_evidence_params, name);
       if (__ring_m23._tag === "some") {
@@ -796,8 +777,7 @@ function topo_sort_defaults(ctx, defaults) {
   for (const name of defaults) {
     _Map_insert(in_deg, name, 0);
     _Map_insert(rev_deps, name, (function() {
-  let l = [""];
-  List_clear(l);
+  let l = [];
   return l;
 })());
   }
@@ -815,8 +795,7 @@ function topo_sort_defaults(ctx, defaults) {
           break __ring_match24;
         }
         if (__ring_m24._tag === "none") {
-          let new_list = [""];
-          List_clear(new_list);
+          let new_list = [];
           List_push(new_list, name);
           _Map_insert(rev_deps, dep, new_list);
           break __ring_match24;
@@ -825,8 +804,7 @@ function topo_sort_defaults(ctx, defaults) {
       }
     }
   }
-  let queue = [""];
-  List_clear(queue);
+  let queue = [];
   for (const entry of _Map_entries(in_deg)) {
     const __ring_dt1 = entry;
     const name = __ring_dt1[0];
@@ -836,8 +814,7 @@ function topo_sort_defaults(ctx, defaults) {
     }
   }
   List_sort(queue);
-  let sorted = [""];
-  List_clear(sorted);
+  let sorted = [];
   while ((List_len(queue) > 0)) {
     const cur = Option_unwrap(List_shift(queue));
     List_push(sorted, cur);

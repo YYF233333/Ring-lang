@@ -110,7 +110,7 @@ pub fn compile_project(entry_file: Str) -> CompileProjectResult {
         none => CompileProjectResult { js: "", success: false },
         some(phases) => {
             let entry_key = module_key(phases.graph.entry.path_segments)
-            let mut js_parts: List<Str> = [""]; js_parts.clear()
+            let mut js_parts: List<Str> = []
             let mut is_first = true
 
             for key in phases.graph.topo_order {
@@ -210,7 +210,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
 // ============================================================
 
 fn build_esm_import_lines(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> List<Str> {
-    let mut import_lines: List<Str> = [""]; import_lines.clear()
+    let mut import_lines: List<Str> = []
 
     // Runtime import
     let runtime_names = RUNTIME_EXPORT_NAMES
@@ -240,7 +240,7 @@ fn build_esm_import_lines(graph: ModuleGraph, exports_map: Map<Str, ModuleExport
 
 // Build import pairs for a single dependency module
 fn build_dep_import_pairs(dep_exports: ModuleExports, dep_prefix: Str) -> List<Str> {
-    let mut import_pairs: List<Str> = [""]; import_pairs.clear()
+    let mut import_pairs: List<Str> = []
 
     // Collect bare variant names (no JS declaration)
     let mut bare_variants: Set<Str> = set_new()
@@ -366,7 +366,7 @@ fn resolve_extern_fn_imports(ast: Program, key: Str, graph: ModuleGraph,
 // ============================================================
 
 fn build_esm_export_names(ast: Program, hir: HProgram) -> List<Str> {
-    let mut export_names: List<Str> = [""]; export_names.clear()
+    let mut export_names: List<Str> = []
 
     // Pass 1: pub fn/struct/enum/const declarations
     for decl in ast.decls {
@@ -477,7 +477,7 @@ fn collect_impl_exports(decl: Decl, all_decls: List<Decl>, mut export_names: Lis
 
 fn build_pub_use_reexports(ast: Program, exports_map: Map<Str, ModuleExports>,
     mut export_names: List<Str>) -> List<Str> {
-    let mut reexport_aliases: List<Str> = [""]; reexport_aliases.clear()
+    let mut reexport_aliases: List<Str> = []
     for use_decl in ast.uses {
         if use_decl.is_pub {
             let src_key = use_decl.path.segments.join("::")
@@ -658,11 +658,13 @@ fn build_external_struct_fields(graph: ModuleGraph, exports_map: Map<Str, Module
 }
 
 fn empty_module_exports_list() -> List<ModuleExports> {
-    let mut x = [0]; x.clear(); x.map(fn(i: Int) -> ModuleExports { panic("unreachable: empty_module_exports_list map callback") })
+    let mut x: List<ModuleExports> = []
+    x
 }
 
 fn empty_str_list() -> List<Str> {
-    let mut x = [""]; x.clear(); x
+    let mut x: List<Str> = []
+    x
 }
 
 fn build_external_impl_methods(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, Str?> {

@@ -287,8 +287,7 @@ function parse_cli_args(args) {
   let debug = false;
   let error_format = "human";
   let out_dir = "dist";
-  let positional = [""];
-  List_clear(positional);
+  let positional = [];
   for (const arg of args) {
     if ((arg === "--debug")) {
       debug = true;

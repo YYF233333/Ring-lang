@@ -231,8 +231,7 @@ function build_module_graph(entry_file) {
   let dependencies = map_new();
   let asts_map = map_new();
   _Map_insert(modules, entry_key, entry_id);
-  let empty_deps = [""];
-  List_clear(empty_deps);
+  let empty_deps = [];
   _Map_insert(dependencies, entry_key, empty_deps);
   let queue = [entry_key];
   while ((List_len(queue) > 0)) {
@@ -252,8 +251,7 @@ function build_module_graph(entry_file) {
               return Option_none;
             }
             _Map_insert(asts_map, current_key, ast);
-            let deps = [""];
-            List_clear(deps);
+            let deps = [];
             for (const use_decl of ast.uses) {
               const segments = use_decl.path.segments;
               const dep_key = module_key(segments);
@@ -269,8 +267,7 @@ function build_module_graph(entry_file) {
                       if (__ring_m10._tag === "none") {
                         const dep_id = new ModuleId(list_clone(segments), abs_resolved);
                         _Map_insert(modules, dep_key, dep_id);
-                        let empty = [""];
-                        List_clear(empty);
+                        let empty = [];
                         _Map_insert(dependencies, dep_key, empty);
                         List_push(queue, dep_key);
                         break __ring_match10;
@@ -319,10 +316,8 @@ function build_module_graph(entry_file) {
     const deps = __ring_dt0[1];
     _Map_insert(dep_count, key, List_len(deps));
   }
-  let topo_order = [""];
-  List_clear(topo_order);
-  let ready = [""];
-  List_clear(ready);
+  let topo_order = [];
+  let ready = [];
   for (const entry of _Map_entries(dep_count)) {
     const __ring_dt1 = entry;
     const key = __ring_dt1[0];
@@ -369,8 +364,7 @@ function build_module_graph(entry_file) {
     }
   }
   if ((List_len(topo_order) !== _Map_len(modules))) {
-    let cycle_nodes = [""];
-    List_clear(cycle_nodes);
+    let cycle_nodes = [];
     for (const entry of _Map_entries(modules)) {
       const __ring_dt3 = entry;
       const key = __ring_dt3[0];
@@ -434,8 +428,7 @@ function find_cycle_path(cycle_nodes, dependencies) {
       return path;
     }
   }
-  let fallback = [""];
-  List_clear(fallback);
+  let fallback = [];
   for (const n of cycle_nodes) {
     List_push(fallback, n);
   }

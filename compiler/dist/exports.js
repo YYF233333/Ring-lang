@@ -222,8 +222,7 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
             if (__ring_m8._tag === "some") {
               const sdef = __ring_m8._0;
               _Map_insert(types, name, TypeDef_StructDef_(sdef));
-              let field_names = [""];
-              List_clear(field_names);
+              let field_names = [];
               for (const f of sdef.fields) {
                 List_push(field_names, f.name);
               }
@@ -363,8 +362,7 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
               }
             }
             if (is_pub_type) {
-              let method_names = [""];
-              List_clear(method_names);
+              let method_names = [];
               for (const m of methods) {
                 __ring_match17: {
                   const __ring_m17 = m;
@@ -487,8 +485,7 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
                     if (__ring_m24._tag === "some") {
                       const sdef = __ring_m24._0;
                       _Map_insert(types, sname, TypeDef_StructDef_(sdef));
-                      let field_names = [""];
-                      List_clear(field_names);
+                      let field_names = [];
                       for (const f of sdef.fields) {
                         List_push(field_names, f.name);
                       }
@@ -656,8 +653,7 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
                             if (__ring_m34._tag === "some") {
                               const sdef = __ring_m34._0;
                               _Map_insert(types, sname2, TypeDef_StructDef_(sdef));
-                              let fns2 = [""];
-                              List_clear(fns2);
+                              let fns2 = [];
                               for (const f of sdef.fields) {
                                 List_push(fns2, f.name);
                               }
@@ -843,8 +839,7 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
               if (__ring_m44._tag === "some") {
                 const sdef = __ring_m44._0;
                 _Map_insert(types, local_name, TypeDef_StructDef_(sdef));
-                let fnames = [""];
-                List_clear(fnames);
+                let fnames = [];
                 for (const f of sdef.fields) {
                   List_push(fnames, f.name);
                 }

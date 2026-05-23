@@ -1,6 +1,5 @@
 pub fn RUNTIME_CODE() -> Str {
-    let mut lines: List<Str> = [""]
-    lines.clear()
+    let mut lines: List<Str> = []
     lines.push("import { createRequire as __cr } from \"node:module\";")
     lines.push("const __require = __cr(import.meta.url);")
     lines.push("// === Ring-lang Runtime ===")

@@ -75,7 +75,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
     let mut asts_map: Map<Str, Program> = map_new()
 
     modules.insert(entry_key, entry_id)
-    let mut empty_deps: List<Str> = [""]; empty_deps.clear()
+    let mut empty_deps: List<Str> = []
     dependencies.insert(entry_key, empty_deps)
 
     let mut queue: List<Str> = [entry_key]
@@ -94,7 +94,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                         }
                         asts_map.insert(current_key, ast)
 
-                        let mut deps: List<Str> = [""]; deps.clear()
+                        let mut deps: List<Str> = []
                         for use_decl in ast.uses {
                             let segments = use_decl.path.segments
                             let dep_key = module_key(segments)
@@ -110,7 +110,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                                                     file_path: abs_resolved
                                                 }
                                                 modules.insert(dep_key, dep_id)
-                                                let mut empty: List<Str> = [""]; empty.clear()
+                                                let mut empty: List<Str> = []
                                                 dependencies.insert(dep_key, empty)
                                                 queue.push(dep_key)
                                             },
@@ -151,8 +151,8 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
         dep_count.insert(key, deps.len())
     }
 
-    let mut topo_order: List<Str> = [""]; topo_order.clear()
-    let mut ready: List<Str> = [""]; ready.clear()
+    let mut topo_order: List<Str> = []
+    let mut ready: List<Str> = []
 
     for entry in dep_count.entries() {
         let (key, count) = entry
@@ -183,7 +183,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
 
     if topo_order.len() != modules.len() {
         // Cycle detected — find and report the cycle path
-        let mut cycle_nodes: List<Str> = [""]; cycle_nodes.clear()
+        let mut cycle_nodes: List<Str> = []
         for entry in modules.entries() {
             let (key, _) = entry
             if !topo_order.contains(key) {
@@ -265,7 +265,7 @@ fn find_cycle_path(cycle_nodes: List<Str>, dependencies: Map<Str, List<Str>>) ->
     }
 
     // Fallback: just list the cycle nodes
-    let mut fallback: List<Str> = [""]; fallback.clear()
+    let mut fallback: List<Str> = []
     for n in cycle_nodes { fallback.push(n) }
     match cycle_nodes.get(0) {
         some(first) => fallback.push(first),

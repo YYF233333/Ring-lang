@@ -9,7 +9,7 @@ pub fn get_derived_method_names(trait_name: Str) -> List<Str> {
         "Clone" => ["clone"],
         "Debug" => ["debug"],
         "Ord" => ["cmp"],
-        _ => { let mut e: List<Str> = [""]; e.clear(); e },
+        _ => { let mut e: List<Str> = []; e },
     }
 }
 
@@ -45,7 +45,7 @@ fn emit_derived_eq(mut ctx: CodegenCtx, impl_: DerivedImpl) {
                 if fields.len() == 0 {
                     emit(ctx, "return true;")
                 } else {
-                    let mut comps: List<Str> = [""]; comps.clear()
+                    let mut comps: List<Str> = []
                     for f in fields {
                         let left = "self.${safe_ident(f.name)}"
                         let right = "other.${safe_ident(f.name)}"
@@ -67,7 +67,7 @@ fn emit_derived_eq(mut ctx: CodegenCtx, impl_: DerivedImpl) {
                         if v.fields.len() == 0 {
                             emit(ctx, "case \"${v.name}\": return true;")
                         } else {
-                            let mut feqs: List<Str> = [""]; feqs.clear()
+                            let mut feqs: List<Str> = []
                             for f in v.fields {
                                 let accessor = field_accessor(v, f)
                                 feqs.push(gen_field_eq("self.${accessor}", "other.${accessor}", f))
@@ -146,7 +146,7 @@ fn emit_derived_clone(mut ctx: CodegenCtx, impl_: DerivedImpl) {
     match impl_.type_kind {
         TypeKind::StructKind => match impl_.struct_fields {
             some(fields) => {
-                let mut args: List<Str> = [""]; args.clear()
+                let mut args: List<Str> = []
                 for f in fields {
                     args.push(gen_field_clone("self.${safe_ident(f.name)}", f))
                 }
@@ -163,7 +163,7 @@ fn emit_derived_clone(mut ctx: CodegenCtx, impl_: DerivedImpl) {
                     if v.fields.len() == 0 {
                         emit(ctx, "case \"${v.name}\": return ${name}_${v.name};")
                     } else {
-                        let mut args: List<Str> = [""]; args.clear()
+                        let mut args: List<Str> = []
                         for f in v.fields {
                             let accessor = field_accessor(v, f)
                             args.push(gen_field_clone("self.${accessor}", f))
@@ -227,7 +227,7 @@ fn emit_derived_ord(mut ctx: CodegenCtx, impl_: DerivedImpl) {
     match impl_.type_kind {
         TypeKind::EnumKind => match impl_.enum_variants {
             some(variants) => {
-                let mut tag_entries: List<Str> = [""]; tag_entries.clear()
+                let mut tag_entries: List<Str> = []
                 for i in 0..variants.len() {
                     match variants.get(i) {
                         some(v) => tag_entries.push("\"${v.name}\": ${i}"),
@@ -397,7 +397,7 @@ fn emit_derived_debug(mut ctx: CodegenCtx, impl_: DerivedImpl) {
                 if fields.len() == 0 {
                     emit(ctx, "return \"${impl_.type_name}\";")
                 } else {
-                    let mut parts: List<Str> = [""]; parts.clear()
+                    let mut parts: List<Str> = []
                     for f in fields {
                         let val = gen_field_debug("self.${safe_ident(f.name)}", f)
                         parts.push("\"${f.name}: \" + ${val}")
@@ -417,7 +417,7 @@ fn emit_derived_debug(mut ctx: CodegenCtx, impl_: DerivedImpl) {
                         emit(ctx, "case \"${v.name}\": return \"${v.name}\";")
                     } else {
                         if v.has_named_fields {
-                            let mut parts: List<Str> = [""]; parts.clear()
+                            let mut parts: List<Str> = []
                             for f in v.fields {
                                 let accessor = field_accessor(v, f)
                                 let val = gen_field_debug("self.${accessor}", f)
@@ -426,7 +426,7 @@ fn emit_derived_debug(mut ctx: CodegenCtx, impl_: DerivedImpl) {
                             let joined = parts.join(" + \", \" + ")
                             emit(ctx, "case \"${v.name}\": return \"${v.name} { \" + ${joined} + \" }\";")
                         } else {
-                            let mut parts: List<Str> = [""]; parts.clear()
+                            let mut parts: List<Str> = []
                             for f in v.fields {
                                 let accessor = field_accessor(v, f)
                                 parts.push(gen_field_debug("self.${accessor}", f))
@@ -488,7 +488,7 @@ fn field_accessor(v: DerivedVariant, f: DerivedField) -> Str {
 }
 
 fn collect_dict_params(impl_: DerivedImpl, trait_name: Str) -> List<Str> {
-    let mut params: List<Str> = [""]; params.clear()
+    let mut params: List<Str> = []
     for b in impl_.bounds {
         if b.trait_name == trait_name {
             params.push(trait_bound_param_name(b.type_param, b.trait_name))

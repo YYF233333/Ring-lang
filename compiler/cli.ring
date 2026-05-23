@@ -154,7 +154,7 @@ fn parse_cli_args(args: List<Str>) -> CliArgs {
     let mut debug = false
     let mut error_format = "human"
     let mut out_dir = "dist"
-    let mut positional: List<Str> = [""]; positional.clear()
+    let mut positional: List<Str> = []
 
     for arg in args {
         if arg == "--debug" {

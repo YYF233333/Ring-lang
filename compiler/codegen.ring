@@ -91,7 +91,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                         some(callee_effects) => {
                             match ctx.local_fn_effects.get(name) {
                                 none => {
-                                    let mut effs: List<Effect> = [Effect::IoEffect]; effs.clear()
+                                    let mut effs: List<Effect> = []
                                     for e in callee_effects.effects { effs.push(e) }
                                     ctx.local_fn_effects.insert(name, EffectRow { effects: effs, tail: none })
                                     changed = true
@@ -227,7 +227,7 @@ fn register_decl_info(decls: List<HDecl>, mut ctx: CodegenCtx) {
             HDecl::Struct { name, fields, .. } => {
                 ctx.local_names.insert(name)
                 let qname = qualify(ctx, name)
-                let mut field_names: List<Str> = [""]; field_names.clear()
+                let mut field_names: List<Str> = []
                 for f in fields { field_names.push(f.name) }
                 ctx.struct_field_order.insert(qname, field_names)
             },

@@ -248,8 +248,7 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
               __ring_match10: {
                 const __ring_m10 = _Map_get(ctx.local_fn_effects, name);
                 if (__ring_m10._tag === "none") {
-                  let effs = [types$Effect_IoEffect];
-                  List_clear(effs);
+                  let effs = [];
                   for (const e of callee_effects.effects) {
                     List_push(effs, e);
                   }
@@ -398,8 +397,7 @@ function register_decl_info(decls, ctx) {
         const name = __ring_m14.name; const fields = __ring_m14.fields;
         _Set_insert(ctx.local_names, name);
         const qname = codegen_ctx$qualify(ctx, name);
-        let field_names = [""];
-        List_clear(field_names);
+        let field_names = [];
         for (const f of fields) {
           List_push(field_names, f.name);
         }

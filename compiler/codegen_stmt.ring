@@ -241,7 +241,7 @@ pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
                             some(ds) => {
                                 if ds.len() > 0 {
                                     let iter = gen_expr(ctx, iterable)
-                                    let mut names: List<Str> = [""]; names.clear()
+                                    let mut names: List<Str> = []
                                     for d in ds { names.push(safe_ident(d.name)) }
                                     let joined = names.join(", ")
                                     emit(ctx, "for (const [${joined}] of ${iter}) {")
@@ -392,7 +392,7 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
         },
         Pattern::Constructor { name, fields, .. } => {
             let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
-            let mut sub_conds: List<Str> = [""]; sub_conds.clear()
+            let mut sub_conds: List<Str> = []
             for i in 0..fields.len() {
                 match fields.get(i) {
                     some(f) => {
@@ -412,7 +412,7 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
             if ctx.struct_field_order.contains_key(name) {
                 let qualified_name = qualify(ctx, safe_ident(name))
                 let inst_check = "${target} instanceof ${qualified_name}"
-                let mut sub_conds: List<Str> = [""]; sub_conds.clear()
+                let mut sub_conds: List<Str> = []
                 for f in fields {
                     let sname = safe_ident(f.name)
                     let sub = gen_pattern_condition(ctx, "${target}.${sname}", f.pattern)
@@ -425,7 +425,7 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
                 }
             } else {
                 let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
-                let mut sub_conds: List<Str> = [""]; sub_conds.clear()
+                let mut sub_conds: List<Str> = []
                 for f in fields {
                     let sname = safe_ident(f.name)
                     let sub = gen_pattern_condition(ctx, "${target}.${sname}", f.pattern)
@@ -440,7 +440,7 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
         },
         Pattern::TuplePattern { elements, .. } => {
             let len_check = "Array.isArray(${target}) && ${target}.length === ${elements.len()}"
-            let mut sub_conds: List<Str> = [""]; sub_conds.clear()
+            let mut sub_conds: List<Str> = []
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(e) => {

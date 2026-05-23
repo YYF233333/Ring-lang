@@ -155,8 +155,7 @@ function to_result(f) {
 }
 
 function RUNTIME_CODE() {
-  let lines = [""];
-  List_clear(lines);
+  let lines = [];
   List_push(lines, "import { createRequire as __cr } from \"node:module\";");
   List_push(lines, "const __require = __cr(import.meta.url);");
   List_push(lines, "// === Ring-lang Runtime ===");

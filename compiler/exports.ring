@@ -63,7 +63,7 @@ pub fn extract_exports(
                     match env.types.structs.get(name) {
                         some(sdef) => {
                             types.insert(name, TypeDef::StructDef_(sdef))
-                            let mut field_names: List<Str> = [""]; field_names.clear()
+                            let mut field_names: List<Str> = []
                             for f in sdef.fields { field_names.push(f.name) }
                             struct_field_orders.insert(name, field_names)
                         },
@@ -134,7 +134,7 @@ pub fn extract_exports(
                             }
                         }
                         if is_pub_type {
-                            let mut method_names: List<Str> = [""]; method_names.clear()
+                            let mut method_names: List<Str> = []
                             for m in methods {
                                 match m {
                                     Decl::Fn { name, .. } => method_names.push(name),
@@ -193,7 +193,7 @@ pub fn extract_exports(
                                     match env.types.structs.get(sname) {
                                         some(sdef) => {
                                             types.insert(sname, TypeDef::StructDef_(sdef))
-                                            let mut field_names: List<Str> = [""]; field_names.clear()
+                                            let mut field_names: List<Str> = []
                                             for f in sdef.fields { field_names.push(f.name) }
                                             struct_field_orders.insert(sname, field_names)
                                         },
@@ -275,7 +275,7 @@ pub fn extract_exports(
                                                     match env.types.structs.get(sname2) {
                                                         some(sdef) => {
                                                             types.insert(sname2, TypeDef::StructDef_(sdef))
-                                                            let mut fns2: List<Str> = [""]; fns2.clear()
+                                                            let mut fns2: List<Str> = []
                                                             for f in sdef.fields { fns2.push(f.name) }
                                                             struct_field_orders.insert(sname2, fns2)
                                                         },
@@ -378,7 +378,7 @@ pub fn extract_exports(
                         match env.types.structs.get(local_name) {
                             some(sdef) => {
                                 types.insert(local_name, TypeDef::StructDef_(sdef))
-                                let mut fnames: List<Str> = [""]; fnames.clear()
+                                let mut fnames: List<Str> = []
                                 for f in sdef.fields { fnames.push(f.name) }
                                 struct_field_orders.insert(local_name, fnames)
                             },

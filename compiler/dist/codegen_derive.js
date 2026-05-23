@@ -175,8 +175,7 @@ function get_derived_method_names(trait_name) {
       return ["cmp"];
       break __ring_match6;
     }
-    let e = [""];
-    List_clear(e);
+    let e = [];
     return e;
     break __ring_match6;
   }
@@ -225,8 +224,7 @@ function emit_derived_eq(ctx, impl_) {
           if ((List_len(fields) === 0)) {
             codegen_ctx$emit(ctx, "return true;");
           } else {
-            let comps = [""];
-            List_clear(comps);
+            let comps = [];
             for (const f of fields) {
               const left = `self.${codegen_ctx$safe_ident(f.name)}`;
               const right = `other.${codegen_ctx$safe_ident(f.name)}`;
@@ -257,8 +255,7 @@ function emit_derived_eq(ctx, impl_) {
               if ((List_len(v.fields) === 0)) {
                 codegen_ctx$emit(ctx, `case "${v.name}": return true;`);
               } else {
-                let feqs = [""];
-                List_clear(feqs);
+                let feqs = [];
                 for (const f of v.fields) {
                   const accessor = field_accessor(v, f);
                   List_push(feqs, gen_field_eq(`self.${accessor}`, `other.${accessor}`, f));
@@ -356,8 +353,7 @@ function emit_derived_clone(ctx, impl_) {
         const __ring_m14 = impl_.struct_fields;
         if (__ring_m14._tag === "some") {
           const fields = __ring_m14._0;
-          let args = [""];
-          List_clear(args);
+          let args = [];
           for (const f of fields) {
             List_push(args, gen_field_clone(`self.${codegen_ctx$safe_ident(f.name)}`, f));
           }
@@ -383,8 +379,7 @@ function emit_derived_clone(ctx, impl_) {
             if ((List_len(v.fields) === 0)) {
               codegen_ctx$emit(ctx, `case "${v.name}": return ${name}_${v.name};`);
             } else {
-              let args = [""];
-              List_clear(args);
+              let args = [];
               for (const f of v.fields) {
                 const accessor = field_accessor(v, f);
                 List_push(args, gen_field_clone(`self.${accessor}`, f));
@@ -470,8 +465,7 @@ function emit_derived_ord(ctx, impl_) {
         const __ring_m19 = impl_.enum_variants;
         if (__ring_m19._tag === "some") {
           const variants = __ring_m19._0;
-          let tag_entries = [""];
-          List_clear(tag_entries);
+          let tag_entries = [];
           const __ring_end2 = List_len(variants);
           for (let i = 0; i < __ring_end2; i++) {
             __ring_match20: {
@@ -716,8 +710,7 @@ function emit_derived_debug(ctx, impl_) {
           if ((List_len(fields) === 0)) {
             codegen_ctx$emit(ctx, `return "${impl_.type_name}";`);
           } else {
-            let parts = [""];
-            List_clear(parts);
+            let parts = [];
             for (const f of fields) {
               const val = gen_field_debug(`self.${codegen_ctx$safe_ident(f.name)}`, f);
               List_push(parts, `"${f.name}: " + ${val}`);
@@ -746,8 +739,7 @@ function emit_derived_debug(ctx, impl_) {
               codegen_ctx$emit(ctx, `case "${v.name}": return "${v.name}";`);
             } else {
               if (v.has_named_fields) {
-                let parts = [""];
-                List_clear(parts);
+                let parts = [];
                 for (const f of v.fields) {
                   const accessor = field_accessor(v, f);
                   const val = gen_field_debug(`self.${accessor}`, f);
@@ -756,8 +748,7 @@ function emit_derived_debug(ctx, impl_) {
                 const joined = List_join(parts, " + \", \" + ");
                 codegen_ctx$emit(ctx, `case "${v.name}": return "${v.name} { " + ${joined} + " }";`);
               } else {
-                let parts = [""];
-                List_clear(parts);
+                let parts = [];
                 for (const f of v.fields) {
                   const accessor = field_accessor(v, f);
                   List_push(parts, gen_field_debug(`self.${accessor}`, f));
@@ -854,8 +845,7 @@ function field_accessor(v, f) {
 }
 
 function collect_dict_params(impl_, trait_name) {
-  let params = [""];
-  List_clear(params);
+  let params = [];
   for (const b of impl_.bounds) {
     if ((b.trait_name === trait_name)) {
       List_push(params, hir$trait_bound_param_name(b.type_param, b.trait_name));

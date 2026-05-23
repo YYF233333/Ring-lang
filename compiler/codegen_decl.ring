@@ -56,9 +56,9 @@ pub fn emit_fn_decl(mut ctx: CodegenCtx, name: Str, params: List<HParam>, effect
         },
         none => qualify(ctx, name),
     }
-    let mut param_names: List<Str> = [""]; param_names.clear()
+    let mut param_names: List<Str> = []
     for p in params { param_names.push(safe_ident(p.name)) }
-    let mut dict_params: List<Str> = [""]; dict_params.clear()
+    let mut dict_params: List<Str> = []
     for b in trait_bounds {
         dict_params.push(trait_bound_param_name(b.type_param, b.trait_name))
     }
@@ -67,7 +67,7 @@ pub fn emit_fn_decl(mut ctx: CodegenCtx, name: Str, params: List<HParam>, effect
         none => effects,
     }
     let ev_params = get_evidence_params(effective_effects)
-    let mut all: List<Str> = [""]; all.clear()
+    let mut all: List<Str> = []
     all.extend(param_names)
     all.extend(dict_params)
     all.extend(ev_params)
@@ -112,8 +112,8 @@ fn emit_const_decl(mut ctx: CodegenCtx, name: Str, init: HExpr) {
 // ============================================================
 
 fn emit_struct_decl(mut ctx: CodegenCtx, name: Str, fields: List<HStructField>) {
-    let mut raw_fields: List<Str> = [""]; raw_fields.clear()
-    let mut safe_fields: List<Str> = [""]; safe_fields.clear()
+    let mut raw_fields: List<Str> = []
+    let mut safe_fields: List<Str> = []
     for f in fields {
         raw_fields.push(f.name)
         safe_fields.push(safe_ident(f.name))
@@ -149,7 +149,7 @@ fn emit_enum_decl(mut ctx: CodegenCtx, name: Str, variants: List<HEnumVariant>) 
         } else {
             match v.field_names {
                 some(fnames) => {
-                    let mut sparams: List<Str> = [""]; sparams.clear()
+                    let mut sparams: List<Str> = []
                     for n in fnames { sparams.push(safe_ident(n)) }
                     let params_str = sparams.join(", ")
                     emit(ctx, "function ${js_name}(${params_str}) {")
@@ -159,7 +159,7 @@ fn emit_enum_decl(mut ctx: CodegenCtx, name: Str, variants: List<HEnumVariant>) 
                     emit(ctx, "}")
                 },
                 none => {
-                    let mut sparams: List<Str> = [""]; sparams.clear()
+                    let mut sparams: List<Str> = []
                     for i in 0..v.fields.len() { sparams.push("_${i}") }
                     let params_str = sparams.join(", ")
                     emit(ctx, "function ${js_name}(${params_str}) {")
@@ -207,7 +207,7 @@ fn emit_trait_dictionary(mut ctx: CodegenCtx, target_type: Str, trait_name: Str,
         }
     }
 
-    let mut entries: List<Str> = [""]; entries.clear()
+    let mut entries: List<Str> = []
     for m in methods {
         match m {
             HDecl::Fn { name, .. } => {
@@ -230,10 +230,10 @@ fn emit_trait_dictionary(mut ctx: CodegenCtx, target_type: Str, trait_name: Str,
                         let stn = safe_ident(trait_name)
                         let smn = safe_ident(tm.name)
                         let default_fn = "__${stn}_${smn}"
-                        let mut param_names: List<Str> = [""]; param_names.clear()
+                        let mut param_names: List<Str> = []
                         for p in tm.params { param_names.push(safe_ident(p.name)) }
                         let params_str = param_names.join(", ")
-                        let mut call_args: List<Str> = [""]; call_args.clear()
+                        let mut call_args: List<Str> = []
                         call_args.push(dict_name)
                         // Pass supertrait dicts for the concrete type
                         for st in all_supers {
@@ -260,9 +260,9 @@ fn emit_trait_dictionary(mut ctx: CodegenCtx, target_type: Str, trait_name: Str,
 // Collect all transitive supertraits from ctx.trait_decls.
 // For example, if Top: Mid and Mid: Base, returns ["Mid", "Base"] for "Top".
 fn collect_all_supertraits_codegen(ctx: CodegenCtx, trait_name: Str) -> List<Str> {
-    let mut result: List<Str> = [""]; result.clear()
+    let mut result: List<Str> = []
     let mut visited: Set<Str> = set_new()
-    let mut stack: List<Str> = [""]; stack.clear()
+    let mut stack: List<Str> = []
     match ctx.trait_decls.get(trait_name) {
         some(tinfo) => {
             for st in tinfo.supertraits { stack.push(st) }
@@ -297,10 +297,10 @@ fn emit_trait_decl(mut ctx: CodegenCtx, name: Str, methods: List<HTraitMethod>, 
                     let sn = safe_ident(name)
                     let smn = safe_ident(method.name)
                     let fn_name = "__${sn}_${smn}"
-                    let mut param_names: List<Str> = [""]; param_names.clear()
+                    let mut param_names: List<Str> = []
                     for p in method.params { param_names.push(safe_ident(p.name)) }
                     let self_name = default_method_self_name(safe_ident(name))
-                    let mut all: List<Str> = [""]; all.clear()
+                    let mut all: List<Str> = []
                     all.push(self_name)
                     // Add supertrait dict params so body can reference them
                     for st in all_supers {
@@ -350,7 +350,7 @@ fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
     if ops.len() == 0 { return }
 
     // Collect effects used by default bodies (excluding io which is always global)
-    let mut body_effect_names: List<Str> = [""]; body_effect_names.clear()
+    let mut body_effect_names: List<Str> = []
     let mut body_effect_set: Set<Str> = set_new()
     for op in ops {
         match op.default_body {
@@ -381,7 +381,7 @@ fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
         for op in ops {
             match op.default_body {
                 some(body) => {
-                    let mut params: List<Str> = [""]; params.clear()
+                    let mut params: List<Str> = []
                     for p in op.params { params.push(safe_ident(p.name)) }
                     let params_str = params.join(", ")
                     let b = gen_expr(ctx, body)
@@ -400,7 +400,7 @@ fn emit_effect_decl(mut ctx: CodegenCtx, name: Str, ops: List<HEffectOp>) {
         for op in ops {
             match op.default_body {
                 some(body) => {
-                    let mut params: List<Str> = [""]; params.clear()
+                    let mut params: List<Str> = []
                     for p in op.params { params.push(safe_ident(p.name)) }
                     let params_str = params.join(", ")
                     let b = gen_expr(ctx, body)
@@ -422,7 +422,7 @@ pub fn emit_toplevel_evidence(mut ctx: CodegenCtx, effects: EffectRow) {
 
     // Pass 1: emit evidence for non-default effects (io/fail/empty)
     let mut emitted: Set<Str> = set_new()
-    let mut deferred_defaults: List<Str> = [""]; deferred_defaults.clear()
+    let mut deferred_defaults: List<Str> = []
     for name in effect_names {
         let ev_name = evidence_param_name(name)
         if name == "io" {
@@ -520,7 +520,7 @@ fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
     // Build adjacency: deps[A] = [B, C] means A depends on B and C
     let mut deps: Map<Str, List<Str>> = map_new()
     for name in defaults {
-        let mut my_deps: List<Str> = [""]; my_deps.clear()
+        let mut my_deps: List<Str> = []
         match ctx.default_evidence_params.get(name) {
             some(factory_params) => {
                 for dp in factory_params {
@@ -542,7 +542,7 @@ fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
     let mut in_deg: Map<Str, Int> = map_new()
     for name in defaults {
         in_deg.insert(name, 0)
-        rev_deps.insert(name, { let mut l: List<Str> = [""]; l.clear(); l })
+        rev_deps.insert(name, { let mut l: List<Str> = []; l })
     }
     for entry in deps.entries() {
         let (name, dep_list) = entry
@@ -551,7 +551,7 @@ fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
             match rev_deps.get(dep) {
                 some(rev_list) => { rev_list.push(name) },
                 none => {
-                    let mut new_list: List<Str> = [""]; new_list.clear()
+                    let mut new_list: List<Str> = []
                     new_list.push(name)
                     rev_deps.insert(dep, new_list)
                 }
@@ -560,14 +560,14 @@ fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
     }
 
     // Start with effects that have no dependencies (in_deg == 0)
-    let mut queue: List<Str> = [""]; queue.clear()
+    let mut queue: List<Str> = []
     for entry in in_deg.entries() {
         let (name, deg) = entry
         if deg == 0 { queue.push(name) }
     }
     queue.sort()  // deterministic order
 
-    let mut sorted: List<Str> = [""]; sorted.clear()
+    let mut sorted: List<Str> = []
     while queue.len() > 0 {
         let cur = queue.shift().unwrap()
         sorted.push(cur)
