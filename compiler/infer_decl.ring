@@ -384,25 +384,28 @@ fn check_effect_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
             pi = pi + 1
         }
         // Type-check default body if present
-        let ast_op = match ast_ops.get(oi) { some(a) => a, none => ast_ops.get(0).unwrap() }
+        let ast_op_opt = ast_ops.get(oi)
         let mut default_body: HExpr? = none
-        match ast_op.body {
-            some(body_expr) => {
-                // Bind op params in a new scope for type checking the default body
-                ctx.env.push_scope()
-                for p in op_params {
-                    ctx.env.bind_mono(p.name, p.ty)
-                }
-                let body_result = infer_block(ctx, body_expr, none)
-                ctx.subst = body_result.subst
-                let body_type = hexpr_type(body_result.hexpr)
-                ctx.subst = unify_at(ctx.sink, ctx.env, body_type, op.return_type, ctx.subst, span)
-                // Zonk the default body
-                let zctx = ZonkCtx { subst: ctx.subst, names: map_new() }
-                default_body = some(zonk_block(zctx, body_result.hexpr))
-                ctx.env.pop_scope()
+        match ast_op_opt {
+            some(ast_op) => match ast_op.body {
+                some(body_expr) => {
+                    // Bind op params in a new scope for type checking the default body
+                    ctx.env.push_scope()
+                    for p in op_params {
+                        ctx.env.bind_mono(p.name, p.ty)
+                    }
+                    let body_result = infer_block(ctx, body_expr, none)
+                    ctx.subst = body_result.subst
+                    let body_type = hexpr_type(body_result.hexpr)
+                    ctx.subst = unify_at(ctx.sink, ctx.env, body_type, op.return_type, ctx.subst, span)
+                    // Zonk the default body
+                    let zctx = ZonkCtx { subst: ctx.subst, names: map_new() }
+                    default_body = some(zonk_block(zctx, body_result.hexpr))
+                    ctx.env.pop_scope()
+                },
+                none => {},
             },
-            none => {}
+            none => {},
         }
         hops.push(HEffectOp { name: op.name, params: op_params, return_type: op.return_type, has_default: op.has_default, default_body: default_body })
         oi = oi + 1
