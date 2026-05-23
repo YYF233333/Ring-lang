@@ -664,6 +664,7 @@ const module_cases: ModuleTestCase[] = [
   { dir: "cross_trait", expected: "Rex\n" },
   { dir: "extern_fn", expected: "100\n2.5\n42\n" },
   { dir: "esm_verify", expected: "hello, world\n3\n" },
+  { dir: "mod_export_effect", expected: "Hello, World!\n" },
 ];
 
 describe("e2e: multi-file modules (ring run)", { concurrency: true }, () => {

@@ -225,6 +225,38 @@ pub fn extract_exports(
                                     }
                                 }
                             },
+                            Decl::Effect { name: eff_name, is_pub: eff_pub, .. } => {
+                                if eff_pub {
+                                    match env.types.effects.get(eff_name) {
+                                        some(effdef) => { effects.insert(eff_name, effdef) },
+                                        none => {},
+                                    }
+                                }
+                            },
+                            Decl::EffectAlias { name: ea_name, is_pub: ea_pub, .. } => {
+                                if ea_pub {
+                                    match env.types.effect_aliases.get(ea_name) {
+                                        some(adef) => { effect_aliases.insert(ea_name, adef) },
+                                        none => {},
+                                    }
+                                }
+                            },
+                            Decl::Trait { name: t_name, is_pub: t_pub, .. } => {
+                                if t_pub {
+                                    match env.trait_reg.traits.get(t_name) {
+                                        some(tdef) => { traits.insert(t_name, tdef) },
+                                        none => {},
+                                    }
+                                }
+                            },
+                            Decl::Impl { target_type: tt, trait_name: tn, methods: ms, .. } => {
+                                match env.trait_reg.impl_methods.get(tt) {
+                                    some(methods_map) => {
+                                        impl_methods.insert(tt, map_clone(methods_map))
+                                    },
+                                    none => {},
+                                }
+                            },
                             Decl::ModBlock { name: sub_mod_name, decls: sub_mod_decls, is_pub: sub_mpub, .. } => {
                                 if sub_mpub {
                                     for sub_subdecl in sub_mod_decls {
@@ -273,6 +305,38 @@ pub fn extract_exports(
                                                         some(scheme) => { values.insert(cname2, scheme) },
                                                         none => {},
                                                     }
+                                                }
+                                            },
+                                            Decl::Effect { name: eff_name2, is_pub: eff_pub2, .. } => {
+                                                if eff_pub2 {
+                                                    match env.types.effects.get(eff_name2) {
+                                                        some(effdef) => { effects.insert(eff_name2, effdef) },
+                                                        none => {},
+                                                    }
+                                                }
+                                            },
+                                            Decl::EffectAlias { name: ea_name2, is_pub: ea_pub2, .. } => {
+                                                if ea_pub2 {
+                                                    match env.types.effect_aliases.get(ea_name2) {
+                                                        some(adef) => { effect_aliases.insert(ea_name2, adef) },
+                                                        none => {},
+                                                    }
+                                                }
+                                            },
+                                            Decl::Trait { name: t_name2, is_pub: t_pub2, .. } => {
+                                                if t_pub2 {
+                                                    match env.trait_reg.traits.get(t_name2) {
+                                                        some(tdef) => { traits.insert(t_name2, tdef) },
+                                                        none => {},
+                                                    }
+                                                }
+                                            },
+                                            Decl::Impl { target_type: tt2, trait_name: tn2, methods: ms2, .. } => {
+                                                match env.trait_reg.impl_methods.get(tt2) {
+                                                    some(methods_map) => {
+                                                        impl_methods.insert(tt2, map_clone(methods_map))
+                                                    },
+                                                    none => {},
                                                 }
                                             },
                                             _ => {},

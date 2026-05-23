@@ -375,26 +375,7 @@ fn build_esm_export_names(ast: Program, hir: HProgram) -> List<Str> {
 
     // Pass 2: impl-related exports for pub types
     for decl in ast.decls {
-        match decl {
-            Decl::Impl { target_type, trait_name: impl_trait, methods, .. } => {
-                if is_pub_type_in_decls(target_type, ast.decls) {
-                    match impl_trait {
-                        some(tn) => {
-                            export_names.push(trait_dict_name(safe_ident(target_type), safe_ident(tn)))
-                        },
-                        none => {
-                            for m in methods {
-                                match m {
-                                    Decl::Fn { name: mn, .. } => export_names.push("${safe_ident(target_type)}_${mn}"),
-                                    _ => {},
-                                }
-                            }
-                        },
-                    }
-                }
-            },
-            _ => {},
-        }
+        collect_impl_exports(decl, ast.decls, export_names)
     }
 
     // Pass 3: auto-derive dict exports
@@ -414,6 +395,18 @@ fn is_pub_type_in_decls(type_name: Str, decls: List<Decl>) -> Bool {
         match d {
             Decl::Struct { name: dn, is_pub: dp, .. } => { if dn == type_name && dp { result = true } },
             Decl::Enum { name: dn, is_pub: dp, .. } => { if dn == type_name && dp { result = true } },
+            Decl::ModBlock { name: mod_name, decls: mod_decls, is_pub: mpub, .. } => {
+                if mpub {
+                    for sd in mod_decls {
+                        let prefixed = prefix_decl_name(mod_name, sd)
+                        match prefixed {
+                            Decl::Struct { name: sn, is_pub: sp, .. } => { if sn == type_name && sp { result = true } },
+                            Decl::Enum { name: en, is_pub: ep, .. } => { if en == type_name && ep { result = true } },
+                            _ => {},
+                        }
+                    }
+                }
+            },
             _ => {},
         }
     }
@@ -439,6 +432,38 @@ fn collect_pub_decl_exports(decl: Decl, mut export_names: List<Str>) {
                 for subdecl in mod_decls {
                     let prefixed = prefix_decl_name(mod_name, subdecl)
                     collect_pub_decl_exports(prefixed, export_names)
+                }
+            }
+        },
+        _ => {},
+    }
+}
+
+// Collect export names for impl declarations (including inside mod blocks)
+fn collect_impl_exports(decl: Decl, all_decls: List<Decl>, mut export_names: List<Str>) {
+    match decl {
+        Decl::Impl { target_type, trait_name: impl_trait, methods, .. } => {
+            if is_pub_type_in_decls(target_type, all_decls) {
+                match impl_trait {
+                    some(tn) => {
+                        export_names.push(trait_dict_name(safe_ident(target_type), safe_ident(tn)))
+                    },
+                    none => {
+                        for m in methods {
+                            match m {
+                                Decl::Fn { name: mn, .. } => export_names.push("${safe_ident(target_type)}_${mn}"),
+                                _ => {},
+                            }
+                        }
+                    },
+                }
+            }
+        },
+        Decl::ModBlock { name: mod_name, decls: mod_decls, is_pub: mpub, .. } => {
+            if mpub {
+                for subdecl in mod_decls {
+                    let prefixed = prefix_decl_name(mod_name, subdecl)
+                    collect_impl_exports(prefixed, all_decls, export_names)
                 }
             }
         },
