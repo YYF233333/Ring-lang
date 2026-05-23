@@ -496,7 +496,7 @@ function check_patterns(patterns, ty, subst) {
           const __ring_m21 = p;
           if (__ring_m21._tag === "NamedConstructor") {
             const pname = __ring_m21.name; const nfields = __ring_m21.fields;
-            if ((pname === sname)) {
+            if (names_match_struct(pname, sname)) {
               covered = true;
               const positional = named_pattern_to_positional(nfields, field_names, List_len(sfields));
               List_push(sub_patterns, positional);
@@ -505,7 +505,7 @@ function check_patterns(patterns, ty, subst) {
           }
           if (__ring_m21._tag === "Constructor") {
             const pname = __ring_m21.name; const cfields = __ring_m21.fields;
-            if ((pname === sname)) {
+            if (names_match_struct(pname, sname)) {
               covered = true;
               List_push(sub_patterns, cfields);
             }
@@ -737,7 +737,7 @@ function specialize_row(row, ctor) {
     }
     if (__ring_m26._tag === "Constructor") {
       const name = __ring_m26.name; const fields = __ring_m26.fields;
-      if ((name === ctor.name)) {
+      if (names_match_struct(name, ctor.name)) {
         let sub = list_clone(fields);
         const wild = wild_pattern();
         while ((List_len(sub) < ctor.arity)) {
@@ -752,7 +752,7 @@ function specialize_row(row, ctor) {
     }
     if (__ring_m26._tag === "NamedConstructor") {
       const name = __ring_m26.name; const nfields = __ring_m26.fields;
-      if ((name === ctor.name)) {
+      if (names_match_struct(name, ctor.name)) {
         const field_names = (function() {
   const __ring_m = ctor.field_names;
   if (__ring_m._tag === "some") { const fns = __ring_m._0; return fns; }
@@ -930,6 +930,13 @@ function check_matrix(rows, col_types, subst, expanding) {
     }
     __match_fail(__ring_m28);
   }
+}
+
+function names_match_struct(pattern_name, type_name) {
+  if ((pattern_name === type_name)) {
+    return true;
+  }
+  return Str_ends_with(type_name, `::${pattern_name}`);
 }
 
 function join_strs(parts, sep) {

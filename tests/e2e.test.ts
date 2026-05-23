@@ -438,6 +438,7 @@ const cases: TestCase[] = [
   { file: "mod_nested_block.ring", expected: "mod_nested_block: all tests passed\n" },
   { file: "mod_nested_impl.ring", expected: "mod_nested_impl: all tests passed\n" },
   { file: "mod_struct_literal.ring", expected: "mod struct literal: ok\n" },
+  { file: "mod_struct_pattern.ring", expected: "mod struct pattern: ok\n" },
   { file: "derive_tuple_fields.ring", expected: "pass: derive tuple\n" },
   { file: "nested_generic_ufcs.ring", expected: "nested generic ufcs: all ok\n" },
   { file: "derive_mod_qualified.ring", expected: "ok\n" },

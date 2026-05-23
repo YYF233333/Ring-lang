@@ -26,15 +26,6 @@
 
 发现者：DS，Opus 交叉验证
 
-### #105 `check_effect_decl` 中 `ast_ops.get(0).unwrap()` 潜在 panic [medium] [doing]
-
-当 processing effect op 的 default body 时，若 `oi >= ast_ops.len()`，fallback 代码 `ast_ops.get(0).unwrap()` 会 panic。虽然正常路径下 oi 应小于 ast_ops 长度，但注册/代码不匹配时（effect def.ops 比 AST ops 多条目）会导致编译器崩溃。
-
-**文件**：`compiler/infer_decl.ring:387`
-**修复方向**：移除 panicking fallback；若 `oi >= ast_ops.len()`，使用合成参数名。
-
-发现者：DS
-
 ### #107 `check_effects_capability` 拒绝所有多态 effect row（含空 effect 函数）[medium] [open]
 
 `check_effects_capability` 在检测到 open tail（`effects.tail` 为 `some`）时无条件报 E0408。这意味着任何未标注 effect 的函数（如 `fn id(x: Int) -> Int { x }`）在 `mod requires {io}` 内部都会被拒绝，即使该函数完全无副作用。
@@ -55,14 +46,6 @@
 
 发现者：Opus
 
-### #109 `collect_var_mappings` 缺失 FnType/TupleType/GenericType arm [medium] [doing]
-
-`collect_var_mappings`（`infer_ctx.ring:456-497`）仅处理 `TypeVar`/`StructType`/`EnumType`，缺失 `FnType`、`TupleType`、`GenericType` 分支。当 bounded type param 仅出现在函数类型参数（如 `fn<T: Eq>(f: fn(T) -> Bool)`）或嵌套泛型中，type variable 映射不完整，`resolve_dicts_from_scheme` 无法正确解析 trait dict。
-
-**文件**：`compiler/infer_ctx.ring:456-497`
-**修复方向**：添加 `FnType`（递归 params + return_type）、`TupleType`（递归 elements）、`GenericType`（递归 base + args）arm。
-
-发现者：Opus+DS
 
 ### #114 `row_merge` 不统一同 kind effect 的类型参数 [medium] [open]
 
@@ -91,32 +74,14 @@
 
 
 
-### #110 Mod block 内 struct pattern 匹配完全不工作（名字限定不一致）[critical] [doing]
+### #115 外部限定 struct pattern（`inner::Pair { a, b }`）报 E0201 [medium] [open]
 
-**三处独立失败，同源问题**：mod block 内 struct 的名字在不同 pass 间不一致——注册用 qualified 名（`inner$Pair`），pattern 用 raw 名（`Pair`）。
+从 mod 外部使用限定路径 `inner::Pair { a, b }` 做 struct pattern 匹配时，checker 报 E0201（未定义类型）。Checker 在 pattern 位置不识别限定 struct 名。mod 内部的 struct pattern 已修复（#110），此为独立的遗留问题。
 
-1. **穷尽性检查器**：`check_exhaustive` 不识别 mod 内 struct pattern，报 E0601 non-exhaustive 误报。
-2. **Codegen `struct_field_order` 查找失败**：`gen_pattern_condition` 用 `struct_field_order.contains_key(name)` 判断 struct vs enum，但 `name` 是 raw 名而 key 是 qualified 名。查找失败→误入 enum 的 `_tag` 检查分支→struct 实例没有 `_tag` 属性→pattern 永远不匹配。
-3. **运行时静默失败**：加 wildcard 后编译通过，但 struct pattern 永远匹配不到，静默 fallthrough 到 wildcard。
+**文件**：`compiler/infer.ring`（pattern 名字解析逻辑）
+**修复方向**：pattern 解析时对限定路径（`mod::Type`）查找 mod 的导出 struct。
 
-**实测证据**：
-```ring
-mod inner {
-    pub struct Pair { a: Str, b: Str }
-    pub fn swap(p: Pair) -> Pair {
-        match p {
-            Pair { a, b } => Pair { a: b, b: a },  // 永远不匹配
-            _ => p  // 永远走这里
-        }
-    }
-}
-```
-生成的 JS：`if (__ring_m6._tag === "Pair")` 而非 `__ring_m6 instanceof inner$Pair`。
-
-**文件**：`compiler/codegen_stmt.ring:412`、`compiler/exhaustive.ring`（struct pattern 名字解析）
-**修复方向**：(1) `gen_pattern_condition` 用 `qualify(ctx, name)` 查找 `struct_field_order`；(2) 穷尽性检查器对 struct pattern 名字也做 qualified 比较。
-
-发现者：DS 发现 codegen 侧，Opus 实测确认并发现穷尽性检查器侧
+发现者：WTA1 agent（#110 修复过程中发现）
 
 ## 代码质量 / 可维护性
 
