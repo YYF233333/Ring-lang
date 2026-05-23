@@ -75,15 +75,6 @@
 
 发现者：Opus
 
-### #88 `exports.ring` 不导出 mod 块内的 effect/trait/effect alias [medium] [doing]
-
-`extract_exports`（exports.ring:178-286）处理 `Decl::ModBlock` 时只匹配 `Decl::Fn`、`Decl::Struct`、`Decl::Enum`、`Decl::Const` 和嵌套 `Decl::ModBlock`。`Decl::Effect`、`Decl::EffectAlias`、`Decl::Trait`、`Decl::Impl` 被 `_ => {}` 静默丢弃。多文件编译时，消费模块无法使用另一文件 pub mod 内定义的 effect、trait 或 effect alias。
-
-**文件**：`compiler/exports.ring:178-286`
-**修复方向**：添加 `Decl::Effect`/`Decl::EffectAlias`/`Decl::Trait`/`Decl::Impl` 的 match arm，参照顶级导出处理逻辑。
-
-发现者：Opus
-
 ### #91 `impl` 目标类型不支持限定路径 [low] [open]
 
 Parser 的 `impl Trait for mod::Type` 不支持——解析到 `::` 时报错。用户必须将 impl 放在 mod 块内部。
@@ -95,7 +86,7 @@ Parser 的 `impl Trait for mod::Type` 不支持——解析到 `::` 时报错。
 
 ## 特性组合 Bug（2026-05-23 审计发现）
 
-### #84 UFCS 调用 trait default 方法未注册到 codegen 的 impl_methods [medium] [open]
+### #84 UFCS 调用 trait default 方法未注册到 codegen 的 impl_methods [medium] [doing]
 
 Trait 有 default 方法（如 `describe`）且类型 impl 未显式覆盖时，该方法只通过 trait dictionary 可达。但 codegen 的 `impl_methods`（codegen.ring:227-250）只注册 `HDecl::Impl` 中显式出现的 `HDecl::Fn`，default 方法不在其中。具体类型的 UFCS 调用（如 `obj.describe()`）在 codegen 查找 `impl_methods` 失败，回退到通用 call 路径生成错误代码，运行时报 `TypeError: not a function`。
 
