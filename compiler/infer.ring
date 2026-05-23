@@ -8,7 +8,7 @@ use ast::{Program, Decl, Expr, Stmt, Param, MatchArm, StructFieldInit,
     NamedPatternField, EffectOpDecl}
 use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     HStructFieldInit, HStringInterpPart, HProgram, DerivedImpl,
-    TraitDispatch, DictDispatchInfo, TraitBound,
+    TraitDispatch, DictDispatchInfo, DictRef, TraitBound,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod,
     HForInDestructure, HLetDestructureBinding,
     variant_js_name, trait_dict_name, trait_bound_param_name,
@@ -1148,12 +1148,12 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
     }
 }
 
-fn resolve_trait_extra_dicts(ctx: InferCtx, type_args: List<Type>, subst: UnionFind, trait_name: Str) -> List<Str>? {
+fn resolve_trait_extra_dicts(ctx: InferCtx, type_args: List<Type>, subst: UnionFind, trait_name: Str) -> List<DictRef>? {
     if type_args.len() == 0 { return none }
-    let mut dicts: List<Str> = []
+    let mut dicts: List<DictRef> = []
     for arg in type_args {
         let resolved = apply_subst(subst, arg)
-        let dict = resolve_type_to_trait_dict(ctx, resolved, trait_name)
+        let dict = resolve_type_to_dict_ref(ctx, resolved, subst, trait_name)
         match dict {
             some(d) => dicts.push(d),
             none => { return none }
@@ -1162,12 +1162,12 @@ fn resolve_trait_extra_dicts(ctx: InferCtx, type_args: List<Type>, subst: UnionF
     some(dicts)
 }
 
-fn resolve_type_to_trait_dict(ctx: InferCtx, t: Type, trait_name: Str) -> Str? {
+fn resolve_type_to_dict_ref(ctx: InferCtx, t: Type, subst: UnionFind, trait_name: Str) -> DictRef? {
     match type_to_builtin_name(t) {
         some(builtin_name) => match t {
             Type::StructType { .. } => {},
             Type::EnumType { .. } => {},
-            _ => { return some(trait_dict_name(builtin_name, trait_name)) }
+            _ => { return some(DictRef::Simple(trait_dict_name(builtin_name, trait_name))) }
         },
         none => {}
     }
@@ -1177,18 +1177,42 @@ fn resolve_type_to_trait_dict(ctx: InferCtx, t: Type, trait_name: Str) -> Str? {
                 fb.type_param_var_id == id && fb.trait_name == trait_name
             })
             match bound {
-                some(b) => some(trait_bound_param_name(b.type_param_name, trait_name)),
+                some(b) => some(DictRef::Simple(trait_bound_param_name(b.type_param_name, trait_name))),
                 none => none
             }
         },
-        Type::StructType { name, .. } => {
+        Type::StructType { name, type_params, .. } => {
             if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
-                some(trait_dict_name(name, trait_name))
+                if type_params.len() > 0 {
+                    let inner = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
+                    match inner {
+                        some(inner_dicts) => some(DictRef::Wrapped {
+                            dict: trait_dict_name(name, trait_name),
+                            trait_name: trait_name,
+                            inner_dicts: inner_dicts
+                        }),
+                        none => some(DictRef::Simple(trait_dict_name(name, trait_name)))
+                    }
+                } else {
+                    some(DictRef::Simple(trait_dict_name(name, trait_name)))
+                }
             } else { none }
         },
-        Type::EnumType { name, .. } => {
+        Type::EnumType { name, type_params, .. } => {
             if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
-                some(trait_dict_name(name, trait_name))
+                if type_params.len() > 0 {
+                    let inner = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
+                    match inner {
+                        some(inner_dicts) => some(DictRef::Wrapped {
+                            dict: trait_dict_name(name, trait_name),
+                            trait_name: trait_name,
+                            inner_dicts: inner_dicts
+                        }),
+                        none => some(DictRef::Simple(trait_dict_name(name, trait_name)))
+                    }
+                } else {
+                    some(DictRef::Simple(trait_dict_name(name, trait_name)))
+                }
             } else { none }
         },
         _ => none
@@ -1303,7 +1327,7 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
 
     let result_type = apply_subst(s, ret_var)
 
-    let mut resolved_dicts: List<Str> = []
+    let mut resolved_dicts: List<DictRef> = []
     match callee {
         Expr::Ident { name: callee_name, .. } => {
             match ctx.env.lookup(callee_name) {
@@ -1742,7 +1766,7 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
         }
     }
 
-    let mut resolved_dicts: List<Str> = []
+    let mut resolved_dicts: List<DictRef> = []
     match method_scheme {
         some(ms) => {
             if ms.bounds.len() > 0 {

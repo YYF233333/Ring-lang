@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, type_to_builtin_name, effect_kind_name}
 use ast::{Pattern, BinOp, UnaryOp}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
-    HStringInterpPart, HEffectHandler,
+    HStringInterpPart, HEffectHandler, DictRef, TraitDispatch,
     evidence_param_name, trait_dict_name,
     ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
     RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
@@ -267,7 +267,7 @@ fn gen_eq_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, di
         },
         TraitDispatch::Direct { dict, extra_dicts } => {
             let d = qualify(ctx, dict)
-            let extra = extra_dicts_str(extra_dicts)
+            let extra = extra_dicts_ref_str(ctx, extra_dicts)
             let eq_call = "${d}.eq(${l}, ${r}${extra})"
             if is_ne { "(!${eq_call})" } else { eq_call }
         },
@@ -289,7 +289,7 @@ fn gen_ord_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, d
         },
         TraitDispatch::Direct { dict, extra_dicts } => {
             let d = qualify(ctx, dict)
-            let extra = extra_dicts_str(extra_dicts)
+            let extra = extra_dicts_ref_str(ctx, extra_dicts)
             let cmp_call = "${d}.cmp(${l}, ${r}${extra})"
             match op {
                 BinOp::Lt => "(${cmp_call} < 0)",
@@ -312,9 +312,35 @@ fn gen_ord_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, d
     }
 }
 
-fn extra_dicts_str(dicts: List<Str>) -> Str {
+fn dict_ref_to_js(ctx: CodegenCtx, dr: DictRef) -> Str {
+    match dr {
+        DictRef::Simple(name) => qualify(ctx, name),
+        DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+            let d = qualify(ctx, dict)
+            let mut inner_strs: List<Str> = []
+            for inner in inner_dicts {
+                inner_strs.push(dict_ref_to_js(ctx, inner))
+            }
+            let inner_args = inner_strs.join(", ")
+            // Generate a wrapper dict object that binds the inner dicts
+            match trait_name {
+                "Eq" => "{ eq: (__a, __b) => ${d}.eq(__a, __b, ${inner_args}), ne: (__a, __b) => ${d}.ne(__a, __b, ${inner_args}) }",
+                "Clone" => "{ clone: (__a) => ${d}.clone(__a, ${inner_args}) }",
+                "Debug" => "{ debug: (__a) => ${d}.debug(__a, ${inner_args}) }",
+                "Ord" => "{ cmp: (__a, __b) => ${d}.cmp(__a, __b, ${inner_args}) }",
+                _ => d,
+            }
+        },
+    }
+}
+
+fn extra_dicts_ref_str(ctx: CodegenCtx, dicts: List<DictRef>) -> Str {
     if dicts.len() > 0 {
-        let joined = dicts.join(", ")
+        let mut parts: List<Str> = []
+        for d in dicts {
+            parts.push(dict_ref_to_js(ctx, d))
+        }
+        let joined = parts.join(", ")
         ", ${joined}"
     } else { "" }
 }
@@ -366,7 +392,7 @@ fn get_callee_evidence_args(ctx: CodegenCtx, callee_type: Type, callee_name: Str
     ""
 }
 
-fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<Str>, dict_dispatch: DictDispatchInfo?) -> Str {
+fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?) -> Str {
     match dict_dispatch {
         some(dd) => {
             let mut skip_first_arg = false
@@ -564,7 +590,7 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                                 "${r}, ${joined}"
                             } else { r }
                             let mut dict_parts: List<Str> = [""]; dict_parts.clear()
-                            for d in resolved_dicts { dict_parts.push(qualify(ctx, d)) }
+                            for d in resolved_dicts { dict_parts.push(dict_ref_to_js(ctx, d)) }
                             let dict_str = dict_parts.join(", ")
                             let ev_args = get_callee_evidence_args(ctx, callee_type, none)
                             let mut parts: List<Str> = [""]; parts.clear()
@@ -610,7 +636,7 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
     }
     let args_str = arg_strs.join(", ")
     let mut dict_parts: List<Str> = [""]; dict_parts.clear()
-    for d in resolved_dicts { dict_parts.push(qualify(ctx, d)) }
+    for d in resolved_dicts { dict_parts.push(dict_ref_to_js(ctx, d)) }
     let dict_str = dict_parts.join(", ")
     let ev_args = get_callee_evidence_args(ctx, hexpr_type(callee), cn)
     let mut all_parts: List<Str> = [""]; all_parts.clear()

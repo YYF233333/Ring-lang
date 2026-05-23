@@ -148,7 +148,7 @@ Ring-lang/
 - `pub` 可见性在多文件模式下强制执行，单文件模式不强制（向后兼容）
 - 穷尽性检查支持嵌套模式递归检查（含 Option<Option<T>> 等嵌套 enum）；多字段交叉组合不验证
 - ~~`List.contains` / `Set.contains` 等仍使用 JS `===` 引用相等~~：已修复。`List.contains`/`List.index_of`/`Set.contains` 现在用 Ring 实现，使用 `==`（Eq trait dispatch）进行比较。`List.find` / `Map` key 查找仍使用 JS `===`
-- 深层嵌套泛型类型（如 `Pair<Pair<Int, Int>, Int>`）的 trait method UFCS 调用不支持——auto-derive codegen 和 operator dispatch 正常工作，但 `.eq()`/`.clone()`/`.debug()`/`.cmp()` 直接方法调用受限
+- ~~深层嵌套泛型类型（如 `Pair<Pair<Int, Int>, Int>`）的 trait method UFCS 调用不支持~~：已修复。`resolve_type_to_dict_ref` 递归构建 `DictRef::Wrapped` 节点，codegen 生成内联 wrapper dict 对象，自动绑定内层类型参数的 trait dict。支持任意深度嵌套
 - ~~**`impl<T: Eq>` bounded impl 跨类型调用冲突**~~：已修复。`resolve_impl_self_type` 现在使用 impl 的类型参数构建 self 类型，确保 TypeScheme 中所有类型变量都被 instantiate 正确替换
 
 ### LSP 限制

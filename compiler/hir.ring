@@ -19,9 +19,14 @@ pub struct HParam {
     pub is_mutable: Bool
 }
 
+pub enum DictRef {
+    Simple(Str),
+    Wrapped { dict: Str, trait_name: Str, inner_dicts: List<DictRef> }
+}
+
 pub enum TraitDispatch {
     Builtin,
-    Direct { dict: Str, extra_dicts: List<Str> },
+    Direct { dict: Str, extra_dicts: List<DictRef> },
     Dict { param: Str }
 }
 
@@ -63,7 +68,7 @@ pub enum HExpr {
     Ident { name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<Str>?, ty: Type, effects: EffectRow, span: Span },
     BinOp { op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?, ord_dispatch: TraitDispatch?, ty: Type, effects: EffectRow, span: Span },
     UnaryOp { op: UnaryOp, operand: HExpr, ty: Type, effects: EffectRow, span: Span },
-    Call { callee: HExpr, args: List<HExpr>, type_args: List<Type>, resolved_dicts: List<Str>, dict_dispatch: DictDispatchInfo?, ty: Type, effects: EffectRow, span: Span },
+    Call { callee: HExpr, args: List<HExpr>, type_args: List<Type>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?, ty: Type, effects: EffectRow, span: Span },
     FieldAccess { receiver: HExpr, field: Str, ty: Type, effects: EffectRow, span: Span },
     StructLit { name: Str, type_args: List<Type>, fields: List<HStructFieldInit>, spread: HExpr?, ty: Type, effects: EffectRow, span: Span },
     NamedVariantConstruct { enum_name: Str, variant_name: Str, fields: List<HStructFieldInit>, spread: HExpr?, ty: Type, effects: EffectRow, span: Span },
