@@ -221,6 +221,9 @@ fn register_option(mut env: TypeEnv) {
     // Register Option enum definition
     let option_t_id = env.fresh_var_id()
     let option_t = Type::TypeVar { id: option_t_id, name: none }
+    let mut option_vi: Map<Str, Int> = map_new()
+    option_vi.insert("some", 0)
+    option_vi.insert("none", 1)
     env.types.enums.insert(BUILTIN_OPTION, EnumDef {
         name: BUILTIN_OPTION,
         type_params: ["T"],
@@ -228,7 +231,8 @@ fn register_option(mut env: TypeEnv) {
         variants: [
             EnumVariant { name: "some", fields: [option_t], field_names: none },
             EnumVariant { name: "none", fields: [], field_names: none }
-        ]
+        ],
+        variant_index: option_vi
     })
 
     env.types.variant_to_enum.insert("some", BUILTIN_OPTION)

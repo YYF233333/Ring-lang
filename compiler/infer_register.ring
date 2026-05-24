@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
-    EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string}
+    EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string, effect_to_string}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
@@ -399,7 +399,7 @@ fn preregister_enum(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>) 
         match tv { Type::TypeVar { id, .. } => { tv_ids.push(id) }, _ => {} }
         ctx.type_param_scope.insert(tp.name, tv)
     }
-    let def = EnumDef { name: name, type_params: tp_names, type_param_vars: tv_ids, variants: [] }
+    let def = EnumDef { name: name, type_params: tp_names, type_param_vars: tv_ids, variants: [], variant_index: map_new() }
     ctx.env.types.enums.insert(name, def)
 }
 
@@ -421,6 +421,7 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                 i = i + 1
             }
 
+            let mut vi = 0
             for v in variants {
                 match v.named_fields {
                     some(nf) => {
@@ -444,6 +445,8 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
                         def.variants.push(EnumVariant { name: v.name, fields: field_types, field_names: none })
                     }
                 }
+                def.variant_index.insert(v.name, vi)
+                vi = vi + 1
             }
 
             let enum_type = Type::EnumType { name: name, type_params: tv_types, variants: def.variants }
@@ -1263,14 +1266,11 @@ pub fn resolve_declared_effects(mut ctx: InferCtx, decl_effects: List<EffectExpr
     let effects = expand_effect_exprs(ctx, decl_effects, expanding)
     // Deduplicate effects after alias expansion (e.g. {IO, io} -> [io, fail<Str>, io] -> [io, fail<Str>])
     let mut deduped: List<Effect> = []
+    let mut seen: Set<Str> = set_new()
     for eff in effects {
-        let mut is_dup = false
-        for existing in deduped {
-            if effects_same_kind(eff, existing) {
-                is_dup = true
-            }
-        }
-        if !is_dup {
+        let key = effect_to_string(eff)
+        if !seen.contains(key) {
+            seen.insert(key)
             deduped.push(eff)
         }
     }
