@@ -27,7 +27,6 @@
 发现者：Opus
 
 
-
 ## Codegen
 
 
@@ -93,13 +92,6 @@
 
 ## Delegate 完整性（2026-05-23 审计发现）
 
-### #77 Delegate forwarding：effect 标注 / evidence 未传递 [medium] [doing]
-
-子项 1（mutability）和 2（type_params）已修复。剩余：
-3. **effect 标注直接复制 trait 声明**：保守但安全，当前不修。
-4. **合成调用不传递 effect evidence**：用户定义带 effect 的 trait 使用 delegate 时会触发。
-
-发现者：DS+Opus
 
 ### #93 Delegate expansion 绕过类型推断直接合成 HIR [low] [open]
 

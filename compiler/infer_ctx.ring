@@ -258,14 +258,17 @@ pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, con
 // ============================================================
 
 pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: UnionFind) -> (EffectRow, UnionFind) {
-    let m = row_merge(a, b)
+    // Apply substitution to resolve already-bound tail variables before merging
+    let resolved_a = apply_subst_row(s, a)
+    let resolved_b = apply_subst_row(s, b)
+    let m = row_merge(resolved_a, resolved_b)
     let mut result_s = s
 
     // Unify type params for same-kind effects between a and b.
     // Catch unification errors: if params can't unify (e.g. mut<Int> vs mut<Str>),
     // keep the substitution unchanged — distinct effects stay separate.
-    for eff_b in b.effects {
-        for eff_a in a.effects {
+    for eff_b in resolved_b.effects {
+        for eff_a in resolved_a.effects {
             if effects_match_kind(eff_a, eff_b) {
                 result_s = (unify_effect_params(eff_a, eff_b, result_s, env)) catch { _ => result_s }
                 break
