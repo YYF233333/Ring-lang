@@ -2,90 +2,27 @@
 
 ## 项目概述
 
-Ring-lang：Rust 的安全性 + Python 的书写体验 + 效果系统让编译器知道一切，然后用这些信息优化性能。当前编译到 JavaScript/V8 运行（bootstrap 后端），目标后端为 LLVM native。
+Ring-lang：写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。代数 effect system + HM 类型推断 + trait 多态，编译器全推断，零标注负担。当前编译到 JS/V8（bootstrap 后端），目标后端为 LLVM native。
 
-三支柱：（1）推断一切——类型 + effect + 可变性 + 所有权全推断，零标注负担；（2）追踪一切——签名即完整行为契约（io/fail/mut/async），LLM 只需签名即可正确使用 API；（3）语义驱动性能——LLVM + effect purity/linearity 信息转化为编译优化。实验赌注：Refinement types（Z3 集成，成了消灭 unsafe，不成前三支柱自洽）。
-
-完整设计文档见 `docs/design.md`（含实现状态附录）。
-
-**当前状态：自举完成（2026-05-21）。** 编译器已从 TypeScript 完全迁移到 Ring 自举实现（33 个 .ring 源文件）。TS 编译器已归档于 git tag `ts-compiler-final`。编译器覆盖完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流、集合类型（List/Map/Set/Tuple）、模块系统、FFI、标准库（含 Iterator/Iterable trait 协议）、auto-derive traits（Eq/Clone/Debug/Ord）。E2E 测试全部通过。Parser 支持声明级错误恢复（多错误报告）。LSP 暂不可用（原 TS 实现未移植）。详见下方"已实现功能"摘要。
+编译器已自举（Ring 写 Ring），完整设计文档见 `docs/design.md`。
 
 ## 技术栈
 
-- **编译器实现语言**：Ring（自举，33 个 .ring 源文件编译为 JS）
-- **编译目标**：JavaScript/V8（bootstrap 后端），目标后端为 LLVM native
-- **测试框架**：node:test（零外部依赖）
-- **参考实现**：Koka 编译器（MIT 许可），用于 effect 推断、evidence passing 等复杂算法的翻译
-- **历史**：TypeScript 原始实现归档于 git tag `ts-compiler-final`
+- **编译器**：Ring 自举，编译为 JS 运行
+- **测试**：node:test，零外部依赖
+- **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译
+- **历史**：TS 原始实现归档于 git tag `ts-compiler-final`
 
 ## 项目结构
 
 ```
 Ring-lang/
-├── docs/
-│   ├── design.md                       完整语言设计（14 章 + 实现状态附录）
-│   ├── competitive-analysis.md         竞品与行业定位（MoonBit/Zero/Mog 等）
-│   └── audit-report.md                 技术债清单（41 项）
-├── compiler/
-│   ├── ast.ring                        AST 节点类型定义
-│   ├── types.ring                      Type、Effect、EffectRow 表示 + BUILTIN_* 常量 + type_to_builtin_name + effect_kind_name
-│   ├── hir.ring                        HIR 节点定义 + 共享约定（variant_js_name, trait_dict_name, evidence_param_name）
-│   ├── builtin_methods.ring            内置方法名注册表（*_METHODS 常量，checker + codegen 共享）
-│   ├── codes.ring                      错误码目录（E0101-E0706 + E0408 + E0504）
-│   ├── diagnostics.ring                DiagnosticSink trait、CollectingSink、Diagnostic 类型
-│   ├── formatter.ring                  format_human + format_llm 输出格式化
-│   ├── lexer.ring                      手写词法分析器
-│   ├── parser.ring                     Pratt 表达式解析 + 声明/语句/类型/模式解析（合并自 TS 的 4 个 parser 文件）
-│   ├── env.ring                        类型环境 + 作用域 + TypeScheme（含 bounds）
-│   ├── builtins.ring                   核心内置注册（effects/Option/Eq/Clone/Ord/Debug traits）+ HOF 方法注册
-│   ├── unify.ring                      HM Unification + Row Unification（含 EffectRowType）+ 替换
-│   ├── infer_ctx.ring                  InferCtx struct + helper 函数（type resolution/generalize/bind_pattern 等）
-│   ├── infer.ring                      类型推断引擎（表达式/语句/模块推断，合并自 TS 的 infer + infer-expr + infer-stmt + infer-modules）
-│   ├── infer_register.ring             Pass 1 声明注册（register_struct/enum/trait/impl 等）
-│   ├── exhaustive.ring                 穷尽性检查（Maranget 风格 pattern matrix）
-│   ├── derive.ring                     Auto-derive fixpoint pass（Eq/Clone/Debug/Ord 自动派生）
-│   ├── zonk.ring                       Zonk 工具（apply subst + label type var names）
-│   ├── infer_decl.ring                 声明检查（check_fn_decl/check_impl_decl 等，从 infer.ring 提取）
-│   ├── union_find.ring                 Union-Find 数据结构（类型变量解析用）
-│   ├── checker.ring                    主入口：check(Program) -> HProgram
-│   ├── runtime.ring                    JS 运行时辅助代码 + RUNTIME_EXPORT_NAMES + runtime_esm_code()
-│   ├── codegen_ctx.ring                CodegenCtx struct + safe_ident + 辅助函数
-│   ├── codegen.ring                    CodeGenerator 入口 + generate() + builtin method 注册
-│   ├── codegen_decl.ring               声明 codegen（fn/struct/enum/impl/trait/effect）
-│   ├── codegen_stmt.ring               语句 codegen + match 语句 + pattern condition/bindings
-│   ├── codegen_expr.ring               表达式 codegen（call/struct_lit/match/if/lambda 等）
-│   ├── codegen_derive.ring             Auto-derive trait codegen（Eq/Clone/Debug/Ord）
-│   ├── resolver.ring                   模块解析（文件发现 + 依赖图 + 拓扑排序 + 循环检测）
-│   ├── exports.ring                    ModuleExports 类型 + extract_exports 导出提取
-│   ├── compiler_mod.ring               多文件编译编排器（compile_phases + compile_project bundle + compile_project_esm）
-│   ├── cli.ring                        ring build/run/check 入口 + --error-format + --out-dir + 多文件 ESM 输出
-│   ├── main.ring                       编译器入口点（调用 cli 解析 + 执行）
-│   ├── dist/                           编译器 JS 产出（入 git，自举安全网）
-│   └── package.json                    npm test 入口
-├── editor/
-│   └── vscode/
-│       ├── syntaxes/ring.tmLanguage.json  TextMate 语法高亮
-│       ├── language-configuration.json    括号匹配、注释、缩进规则
-│       └── package.json                VSCode extension manifest（LSP 暂不可用）
-├── std/
-│   ├── io.ring                         标准库：print/assert(cond,msg)/panic/exit/json_stringify
-│   ├── iterator.ring                   标准库：Iterator + Iterable trait 定义
-│   ├── list.ring                       标准库：extern type List<T> + 17 非 HOF 方法 + list_clone + ListIterator
-│   ├── map.ring                        标准库：extern type Map<K,V> + 10 方法 + map_new/map_from/map_clone + MapIterator
-│   ├── set.ring                        标准库：extern type Set<T> + 10 方法 + set_new/set_from/set_clone + SetIterator
-│   ├── str.ring                        标准库：impl Str 20 方法
-│   ├── num.ring                        标准库：Int::to_str, Float::to_str, parse_int, parse_float
-│   ├── result.ring                     标准库：Result<T,E> enum + impl（map/and_then/unwrap_or/is_ok/is_err）+ to_result
-│   ├── fs.ring                         标准库：read_file/write_file/file_exists/delete_file
-│   ├── path.ring                       标准库：path_join/path_resolve/path_dirname/path_basename/path_extname
-│   └── process.ring                    标准库：argv/exit_process/eprintln/cwd
-├── examples/
-│   ├── hello.ring                      基本示例（可运行）
-│   └── effects.ring                    Effect 系统示例（可类型检查）
-├── tests/
-│   ├── cases/                          E2E 测试用例（正向 + 负向 .ring 文件）
-│   └── e2e.test.ts                     测试运行器（in-process Ring 编译器 ESM 模块调用）
-└── CLAUDE.md
+├── compiler/          编译器源码（*.ring）+ dist/（JS 产出，入 git）
+├── std/               标准库（io/fs/path/process/str/num/list/map/set/result/iterator）
+├── tests/             E2E 测试用例 + 测试运行器
+├── examples/          示例程序
+├── editor/vscode/     VSCode 插件（语法高亮，LSP 暂不可用）
+└── docs/              设计文档、技术债清单、竞品分析
 ```
 
 ## 编译器管线
@@ -96,149 +33,99 @@ Ring-lang/
                            DiagnosticSink → format_human / format_llm
 ```
 
-- **AST**：忠实反映源码结构，所有节点带 Span 位置
-- **HIR**：独立数据结构，每个表达式均带推断的 Type + EffectRow，语法糖已展开
-- **DiagnosticSink**：Lexer、Parser 和 Checker 的错误统一收集，支持多错误报告（Lexer 产出 Error token 不 crash，Parser 有声明级恢复，Checker 有 declaration 级恢复——跨声明继续检查报告多个错误）
-- **设计意图**：HIR 独立于 AST，后续优化 pass 在 HIR → Codegen 之间插入
+- **AST**：忠实反映源码结构，所有节点带 Span
+- **HIR**：独立数据结构，每个表达式带推断的 Type + EffectRow，语法糖已展开
+- **DiagnosticSink**：Lexer/Parser/Checker 错误统一收集，支持多错误报告
+- HIR 独立于 AST，后续优化 pass 在 HIR → Codegen 之间插入
 
 ## 开发约定
 
 - 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
 - 编译器各阶段共享约定放 `hir.ring`（如 `variant_js_name`），不允许跨阶段硬编码字符串契约
 - **修改编译器后必须重新编译 dist/**：`node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist`，并提交更新后的 dist/ 文件。**Worktree merge 后的 rebuild 必须 amend 进 merge commit**——不允许 broken intermediate state（dist/ 失配）作为独立 commit 存在。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist 编译新源码的产出可能有引用错误，需先用 worktree 的 dist 做中间 bootstrap 再 double bootstrap。
-- Ring-lang 注释语法：`//`（非 `--`），与 Rust/JS 一致，LLM 更友好
-- 无 pipe 运算符：UFCS `.method()` 是唯一的链式调用方式（"一种事一种写法"）
-- 编译器必须编译速度快（亚秒级增量编译），因为 IDE 耦合
-- 生成的 JS 代码应是可读的——方便调试和理解翻译逻辑
+- 注释语法 `//`，无 pipe 运算符，UFCS `.method()` 是唯一链式调用方式
+- 生成的 JS 代码应可读——方便调试
 - 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源
-- 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（Ring 编译器自动检查）
-- 每个 PR 至少包含一个 e2e 测试用例（`tests/cases/*.ring` + `e2e.test.ts` 注册）
-- PR 合入前必须通过 `npm test`（从 `compiler/` 目录运行）
-- **Worktree 隔离规则**：Agent 工具可使用 `isolation: "worktree"` 进行并行开发。worktree 完成后必须通过 `git merge` CLI 命令同步回主分支，禁止用 Edit 工具手动搬迁或同步修改。Worktree agent 启动后必须立即执行 `git log --oneline -1` 验证 base commit 是否为预期的 HEAD，如果落后于预期则中止并报告（Claude Code worktree 创建存在 race condition，可能拿到旧 base）。**每次任务完成后（merge 或放弃）必须清理 stale worktree**：`git worktree remove -f -f <path>`。残留 worktree 会影响后续创建且浪费磁盘空间。
-- **决策必须讨论**：发现问题后不得自行决定修复方案，除非问题trival且有唯一正确修复方式。所有需要判断的问题必须先列出来让用户拍板，然后一次性执行。不讨论就动手 = 错误。
-- **禁止忽略问题**：列出来的问题不能以"推迟到下阶段"、"很难触发"、"当前阶段不重要"等原因**主动**替用户忽略，必须上报用户阐明推荐理由，由用户拍板。
-- **文档时效性**：每次修改编译器功能后，必须同步更新 CLAUDE.md 和 docs/design.md 中受影响的描述（测试数量、已知限制、实现状态附录等）。过时文档比没有文档更有害。已完成的 review/plan/spec 文件应删除而非保留。
-- **禁止temp fix**：禁止以fix很大，费时费力为由使用偷懒的、局部的、会给后续开发埋下隐患的修复方式。修复应当以提升项目健壮性，不增加技术债的方式进行，即使这样会比简单修复有更大的工作量。
-- bug fix后如果问题典型且有后续再犯风险，应当补充regression test，加强测试边界。
+- 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（编译器自动检查）
+- 每个 PR 至少包含一个 e2e 测试，合入前必须通过 `npm test`（从 `compiler/` 目录运行）
+- **Worktree 隔离规则**：Agent 工具可使用 `isolation: "worktree"` 进行并行开发。worktree 完成后必须通过 `git merge` CLI 命令同步回主分支，禁止用 Edit 工具手动搬迁。Worktree agent 启动后必须立即 `git log --oneline -1` 验证 base commit。**每次任务完成后必须清理 stale worktree**：`git worktree remove -f -f <path>`。
+- **决策必须讨论**：发现问题后不得自行决定修复方案，除非问题 trivial 且有唯一正确修复方式。不讨论就动手 = 错误。
+- **禁止忽略问题**：不能以"推迟"、"很难触发"等原因主动替用户忽略问题，必须上报由用户拍板。
+- **文档时效性**：修改编译器功能后同步更新 CLAUDE.md 和 docs/design.md。已完成的 review/plan/spec 文件应删除。
+- **禁止 temp fix**：修复应提升项目健壮性，不增加技术债，即使工作量更大。
+- bug fix 后如果问题典型，补充 regression test。
 
 ## 测试策略
 
-- **E2E 语义测试**（`tests/cases/*.ring`）：语言规范的可执行版本，每个特性一个文件，大量写
+- **E2E 语义测试**（`tests/cases/*.ring`）：语言规范的可执行版本，每个特性一个文件
 - **负面测试**（期望编译错误）：定义类型系统边界，含 pending 测试标记未来特性
-- **Bug fix 回归测试写 E2E 层**：不写"第 X 行生成的 JS 应该是 Y"——codegen 实现可变
-- **不要追求覆盖率数字**：度量语义覆盖（多少语言特性有 E2E 测试），不度量代码行覆盖
-
-## 已实现功能
-
-完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/loop/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM/inline mod 块（含嵌套 `mod a { mod b { ... } }`，多级限定路径 `a::b::c`）/`super::`/`self::` 相对路径/`sig` 接口声明/mod 内 impl 方法/限定类型语法 `mod::Type`/三级限定访问 `mod::Enum::Variant`/`mod requires {effects}` capability 限制）、FFI（extern fn/extern type）、标准库（11 个 .ring 文件，含 Iterator/Iterable/`Result<T,E>`/fs/path/process）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、多行字符串（`"..."` 允许跨行，空白原样保留）、raw string（`r"..."` 和 `r#"..."#`，无转义无插值）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、mut self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）、Checker 函数级多错误恢复、`loop` 无限循环关键字（脱糖为 `while true`）、Effect 标注语法（`fn foo() -> T with {io, fail<E>}`）、fn 类型表达式 effect 标注（`fn(T) -> U with {io}`，无标注时为 open row 支持 effect 多态）、`let mut` 可变绑定 + 闭包自动 boxing、`mut` 函数参数（mutating 方法调用强制检查）、impl 类型参数 bounds（`impl<T: Eq> List { ... }`）、`List.set(i, v)` 原地修改、union-find 类型变量解析、下标运算符 `list[i]` / `map[key]` / `str[i]`（越界/key 不存在 panic，安全访问用 `.get()`）、`effect alias` 语法糖（`effect alias IO = {io, fail<Str>}`，含泛型参数 + 循环检测 + pub 模块导出）、supertrait 继承（`trait Ord: Eq`，含多级传递 + 循环检测 + impl 验证 + bound 自动展开）、Default Effect Handler（effect op 带 body = 默认 handler，全默认 effect 可省略 `handle...with`，编译器自动注入 evidence，显式 handle 可覆盖默认）、`mut<T>` Marker Effect（`mut self` 方法调用 `mut` 函数参数时自动注入 `mut<T>` 编译期 effect，零运行时成本，`mod requires {}` 可限制，局部变量 mutation 自动消除——调用 `push_item(local)` 时若 `local` 是局部变量则不传播 `mut` effect）、DiagnosticSink 错误去重（按 code+span 去重，多 pass 不重复报告同一错误）、`delegate` 关键字（`impl Admin { delegate base: Describable, Loggable }` 自动生成 trait 转发方法，替代继承的复用机制，支持多 trait 委托 + 带参数方法转发 + E0507/E0508/E0509 错误码 + 冲突检测）、关联类型（`trait T { type Item }` + `impl T for S { type Item = Int }` + `T::Item` 限定路径 + `<Item = Int>` 约束语法 + 默认关联类型 + E0510-E0514 错误码）、Or-Pattern（`A | B => expr` 模式匹配 or 分支，支持 enum 变体/字面量/构造器/绑定变量，穷尽性检查正确处理）、Iterator/Iterable Trait 协议（`trait Iterator { type Item; fn next(mut self) -> Item? }` + `trait Iterable { type Item; type Iter: Iterator; fn iter(self) -> Iter }` + `for..in` 通过 Iterable 协议脱糖，List/Map/Set 内置实现，支持自定义迭代器；Range 保留特殊快速路径）。开发历史详见 git log。
+- **回归测试写 E2E 层**：不写 "第 X 行生成的 JS 应该是 Y"——codegen 实现可变
+- **度量语义覆盖**，不度量代码行覆盖
 
 ## 已知限制
 
-### Effect / Codegen 限制
+### Effect / Codegen
 
-- **Handler 支持 tail-resumptive + abort 两种语义**：非 abort effect（io/custom）的 handler 返回值即 resume 值，计算继续；`fail.raise` 为 abort 语义。Full AE（post-resume / multi-resume）已取消，不计划实现
-- **Trait dictionary dispatch 不转发 evidence**：trait 方法带 effect 时缺少 evidence 参数（trait dict closure 已支持高阶传递）
-- **`catch` 总是消除 fail effect**：`expr catch { pattern => handler, ... }` 是完整捕获点，catch arms 经穷尽性检查（非穷尽报 E0601）。内部用模式匹配分派错误类型；需要部分处理时在 catch 内部 match + re-raise（显式）。错误处理遵循生命周期模型：fail effect 为主（诞生/流动），`catch` 就地恢复，`to_result()` 物化为数据
-- ~~**表达式位置的 block/if 包含 `return` 时 IIFE 仍会截获**~~：已修复。`gen_block_expr`/`gen_if`/`gen_match` 检测到 return 时改用临时变量方案（inline emit + `__ring_blkN` 赋值），避免 IIFE 截获 return。无 return 的 block 仍使用 IIFE（行为不变）。
+- **Handler 只支持 tail-resumptive + abort**：非 abort effect 的 handler 返回值即 resume 值；`fail.raise` 为 abort。Full AE（post-resume / multi-resume）不计划实现
+- **Trait dictionary dispatch 不转发 evidence**：trait 方法带 effect 时缺少 evidence 参数
+- **`catch` 总是消除 fail effect**：完整捕获点，catch arms 经穷尽性检查。需要部分处理时在 catch 内部 match + re-raise
 
-### 类型系统限制
+### 类型系统
 
-- Record row types 仅在参数位置使用（无匿名 record 字面量、无 spread 运算符）
-- Refinement `where` 子句只解析不验证（tokens 被消费后丢弃）
-- Trait 系统暂不支持：`dyn Trait` 动态分发、GATs（Generic Associated Types）
-- `pub` 可见性在多文件模式下强制执行，单文件模式不强制（向后兼容）
-- 穷尽性检查支持嵌套模式递归检查（含 Option<Option<T>> 等嵌套 enum）；多字段交叉组合不验证
-- ~~`List.contains` / `Set.contains` 等仍使用 JS `===` 引用相等~~：已修复。`List.contains`/`List.index_of`/`Set.contains` 现在用 Ring 实现，使用 `==`（Eq trait dispatch）进行比较。`List.find` / `Map` key 查找仍使用 JS `===`
-- ~~深层嵌套泛型类型（如 `Pair<Pair<Int, Int>, Int>`）的 trait method UFCS 调用不支持~~：已修复。`resolve_type_to_dict_ref` 递归构建 `DictRef::Wrapped` 节点，codegen 生成内联 wrapper dict 对象，自动绑定内层类型参数的 trait dict。支持任意深度嵌套
-- ~~**`impl<T: Eq>` bounded impl 跨类型调用冲突**~~：已修复。`resolve_impl_self_type` 现在使用 impl 的类型参数构建 self 类型，确保 TypeScheme 中所有类型变量都被 instantiate 正确替换
+- Record row types 仅在参数位置使用（无匿名 record 字面量）
+- Refinement `where` 子句只解析不验证（tokens 消费后丢弃）
+- 不支持 `dyn Trait` 动态分发、GATs
+- `pub` 可见性在单文件模式不强制（向后兼容）
+- 穷尽性检查：嵌套模式递归检查正常，多字段交叉组合不验证
+- `List.find` / `Map` key 查找仍用 JS `===`（其他 contains 方法已用 Eq trait）
 
-### LSP 限制
+### 语法
 
-- **LSP 暂不可用**：LSP 服务器原为 TS 实现，未移植到 Ring 自举编译器。VSCode 插件仅提供语法高亮。
-- 跨文件跳转定义和查找引用尚未实现（hover 和类型检查已支持跨模块）
+- 字符串无 `+` 拼接：用插值 `"${a}${b}"` 或 `join()`
+- `return` 不能出现在 match arm 表达式位置
+- `list[i]` / `map[key]` / `str[i]` 越界 panic，安全访问用 `.get()`
+- `.map()` 闭包不能捕获 `let mut` 变量，改用 `for` 循环
+- Struct literal 不能直接出现在 if/while/for/match 条件位置（`{` 歧义），需加括号或用变量
 
-### 语法与表达式限制
+### 基础设施
 
-- **字符串无 `+` 拼接运算符**：`"a" + "b"` 报 E0303（要求数值类型）。所有字符串拼接必须用插值 `"${a}${b}"` 或 `List<Str>.join()`
-- **`return` 不能出现在 match arm 表达式位置**：match arm 是表达式，`return` 是语句。需要提取到独立函数用 `return`，或重构为 if-else
-- **`[x].clear()` 返回 `Unit`**：`clear()` 是原地操作返回 `()`，不能链式调用 `.map()`。必须分为 `let x = [v]; x.clear(); x.map(...)` 三条语句
-- **`list[i]` / `map[key]` / `str[i]` 下标访问**：越界或 key 不存在时 panic。安全访问用 `.get()` 返回 `Option<T>`
-- **`for..in` 闭包捕获 `var` 限制**：`.map()` 闭包不能捕获 `var` 变量，需改用 `for` 循环 + `push`
+- 无 CI（test 手动执行）
+- 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
+- Checker 多错误恢复是 declaration 级（同一函数内停于首错）
+- LSP 暂不可用（TS 实现未移植）
+- Impl 方法 effect 传播有 `__ring_raise_fail` workaround（跨模块 effect 传播的独立问题）
 
-### 基础设施限制
+## 路线图
 
-- ~~无 Range/List/Set/Map 以外的自定义迭代器~~：已修复。Iterator/Iterable trait 协议支持自定义迭代器
-- **Struct literal 不能直接出现在 if/while/for/match 条件位置**：`if x == MyStruct { f: 1 } { ... }` 歧义——parser 无法区分 struct literal 和块的 `{`。需用括号 `if x == (MyStruct { f: 1 }) { ... }` 或变量绑定。Go/Rust 同有此限制。
-- ~~`for..in` 不支持 Map 直接迭代~~：已修复。`for (k, v) in map` 和 `for entry in map` 均通过 Iterable trait 支持
-- 无 CI 管线（test 依赖手动执行）
-- 模块系统不支持：first-class modules、`mod : SigName` 一致性检查、跨文件相对路径
-- Checker 多错误恢复：declaration 级（同一函数内仍停于首错）
-- Parser 声明级错误恢复：遇到语法错误时跳到下一个声明关键字继续，一次 parse 报告多个语法错误
-- **~~Impl 方法 effect 不传播~~**：已修复。`check()` 增加 effect pre-pass，在主 pass 前先检查所有 impl 块填充 `impl_methods` 中的 effect。Parser 的 `__ring_raise_fail` workaround 仍保留（跨模块 effect 传播的独立问题）
-- E2E 测试通过 `cd compiler && npm test` 运行
+**当前**：LLVM Native Backend（前置特性全部就绪）
 
-## Phase C 路线图（当前）
+**后续**：Ownership + Perceus RC → async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
-### 层 1：基础设施特性（优先）
+**遗留**：impl effect 传播修复、LSP 移植、技术债清理（见 `docs/audit-report.md`）
 
-- ~~Effect Aliases（`effect alias IO = {io, fail<Str>}`）~~ ✅ 已完成
-- ~~Supertrait 继承（`trait Ord: Eq`）~~ ✅ 已完成
-- ~~`mut<T>` Marker Effect（mut self/mut 参数触发编译期 effect 追踪）~~ ✅ 已完成
-- ~~Default Effect Handler（op 带 body = 默认 handler）~~ ✅ 已完成
-
-### 层 2：核心特性 → LLVM 关键路径
-
-- ~~关联类型（`type Item` in trait）~~ ✅ 已完成（2026-05-24）
-- ~~Iterator Trait + 自定义迭代器（依赖关联类型 ✅）~~ ✅ 已完成（2026-05-24）
-- ~~`delegate` 关键字（trait 实现委托）~~ ✅ 已完成
-- ~~B-044 语义规范~~ ✅ 已完成（design.md 1.7）
-- **LLVM Native Backend**（前置全部完成，可启动。Ring 写 codegen + `extern fn` 调 LLVM-C API，bootstrap 用本地 N-API addon，自举后废弃 JS 后端）
-
-### 层 3：重型特性（LLVM 后端可用后启动）
-
-- Ownership + Perceus RC（LLVM 上实现）
-- async Effect + 结构化并发
-- Refinement types（实验赌注，Z3 集成）
-- GADTs（无下游依赖，推迟至 LLVM 之后）
-
-### 遗留改进
-
-- Impl 方法 effect 传播修复（当前用 `__ring_raise_fail` workaround）
-- LSP 移植到 Ring（从 TS 归档版本翻译）
-- 技术债清理（详见 `docs/audit-report.md`）
-
-### 长期目标
-
-- Dependent types lite
-- 语义驱动编译优化（利用 effect/refinement/linear 类型信息做 bounds check 消除、RC 省略、纯函数自动并行化等——AOT 和 JIT 两层）
-- JIT 编译（LLVM ORC，在 AOT native 基础上运行时 PGO 优化热路径）
-- Formatter 自动标注等级系统
+**长期**：Dependent types lite、语义驱动编译优化（AOT + JIT）、Formatter 等级系统
 
 ## 常用命令
 
 ```bash
-# 运行 Ring-lang 程序
+# 运行
 node compiler/dist/main.js run examples/hello.ring
 
-# 编译为 JS（不执行）
+# 编译为 JS
 node compiler/dist/main.js build examples/hello.ring
 
-# 仅类型检查
+# 类型检查
 node compiler/dist/main.js check examples/effects.ring
 
-# 类型检查 + LLM 格式错误输出
+# LLM 格式错误输出
 node compiler/dist/main.js check --error-format=llm examples/effects.ring
 
-# 运行 E2E 测试
+# E2E 测试
 cd compiler && npm test
 
-# 多文件编译（ESM 输出）
-node compiler/dist/main.js build examples/multifile/main.ring          # → dist/
-node compiler/dist/main.js build examples/multifile/main.ring --out-dir=build  # → build/
-
-# 重新编译 Ring 编译器自身（修改 compiler/*.ring 后）
+# 重新编译编译器自身
 node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
 
-# 调试模式（打印中间 AST/HIR/JS）
+# 调试模式
 node compiler/dist/main.js run --debug examples/hello.ring
 ```

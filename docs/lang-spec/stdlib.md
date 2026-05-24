@@ -23,9 +23,6 @@ enum Option<T> { some(T), none }
 ### 语法糖
 
 - `T?` ≡ `Option<T>`
-- `expr?` — 解包 some 或传播 fail
-- `try { expr }` — 将 fail 转为 Option
-- `opt or default` — 解包或使用默认值
 
 ### 方法
 
@@ -33,7 +30,9 @@ enum Option<T> { some(T), none }
 |------|------|------|
 | `is_some` | `(self) -> Bool` | 是否为 some |
 | `is_none` | `(self) -> Bool` | 是否为 none |
+| `unwrap` | `(self) -> T` | 解包，none 时 panic |
 | `unwrap_or` | `(self, default: T) -> T` | 解包或返回默认值 |
+| `to_fail` | `(self) -> T ! fail<Str>` | 解包，none 时 raise fail |
 
 ### HOF 方法
 
@@ -41,6 +40,7 @@ enum Option<T> { some(T), none }
 |------|------|------|
 | `map` | `<U>(self, f: (T) -> U / ?ε) -> Option<U> / ?ε` | 映射 some 内的值 |
 | `and_then` | `<U>(self, f: (T) -> Option<U> / ?ε) -> Option<U> / ?ε` | 链式操作（flatMap） |
+| `unwrap_or_else` | `(self, f: () -> T / ?ε) -> T / ?ε` | 解包或调用函数获取默认值 |
 
 ## Str 方法
 
@@ -97,7 +97,7 @@ enum Option<T> { some(T), none }
 | `get` | `(self, index: Int) -> Option<T>` | 按索引取值 |
 | `first` | `(self) -> Option<T>` | 首元素 |
 | `last` | `(self) -> Option<T>` | 末元素 |
-| `contains` | `(self, value: T) -> Bool` | 是否包含（`===` 比较） |
+| `contains` | `(self, value: T) -> Bool` | 是否包含（使用 Eq trait `==` 比较） |
 | `is_empty` | `(self) -> Bool` | 是否为空 |
 | `push` | `(self, value: T) -> Unit` | 原地追加 |
 | `pop` | `(self) -> Option<T>` | 移除并返回末元素 |
@@ -109,7 +109,7 @@ enum Option<T> { some(T), none }
 | `sort` | `(self) -> Unit` | 原地排序（数值比较器） |
 | `shift` | `(self) -> Option<T>` | 移除并返回首元素 |
 | `clear` | `(self) -> Unit` | 原地清空 |
-| `index_of` | `(self, item: T) -> Option<Int>` | 查找元素索引（`===` 比较） |
+| `index_of` | `(self, item: T) -> Option<Int>` | 查找元素索引（使用 Eq trait `==` 比较） |
 
 ### HOF 方法（effect 多态）
 
@@ -130,8 +130,7 @@ enum Option<T> { some(T), none }
 ### 迭代
 
 ```ring
-for x in list { ... }           // for-of
-// List 不支持 index-value 迭代（无 entries() 方法）
+for x in list { ... }           // 通过 Iterable trait 协议
 ```
 
 ## Map\<K, V\>
@@ -172,7 +171,14 @@ for x in list { ... }           // for-of
 
 ### 迭代
 
-Map 不可直接 `for..in` 迭代。需使用 `map.entries()` 获取 `List<(K, V)>` 后解构迭代：
+Map 支持通过 Iterable trait 直接 `for..in` 迭代：
+
+```ring
+for (k, v) in map { ... }      // 解构键值对
+for entry in map { ... }       // entry 为 (K, V) tuple
+```
+
+也可使用 `map.entries()` 获取 `List<(K, V)>` 后迭代：
 
 ```ring
 for (k, v) in map.entries() { ... }
@@ -195,7 +201,7 @@ for (k, v) in map.entries() { ... }
 | 方法 | 签名 | 描述 |
 |------|------|------|
 | `len` | `(self) -> Int` | 大小 |
-| `contains` | `(self, value: T) -> Bool` | 是否包含 |
+| `contains` | `(self, value: T) -> Bool` | 是否包含（使用 Eq trait `==` 比较） |
 | `is_empty` | `(self) -> Bool` | 是否为空 |
 | `to_list` | `(self) -> List<T>` | 转为列表 |
 | `insert` | `(self, value: T) -> Unit` | 原地插入 |
@@ -233,12 +239,63 @@ for x in set { ... }
 
 ## 相等性说明
 
-所有集合操作（`contains`、`Map.get`、`Set.contains` 等）使用 JS `===` 引用相等：
+`Eq` trait 已实现（auto-derive），`==`/`!=` 运算符解糖为 Eq trait dispatch。
 
-- 对原始类型（Int、Str、Bool）正确
-- 对 struct/enum 仅比较引用，不做结构相等
+以下集合操作已升级为使用 Eq trait（`==`）比较，支持结构相等：
 
-`Eq` trait 已实现（auto-derive，Phase 3a Batch 8），`==`/`!=` 运算符已解糖为 Eq trait dispatch。集合操作（`contains`、`Map.get`、`Set.contains` 等）计划升级为使用 Eq trait。
+- `List.contains`、`List.index_of`
+- `Set.contains`
+
+以下操作仍使用 JS `===` 引用相等（对原始类型正确，struct/enum 仅比较引用）：
+
+- `List.find`（通过回调谓词查找，谓词内部可自行使用 `==`）
+- `Map` key 查找（`Map.get`、`Map.contains_key` 等）
+
+## Result\<T, E\>
+
+标准库 enum，表示可能失败的计算结果。通过 `std/result.ring` 声明。
+
+```ring
+pub enum Result<T, E> { Ok(T), Err(E) }
+```
+
+### 方法
+
+| 方法 | 签名 | 描述 |
+|------|------|------|
+| `map` | `<U>(self, f: fn(T) -> U) -> Result<U, E>` | 映射 Ok 内的值 |
+| `and_then` | `<U>(self, f: fn(T) -> Result<U, E>) -> Result<U, E>` | 链式操作（flatMap） |
+| `unwrap_or` | `(self, default: T) -> T` | 解包 Ok 或返回默认值 |
+| `is_ok` | `(self) -> Bool` | 是否为 Ok |
+| `is_err` | `(self) -> Bool` | 是否为 Err |
+
+### 桥接函数
+
+| 函数 | 签名 | 描述 |
+|------|------|------|
+| `to_result` | `<T, E>(f: fn() -> T) -> Result<T, E>` | 将 fail effect 转为 Result：执行 `f()`，成功返回 `Ok(v)`，raise 时返回 `Err(e)` |
+
+## Iterator / Iterable Trait 协议
+
+通过 `std/iterator.ring` 声明。定义了统一的迭代器协议，`for..in` 通过 Iterable trait 脱糖。
+
+```ring
+pub trait Iterator {
+    type Item
+    fn next(mut self) -> Item?
+}
+
+pub trait Iterable {
+    type Item
+    type Iter: Iterator
+    fn iter(self) -> Iter
+}
+```
+
+- List、Map、Set 内置 Iterable 实现
+- `for x in collection { ... }` 脱糖为调用 `collection.iter()` 获取迭代器，循环调用 `next()`
+- 支持自定义迭代器：实现 Iterator trait 即可
+- Range（`0..n`）保留特殊快速路径，不经过 Iterable 协议
 
 ## 文件系统（std/fs.ring）
 

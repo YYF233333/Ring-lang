@@ -366,6 +366,10 @@ apply(subst, τ):
   ──────────────────────────────────
   Γ ⊢ match scrutinee { arms } : τ₀ / (ε_s ∪ ε₁ ∪ ... ∪ εₙ)
 
+  支持 Or-Pattern：p₁ | p₂ | ... | pₖ => body
+  所有子模式必须绑定相同的变量名集合，且对应变量类型兼容。
+  穷尽性检查将 or-pattern 展开为独立行处理。
+
 ── Lambda ──
   Γ, x₁:T₁, ..., xₙ:Tₙ ⊢ body : R / ε_body
   ──────────────────────────────────────────────
@@ -378,40 +382,17 @@ apply(subst, τ):
   ────────────────────────────
   Γ ⊢ "...${e₁}...${e₂}..." : Str / (ε₁ ∪ ... ∪ εₙ)
 
-── Try 块 ──
-  Γ ⊢ body : τ / ε
-  ε' = remove_all_fail(ε)
-  ────────────────────────
-  Γ ⊢ try { body } : Option<τ> / ε'
-
-── Option 解包（?）──
-  Γ ⊢ e : Option<τ> / ε
-  ε' = ε ∪ { fail<α> }     （fresh α）
-  ─────────────────────────
-  Γ ⊢ e? : τ / ε'
-
-── Or（Option 路径）──
-  Γ ⊢ e : Option<τ> / ε₁     Γ ⊢ d : σ / ε₂
-  unify(τ, σ)
-  ──────────────────────────────────────
-  Γ ⊢ e or d : τ / (ε₁ ∪ ε₂)
-
-── Or（fail 路径）──
-  Γ ⊢ e : τ / ε₁     fail ∈ ε₁
-  Γ ⊢ d : σ / ε₂     unify(τ, σ)
-  ε' = remove_all_fail(ε₁ ∪ ε₂)
-  ──────────────────────────────
-  Γ ⊢ e or d : τ / ε'
-
 ── Catch ──
-  Γ ⊢ e : τ / ε     fail ∈ ε
-  Γ, err: E ⊢ handler : σ / ε_h
-  unify(τ, σ)
-  ε' = remove_fail(ε ∪ ε_h, E)
-  ──────────────────────────────
-  Γ ⊢ e catch E fn(err) { handler } : τ / ε'
+  Γ ⊢ e : τ / ε     fail<E> ∈ ε
+  对每个分支：bind_pattern(pᵢ, E) → Γᵢ
+    Γᵢ ⊢ handlerᵢ : σᵢ / ε_hᵢ
+    unify(τ, σᵢ)
+  check_exhaustive(patterns, E)
+  ε' = remove_fail(ε ∪ ε_h₁ ∪ ... ∪ ε_hₙ, E)
+  ──────────────────────────────────────────────
+  Γ ⊢ e catch { p₁ => handler₁, ..., pₙ => handlerₙ } : τ / ε'
 
-  不指定 E 时：捕获所有 fail effect。
+  catch 总是消除 fail effect。catch arms 经穷尽性检查（非穷尽报 E0601）。
 
 ── Handle ──
   见 Effect 系统规范。
@@ -426,10 +407,10 @@ apply(subst, τ):
   ─────────────────────────
   Γ ⊢ let x = e ⇒ (Γ[x ↦ σ], ε)     x 不可变
 
-── Var 绑定 ──
+── Let Mut 绑定 ──
   Γ ⊢ e : τ / ε
   ─────────────────────────
-  Γ ⊢ var x = e ⇒ (Γ[x ↦ τ], ε)     x 可变，不泛化
+  Γ ⊢ let mut x = e ⇒ (Γ[x ↦ τ], ε)     x 可变，不泛化
 
 ── Let 解构 ──
   Γ ⊢ e : (T₁, ..., Tₙ) / ε
@@ -454,12 +435,15 @@ apply(subst, τ):
   Γ ⊢ while cond { body } ⇒ (Γ, ε₀ ∪ ε₁)
 
 ── For-in ──
-  Γ ⊢ iter : Iterable<T> / ε₀
+  Γ ⊢ coll : C / ε₀     C 实现 Iterable trait
+  Iterable::Item = T     Iterable::Iter = I     I 实现 Iterator trait
   Γ, x: T ⊢ body ⇒ ε₁
   ──────────────────────────────
-  Γ ⊢ for x in iter { body } ⇒ (Γ, ε₀ ∪ ε₁)
+  Γ ⊢ for x in coll { body } ⇒ (Γ, ε₀ ∪ ε₁)
 
-  其中 Iterable<T> 是 Range<Int>、List<T> 或 Set<T> 之一。
+  通过 Iterable trait 协议脱糖：coll.iter() 获取迭代器，循环调用 .next()。
+  List、Map、Set 均实现 Iterable，也支持自定义迭代器。
+  Range<Int> 保留特殊快速路径（直接编译为计数循环）。
 ```
 
 ## 方法解析
@@ -478,7 +462,7 @@ apply(subst, τ):
 
 - 作用域是词法的且嵌套的（函数体、块、for-in 体、match 分支、if-let 体）。
 - 每对 `push_scope` / `pop_scope` 创建一个新的作用域层级。
-- `let` / `var` 绑定从声明点到封闭作用域末尾可见。
+- `let` / `let mut` 绑定从声明点到封闭作用域末尾可见。
 - 函数参数在函数体内可见。
 - For-in 循环变量在循环体内可见。
 - Match 分支模式绑定在该分支的 body 内可见。

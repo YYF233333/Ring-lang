@@ -10,6 +10,7 @@
 | 位置构造器 | `Some(x)` | enum 变体 tag 匹配，递归匹配字段 |
 | 命名构造器 | `Ok { value: x }` | enum 变体 tag 匹配，按名称匹配字段 |
 | Tuple | `(a, b)` | 元素逐个匹配 |
+| Or | `A \| B` | 任一子模式匹配 |
 
 ### 绑定 vs Unit 变体消歧
 
@@ -55,6 +56,13 @@ bind_pattern((p₁, ..., pₙ), (T₁, ..., Tₙ)):
   验证元素个数匹配
   对每个 pᵢ：bind_pattern(pᵢ, Tᵢ)
   返回扩展后的环境
+
+── Or ──
+bind_pattern(p₁ | p₂ | ..., τ):
+  对每个 pᵢ：bind_pattern(pᵢ, τ)
+  所有子模式必须绑定相同变量集
+  变量类型必须兼容
+  返回统一后的环境
 ```
 
 ## 穷尽性检查
@@ -153,6 +161,40 @@ match (a, b) {
 ```
 
 这是保守正确的（不会漏报），但可能拒绝一些实际穷尽的模式组合。
+
+### Or-Pattern
+
+Or-Pattern 允许在单个 match arm 中匹配多个模式，语法为 `p₁ | p₂ | ...`，`|` 分隔备选模式。任一子模式匹配即执行该分支。
+
+```ring
+match color {
+    Red | Green => "warm",
+    Blue => "cool",
+}
+```
+
+支持的子模式类型：enum 变体、字面量、构造器模式、绑定变量。
+
+**变量绑定约束：** Or-Pattern 中的所有子模式必须绑定相同的变量集，且对应变量的类型必须兼容。例如：
+
+```ring
+match val {
+    Some(x) | Other(x) => x,   // 合法：两个子模式都绑定 x
+    None => 0,
+}
+```
+
+**穷尽性处理：** Or-Pattern 中的每个子模式被视为独立的备选项。`Red | Green` 在穷尽性矩阵中展开为两行，分别覆盖 `Red` 和 `Green` 变体。
+
+### 行特化中的 Or-Pattern
+
+```
+specialize_row(row, ctor):
+  first = row[0]
+
+  first 为 Or → 对每个子模式 pᵢ 递归 specialize_row([pᵢ, ..rest], ctor)
+              合并所有结果行
+```
 
 ## Match 表达式语义
 

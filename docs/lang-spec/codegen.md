@@ -156,13 +156,21 @@ const __ring_end0 = 10;
 for (let i = 0; i <= __ring_end0; i++) { body }
 ```
 
-**List/Set（通用路径）：**
+**Iterable 协议（通用路径）：**
+
+当迭代对象不是 Range 时，编译器通过 Iterable trait 协议脱糖。内置集合类型（List/Set/Map）以及任何实现了 `Iterable` trait 的自定义类型均适用。
 
 ```ring
-for x in list { body }
+for x in collection { body }
 ```
 ```javascript
-for (const x of list) { body }
+const __ring_iter = collection_Iterable.iter(collection);
+while (true) {
+  const __ring_next = __ring_iter_Iterator.next(__ring_iter);
+  if (__ring_next._tag === "none") break;
+  const x = __ring_next._0;
+  body
+}
 ```
 
 **解构迭代：**
@@ -170,9 +178,8 @@ for (const x of list) { body }
 ```ring
 for (k, v) in entries { body }
 ```
-```javascript
-for (const [k, v] of entries) { body }
-```
+
+解构迭代同样通过 Iterable 协议，迭代器 `next()` 返回的值在绑定时解构。
 
 ### If-let
 
@@ -273,6 +280,16 @@ const x = (function() {
 })();
 ```
 
+**含 `return` 时的临时变量方案：** 当 match 表达式内部包含 `return` 语句时，IIFE 会截获 `return`（return 退出的是 IIFE 而非外层函数）。编译器检测到这种情况后改用临时变量方案：
+
+```javascript
+let __ring_blk0;
+const __ring_m = v;
+if (__ring_m === 0) { __ring_blk0 = "zero"; }
+else if (true) { __ring_blk0 = "other"; }
+const x = __ring_blk0;
+```
+
 ### Block 表达式
 
 表达式位置的 block 翻译为 IIFE：
@@ -286,6 +303,8 @@ const x = (function() { const a = 1; return (a + 2); })();
 
 语句位置的 block 直接生成 JS 语句（不包 IIFE）。
 
+**含 `return` 时的临时变量方案：** 与 match 表达式同理，当 block 或 if 表达式内部包含 `return` 语句时，编译器改用 `__ring_blkN` 临时变量赋值方案替代 IIFE，避免 IIFE 截获 `return`。无 `return` 的表达式仍使用 IIFE（行为不变）。
+
 ### Lambda
 
 ```ring
@@ -297,57 +316,34 @@ fn(x: Int) -> Int { x + 1 }
 
 Lambda 的 evidence 参数通过 JS 闭包捕获，不在参数列表中声明。
 
-### Try 块
+### Catch 表达式
+
+`catch` 使用 match-arm 风格语法，捕获 `fail` effect 并按模式匹配分派错误处理：
 
 ```ring
-try { risky() }
+expr catch {
+    NotFound(path) => default_value,
+    Timeout => retry(),
+}
 ```
 ```javascript
 (function() {
   const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } };
-  try { return { _tag: "some", _0: risky(__ring_ev_fail) }; }
-  catch (__ring_e) {
-    if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") return { _tag: "none" };
+  try {
+    return expr;
+  } catch (__ring_e) {
+    if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") {
+      const __ring_m = __ring_e.value;
+      if (__ring_m._tag === "NotFound") { const path = __ring_m._0; return default_value; }
+      if (__ring_m._tag === "Timeout") { return retry(); }
+      __match_fail(__ring_m);
+    }
     throw __ring_e;
   }
 })()
 ```
 
-### Option 解包（`?`）
-
-```ring
-value?
-```
-```javascript
-((v) => v._tag === "some" ? v._0 : __ring_ev_fail.raise(undefined))(value)
-```
-
-### Or 表达式
-
-**Option 路径：**
-
-```ring
-opt or 42
-```
-```javascript
-((v) => v._tag === "some" ? v._0 : 42)(opt)
-```
-
-**Fail 路径：**
-
-```ring
-risky() or 42
-```
-```javascript
-(function() {
-  const __ring_ev_fail = { raise: (e) => { throw new __EffectAbort("fail", e); } };
-  try { return risky(__ring_ev_fail); }
-  catch (__ring_e) {
-    if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") return 42;
-    throw __ring_e;
-  }
-})()
-```
+`catch` 总是消除 `fail` effect——catch arms 经穷尽性检查（非穷尽报 E0601）。
 
 ### Handle 表达式
 

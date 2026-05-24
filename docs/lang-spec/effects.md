@@ -8,12 +8,12 @@ Ring 的 effect 系统基于 effect row（来自 Koka），通过 evidence passi
 |--------|------|------|
 | `io` | I/O 副作用 | `read(path: Str) -> Str`、`write(path: Str, data: Str) -> Unit` |
 | `fail<E>` | 可恢复错误 | `raise(error: E) -> Never` |
-| `mut` | 可变状态 | Cell 操作 |
+| `mut<T>` | 可变性追踪 | `mut self` 方法调用、`mut` 函数参数自动注入；Cell 操作 |
 | 自定义 | 用户定义 effect | 用户定义的操作 |
 
 ### 内置 Effect
 
-`io` 和 `fail` 是内置的——编译器直接理解它们的语义。`mut` 用于 `Cell<T>` 操作。自定义 effect 通过 `effect` 声明引入。
+`io` 和 `fail` 是内置的——编译器直接理解它们的语义。`mut<T>` 是编译期 marker effect，用于追踪可变性（详见下方 `mut<T>` Marker Effect 章节）。自定义 effect 通过 `effect` 声明引入。
 
 ### 自定义 Effect 声明
 
@@ -24,6 +24,84 @@ effect Logger {
 ```
 
 声明一个 effect 及其操作。操作签名定义参数和返回类型。
+
+### Default Effect Handler
+
+Effect 操作可以带有默认实现（body）。当一个 effect 的所有操作都有默认实现时，可以直接调用操作而无需 `handle...with`，编译器自动注入 evidence。显式 `handle...with` 可覆盖默认实现。
+
+```ring
+effect Logger {
+    fn log(msg: Str) -> Unit {
+        print(msg)   // 默认实现
+    }
+}
+
+// 可以直接调用，无需 handle...with
+fn main() {
+    Logger.log("hello")
+}
+
+// 显式 handle 覆盖默认
+let result = handle {
+    Logger.log("hello")
+    42
+} with {
+    Logger.log(msg) => eprintln(msg),
+}
+```
+
+AST 中 `EffectOpDecl` 的 `body: Expr?` 字段存储默认实现。`body` 为 `none` 时操作无默认 handler，必须通过 `handle...with` 提供。
+
+### Effect Alias
+
+`effect alias` 定义 effect 集合的别名，简化常用 effect 组合的标注：
+
+```ring
+effect alias IO = {io, fail<Str>}
+
+// 等价于 fn read_config() -> Config with {io, fail<Str>}
+fn read_config() -> Config with IO {
+    // ...
+}
+```
+
+支持泛型参数：
+
+```ring
+effect alias Fallible<E> = {fail<E>}
+```
+
+特性：
+- 编译器执行循环检测，禁止 alias 间的循环引用
+- 支持 `pub` 导出，跨模块使用
+- 展开发生在类型检查阶段，对 codegen 透明
+
+### `mut<T>` Marker Effect
+
+`mut<T>` 是编译期 marker effect，用于追踪可变操作。零运行时成本。
+
+自动注入时机：
+- 调用 `mut self` 方法时，自动注入 `mut<T>`（T 为 receiver 类型）
+- 调用带 `mut` 参数的函数时，自动注入对应的 `mut<T>`
+
+```ring
+struct Counter { value: Int }
+
+impl Counter {
+    fn increment(mut self) {
+        self.value = self.value + 1
+    }
+}
+
+fn main() {
+    let mut c = Counter { value: 0 }
+    c.increment()  // 自动注入 mut<Counter> effect
+}
+```
+
+局部变量 mutation 自动消除：当 `mut` 参数为局部变量时，`mut` effect 不会向上传播。例如调用 `push_item(local)` 时若 `local` 是局部绑定的变量，则不产生 `mut` effect。
+
+可通过 `mod requires {}` 限制模块允许的 effect，从而禁止特定类型的 mutation。
 
 ## Effect Row
 
@@ -63,35 +141,32 @@ merge(ε₁, ε₂):
 
 ## Effect 消除
 
-四种机制从 effect row 中移除 effect：
-
-### `try { ... }` — 将 fail 转为 Option
-
-```ring
-let result: Option<Int> = try { risky_operation() }
-```
-
-移除所有 `fail` effect，将结果包装为 `Option<T>`：成功 → `some(result)`，fail → `none`。
-
-### `or` — 默认值
-
-```ring
-let x = risky() or 42
-```
-
-当左操作数有 `fail` effect 时：移除 `fail`，失败时使用右操作数作为默认值。
-
-当左操作数为 `Option<T>` 时：解包 `some` 或使用默认值。
+两种机制从 effect row 中移除 effect：
 
 ### `catch` — 错误处理
 
+`catch` 使用 match-arm 风格语法捕获 `fail` effect：
+
 ```ring
-let x = risky() catch fn(e) { handle(e) }
-let y = risky() catch MyError fn(e) { handle(e) }
+let x = risky() catch {
+    MyError(e) => handle(e),
+    OtherError(msg) => default_from(msg),
+}
 ```
 
-不带类型名：捕获所有 `fail` effect。
-带类型名：仅捕获特定类型的 `fail<E>` effect（typed catch）。
+`catch` 总是消除 `fail` effect——它是完整的捕获点。catch arms 经过穷尽性检查：如果 arms 未覆盖所有可能的错误类型，编译器报 E0601 错误。
+
+```ring
+// 使用通配符处理所有错误
+let y = risky() catch {
+    SpecificError(e) => recover(e),
+    _ => default_value,
+}
+```
+
+内部用模式匹配分派错误类型。需要部分处理时在 catch 内部 match + re-raise（显式）。
+
+> **注意：** `try` 是保留关键字，使用时产生编译错误（E0101），提示使用 `catch` 替代。
 
 ### `handle...with` — Effect Handler
 

@@ -21,9 +21,13 @@ DeclKind     ::= FnDecl
                | ImplDecl
                | TraitDecl
                | EffectDecl
+               | EffectAliasDecl
                | ExternDecl
                | TypeAliasDecl
                | TestDecl
+               | ConstDecl
+               | ModDecl
+               | SigDecl
 ```
 
 `pub` 修饰符控制多文件编译中的可见性。单文件模式下接受但不强制。
@@ -31,13 +35,13 @@ DeclKind     ::= FnDecl
 ### 函数声明
 
 ```ebnf
-FnDecl       ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? Block
+FnDecl       ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr ('with' '{' EffectExpr (',' EffectExpr)* '}')?)? Block
 
 Params       ::= (Param (',' Param)* ','?)?
-Param        ::= 'var'? Ident (':' TypeExpr)?
+Param        ::= 'mut'? Ident (':' TypeExpr)?
 ```
 
-省略返回类型注解时由推断确定。省略参数类型注解时分配 fresh 类型变量。`var` 前缀标记参数为可变（允许在函数体内重赋值），也适用于方法的 `var self`。
+省略返回类型注解时由推断确定。省略参数类型注解时分配 fresh 类型变量。`mut` 前缀标记参数为可变（允许在函数体内重赋值），也适用于方法的 `mut self`。`with { ... }` 子句声明函数的 effect 签名。
 
 ### Struct 声明
 
@@ -76,27 +80,43 @@ ImplTarget   ::= Ident TypeArgs?
 
 ImplMember   ::= 'pub'? FnDecl
                | 'pub'? 'extern' 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)?
+               | 'delegate' Ident ':' Ident (',' Ident)*
+               | 'pub'? AssocTypeDecl
 ```
 
-`impl Type { ... }` 定义固有方法。`impl Trait for Type { ... }` 实现 trait。Impl 块内可包含 `extern fn` 声明用于 FFI 方法绑定。
+`impl Type { ... }` 定义固有方法。`impl Trait for Type { ... }` 实现 trait。Impl 块内可包含 `extern fn` 声明用于 FFI 方法绑定。`delegate field: Trait1, Trait2` 自动生成 trait 转发方法（替代继承的复用机制）。关联类型 `type Name = TypeExpr` 用于满足 trait 的关联类型要求。
 
 ### Trait 声明
 
 ```ebnf
-TraitDecl    ::= 'trait' Ident TypeParams? '{' TraitMethod* '}'
+TraitDecl    ::= 'trait' Ident TypeParams? (':' TypeBound ('+' TypeBound)*)? '{' TraitMember* '}'
+
+TraitMember  ::= TraitMethod | AssocTypeDecl
 
 TraitMethod  ::= 'pub'? 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? Block?
+
+AssocTypeDecl ::= 'pub'? 'type' Ident (':' TypeBound ('+' TypeBound)*)? ('=' TypeExpr)?
 ```
 
-无函数体的方法是抽象方法（必须实现）。有函数体的方法提供默认实现。
+无函数体的方法是抽象方法（必须实现）。有函数体的方法提供默认实现。Supertrait 继承通过 `:` 后的 `TypeBound` 列表声明（如 `trait Ord: Eq`），支持多级传递和循环检测。关联类型通过 `type Name` 声明，可带 bounds 约束和默认值。
 
 ### Effect 声明
 
 ```ebnf
 EffectDecl   ::= 'effect' Ident TypeParams? '{' EffectOp* '}'
 
-EffectOp     ::= 'fn' Ident '(' Params ')' '->' TypeExpr (';' | ',')?
+EffectOp     ::= 'fn' Ident '(' Params ')' '->' TypeExpr (Block | ';' | ',')?
 ```
+
+当 `EffectOp` 带有 `Block` 时，该 block 作为默认 handler body。全部 op 都有默认 handler 的 effect 可省略 `handle...with`，编译器自动注入 evidence；显式 `handle` 可覆盖默认。
+
+### Effect Alias 声明
+
+```ebnf
+EffectAliasDecl ::= 'pub'? 'effect' 'alias' Ident TypeParams? '=' '{' EffectExpr (',' EffectExpr)* '}'
+```
+
+Effect alias 是 effect 集合的语法糖，如 `effect alias IO = {io, fail<Str>}`。支持泛型参数、循环检测和 `pub` 模块导出。
 
 ### Extern 声明
 
@@ -115,11 +135,37 @@ ExternKind   ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)?   (* ext
 TypeAliasDecl ::= 'type' Ident TypeParams? '=' TypeExpr
 ```
 
+### Const 声明
+
+```ebnf
+ConstDecl    ::= 'const' Ident (':' TypeExpr)? '=' Expr
+```
+
+顶级编译期常量绑定。
+
 ### 测试声明
 
 ```ebnf
 TestDecl     ::= 'test' StringLit Block
 ```
+
+### Mod 块声明
+
+```ebnf
+ModDecl      ::= 'pub'? 'mod' Ident ('requires' '{' EffectExpr (',' EffectExpr)* '}')? '{' UseDecl* Decl* '}'
+```
+
+内联模块块，支持嵌套（`mod a { mod b { ... } }`）。`requires` 子句限制模块内可用的 effect capability。模块内可包含 `use` 声明和任意声明。
+
+### Sig 块声明
+
+```ebnf
+SigDecl      ::= 'sig' Ident '{' SigMember* '}'
+
+SigMember    ::= 'fn' Ident TypeParams? '(' Params ')' ('->' TypeExpr)? ('with' '{' EffectExpr (',' EffectExpr)* '}')?
+```
+
+接口签名声明，定义模块的类型接口。
 
 ### Use 声明
 
@@ -145,7 +191,7 @@ TypeExpr     ::= NamedType
 
 NamedType    ::= Ident TypeArgs? '?'?
 
-FnType       ::= 'fn' '(' TypeExprList? ')' '->' TypeExpr
+FnType       ::= 'fn' '(' TypeExprList? ')' '->' TypeExpr ('with' '{' EffectExpr (',' EffectExpr)* '}')?
 
 TupleType    ::= '(' TypeExpr ',' TypeExprList ')'
 
@@ -156,7 +202,7 @@ RecordField  ::= Ident ':' TypeExpr
 TypeExprList ::= TypeExpr (',' TypeExpr)* ','?
 ```
 
-命名类型的 `?` 后缀是 `Option<T>` 的语法糖：`Int?` ≡ `Option<Int>`。
+命名类型的 `?` 后缀是 `Option<T>` 的语法糖：`Int?` ≡ `Option<Int>`。`FnType` 的 `with` 子句标注函数类型的 effect（无标注时为 open row，支持 effect 多态）。
 
 ### 类型参数与约束
 
@@ -172,15 +218,25 @@ TypeArgs     ::= '<' TypeExpr (',' TypeExpr)* '>'
 
 类型参数解析使用推测性前瞻：解析器尝试解析 `<Type, ...>`，如果 `<` 实际是比较运算符则回溯。
 
+### Effect 表达式
+
+```ebnf
+EffectExpr   ::= Ident ('::' Ident)* TypeArgs?
+```
+
+Effect 表达式用于 effect 标注、effect alias 和 `requires` 子句中。支持限定路径（如 `mod::effect`）和类型参数（如 `fail<Str>`、`mut<T>`）。
+
 ## 语句
 
 ```ebnf
 Stmt         ::= LetStmt
+               | LetMutStmt
                | VarStmt
                | LetDestructStmt
                | IfLetStmt
                | ReturnStmt
                | WhileStmt
+               | LoopStmt
                | ForInStmt
                | BreakStmt
                | ContinueStmt
@@ -192,11 +248,12 @@ Stmt         ::= LetStmt
 
 ```ebnf
 LetStmt          ::= 'let' Ident (':' TypeExpr)? '=' Expr ';'?
+LetMutStmt       ::= 'let' 'mut' Ident (':' TypeExpr)? '=' Expr ';'?
 VarStmt          ::= 'var' Ident (':' TypeExpr)? '=' Expr ';'?
 LetDestructStmt  ::= 'let' TuplePattern '=' Expr ';'?
 ```
 
-`let` 绑定不可变（重赋值报 E0205 错误）。`var` 绑定可变。
+`let` 绑定不可变（重赋值报 E0205 错误）。`let mut` 和 `var` 绑定可变（两种形式等价，`let mut` 是推荐写法）。
 
 ### 控制流语句
 
@@ -204,6 +261,8 @@ LetDestructStmt  ::= 'let' TuplePattern '=' Expr ';'?
 IfLetStmt    ::= 'if' 'let' Pattern '=' Expr Block ('else' Block)?
 
 WhileStmt    ::= 'while' Expr Block
+
+LoopStmt     ::= 'loop' Block
 
 ForInStmt    ::= 'for' ForBinding 'in' Expr Block
 ForBinding   ::= Ident
@@ -214,7 +273,7 @@ ContinueStmt ::= 'continue' ';'?
 ReturnStmt   ::= 'return' Expr? ';'?
 ```
 
-`break` 和 `continue` 仅在 `while` 或 `for` 循环内有效（否则报 E0206 错误）。`for` 接受 `Range<Int>`、`List<T>`、`Set<T>` 和 `Map<K,V>.entries()` 作为可迭代对象。
+`break` 和 `continue` 仅在 `while`、`for` 或 `loop` 循环内有效（否则报 E0206 错误）。`loop` 是 `while true` 的语法糖。`for` 接受任何实现了 `Iterable` trait 的类型作为可迭代对象。
 
 ### 赋值和表达式语句
 
@@ -223,7 +282,7 @@ AssignStmt   ::= Expr ('=' | '+=' | '-=') Expr ';'?
 ExprStmt     ::= Expr ';'?
 ```
 
-赋值目标必须是可变的（`var` 绑定、struct 字段等）。
+赋值目标必须是可变的（`var`/`let mut` 绑定、struct 字段等）。
 
 ## 表达式
 
@@ -346,12 +405,10 @@ OrExpr       ::= Expr 'or' Expr
 ### Catch 表达式
 
 ```ebnf
-CatchExpr    ::= Expr 'catch' TypeName? 'fn' '(' Ident ')' Block
-
-TypeName     ::= Ident
+CatchExpr    ::= Expr 'catch' '{' MatchArm* '}'
 ```
 
-捕获 `fail` effect 并获得错误值的访问权。如果指定了 `TypeName`，仅捕获该类型的错误（typed catch）。结果类型必须与左操作数类型统一。
+捕获 `fail` effect 并用 match-arm 风格的模式匹配分派错误类型。catch arms 经穷尽性检查（非穷尽报 E0601）。结果类型必须与左操作数类型统一。内部用模式匹配分派错误类型；需要部分处理时在 catch 内部 match + re-raise（显式）。
 
 ### 后缀表达式
 
@@ -359,12 +416,14 @@ TypeName     ::= Ident
 PostfixExpr  ::= Expr '?'              (* option 解包 / fail 传播 *)
                | Expr '.' Ident ArgList (* 方法调用 *)
                | Expr '.' Ident        (* 字段访问 *)
+               | Expr '.' IntLit       (* tuple 位置字段访问：.0 .1 .2 *)
                | Expr ArgList          (* 函数调用，同行规则 *)
+               | Expr '[' Expr ']'     (* 下标访问 *)
 
 ArgList      ::= '(' (Expr (',' Expr)* ','?)? ')'
 ```
 
-`?` 后缀对 `Option<T>` 解包 `some` 或传播 `fail`。对带 `fail` effect 的表达式传播错误。
+`?` 后缀对 `Option<T>` 解包 `some` 或传播 `fail`。对带 `fail` effect 的表达式传播错误。下标访问 `list[i]` / `map[key]` / `str[i]` 越界或 key 不存在时 panic，安全访问用 `.get()` 返回 `Option<T>`。
 
 ### 二元表达式
 
@@ -397,7 +456,9 @@ UnaryExpr    ::= '-' Expr              (* 数值取反 *)
 ## 模式
 
 ```ebnf
-Pattern      ::= '_'                                      (* 通配符 *)
+Pattern      ::= SinglePattern ('|' SinglePattern)*
+
+SinglePattern ::= '_'                                      (* 通配符 *)
                | IntLit | FloatLit | StringLit | BoolLit  (* 字面量 *)
                | Ident                                     (* 绑定或 unit 变体 *)
                | UpperIdent '(' PatList ')'               (* 位置构造器 *)
@@ -412,6 +473,8 @@ PatList      ::= Pattern (',' Pattern)* ','?
 
 NamedPat     ::= Ident (':' Pattern)? ','?
 ```
+
+当 `Pattern` 包含 `|` 分隔的多个 `SinglePattern` 时，形成 Or-Pattern（如 `A | B => expr`）。Or-Pattern 支持 enum 变体、字面量、构造器和绑定变量，穷尽性检查正确处理。
 
 与零字段 enum 变体同名的绑定模式会被重分类为构造器模式。命名构造器模式支持字段 punning（`{ x }` ≡ `{ x: x }`）和部分匹配（`..` 忽略其余字段）。
 
