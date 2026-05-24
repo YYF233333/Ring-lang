@@ -549,6 +549,107 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
+### B-058 关联类型 bound 验证完善（E0513）[bugfix] [P3] [S] [queued]
+B-004 遗留。关联类型带 bound（`type Iter: Iterator<T>`）的验证基础设施已搭建（E0513 错误码 + ImplEntry.assoc_types），但 impl 中赋值类型是否满足 bound 的完整验证未实施——bound 信息被存储但不触发错误报告。
+
+**涉及修改**：
+1. `infer_decl.ring`：`check_impl_decl` 中验证 impl 的关联类型赋值是否满足 trait 声明中的 bound 约束，不满足时报 E0513
+
+**验收标准**：
+- `impl T for S { type Item = Foo }` 当 `Foo` 不满足 trait 中 `type Item: Bound` 的 bound 时报 E0513
+- 满足 bound 时正常通过
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-059 trait body 内支持 `Self::Item` 关联类型路径 [feature] [P3] [S] [queued]
+B-004 遗留。trait body 中引用关联类型目前只能用裸名 `Item`（通过 `type_param_scope` 注入），不支持 `Self::Item` 路径。Rust 两种写法都支持。
+
+**涉及修改**：
+1. `infer.ring` 或 `infer_ctx.ring`：trait body 类型解析时识别 `Self::Name` 路径，查找当前 trait 的关联类型
+
+**验收标准**：
+- trait body 中 `Self::Item` 与 `Item` 等价
+- impl body 中 `Self::Item` 解析为该 impl 的关联类型赋值
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-060 Pattern codegen 重复代码消除 [refactor] [P3] [S] [queued]
+B-051 遗留。两处重复：（1）`gen_pattern_condition_for_bindings` 与 `gen_pattern_condition` ~60 行逻辑重复（因 binding 生成不接受 ctx 参数）；（2）`pattern_is_catchall`（codegen_expr.ring）与 `pattern_is_catchall_stmt`（codegen_stmt.ring）完全相同逻辑。
+
+**涉及修改**：
+1. `codegen_stmt.ring`：重构 `gen_pattern_bindings` 接口使其接受 ctx，消除 `gen_pattern_condition_for_bindings`
+2. `hir.ring` 或新建共享文件：将 `pattern_is_catchall` 移入共享位置，两处引用
+
+**验收标准**：
+- 重复代码消除，两对函数各只保留一份
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-061 `json_stringify` 去除 `with {io}` 标注 [bugfix] [P3] [S] [queued]
+Audit 观察。`std/io.ring` 中 `json_stringify` 标注 `with {io}` 但实际是纯函数（JS `JSON.stringify`），无 I/O 副作用。类型签名误导读者，远期 LLVM 后端 effect 纯度信息影响优化决策。
+
+**涉及修改**：
+1. `std/io.ring`：`json_stringify` 去除 `with {io}` effect 标注
+2. `runtime.ring`：对应的 runtime 实现确认不消费 evidence
+
+**验收标准**：
+- `json_stringify` 签名无 `with {io}`
+- 调用 `json_stringify` 不要求 io effect 上下文
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-062 关联类型约束调用点验证（audit #124）[bugfix] [P2] [M] [queued]
+**Critical**。`resolve_dicts_from_scheme`（`infer_ctx.ring`）检查具体类型是否 impl 了 trait，但完全不验证关联类型约束。`fn f<T: Container<Item = Int>>(...)` 调用 `f(StrBox{...})`（StrBox 的 `Item = Str`）类型检查通过但运行时行为错误。
+
+**涉及修改**：
+1. `infer_ctx.ring`：`resolve_dicts_from_scheme` 中找到具体类型的 impl entry 后，查询 `assoc_types` map，与 scheme bounds 中的约束逐一 unify，不匹配时报错
+
+**验收标准**：
+- `f<T: Container<Item = Int>>` 调用时传入 `Item = Str` 的类型 → 编译错误
+- 约束匹配时正常通过
+- `tests/cases/audit_test_assoc_type_constraint.ring` 转为期望编译错误的负面测试
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-063 Delegate + 关联类型转发方法类型解析（audit #125 + #128）[bugfix] [P2] [M] [queued]
+**Critical**。合并 audit #125 和 #128。`expand_delegate_impls` 合成转发方法时使用 trait method 的原始类型（含未解析的关联类型 type var），且 `register_delegate_traits` 创建 ImplEntry 时传递空 `assoc_types`。当 trait 有关联类型时，转发方法返回类型未解析，codegen 生成 UFCS 调用在 JS 原始类型上崩溃。
+
+**涉及修改**：
+1. `infer_register.ring`：`register_delegate_traits` 创建 delegate ImplEntry 时从 field 类型的原始 ImplEntry 复制 `assoc_types`
+2. `infer_decl.ring`：`expand_delegate_impls` 合成方法时将 trait 关联类型 var 替换为 field 类型 impl 的具体类型
+
+**验收标准**：
+- delegate trait 有关联类型时，转发方法返回正确的具体类型
+- `tests/cases/audit_test_delegate_assoc.ring` 正常运行不崩溃
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-064 `resolve_assoc_type` 限定类型参数区分（audit #129）[bugfix] [P3] [M] [queued]
+`resolve_assoc_type` 首先检查 `type_param_scope.get(assoc_name)`，找到立即返回，完全忽略 `type_param_name` 参数。当 `T: TraitA` 和 `U: TraitB` 各有同名关联类型 `Item` 时，`U::Item` 可能返回 `T` 的 `Item`。
+
+**涉及修改**：
+1. `infer_ctx.ring`：`resolve_assoc_type` 中验证返回的类型来自特定 `type_param_name` 的 bound 注入，可能需要 per-type-param 的 scope 跟踪
+
+**验收标准**：
+- `T::Item` 和 `U::Item` 解析到各自 trait bound 的关联类型
+- 无歧义时裸名 `Item` 仍正常工作
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-065 Zonk names 包含关联类型变量名（audit #121）[bugfix] [P3] [S] [queued]
+`check_fn_body` 构建 ZonkCtx names map 时仅迭代 `type_params`，但 `inject_assoc_types_from_bounds` 注入的关联类型 fresh type var 未被收录。错误消息中关联类型显示为 `?NNN` 而非 `Item`。
+
+**涉及修改**：
+1. `infer_decl.ring`：收集 type_param 名称后，额外迭代 `ctx.type_param_scope` 为关联类型变量添加名称
+
+**验收标准**：
+- 错误消息中关联类型显示为 `Item` 而非 `?NNN`
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+## 关联类型修复依赖序（audit 建议）
+
+B-062（#124 约束验证）→ B-063（#125/#128 delegate 转发）→ B-064（#129 scope 区分）→ B-058（#115 bound 验证）→ B-065（#121 显示改善）
 
 ## 架构：后端策略（2026-05-23 更新）
 

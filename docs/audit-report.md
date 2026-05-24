@@ -9,6 +9,28 @@
 
 ## Checker
 
+### #124 关联类型约束 `<Item = Int>` 调用点不验证（类型不安全） [critical] [open]
+
+`resolve_dicts_from_scheme`（`infer_ctx.ring:559-646`）检查具体类型是否 impl 了 trait，但完全不验证关联类型约束。当函数声明 `fn f<T: Container<Item = Int>>(...)` 时，调用 `f(StrBox{...})`（其中 StrBox 的 `Item = Str`）不产生任何错误，类型检查通过但运行时行为错误。
+
+**已测试确认**：测试文件 `tests/cases/audit_test_assoc_type_constraint.ring` 中 `get_first_int(StrBox{...})` 类型检查通过并输出 "hello"（应为编译错误）。
+
+**文件**：`compiler/infer_ctx.ring:559-646`（`resolve_dicts_from_scheme`）、`compiler/infer_register.ring:1261-1284`（`inject_assoc_types_from_bounds`）
+**修复方向**：在 `resolve_dicts_from_scheme` 中，找到具体类型的 impl entry 后，查询其 `assoc_types` map，与 scheme bounds 中的约束逐一 unify。不匹配时 emit E0301 或新错误码。
+
+发现者：Opus+DS
+
+### #125 Delegate + 关联类型：转发方法返回类型未解析致运行时崩溃 [critical] [open]
+
+`expand_delegate_impls`（`infer_decl.ring:594-842`）合成转发方法时，使用 trait method 定义中的原始类型（含关联类型 type var）。当 trait 有关联类型（如 `type Value`），转发方法的返回类型保留为未解析的 type var，而非从 field 类型的 impl 解析出的具体类型（如 `Int`）。Codegen 对此 type var 生成 UFCS 风格调用（`v.to_str()`），在 JS 原始类型上失败。
+
+**已测试确认**：`tests/cases/audit_test_delegate_assoc.ring` 中 `w.get_value().to_str()` 运行时 `TypeError: v.to_str is not a function`。
+
+**文件**：`compiler/infer_decl.ring:594-842`（`expand_delegate_impls`）
+**修复方向**：合成转发方法时查找 field 类型的 `ImplEntry.assoc_types`，将 trait 的关联类型 var 替换为具体类型。或让转发方法走完整类型推断流程。
+
+发现者：Opus
+
 ### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open] [deferred: LLVM]
 
 设计约束：fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16）。
@@ -26,6 +48,59 @@
 
 发现者：Opus
 
+### #115 E0513 dead error code: associated type bound not satisfied [medium] [open]
+
+`E0513` is defined at `codes.ring:52` with description "Associated type bound not satisfied" but never emitted by any compiler pass. When a trait declares `type Item: Eq` (an associated type with bounds), `AssocTypeDef.bounds` stores the bound list but `register_impl` (`infer_register.ring:756-770`) only checks for missing/extra associated types, not whether concrete types satisfy declared bounds. For example `impl T for S { type Item = Int }` when `trait T { type Item: Clone }` would succeed without verifying `Int` satisfies `Clone`.
+
+**文件**：`compiler/codes.ring:52`、`compiler/infer_register.ring:756-770`
+**修复方向**：在 `register_impl` 中增加 bound 验证：对每个 `trait_def.assoc_types` 中带 bounds 的条目，检查 `assoc_type_map` 中的具体类型是否满足所有 trait bounds。
+
+发现者：DS
+
+### #116 `FnType` `types_equal` 用 exact ID 比较 open effect row tail [low] [open]
+
+`types_equal` 对 `FnType` 比较 `optional_ids_equal(ea.tail, eb.tail)`（`types.ring:305`）。当两个函数都有 open effect row tail（不同 type var `?N1` 和 `?N2`），这返回 false，即使它们实际表示相同的 open effect row 语义。`row_merge` 的 `effects_match_kind` 对此处理正确，但 `types_equal` 过于严格，可能导致错误消息/调试输出中的比较误判。
+
+**文件**：`compiler/types.ring:301-306`
+**修复方向**：对 open tail 考虑是否有意要区分不同 type var ID（它们语义相同），或添加注释说明设计意图。
+
+发现者：DS
+
+### #120 `resolve_assoc_type` 歧义时返回 fresh var 而非 ErrorType [low] [open]
+
+当关联类型名解析到多个 trait bound（E0512 歧义错误），`resolve_assoc_type`（`infer_ctx.ring:889-895`）报告错误后仍返回 `found_types.get(0)`（fresh type var），而非 `ErrorType`。这使 checker 在已报错后继续类型解析，可能导致后续级联错误信息。
+
+**文件**：`compiler/infer_ctx.ring:889-895`
+**修复方向**：歧义时返回 ErrorType 抑制级联错误。
+
+发现者：Opus
+
+### #128 Delegate expansion 传递空 `assoc_types` 到 ImplEntry [medium] [open]
+
+`register_delegate_traits`（`infer_register.ring:1057-1061`）和 `expand_delegate_impls`（`infer_decl.ring:826-833`）创建 `ImplEntry` 时始终传 `assoc_types: map_new()` / `assoc_types: []`。若被委托的 trait 有关联类型（如 `Container { type Item }`），生成的 impl entry 无关联类型赋值。通过 `ImplEntry.assoc_types` 解析关联类型的代码（如解析 `Wrapper::Item`）会得到空结果。
+
+**文件**：`compiler/infer_register.ring:1060`、`compiler/infer_decl.ring:831`
+**修复方向**：注册 delegate impls 时，查找 field 类型对应 trait 的 `ImplEntry`，复制其 `assoc_types` 到委托生成的 impl entry。
+
+发现者：Opus
+
+### #129 `resolve_assoc_type` 忽略限定的类型参数名 [medium] [open]
+
+`resolve_assoc_type(ctx, type_param_name, assoc_name, span)`（`infer_ctx.ring:818-828`）首先检查 `type_param_scope.get(assoc_name)`，若找到立即返回，**完全忽略 `type_param_name` 参数**。当两个类型参数 `T: TraitA` 和 `U: TraitB` 各有同名关联类型 `Item` 时，写 `U::Item` 会返回 `T` 的 `Item`（如果 `T` 的 bound 先被处理并将 `Item` 注入了共享的 `type_param_scope`）。
+
+**文件**：`compiler/infer_ctx.ring:821-826`
+**修复方向**：在 first-pass 检查中验证返回的类型是否来自特定 `type_param_name` 的 bound 注入。可能需要 per-type-param 的 scope 跟踪。
+
+发现者：Opus
+
+### #121 `check_fn_body` Zonk names 不包含关联类型变量名 [low] [open]
+
+`check_fn_body`（`infer_decl.ring:1038-1049`）构建 ZonkCtx names map 时仅迭代 `type_params`（函数级泛型参数），但 `inject_assoc_types_from_bounds`（在 `register_fn_common` 中调用）会为 `Item` 等关联类型注入 fresh type var 到 `type_param_scope`。这些 var 在 ZonkCtx 中无名称，错误消息和调试输出中显示为 `?NNN` 而非 `Item`。
+
+**文件**：`compiler/infer_decl.ring:1038-1049`
+**修复方向**：收集 type_param 名称后，额外迭代 `ctx.type_param_scope` 为未覆盖的条目添加名称。
+
+发现者：Opus
 
 ## Codegen
 
@@ -70,8 +145,14 @@
 
 发现者：Opus
 
+### #119 `register_decl_info` + `scan_fn_mut_params` 使用 `_ => {}` 静默忽略 HDecl 变体 [low] [open]
 
-## 技术债 / DRY 违反（2026-05-24 审计发现）
+`codegen.ring:299`（`register_decl_info`）显式处理 `Fn`、`Struct`、`Enum`、`Trait`、`Impl`、`Effect`、`Const`、`ModBlock`，然后 `_ => {}` 静默忽略 `Sig`、`ExternFn`、`ExternType`、`TypeAlias`、`AssocType`、`Test`。`codegen.ring:490`（`scan_fn_mut_params`）有相同模式。新增 HDecl 变体时编译器不会警告，违反 #19 的编译期保护原则。
+
+**文件**：`compiler/codegen.ring:299, 490`
+**修复方向**：显式列出每个被忽略的变体并加注释说明为何是 no-op。
+
+发现者：DS
 
 
 ## 架构债
@@ -104,8 +185,14 @@
 
 发现者：Opus
 
+### #123 Delegate dict dispatch effect 转发在 catch 块内可能不足 [low] [open]
 
-## Codegen 技术债
+`get_callee_evidence_args`（`codegen_expr.ring:352-393`）有两个路径：(1) callee_type 路径——从 FnType 提取 effect 并返回 evidence params；(2) callee_name 路径——从 `local_fn_effects` 查找实际 effect 并检查 `ctx.in_try_fail`。Delegate 的 dict dispatch 走路径 (1)（callee_name 为 `none`），其效应从 trait method 的 FnType 推导。路径 (1) 不检查 `ctx.in_try_fail`，这意味着如果在 `catch` 块内对 delegate field 调用带 `fail` 的 trait 方法，且该 `fail` effect 的 evidence 依赖 catch 上下文，evidence 可能不完整。当前实践中难触发—默认 trait（Eq/Clone/Ord/Debug）均无 `fail` effect，#77 修复后 trait method FnType 也正确携带 effect 信息。
+
+**文件**：`compiler/codegen_expr.ring:352-360`
+**修复方向**：在 callee_type 路径中也注入 `ctx.in_try_fail` 的 `fail` evidence（与 callee_name 路径一致）。
+
+发现者：Opus
 
 ### #103 Auto-boxing 仅 box 值类型依赖 JS 引用语义 [medium] [open] [deferred: LLVM]
 
@@ -118,6 +205,33 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：Worker Wave A+B
 
+### #130 `effects_match_kind` MutEffect 非对称 `is_type_var` 回退 [low] [open]
+
+`effects_match_kind`（`types.ring:92-93`）对 `MutEffect` 使用 `is_type_var(sa) || is_type_var(sb) || types_equal(sa, sb)` 判断"同类"，而 `effects_same_kind`（`types.ring:199`）要求 `types_equal(sa, sb)`。前者用于 `row_merge` 去重——若有 `mut<Int>` 和 `mut<?T>`（未解析），`row_merge` 认为它们"同类"并可能丢弃一个，导致 effect 追踪精度下降。
+
+**文件**：`compiler/types.ring:89-102`
+**修复方向**：确认 `is_type_var` 回退是否仍需要（unification 阶段 type var 可能未解析）。若需要，添加注释说明理由；否则与 `effects_same_kind` 保持一致。
+
+发现者：Opus
+
+### #131 `FailEffect` 在 `effects_match_kind` 中忽略错误类型 [low] [open]
+
+`effects_match_kind`（`types.ring:96`）对任意两个 `FailEffect` 均返回 `true`，不考虑错误类型参数。这意味着 `fail<Int>` 和 `fail<Str>` 被视为"同类"——`row_merge` 去重时可能丢弃其中一个。这是 single-fail-effect 设计的有意行为（unification 引擎单独处理类型参数合并），但缺少注释说明，可能误导未来开发者。
+
+**文件**：`compiler/types.ring:96`
+**修复方向**：添加注释说明此为 intentional——single fail effect 设计。
+
+发现者：Opus
+
+### #132 `exports.ring` ModBlock 不处理 ExternFn/ExternType 声明 [low] [open]
+
+`extract_exports` 处理 `ModBlock` 内的声明时（`exports.ring:178-260`），显式处理了 `Fn`、`Struct`、`Enum`、`Const`、`Effect`、`EffectAlias`、`Trait`、`Impl`、`ModBlock`，但遗漏了 `ExternFn` 和 `ExternType`。`pub mod foo { pub extern fn bar() ... }` 中的 `bar` 不会被导出，其他模块无法 import。顶层 `ExternFn`（`exports.ring:153`）处理正确。
+
+**文件**：`compiler/exports.ring:178-260`
+**修复方向**：在 ModBlock 处理中增加 `Decl::ExternFn` 和 `Decl::ExternType` 分支，与顶层处理逻辑一致。
+
+发现者：Opus
+
 ### #113 `RecordType` `types_equal` 不检查 field 顺序 [low] [open]
 
 `types_equal` 对 RecordType 使用 `fa.all(fn(f) { fb.any(...) })` 视 fields 为无序集合。对于 row type 语义这可能是有意的（field order 不影响 record subtyping），但与其他类型比较（如 `TupleType` 检查元素顺序）不一致。
@@ -127,8 +241,62 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：Opus
 
+### #117 Magic number 10 硬编码证据前缀长度 [low] [open]
+
+`codegen_decl.ring:461, 495, 527` 三处使用 `dp.slice(10, dp.len())` 剥离 `__ring_ev_` 前缀。若 `evidence_param_name()`（`hir.ring:223-226`）的前缀格式变动，这些硬编码会无声断裂。
+
+**文件**：`compiler/codegen_decl.ring:461, 495, 527`
+**修复方向**：定义常量 `const EVIDENCE_PREFIX_LEN = "__ring_ev_".len()` 或抽取 helper 函数 `fn evidence_param_to_effect_name(dp: Str) -> Str`。
+
+发现者：DS
+
+### #118 `collect_local_calls` 遗漏限定的调用路径 [low] [open]
+
+`collect_local_calls`（`codegen.ring:336-340`）仅匹配 `HExpr::Ident` 作为 callee。若本地函数通过限定名调用（`mod_name::fn()` 或 `super::helper()`），callee 不匹配 `HExpr::Ident`，调用不会被记录。effect 传播优化可能遗漏通过限定路径的 effect 依赖。
+
+**文件**：`compiler/codegen.ring:336-340`
+**修复方向**：同时检查 `FieldAccess` callee（receiver 为模块名）或使用 `resolved_name`（如可用）。
+
+发现者：DS
+
+### #122 `gen_handle_body` IIFE 仅传递 handled effects 的 evidence，未 handling 的依赖闭包 [low] [open]
+
+`gen_handle_body`（`codegen_expr.ring:1421-1444`）的 IIFE 仅传 `by_effect.entries()` 中的 evidence params。若 body 中有 effect op 对应 unhandled effect（带默认 handler 但不在当前 `handle...with` 列表中），该 evidence 需通过 JS 闭包从外部作用域解析。嵌套 handle 时中间作用域若不保留 evidence 变量，闭包链可能断裂。
+
+**文件**：`compiler/codegen_expr.ring:1421-1444`
+**修复方向**：将 body 的 HExpr 中所有涉及 effects 的 evidence 都传入 IIFE（不仅是 handled effects），确保显式 evidence 访问不依赖闭包链。
+
+发现者：Opus
+
+
 ## 模块/诊断
 
+### #126 `mut_methods` 多文件编译不导出/导入 [medium] [open]
+
+`TraitRegistry.mut_methods`（跟踪哪些方法是 `mut self`）在单文件编译中正确填充，但不包含在 `ModuleExports` 中，`inject_module_exports` 也不注入。在多文件模式下，对来自其他模块的类型调用 `mut self` 方法时：(1) 不会注入 `mut<T>` effect；(2) 不会检查不可变绑定调用 mutating 方法（E0208）。
+
+**文件**：`compiler/exports.ring`（缺失）、`compiler/checker.ring:154-199`（`inject_module_exports`）
+**修复方向**：在 `ModuleExports` 中增加 `mut_methods: Map<Str, Set<Str>>`，在 `extract_exports` 中填充，在 `inject_module_exports` 中注入。
+
+发现者：Opus
+
+### #127 `fn_mut_params` 多文件编译不导出/导入 [medium] [open]
+
+`fn_mut_params`（跟踪哪些函数参数是 `mut` 值类型参数以便自动 boxing）在单文件编译中正确填充，但不导出到 `ModuleExports`。在多文件模式下，调用来自其他模块的带 `mut` 值类型参数的函数时，调用点不生成 `{value: ...}` 包装，mutation 不会反映回调用方。
+
+**文件**：`compiler/exports.ring`（缺失）、`compiler/checker.ring:121`
+**修复方向**：在 `ModuleExports` 中增加 `fn_mut_params: Map<Str, List<Bool>>`，在 `extract_exports` 中填充，在 `inject_module_exports` 中注入到 `ctx.fn_mut_params`。
+
+发现者：Opus
+
+### #114 E0408 dead error code: "Open effect row in capability-restricted module" [medium] [open]
+
+`E0408` 在 `codes.ring:40` 定义、`codes.ring:89` 有描述，但从未被任何编译器 pass 实际 emit。`mod requires {effects}` capability 限制（E0405）正常工作，但未检查 open effect row tail 是否从受限模块泄漏。带 open effect row tail（`fn() -> T with {io, ?N}`）的函数可从 capability-restricted 模块导出而无错误。
+
+**文件**：`compiler/codes.ring:40, 89`
+**修复方向**：在 `check_fn_decl` 中当 `mod_path_stack` 在 `requires {}` 块内时实现 open row 检查，或将 E0408 标记为 deferred feature 并在 `error_description` 中注明。
+
+发现者：DS
 
 
 ## 设计-实现差距（参考，已在 backlog 跟踪）
