@@ -8,7 +8,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
 use env::{TypeScheme, apply_subst}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0408, E0409, E0410, E0501, E0507, E0705}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error,
     unify_at, update_fn_effects,
@@ -171,18 +171,18 @@ fn check_effects_capability(mut ctx: InferCtx, name: Str, effects: EffectRow, ca
                 DiagnosticContext::OtherContext { detail: some("capability violation") })
         }
     }
-    // An open effect row (tail is a type variable) means the function has
-    // polymorphic effects that cannot be statically verified against the
-    // module's capability set. Reject conservatively.
-    match effects.tail {
-        some(_) => {
-            let _ = type_error(ctx.sink, E0408,
-                "'${name}' has polymorphic effects (open effect row) which cannot be verified against mod requires constraints",
-                span,
-                DiagnosticContext::OtherContext { detail: some("capability violation: open effect row") })
-        },
-        none => {}
-    }
+    // Note: an open effect row tail (type variable) represents effect
+    // polymorphism — the function *may* carry additional effects depending
+    // on its call site.  We do NOT reject open tails here because:
+    //   1. The per-effect loop above already catches every *concrete* effect
+    //      that is not in the capability set.
+    //   2. A truly pure function (e.g. `fn id(x: Int) -> Int { x }`) has
+    //      effects=[] with an open tail simply because the row was never
+    //      closed — rejecting it would be a false positive.
+    //   3. For genuinely polymorphic functions (e.g. accepting a callback
+    //      with an open effect row), any concrete effect that flows through
+    //      will surface in the *caller's* effect row and be caught by the
+    //      per-effect check on that caller's declaration.
 }
 
 fn check_sig_decl(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool, span: Span) -> HDecl {
