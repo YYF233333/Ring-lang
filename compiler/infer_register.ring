@@ -121,6 +121,95 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
     }
 }
 
+// Shared 5-pass ModBlock registration strategy.
+// When deferred_struct_names/deferred_enum_names are provided (some), operates in phase1 mode
+// (preregister struct/enum only, defer field/variant completion).
+// When none, operates in register_decl mode (complete struct/enum immediately).
+fn register_mod_block_items(
+    mut ctx: InferCtx, mod_name: Str, mod_decls: List<Decl>,
+    deferred_struct_names: List<Str>?, deferred_enum_names: List<Str>?
+) {
+    // Pass 1a: register struct/enum types first
+    for d in mod_decls {
+        match d {
+            Decl::Struct { .. } => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+            },
+            Decl::Enum { .. } => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+            },
+            _ => {}
+        }
+    }
+    // Incremental aliases: struct/enum short names available for trait bounds
+    insert_mod_aliases(ctx, mod_name, mod_decls, true)
+    // Pass 1b-1: traits -- alias after each so supertraits resolve by short name (#83)
+    for d in mod_decls {
+        match d {
+            Decl::Trait { .. } => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+                // Incremental alias: makes this trait's short name available
+                // for subsequent traits' supertrait lookup (#83)
+                insert_mod_aliases(ctx, mod_name, mod_decls, true)
+            },
+            _ => {}
+        }
+    }
+    // Pass 1b-2: effects, effect aliases, extern types
+    for d in mod_decls {
+        match d {
+            Decl::Effect { .. } => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+            },
+            Decl::EffectAlias { .. } => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+            },
+            Decl::ExternType { .. } => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+            },
+            _ => {}
+        }
+    }
+    // Final aliases: all names available for remaining declarations
+    insert_mod_aliases(ctx, mod_name, mod_decls, true)
+    // Pass 2: register everything else (functions, impls, consts, etc.)
+    for d in mod_decls {
+        match d {
+            Decl::Struct { .. } => {},
+            Decl::Enum { .. } => {},
+            Decl::Trait { .. } => {},
+            Decl::Effect { .. } => {},
+            Decl::EffectAlias { .. } => {},
+            Decl::ExternType { .. } => {},
+            _ => {
+                let prefixed = prefix_decl_name(mod_name, d)
+                register_mod_item(ctx, prefixed, deferred_struct_names, deferred_enum_names)
+            }
+        }
+    }
+}
+
+// Dispatch a single declaration to the appropriate registration function.
+// When deferred lists are provided, operates in phase1 mode; otherwise in register_decl mode.
+fn register_mod_item(
+    mut ctx: InferCtx, decl: Decl,
+    deferred_struct_names: List<Str>?, deferred_enum_names: List<Str>?
+) {
+    match deferred_struct_names {
+        some(dsn) => match deferred_enum_names {
+            some(den) => register_phase1(ctx, decl, dsn, den),
+            none => register_decl(ctx, decl)
+        },
+        none => register_decl(ctx, decl)
+    }
+}
+
 fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: List<Str>, mut deferred_enum_names: List<Str>) {
     match decl {
         Decl::Struct { name, type_params, fields, span, .. } => {
@@ -132,70 +221,7 @@ fn register_phase1(mut ctx: InferCtx, decl: Decl, mut deferred_struct_names: Lis
             deferred_enum_names.push(name)
         },
         Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
-            // Pass 1a: register struct/enum types first (preregister)
-            for d in mod_decls {
-                match d {
-                    Decl::Struct { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
-                    },
-                    Decl::Enum { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
-                    },
-                    _ => {}
-                }
-            }
-            // Incremental aliases: struct/enum short names available for trait bounds
-            insert_mod_aliases(ctx, mod_name, mod_decls, true)
-            // Pass 1b-1: traits — alias after each so supertraits resolve by short name (#83)
-            for d in mod_decls {
-                match d {
-                    Decl::Trait { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
-                        // Incremental alias: makes this trait's short name available
-                        // for subsequent traits' supertrait lookup (#83)
-                        insert_mod_aliases(ctx, mod_name, mod_decls, true)
-                    },
-                    _ => {}
-                }
-            }
-            // Pass 1b-2: effects, effect aliases, extern types
-            for d in mod_decls {
-                match d {
-                    Decl::Effect { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
-                    },
-                    Decl::EffectAlias { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
-                    },
-                    Decl::ExternType { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
-                    },
-                    _ => {}
-                }
-            }
-            // Final aliases: all names available for phase 2
-            insert_mod_aliases(ctx, mod_name, mod_decls, true)
-            // Pass 2: register everything else (functions, impls, consts, etc.)
-            for d in mod_decls {
-                match d {
-                    Decl::Struct { .. } => {},
-                    Decl::Enum { .. } => {},
-                    Decl::Trait { .. } => {},
-                    Decl::Effect { .. } => {},
-                    Decl::EffectAlias { .. } => {},
-                    Decl::ExternType { .. } => {},
-                    _ => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_phase1(ctx, prefixed, deferred_struct_names, deferred_enum_names)
-                    }
-                }
-            }
+            register_mod_block_items(ctx, mod_name, mod_decls, some(deferred_struct_names), some(deferred_enum_names))
         },
         _ => register_decl(ctx, decl)
     }
@@ -1135,8 +1161,17 @@ fn is_register_value_type(t: Type) -> Bool {
     }
 }
 
-fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
-    check_duplicate_def(ctx, name, span)
+// Shared helper for register_fn and register_extern_fn.
+// - check_dup: call check_duplicate_def (true for fn, false for extern fn)
+// - track_mut_params: track fn_mut_params (true for fn, false for extern fn)
+// - track_fn_bounds: build fn_bounds_list and insert into scope (true for fn, false for extern fn)
+fn register_fn_common(
+    mut ctx: InferCtx, name: Str, type_params: List<TypeParam>,
+    params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?,
+    span: Span, check_dup: Bool, track_mut_params: Bool, track_fn_bounds: Bool
+) {
+    if check_dup { check_duplicate_def(ctx, name, span) }
+
     let mut type_vars: List<Int> = []
     let saved = map_clone(ctx.type_param_scope)
     for tp in type_params {
@@ -1146,21 +1181,30 @@ fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
     }
 
     let mut param_types: List<Type> = []
-    let mut mut_flags: List<Bool> = []
-    for p in params {
-        let pt = match p.type_annotation {
-            some(ta) => resolve_type_expr(ctx, ta),
-            none => ctx.env.fresh_var()
+    if track_mut_params {
+        let mut mut_flags: List<Bool> = []
+        for p in params {
+            let pt = match p.type_annotation {
+                some(ta) => resolve_type_expr(ctx, ta),
+                none => ctx.env.fresh_var()
+            }
+            param_types.push(pt)
+            // Register fn_mut_params: only flag mut value-type params (not self)
+            if p.name == "self" || !p.is_mutable {
+                mut_flags.push(false)
+            } else {
+                mut_flags.push(is_register_value_type(pt))
+            }
         }
-        param_types.push(pt)
-        // Register fn_mut_params: only flag mut value-type params (not self)
-        if p.name == "self" || !p.is_mutable {
-            mut_flags.push(false)
-        } else {
-            mut_flags.push(is_register_value_type(pt))
+        ctx.fn_mut_params.insert(name, mut_flags)
+    } else {
+        for p in params {
+            match p.type_annotation {
+                some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
+                none => param_types.push(ctx.env.fresh_var())
+            }
         }
     }
-    ctx.fn_mut_params.insert(name, mut_flags)
     let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
 
     let mut declared_names: Set<Str> = set_new()
@@ -1188,7 +1232,9 @@ fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
                     "Unknown trait: ${b.trait_name}", tp.span,
                     DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
             }
-            fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: b.trait_name })
+            if track_fn_bounds {
+                fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: b.trait_name })
+            }
             match tv {
                 some(t) => match t { Type::TypeVar { id, .. } => {
                     scheme_bounds.push(SchemeBound { type_var: id, trait_name: b.trait_name })
@@ -1198,7 +1244,9 @@ fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
             // Expand supertrait bounds: if T: Ord and Ord: Eq, add T: Eq too
             let supers = collect_all_supertraits(ctx, b.trait_name)
             for st_name in supers {
-                fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: st_name })
+                if track_fn_bounds {
+                    fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: st_name })
+                }
                 match tv {
                     some(t) => match t { Type::TypeVar { id, .. } => {
                         scheme_bounds.push(SchemeBound { type_var: id, trait_name: st_name })
@@ -1208,7 +1256,9 @@ fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
             }
         }
     }
-    if fn_bounds_list.len() > 0 { ctx.env.scope.fn_bounds.insert(name, fn_bounds_list) }
+    if track_fn_bounds && fn_bounds_list.len() > 0 {
+        ctx.env.scope.fn_bounds.insert(name, fn_bounds_list)
+    }
 
     ctx.type_param_scope = saved
 
@@ -1223,73 +1273,12 @@ fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, param
     }
 }
 
+fn register_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
+    register_fn_common(ctx, name, type_params, params, return_type, declared_effects, span, true, true, true)
+}
+
 fn register_extern_fn(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, span: Span) {
-    let mut type_vars: List<Int> = []
-    let saved = map_clone(ctx.type_param_scope)
-    for tp in type_params {
-        let tv = ctx.env.fresh_var()
-        match tv { Type::TypeVar { id, .. } => { type_vars.push(id) }, _ => {} }
-        ctx.type_param_scope.insert(tp.name, tv)
-    }
-
-    let mut param_types: List<Type> = []
-    for p in params {
-        match p.type_annotation {
-            some(ta) => param_types.push(resolve_type_expr(ctx, ta)),
-            none => param_types.push(ctx.env.fresh_var())
-        }
-    }
-    let ret = match return_type { some(rt) => resolve_type_expr(ctx, rt), none => ctx.env.fresh_var() }
-
-    let mut declared_names: Set<Str> = set_new()
-    for tp in type_params { declared_names.insert(tp.name) }
-    for entry in ctx.type_param_scope.entries() {
-        let (tpname, tv) = entry
-        if !saved.contains_key(tpname) && !declared_names.contains(tpname) {
-            match tv { Type::TypeVar { id, .. } => { type_vars.push(id) }, _ => {} }
-        }
-    }
-
-    let reg_effects = match declared_effects {
-        some(de) => resolve_declared_effects(ctx, de),
-        none => EMPTY_ROW
-    }
-    let fn_type = Type::FnType { params: param_types, return_type: ret, effects: reg_effects }
-
-    let mut scheme_bounds: List<SchemeBound> = []
-    for tp in type_params {
-        let tv = ctx.type_param_scope.get(tp.name)
-        for b in tp.bounds {
-            if !ctx.env.trait_reg.traits.contains_key(b.trait_name) {
-                let _ = type_error(ctx.sink, E0501,
-                    "Unknown trait: ${b.trait_name}", tp.span,
-                    DiagnosticContext::TraitError { detail: "unknown trait '${b.trait_name}'" })
-            }
-            match tv {
-                some(t) => match t { Type::TypeVar { id, .. } => {
-                    scheme_bounds.push(SchemeBound { type_var: id, trait_name: b.trait_name })
-                    // Expand supertrait bounds
-                    let supers = collect_all_supertraits(ctx, b.trait_name)
-                    for st_name in supers {
-                        scheme_bounds.push(SchemeBound { type_var: id, trait_name: st_name })
-                    }
-                }, _ => {} },
-                none => {}
-            }
-        }
-    }
-
-    ctx.type_param_scope = saved
-
-    if type_vars.len() > 0 {
-        ctx.env.bind(name, TypeScheme { ty: fn_type, type_vars: type_vars, bounds: scheme_bounds, def_id: none })
-    } else {
-        ctx.env.bind_mono(name, fn_type)
-    }
-    match ctx.env.lookup(name) {
-        some(s) => match s.def_id { some(did) => ctx.env.record_def_span(did, span), none => {} },
-        none => {}
-    }
+    register_fn_common(ctx, name, type_params, params, return_type, declared_effects, span, false, false, false)
 }
 
 fn register_extern_type(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>) {
@@ -1433,70 +1422,7 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
             register_effect_alias(ctx, name, type_params, effects, span),
         Decl::Delegate { .. } => {},  // Only valid inside impl blocks, handled by register_impl
         Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
-            // Register struct/enum types first
-            for d in mod_decls {
-                match d {
-                    Decl::Struct { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_decl(ctx, prefixed)
-                    },
-                    Decl::Enum { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_decl(ctx, prefixed)
-                    },
-                    _ => {}
-                }
-            }
-            // Incremental aliases: struct/enum short names available for trait bounds
-            insert_mod_aliases(ctx, mod_name, mod_decls, true)
-            // Register traits — alias after each so supertraits resolve by short name (#83)
-            for d in mod_decls {
-                match d {
-                    Decl::Trait { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_decl(ctx, prefixed)
-                        // Incremental alias: makes this trait's short name available
-                        // for subsequent traits' supertrait lookup (#83)
-                        insert_mod_aliases(ctx, mod_name, mod_decls, true)
-                    },
-                    _ => {}
-                }
-            }
-            // Register effects, effect aliases, extern types
-            for d in mod_decls {
-                match d {
-                    Decl::Effect { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_decl(ctx, prefixed)
-                    },
-                    Decl::EffectAlias { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_decl(ctx, prefixed)
-                    },
-                    Decl::ExternType { .. } => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_decl(ctx, prefixed)
-                    },
-                    _ => {}
-                }
-            }
-            // Final aliases: all names available for remaining declarations
-            insert_mod_aliases(ctx, mod_name, mod_decls, true)
-            // Register everything else (functions, impls, consts, etc.)
-            for d in mod_decls {
-                match d {
-                    Decl::Struct { .. } => {},
-                    Decl::Enum { .. } => {},
-                    Decl::Trait { .. } => {},
-                    Decl::Effect { .. } => {},
-                    Decl::EffectAlias { .. } => {},
-                    Decl::ExternType { .. } => {},
-                    _ => {
-                        let prefixed = prefix_decl_name(mod_name, d)
-                        register_decl(ctx, prefixed)
-                    }
-                }
-            }
+            register_mod_block_items(ctx, mod_name, mod_decls, none, none)
         }
     }
 }
