@@ -94,7 +94,7 @@ fn occurs_in_effect(var_id: Int, e: Effect, subst: UnionFind) -> Bool {
 // ============================================================
 
 
-fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, mut env: TypeEnv) -> UnionFind {
+pub fn unify_effect_params(a: Effect, b: Effect, subst: UnionFind, mut env: TypeEnv) -> UnionFind {
     match (a, b) {
         (Effect::FailEffect { error_type: et_a }, Effect::FailEffect { error_type: et_b }) =>
             unify(et_a, et_b, subst, env),

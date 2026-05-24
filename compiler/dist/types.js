@@ -580,7 +580,7 @@ function effects_same_kind(a, b) {
 function row_merge(a, b) {
   let merged = list_clone(a.effects);
   for (const eff of b.effects) {
-    if ((!merged.some((function(e) { return effects_same_kind(e, eff); })))) {
+    if ((!merged.some((function(e) { return effects_match_kind(e, eff); })))) {
       List_push(merged, eff);
     }
   }

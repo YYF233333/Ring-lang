@@ -493,6 +493,7 @@ const cases: TestCase[] = [
   { file: "impl_qualified_path.ring", expected: "ok\n" },
   { file: "return_in_expr_block.ring", expected: "return_in_expr_block: ok\n" },
   { file: "trait_fn_param.ring", expected: "trait fn param: ok\n" },
+  { file: "effect_merge_same_kind.ring", expected: "effect merge same kind: ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

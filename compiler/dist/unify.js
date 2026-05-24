@@ -922,4 +922,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { UnificationError, empty_subst, occurs_in, unify_effect_rows, unify, __UnificationError_Eq, __UnificationError_Clone, __UnificationError_Ord, __UnificationError_Debug };
+export { UnificationError, empty_subst, occurs_in, unify_effect_params, unify_effect_rows, unify, __UnificationError_Eq, __UnificationError_Clone, __UnificationError_Ord, __UnificationError_Debug };

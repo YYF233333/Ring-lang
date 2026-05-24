@@ -211,7 +211,7 @@ pub fn effects_same_kind(a: Effect, b: Effect) -> Bool {
 pub fn row_merge(a: EffectRow, b: EffectRow) -> RowMergeResult {
     let mut merged = list_clone(a.effects)
     for eff in b.effects {
-        if !merged.any(fn(e) { effects_same_kind(e, eff) }) {
+        if !merged.any(fn(e) { effects_match_kind(e, eff) }) {
             merged.push(eff)
         }
     }
