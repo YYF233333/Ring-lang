@@ -23,6 +23,7 @@
 
 **设计验证（Stabilize 前置，阻塞层 3）**：
 - B-042 Perceus 循环引用策略 [M]（阻塞 B-012）
+- B-068 Borrow-by-default 参数传递模型 [L]（阻塞 B-012 Perceus，与 B-042 并行）
 - ~~B-043 Refinement × Linear × Effects 交互矩阵 [M]~~ ✅ 已完成（2026-05-24）
 - ~~B-044 Ring 语义规范 [M]~~ ✅ 已完成（2026-05-24）
 
@@ -421,23 +422,181 @@ source-map 支持 + 断点调试。
 
 > 非实现任务，而是设计探针。在对应 XL 特性实现前完成，防止特性交互导致事后 breaking change。
 
-### B-042 Perceus RC + 循环引用策略 [design] [P1] [M] [queued]
-Perceus RC 不处理循环引用。Ring 有 OOP 手感（struct + impl + delegate），用户会写循环引用模式（观察者、树 + parent 指针、双向链表、图结构）。需要在 B-012 实现前确定逃逸方案。
+### B-068 Borrow-by-default 参数传递 + 标注等级规范 [design] [P1] [L] [queued]
+Ring 的参数传递模型：borrow-by-default + 编译器推断 move + 逃逸分析（非 lifetime，非 borrow checker）。配套标注等级规范（formatter 自动管理）。
 
-**需要决策的选项**：
-1. Weak reference 语法（`weak T`）— 显式标注，用户负责打断循环
-2. Cycle collector 备选层 — RC 为主 + 可选 tracing GC 回收循环（Python/Swift 方案）
-3. 类型系统禁止循环 — linear types 保证无循环（限制性强，可能影响 OOP 模式）
-4. 混合方案 — 默认禁止 + `@cyclic` 标注允许（编译器自动插入 weak/cycle-collect）
+**已确定决策（2026-05-24）**：
+
+*参数传递模型：*
+- 默认参数 = 只读借用（调用方保留所有权，被调用方不能逃逸）
+- `mut x: T` = 可变借用（已有语义，不变）
+- move 由编译器从函数体推断（参数被返回/存入字段/跨 spawn = move）
+- 逃逸规则：借用值不能返回、不能存入更长生命周期的位置、不能跨 spawn
+- Scoped struct borrow：含借用的结构体遵守相同逃逸约束（Iterator/Parser/Slice 可用）
+- 无 `&T` 语法，无 lifetime 标注
+- COW 退化为 Perceus 内部 clone 优化，不是用户可见语义
+
+*标注等级规范（Git 存 lv2）：*
+- lv0（写时）：零标注，编译器全推断。开发者本地编辑用。
+- lv2（推荐/Git 存储）：完整语义标注。所有标注项均为合法可选语法。
+- `ring fmt` 将 lv0 自动补全为 lv2，幂等确定性。
+
+*lv2 标注内容：*
+
+| 标注项 | lv2 是否标注 | 说明 |
+|--------|:---:|------|
+| return type | ✅ | 函数返回类型 |
+| effect row | ✅ | `with {io, fail<E>}` |
+| move param（声明） | ✅ | `fn f(move x: T)` |
+| mut callsite | ✅ | `f(mut list)` |
+| closure effect | ✅ | 闭包的 effect 签名 |
+| move callsite | ❌ | 不标注（编译器 use-after-move 够用，标了噪音大） |
+| local variable type | ❌ | 不标注（过于繁琐，与 Rust/TS 一致） |
+| borrow param | ❌ | 不标注（默认即 borrow，标了是噪音） |
+| 泛型实例化类型参数 | ❌ | 不标注（`Vec.new()` 不写 `::<Int>`） |
+
+*模块边界标注（pub fn/trait/type）：*
+- return type: 必须有（`ring check` 缺失报 warning）
+- effect row: 必须有（纯函数省略 with = 空 effect）
+- move 参数: 必须有（有 move 推断但无标注 → warning）
+- mut 参数: 必须有（已有）
+- 泛型约束: 必须有（`<T: Ord>`）
+- borrow 参数: 不标注（默认）
+
+*核心设计原则：标注是文档，不是语义。*
+- 编译器永远从函数体推断 convention，标注不改变编译行为
+- 标注一致 = 无事；标注缺失/不一致 = warning（从不 error）
+- lv0 能编译的代码加上任何标注后仍能编译（标注不会让代码变得不可编译）
+- 编译错误只来自逻辑问题（use-after-move, 类型不匹配等），不来自标注
+
+*Formatter 对 pub fn 的处理策略：*
+
+| 源码状态 | `ring fmt` | `ring fmt --force` | `ring check` |
+|---------|-----------|-------------------|-------------|
+| 无标注（新 fn） | 直接补全 | 直接补全 | ⚠ warning "missing" |
+| 标注正确 | 无操作 | 无操作 | ✅ |
+| 标注 ≠ 推断（过期/误写/改了函数体） | 只报 warning，不改 | 更新标注 | ⚠ warning "stale" |
+
+Breaking change 附加提示（不影响编译，只影响 warning 措辞）：
+- borrow → move: ⚠ "breaking: callers' values will be consumed"
+- move → borrow: ℹ "non-breaking: callers retain ownership"
+- effect 新增: ⚠ "breaking: callers need additional effect"
+- effect 减少: ℹ "non-breaking: fewer requirements"
+
+*环境适配：*
+- IDE：clean view 写 lv0，保存/提交时 fmt 补全为 lv2
+- vim/emacs + LSP：inlay hints + 保存时 fmt
+- GitHub 网页端：直接看 lv2（Git 存的就是）
+- 纯文本编辑器：文件中是 lv2，手动 `ring fmt` 补全
+
+**追加决策（2026-05-24 续）**：
+
+*赋值语义：*
+- 值类型（Int/Float/Bool/Char）：赋值 auto copy（零成本 memcpy）
+- 复合类型（List/Map/struct/enum）：赋值 = move。保留需显式 `.clone()`
+
+*Scoped struct borrow 传递性：*
+- 含 borrow 的类型自动标记为"不可存储"，传参时走 borrow 语义
+- 不需要跨函数逃逸分析——类型系统自动处理传染性
+
+*函数类型中的 convention：*
+- `fn(T) -> U`：T 为 borrow（默认，与参数 borrow-default 一致）
+- `fn(move T) -> U`：T 为 move（必须手写——唯一不可推断的 move 标注点）
+- 大多数回调只读，极少需要 `fn(move T)`
+
+*B-068 与 B-002 关系：*
+- 合并实现。Ownership + borrow-by-default 一步到位。
+
+*纯函数 effect 标注：*
+- 省略 `with` = 纯函数。fmt 不给纯函数补 `with {}`。
+- lv2 中纯函数和 lv0 写法相同（无冗余标注）。
+
+*Trait effect 子类型：*
+- Trait 方法声明 = effect 上界（契约）
+- Implementer 的 effect 可以 ⊆ trait 声明（更窄）
+- 泛型调用（`S: Storage`）：编译器用 trait 声明的 effect（保守）
+- 具体类型调用（已知 `MemoryStorage`）：编译器用 impl 的实际 effect（精确）
+- 私有 trait：effect 完全推断（所有 impl 的并集）
+- impl effect 超出 trait 声明 → 编译错误
+
+*类型推断延迟解析：*
+- `let x = []` 允许——类型变量延迟到后续 usage 消歧
+- 函数结束时类型变量仍未确定 → 报错（要求标注）
+- 标准 HM unification 天然支持，无需特殊处理
+
+*Trait 系统设计约束（不支持 overlap/specialization）：*
+- Ring 有意选择简单 trait 系统，换取更强推断能力
+- 支持 blanket impl（`impl<T: A> B for T`），但不允许 overlap
+- 不支持 specialization（blanket impl + 具体类型覆盖）
+- 性能特化由编译器单态化 + Phase E 热路径优化替代
+- Default 覆盖由 trait 默认方法替代（不需要 specialization）
+- Rust 标准库 blanket impl 模式的 Ring 替代方案见 design.md
+
+*泛型约束推断（2026-05-24 修正）：*
+- 所有函数（pub/私有）统一推断泛型约束（类型检查 + lv2 标注）
+- 单态化是 codegen 优化，和类型系统无关
+- 推断算法：方法调用 → 反查提供该方法的 trait → 添加约束
+- 方法名全局唯一时 100% 能推断；方法名冲突 = 语义错误（ambiguous method）
+- 最小约束 = 只含实际调用方法对应的 trait（不做 supertrait 归并）
+- 方法属于具体类型固有方法（非 trait）→ 推断为具体类型参数（非泛型）
+- 不支持函数重载（破坏 HM principal types）
+- 不需要 impl Trait 语法（推断比 impl Trait 更强）
+
+**仍需细化的实现问题**：
+1. 闭包捕获借用的精确语义（同步闭包 OK，逃逸闭包需 move/clone——边界 case 待验证）
+2. `lang.toml` 中 formatter preset 的配置格式
+3. 方法名冲突的具体报错策略（qualified call 语法）
 
 **验证方式**：
-- 列出 5-10 个典型 OOP 模式（观察者、树+parent、双向链表、图邻接、事件系统）
-- 对每个模式验证选定方案是否可写、是否自然
-- 确认方案不与 linear types / effect system 冲突
+- 对照 Rust std top 20 常用函数签名，验证 Ring 等价写法的自然度
+- 对 Iterator/Parser/Slice 三种 "struct 持有引用" 模式验证可写性
+- 确认与 effect system / ownership / Perceus 无冲突
+- 验证 lv2 标注的 diff 噪音水平（实际项目模拟）
 
 **验收标准**：
-- 决策文档写入 design.md（含选定方案 + 否决理由）
-- B-012 Perceus 的 spec 更新为包含循环处理
+- 决策文档写入 design.md（含逃逸规则 + 标注等级定义 + 模块边界规范 + fmt 策略）
+- B-012 Perceus spec 更新（COW 为内部优化，非用户语义）
+- Formatter spec 完成（lv0→lv2 转换规则 + pub fn 三种情况处理）
+
+**前置依赖**：无
+**阻塞**：B-012 Perceus RC、F3 Formatter
+
+### B-042 Perceus RC + 循环引用策略 [design] [P1] [M] [queued]
+
+**已决策（2026-05-24）**：`Weak<T>` 库类型，确定性析构。
+
+**决策内容**：
+- `Weak<T>` 作为标准库类型（非关键字），配合 `Rc.downgrade()` 和 `.upgrade() -> T?`
+- 确定性析构——最后一个强引用 drop 时立即释放，Weak 引用变为 none
+- 不引入 cycle collector（破坏 RAII 确定性析构承诺）
+- 不做类型系统禁止循环（过于限制）
+- 图结构推荐 arena + index 模式（节点存 `List<Node>`，边用 `USize` index）
+
+**否决理由**：
+- Cycle collector：析构不确定，与 Ring 的 Drop/RAII 承诺冲突（Drop 延迟 = 资源泄漏风险）
+- 类型系统禁止循环：GUI/图/观察者全部写不了，限制过强
+- 混合方案：两套机制，复杂度高，收益不明显
+
+**场景覆盖**：
+
+| 场景 | 解法 |
+|------|------|
+| GUI 父子组件 | child 持有 `Weak<Parent>` |
+| 观察者模式 | listener 持有 `Weak<Emitter>` |
+| 双向链表 | prev 用 `Weak<Node>` |
+| 图结构 | arena + index（`List<Node>` + `List<USize>` 邻接表） |
+| 事件系统 | emitter 持有 `Weak<Listener>` |
+
+**涉及修改**：
+1. `std/rc.ring`：新增 `Weak<T>` 类型 + `Rc.downgrade()` + `Weak.upgrade()`
+2. design.md：写入循环引用策略
+3. B-012 Perceus spec：更新为包含 Weak 引用支持
+
+**验收标准**：
+- `Weak<T>` 类型可用，`.upgrade()` 返回 `T?`
+- 强引用归零后 Weak.upgrade() 返回 none
+- 确认与 Drop/RAII 不冲突
+- GUI 父子、观察者模式可写可编译
 
 **前置依赖**：无
 **阻塞**：B-012 Perceus RC
@@ -447,6 +606,30 @@ Perceus RC 不处理循环引用。Ring 有 OOP 手感（struct + impl + delegat
 
 
 ## 语法增强
+
+### B-069 默认参数 [feature] [P2] [M] [queued]
+函数参数支持默认值。调用时可省略有默认值的参数。
+
+```ring
+fn connect(host: Str, port: Int = 8080, timeout: Int = 30) with {io} { ... }
+
+connect("localhost")           // port=8080, timeout=30
+connect("localhost", 3000)     // timeout=30
+```
+
+**设计约束**：
+- 默认值必须是编译期可求值的纯表达式（无 effect）
+- 只能从参数列表末尾开始省略（无命名参数时）
+- 默认值是签名的一部分，lv2 标注展示
+- 与 borrow/move/effect 系统无冲突
+
+**命名参数（待定）**：
+- 配合默认参数可实现"跳过中间参数"：`connect("localhost", timeout = 60)`
+- 参数名成为 API 一部分（改名 = breaking change）
+- 推迟到实现默认参数时重新评估是否需要
+
+**前置依赖**：无
+**复杂度**：M（Parser 扩展 + Checker 参数匹配 + Codegen 展开）
 
 ### B-067 Tuple 类型支持 `?` Option sugar [feature] [P3] [S] [queued]
 `(K, V)?` 应等价于 `Option<(K, V)>`，当前不支持，只能写完整形式。影响 MapIterator 等场景的写作体验。
@@ -532,6 +715,46 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 
 
 
+
+### B-070 固定长度数组 `[T; N]` [feature] [P2] [M] [queued]
+栈分配固定长度数组，值类型语义。密码学、音视频、矩阵运算、协议头等场景必备。
+
+```ring
+let key: [U8; 32] = [0; 32]
+let matrix: [F64; 16] = [0.0; 16]
+
+fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
+    let mut sum: F64 = 0.0
+    let mut i: USize = 0
+    while i < N { sum = sum + a[i] * b[i]; i = i + 1 }
+    sum
+}
+```
+
+**语义**：
+- 栈上分配，内联存储（值类型）
+- 赋值 = memcpy（值语义，零 RC）
+- 越界 panic（和 `List` 一致）
+- `N` 为编译期整数常量（const generic 最简子集）
+- `.to_list() -> List<T>`（拷贝到堆），`List.to_array<N>() -> [T; N]?`
+
+**涉及修改**：
+1. `parser.ring`：类型语法 `[T; expr]` 解析
+2. `types.ring`：新增 `ArrayType { element: Type, length: I64 }`
+3. `infer.ring`：const generic 参数追踪 + 常量求值
+4. `codegen.ring`：JS 后端映射为普通 Array（语义近似）
+5. `codegen_llvm.ring`：LLVM `[N x T]` 数组类型，直接映射
+
+**验收标准**：
+- `[U8; 32]` 类型可声明、初始化、索引
+- `fn f<N>(a: [T; N])` const generic 可推断
+- 越界 panic
+- 值语义（赋值 = 拷贝）
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+**前置依赖**：无
+**复杂度**：M（Parser + Checker const generic + Codegen）
 
 ## 关联类型修复依赖序（audit 建议）
 
