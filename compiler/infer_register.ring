@@ -2,7 +2,7 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     EMPTY_ROW, effects_same_kind}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
-use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
+use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0514}
@@ -301,10 +301,10 @@ fn register_phase3_delegate(mut ctx: InferCtx, decl: Decl) {
                     for b in tp.bounds {
                         if tp_idx < impl_tv_ids.len() {
                             let tv_id = impl_tv_ids.get(tp_idx).unwrap()
-                            impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: b.trait_name })
+                            impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: b.trait_name, assoc_constraints: [] })
                             let supers = collect_all_supertraits(ctx, b.trait_name)
                             for st_name in supers {
-                                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name })
+                                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name, assoc_constraints: [] })
                             }
                         }
                     }
@@ -684,11 +684,11 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
         for b in tp.bounds {
             if tp_idx < impl_tv_ids.len() {
                 let tv_id = impl_tv_ids.get(tp_idx).unwrap()
-                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: b.trait_name })
+                impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: b.trait_name, assoc_constraints: [] })
                 // Expand supertrait bounds
                 let supers = collect_all_supertraits(ctx, b.trait_name)
                 for st_name in supers {
-                    impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name })
+                    impl_scheme_bounds.push(SchemeBound { type_var: tv_id, trait_name: st_name, assoc_constraints: [] })
                 }
             }
         }
@@ -1361,9 +1361,15 @@ fn register_fn_common(
             if track_fn_bounds {
                 fn_bounds_list.push(FnBound { type_param: tp.name, trait_name: b.trait_name })
             }
+            // Build associated type constraint entries from bound's assoc_constraints
+            let mut assoc_entries: List<AssocConstraintEntry> = []
+            for ac in b.assoc_constraints {
+                let concrete_ty = resolve_type_expr(ctx, ac.ty)
+                assoc_entries.push(AssocConstraintEntry { name: ac.name, ty: concrete_ty })
+            }
             match tv {
                 some(t) => match t { Type::TypeVar { id, .. } => {
-                    scheme_bounds.push(SchemeBound { type_var: id, trait_name: b.trait_name })
+                    scheme_bounds.push(SchemeBound { type_var: id, trait_name: b.trait_name, assoc_constraints: assoc_entries })
                 }, _ => {} },
                 none => {}
             }
@@ -1375,7 +1381,7 @@ fn register_fn_common(
                 }
                 match tv {
                     some(t) => match t { Type::TypeVar { id, .. } => {
-                        scheme_bounds.push(SchemeBound { type_var: id, trait_name: st_name })
+                        scheme_bounds.push(SchemeBound { type_var: id, trait_name: st_name, assoc_constraints: [] })
                     }, _ => {} },
                     none => {}
                 }

@@ -6,9 +6,15 @@ use ast::{Span, EffectExpr, TypeParam}
 // Type Scheme (for let-polymorphism)
 // ============================================================
 
+pub struct AssocConstraintEntry {
+    pub name: Str,   // "Item"
+    pub ty: Type     // the constrained concrete type
+}
+
 pub struct SchemeBound {
     pub type_var: Int,
-    pub trait_name: Str
+    pub trait_name: Str,
+    pub assoc_constraints: List<AssocConstraintEntry>
 }
 
 pub struct TypeScheme {

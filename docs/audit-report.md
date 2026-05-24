@@ -9,18 +9,8 @@
 
 ## Checker
 
-### #124 关联类型约束 `<Item = Int>` 调用点不验证（类型不安全） [critical] [open]
 
-`resolve_dicts_from_scheme`（`infer_ctx.ring:559-646`）检查具体类型是否 impl 了 trait，但完全不验证关联类型约束。当函数声明 `fn f<T: Container<Item = Int>>(...)` 时，调用 `f(StrBox{...})`（其中 StrBox 的 `Item = Str`）不产生任何错误，类型检查通过但运行时行为错误。
-
-**已测试确认**：测试文件 `tests/cases/audit_test_assoc_type_constraint.ring` 中 `get_first_int(StrBox{...})` 类型检查通过并输出 "hello"（应为编译错误）。
-
-**文件**：`compiler/infer_ctx.ring:559-646`（`resolve_dicts_from_scheme`）、`compiler/infer_register.ring:1261-1284`（`inject_assoc_types_from_bounds`）
-**修复方向**：在 `resolve_dicts_from_scheme` 中，找到具体类型的 impl entry 后，查询其 `assoc_types` map，与 scheme bounds 中的约束逐一 unify。不匹配时 emit E0301 或新错误码。
-
-发现者：Opus+DS
-
-### #125 Delegate + 关联类型：转发方法返回类型未解析致运行时崩溃 [critical] [open]
+### #125 Delegate + 关联类型：转发方法返回类型未解析致运行时崩溃 [critical] [doing]
 
 `expand_delegate_impls`（`infer_decl.ring:594-842`）合成转发方法时，使用 trait method 定义中的原始类型（含关联类型 type var）。当 trait 有关联类型（如 `type Value`），转发方法的返回类型保留为未解析的 type var，而非从 field 类型的 impl 解析出的具体类型（如 `Int`）。Codegen 对此 type var 生成 UFCS 风格调用（`v.to_str()`），在 JS 原始类型上失败。
 
@@ -75,7 +65,7 @@
 
 发现者：Opus
 
-### #128 Delegate expansion 传递空 `assoc_types` 到 ImplEntry [medium] [open]
+### #128 Delegate expansion 传递空 `assoc_types` 到 ImplEntry [medium] [doing]
 
 `register_delegate_traits`（`infer_register.ring:1057-1061`）和 `expand_delegate_impls`（`infer_decl.ring:826-833`）创建 `ImplEntry` 时始终传 `assoc_types: map_new()` / `assoc_types: []`。若被委托的 trait 有关联类型（如 `Container { type Item }`），生成的 impl entry 无关联类型赋值。通过 `ImplEntry.assoc_types` 解析关联类型的代码（如解析 `Wrapper::Item`）会得到空结果。
 
