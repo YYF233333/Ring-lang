@@ -1099,6 +1099,9 @@ impl Parser {
             self.advance()
             trait_name = some(first_name)
             target_type = self.parse_qualified_ident()
+            // Consume optional type arguments on target type (e.g., ListIterator<T>)
+            // These are redundant since the impl's own type_params bind the variables.
+            self.skip_type_args()
         }
 
         self.expect(TokenKind::TkLBrace)
@@ -2122,6 +2125,23 @@ impl Parser {
             // lowercase segment: could be another mod level, continue if :: follows
         }
         parts.join("::")
+    }
+
+    // ============================================================
+    // Skip type arguments: consume <T, U, ...> if present
+    // Used in impl Trait for Type<T> where <T> on the target type is redundant.
+    // ============================================================
+
+    fn skip_type_args(mut self) {
+        if !self.check(TokenKind::TkLt) { return }
+        self.advance()
+        let mut depth = 1
+        while depth > 0 && !self.at_end() {
+            if self.check(TokenKind::TkLt) { depth = depth + 1 }
+            if self.check(TokenKind::TkGt) { depth = depth - 1 }
+            if depth > 0 { self.advance() }
+        }
+        if self.check(TokenKind::TkGt) { self.advance() }
     }
 
     // ============================================================

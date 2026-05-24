@@ -29,6 +29,29 @@ impl<T> List {
     pub extern fn set(self: List<T>, index: Int, value: T) -> Unit
 }
 
+pub struct ListIterator<T> { pub list: List<T>, pub index: Int }
+
+impl<T> Iterator for ListIterator<T> {
+    type Item = T
+    fn next(mut self) -> T? {
+        if self.index < self.list.len() {
+            let v = self.list.get(self.index)
+            self.index = self.index + 1
+            v
+        } else {
+            none
+        }
+    }
+}
+
+impl<T> Iterable for List<T> {
+    type Item = T
+    type Iter = ListIterator<T>
+    fn iter(self) -> ListIterator<T> {
+        ListIterator { list: self, index: 0 }
+    }
+}
+
 impl<T: Eq> List {
     pub fn contains(self: List<T>, item: T) -> Bool {
         for x in self {

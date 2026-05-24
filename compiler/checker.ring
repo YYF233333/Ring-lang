@@ -20,7 +20,7 @@ pub struct CheckResult {
 }
 
 const STD_FILES: List<Str> =
-    ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"]
+    ["io.ring", "iterator.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"]
 
 fn find_std_dir() -> Str? {
     let candidates = [
@@ -51,10 +51,24 @@ fn load_prelude(mut ctx: InferCtx) -> List<HDecl> {
                     }
                 }
             }
-            // Phase 2: compile enum/struct declarations, non-extern impl methods, and top-level functions
+            // Phase 2: compile struct/enum/trait declarations, non-extern impl methods, and top-level functions
             for decl in all_prelude_decls {
                 match decl {
+                    Decl::Struct { .. } => {
+                        let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
+                        match result {
+                            some(hd) => { prelude_hdecls.push(hd) },
+                            none => {}
+                        }
+                    },
                     Decl::Enum { .. } => {
+                        let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
+                        match result {
+                            some(hd) => { prelude_hdecls.push(hd) },
+                            none => {}
+                        }
+                    },
+                    Decl::Trait { .. } => {
                         let result = some(check_prelude_decl(ctx, decl)) catch { _ => none }
                         match result {
                             some(hd) => { prelude_hdecls.push(hd) },

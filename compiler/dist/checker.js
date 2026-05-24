@@ -10,9 +10,11 @@ import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_
 import { register_decl_public as infer_register$register_decl_public, insert_mod_aliases as infer_register$insert_mod_aliases, prefix_decl_name as infer_register$prefix_decl_name, register_decls_two_phase as infer_register$register_decls_two_phase, collect_all_supertraits as infer_register$collect_all_supertraits, resolve_effect_expr as infer_register$resolve_effect_expr, resolve_declared_effects as infer_register$resolve_declared_effects, inject_assoc_types_from_bounds as infer_register$inject_assoc_types_from_bounds } from "./infer_register.js";
 import { extract_exports as exports$extract_exports, ModuleExports as exports$ModuleExports, TypeDef_StructDef_ as exports$TypeDef_StructDef_, TypeDef_EnumDef_ as exports$TypeDef_EnumDef_ } from "./exports.js";
 import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0409 as codes$E0409, E0410 as codes$E0410, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, error_description as codes$error_description, error_category as codes$error_category } from "./codes.js";
-import { PREC_NONE as parser$PREC_NONE, PREC_CATCH as parser$PREC_CATCH, PREC_LOGIC_OR as parser$PREC_LOGIC_OR, PREC_LOGIC_AND as parser$PREC_LOGIC_AND, PREC_EQUALITY as parser$PREC_EQUALITY, PREC_COMPARE as parser$PREC_COMPARE, PREC_RANGE as parser$PREC_RANGE, PREC_ADD_SUB as parser$PREC_ADD_SUB, PREC_MUL_DIV as parser$PREC_MUL_DIV, PREC_UNARY as parser$PREC_UNARY, PREC_POSTFIX as parser$PREC_POSTFIX, infix_precedence as parser$infix_precedence, type_expr_span as parser$type_expr_span, expr_span as parser$expr_span, pattern_span as parser$pattern_span, new_parser as parser$new_parser, parse as parser$parse, Parser as parser$Parser, __Parser_Clone as parser$__Parser_Clone, __Parser_Debug as parser$__Parser_Debug, Parser_peek as parser$Parser_peek, Parser_peek_at as parser$Parser_peek_at, Parser_advance as parser$Parser_advance, Parser_check as parser$Parser_check, Parser_try_consume as parser$Parser_try_consume, Parser_expect as parser$Parser_expect, Parser_at_end as parser$Parser_at_end, Parser_current_span_start as parser$Parser_current_span_start, Parser_make_span as parser$Parser_make_span, Parser_report_error as parser$Parser_report_error, Parser_error as parser$Parser_error, Parser_parse_program as parser$Parser_parse_program, Parser_parse_stmt as parser$Parser_parse_stmt, Parser_parse_while_stmt as parser$Parser_parse_while_stmt, Parser_parse_loop_stmt as parser$Parser_parse_loop_stmt, Parser_parse_for_in_stmt as parser$Parser_parse_for_in_stmt, Parser_parse_break_stmt as parser$Parser_parse_break_stmt, Parser_parse_continue_stmt as parser$Parser_parse_continue_stmt, Parser_parse_if_let_stmt as parser$Parser_parse_if_let_stmt, Parser_parse_binding_stmt as parser$Parser_parse_binding_stmt, Parser_parse_binding_body as parser$Parser_parse_binding_body, Parser_parse_return_stmt as parser$Parser_parse_return_stmt, Parser_parse_block_expr as parser$Parser_parse_block_expr, Parser_parse_use_decl as parser$Parser_parse_use_decl, Parser_parse_mod_block as parser$Parser_parse_mod_block, Parser_parse_decl as parser$Parser_parse_decl, Parser_parse_effect_list as parser$Parser_parse_effect_list, Parser_parse_effect_annotation as parser$Parser_parse_effect_annotation, Parser_parse_fn_decl as parser$Parser_parse_fn_decl, Parser_parse_const_decl as parser$Parser_parse_const_decl, Parser_parse_sig_block as parser$Parser_parse_sig_block, Parser_parse_extern_decl as parser$Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body as parser$Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body as parser$Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl as parser$Parser_parse_type_alias_decl, Parser_parse_struct_decl as parser$Parser_parse_struct_decl, Parser_parse_enum_decl as parser$Parser_parse_enum_decl, Parser_parse_impl_decl as parser$Parser_parse_impl_decl, Parser_parse_effect_alias_decl as parser$Parser_parse_effect_alias_decl, Parser_parse_effect_decl as parser$Parser_parse_effect_decl, Parser_parse_test_decl as parser$Parser_parse_test_decl, Parser_parse_assoc_type_decl as parser$Parser_parse_assoc_type_decl, Parser_parse_trait_decl as parser$Parser_parse_trait_decl, Parser_parse_expr as parser$Parser_parse_expr, Parser_parse_expr_no_struct as parser$Parser_parse_expr_no_struct, Parser_parse_expr_bp as parser$Parser_parse_expr_bp, Parser_parse_prefix as parser$Parser_parse_prefix, Parser_parse_dot_expr as parser$Parser_parse_dot_expr, Parser_parse_index_expr as parser$Parser_parse_index_expr, Parser_parse_call_expr as parser$Parser_parse_call_expr, Parser_parse_arg_list as parser$Parser_parse_arg_list, Parser_parse_catch_expr as parser$Parser_parse_catch_expr, Parser_parse_string_interp as parser$Parser_parse_string_interp, Parser_parse_if_expr as parser$Parser_parse_if_expr, Parser_parse_match_expr as parser$Parser_parse_match_expr, Parser_parse_match_arm as parser$Parser_parse_match_arm, Parser_parse_pattern as parser$Parser_parse_pattern, Parser_parse_handle_expr as parser$Parser_parse_handle_expr, Parser_parse_effect_handler as parser$Parser_parse_effect_handler, Parser_parse_lambda_expr as parser$Parser_parse_lambda_expr, Parser_parse_struct_literal as parser$Parser_parse_struct_literal, Parser_try_parse_type_args as parser$Parser_try_parse_type_args, Parser_parse_type_expr as parser$Parser_parse_type_expr, Parser_parse_record_type_expr as parser$Parser_parse_record_type_expr, Parser_parse_qualified_ident as parser$Parser_parse_qualified_ident, Parser_parse_type_params as parser$Parser_parse_type_params, Parser_parse_type_bound as parser$Parser_parse_type_bound, Parser_parse_params as parser$Parser_parse_params, Parser_parse_param as parser$Parser_parse_param } from "./parser.js";
+import { PREC_NONE as parser$PREC_NONE, PREC_CATCH as parser$PREC_CATCH, PREC_LOGIC_OR as parser$PREC_LOGIC_OR, PREC_LOGIC_AND as parser$PREC_LOGIC_AND, PREC_EQUALITY as parser$PREC_EQUALITY, PREC_COMPARE as parser$PREC_COMPARE, PREC_RANGE as parser$PREC_RANGE, PREC_ADD_SUB as parser$PREC_ADD_SUB, PREC_MUL_DIV as parser$PREC_MUL_DIV, PREC_UNARY as parser$PREC_UNARY, PREC_POSTFIX as parser$PREC_POSTFIX, infix_precedence as parser$infix_precedence, type_expr_span as parser$type_expr_span, expr_span as parser$expr_span, pattern_span as parser$pattern_span, new_parser as parser$new_parser, parse as parser$parse, Parser as parser$Parser, __Parser_Clone as parser$__Parser_Clone, __Parser_Debug as parser$__Parser_Debug, Parser_peek as parser$Parser_peek, Parser_peek_at as parser$Parser_peek_at, Parser_advance as parser$Parser_advance, Parser_check as parser$Parser_check, Parser_try_consume as parser$Parser_try_consume, Parser_expect as parser$Parser_expect, Parser_at_end as parser$Parser_at_end, Parser_current_span_start as parser$Parser_current_span_start, Parser_make_span as parser$Parser_make_span, Parser_report_error as parser$Parser_report_error, Parser_error as parser$Parser_error, Parser_parse_program as parser$Parser_parse_program, Parser_parse_stmt as parser$Parser_parse_stmt, Parser_parse_while_stmt as parser$Parser_parse_while_stmt, Parser_parse_loop_stmt as parser$Parser_parse_loop_stmt, Parser_parse_for_in_stmt as parser$Parser_parse_for_in_stmt, Parser_parse_break_stmt as parser$Parser_parse_break_stmt, Parser_parse_continue_stmt as parser$Parser_parse_continue_stmt, Parser_parse_if_let_stmt as parser$Parser_parse_if_let_stmt, Parser_parse_binding_stmt as parser$Parser_parse_binding_stmt, Parser_parse_binding_body as parser$Parser_parse_binding_body, Parser_parse_return_stmt as parser$Parser_parse_return_stmt, Parser_parse_block_expr as parser$Parser_parse_block_expr, Parser_parse_use_decl as parser$Parser_parse_use_decl, Parser_parse_mod_block as parser$Parser_parse_mod_block, Parser_parse_decl as parser$Parser_parse_decl, Parser_parse_effect_list as parser$Parser_parse_effect_list, Parser_parse_effect_annotation as parser$Parser_parse_effect_annotation, Parser_parse_fn_decl as parser$Parser_parse_fn_decl, Parser_parse_const_decl as parser$Parser_parse_const_decl, Parser_parse_sig_block as parser$Parser_parse_sig_block, Parser_parse_extern_decl as parser$Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body as parser$Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body as parser$Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl as parser$Parser_parse_type_alias_decl, Parser_parse_struct_decl as parser$Parser_parse_struct_decl, Parser_parse_enum_decl as parser$Parser_parse_enum_decl, Parser_parse_impl_decl as parser$Parser_parse_impl_decl, Parser_parse_effect_alias_decl as parser$Parser_parse_effect_alias_decl, Parser_parse_effect_decl as parser$Parser_parse_effect_decl, Parser_parse_test_decl as parser$Parser_parse_test_decl, Parser_parse_assoc_type_decl as parser$Parser_parse_assoc_type_decl, Parser_parse_trait_decl as parser$Parser_parse_trait_decl, Parser_parse_expr as parser$Parser_parse_expr, Parser_parse_expr_no_struct as parser$Parser_parse_expr_no_struct, Parser_parse_expr_bp as parser$Parser_parse_expr_bp, Parser_parse_prefix as parser$Parser_parse_prefix, Parser_parse_dot_expr as parser$Parser_parse_dot_expr, Parser_parse_index_expr as parser$Parser_parse_index_expr, Parser_parse_call_expr as parser$Parser_parse_call_expr, Parser_parse_arg_list as parser$Parser_parse_arg_list, Parser_parse_catch_expr as parser$Parser_parse_catch_expr, Parser_parse_string_interp as parser$Parser_parse_string_interp, Parser_parse_if_expr as parser$Parser_parse_if_expr, Parser_parse_match_expr as parser$Parser_parse_match_expr, Parser_parse_match_arm as parser$Parser_parse_match_arm, Parser_parse_pattern as parser$Parser_parse_pattern, Parser_parse_handle_expr as parser$Parser_parse_handle_expr, Parser_parse_effect_handler as parser$Parser_parse_effect_handler, Parser_parse_lambda_expr as parser$Parser_parse_lambda_expr, Parser_parse_struct_literal as parser$Parser_parse_struct_literal, Parser_try_parse_type_args as parser$Parser_try_parse_type_args, Parser_parse_type_expr as parser$Parser_parse_type_expr, Parser_parse_record_type_expr as parser$Parser_parse_record_type_expr, Parser_parse_qualified_ident as parser$Parser_parse_qualified_ident, Parser_skip_type_args as parser$Parser_skip_type_args, Parser_parse_type_params as parser$Parser_parse_type_params, Parser_parse_type_bound as parser$Parser_parse_type_bound, Parser_parse_params as parser$Parser_parse_params, Parser_parse_param as parser$Parser_parse_param } from "./parser.js";
 import { new_union_find as union_find$new_union_find, uf_find as union_find$uf_find, uf_bind as union_find$uf_bind, uf_lookup as union_find$uf_lookup, uf_union as union_find$uf_union, uf_insert as union_find$uf_insert, UnionFind as union_find$UnionFind } from "./union_find.js";
 import { empty_subst as unify$empty_subst, occurs_in as unify$occurs_in, unify_effect_params as unify$unify_effect_params, unify_effect_rows as unify$unify_effect_rows, unify as unify$unify, UnificationError as unify$UnificationError, __UnificationError_Eq as unify$__UnificationError_Eq, __UnificationError_Clone as unify$__UnificationError_Clone, __UnificationError_Ord as unify$__UnificationError_Ord, __UnificationError_Debug as unify$__UnificationError_Debug } from "./unify.js";
+
+
 
 function List_first(self) {
   if (List_is_empty(self)) {
@@ -30,8 +32,35 @@ function List_is_empty(self) {
   return (List_len(self) === 0);
 }
 
+class ListIterator {
+  constructor(list, index) {
+    this.list = list;
+    this.index = index;
+  }
+}
+
+function __ListIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.list))) {
+    const v = List_get(self.list, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __ListIterator_Iterator = { next: __ListIterator_Iterator_next };
+
+function __List_Iterable_iter(self) {
+  return new ListIterator(self, 0);
+}
+const __List_Iterable = { iter: __List_Iterable_iter };
+
 function List_contains(self, item, __ring_T_Eq) {
-  for (const x of self) {
+  const __ring_iter_0 = __List_Iterable.iter(self);
+  while (true) {
+    const __ring_next_0 = __ListIterator_Iterator.next(__ring_iter_0);
+    if (__ring_next_0._tag === "none") break;
+    const x = __ring_next_0._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -60,9 +89,55 @@ function List_index_of(self, item, __ring_T_Eq) {
   return Option_none;
 }
 
+class MapIterator {
+  constructor(entries, index) {
+    this.entries = entries;
+    this.index = index;
+  }
+}
+
+function __MapIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.entries))) {
+    const v = List_get(self.entries, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __MapIterator_Iterator = { next: __MapIterator_Iterator_next };
+
+function ___Map_Iterable_iter(self) {
+  return new MapIterator(_Map_entries(self), 0);
+}
+const ___Map_Iterable = { iter: ___Map_Iterable_iter };
+
 function _Map_is_empty(self) {
   return (_Map_len(self) === 0);
 }
+
+class SetIterator {
+  constructor(items, index) {
+    this.items = items;
+    this.index = index;
+  }
+}
+
+function __SetIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.items))) {
+    const v = List_get(self.items, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __SetIterator_Iterator = { next: __SetIterator_Iterator_next };
+
+function ___Set_Iterable_iter(self) {
+  return new SetIterator(_Set_to_list(self), 0);
+}
+const ___Set_Iterable = { iter: ___Set_Iterable_iter };
 
 function _Set_is_empty(self) {
   return (_Set_len(self) === 0);
@@ -70,7 +145,11 @@ function _Set_is_empty(self) {
 
 function _Set_contains(self, item, __ring_T_Eq) {
   const items = _Set_to_list(self);
-  for (const x of items) {
+  const __ring_iter_1 = __List_Iterable.iter(items);
+  while (true) {
+    const __ring_next_1 = __ListIterator_Iterator.next(__ring_iter_1);
+    if (__ring_next_1._tag === "none") break;
+    const x = __ring_next_1._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -176,11 +255,15 @@ class CheckResult {
   }
 }
 
-const STD_FILES = ["io.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"];
+const STD_FILES = ["io.ring", "iterator.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"];
 
 function find_std_dir() {
   const candidates = [path_resolve(path_join(path_dirname(path_resolve(".")), "std")), path_resolve("std")];
-  for (const dir of candidates) {
+  const __ring_iter_2 = __List_Iterable.iter(candidates);
+  while (true) {
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const dir = __ring_next_2._0;
     if (file_exists(dir)) {
       return Option_some(dir);
     }
@@ -195,22 +278,34 @@ function load_prelude(ctx) {
     if (__ring_m6._tag === "some") {
       const std_dir = __ring_m6._0;
       let all_prelude_decls = [];
-      for (const file of STD_FILES) {
+      const __ring_iter_3 = __List_Iterable.iter(STD_FILES);
+      while (true) {
+        const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+        if (__ring_next_3._tag === "none") break;
+        const file = __ring_next_3._0;
         const file_path = path_join(std_dir, file);
         if (file_exists(file_path)) {
           const source = read_file(file_path);
           const prelude_sink = diagnostics$new_collecting_sink();
           const ast = parser$parse(source, file_path, prelude_sink);
-          for (const decl of ast.decls) {
+          const __ring_iter_4 = __List_Iterable.iter(ast.decls);
+          while (true) {
+            const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+            if (__ring_next_4._tag === "none") break;
+            const decl = __ring_next_4._0;
             infer_register$register_decl_public(ctx, decl);
             List_push(all_prelude_decls, decl);
           }
         }
       }
-      for (const decl of all_prelude_decls) {
+      const __ring_iter_5 = __List_Iterable.iter(all_prelude_decls);
+      while (true) {
+        const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+        if (__ring_next_5._tag === "none") break;
+        const decl = __ring_next_5._0;
         __ring_match7: {
           const __ring_m7 = decl;
-          if (__ring_m7._tag === "Enum") {
+          if (__ring_m7._tag === "Struct") {
             const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
             __ring_match8: {
               const __ring_m8 = result;
@@ -226,50 +321,86 @@ function load_prelude(ctx) {
             }
             break __ring_match7;
           }
+          if (__ring_m7._tag === "Enum") {
+            const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
+            __ring_match9: {
+              const __ring_m9 = result;
+              if (__ring_m9._tag === "some") {
+                const hd = __ring_m9._0;
+                List_push(prelude_hdecls, hd);
+                break __ring_match9;
+              }
+              if (__ring_m9._tag === "none") {
+                break __ring_match9;
+              }
+              __match_fail(__ring_m9);
+            }
+            break __ring_match7;
+          }
+          if (__ring_m7._tag === "Trait") {
+            const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
+            __ring_match10: {
+              const __ring_m10 = result;
+              if (__ring_m10._tag === "some") {
+                const hd = __ring_m10._0;
+                List_push(prelude_hdecls, hd);
+                break __ring_match10;
+              }
+              if (__ring_m10._tag === "none") {
+                break __ring_match10;
+              }
+              __match_fail(__ring_m10);
+            }
+            break __ring_match7;
+          }
           if (__ring_m7._tag === "Impl") {
             const target_type = __ring_m7.target_type; const type_params = __ring_m7.type_params; const trait_name = __ring_m7.trait_name; const methods = __ring_m7.methods; const span = __ring_m7.span;
             let fn_methods = [];
-            for (const m of methods) {
-              __ring_match9: {
-                const __ring_m9 = m;
-                if (__ring_m9._tag === "Fn") {
+            const __ring_iter_6 = __List_Iterable.iter(methods);
+            while (true) {
+              const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+              if (__ring_next_6._tag === "none") break;
+              const m = __ring_next_6._0;
+              __ring_match11: {
+                const __ring_m11 = m;
+                if (__ring_m11._tag === "Fn") {
                   List_push(fn_methods, m);
-                  break __ring_match9;
+                  break __ring_match11;
                 }
-                break __ring_match9;
+                break __ring_match11;
               }
             }
             if ((List_len(fn_methods) > 0)) {
               const filtered_decl = ast$Decl_Impl(target_type, type_params, trait_name, fn_methods, span);
               const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, filtered_decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-              __ring_match10: {
-                const __ring_m10 = result;
-                if (__ring_m10._tag === "some") {
-                  const hd = __ring_m10._0;
+              __ring_match12: {
+                const __ring_m12 = result;
+                if (__ring_m12._tag === "some") {
+                  const hd = __ring_m12._0;
                   List_push(prelude_hdecls, hd);
-                  break __ring_match10;
+                  break __ring_match12;
                 }
-                if (__ring_m10._tag === "none") {
-                  break __ring_match10;
+                if (__ring_m12._tag === "none") {
+                  break __ring_match12;
                 }
-                __match_fail(__ring_m10);
+                __match_fail(__ring_m12);
               }
             }
             break __ring_match7;
           }
           if (__ring_m7._tag === "Fn") {
             const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(infer_decl$check_prelude_decl(ctx, decl, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-            __ring_match11: {
-              const __ring_m11 = result;
-              if (__ring_m11._tag === "some") {
-                const hd = __ring_m11._0;
+            __ring_match13: {
+              const __ring_m13 = result;
+              if (__ring_m13._tag === "some") {
+                const hd = __ring_m13._0;
                 List_push(prelude_hdecls, hd);
-                break __ring_match11;
+                break __ring_match13;
               }
-              if (__ring_m11._tag === "none") {
-                break __ring_match11;
+              if (__ring_m13._tag === "none") {
+                break __ring_match13;
               }
-              __match_fail(__ring_m11);
+              __match_fail(__ring_m13);
             }
             break __ring_match7;
           }
@@ -298,7 +429,11 @@ function check(program, sink) {
   const prelude_hdecls = load_prelude(ctx);
   const hprogram = infer_decl$check(ctx, program);
   let all_decls = list_clone(prelude_hdecls);
-  for (const d of hprogram.decls) {
+  const __ring_iter_7 = __List_Iterable.iter(hprogram.decls);
+  while (true) {
+    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+    if (__ring_next_7._tag === "none") break;
+    const d = __ring_next_7._0;
     List_push(all_decls, d);
   }
   return new CheckResult(new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars), ctx.env, ctx.fn_mut_params);
@@ -311,105 +446,161 @@ function check_module(program, module_exports, sink) {
   resolve_uses(ctx, program.uses, module_exports);
   const hprogram = infer_decl$check(ctx, program);
   let all_decls = list_clone(prelude_hdecls);
-  for (const d of hprogram.decls) {
+  const __ring_iter_8 = __List_Iterable.iter(hprogram.decls);
+  while (true) {
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const d = __ring_next_8._0;
     List_push(all_decls, d);
   }
   return new CheckResult(new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars), ctx.env, ctx.fn_mut_params);
 }
 
 function inject_module_exports(ctx, exports) {
-  for (const mod_ of exports) {
-    for (const entry of _Map_entries(mod_.types)) {
+  const __ring_iter_9 = __List_Iterable.iter(exports);
+  while (true) {
+    const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+    if (__ring_next_9._tag === "none") break;
+    const mod_ = __ring_next_9._0;
+    const __ring_iter_10 = __List_Iterable.iter(_Map_entries(mod_.types));
+    while (true) {
+      const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+      if (__ring_next_10._tag === "none") break;
+      const entry = __ring_next_10._0;
       const __ring_dt0 = entry;
       const name = __ring_dt0[0];
       const def = __ring_dt0[1];
-      __ring_match12: {
-        const __ring_m12 = def;
-        if (__ring_m12._tag === "StructDef_") {
-          const sdef = __ring_m12._0;
-          _Map_insert(ctx.env.types.structs, name, sdef);
-          break __ring_match12;
-        }
-        if (__ring_m12._tag === "EnumDef_") {
-          const edef = __ring_m12._0;
-          _Map_insert(ctx.env.types.enums, name, edef);
-          for (const v of edef.variants) {
-            _Map_insert(ctx.env.types.variant_to_enum, v.name, name);
-          }
-          break __ring_match12;
-        }
-        __match_fail(__ring_m12);
-      }
-    }
-    for (const entry of _Map_entries(mod_.effects)) {
-      const __ring_dt1 = entry;
-      const name = __ring_dt1[0];
-      const effdef = __ring_dt1[1];
-      _Map_insert(ctx.env.types.effects, name, effdef);
-    }
-    for (const entry of _Map_entries(mod_.effect_aliases)) {
-      const __ring_dt2 = entry;
-      const name = __ring_dt2[0];
-      const adef = __ring_dt2[1];
-      _Map_insert(ctx.env.types.effect_aliases, name, adef);
-    }
-    for (const entry of _Map_entries(mod_.traits)) {
-      const __ring_dt3 = entry;
-      const name = __ring_dt3[0];
-      const tdef = __ring_dt3[1];
-      _Map_insert(ctx.env.trait_reg.traits, name, tdef);
-    }
-    for (const impl_ of mod_.trait_impls) {
-      env$add_impl(ctx.env.trait_reg, impl_);
-    }
-    for (const entry of _Map_entries(mod_.impl_methods)) {
-      const __ring_dt4 = entry;
-      const type_name = __ring_dt4[0];
-      const methods = __ring_dt4[1];
-      __ring_match13: {
-        const __ring_m13 = _Map_get(ctx.env.trait_reg.impl_methods, type_name);
-        if (__ring_m13._tag === "some") {
-          const existing = __ring_m13._0;
-          for (const mentry of _Map_entries(methods)) {
-            const __ring_dt5 = mentry;
-            const method_name = __ring_dt5[0];
-            const scheme = __ring_dt5[1];
-            _Map_insert(existing, method_name, scheme);
-          }
-          break __ring_match13;
-        }
-        if (__ring_m13._tag === "none") {
-          _Map_insert(ctx.env.trait_reg.impl_methods, type_name, map_clone(methods));
-          break __ring_match13;
-        }
-        __match_fail(__ring_m13);
-      }
-    }
-    for (const entry of _Map_entries(mod_.mut_methods)) {
-      const __ring_dt6 = entry;
-      const type_name = __ring_dt6[0];
-      const method_set = __ring_dt6[1];
       __ring_match14: {
-        const __ring_m14 = _Map_get(ctx.env.trait_reg.mut_methods, type_name);
-        if (__ring_m14._tag === "some") {
-          const existing = __ring_m14._0;
-          for (const m of _Set_to_list(method_set)) {
-            _Set_insert(existing, m);
-          }
+        const __ring_m14 = def;
+        if (__ring_m14._tag === "StructDef_") {
+          const sdef = __ring_m14._0;
+          _Map_insert(ctx.env.types.structs, name, sdef);
           break __ring_match14;
         }
-        if (__ring_m14._tag === "none") {
-          let new_set = set_new();
-          for (const m of _Set_to_list(method_set)) {
-            _Set_insert(new_set, m);
+        if (__ring_m14._tag === "EnumDef_") {
+          const edef = __ring_m14._0;
+          _Map_insert(ctx.env.types.enums, name, edef);
+          const __ring_iter_11 = __List_Iterable.iter(edef.variants);
+          while (true) {
+            const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+            if (__ring_next_11._tag === "none") break;
+            const v = __ring_next_11._0;
+            _Map_insert(ctx.env.types.variant_to_enum, v.name, name);
           }
-          _Map_insert(ctx.env.trait_reg.mut_methods, type_name, new_set);
           break __ring_match14;
         }
         __match_fail(__ring_m14);
       }
     }
-    for (const entry of _Map_entries(mod_.fn_mut_params)) {
+    const __ring_iter_12 = __List_Iterable.iter(_Map_entries(mod_.effects));
+    while (true) {
+      const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+      if (__ring_next_12._tag === "none") break;
+      const entry = __ring_next_12._0;
+      const __ring_dt1 = entry;
+      const name = __ring_dt1[0];
+      const effdef = __ring_dt1[1];
+      _Map_insert(ctx.env.types.effects, name, effdef);
+    }
+    const __ring_iter_13 = __List_Iterable.iter(_Map_entries(mod_.effect_aliases));
+    while (true) {
+      const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+      if (__ring_next_13._tag === "none") break;
+      const entry = __ring_next_13._0;
+      const __ring_dt2 = entry;
+      const name = __ring_dt2[0];
+      const adef = __ring_dt2[1];
+      _Map_insert(ctx.env.types.effect_aliases, name, adef);
+    }
+    const __ring_iter_14 = __List_Iterable.iter(_Map_entries(mod_.traits));
+    while (true) {
+      const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+      if (__ring_next_14._tag === "none") break;
+      const entry = __ring_next_14._0;
+      const __ring_dt3 = entry;
+      const name = __ring_dt3[0];
+      const tdef = __ring_dt3[1];
+      _Map_insert(ctx.env.trait_reg.traits, name, tdef);
+    }
+    const __ring_iter_15 = __List_Iterable.iter(mod_.trait_impls);
+    while (true) {
+      const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+      if (__ring_next_15._tag === "none") break;
+      const impl_ = __ring_next_15._0;
+      env$add_impl(ctx.env.trait_reg, impl_);
+    }
+    const __ring_iter_16 = __List_Iterable.iter(_Map_entries(mod_.impl_methods));
+    while (true) {
+      const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+      if (__ring_next_16._tag === "none") break;
+      const entry = __ring_next_16._0;
+      const __ring_dt4 = entry;
+      const type_name = __ring_dt4[0];
+      const methods = __ring_dt4[1];
+      __ring_match15: {
+        const __ring_m15 = _Map_get(ctx.env.trait_reg.impl_methods, type_name);
+        if (__ring_m15._tag === "some") {
+          const existing = __ring_m15._0;
+          const __ring_iter_17 = __List_Iterable.iter(_Map_entries(methods));
+          while (true) {
+            const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+            if (__ring_next_17._tag === "none") break;
+            const mentry = __ring_next_17._0;
+            const __ring_dt5 = mentry;
+            const method_name = __ring_dt5[0];
+            const scheme = __ring_dt5[1];
+            _Map_insert(existing, method_name, scheme);
+          }
+          break __ring_match15;
+        }
+        if (__ring_m15._tag === "none") {
+          _Map_insert(ctx.env.trait_reg.impl_methods, type_name, map_clone(methods));
+          break __ring_match15;
+        }
+        __match_fail(__ring_m15);
+      }
+    }
+    const __ring_iter_18 = __List_Iterable.iter(_Map_entries(mod_.mut_methods));
+    while (true) {
+      const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+      if (__ring_next_18._tag === "none") break;
+      const entry = __ring_next_18._0;
+      const __ring_dt6 = entry;
+      const type_name = __ring_dt6[0];
+      const method_set = __ring_dt6[1];
+      __ring_match16: {
+        const __ring_m16 = _Map_get(ctx.env.trait_reg.mut_methods, type_name);
+        if (__ring_m16._tag === "some") {
+          const existing = __ring_m16._0;
+          const __ring_iter_19 = __List_Iterable.iter(_Set_to_list(method_set));
+          while (true) {
+            const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+            if (__ring_next_19._tag === "none") break;
+            const m = __ring_next_19._0;
+            _Set_insert(existing, m);
+          }
+          break __ring_match16;
+        }
+        if (__ring_m16._tag === "none") {
+          let new_set = set_new();
+          const __ring_iter_20 = __List_Iterable.iter(_Set_to_list(method_set));
+          while (true) {
+            const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+            if (__ring_next_20._tag === "none") break;
+            const m = __ring_next_20._0;
+            _Set_insert(new_set, m);
+          }
+          _Map_insert(ctx.env.trait_reg.mut_methods, type_name, new_set);
+          break __ring_match16;
+        }
+        __match_fail(__ring_m16);
+      }
+    }
+    const __ring_iter_21 = __List_Iterable.iter(_Map_entries(mod_.fn_mut_params));
+    while (true) {
+      const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+      if (__ring_next_21._tag === "none") break;
+      const entry = __ring_next_21._0;
       const __ring_dt7 = entry;
       const fn_name = __ring_dt7[0];
       const flags = __ring_dt7[1];
@@ -420,10 +611,18 @@ function inject_module_exports(ctx, exports) {
 
 function resolve_uses(ctx, uses, available_modules) {
   let module_map = map_new();
-  for (const mod_ of available_modules) {
+  const __ring_iter_22 = __List_Iterable.iter(available_modules);
+  while (true) {
+    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+    if (__ring_next_22._tag === "none") break;
+    const mod_ = __ring_next_22._0;
     _Map_insert(module_map, mod_.module_key, mod_);
   }
-  for (const use_decl of uses) {
+  const __ring_iter_23 = __List_Iterable.iter(uses);
+  while (true) {
+    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+    if (__ring_next_23._tag === "none") break;
+    const use_decl = __ring_next_23._0;
     const first_seg = Option_unwrap_or(List_get(use_decl.path.segments, 0), "");
     if (((first_seg === "self") || (first_seg === "super"))) {
       const d = diagnostics$make_diag(codes$E0705, diagnostics$Severity_SevError, `Cannot use '${first_seg}::' at file level — relative paths are only supported inside mod blocks`, use_decl.path.span, diagnostics$DiagnosticContext_OtherContext(Option_some("relative path out of scope")));
@@ -431,20 +630,24 @@ function resolve_uses(ctx, uses, available_modules) {
       continue;
     }
     const mod_key = List_join(use_decl.path.segments, "::");
-    __ring_match15: {
-      const __ring_m15 = _Map_get(module_map, mod_key);
-      if (__ring_m15._tag === "none") {
+    __ring_match17: {
+      const __ring_m17 = _Map_get(module_map, mod_key);
+      if (__ring_m17._tag === "none") {
         const d = diagnostics$make_diag(codes$E0702, diagnostics$Severity_SevError, `Module '${mod_key}' not found`, use_decl.path.span, diagnostics$DiagnosticContext_OtherContext(Option_some("module not found")));
         diagnostics$CollectingSink_report(ctx.sink, d);
-        break __ring_match15;
+        break __ring_match17;
       }
-      if (__ring_m15._tag === "some") {
-        const mod_ = __ring_m15._0;
-        __ring_match16: {
-          const __ring_m16 = use_decl.imports;
-          if (__ring_m16._tag === "NamedItems") {
-            const names = __ring_m16.names;
-            for (const item of names) {
+      if (__ring_m17._tag === "some") {
+        const mod_ = __ring_m17._0;
+        __ring_match18: {
+          const __ring_m18 = use_decl.imports;
+          if (__ring_m18._tag === "NamedItems") {
+            const names = __ring_m18.names;
+            const __ring_iter_24 = __List_Iterable.iter(names);
+            while (true) {
+              const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+              if (__ring_next_24._tag === "none") break;
+              const item = __ring_next_24._0;
               const local_name = (function() {
   const __ring_m = item.alias;
   if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
@@ -452,52 +655,56 @@ function resolve_uses(ctx, uses, available_modules) {
   __match_fail(__ring_m);
 })();
               let found = false;
-              __ring_match17: {
-                const __ring_m17 = _Map_get(mod_.values, item.name);
-                if (__ring_m17._tag === "some") {
-                  const scheme = __ring_m17._0;
+              __ring_match19: {
+                const __ring_m19 = _Map_get(mod_.values, item.name);
+                if (__ring_m19._tag === "some") {
+                  const scheme = __ring_m19._0;
                   env$TypeEnv_bind(ctx.env, local_name, scheme);
                   found = true;
-                  break __ring_match17;
+                  break __ring_match19;
                 }
-                if (__ring_m17._tag === "none") {
-                  break __ring_match17;
+                if (__ring_m19._tag === "none") {
+                  break __ring_match19;
                 }
-                __match_fail(__ring_m17);
+                __match_fail(__ring_m19);
               }
-              __ring_match18: {
-                const __ring_m18 = _Map_get(mod_.types, item.name);
-                if (__ring_m18._tag === "some") {
-                  const tdef = __ring_m18._0;
+              __ring_match20: {
+                const __ring_m20 = _Map_get(mod_.types, item.name);
+                if (__ring_m20._tag === "some") {
+                  const tdef = __ring_m20._0;
                   found = true;
-                  __ring_match19: {
-                    const __ring_m19 = tdef;
-                    if (__ring_m19._tag === "EnumDef_") {
-                      const edef = __ring_m19._0;
-                      for (const v of edef.variants) {
-                        __ring_match20: {
-                          const __ring_m20 = _Map_get(mod_.values, v.name);
-                          if (__ring_m20._tag === "some") {
-                            const vscheme = __ring_m20._0;
+                  __ring_match21: {
+                    const __ring_m21 = tdef;
+                    if (__ring_m21._tag === "EnumDef_") {
+                      const edef = __ring_m21._0;
+                      const __ring_iter_25 = __List_Iterable.iter(edef.variants);
+                      while (true) {
+                        const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+                        if (__ring_next_25._tag === "none") break;
+                        const v = __ring_next_25._0;
+                        __ring_match22: {
+                          const __ring_m22 = _Map_get(mod_.values, v.name);
+                          if (__ring_m22._tag === "some") {
+                            const vscheme = __ring_m22._0;
                             env$TypeEnv_bind(ctx.env, v.name, vscheme);
-                            break __ring_match20;
+                            break __ring_match22;
                           }
-                          if (__ring_m20._tag === "none") {
-                            break __ring_match20;
+                          if (__ring_m22._tag === "none") {
+                            break __ring_match22;
                           }
-                          __match_fail(__ring_m20);
+                          __match_fail(__ring_m22);
                         }
                       }
-                      break __ring_match19;
+                      break __ring_match21;
                     }
-                    break __ring_match19;
+                    break __ring_match21;
                   }
-                  break __ring_match18;
+                  break __ring_match20;
                 }
-                if (__ring_m18._tag === "none") {
-                  break __ring_match18;
+                if (__ring_m20._tag === "none") {
+                  break __ring_match20;
                 }
-                __match_fail(__ring_m18);
+                __match_fail(__ring_m20);
               }
               if (_Map_contains_key(mod_.effects, item.name)) {
                 found = true;
@@ -513,48 +720,60 @@ function resolve_uses(ctx, uses, available_modules) {
                 diagnostics$CollectingSink_report(ctx.sink, d);
               }
             }
-            break __ring_match16;
+            break __ring_match18;
           }
-          if (__ring_m16._tag === "Module") {
-            for (const entry of _Map_entries(mod_.values)) {
+          if (__ring_m18._tag === "Module") {
+            const __ring_iter_26 = __List_Iterable.iter(_Map_entries(mod_.values));
+            while (true) {
+              const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+              if (__ring_next_26._tag === "none") break;
+              const entry = __ring_next_26._0;
               const __ring_dt8 = entry;
               const name = __ring_dt8[0];
               const scheme = __ring_dt8[1];
               env$TypeEnv_bind(ctx.env, name, scheme);
             }
-            for (const entry of _Map_entries(mod_.types)) {
+            const __ring_iter_27 = __List_Iterable.iter(_Map_entries(mod_.types));
+            while (true) {
+              const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+              if (__ring_next_27._tag === "none") break;
+              const entry = __ring_next_27._0;
               const __ring_dt9 = entry;
               const tdef = __ring_dt9[1];
-              __ring_match21: {
-                const __ring_m21 = tdef;
-                if (__ring_m21._tag === "EnumDef_") {
-                  const edef = __ring_m21._0;
-                  for (const v of edef.variants) {
-                    __ring_match22: {
-                      const __ring_m22 = _Map_get(mod_.values, v.name);
-                      if (__ring_m22._tag === "some") {
-                        const vscheme = __ring_m22._0;
+              __ring_match23: {
+                const __ring_m23 = tdef;
+                if (__ring_m23._tag === "EnumDef_") {
+                  const edef = __ring_m23._0;
+                  const __ring_iter_28 = __List_Iterable.iter(edef.variants);
+                  while (true) {
+                    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+                    if (__ring_next_28._tag === "none") break;
+                    const v = __ring_next_28._0;
+                    __ring_match24: {
+                      const __ring_m24 = _Map_get(mod_.values, v.name);
+                      if (__ring_m24._tag === "some") {
+                        const vscheme = __ring_m24._0;
                         env$TypeEnv_bind(ctx.env, v.name, vscheme);
-                        break __ring_match22;
+                        break __ring_match24;
                       }
-                      if (__ring_m22._tag === "none") {
-                        break __ring_match22;
+                      if (__ring_m24._tag === "none") {
+                        break __ring_match24;
                       }
-                      __match_fail(__ring_m22);
+                      __match_fail(__ring_m24);
                     }
                   }
-                  break __ring_match21;
+                  break __ring_match23;
                 }
-                break __ring_match21;
+                break __ring_match23;
               }
             }
-            break __ring_match16;
+            break __ring_match18;
           }
-          __match_fail(__ring_m16);
+          __match_fail(__ring_m18);
         }
-        break __ring_match15;
+        break __ring_match17;
       }
-      __match_fail(__ring_m15);
+      __match_fail(__ring_m17);
     }
   }
 }
@@ -573,6 +792,16 @@ function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   }
 }
 const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
+
+function __ListIterator_Clone_clone(self, __ring_T_Clone) {
+  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
+}
+const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
@@ -605,6 +834,16 @@ function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
   }
 }
 const __Result_Ord = { cmp: __Result_Ord_cmp };
+
+function __ListIterator_Debug_debug(self, __ring_T_Debug) {
+  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __StringBuilder_Debug_debug(self) {
   return "StringBuilder";

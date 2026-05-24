@@ -4,6 +4,29 @@ pub extern fn set_new<T>() -> Set<T>
 pub extern fn set_from<T>(items: List<T>) -> Set<T>
 pub extern fn set_clone<T>(s: Set<T>) -> Set<T>
 
+pub struct SetIterator<T> { pub items: List<T>, pub index: Int }
+
+impl<T> Iterator for SetIterator<T> {
+    type Item = T
+    fn next(mut self) -> T? {
+        if self.index < self.items.len() {
+            let v = self.items.get(self.index)
+            self.index = self.index + 1
+            v
+        } else {
+            none
+        }
+    }
+}
+
+impl<T> Iterable for Set<T> {
+    type Item = T
+    type Iter = SetIterator<T>
+    fn iter(self) -> SetIterator<T> {
+        SetIterator { items: self.to_list(), index: 0 }
+    }
+}
+
 impl<T> Set {
     pub extern fn len(self: Set<T>) -> Int
     // contains moved to impl<T: Eq> Set below

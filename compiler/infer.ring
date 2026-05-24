@@ -20,7 +20,7 @@ use codes::{E0201, E0203, E0205, E0206, E0208, E0301, E0303, E0304, E0305, E0306
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
-    BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, lookup_variant}
+    BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl, lookup_variant}
 use unify::{unify, empty_subst}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, merge_effects, unify_at, update_fn_effects,
@@ -361,43 +361,132 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             let iter_type = apply_subst(s, hexpr_type(iter_r.hexpr))
             let is_destructure = destructure.is_some()
             let mut element_type: Type = ctx.env.fresh_var()
-            match iter_type {
-                Type::EnumType { name, type_params, .. } => {
-                    if name == BUILTIN_RANGE && type_params.len() > 0 {
+            let mut iterable_type_name: Str? = none
+            let mut iter_type_name: Str? = none
+            // Check for Range (builtin, keep special path)
+            let is_range = match iter_type {
+                Type::EnumType { name, .. } => name == BUILTIN_RANGE,
+                _ => false
+            }
+            if is_range {
+                match iter_type {
+                    Type::EnumType { type_params, .. } => {
                         element_type = match type_params.first() { some(t) => t, none => INT }
-                    } else {
-                        let _ = type_error(ctx.sink, E0301,
-                            "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
-                            span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
-                    }
-                },
-                Type::StructType { name, type_params, .. } => {
-                    if name == BUILTIN_LIST && type_params.len() > 0 {
-                        element_type = match type_params.first() { some(t) => t, none => element_type }
-                    } else if name == BUILTIN_SET && type_params.len() > 0 {
-                        element_type = match type_params.first() { some(t) => t, none => element_type }
-                    } else if name == BUILTIN_MAP && type_params.len() >= 2 {
-                        if !is_destructure {
-                            let _ = type_error(ctx.sink, E0301,
-                                "Map is not directly iterable with for..in. Use 'for (k, v) in map { ... }' instead.",
-                                span, DiagnosticContext::OtherContext { detail: some("Map requires destructuring: for (k, v) in map") })
-                        }
-                        match (type_params.get(0), type_params.get(1)) {
-                            (some(kt), some(vt)) => {
-                                element_type = Type::TupleType { elements: [kt, vt] }
+                    },
+                    _ => {}
+                }
+            } else {
+                // Look up Iterable trait impl to resolve element type
+                let type_name = type_to_builtin_name(iter_type)
+                match type_name {
+                    some(tn) => {
+                        let iterable_impl = find_impl(ctx.env.trait_reg, tn, "Iterable")
+                        match iterable_impl {
+                            some(impl_entry) => {
+                                iterable_type_name = some(tn)
+                                // Get the Iter associated type from the Iterable impl
+                                match impl_entry.assoc_types.get("Iter") {
+                                    some(iter_assoc_ty) => {
+                                        // Get the concrete iterable type params (e.g., [Int] for List<Int>)
+                                        let concrete_type_params = match iter_type {
+                                            Type::StructType { type_params: tps, .. } => tps,
+                                            Type::EnumType { type_params: tps, .. } => tps,
+                                            _ => []
+                                        }
+                                        // Extract the iterator type name from the assoc type
+                                        let concrete_iter_name = type_to_builtin_name(iter_assoc_ty)
+                                        match concrete_iter_name {
+                                            some(itn) => {
+                                                iter_type_name = some(itn)
+                                                // Build the concrete iterator type by using iterable's type params
+                                                // For impl<T> Iterable for List<T>, Iter = ListIterator<T>
+                                                // The T in ListIterator<T> maps positionally to T in List<T>
+                                                // So ListIterator gets the same concrete type params as List
+                                                let concrete_iter_type = Type::StructType { name: itn, type_params: concrete_type_params, fields: [] }
+                                                // Look up Iterator impl for the iterator type
+                                                let iterator_impl = find_impl(ctx.env.trait_reg, itn, "Iterator")
+                                                match iterator_impl {
+                                                    some(iter_impl_entry) => {
+                                                        // Get the Item associated type from Iterator impl
+                                                        match iter_impl_entry.assoc_types.get("Item") {
+                                                            some(item_assoc_ty) => {
+                                                                // Build the concrete element type
+                                                                // For simple cases (Item = T), use position-based mapping
+                                                                // The item_assoc_ty contains TypeVars from the impl registration
+                                                                // We substitute them using the concrete iterator type params
+                                                                let item_name = type_to_builtin_name(item_assoc_ty)
+                                                                match item_assoc_ty {
+                                                                    Type::TypeVar { .. } => {
+                                                                        // Item = T (single type var) — map to first concrete type param
+                                                                        element_type = match concrete_type_params.first() {
+                                                                            some(ct) => ct,
+                                                                            none => element_type
+                                                                        }
+                                                                    },
+                                                                    Type::TupleType { elements } => {
+                                                                        // Item = (K, V) — map TypeVars positionally to concrete type params
+                                                                        let mut concrete_elems: List<Type> = []
+                                                                        let mut ei = 0
+                                                                        for elem in elements {
+                                                                            match elem {
+                                                                                Type::TypeVar { .. } => {
+                                                                                    match concrete_type_params.get(ei) {
+                                                                                        some(ct) => { concrete_elems.push(ct) },
+                                                                                        none => { concrete_elems.push(elem) }
+                                                                                    }
+                                                                                    ei = ei + 1
+                                                                                },
+                                                                                _ => { concrete_elems.push(elem) }
+                                                                            }
+                                                                        }
+                                                                        element_type = Type::TupleType { elements: concrete_elems }
+                                                                    },
+                                                                    _ => {
+                                                                        // Other types (struct, etc.) — use as-is
+                                                                        element_type = item_assoc_ty
+                                                                    }
+                                                                }
+                                                            },
+                                                            none => {
+                                                                let _ = type_error(ctx.sink, E0301,
+                                                                    "Iterator impl for '${itn}' missing associated type 'Item'",
+                                                                    span, DiagnosticContext::OtherContext { detail: some("Iterator impl must define type Item") })
+                                                            }
+                                                        }
+                                                    },
+                                                    none => {
+                                                        let _ = type_error(ctx.sink, E0301,
+                                                            "Type '${itn}' (Iter of '${tn}') does not implement Iterator",
+                                                            span, DiagnosticContext::OtherContext { detail: some("Iter associated type must implement Iterator") })
+                                                    }
+                                                }
+                                            },
+                                            none => {
+                                                let _ = type_error(ctx.sink, E0301,
+                                                    "Cannot resolve iterator type for '${tn}'",
+                                                    span, DiagnosticContext::OtherContext { detail: some("Iter associated type could not be resolved") })
+                                            }
+                                        }
+                                    },
+                                    none => {
+                                        let _ = type_error(ctx.sink, E0301,
+                                            "Iterable impl for '${tn}' missing associated type 'Iter'",
+                                            span, DiagnosticContext::OtherContext { detail: some("Iterable impl must define type Iter") })
+                                    }
+                                }
                             },
-                            _ => {}
+                            none => {
+                                let _ = type_error(ctx.sink, E0301,
+                                    "for..in requires an iterable type (one that implements Iterable), got ${type_to_string(iter_type)}",
+                                    span, DiagnosticContext::OtherContext { detail: some("Type does not implement the Iterable trait. Implement 'Iterable' for custom iteration.") })
+                            }
                         }
-                    } else {
+                    },
+                    none => {
                         let _ = type_error(ctx.sink, E0301,
-                            "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
-                            span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
+                            "for..in requires an iterable type, got ${type_to_string(iter_type)}",
+                            span, DiagnosticContext::OtherContext { detail: some("Primitive types are not iterable") })
                     }
-                },
-                _ => {
-                    let _ = type_error(ctx.sink, E0301,
-                        "for..in requires an iterable type (Range, List, Set, or Map), got ${type_to_string(iter_type)}",
-                        span, DiagnosticContext::OtherContext { detail: some("Supported iterables: range expressions (0..10), List<T>, Set<T>, Map<K,V>") })
                 }
             }
 
@@ -481,7 +570,10 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                             binding: binding, binding_span: binding_span,
                             def_id: match binding_scheme { some(bs) => bs.def_id, none => none },
                             destructure: hdestructure,
-                            iterable: iter_r.hexpr, body: body_r.hexpr, span: span
+                            iterable: iter_r.hexpr, body: body_r.hexpr,
+                            iterable_type_name: iterable_type_name,
+                            iter_type_name: iter_type_name,
+                            span: span
                         },
                         subst: me.1,
                         effects: me.0

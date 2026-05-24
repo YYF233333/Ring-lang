@@ -4,6 +4,29 @@ pub extern fn map_new<K, V>() -> Map<K, V>
 pub extern fn map_from<K, V>(entries: List<(K, V)>) -> Map<K, V>
 pub extern fn map_clone<K, V>(m: Map<K, V>) -> Map<K, V>
 
+pub struct MapIterator<K, V> { pub entries: List<(K, V)>, pub index: Int }
+
+impl<K, V> Iterator for MapIterator<K, V> {
+    type Item = (K, V)
+    fn next(mut self) -> Option<(K, V)> {
+        if self.index < self.entries.len() {
+            let v = self.entries.get(self.index)
+            self.index = self.index + 1
+            v
+        } else {
+            none
+        }
+    }
+}
+
+impl<K, V> Iterable for Map<K, V> {
+    type Item = (K, V)
+    type Iter = MapIterator<K, V>
+    fn iter(self) -> MapIterator<K, V> {
+        MapIterator { entries: self.entries(), index: 0 }
+    }
+}
+
 impl<K, V> Map {
     pub extern fn len(self: Map<K, V>) -> Int
     pub extern fn get(self: Map<K, V>, key: K) -> Option<V>

@@ -18,7 +18,7 @@
 
 **层 2（核心特性）**：
 - ~~B-004 关联类型 [L]~~ ✅ 已完成（2026-05-24）
-- B-036 Iterator Trait [M]（依赖 B-005 + B-004，双 trait 方案）
+- ~~B-036 Iterator Trait [M]~~ ✅ 已完成（2026-05-24）
 - ~~B-010 `delegate` 关键字 [M]~~ ✅ 已完成（2026-05-23）
 
 **设计验证（Stabilize 前置，阻塞层 3）**：
@@ -27,8 +27,8 @@
 - ~~B-044 Ring 语义规范 [M]~~ ✅ 已完成（2026-05-24）
 
 **关键路径（2026-05-24 更新）**：
-- ~~B-004~~ → B-036 → B-011 LLVM（~~关联类型~~ ✅ → Iterator → LLVM 基础后端）
-- B-036 阻塞 LLVM 原因：编译器自身需要 Iterator 语法糖
+- ~~B-004~~ → ~~B-036~~ → B-011 LLVM（~~关联类型~~ ✅ → ~~Iterator~~ ✅ → LLVM 基础后端）
+- ~~B-036 不再阻塞 LLVM~~
 - Linear types 不阻塞基础 LLVM，是 Perceus RC 的前置
 - B-042 与关键路径并行，阻塞 B-012 Perceus 但不阻塞 LLVM 基础
 - B-033 GADTs 移出层 2，推迟至 LLVM 之后（无下游依赖，非编译器自举需求）
@@ -257,144 +257,6 @@ fn test_fetch() {
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
 
 ## 迭代与集合
-
-### B-036 Iterator Trait + 自定义迭代器 [feature] [P2] [M] [queued]
-双 trait 方案（无类型参数，元素类型由关联类型承载）：`Iterable` 负责创建迭代器，`Iterator` 负责逐步产出。`for..in` 统一脱糖为 Iterable 协议，不保留 JS 快速路径（JS 后端不追求性能优化，LLVM 后端时自然解决）。
-
-```ring
-trait Iterator {
-    type Item
-    fn next(mut self) -> Item?
-}
-
-trait Iterable {
-    type Iter: Iterator
-    fn iter(self) -> Iter
-}
-
-// 自定义 Iterator
-struct Range { start: Int, end: Int, current: Int }
-
-impl Iterator for Range {
-    type Item = Int
-    fn next(mut self) -> Int? {
-        if self.current < self.end {
-            let v = self.current
-            self.current = self.current + 1
-            v
-        } else {
-            none
-        }
-    }
-}
-
-impl Iterable for Range {
-    type Iter = Range
-    fn iter(self) -> Range { self }
-}
-
-// List 需要独立游标
-struct ListIterator<T> { list: List<T>, index: Int }
-
-impl<T> Iterator for ListIterator<T> {
-    type Item = T
-    fn next(mut self) -> T? {
-        if self.index < self.list.len() {
-            let v = self.list.get(self.index)
-            self.index = self.index + 1
-            v
-        } else {
-            none
-        }
-    }
-}
-
-impl<T> Iterable for List<T> {
-    type Iter = ListIterator<T>
-    fn iter(self) -> ListIterator<T> {
-        ListIterator { list: self, index: 0 }
-    }
-}
-
-// Map impl Iterable（元素类型 (K, V)，向后兼容 `for (k, v) in map`）
-struct MapIterator<K, V> { entries: List<(K, V)>, index: Int }
-
-impl<K, V> Iterator for MapIterator<K, V> {
-    type Item = (K, V)
-    fn next(mut self) -> (K, V)? {
-        if self.index < self.entries.len() {
-            let v = self.entries.get(self.index)
-            self.index = self.index + 1
-            v
-        } else {
-            none
-        }
-    }
-}
-
-impl<K, V> Iterable for Map<K, V> {
-    type Iter = MapIterator<K, V>
-    fn iter(self) -> MapIterator<K, V> {
-        MapIterator { entries: self.entries(), index: 0 }
-    }
-}
-
-// Set：先 to_list() 再遍历（JS 后端不追求性能，LLVM 后端时 Set 会是纯 Ring 实现）
-struct SetIterator<T> { items: List<T>, index: Int }
-
-impl<T> Iterator for SetIterator<T> {
-    type Item = T
-    fn next(mut self) -> T? {
-        if self.index < self.items.len() {
-            let v = self.items.get(self.index)
-            self.index = self.index + 1
-            v
-        } else {
-            none
-        }
-    }
-}
-
-impl<T> Iterable for Set<T> {
-    type Iter = SetIterator<T>
-    fn iter(self) -> SetIterator<T> {
-        SetIterator { items: self.to_list(), index: 0 }
-    }
-}
-
-// for..in 脱糖
-for x in collection { body }
-// → let mut __iter = collection.iter()
-//   loop { match __iter.next() { some(x) => { body }, none => break } }
-```
-
-**设计决策（2026-05-24 Discussion 确认）**：
-- trait 无类型参数：`Iterator` / `Iterable`（非 `Iterator<T>`），元素类型由 `type Item` 关联类型承载
-- 所有类型统一走 protocol：Range/List/Set/Map 均 impl Iterable，codegen 不保留 JS `for..of` 快速路径（JS 后端是 bootstrap，不优化）
-- Map impl Iterable：元素类型 `(K, V)`，保持 `for (k, v) in map` 向后兼容
-- Set/Map iterator 实现：先 `to_list()`/`entries()` 拷贝为 List 再 index 遍历（不加新 extern API，JS 后端不追求性能）
-- Iterator 作为普通 std trait：定义在 `std/iterator.ring`，不注册为 builtin trait
-- HOF 组合子（map/filter/take/zip）不在 B-036 范围内，作为后续 item
-
-**前置依赖**：~~B-005 (Supertrait)~~ ✅ + ~~B-004 (关联类型)~~ ✅
-
-**涉及修改**：
-1. `std/iterator.ring`：新标准库文件，定义 `Iterator` + `Iterable` trait（普通 trait，非 builtin）
-2. `std/list.ring`：新增 `ListIterator<T>` struct + impl Iterator + impl Iterable for List
-3. `std/map.ring`：新增 `MapIterator<K,V>` struct + impl Iterator + impl Iterable for Map（`.entries()` 拷贝方案）
-4. `std/set.ring`：新增 `SetIterator<T>` struct + impl Iterator + impl Iterable for Set（`.to_list()` 拷贝方案）
-5. `compiler/infer.ring`：`for..in` 推断逻辑从硬编码 List/Map/Set/Range 改为按名查找 `Iterable` trait impl → 获取 `Iter` 关联类型 → 获取 `Item` 关联类型作为元素类型。删除所有硬编码的类型名检查（`BUILTIN_LIST`/`BUILTIN_SET`/`BUILTIN_MAP`/`BUILTIN_RANGE`）
-6. `compiler/codegen_stmt.ring`：`for..in` codegen 统一为脱糖方案：`let __iter = collection.iter(); while (true) { let __next = __iter.next(); if (__next === undefined) break; ... }`。删除 Range 特殊路径和 JS `for..of` 路径
-
-**验收标准**：
-- 自定义类型 impl Iterator → `for x in obj` 正常工作
-- `for x in [1,2,3]` 仍正常（通过 List 的 Iterable impl）
-- `for (k, v) in map` 仍正常（Map impl Iterable，元素类型 `(K, V)`）
-- `for x in set` 正常工作
-- `for i in 0..10` 正常工作（Range impl Iterable）
-- 嵌套 `for` 遍历同一 list → 两个独立游标，结果正确
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身（double bootstrap 验证）
 
 ## 性能优化（愿景：语义驱动的编译优化）
 

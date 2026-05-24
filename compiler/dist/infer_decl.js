@@ -12,6 +12,8 @@ import { infer_block as infer$infer_block, infer_stmt as infer$infer_stmt, infer
 import { zonk_type as zonk$zonk_type, zonk_row as zonk$zonk_row, zonk_param as zonk$zonk_param, zonk_block as zonk$zonk_block, zonk_expr as zonk$zonk_expr, ZonkCtx as zonk$ZonkCtx } from "./zonk.js";
 import { run_derive_pass as derive$run_derive_pass } from "./derive.js";
 
+
+
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -28,8 +30,35 @@ function List_is_empty(self) {
   return (List_len(self) === 0);
 }
 
+class ListIterator {
+  constructor(list, index) {
+    this.list = list;
+    this.index = index;
+  }
+}
+
+function __ListIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.list))) {
+    const v = List_get(self.list, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __ListIterator_Iterator = { next: __ListIterator_Iterator_next };
+
+function __List_Iterable_iter(self) {
+  return new ListIterator(self, 0);
+}
+const __List_Iterable = { iter: __List_Iterable_iter };
+
 function List_contains(self, item, __ring_T_Eq) {
-  for (const x of self) {
+  const __ring_iter_0 = __List_Iterable.iter(self);
+  while (true) {
+    const __ring_next_0 = __ListIterator_Iterator.next(__ring_iter_0);
+    if (__ring_next_0._tag === "none") break;
+    const x = __ring_next_0._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -58,9 +87,55 @@ function List_index_of(self, item, __ring_T_Eq) {
   return Option_none;
 }
 
+class MapIterator {
+  constructor(entries, index) {
+    this.entries = entries;
+    this.index = index;
+  }
+}
+
+function __MapIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.entries))) {
+    const v = List_get(self.entries, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __MapIterator_Iterator = { next: __MapIterator_Iterator_next };
+
+function ___Map_Iterable_iter(self) {
+  return new MapIterator(_Map_entries(self), 0);
+}
+const ___Map_Iterable = { iter: ___Map_Iterable_iter };
+
 function _Map_is_empty(self) {
   return (_Map_len(self) === 0);
 }
+
+class SetIterator {
+  constructor(items, index) {
+    this.items = items;
+    this.index = index;
+  }
+}
+
+function __SetIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.items))) {
+    const v = List_get(self.items, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __SetIterator_Iterator = { next: __SetIterator_Iterator_next };
+
+function ___Set_Iterable_iter(self) {
+  return new SetIterator(_Set_to_list(self), 0);
+}
+const ___Set_Iterable = { iter: ___Set_Iterable_iter };
 
 function _Set_is_empty(self) {
   return (_Set_len(self) === 0);
@@ -68,7 +143,11 @@ function _Set_is_empty(self) {
 
 function _Set_contains(self, item, __ring_T_Eq) {
   const items = _Set_to_list(self);
-  for (const x of items) {
+  const __ring_iter_1 = __List_Iterable.iter(items);
+  while (true) {
+    const __ring_next_1 = __ListIterator_Iterator.next(__ring_iter_1);
+    if (__ring_next_1._tag === "none") break;
+    const x = __ring_next_1._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -279,7 +358,11 @@ function check_mod_decl(ctx, mod_name, uses, decls, required_effects, is_pub, sp
     __match_fail(__ring_m7);
   }
   let hdecls = [];
-  for (const decl of decls) {
+  const __ring_iter_2 = __List_Iterable.iter(decls);
+  while (true) {
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const decl = __ring_next_2._0;
     const prefixed = infer_register$prefix_decl_name(mod_name, decl);
     const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_decl(ctx, prefixed, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
     __ring_match8: {
@@ -321,13 +404,21 @@ function check_mod_decl(ctx, mod_name, uses, decls, required_effects, is_pub, sp
       const __ring_m11 = prefixed;
       if (__ring_m11._tag === "Impl") {
         const target_type = __ring_m11.target_type; const impl_tps = __ring_m11.type_params; const methods = __ring_m11.methods; const impl_span = __ring_m11.span;
-        for (const m of methods) {
+        const __ring_iter_3 = __List_Iterable.iter(methods);
+        while (true) {
+          const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+          if (__ring_next_3._tag === "none") break;
+          const m = __ring_next_3._0;
           __ring_match12: {
             const __ring_m12 = m;
             if (__ring_m12._tag === "Delegate") {
               const field = __ring_m12.field; const trait_names = __ring_m12.trait_names; const dspan = __ring_m12.span;
               const delegate_impls = expand_delegate_impls(ctx, target_type, impl_tps, field, trait_names, dspan);
-              for (const di of delegate_impls) {
+              const __ring_iter_4 = __List_Iterable.iter(delegate_impls);
+              while (true) {
+                const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+                if (__ring_next_4._tag === "none") break;
+                const di = __ring_next_4._0;
                 __ring_match13: {
                   const __ring_m13 = cap_row;
                   if (__ring_m13._tag === "some") {
@@ -366,7 +457,11 @@ function check_capability(ctx, decl, cap, mod_span) {
     }
     if (__ring_m14._tag === "Impl") {
       const methods = __ring_m14.methods;
-      for (const method of methods) {
+      const __ring_iter_5 = __List_Iterable.iter(methods);
+      while (true) {
+        const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+        if (__ring_next_5._tag === "none") break;
+        const method = __ring_next_5._0;
         __ring_match15: {
           const __ring_m15 = method;
           if (__ring_m15._tag === "Fn") {
@@ -384,7 +479,11 @@ function check_capability(ctx, decl, cap, mod_span) {
 }
 
 function check_effects_capability(ctx, name, effects, cap, span) {
-  for (const eff of effects.effects) {
+  const __ring_iter_6 = __List_Iterable.iter(effects.effects);
+  while (true) {
+    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+    if (__ring_next_6._tag === "none") break;
+    const eff = __ring_next_6._0;
     const kind = types$effect_kind_name(eff);
     const in_cap = cap.effects.some((function(c) { return types$effects_match_kind(eff, c); }));
     if ((!in_cap)) {
@@ -399,7 +498,11 @@ function check_sig_decl(ctx, name, members, is_pub, span) {
     const __ring_m16 = _Map_get(ctx.env.types.sigs, name);
     if (__ring_m16._tag === "some") {
       const sig_def = __ring_m16._0;
-      for (const m of members) {
+      const __ring_iter_7 = __List_Iterable.iter(members);
+      while (true) {
+        const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+        if (__ring_next_7._tag === "none") break;
+        const m = __ring_next_7._0;
         __ring_match17: {
           const __ring_m17 = _Map_get(sig_def.members, m.name);
           if (__ring_m17._tag === "some") {
@@ -425,7 +528,11 @@ function check_sig_decl(ctx, name, members, is_pub, span) {
 }
 
 function resolve_mod_uses(ctx, uses) {
-  for (const use_decl of uses) {
+  const __ring_iter_8 = __List_Iterable.iter(uses);
+  while (true) {
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const use_decl = __ring_next_8._0;
     const segments = use_decl.path.segments;
     if ((List_len(segments) === 0)) {
       continue;
@@ -461,7 +568,11 @@ function resolve_mod_uses(ctx, uses) {
           const __ring_m19 = use_decl.imports;
           if (__ring_m19._tag === "NamedItems") {
             const names = __ring_m19.names;
-            for (const item of names) {
+            const __ring_iter_9 = __List_Iterable.iter(names);
+            while (true) {
+              const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+              if (__ring_next_9._tag === "none") break;
+              const item = __ring_next_9._0;
               const local_name = (function() {
   const __ring_m = item.alias;
   if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
@@ -577,7 +688,11 @@ function check_struct_decl(ctx, name, type_params, is_pub, span, __ring_ev_fail)
   __match_fail(__ring_m);
 })();
   let hfields = [];
-  for (const f of def.fields) {
+  const __ring_iter_10 = __List_Iterable.iter(def.fields);
+  while (true) {
+    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+    if (__ring_next_10._tag === "none") break;
+    const f = __ring_next_10._0;
     List_push(hfields, new hir$HStructField(f.name, f.ty, f.is_pub));
   }
   return hir$HDecl_Struct(name, type_params, hfields, is_pub, span);
@@ -594,7 +709,11 @@ function check_enum_decl(ctx, name, type_params, is_pub, span, __ring_ev_fail) {
   __match_fail(__ring_m);
 })();
   let hvariants = [];
-  for (const v of def.variants) {
+  const __ring_iter_11 = __List_Iterable.iter(def.variants);
+  while (true) {
+    const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+    if (__ring_next_11._tag === "none") break;
+    const v = __ring_next_11._0;
     List_push(hvariants, new hir$HEnumVariant(v.name, v.fields, v.field_names));
   }
   return hir$HDecl_Enum(name, type_params, hvariants, is_pub, span);
@@ -612,10 +731,18 @@ function check_effect_decl(ctx, name, type_params, ast_ops, is_pub, span, __ring
 })();
   let hops = [];
   let oi = 0;
-  for (const op of def.ops) {
+  const __ring_iter_12 = __List_Iterable.iter(def.ops);
+  while (true) {
+    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+    if (__ring_next_12._tag === "none") break;
+    const op = __ring_next_12._0;
     let op_params = [];
     let pi = 0;
-    for (const pt of op.params) {
+    const __ring_iter_13 = __List_Iterable.iter(op.params);
+    while (true) {
+      const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+      if (__ring_next_13._tag === "none") break;
+      const pt = __ring_next_13._0;
       const p_name = (function() {
   const __ring_m = List_get(ast_ops, oi);
   if (__ring_m._tag === "some") { const ast_op = __ring_m._0; return (function() {
@@ -641,7 +768,11 @@ function check_effect_decl(ctx, name, type_params, ast_ops, is_pub, span, __ring
           if (__ring_m25._tag === "some") {
             const body_expr = __ring_m25._0;
             env$TypeEnv_push_scope(ctx.env);
-            for (const p of op_params) {
+            const __ring_iter_14 = __List_Iterable.iter(op_params);
+            while (true) {
+              const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+              if (__ring_next_14._tag === "none") break;
+              const p = __ring_next_14._0;
               env$TypeEnv_bind_mono(ctx.env, p.name, p.ty);
             }
             const body_result = infer$infer_block(ctx, body_expr, Option_none, __ring_ev_fail);
@@ -669,7 +800,11 @@ function check_effect_decl(ctx, name, type_params, ast_ops, is_pub, span, __ring
     oi = (oi + 1);
   }
   let all_defaults = true;
-  for (const op of def.ops) {
+  const __ring_iter_15 = __List_Iterable.iter(def.ops);
+  while (true) {
+    const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+    if (__ring_next_15._tag === "none") break;
+    const op = __ring_next_15._0;
     if ((!op.has_default)) {
       all_defaults = false;
     }
@@ -677,13 +812,21 @@ function check_effect_decl(ctx, name, type_params, ast_ops, is_pub, span, __ring
   if ((all_defaults && (List_len(def.ops) > 0))) {
     let deps = [];
     let dep_set = set_new();
-    for (const hop of hops) {
+    const __ring_iter_16 = __List_Iterable.iter(hops);
+    while (true) {
+      const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+      if (__ring_next_16._tag === "none") break;
+      const hop = __ring_next_16._0;
       __ring_match26: {
         const __ring_m26 = hop.default_body;
         if (__ring_m26._tag === "some") {
           const body = __ring_m26._0;
           const body_effs = hir$hexpr_effects(body);
-          for (const eff of body_effs.effects) {
+          const __ring_iter_17 = __List_Iterable.iter(body_effs.effects);
+          while (true) {
+            const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+            if (__ring_next_17._tag === "none") break;
+            const eff = __ring_next_17._0;
             const eff_name = types$effect_kind_name(eff);
             if (((((eff_name === "io") || (eff_name === "fail")) || (eff_name === "mut")) || (eff_name === name))) {
               continue;
@@ -761,13 +904,21 @@ function update_impl_method_effects(ctx, target_type, method_name, effects) {
 function check_impl_decl(ctx, target_type, type_params, trait_name, methods, span, __ring_ev_fail) {
   const saved_tp_scope = map_clone(ctx.type_param_scope);
   const saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope);
-  for (const tp of type_params) {
+  const __ring_iter_18 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+    if (__ring_next_18._tag === "none") break;
+    const tp = __ring_next_18._0;
     const tv = env$TypeEnv_fresh_var(ctx.env);
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
   const impl_self_type = ((List_len(type_params) > 0) ? (function() {
   let impl_tp_types = [];
-  for (const tp of type_params) {
+  const __ring_iter_19 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+    if (__ring_next_19._tag === "none") break;
+    const tp = __ring_next_19._0;
     __ring_match31: {
       const __ring_m31 = _Map_get(ctx.type_param_scope, tp.name);
       if (__ring_m31._tag === "some") {
@@ -811,7 +962,11 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
   _Map_insert(ctx.type_param_scope, "Self", impl_self_type);
   const saved_impl_bounds = ctx.current_fn_bounds;
   let impl_bounds = [];
-  for (const tp of type_params) {
+  const __ring_iter_20 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+    if (__ring_next_20._tag === "none") break;
+    const tp = __ring_next_20._0;
     __ring_match34: {
       const __ring_m34 = _Map_get(ctx.type_param_scope, tp.name);
       if (__ring_m34._tag === "some") {
@@ -820,10 +975,18 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
           const __ring_m35 = tv;
           if (__ring_m35._tag === "TypeVar") {
             const id = __ring_m35.id;
-            for (const bound of tp.bounds) {
+            const __ring_iter_21 = __List_Iterable.iter(tp.bounds);
+            while (true) {
+              const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+              if (__ring_next_21._tag === "none") break;
+              const bound = __ring_next_21._0;
               List_push(impl_bounds, new infer_ctx$FnBoundsEntry(id, bound.trait_name, tp.name));
               const supers = infer_register$collect_all_supertraits(ctx, bound.trait_name);
-              for (const st_name of supers) {
+              const __ring_iter_22 = __List_Iterable.iter(supers);
+              while (true) {
+                const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+                if (__ring_next_22._tag === "none") break;
+                const st_name = __ring_next_22._0;
                 List_push(impl_bounds, new infer_ctx$FnBoundsEntry(id, st_name, tp.name));
               }
             }
@@ -841,13 +1004,21 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
   }
   ctx.current_fn_bounds = impl_bounds;
   let hassoc_types = [];
-  for (const method of methods) {
+  const __ring_iter_23 = __List_Iterable.iter(methods);
+  while (true) {
+    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+    if (__ring_next_23._tag === "none") break;
+    const method = __ring_next_23._0;
     __ring_match36: {
       const __ring_m36 = method;
       if (__ring_m36._tag === "AssocType") {
         const aname = __ring_m36.name; const abounds = __ring_m36.bounds; const avalue = __ring_m36.value;
         let bound_names = [];
-        for (const b of abounds) {
+        const __ring_iter_24 = __List_Iterable.iter(abounds);
+        while (true) {
+          const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+          if (__ring_next_24._tag === "none") break;
+          const b = __ring_next_24._0;
           List_push(bound_names, b.trait_name);
         }
         const concrete = (function() {
@@ -876,7 +1047,11 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
     }
   }
   let hmethods = [];
-  for (const method of methods) {
+  const __ring_iter_25 = __List_Iterable.iter(methods);
+  while (true) {
+    const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+    if (__ring_next_25._tag === "none") break;
+    const method = __ring_next_25._0;
     __ring_match38: {
       const __ring_m38 = method;
       if (__ring_m38._tag === "ExternFn") {
@@ -927,7 +1102,11 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
     if (__ring_m40._tag === "some") {
       const struct_def = __ring_m40._0;
       let field_type = Option_none;
-      for (const f of struct_def.fields) {
+      const __ring_iter_26 = __List_Iterable.iter(struct_def.fields);
+      while (true) {
+        const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+        if (__ring_next_26._tag === "none") break;
+        const f = __ring_next_26._0;
         if ((f.name === field)) {
           field_type = Option_some(f.ty);
         }
@@ -942,7 +1121,11 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
           const ft = __ring_m41._0;
           const self_type = ((List_len(type_params) > 0) ? (function() {
   let impl_tp_types = [];
-  for (const tp of type_params) {
+  const __ring_iter_27 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+    if (__ring_next_27._tag === "none") break;
+    const tp = __ring_next_27._0;
     __ring_match42: {
       const __ring_m42 = _Map_get(ctx.type_param_scope, tp.name);
       if (__ring_m42._tag === "some") {
@@ -984,10 +1167,18 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
   }
 })() : infer_ctx$resolve_self_type(ctx, target_type));
           let all_traits = [];
-          for (const tname of trait_names) {
+          const __ring_iter_28 = __List_Iterable.iter(trait_names);
+          while (true) {
+            const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+            if (__ring_next_28._tag === "none") break;
+            const tname = __ring_next_28._0;
             List_push(all_traits, tname);
             const supers = infer_register$collect_all_supertraits(ctx, tname);
-            for (const st_name of supers) {
+            const __ring_iter_29 = __List_Iterable.iter(supers);
+            while (true) {
+              const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+              if (__ring_next_29._tag === "none") break;
+              const st_name = __ring_next_29._0;
               if ((!List_contains(all_traits, st_name, __Str_Eq))) {
                 List_push(all_traits, st_name);
               }
@@ -1005,7 +1196,11 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-          for (const tname of all_traits) {
+          const __ring_iter_30 = __List_Iterable.iter(all_traits);
+          while (true) {
+            const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+            if (__ring_next_30._tag === "none") break;
+            const tname = __ring_next_30._0;
             __ring_match45: {
               const __ring_m45 = _Map_get(ctx.env.trait_reg.traits, tname);
               if (__ring_m45._tag === "none") {
@@ -1038,7 +1233,11 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
                   __match_fail(__ring_m46);
                 }
                 let trait_hmethods = [];
-                for (const tm of trait_def.methods) {
+                const __ring_iter_31 = __List_Iterable.iter(trait_def.methods);
+                while (true) {
+                  const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+                  if (__ring_next_31._tag === "none") break;
+                  const tm = __ring_next_31._0;
                   const resolved_method_scheme = (function() {
   const __ring_m = field_impl_methods;
   if (__ring_m._tag === "some") { const fm_map = __ring_m._0; return _Map_get(fm_map, tm.name); }
@@ -1197,7 +1396,11 @@ function expand_delegate_impls(ctx, target_type, type_params, field, trait_names
                   }
                 }
                 let h_assoc_types = [];
-                for (const entry of _Map_entries(field_assoc_map)) {
+                const __ring_iter_32 = __List_Iterable.iter(_Map_entries(field_assoc_map));
+                while (true) {
+                  const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+                  if (__ring_next_32._tag === "none") break;
+                  const entry = __ring_next_32._0;
                   const __ring_dt0 = entry;
                   const aname = __ring_dt0[0];
                   const aty = __ring_dt0[1];
@@ -1267,7 +1470,11 @@ function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __r
     }
   }
   let hmethods = [];
-  for (const m of trait_def.methods) {
+  const __ring_iter_33 = __List_Iterable.iter(trait_def.methods);
+  while (true) {
+    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+    if (__ring_next_33._tag === "none") break;
+    const m = __ring_next_33._0;
     const ast_method = find_ast_fn_by_name(ast_methods, m.name);
     const fn_params = (function() {
   const __ring_m = m.ty;
@@ -1291,7 +1498,11 @@ function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __r
 })();
     let hparams = [];
     let pi = 0;
-    for (const param_type of fn_params) {
+    const __ring_iter_34 = __List_Iterable.iter(fn_params);
+    while (true) {
+      const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+      if (__ring_next_34._tag === "none") break;
+      const param_type = __ring_next_34._0;
       const p_name = (function() {
   const __ring_m = ast_params;
   if (__ring_m._tag === "some") { const aps = __ring_m._0; return (function() {
@@ -1350,7 +1561,11 @@ function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __r
     List_push(hmethods, new hir$HTraitMethod(m.name, hparams, fn_ret, m.has_default, method_body));
   }
   let hassoc_types = [];
-  for (const atdef of trait_def.assoc_types) {
+  const __ring_iter_35 = __List_Iterable.iter(trait_def.assoc_types);
+  while (true) {
+    const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+    if (__ring_next_35._tag === "none") break;
+    const atdef = __ring_next_35._0;
     List_push(hassoc_types, new hir$HAssocType(atdef.name, atdef.bounds, atdef.default_type));
   }
   return hir$HDecl_Trait(name, type_params, hmethods, trait_def.supertraits, hassoc_types, is_pub, span);
@@ -1370,7 +1585,11 @@ function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
       const id = __ring_m56.id;
       List_push(ctx.current_fn_bounds, new infer_ctx$FnBoundsEntry(id, trait_name, "self"));
       const supers = infer_register$collect_all_supertraits(ctx, trait_name);
-      for (const st_name of supers) {
+      const __ring_iter_36 = __List_Iterable.iter(supers);
+      while (true) {
+        const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+        if (__ring_next_36._tag === "none") break;
+        const st_name = __ring_next_36._0;
         List_push(ctx.current_fn_bounds, new infer_ctx$FnBoundsEntry(id, st_name, "self"));
       }
       break __ring_match56;
@@ -1382,7 +1601,11 @@ function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
     const __ring_m57 = _Map_get(ctx.env.trait_reg.traits, trait_name);
     if (__ring_m57._tag === "some") {
       const tdef = __ring_m57._0;
-      for (const atdef of tdef.assoc_types) {
+      const __ring_iter_37 = __List_Iterable.iter(tdef.assoc_types);
+      while (true) {
+        const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+        if (__ring_next_37._tag === "none") break;
+        const atdef = __ring_next_37._0;
         __ring_match58: {
           const __ring_m58 = _Map_get(ctx.type_param_scope, atdef.name);
           if (__ring_m58._tag === "some") {
@@ -1403,7 +1626,11 @@ function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
     }
     __match_fail(__ring_m57);
   }
-  for (const p of hparams) {
+  const __ring_iter_38 = __List_Iterable.iter(hparams);
+  while (true) {
+    const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
+    if (__ring_next_38._tag === "none") break;
+    const p = __ring_next_38._0;
     env$TypeEnv_bind_mono(ctx.env, p.name, p.ty);
     if (p.is_mutable) {
       __ring_match59: {
@@ -1489,7 +1716,11 @@ function check_extern_fn_decl(ctx, name, type_params, params, declared_effects, 
 })();
   let hparams = [];
   let i = 0;
-  for (const p of params) {
+  const __ring_iter_39 = __List_Iterable.iter(params);
+  while (true) {
+    const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
+    if (__ring_next_39._tag === "none") break;
+    const p = __ring_next_39._0;
     const ptype = (function() {
   const __ring_m = List_get(fn_params, i);
   if (__ring_m._tag === "some") { const t = __ring_m._0; return t; }
@@ -1522,7 +1753,11 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
   ctx.subst = body_result.subst;
   ctx.subst = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span);
   let local_names = map_new();
-  for (const tp of type_params) {
+  const __ring_iter_40 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
+    if (__ring_next_40._tag === "none") break;
+    const tp = __ring_next_40._0;
     __ring_match61: {
       const __ring_m61 = _Map_get(ctx.type_param_scope, tp.name);
       if (__ring_m61._tag === "some") {
@@ -1553,10 +1788,18 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
     }
   }
   let declared_names = set_new();
-  for (const tp of type_params) {
+  const __ring_iter_41 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
+    if (__ring_next_41._tag === "none") break;
+    const tp = __ring_next_41._0;
     _Set_insert(declared_names, tp.name);
   }
-  for (const entry of _Map_entries(ctx.type_param_scope)) {
+  const __ring_iter_42 = __List_Iterable.iter(_Map_entries(ctx.type_param_scope));
+  while (true) {
+    const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
+    if (__ring_next_42._tag === "none") break;
+    const entry = __ring_next_42._0;
     const __ring_dt1 = entry;
     const tpname = __ring_dt1[0];
     const tv = __ring_dt1[1];
@@ -1581,7 +1824,11 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
     }
   }
   let seen_traits = set_new();
-  for (const fb of ctx.current_fn_bounds) {
+  const __ring_iter_43 = __List_Iterable.iter(ctx.current_fn_bounds);
+  while (true) {
+    const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
+    if (__ring_next_43._tag === "none") break;
+    const fb = __ring_next_43._0;
     if (_Set_contains(seen_traits, fb.trait_name, __Str_Eq)) {
       continue;
     }
@@ -1590,7 +1837,11 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
       const __ring_m66 = _Map_get(ctx.env.trait_reg.traits, fb.trait_name);
       if (__ring_m66._tag === "some") {
         const tdef = __ring_m66._0;
-        for (const atdef of tdef.assoc_types) {
+        const __ring_iter_44 = __List_Iterable.iter(tdef.assoc_types);
+        while (true) {
+          const __ring_next_44 = __ListIterator_Iterator.next(__ring_iter_44);
+          if (__ring_next_44._tag === "none") break;
+          const atdef = __ring_next_44._0;
           if ((!_Map_contains_key(local_names, atdef.var_id))) {
             const resolved = env$apply_subst(ctx.subst, types$Type_TypeVar(atdef.var_id, Option_none));
             __ring_match67: {
@@ -1614,7 +1865,11 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
   }
   const zctx = new zonk$ZonkCtx(ctx.subst, local_names);
   let final_params = [];
-  for (const hp of hparams) {
+  const __ring_iter_45 = __List_Iterable.iter(hparams);
+  while (true) {
+    const __ring_next_45 = __ListIterator_Iterator.next(__ring_iter_45);
+    if (__ring_next_45._tag === "none") break;
+    const hp = __ring_next_45._0;
     List_push(final_params, zonk$zonk_param(zctx, hp));
   }
   const final_ret = zonk$zonk_type(zctx, expected_ret);
@@ -1653,18 +1908,30 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   env$TypeEnv_push_scope(ctx.env);
   const saved_tp_scope = map_clone(ctx.type_param_scope);
   const saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope);
-  for (const tp of type_params) {
+  const __ring_iter_46 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_46 = __ListIterator_Iterator.next(__ring_iter_46);
+    if (__ring_next_46._tag === "none") break;
+    const tp = __ring_next_46._0;
     const tv = env$TypeEnv_fresh_var(ctx.env);
     _Map_insert(ctx.type_param_scope, tp.name, tv);
     env$TypeEnv_bind_mono(ctx.env, tp.name, tv);
   }
   List_push(ctx.fn_bounds_stack, ctx.current_fn_bounds);
   let inherited_bounds = [];
-  for (const ib of ctx.current_fn_bounds) {
+  const __ring_iter_47 = __List_Iterable.iter(ctx.current_fn_bounds);
+  while (true) {
+    const __ring_next_47 = __ListIterator_Iterator.next(__ring_iter_47);
+    if (__ring_next_47._tag === "none") break;
+    const ib = __ring_next_47._0;
     List_push(inherited_bounds, ib);
   }
   ctx.current_fn_bounds = inherited_bounds;
-  for (const tp of type_params) {
+  const __ring_iter_48 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_48 = __ListIterator_Iterator.next(__ring_iter_48);
+    if (__ring_next_48._tag === "none") break;
+    const tp = __ring_next_48._0;
     __ring_match69: {
       const __ring_m69 = _Map_get(ctx.type_param_scope, tp.name);
       if (__ring_m69._tag === "some") {
@@ -1673,10 +1940,18 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
           const __ring_m70 = tv;
           if (__ring_m70._tag === "TypeVar") {
             const id = __ring_m70.id;
-            for (const bound of tp.bounds) {
+            const __ring_iter_49 = __List_Iterable.iter(tp.bounds);
+            while (true) {
+              const __ring_next_49 = __ListIterator_Iterator.next(__ring_iter_49);
+              if (__ring_next_49._tag === "none") break;
+              const bound = __ring_next_49._0;
               List_push(ctx.current_fn_bounds, new infer_ctx$FnBoundsEntry(id, bound.trait_name, tp.name));
               const supers = infer_register$collect_all_supertraits(ctx, bound.trait_name);
-              for (const st_name of supers) {
+              const __ring_iter_50 = __List_Iterable.iter(supers);
+              while (true) {
+                const __ring_next_50 = __ListIterator_Iterator.next(__ring_iter_50);
+                if (__ring_next_50._tag === "none") break;
+                const st_name = __ring_next_50._0;
                 List_push(ctx.current_fn_bounds, new infer_ctx$FnBoundsEntry(id, st_name, tp.name));
               }
             }
@@ -1694,7 +1969,11 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   }
   infer_register$inject_assoc_types_from_bounds(ctx, type_params);
   let hparams = [];
-  for (const p of params) {
+  const __ring_iter_51 = __List_Iterable.iter(params);
+  while (true) {
+    const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
+    if (__ring_next_51._tag === "none") break;
+    const p = __ring_next_51._0;
     const ptype = (function() {
   const __ring_m = p.type_annotation;
   if (__ring_m._tag === "some") { const ta = __ring_m._0; return infer_ctx$resolve_type_expr(ctx, ta); }
@@ -1782,9 +2061,17 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   const __ring_m = declared_effects;
   if (__ring_m._tag === "some") { const de = __ring_m._0; return (function() {
   const declared_row = infer_register$resolve_declared_effects(ctx, de);
-  for (const inferred_eff of inferred_effects.effects) {
+  const __ring_iter_52 = __List_Iterable.iter(inferred_effects.effects);
+  while (true) {
+    const __ring_next_52 = __ListIterator_Iterator.next(__ring_iter_52);
+    if (__ring_next_52._tag === "none") break;
+    const inferred_eff = __ring_next_52._0;
     let found = false;
-    for (const declared_eff of declared_row.effects) {
+    const __ring_iter_53 = __List_Iterable.iter(declared_row.effects);
+    while (true) {
+      const __ring_next_53 = __ListIterator_Iterator.next(__ring_iter_53);
+      if (__ring_next_53._tag === "none") break;
+      const declared_eff = __ring_next_53._0;
       if (types$effects_match_kind(inferred_eff, declared_eff)) {
         found = true;
         __ring_match73: {
@@ -1822,7 +2109,11 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   __match_fail(__ring_m);
 })();
   if ((name === "main")) {
-    for (const eff of final_effects.effects) {
+    const __ring_iter_54 = __List_Iterable.iter(final_effects.effects);
+    while (true) {
+      const __ring_next_54 = __ListIterator_Iterator.next(__ring_iter_54);
+      if (__ring_next_54._tag === "none") break;
+      const eff = __ring_next_54._0;
       __ring_match74: {
         const __ring_m74 = eff;
         if (__ring_m74._tag === "CustomEffect") {
@@ -1852,7 +2143,11 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
     }
   }
   let trait_bounds = [];
-  for (const fb of complete_fn_bounds) {
+  const __ring_iter_55 = __List_Iterable.iter(complete_fn_bounds);
+  while (true) {
+    const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
+    if (__ring_next_55._tag === "none") break;
+    const fb = __ring_next_55._0;
     List_push(trait_bounds, new hir$TraitBound(fb.type_param_name, fb.trait_name));
   }
   const fn_scheme = env$TypeEnv_lookup(ctx.env, name);
@@ -1876,7 +2171,11 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   }
   let mut_flags = [];
   let fi = 0;
-  for (const p of params) {
+  const __ring_iter_56 = __List_Iterable.iter(params);
+  while (true) {
+    const __ring_next_56 = __ListIterator_Iterator.next(__ring_iter_56);
+    if (__ring_next_56._tag === "none") break;
+    const p = __ring_next_56._0;
     if (((p.name === "self") || (!p.is_mutable))) {
       List_push(mut_flags, false);
     } else {
@@ -1942,13 +2241,21 @@ function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
     const __ring_m79 = decl;
     if (__ring_m79._tag === "Impl") {
       const target_type = __ring_m79.target_type; const type_params = __ring_m79.type_params; const methods = __ring_m79.methods; const span = __ring_m79.span;
-      for (const m of methods) {
+      const __ring_iter_57 = __List_Iterable.iter(methods);
+      while (true) {
+        const __ring_next_57 = __ListIterator_Iterator.next(__ring_iter_57);
+        if (__ring_next_57._tag === "none") break;
+        const m = __ring_next_57._0;
         __ring_match80: {
           const __ring_m80 = m;
           if (__ring_m80._tag === "Delegate") {
             const field = __ring_m80.field; const trait_names = __ring_m80.trait_names; const dspan = __ring_m80.span;
             const delegate_impls = expand_delegate_impls(ctx, target_type, type_params, field, trait_names, dspan);
-            for (const di of delegate_impls) {
+            const __ring_iter_58 = __List_Iterable.iter(delegate_impls);
+            while (true) {
+              const __ring_next_58 = __ListIterator_Iterator.next(__ring_iter_58);
+              if (__ring_next_58._tag === "none") break;
+              const di = __ring_next_58._0;
               List_push(delegate_decls, di);
             }
             break __ring_match80;
@@ -1961,7 +2268,11 @@ function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
     break __ring_match79;
   }
   List_push(hdecls, hd);
-  for (const di of delegate_decls) {
+  const __ring_iter_59 = __List_Iterable.iter(delegate_decls);
+  while (true) {
+    const __ring_next_59 = __ListIterator_Iterator.next(__ring_iter_59);
+    if (__ring_next_59._tag === "none") break;
+    const di = __ring_next_59._0;
     List_push(hdecls, di);
   }
 }
@@ -1971,7 +2282,11 @@ function check_default_effect_cycles(ctx, decls) {
   collect_effect_spans(decls, effect_spans);
   let state = map_new();
   let path = [];
-  for (const entry of _Map_entries(ctx.effect_default_deps)) {
+  const __ring_iter_60 = __List_Iterable.iter(_Map_entries(ctx.effect_default_deps));
+  while (true) {
+    const __ring_next_60 = __ListIterator_Iterator.next(__ring_iter_60);
+    if (__ring_next_60._tag === "none") break;
+    const entry = __ring_next_60._0;
     const __ring_dt2 = entry;
     const eff_name = __ring_dt2[0];
     if ((!_Map_contains_key(state, eff_name))) {
@@ -1981,7 +2296,11 @@ function check_default_effect_cycles(ctx, decls) {
 }
 
 function collect_effect_spans(decls, spans) {
-  for (const decl of decls) {
+  const __ring_iter_61 = __List_Iterable.iter(decls);
+  while (true) {
+    const __ring_next_61 = __ListIterator_Iterator.next(__ring_iter_61);
+    if (__ring_next_61._tag === "none") break;
+    const decl = __ring_next_61._0;
     __ring_match81: {
       const __ring_m81 = decl;
       if (__ring_m81._tag === "Effect") {
@@ -2006,7 +2325,11 @@ function dfs_detect_cycle(ctx, name, state, path, effect_spans) {
     const __ring_m82 = _Map_get(ctx.effect_default_deps, name);
     if (__ring_m82._tag === "some") {
       const deps = __ring_m82._0;
-      for (const dep of deps) {
+      const __ring_iter_62 = __List_Iterable.iter(deps);
+      while (true) {
+        const __ring_next_62 = __ListIterator_Iterator.next(__ring_iter_62);
+        if (__ring_next_62._tag === "none") break;
+        const dep = __ring_next_62._0;
         __ring_match83: {
           const __ring_m83 = _Map_get(state, dep);
           if (__ring_m83._tag === "some") {
@@ -2014,7 +2337,11 @@ function dfs_detect_cycle(ctx, name, state, path, effect_spans) {
             if ((s === 1)) {
               let cycle_parts = [];
               let found_start = false;
-              for (const p of path) {
+              const __ring_iter_63 = __List_Iterable.iter(path);
+              while (true) {
+                const __ring_next_63 = __ListIterator_Iterator.next(__ring_iter_63);
+                if (__ring_next_63._tag === "none") break;
+                const p = __ring_next_63._0;
                 if ((p === dep)) {
                   found_start = true;
                 }
@@ -2055,7 +2382,11 @@ function dfs_detect_cycle(ctx, name, state, path, effect_spans) {
 function check(ctx, program, __ring_ev_fail) {
   infer_register$register_decls_two_phase(ctx, program.decls);
   const derived_impls = derive$run_derive_pass(ctx.env);
-  for (const decl of program.decls) {
+  const __ring_iter_64 = __List_Iterable.iter(program.decls);
+  while (true) {
+    const __ring_next_64 = __ListIterator_Iterator.next(__ring_iter_64);
+    if (__ring_next_64._tag === "none") break;
+    const decl = __ring_next_64._0;
     __ring_match84: {
       const __ring_m84 = decl;
       if (__ring_m84._tag === "Impl") {
@@ -2067,7 +2398,11 @@ function check(ctx, program, __ring_ev_fail) {
     }
   }
   let hdecls = [];
-  for (const decl of program.decls) {
+  const __ring_iter_65 = __List_Iterable.iter(program.decls);
+  while (true) {
+    const __ring_next_65 = __ListIterator_Iterator.next(__ring_iter_65);
+    if (__ring_next_65._tag === "none") break;
+    const decl = __ring_next_65._0;
     const result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_one_decl(ctx, decl, hdecls)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
   }
   check_default_effect_cycles(ctx, program.decls);
@@ -2101,6 +2436,16 @@ function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
 }
 const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
 
+function __ListIterator_Clone_clone(self, __ring_T_Clone) {
+  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
+}
+const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
+
 function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
 }
@@ -2132,6 +2477,16 @@ function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
   }
 }
 const __Result_Ord = { cmp: __Result_Ord_cmp };
+
+function __ListIterator_Debug_debug(self, __ring_T_Debug) {
+  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __StringBuilder_Debug_debug(self) {
   return "StringBuilder";

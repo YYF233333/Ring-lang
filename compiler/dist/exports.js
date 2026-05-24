@@ -5,6 +5,8 @@ import { variant_js_name as hir$variant_js_name, trait_dict_name as hir$trait_di
 import { lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, add_impl as env$add_impl, has_impl as env$has_impl, find_impl as env$find_impl, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, AssocConstraintEntry as env$AssocConstraintEntry, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 import { register_decl_public as infer_register$register_decl_public, insert_mod_aliases as infer_register$insert_mod_aliases, prefix_decl_name as infer_register$prefix_decl_name, register_decls_two_phase as infer_register$register_decls_two_phase, collect_all_supertraits as infer_register$collect_all_supertraits, resolve_effect_expr as infer_register$resolve_effect_expr, resolve_declared_effects as infer_register$resolve_declared_effects, inject_assoc_types_from_bounds as infer_register$inject_assoc_types_from_bounds } from "./infer_register.js";
 
+
+
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -21,8 +23,35 @@ function List_is_empty(self) {
   return (List_len(self) === 0);
 }
 
+class ListIterator {
+  constructor(list, index) {
+    this.list = list;
+    this.index = index;
+  }
+}
+
+function __ListIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.list))) {
+    const v = List_get(self.list, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __ListIterator_Iterator = { next: __ListIterator_Iterator_next };
+
+function __List_Iterable_iter(self) {
+  return new ListIterator(self, 0);
+}
+const __List_Iterable = { iter: __List_Iterable_iter };
+
 function List_contains(self, item, __ring_T_Eq) {
-  for (const x of self) {
+  const __ring_iter_0 = __List_Iterable.iter(self);
+  while (true) {
+    const __ring_next_0 = __ListIterator_Iterator.next(__ring_iter_0);
+    if (__ring_next_0._tag === "none") break;
+    const x = __ring_next_0._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -51,9 +80,55 @@ function List_index_of(self, item, __ring_T_Eq) {
   return Option_none;
 }
 
+class MapIterator {
+  constructor(entries, index) {
+    this.entries = entries;
+    this.index = index;
+  }
+}
+
+function __MapIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.entries))) {
+    const v = List_get(self.entries, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __MapIterator_Iterator = { next: __MapIterator_Iterator_next };
+
+function ___Map_Iterable_iter(self) {
+  return new MapIterator(_Map_entries(self), 0);
+}
+const ___Map_Iterable = { iter: ___Map_Iterable_iter };
+
 function _Map_is_empty(self) {
   return (_Map_len(self) === 0);
 }
+
+class SetIterator {
+  constructor(items, index) {
+    this.items = items;
+    this.index = index;
+  }
+}
+
+function __SetIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.items))) {
+    const v = List_get(self.items, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __SetIterator_Iterator = { next: __SetIterator_Iterator_next };
+
+function ___Set_Iterable_iter(self) {
+  return new SetIterator(_Set_to_list(self), 0);
+}
+const ___Set_Iterable = { iter: ___Set_Iterable_iter };
 
 function _Set_is_empty(self) {
   return (_Set_len(self) === 0);
@@ -61,7 +136,11 @@ function _Set_is_empty(self) {
 
 function _Set_contains(self, item, __ring_T_Eq) {
   const items = _Set_to_list(self);
-  for (const x of items) {
+  const __ring_iter_1 = __List_Iterable.iter(items);
+  while (true) {
+    const __ring_next_1 = __ListIterator_Iterator.next(__ring_iter_1);
+    if (__ring_next_1._tag === "none") break;
+    const x = __ring_next_1._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -197,7 +276,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
   let extern_values = set_new();
   let mut_methods = map_new();
   let fn_mut_params = map_new();
-  for (const decl of program.decls) {
+  const __ring_iter_2 = __List_Iterable.iter(program.decls);
+  while (true) {
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const decl = __ring_next_2._0;
     __ring_match6: {
       const __ring_m6 = decl;
       if (__ring_m6._tag === "Fn") {
@@ -239,7 +322,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
               const sdef = __ring_m9._0;
               _Map_insert(types, name, TypeDef_StructDef_(sdef));
               let field_names = [];
-              for (const f of sdef.fields) {
+              const __ring_iter_3 = __List_Iterable.iter(sdef.fields);
+              while (true) {
+                const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+                if (__ring_next_3._tag === "none") break;
+                const f = __ring_next_3._0;
                 List_push(field_names, f.name);
               }
               _Map_insert(struct_field_orders, name, field_names);
@@ -261,7 +348,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
             if (__ring_m10._tag === "some") {
               const edef = __ring_m10._0;
               _Map_insert(types, name, TypeDef_EnumDef_(edef));
-              for (const v of edef.variants) {
+              const __ring_iter_4 = __List_Iterable.iter(edef.variants);
+              while (true) {
+                const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+                if (__ring_next_4._tag === "none") break;
+                const v = __ring_next_4._0;
                 __ring_match11: {
                   const __ring_m11 = env$TypeEnv_lookup(env, v.name);
                   if (__ring_m11._tag === "some") {
@@ -365,7 +456,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
           }
           __match_fail(__ring_m16);
         }
-        for (const m of methods) {
+        const __ring_iter_5 = __List_Iterable.iter(methods);
+        while (true) {
+          const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+          if (__ring_next_5._tag === "none") break;
+          const m = __ring_next_5._0;
           __ring_match17: {
             const __ring_m17 = m;
             if (__ring_m17._tag === "Fn") {
@@ -392,7 +487,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
           const __ring_m19 = trait_name;
           if (__ring_m19._tag === "none") {
             let is_pub_type = false;
-            for (const d of program.decls) {
+            const __ring_iter_6 = __List_Iterable.iter(program.decls);
+            while (true) {
+              const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+              if (__ring_next_6._tag === "none") break;
+              const d = __ring_next_6._0;
               __ring_match20: {
                 const __ring_m20 = d;
                 if (__ring_m20._tag === "Struct") {
@@ -414,7 +513,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
             }
             if (is_pub_type) {
               let method_names = [];
-              for (const m of methods) {
+              const __ring_iter_7 = __List_Iterable.iter(methods);
+              while (true) {
+                const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+                if (__ring_next_7._tag === "none") break;
+                const m = __ring_next_7._0;
                 __ring_match21: {
                   const __ring_m21 = m;
                   if (__ring_m21._tag === "Fn") {
@@ -506,7 +609,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
       if (__ring_m6._tag === "ModBlock") {
         const mod_name = __ring_m6.name; const mod_decls = __ring_m6.decls; const mpub = __ring_m6.is_pub;
         if (mpub) {
-          for (const subdecl of mod_decls) {
+          const __ring_iter_8 = __List_Iterable.iter(mod_decls);
+          while (true) {
+            const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+            if (__ring_next_8._tag === "none") break;
+            const subdecl = __ring_next_8._0;
             const prefixed = infer_register$prefix_decl_name(mod_name, subdecl);
             __ring_match26: {
               const __ring_m26 = prefixed;
@@ -549,7 +656,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                       const sdef = __ring_m29._0;
                       _Map_insert(types, sname, TypeDef_StructDef_(sdef));
                       let field_names = [];
-                      for (const f of sdef.fields) {
+                      const __ring_iter_9 = __List_Iterable.iter(sdef.fields);
+                      while (true) {
+                        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+                        if (__ring_next_9._tag === "none") break;
+                        const f = __ring_next_9._0;
                         List_push(field_names, f.name);
                       }
                       _Map_insert(struct_field_orders, sname, field_names);
@@ -571,7 +682,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                     if (__ring_m30._tag === "some") {
                       const edef = __ring_m30._0;
                       _Map_insert(types, ename, TypeDef_EnumDef_(edef));
-                      for (const v of edef.variants) {
+                      const __ring_iter_10 = __List_Iterable.iter(edef.variants);
+                      while (true) {
+                        const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+                        if (__ring_next_10._tag === "none") break;
+                        const v = __ring_next_10._0;
                         __ring_match31: {
                           const __ring_m31 = env$TypeEnv_lookup(env, v.name);
                           if (__ring_m31._tag === "some") {
@@ -693,7 +808,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                   }
                   __match_fail(__ring_m37);
                 }
-                for (const m of ms) {
+                const __ring_iter_11 = __List_Iterable.iter(ms);
+                while (true) {
+                  const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+                  if (__ring_next_11._tag === "none") break;
+                  const m = __ring_next_11._0;
                   __ring_match38: {
                     const __ring_m38 = m;
                     if (__ring_m38._tag === "Fn") {
@@ -721,7 +840,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
               if (__ring_m26._tag === "ModBlock") {
                 const sub_mod_name = __ring_m26.name; const sub_mod_decls = __ring_m26.decls; const sub_mpub = __ring_m26.is_pub;
                 if (sub_mpub) {
-                  for (const sub_subdecl of sub_mod_decls) {
+                  const __ring_iter_12 = __List_Iterable.iter(sub_mod_decls);
+                  while (true) {
+                    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+                    if (__ring_next_12._tag === "none") break;
+                    const sub_subdecl = __ring_next_12._0;
                     const sub_prefixed = infer_register$prefix_decl_name(sub_mod_name, sub_subdecl);
                     __ring_match40: {
                       const __ring_m40 = sub_prefixed;
@@ -764,7 +887,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                               const sdef = __ring_m43._0;
                               _Map_insert(types, sname2, TypeDef_StructDef_(sdef));
                               let fns2 = [];
-                              for (const f of sdef.fields) {
+                              const __ring_iter_13 = __List_Iterable.iter(sdef.fields);
+                              while (true) {
+                                const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+                                if (__ring_next_13._tag === "none") break;
+                                const f = __ring_next_13._0;
                                 List_push(fns2, f.name);
                               }
                               _Map_insert(struct_field_orders, sname2, fns2);
@@ -786,7 +913,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                             if (__ring_m44._tag === "some") {
                               const edef = __ring_m44._0;
                               _Map_insert(types, ename2, TypeDef_EnumDef_(edef));
-                              for (const v of edef.variants) {
+                              const __ring_iter_14 = __List_Iterable.iter(edef.variants);
+                              while (true) {
+                                const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+                                if (__ring_next_14._tag === "none") break;
+                                const v = __ring_next_14._0;
                                 __ring_match45: {
                                   const __ring_m45 = env$TypeEnv_lookup(env, v.name);
                                   if (__ring_m45._tag === "some") {
@@ -908,7 +1039,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                           }
                           __match_fail(__ring_m51);
                         }
-                        for (const m of ms2) {
+                        const __ring_iter_15 = __List_Iterable.iter(ms2);
+                        while (true) {
+                          const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+                          if (__ring_next_15._tag === "none") break;
+                          const m = __ring_next_15._0;
                           __ring_match52: {
                             const __ring_m52 = m;
                             if (__ring_m52._tag === "Fn") {
@@ -949,22 +1084,38 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
     }
   }
   let trait_impls = [];
-  for (const map_entry of _Map_entries(env.trait_reg.trait_impls)) {
+  const __ring_iter_16 = __List_Iterable.iter(_Map_entries(env.trait_reg.trait_impls));
+  while (true) {
+    const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+    if (__ring_next_16._tag === "none") break;
+    const map_entry = __ring_next_16._0;
     const __ring_dt0 = map_entry;
     const impl_list = __ring_dt0[1];
-    for (const impl_ of impl_list) {
+    const __ring_iter_17 = __List_Iterable.iter(impl_list);
+    while (true) {
+      const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+      if (__ring_next_17._tag === "none") break;
+      const impl_ = __ring_next_17._0;
       if ((_Map_contains_key(types, impl_.target_type_name) || _Map_contains_key(traits, impl_.trait_name))) {
         List_push(trait_impls, impl_);
       }
     }
   }
-  for (const use_decl of program.uses) {
+  const __ring_iter_18 = __List_Iterable.iter(program.uses);
+  while (true) {
+    const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+    if (__ring_next_18._tag === "none") break;
+    const use_decl = __ring_next_18._0;
     if (use_decl.is_pub) {
       __ring_match54: {
         const __ring_m54 = use_decl.imports;
         if (__ring_m54._tag === "NamedItems") {
           const names = __ring_m54.names;
-          for (const item of names) {
+          const __ring_iter_19 = __List_Iterable.iter(names);
+          while (true) {
+            const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+            if (__ring_next_19._tag === "none") break;
+            const item = __ring_next_19._0;
             const local_name = (function() {
   const __ring_m = item.alias;
   if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
@@ -989,7 +1140,11 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                 const sdef = __ring_m56._0;
                 _Map_insert(types, local_name, TypeDef_StructDef_(sdef));
                 let fnames = [];
-                for (const f of sdef.fields) {
+                const __ring_iter_20 = __List_Iterable.iter(sdef.fields);
+                while (true) {
+                  const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+                  if (__ring_next_20._tag === "none") break;
+                  const f = __ring_next_20._0;
                   List_push(fnames, f.name);
                 }
                 _Map_insert(struct_field_orders, local_name, fnames);
@@ -1061,6 +1216,16 @@ function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
 }
 const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
 
+function __ListIterator_Clone_clone(self, __ring_T_Clone) {
+  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
+}
+const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
+
 function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
 }
@@ -1092,6 +1257,16 @@ function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
   }
 }
 const __Result_Ord = { cmp: __Result_Ord_cmp };
+
+function __ListIterator_Debug_debug(self, __ring_T_Debug) {
+  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __StringBuilder_Debug_debug(self) {
   return "StringBuilder";
