@@ -192,7 +192,7 @@ Ring-lang/
 - ~~Iterator Trait + 自定义迭代器（依赖关联类型 ✅）~~ ✅ 已完成（2026-05-24）
 - ~~`delegate` 关键字（trait 实现委托）~~ ✅ 已完成
 - ~~B-044 语义规范~~ ✅ 已完成（design.md 1.7）
-- **LLVM Native Backend**（层 2 完成后启动，落地后 JS 后端废弃）
+- **LLVM Native Backend**（前置全部完成，可启动。Ring 写 codegen + `extern fn` 调 LLVM-C API，bootstrap 用本地 N-API addon，自举后废弃 JS 后端）
 
 ### 层 3：重型特性（LLVM 后端可用后启动）
 

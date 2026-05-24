@@ -268,12 +268,51 @@ fn test_fetch() {
 ### B-011 LLVM Native Backend [feature] [P1] [XL] [queued]
 编译到 LLVM IR，所有后续优化的基础。**LLVM 落地后 JS 后端废弃。**
 
-- **前置依赖**：B-004（关联类型）+ B-036（Iterator）——编译器自身需要这些语法糖。~~B-044 语义规范~~ ✅ 已完成
+- **前置依赖**：~~B-004（关联类型）~~ ✅ + ~~B-036（Iterator）~~ ✅ + ~~B-044 语义规范~~ ✅。**全部前置已完成，无阻塞。**
 - **不阻塞基础 LLVM**：Linear types / Perceus RC（后续增量添加）
 - **FFI 边界 effect 设计**：
   1. Evidence 传递：LLVM 端用 TLS handler stack，C 函数无需感知
   2. Effect-free 函数保证干净 C ABI，零成本互调
   3. 跨语言资源安全：Linear types + `defer` 清理 FFI 资源（Perceus RC 阶段实现）
+
+**实现策略（2026-05-24 决策）**：
+
+1. **Codegen 只写一次**：LLVM codegen 用 Ring 编写，通过 `extern fn` 包装 LLVM-C API（~50-80 个核心函数）
+2. **Bootstrap 桥**：本地 N-API addon（~300 行 C++，纯机械转发 LLVM-C），不入仓库，自举后废弃
+3. **内存管理**：malloc 不回收 → 直接上 Perceus RC（B-012），无中间 GC
+4. **值表示**：Uniform boxing（一切皆 `void*`，含 Int/Float/Bool），极简 codegen，Perceus RC 阶段引入 unboxing
+5. **Runtime**：`ring_runtime.cpp`（~300 行 C++ STL wrapper，extern "C"），List→vector、Map→unordered_map（Str key）、Str→string
+6. **闭包**：`{fn_ptr, env_ptr}` 二元组，已知函数直接调用不走闭包
+7. **Enum 布局**：`{tag: i64, fields: void*[N]}`，N = 最大变体字段数，内联分配
+8. **fail/catch**：setjmp/longjmp（bootstrap 无 Drop 不需要栈展开），Ownership 阶段可切换
+9. **多文件编译**：bootstrap 阶段单 LLVM Module → 单 .o → 链接为单一二进制
+10. **标准库/FFI**：按编译器自身迁移需求驱动，不追求完整迁移
+11. **目标**：编译器完整自举到 LLVM native，JS 后端归档
+
+**Bootstrap 路径**：
+1. 声明 LLVM FFI 层（`extern fn` + `extern type`）
+2. 编写 Ring LLVM codegen 模块（`codegen_llvm*.ring`，消费 HProgram）
+3. 编写 `ring_runtime.cpp`（C++ STL wrapper，~300 行）
+4. 本地编译 N-API addon（不入仓库）
+5. JS 版编译器 + addon → 编译自身为 native
+6. Native 编译器编译自身（验证自举一致性）
+7. 废弃 addon + 归档 JS 后端
+
+**涉及修改**：
+1. `compiler/codegen_llvm.ring`（新增）：LLVM codegen 入口 + IR builder 调用
+2. `compiler/codegen_llvm_expr.ring`（新增）：表达式 → LLVM IR
+3. `compiler/codegen_llvm_decl.ring`（新增）：声明 → LLVM IR
+4. `compiler/llvm_ffi.ring`（新增）：`extern fn` + `extern type` 包装 LLVM-C API
+5. `compiler/compiler_mod.ring`：编排器支持 `--target=llvm` 切换后端
+6. `compiler/cli.ring`：新增 `--target` 参数
+7. `ring_runtime.cpp`（新增，仓库内）：C++ STL runtime（List/Map/Set/Str/IO）
+8. `std/*.ring`：编译器用到的 extern fn 按需提供 C ABI 实现
+
+**验收标准**：
+- Ring 编译器编译自身为 native 二进制
+- Native 编译器编译自身（二次自举一致性）
+- E2E 测试在 native 编译器上全部通过
+- 用户运行 `ring build` 产出 native 可执行文件，无需安装外部工具
 
 ### B-012 Perceus 引用计数 [feature] [P3] [XL] [queued]
 精确 RC + 就地复用分析（reuse analysis），消除 GC。
@@ -409,9 +448,32 @@ Perceus RC 不处理循环引用。Ring 有 OOP 手感（struct + impl + delegat
 
 ## 语法增强
 
+### B-067 Tuple 类型支持 `?` Option sugar [feature] [P3] [S] [queued]
+`(K, V)?` 应等价于 `Option<(K, V)>`，当前不支持，只能写完整形式。影响 MapIterator 等场景的写作体验。
+
+**涉及修改**：
+1. `parser.ring`：类型解析中，tuple 类型后遇到 `?` token 时包装为 `Option<...>`
+
+**验收标准**：
+- `(Int, Str)?` 解析为 `Option<(Int, Str)>`
+- 嵌套场景 `((A, B), C)?` 正确处理
+- 全部 E2E 测试通过
 
 ## 已知 Bug / 技术债
 
+
+### B-066 Parser `impl Trait for Type<T>` target 类型参数验证 [bugfix] [P3] [S] [queued]
+`skip_type_args()` 丢弃 target type 上的类型参数而不验证其与 impl 的 `type_params` 一致。`impl<T> Foo for Bar<Int>`（具体类型而非类型变量）不会报错，是类型安全漏洞。
+
+**涉及修改**：
+1. `parser.ring`：`skip_type_args()` 改为解析并保留 target type 的类型参数
+2. `infer_register.ring`：注册 impl 时验证 target type 的类型参数与 impl 的 type_params 一致
+
+**验收标准**：
+- `impl<T> Foo for Bar<T>` 正常工作（现有行为不变）
+- `impl<T> Foo for Bar<Int>` 报编译错误
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ### B-054 Parser expression-level 错误恢复 [feature] [P3] [M] [queued]
 Parser 有声明级错误恢复，但 `handle...with` 等复合表达式无恢复机制，单个 malformed 表达式会 poison 整个声明的解析。
