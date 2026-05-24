@@ -81,7 +81,7 @@ design.md 1.3。类型可依赖特定值（`Vec<T, n: Nat>`），不要求完整
 - **复杂度**：极大（约束求解可能不可判定）
 - **优先级**：Phase D（研究向）
 
-### B-004 关联类型（Associated Types）[feature] [P2] [L] [queued]
+### B-004 关联类型（Associated Types）[feature] [P1] [L] [queued]
 Trait 中声明关联类型 `type Item`，impl 时指定具体类型。访问语法 `T::Item`（统一路径，checker 语义区分；歧义时后续加 `<T as Trait>::Item` 消歧）。
 
 ```ring
@@ -110,34 +110,231 @@ fn first<I: Iterator<Item = Int>>(iter: I) -> Int { ... }
 
 **当前状态**：未实现。AST/HIR/env 中无关联类型相关字段。
 
-**前置依赖**：B-005 (Supertrait)——关联类型的 bound 约束（`type Iter: Iterator`）需要 supertrait 基础设施
+**前置依赖**：B-005 (Supertrait) ✅ 已完成
 
-**涉及修改**：
-1. `ast.ring`：`Decl::Trait` 的 methods 列表支持 `Decl::TypeAlias { name, bounds, span }` 成员（或新增 `assoc_types` 字段）
-2. `parser.ring`：在 trait body 内识别 `type Name` 声明（可选 `: Bound`，可选 `= Default`）；在 impl body 内识别 `type Name = ConcreteType`
-3. `env.ring`：`TraitDef` 新增 `assoc_types: List<AssocTypeDef>`（含 name + bounds）；`ImplEntry` 新增 `assoc_types: Map<Str, Type>`（name → 具体类型）
-4. `infer_register.ring`：
-   - `register_trait()`：注册关联类型声明
-   - `register_impl()`：收集 impl 中的 `type X = T` 赋值，验证 trait 声明的每个关联类型都有赋值，验证赋值类型满足 bound
-5. `infer.ring`：
-   - 路径解析（`T::Item`）：当路径前缀是类型参数时，查找该参数 bounds 中 trait 的关联类型，返回对应具体类型（或约束类型变量）
-   - Bound 匹配：`T: Iterator<Item = Int>` 在 instantiate 时将关联类型约束传播为 unification 约束
-6. `hir.ring`：`HTraitMethod` 平级新增 `HAssocType { name: Str, bounds: List<TraitBound>, concrete: Type? }`
-7. `codegen`：关联类型是纯编译期概念，不生成运行时代码。trait 字典不携带类型信息。
+#### 涉及修改（详细实现 spec）
 
-**交互规则（design.md 1.5）**：
-- Associated Types × Supertrait：`T: SubTrait` 蕴含 supertrait 的关联类型可用（`T::Item`），bound 展开时自动带上
-- delegate × Associated Types：delegate 创建完整 trait impl，关联类型绑定从 inner 字段的 impl 自动推导继承
+##### 1. AST（`ast.ring`）
+
+**1a. 新增 `Decl::AssocType` 变体**（~L269，Decl enum 内）：
+```ring
+AssocType {
+    name: Str,
+    bounds: List<TypeBound>,   // type Iter: Iterator<T> + Clone
+    value: TypeExpr?,          // trait 中 none（或 some 表示默认值），impl 中 some（必填）
+    is_pub: Bool,
+    span: Span
+}
+```
+`Decl::Trait.methods` 和 `Decl::Impl.methods` 的 `List<Decl>` 将包含此变体（与 `Decl::Fn` 混排）。
+
+**1b. 扩展 `TypeBound` struct**（L220-224）：
+```ring
+pub struct TypeBound {
+    pub trait_name: Str,
+    pub type_args: List<TypeExpr>,
+    pub assoc_constraints: List<AssocConstraint>,  // 新增
+    pub span: Span
+}
+```
+新增 struct：
+```ring
+pub struct AssocConstraint {
+    pub name: Str,       // "Item"
+    pub ty: TypeExpr,    // Int
+    pub span: Span
+}
+```
+支持 `Iterator<Item = Int>` 语法。现有 `TypeBound` 的所有构造点需补 `assoc_constraints: []`。
+
+##### 2. Parser（`parser.ring`）
+
+**2a. 新增 `parse_assoc_type_decl(is_pub: Bool) -> Decl`**：
+- 消费 `type` identifier（`advance()`，当前 token 已确认是 `TkIdent` 且 `value == "type"`）
+- 读 name（`expect(TkIdent)`）
+- 可选 bounds：若 peek 是 `:`，消费后解析 `TypeBound` 列表（用 `+` 分隔，复用 supertrait 解析逻辑）
+- 可选 value：若 peek 是 `=`，消费后调 `parse_type_expr()`
+- 返回 `Decl::AssocType { name, bounds, value, is_pub, span }`
+
+**2b. 修改 `parse_trait_decl`**（~L1206-1209，body while 循环）：
+```
+// 现有：try_consume(TkPub) → parse_fn_decl(m_pub, true)
+// 改为：
+try_consume(TkPub)
+if check(TkIdent) && peek().value == "type" {
+    parse_assoc_type_decl(m_pub)
+} else {
+    parse_fn_decl(m_pub, true)
+}
+```
+
+**2c. 修改 `parse_impl_decl`**（~L1094-1118，body while 循环）：
+在 delegate 分支之后、`parse_fn_decl` 之前，加 `type` 检测分支（同上逻辑）。
+
+**2d. 修改 type bound 内的 type arg 解析**：
+在解析 `<...>` 内容时（`parse_type_args` 或等效函数），若遇到 `TkIdent + TkAssign`（即 `Name =`），解析为 `AssocConstraint { name, ty }`；否则解析为普通 `TypeExpr` 位置参数。需确定解析 type arg list 的具体函数位置并修改。
+
+##### 3. 环境（`env.ring`）
+
+**3a. 新增 `AssocTypeDef` struct**：
+```ring
+pub struct AssocTypeDef {
+    pub name: Str,
+    pub bounds: List<Str>,    // trait name bounds（"Iterator" 等）
+    pub default_type: Type?   // trait 中的默认值
+}
+```
+
+**3b. 扩展 `TraitDef`**（L69-75）：新增字段 `assoc_types: List<AssocTypeDef>`
+
+**3c. 扩展 `ImplEntry`**（L77-82）：新增字段 `assoc_types: Map<Str, Type>`（name → 具体类型）
+
+##### 4. HIR（`hir.ring`）
+
+**4a. 新增 `HAssocType` struct**：
+```ring
+pub struct HAssocType {
+    pub name: Str,
+    pub bounds: List<Str>,
+    pub concrete: Type?    // impl 中的具体类型；trait 声明中为 none 或 default
+}
+```
+
+**4b. 扩展 `HDecl::Trait`**（~L160）：新增字段 `assoc_types: List<HAssocType>`
+
+**4c. 扩展 `HDecl::Impl`**（~L157）：新增字段 `assoc_types: List<HAssocType>`
+
+##### 5. 错误码（`codes.ring`）
+
+新增 E05xx 系列（trait 域）：
+- `E0510`：`Missing associated type implementation`（impl 未提供 trait 要求的关联类型）
+- `E0511`：`Unknown associated type`（`T::Foo` 但 T 的 bounds 中无 `Foo` 关联类型）
+- `E0512`：`Ambiguous associated type`（多个 trait bound 提供同名关联类型）
+- `E0513`：`Associated type bound not satisfied`（`type Iter: Iterator` 但赋值类型未 impl Iterator）
+- `E0514`：`Unexpected associated type`（impl 中提供了 trait 未声明的关联类型）
+
+##### 6. 注册（`infer_register.ring`）
+
+**6a. `register_trait`**（L549-628）：
+- 在方法循环（~L600）中增加 `Decl::AssocType` 分支
+- 收集到临时 list：`assoc_type_defs: List<AssocTypeDef>`
+- 对每个关联类型，为其名字创建一个 fresh type variable 并注入 `type_param_scope`（使得 trait 方法签名中的裸 `Item` 引用可解析为该变量）
+- 构造 `TraitDef` 时传入 `assoc_types`
+
+**6b. `register_impl`**（L634-730）：
+- 在方法循环（~L669）中增加 `Decl::AssocType` 分支
+- 解析 `value` TypeExpr 为具体 Type
+- 存入 `assoc_type_map: Map<Str, Type>`
+- 在完整性验证（~L726 附近）中增加：
+  - 检查 trait 声明的每个关联类型在 impl 中都有赋值（或 trait 提供了 default）→ 缺失报 E0510
+  - 检查 impl 中没有多余的关联类型 → 多余报 E0514
+  - 检查 bounds 满足：若 trait 声明 `type Iter: Iterator<T>`，验证 impl 中 `type Iter = Range` 的 Range 已 impl Iterator → 不满足报 E0513
+- 构造 `ImplEntry` 时传入 `assoc_types`
+
+**6c. trait 方法签名中的裸名引用**：
+在 `register_trait` 注入 assoc type 的 fresh type variable 到 `type_param_scope` 后，trait 方法签名中 `fn next(mut self) -> Item?` 的 `Item` 会被 `resolve_named_type` 解析为该变量（因为 `type_param_scope` 中有 `"Item" → var_id`）。这依赖于 `resolve_named_type` 对 `type_param_scope` 的查找优先于 struct/enum 查找——验证确认如此。
+
+##### 7. 类型路径解析（`infer_ctx.ring`）
+
+**7a. 修改 `resolve_type_expr`**（~L727-756，`TypeExpr::Named` + `qualifier: some(q)` 分支）：
+
+在现有的模块路径查找之前，插入关联类型检测：
+```
+if qualifier == some(q) {
+    // 新增：检查 q 是否是当前 type_param_scope 中的类型参数
+    if type_param_scope.contains(q) {
+        // q 是类型参数，name 是关联类型名
+        return resolve_assoc_type(q, name, span)
+    }
+    // 现有：self::/super:: 相对路径 + 模块路径查找
+    ...
+}
+```
+
+**7b. 新增 `resolve_assoc_type(type_param_name: Str, assoc_name: Str, span: Span) -> Type`**：
+1. 获取 type_param 的 bounds（从当前 `scheme_bounds` 或 `fn_bounds_list` 中查找）
+2. 遍历 bounds，查找每个 bound trait 的 `TraitDef.assoc_types` 中是否有 `assoc_name`
+3. 同时遍历 supertrait（递归），supertrait 的关联类型也可通过 `T::SuperItem` 访问
+4. 找到 0 个 → 报 E0511
+5. 找到 1 个 → 返回对应的 fresh type variable（或在具体化上下文中直接返回具体类型）
+6. 找到多个 → 报 E0512
+
+**7c. 具体化上下文中的解析**：
+当 `T` 已经被 instantiate 为具体类型（如 `Range`），`T::Item` 应解析为 `Range` 对应 trait impl 的 assoc type 具体值。这在 `instantiate_scheme` 或调用点的 type arg 替换中处理：将 assoc type 的 type variable 替换为 impl 中注册的具体类型。
+
+##### 8. Bound 约束传播（`infer.ring` / `infer_ctx.ring`）
+
+**8a. `Iterator<Item = Int>` 约束**：
+在 trait bound 处理中（instantiate trait bound 时），遍历 `TypeBound.assoc_constraints`，对每个 `AssocConstraint { name, ty }`：
+1. 查找 trait 的 `assoc_types` 中对应 `name` 的 type variable
+2. 用 `unify()` 将该 variable 与 `ty` 解析后的类型统一
+3. 找不到 → 报 E0511
+
+**8b. `where I::Item == Int` 语法**：
+这是 `T::Item` 路径解析（7a）+ `==` unification 的组合。Parser 中 `where` 子句已有 tokenize 但丢弃行为（当前 refinement where 解析消费后丢弃）。若要支持此语法需修改 where clause 解析——**此次不实现**，`Iterator<Item = Int>` in-bound 语法已覆盖主要用例。
+
+##### 9. 声明检查（`infer_decl.ring`）
+
+**9a. `check_trait_decl`**（check_one_decl 中的 Trait 分支）：
+- 对 trait 的 `Decl::AssocType` 项，构造 `HAssocType { name, bounds, concrete: default_type }`
+- 加入 `HDecl::Trait.assoc_types`
+
+**9b. `check_impl_decl`**（check_one_decl 中的 Impl 分支）：
+- 对 impl 的 `Decl::AssocType` 项，检查 value 不为 none（impl 中必须提供具体类型）
+- 将 assoc type 的 type variable 与具体类型 unify（使得 impl 方法签名中引用的 `Item` 解析为具体类型）
+- 构造 `HAssocType { name, bounds: [], concrete: some(concrete_type) }`
+- 加入 `HDecl::Impl.assoc_types`
+
+**9c. Delegate expansion**（`expand_delegate_impls`）：
+- 当 delegate 的 target trait 有关联类型时：
+- 从 inner 字段类型的对应 trait impl 中查找 assoc type 具体值
+- 自动生成 `HAssocType` 条目加入合成的 impl
+
+##### 10. Codegen（`codegen_decl.ring`）
+
+**10a. `emit_trait_dictionary`**（~L199-254）：
+- 遍历 impl methods 时跳过 `HDecl::AssocType`（关联类型不入 dict）
+- 无运行时代码生成
+
+**10b. 所有 `match decl` 分支**：
+`Decl::AssocType` 是新 variant，编译器穷尽性检查会强制处理。在以下文件的 match 中增加分支：
+- `codegen.ring`、`codegen_decl.ring`、`codegen_stmt.ring`（emit 时跳过或 panic "unreachable"）
+- `exports.ring`（`extract_exports` 中，pub assoc type 不导出为独立符号）
+- `checker.ring`（如有 Decl match）
+- `resolver.ring`（如有 Decl match）
+
+**10c. `HAssocType` 在 HIR match 中**：
+- `zonk.ring`：zonk HDecl::Trait/Impl 时处理新的 `assoc_types` 字段
+- `codegen_decl.ring`：emit trait/impl 时跳过 assoc type 条目
+
+##### 11. 测试
+
+**正面测试**（`tests/cases/`）：
+- `assoc_type_basic.ring`：trait 声明 + impl 赋值 + 方法使用 `Item` 返回类型
+- `assoc_type_bound.ring`：`type Iter: Iterator<T>` 带 bound 的关联类型
+- `assoc_type_constraint.ring`：`fn foo<T: Trait<Item = Int>>()` 约束语法
+- `assoc_type_qualified.ring`：`T::Item` 限定路径在函数体内使用
+- `assoc_type_supertrait.ring`：通过 subtrait bound 访问 supertrait 的关联类型
+- `assoc_type_delegate.ring`：delegate 自动继承关联类型绑定
+- `assoc_type_default.ring`：trait 中提供默认关联类型 `type Item = Int`，impl 可省略
+
+**负面测试**（期望编译错误）：
+- `error_assoc_type_missing.ring`：impl 缺少关联类型赋值 → E0510
+- `error_assoc_type_unknown.ring`：`T::Foo` 但无关联类型 Foo → E0511
+- `error_assoc_type_ambiguous.ring`：多 trait 同名关联类型 → E0512
+- `error_assoc_type_bound.ring`：赋值类型不满足 bound → E0513
 
 **验收标准**：
 - `trait Foo { type Item }` + `impl Foo for Bar { type Item = Int }` 可编译
 - `T::Item` 在泛型函数体内解析为关联类型
 - `fn foo<T: Iterator<Item = Int>>()` 约束语法生效
-- 关联类型带 bound：`type Iter: Iterator<T>` → impl 中 `type Iter = X`，X 未 impl Iterator → 报错
-- 未提供关联类型赋值 → 编译错误
-- 同名歧义（多 trait 提供同名关联类型）→ 暂报"ambiguous associated type"错误（后续加消歧语法）
+- 关联类型带 bound：`type Iter: Iterator<T>` → impl 中 `type Iter = X`，X 未 impl Iterator → 报 E0513
+- 未提供关联类型赋值 → E0510
+- 同名歧义（多 trait 提供同名关联类型）→ E0512
 - `T: SubTrait` 约束下 `T::SuperItem`（supertrait 关联类型）可用
 - `delegate inner: TraitWithAssocType` 自动继承关联类型绑定
+- trait body 中裸名 `Item` 引用正确解析
+- `where I::Item == Int` 语法本次不实现（in-bound 语法 `Iterator<Item = Int>` 已覆盖）
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
