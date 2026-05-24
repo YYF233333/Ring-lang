@@ -29,14 +29,6 @@
 发现者：Opus
 
 
-### #116 `FnType` `types_equal` 用 exact ID 比较 open effect row tail [low] [open]
-
-`types_equal` 对 `FnType` 比较 `optional_ids_equal(ea.tail, eb.tail)`（`types.ring:305`）。当两个函数都有 open effect row tail（不同 type var `?N1` 和 `?N2`），这返回 false，即使它们实际表示相同的 open effect row 语义。`row_merge` 的 `effects_match_kind` 对此处理正确，但 `types_equal` 过于严格，可能导致错误消息/调试输出中的比较误判。
-
-**文件**：`compiler/types.ring:301-306`
-**修复方向**：对 open tail 考虑是否有意要区分不同 type var ID（它们语义相同），或添加注释说明设计意图。
-
-发现者：DS
 
 
 
@@ -132,14 +124,6 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 
 
-### #113 `RecordType` `types_equal` 不检查 field 顺序 [low] [open]
-
-`types_equal` 对 RecordType 使用 `fa.all(fn(f) { fb.any(...) })` 视 fields 为无序集合。对于 row type 语义这可能是有意的（field order 不影响 record subtyping），但与其他类型比较（如 `TupleType` 检查元素顺序）不一致。
-
-**文件**：`compiler/types.ring:323-332`
-**修复方向**：确认设计意图后，添加注释说明或增加顺序检查。
-
-发现者：Opus
 
 
 ### #118 `collect_local_calls` 遗漏限定的调用路径 [low] [open]
@@ -165,14 +149,6 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 
 
-### #114 E0408 dead error code: "Open effect row in capability-restricted module" [medium] [open]
-
-`E0408` 在 `codes.ring:40` 定义、`codes.ring:89` 有描述，但从未被任何编译器 pass 实际 emit。`mod requires {effects}` capability 限制（E0405）正常工作，但未检查 open effect row tail 是否从受限模块泄漏。带 open effect row tail（`fn() -> T with {io, ?N}`）的函数可从 capability-restricted 模块导出而无错误。
-
-**文件**：`compiler/codes.ring:40, 89`
-**修复方向**：在 `check_fn_decl` 中当 `mod_path_stack` 在 `requires {}` 块内时实现 open row 检查，或将 E0408 标记为 deferred feature 并在 `error_description` 中注明。
-
-发现者：DS
 
 
 ## 设计-实现差距（参考，已在 backlog 跟踪）
