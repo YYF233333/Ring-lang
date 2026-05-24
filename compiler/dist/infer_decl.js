@@ -1720,7 +1720,6 @@ function check_test_decl(ctx, description, body, span, __ring_ev_fail) {
 
 function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
   const hd = check_decl(ctx, decl, __ring_ev_fail);
-  List_push(hdecls, hd);
   __ring_match70: {
     const __ring_m70 = hd;
     if (__ring_m70._tag === "Fn") {
@@ -1732,6 +1731,7 @@ function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
     }
     break __ring_match70;
   }
+  let delegate_decls = [];
   __ring_match71: {
     const __ring_m71 = decl;
     if (__ring_m71._tag === "Impl") {
@@ -1743,7 +1743,7 @@ function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
             const field = __ring_m72.field; const trait_names = __ring_m72.trait_names; const dspan = __ring_m72.span;
             const delegate_impls = expand_delegate_impls(ctx, target_type, type_params, field, trait_names, dspan);
             for (const di of delegate_impls) {
-              List_push(hdecls, di);
+              List_push(delegate_decls, di);
             }
             break __ring_match72;
           }
@@ -1753,6 +1753,10 @@ function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
       break __ring_match71;
     }
     break __ring_match71;
+  }
+  List_push(hdecls, hd);
+  for (const di of delegate_decls) {
+    List_push(hdecls, di);
   }
 }
 

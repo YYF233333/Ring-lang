@@ -1293,7 +1293,8 @@ fn check_test_decl(mut ctx: InferCtx, description: Str, body: Expr, span: Span) 
 
 fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
     let hd = check_decl(ctx, decl)
-    hdecls.push(hd)
+
+    // Update fn effects before push (modifies ctx.env, not hdecls)
     match hd {
         HDecl::Fn { name, effects, .. } => {
             if effects.effects.len() > 0 {
@@ -1303,15 +1304,17 @@ fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
         _ => {}
     }
 
-    // Expand delegates: an Impl with Delegate children generates additional
-    // HDecl::Impl nodes (one per delegated trait) with forwarding methods
+    // Expand delegates first, collect results before pushing anything to hdecls.
+    // If expand_delegate_impls fails (raises CompileError), neither the impl HIR
+    // nor partial delegate HIR will be left in hdecls.
+    let mut delegate_decls: List<HDecl> = []
     match decl {
         Decl::Impl { target_type, type_params, methods, span, .. } => {
             for m in methods {
                 match m {
                     Decl::Delegate { field, trait_names, span: dspan } => {
                         let delegate_impls = expand_delegate_impls(ctx, target_type, type_params, field, trait_names, dspan)
-                        for di in delegate_impls { hdecls.push(di) }
+                        for di in delegate_impls { delegate_decls.push(di) }
                     },
                     _ => {}
                 }
@@ -1319,6 +1322,10 @@ fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
         },
         _ => {}
     }
+
+    // Only push after everything succeeded
+    hdecls.push(hd)
+    for di in delegate_decls { hdecls.push(di) }
 }
 
 // ============================================================
