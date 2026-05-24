@@ -5,7 +5,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects}
-use env::{TypeScheme, apply_subst}
+use env::{TypeScheme, apply_subst, find_impl}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext}
 use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705}
@@ -663,10 +663,9 @@ fn expand_delegate_impls(
                                 let mut field_assoc_map: Map<Str, Type> = map_new()
                                 match field_type_name {
                                     some(ftn) => {
-                                        for impl_ in ctx.env.trait_reg.trait_impls {
-                                            if impl_.trait_name == tname && impl_.target_type_name == ftn {
-                                                field_assoc_map = map_clone(impl_.assoc_types)
-                                            }
+                                        match find_impl(ctx.env.trait_reg, ftn, tname) {
+                                            some(field_impl) => { field_assoc_map = map_clone(field_impl.assoc_types) },
+                                            none => {}
                                         }
                                     },
                                     none => {}

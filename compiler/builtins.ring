@@ -6,7 +6,7 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL,
     make_option_type, make_map_type}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef,
-    EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef, ImplEntry, mono}
+    EffectDef, EffectOpDef, BuiltInKind, TraitDef, TraitMethodDef, ImplEntry, mono, add_impl}
 
 // ============================================================
 // Struct for open_row return value
@@ -326,7 +326,7 @@ fn register_eq_trait(mut env: TypeEnv) {
 
     // Register Eq impls for primitive types
     for prim in ["Int", "Float", "Str", "Bool"] {
-        env.trait_reg.trait_impls.push(ImplEntry {
+        add_impl(env.trait_reg, ImplEntry {
             trait_name: "Eq",
             target_type_name: prim,
             type_params: [],
@@ -363,7 +363,7 @@ fn register_option_eq(mut env: TypeEnv) {
         def_id: none
     })
 
-    env.trait_reg.trait_impls.push(ImplEntry {
+    add_impl(env.trait_reg, ImplEntry {
         trait_name: "Eq",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
@@ -395,7 +395,7 @@ fn register_clone_trait(mut env: TypeEnv) {
 
     // Primitive impls
     for prim in ["Int", "Float", "Str", "Bool"] {
-        env.trait_reg.trait_impls.push(ImplEntry {
+        add_impl(env.trait_reg, ImplEntry {
             trait_name: "Clone",
             target_type_name: prim,
             type_params: [],
@@ -406,7 +406,7 @@ fn register_clone_trait(mut env: TypeEnv) {
 
     // Collection impls
     for coll in ["List", "Map", "Set"] {
-        env.trait_reg.trait_impls.push(ImplEntry {
+        add_impl(env.trait_reg, ImplEntry {
             trait_name: "Clone",
             target_type_name: coll,
             type_params: [],
@@ -434,7 +434,7 @@ fn register_option_clone(mut env: TypeEnv) {
         def_id: none
     })
 
-    env.trait_reg.trait_impls.push(ImplEntry {
+    add_impl(env.trait_reg, ImplEntry {
         trait_name: "Clone",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
@@ -465,7 +465,7 @@ fn register_ord_trait(mut env: TypeEnv) {
     })
 
     for prim in ["Int", "Float", "Str", "Bool"] {
-        env.trait_reg.trait_impls.push(ImplEntry {
+        add_impl(env.trait_reg, ImplEntry {
             trait_name: "Ord",
             target_type_name: prim,
             type_params: [],
@@ -498,7 +498,7 @@ fn register_debug_trait(mut env: TypeEnv) {
 
     // Primitive impls
     for prim in ["Int", "Float", "Str", "Bool"] {
-        env.trait_reg.trait_impls.push(ImplEntry {
+        add_impl(env.trait_reg, ImplEntry {
             trait_name: "Debug",
             target_type_name: prim,
             type_params: [],
@@ -519,7 +519,7 @@ fn register_debug_trait(mut env: TypeEnv) {
         bounds: [SchemeBound { type_var: t_id, trait_name: "Debug", assoc_constraints: [] }],
         def_id: none
     })
-    env.trait_reg.trait_impls.push(ImplEntry {
+    add_impl(env.trait_reg, ImplEntry {
         trait_name: "Debug",
         target_type_name: BUILTIN_LIST,
         type_params: ["T"],
@@ -541,7 +541,7 @@ fn register_debug_trait(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
-    env.trait_reg.trait_impls.push(ImplEntry {
+    add_impl(env.trait_reg, ImplEntry {
         trait_name: "Debug",
         target_type_name: BUILTIN_MAP,
         type_params: ["K", "V"],
@@ -561,7 +561,7 @@ fn register_debug_trait(mut env: TypeEnv) {
         bounds: [],
         def_id: none
     })
-    env.trait_reg.trait_impls.push(ImplEntry {
+    add_impl(env.trait_reg, ImplEntry {
         trait_name: "Debug",
         target_type_name: BUILTIN_SET,
         type_params: ["T"],
@@ -588,7 +588,7 @@ fn register_option_debug(mut env: TypeEnv) {
         def_id: none
     })
 
-    env.trait_reg.trait_impls.push(ImplEntry {
+    add_impl(env.trait_reg, ImplEntry {
         trait_name: "Debug",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],

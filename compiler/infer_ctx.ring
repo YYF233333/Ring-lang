@@ -8,7 +8,7 @@ use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
 use codes::{E0201, E0204, E0301, E0302, E0503, E0511, E0512, E0513, E0705}
 use union_find::{UnionFind, new_union_find, uf_find}
-use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map}
+use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
 
 // ============================================================
@@ -575,9 +575,7 @@ pub fn resolve_dicts_from_scheme(
                 let concrete = apply_subst(s, fresh_var)
                 match concrete {
                     Type::StructType { name, type_params, .. } => {
-                        if env.trait_reg.trait_impls.any(fn(impl_) {
-                            impl_.target_type_name == name && impl_.trait_name == bound.trait_name
-                        }) {
+                        if has_impl(env.trait_reg, name, bound.trait_name) {
                             if type_params.len() > 0 {
                                 let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, bound.trait_name)
                                 resolved_dicts.push(DictRef::Wrapped {
@@ -594,9 +592,7 @@ pub fn resolve_dicts_from_scheme(
                         }
                     },
                     Type::EnumType { name, type_params, .. } => {
-                        if env.trait_reg.trait_impls.any(fn(impl_) {
-                            impl_.target_type_name == name && impl_.trait_name == bound.trait_name
-                        }) {
+                        if has_impl(env.trait_reg, name, bound.trait_name) {
                             if type_params.len() > 0 {
                                 let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, bound.trait_name)
                                 resolved_dicts.push(DictRef::Wrapped {
@@ -631,9 +627,7 @@ pub fn resolve_dicts_from_scheme(
                 if !found {
                     match type_to_builtin_name(concrete) {
                         some(prim_name) => {
-                            if env.trait_reg.trait_impls.any(fn(impl_) {
-                                impl_.target_type_name == prim_name && impl_.trait_name == bound.trait_name
-                            }) {
+                            if has_impl(env.trait_reg, prim_name, bound.trait_name) {
                                 resolved_dicts.push(DictRef::Simple(trait_dict_name(prim_name, bound.trait_name)))
                                 found = true
                                 // Validate associated type constraints
@@ -663,9 +657,7 @@ fn check_assoc_constraints(
 ) {
     if bound.assoc_constraints.len() == 0 { return }
     // Find the impl entry for this type + trait
-    let impl_entry = env.trait_reg.trait_impls.find(fn(impl_) {
-        impl_.target_type_name == target_type_name && impl_.trait_name == bound.trait_name
-    })
+    let impl_entry = find_impl(env.trait_reg, target_type_name, bound.trait_name)
     match impl_entry {
         some(entry) => {
             for ac in bound.assoc_constraints {
@@ -728,7 +720,7 @@ fn resolve_concrete_type_to_dict_ref(
             }
         },
         Type::StructType { name, type_params, .. } => {
-            if env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if has_impl(env.trait_reg, name, trait_name) {
                 if type_params.len() > 0 {
                     let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name)
                     DictRef::Wrapped {
@@ -744,7 +736,7 @@ fn resolve_concrete_type_to_dict_ref(
             }
         },
         Type::EnumType { name, type_params, .. } => {
-            if env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if has_impl(env.trait_reg, name, trait_name) {
                 if type_params.len() > 0 {
                     let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name)
                     DictRef::Wrapped {

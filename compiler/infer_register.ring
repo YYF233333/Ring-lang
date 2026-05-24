@@ -3,7 +3,7 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
-    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map}
+    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map, add_impl, has_impl, find_impl}
 use diagnostics::{DiagnosticContext}
 use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
@@ -792,13 +792,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                                     match concrete_name {
                                         some(cname) => {
                                             for bound_trait in atdef.bounds {
-                                                let mut has_impl = false
-                                                for impl_ in ctx.env.trait_reg.trait_impls {
-                                                    if impl_.trait_name == bound_trait && impl_.target_type_name == cname {
-                                                        has_impl = true
-                                                    }
-                                                }
-                                                if !has_impl {
+                                                if !has_impl(ctx.env.trait_reg, cname, bound_trait) {
                                                     let _ = type_error(ctx.sink, E0513,
                                                         "Associated type '${atdef.name}' requires '${bound_trait}', but '${type_to_string(concrete_ty)}' does not implement it",
                                                         span, DiagnosticContext::TraitError { detail: "associated type bound '${bound_trait}' not satisfied by '${cname}'" })
@@ -816,13 +810,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                     // Validate supertrait impls exist (recursively)
                     let all_supertraits = collect_all_supertraits(ctx, tname)
                     for required_st in all_supertraits {
-                        let mut has_st_impl = false
-                        for impl_ in ctx.env.trait_reg.trait_impls {
-                            if impl_.trait_name == required_st && impl_.target_type_name == target_type {
-                                has_st_impl = true
-                            }
-                        }
-                        if !has_st_impl {
+                        if !has_impl(ctx.env.trait_reg, target_type, required_st) {
                             let _ = type_error(ctx.sink, E0505,
                                 "Type '${target_type}' does not implement supertrait '${required_st}' required by '${tname}'",
                                 span, DiagnosticContext::TraitError { detail: "missing supertrait impl '${required_st}'" })
@@ -839,7 +827,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                             _ => {}
                         }
                     }
-                    ctx.env.trait_reg.trait_impls.push(ImplEntry {
+                    add_impl(ctx.env.trait_reg, ImplEntry {
                         trait_name: tname, target_type_name: target_type,
                         type_params: tp_names, method_names: method_names,
                         assoc_types: map_clone(assoc_type_map)
@@ -1024,25 +1012,13 @@ fn register_delegate_traits(
             },
             some(trait_def) => {
                 // Validate that the field type implements the trait
-                let mut has_impl = false
-                for impl_ in ctx.env.trait_reg.trait_impls {
-                    if impl_.trait_name == tname && impl_.target_type_name == field_type_name {
-                        has_impl = true
-                    }
-                }
-                if !has_impl {
+                if !has_impl(ctx.env.trait_reg, field_type_name, tname) {
                     let _ = type_error(ctx.sink, E0508,
                         "type '${field_type_name}' (field '${field}') does not implement trait '${tname}'",
                         span, DiagnosticContext::TraitError { detail: "delegate field type missing trait impl" })
                 } else {
                     // Check for conflict: same trait already implemented (hand-written) for this type
-                    let mut conflict = false
-                    for existing in ctx.env.trait_reg.trait_impls {
-                        if existing.trait_name == tname && existing.target_type_name == target_type {
-                            conflict = true
-                        }
-                    }
-                    if conflict {
+                    if has_impl(ctx.env.trait_reg, target_type, tname) {
                         let _ = type_error(ctx.sink, E0509,
                             "trait '${tname}' is already implemented for '${target_type}'; cannot delegate the same trait",
                             span, DiagnosticContext::TraitError { detail: "delegate conflicts with existing impl" })
@@ -1059,32 +1035,19 @@ fn register_delegate_traits(
 
                     for reg_tname in all_traits_to_register {
                         // Check if this trait (or supertrait) is already implemented
-                        let mut already_impl = false
-                        for existing in ctx.env.trait_reg.trait_impls {
-                            if existing.trait_name == reg_tname && existing.target_type_name == target_type {
-                                already_impl = true
-                            }
-                        }
-                        if already_impl { continue }
+                        if has_impl(ctx.env.trait_reg, target_type, reg_tname) { continue }
 
                         // Validate that the field type implements this trait
-                        let mut field_has_impl = false
-                        for impl_ in ctx.env.trait_reg.trait_impls {
-                            if impl_.trait_name == reg_tname && impl_.target_type_name == field_type_name {
-                                field_has_impl = true
-                            }
-                        }
-                        if !field_has_impl { continue }
+                        if !has_impl(ctx.env.trait_reg, field_type_name, reg_tname) { continue }
 
                         match ctx.env.trait_reg.traits.get(reg_tname) {
                             none => {},
                             some(reg_trait_def) => {
                                 // #128: Copy assoc_types from field type's ImplEntry
                                 let mut field_assoc_types: Map<Str, Type> = map_new()
-                                for impl_ in ctx.env.trait_reg.trait_impls {
-                                    if impl_.trait_name == reg_tname && impl_.target_type_name == field_type_name {
-                                        field_assoc_types = map_clone(impl_.assoc_types)
-                                    }
+                                match find_impl(ctx.env.trait_reg, field_type_name, reg_tname) {
+                                    some(field_impl) => { field_assoc_types = map_clone(field_impl.assoc_types) },
+                                    none => {}
                                 }
 
                                 // Register ImplEntry
@@ -1092,7 +1055,7 @@ fn register_delegate_traits(
                                 for tp in impl_type_params { tp_names.push(tp.name) }
                                 let mut method_names: List<Str> = []
                                 for tm in reg_trait_def.methods { method_names.push(tm.name) }
-                                ctx.env.trait_reg.trait_impls.push(ImplEntry {
+                                add_impl(ctx.env.trait_reg, ImplEntry {
                                     trait_name: reg_tname, target_type_name: target_type,
                                     type_params: tp_names, method_names: method_names,
                                     assoc_types: map_clone(field_assoc_types)

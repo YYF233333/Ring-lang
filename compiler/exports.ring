@@ -422,9 +422,12 @@ pub fn extract_exports(
 
     // Filter trait impls
     let mut trait_impls: List<ImplEntry> = []
-    for impl_ in env.trait_reg.trait_impls {
-        if types.contains_key(impl_.target_type_name) || traits.contains_key(impl_.trait_name) {
-            trait_impls.push(impl_)
+    for map_entry in env.trait_reg.trait_impls.entries() {
+        let (_, impl_list) = map_entry
+        for impl_ in impl_list {
+            if types.contains_key(impl_.target_type_name) || traits.contains_key(impl_.trait_name) {
+                trait_impls.push(impl_)
+            }
         }
     }
 

@@ -4,7 +4,7 @@ use infer_register::{prefix_decl_name}
 use hir::{HProgram, HDecl, trait_dict_name}
 use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
 use formatter::{format_human}
-use env::{TypeEnv}
+use env::{TypeEnv, add_impl}
 use checker::{CheckResult, check as check_single, check_module}
 use codegen::{generate}
 use codegen_ctx::{safe_ident}

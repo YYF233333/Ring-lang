@@ -20,14 +20,14 @@ use codes::{E0201, E0203, E0205, E0206, E0208, E0301, E0303, E0304, E0305, E0306
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
-    BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map}
-use unify::{unify}
+    BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl}
+use unify::{unify, empty_subst}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, merge_effects, unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_named_type,
     bind_pattern, build_scheme_var_map, resolve_dicts_from_scheme,
     remove_fail_effect,
-    generalize, resolve_relative_qualifier}
+    generalize, free_type_vars, resolve_relative_qualifier}
 use exhaustive::{check_exhaustive}
 
 
@@ -218,7 +218,15 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                 none => {}
             }
             let resolved = apply_subst(s, var_type)
-            let scheme = generalize(ctx.env, resolved, s)
+            // Optimization: skip the expensive free_type_vars_in_env scan when the resolved
+            // type is ground (no type variables). Most function-local let bindings have ground
+            // types, so this avoids a full env scan on each one.
+            let ftv = free_type_vars(resolved, empty_subst())
+            let scheme = if ftv.len() == 0 {
+                mono(resolved)
+            } else {
+                generalize(ctx.env, resolved, s)
+            }
             ctx.env.bind(name, scheme)
             let bound_scheme = ctx.env.lookup(name)
             let bound_def_id: Int? = match bound_scheme {
@@ -1198,7 +1206,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
             TraitDispatch::Builtin
         },
         Type::StructType { name, type_params, .. } => {
-            if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if has_impl(ctx.env.trait_reg, name, trait_name) {
                 let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
                 return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
@@ -1208,7 +1216,7 @@ fn resolve_trait_dispatch(ctx: InferCtx, resolved: Type, trait_name: Str, error_
             TraitDispatch::Builtin
         },
         Type::EnumType { name, type_params, .. } => {
-            if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if has_impl(ctx.env.trait_reg, name, trait_name) {
                 let extra_dicts = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
                 return TraitDispatch::Direct { dict: trait_dict_name(name, trait_name), extra_dicts: match extra_dicts { some(d) => d, none => [] } }
             }
@@ -1260,7 +1268,7 @@ fn resolve_type_to_dict_ref(ctx: InferCtx, t: Type, subst: UnionFind, trait_name
             }
         },
         Type::StructType { name, type_params, .. } => {
-            if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if has_impl(ctx.env.trait_reg, name, trait_name) {
                 if type_params.len() > 0 {
                     let inner = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
                     match inner {
@@ -1277,7 +1285,7 @@ fn resolve_type_to_dict_ref(ctx: InferCtx, t: Type, subst: UnionFind, trait_name
             } else { none }
         },
         Type::EnumType { name, type_params, .. } => {
-            if ctx.env.trait_reg.trait_impls.any(fn(i) { i.target_type_name == name && i.trait_name == trait_name }) {
+            if has_impl(ctx.env.trait_reg, name, trait_name) {
                 if type_params.len() > 0 {
                     let inner = resolve_trait_extra_dicts(ctx, type_params, subst, trait_name)
                     match inner {
@@ -1517,12 +1525,12 @@ fn resolve_arg_dict_closure(ctx: InferCtx, harg: HExpr, s: UnionFind) -> HExpr {
 fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, mut dicts: List<Str>) {
     match concrete {
         Type::StructType { name, .. } => {
-            if ctx.env.trait_reg.trait_impls.any(fn(impl_) { impl_.target_type_name == name && impl_.trait_name == trait_name }) {
+            if has_impl(ctx.env.trait_reg, name, trait_name) {
                 dicts.push(trait_dict_name(name, trait_name))
             }
         },
         Type::EnumType { name, .. } => {
-            if ctx.env.trait_reg.trait_impls.any(fn(impl_) { impl_.target_type_name == name && impl_.trait_name == trait_name }) {
+            if has_impl(ctx.env.trait_reg, name, trait_name) {
                 dicts.push(trait_dict_name(name, trait_name))
             }
         },
@@ -1538,7 +1546,7 @@ fn resolve_arg_bound_dict(ctx: InferCtx, concrete: Type, trait_name: Str, mut di
         _ => {
             match type_to_builtin_name(concrete) {
                 some(prim_name) => {
-                    if ctx.env.trait_reg.trait_impls.any(fn(impl_) { impl_.target_type_name == prim_name && impl_.trait_name == trait_name }) {
+                    if has_impl(ctx.env.trait_reg, prim_name, trait_name) {
                         dicts.push(trait_dict_name(prim_name, trait_name))
                     }
                 },
@@ -1891,32 +1899,35 @@ fn lookup_impl_method(mut ctx: InferCtx, type_name: Str, method: Str) -> MethodL
 fn lookup_trait_method(mut ctx: InferCtx, type_name: Str, method: Str, span: Span) -> Type? {
     let mut found_type: Type? = none
     let mut found_trait_name: Str? = none
-    for impl_entry in ctx.env.trait_reg.trait_impls {
-        if impl_entry.target_type_name == type_name {
-            match ctx.env.trait_reg.traits.get(impl_entry.trait_name) {
-                some(trait_def) => {
-                    let tm = trait_def.methods.find(fn(m) { m.name == method })
-                    match tm {
-                        some(found_method) => {
-                            match found_trait_name {
-                                some(prev_trait) => {
-                                    let _ = type_error(ctx.sink, E0504,
-                                        "Ambiguous method '${method}' on '${type_name}': found in trait '${prev_trait}' and '${impl_entry.trait_name}'",
-                                        span, DiagnosticContext::OtherContext { detail: some("disambiguate by calling TraitName::${method}") })
-                                    return found_type
-                                },
-                                none => {
-                                    found_type = some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: [], def_id: none }))
-                                    found_trait_name = some(impl_entry.trait_name)
+    match ctx.env.trait_reg.trait_impls.get(type_name) {
+        some(type_impls) => {
+            for impl_entry in type_impls {
+                match ctx.env.trait_reg.traits.get(impl_entry.trait_name) {
+                    some(trait_def) => {
+                        let tm = trait_def.methods.find(fn(m) { m.name == method })
+                        match tm {
+                            some(found_method) => {
+                                match found_trait_name {
+                                    some(prev_trait) => {
+                                        let _ = type_error(ctx.sink, E0504,
+                                            "Ambiguous method '${method}' on '${type_name}': found in trait '${prev_trait}' and '${impl_entry.trait_name}'",
+                                            span, DiagnosticContext::OtherContext { detail: some("disambiguate by calling TraitName::${method}") })
+                                        return found_type
+                                    },
+                                    none => {
+                                        found_type = some(ctx.env.instantiate(TypeScheme { ty: found_method.ty, type_vars: trait_def.type_param_vars, bounds: [], def_id: none }))
+                                        found_trait_name = some(impl_entry.trait_name)
+                                    }
                                 }
-                            }
-                        },
-                        none => {}
-                    }
-                },
-                none => {}
+                            },
+                            none => {}
+                        }
+                    },
+                    none => {}
+                }
             }
-        }
+        },
+        none => {}
     }
     found_type
 }

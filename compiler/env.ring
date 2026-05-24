@@ -148,7 +148,7 @@ pub struct TypeRegistry {
 
 pub struct TraitRegistry {
     pub traits: Map<Str, TraitDef>,
-    pub trait_impls: List<ImplEntry>,
+    pub trait_impls: Map<Str, List<ImplEntry>>,
     pub impl_methods: Map<Str, Map<Str, TypeScheme>>,
     pub mut_methods: Map<Str, Set<Str>>
 }
@@ -201,7 +201,7 @@ pub fn new_type_env() -> TypeEnv {
         },
         trait_reg: TraitRegistry {
             traits: map_new(),
-            trait_impls: [],
+            trait_impls: map_new(),
             impl_methods: map_new(),
             mut_methods: map_new()
         },
@@ -330,6 +330,35 @@ impl TypeEnv {
             }
         }
         apply_subst_map(mapping, scheme.ty)
+    }
+}
+
+// ============================================================
+// trait_impls helpers (Map<Str, List<ImplEntry>> keyed by target_type_name)
+// ============================================================
+
+pub fn add_impl(mut reg: TraitRegistry, entry: ImplEntry) {
+    match reg.trait_impls.get(entry.target_type_name) {
+        some(impls) => impls.push(entry),
+        none => {
+            let mut list: List<ImplEntry> = []
+            list.push(entry)
+            reg.trait_impls.insert(entry.target_type_name, list)
+        }
+    }
+}
+
+pub fn has_impl(reg: TraitRegistry, type_name: Str, trait_name: Str) -> Bool {
+    match reg.trait_impls.get(type_name) {
+        some(impls) => impls.any(fn(i) { i.trait_name == trait_name }),
+        none => false
+    }
+}
+
+pub fn find_impl(reg: TraitRegistry, type_name: Str, trait_name: Str) -> ImplEntry? {
+    match reg.trait_impls.get(type_name) {
+        some(impls) => impls.find(fn(i) { i.trait_name == trait_name }),
+        none => none
     }
 }
 
