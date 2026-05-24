@@ -2440,6 +2440,13 @@ fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
             }
             Pattern::NamedConstructor { name: name, qualifier: qualifier, fields: new_fields, rest: rest, span: span }
         },
+        Pattern::OrPattern { patterns, span } => {
+            let mut new_pats: List<Pattern> = []
+            for p in patterns {
+                new_pats.push(rewrite_bare_enum_bindings(env, p))
+            }
+            Pattern::OrPattern { patterns: new_pats, span: span }
+        },
         _ => pattern,
     }
 }

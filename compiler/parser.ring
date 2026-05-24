@@ -139,6 +139,18 @@ pub fn expr_span(e: Expr) -> Span {
     }
 }
 
+pub fn pattern_span(p: Pattern) -> Span {
+    match p {
+        Pattern::Wildcard { span, .. } => span,
+        Pattern::Binding { span, .. } => span,
+        Pattern::Constructor { span, .. } => span,
+        Pattern::NamedConstructor { span, .. } => span,
+        Pattern::Literal { span, .. } => span,
+        Pattern::TuplePattern { span, .. } => span,
+        Pattern::OrPattern { span, .. } => span
+    }
+}
+
 // ============================================================
 // Parser struct
 // ============================================================
@@ -1670,7 +1682,18 @@ impl Parser {
 
     fn parse_match_arm(mut self) -> MatchArm {
         let start = self.current_span_start()
-        let pattern = self.parse_pattern()
+        let mut pattern = self.parse_pattern()
+
+        // Or-pattern: pat1 | pat2 | ... => body
+        if self.check(TokenKind::TkPipe) {
+            let mut patterns: List<Pattern> = [pattern]
+            while self.try_consume(TokenKind::TkPipe) {
+                patterns.push(self.parse_pattern())
+            }
+            let end = pattern_span(patterns.get(patterns.len() - 1).unwrap())
+            pattern = Pattern::OrPattern { patterns: patterns, span: self.make_span(start, end.end) }
+        }
+
         let mut guard: Expr? = none
         if self.check(TokenKind::TkIf) {
             self.advance()

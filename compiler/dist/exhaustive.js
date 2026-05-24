@@ -1,5 +1,5 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
-import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, AssocConstraint as ast$AssocConstraint, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Span_Eq as ast$__Span_Eq, __NamedImport_Eq as ast$__NamedImport_Eq, __LiteralValue_Eq as ast$__LiteralValue_Eq, __BinOp_Eq as ast$__BinOp_Eq, __UnaryOp_Eq as ast$__UnaryOp_Eq, __Position_Clone as ast$__Position_Clone, __Span_Clone as ast$__Span_Clone, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __UsePath_Clone as ast$__UsePath_Clone, __NamedImport_Clone as ast$__NamedImport_Clone, __LiteralValue_Clone as ast$__LiteralValue_Clone, __BinOp_Clone as ast$__BinOp_Clone, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UseImport_Clone as ast$__UseImport_Clone, __UseDecl_Clone as ast$__UseDecl_Clone, __Position_Ord as ast$__Position_Ord, __Span_Ord as ast$__Span_Ord, __LiteralValue_Ord as ast$__LiteralValue_Ord, __BinOp_Ord as ast$__BinOp_Ord, __UnaryOp_Ord as ast$__UnaryOp_Ord, __Position_Debug as ast$__Position_Debug, __Span_Debug as ast$__Span_Debug, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Debug as ast$__UsePath_Debug, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
+import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, AssocConstraint as ast$AssocConstraint, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Span_Eq as ast$__Span_Eq, __NamedImport_Eq as ast$__NamedImport_Eq, __LiteralValue_Eq as ast$__LiteralValue_Eq, __BinOp_Eq as ast$__BinOp_Eq, __UnaryOp_Eq as ast$__UnaryOp_Eq, __Position_Clone as ast$__Position_Clone, __Span_Clone as ast$__Span_Clone, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __UsePath_Clone as ast$__UsePath_Clone, __NamedImport_Clone as ast$__NamedImport_Clone, __LiteralValue_Clone as ast$__LiteralValue_Clone, __BinOp_Clone as ast$__BinOp_Clone, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UseImport_Clone as ast$__UseImport_Clone, __UseDecl_Clone as ast$__UseDecl_Clone, __Position_Ord as ast$__Position_Ord, __Span_Ord as ast$__Span_Ord, __LiteralValue_Ord as ast$__LiteralValue_Ord, __BinOp_Ord as ast$__BinOp_Ord, __UnaryOp_Ord as ast$__UnaryOp_Ord, __Position_Debug as ast$__Position_Debug, __Span_Debug as ast$__Span_Debug, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Debug as ast$__UsePath_Debug, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
 import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, effect_kind_name as types$effect_kind_name, effects_match_kind as types$effects_match_kind, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, effects_same_kind as types$effects_same_kind, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
 import { new_union_find as union_find$new_union_find, uf_find as union_find$uf_find, uf_bind as union_find$uf_bind, uf_lookup as union_find$uf_lookup, uf_union as union_find$uf_union, uf_insert as union_find$uf_insert, UnionFind as union_find$UnionFind } from "./union_find.js";
 import { mono as env$mono, new_type_env as env$new_type_env, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __SchemeBound_Eq as env$__SchemeBound_Eq, __FnBound_Eq as env$__FnBound_Eq, __IdGen_Eq as env$__IdGen_Eq, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __SchemeBound_Clone as env$__SchemeBound_Clone, __FnBound_Clone as env$__FnBound_Clone, __IdGen_Clone as env$__IdGen_Clone, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __SchemeBound_Ord as env$__SchemeBound_Ord, __FnBound_Ord as env$__FnBound_Ord, __IdGen_Ord as env$__IdGen_Ord, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __SchemeBound_Debug as env$__SchemeBound_Debug, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
@@ -347,62 +347,82 @@ function check_exhaustive(arms, scrutinee_type, subst) {
   return check_patterns(patterns, scrutinee_type, subst);
 }
 
-function check_patterns(patterns, ty, subst) {
-  const resolved = env$apply_subst(subst, ty);
+function expand_or_patterns(patterns) {
+  let result = [];
   for (const p of patterns) {
     __ring_match14: {
       const __ring_m14 = p;
-      if (__ring_m14._tag === "Wildcard") {
-        return Option_none;
+      if (__ring_m14._tag === "OrPattern") {
+        const sub_pats = __ring_m14.patterns;
+        for (const sp of sub_pats) {
+          List_push(result, sp);
+        }
         break __ring_match14;
       }
-      if (__ring_m14._tag === "Binding") {
-        return Option_none;
-        break __ring_match14;
-      }
+      List_push(result, p);
       break __ring_match14;
     }
   }
-  __ring_match15: {
-    const __ring_m15 = resolved;
-    if (__ring_m15._tag === "EnumType") {
-      const name = __ring_m15.name; const type_params = __ring_m15.type_params; const variants = __ring_m15.variants;
+  return result;
+}
+
+function check_patterns(patterns, ty, subst) {
+  const resolved = env$apply_subst(subst, ty);
+  const expanded = expand_or_patterns(patterns);
+  for (const p of expanded) {
+    __ring_match15: {
+      const __ring_m15 = p;
+      if (__ring_m15._tag === "Wildcard") {
+        return Option_none;
+        break __ring_match15;
+      }
+      if (__ring_m15._tag === "Binding") {
+        return Option_none;
+        break __ring_match15;
+      }
+      break __ring_match15;
+    }
+  }
+  __ring_match16: {
+    const __ring_m16 = resolved;
+    if (__ring_m16._tag === "EnumType") {
+      const name = __ring_m16.name; const type_params = __ring_m16.type_params; const variants = __ring_m16.variants;
       const variant_names = variants.map((function(v) { return v.name; }));
       let covered = set_new();
       for (const v of variants) {
         let sub_patterns_for_variant = [];
-        for (const p of patterns) {
-          __ring_match16: {
-            const __ring_m16 = p;
-            if (__ring_m16._tag === "Constructor") {
-              const pname = __ring_m16.name; const fields = __ring_m16.fields;
+        for (const p of expanded) {
+          __ring_match17: {
+            const __ring_m17 = p;
+            if (__ring_m17._tag === "Constructor") {
+              const pname = __ring_m17.name; const fields = __ring_m17.fields;
               if ((pname === v.name)) {
                 _Set_insert(covered, v.name);
                 List_push(sub_patterns_for_variant, fields);
               }
-              break __ring_match16;
+              break __ring_match17;
             }
-            if (__ring_m16._tag === "NamedConstructor") {
-              const pname = __ring_m16.name; const nfields = __ring_m16.fields;
-              __ring_match17: {
-                const __ring_m17 = v.field_names;
-                if (__ring_m17._tag === "some") {
-                  const fnames = __ring_m17._0;
+            if (__ring_m17._tag === "NamedConstructor") {
+              const pname = __ring_m17.name; const nfields = __ring_m17.fields;
+              __ring_match18: {
+                const __ring_m18 = v.field_names;
+                if (__ring_m18._tag === "some") {
+                  const fnames = __ring_m18._0;
                   if ((pname === v.name)) {
                     _Set_insert(covered, v.name);
                     const positional = named_pattern_to_positional(nfields, fnames, List_len(v.fields));
                     List_push(sub_patterns_for_variant, positional);
                   }
-                  break __ring_match17;
+                  break __ring_match18;
                 }
-                if (__ring_m17._tag === "none") {
-                  break __ring_match17;
+                if (__ring_m18._tag === "none") {
+                  break __ring_match18;
                 }
-                __match_fail(__ring_m17);
+                __match_fail(__ring_m18);
               }
-              break __ring_match16;
+              break __ring_match17;
             }
-            break __ring_match16;
+            break __ring_match17;
           }
         }
         if ((_Set_contains(covered, v.name, __Str_Eq) === false)) {
@@ -420,18 +440,18 @@ function check_patterns(patterns, ty, subst) {
             let expanding = set_new();
             _Set_insert(expanding, types$type_to_string(resolved));
             const missing_fields = check_matrix(normalized, v.fields, subst, expanding);
-            __ring_match18: {
-              const __ring_m18 = missing_fields;
-              if (__ring_m18._tag === "some") {
-                const mf = __ring_m18._0;
+            __ring_match19: {
+              const __ring_m19 = missing_fields;
+              if (__ring_m19._tag === "some") {
+                const mf = __ring_m19._0;
                 const joined = join_strs(mf, ", ");
                 return Option_some(`${v.name}(${joined})`);
-                break __ring_match18;
+                break __ring_match19;
               }
-              if (__ring_m18._tag === "none") {
-                break __ring_match18;
+              if (__ring_m19._tag === "none") {
+                break __ring_match19;
               }
-              __match_fail(__ring_m18);
+              __match_fail(__ring_m19);
             }
           }
         }
@@ -442,32 +462,32 @@ function check_patterns(patterns, ty, subst) {
         }
       }
       return Option_none;
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "BoolType") {
+    if (__ring_m16._tag === "BoolType") {
       let has_true = false;
       let has_false = false;
-      for (const p of patterns) {
-        __ring_match19: {
-          const __ring_m19 = p;
-          if (__ring_m19._tag === "Literal") {
-            const value = __ring_m19.value;
-            __ring_match20: {
-              const __ring_m20 = value;
-              if (__ring_m20._tag === "BoolVal") {
-                const b = __ring_m20._0;
+      for (const p of expanded) {
+        __ring_match20: {
+          const __ring_m20 = p;
+          if (__ring_m20._tag === "Literal") {
+            const value = __ring_m20.value;
+            __ring_match21: {
+              const __ring_m21 = value;
+              if (__ring_m21._tag === "BoolVal") {
+                const b = __ring_m21._0;
                 if (b) {
                   has_true = true;
                 } else {
                   has_false = true;
                 }
-                break __ring_match20;
+                break __ring_match21;
               }
-              break __ring_match20;
+              break __ring_match21;
             }
-            break __ring_match19;
+            break __ring_match20;
           }
-          break __ring_match19;
+          break __ring_match20;
         }
       }
       if ((has_true === true)) {
@@ -479,10 +499,10 @@ function check_patterns(patterns, ty, subst) {
       } else {
         return Option_some("true");
       }
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "StructType") {
-      const sname = __ring_m15.name; const sfields = __ring_m15.fields;
+    if (__ring_m16._tag === "StructType") {
+      const sname = __ring_m16.name; const sfields = __ring_m16.fields;
       let covered = false;
       let sub_patterns = [];
       let field_names = [];
@@ -491,27 +511,27 @@ function check_patterns(patterns, ty, subst) {
         List_push(field_names, f.name);
         List_push(field_types, f.ty);
       }
-      for (const p of patterns) {
-        __ring_match21: {
-          const __ring_m21 = p;
-          if (__ring_m21._tag === "NamedConstructor") {
-            const pname = __ring_m21.name; const nfields = __ring_m21.fields;
+      for (const p of expanded) {
+        __ring_match22: {
+          const __ring_m22 = p;
+          if (__ring_m22._tag === "NamedConstructor") {
+            const pname = __ring_m22.name; const nfields = __ring_m22.fields;
             if (names_match_struct(pname, sname)) {
               covered = true;
               const positional = named_pattern_to_positional(nfields, field_names, List_len(sfields));
               List_push(sub_patterns, positional);
             }
-            break __ring_match21;
+            break __ring_match22;
           }
-          if (__ring_m21._tag === "Constructor") {
-            const pname = __ring_m21.name; const cfields = __ring_m21.fields;
+          if (__ring_m22._tag === "Constructor") {
+            const pname = __ring_m22.name; const cfields = __ring_m22.fields;
             if (names_match_struct(pname, sname)) {
               covered = true;
               List_push(sub_patterns, cfields);
             }
-            break __ring_match21;
+            break __ring_match22;
           }
-          break __ring_match21;
+          break __ring_match22;
         }
       }
       if ((covered === false)) {
@@ -530,41 +550,41 @@ function check_patterns(patterns, ty, subst) {
         let expanding = set_new();
         _Set_insert(expanding, types$type_to_string(resolved));
         const missing_fields = check_matrix(normalized, field_types, subst, expanding);
-        __ring_match22: {
-          const __ring_m22 = missing_fields;
-          if (__ring_m22._tag === "some") {
-            const mf = __ring_m22._0;
+        __ring_match23: {
+          const __ring_m23 = missing_fields;
+          if (__ring_m23._tag === "some") {
+            const mf = __ring_m23._0;
             const joined = join_strs(mf, ", ");
             return Option_some(`${sname}(${joined})`);
-            break __ring_match22;
+            break __ring_match23;
           }
-          if (__ring_m22._tag === "none") {
-            break __ring_match22;
+          if (__ring_m23._tag === "none") {
+            break __ring_match23;
           }
-          __match_fail(__ring_m22);
+          __match_fail(__ring_m23);
         }
       }
       return Option_none;
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "UnitType") {
+    if (__ring_m16._tag === "UnitType") {
       return Option_none;
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "TupleType") {
-      const elements = __ring_m15.elements;
+    if (__ring_m16._tag === "TupleType") {
+      const elements = __ring_m16.elements;
       let matrix = [];
-      for (const p of patterns) {
-        __ring_match23: {
-          const __ring_m23 = p;
-          if (__ring_m23._tag === "TuplePattern") {
-            const pelems = __ring_m23.elements;
+      for (const p of expanded) {
+        __ring_match24: {
+          const __ring_m24 = p;
+          if (__ring_m24._tag === "TuplePattern") {
+            const pelems = __ring_m24.elements;
             if ((List_len(pelems) === List_len(elements))) {
               List_push(matrix, pelems);
             }
-            break __ring_match23;
+            break __ring_match24;
           }
-          break __ring_match23;
+          break __ring_match24;
         }
       }
       if ((List_len(matrix) === 0)) {
@@ -573,48 +593,48 @@ function check_patterns(patterns, ty, subst) {
         return Option_some(`(${joined})`);
       }
       const missing = check_matrix(matrix, elements, subst, set_new());
-      __ring_match24: {
-        const __ring_m24 = missing;
-        if (__ring_m24._tag === "some") {
-          const m = __ring_m24._0;
+      __ring_match25: {
+        const __ring_m25 = missing;
+        if (__ring_m25._tag === "some") {
+          const m = __ring_m25._0;
           const joined = join_strs(m, ", ");
           return Option_some(`(${joined})`);
-          break __ring_match24;
+          break __ring_match25;
         }
-        if (__ring_m24._tag === "none") {
+        if (__ring_m25._tag === "none") {
           return Option_none;
-          break __ring_match24;
+          break __ring_match25;
         }
-        __match_fail(__ring_m24);
+        __match_fail(__ring_m25);
       }
-      break __ring_match15;
+      break __ring_match16;
     }
     return Option_some("_");
-    break __ring_match15;
+    break __ring_match16;
   }
 }
 
 function finite_type_ctors(ty) {
-  __ring_match25: {
-    const __ring_m25 = ty;
-    if (__ring_m25._tag === "BoolType") {
+  __ring_match26: {
+    const __ring_m26 = ty;
+    if (__ring_m26._tag === "BoolType") {
       let result = [];
       List_push(result, new Ctor("true", 0, [], Option_none, false));
       List_push(result, new Ctor("false", 0, [], Option_none, false));
       return Option_some(result);
-      break __ring_match25;
+      break __ring_match26;
     }
-    if (__ring_m25._tag === "EnumType") {
-      const variants = __ring_m25.variants;
+    if (__ring_m26._tag === "EnumType") {
+      const variants = __ring_m26.variants;
       let result = [];
       for (const v of variants) {
         List_push(result, new Ctor(v.name, List_len(v.fields), v.fields, v.field_names, false));
       }
       return Option_some(result);
-      break __ring_match25;
+      break __ring_match26;
     }
-    if (__ring_m25._tag === "StructType") {
-      const name = __ring_m25.name; const fields = __ring_m25.fields;
+    if (__ring_m26._tag === "StructType") {
+      const name = __ring_m26.name; const fields = __ring_m26.fields;
       let field_types = [];
       let field_names = [];
       for (const f of fields) {
@@ -624,23 +644,23 @@ function finite_type_ctors(ty) {
       let result = [];
       List_push(result, new Ctor(name, List_len(fields), field_types, Option_some(field_names), false));
       return Option_some(result);
-      break __ring_match25;
+      break __ring_match26;
     }
-    if (__ring_m25._tag === "UnitType") {
+    if (__ring_m26._tag === "UnitType") {
       let result = [];
       List_push(result, new Ctor("()", 0, [], Option_none, false));
       return Option_some(result);
-      break __ring_match25;
+      break __ring_match26;
     }
-    if (__ring_m25._tag === "TupleType") {
-      const elements = __ring_m25.elements;
+    if (__ring_m26._tag === "TupleType") {
+      const elements = __ring_m26.elements;
       let result = [];
       List_push(result, new Ctor("", List_len(elements), elements, Option_none, true));
       return Option_some(result);
-      break __ring_match25;
+      break __ring_match26;
     }
     return Option_none;
-    break __ring_match25;
+    break __ring_match26;
   }
 }
 
@@ -692,9 +712,9 @@ function specialize_row(row, ctor) {
   for (let i = 1; i < __ring_end3; i++) {
     List_push(rest, pat_at(row, i));
   }
-  __ring_match26: {
-    const __ring_m26 = first;
-    if (__ring_m26._tag === "Wildcard") {
+  __ring_match27: {
+    const __ring_m27 = first;
+    if (__ring_m27._tag === "Wildcard") {
       let result = [];
       const wild = wild_pattern();
       const __ring_end4 = ctor.arity;
@@ -703,9 +723,9 @@ function specialize_row(row, ctor) {
       }
       List_extend(result, rest);
       return Option_some(result);
-      break __ring_match26;
+      break __ring_match27;
     }
-    if (__ring_m26._tag === "Binding") {
+    if (__ring_m27._tag === "Binding") {
       let result = [];
       const wild = wild_pattern();
       const __ring_end5 = ctor.arity;
@@ -714,29 +734,29 @@ function specialize_row(row, ctor) {
       }
       List_extend(result, rest);
       return Option_some(result);
-      break __ring_match26;
+      break __ring_match27;
     }
-    if (__ring_m26._tag === "Literal") {
-      const value = __ring_m26.value;
-      __ring_match27: {
-        const __ring_m27 = value;
-        if (__ring_m27._tag === "BoolVal") {
-          const b = __ring_m27._0;
+    if (__ring_m27._tag === "Literal") {
+      const value = __ring_m27.value;
+      __ring_match28: {
+        const __ring_m28 = value;
+        if (__ring_m28._tag === "BoolVal") {
+          const b = __ring_m28._0;
           const match_name = (b ? "true" : "false");
           if ((match_name === ctor.name)) {
             return Option_some(rest);
           } else {
             return Option_none;
           }
-          break __ring_match27;
+          break __ring_match28;
         }
         return Option_none;
-        break __ring_match27;
+        break __ring_match28;
       }
-      break __ring_match26;
+      break __ring_match27;
     }
-    if (__ring_m26._tag === "Constructor") {
-      const name = __ring_m26.name; const fields = __ring_m26.fields;
+    if (__ring_m27._tag === "Constructor") {
+      const name = __ring_m27.name; const fields = __ring_m27.fields;
       if (names_match_struct(name, ctor.name)) {
         let sub = list_clone(fields);
         const wild = wild_pattern();
@@ -748,10 +768,10 @@ function specialize_row(row, ctor) {
       } else {
         return Option_none;
       }
-      break __ring_match26;
+      break __ring_match27;
     }
-    if (__ring_m26._tag === "NamedConstructor") {
-      const name = __ring_m26.name; const nfields = __ring_m26.fields;
+    if (__ring_m27._tag === "NamedConstructor") {
+      const name = __ring_m27.name; const nfields = __ring_m27.fields;
       if (names_match_struct(name, ctor.name)) {
         const field_names = (function() {
   const __ring_m = ctor.field_names;
@@ -768,10 +788,10 @@ function specialize_row(row, ctor) {
       } else {
         return Option_none;
       }
-      break __ring_match26;
+      break __ring_match27;
     }
-    if (__ring_m26._tag === "TuplePattern") {
-      const elements = __ring_m26.elements;
+    if (__ring_m27._tag === "TuplePattern") {
+      const elements = __ring_m27.elements;
       if ((ctor.is_tuple === true)) {
         if ((List_len(elements) === ctor.arity)) {
           let result = list_clone(elements);
@@ -783,9 +803,30 @@ function specialize_row(row, ctor) {
       } else {
         return Option_none;
       }
-      break __ring_match26;
+      break __ring_match27;
     }
-    __match_fail(__ring_m26);
+    if (__ring_m27._tag === "OrPattern") {
+      const sub_pats = __ring_m27.patterns;
+      for (const sp of sub_pats) {
+        let trial_row = [sp];
+        List_extend(trial_row, rest);
+        const result = specialize_row(trial_row, ctor);
+        __ring_match29: {
+          const __ring_m29 = result;
+          if (__ring_m29._tag === "some") {
+            return result;
+            break __ring_match29;
+          }
+          if (__ring_m29._tag === "none") {
+            break __ring_match29;
+          }
+          __match_fail(__ring_m29);
+        }
+      }
+      return Option_none;
+      break __ring_match27;
+    }
+    __match_fail(__ring_m27);
   }
 }
 
@@ -811,10 +852,10 @@ function check_matrix(rows, col_types, subst, expanding) {
 })();
   const is_reentrant = ((type_key !== "") ? _Set_contains(expanding, type_key, __Str_Eq) : false);
   const ctors = (is_reentrant ? Option_none : finite_type_ctors(first_type));
-  __ring_match28: {
-    const __ring_m28 = ctors;
-    if (__ring_m28._tag === "some") {
-      const ctor_list = __ring_m28._0;
+  __ring_match30: {
+    const __ring_m30 = ctors;
+    if (__ring_m30._tag === "some") {
+      const ctor_list = __ring_m30._0;
       let new_expanding = set_clone(expanding);
       if ((type_key !== "")) {
         if (type_is_recursive(first_type, type_key)) {
@@ -824,27 +865,27 @@ function check_matrix(rows, col_types, subst, expanding) {
       for (const ctor of ctor_list) {
         let specialized = [];
         for (const row of rows) {
-          __ring_match29: {
-            const __ring_m29 = specialize_row(row, ctor);
-            if (__ring_m29._tag === "some") {
-              const s = __ring_m29._0;
+          __ring_match31: {
+            const __ring_m31 = specialize_row(row, ctor);
+            if (__ring_m31._tag === "some") {
+              const s = __ring_m31._0;
               List_push(specialized, s);
-              break __ring_match29;
+              break __ring_match31;
             }
-            if (__ring_m29._tag === "none") {
-              break __ring_match29;
+            if (__ring_m31._tag === "none") {
+              break __ring_match31;
             }
-            __match_fail(__ring_m29);
+            __match_fail(__ring_m31);
           }
         }
         let new_types = [];
         List_extend(new_types, ctor.field_types);
         List_extend(new_types, rest_types);
         const sub = check_matrix(specialized, new_types, subst, new_expanding);
-        __ring_match30: {
-          const __ring_m30 = sub;
-          if (__ring_m30._tag === "some") {
-            const sub_result = __ring_m30._0;
+        __ring_match32: {
+          const __ring_m32 = sub;
+          if (__ring_m32._tag === "some") {
+            const sub_result = __ring_m32._0;
             let ctor_sub = [];
             const __ring_end7 = ctor.arity;
             for (let i = 0; i < __ring_end7; i++) {
@@ -871,64 +912,81 @@ function check_matrix(rows, col_types, subst, expanding) {
             List_push(result, ctor_str);
             List_extend(result, rest_sub);
             return Option_some(result);
-            break __ring_match30;
+            break __ring_match32;
           }
-          if (__ring_m30._tag === "none") {
-            break __ring_match30;
+          if (__ring_m32._tag === "none") {
+            break __ring_match32;
           }
-          __match_fail(__ring_m30);
+          __match_fail(__ring_m32);
         }
       }
       return Option_none;
-      break __ring_match28;
+      break __ring_match30;
     }
-    if (__ring_m28._tag === "none") {
+    if (__ring_m30._tag === "none") {
       let defaults = [];
       for (const row of rows) {
         const first = pat_at(row, 0);
-        __ring_match31: {
-          const __ring_m31 = first;
-          if (__ring_m31._tag === "Wildcard") {
-            let tail = [];
-            const __ring_end9 = List_len(row);
-            for (let i = 1; i < __ring_end9; i++) {
-              List_push(tail, pat_at(row, i));
-            }
-            List_push(defaults, tail);
-            break __ring_match31;
+        let is_default = false;
+        __ring_match33: {
+          const __ring_m33 = first;
+          if (__ring_m33._tag === "Wildcard") {
+            is_default = true;
+            break __ring_match33;
           }
-          if (__ring_m31._tag === "Binding") {
-            let tail = [];
-            const __ring_end10 = List_len(row);
-            for (let i = 1; i < __ring_end10; i++) {
-              List_push(tail, pat_at(row, i));
-            }
-            List_push(defaults, tail);
-            break __ring_match31;
+          if (__ring_m33._tag === "Binding") {
+            is_default = true;
+            break __ring_match33;
           }
-          break __ring_match31;
+          if (__ring_m33._tag === "OrPattern") {
+            const sub_pats = __ring_m33.patterns;
+            for (const sp of sub_pats) {
+              __ring_match34: {
+                const __ring_m34 = sp;
+                if (__ring_m34._tag === "Wildcard") {
+                  is_default = true;
+                  break __ring_match34;
+                }
+                if (__ring_m34._tag === "Binding") {
+                  is_default = true;
+                  break __ring_match34;
+                }
+                break __ring_match34;
+              }
+            }
+            break __ring_match33;
+          }
+          break __ring_match33;
+        }
+        if (is_default) {
+          let tail = [];
+          const __ring_end9 = List_len(row);
+          for (let i = 1; i < __ring_end9; i++) {
+            List_push(tail, pat_at(row, i));
+          }
+          List_push(defaults, tail);
         }
       }
       const sub = check_matrix(defaults, rest_types, subst, expanding);
-      __ring_match32: {
-        const __ring_m32 = sub;
-        if (__ring_m32._tag === "some") {
-          const s = __ring_m32._0;
+      __ring_match35: {
+        const __ring_m35 = sub;
+        if (__ring_m35._tag === "some") {
+          const s = __ring_m35._0;
           let result = [];
           List_push(result, "_");
           List_extend(result, s);
           return Option_some(result);
-          break __ring_match32;
+          break __ring_match35;
         }
-        if (__ring_m32._tag === "none") {
+        if (__ring_m35._tag === "none") {
           return Option_none;
-          break __ring_match32;
+          break __ring_match35;
         }
-        __match_fail(__ring_m32);
+        __match_fail(__ring_m35);
       }
-      break __ring_match28;
+      break __ring_match30;
     }
-    __match_fail(__ring_m28);
+    __match_fail(__ring_m30);
   }
 }
 
@@ -941,8 +999,8 @@ function names_match_struct(pattern_name, type_name) {
 
 function join_strs(parts, sep) {
   let result = "";
-  const __ring_end11 = List_len(parts);
-  for (let i = 0; i < __ring_end11; i++) {
+  const __ring_end10 = List_len(parts);
+  for (let i = 0; i < __ring_end10; i++) {
     if ((i > 0)) {
       result = `${result}${sep}`;
     }

@@ -27,7 +27,7 @@ pub enum TokenKind {
     // Operators
     TkPlus, TkMinus, TkStar, TkSlash, TkPercent,
     TkEqEq, TkBangEq, TkLt, TkGt, TkLtEq, TkGtEq,
-    TkAmpAmp, TkPipePipe, TkBang,
+    TkAmpAmp, TkPipePipe, TkPipe, TkBang,
     TkEq, TkPlusEq, TkMinusEq,
 
     // Delimiters
@@ -63,7 +63,7 @@ pub fn token_kind_value(k: TokenKind) -> Str {
         TkPlus => "+", TkMinus => "-", TkStar => "*", TkSlash => "/", TkPercent => "%",
         TkEqEq => "==", TkBangEq => "!=", TkLt => "<", TkGt => ">",
         TkLtEq => "<=", TkGtEq => ">=",
-        TkAmpAmp => "&&", TkPipePipe => "||", TkBang => "!",
+        TkAmpAmp => "&&", TkPipePipe => "||", TkPipe => "|", TkBang => "!",
         TkEq => "=", TkPlusEq => "+=", TkMinusEq => "-=",
         TkLParen => "(", TkRParen => ")", TkLBrace => "{", TkRBrace => "}",
         TkLBracket => "[", TkRBracket => "]",
@@ -478,9 +478,7 @@ impl Lexer {
         }
         if ch == "|" {
             if self.peek() == "|" { self.advance(); return self.make_token(TokenKind::TkPipePipe, "||", start, self.current_position()) }
-            let tok = self.make_token(TokenKind::TkError, "|", start, self.current_position())
-            self.sink.report(make_diag(E0101, Severity::SevError, "Unexpected character '|' (use '||' for logical OR)", tok.span, DiagnosticContext::ParseError { token: "|", expected: none }))
-            return tok
+            return self.make_token(TokenKind::TkPipe, "|", start, self.current_position())
         }
 
         let tok = self.make_token(TokenKind::TkError, ch, start, self.current_position())

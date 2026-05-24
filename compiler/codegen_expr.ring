@@ -896,11 +896,9 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
 
         let mut has_catchall = false
         for a in arms {
-            match a.pattern {
-                Pattern::Wildcard { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
-                Pattern::Binding { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
-                _ => {},
-            }
+            match a.guard { some(_) => {}, none => {
+                if pattern_is_catchall(a.pattern) { has_catchall = true }
+            }}
         }
         if has_catchall == false {
             let mf = RUNTIME_MATCH_FAIL
@@ -938,11 +936,9 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
 
     let mut has_catchall = false
     for a in arms {
-        match a.pattern {
-            Pattern::Wildcard { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
-            Pattern::Binding { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
-            _ => {},
-        }
+        match a.guard { some(_) => {}, none => {
+            if pattern_is_catchall(a.pattern) { has_catchall = true }
+        }}
     }
     if has_catchall == false {
         let mf = RUNTIME_MATCH_FAIL
@@ -951,6 +947,24 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
 
     parts.push("})()")
     parts.join("\n")
+}
+
+// ============================================================
+// Pattern catchall detection
+// ============================================================
+
+fn pattern_is_catchall(pat: Pattern) -> Bool {
+    match pat {
+        Pattern::Wildcard { .. } => true,
+        Pattern::Binding { .. } => true,
+        Pattern::OrPattern { patterns, .. } => {
+            for p in patterns {
+                if pattern_is_catchall(p) { return true }
+            }
+            false
+        },
+        _ => false,
+    }
 }
 
 // ============================================================
