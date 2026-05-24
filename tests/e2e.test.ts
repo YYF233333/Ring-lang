@@ -483,6 +483,7 @@ const cases: TestCase[] = [
   { file: "delegate_default_method.ring", expected: "delegate_default_method: all tests passed\n" },
   { file: "delegate_with_effects.ring", expected: "logging: test\ndelegate with effects: ok\n" },
   { file: "delegate_mut_self.ring", expected: "ok\n" },
+  { file: "delegate_assoc_type.ring", expected: "delegate_assoc_type: ok\n" },
   { file: "mod_effect_evidence.ring", expected: "mod effect evidence: ok\n" },
   { file: "mod_derive_no_dup.ring", expected: "mod derive no dup: ok\n" },
   { file: "mod_effect_qualified.ring", expected: "mod effect qualified: ok\n" },

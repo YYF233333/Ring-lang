@@ -644,14 +644,69 @@ fn expand_delegate_impls(
                         }
                     }
 
+                    // #125/#128: Get the field type name for looking up resolved methods
+                    let field_type_name = match ft {
+                        Type::StructType { name: n, .. } => some(n),
+                        Type::EnumType { name: n, .. } => some(n),
+                        _ => none
+                    }
+                    let field_impl_methods = match field_type_name {
+                        some(ftn) => ctx.env.trait_reg.impl_methods.get(ftn),
+                        none => none
+                    }
+
                     for tname in all_traits {
                         match ctx.env.trait_reg.traits.get(tname) {
                             none => {},  // Error already reported in Pass 1
                             some(trait_def) => {
+                                // #128: Look up field type's ImplEntry for assoc_types
+                                let mut field_assoc_map: Map<Str, Type> = map_new()
+                                match field_type_name {
+                                    some(ftn) => {
+                                        for impl_ in ctx.env.trait_reg.trait_impls {
+                                            if impl_.trait_name == tname && impl_.target_type_name == ftn {
+                                                field_assoc_map = map_clone(impl_.assoc_types)
+                                            }
+                                        }
+                                    },
+                                    none => {}
+                                }
+
                                 let mut trait_hmethods: List<HDecl> = []
                                 for tm in trait_def.methods {
+                                    // #125: Look up field type's resolved method to get concrete
+                                    // assoc types for ret_ty / param types, but keep trait def's
+                                    // method type for binary-method detection (Self type var matching).
+                                    let resolved_method_scheme = match field_impl_methods {
+                                        some(fm_map) => fm_map.get(tm.name),
+                                        none => none
+                                    }
                                     match tm.ty {
-                                        Type::FnType { params: trait_params, return_type: ret_ty, effects: eff } => {
+                                        Type::FnType { params: trait_params, return_type: trait_ret_ty, effects: trait_eff } => {
+                                            // Use resolved return type and effects from field type's method
+                                            // if available (concrete assoc types), else fall back to trait def
+                                            let ret_ty = match resolved_method_scheme {
+                                                some(rs) => match rs.ty {
+                                                    Type::FnType { return_type: resolved_ret, .. } => resolved_ret,
+                                                    _ => trait_ret_ty
+                                                },
+                                                none => trait_ret_ty
+                                            }
+                                            let eff = match resolved_method_scheme {
+                                                some(rs) => match rs.ty {
+                                                    Type::FnType { effects: resolved_eff, .. } => resolved_eff,
+                                                    _ => trait_eff
+                                                },
+                                                none => trait_eff
+                                            }
+                                            // Build resolved param types from field method (skipping self)
+                                            let resolved_non_self_params = match resolved_method_scheme {
+                                                some(rs) => match rs.ty {
+                                                    Type::FnType { params: rp, .. } => some(rp),
+                                                    _ => none
+                                                },
+                                                none => none
+                                            }
                                             // Build HParam list: first is self, rest are synthetic params
                                             let mut hparams: List<HParam> = []
                                             let def_id_self = ctx.env.fresh_def_id()
@@ -677,21 +732,34 @@ fn expand_delegate_impls(
                                                     some(t) => t,
                                                     none => UNIT
                                                 }
+                                                // #125: Use resolved param type from field method if available
+                                                // (resolves assoc type vars to concrete types)
+                                                let resolved_pty = match resolved_non_self_params {
+                                                    some(rp) => match rp.get(pi) {
+                                                        some(rpt) => rpt,
+                                                        none => pty
+                                                    },
+                                                    none => pty
+                                                }
                                                 let pid = ctx.env.fresh_def_id()
                                                 // #77: Read param mutability from trait method declaration
                                                 let p_is_mut = match tm.param_mutabilities.get(pi) {
                                                     some(m) => m,
                                                     none => false
                                                 }
-                                                hparams.push(HParam { name: pname, ty: pty, def_id: some(pid), is_mutable: p_is_mut })
 
                                                 // #79: For binary trait methods (e.g. eq(self, other: Self)),
                                                 // if the param type is the trait's Self type, forward arg.field
                                                 // instead of arg so the field type's method receives the right value.
+                                                // Use original trait type vars (pty) for this check.
                                                 let is_self_typed = match (pty, trait_self_type) {
                                                     (Type::TypeVar { id: a, .. }, Type::TypeVar { id: b, .. }) => a == b,
                                                     _ => false
                                                 }
+                                                // For binary Self-typed params, use self_type; otherwise use resolved type
+                                                let param_ty = if is_self_typed { self_type } else { resolved_pty }
+                                                hparams.push(HParam { name: pname, ty: param_ty, def_id: some(pid), is_mutable: p_is_mut })
+
                                                 if is_self_typed {
                                                     // Forward: __p0.field (access the delegated field from the arg)
                                                     let arg_ident = HExpr::Ident {
@@ -710,7 +778,7 @@ fn expand_delegate_impls(
                                                     forward_args.push(HExpr::Ident {
                                                         name: pname, resolved_name: none, def_id: some(pid),
                                                         dict_closure_dicts: none,
-                                                        ty: pty, effects: EMPTY_ROW, span: span
+                                                        ty: resolved_pty, effects: EMPTY_ROW, span: span
                                                     })
                                                 }
                                                 pi = pi + 1
@@ -823,12 +891,19 @@ fn expand_delegate_impls(
                                     }
                                 }
 
+                                // #128: Build HAssocType list from field type's assoc_types
+                                let mut h_assoc_types: List<HAssocType> = []
+                                for entry in field_assoc_map.entries() {
+                                    let (aname, aty) = entry
+                                    h_assoc_types.push(HAssocType { name: aname, bounds: [], concrete: some(aty) })
+                                }
+
                                 result.push(HDecl::Impl {
                                     target_type: target_type,
                                     type_params: type_params,
                                     trait_name: some(tname),
                                     methods: trait_hmethods,
-                                    assoc_types: [],
+                                    assoc_types: h_assoc_types,
                                     span: span
                                 })
                             }
