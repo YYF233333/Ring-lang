@@ -243,7 +243,7 @@ fn find_similar_name(target: Str, candidates: List<Str>) -> Str? {
     best
 }
 
-pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, context: DiagnosticContext) -> Type {
+pub fn type_error(mut sink: CollectingSink, code: Str, message: Str, span: Span, context: DiagnosticContext) -> Type {
     let mut diag = make_diag(code, Severity::SevError, message, span, context)
     let suggestions = infer_suggestion(code, message, context)
     if suggestions.len() > 0 {
@@ -430,7 +430,7 @@ pub fn generalize(env: TypeEnv, t: Type, subst: UnionFind) -> TypeScheme {
 // Fn effects update
 // ============================================================
 
-pub fn update_fn_effects(env: TypeEnv, name: Str, effects: EffectRow) {
+pub fn update_fn_effects(mut env: TypeEnv, name: Str, effects: EffectRow) {
     match env.lookup(name) {
         some(scheme) => match scheme.ty {
             Type::FnType { params, return_type, .. } => {
@@ -933,7 +933,7 @@ fn resolve_assoc_type(mut ctx: InferCtx, type_param_name: Str, assoc_name: Str, 
     found_types.get(0).unwrap_or(ctx.env.fresh_var())
 }
 
-fn resolve_fn_type_effect(ctx: InferCtx, eff: EffectExpr) -> Effect {
+fn resolve_fn_type_effect(mut ctx: InferCtx, eff: EffectExpr) -> Effect {
     if eff.name == "io" { return Effect::IoEffect }
     if eff.name == "mut" {
         let mut_state = if eff.type_args.len() > 0 {
@@ -962,11 +962,11 @@ fn resolve_fn_type_effect(ctx: InferCtx, eff: EffectExpr) -> Effect {
     Effect::CustomEffect { name: eff.name, type_args: resolved_args }
 }
 
-pub fn resolve_self_type(ctx: InferCtx, name: Str) -> Type {
+pub fn resolve_self_type(mut ctx: InferCtx, name: Str) -> Type {
     resolve_named_type(ctx, name, [], span_zero())
 }
 
-pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, span: Span) -> Type {
+pub fn resolve_named_type(mut ctx: InferCtx, name: Str, type_args: List<TypeExpr>, span: Span) -> Type {
     if (name == BUILTIN_INT) { return INT }
     if (name == BUILTIN_FLOAT) { return FLOAT }
     if (name == BUILTIN_STR) { return STR }
@@ -1084,7 +1084,7 @@ pub fn resolve_named_type(ctx: InferCtx, name: Str, type_args: List<TypeExpr>, s
 // Pattern binding
 // ============================================================
 
-pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst: UnionFind) {
+pub fn bind_pattern(mut ctx: InferCtx, pattern: Pattern, expected_type: Type, subst: UnionFind) {
     match pattern {
         Pattern::Wildcard { .. } => {},
         Pattern::Binding { name, span } => {

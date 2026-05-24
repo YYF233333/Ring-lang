@@ -470,7 +470,7 @@ fn complete_enum_variants(mut ctx: InferCtx, name: Str, type_params: List<TypePa
     }
 }
 
-fn bind_variant_constructor(ctx: InferCtx, variant_name: Str, enum_type: Type, tv_ids: List<Int>) {
+fn bind_variant_constructor(mut ctx: InferCtx, variant_name: Str, enum_type: Type, tv_ids: List<Int>) {
     if tv_ids.len() > 0 {
         ctx.env.bind(variant_name, TypeScheme { ty: enum_type, type_vars: tv_ids, bounds: [], def_id: none })
     } else {
@@ -1126,7 +1126,7 @@ fn register_delegate_traits(
 // Effect annotation resolution
 // ============================================================
 
-pub fn resolve_effect_expr(ctx: InferCtx, eff: EffectExpr) -> Effect {
+pub fn resolve_effect_expr(mut ctx: InferCtx, eff: EffectExpr) -> Effect {
     if eff.name == "io" { return Effect::IoEffect }
     if eff.name == "mut" {
         let mut_state = if eff.type_args.len() > 0 {

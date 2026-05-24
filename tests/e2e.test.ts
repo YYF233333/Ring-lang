@@ -99,7 +99,7 @@ function ring_run_single(file_path: string): string {
   if (has_errors(sink)) {
     throw new Error(`Type error in ${file_path}: ${sink.items.map((d: any) => d.message).join("; ")}`);
   }
-  const js = generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
+  const js = generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
   return run_js_in_vm(strip_esm_lines(js));
 }
 
@@ -177,7 +177,7 @@ function ring_build_single(file_path: string): string {
   const ast = parse(source, file_path, sink);
   const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
   const result = check(ast, sink, fail_ev);
-  return generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
+  return generate(result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
 }
 
 function ring_build_multi_esm(file_path: string): Map<string, string> {
@@ -700,6 +700,7 @@ const module_cases: ModuleTestCase[] = [
   { dir: "extern_fn", expected: "100\n2.5\n42\n" },
   { dir: "esm_verify", expected: "hello, world\n3\n" },
   { dir: "mod_export_effect", expected: "Hello, World!\n" },
+  { dir: "multifile_mut_export", expected: "multifile_mut_export: all tests passed\n" },
 ];
 
 describe("e2e: multi-file modules (ring run)", { concurrency: true }, () => {
@@ -740,6 +741,7 @@ describe("e2e: multi-file modules (negative)", () => {
     { dir: "error_circular", desc: "circular dependency", error_pattern: "E0704" },
     { dir: "error_private_import", desc: "private symbol import", error_pattern: "E0703" },
     { dir: "error_symbol_not_found", desc: "symbol not found in module", error_pattern: "E0703" },
+    { dir: "error_cross_mut_immutable", desc: "immutable binding calling cross-module mut method", error_pattern: "E0208" },
   ];
 
   for (const tc of module_negative_cases) {

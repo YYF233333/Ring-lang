@@ -114,7 +114,7 @@ pub fn cli_main() {
         eprintln(format_human(sink.items, source))
     }
 
-    let js = generate(check_result.program, false, false, none, none, none, none, none, none)
+    let js = generate(check_result.program, false, false, none, none, none, none, none, none, none)
 
     if parsed.command == "check" {
         print("OK")

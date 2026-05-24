@@ -78,7 +78,7 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
                                 match graph.modules.get(key) {
                                     some(mod_) => {
                                         let prefix = module_prefix(mod_.path_segments)
-                                        let exp = extract_exports(key, prefix, ast, result.program, result.env)
+                                        let exp = extract_exports(key, prefix, ast, result.program, result.env, result.fn_mut_params)
                                         module_exports_map.insert(key, exp)
                                     },
                                     none => {},
@@ -120,10 +120,11 @@ pub fn compile_project(entry_file: Str) -> CompileProjectResult {
                         let mut imports_map = build_imports_map(phases.graph, phases.module_exports_map, key)
                         let esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key)
                         let eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key)
+                        let efmp = build_external_fn_mut_params(phases.graph, phases.module_exports_map, key)
                         let skip_preamble = is_first == false
                         let skip_main = key != entry_key
                         let module_js = generate(hir, skip_preamble, skip_main,
-                            some(prefix), some(imports_map), some(esf), some(eim), none, none)
+                            some(prefix), some(imports_map), some(esf), some(eim), none, none, some(efmp))
                         js_parts.push("// === module: ${key} ===")
                         js_parts.push(module_js)
                         js_parts.push("")
@@ -166,6 +167,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         let mut imports_map = build_imports_map(phases.graph, phases.module_exports_map, key)
                         let esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key)
                         let eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key)
+                        let efmp = build_external_fn_mut_params(phases.graph, phases.module_exports_map, key)
 
                         // Build import lines (runtime + cross-module)
                         let mut import_lines = build_esm_import_lines(phases.graph, phases.module_exports_map, key)
@@ -188,7 +190,7 @@ pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
                         let skip_main = key != entry_key
                         let module_js = generate(hir, true, skip_main,
                             none, some(imports_map), some(esf), some(eim),
-                            some(import_lines), some(export_names))
+                            some(import_lines), some(export_names), some(efmp))
                         write_file(mod_out_path, module_js)
 
                         if key == entry_key { entry_js_path = mod_out_path }
@@ -682,6 +684,32 @@ fn build_external_impl_methods(graph: ModuleGraph, exports_map: Map<Str, ModuleE
                                 let (mname, _) = mentry
                                 result.insert("${dep_prefix}$${si}.${mname}", none)
                             }
+                        }
+                    },
+                    none => {},
+                }
+            }
+        },
+        none => {},
+    }
+    result
+}
+
+fn build_external_fn_mut_params(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, key: Str) -> Map<Str, List<Bool>> {
+    let mut result: Map<Str, List<Bool>> = map_new()
+    match graph.dependencies.get(key) {
+        some(deps) => {
+            for dk in deps {
+                match exports_map.get(dk) {
+                    some(dep_exports) => {
+                        let dep_prefix = dep_exports.module_prefix
+                        for entry in dep_exports.fn_mut_params.entries() {
+                            let (fn_name, flags) = entry
+                            // Register under both the raw name and the qualified name
+                            result.insert(fn_name, flags)
+                            let si = safe_ident(fn_name)
+                            let qualified = "${dep_prefix}$${si}"
+                            result.insert(qualified, flags)
                         }
                     },
                     none => {},

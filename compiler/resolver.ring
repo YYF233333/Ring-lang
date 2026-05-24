@@ -127,7 +127,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                                             use_decl.span,
                                             DiagnosticContext::OtherContext { detail: some("no file '${mod_path}.ring' in project root") }
                                         )
-                                        let err_sink = new_collecting_sink()
+                                        let mut err_sink = new_collecting_sink()
                                         err_sink.report(diag)
                                         eprintln(format_human(err_sink.diagnostics(), source))
                                         return none
@@ -205,7 +205,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
             file_span,
             DiagnosticContext::OtherContext { detail: some("modules form a dependency cycle") }
         )
-        let err_sink = new_collecting_sink()
+        let mut err_sink = new_collecting_sink()
         err_sink.report(diag)
         let entry_source = read_file(abs_entry)
         eprintln(format_human(err_sink.diagnostics(), entry_source))

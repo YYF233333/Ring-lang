@@ -15,7 +15,8 @@ use unify::{empty_subst}
 
 pub struct CheckResult {
     pub program: HProgram,
-    pub env: TypeEnv
+    pub env: TypeEnv,
+    pub fn_mut_params: Map<Str, List<Bool>>
 }
 
 const STD_FILES: List<Str> =
@@ -132,7 +133,8 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     for d in hprogram.decls { all_decls.push(d) }
     CheckResult {
         program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars },
-        env: ctx.env
+        env: ctx.env,
+        fn_mut_params: ctx.fn_mut_params
     }
 }
 
@@ -147,7 +149,8 @@ pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink:
     for d in hprogram.decls { all_decls.push(d) }
     CheckResult {
         program: HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars },
-        env: ctx.env
+        env: ctx.env,
+        fn_mut_params: ctx.fn_mut_params
     }
 }
 
@@ -195,6 +198,29 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
                     ctx.env.trait_reg.impl_methods.insert(type_name, map_clone(methods))
                 },
             }
+        }
+        // Inject mut_methods
+        for entry in mod_.mut_methods.entries() {
+            let (type_name, method_set) = entry
+            match ctx.env.trait_reg.mut_methods.get(type_name) {
+                some(existing) => {
+                    for m in method_set.to_list() {
+                        existing.insert(m)
+                    }
+                },
+                none => {
+                    let mut new_set: Set<Str> = set_new()
+                    for m in method_set.to_list() {
+                        new_set.insert(m)
+                    }
+                    ctx.env.trait_reg.mut_methods.insert(type_name, new_set)
+                },
+            }
+        }
+        // Inject fn_mut_params
+        for entry in mod_.fn_mut_params.entries() {
+            let (fn_name, flags) = entry
+            ctx.fn_mut_params.insert(fn_name, flags)
         }
     }
 }

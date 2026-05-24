@@ -283,7 +283,7 @@ function build_module_graph(entry_file) {
                   if (__ring_m9._tag === "none") {
                     const mod_path = List_join(segments, "::");
                     const diag = diagnostics$make_diag(codes$E0702, diagnostics$Severity_SevError, `Module '${mod_path}' not found`, use_decl.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`no file '${mod_path}.ring' in project root`)));
-                    const err_sink = diagnostics$new_collecting_sink();
+                    let err_sink = diagnostics$new_collecting_sink();
                     diagnostics$CollectingSink_report(err_sink, diag);
                     eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), source));
                     return Option_none;
@@ -376,7 +376,7 @@ function build_module_graph(entry_file) {
     const cycle_desc = List_join(cycle_path, " -> ");
     const file_span = new ast$Span(abs_entry, new ast$Position(1, 0, 0), new ast$Position(1, 0, 0));
     const diag = diagnostics$make_diag(codes$E0704, diagnostics$Severity_SevError, `Circular dependency detected: ${cycle_desc}`, file_span, diagnostics$DiagnosticContext_OtherContext(Option_some("modules form a dependency cycle")));
-    const err_sink = diagnostics$new_collecting_sink();
+    let err_sink = diagnostics$new_collecting_sink();
     diagnostics$CollectingSink_report(err_sink, diag);
     const entry_source = read_file(abs_entry);
     eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), entry_source));
