@@ -10,16 +10,6 @@
 ## Checker
 
 
-### #125 Delegate + 关联类型：转发方法返回类型未解析致运行时崩溃 [critical] [doing]
-
-`expand_delegate_impls`（`infer_decl.ring:594-842`）合成转发方法时，使用 trait method 定义中的原始类型（含关联类型 type var）。当 trait 有关联类型（如 `type Value`），转发方法的返回类型保留为未解析的 type var，而非从 field 类型的 impl 解析出的具体类型（如 `Int`）。Codegen 对此 type var 生成 UFCS 风格调用（`v.to_str()`），在 JS 原始类型上失败。
-
-**已测试确认**：`tests/cases/audit_test_delegate_assoc.ring` 中 `w.get_value().to_str()` 运行时 `TypeError: v.to_str is not a function`。
-
-**文件**：`compiler/infer_decl.ring:594-842`（`expand_delegate_impls`）
-**修复方向**：合成转发方法时查找 field 类型的 `ImplEntry.assoc_types`，将 trait 的关联类型 var 替换为具体类型。或让转发方法走完整类型推断流程。
-
-发现者：Opus
 
 ### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open] [deferred: LLVM]
 
@@ -65,14 +55,6 @@
 
 发现者：Opus
 
-### #128 Delegate expansion 传递空 `assoc_types` 到 ImplEntry [medium] [doing]
-
-`register_delegate_traits`（`infer_register.ring:1057-1061`）和 `expand_delegate_impls`（`infer_decl.ring:826-833`）创建 `ImplEntry` 时始终传 `assoc_types: map_new()` / `assoc_types: []`。若被委托的 trait 有关联类型（如 `Container { type Item }`），生成的 impl entry 无关联类型赋值。通过 `ImplEntry.assoc_types` 解析关联类型的代码（如解析 `Wrapper::Item`）会得到空结果。
-
-**文件**：`compiler/infer_register.ring:1060`、`compiler/infer_decl.ring:831`
-**修复方向**：注册 delegate impls 时，查找 field 类型对应 trait 的 `ImplEntry`，复制其 `assoc_types` 到委托生成的 impl entry。
-
-发现者：Opus
 
 ### #129 `resolve_assoc_type` 忽略限定的类型参数名 [medium] [open]
 

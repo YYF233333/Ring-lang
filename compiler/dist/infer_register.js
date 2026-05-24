@@ -1492,6 +1492,12 @@ function register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type, fi
               }
               if (__ring_m63._tag === "some") {
                 const reg_trait_def = __ring_m63._0;
+                let field_assoc_types = map_new();
+                for (const impl_ of ctx.env.trait_reg.trait_impls) {
+                  if (((impl_.trait_name === reg_tname) && (impl_.target_type_name === field_type_name))) {
+                    field_assoc_types = map_clone(impl_.assoc_types);
+                  }
+                }
                 let tp_names = [];
                 for (const tp of impl_type_params) {
                   List_push(tp_names, tp.name);
@@ -1500,12 +1506,39 @@ function register_delegate_traits(ctx, methods_map, impl_tv_ids, target_type, fi
                 for (const tm of reg_trait_def.methods) {
                   List_push(method_names, tm.name);
                 }
-                List_push(ctx.env.trait_reg.trait_impls, new env$ImplEntry(reg_tname, target_type, tp_names, method_names, map_new()));
+                List_push(ctx.env.trait_reg.trait_impls, new env$ImplEntry(reg_tname, target_type, tp_names, method_names, map_clone(field_assoc_types)));
+                const field_methods = _Map_get(ctx.env.trait_reg.impl_methods, field_type_name);
                 for (const tm of reg_trait_def.methods) {
                   __ring_match64: {
                     const __ring_m64 = tm.ty;
                     if (__ring_m64._tag === "FnType") {
-                      const trait_params = __ring_m64.params; const ret_ty = __ring_m64.return_type; const eff = __ring_m64.effects;
+                      const trait_params = __ring_m64.params; const trait_ret_ty = __ring_m64.return_type; const trait_eff = __ring_m64.effects;
+                      const resolved_method_scheme = (function() {
+  const __ring_m = field_methods;
+  if (__ring_m._tag === "some") { const fm_map = __ring_m._0; return _Map_get(fm_map, tm.name); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+                      const ret_ty = (function() {
+  const __ring_m = resolved_method_scheme;
+  if (__ring_m._tag === "some") { const rs = __ring_m._0; return (function() {
+  const __ring_m = rs.ty;
+  if (__ring_m._tag === "FnType") { const rr = __ring_m.return_type; return rr; }
+  return trait_ret_ty;
+})(); }
+  if (__ring_m._tag === "none") { return trait_ret_ty; }
+  __match_fail(__ring_m);
+})();
+                      const eff = (function() {
+  const __ring_m = resolved_method_scheme;
+  if (__ring_m._tag === "some") { const rs = __ring_m._0; return (function() {
+  const __ring_m = rs.ty;
+  if (__ring_m._tag === "FnType") { const re = __ring_m.effects; return re; }
+  return trait_eff;
+})(); }
+  if (__ring_m._tag === "none") { return trait_eff; }
+  __match_fail(__ring_m);
+})();
                       let param_types = [];
                       let first = true;
                       for (const tp of trait_params) {

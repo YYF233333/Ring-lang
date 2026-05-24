@@ -1049,6 +1049,14 @@ fn register_delegate_traits(
                         match ctx.env.trait_reg.traits.get(reg_tname) {
                             none => {},
                             some(reg_trait_def) => {
+                                // #128: Copy assoc_types from field type's ImplEntry
+                                let mut field_assoc_types: Map<Str, Type> = map_new()
+                                for impl_ in ctx.env.trait_reg.trait_impls {
+                                    if impl_.trait_name == reg_tname && impl_.target_type_name == field_type_name {
+                                        field_assoc_types = map_clone(impl_.assoc_types)
+                                    }
+                                }
+
                                 // Register ImplEntry
                                 let mut tp_names: List<Str> = []
                                 for tp in impl_type_params { tp_names.push(tp.name) }
@@ -1057,13 +1065,37 @@ fn register_delegate_traits(
                                 ctx.env.trait_reg.trait_impls.push(ImplEntry {
                                     trait_name: reg_tname, target_type_name: target_type,
                                     type_params: tp_names, method_names: method_names,
-                                    assoc_types: map_new()
+                                    assoc_types: map_clone(field_assoc_types)
                                 })
+
+                                // #125: Get field type's registered methods for resolved assoc types
+                                let field_methods = ctx.env.trait_reg.impl_methods.get(field_type_name)
 
                                 // Register forwarding methods for each trait method
                                 for tm in reg_trait_def.methods {
                                     match tm.ty {
-                                        Type::FnType { params: trait_params, return_type: ret_ty, effects: eff } => {
+                                        Type::FnType { params: trait_params, return_type: trait_ret_ty, effects: trait_eff } => {
+                                            // #125: Use resolved return type/effects from field type's
+                                            // method (has concrete assoc types) if available. Keep trait
+                                            // def's param types for Self type var structure.
+                                            let resolved_method_scheme = match field_methods {
+                                                some(fm_map) => fm_map.get(tm.name),
+                                                none => none
+                                            }
+                                            let ret_ty = match resolved_method_scheme {
+                                                some(rs) => match rs.ty {
+                                                    Type::FnType { return_type: rr, .. } => rr,
+                                                    _ => trait_ret_ty
+                                                },
+                                                none => trait_ret_ty
+                                            }
+                                            let eff = match resolved_method_scheme {
+                                                some(rs) => match rs.ty {
+                                                    Type::FnType { effects: re, .. } => re,
+                                                    _ => trait_eff
+                                                },
+                                                none => trait_eff
+                                            }
                                             // Build param types: replace first param (Self) with target_type
                                             let mut param_types: List<Type> = []
                                             let mut first = true
