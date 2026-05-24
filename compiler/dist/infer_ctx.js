@@ -348,10 +348,12 @@ function type_error(sink, code, message, span, context) {
 }
 
 function merge_effects(env, a, b, s, __ring_ev_fail) {
-  const m = types$row_merge(a, b);
+  const resolved_a = env$apply_subst_row(s, a);
+  const resolved_b = env$apply_subst_row(s, b);
+  const m = types$row_merge(resolved_a, resolved_b);
   let result_s = s;
-  for (const eff_b of b.effects) {
-    for (const eff_a of a.effects) {
+  for (const eff_b of resolved_b.effects) {
+    for (const eff_a of resolved_a.effects) {
       if (types$effects_match_kind(eff_a, eff_b)) {
         result_s = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return unify$unify_effect_params(eff_a, eff_b, result_s, env, __ring_ev_fail); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return result_s; } else { throw __ring_e; } } throw __ring_e; } })();
         break;
