@@ -1,11 +1,11 @@
 use types::{Type, Effect, EffectRow, StructField, EnumVariant,
-    EMPTY_ROW, effects_same_kind}
+    EMPTY_ROW, effects_same_kind, type_to_builtin_name, type_to_string}
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map}
 use diagnostics::{DiagnosticContext}
-use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0514}
+use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
 
 // ============================================================
@@ -780,6 +780,36 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                             let _ = type_error(ctx.sink, E0514,
                                 "Unexpected associated type '${aname}' in impl ${tname} for ${target_type}; trait '${tname}' does not declare it",
                                 span, DiagnosticContext::TraitError { detail: "unexpected associated type '${aname}'" })
+                        }
+                    }
+
+                    // Validate associated type bounds are satisfied
+                    for atdef in trait_def.assoc_types {
+                        if atdef.bounds.len() > 0 {
+                            match assoc_type_map.get(atdef.name) {
+                                some(concrete_ty) => {
+                                    let concrete_name = type_to_builtin_name(concrete_ty)
+                                    match concrete_name {
+                                        some(cname) => {
+                                            for bound_trait in atdef.bounds {
+                                                let mut has_impl = false
+                                                for impl_ in ctx.env.trait_reg.trait_impls {
+                                                    if impl_.trait_name == bound_trait && impl_.target_type_name == cname {
+                                                        has_impl = true
+                                                    }
+                                                }
+                                                if !has_impl {
+                                                    let _ = type_error(ctx.sink, E0513,
+                                                        "Associated type '${atdef.name}' requires '${bound_trait}', but '${type_to_string(concrete_ty)}' does not implement it",
+                                                        span, DiagnosticContext::TraitError { detail: "associated type bound '${bound_trait}' not satisfied by '${cname}'" })
+                                                }
+                                            }
+                                        },
+                                        none => {}  // TypeVar or other non-named types: skip bound check
+                                    }
+                                },
+                                none => {}  // Missing assoc type already reported via E0510
+                            }
                         }
                     }
 
