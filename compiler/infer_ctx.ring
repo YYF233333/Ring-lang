@@ -1086,6 +1086,14 @@ pub fn bind_pattern(ctx: InferCtx, pattern: Pattern, expected_type: Type, subst:
                     "Tuple pattern requires tuple type, got ${type_to_string(resolved)}",
                     span, DiagnosticContext::TypeMismatch { expected: "tuple", actual: type_to_string(resolved), expression: none }) }
             }
+        },
+        Pattern::OrPattern { patterns, span } => {
+            // Bind each sub-pattern against the same expected type.
+            // For or-patterns without bindings, this just validates each alternative.
+            // For or-patterns with bindings, each sub-pattern introduces the same names.
+            for pat in patterns {
+                bind_pattern(ctx, pat, expected_type, subst)
+            }
         }
     }
 }

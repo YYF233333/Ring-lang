@@ -80,7 +80,8 @@ pub enum Pattern {
     Constructor { name: Str, qualifier: Str?, fields: List<Pattern>, span: Span },
     NamedConstructor { name: Str, qualifier: Str?, fields: List<NamedPatternField>, rest: Bool, span: Span },
     Literal { value: LiteralValue, span: Span },
-    TuplePattern { elements: List<Pattern>, span: Span }
+    TuplePattern { elements: List<Pattern>, span: Span },
+    OrPattern { patterns: List<Pattern>, span: Span }
 }
 
 // ============================================================

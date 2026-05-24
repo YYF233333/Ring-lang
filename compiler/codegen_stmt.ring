@@ -197,11 +197,9 @@ fn emit_match_stmt(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
 
     let mut has_catchall = false
     for a in arms {
-        match a.pattern {
-            Pattern::Wildcard { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
-            Pattern::Binding { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
-            _ => {},
-        }
+        match a.guard { some(_) => {}, none => {
+            if pattern_is_catchall_stmt(a.pattern) { has_catchall = true }
+        }}
     }
     if has_catchall == false {
         emit(ctx, "${RUNTIME_MATCH_FAIL}(${scrut_var});")
@@ -392,6 +390,20 @@ pub fn gen_stmt_inline(mut ctx: CodegenCtx, stmt: HStmt) -> Str {
     }
 }
 
+fn pattern_is_catchall_stmt(pat: Pattern) -> Bool {
+    match pat {
+        Pattern::Wildcard { .. } => true,
+        Pattern::Binding { .. } => true,
+        Pattern::OrPattern { patterns, .. } => {
+            for p in patterns {
+                if pattern_is_catchall_stmt(p) { return true }
+            }
+            false
+        },
+        _ => false,
+    }
+}
+
 // ============================================================
 // Pattern condition generation
 // ============================================================
@@ -478,6 +490,14 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
                 "${len_check} && ${joined}"
             }
         },
+        Pattern::OrPattern { patterns, .. } => {
+            let mut or_conds: List<Str> = []
+            for p in patterns {
+                let sub = gen_pattern_condition(ctx, target, p)
+                or_conds.push("(${sub})")
+            }
+            or_conds.join(" || ")
+        },
     }
 }
 
@@ -527,6 +547,198 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
                 }
             }
             result
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            // Collect binding names from the first sub-pattern
+            let mut binding_names: List<Str> = []
+            collect_binding_names(pat_at_list(patterns, 0), binding_names)
+            if binding_names.len() == 0 {
+                // No bindings in any sub-pattern — nothing to emit
+                ""
+            } else {
+                // Declare binding variables with let, then conditionally assign
+                let mut result = ""
+                for name in binding_names {
+                    let sname = safe_ident(name)
+                    result = "${result}let ${sname}; "
+                }
+                let mut i = 0
+                for p in patterns {
+                    let cond = gen_pattern_condition_for_bindings(target, p)
+                    let assigns = gen_pattern_assignments(target, p)
+                    if i == 0 {
+                        result = "${result}if (${cond}) { ${assigns}} "
+                    } else {
+                        result = "${result}else if (${cond}) { ${assigns}} "
+                    }
+                    i = i + 1
+                }
+                result
+            }
+        },
+    }
+}
+
+fn pat_at_list(list: List<Pattern>, i: Int) -> Pattern {
+    match list.get(i) { some(v) => v, none => panic("unreachable: pat_at_list out of bounds") }
+}
+
+// Collect all binding variable names from a pattern (recursive)
+fn collect_binding_names(pat: Pattern, mut names: List<Str>) {
+    match pat {
+        Pattern::Wildcard { .. } => {},
+        Pattern::Literal { .. } => {},
+        Pattern::Binding { name, .. } => names.push(name),
+        Pattern::Constructor { fields, .. } => {
+            for f in fields { collect_binding_names(f, names) }
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            for f in fields { collect_binding_names(f.pattern, names) }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            for e in elements { collect_binding_names(e, names) }
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            // Only collect from first sub-pattern (all should have same names)
+            collect_binding_names(pat_at_list(patterns, 0), names)
+        },
+    }
+}
+
+// Generate pattern bindings as assignments (= instead of const =) for or-pattern
+fn gen_pattern_assignments(target: Str, pat: Pattern) -> Str {
+    match pat {
+        Pattern::Wildcard { .. } => "",
+        Pattern::Literal { .. } => "",
+        Pattern::Binding { name, .. } => {
+            let sname = safe_ident(name)
+            "${sname} = ${target}; "
+        },
+        Pattern::Constructor { fields, .. } => {
+            let mut result = ""
+            for i in 0..fields.len() {
+                match fields.get(i) {
+                    some(f) => {
+                        let sub = gen_pattern_assignments("${target}._${i}", f)
+                        result = "${result}${sub}"
+                    },
+                    none => {},
+                }
+            }
+            result
+        },
+        Pattern::NamedConstructor { fields, .. } => {
+            let mut result = ""
+            for f in fields {
+                let sname = safe_ident(f.name)
+                let sub = gen_pattern_assignments("${target}.${sname}", f.pattern)
+                result = "${result}${sub}"
+            }
+            result
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            let mut result = ""
+            for i in 0..elements.len() {
+                match elements.get(i) {
+                    some(e) => {
+                        let sub = gen_pattern_assignments("${target}[${i}]", e)
+                        result = "${result}${sub}"
+                    },
+                    none => {},
+                }
+            }
+            result
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            // Nested or-pattern in or-pattern — use same conditional approach
+            let mut result = ""
+            let mut i = 0
+            for p in patterns {
+                let cond = gen_pattern_condition_for_bindings(target, p)
+                let assigns = gen_pattern_assignments(target, p)
+                if i == 0 {
+                    result = "${result}if (${cond}) { ${assigns}} "
+                } else {
+                    result = "${result}else if (${cond}) { ${assigns}} "
+                }
+                i = i + 1
+            }
+            result
+        },
+    }
+}
+
+// Generate pattern condition without CodegenCtx (for use in bindings generation)
+fn gen_pattern_condition_for_bindings(target: Str, pat: Pattern) -> Str {
+    match pat {
+        Pattern::Wildcard { .. } => "true",
+        Pattern::Binding { .. } => "true",
+        Pattern::Literal { value, .. } => {
+            let val_str = match value {
+                LiteralValue::IntVal(n) => n.to_str(),
+                LiteralValue::FloatVal(f) => f.to_str(),
+                LiteralValue::StrVal(s) => json_stringify(s),
+                LiteralValue::BoolVal(b) => if b { "true" } else { "false" },
+            }
+            "${target} === ${val_str}"
+        },
+        Pattern::Constructor { name, fields, .. } => {
+            let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
+            let mut sub_conds: List<Str> = []
+            for i in 0..fields.len() {
+                match fields.get(i) {
+                    some(f) => {
+                        let sub = gen_pattern_condition_for_bindings("${target}._${i}", f)
+                        if sub != "true" { sub_conds.push(sub) }
+                    },
+                    none => {},
+                }
+            }
+            if sub_conds.len() == 0 { tag_check }
+            else {
+                let joined = sub_conds.join(" && ")
+                "${tag_check} && ${joined}"
+            }
+        },
+        Pattern::NamedConstructor { name, fields, .. } => {
+            let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
+            let mut sub_conds: List<Str> = []
+            for f in fields {
+                let sname = safe_ident(f.name)
+                let sub = gen_pattern_condition_for_bindings("${target}.${sname}", f.pattern)
+                if sub != "true" { sub_conds.push(sub) }
+            }
+            if sub_conds.len() == 0 { tag_check }
+            else {
+                let joined = sub_conds.join(" && ")
+                "${tag_check} && ${joined}"
+            }
+        },
+        Pattern::TuplePattern { elements, .. } => {
+            let len_check = "Array.isArray(${target}) && ${target}.length === ${elements.len()}"
+            let mut sub_conds: List<Str> = []
+            for i in 0..elements.len() {
+                match elements.get(i) {
+                    some(e) => {
+                        let sub = gen_pattern_condition_for_bindings("${target}[${i}]", e)
+                        if sub != "true" { sub_conds.push(sub) }
+                    },
+                    none => {},
+                }
+            }
+            if sub_conds.len() == 0 { len_check }
+            else {
+                let joined = sub_conds.join(" && ")
+                "${len_check} && ${joined}"
+            }
+        },
+        Pattern::OrPattern { patterns, .. } => {
+            let mut or_conds: List<Str> = []
+            for p in patterns {
+                let sub = gen_pattern_condition_for_bindings(target, p)
+                or_conds.push("(${sub})")
+            }
+            or_conds.join(" || ")
         },
     }
 }

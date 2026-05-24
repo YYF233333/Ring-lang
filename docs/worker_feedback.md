@@ -23,6 +23,20 @@ trait body 中引用关联类型需使用裸名 `Item`（通过 `type_param_scop
 
 `parse_type_bound` 中解析 `<...>` 内容时使用 `save_pos` / `sink.save()` / `sink.restore()` 的 rollback 策略区分 assoc constraint (`Name =`) 和普通 type arg。这要求 DiagnosticSink 支持 checkpoint/restore。
 
+## B-051 Or-Pattern
+
+### 1. `gen_pattern_condition_for_bindings` 与 `gen_pattern_condition` 代码重复 [通知]
+
+Or-pattern 的 binding 生成需要在无 `CodegenCtx` 的上下文中调用 pattern condition 生成（因为 `gen_pattern_bindings` 不接受 ctx）。因此新增了 `gen_pattern_condition_for_bindings` 函数，逻辑与 `gen_pattern_condition` 几乎完全相同但不依赖 ctx。~60 行代码重复。如果未来重构 binding 生成接口使其也接受 ctx，可以消除这一重复。
+
+### 2. `pattern_is_catchall` / `pattern_is_catchall_stmt` 重复 [通知]
+
+codegen_expr.ring 和 codegen_stmt.ring 各自定义了 `pattern_is_catchall` / `pattern_is_catchall_stmt`（完全相同逻辑）。两个文件没有共享导入路径，因此各自定义。可考虑移入 hir.ring 或新建共享文件。
+
+### 3. 缺失的测试文件 `audit_partial_handle_default.ring` [通知]
+
+merge B-051 后发现 `tests/cases/audit_partial_handle_default.ring` 文件缺失（已在 e2e.test.ts 注册但文件不存在）。从 git 历史 `da54dbc` 恢复。该文件是之前 #72 修复的回归测试，可能在某次 merge 中丢失。
+
 ## B-055 Match IIFE → temp variable（已 revert）
 
 ### 1. lambda 内 match 的 emit 作用域问题 [通知]

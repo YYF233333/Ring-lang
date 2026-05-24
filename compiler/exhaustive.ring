@@ -96,10 +96,27 @@ pub fn check_exhaustive(arms: List<HMatchArm>, scrutinee_type: Type, subst: Unio
     check_patterns(patterns, scrutinee_type, subst)
 }
 
+// Expand or-patterns into flat list of patterns for exhaustiveness checking
+fn expand_or_patterns(patterns: List<Pattern>) -> List<Pattern> {
+    let mut result: List<Pattern> = []
+    for p in patterns {
+        match p {
+            Pattern::OrPattern { patterns: sub_pats, .. } => {
+                for sp in sub_pats {
+                    result.push(sp)
+                }
+            },
+            _ => result.push(p),
+        }
+    }
+    result
+}
+
 fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
     let resolved = apply_subst(subst, ty)
+    let expanded = expand_or_patterns(patterns)
 
-    for p in patterns {
+    for p in expanded {
         match p {
             Pattern::Wildcard { .. } => { return none },
             Pattern::Binding { .. } => { return none },
@@ -114,7 +131,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
 
             for v in variants {
                 let mut sub_patterns_for_variant: List<List<Pattern>> = []
-                for p in patterns {
+                for p in expanded {
                     match p {
                         Pattern::Constructor { name: pname, fields, .. } => {
                             if pname == v.name {
@@ -175,7 +192,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
         Type::BoolType => {
             let mut has_true = false
             let mut has_false = false
-            for p in patterns {
+            for p in expanded {
                 match p {
                     Pattern::Literal { value, .. } => match value {
                         LiteralValue::BoolVal(b) => {
@@ -205,7 +222,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
                 field_names.push(f.name)
                 field_types.push(f.ty)
             }
-            for p in patterns {
+            for p in expanded {
                 match p {
                     Pattern::NamedConstructor { name: pname, fields: nfields, .. } => {
                         if names_match_struct(pname, sname) {
@@ -252,7 +269,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
         Type::UnitType => none,
         Type::TupleType { elements } => {
             let mut matrix: List<List<Pattern>> = []
-            for p in patterns {
+            for p in expanded {
                 match p {
                     Pattern::TuplePattern { elements: pelems, .. } => {
                         if pelems.len() == elements.len() {
@@ -441,6 +458,19 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
                 none
             }
         },
+        Pattern::OrPattern { patterns: sub_pats, .. } => {
+            // Try each sub-pattern; return the first that matches
+            for sp in sub_pats {
+                let mut trial_row: List<Pattern> = [sp]
+                trial_row.extend(rest)
+                let result = specialize_row(trial_row, ctor)
+                match result {
+                    some(_) => { return result },
+                    none => {},
+                }
+            }
+            none
+        },
     }
 }
 
@@ -523,22 +553,27 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFi
             let mut defaults: List<List<Pattern>> = []
             for row in rows {
                 let first = pat_at(row, 0)
+                let mut is_default = false
                 match first {
-                    Pattern::Wildcard { .. } => {
-                        let mut tail: List<Pattern> = []
-                        for i in 1..row.len() {
-                            tail.push(pat_at(row, i))
+                    Pattern::Wildcard { .. } => { is_default = true },
+                    Pattern::Binding { .. } => { is_default = true },
+                    Pattern::OrPattern { patterns: sub_pats, .. } => {
+                        for sp in sub_pats {
+                            match sp {
+                                Pattern::Wildcard { .. } => { is_default = true },
+                                Pattern::Binding { .. } => { is_default = true },
+                                _ => {},
+                            }
                         }
-                        defaults.push(tail)
-                    },
-                    Pattern::Binding { .. } => {
-                        let mut tail: List<Pattern> = []
-                        for i in 1..row.len() {
-                            tail.push(pat_at(row, i))
-                        }
-                        defaults.push(tail)
                     },
                     _ => {},
+                }
+                if is_default {
+                    let mut tail: List<Pattern> = []
+                    for i in 1..row.len() {
+                        tail.push(pat_at(row, i))
+                    }
+                    defaults.push(tail)
                 }
             }
             let sub = check_matrix(defaults, rest_types, subst, expanding)

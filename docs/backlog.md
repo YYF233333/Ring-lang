@@ -494,43 +494,6 @@ Perceus RC 不处理循环引用。Ring 有 OOP 手感（struct + impl + delegat
 
 ## 语法增强
 
-### B-051 Or-Pattern（模式匹配 or 分支）[feature] [P2] [M] [doing]
-match arm 支持 `|` 合并多个模式，消除重复分支。
-
-```ring
-match shape {
-    Circle { r } | Ellipse { r, .. } => calc_area(r),
-    Rect { w, h } | Square { w, h } => w * h,
-}
-
-// 也支持 enum 变体合并：
-match opt {
-    Some(x) | Ok(x) => process(x),   // 要求绑定变量名和类型一致
-    None | Err(_) => default(),
-}
-```
-
-**动机**：审计发现编译器自身（infer.ring）至少 5 处存在 StructType/EnumType 分支逻辑完全相同的 match arm（每处 10-25 行重复），属语言限制导致的系统性问题。Or-pattern 实现后可批量消除。
-
-**涉及修改**：
-1. `ast.ring`：`Pattern` 新增 `OrPattern { patterns: List<Pattern>, span }` 变体
-2. `parser.ring`：match arm 的 pattern 位置识别 `|` token，收集多个 pattern
-3. `infer.ring`：推断 or-pattern 时，验证每个分支绑定相同的变量名集合且类型一致
-4. `exhaustive.ring`：穷尽性检查支持 or-pattern（展开为独立行）
-5. `codegen_stmt.ring`：or-pattern 生成多条件 `||` 链，bindings 取自首个匹配分支
-
-**交互规则（design.md 1.5）**：
-- Or-Pattern × GADTs：合并的 GADT 变体必须携带兼容的类型等式，不兼容则编译错误（如 `Lit(n) | IsZero(e)` 中 T=Int vs T=Bool 冲突）
-
-**验收标准**：
-- `A | B => expr` 语法可解析、可编译
-- 绑定变量名不一致 → 编译错误
-- 绑定变量类型不一致 → 编译错误
-- GADT 变体合并时类型等式不兼容 → 编译错误
-- 穷尽性检查正确处理 or-pattern
-- 编译器自身可使用 or-pattern 消除重复分支
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
 
 ## 已知 Bug / 技术债
 
