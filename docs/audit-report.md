@@ -28,14 +28,6 @@
 
 发现者：Opus
 
-### #115 E0513 dead error code: associated type bound not satisfied [medium] [doing]
-
-`E0513` is defined at `codes.ring:52` with description "Associated type bound not satisfied" but never emitted by any compiler pass. When a trait declares `type Item: Eq` (an associated type with bounds), `AssocTypeDef.bounds` stores the bound list but `register_impl` (`infer_register.ring:756-770`) only checks for missing/extra associated types, not whether concrete types satisfy declared bounds. For example `impl T for S { type Item = Int }` when `trait T { type Item: Clone }` would succeed without verifying `Int` satisfies `Clone`.
-
-**文件**：`compiler/codes.ring:52`、`compiler/infer_register.ring:756-770`
-**修复方向**：在 `register_impl` 中增加 bound 验证：对每个 `trait_def.assoc_types` 中带 bounds 的条目，检查 `assoc_type_map` 中的具体类型是否满足所有 trait bounds。
-
-发现者：DS
 
 ### #116 `FnType` `types_equal` 用 exact ID 比较 open effect row tail [low] [open]
 

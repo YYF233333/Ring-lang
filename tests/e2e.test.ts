@@ -505,6 +505,7 @@ const cases: TestCase[] = [
   { file: "assoc_type_default.ring", expected: "assoc type default: ok\n" },
   { file: "assoc_type_constraint.ring", expected: "assoc type constraint: ok\n" },
   { file: "assoc_type_qualified_multi.ring", expected: "assoc_type_qualified_multi: ok\n" },
+  { file: "assoc_type_bound.ring", expected: "assoc type bound: ok\n" },
   { file: "or_pattern.ring", expected: "or pattern: ok\n" },
 ];
 
@@ -587,6 +588,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_assoc_type_missing.ring", error_pattern: "E0510" },
     { file: "error_assoc_type_unknown.ring", error_pattern: "E0511" },
     { file: "error_assoc_type_constraint_mismatch.ring", error_pattern: "E0513" },
+    { file: "error_assoc_type_bound.ring", error_pattern: "E0513" },
   ];
 
   for (const tc of negative_cases) {

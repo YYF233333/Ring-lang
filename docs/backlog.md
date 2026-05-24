@@ -549,17 +549,6 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
-### B-058 关联类型 bound 验证完善（E0513）[bugfix] [P3] [S] [doing]
-B-004 遗留。关联类型带 bound（`type Iter: Iterator<T>`）的验证基础设施已搭建（E0513 错误码 + ImplEntry.assoc_types），但 impl 中赋值类型是否满足 bound 的完整验证未实施——bound 信息被存储但不触发错误报告。
-
-**涉及修改**：
-1. `infer_decl.ring`：`check_impl_decl` 中验证 impl 的关联类型赋值是否满足 trait 声明中的 bound 约束，不满足时报 E0513
-
-**验收标准**：
-- `impl T for S { type Item = Foo }` 当 `Foo` 不满足 trait 中 `type Item: Bound` 的 bound 时报 E0513
-- 满足 bound 时正常通过
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
 
 ### B-059 trait body 内支持 `Self::Item` 关联类型路径 [feature] [P3] [S] [queued]
 B-004 遗留。trait body 中引用关联类型目前只能用裸名 `Item`（通过 `type_param_scope` 注入），不支持 `Self::Item` 路径。Rust 两种写法都支持。
