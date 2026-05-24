@@ -240,6 +240,7 @@ const cases: TestCase[] = [
   { file: "row_generic.ring", expected: "whiskers-rex\n" },
   { file: "effect_row_strict.ring", expected: "3-mock-data\n" },
   { file: "effect_row_handle.ring", expected: "42\n" },
+  { file: "effect_row_asymmetric.ring", expected: "effect_row_asymmetric: ok\n" },
   { file: "option_basic.ring", expected: "42\n" },
   { file: "option_unwrap.ring", expected: "43\n" },
   { file: "option_try.ring", expected: "42\n" },

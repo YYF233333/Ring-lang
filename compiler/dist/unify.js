@@ -438,7 +438,32 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
       }
       break __ring_match10;
     }
-    break __ring_match10;
+    if (Array.isArray(__ring_m10) && __ring_m10.length === 2 && __ring_m10[0]._tag === "none" && __ring_m10[1]._tag === "some") {
+      const tb = __ring_m10[1]._0;
+      if ((List_len(a_unmatched) > 0)) {
+        const row_for_b_tail = types$Type_EffectRowType(a_unmatched, Option_none);
+        if (occurs_in(tb, row_for_b_tail, s)) {
+          unify_error_msg("infinite type in effect row variable", __ring_ev_fail);
+        }
+        union_find$uf_insert(s, tb, row_for_b_tail);
+      }
+      break __ring_match10;
+    }
+    if (Array.isArray(__ring_m10) && __ring_m10.length === 2 && __ring_m10[0]._tag === "some" && __ring_m10[1]._tag === "none") {
+      const ta = __ring_m10[0]._0;
+      if ((List_len(b_unmatched) > 0)) {
+        const row_for_a_tail = types$Type_EffectRowType(b_unmatched, Option_none);
+        if (occurs_in(ta, row_for_a_tail, s)) {
+          unify_error_msg("infinite type in effect row variable", __ring_ev_fail);
+        }
+        union_find$uf_insert(s, ta, row_for_a_tail);
+      }
+      break __ring_match10;
+    }
+    if (Array.isArray(__ring_m10) && __ring_m10.length === 2 && __ring_m10[0]._tag === "none" && __ring_m10[1]._tag === "none") {
+      break __ring_match10;
+    }
+    __match_fail(__ring_m10);
   }
   return s;
 }
