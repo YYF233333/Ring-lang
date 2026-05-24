@@ -23,6 +23,16 @@ trait body 中引用关联类型需使用裸名 `Item`（通过 `type_param_scop
 
 `parse_type_bound` 中解析 `<...>` 内容时使用 `save_pos` / `sink.save()` / `sink.restore()` 的 rollback 策略区分 assoc constraint (`Name =`) 和普通 type arg。这要求 DiagnosticSink 支持 checkpoint/restore。
 
+## B-055 Match IIFE → temp variable（已 revert）
+
+### 1. lambda 内 match 的 emit 作用域问题 [通知]
+
+B-055 实现（统一 temp variable 方案）在 worktree 内声称 double bootstrap 通过，但 merge 后发现 `diagnostics.ring` 的 `has_errors` 方法崩溃：`self.items.any(fn(d) { match d.severity { ... } })` 中的 match 被 `gen_match` emit 到了 lambda 外部作用域，导致 `d` 变量引用失效。已 revert。
+
+**根因**：`gen_match` 使用 `emit(ctx, ...)` 写入当前语句上下文，但 lambda body 编译为内联表达式字符串。IIFE 在表达式上下文中是必要的——它将语句封装为表达式。要消除 IIFE 需要 codegen 感知 statement vs expression 上下文。
+
+**B-055 backlog 已更新**：标注阻塞条件（需先解决 codegen 上下文区分）。
+
 ## B-053 Debug derive FnType
 
 ### 1. 新增 FieldAction::FnLiteral variant [通知]

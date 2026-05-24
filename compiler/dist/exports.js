@@ -816,26 +816,34 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
         if (__ring_m42._tag === "NamedItems") {
           const names = __ring_m42.names;
           for (const item of names) {
-            let __ring_blk0;
+            const local_name = (function() {
+  const __ring_m = item.alias;
+  if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
+  if (__ring_m._tag === "none") { return item.name; }
+  __match_fail(__ring_m);
+})();
             __ring_match43: {
-              const __ring_m43 = item.alias;
+              const __ring_m43 = env$TypeEnv_lookup(env, local_name);
               if (__ring_m43._tag === "some") {
-                const a = __ring_m43._0;
-                __ring_blk0 = a;
+                const scheme = __ring_m43._0;
+                _Map_insert(values, local_name, scheme);
                 break __ring_match43;
               }
               if (__ring_m43._tag === "none") {
-                __ring_blk0 = item.name;
                 break __ring_match43;
               }
               __match_fail(__ring_m43);
             }
-            const local_name = __ring_blk0;
             __ring_match44: {
-              const __ring_m44 = env$TypeEnv_lookup(env, local_name);
+              const __ring_m44 = _Map_get(env.types.structs, local_name);
               if (__ring_m44._tag === "some") {
-                const scheme = __ring_m44._0;
-                _Map_insert(values, local_name, scheme);
+                const sdef = __ring_m44._0;
+                _Map_insert(types, local_name, TypeDef_StructDef_(sdef));
+                let fnames = [];
+                for (const f of sdef.fields) {
+                  List_push(fnames, f.name);
+                }
+                _Map_insert(struct_field_orders, local_name, fnames);
                 break __ring_match44;
               }
               if (__ring_m44._tag === "none") {
@@ -844,15 +852,10 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
               __match_fail(__ring_m44);
             }
             __ring_match45: {
-              const __ring_m45 = _Map_get(env.types.structs, local_name);
+              const __ring_m45 = _Map_get(env.types.enums, local_name);
               if (__ring_m45._tag === "some") {
-                const sdef = __ring_m45._0;
-                _Map_insert(types, local_name, TypeDef_StructDef_(sdef));
-                let fnames = [];
-                for (const f of sdef.fields) {
-                  List_push(fnames, f.name);
-                }
-                _Map_insert(struct_field_orders, local_name, fnames);
+                const edef = __ring_m45._0;
+                _Map_insert(types, local_name, TypeDef_EnumDef_(edef));
                 break __ring_match45;
               }
               if (__ring_m45._tag === "none") {
@@ -861,10 +864,10 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
               __match_fail(__ring_m45);
             }
             __ring_match46: {
-              const __ring_m46 = _Map_get(env.types.enums, local_name);
+              const __ring_m46 = _Map_get(env.types.effects, local_name);
               if (__ring_m46._tag === "some") {
-                const edef = __ring_m46._0;
-                _Map_insert(types, local_name, TypeDef_EnumDef_(edef));
+                const effdef = __ring_m46._0;
+                _Map_insert(effects, local_name, effdef);
                 break __ring_match46;
               }
               if (__ring_m46._tag === "none") {
@@ -873,28 +876,16 @@ function extract_exports(module_key, module_prefix, program, hprogram, env) {
               __match_fail(__ring_m46);
             }
             __ring_match47: {
-              const __ring_m47 = _Map_get(env.types.effects, local_name);
+              const __ring_m47 = _Map_get(env.trait_reg.traits, local_name);
               if (__ring_m47._tag === "some") {
-                const effdef = __ring_m47._0;
-                _Map_insert(effects, local_name, effdef);
+                const tdef = __ring_m47._0;
+                _Map_insert(traits, local_name, tdef);
                 break __ring_match47;
               }
               if (__ring_m47._tag === "none") {
                 break __ring_match47;
               }
               __match_fail(__ring_m47);
-            }
-            __ring_match48: {
-              const __ring_m48 = _Map_get(env.trait_reg.traits, local_name);
-              if (__ring_m48._tag === "some") {
-                const tdef = __ring_m48._0;
-                _Map_insert(traits, local_name, tdef);
-                break __ring_match48;
-              }
-              if (__ring_m48._tag === "none") {
-                break __ring_match48;
-              }
-              __match_fail(__ring_m48);
             }
           }
           break __ring_match42;

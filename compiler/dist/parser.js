@@ -876,21 +876,12 @@ function Parser_parse_if_let_stmt(self, start) {
   if (Parser_try_consume(self, lexer$TokenKind_TkElse)) {
     else_block = Option_some(Parser_parse_block_expr(self));
   }
-  let __ring_blk0;
-  __ring_match13: {
-    const __ring_m13 = else_block;
-    if (__ring_m13._tag === "some") {
-      const eb = __ring_m13._0;
-      __ring_blk0 = expr_span(eb).end;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "none") {
-      __ring_blk0 = expr_span(then_block).end;
-      break __ring_match13;
-    }
-    __match_fail(__ring_m13);
-  }
-  const end_pos = __ring_blk0;
+  const end_pos = (function() {
+  const __ring_m = else_block;
+  if (__ring_m._tag === "some") { const eb = __ring_m._0; return expr_span(eb).end; }
+  if (__ring_m._tag === "none") { return expr_span(then_block).end; }
+  __match_fail(__ring_m);
+})();
   return ast$Stmt_IfLet(pattern, expr, then_block, else_block, Parser_make_span(self, start, end_pos));
 }
 function Parser_parse_binding_stmt(self, mutable) {
@@ -940,19 +931,19 @@ function Parser_parse_block_expr(self) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     const stmt = Parser_parse_stmt(self);
     if (Parser_check(self, lexer$TokenKind_TkRBrace)) {
-      __ring_match14: {
-        const __ring_m14 = stmt;
-        if (__ring_m14._tag === "ExprStmt") {
-          const e = __ring_m14.expr; const hs = __ring_m14.has_semi;
+      __ring_match13: {
+        const __ring_m13 = stmt;
+        if (__ring_m13._tag === "ExprStmt") {
+          const e = __ring_m13.expr; const hs = __ring_m13.has_semi;
           if ((!hs)) {
             tail = Option_some(e);
           } else {
             List_push(stmts, stmt);
           }
-          break __ring_match14;
+          break __ring_match13;
         }
         List_push(stmts, stmt);
-        break __ring_match14;
+        break __ring_match13;
       }
     } else {
       List_push(stmts, stmt);
@@ -1043,44 +1034,44 @@ function Parser_parse_mod_block(self, is_pub) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
     if (Parser_check(self, lexer$TokenKind_TkUse)) {
       const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-      __ring_match15: {
-        const __ring_m15 = use_result;
-        if (__ring_m15._tag === "some") {
-          const ud = __ring_m15._0;
+      __ring_match14: {
+        const __ring_m14 = use_result;
+        if (__ring_m14._tag === "some") {
+          const ud = __ring_m14._0;
           List_push(uses, ud);
-          break __ring_match15;
+          break __ring_match14;
         }
-        if (__ring_m15._tag === "none") {
+        if (__ring_m14._tag === "none") {
           while ((!Parser_at_end(self))) {
             if (((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkUse)) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
               break;
             }
             Parser_advance(self);
           }
-          break __ring_match15;
+          break __ring_match14;
         }
-        __match_fail(__ring_m15);
+        __match_fail(__ring_m14);
       }
       continue;
     }
     const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-    __ring_match16: {
-      const __ring_m16 = maybe_decl;
-      if (__ring_m16._tag === "some") {
-        const decl = __ring_m16._0;
+    __ring_match15: {
+      const __ring_m15 = maybe_decl;
+      if (__ring_m15._tag === "some") {
+        const decl = __ring_m15._0;
         List_push(decls, decl);
-        break __ring_match16;
+        break __ring_match15;
       }
-      if (__ring_m16._tag === "none") {
+      if (__ring_m15._tag === "none") {
         while ((!Parser_at_end(self))) {
           if ((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
             break;
           }
           Parser_advance(self);
         }
-        break __ring_match16;
+        break __ring_match15;
       }
-      __match_fail(__ring_m16);
+      __match_fail(__ring_m15);
     }
   }
   const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
@@ -1089,63 +1080,63 @@ function Parser_parse_mod_block(self, is_pub) {
 function Parser_parse_decl(self) {
   const is_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
   const tok = Parser_peek(self);
-  __ring_match17: {
-    const __ring_m17 = tok.kind;
-    if (__ring_m17._tag === "TkMod") {
+  __ring_match16: {
+    const __ring_m16 = tok.kind;
+    if (__ring_m16._tag === "TkMod") {
       return Option_some(Parser_parse_mod_block(self, is_pub));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkFn") {
+    if (__ring_m16._tag === "TkFn") {
       return Option_some(Parser_parse_fn_decl(self, is_pub, false));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkStruct") {
+    if (__ring_m16._tag === "TkStruct") {
       return Option_some(Parser_parse_struct_decl(self, is_pub));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkEnum") {
+    if (__ring_m16._tag === "TkEnum") {
       return Option_some(Parser_parse_enum_decl(self, is_pub));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkImpl") {
+    if (__ring_m16._tag === "TkImpl") {
       return Option_some(Parser_parse_impl_decl(self));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkEffect") {
+    if (__ring_m16._tag === "TkEffect") {
       return Option_some(Parser_parse_effect_decl(self, is_pub));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkTest") {
+    if (__ring_m16._tag === "TkTest") {
       return Option_some(Parser_parse_test_decl(self));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkTrait") {
+    if (__ring_m16._tag === "TkTrait") {
       return Option_some(Parser_parse_trait_decl(self, is_pub));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkExtern") {
+    if (__ring_m16._tag === "TkExtern") {
       return Option_some(Parser_parse_extern_decl(self, is_pub));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkConst") {
+    if (__ring_m16._tag === "TkConst") {
       return Option_some(Parser_parse_const_decl(self, is_pub));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkSig") {
+    if (__ring_m16._tag === "TkSig") {
       return Option_some(Parser_parse_sig_block(self, is_pub));
-      break __ring_match17;
+      break __ring_match16;
     }
-    if (__ring_m17._tag === "TkIdent") {
+    if (__ring_m16._tag === "TkIdent") {
       if ((tok.value === "type")) {
         return Option_some(Parser_parse_type_alias_decl(self, is_pub));
       }
       Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
       return Option_none;
-      break __ring_match17;
+      break __ring_match16;
     }
     Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
     return Option_none;
-    break __ring_match17;
+    break __ring_match16;
   }
 }
 function Parser_parse_effect_list(self) {
@@ -1865,21 +1856,12 @@ function Parser_parse_if_expr(self) {
       else_branch = Option_some(Parser_parse_block_expr(self));
     }
   }
-  let __ring_blk1;
-  __ring_match18: {
-    const __ring_m18 = else_branch;
-    if (__ring_m18._tag === "some") {
-      const eb = __ring_m18._0;
-      __ring_blk1 = expr_span(eb).end;
-      break __ring_match18;
-    }
-    if (__ring_m18._tag === "none") {
-      __ring_blk1 = expr_span(then_branch).end;
-      break __ring_match18;
-    }
-    __match_fail(__ring_m18);
-  }
-  const end_pos = __ring_blk1;
+  const end_pos = (function() {
+  const __ring_m = else_branch;
+  if (__ring_m._tag === "some") { const eb = __ring_m._0; return expr_span(eb).end; }
+  if (__ring_m._tag === "none") { return expr_span(then_branch).end; }
+  __match_fail(__ring_m);
+})();
   return ast$Expr_IfExpr(condition, then_branch, else_branch, Parser_make_span(self, start, end_pos));
 }
 function Parser_parse_match_expr(self) {
@@ -1965,21 +1947,12 @@ function Parser_parse_pattern(self) {
     if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
       Parser_advance(self);
       const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
-      let __ring_blk2;
-      __ring_match19: {
-        const __ring_m19 = qualifier;
-        if (__ring_m19._tag === "some") {
-          const q = __ring_m19._0;
-          __ring_blk2 = `${q}::${name}`;
-          break __ring_match19;
-        }
-        if (__ring_m19._tag === "none") {
-          __ring_blk2 = name;
-          break __ring_match19;
-        }
-        __match_fail(__ring_m19);
-      }
-      qualifier = Option_some(__ring_blk2);
+      qualifier = Option_some((function() {
+  const __ring_m = qualifier;
+  if (__ring_m._tag === "some") { const q = __ring_m._0; return `${q}::${name}`; }
+  if (__ring_m._tag === "none") { return name; }
+  __match_fail(__ring_m);
+})());
       name = variant_tok.value;
     }
     if (Parser_check(self, lexer$TokenKind_TkLParen)) {

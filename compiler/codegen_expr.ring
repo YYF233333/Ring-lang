@@ -833,53 +833,105 @@ fn gen_named_variant_construct(mut ctx: CodegenCtx, enum_name: Str, variant_name
 }
 
 // ============================================================
-// Match expression (labeled block + temp variable)
+// Match expression (expression-mode — IIFE)
 // ============================================================
 
-fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> Str {
-    let tmp = "__ring_blk${ctx.block_counter}"
-    ctx.block_counter = ctx.block_counter + 1
-    let label = "__ring_match${ctx.match_counter}"
-    ctx.match_counter = ctx.match_counter + 1
-    let scrut_js = gen_expr(ctx, scrutinee)
-    emit(ctx, "let ${tmp};")
-    emit(ctx, "${label}: {")
-    push_indent(ctx)
-    let scrut_var = "__ring_m${ctx.match_counter - 1}"
-    emit(ctx, "const ${scrut_var} = ${scrut_js};")
-
+fn match_contains_return(arms: List<HMatchArm>) -> Bool {
     for arm in arms {
-        let cond = gen_pattern_condition(ctx, scrut_var, arm.pattern)
-        let bindings_str = gen_pattern_bindings(scrut_var, arm.pattern)
-        match arm.guard {
-            none => {
-                if cond == "true" {
-                    if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
-                    emit_branch_as_assign(ctx, arm.body, tmp)
-                    emit(ctx, "break ${label};")
-                } else {
+        if expr_contains_return(arm.body) { return true }
+    }
+    false
+}
+
+fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> Str {
+    // When any arm body contains `return`, use labeled-block + temp variable
+    // instead of IIFE, to avoid capturing the return.
+    if match_contains_return(arms) {
+        let tmp = "__ring_blk${ctx.block_counter}"
+        ctx.block_counter = ctx.block_counter + 1
+        let label = "__ring_match${ctx.match_counter}"
+        ctx.match_counter = ctx.match_counter + 1
+        let scrut_js = gen_expr(ctx, scrutinee)
+        emit(ctx, "let ${tmp};")
+        emit(ctx, "${label}: {")
+        push_indent(ctx)
+        let scrut_var = "__ring_m${ctx.match_counter - 1}"
+        emit(ctx, "const ${scrut_var} = ${scrut_js};")
+
+        for arm in arms {
+            let cond = gen_pattern_condition(ctx, scrut_var, arm.pattern)
+            let bindings_str = gen_pattern_bindings(scrut_var, arm.pattern)
+            match arm.guard {
+                none => {
+                    if cond == "true" {
+                        if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
+                        emit_branch_as_assign(ctx, arm.body, tmp)
+                        emit(ctx, "break ${label};")
+                    } else {
+                        emit(ctx, "if (${cond}) {")
+                        push_indent(ctx)
+                        if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
+                        emit_branch_as_assign(ctx, arm.body, tmp)
+                        emit(ctx, "break ${label};")
+                        pop_indent(ctx)
+                        emit(ctx, "}")
+                    }
+                },
+                some(guard) => {
                     emit(ctx, "if (${cond}) {")
                     push_indent(ctx)
                     if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
+                    let guard_js = gen_expr(ctx, guard)
+                    emit(ctx, "if (${guard_js}) {")
+                    push_indent(ctx)
                     emit_branch_as_assign(ctx, arm.body, tmp)
                     emit(ctx, "break ${label};")
                     pop_indent(ctx)
                     emit(ctx, "}")
+                    pop_indent(ctx)
+                    emit(ctx, "}")
+                },
+            }
+        }
+
+        let mut has_catchall = false
+        for a in arms {
+            match a.pattern {
+                Pattern::Wildcard { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
+                Pattern::Binding { .. } => match a.guard { none => { has_catchall = true }, some(_) => {} },
+                _ => {},
+            }
+        }
+        if has_catchall == false {
+            let mf = RUNTIME_MATCH_FAIL
+            emit(ctx, "${mf}(${scrut_var});")
+        }
+
+        pop_indent(ctx)
+        emit(ctx, "}")
+        return tmp
+    }
+
+    let scrut = gen_expr(ctx, scrutinee)
+    let mut parts: List<Str> = []
+    parts.push("(function() {")
+    parts.push("  const __ring_m = ${scrut};")
+
+    for arm in arms {
+        let cond = gen_pattern_condition(ctx, "__ring_m", arm.pattern)
+        let bindings = gen_pattern_bindings("__ring_m", arm.pattern)
+        let body = gen_expr(ctx, arm.body)
+        match arm.guard {
+            none => {
+                if cond == "true" {
+                    parts.push("  ${bindings}return ${body};")
+                } else {
+                    parts.push("  if (${cond}) { ${bindings}return ${body}; }")
                 }
             },
-            some(guard) => {
-                emit(ctx, "if (${cond}) {")
-                push_indent(ctx)
-                if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
-                let guard_js = gen_expr(ctx, guard)
-                emit(ctx, "if (${guard_js}) {")
-                push_indent(ctx)
-                emit_branch_as_assign(ctx, arm.body, tmp)
-                emit(ctx, "break ${label};")
-                pop_indent(ctx)
-                emit(ctx, "}")
-                pop_indent(ctx)
-                emit(ctx, "}")
+            some(g) => {
+                let guard_js = gen_expr(ctx, g)
+                parts.push("  if (${cond}) { ${bindings}if (${guard_js}) { return ${body}; } }")
             },
         }
     }
@@ -894,12 +946,11 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
     }
     if has_catchall == false {
         let mf = RUNTIME_MATCH_FAIL
-        emit(ctx, "${mf}(${scrut_var});")
+        parts.push("  ${mf}(__ring_m);")
     }
 
-    pop_indent(ctx)
-    emit(ctx, "}")
-    tmp
+    parts.push("})()")
+    parts.join("\n")
 }
 
 // ============================================================
