@@ -322,7 +322,7 @@ fn resolve_field_action(
         },
         Type::FnType { .. } => {
             if trait_name == "Debug" {
-                some(FieldAction::Identity)
+                some(FieldAction::FnLiteral)
             } else {
                 none
             }

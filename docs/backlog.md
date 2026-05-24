@@ -81,7 +81,7 @@ design.md 1.3。类型可依赖特定值（`Vec<T, n: Nat>`），不要求完整
 - **复杂度**：极大（约束求解可能不可判定）
 - **优先级**：Phase D（研究向）
 
-### B-004 关联类型（Associated Types）[feature] [P1] [L] [queued]
+### B-004 关联类型（Associated Types）[feature] [P1] [L] [doing]
 Trait 中声明关联类型 `type Item`，impl 时指定具体类型。访问语法 `T::Item`（统一路径，checker 语义区分；歧义时后续加 `<T as Trait>::Item` 消歧）。
 
 ```ring
@@ -802,15 +802,6 @@ match opt {
 - 携带 capability 外 effect 的函数仍报 E0408
 - 全部 E2E 测试通过
 
-### B-053 Debug derive 对 FnType 输出改为 `"<fn>"` [bugfix] [P3] [S] [queued]
-`derive.ring` 对函数类型字段使用 `FieldAction::Identity`，codegen 生成 `String(expr)` 导致输出整个函数源码。应改为固定字符串 `"<fn>"`。
-
-**涉及修改**：
-1. `derive.ring` 或 `codegen_derive.ring`：FnType 字段的 Debug 输出改为 `"<fn>"` 字面量
-
-**验收标准**：
-- 含函数字段的 struct Debug 输出显示 `<fn>` 而非函数源码
-- 全部 E2E 测试通过
 
 ### B-054 Parser expression-level 错误恢复 [feature] [P3] [M] [queued]
 Parser 有声明级错误恢复，但 `handle...with` 等复合表达式无恢复机制，单个 malformed 表达式会 poison 整个声明的解析。

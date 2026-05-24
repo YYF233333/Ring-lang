@@ -124,6 +124,7 @@ fn gen_action_eq(left: Str, right: Str, action: FieldAction) -> Str {
                 "(${parts.join(" && ")})"
             }
         },
+        FieldAction::FnLiteral => panic("unreachable: FnLiteral in Eq derive"),
     }
 }
 
@@ -208,6 +209,7 @@ fn gen_action_clone(expr: Str, action: FieldAction) -> Str {
             }
             "[${parts.join(", ")}]"
         },
+        FieldAction::FnLiteral => panic("unreachable: FnLiteral in Clone derive"),
     }
 }
 
@@ -372,6 +374,7 @@ fn gen_action_cmp(left: Str, right: Str, action: FieldAction) -> Str {
                 }
             }
         },
+        FieldAction::FnLiteral => panic("unreachable: FnLiteral in Ord derive"),
     }
 }
 
@@ -476,6 +479,7 @@ fn gen_action_debug(expr: Str, action: FieldAction) -> Str {
                 "\"(\" + ${parts.join(" + \", \" + ")} + \")\""
             }
         },
+        FieldAction::FnLiteral => "\"<fn>\"",
     }
 }
 
