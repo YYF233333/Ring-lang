@@ -760,6 +760,7 @@ function update_impl_method_effects(ctx, target_type, method_name, effects) {
 
 function check_impl_decl(ctx, target_type, type_params, trait_name, methods, span, __ring_ev_fail) {
   const saved_tp_scope = map_clone(ctx.type_param_scope);
+  const saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope);
   for (const tp of type_params) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
     _Map_insert(ctx.type_param_scope, tp.name, tv);
@@ -807,6 +808,7 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
     __match_fail(__ring_m32);
   }
 })() : infer_ctx$resolve_self_type(ctx, target_type));
+  _Map_insert(ctx.type_param_scope, "Self", impl_self_type);
   const saved_impl_bounds = ctx.current_fn_bounds;
   let impl_bounds = [];
   for (const tp of type_params) {
@@ -860,6 +862,7 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
           if (__ring_m37._tag === "some") {
             const ct = __ring_m37._0;
             _Map_insert(ctx.type_param_scope, aname, ct);
+            _Map_insert(ctx.qualified_assoc_scope, `Self::${aname}`, ct);
             break __ring_match37;
           }
           if (__ring_m37._tag === "none") {
@@ -909,6 +912,7 @@ function check_impl_decl(ctx, target_type, type_params, trait_name, methods, spa
   }
   ctx.current_fn_bounds = saved_impl_bounds;
   ctx.type_param_scope = saved_tp_scope;
+  ctx.qualified_assoc_scope = saved_qualified_assoc;
   return hir$HDecl_Impl(target_type, type_params, trait_name, hmethods, hassoc_types, span);
 }
 
@@ -1356,6 +1360,8 @@ function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
   const saved_subst = ctx.subst;
   ctx.subst = unify$empty_subst();
   env$TypeEnv_push_scope(ctx.env);
+  const saved_tp_scope = map_clone(ctx.type_param_scope);
+  const saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope);
   List_push(ctx.fn_bounds_stack, ctx.current_fn_bounds);
   ctx.current_fn_bounds = [];
   __ring_match56: {
@@ -1371,31 +1377,57 @@ function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
     }
     break __ring_match56;
   }
+  _Map_insert(ctx.type_param_scope, "Self", self_var);
+  __ring_match57: {
+    const __ring_m57 = _Map_get(ctx.env.trait_reg.traits, trait_name);
+    if (__ring_m57._tag === "some") {
+      const tdef = __ring_m57._0;
+      for (const atdef of tdef.assoc_types) {
+        __ring_match58: {
+          const __ring_m58 = _Map_get(ctx.type_param_scope, atdef.name);
+          if (__ring_m58._tag === "some") {
+            const at_ty = __ring_m58._0;
+            _Map_insert(ctx.qualified_assoc_scope, `Self::${atdef.name}`, at_ty);
+            break __ring_match58;
+          }
+          if (__ring_m58._tag === "none") {
+            break __ring_match58;
+          }
+          __match_fail(__ring_m58);
+        }
+      }
+      break __ring_match57;
+    }
+    if (__ring_m57._tag === "none") {
+      break __ring_match57;
+    }
+    __match_fail(__ring_m57);
+  }
   for (const p of hparams) {
     env$TypeEnv_bind_mono(ctx.env, p.name, p.ty);
     if (p.is_mutable) {
-      __ring_match57: {
-        const __ring_m57 = env$TypeEnv_lookup(ctx.env, p.name);
-        if (__ring_m57._tag === "some") {
-          const ps = __ring_m57._0;
-          __ring_match58: {
-            const __ring_m58 = ps.def_id;
-            if (__ring_m58._tag === "some") {
-              const did = __ring_m58._0;
+      __ring_match59: {
+        const __ring_m59 = env$TypeEnv_lookup(ctx.env, p.name);
+        if (__ring_m59._tag === "some") {
+          const ps = __ring_m59._0;
+          __ring_match60: {
+            const __ring_m60 = ps.def_id;
+            if (__ring_m60._tag === "some") {
+              const did = __ring_m60._0;
               _Set_insert(ctx.env.scope.mutable_vars, did);
-              break __ring_match58;
+              break __ring_match60;
             }
-            if (__ring_m58._tag === "none") {
-              break __ring_match58;
+            if (__ring_m60._tag === "none") {
+              break __ring_match60;
             }
-            __match_fail(__ring_m58);
+            __match_fail(__ring_m60);
           }
-          break __ring_match57;
+          break __ring_match59;
         }
-        if (__ring_m57._tag === "none") {
-          break __ring_match57;
+        if (__ring_m59._tag === "none") {
+          break __ring_match59;
         }
-        __match_fail(__ring_m57);
+        __match_fail(__ring_m59);
       }
     }
   }
@@ -1407,6 +1439,8 @@ function check_trait_default_body(ctx, trait_name, self_var, hparams, body) {
   if (__ring_m._tag === "none") { return []; }
   __match_fail(__ring_m);
 })();
+  ctx.type_param_scope = saved_tp_scope;
+  ctx.qualified_assoc_scope = saved_qualified_assoc;
   const final_body = (function() {
   const __ring_m = body_result;
   if (__ring_m._tag === "some") { const br = __ring_m._0; return (function() {
@@ -1489,33 +1523,33 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
   ctx.subst = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span);
   let local_names = map_new();
   for (const tp of type_params) {
-    __ring_match59: {
-      const __ring_m59 = _Map_get(ctx.type_param_scope, tp.name);
-      if (__ring_m59._tag === "some") {
-        const tv = __ring_m59._0;
-        __ring_match60: {
-          const __ring_m60 = tv;
-          if (__ring_m60._tag === "TypeVar") {
+    __ring_match61: {
+      const __ring_m61 = _Map_get(ctx.type_param_scope, tp.name);
+      if (__ring_m61._tag === "some") {
+        const tv = __ring_m61._0;
+        __ring_match62: {
+          const __ring_m62 = tv;
+          if (__ring_m62._tag === "TypeVar") {
             const resolved = env$apply_subst(ctx.subst, tv);
-            __ring_match61: {
-              const __ring_m61 = resolved;
-              if (__ring_m61._tag === "TypeVar") {
-                const rid = __ring_m61.id;
+            __ring_match63: {
+              const __ring_m63 = resolved;
+              if (__ring_m63._tag === "TypeVar") {
+                const rid = __ring_m63.id;
                 _Map_insert(local_names, rid, tp.name);
-                break __ring_match61;
+                break __ring_match63;
               }
-              break __ring_match61;
+              break __ring_match63;
             }
-            break __ring_match60;
+            break __ring_match62;
           }
-          break __ring_match60;
+          break __ring_match62;
         }
-        break __ring_match59;
+        break __ring_match61;
       }
-      if (__ring_m59._tag === "none") {
-        break __ring_match59;
+      if (__ring_m61._tag === "none") {
+        break __ring_match61;
       }
-      __match_fail(__ring_m59);
+      __match_fail(__ring_m61);
     }
   }
   let declared_names = set_new();
@@ -1527,22 +1561,22 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
     const tpname = __ring_dt1[0];
     const tv = __ring_dt1[1];
     if (((!_Map_contains_key(saved_tp_scope, tpname)) && (!_Set_contains(declared_names, tpname, __Str_Eq)))) {
-      __ring_match62: {
-        const __ring_m62 = tv;
-        if (__ring_m62._tag === "TypeVar") {
+      __ring_match64: {
+        const __ring_m64 = tv;
+        if (__ring_m64._tag === "TypeVar") {
           const resolved = env$apply_subst(ctx.subst, tv);
-          __ring_match63: {
-            const __ring_m63 = resolved;
-            if (__ring_m63._tag === "TypeVar") {
-              const rid = __ring_m63.id;
+          __ring_match65: {
+            const __ring_m65 = resolved;
+            if (__ring_m65._tag === "TypeVar") {
+              const rid = __ring_m65.id;
               _Map_insert(local_names, rid, tpname);
-              break __ring_match63;
+              break __ring_match65;
             }
-            break __ring_match63;
+            break __ring_match65;
           }
-          break __ring_match62;
+          break __ring_match64;
         }
-        break __ring_match62;
+        break __ring_match64;
       }
     }
   }
@@ -1552,30 +1586,30 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
       continue;
     }
     _Set_insert(seen_traits, fb.trait_name);
-    __ring_match64: {
-      const __ring_m64 = _Map_get(ctx.env.trait_reg.traits, fb.trait_name);
-      if (__ring_m64._tag === "some") {
-        const tdef = __ring_m64._0;
+    __ring_match66: {
+      const __ring_m66 = _Map_get(ctx.env.trait_reg.traits, fb.trait_name);
+      if (__ring_m66._tag === "some") {
+        const tdef = __ring_m66._0;
         for (const atdef of tdef.assoc_types) {
           if ((!_Map_contains_key(local_names, atdef.var_id))) {
             const resolved = env$apply_subst(ctx.subst, types$Type_TypeVar(atdef.var_id, Option_none));
-            __ring_match65: {
-              const __ring_m65 = resolved;
-              if (__ring_m65._tag === "TypeVar") {
-                const rid = __ring_m65.id;
+            __ring_match67: {
+              const __ring_m67 = resolved;
+              if (__ring_m67._tag === "TypeVar") {
+                const rid = __ring_m67.id;
                 _Map_insert(local_names, rid, atdef.name);
-                break __ring_match65;
+                break __ring_match67;
               }
-              break __ring_match65;
+              break __ring_match67;
             }
           }
         }
-        break __ring_match64;
+        break __ring_match66;
       }
-      if (__ring_m64._tag === "none") {
-        break __ring_match64;
+      if (__ring_m66._tag === "none") {
+        break __ring_match66;
       }
-      __match_fail(__ring_m64);
+      __match_fail(__ring_m66);
     }
   }
   const zctx = new zonk$ZonkCtx(ctx.subst, local_names);
@@ -1590,26 +1624,26 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
 }
 
 function is_value_type(t) {
-  __ring_match66: {
-    const __ring_m66 = t;
-    if (__ring_m66._tag === "IntType") {
+  __ring_match68: {
+    const __ring_m68 = t;
+    if (__ring_m68._tag === "IntType") {
       return true;
-      break __ring_match66;
+      break __ring_match68;
     }
-    if (__ring_m66._tag === "FloatType") {
+    if (__ring_m68._tag === "FloatType") {
       return true;
-      break __ring_match66;
+      break __ring_match68;
     }
-    if (__ring_m66._tag === "BoolType") {
+    if (__ring_m68._tag === "BoolType") {
       return true;
-      break __ring_match66;
+      break __ring_match68;
     }
-    if (__ring_m66._tag === "StrType") {
+    if (__ring_m68._tag === "StrType") {
       return true;
-      break __ring_match66;
+      break __ring_match68;
     }
     return false;
-    break __ring_match66;
+    break __ring_match68;
   }
 }
 
@@ -1631,14 +1665,14 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   }
   ctx.current_fn_bounds = inherited_bounds;
   for (const tp of type_params) {
-    __ring_match67: {
-      const __ring_m67 = _Map_get(ctx.type_param_scope, tp.name);
-      if (__ring_m67._tag === "some") {
-        const tv = __ring_m67._0;
-        __ring_match68: {
-          const __ring_m68 = tv;
-          if (__ring_m68._tag === "TypeVar") {
-            const id = __ring_m68.id;
+    __ring_match69: {
+      const __ring_m69 = _Map_get(ctx.type_param_scope, tp.name);
+      if (__ring_m69._tag === "some") {
+        const tv = __ring_m69._0;
+        __ring_match70: {
+          const __ring_m70 = tv;
+          if (__ring_m70._tag === "TypeVar") {
+            const id = __ring_m70.id;
             for (const bound of tp.bounds) {
               List_push(ctx.current_fn_bounds, new infer_ctx$FnBoundsEntry(id, bound.trait_name, tp.name));
               const supers = infer_register$collect_all_supertraits(ctx, bound.trait_name);
@@ -1646,16 +1680,16 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
                 List_push(ctx.current_fn_bounds, new infer_ctx$FnBoundsEntry(id, st_name, tp.name));
               }
             }
-            break __ring_match68;
+            break __ring_match70;
           }
-          break __ring_match68;
+          break __ring_match70;
         }
-        break __ring_match67;
+        break __ring_match69;
       }
-      if (__ring_m67._tag === "none") {
-        break __ring_match67;
+      if (__ring_m69._tag === "none") {
+        break __ring_match69;
       }
-      __match_fail(__ring_m67);
+      __match_fail(__ring_m69);
     }
   }
   infer_register$inject_assoc_types_from_bounds(ctx, type_params);
@@ -1674,14 +1708,14 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
 })();
     env$TypeEnv_bind_mono(ctx.env, p.name, ptype);
     const param_scheme = env$TypeEnv_lookup(ctx.env, p.name);
-    __ring_match69: {
-      const __ring_m69 = param_scheme;
-      if (__ring_m69._tag === "some") {
-        const ps = __ring_m69._0;
-        __ring_match70: {
-          const __ring_m70 = ps.def_id;
-          if (__ring_m70._tag === "some") {
-            const did = __ring_m70._0;
+    __ring_match71: {
+      const __ring_m71 = param_scheme;
+      if (__ring_m71._tag === "some") {
+        const ps = __ring_m71._0;
+        __ring_match72: {
+          const __ring_m72 = ps.def_id;
+          if (__ring_m72._tag === "some") {
+            const did = __ring_m72._0;
             env$TypeEnv_record_def_span(ctx.env, did, p.span);
             _Map_insert(ctx.var_lambda_depth, did, ctx.lambda_depth);
             if (p.is_mutable) {
@@ -1696,21 +1730,21 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
             } else {
               _Set_insert(ctx.env.scope.let_defs, did);
             }
-            break __ring_match70;
+            break __ring_match72;
           }
-          if (__ring_m70._tag === "none") {
-            break __ring_match70;
+          if (__ring_m72._tag === "none") {
+            break __ring_match72;
           }
-          __match_fail(__ring_m70);
+          __match_fail(__ring_m72);
         }
         List_push(hparams, new hir$HParam(p.name, ptype, ps.def_id, p.is_mutable));
-        break __ring_match69;
+        break __ring_match71;
       }
-      if (__ring_m69._tag === "none") {
+      if (__ring_m71._tag === "none") {
         List_push(hparams, new hir$HParam(p.name, ptype, Option_none, p.is_mutable));
-        break __ring_match69;
+        break __ring_match71;
       }
-      __match_fail(__ring_m69);
+      __match_fail(__ring_m71);
     }
   }
   const saved_fn_return = ctx.current_fn_return_type;
@@ -1753,28 +1787,28 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
     for (const declared_eff of declared_row.effects) {
       if (types$effects_match_kind(inferred_eff, declared_eff)) {
         found = true;
-        __ring_match71: {
-          const __ring_m71 = [inferred_eff, declared_eff];
-          if (Array.isArray(__ring_m71) && __ring_m71.length === 2 && __ring_m71[0]._tag === "FailEffect" && __ring_m71[1]._tag === "FailEffect") {
-            const ie = __ring_m71[0].error_type; const de = __ring_m71[1].error_type;
+        __ring_match73: {
+          const __ring_m73 = [inferred_eff, declared_eff];
+          if (Array.isArray(__ring_m73) && __ring_m73.length === 2 && __ring_m73[0]._tag === "FailEffect" && __ring_m73[1]._tag === "FailEffect") {
+            const ie = __ring_m73[0].error_type; const de = __ring_m73[1].error_type;
             ctx.subst = infer_ctx$unify_at(ctx.sink, ctx.env, ie, de, ctx.subst, span);
-            break __ring_match71;
+            break __ring_match73;
           }
-          if (Array.isArray(__ring_m71) && __ring_m71.length === 2 && __ring_m71[0]._tag === "MutEffect" && __ring_m71[1]._tag === "MutEffect") {
-            const is = __ring_m71[0].state_type; const ds = __ring_m71[1].state_type;
+          if (Array.isArray(__ring_m73) && __ring_m73.length === 2 && __ring_m73[0]._tag === "MutEffect" && __ring_m73[1]._tag === "MutEffect") {
+            const is = __ring_m73[0].state_type; const ds = __ring_m73[1].state_type;
             ctx.subst = infer_ctx$unify_at(ctx.sink, ctx.env, is, ds, ctx.subst, span);
-            break __ring_match71;
+            break __ring_match73;
           }
-          if (Array.isArray(__ring_m71) && __ring_m71.length === 2 && __ring_m71[0]._tag === "CustomEffect" && __ring_m71[1]._tag === "CustomEffect") {
-            const ia = __ring_m71[0].type_args; const da = __ring_m71[1].type_args;
+          if (Array.isArray(__ring_m73) && __ring_m73.length === 2 && __ring_m73[0]._tag === "CustomEffect" && __ring_m73[1]._tag === "CustomEffect") {
+            const ia = __ring_m73[0].type_args; const da = __ring_m73[1].type_args;
             let i = 0;
             while (((i < List_len(ia)) && (i < List_len(da)))) {
               ctx.subst = infer_ctx$unify_at(ctx.sink, ctx.env, Option_unwrap_or(List_get(ia, i), types$UNIT), Option_unwrap_or(List_get(da, i), types$UNIT), ctx.subst, span);
               i = (i + 1);
             }
-            break __ring_match71;
+            break __ring_match73;
           }
-          break __ring_match71;
+          break __ring_match73;
         }
       }
     }
@@ -1789,31 +1823,31 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
 })();
   if ((name === "main")) {
     for (const eff of final_effects.effects) {
-      __ring_match72: {
-        const __ring_m72 = eff;
-        if (__ring_m72._tag === "CustomEffect") {
-          const eff_name = __ring_m72.name;
+      __ring_match74: {
+        const __ring_m74 = eff;
+        if (__ring_m74._tag === "CustomEffect") {
+          const eff_name = __ring_m74.name;
           let skip = false;
-          __ring_match73: {
-            const __ring_m73 = _Map_get(ctx.env.types.effects, eff_name);
-            if (__ring_m73._tag === "some") {
-              const edef = __ring_m73._0;
+          __ring_match75: {
+            const __ring_m75 = _Map_get(ctx.env.types.effects, eff_name);
+            if (__ring_m75._tag === "some") {
+              const edef = __ring_m75._0;
               if (edef.all_have_defaults) {
                 skip = true;
               }
-              break __ring_match73;
+              break __ring_match75;
             }
-            if (__ring_m73._tag === "none") {
-              break __ring_match73;
+            if (__ring_m75._tag === "none") {
+              break __ring_match75;
             }
-            __match_fail(__ring_m73);
+            __match_fail(__ring_m75);
           }
           if ((!skip)) {
             const _ = infer_ctx$type_error(ctx.sink, codes$E0403, `Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main`, span, diagnostics$DiagnosticContext_EffectUnhandled(eff_name, Option_some("main")));
           }
-          break __ring_match72;
+          break __ring_match74;
         }
-        break __ring_match72;
+        break __ring_match74;
       }
     }
   }
@@ -1828,17 +1862,17 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-  __ring_match74: {
-    const __ring_m74 = fn_def_id;
-    if (__ring_m74._tag === "some") {
-      const did = __ring_m74._0;
+  __ring_match76: {
+    const __ring_m76 = fn_def_id;
+    if (__ring_m76._tag === "some") {
+      const did = __ring_m76._0;
       env$TypeEnv_record_def_span(ctx.env, did, span);
-      break __ring_match74;
+      break __ring_match76;
     }
-    if (__ring_m74._tag === "none") {
-      break __ring_match74;
+    if (__ring_m76._tag === "none") {
+      break __ring_match76;
     }
-    __match_fail(__ring_m74);
+    __match_fail(__ring_m76);
   }
   let mut_flags = [];
   let fi = 0;
@@ -1846,18 +1880,18 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
     if (((p.name === "self") || (!p.is_mutable))) {
       List_push(mut_flags, false);
     } else {
-      __ring_match75: {
-        const __ring_m75 = List_get(final_params, fi);
-        if (__ring_m75._tag === "some") {
-          const fp = __ring_m75._0;
+      __ring_match77: {
+        const __ring_m77 = List_get(final_params, fi);
+        if (__ring_m77._tag === "some") {
+          const fp = __ring_m77._0;
           List_push(mut_flags, is_value_type(fp.ty));
-          break __ring_match75;
+          break __ring_match77;
         }
-        if (__ring_m75._tag === "none") {
+        if (__ring_m77._tag === "none") {
           List_push(mut_flags, false);
-          break __ring_match75;
+          break __ring_match77;
         }
-        __match_fail(__ring_m75);
+        __match_fail(__ring_m77);
       }
     }
     fi = (fi + 1);
@@ -1892,39 +1926,39 @@ function check_test_decl(ctx, description, body, span, __ring_ev_fail) {
 
 function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {
   const hd = check_decl(ctx, decl, __ring_ev_fail);
-  __ring_match76: {
-    const __ring_m76 = hd;
-    if (__ring_m76._tag === "Fn") {
-      const name = __ring_m76.name; const effects = __ring_m76.effects;
+  __ring_match78: {
+    const __ring_m78 = hd;
+    if (__ring_m78._tag === "Fn") {
+      const name = __ring_m78.name; const effects = __ring_m78.effects;
       if ((List_len(effects.effects) > 0)) {
         infer_ctx$update_fn_effects(ctx.env, name, effects);
       }
-      break __ring_match76;
+      break __ring_match78;
     }
-    break __ring_match76;
+    break __ring_match78;
   }
   let delegate_decls = [];
-  __ring_match77: {
-    const __ring_m77 = decl;
-    if (__ring_m77._tag === "Impl") {
-      const target_type = __ring_m77.target_type; const type_params = __ring_m77.type_params; const methods = __ring_m77.methods; const span = __ring_m77.span;
+  __ring_match79: {
+    const __ring_m79 = decl;
+    if (__ring_m79._tag === "Impl") {
+      const target_type = __ring_m79.target_type; const type_params = __ring_m79.type_params; const methods = __ring_m79.methods; const span = __ring_m79.span;
       for (const m of methods) {
-        __ring_match78: {
-          const __ring_m78 = m;
-          if (__ring_m78._tag === "Delegate") {
-            const field = __ring_m78.field; const trait_names = __ring_m78.trait_names; const dspan = __ring_m78.span;
+        __ring_match80: {
+          const __ring_m80 = m;
+          if (__ring_m80._tag === "Delegate") {
+            const field = __ring_m80.field; const trait_names = __ring_m80.trait_names; const dspan = __ring_m80.span;
             const delegate_impls = expand_delegate_impls(ctx, target_type, type_params, field, trait_names, dspan);
             for (const di of delegate_impls) {
               List_push(delegate_decls, di);
             }
-            break __ring_match78;
+            break __ring_match80;
           }
-          break __ring_match78;
+          break __ring_match80;
         }
       }
-      break __ring_match77;
+      break __ring_match79;
     }
-    break __ring_match77;
+    break __ring_match79;
   }
   List_push(hdecls, hd);
   for (const di of delegate_decls) {
@@ -1948,19 +1982,19 @@ function check_default_effect_cycles(ctx, decls) {
 
 function collect_effect_spans(decls, spans) {
   for (const decl of decls) {
-    __ring_match79: {
-      const __ring_m79 = decl;
-      if (__ring_m79._tag === "Effect") {
-        const name = __ring_m79.name; const span = __ring_m79.span;
+    __ring_match81: {
+      const __ring_m81 = decl;
+      if (__ring_m81._tag === "Effect") {
+        const name = __ring_m81.name; const span = __ring_m81.span;
         _Map_insert(spans, name, span);
-        break __ring_match79;
+        break __ring_match81;
       }
-      if (__ring_m79._tag === "ModBlock") {
-        const mod_decls = __ring_m79.decls;
+      if (__ring_m81._tag === "ModBlock") {
+        const mod_decls = __ring_m81.decls;
         collect_effect_spans(mod_decls, spans);
-        break __ring_match79;
+        break __ring_match81;
       }
-      break __ring_match79;
+      break __ring_match81;
     }
   }
 }
@@ -1968,15 +2002,15 @@ function collect_effect_spans(decls, spans) {
 function dfs_detect_cycle(ctx, name, state, path, effect_spans) {
   _Map_insert(state, name, 1);
   List_push(path, name);
-  __ring_match80: {
-    const __ring_m80 = _Map_get(ctx.effect_default_deps, name);
-    if (__ring_m80._tag === "some") {
-      const deps = __ring_m80._0;
+  __ring_match82: {
+    const __ring_m82 = _Map_get(ctx.effect_default_deps, name);
+    if (__ring_m82._tag === "some") {
+      const deps = __ring_m82._0;
       for (const dep of deps) {
-        __ring_match81: {
-          const __ring_m81 = _Map_get(state, dep);
-          if (__ring_m81._tag === "some") {
-            const s = __ring_m81._0;
+        __ring_match83: {
+          const __ring_m83 = _Map_get(state, dep);
+          if (__ring_m83._tag === "some") {
+            const s = __ring_m83._0;
             if ((s === 1)) {
               let cycle_parts = [];
               let found_start = false;
@@ -1998,21 +2032,21 @@ function dfs_detect_cycle(ctx, name, state, path, effect_spans) {
 })();
               const _ = infer_ctx$type_error(ctx.sink, codes$E0410, `Cyclic dependency in default effect handlers: ${cycle_str}`, err_span, diagnostics$DiagnosticContext_OtherContext(Option_some("cyclic default effect dependency")));
             }
-            break __ring_match81;
+            break __ring_match83;
           }
-          if (__ring_m81._tag === "none") {
+          if (__ring_m83._tag === "none") {
             dfs_detect_cycle(ctx, dep, state, path, effect_spans);
-            break __ring_match81;
+            break __ring_match83;
           }
-          __match_fail(__ring_m81);
+          __match_fail(__ring_m83);
         }
       }
-      break __ring_match80;
+      break __ring_match82;
     }
-    if (__ring_m80._tag === "none") {
-      break __ring_match80;
+    if (__ring_m82._tag === "none") {
+      break __ring_match82;
     }
-    __match_fail(__ring_m80);
+    __match_fail(__ring_m82);
   }
   List_pop(path);
   return _Map_insert(state, name, 2);
@@ -2022,14 +2056,14 @@ function check(ctx, program, __ring_ev_fail) {
   infer_register$register_decls_two_phase(ctx, program.decls);
   const derived_impls = derive$run_derive_pass(ctx.env);
   for (const decl of program.decls) {
-    __ring_match82: {
-      const __ring_m82 = decl;
-      if (__ring_m82._tag === "Impl") {
-        const target_type = __ring_m82.target_type; const type_params = __ring_m82.type_params; const trait_name = __ring_m82.trait_name; const methods = __ring_m82.methods; const span = __ring_m82.span;
+    __ring_match84: {
+      const __ring_m84 = decl;
+      if (__ring_m84._tag === "Impl") {
+        const target_type = __ring_m84.target_type; const type_params = __ring_m84.type_params; const trait_name = __ring_m84.trait_name; const methods = __ring_m84.methods; const span = __ring_m84.span;
         const _ = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(check_impl_decl(ctx, target_type, type_params, trait_name, methods, span, __ring_ev_fail)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-        break __ring_match82;
+        break __ring_match84;
       }
-      break __ring_match82;
+      break __ring_match84;
     }
   }
   let hdecls = [];

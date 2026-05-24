@@ -549,6 +549,7 @@ pub fn collect_all_supertraits(ctx: InferCtx, trait_name: Str) -> List<Str> {
 
 fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, supertraits: List<TypeBound>, methods: List<Decl>, span: Span) {
     let saved = map_clone(ctx.type_param_scope)
+    let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
     let mut tp_names: List<Str> = []
     let mut tp_vars: List<Int> = []
     for tp in type_params {
@@ -621,6 +622,18 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
         }
     }
 
+    // Inject Self into type_param_scope so Self::Item resolves in trait method signatures
+    ctx.type_param_scope.insert("Self", self_var)
+    // Inject Self::Item into qualified_assoc_scope
+    for atd in assoc_type_defs {
+        match ctx.type_param_scope.get(atd.name) {
+            some(at_ty) => {
+                ctx.qualified_assoc_scope.insert("Self::${atd.name}", at_ty)
+            },
+            none => {}
+        }
+    }
+
     let mut trait_methods: List<TraitMethodDef> = []
     for method in methods {
         match method {
@@ -655,6 +668,7 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
     }
 
     ctx.type_param_scope = saved
+    ctx.qualified_assoc_scope = saved_qualified_assoc
     ctx.env.trait_reg.traits.insert(name, TraitDef { name: name, type_params: tp_names, type_param_vars: tp_vars, methods: trait_methods, supertraits: supertrait_names, assoc_types: assoc_type_defs })
 }
 
@@ -673,6 +687,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
     }
 
     let saved = map_clone(ctx.type_param_scope)
+    let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
     let mut impl_tv_ids: List<Int> = []
     for tp in type_params {
         let tv = ctx.env.fresh_var()
@@ -719,6 +734,15 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
             },
             _ => {}
         }
+    }
+
+    // Inject Self into type_param_scope so Self::Item resolves in impl method signatures
+    let impl_self_type = resolve_impl_self_type(ctx, target_type, type_params)
+    ctx.type_param_scope.insert("Self", impl_self_type)
+    // Inject Self::Item into qualified_assoc_scope
+    for entry in assoc_type_map.entries() {
+        let (aname, aty) = entry
+        ctx.qualified_assoc_scope.insert("Self::${aname}", aty)
     }
 
     for method in methods {
@@ -844,6 +868,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
     }
 
     ctx.type_param_scope = saved
+    ctx.qualified_assoc_scope = saved_qualified_assoc
 }
 
 // Construct the self type for an impl method, using the impl's type params

@@ -491,6 +491,7 @@ fn update_impl_method_effects(ctx: InferCtx, target_type: Str, method_name: Str,
 
 fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypeParam>, trait_name: Str?, methods: List<Decl>, span: Span) -> HDecl {
     let saved_tp_scope = map_clone(ctx.type_param_scope)
+    let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
     for tp in type_params {
         let tv = ctx.env.fresh_var()
         ctx.type_param_scope.insert(tp.name, tv)
@@ -514,6 +515,9 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
     } else {
         resolve_self_type(ctx, target_type)
     }
+
+    // Inject Self into type_param_scope so Self::Item resolves in impl methods
+    ctx.type_param_scope.insert("Self", impl_self_type)
 
     let saved_impl_bounds = ctx.current_fn_bounds
     let mut impl_bounds: List<FnBoundsEntry> = []
@@ -555,7 +559,11 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
                 hassoc_types.push(HAssocType { name: aname, bounds: bound_names, concrete: concrete })
                 // Inject concrete type into type_param_scope for method signature resolution
                 match concrete {
-                    some(ct) => { ctx.type_param_scope.insert(aname, ct) },
+                    some(ct) => {
+                        ctx.type_param_scope.insert(aname, ct)
+                        // Also inject Self::ItemName into qualified_assoc_scope
+                        ctx.qualified_assoc_scope.insert("Self::${aname}", ct)
+                    },
                     none => {}
                 }
             },
@@ -588,6 +596,7 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
 
     ctx.current_fn_bounds = saved_impl_bounds
     ctx.type_param_scope = saved_tp_scope
+    ctx.qualified_assoc_scope = saved_qualified_assoc
     HDecl::Impl { target_type: target_type, type_params: type_params, trait_name: trait_name, methods: hmethods, assoc_types: hassoc_types, span: span }
 }
 
@@ -1006,6 +1015,8 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
     let saved_subst = ctx.subst
     ctx.subst = empty_subst()
     ctx.env.push_scope()
+    let saved_tp_scope = map_clone(ctx.type_param_scope)
+    let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
     ctx.fn_bounds_stack.push(ctx.current_fn_bounds)
     ctx.current_fn_bounds = []
 
@@ -1025,6 +1036,26 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
         _ => {}
     }
 
+    // Inject Self into type_param_scope so Self::Item resolves
+    ctx.type_param_scope.insert("Self", self_var)
+
+    // Inject associated types into qualified_assoc_scope for Self::Item paths
+    match ctx.env.trait_reg.traits.get(trait_name) {
+        some(tdef) => {
+            for atdef in tdef.assoc_types {
+                // Associated types are already in type_param_scope (bare name, e.g. "Item")
+                // from register_trait. Now also inject Self::Item qualified path.
+                match ctx.type_param_scope.get(atdef.name) {
+                    some(at_ty) => {
+                        ctx.qualified_assoc_scope.insert("Self::${atdef.name}", at_ty)
+                    },
+                    none => {}
+                }
+            }
+        },
+        none => {}
+    }
+
     for p in hparams {
         ctx.env.bind_mono(p.name, p.ty)
         if p.is_mutable {
@@ -1042,6 +1073,8 @@ fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, 
 
     ctx.env.pop_scope()
     ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => [] }
+    ctx.type_param_scope = saved_tp_scope
+    ctx.qualified_assoc_scope = saved_qualified_assoc
 
     let final_body = match body_result {
         some(br) => {
