@@ -869,6 +869,10 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
       let all = [];
       List_push(all, receiver_arg);
       List_extend(all, other_args);
+      const ev_args = get_callee_evidence_args(ctx, hir$hexpr_type(callee), Option_none);
+      if ((Str_len(ev_args) > 0)) {
+        List_push(all, ev_args);
+      }
       const all_str = List_join(all, ", ");
       const meth = codegen_ctx$safe_ident(dd.method);
       return `${dd.dict_param}.${meth}(${all_str})`;
