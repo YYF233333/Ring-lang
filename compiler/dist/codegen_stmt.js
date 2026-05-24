@@ -342,7 +342,7 @@ function emit_match_stmt(ctx, scrutinee, arms, mode) {
   codegen_ctx$emit(ctx, `const ${scrut_var} = ${scrut_js};`);
   for (const arm of arms) {
     const cond = gen_pattern_condition(ctx, scrut_var, arm.pattern);
-    const bindings_str = gen_pattern_bindings(scrut_var, arm.pattern);
+    const bindings_str = gen_pattern_bindings(ctx, scrut_var, arm.pattern);
     __ring_match15: {
       const __ring_m15 = arm.guard;
       if (__ring_m15._tag === "none") {
@@ -394,7 +394,7 @@ function emit_match_stmt(ctx, scrutinee, arms, mode) {
         break __ring_match16;
       }
       if (__ring_m16._tag === "none") {
-        if (pattern_is_catchall_stmt(a.pattern)) {
+        if (pattern_is_catchall(a.pattern)) {
           has_catchall = true;
         }
         break __ring_match16;
@@ -553,7 +553,7 @@ function emit_stmt(ctx, stmt) {
       const cond = gen_pattern_condition(ctx, "__ring_t", pattern);
       codegen_ctx$emit(ctx, `if (${cond}) {`);
       codegen_ctx$push_indent(ctx);
-      const bindings = gen_pattern_bindings("__ring_t", pattern);
+      const bindings = gen_pattern_bindings(ctx, "__ring_t", pattern);
       if ((Str_len(Str_trim(bindings)) > 0)) {
         codegen_ctx$emit(ctx, Str_trim(bindings));
       }
@@ -678,7 +678,7 @@ function gen_stmt_inline(ctx, stmt) {
   }
 }
 
-function pattern_is_catchall_stmt(pat) {
+function pattern_is_catchall(pat) {
   __ring_match25: {
     const __ring_m25 = pat;
     if (__ring_m25._tag === "Wildcard") {
@@ -692,7 +692,7 @@ function pattern_is_catchall_stmt(pat) {
     if (__ring_m25._tag === "OrPattern") {
       const patterns = __ring_m25.patterns;
       for (const p of patterns) {
-        if (pattern_is_catchall_stmt(p)) {
+        if (pattern_is_catchall(p)) {
           return true;
         }
       }
@@ -848,7 +848,7 @@ function gen_pattern_condition(ctx, target, pat) {
   }
 }
 
-function gen_pattern_bindings(target, pat) {
+function gen_pattern_bindings(ctx, target, pat) {
   __ring_match30: {
     const __ring_m30 = pat;
     if (__ring_m30._tag === "Wildcard") {
@@ -874,7 +874,7 @@ function gen_pattern_bindings(target, pat) {
           const __ring_m31 = List_get(fields, i);
           if (__ring_m31._tag === "some") {
             const f = __ring_m31._0;
-            const sub = gen_pattern_bindings(`${target}._${i}`, f);
+            const sub = gen_pattern_bindings(ctx, `${target}._${i}`, f);
             result = `${result}${sub}`;
             break __ring_match31;
           }
@@ -892,7 +892,7 @@ function gen_pattern_bindings(target, pat) {
       let result = "";
       for (const f of fields) {
         const sname = codegen_ctx$safe_ident(f.name);
-        const sub = gen_pattern_bindings(`${target}.${sname}`, f.pattern);
+        const sub = gen_pattern_bindings(ctx, `${target}.${sname}`, f.pattern);
         result = `${result}${sub}`;
       }
       return result;
@@ -907,7 +907,7 @@ function gen_pattern_bindings(target, pat) {
           const __ring_m32 = List_get(elements, i);
           if (__ring_m32._tag === "some") {
             const e = __ring_m32._0;
-            const sub = gen_pattern_bindings(`${target}[${i}]`, e);
+            const sub = gen_pattern_bindings(ctx, `${target}[${i}]`, e);
             result = `${result}${sub}`;
             break __ring_match32;
           }
@@ -934,8 +934,8 @@ function gen_pattern_bindings(target, pat) {
         }
         let i = 0;
         for (const p of patterns) {
-          const cond = gen_pattern_condition_for_bindings(target, p);
-          const assigns = gen_pattern_assignments(target, p);
+          const cond = gen_pattern_condition(ctx, target, p);
+          const assigns = gen_pattern_assignments(ctx, target, p);
           if ((i === 0)) {
             result = `${result}if (${cond}) { ${assigns}} `;
           } else {
@@ -1011,7 +1011,7 @@ function collect_binding_names(pat, names) {
   }
 }
 
-function gen_pattern_assignments(target, pat) {
+function gen_pattern_assignments(ctx, target, pat) {
   __ring_match35: {
     const __ring_m35 = pat;
     if (__ring_m35._tag === "Wildcard") {
@@ -1037,7 +1037,7 @@ function gen_pattern_assignments(target, pat) {
           const __ring_m36 = List_get(fields, i);
           if (__ring_m36._tag === "some") {
             const f = __ring_m36._0;
-            const sub = gen_pattern_assignments(`${target}._${i}`, f);
+            const sub = gen_pattern_assignments(ctx, `${target}._${i}`, f);
             result = `${result}${sub}`;
             break __ring_match36;
           }
@@ -1055,7 +1055,7 @@ function gen_pattern_assignments(target, pat) {
       let result = "";
       for (const f of fields) {
         const sname = codegen_ctx$safe_ident(f.name);
-        const sub = gen_pattern_assignments(`${target}.${sname}`, f.pattern);
+        const sub = gen_pattern_assignments(ctx, `${target}.${sname}`, f.pattern);
         result = `${result}${sub}`;
       }
       return result;
@@ -1070,7 +1070,7 @@ function gen_pattern_assignments(target, pat) {
           const __ring_m37 = List_get(elements, i);
           if (__ring_m37._tag === "some") {
             const e = __ring_m37._0;
-            const sub = gen_pattern_assignments(`${target}[${i}]`, e);
+            const sub = gen_pattern_assignments(ctx, `${target}[${i}]`, e);
             result = `${result}${sub}`;
             break __ring_match37;
           }
@@ -1088,8 +1088,8 @@ function gen_pattern_assignments(target, pat) {
       let result = "";
       let i = 0;
       for (const p of patterns) {
-        const cond = gen_pattern_condition_for_bindings(target, p);
-        const assigns = gen_pattern_assignments(target, p);
+        const cond = gen_pattern_condition(ctx, target, p);
+        const assigns = gen_pattern_assignments(ctx, target, p);
         if ((i === 0)) {
           result = `${result}if (${cond}) { ${assigns}} `;
         } else {
@@ -1101,123 +1101,6 @@ function gen_pattern_assignments(target, pat) {
       break __ring_match35;
     }
     __match_fail(__ring_m35);
-  }
-}
-
-function gen_pattern_condition_for_bindings(target, pat) {
-  __ring_match38: {
-    const __ring_m38 = pat;
-    if (__ring_m38._tag === "Wildcard") {
-      return "true";
-      break __ring_match38;
-    }
-    if (__ring_m38._tag === "Binding") {
-      return "true";
-      break __ring_match38;
-    }
-    if (__ring_m38._tag === "Literal") {
-      const value = __ring_m38.value;
-      const val_str = (function() {
-  const __ring_m = value;
-  if (__ring_m._tag === "IntVal") { const n = __ring_m._0; return Int_to_str(n); }
-  if (__ring_m._tag === "FloatVal") { const f = __ring_m._0; return Float_to_str(f); }
-  if (__ring_m._tag === "StrVal") { const s = __ring_m._0; return json_stringify(s); }
-  if (__ring_m._tag === "BoolVal") { const b = __ring_m._0; return (b ? "true" : "false"); }
-  __match_fail(__ring_m);
-})();
-      return `${target} === ${val_str}`;
-      break __ring_match38;
-    }
-    if (__ring_m38._tag === "Constructor") {
-      const name = __ring_m38.name; const fields = __ring_m38.fields;
-      const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
-      let sub_conds = [];
-      const __ring_end7 = List_len(fields);
-      for (let i = 0; i < __ring_end7; i++) {
-        __ring_match39: {
-          const __ring_m39 = List_get(fields, i);
-          if (__ring_m39._tag === "some") {
-            const f = __ring_m39._0;
-            const sub = gen_pattern_condition_for_bindings(`${target}._${i}`, f);
-            if ((sub !== "true")) {
-              List_push(sub_conds, sub);
-            }
-            break __ring_match39;
-          }
-          if (__ring_m39._tag === "none") {
-            break __ring_match39;
-          }
-          __match_fail(__ring_m39);
-        }
-      }
-      if ((List_len(sub_conds) === 0)) {
-        return tag_check;
-      } else {
-        const joined = List_join(sub_conds, " && ");
-        return `${tag_check} && ${joined}`;
-      }
-      break __ring_match38;
-    }
-    if (__ring_m38._tag === "NamedConstructor") {
-      const name = __ring_m38.name; const fields = __ring_m38.fields;
-      const tag_check = `${target}.${hir$ENUM_TAG_FIELD} === "${name}"`;
-      let sub_conds = [];
-      for (const f of fields) {
-        const sname = codegen_ctx$safe_ident(f.name);
-        const sub = gen_pattern_condition_for_bindings(`${target}.${sname}`, f.pattern);
-        if ((sub !== "true")) {
-          List_push(sub_conds, sub);
-        }
-      }
-      if ((List_len(sub_conds) === 0)) {
-        return tag_check;
-      } else {
-        const joined = List_join(sub_conds, " && ");
-        return `${tag_check} && ${joined}`;
-      }
-      break __ring_match38;
-    }
-    if (__ring_m38._tag === "TuplePattern") {
-      const elements = __ring_m38.elements;
-      const len_check = `Array.isArray(${target}) && ${target}.length === ${List_len(elements)}`;
-      let sub_conds = [];
-      const __ring_end8 = List_len(elements);
-      for (let i = 0; i < __ring_end8; i++) {
-        __ring_match40: {
-          const __ring_m40 = List_get(elements, i);
-          if (__ring_m40._tag === "some") {
-            const e = __ring_m40._0;
-            const sub = gen_pattern_condition_for_bindings(`${target}[${i}]`, e);
-            if ((sub !== "true")) {
-              List_push(sub_conds, sub);
-            }
-            break __ring_match40;
-          }
-          if (__ring_m40._tag === "none") {
-            break __ring_match40;
-          }
-          __match_fail(__ring_m40);
-        }
-      }
-      if ((List_len(sub_conds) === 0)) {
-        return len_check;
-      } else {
-        const joined = List_join(sub_conds, " && ");
-        return `${len_check} && ${joined}`;
-      }
-      break __ring_match38;
-    }
-    if (__ring_m38._tag === "OrPattern") {
-      const patterns = __ring_m38.patterns;
-      let or_conds = [];
-      for (const p of patterns) {
-        const sub = gen_pattern_condition_for_bindings(target, p);
-        List_push(or_conds, `(${sub})`);
-      }
-      return List_join(or_conds, " || ");
-      break __ring_match38;
-    }
-    __match_fail(__ring_m38);
   }
 }
 
@@ -1283,4 +1166,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { emit_in_stmt_context, emit_block_in_stmt_context, emit_block_body, emit_stmt, gen_stmt_inline, gen_pattern_condition, gen_pattern_bindings };
+export { emit_in_stmt_context, emit_block_in_stmt_context, emit_block_body, emit_stmt, gen_stmt_inline, pattern_is_catchall, gen_pattern_condition, gen_pattern_bindings };

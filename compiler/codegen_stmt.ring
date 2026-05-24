@@ -161,7 +161,7 @@ fn emit_match_stmt(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
 
     for arm in arms {
         let cond = gen_pattern_condition(ctx, scrut_var, arm.pattern)
-        let bindings_str = gen_pattern_bindings(scrut_var, arm.pattern)
+        let bindings_str = gen_pattern_bindings(ctx, scrut_var, arm.pattern)
         match arm.guard {
             none => {
                 if cond == "true" {
@@ -198,7 +198,7 @@ fn emit_match_stmt(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>,
     let mut has_catchall = false
     for a in arms {
         match a.guard { some(_) => {}, none => {
-            if pattern_is_catchall_stmt(a.pattern) { has_catchall = true }
+            if pattern_is_catchall(a.pattern) { has_catchall = true }
         }}
     }
     if has_catchall == false {
@@ -309,7 +309,7 @@ pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
             let cond = gen_pattern_condition(ctx, "__ring_t", pattern)
             emit(ctx, "if (${cond}) {")
             push_indent(ctx)
-            let bindings = gen_pattern_bindings("__ring_t", pattern)
+            let bindings = gen_pattern_bindings(ctx, "__ring_t", pattern)
             if bindings.trim().len() > 0 { emit(ctx, bindings.trim()) }
             emit_block_in_stmt_context(ctx, then_block, "discard")
             pop_indent(ctx)
@@ -390,13 +390,13 @@ pub fn gen_stmt_inline(mut ctx: CodegenCtx, stmt: HStmt) -> Str {
     }
 }
 
-fn pattern_is_catchall_stmt(pat: Pattern) -> Bool {
+pub fn pattern_is_catchall(pat: Pattern) -> Bool {
     match pat {
         Pattern::Wildcard { .. } => true,
         Pattern::Binding { .. } => true,
         Pattern::OrPattern { patterns, .. } => {
             for p in patterns {
-                if pattern_is_catchall_stmt(p) { return true }
+                if pattern_is_catchall(p) { return true }
             }
             false
         },
@@ -505,7 +505,7 @@ pub fn gen_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str 
 // Pattern bindings generation
 // ============================================================
 
-pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
+pub fn gen_pattern_bindings(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str {
     match pat {
         Pattern::Wildcard { .. } => "",
         Pattern::Literal { .. } => "",
@@ -518,7 +518,7 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
             for i in 0..fields.len() {
                 match fields.get(i) {
                     some(f) => {
-                        let sub = gen_pattern_bindings("${target}._${i}", f)
+                        let sub = gen_pattern_bindings(ctx, "${target}._${i}", f)
                         result = "${result}${sub}"
                     },
                     none => {},
@@ -530,7 +530,7 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
             let mut result = ""
             for f in fields {
                 let sname = safe_ident(f.name)
-                let sub = gen_pattern_bindings("${target}.${sname}", f.pattern)
+                let sub = gen_pattern_bindings(ctx, "${target}.${sname}", f.pattern)
                 result = "${result}${sub}"
             }
             result
@@ -540,7 +540,7 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(e) => {
-                        let sub = gen_pattern_bindings("${target}[${i}]", e)
+                        let sub = gen_pattern_bindings(ctx, "${target}[${i}]", e)
                         result = "${result}${sub}"
                     },
                     none => {},
@@ -564,8 +564,8 @@ pub fn gen_pattern_bindings(target: Str, pat: Pattern) -> Str {
                 }
                 let mut i = 0
                 for p in patterns {
-                    let cond = gen_pattern_condition_for_bindings(target, p)
-                    let assigns = gen_pattern_assignments(target, p)
+                    let cond = gen_pattern_condition(ctx, target, p)
+                    let assigns = gen_pattern_assignments(ctx, target, p)
                     if i == 0 {
                         result = "${result}if (${cond}) { ${assigns}} "
                     } else {
@@ -606,7 +606,7 @@ fn collect_binding_names(pat: Pattern, mut names: List<Str>) {
 }
 
 // Generate pattern bindings as assignments (= instead of const =) for or-pattern
-fn gen_pattern_assignments(target: Str, pat: Pattern) -> Str {
+fn gen_pattern_assignments(ctx: CodegenCtx, target: Str, pat: Pattern) -> Str {
     match pat {
         Pattern::Wildcard { .. } => "",
         Pattern::Literal { .. } => "",
@@ -619,7 +619,7 @@ fn gen_pattern_assignments(target: Str, pat: Pattern) -> Str {
             for i in 0..fields.len() {
                 match fields.get(i) {
                     some(f) => {
-                        let sub = gen_pattern_assignments("${target}._${i}", f)
+                        let sub = gen_pattern_assignments(ctx, "${target}._${i}", f)
                         result = "${result}${sub}"
                     },
                     none => {},
@@ -631,7 +631,7 @@ fn gen_pattern_assignments(target: Str, pat: Pattern) -> Str {
             let mut result = ""
             for f in fields {
                 let sname = safe_ident(f.name)
-                let sub = gen_pattern_assignments("${target}.${sname}", f.pattern)
+                let sub = gen_pattern_assignments(ctx, "${target}.${sname}", f.pattern)
                 result = "${result}${sub}"
             }
             result
@@ -641,7 +641,7 @@ fn gen_pattern_assignments(target: Str, pat: Pattern) -> Str {
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(e) => {
-                        let sub = gen_pattern_assignments("${target}[${i}]", e)
+                        let sub = gen_pattern_assignments(ctx, "${target}[${i}]", e)
                         result = "${result}${sub}"
                     },
                     none => {},
@@ -654,8 +654,8 @@ fn gen_pattern_assignments(target: Str, pat: Pattern) -> Str {
             let mut result = ""
             let mut i = 0
             for p in patterns {
-                let cond = gen_pattern_condition_for_bindings(target, p)
-                let assigns = gen_pattern_assignments(target, p)
+                let cond = gen_pattern_condition(ctx, target, p)
+                let assigns = gen_pattern_assignments(ctx, target, p)
                 if i == 0 {
                     result = "${result}if (${cond}) { ${assigns}} "
                 } else {
@@ -668,77 +668,3 @@ fn gen_pattern_assignments(target: Str, pat: Pattern) -> Str {
     }
 }
 
-// Generate pattern condition without CodegenCtx (for use in bindings generation)
-fn gen_pattern_condition_for_bindings(target: Str, pat: Pattern) -> Str {
-    match pat {
-        Pattern::Wildcard { .. } => "true",
-        Pattern::Binding { .. } => "true",
-        Pattern::Literal { value, .. } => {
-            let val_str = match value {
-                LiteralValue::IntVal(n) => n.to_str(),
-                LiteralValue::FloatVal(f) => f.to_str(),
-                LiteralValue::StrVal(s) => json_stringify(s),
-                LiteralValue::BoolVal(b) => if b { "true" } else { "false" },
-            }
-            "${target} === ${val_str}"
-        },
-        Pattern::Constructor { name, fields, .. } => {
-            let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
-            let mut sub_conds: List<Str> = []
-            for i in 0..fields.len() {
-                match fields.get(i) {
-                    some(f) => {
-                        let sub = gen_pattern_condition_for_bindings("${target}._${i}", f)
-                        if sub != "true" { sub_conds.push(sub) }
-                    },
-                    none => {},
-                }
-            }
-            if sub_conds.len() == 0 { tag_check }
-            else {
-                let joined = sub_conds.join(" && ")
-                "${tag_check} && ${joined}"
-            }
-        },
-        Pattern::NamedConstructor { name, fields, .. } => {
-            let tag_check = "${target}.${ENUM_TAG_FIELD} === \"${name}\""
-            let mut sub_conds: List<Str> = []
-            for f in fields {
-                let sname = safe_ident(f.name)
-                let sub = gen_pattern_condition_for_bindings("${target}.${sname}", f.pattern)
-                if sub != "true" { sub_conds.push(sub) }
-            }
-            if sub_conds.len() == 0 { tag_check }
-            else {
-                let joined = sub_conds.join(" && ")
-                "${tag_check} && ${joined}"
-            }
-        },
-        Pattern::TuplePattern { elements, .. } => {
-            let len_check = "Array.isArray(${target}) && ${target}.length === ${elements.len()}"
-            let mut sub_conds: List<Str> = []
-            for i in 0..elements.len() {
-                match elements.get(i) {
-                    some(e) => {
-                        let sub = gen_pattern_condition_for_bindings("${target}[${i}]", e)
-                        if sub != "true" { sub_conds.push(sub) }
-                    },
-                    none => {},
-                }
-            }
-            if sub_conds.len() == 0 { len_check }
-            else {
-                let joined = sub_conds.join(" && ")
-                "${len_check} && ${joined}"
-            }
-        },
-        Pattern::OrPattern { patterns, .. } => {
-            let mut or_conds: List<Str> = []
-            for p in patterns {
-                let sub = gen_pattern_condition_for_bindings(target, p)
-                or_conds.push("(${sub})")
-            }
-            or_conds.join(" || ")
-        },
-    }
-}

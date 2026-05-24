@@ -9,7 +9,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     hexpr_type}
 use codegen_ctx::{CodegenCtx, emit, emit_raw, push_indent, pop_indent,
     qualify, safe_ident, get_evidence_params, LIST_HOF_JS_METHOD}
-use codegen_stmt::{gen_pattern_condition, gen_pattern_bindings,
+use codegen_stmt::{gen_pattern_condition, gen_pattern_bindings, pattern_is_catchall,
     emit_block_body, emit_block_in_stmt_context, emit_stmt, emit_in_stmt_context}
 
 // ============================================================
@@ -860,7 +860,7 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
 
         for arm in arms {
             let cond = gen_pattern_condition(ctx, scrut_var, arm.pattern)
-            let bindings_str = gen_pattern_bindings(scrut_var, arm.pattern)
+            let bindings_str = gen_pattern_bindings(ctx, scrut_var, arm.pattern)
             match arm.guard {
                 none => {
                     if cond == "true" {
@@ -917,7 +917,7 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
 
     for arm in arms {
         let cond = gen_pattern_condition(ctx, "__ring_m", arm.pattern)
-        let bindings = gen_pattern_bindings("__ring_m", arm.pattern)
+        let bindings = gen_pattern_bindings(ctx, "__ring_m", arm.pattern)
         let body = gen_expr(ctx, arm.body)
         match arm.guard {
             none => {
@@ -947,24 +947,6 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
 
     parts.push("})()")
     parts.join("\n")
-}
-
-// ============================================================
-// Pattern catchall detection
-// ============================================================
-
-fn pattern_is_catchall(pat: Pattern) -> Bool {
-    match pat {
-        Pattern::Wildcard { .. } => true,
-        Pattern::Binding { .. } => true,
-        Pattern::OrPattern { patterns, .. } => {
-            for p in patterns {
-                if pattern_is_catchall(p) { return true }
-            }
-            false
-        },
-        _ => false,
-    }
 }
 
 // ============================================================
@@ -1283,7 +1265,7 @@ fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str
     let mut arm_js: List<Str> = []
     for arm in arms {
         let cond = gen_catch_pattern_condition(ctx, "__ring_err", arm.pattern)
-        let bindings = gen_pattern_bindings("__ring_err", arm.pattern)
+        let bindings = gen_pattern_bindings(ctx, "__ring_err", arm.pattern)
         let arm_body_js = gen_expr(ctx, arm.body)
 
         // Check for guard
