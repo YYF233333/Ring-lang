@@ -6,7 +6,7 @@ use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
-use codes::{E0201, E0204, E0301, E0302, E0503}
+use codes::{E0201, E0204, E0301, E0302, E0503, E0705}
 use union_find::{UnionFind, new_union_find, uf_find}
 use env::{TypeEnv, TypeScheme, SchemeBound, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
@@ -1053,7 +1053,33 @@ fn bind_named_constructor_pattern(
     ctx: InferCtx, name: Str, qualifier: Str?, fields: List<NamedPatternField>,
     expected_type: Type, subst: UnionFind, span: Span
 ) {
-    let enum_name = resolve_pattern_enum(ctx, name, qualifier, span)
+    // Resolve relative paths (self::/super::) to actual qualified names
+    let mut resolved_qualifier = qualifier
+    match qualifier {
+        some(q) => {
+            if q == "self" || q.starts_with("super") {
+                match resolve_relative_qualifier(q, ctx.mod_path_stack) {
+                    some(prefix) => {
+                        if prefix == "" {
+                            resolved_qualifier = none
+                        } else {
+                            resolved_qualifier = some(prefix)
+                        }
+                    },
+                    none => {
+                        let _ = type_error(ctx.sink, E0705,
+                            "Cannot use '${q}' — relative path exceeds module nesting depth",
+                            span, DiagnosticContext::OtherContext { detail: some("relative path out of scope") })
+                        return
+                    }
+                }
+            }
+        },
+        none => {}
+    }
+
+    // Try enum variant lookup first (non-error-reporting)
+    let enum_name = try_resolve_pattern_enum(ctx, name, resolved_qualifier)
     match enum_name {
         some(ename) => match ctx.env.types.enums.get(ename) {
             some(enum_def) => {
@@ -1098,8 +1124,8 @@ fn bind_named_constructor_pattern(
         },
         none => {
             // Not an enum variant — try struct lookup
-            let struct_name = match qualifier {
-                some(q) => q,
+            let struct_name = match resolved_qualifier {
+                some(q) => "${q}::${name}",
                 none => name
             }
             bind_struct_pattern_fields(ctx, struct_name, name, fields, expected_type, subst, span)
@@ -1154,6 +1180,40 @@ fn bind_struct_pattern_fields(
                 }
             }
         }
+    }
+}
+
+// Like resolve_pattern_enum but returns none silently if not found (no E0201 error).
+// Used by bind_named_constructor_pattern where the name might be a struct, not an enum variant.
+fn try_resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?) -> Str? {
+    match qualifier {
+        some(q) => {
+            let direct = ctx.env.types.enums.get(q)
+            match direct {
+                some(enum_def) => {
+                    if enum_def.variants.any(fn(v) { v.name == variant_name }) {
+                        return some(enum_def.name)
+                    }
+                    return none
+                },
+                none => {}
+            }
+            if ctx.mod_path_stack.len() > 0 {
+                let mod_prefix = ctx.mod_path_stack.join("::")
+                let full_q = "${mod_prefix}::${q}"
+                let fallback = ctx.env.types.enums.get(full_q)
+                match fallback {
+                    some(enum_def2) => {
+                        if enum_def2.variants.any(fn(v) { v.name == variant_name }) {
+                            return some(enum_def2.name)
+                        }
+                    },
+                    none => {}
+                }
+            }
+            none
+        },
+        none => ctx.env.types.variant_to_enum.get(variant_name)
     }
 }
 
