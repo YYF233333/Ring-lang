@@ -309,6 +309,10 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
             Type::FnType { params: pb, return_type: rb, effects: eb } =>
                 type_lists_equal(pa, pb) && types_equal(ra, rb)
                     && effects_list_equal(ea.effects, eb.effects)
+                    // Open effect row tails are compared by exact TypeVar ID (structural equality).
+                    // Two different open tails (?N1, ?N2) are structurally distinct even though both
+                    // represent "open row" semantically. Semantic equivalence is handled by unification,
+                    // not types_equal — this function is for error messages and debug output.
                     && optional_ids_equal(ea.tail, eb.tail),
             _ => false
         },
@@ -327,6 +331,8 @@ pub fn types_equal(a: Type, b: Type) -> Bool {
                 types_equal(ba, bb) && type_lists_equal(aa, ab),
             _ => false
         },
+        // Record fields are compared as unordered sets (row polymorphism semantics).
+        // Field order does not affect type equality, unlike TupleType where position matters.
         Type::RecordType { fields: fa, tail: ta, .. } => match b {
             Type::RecordType { fields: fb, tail: tb, .. } => {
                 if fa.len() != fb.len() { return false }
