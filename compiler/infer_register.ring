@@ -602,8 +602,10 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
     for method in methods {
         match method {
             Decl::AssocType { name: aname, bounds: abounds, value: avalue, .. } => {
-                // Create a fresh type variable for this associated type
-                let at_var = ctx.env.fresh_var()
+                // Create a named type variable for this associated type
+                // so error messages show "Item" instead of "?NNN"
+                let at_var_id = ctx.env.fresh_var_id()
+                let at_var = Type::TypeVar { id: at_var_id, name: some(aname) }
                 ctx.type_param_scope.insert(aname, at_var)
                 let mut bound_names: List<Str> = []
                 for b in abounds {
@@ -613,7 +615,7 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
                     some(v) => some(resolve_type_expr(ctx, v)),
                     none => none
                 }
-                assoc_type_defs.push(AssocTypeDef { name: aname, bounds: bound_names, default_type: default_ty })
+                assoc_type_defs.push(AssocTypeDef { name: aname, bounds: bound_names, default_type: default_ty, var_id: at_var_id })
             },
             _ => {}
         }
@@ -1320,7 +1322,7 @@ fn is_register_value_type(t: Type) -> Bool {
 // This makes T::Item references resolve during registration (Pass 1).
 // Also resolves assoc_constraints (e.g., T: Trait<Item = Int>) by directly binding the
 // associated type name to the concrete type.
-fn inject_assoc_types_from_bounds(mut ctx: InferCtx, type_params: List<TypeParam>) {
+pub fn inject_assoc_types_from_bounds(mut ctx: InferCtx, type_params: List<TypeParam>) {
     for tp in type_params {
         for b in tp.bounds {
             // First, handle explicit assoc constraints (Item = Int)

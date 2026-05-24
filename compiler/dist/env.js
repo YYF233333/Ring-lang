@@ -234,10 +234,11 @@ class TraitMethodDef {
 }
 
 class AssocTypeDef {
-  constructor(name, bounds, default_type) {
+  constructor(name, bounds, default_type, var_id) {
     this.name = name;
     this.bounds = bounds;
     this.default_type = default_type;
+    this.var_id = var_id;
   }
 }
 

@@ -589,6 +589,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_assoc_type_unknown.ring", error_pattern: "E0511" },
     { file: "error_assoc_type_constraint_mismatch.ring", error_pattern: "E0513" },
     { file: "error_assoc_type_bound.ring", error_pattern: "E0513" },
+    { file: "error_assoc_type_name_display.ring", error_pattern: "Item" },
   ];
 
   for (const tc of negative_cases) {

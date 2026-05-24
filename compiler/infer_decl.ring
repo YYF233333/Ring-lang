@@ -14,7 +14,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     unify_at, update_fn_effects,
     resolve_type_expr, resolve_self_type,
     generalize, resolve_relative_qualifier}
-use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases, collect_all_supertraits}
+use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases, collect_all_supertraits, inject_assoc_types_from_bounds}
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
@@ -1138,6 +1138,25 @@ fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
         }
     }
 
+    // Add associated type variable names from trait bounds so error messages
+    // show "Item" instead of "?NNN" for associated types
+    let mut seen_traits: Set<Str> = set_new()
+    for fb in ctx.current_fn_bounds {
+        if seen_traits.contains(fb.trait_name) { continue }
+        seen_traits.insert(fb.trait_name)
+        match ctx.env.trait_reg.traits.get(fb.trait_name) {
+            some(tdef) => {
+                for atdef in tdef.assoc_types {
+                    if !local_names.contains_key(atdef.var_id) {
+                        let resolved = apply_subst(ctx.subst, Type::TypeVar { id: atdef.var_id, name: none })
+                        match resolved { Type::TypeVar { id: rid, .. } => { local_names.insert(rid, atdef.name) }, _ => {} }
+                    }
+                }
+            },
+            none => {}
+        }
+    }
+
     let zctx = ZonkCtx { subst: ctx.subst, names: local_names }
     let mut final_params: List<HParam> = []
     for hp in hparams { final_params.push(zonk_param(zctx, hp)) }
@@ -1163,6 +1182,7 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     ctx.env.push_scope()
 
     let saved_tp_scope = map_clone(ctx.type_param_scope)
+    let saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope)
     for tp in type_params {
         let tv = ctx.env.fresh_var()
         ctx.type_param_scope.insert(tp.name, tv)
@@ -1195,6 +1215,10 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
             none => {}
         }
     }
+
+    // Inject associated types from type param bounds into type_param_scope
+    // so that zonk names map includes associated type variable names (e.g., Item instead of ?NNN)
+    inject_assoc_types_from_bounds(ctx, type_params)
 
     let mut hparams: List<HParam> = []
     for p in params {
@@ -1256,6 +1280,7 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     ctx.current_fn_return_type = saved_fn_return
     ctx.env.pop_scope()
     ctx.type_param_scope = saved_tp_scope
+    ctx.qualified_assoc_scope = saved_qualified_assoc
     ctx.current_fn_bounds = match ctx.fn_bounds_stack.pop() { some(prev) => prev, none => [] }
     ctx.subst = saved_subst
 

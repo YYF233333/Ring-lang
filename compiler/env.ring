@@ -75,7 +75,8 @@ pub struct TraitMethodDef {
 pub struct AssocTypeDef {
     pub name: Str,
     pub bounds: List<Str>,        // trait name bounds
-    pub default_type: Type?       // trait-level default value
+    pub default_type: Type?,      // trait-level default value
+    pub var_id: Int               // type variable ID used in trait method signatures
 }
 
 pub struct TraitDef {

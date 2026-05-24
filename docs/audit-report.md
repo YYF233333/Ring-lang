@@ -49,14 +49,6 @@
 
 
 
-### #121 `check_fn_body` Zonk names 不包含关联类型变量名 [low] [open]
-
-`check_fn_body`（`infer_decl.ring:1038-1049`）构建 ZonkCtx names map 时仅迭代 `type_params`（函数级泛型参数），但 `inject_assoc_types_from_bounds`（在 `register_fn_common` 中调用）会为 `Item` 等关联类型注入 fresh type var 到 `type_param_scope`。这些 var 在 ZonkCtx 中无名称，错误消息和调试输出中显示为 `?NNN` 而非 `Item`。
-
-**文件**：`compiler/infer_decl.ring:1038-1049`
-**修复方向**：收集 type_param 名称后，额外迭代 `ctx.type_param_scope` 为未覆盖的条目添加名称。
-
-发现者：Opus
 
 ## Codegen
 

@@ -942,7 +942,8 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
       const __ring_m39 = method;
       if (__ring_m39._tag === "AssocType") {
         const aname = __ring_m39.name; const abounds = __ring_m39.bounds; const avalue = __ring_m39.value;
-        const at_var = env$TypeEnv_fresh_var(ctx.env);
+        const at_var_id = env$TypeEnv_fresh_var_id(ctx.env);
+        const at_var = types$Type_TypeVar(at_var_id, Option_some(aname));
         _Map_insert(ctx.type_param_scope, aname, at_var);
         let bound_names = [];
         for (const b of abounds) {
@@ -954,7 +955,7 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-        List_push(assoc_type_defs, new env$AssocTypeDef(aname, bound_names, default_ty));
+        List_push(assoc_type_defs, new env$AssocTypeDef(aname, bound_names, default_ty, at_var_id));
         break __ring_match39;
       }
       break __ring_match39;
@@ -2335,4 +2336,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { register_decl_public, insert_mod_aliases, prefix_decl_name, register_decls_two_phase, collect_all_supertraits, resolve_effect_expr, resolve_declared_effects };
+export { register_decl_public, insert_mod_aliases, prefix_decl_name, register_decls_two_phase, collect_all_supertraits, resolve_effect_expr, resolve_declared_effects, inject_assoc_types_from_bounds };
