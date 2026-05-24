@@ -308,7 +308,11 @@ fn register_decl_info(decls: List<HDecl>, mut ctx: CodegenCtx) {
                 ctx.local_names.insert(name)
                 register_decl_info(mod_decls, ctx)
             },
-            _ => {},
+            HDecl::Test { .. } => {},
+            HDecl::ExternFn { .. } => {},
+            HDecl::ExternType { .. } => {},
+            HDecl::TypeAlias { .. } => {},
+            HDecl::Sig { .. } => {},
         }
     }
 }
@@ -499,7 +503,16 @@ fn scan_fn_mut_params(decls: List<HDecl>, mut ctx: CodegenCtx) {
             HDecl::ModBlock { decls: mod_decls, .. } => {
                 scan_fn_mut_params(mod_decls, ctx)
             },
-            _ => {}
+            HDecl::Struct { .. } => {},
+            HDecl::Enum { .. } => {},
+            HDecl::Trait { .. } => {},
+            HDecl::Effect { .. } => {},
+            HDecl::Test { .. } => {},
+            HDecl::ExternFn { .. } => {},
+            HDecl::ExternType { .. } => {},
+            HDecl::TypeAlias { .. } => {},
+            HDecl::Const { .. } => {},
+            HDecl::Sig { .. } => {},
         }
     }
 }
