@@ -25,7 +25,8 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
                 module_prefix: Str?, imports_map: Map<Str, Str>?,
                 external_struct_fields: Map<Str, List<Str>>?,
                 external_impl_methods: Map<Str, Str?>?,
-                module_imports: List<Str>?, module_exports: List<Str>?) -> Str {
+                module_imports: List<Str>?, module_exports: List<Str>?,
+                external_fn_mut_params: Map<Str, List<Bool>>?) -> Str {
     let mut ctx = new_codegen_ctx(skip_preamble, skip_main_call)
     ctx.module_prefix = module_prefix
     ctx.imports_map = imports_map
@@ -35,6 +36,17 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
 
     // Pre-scan fn_mut_params from HDecl::Fn and HDecl::Impl methods
     scan_fn_mut_params(program.decls, ctx)
+
+    // Load external fn_mut_params from other modules
+    match external_fn_mut_params {
+        some(efmp) => {
+            for entry in efmp.entries() {
+                let (k, v) = entry
+                ctx.fn_mut_params.insert(k, v)
+            }
+        },
+        none => {},
+    }
 
     // Load external struct fields
     match external_struct_fields {

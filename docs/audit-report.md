@@ -227,23 +227,7 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 ## 模块/诊断
 
-### #126 `mut_methods` 多文件编译不导出/导入 [medium] [doing]
 
-`TraitRegistry.mut_methods`（跟踪哪些方法是 `mut self`）在单文件编译中正确填充，但不包含在 `ModuleExports` 中，`inject_module_exports` 也不注入。在多文件模式下，对来自其他模块的类型调用 `mut self` 方法时：(1) 不会注入 `mut<T>` effect；(2) 不会检查不可变绑定调用 mutating 方法（E0208）。
-
-**文件**：`compiler/exports.ring`（缺失）、`compiler/checker.ring:154-199`（`inject_module_exports`）
-**修复方向**：在 `ModuleExports` 中增加 `mut_methods: Map<Str, Set<Str>>`，在 `extract_exports` 中填充，在 `inject_module_exports` 中注入。
-
-发现者：Opus
-
-### #127 `fn_mut_params` 多文件编译不导出/导入 [medium] [doing]
-
-`fn_mut_params`（跟踪哪些函数参数是 `mut` 值类型参数以便自动 boxing）在单文件编译中正确填充，但不导出到 `ModuleExports`。在多文件模式下，调用来自其他模块的带 `mut` 值类型参数的函数时，调用点不生成 `{value: ...}` 包装，mutation 不会反映回调用方。
-
-**文件**：`compiler/exports.ring`（缺失）、`compiler/checker.ring:121`
-**修复方向**：在 `ModuleExports` 中增加 `fn_mut_params: Map<Str, List<Bool>>`，在 `extract_exports` 中填充，在 `inject_module_exports` 中注入到 `ctx.fn_mut_params`。
-
-发现者：Opus
 
 ### #114 E0408 dead error code: "Open effect row in capability-restricted module" [medium] [open]
 

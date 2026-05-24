@@ -20,7 +20,9 @@ pub struct ModuleExports {
     pub impl_methods: Map<Str, Map<Str, TypeScheme>>,
     pub inherent_methods: Map<Str, List<Str>>,
     pub struct_field_orders: Map<Str, List<Str>>,
-    pub extern_values: Set<Str>
+    pub extern_values: Set<Str>,
+    pub mut_methods: Map<Str, Set<Str>>,
+    pub fn_mut_params: Map<Str, List<Bool>>
 }
 
 pub enum TypeDef {
@@ -37,7 +39,8 @@ pub fn extract_exports(
     module_prefix: Str,
     program: Program,
     hprogram: HProgram,
-    env: TypeEnv
+    env: TypeEnv,
+    fn_mut_params_map: Map<Str, List<Bool>>
 ) -> ModuleExports {
     let mut values: Map<Str, TypeScheme> = map_new()
     let mut types: Map<Str, TypeDef> = map_new()
@@ -48,12 +51,18 @@ pub fn extract_exports(
     let mut inherent_methods: Map<Str, List<Str>> = map_new()
     let mut struct_field_orders: Map<Str, List<Str>> = map_new()
     let mut extern_values: Set<Str> = set_new()
+    let mut mut_methods: Map<Str, Set<Str>> = map_new()
+    let mut fn_mut_params: Map<Str, List<Bool>> = map_new()
     for decl in program.decls {
         match decl {
             Decl::Fn { name, is_pub, .. } => {
                 if is_pub {
                     match env.lookup(name) {
                         some(scheme) => { values.insert(name, scheme) },
+                        none => {},
+                    }
+                    match fn_mut_params_map.get(name) {
+                        some(flags) => { fn_mut_params.insert(name, flags) },
                         none => {},
                     }
                 }
@@ -117,6 +126,24 @@ pub fn extract_exports(
                         impl_methods.insert(target_type, map_clone(methods_map))
                     },
                     none => {},
+                }
+                // Export mut_methods for this type
+                match env.trait_reg.mut_methods.get(target_type) {
+                    some(ms) => { mut_methods.insert(target_type, ms) },
+                    none => {},
+                }
+                // Export fn_mut_params for impl methods
+                for m in methods {
+                    match m {
+                        Decl::Fn { name: mname, .. } => {
+                            let full_name = "${target_type}_${mname}"
+                            match fn_mut_params_map.get(full_name) {
+                                some(flags) => { fn_mut_params.insert(full_name, flags) },
+                                none => {},
+                            }
+                        },
+                        _ => {},
+                    }
                 }
                 match trait_name {
                     none => {
@@ -184,6 +211,10 @@ pub fn extract_exports(
                                 if fpub {
                                     match env.lookup(fname) {
                                         some(scheme) => { values.insert(fname, scheme) },
+                                        none => {},
+                                    }
+                                    match fn_mut_params_map.get(fname) {
+                                        some(flags) => { fn_mut_params.insert(fname, flags) },
                                         none => {},
                                     }
                                 }
@@ -256,6 +287,22 @@ pub fn extract_exports(
                                     },
                                     none => {},
                                 }
+                                match env.trait_reg.mut_methods.get(tt) {
+                                    some(ms2) => { mut_methods.insert(tt, ms2) },
+                                    none => {},
+                                }
+                                for m in ms {
+                                    match m {
+                                        Decl::Fn { name: mn, .. } => {
+                                            let full = "${tt}_${mn}"
+                                            match fn_mut_params_map.get(full) {
+                                                some(flags) => { fn_mut_params.insert(full, flags) },
+                                                none => {},
+                                            }
+                                        },
+                                        _ => {},
+                                    }
+                                }
                             },
                             Decl::ModBlock { name: sub_mod_name, decls: sub_mod_decls, is_pub: sub_mpub, .. } => {
                                 if sub_mpub {
@@ -266,6 +313,10 @@ pub fn extract_exports(
                                                 if fpub2 {
                                                     match env.lookup(fname2) {
                                                         some(scheme) => { values.insert(fname2, scheme) },
+                                                        none => {},
+                                                    }
+                                                    match fn_mut_params_map.get(fname2) {
+                                                        some(flags) => { fn_mut_params.insert(fname2, flags) },
                                                         none => {},
                                                     }
                                                 }
@@ -337,6 +388,22 @@ pub fn extract_exports(
                                                         impl_methods.insert(tt2, map_clone(methods_map))
                                                     },
                                                     none => {},
+                                                }
+                                                match env.trait_reg.mut_methods.get(tt2) {
+                                                    some(ms3) => { mut_methods.insert(tt2, ms3) },
+                                                    none => {},
+                                                }
+                                                for m in ms2 {
+                                                    match m {
+                                                        Decl::Fn { name: mn2, .. } => {
+                                                            let full2 = "${tt2}_${mn2}"
+                                                            match fn_mut_params_map.get(full2) {
+                                                                some(flags) => { fn_mut_params.insert(full2, flags) },
+                                                                none => {},
+                                                            }
+                                                        },
+                                                        _ => {},
+                                                    }
                                                 }
                                             },
                                             _ => {},
@@ -415,7 +482,9 @@ pub fn extract_exports(
         impl_methods: impl_methods,
         inherent_methods: inherent_methods,
         struct_field_orders: struct_field_orders,
-        extern_values: extern_values
+        extern_values: extern_values,
+        mut_methods: mut_methods,
+        fn_mut_params: fn_mut_params
     }
 }
 

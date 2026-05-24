@@ -251,7 +251,7 @@ function cli_main(__ring_ev_io) {
   if ((List_len(sink.items) > 0)) {
     eprintln(formatter$format_human(sink.items, source));
   }
-  const js = codegen$generate(check_result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
+  const js = codegen$generate(check_result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
   if ((parsed.command === "check")) {
     return print("OK", __ring_ev_io);
   } else {

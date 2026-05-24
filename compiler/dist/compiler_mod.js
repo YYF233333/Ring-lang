@@ -262,7 +262,7 @@ function compile_phases(entry_file) {
                   if (__ring_m10._tag === "some") {
                     const mod_ = __ring_m10._0;
                     const prefix = resolver$module_prefix(mod_.path_segments);
-                    const exp = exports$extract_exports(key, prefix, ast, result.program, result.env);
+                    const exp = exports$extract_exports(key, prefix, ast, result.program, result.env, result.fn_mut_params);
                     _Map_insert(module_exports_map, key, exp);
                     break __ring_match10;
                   }
@@ -313,9 +313,10 @@ function compile_project(entry_file) {
             let imports_map = build_imports_map(phases.graph, phases.module_exports_map, key);
             const esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key);
             const eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key);
+            const efmp = build_external_fn_mut_params(phases.graph, phases.module_exports_map, key);
             const skip_preamble = (is_first === false);
             const skip_main = (key !== entry_key);
-            const module_js = codegen$generate(hir, skip_preamble, skip_main, Option_some(prefix), Option_some(imports_map), Option_some(esf), Option_some(eim), Option_none, Option_none);
+            const module_js = codegen$generate(hir, skip_preamble, skip_main, Option_some(prefix), Option_some(imports_map), Option_some(esf), Option_some(eim), Option_none, Option_none, Option_some(efmp));
             List_push(js_parts, `// === module: ${key} ===`);
             List_push(js_parts, module_js);
             List_push(js_parts, "");
@@ -355,6 +356,7 @@ function compile_project_esm(entry_file, out_dir) {
             let imports_map = build_imports_map(phases.graph, phases.module_exports_map, key);
             const esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key);
             const eim = build_external_impl_methods(phases.graph, phases.module_exports_map, key);
+            const efmp = build_external_fn_mut_params(phases.graph, phases.module_exports_map, key);
             let import_lines = build_esm_import_lines(phases.graph, phases.module_exports_map, key);
             register_use_aliases(ast, imports_map);
             resolve_extern_fn_imports(ast, key, phases.graph, phases.module_exports_map, imports_map, import_lines);
@@ -364,7 +366,7 @@ function compile_project_esm(entry_file, out_dir) {
               List_push(import_lines, ra);
             }
             const skip_main = (key !== entry_key);
-            const module_js = codegen$generate(hir, true, skip_main, Option_none, Option_some(imports_map), Option_some(esf), Option_some(eim), Option_some(import_lines), Option_some(export_names));
+            const module_js = codegen$generate(hir, true, skip_main, Option_none, Option_some(imports_map), Option_some(esf), Option_some(eim), Option_some(import_lines), Option_some(export_names), Option_some(efmp));
             write_file(mod_out_path, module_js);
             if ((key === entry_key)) {
               entry_js_path = mod_out_path;
@@ -1010,6 +1012,45 @@ function build_external_impl_methods(graph, exports_map, key) {
       break __ring_match40;
     }
     __match_fail(__ring_m40);
+  }
+  return result;
+}
+
+function build_external_fn_mut_params(graph, exports_map, key) {
+  let result = map_new();
+  __ring_match42: {
+    const __ring_m42 = _Map_get(graph.dependencies, key);
+    if (__ring_m42._tag === "some") {
+      const deps = __ring_m42._0;
+      for (const dk of deps) {
+        __ring_match43: {
+          const __ring_m43 = _Map_get(exports_map, dk);
+          if (__ring_m43._tag === "some") {
+            const dep_exports = __ring_m43._0;
+            const dep_prefix = dep_exports.module_prefix;
+            for (const entry of _Map_entries(dep_exports.fn_mut_params)) {
+              const __ring_dt13 = entry;
+              const fn_name = __ring_dt13[0];
+              const flags = __ring_dt13[1];
+              _Map_insert(result, fn_name, flags);
+              const si = codegen_ctx$safe_ident(fn_name);
+              const qualified = `${dep_prefix}$${si}`;
+              _Map_insert(result, qualified, flags);
+            }
+            break __ring_match43;
+          }
+          if (__ring_m43._tag === "none") {
+            break __ring_match43;
+          }
+          __match_fail(__ring_m43);
+        }
+      }
+      break __ring_match42;
+    }
+    if (__ring_m42._tag === "none") {
+      break __ring_match42;
+    }
+    __match_fail(__ring_m42);
   }
   return result;
 }
