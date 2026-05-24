@@ -773,11 +773,17 @@ function Lexer_tokenize(self) {
   let tokens = [];
   while (true) {
     const tok = Lexer_next_token(self);
-    const is_eof = (function() {
-  const __ring_m = tok.kind;
-  if (__ring_m._tag === "TkEof") { return true; }
-  return false;
-})();
+    let __ring_blk0;
+    __ring_match8: {
+      const __ring_m8 = tok.kind;
+      if (__ring_m8._tag === "TkEof") {
+        __ring_blk0 = true;
+        break __ring_match8;
+      }
+      __ring_blk0 = false;
+      break __ring_match8;
+    }
+    const is_eof = __ring_blk0;
     List_push(tokens, tok);
     if (is_eof) {
       break;

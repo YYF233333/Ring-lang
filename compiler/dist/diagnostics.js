@@ -265,11 +265,17 @@ function CollectingSink_report(self, d) {
   }
 }
 function CollectingSink_has_errors(self) {
-  return self.items.some((function(d) { return (function() {
-  const __ring_m = d.severity;
-  if (__ring_m._tag === "SevError") { return true; }
-  return false;
-})(); }));
+  let __ring_blk0;
+  __ring_match7: {
+    const __ring_m7 = d.severity;
+    if (__ring_m7._tag === "SevError") {
+      __ring_blk0 = true;
+      break __ring_match7;
+    }
+    __ring_blk0 = false;
+    break __ring_match7;
+  }
+  return self.items.some((function(d) { return __ring_blk0; }));
 }
 function CollectingSink_diagnostics(self) {
   return self.items;
@@ -297,11 +303,17 @@ function __CollectingSink_DiagnosticSink_report(self, d) {
   }
 }
 function __CollectingSink_DiagnosticSink_has_errors(self) {
-  return self.items.some((function(d) { return (function() {
-  const __ring_m = d.severity;
-  if (__ring_m._tag === "SevError") { return true; }
-  return false;
-})(); }));
+  let __ring_blk1;
+  __ring_match8: {
+    const __ring_m8 = d.severity;
+    if (__ring_m8._tag === "SevError") {
+      __ring_blk1 = true;
+      break __ring_match8;
+    }
+    __ring_blk1 = false;
+    break __ring_match8;
+  }
+  return self.items.some((function(d) { return __ring_blk1; }));
 }
 function __CollectingSink_DiagnosticSink_get_diagnostics(self) {
   return self.items;

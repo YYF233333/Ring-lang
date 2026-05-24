@@ -303,18 +303,36 @@ function parse_cli_args(args) {
       }
     }
   }
-  const command = (function() {
-  const __ring_m = List_get(positional, 0);
-  if (__ring_m._tag === "some") { const c = __ring_m._0; return c; }
-  if (__ring_m._tag === "none") { return "help"; }
-  __match_fail(__ring_m);
-})();
-  const file = (function() {
-  const __ring_m = List_get(positional, 1);
-  if (__ring_m._tag === "some") { const f = __ring_m._0; return f; }
-  if (__ring_m._tag === "none") { return ""; }
-  __match_fail(__ring_m);
-})();
+  let __ring_blk0;
+  __ring_match6: {
+    const __ring_m6 = List_get(positional, 0);
+    if (__ring_m6._tag === "some") {
+      const c = __ring_m6._0;
+      __ring_blk0 = c;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "none") {
+      __ring_blk0 = "help";
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+  const command = __ring_blk0;
+  let __ring_blk1;
+  __ring_match7: {
+    const __ring_m7 = List_get(positional, 1);
+    if (__ring_m7._tag === "some") {
+      const f = __ring_m7._0;
+      __ring_blk1 = f;
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "none") {
+      __ring_blk1 = "";
+      break __ring_match7;
+    }
+    __match_fail(__ring_m7);
+  }
+  const file = __ring_blk1;
   return new CliArgs(command, file, debug, error_format, out_dir);
 }
 

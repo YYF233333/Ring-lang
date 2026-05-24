@@ -414,59 +414,68 @@ function resolve_uses(ctx, uses, available_modules) {
           if (__ring_m15._tag === "NamedItems") {
             const names = __ring_m15.names;
             for (const item of names) {
-              const local_name = (function() {
-  const __ring_m = item.alias;
-  if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
-  if (__ring_m._tag === "none") { return item.name; }
-  __match_fail(__ring_m);
-})();
-              let found = false;
+              let __ring_blk0;
               __ring_match16: {
-                const __ring_m16 = _Map_get(mod_.values, item.name);
+                const __ring_m16 = item.alias;
                 if (__ring_m16._tag === "some") {
-                  const scheme = __ring_m16._0;
-                  env$TypeEnv_bind(ctx.env, local_name, scheme);
-                  found = true;
+                  const a = __ring_m16._0;
+                  __ring_blk0 = a;
                   break __ring_match16;
                 }
                 if (__ring_m16._tag === "none") {
+                  __ring_blk0 = item.name;
                   break __ring_match16;
                 }
                 __match_fail(__ring_m16);
               }
+              const local_name = __ring_blk0;
+              let found = false;
               __ring_match17: {
-                const __ring_m17 = _Map_get(mod_.types, item.name);
+                const __ring_m17 = _Map_get(mod_.values, item.name);
                 if (__ring_m17._tag === "some") {
-                  const tdef = __ring_m17._0;
+                  const scheme = __ring_m17._0;
+                  env$TypeEnv_bind(ctx.env, local_name, scheme);
                   found = true;
-                  __ring_match18: {
-                    const __ring_m18 = tdef;
-                    if (__ring_m18._tag === "EnumDef_") {
-                      const edef = __ring_m18._0;
-                      for (const v of edef.variants) {
-                        __ring_match19: {
-                          const __ring_m19 = _Map_get(mod_.values, v.name);
-                          if (__ring_m19._tag === "some") {
-                            const vscheme = __ring_m19._0;
-                            env$TypeEnv_bind(ctx.env, v.name, vscheme);
-                            break __ring_match19;
-                          }
-                          if (__ring_m19._tag === "none") {
-                            break __ring_match19;
-                          }
-                          __match_fail(__ring_m19);
-                        }
-                      }
-                      break __ring_match18;
-                    }
-                    break __ring_match18;
-                  }
                   break __ring_match17;
                 }
                 if (__ring_m17._tag === "none") {
                   break __ring_match17;
                 }
                 __match_fail(__ring_m17);
+              }
+              __ring_match18: {
+                const __ring_m18 = _Map_get(mod_.types, item.name);
+                if (__ring_m18._tag === "some") {
+                  const tdef = __ring_m18._0;
+                  found = true;
+                  __ring_match19: {
+                    const __ring_m19 = tdef;
+                    if (__ring_m19._tag === "EnumDef_") {
+                      const edef = __ring_m19._0;
+                      for (const v of edef.variants) {
+                        __ring_match20: {
+                          const __ring_m20 = _Map_get(mod_.values, v.name);
+                          if (__ring_m20._tag === "some") {
+                            const vscheme = __ring_m20._0;
+                            env$TypeEnv_bind(ctx.env, v.name, vscheme);
+                            break __ring_match20;
+                          }
+                          if (__ring_m20._tag === "none") {
+                            break __ring_match20;
+                          }
+                          __match_fail(__ring_m20);
+                        }
+                      }
+                      break __ring_match19;
+                    }
+                    break __ring_match19;
+                  }
+                  break __ring_match18;
+                }
+                if (__ring_m18._tag === "none") {
+                  break __ring_match18;
+                }
+                __match_fail(__ring_m18);
               }
               if (_Map_contains_key(mod_.effects, item.name)) {
                 found = true;
@@ -494,27 +503,27 @@ function resolve_uses(ctx, uses, available_modules) {
             for (const entry of _Map_entries(mod_.types)) {
               const __ring_dt7 = entry;
               const tdef = __ring_dt7[1];
-              __ring_match20: {
-                const __ring_m20 = tdef;
-                if (__ring_m20._tag === "EnumDef_") {
-                  const edef = __ring_m20._0;
+              __ring_match21: {
+                const __ring_m21 = tdef;
+                if (__ring_m21._tag === "EnumDef_") {
+                  const edef = __ring_m21._0;
                   for (const v of edef.variants) {
-                    __ring_match21: {
-                      const __ring_m21 = _Map_get(mod_.values, v.name);
-                      if (__ring_m21._tag === "some") {
-                        const vscheme = __ring_m21._0;
+                    __ring_match22: {
+                      const __ring_m22 = _Map_get(mod_.values, v.name);
+                      if (__ring_m22._tag === "some") {
+                        const vscheme = __ring_m22._0;
                         env$TypeEnv_bind(ctx.env, v.name, vscheme);
-                        break __ring_match21;
+                        break __ring_match22;
                       }
-                      if (__ring_m21._tag === "none") {
-                        break __ring_match21;
+                      if (__ring_m22._tag === "none") {
+                        break __ring_match22;
                       }
-                      __match_fail(__ring_m21);
+                      __match_fail(__ring_m22);
                     }
                   }
-                  break __ring_match20;
+                  break __ring_match21;
                 }
-                break __ring_match20;
+                break __ring_match21;
               }
             }
             break __ring_match15;

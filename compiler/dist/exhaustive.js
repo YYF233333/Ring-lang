@@ -753,15 +753,22 @@ function specialize_row(row, ctor) {
     if (__ring_m26._tag === "NamedConstructor") {
       const name = __ring_m26.name; const nfields = __ring_m26.fields;
       if (names_match_struct(name, ctor.name)) {
-        const field_names = (function() {
-  const __ring_m = ctor.field_names;
-  if (__ring_m._tag === "some") { const fns = __ring_m._0; return fns; }
-  if (__ring_m._tag === "none") { return (function() {
-  const empty = [];
-  return empty;
-})(); }
-  __match_fail(__ring_m);
-})();
+        let __ring_blk0;
+        __ring_match28: {
+          const __ring_m28 = ctor.field_names;
+          if (__ring_m28._tag === "some") {
+            const fns = __ring_m28._0;
+            __ring_blk0 = fns;
+            break __ring_match28;
+          }
+          if (__ring_m28._tag === "none") {
+            const empty = [];
+            __ring_blk0 = empty;
+            break __ring_match28;
+          }
+          __match_fail(__ring_m28);
+        }
+        const field_names = __ring_blk0;
         let positional = named_pattern_to_positional(nfields, field_names, ctor.arity);
         List_extend(positional, rest);
         return Option_some(positional);
@@ -804,17 +811,23 @@ function check_matrix(rows, col_types, subst, expanding) {
   for (let i = 1; i < __ring_end6; i++) {
     List_push(rest_types, type_at(col_types, i));
   }
-  const type_key = (function() {
-  const __ring_m = first_type;
-  if (__ring_m._tag === "EnumType") { return types$type_to_string(first_type); }
-  return "";
-})();
+  let __ring_blk1;
+  __ring_match29: {
+    const __ring_m29 = first_type;
+    if (__ring_m29._tag === "EnumType") {
+      __ring_blk1 = types$type_to_string(first_type);
+      break __ring_match29;
+    }
+    __ring_blk1 = "";
+    break __ring_match29;
+  }
+  const type_key = __ring_blk1;
   const is_reentrant = ((type_key !== "") ? _Set_contains(expanding, type_key, __Str_Eq) : false);
   const ctors = (is_reentrant ? Option_none : finite_type_ctors(first_type));
-  __ring_match28: {
-    const __ring_m28 = ctors;
-    if (__ring_m28._tag === "some") {
-      const ctor_list = __ring_m28._0;
+  __ring_match30: {
+    const __ring_m30 = ctors;
+    if (__ring_m30._tag === "some") {
+      const ctor_list = __ring_m30._0;
       let new_expanding = set_clone(expanding);
       if ((type_key !== "")) {
         if (type_is_recursive(first_type, type_key)) {
@@ -824,27 +837,27 @@ function check_matrix(rows, col_types, subst, expanding) {
       for (const ctor of ctor_list) {
         let specialized = [];
         for (const row of rows) {
-          __ring_match29: {
-            const __ring_m29 = specialize_row(row, ctor);
-            if (__ring_m29._tag === "some") {
-              const s = __ring_m29._0;
+          __ring_match31: {
+            const __ring_m31 = specialize_row(row, ctor);
+            if (__ring_m31._tag === "some") {
+              const s = __ring_m31._0;
               List_push(specialized, s);
-              break __ring_match29;
+              break __ring_match31;
             }
-            if (__ring_m29._tag === "none") {
-              break __ring_match29;
+            if (__ring_m31._tag === "none") {
+              break __ring_match31;
             }
-            __match_fail(__ring_m29);
+            __match_fail(__ring_m31);
           }
         }
         let new_types = [];
         List_extend(new_types, ctor.field_types);
         List_extend(new_types, rest_types);
         const sub = check_matrix(specialized, new_types, subst, new_expanding);
-        __ring_match30: {
-          const __ring_m30 = sub;
-          if (__ring_m30._tag === "some") {
-            const sub_result = __ring_m30._0;
+        __ring_match32: {
+          const __ring_m32 = sub;
+          if (__ring_m32._tag === "some") {
+            const sub_result = __ring_m32._0;
             let ctor_sub = [];
             const __ring_end7 = ctor.arity;
             for (let i = 0; i < __ring_end7; i++) {
@@ -871,64 +884,64 @@ function check_matrix(rows, col_types, subst, expanding) {
             List_push(result, ctor_str);
             List_extend(result, rest_sub);
             return Option_some(result);
-            break __ring_match30;
+            break __ring_match32;
           }
-          if (__ring_m30._tag === "none") {
-            break __ring_match30;
+          if (__ring_m32._tag === "none") {
+            break __ring_match32;
           }
-          __match_fail(__ring_m30);
+          __match_fail(__ring_m32);
         }
       }
       return Option_none;
-      break __ring_match28;
+      break __ring_match30;
     }
-    if (__ring_m28._tag === "none") {
+    if (__ring_m30._tag === "none") {
       let defaults = [];
       for (const row of rows) {
         const first = pat_at(row, 0);
-        __ring_match31: {
-          const __ring_m31 = first;
-          if (__ring_m31._tag === "Wildcard") {
+        __ring_match33: {
+          const __ring_m33 = first;
+          if (__ring_m33._tag === "Wildcard") {
             let tail = [];
             const __ring_end9 = List_len(row);
             for (let i = 1; i < __ring_end9; i++) {
               List_push(tail, pat_at(row, i));
             }
             List_push(defaults, tail);
-            break __ring_match31;
+            break __ring_match33;
           }
-          if (__ring_m31._tag === "Binding") {
+          if (__ring_m33._tag === "Binding") {
             let tail = [];
             const __ring_end10 = List_len(row);
             for (let i = 1; i < __ring_end10; i++) {
               List_push(tail, pat_at(row, i));
             }
             List_push(defaults, tail);
-            break __ring_match31;
+            break __ring_match33;
           }
-          break __ring_match31;
+          break __ring_match33;
         }
       }
       const sub = check_matrix(defaults, rest_types, subst, expanding);
-      __ring_match32: {
-        const __ring_m32 = sub;
-        if (__ring_m32._tag === "some") {
-          const s = __ring_m32._0;
+      __ring_match34: {
+        const __ring_m34 = sub;
+        if (__ring_m34._tag === "some") {
+          const s = __ring_m34._0;
           let result = [];
           List_push(result, "_");
           List_extend(result, s);
           return Option_some(result);
-          break __ring_match32;
+          break __ring_match34;
         }
-        if (__ring_m32._tag === "none") {
+        if (__ring_m34._tag === "none") {
           return Option_none;
-          break __ring_match32;
+          break __ring_match34;
         }
-        __match_fail(__ring_m32);
+        __match_fail(__ring_m34);
       }
-      break __ring_match28;
+      break __ring_match30;
     }
-    __match_fail(__ring_m28);
+    __match_fail(__ring_m30);
   }
 }
 
