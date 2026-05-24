@@ -13,6 +13,8 @@ import { RUNTIME_CODE as runtime$RUNTIME_CODE, RUNTIME_EXPORT_NAMES as runtime$R
 import { module_key as resolver$module_key, module_prefix as resolver$module_prefix, resolve_module_file as resolver$resolve_module_file, build_module_graph as resolver$build_module_graph, ModuleId as resolver$ModuleId, ModuleGraph as resolver$ModuleGraph, GraphError as resolver$GraphError, __ModuleId_Clone as resolver$__ModuleId_Clone, __ModuleId_Debug as resolver$__ModuleId_Debug, __GraphError_Clone as resolver$__GraphError_Clone, __GraphError_Debug as resolver$__GraphError_Debug } from "./resolver.js";
 import { extract_exports as exports$extract_exports, ModuleExports as exports$ModuleExports, TypeDef_StructDef_ as exports$TypeDef_StructDef_, TypeDef_EnumDef_ as exports$TypeDef_EnumDef_ } from "./exports.js";
 
+
+
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -29,8 +31,35 @@ function List_is_empty(self) {
   return (List_len(self) === 0);
 }
 
+class ListIterator {
+  constructor(list, index) {
+    this.list = list;
+    this.index = index;
+  }
+}
+
+function __ListIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.list))) {
+    const v = List_get(self.list, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __ListIterator_Iterator = { next: __ListIterator_Iterator_next };
+
+function __List_Iterable_iter(self) {
+  return new ListIterator(self, 0);
+}
+const __List_Iterable = { iter: __List_Iterable_iter };
+
 function List_contains(self, item, __ring_T_Eq) {
-  for (const x of self) {
+  const __ring_iter_0 = __List_Iterable.iter(self);
+  while (true) {
+    const __ring_next_0 = __ListIterator_Iterator.next(__ring_iter_0);
+    if (__ring_next_0._tag === "none") break;
+    const x = __ring_next_0._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -59,9 +88,55 @@ function List_index_of(self, item, __ring_T_Eq) {
   return Option_none;
 }
 
+class MapIterator {
+  constructor(entries, index) {
+    this.entries = entries;
+    this.index = index;
+  }
+}
+
+function __MapIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.entries))) {
+    const v = List_get(self.entries, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __MapIterator_Iterator = { next: __MapIterator_Iterator_next };
+
+function ___Map_Iterable_iter(self) {
+  return new MapIterator(_Map_entries(self), 0);
+}
+const ___Map_Iterable = { iter: ___Map_Iterable_iter };
+
 function _Map_is_empty(self) {
   return (_Map_len(self) === 0);
 }
+
+class SetIterator {
+  constructor(items, index) {
+    this.items = items;
+    this.index = index;
+  }
+}
+
+function __SetIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.items))) {
+    const v = List_get(self.items, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __SetIterator_Iterator = { next: __SetIterator_Iterator_next };
+
+function ___Set_Iterable_iter(self) {
+  return new SetIterator(_Set_to_list(self), 0);
+}
+const ___Set_Iterable = { iter: ___Set_Iterable_iter };
 
 function _Set_is_empty(self) {
   return (_Set_len(self) === 0);
@@ -69,7 +144,11 @@ function _Set_is_empty(self) {
 
 function _Set_contains(self, item, __ring_T_Eq) {
   const items = _Set_to_list(self);
-  for (const x of items) {
+  const __ring_iter_1 = __List_Iterable.iter(items);
+  while (true) {
+    const __ring_next_1 = __ListIterator_Iterator.next(__ring_iter_1);
+    if (__ring_next_1._tag === "none") break;
+    const x = __ring_next_1._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -202,7 +281,11 @@ function compile_phases(entry_file) {
       let module_asts = map_new();
       let module_hirs = map_new();
       let module_exports_map = map_new();
-      for (const key of graph.topo_order) {
+      const __ring_iter_2 = __List_Iterable.iter(graph.topo_order);
+      while (true) {
+        const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+        if (__ring_next_2._tag === "none") break;
+        const key = __ring_next_2._0;
         __ring_match7: {
           const __ring_m7 = _Map_get(graph.asts, key);
           if (__ring_m7._tag === "some") {
@@ -217,7 +300,11 @@ function compile_phases(entry_file) {
         }
       }
       let check_ok = true;
-      for (const key of graph.topo_order) {
+      const __ring_iter_3 = __List_Iterable.iter(graph.topo_order);
+      while (true) {
+        const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+        if (__ring_next_3._tag === "none") break;
+        const key = __ring_next_3._0;
         if (check_ok) {
           __ring_match8: {
             const __ring_m8 = _Map_get(module_asts, key);
@@ -231,7 +318,11 @@ function compile_phases(entry_file) {
   __match_fail(__ring_m);
 })();
               let dep_exports = empty_module_exports_list();
-              for (const dk of deps) {
+              const __ring_iter_4 = __List_Iterable.iter(deps);
+              while (true) {
+                const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+                if (__ring_next_4._tag === "none") break;
+                const dk = __ring_next_4._0;
                 __ring_match9: {
                   const __ring_m9 = _Map_get(module_exports_map, dk);
                   if (__ring_m9._tag === "some") {
@@ -304,7 +395,11 @@ function compile_project(entry_file) {
       const entry_key = resolver$module_key(phases.graph.entry.path_segments);
       let js_parts = [];
       let is_first = true;
-      for (const key of phases.graph.topo_order) {
+      const __ring_iter_5 = __List_Iterable.iter(phases.graph.topo_order);
+      while (true) {
+        const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+        if (__ring_next_5._tag === "none") break;
+        const key = __ring_next_5._0;
         __ring_match12: {
           const __ring_m12 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key)];
           if (Array.isArray(__ring_m12) && __ring_m12.length === 2 && __ring_m12[0]._tag === "some" && __ring_m12[1]._tag === "some") {
@@ -346,7 +441,11 @@ function compile_project_esm(entry_file, out_dir) {
       const runtime_path = path_join(out_dir, "__ring_runtime.js");
       write_file(runtime_path, runtime$runtime_esm_code());
       let entry_js_path = "";
-      for (const key of phases.graph.topo_order) {
+      const __ring_iter_6 = __List_Iterable.iter(phases.graph.topo_order);
+      while (true) {
+        const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+        if (__ring_next_6._tag === "none") break;
+        const key = __ring_next_6._0;
         __ring_match14: {
           const __ring_m14 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key), _Map_get(phases.module_asts, key)];
           if (Array.isArray(__ring_m14) && __ring_m14.length === 3 && __ring_m14[0]._tag === "some" && __ring_m14[1]._tag === "some" && __ring_m14[2]._tag === "some") {
@@ -362,7 +461,11 @@ function compile_project_esm(entry_file, out_dir) {
             resolve_extern_fn_imports(ast, key, phases.graph, phases.module_exports_map, imports_map, import_lines);
             let export_names = build_esm_export_names(ast, hir);
             const reexport_aliases = build_pub_use_reexports(ast, phases.module_exports_map, export_names);
-            for (const ra of reexport_aliases) {
+            const __ring_iter_7 = __List_Iterable.iter(reexport_aliases);
+            while (true) {
+              const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+              if (__ring_next_7._tag === "none") break;
+              const ra = __ring_next_7._0;
               List_push(import_lines, ra);
             }
             const skip_main = (key !== entry_key);
@@ -394,7 +497,11 @@ function build_esm_import_lines(graph, exports_map, key) {
   if (__ring_m._tag === "none") { return empty_str_list(); }
   __match_fail(__ring_m);
 })();
-  for (const dk of deps) {
+  const __ring_iter_8 = __List_Iterable.iter(deps);
+  while (true) {
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const dk = __ring_next_8._0;
     __ring_match15: {
       const __ring_m15 = [_Map_get(exports_map, dk), _Map_get(graph.modules, dk)];
       if (Array.isArray(__ring_m15) && __ring_m15.length === 2 && __ring_m15[0]._tag === "some" && __ring_m15[1]._tag === "some") {
@@ -417,14 +524,22 @@ function build_esm_import_lines(graph, exports_map, key) {
 function build_dep_import_pairs(dep_exports, dep_prefix) {
   let import_pairs = [];
   let bare_variants = set_new();
-  for (const tentry of _Map_entries(dep_exports.types)) {
+  const __ring_iter_9 = __List_Iterable.iter(_Map_entries(dep_exports.types));
+  while (true) {
+    const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+    if (__ring_next_9._tag === "none") break;
+    const tentry = __ring_next_9._0;
     const __ring_dt0 = tentry;
     const tdef = __ring_dt0[1];
     __ring_match16: {
       const __ring_m16 = tdef;
       if (__ring_m16._tag === "EnumDef_") {
         const edef = __ring_m16._0;
-        for (const v of edef.variants) {
+        const __ring_iter_10 = __List_Iterable.iter(edef.variants);
+        while (true) {
+          const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+          if (__ring_next_10._tag === "none") break;
+          const v = __ring_next_10._0;
           _Set_insert(bare_variants, v.name);
         }
         break __ring_match16;
@@ -432,7 +547,11 @@ function build_dep_import_pairs(dep_exports, dep_prefix) {
       break __ring_match16;
     }
   }
-  for (const ventry of _Map_entries(dep_exports.values)) {
+  const __ring_iter_11 = __List_Iterable.iter(_Map_entries(dep_exports.values));
+  while (true) {
+    const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+    if (__ring_next_11._tag === "none") break;
+    const ventry = __ring_next_11._0;
     const __ring_dt1 = ventry;
     const name = __ring_dt1[0];
     if (((!_Set_contains(dep_exports.extern_values, name, __Str_Eq)) && (!_Set_contains(bare_variants, name, __Str_Eq)))) {
@@ -441,7 +560,11 @@ function build_dep_import_pairs(dep_exports, dep_prefix) {
       List_push(import_pairs, `${si} as ${alias}`);
     }
   }
-  for (const tentry of _Map_entries(dep_exports.types)) {
+  const __ring_iter_12 = __List_Iterable.iter(_Map_entries(dep_exports.types));
+  while (true) {
+    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+    if (__ring_next_12._tag === "none") break;
+    const tentry = __ring_next_12._0;
     const __ring_dt2 = tentry;
     const name = __ring_dt2[0];
     const tdef = __ring_dt2[1];
@@ -450,7 +573,11 @@ function build_dep_import_pairs(dep_exports, dep_prefix) {
       const __ring_m17 = tdef;
       if (__ring_m17._tag === "EnumDef_") {
         const edef = __ring_m17._0;
-        for (const v of edef.variants) {
+        const __ring_iter_13 = __List_Iterable.iter(edef.variants);
+        while (true) {
+          const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+          if (__ring_next_13._tag === "none") break;
+          const v = __ring_next_13._0;
           const valias = `${dep_prefix}$${si}_${v.name}`;
           List_push(import_pairs, `${si}_${v.name} as ${valias}`);
         }
@@ -464,16 +591,28 @@ function build_dep_import_pairs(dep_exports, dep_prefix) {
       __match_fail(__ring_m17);
     }
   }
-  for (const impl_ of dep_exports.trait_impls) {
+  const __ring_iter_14 = __List_Iterable.iter(dep_exports.trait_impls);
+  while (true) {
+    const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+    if (__ring_next_14._tag === "none") break;
+    const impl_ = __ring_next_14._0;
     const dict_js = hir$trait_dict_name(codegen_ctx$safe_ident(impl_.target_type_name), codegen_ctx$safe_ident(impl_.trait_name));
     const alias = `${dep_prefix}$${dict_js}`;
     List_push(import_pairs, `${dict_js} as ${alias}`);
   }
-  for (const ientry of _Map_entries(dep_exports.inherent_methods)) {
+  const __ring_iter_15 = __List_Iterable.iter(_Map_entries(dep_exports.inherent_methods));
+  while (true) {
+    const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+    if (__ring_next_15._tag === "none") break;
+    const ientry = __ring_next_15._0;
     const __ring_dt3 = ientry;
     const type_name = __ring_dt3[0];
     const method_names = __ring_dt3[1];
-    for (const mname of method_names) {
+    const __ring_iter_16 = __List_Iterable.iter(method_names);
+    while (true) {
+      const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+      if (__ring_next_16._tag === "none") break;
+      const mname = __ring_next_16._0;
       const method_js = `${codegen_ctx$safe_ident(type_name)}_${mname}`;
       const alias = `${dep_prefix}$${method_js}`;
       List_push(import_pairs, `${method_js} as ${alias}`);
@@ -483,12 +622,20 @@ function build_dep_import_pairs(dep_exports, dep_prefix) {
 }
 
 function register_use_aliases(ast, imports_map) {
-  for (const use_decl of ast.uses) {
+  const __ring_iter_17 = __List_Iterable.iter(ast.uses);
+  while (true) {
+    const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+    if (__ring_next_17._tag === "none") break;
+    const use_decl = __ring_next_17._0;
     __ring_match18: {
       const __ring_m18 = use_decl.imports;
       if (__ring_m18._tag === "NamedItems") {
         const names = __ring_m18.names;
-        for (const item of names) {
+        const __ring_iter_18 = __List_Iterable.iter(names);
+        while (true) {
+          const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+          if (__ring_next_18._tag === "none") break;
+          const item = __ring_next_18._0;
           __ring_match19: {
             const __ring_m19 = item.alias;
             if (__ring_m19._tag === "some") {
@@ -521,13 +668,21 @@ function register_use_aliases(ast, imports_map) {
 }
 
 function resolve_extern_fn_imports(ast, key, graph, exports_map, imports_map, import_lines) {
-  for (const decl of ast.decls) {
+  const __ring_iter_19 = __List_Iterable.iter(ast.decls);
+  while (true) {
+    const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+    if (__ring_next_19._tag === "none") break;
+    const decl = __ring_next_19._0;
     __ring_match21: {
       const __ring_m21 = decl;
       if (__ring_m21._tag === "ExternFn") {
         const name = __ring_m21.name;
         if ((!_Map_contains_key(imports_map, name))) {
-          for (const eentry of _Map_entries(exports_map)) {
+          const __ring_iter_20 = __List_Iterable.iter(_Map_entries(exports_map));
+          while (true) {
+            const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+            if (__ring_next_20._tag === "none") break;
+            const eentry = __ring_next_20._0;
             const __ring_dt4 = eentry;
             const other_key = __ring_dt4[0];
             const other_exports = __ring_dt4[1];
@@ -561,13 +716,25 @@ function resolve_extern_fn_imports(ast, key, graph, exports_map, imports_map, im
 
 function build_esm_export_names(ast, hir) {
   let export_names = [];
-  for (const decl of ast.decls) {
+  const __ring_iter_21 = __List_Iterable.iter(ast.decls);
+  while (true) {
+    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+    if (__ring_next_21._tag === "none") break;
+    const decl = __ring_next_21._0;
     collect_pub_decl_exports(decl, export_names);
   }
-  for (const decl of ast.decls) {
+  const __ring_iter_22 = __List_Iterable.iter(ast.decls);
+  while (true) {
+    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+    if (__ring_next_22._tag === "none") break;
+    const decl = __ring_next_22._0;
     collect_impl_exports(decl, ast.decls, export_names);
   }
-  for (const di of hir.derived_impls) {
+  const __ring_iter_23 = __List_Iterable.iter(hir.derived_impls);
+  while (true) {
+    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+    if (__ring_next_23._tag === "none") break;
+    const di = __ring_next_23._0;
     if (is_pub_type_in_decls(di.type_name, ast.decls)) {
       List_push(export_names, hir$trait_dict_name(codegen_ctx$safe_ident(di.type_name), codegen_ctx$safe_ident(di.trait_name)));
     }
@@ -577,7 +744,11 @@ function build_esm_export_names(ast, hir) {
 
 function is_pub_type_in_decls(type_name, decls) {
   let result = false;
-  for (const d of decls) {
+  const __ring_iter_24 = __List_Iterable.iter(decls);
+  while (true) {
+    const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+    if (__ring_next_24._tag === "none") break;
+    const d = __ring_next_24._0;
     __ring_match23: {
       const __ring_m23 = d;
       if (__ring_m23._tag === "Struct") {
@@ -597,7 +768,11 @@ function is_pub_type_in_decls(type_name, decls) {
       if (__ring_m23._tag === "ModBlock") {
         const mod_name = __ring_m23.name; const mod_decls = __ring_m23.decls; const mpub = __ring_m23.is_pub;
         if (mpub) {
-          for (const sd of mod_decls) {
+          const __ring_iter_25 = __List_Iterable.iter(mod_decls);
+          while (true) {
+            const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+            if (__ring_next_25._tag === "none") break;
+            const sd = __ring_next_25._0;
             const prefixed = infer_register$prefix_decl_name(mod_name, sd);
             __ring_match24: {
               const __ring_m24 = prefixed;
@@ -647,7 +822,11 @@ function collect_pub_decl_exports(decl, export_names) {
     if (__ring_m25._tag === "Enum") {
       const name = __ring_m25.name; const is_pub = __ring_m25.is_pub; const variants = __ring_m25.variants;
       if (is_pub) {
-        for (const v of variants) {
+        const __ring_iter_26 = __List_Iterable.iter(variants);
+        while (true) {
+          const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+          if (__ring_next_26._tag === "none") break;
+          const v = __ring_next_26._0;
           const sn = codegen_ctx$safe_ident(name);
           List_push(export_names, `${sn}_${v.name}`);
         }
@@ -664,7 +843,11 @@ function collect_pub_decl_exports(decl, export_names) {
     if (__ring_m25._tag === "ModBlock") {
       const mod_name = __ring_m25.name; const mod_decls = __ring_m25.decls; const mpub = __ring_m25.is_pub;
       if (mpub) {
-        for (const subdecl of mod_decls) {
+        const __ring_iter_27 = __List_Iterable.iter(mod_decls);
+        while (true) {
+          const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+          if (__ring_next_27._tag === "none") break;
+          const subdecl = __ring_next_27._0;
           const prefixed = infer_register$prefix_decl_name(mod_name, subdecl);
           collect_pub_decl_exports(prefixed, export_names);
         }
@@ -689,7 +872,11 @@ function collect_impl_exports(decl, all_decls, export_names) {
             break __ring_match27;
           }
           if (__ring_m27._tag === "none") {
-            for (const m of methods) {
+            const __ring_iter_28 = __List_Iterable.iter(methods);
+            while (true) {
+              const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+              if (__ring_next_28._tag === "none") break;
+              const m = __ring_next_28._0;
               __ring_match28: {
                 const __ring_m28 = m;
                 if (__ring_m28._tag === "Fn") {
@@ -710,7 +897,11 @@ function collect_impl_exports(decl, all_decls, export_names) {
     if (__ring_m26._tag === "ModBlock") {
       const mod_name = __ring_m26.name; const mod_decls = __ring_m26.decls; const mpub = __ring_m26.is_pub;
       if (mpub) {
-        for (const subdecl of mod_decls) {
+        const __ring_iter_29 = __List_Iterable.iter(mod_decls);
+        while (true) {
+          const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+          if (__ring_next_29._tag === "none") break;
+          const subdecl = __ring_next_29._0;
           const prefixed = infer_register$prefix_decl_name(mod_name, subdecl);
           collect_impl_exports(prefixed, all_decls, export_names);
         }
@@ -723,7 +914,11 @@ function collect_impl_exports(decl, all_decls, export_names) {
 
 function build_pub_use_reexports(ast, exports_map, export_names) {
   let reexport_aliases = [];
-  for (const use_decl of ast.uses) {
+  const __ring_iter_30 = __List_Iterable.iter(ast.uses);
+  while (true) {
+    const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+    if (__ring_next_30._tag === "none") break;
+    const use_decl = __ring_next_30._0;
     if (use_decl.is_pub) {
       const src_key = List_join(use_decl.path.segments, "::");
       __ring_match29: {
@@ -757,7 +952,11 @@ function build_pub_use_reexports(ast, exports_map, export_names) {
 }
 
 function collect_named_reexports(names, src_exports, src_prefix, export_names, reexport_aliases) {
-  for (const item of names) {
+  const __ring_iter_31 = __List_Iterable.iter(names);
+  while (true) {
+    const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+    if (__ring_next_31._tag === "none") break;
+    const item = __ring_next_31._0;
     const local_name = (function() {
   const __ring_m = item.alias;
   if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
@@ -778,7 +977,11 @@ function collect_named_reexports(names, src_exports, src_prefix, export_names, r
           const __ring_m32 = tdef;
           if (__ring_m32._tag === "EnumDef_") {
             const edef = __ring_m32._0;
-            for (const v of edef.variants) {
+            const __ring_iter_32 = __List_Iterable.iter(edef.variants);
+            while (true) {
+              const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+              if (__ring_next_32._tag === "none") break;
+              const v = __ring_next_32._0;
               const src_v = `${src_prefix}$${codegen_ctx$safe_ident(item.name)}_${v.name}`;
               const local_v = `${codegen_ctx$safe_ident(local_name)}_${v.name}`;
               if ((local_v !== src_v)) {
@@ -801,7 +1004,11 @@ function collect_named_reexports(names, src_exports, src_prefix, export_names, r
 }
 
 function collect_module_reexports(src_exports, src_prefix, export_names, reexport_aliases) {
-  for (const ventry of _Map_entries(src_exports.values)) {
+  const __ring_iter_33 = __List_Iterable.iter(_Map_entries(src_exports.values));
+  while (true) {
+    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+    if (__ring_next_33._tag === "none") break;
+    const ventry = __ring_next_33._0;
     const __ring_dt5 = ventry;
     const vname = __ring_dt5[0];
     if ((!_Set_contains(src_exports.extern_values, vname, __Str_Eq))) {
@@ -813,7 +1020,11 @@ function collect_module_reexports(src_exports, src_prefix, export_names, reexpor
       List_push(export_names, local_js);
     }
   }
-  for (const tentry of _Map_entries(src_exports.types)) {
+  const __ring_iter_34 = __List_Iterable.iter(_Map_entries(src_exports.types));
+  while (true) {
+    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+    if (__ring_next_34._tag === "none") break;
+    const tentry = __ring_next_34._0;
     const __ring_dt6 = tentry;
     const tname = __ring_dt6[0];
     const tdef = __ring_dt6[1];
@@ -827,7 +1038,11 @@ function collect_module_reexports(src_exports, src_prefix, export_names, reexpor
       const __ring_m33 = tdef;
       if (__ring_m33._tag === "EnumDef_") {
         const edef = __ring_m33._0;
-        for (const v of edef.variants) {
+        const __ring_iter_35 = __List_Iterable.iter(edef.variants);
+        while (true) {
+          const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+          if (__ring_next_35._tag === "none") break;
+          const v = __ring_next_35._0;
           const src_v = `${src_prefix}$${codegen_ctx$safe_ident(tname)}_${v.name}`;
           const local_v = `${codegen_ctx$safe_ident(tname)}_${v.name}`;
           if ((local_v !== src_v)) {
@@ -848,21 +1063,33 @@ function build_imports_map(graph, exports_map, key) {
     const __ring_m34 = _Map_get(graph.dependencies, key);
     if (__ring_m34._tag === "some") {
       const deps = __ring_m34._0;
-      for (const dk of deps) {
+      const __ring_iter_36 = __List_Iterable.iter(deps);
+      while (true) {
+        const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+        if (__ring_next_36._tag === "none") break;
+        const dk = __ring_next_36._0;
         __ring_match35: {
           const __ring_m35 = _Map_get(exports_map, dk);
           if (__ring_m35._tag === "some") {
             const dep_exports = __ring_m35._0;
             const dep_prefix = dep_exports.module_prefix;
             let bare_variants = set_new();
-            for (const tentry of _Map_entries(dep_exports.types)) {
+            const __ring_iter_37 = __List_Iterable.iter(_Map_entries(dep_exports.types));
+            while (true) {
+              const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+              if (__ring_next_37._tag === "none") break;
+              const tentry = __ring_next_37._0;
               const __ring_dt7 = tentry;
               const tdef = __ring_dt7[1];
               __ring_match36: {
                 const __ring_m36 = tdef;
                 if (__ring_m36._tag === "EnumDef_") {
                   const edef = __ring_m36._0;
-                  for (const v of edef.variants) {
+                  const __ring_iter_38 = __List_Iterable.iter(edef.variants);
+                  while (true) {
+                    const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
+                    if (__ring_next_38._tag === "none") break;
+                    const v = __ring_next_38._0;
                     _Set_insert(bare_variants, v.name);
                   }
                   break __ring_match36;
@@ -870,7 +1097,11 @@ function build_imports_map(graph, exports_map, key) {
                 break __ring_match36;
               }
             }
-            for (const entry of _Map_entries(dep_exports.values)) {
+            const __ring_iter_39 = __List_Iterable.iter(_Map_entries(dep_exports.values));
+            while (true) {
+              const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
+              if (__ring_next_39._tag === "none") break;
+              const entry = __ring_next_39._0;
               const __ring_dt8 = entry;
               const name = __ring_dt8[0];
               if (_Set_contains(dep_exports.extern_values, name, __Str_Eq)) {
@@ -887,7 +1118,11 @@ function build_imports_map(graph, exports_map, key) {
                 }
               }
             }
-            for (const entry of _Map_entries(dep_exports.types)) {
+            const __ring_iter_40 = __List_Iterable.iter(_Map_entries(dep_exports.types));
+            while (true) {
+              const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
+              if (__ring_next_40._tag === "none") break;
+              const entry = __ring_next_40._0;
               const __ring_dt9 = entry;
               const name = __ring_dt9[0];
               const type_def = __ring_dt9[1];
@@ -897,7 +1132,11 @@ function build_imports_map(graph, exports_map, key) {
                 const __ring_m37 = type_def;
                 if (__ring_m37._tag === "EnumDef_") {
                   const edef = __ring_m37._0;
-                  for (const v of edef.variants) {
+                  const __ring_iter_41 = __List_Iterable.iter(edef.variants);
+                  while (true) {
+                    const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
+                    if (__ring_next_41._tag === "none") break;
+                    const v = __ring_next_41._0;
                     const variant_js = `${dep_prefix}$${si}_${v.name}`;
                     _Map_insert(imports_map, `${name}_${v.name}`, variant_js);
                   }
@@ -906,7 +1145,11 @@ function build_imports_map(graph, exports_map, key) {
                 break __ring_match37;
               }
             }
-            for (const impl_ of dep_exports.trait_impls) {
+            const __ring_iter_42 = __List_Iterable.iter(dep_exports.trait_impls);
+            while (true) {
+              const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
+              if (__ring_next_42._tag === "none") break;
+              const impl_ = __ring_next_42._0;
               const dict_js = hir$trait_dict_name(codegen_ctx$safe_ident(impl_.target_type_name), codegen_ctx$safe_ident(impl_.trait_name));
               _Map_insert(imports_map, dict_js, `${dep_prefix}$${dict_js}`);
             }
@@ -934,13 +1177,21 @@ function build_external_struct_fields(graph, exports_map, key) {
     const __ring_m38 = _Map_get(graph.dependencies, key);
     if (__ring_m38._tag === "some") {
       const deps = __ring_m38._0;
-      for (const dk of deps) {
+      const __ring_iter_43 = __List_Iterable.iter(deps);
+      while (true) {
+        const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
+        if (__ring_next_43._tag === "none") break;
+        const dk = __ring_next_43._0;
         __ring_match39: {
           const __ring_m39 = _Map_get(exports_map, dk);
           if (__ring_m39._tag === "some") {
             const dep_exports = __ring_m39._0;
             const dep_prefix = dep_exports.module_prefix;
-            for (const entry of _Map_entries(dep_exports.struct_field_orders)) {
+            const __ring_iter_44 = __List_Iterable.iter(_Map_entries(dep_exports.struct_field_orders));
+            while (true) {
+              const __ring_next_44 = __ListIterator_Iterator.next(__ring_iter_44);
+              if (__ring_next_44._tag === "none") break;
+              const entry = __ring_next_44._0;
               const __ring_dt10 = entry;
               const name = __ring_dt10[0];
               const fields = __ring_dt10[1];
@@ -981,18 +1232,30 @@ function build_external_impl_methods(graph, exports_map, key) {
     const __ring_m40 = _Map_get(graph.dependencies, key);
     if (__ring_m40._tag === "some") {
       const deps = __ring_m40._0;
-      for (const dk of deps) {
+      const __ring_iter_45 = __List_Iterable.iter(deps);
+      while (true) {
+        const __ring_next_45 = __ListIterator_Iterator.next(__ring_iter_45);
+        if (__ring_next_45._tag === "none") break;
+        const dk = __ring_next_45._0;
         __ring_match41: {
           const __ring_m41 = _Map_get(exports_map, dk);
           if (__ring_m41._tag === "some") {
             const dep_exports = __ring_m41._0;
             const dep_prefix = dep_exports.module_prefix;
-            for (const entry of _Map_entries(dep_exports.impl_methods)) {
+            const __ring_iter_46 = __List_Iterable.iter(_Map_entries(dep_exports.impl_methods));
+            while (true) {
+              const __ring_next_46 = __ListIterator_Iterator.next(__ring_iter_46);
+              if (__ring_next_46._tag === "none") break;
+              const entry = __ring_next_46._0;
               const __ring_dt11 = entry;
               const type_name = __ring_dt11[0];
               const methods = __ring_dt11[1];
               const si = codegen_ctx$safe_ident(type_name);
-              for (const mentry of _Map_entries(methods)) {
+              const __ring_iter_47 = __List_Iterable.iter(_Map_entries(methods));
+              while (true) {
+                const __ring_next_47 = __ListIterator_Iterator.next(__ring_iter_47);
+                if (__ring_next_47._tag === "none") break;
+                const mentry = __ring_next_47._0;
                 const __ring_dt12 = mentry;
                 const mname = __ring_dt12[0];
                 _Map_insert(result, `${dep_prefix}$${si}.${mname}`, Option_none);
@@ -1022,13 +1285,21 @@ function build_external_fn_mut_params(graph, exports_map, key) {
     const __ring_m42 = _Map_get(graph.dependencies, key);
     if (__ring_m42._tag === "some") {
       const deps = __ring_m42._0;
-      for (const dk of deps) {
+      const __ring_iter_48 = __List_Iterable.iter(deps);
+      while (true) {
+        const __ring_next_48 = __ListIterator_Iterator.next(__ring_iter_48);
+        if (__ring_next_48._tag === "none") break;
+        const dk = __ring_next_48._0;
         __ring_match43: {
           const __ring_m43 = _Map_get(exports_map, dk);
           if (__ring_m43._tag === "some") {
             const dep_exports = __ring_m43._0;
             const dep_prefix = dep_exports.module_prefix;
-            for (const entry of _Map_entries(dep_exports.fn_mut_params)) {
+            const __ring_iter_49 = __List_Iterable.iter(_Map_entries(dep_exports.fn_mut_params));
+            while (true) {
+              const __ring_next_49 = __ListIterator_Iterator.next(__ring_iter_49);
+              if (__ring_next_49._tag === "none") break;
+              const entry = __ring_next_49._0;
               const __ring_dt13 = entry;
               const fn_name = __ring_dt13[0];
               const flags = __ring_dt13[1];
@@ -1079,6 +1350,16 @@ function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   }
 }
 const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
+
+function __ListIterator_Clone_clone(self, __ring_T_Clone) {
+  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
+}
+const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
@@ -1137,6 +1418,16 @@ function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
   }
 }
 const __Result_Ord = { cmp: __Result_Ord_cmp };
+
+function __ListIterator_Debug_debug(self, __ring_T_Debug) {
+  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __StringBuilder_Debug_debug(self) {
   return "StringBuilder";

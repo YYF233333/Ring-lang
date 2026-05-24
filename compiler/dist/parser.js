@@ -4,6 +4,8 @@ import { token_kind_value as lexer$token_kind_value, new_lexer as lexer$new_lexe
 import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
 import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0409 as codes$E0409, E0410 as codes$E0410, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, error_description as codes$error_description, error_category as codes$error_category } from "./codes.js";
 
+
+
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -20,8 +22,35 @@ function List_is_empty(self) {
   return (List_len(self) === 0);
 }
 
+class ListIterator {
+  constructor(list, index) {
+    this.list = list;
+    this.index = index;
+  }
+}
+
+function __ListIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.list))) {
+    const v = List_get(self.list, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __ListIterator_Iterator = { next: __ListIterator_Iterator_next };
+
+function __List_Iterable_iter(self) {
+  return new ListIterator(self, 0);
+}
+const __List_Iterable = { iter: __List_Iterable_iter };
+
 function List_contains(self, item, __ring_T_Eq) {
-  for (const x of self) {
+  const __ring_iter_0 = __List_Iterable.iter(self);
+  while (true) {
+    const __ring_next_0 = __ListIterator_Iterator.next(__ring_iter_0);
+    if (__ring_next_0._tag === "none") break;
+    const x = __ring_next_0._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -50,9 +79,55 @@ function List_index_of(self, item, __ring_T_Eq) {
   return Option_none;
 }
 
+class MapIterator {
+  constructor(entries, index) {
+    this.entries = entries;
+    this.index = index;
+  }
+}
+
+function __MapIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.entries))) {
+    const v = List_get(self.entries, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __MapIterator_Iterator = { next: __MapIterator_Iterator_next };
+
+function ___Map_Iterable_iter(self) {
+  return new MapIterator(_Map_entries(self), 0);
+}
+const ___Map_Iterable = { iter: ___Map_Iterable_iter };
+
 function _Map_is_empty(self) {
   return (_Map_len(self) === 0);
 }
+
+class SetIterator {
+  constructor(items, index) {
+    this.items = items;
+    this.index = index;
+  }
+}
+
+function __SetIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.items))) {
+    const v = List_get(self.items, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __SetIterator_Iterator = { next: __SetIterator_Iterator_next };
+
+function ___Set_Iterable_iter(self) {
+  return new SetIterator(_Set_to_list(self), 0);
+}
+const ___Set_Iterable = { iter: ___Set_Iterable_iter };
 
 function _Set_is_empty(self) {
   return (_Set_len(self) === 0);
@@ -60,7 +135,11 @@ function _Set_is_empty(self) {
 
 function _Set_contains(self, item, __ring_T_Eq) {
   const items = _Set_to_list(self);
-  for (const x of items) {
+  const __ring_iter_1 = __List_Iterable.iter(items);
+  while (true) {
+    const __ring_next_1 = __ListIterator_Iterator.next(__ring_iter_1);
+    if (__ring_next_1._tag === "none") break;
+    const x = __ring_next_1._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -1443,6 +1522,7 @@ function Parser_parse_impl_decl(self) {
     Parser_advance(self);
     trait_name = Option_some(first_name);
     target_type = Parser_parse_qualified_ident(self);
+    Parser_skip_type_args(self);
   }
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let methods = [];
@@ -1792,7 +1872,11 @@ function Parser_parse_dot_expr(self, left) {
     const tok = Parser_advance(self);
     const parts = Str_split(tok.value, ".");
     let result = left;
-    for (const part of parts) {
+    const __ring_iter_2 = __List_Iterable.iter(parts);
+    while (true) {
+      const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+      if (__ring_next_2._tag === "none") break;
+      const part = __ring_next_2._0;
       result = ast$Expr_FieldAccess(result, part, Parser_make_span(self, expr_span(left).start, tok.span.end));
     }
     return result;
@@ -2300,6 +2384,27 @@ function Parser_parse_qualified_ident(self) {
   }
   return List_join(parts, "::");
 }
+function Parser_skip_type_args(self) {
+  if ((!Parser_check(self, lexer$TokenKind_TkLt))) {
+    return;
+  }
+  Parser_advance(self);
+  let depth = 1;
+  while (((depth > 0) && (!Parser_at_end(self)))) {
+    if (Parser_check(self, lexer$TokenKind_TkLt)) {
+      depth = (depth + 1);
+    }
+    if (Parser_check(self, lexer$TokenKind_TkGt)) {
+      depth = (depth - 1);
+    }
+    if ((depth > 0)) {
+      Parser_advance(self);
+    }
+  }
+  if (Parser_check(self, lexer$TokenKind_TkGt)) {
+    return Parser_advance(self);
+  }
+}
 function Parser_parse_type_params(self) {
   if ((!Parser_check(self, lexer$TokenKind_TkLt))) {
     return [];
@@ -2412,6 +2517,16 @@ function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
 }
 const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
 
+function __ListIterator_Clone_clone(self, __ring_T_Clone) {
+  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
+}
+const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
+
 function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
 }
@@ -2449,6 +2564,16 @@ function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
 }
 const __Result_Ord = { cmp: __Result_Ord_cmp };
 
+function __ListIterator_Debug_debug(self, __ring_T_Debug) {
+  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
+
 function __StringBuilder_Debug_debug(self) {
   return "StringBuilder";
 }
@@ -2469,4 +2594,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { PREC_NONE, PREC_CATCH, PREC_LOGIC_OR, PREC_LOGIC_AND, PREC_EQUALITY, PREC_COMPARE, PREC_RANGE, PREC_ADD_SUB, PREC_MUL_DIV, PREC_UNARY, PREC_POSTFIX, infix_precedence, type_expr_span, expr_span, pattern_span, Parser, new_parser, parse, Parser_peek, Parser_peek_at, Parser_advance, Parser_check, Parser_try_consume, Parser_expect, Parser_at_end, Parser_current_span_start, Parser_make_span, Parser_report_error, Parser_error, Parser_parse_program, Parser_parse_stmt, Parser_parse_while_stmt, Parser_parse_loop_stmt, Parser_parse_for_in_stmt, Parser_parse_break_stmt, Parser_parse_continue_stmt, Parser_parse_if_let_stmt, Parser_parse_binding_stmt, Parser_parse_binding_body, Parser_parse_return_stmt, Parser_parse_block_expr, Parser_parse_use_decl, Parser_parse_mod_block, Parser_parse_decl, Parser_parse_effect_list, Parser_parse_effect_annotation, Parser_parse_fn_decl, Parser_parse_const_decl, Parser_parse_sig_block, Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl, Parser_parse_struct_decl, Parser_parse_enum_decl, Parser_parse_impl_decl, Parser_parse_effect_alias_decl, Parser_parse_effect_decl, Parser_parse_test_decl, Parser_parse_assoc_type_decl, Parser_parse_trait_decl, Parser_parse_expr, Parser_parse_expr_no_struct, Parser_parse_expr_bp, Parser_parse_prefix, Parser_parse_dot_expr, Parser_parse_index_expr, Parser_parse_call_expr, Parser_parse_arg_list, Parser_parse_catch_expr, Parser_parse_string_interp, Parser_parse_if_expr, Parser_parse_match_expr, Parser_parse_match_arm, Parser_parse_pattern, Parser_parse_handle_expr, Parser_parse_effect_handler, Parser_parse_lambda_expr, Parser_parse_struct_literal, Parser_try_parse_type_args, Parser_parse_type_expr, Parser_parse_record_type_expr, Parser_parse_qualified_ident, Parser_parse_type_params, Parser_parse_type_bound, Parser_parse_params, Parser_parse_param, __Parser_Clone, __Parser_Debug };
+export { PREC_NONE, PREC_CATCH, PREC_LOGIC_OR, PREC_LOGIC_AND, PREC_EQUALITY, PREC_COMPARE, PREC_RANGE, PREC_ADD_SUB, PREC_MUL_DIV, PREC_UNARY, PREC_POSTFIX, infix_precedence, type_expr_span, expr_span, pattern_span, Parser, new_parser, parse, Parser_peek, Parser_peek_at, Parser_advance, Parser_check, Parser_try_consume, Parser_expect, Parser_at_end, Parser_current_span_start, Parser_make_span, Parser_report_error, Parser_error, Parser_parse_program, Parser_parse_stmt, Parser_parse_while_stmt, Parser_parse_loop_stmt, Parser_parse_for_in_stmt, Parser_parse_break_stmt, Parser_parse_continue_stmt, Parser_parse_if_let_stmt, Parser_parse_binding_stmt, Parser_parse_binding_body, Parser_parse_return_stmt, Parser_parse_block_expr, Parser_parse_use_decl, Parser_parse_mod_block, Parser_parse_decl, Parser_parse_effect_list, Parser_parse_effect_annotation, Parser_parse_fn_decl, Parser_parse_const_decl, Parser_parse_sig_block, Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl, Parser_parse_struct_decl, Parser_parse_enum_decl, Parser_parse_impl_decl, Parser_parse_effect_alias_decl, Parser_parse_effect_decl, Parser_parse_test_decl, Parser_parse_assoc_type_decl, Parser_parse_trait_decl, Parser_parse_expr, Parser_parse_expr_no_struct, Parser_parse_expr_bp, Parser_parse_prefix, Parser_parse_dot_expr, Parser_parse_index_expr, Parser_parse_call_expr, Parser_parse_arg_list, Parser_parse_catch_expr, Parser_parse_string_interp, Parser_parse_if_expr, Parser_parse_match_expr, Parser_parse_match_arm, Parser_parse_pattern, Parser_parse_handle_expr, Parser_parse_effect_handler, Parser_parse_lambda_expr, Parser_parse_struct_literal, Parser_try_parse_type_args, Parser_parse_type_expr, Parser_parse_record_type_expr, Parser_parse_qualified_ident, Parser_skip_type_args, Parser_parse_type_params, Parser_parse_type_bound, Parser_parse_params, Parser_parse_param, __Parser_Clone, __Parser_Debug };

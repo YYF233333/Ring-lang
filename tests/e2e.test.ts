@@ -381,6 +381,7 @@ const cases: TestCase[] = [
   { file: "list_flat_map.ring", expected: "list_flat_map: all tests passed\n" },
   { file: "list_method_chain.ring", expected: "list_method_chain: all tests passed\n" },
   { file: "list_push_mutate.ring", expected: "list_push_mutate: all tests passed\n" },
+  { file: "iterator.ring", expected: "iterator: all tests passed\n" },
   { file: "map_iteration.ring", expected: "map_iteration: all tests passed\n" },
   { file: "map_ufcs_bug.ring", expected: "ok\n" },
   { file: "match_enum_deep.ring", expected: "match_enum_deep: all tests passed\n" },

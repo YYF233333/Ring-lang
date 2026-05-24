@@ -5,6 +5,8 @@ import { new_union_find as union_find$new_union_find, uf_find as union_find$uf_f
 import { lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, add_impl as env$add_impl, has_impl as env$has_impl, find_impl as env$find_impl, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, AssocConstraintEntry as env$AssocConstraintEntry, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 import { variant_js_name as hir$variant_js_name, trait_dict_name as hir$trait_dict_name, evidence_param_name as hir$evidence_param_name, default_evidence_name as hir$default_evidence_name, trait_bound_param_name as hir$trait_bound_param_name, default_method_self_name as hir$default_method_self_name, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, hexpr_type as hir$hexpr_type, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, STR_METHODS as hir$STR_METHODS, INT_METHODS as hir$INT_METHODS, FLOAT_METHODS as hir$FLOAT_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, SET_HOF_METHODS as hir$SET_HOF_METHODS, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, HParam as hir$HParam, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, DictDispatchInfo as hir$DictDispatchInfo, HStructFieldInit as hir$HStructFieldInit, HMatchArm as hir$HMatchArm, HEffectHandler as hir$HEffectHandler, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStructField as hir$HStructField, HEnumVariant as hir$HEnumVariant, HEffectOp as hir$HEffectOp, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, HAssocType as hir$HAssocType, HSigMember as hir$HSigMember, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, DerivedField as hir$DerivedField, DerivedVariant as hir$DerivedVariant, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, DerivedImpl as hir$DerivedImpl, HProgram as hir$HProgram, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug } from "./hir.js";
 
+
+
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -21,8 +23,35 @@ function List_is_empty(self) {
   return (List_len(self) === 0);
 }
 
+class ListIterator {
+  constructor(list, index) {
+    this.list = list;
+    this.index = index;
+  }
+}
+
+function __ListIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.list))) {
+    const v = List_get(self.list, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __ListIterator_Iterator = { next: __ListIterator_Iterator_next };
+
+function __List_Iterable_iter(self) {
+  return new ListIterator(self, 0);
+}
+const __List_Iterable = { iter: __List_Iterable_iter };
+
 function List_contains(self, item, __ring_T_Eq) {
-  for (const x of self) {
+  const __ring_iter_0 = __List_Iterable.iter(self);
+  while (true) {
+    const __ring_next_0 = __ListIterator_Iterator.next(__ring_iter_0);
+    if (__ring_next_0._tag === "none") break;
+    const x = __ring_next_0._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -51,9 +80,55 @@ function List_index_of(self, item, __ring_T_Eq) {
   return Option_none;
 }
 
+class MapIterator {
+  constructor(entries, index) {
+    this.entries = entries;
+    this.index = index;
+  }
+}
+
+function __MapIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.entries))) {
+    const v = List_get(self.entries, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __MapIterator_Iterator = { next: __MapIterator_Iterator_next };
+
+function ___Map_Iterable_iter(self) {
+  return new MapIterator(_Map_entries(self), 0);
+}
+const ___Map_Iterable = { iter: ___Map_Iterable_iter };
+
 function _Map_is_empty(self) {
   return (_Map_len(self) === 0);
 }
+
+class SetIterator {
+  constructor(items, index) {
+    this.items = items;
+    this.index = index;
+  }
+}
+
+function __SetIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.items))) {
+    const v = List_get(self.items, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __SetIterator_Iterator = { next: __SetIterator_Iterator_next };
+
+function ___Set_Iterable_iter(self) {
+  return new SetIterator(_Set_to_list(self), 0);
+}
+const ___Set_Iterable = { iter: ___Set_Iterable_iter };
 
 function _Set_is_empty(self) {
   return (_Set_len(self) === 0);
@@ -61,7 +136,11 @@ function _Set_is_empty(self) {
 
 function _Set_contains(self, item, __ring_T_Eq) {
   const items = _Set_to_list(self);
-  for (const x of items) {
+  const __ring_iter_1 = __List_Iterable.iter(items);
+  while (true) {
+    const __ring_next_1 = __ListIterator_Iterator.next(__ring_iter_1);
+    if (__ring_next_1._tag === "none") break;
+    const x = __ring_next_1._0;
     if (__ring_T_Eq.eq(x, item)) {
       return true;
     }
@@ -256,8 +335,16 @@ function type_is_recursive(ty, key) {
       const variants = __ring_m11.variants;
       let visited = set_new();
       _Set_insert(visited, key);
-      for (const v of variants) {
-        for (const ft of v.fields) {
+      const __ring_iter_2 = __List_Iterable.iter(variants);
+      while (true) {
+        const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+        if (__ring_next_2._tag === "none") break;
+        const v = __ring_next_2._0;
+        const __ring_iter_3 = __List_Iterable.iter(v.fields);
+        while (true) {
+          const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+          if (__ring_next_3._tag === "none") break;
+          const ft = __ring_next_3._0;
           if (type_contains_key(ft, key, visited)) {
             return true;
           }
@@ -284,8 +371,16 @@ function type_contains_key(ty, key, visited) {
     const __ring_m12 = ty;
     if (__ring_m12._tag === "EnumType") {
       const variants = __ring_m12.variants;
-      for (const v of variants) {
-        for (const ft of v.fields) {
+      const __ring_iter_4 = __List_Iterable.iter(variants);
+      while (true) {
+        const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+        if (__ring_next_4._tag === "none") break;
+        const v = __ring_next_4._0;
+        const __ring_iter_5 = __List_Iterable.iter(v.fields);
+        while (true) {
+          const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+          if (__ring_next_5._tag === "none") break;
+          const ft = __ring_next_5._0;
           if (type_contains_key(ft, key, visited)) {
             return true;
           }
@@ -296,7 +391,11 @@ function type_contains_key(ty, key, visited) {
     }
     if (__ring_m12._tag === "StructType") {
       const fields = __ring_m12.fields;
-      for (const f of fields) {
+      const __ring_iter_6 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+        if (__ring_next_6._tag === "none") break;
+        const f = __ring_next_6._0;
         if (type_contains_key(f.ty, key, visited)) {
           return true;
         }
@@ -306,7 +405,11 @@ function type_contains_key(ty, key, visited) {
     }
     if (__ring_m12._tag === "TupleType") {
       const elements = __ring_m12.elements;
-      for (const e of elements) {
+      const __ring_iter_7 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+        if (__ring_next_7._tag === "none") break;
+        const e = __ring_next_7._0;
         if (type_contains_key(e, key, visited)) {
           return true;
         }
@@ -316,7 +419,11 @@ function type_contains_key(ty, key, visited) {
     }
     if (__ring_m12._tag === "FnType") {
       const params = __ring_m12.params; const return_type = __ring_m12.return_type;
-      for (const p of params) {
+      const __ring_iter_8 = __List_Iterable.iter(params);
+      while (true) {
+        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+        if (__ring_next_8._tag === "none") break;
+        const p = __ring_next_8._0;
         if (type_contains_key(p, key, visited)) {
           return true;
         }
@@ -331,7 +438,11 @@ function type_contains_key(ty, key, visited) {
 
 function check_exhaustive(arms, scrutinee_type, subst) {
   let patterns = [];
-  for (const arm of arms) {
+  const __ring_iter_9 = __List_Iterable.iter(arms);
+  while (true) {
+    const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+    if (__ring_next_9._tag === "none") break;
+    const arm = __ring_next_9._0;
     __ring_match13: {
       const __ring_m13 = arm.guard;
       if (__ring_m13._tag === "some") {
@@ -349,12 +460,20 @@ function check_exhaustive(arms, scrutinee_type, subst) {
 
 function expand_or_patterns(patterns) {
   let result = [];
-  for (const p of patterns) {
+  const __ring_iter_10 = __List_Iterable.iter(patterns);
+  while (true) {
+    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+    if (__ring_next_10._tag === "none") break;
+    const p = __ring_next_10._0;
     __ring_match14: {
       const __ring_m14 = p;
       if (__ring_m14._tag === "OrPattern") {
         const sub_pats = __ring_m14.patterns;
-        for (const sp of sub_pats) {
+        const __ring_iter_11 = __List_Iterable.iter(sub_pats);
+        while (true) {
+          const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+          if (__ring_next_11._tag === "none") break;
+          const sp = __ring_next_11._0;
           List_push(result, sp);
         }
         break __ring_match14;
@@ -369,7 +488,11 @@ function expand_or_patterns(patterns) {
 function check_patterns(patterns, ty, subst) {
   const resolved = env$apply_subst(subst, ty);
   const expanded = expand_or_patterns(patterns);
-  for (const p of expanded) {
+  const __ring_iter_12 = __List_Iterable.iter(expanded);
+  while (true) {
+    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+    if (__ring_next_12._tag === "none") break;
+    const p = __ring_next_12._0;
     __ring_match15: {
       const __ring_m15 = p;
       if (__ring_m15._tag === "Wildcard") {
@@ -389,9 +512,17 @@ function check_patterns(patterns, ty, subst) {
       const name = __ring_m16.name; const type_params = __ring_m16.type_params; const variants = __ring_m16.variants;
       const variant_names = variants.map((function(v) { return v.name; }));
       let covered = set_new();
-      for (const v of variants) {
+      const __ring_iter_13 = __List_Iterable.iter(variants);
+      while (true) {
+        const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+        if (__ring_next_13._tag === "none") break;
+        const v = __ring_next_13._0;
         let sub_patterns_for_variant = [];
-        for (const p of expanded) {
+        const __ring_iter_14 = __List_Iterable.iter(expanded);
+        while (true) {
+          const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+          if (__ring_next_14._tag === "none") break;
+          const p = __ring_next_14._0;
           __ring_match17: {
             const __ring_m17 = p;
             if (__ring_m17._tag === "Constructor") {
@@ -430,7 +561,11 @@ function check_patterns(patterns, ty, subst) {
           if ((List_len(v.fields) > 0)) {
             const wild = ast$Pattern_Wildcard(ast$span_zero());
             let normalized = [];
-            for (const row of sub_patterns_for_variant) {
+            const __ring_iter_15 = __List_Iterable.iter(sub_patterns_for_variant);
+            while (true) {
+              const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+              if (__ring_next_15._tag === "none") break;
+              const row = __ring_next_15._0;
               let padded = list_clone(row);
               while ((List_len(padded) < List_len(v.fields))) {
                 List_push(padded, wild);
@@ -456,7 +591,11 @@ function check_patterns(patterns, ty, subst) {
           }
         }
       }
-      for (const vn of variant_names) {
+      const __ring_iter_16 = __List_Iterable.iter(variant_names);
+      while (true) {
+        const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+        if (__ring_next_16._tag === "none") break;
+        const vn = __ring_next_16._0;
         if ((_Set_contains(covered, vn, __Str_Eq) === false)) {
           return Option_some(vn);
         }
@@ -467,7 +606,11 @@ function check_patterns(patterns, ty, subst) {
     if (__ring_m16._tag === "BoolType") {
       let has_true = false;
       let has_false = false;
-      for (const p of expanded) {
+      const __ring_iter_17 = __List_Iterable.iter(expanded);
+      while (true) {
+        const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+        if (__ring_next_17._tag === "none") break;
+        const p = __ring_next_17._0;
         __ring_match20: {
           const __ring_m20 = p;
           if (__ring_m20._tag === "Literal") {
@@ -507,11 +650,19 @@ function check_patterns(patterns, ty, subst) {
       let sub_patterns = [];
       let field_names = [];
       let field_types = [];
-      for (const f of sfields) {
+      const __ring_iter_18 = __List_Iterable.iter(sfields);
+      while (true) {
+        const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+        if (__ring_next_18._tag === "none") break;
+        const f = __ring_next_18._0;
         List_push(field_names, f.name);
         List_push(field_types, f.ty);
       }
-      for (const p of expanded) {
+      const __ring_iter_19 = __List_Iterable.iter(expanded);
+      while (true) {
+        const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+        if (__ring_next_19._tag === "none") break;
+        const p = __ring_next_19._0;
         __ring_match22: {
           const __ring_m22 = p;
           if (__ring_m22._tag === "NamedConstructor") {
@@ -540,7 +691,11 @@ function check_patterns(patterns, ty, subst) {
       if ((List_len(sfields) > 0)) {
         const wild = ast$Pattern_Wildcard(ast$span_zero());
         let normalized = [];
-        for (const row of sub_patterns) {
+        const __ring_iter_20 = __List_Iterable.iter(sub_patterns);
+        while (true) {
+          const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+          if (__ring_next_20._tag === "none") break;
+          const row = __ring_next_20._0;
           let padded = list_clone(row);
           while ((List_len(padded) < List_len(sfields))) {
             List_push(padded, wild);
@@ -574,7 +729,11 @@ function check_patterns(patterns, ty, subst) {
     if (__ring_m16._tag === "TupleType") {
       const elements = __ring_m16.elements;
       let matrix = [];
-      for (const p of expanded) {
+      const __ring_iter_21 = __List_Iterable.iter(expanded);
+      while (true) {
+        const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+        if (__ring_next_21._tag === "none") break;
+        const p = __ring_next_21._0;
         __ring_match24: {
           const __ring_m24 = p;
           if (__ring_m24._tag === "TuplePattern") {
@@ -627,7 +786,11 @@ function finite_type_ctors(ty) {
     if (__ring_m26._tag === "EnumType") {
       const variants = __ring_m26.variants;
       let result = [];
-      for (const v of variants) {
+      const __ring_iter_22 = __List_Iterable.iter(variants);
+      while (true) {
+        const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+        if (__ring_next_22._tag === "none") break;
+        const v = __ring_next_22._0;
         List_push(result, new Ctor(v.name, List_len(v.fields), v.fields, v.field_names, false));
       }
       return Option_some(result);
@@ -637,7 +800,11 @@ function finite_type_ctors(ty) {
       const name = __ring_m26.name; const fields = __ring_m26.fields;
       let field_types = [];
       let field_names = [];
-      for (const f of fields) {
+      const __ring_iter_23 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+        if (__ring_next_23._tag === "none") break;
+        const f = __ring_next_23._0;
         List_push(field_types, f.ty);
         List_push(field_names, f.name);
       }
@@ -671,17 +838,21 @@ function wild_pattern() {
 function named_pattern_to_positional(fields, field_names, arity) {
   const wild = wild_pattern();
   let result = [];
-  const __ring_end0 = arity;
-  for (let i = 0; i < __ring_end0; i++) {
+  const __ring_end24 = arity;
+  for (let i = 0; i < __ring_end24; i++) {
     List_push(result, wild);
   }
-  for (const f of fields) {
+  const __ring_iter_25 = __List_Iterable.iter(fields);
+  while (true) {
+    const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+    if (__ring_next_25._tag === "none") break;
+    const f = __ring_next_25._0;
     const idx = index_of(field_names, f.name);
     if ((idx >= 0)) {
       if ((idx < arity)) {
         let new_result = [];
-        const __ring_end1 = List_len(result);
-        for (let j = 0; j < __ring_end1; j++) {
+        const __ring_end26 = List_len(result);
+        for (let j = 0; j < __ring_end26; j++) {
           if ((j === idx)) {
             List_push(new_result, f.pattern);
           } else {
@@ -696,8 +867,8 @@ function named_pattern_to_positional(fields, field_names, arity) {
 }
 
 function index_of(list, target) {
-  const __ring_end2 = List_len(list);
-  for (let i = 0; i < __ring_end2; i++) {
+  const __ring_end27 = List_len(list);
+  for (let i = 0; i < __ring_end27; i++) {
     if ((str_at(list, i) === target)) {
       return i;
     }
@@ -708,8 +879,8 @@ function index_of(list, target) {
 function specialize_row(row, ctor) {
   const first = pat_at(row, 0);
   let rest = [];
-  const __ring_end3 = List_len(row);
-  for (let i = 1; i < __ring_end3; i++) {
+  const __ring_end28 = List_len(row);
+  for (let i = 1; i < __ring_end28; i++) {
     List_push(rest, pat_at(row, i));
   }
   __ring_match27: {
@@ -717,8 +888,8 @@ function specialize_row(row, ctor) {
     if (__ring_m27._tag === "Wildcard") {
       let result = [];
       const wild = wild_pattern();
-      const __ring_end4 = ctor.arity;
-      for (let i = 0; i < __ring_end4; i++) {
+      const __ring_end29 = ctor.arity;
+      for (let i = 0; i < __ring_end29; i++) {
         List_push(result, wild);
       }
       List_extend(result, rest);
@@ -728,8 +899,8 @@ function specialize_row(row, ctor) {
     if (__ring_m27._tag === "Binding") {
       let result = [];
       const wild = wild_pattern();
-      const __ring_end5 = ctor.arity;
-      for (let i = 0; i < __ring_end5; i++) {
+      const __ring_end30 = ctor.arity;
+      for (let i = 0; i < __ring_end30; i++) {
         List_push(result, wild);
       }
       List_extend(result, rest);
@@ -807,7 +978,11 @@ function specialize_row(row, ctor) {
     }
     if (__ring_m27._tag === "OrPattern") {
       const sub_pats = __ring_m27.patterns;
-      for (const sp of sub_pats) {
+      const __ring_iter_31 = __List_Iterable.iter(sub_pats);
+      while (true) {
+        const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+        if (__ring_next_31._tag === "none") break;
+        const sp = __ring_next_31._0;
         let trial_row = [sp];
         List_extend(trial_row, rest);
         const result = specialize_row(trial_row, ctor);
@@ -841,8 +1016,8 @@ function check_matrix(rows, col_types, subst, expanding) {
   }
   const first_type = env$apply_subst(subst, type_at(col_types, 0));
   let rest_types = [];
-  const __ring_end6 = List_len(col_types);
-  for (let i = 1; i < __ring_end6; i++) {
+  const __ring_end32 = List_len(col_types);
+  for (let i = 1; i < __ring_end32; i++) {
     List_push(rest_types, type_at(col_types, i));
   }
   const type_key = (function() {
@@ -862,9 +1037,17 @@ function check_matrix(rows, col_types, subst, expanding) {
           _Set_insert(new_expanding, type_key);
         }
       }
-      for (const ctor of ctor_list) {
+      const __ring_iter_33 = __List_Iterable.iter(ctor_list);
+      while (true) {
+        const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+        if (__ring_next_33._tag === "none") break;
+        const ctor = __ring_next_33._0;
         let specialized = [];
-        for (const row of rows) {
+        const __ring_iter_34 = __List_Iterable.iter(rows);
+        while (true) {
+          const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+          if (__ring_next_34._tag === "none") break;
+          const row = __ring_next_34._0;
           __ring_match31: {
             const __ring_m31 = specialize_row(row, ctor);
             if (__ring_m31._tag === "some") {
@@ -887,13 +1070,13 @@ function check_matrix(rows, col_types, subst, expanding) {
           if (__ring_m32._tag === "some") {
             const sub_result = __ring_m32._0;
             let ctor_sub = [];
-            const __ring_end7 = ctor.arity;
-            for (let i = 0; i < __ring_end7; i++) {
+            const __ring_end35 = ctor.arity;
+            for (let i = 0; i < __ring_end35; i++) {
               List_push(ctor_sub, str_at(sub_result, i));
             }
             let rest_sub = [];
-            const __ring_end8 = List_len(sub_result);
-            for (let i = ctor.arity; i < __ring_end8; i++) {
+            const __ring_end36 = List_len(sub_result);
+            for (let i = ctor.arity; i < __ring_end36; i++) {
               List_push(rest_sub, str_at(sub_result, i));
             }
             let ctor_str = "";
@@ -925,7 +1108,11 @@ function check_matrix(rows, col_types, subst, expanding) {
     }
     if (__ring_m30._tag === "none") {
       let defaults = [];
-      for (const row of rows) {
+      const __ring_iter_37 = __List_Iterable.iter(rows);
+      while (true) {
+        const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+        if (__ring_next_37._tag === "none") break;
+        const row = __ring_next_37._0;
         const first = pat_at(row, 0);
         let is_default = false;
         __ring_match33: {
@@ -940,7 +1127,11 @@ function check_matrix(rows, col_types, subst, expanding) {
           }
           if (__ring_m33._tag === "OrPattern") {
             const sub_pats = __ring_m33.patterns;
-            for (const sp of sub_pats) {
+            const __ring_iter_38 = __List_Iterable.iter(sub_pats);
+            while (true) {
+              const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
+              if (__ring_next_38._tag === "none") break;
+              const sp = __ring_next_38._0;
               __ring_match34: {
                 const __ring_m34 = sp;
                 if (__ring_m34._tag === "Wildcard") {
@@ -960,8 +1151,8 @@ function check_matrix(rows, col_types, subst, expanding) {
         }
         if (is_default) {
           let tail = [];
-          const __ring_end9 = List_len(row);
-          for (let i = 1; i < __ring_end9; i++) {
+          const __ring_end39 = List_len(row);
+          for (let i = 1; i < __ring_end39; i++) {
             List_push(tail, pat_at(row, i));
           }
           List_push(defaults, tail);
@@ -999,8 +1190,8 @@ function names_match_struct(pattern_name, type_name) {
 
 function join_strs(parts, sep) {
   let result = "";
-  const __ring_end10 = List_len(parts);
-  for (let i = 0; i < __ring_end10; i++) {
+  const __ring_end40 = List_len(parts);
+  for (let i = 0; i < __ring_end40; i++) {
     if ((i > 0)) {
       result = `${result}${sep}`;
     }
@@ -1024,6 +1215,16 @@ function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   }
 }
 const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
+
+function __ListIterator_Clone_clone(self, __ring_T_Clone) {
+  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
+}
+const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
@@ -1056,6 +1257,16 @@ function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
   }
 }
 const __Result_Ord = { cmp: __Result_Ord_cmp };
+
+function __ListIterator_Debug_debug(self, __ring_T_Debug) {
+  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __StringBuilder_Debug_debug(self) {
   return "StringBuilder";

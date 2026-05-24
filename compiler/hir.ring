@@ -104,7 +104,7 @@ pub enum HStmt {
     ExprStmt { expr: HExpr, span: Span },
     Return { value: HExpr?, span: Span },
     While { condition: HExpr, body: HExpr, span: Span },
-    ForIn { binding: Str, binding_span: Span, def_id: Int?, destructure: List<HForInDestructure>?, iterable: HExpr, body: HExpr, span: Span },
+    ForIn { binding: Str, binding_span: Span, def_id: Int?, destructure: List<HForInDestructure>?, iterable: HExpr, body: HExpr, iterable_type_name: Str?, iter_type_name: Str?, span: Span },
     Break { span: Span },
     Continue { span: Span },
     LetDestructure { pattern: Pattern, bindings: List<HLetDestructureBinding>, init: HExpr, span: Span },

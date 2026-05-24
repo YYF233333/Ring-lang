@@ -1,6 +1,6 @@
 use ast::{Pattern, NamedPatternField, LiteralValue}
 use hir::{HExpr, HStmt, HMatchArm, HLetDestructureBinding,
-    ENUM_TAG_FIELD, RUNTIME_MATCH_FAIL, hexpr_type}
+    ENUM_TAG_FIELD, RUNTIME_MATCH_FAIL, hexpr_type, trait_dict_name, HForInDestructure}
 use types::{Type, BUILTIN_RANGE}
 use codegen_ctx::{CodegenCtx, emit, push_indent, pop_indent, safe_ident, qualify}
 
@@ -144,6 +144,68 @@ pub fn emit_block_body(mut ctx: CodegenCtx, block: HExpr) {
 }
 
 // ============================================================
+// Iterator protocol for-in codegen
+// ============================================================
+
+// Generates JS code for for..in using the Iterator/Iterable trait protocol:
+//   const __ring_iter_N = __Type_Iterable.iter(collection);
+//   while (true) {
+//       const __ring_next_N = __IterType_Iterator.next(__ring_iter_N);
+//       if (__ring_next_N._tag === "none") break;
+//       const x = __ring_next_N._0;
+//       // body
+//   }
+fn emit_iterator_for_in(mut ctx: CodegenCtx, binding: Str, destructure: List<HForInDestructure>?,
+                         iterable: HExpr, body: HExpr, iterable_type_name: Str?, iter_type_name: Str?) {
+    let counter = ctx.loop_counter
+    ctx.loop_counter = ctx.loop_counter + 1
+    let it_expr = gen_expr(ctx, iterable)
+
+    match (iterable_type_name, iter_type_name) {
+        (some(itn), some(iter_tn)) => {
+            let iter_dict = trait_dict_name(qualify(ctx, itn), "Iterable")
+            let next_dict = trait_dict_name(qualify(ctx, iter_tn), "Iterator")
+            let iter_var = "__ring_iter_${counter}"
+            let next_var = "__ring_next_${counter}"
+            emit(ctx, "const ${iter_var} = ${iter_dict}.iter(${it_expr});")
+            emit(ctx, "while (true) {")
+            push_indent(ctx)
+            emit(ctx, "const ${next_var} = ${next_dict}.next(${iter_var});")
+            emit(ctx, "if (${next_var}._tag === \"none\") break;")
+            match destructure {
+                some(ds) => {
+                    if ds.len() > 0 {
+                        let mut names: List<Str> = []
+                        for d in ds { names.push(safe_ident(d.name)) }
+                        let joined = names.join(", ")
+                        emit(ctx, "const [${joined}] = ${next_var}._0;")
+                    } else {
+                        let b = safe_ident(binding)
+                        emit(ctx, "const ${b} = ${next_var}._0;")
+                    }
+                },
+                none => {
+                    let b = safe_ident(binding)
+                    emit(ctx, "const ${b} = ${next_var}._0;")
+                },
+            }
+            emit_block_in_stmt_context(ctx, body, "discard")
+            pop_indent(ctx)
+            emit(ctx, "}")
+        },
+        _ => {
+            // Fallback: should not happen if checker is correct, but generate for..of as safety net
+            let b = safe_ident(binding)
+            emit(ctx, "for (const ${b} of ${it_expr}) {")
+            push_indent(ctx)
+            emit_block_in_stmt_context(ctx, body, "discard")
+            pop_indent(ctx)
+            emit(ctx, "}")
+        }
+    }
+}
+
+// ============================================================
 // Match statement (statement-mode)
 // ============================================================
 
@@ -227,7 +289,7 @@ pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
             pop_indent(ctx)
             emit(ctx, "}")
         },
-        HStmt::ForIn { binding, destructure, iterable, body, .. } => {
+        HStmt::ForIn { binding, destructure, iterable, body, iterable_type_name, iter_type_name, .. } => {
             match iterable {
                 HExpr::RangeExpr { start, end, inclusive, .. } => {
                     let start_js = gen_expr(ctx, start)
@@ -238,49 +300,35 @@ pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
                     emit(ctx, "const ${end_var} = ${end_js};")
                     let cmp = if inclusive { "<=" } else { "<" }
                     emit(ctx, "for (let ${b} = ${start_js}; ${b} ${cmp} ${end_var}; ${b}++) {")
+                    push_indent(ctx)
+                    emit_block_in_stmt_context(ctx, body, "discard")
+                    pop_indent(ctx)
+                    emit(ctx, "}")
                 },
                 _ => {
                     // Check if the iterable has Range type (e.g. variable holding a range)
-                    let iter_type = hexpr_type(iterable)
-                    let is_range = match iter_type {
+                    let iter_htype = hexpr_type(iterable)
+                    let is_range = match iter_htype {
                         Type::EnumType { name, .. } => name == BUILTIN_RANGE,
                         _ => false,
                     }
                     if is_range {
                         let rng_var = "__ring_rng${ctx.loop_counter}"
                         ctx.loop_counter = ctx.loop_counter + 1
-                        let iter = gen_expr(ctx, iterable)
+                        let it = gen_expr(ctx, iterable)
                         let b = safe_ident(binding)
-                        emit(ctx, "const ${rng_var} = ${iter};")
+                        emit(ctx, "const ${rng_var} = ${it};")
                         emit(ctx, "for (let ${b} = ${rng_var}.start; ${rng_var}.inclusive ? ${b} <= ${rng_var}.end : ${b} < ${rng_var}.end; ${b}++) {")
+                        push_indent(ctx)
+                        emit_block_in_stmt_context(ctx, body, "discard")
+                        pop_indent(ctx)
+                        emit(ctx, "}")
                     } else {
-                        match destructure {
-                            some(ds) => {
-                                if ds.len() > 0 {
-                                    let iter = gen_expr(ctx, iterable)
-                                    let mut names: List<Str> = []
-                                    for d in ds { names.push(safe_ident(d.name)) }
-                                    let joined = names.join(", ")
-                                    emit(ctx, "for (const [${joined}] of ${iter}) {")
-                                } else {
-                                    let iter = gen_expr(ctx, iterable)
-                                    let b = safe_ident(binding)
-                                    emit(ctx, "for (const ${b} of ${iter}) {")
-                                }
-                            },
-                            none => {
-                                let iter = gen_expr(ctx, iterable)
-                                let b = safe_ident(binding)
-                                emit(ctx, "for (const ${b} of ${iter}) {")
-                            },
-                        }
+                        // Iterator trait protocol: call iter() then loop with next()
+                        emit_iterator_for_in(ctx, binding, destructure, iterable, body, iterable_type_name, iter_type_name)
                     }
                 },
             }
-            push_indent(ctx)
-            emit_block_in_stmt_context(ctx, body, "discard")
-            pop_indent(ctx)
-            emit(ctx, "}")
         },
         HStmt::Break { .. } => emit(ctx, "break;"),
         HStmt::Continue { .. } => emit(ctx, "continue;"),

@@ -146,8 +146,8 @@ fn zonk_stmt(ctx: ZonkCtx, stmt: HStmt) -> HStmt {
         },
         HStmt::While { condition, body, span } =>
             HStmt::While { condition: zonk_expr(ctx, condition), body: zonk_block(ctx, body), span: span },
-        HStmt::ForIn { binding, binding_span, def_id, destructure, iterable, body, span } =>
-            HStmt::ForIn { binding: binding, binding_span: binding_span, def_id: def_id, destructure: destructure, iterable: zonk_expr(ctx, iterable), body: zonk_block(ctx, body), span: span },
+        HStmt::ForIn { binding, binding_span, def_id, destructure, iterable, body, iterable_type_name, iter_type_name, span } =>
+            HStmt::ForIn { binding: binding, binding_span: binding_span, def_id: def_id, destructure: destructure, iterable: zonk_expr(ctx, iterable), body: zonk_block(ctx, body), iterable_type_name: iterable_type_name, iter_type_name: iter_type_name, span: span },
         HStmt::Break { span } => stmt,
         HStmt::Continue { span } => stmt,
         HStmt::LetDestructure { pattern, bindings, init, span } => {
