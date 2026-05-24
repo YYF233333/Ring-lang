@@ -2,7 +2,7 @@ use types::{Type, UNIT}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport, Span, TypeParam}
 use hir::{HDecl, HProgram}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
-use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env}
+use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_prelude_decl}
 use infer_ctx::{InferCtx}
@@ -184,7 +184,7 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             ctx.env.trait_reg.traits.insert(name, tdef)
         }
         for impl_ in mod_.trait_impls {
-            ctx.env.trait_reg.trait_impls.push(impl_)
+            add_impl(ctx.env.trait_reg, impl_)
         }
         for entry in mod_.impl_methods.entries() {
             let (type_name, methods) = entry

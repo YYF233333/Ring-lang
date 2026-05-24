@@ -1,6 +1,6 @@
 use types::{Type, EffectRow, StructField, EnumVariant,
     INT, STR, BOOL, EMPTY_ROW}
-use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, ImplEntry}
+use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, ImplEntry, add_impl, has_impl}
 use hir::{DerivedImpl, DerivedField, DerivedVariant, FieldAction,
     TraitBound, TypeKind, trait_dict_name, trait_bound_param_name}
 
@@ -75,9 +75,12 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
 
 fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mut derived_impls: List<DerivedImpl>) {
     let mut known = set_new()
-    for imp in env.trait_reg.trait_impls {
-        if imp.trait_name == trait_name {
-            known.insert(imp.target_type_name)
+    for entry in env.trait_reg.trait_impls.entries() {
+        let (tname, impls) = entry
+        for imp in impls {
+            if imp.trait_name == trait_name {
+                known.insert(imp.target_type_name)
+            }
         }
     }
     known.insert("Int")
@@ -108,14 +111,7 @@ fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mu
 }
 
 fn has_manual_impl(env: TypeEnv, type_name: Str, trait_name: Str) -> Bool {
-    for imp in env.trait_reg.trait_impls {
-        if imp.trait_name == trait_name {
-            if imp.target_type_name == type_name {
-                return true
-            }
-        }
-    }
-    false
+    has_impl(env.trait_reg, type_name, trait_name)
 }
 
 // ================================================================
@@ -411,7 +407,7 @@ fn resolve_type_arg_dict(
 // ================================================================
 
 fn register_derived_impl(mut env: TypeEnv, di: DerivedImpl, trait_name: Str) {
-    env.trait_reg.trait_impls.push(ImplEntry {
+    add_impl(env.trait_reg, ImplEntry {
         trait_name: trait_name,
         target_type_name: di.type_name,
         type_params: di.type_params,
