@@ -129,7 +129,7 @@ Ring-lang/
 
 ## 已实现功能
 
-完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/loop/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM/inline mod 块（含嵌套 `mod a { mod b { ... } }`，多级限定路径 `a::b::c`）/`super::`/`self::` 相对路径/`sig` 接口声明/mod 内 impl 方法/限定类型语法 `mod::Type`/三级限定访问 `mod::Enum::Variant`/`mod requires {effects}` capability 限制）、FFI（extern fn/extern type）、标准库（10 个 .ring 文件，含 `Result<T,E>`/fs/path/process）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、多行字符串（`"..."` 允许跨行，空白原样保留）、raw string（`r"..."` 和 `r#"..."#`，无转义无插值）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、mut self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）、Checker 函数级多错误恢复、`loop` 无限循环关键字（脱糖为 `while true`）、Effect 标注语法（`fn foo() -> T with {io, fail<E>}`）、fn 类型表达式 effect 标注（`fn(T) -> U with {io}`，无标注时为 open row 支持 effect 多态）、`let mut` 可变绑定 + 闭包自动 boxing、`mut` 函数参数（mutating 方法调用强制检查）、impl 类型参数 bounds（`impl<T: Eq> List { ... }`）、`List.set(i, v)` 原地修改、union-find 类型变量解析、下标运算符 `list[i]` / `map[key]` / `str[i]`（越界/key 不存在 panic，安全访问用 `.get()`）、`effect alias` 语法糖（`effect alias IO = {io, fail<Str>}`，含泛型参数 + 循环检测 + pub 模块导出）、supertrait 继承（`trait Ord: Eq`，含多级传递 + 循环检测 + impl 验证 + bound 自动展开）、Default Effect Handler（effect op 带 body = 默认 handler，全默认 effect 可省略 `handle...with`，编译器自动注入 evidence，显式 handle 可覆盖默认）、`mut<T>` Marker Effect（`mut self` 方法调用 `mut` 函数参数时自动注入 `mut<T>` 编译期 effect，零运行时成本，`mod requires {}` 可限制，局部变量 mutation 自动消除——调用 `push_item(local)` 时若 `local` 是局部变量则不传播 `mut` effect）、DiagnosticSink 错误去重（按 code+span 去重，多 pass 不重复报告同一错误）、`delegate` 关键字（`impl Admin { delegate base: Describable, Loggable }` 自动生成 trait 转发方法，替代继承的复用机制，支持多 trait 委托 + 带参数方法转发 + E0507/E0508/E0509 错误码 + 冲突检测）。开发历史详见 git log。
+完整的类型系统（HM 推断 + effect system + trait + row polymorphism）、控制流（while/for/loop/break/continue）、集合类型（List/Map/Set/Tuple）、模块系统（use/pub use/多文件 ESM/inline mod 块（含嵌套 `mod a { mod b { ... } }`，多级限定路径 `a::b::c`）/`super::`/`self::` 相对路径/`sig` 接口声明/mod 内 impl 方法/限定类型语法 `mod::Type`/三级限定访问 `mod::Enum::Variant`/`mod requires {effects}` capability 限制）、FFI（extern fn/extern type）、标准库（10 个 .ring 文件，含 `Result<T,E>`/fs/path/process）、auto-derive traits（Eq/Clone/Debug/Ord）、Option\<T\>（T? 类型语法 / `unwrap` / `to_fail` / `unwrap_or` / `unwrap_or_else`）、`catch { pattern => handler }` match-arm 风格错误处理、`Result<T,E>` 标准库类型（`to_result()` 桥接 fail→Result）、字符串插值（支持嵌套引号 `"${fn("arg")}"`）、多行字符串（`"..."` 允许跨行，空白原样保留）、raw string（`r"..."` 和 `r#"..."#`，无转义无插值）、enum 命名字段（无字段变体统一为裸名）、struct update 语法、mut self 可变方法、空列表字面量 `[]` 类型推断、tuple 位置字段访问（`.0`/`.1`/`.2`）、普通函数调用的 lambda 参数双向类型推断、`const` 顶级声明（编译期常量绑定）、Parser 声明级错误恢复（多错误报告）、Checker 函数级多错误恢复、`loop` 无限循环关键字（脱糖为 `while true`）、Effect 标注语法（`fn foo() -> T with {io, fail<E>}`）、fn 类型表达式 effect 标注（`fn(T) -> U with {io}`，无标注时为 open row 支持 effect 多态）、`let mut` 可变绑定 + 闭包自动 boxing、`mut` 函数参数（mutating 方法调用强制检查）、impl 类型参数 bounds（`impl<T: Eq> List { ... }`）、`List.set(i, v)` 原地修改、union-find 类型变量解析、下标运算符 `list[i]` / `map[key]` / `str[i]`（越界/key 不存在 panic，安全访问用 `.get()`）、`effect alias` 语法糖（`effect alias IO = {io, fail<Str>}`，含泛型参数 + 循环检测 + pub 模块导出）、supertrait 继承（`trait Ord: Eq`，含多级传递 + 循环检测 + impl 验证 + bound 自动展开）、Default Effect Handler（effect op 带 body = 默认 handler，全默认 effect 可省略 `handle...with`，编译器自动注入 evidence，显式 handle 可覆盖默认）、`mut<T>` Marker Effect（`mut self` 方法调用 `mut` 函数参数时自动注入 `mut<T>` 编译期 effect，零运行时成本，`mod requires {}` 可限制，局部变量 mutation 自动消除——调用 `push_item(local)` 时若 `local` 是局部变量则不传播 `mut` effect）、DiagnosticSink 错误去重（按 code+span 去重，多 pass 不重复报告同一错误）、`delegate` 关键字（`impl Admin { delegate base: Describable, Loggable }` 自动生成 trait 转发方法，替代继承的复用机制，支持多 trait 委托 + 带参数方法转发 + E0507/E0508/E0509 错误码 + 冲突检测）、关联类型（`trait T { type Item }` + `impl T for S { type Item = Int }` + `T::Item` 限定路径 + `<Item = Int>` 约束语法 + 默认关联类型 + E0510-E0514 错误码）。开发历史详见 git log。
 
 ## 已知限制
 
@@ -144,7 +144,7 @@ Ring-lang/
 
 - Record row types 仅在参数位置使用（无匿名 record 字面量、无 spread 运算符）
 - Refinement `where` 子句只解析不验证（tokens 被消费后丢弃）
-- Trait 系统暂不支持：关联类型、supertrait 继承、`dyn Trait` 动态分发
+- Trait 系统暂不支持：`dyn Trait` 动态分发、GATs（Generic Associated Types）
 - `pub` 可见性在多文件模式下强制执行，单文件模式不强制（向后兼容）
 - 穷尽性检查支持嵌套模式递归检查（含 Option<Option<T>> 等嵌套 enum）；多字段交叉组合不验证
 - ~~`List.contains` / `Set.contains` 等仍使用 JS `===` 引用相等~~：已修复。`List.contains`/`List.index_of`/`Set.contains` 现在用 Ring 实现，使用 `==`（Eq trait dispatch）进行比较。`List.find` / `Map` key 查找仍使用 JS `===`
@@ -187,8 +187,8 @@ Ring-lang/
 
 ### 层 2：核心特性 → LLVM 关键路径
 
-- 关联类型（`type Item` in trait）→ 编译器自身需要
-- Iterator Trait + 自定义迭代器（依赖关联类型）→ 编译器自身需要
+- ~~关联类型（`type Item` in trait）~~ ✅ 已完成（2026-05-24）
+- Iterator Trait + 自定义迭代器（依赖关联类型 ✅）→ 编译器自身需要
 - ~~`delegate` 关键字（trait 实现委托）~~ ✅ 已完成
 - ~~B-044 语义规范~~ ✅ 已完成（design.md 1.7）
 - **LLVM Native Backend**（层 2 完成后启动，落地后 JS 后端废弃）

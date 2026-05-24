@@ -415,7 +415,8 @@ fn register_derived_impl(mut env: TypeEnv, di: DerivedImpl, trait_name: Str) {
         trait_name: trait_name,
         target_type_name: di.type_name,
         type_params: di.type_params,
-        method_names: get_method_names(trait_name)
+        method_names: get_method_names(trait_name),
+        assoc_types: map_new()
     })
 
     let mut methods = match env.trait_reg.impl_methods.get(di.type_name) {

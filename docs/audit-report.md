@@ -142,4 +142,4 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 | 38 | Post-resume handler / Full AE | 已取消 (B-009) | 不实现 |
 | 39 | `dyn Trait` 动态分发 | B-006 | 未实现 |
 | 40 | Supertrait 继承 | B-005 | ✅ 已实现 |
-| 41 | 关联类型 | B-004 | 未实现 |
+| 41 | 关联类型 | B-004 | ✅ 已实现 |

@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string, effects_match_kind, effect_kind_name}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
     UseDecl, UseImport, NamedImport, SigMember}
-use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound,
+use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
     hexpr_type, hexpr_effects}
@@ -60,7 +60,10 @@ fn check_decl(mut ctx: InferCtx, decl: Decl) -> HDecl {
             HDecl::TypeAlias { name: name, ty: UNIT, is_pub: is_pub, span: span },
         Decl::Delegate { span, .. } =>
             // Delegate is only valid inside impl blocks; handled by check_impl_decl
-            HDecl::TypeAlias { name: "<delegate>", ty: UNIT, is_pub: false, span: span }
+            HDecl::TypeAlias { name: "<delegate>", ty: UNIT, is_pub: false, span: span },
+        Decl::AssocType { span, .. } =>
+            // Associated types are only valid inside trait/impl blocks; handled there
+            HDecl::TypeAlias { name: "<assoc_type>", ty: UNIT, is_pub: false, span: span }
     }
 }
 
@@ -538,6 +541,28 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
     }
     ctx.current_fn_bounds = impl_bounds
 
+    // Collect associated types from impl
+    let mut hassoc_types: List<HAssocType> = []
+    for method in methods {
+        match method {
+            Decl::AssocType { name: aname, bounds: abounds, value: avalue, .. } => {
+                let mut bound_names: List<Str> = []
+                for b in abounds { bound_names.push(b.trait_name) }
+                let concrete = match avalue {
+                    some(v) => some(resolve_type_expr(ctx, v)),
+                    none => none
+                }
+                hassoc_types.push(HAssocType { name: aname, bounds: bound_names, concrete: concrete })
+                // Inject concrete type into type_param_scope for method signature resolution
+                match concrete {
+                    some(ct) => { ctx.type_param_scope.insert(aname, ct) },
+                    none => {}
+                }
+            },
+            _ => {}
+        }
+    }
+
     let mut hmethods: List<HDecl> = []
     for method in methods {
         match method {
@@ -556,13 +581,14 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
                 }
             },
             Decl::Delegate { .. } => {},  // Handled at check_one_decl level
+            Decl::AssocType { .. } => {},  // Already handled above
             _ => {}
         }
     }
 
     ctx.current_fn_bounds = saved_impl_bounds
     ctx.type_param_scope = saved_tp_scope
-    HDecl::Impl { target_type: target_type, type_params: type_params, trait_name: trait_name, methods: hmethods, span: span }
+    HDecl::Impl { target_type: target_type, type_params: type_params, trait_name: trait_name, methods: hmethods, assoc_types: hassoc_types, span: span }
 }
 
 fn expand_delegate_impls(
@@ -802,6 +828,7 @@ fn expand_delegate_impls(
                                     type_params: type_params,
                                     trait_name: some(tname),
                                     methods: trait_hmethods,
+                                    assoc_types: [],
                                     span: span
                                 })
                             }
@@ -892,7 +919,13 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
         hmethods.push(HTraitMethod { name: m.name, params: hparams, return_type: fn_ret, has_default: m.has_default, body: method_body })
     }
 
-    HDecl::Trait { name: name, type_params: type_params, methods: hmethods, supertraits: trait_def.supertraits, is_pub: is_pub, span: span }
+    // Build HAssocType list from trait def
+    let mut hassoc_types: List<HAssocType> = []
+    for atdef in trait_def.assoc_types {
+        hassoc_types.push(HAssocType { name: atdef.name, bounds: atdef.bounds, concrete: atdef.default_type })
+    }
+
+    HDecl::Trait { name: name, type_params: type_params, methods: hmethods, supertraits: trait_def.supertraits, assoc_types: hassoc_types, is_pub: is_pub, span: span }
 }
 
 fn check_trait_default_body(mut ctx: InferCtx, trait_name: Str, self_var: Type, hparams: List<HParam>, body: Expr) -> HExpr? {

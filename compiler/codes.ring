@@ -46,6 +46,11 @@ pub const E0508: Str = "E0508"
 pub const E0409: Str = "E0409"
 pub const E0410: Str = "E0410"
 pub const E0509: Str = "E0509"
+pub const E0510: Str = "E0510"
+pub const E0511: Str = "E0511"
+pub const E0512: Str = "E0512"
+pub const E0513: Str = "E0513"
+pub const E0514: Str = "E0514"
 pub const E0601: Str = "E0601"
 pub const E0702: Str = "E0702"
 pub const E0703: Str = "E0703"
@@ -93,6 +98,11 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0507" { return "Delegate field not found" }
     if code == "E0508" { return "Delegate field type does not implement trait" }
     if code == "E0509" { return "Delegate conflicts with existing impl" }
+    if code == "E0510" { return "Missing associated type implementation" }
+    if code == "E0511" { return "Unknown associated type" }
+    if code == "E0512" { return "Ambiguous associated type" }
+    if code == "E0513" { return "Associated type bound not satisfied" }
+    if code == "E0514" { return "Unexpected associated type" }
     if code == "E0601" { return "Non-exhaustive pattern match" }
     if code == "E0702" { return "Module not found" }
     if code == "E0703" { return "Symbol not found in module" }
