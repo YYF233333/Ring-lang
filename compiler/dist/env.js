@@ -157,10 +157,18 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
+class AssocConstraintEntry {
+  constructor(name, ty) {
+    this.name = name;
+    this.ty = ty;
+  }
+}
+
 class SchemeBound {
-  constructor(type_var, trait_name) {
+  constructor(type_var, trait_name, assoc_constraints) {
     this.type_var = type_var;
     this.trait_name = trait_name;
+    this.assoc_constraints = assoc_constraints;
   }
 }
 
@@ -928,11 +936,6 @@ function __StringBuilder_Eq_eq(self, other) {
 }
 const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
 
-function __SchemeBound_Eq_eq(self, other) {
-  return (self.type_var === other.type_var) && (self.trait_name === other.trait_name);
-}
-const __SchemeBound_Eq = { eq: __SchemeBound_Eq_eq, ne: function(self, other) { return !__SchemeBound_Eq_eq(self, other); } };
-
 function __FnBound_Eq_eq(self, other) {
   return (self.type_param === other.type_param) && (self.trait_name === other.trait_name);
 }
@@ -963,11 +966,6 @@ function __StringBuilder_Clone_clone(self) {
   return new StringBuilder();
 }
 const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
-
-function __SchemeBound_Clone_clone(self) {
-  return new SchemeBound(self.type_var, self.trait_name);
-}
-const __SchemeBound_Clone = { clone: __SchemeBound_Clone_clone };
 
 function __FnBound_Clone_clone(self) {
   return new FnBound(self.type_param, self.trait_name);
@@ -1002,14 +1000,6 @@ function __StringBuilder_Ord_cmp(self, other) {
   return 0;
 }
 const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
-
-function __SchemeBound_Ord_cmp(self, other) {
-  var c;
-  c = (self.type_var < other.type_var ? -1 : self.type_var > other.type_var ? 1 : 0);
-  if (c !== 0) return c;
-  return (self.trait_name < other.trait_name ? -1 : self.trait_name > other.trait_name ? 1 : 0);
-}
-const __SchemeBound_Ord = { cmp: __SchemeBound_Ord_cmp };
 
 function __FnBound_Ord_cmp(self, other) {
   var c;
@@ -1054,11 +1044,6 @@ function __StringBuilder_Debug_debug(self) {
 }
 const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
-function __SchemeBound_Debug_debug(self) {
-  return "SchemeBound { " + "type_var: " + String(self.type_var) + ", " + "trait_name: " + String(self.trait_name) + " }";
-}
-const __SchemeBound_Debug = { debug: __SchemeBound_Debug_debug };
-
 function __FnBound_Debug_debug(self) {
   return "FnBound { " + "type_param: " + String(self.type_param) + ", " + "trait_name: " + String(self.trait_name) + " }";
 }
@@ -1089,4 +1074,4 @@ function __BuiltInKind_Debug_debug(self) {
 const __BuiltInKind_Debug = { debug: __BuiltInKind_Debug_debug };
 
 
-export { SchemeBound, TypeScheme, StructDef, EnumDef, EffectOpDef, BuiltInKind_BkIo, BuiltInKind_BkFail, BuiltInKind_BkMut, EffectDef, TraitMethodDef, AssocTypeDef, TraitDef, ImplEntry, TypeAliasDef, EffectAliasDef, FnBound, SigDef, Scope, TypeRegistry, TraitRegistry, ScopeManager, IdGen, TypeEnv, mono, new_type_env, apply_subst_map, apply_subst_effect_map, apply_subst_row_map, apply_subst, apply_subst_row, TypeEnv_current_var_id, TypeEnv_fresh_var, TypeEnv_fresh_var_id, TypeEnv_fresh_def_id, TypeEnv_push_scope, TypeEnv_pop_scope, TypeEnv_bind, TypeEnv_bind_mono, TypeEnv_record_def_span, TypeEnv_rebind, TypeEnv_lookup, TypeEnv_instantiate, __SchemeBound_Eq, __FnBound_Eq, __IdGen_Eq, __BuiltInKind_Eq, __SchemeBound_Clone, __FnBound_Clone, __IdGen_Clone, __BuiltInKind_Clone, __SchemeBound_Ord, __FnBound_Ord, __IdGen_Ord, __BuiltInKind_Ord, __SchemeBound_Debug, __FnBound_Debug, __IdGen_Debug, __BuiltInKind_Debug };
+export { AssocConstraintEntry, SchemeBound, TypeScheme, StructDef, EnumDef, EffectOpDef, BuiltInKind_BkIo, BuiltInKind_BkFail, BuiltInKind_BkMut, EffectDef, TraitMethodDef, AssocTypeDef, TraitDef, ImplEntry, TypeAliasDef, EffectAliasDef, FnBound, SigDef, Scope, TypeRegistry, TraitRegistry, ScopeManager, IdGen, TypeEnv, mono, new_type_env, apply_subst_map, apply_subst_effect_map, apply_subst_row_map, apply_subst, apply_subst_row, TypeEnv_current_var_id, TypeEnv_fresh_var, TypeEnv_fresh_var_id, TypeEnv_fresh_def_id, TypeEnv_push_scope, TypeEnv_pop_scope, TypeEnv_bind, TypeEnv_bind_mono, TypeEnv_record_def_span, TypeEnv_rebind, TypeEnv_lookup, TypeEnv_instantiate, __FnBound_Eq, __IdGen_Eq, __BuiltInKind_Eq, __FnBound_Clone, __IdGen_Clone, __BuiltInKind_Clone, __FnBound_Ord, __IdGen_Ord, __BuiltInKind_Ord, __FnBound_Debug, __IdGen_Debug, __BuiltInKind_Debug };

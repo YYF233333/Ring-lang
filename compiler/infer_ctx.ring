@@ -6,9 +6,9 @@ use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
-use codes::{E0201, E0204, E0301, E0302, E0503, E0511, E0512, E0705}
+use codes::{E0201, E0204, E0301, E0302, E0503, E0511, E0512, E0513, E0705}
 use union_find::{UnionFind, new_union_find, uf_find}
-use env::{TypeEnv, TypeScheme, SchemeBound, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map}
+use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
 
 // ============================================================
@@ -417,7 +417,7 @@ pub fn generalize(env: TypeEnv, t: Type, subst: UnionFind) -> TypeScheme {
         match env.scope.var_bounds.get(tv) {
             some(traits) => {
                 for trait_name in traits {
-                    bounds.push(SchemeBound { type_var: tv, trait_name: trait_name })
+                    bounds.push(SchemeBound { type_var: tv, trait_name: trait_name, assoc_constraints: [] })
                 }
             },
             none => {}
@@ -585,6 +585,8 @@ pub fn resolve_dicts_from_scheme(
                                 resolved_dicts.push(DictRef::Simple(trait_dict_name(name, bound.trait_name)))
                             }
                             found = true
+                            // Validate associated type constraints
+                            check_assoc_constraints(sink, env, bound, name, s, span)
                         }
                     },
                     Type::EnumType { name, type_params, .. } => {
@@ -602,6 +604,8 @@ pub fn resolve_dicts_from_scheme(
                                 resolved_dicts.push(DictRef::Simple(trait_dict_name(name, bound.trait_name)))
                             }
                             found = true
+                            // Validate associated type constraints
+                            check_assoc_constraints(sink, env, bound, name, s, span)
                         }
                     },
                     Type::TypeVar { id, .. } => {
@@ -628,6 +632,8 @@ pub fn resolve_dicts_from_scheme(
                             }) {
                                 resolved_dicts.push(DictRef::Simple(trait_dict_name(prim_name, bound.trait_name)))
                                 found = true
+                                // Validate associated type constraints
+                                check_assoc_constraints(sink, env, bound, prim_name, s, span)
                             }
                         },
                         none => {}
@@ -643,6 +649,38 @@ pub fn resolve_dicts_from_scheme(
         }
     }
     resolved_dicts
+}
+
+// Check associated type constraints on a bound against an impl entry's actual assoc types.
+fn check_assoc_constraints(
+    sink: CollectingSink, env: TypeEnv,
+    bound: SchemeBound, target_type_name: Str,
+    s: UnionFind, span: Span
+) {
+    if bound.assoc_constraints.len() == 0 { return }
+    // Find the impl entry for this type + trait
+    let impl_entry = env.trait_reg.trait_impls.find(fn(impl_) {
+        impl_.target_type_name == target_type_name && impl_.trait_name == bound.trait_name
+    })
+    match impl_entry {
+        some(entry) => {
+            for ac in bound.assoc_constraints {
+                match entry.assoc_types.get(ac.name) {
+                    some(actual_ty) => {
+                        let expected_ty = apply_subst(s, ac.ty)
+                        let actual_resolved = apply_subst(s, actual_ty)
+                        if !types_equal(expected_ty, actual_resolved) {
+                            let _ = type_error(sink, E0513,
+                                "Associated type '${ac.name}' mismatch: expected '${type_to_string(expected_ty)}' but impl provides '${type_to_string(actual_resolved)}'",
+                                span, DiagnosticContext::TraitError { detail: "associated type constraint mismatch" })
+                        }
+                    },
+                    none => {}
+                }
+            }
+        },
+        none => {}
+    }
 }
 
 fn resolve_inner_dicts_from_type_params(

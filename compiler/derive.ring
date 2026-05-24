@@ -438,7 +438,7 @@ fn register_derived_impl(mut env: TypeEnv, di: DerivedImpl, trait_name: Str) {
     for b in di.bounds {
         let param_idx = index_of_str(di.type_params, b.type_param)
         if param_idx >= 0 {
-            scheme_bounds.push(SchemeBound { type_var: int_at(type_var_ids, param_idx), trait_name: b.trait_name })
+            scheme_bounds.push(SchemeBound { type_var: int_at(type_var_ids, param_idx), trait_name: b.trait_name, assoc_constraints: [] })
         }
     }
 

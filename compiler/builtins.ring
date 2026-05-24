@@ -347,7 +347,7 @@ fn register_option_eq(mut env: TypeEnv) {
 
     let mut methods = get_or_create_methods(env, BUILTIN_OPTION)
 
-    let eq_bounds = [SchemeBound { type_var: t_id, trait_name: "Eq" }]
+    let eq_bounds = [SchemeBound { type_var: t_id, trait_name: "Eq", assoc_constraints: [] }]
 
     methods.insert("eq", TypeScheme {
         ty: Type::FnType { params: [opt, opt], return_type: BOOL, effects: EMPTY_ROW },
@@ -359,7 +359,7 @@ fn register_option_eq(mut env: TypeEnv) {
     methods.insert("ne", TypeScheme {
         ty: Type::FnType { params: [opt, opt], return_type: BOOL, effects: EMPTY_ROW },
         type_vars: [t_id],
-        bounds: [SchemeBound { type_var: t_id, trait_name: "Eq" }],
+        bounds: [SchemeBound { type_var: t_id, trait_name: "Eq", assoc_constraints: [] }],
         def_id: none
     })
 
@@ -430,7 +430,7 @@ fn register_option_clone(mut env: TypeEnv) {
     methods.insert("clone", TypeScheme {
         ty: Type::FnType { params: [opt], return_type: opt, effects: EMPTY_ROW },
         type_vars: [t_id],
-        bounds: [SchemeBound { type_var: t_id, trait_name: "Clone" }],
+        bounds: [SchemeBound { type_var: t_id, trait_name: "Clone", assoc_constraints: [] }],
         def_id: none
     })
 
@@ -516,7 +516,7 @@ fn register_debug_trait(mut env: TypeEnv) {
     list_methods.insert("debug", TypeScheme {
         ty: list_debug_fn,
         type_vars: [t_id],
-        bounds: [SchemeBound { type_var: t_id, trait_name: "Debug" }],
+        bounds: [SchemeBound { type_var: t_id, trait_name: "Debug", assoc_constraints: [] }],
         def_id: none
     })
     env.trait_reg.trait_impls.push(ImplEntry {
@@ -584,7 +584,7 @@ fn register_option_debug(mut env: TypeEnv) {
     methods.insert("debug", TypeScheme {
         ty: Type::FnType { params: [opt], return_type: STR, effects: EMPTY_ROW },
         type_vars: [t_id],
-        bounds: [SchemeBound { type_var: t_id, trait_name: "Debug" }],
+        bounds: [SchemeBound { type_var: t_id, trait_name: "Debug", assoc_constraints: [] }],
         def_id: none
     })
 
