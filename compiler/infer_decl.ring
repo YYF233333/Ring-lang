@@ -186,6 +186,8 @@ fn check_effects_capability(mut ctx: InferCtx, name: Str, effects: EffectRow, ca
     //      with an open effect row), any concrete effect that flows through
     //      will surface in the *caller's* effect row and be caught by the
     //      per-effect check on that caller's declaration.
+    //   This is why E0408 ("Open effect row in capability-restricted module")
+    //   is defined but never emitted.
 }
 
 fn check_sig_decl(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub: Bool, span: Span) -> HDecl {

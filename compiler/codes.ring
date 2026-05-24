@@ -37,6 +37,9 @@ pub const E0503: Str = "E0503"
 pub const E0405: Str = "E0405"
 pub const E0406: Str = "E0406"
 pub const E0407: Str = "E0407"
+// Reserved: open effect row in capability-restricted module.
+// Not emitted — see check_effects_capability in infer_decl.ring for rationale:
+// open row tails represent effect polymorphism, not capability violations.
 pub const E0408: Str = "E0408"
 pub const E0504: Str = "E0504"
 pub const E0505: Str = "E0505"
@@ -86,6 +89,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0405" { return "Capability violation" }
     if code == "E0406" { return "Cyclic effect alias" }
     if code == "E0407" { return "Unknown effect" }
+    // Reserved: not currently emitted (open row ≠ capability violation, see infer_decl.ring)
     if code == "E0408" { return "Open effect row in capability-restricted module" }
     if code == "E0409" { return "Default handler body uses effect without default handler" }
     if code == "E0410" { return "Cyclic default effect handler dependency" }
