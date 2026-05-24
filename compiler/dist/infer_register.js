@@ -1768,6 +1768,7 @@ function inject_assoc_types_from_bounds(ctx, type_params) {
       for (const ac of b.assoc_constraints) {
         const concrete_ty = infer_ctx$resolve_type_expr(ctx, ac.ty);
         _Map_insert(ctx.type_param_scope, ac.name, concrete_ty);
+        _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${ac.name}`, concrete_ty);
       }
       __ring_match73: {
         const __ring_m73 = _Map_get(ctx.env.trait_reg.traits, b.trait_name);
@@ -1777,6 +1778,10 @@ function inject_assoc_types_from_bounds(ctx, type_params) {
             if ((!_Map_contains_key(ctx.type_param_scope, atdef.name))) {
               const at_var = env$TypeEnv_fresh_var(ctx.env);
               _Map_insert(ctx.type_param_scope, atdef.name, at_var);
+              _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${atdef.name}`, at_var);
+            } else {
+              const at_var = env$TypeEnv_fresh_var(ctx.env);
+              _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${atdef.name}`, at_var);
             }
           }
           break __ring_match73;
@@ -1796,6 +1801,7 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
   }
   let type_vars = [];
   const saved = map_clone(ctx.type_param_scope);
+  const saved_qualified = map_clone(ctx.qualified_assoc_scope);
   for (const tp of type_params) {
     const tv = env$TypeEnv_fresh_var(ctx.env);
     __ring_match74: {
@@ -1946,6 +1952,7 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
     _Map_insert(ctx.env.scope.fn_bounds, name, fn_bounds_list);
   }
   ctx.type_param_scope = saved;
+  ctx.qualified_assoc_scope = saved_qualified;
   if ((List_len(type_vars) > 0)) {
     env$TypeEnv_bind(ctx.env, name, new env$TypeScheme(fn_type, type_vars, scheme_bounds, Option_none));
   } else {

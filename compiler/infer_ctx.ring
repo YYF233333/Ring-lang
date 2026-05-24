@@ -57,7 +57,10 @@ pub struct InferCtx {
     pub var_lambda_depth: Map<Int, Int>,
     pub fn_mut_params: Map<Str, List<Bool>>,
     // Default effect handler dependency graph: effect name -> list of effect names it depends on
-    pub effect_default_deps: Map<Str, List<Str>>
+    pub effect_default_deps: Map<Str, List<Str>>,
+    // Qualified associated type scope: "T::Item" -> Type
+    // Used to disambiguate when multiple type params have same-named associated types
+    pub qualified_assoc_scope: Map<Str, Type>
 }
 
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -76,7 +79,8 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         lambda_depth: 0,
         var_lambda_depth: map_new(),
         fn_mut_params: map_new(),
-        effect_default_deps: map_new()
+        effect_default_deps: map_new(),
+        qualified_assoc_scope: map_new()
     }
 }
 
@@ -854,7 +858,18 @@ pub fn resolve_type_expr(mut ctx: InferCtx, texpr: TypeExpr) -> Type {
 
 // Resolve associated type T::Item by searching the type parameter's trait bounds
 fn resolve_assoc_type(mut ctx: InferCtx, type_param_name: Str, assoc_name: Str, span: Span) -> Type {
-    // First check: is the assoc_name already directly in the type_param_scope?
+    // First check: if we have a qualified path (T::Item), look up the qualified_assoc_scope
+    // which tracks per-type-param associated types to disambiguate when multiple
+    // type params have same-named associated types (e.g., T::Item vs U::Item)
+    if type_param_name != "" {
+        let qualified_key = "${type_param_name}::${assoc_name}"
+        match ctx.qualified_assoc_scope.get(qualified_key) {
+            some(ty) => { return ty },
+            none => {}
+        }
+    }
+
+    // Fallback: is the assoc_name already directly in the type_param_scope?
     // (This happens when trait body injects assoc type vars into scope during registration)
     match ctx.type_param_scope.get(assoc_name) {
         some(ty) => {

@@ -184,7 +184,7 @@ class CompileError {
 }
 
 class InferCtx {
-  constructor(env, subst, sink, type_param_scope, current_fn_return_type, current_fn_bounds, fn_bounds_stack, loop_depth, mod_path_stack, use_aliases, boxed_vars, lambda_depth, var_lambda_depth, fn_mut_params, effect_default_deps) {
+  constructor(env, subst, sink, type_param_scope, current_fn_return_type, current_fn_bounds, fn_bounds_stack, loop_depth, mod_path_stack, use_aliases, boxed_vars, lambda_depth, var_lambda_depth, fn_mut_params, effect_default_deps, qualified_assoc_scope) {
     this.env = env;
     this.subst = subst;
     this.sink = sink;
@@ -200,11 +200,12 @@ class InferCtx {
     this.var_lambda_depth = var_lambda_depth;
     this.fn_mut_params = fn_mut_params;
     this.effect_default_deps = effect_default_deps;
+    this.qualified_assoc_scope = qualified_assoc_scope;
   }
 }
 
 function new_infer_ctx(sink) {
-  return new InferCtx(env$new_type_env(), unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new(), set_new(), 0, map_new(), map_new(), map_new());
+  return new InferCtx(env$new_type_env(), unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new(), set_new(), 0, map_new(), map_new(), map_new(), map_new());
 }
 
 function infer_suggestion(code, message, context) {
@@ -1185,26 +1186,41 @@ function resolve_type_expr(ctx, texpr) {
 }
 
 function resolve_assoc_type(ctx, type_param_name, assoc_name, span) {
-  __ring_match52: {
-    const __ring_m52 = _Map_get(ctx.type_param_scope, assoc_name);
-    if (__ring_m52._tag === "some") {
-      const ty = __ring_m52._0;
+  if ((type_param_name !== "")) {
+    const qualified_key = `${type_param_name}::${assoc_name}`;
+    __ring_match52: {
+      const __ring_m52 = _Map_get(ctx.qualified_assoc_scope, qualified_key);
+      if (__ring_m52._tag === "some") {
+        const ty = __ring_m52._0;
+        return ty;
+        break __ring_match52;
+      }
+      if (__ring_m52._tag === "none") {
+        break __ring_match52;
+      }
+      __match_fail(__ring_m52);
+    }
+  }
+  __ring_match53: {
+    const __ring_m53 = _Map_get(ctx.type_param_scope, assoc_name);
+    if (__ring_m53._tag === "some") {
+      const ty = __ring_m53._0;
       return ty;
-      break __ring_match52;
+      break __ring_match53;
     }
-    if (__ring_m52._tag === "none") {
-      break __ring_match52;
+    if (__ring_m53._tag === "none") {
+      break __ring_match53;
     }
-    __match_fail(__ring_m52);
+    __match_fail(__ring_m53);
   }
   let found_types = [];
   let found_trait_names = [];
   for (const fb of ctx.current_fn_bounds) {
     if ((fb.type_param_name === type_param_name)) {
-      __ring_match53: {
-        const __ring_m53 = _Map_get(ctx.env.trait_reg.traits, fb.trait_name);
-        if (__ring_m53._tag === "some") {
-          const tdef = __ring_m53._0;
+      __ring_match54: {
+        const __ring_m54 = _Map_get(ctx.env.trait_reg.traits, fb.trait_name);
+        if (__ring_m54._tag === "some") {
+          const tdef = __ring_m54._0;
           for (const atdef of tdef.assoc_types) {
             if ((atdef.name === assoc_name)) {
               const at_var = env$TypeEnv_fresh_var(ctx.env);
@@ -1212,33 +1228,33 @@ function resolve_assoc_type(ctx, type_param_name, assoc_name, span) {
               List_push(found_trait_names, fb.trait_name);
             }
           }
-          break __ring_match53;
+          break __ring_match54;
         }
-        if (__ring_m53._tag === "none") {
-          break __ring_match53;
+        if (__ring_m54._tag === "none") {
+          break __ring_match54;
         }
-        __match_fail(__ring_m53);
+        __match_fail(__ring_m54);
       }
     }
   }
   if ((List_len(found_types) === 0)) {
-    __ring_match54: {
-      const __ring_m54 = _Map_get(ctx.type_param_scope, type_param_name);
-      if (__ring_m54._tag === "some") {
-        const tp_type = __ring_m54._0;
-        __ring_match55: {
-          const __ring_m55 = tp_type;
-          if (__ring_m55._tag === "TypeVar") {
-            const id = __ring_m55.id;
-            __ring_match56: {
-              const __ring_m56 = _Map_get(ctx.env.scope.var_bounds, id);
-              if (__ring_m56._tag === "some") {
-                const bound_set = __ring_m56._0;
+    __ring_match55: {
+      const __ring_m55 = _Map_get(ctx.type_param_scope, type_param_name);
+      if (__ring_m55._tag === "some") {
+        const tp_type = __ring_m55._0;
+        __ring_match56: {
+          const __ring_m56 = tp_type;
+          if (__ring_m56._tag === "TypeVar") {
+            const id = __ring_m56.id;
+            __ring_match57: {
+              const __ring_m57 = _Map_get(ctx.env.scope.var_bounds, id);
+              if (__ring_m57._tag === "some") {
+                const bound_set = __ring_m57._0;
                 for (const bound_name of _Set_to_list(bound_set)) {
-                  __ring_match57: {
-                    const __ring_m57 = _Map_get(ctx.env.trait_reg.traits, bound_name);
-                    if (__ring_m57._tag === "some") {
-                      const tdef = __ring_m57._0;
+                  __ring_match58: {
+                    const __ring_m58 = _Map_get(ctx.env.trait_reg.traits, bound_name);
+                    if (__ring_m58._tag === "some") {
+                      const tdef = __ring_m58._0;
                       for (const atdef of tdef.assoc_types) {
                         if ((atdef.name === assoc_name)) {
                           const at_var = env$TypeEnv_fresh_var(ctx.env);
@@ -1246,31 +1262,31 @@ function resolve_assoc_type(ctx, type_param_name, assoc_name, span) {
                           List_push(found_trait_names, bound_name);
                         }
                       }
-                      break __ring_match57;
+                      break __ring_match58;
                     }
-                    if (__ring_m57._tag === "none") {
-                      break __ring_match57;
+                    if (__ring_m58._tag === "none") {
+                      break __ring_match58;
                     }
-                    __match_fail(__ring_m57);
+                    __match_fail(__ring_m58);
                   }
                 }
-                break __ring_match56;
+                break __ring_match57;
               }
-              if (__ring_m56._tag === "none") {
-                break __ring_match56;
+              if (__ring_m57._tag === "none") {
+                break __ring_match57;
               }
-              __match_fail(__ring_m56);
+              __match_fail(__ring_m57);
             }
-            break __ring_match55;
+            break __ring_match56;
           }
-          break __ring_match55;
+          break __ring_match56;
         }
-        break __ring_match54;
+        break __ring_match55;
       }
-      if (__ring_m54._tag === "none") {
-        break __ring_match54;
+      if (__ring_m55._tag === "none") {
+        break __ring_match55;
       }
-      __match_fail(__ring_m54);
+      __match_fail(__ring_m55);
     }
   }
   if ((List_len(found_types) === 0)) {
@@ -1336,51 +1352,24 @@ function resolve_named_type(ctx, name, type_args, span) {
   if ((name === "Unit")) {
     return types$UNIT;
   }
-  __ring_match58: {
-    const __ring_m58 = _Map_get(ctx.type_param_scope, name);
-    if (__ring_m58._tag === "some") {
-      const tp = __ring_m58._0;
+  __ring_match59: {
+    const __ring_m59 = _Map_get(ctx.type_param_scope, name);
+    if (__ring_m59._tag === "some") {
+      const tp = __ring_m59._0;
       return tp;
-      break __ring_match58;
+      break __ring_match59;
     }
-    if (__ring_m58._tag === "none") {
-      break __ring_match58;
+    if (__ring_m59._tag === "none") {
+      break __ring_match59;
     }
-    __match_fail(__ring_m58);
+    __match_fail(__ring_m59);
   }
   if (((name === hir$BUILTIN_OPTION) && (List_len(type_args) === 1))) {
-    __ring_match59: {
-      const __ring_m59 = List_get(type_args, 0);
-      if (__ring_m59._tag === "some") {
-        const arg = __ring_m59._0;
-        return types$make_option_type(resolve_type_expr(ctx, arg));
-        break __ring_match59;
-      }
-      if (__ring_m59._tag === "none") {
-        break __ring_match59;
-      }
-      __match_fail(__ring_m59);
-    }
-  }
-  if (_Map_contains_key(ctx.env.types.structs, name)) {
     __ring_match60: {
-      const __ring_m60 = _Map_get(ctx.env.types.structs, name);
+      const __ring_m60 = List_get(type_args, 0);
       if (__ring_m60._tag === "some") {
-        const def = __ring_m60._0;
-        if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(def.type_params)))) {
-          const _ = type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(def.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(def.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none));
-        }
-        let resolved_params = [];
-        if ((List_len(type_args) > 0)) {
-          for (const a of type_args) {
-            List_push(resolved_params, resolve_type_expr(ctx, a));
-          }
-        } else {
-          for (const _ of def.type_params) {
-            List_push(resolved_params, env$TypeEnv_fresh_var(ctx.env));
-          }
-        }
-        return types$Type_StructType(def.name, resolved_params, def.fields);
+        const arg = __ring_m60._0;
+        return types$make_option_type(resolve_type_expr(ctx, arg));
         break __ring_match60;
       }
       if (__ring_m60._tag === "none") {
@@ -1389,9 +1378,9 @@ function resolve_named_type(ctx, name, type_args, span) {
       __match_fail(__ring_m60);
     }
   }
-  if (_Map_contains_key(ctx.env.types.enums, name)) {
+  if (_Map_contains_key(ctx.env.types.structs, name)) {
     __ring_match61: {
-      const __ring_m61 = _Map_get(ctx.env.types.enums, name);
+      const __ring_m61 = _Map_get(ctx.env.types.structs, name);
       if (__ring_m61._tag === "some") {
         const def = __ring_m61._0;
         if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(def.type_params)))) {
@@ -1407,7 +1396,7 @@ function resolve_named_type(ctx, name, type_args, span) {
             List_push(resolved_params, env$TypeEnv_fresh_var(ctx.env));
           }
         }
-        return types$Type_EnumType(def.name, resolved_params, def.variants);
+        return types$Type_StructType(def.name, resolved_params, def.fields);
         break __ring_match61;
       }
       if (__ring_m61._tag === "none") {
@@ -1416,10 +1405,37 @@ function resolve_named_type(ctx, name, type_args, span) {
       __match_fail(__ring_m61);
     }
   }
-  __ring_match62: {
-    const __ring_m62 = _Map_get(ctx.env.types.type_aliases, name);
-    if (__ring_m62._tag === "some") {
-      const alias = __ring_m62._0;
+  if (_Map_contains_key(ctx.env.types.enums, name)) {
+    __ring_match62: {
+      const __ring_m62 = _Map_get(ctx.env.types.enums, name);
+      if (__ring_m62._tag === "some") {
+        const def = __ring_m62._0;
+        if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(def.type_params)))) {
+          const _ = type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(def.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(def.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none));
+        }
+        let resolved_params = [];
+        if ((List_len(type_args) > 0)) {
+          for (const a of type_args) {
+            List_push(resolved_params, resolve_type_expr(ctx, a));
+          }
+        } else {
+          for (const _ of def.type_params) {
+            List_push(resolved_params, env$TypeEnv_fresh_var(ctx.env));
+          }
+        }
+        return types$Type_EnumType(def.name, resolved_params, def.variants);
+        break __ring_match62;
+      }
+      if (__ring_m62._tag === "none") {
+        break __ring_match62;
+      }
+      __match_fail(__ring_m62);
+    }
+  }
+  __ring_match63: {
+    const __ring_m63 = _Map_get(ctx.env.types.type_aliases, name);
+    if (__ring_m63._tag === "some") {
+      const alias = __ring_m63._0;
       if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(alias.type_params)))) {
         const _ = type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(alias.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(alias.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none));
       }
@@ -1434,146 +1450,146 @@ function resolve_named_type(ctx, name, type_args, span) {
       let i = 0;
       const limit = ((List_len(alias.type_param_vars) < List_len(resolved_args)) ? List_len(alias.type_param_vars) : List_len(resolved_args));
       while ((i < limit)) {
-        __ring_match63: {
-          const __ring_m63 = [List_get(alias.type_param_vars, i), List_get(resolved_args, i)];
-          if (Array.isArray(__ring_m63) && __ring_m63.length === 2 && __ring_m63[0]._tag === "some" && __ring_m63[1]._tag === "some") {
-            const var_id = __ring_m63[0]._0; const arg = __ring_m63[1]._0;
+        __ring_match64: {
+          const __ring_m64 = [List_get(alias.type_param_vars, i), List_get(resolved_args, i)];
+          if (Array.isArray(__ring_m64) && __ring_m64.length === 2 && __ring_m64[0]._tag === "some" && __ring_m64[1]._tag === "some") {
+            const var_id = __ring_m64[0]._0; const arg = __ring_m64[1]._0;
             _Map_insert(mapping, var_id, arg);
-            break __ring_match63;
+            break __ring_match64;
           }
-          break __ring_match63;
+          break __ring_match64;
         }
         i = (i + 1);
       }
       return env$apply_subst_map(mapping, alias.ty);
-      break __ring_match62;
+      break __ring_match63;
     }
-    if (__ring_m62._tag === "none") {
-      break __ring_match62;
+    if (__ring_m63._tag === "none") {
+      break __ring_match63;
     }
-    __match_fail(__ring_m62);
+    __match_fail(__ring_m63);
   }
   return type_error(ctx.sink, codes$E0204, `Unknown type: ${name}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown type '${name}'`)));
 }
 
 function bind_pattern(ctx, pattern, expected_type, subst) {
-  __ring_match64: {
-    const __ring_m64 = pattern;
-    if (__ring_m64._tag === "Wildcard") {
-      break __ring_match64;
+  __ring_match65: {
+    const __ring_m65 = pattern;
+    if (__ring_m65._tag === "Wildcard") {
+      break __ring_match65;
     }
-    if (__ring_m64._tag === "Binding") {
-      const name = __ring_m64.name; const span = __ring_m64.span;
+    if (__ring_m65._tag === "Binding") {
+      const name = __ring_m65.name; const span = __ring_m65.span;
       env$TypeEnv_bind_mono(ctx.env, name, env$apply_subst(subst, expected_type));
-      __ring_match65: {
-        const __ring_m65 = env$TypeEnv_lookup(ctx.env, name);
-        if (__ring_m65._tag === "some") {
-          const scheme = __ring_m65._0;
-          __ring_match66: {
-            const __ring_m66 = scheme.def_id;
-            if (__ring_m66._tag === "some") {
-              const did = __ring_m66._0;
+      __ring_match66: {
+        const __ring_m66 = env$TypeEnv_lookup(ctx.env, name);
+        if (__ring_m66._tag === "some") {
+          const scheme = __ring_m66._0;
+          __ring_match67: {
+            const __ring_m67 = scheme.def_id;
+            if (__ring_m67._tag === "some") {
+              const did = __ring_m67._0;
               return env$TypeEnv_record_def_span(ctx.env, did, span);
-              break __ring_match66;
+              break __ring_match67;
             }
-            if (__ring_m66._tag === "none") {
-              break __ring_match66;
+            if (__ring_m67._tag === "none") {
+              break __ring_match67;
             }
-            __match_fail(__ring_m66);
+            __match_fail(__ring_m67);
           }
-          break __ring_match65;
+          break __ring_match66;
         }
-        if (__ring_m65._tag === "none") {
-          break __ring_match65;
+        if (__ring_m66._tag === "none") {
+          break __ring_match66;
         }
-        __match_fail(__ring_m65);
+        __match_fail(__ring_m66);
       }
-      break __ring_match64;
+      break __ring_match65;
     }
-    if (__ring_m64._tag === "Constructor") {
-      const name = __ring_m64.name; const qualifier = __ring_m64.qualifier; const fields = __ring_m64.fields; const span = __ring_m64.span;
+    if (__ring_m65._tag === "Constructor") {
+      const name = __ring_m65.name; const qualifier = __ring_m65.qualifier; const fields = __ring_m65.fields; const span = __ring_m65.span;
       return bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span);
-      break __ring_match64;
+      break __ring_match65;
     }
-    if (__ring_m64._tag === "Literal") {
-      break __ring_match64;
+    if (__ring_m65._tag === "Literal") {
+      break __ring_match65;
     }
-    if (__ring_m64._tag === "NamedConstructor") {
-      const name = __ring_m64.name; const qualifier = __ring_m64.qualifier; const fields = __ring_m64.fields; const span = __ring_m64.span;
+    if (__ring_m65._tag === "NamedConstructor") {
+      const name = __ring_m65.name; const qualifier = __ring_m65.qualifier; const fields = __ring_m65.fields; const span = __ring_m65.span;
       return bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span);
-      break __ring_match64;
+      break __ring_match65;
     }
-    if (__ring_m64._tag === "TuplePattern") {
-      const elements = __ring_m64.elements; const span = __ring_m64.span;
+    if (__ring_m65._tag === "TuplePattern") {
+      const elements = __ring_m65.elements; const span = __ring_m65.span;
       const resolved = env$apply_subst(subst, expected_type);
-      __ring_match67: {
-        const __ring_m67 = resolved;
-        if (__ring_m67._tag === "TupleType") {
-          const type_elems = __ring_m67.elements;
+      __ring_match68: {
+        const __ring_m68 = resolved;
+        if (__ring_m68._tag === "TupleType") {
+          const type_elems = __ring_m68.elements;
           if ((List_len(elements) !== List_len(type_elems))) {
             const _ = type_error(ctx.sink, codes$E0301, `Tuple pattern has ${Int_to_str(List_len(elements))} elements but type has ${Int_to_str(List_len(type_elems))}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some("tuple arity mismatch")));
           }
           let i = 0;
           while ((i < List_len(elements))) {
-            __ring_match68: {
-              const __ring_m68 = [List_get(elements, i), List_get(type_elems, i)];
-              if (Array.isArray(__ring_m68) && __ring_m68.length === 2 && __ring_m68[0]._tag === "some" && __ring_m68[1]._tag === "some") {
-                const pat = __ring_m68[0]._0; const ty = __ring_m68[1]._0;
+            __ring_match69: {
+              const __ring_m69 = [List_get(elements, i), List_get(type_elems, i)];
+              if (Array.isArray(__ring_m69) && __ring_m69.length === 2 && __ring_m69[0]._tag === "some" && __ring_m69[1]._tag === "some") {
+                const pat = __ring_m69[0]._0; const ty = __ring_m69[1]._0;
                 bind_pattern(ctx, pat, ty, subst);
-                break __ring_match68;
+                break __ring_match69;
               }
-              break __ring_match68;
+              break __ring_match69;
             }
             i = (i + 1);
           }
-          break __ring_match67;
+          break __ring_match68;
         }
         const _ = type_error(ctx.sink, codes$E0301, `Tuple pattern requires tuple type, got ${types$type_to_string(resolved)}`, span, diagnostics$DiagnosticContext_TypeMismatch("tuple", types$type_to_string(resolved), Option_none));
-        break __ring_match67;
+        break __ring_match68;
       }
-      break __ring_match64;
+      break __ring_match65;
     }
-    if (__ring_m64._tag === "OrPattern") {
-      const patterns = __ring_m64.patterns; const span = __ring_m64.span;
+    if (__ring_m65._tag === "OrPattern") {
+      const patterns = __ring_m65.patterns; const span = __ring_m65.span;
       for (const pat of patterns) {
         bind_pattern(ctx, pat, expected_type, subst);
       }
-      break __ring_match64;
+      break __ring_match65;
     }
-    __match_fail(__ring_m64);
+    __match_fail(__ring_m65);
   }
 }
 
 function bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span) {
   const enum_name = resolve_pattern_enum(ctx, name, qualifier, span);
-  __ring_match69: {
-    const __ring_m69 = enum_name;
-    if (__ring_m69._tag === "some") {
-      const ename = __ring_m69._0;
-      __ring_match70: {
-        const __ring_m70 = _Map_get(ctx.env.types.enums, ename);
-        if (__ring_m70._tag === "some") {
-          const enum_def = __ring_m70._0;
+  __ring_match70: {
+    const __ring_m70 = enum_name;
+    if (__ring_m70._tag === "some") {
+      const ename = __ring_m70._0;
+      __ring_match71: {
+        const __ring_m71 = _Map_get(ctx.env.types.enums, ename);
+        if (__ring_m71._tag === "some") {
+          const enum_def = __ring_m71._0;
           const variant = ((__a) => { const __i = __a.findIndex((function(v) { return (v.name === name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(enum_def.variants);
-          __ring_match71: {
-            const __ring_m71 = variant;
-            if (__ring_m71._tag === "some") {
-              const v = __ring_m71._0;
+          __ring_match72: {
+            const __ring_m72 = variant;
+            if (__ring_m72._tag === "some") {
+              const v = __ring_m72._0;
               const resolved_expected = env$apply_subst(subst, expected_type);
-              __ring_match72: {
-                const __ring_m72 = resolved_expected;
-                if (__ring_m72._tag === "EnumType") {
-                  const rname = __ring_m72.name;
+              __ring_match73: {
+                const __ring_m73 = resolved_expected;
+                if (__ring_m73._tag === "EnumType") {
+                  const rname = __ring_m73.name;
                   if ((rname !== ename)) {
                     const _ = type_error(ctx.sink, codes$E0301, `variant '${name}' belongs to enum '${ename}', not '${rname}'`, span, diagnostics$DiagnosticContext_TypeMismatch(rname, ename, Option_none));
                   }
-                  break __ring_match72;
+                  break __ring_match73;
                 }
-                if (__ring_m72._tag === "TypeVar") {
-                  break __ring_match72;
+                if (__ring_m73._tag === "TypeVar") {
+                  break __ring_match73;
                 }
                 const _ = type_error(ctx.sink, codes$E0301, `cannot destructure type '${types$type_to_string(resolved_expected)}' with constructor pattern '${name}'`, span, diagnostics$DiagnosticContext_PatternError("constructor pattern on non-enum type"));
-                break __ring_match72;
+                break __ring_match73;
               }
               const inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected);
               if ((List_len(fields) !== List_len(v.fields))) {
@@ -1581,157 +1597,157 @@ function bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, s
               }
               let i = 0;
               while (((i < List_len(fields)) && (i < List_len(v.fields)))) {
-                __ring_match73: {
-                  const __ring_m73 = [List_get(fields, i), List_get(v.fields, i)];
-                  if (Array.isArray(__ring_m73) && __ring_m73.length === 2 && __ring_m73[0]._tag === "some" && __ring_m73[1]._tag === "some") {
-                    const fpat = __ring_m73[0]._0; const ftype = __ring_m73[1]._0;
+                __ring_match74: {
+                  const __ring_m74 = [List_get(fields, i), List_get(v.fields, i)];
+                  if (Array.isArray(__ring_m74) && __ring_m74.length === 2 && __ring_m74[0]._tag === "some" && __ring_m74[1]._tag === "some") {
+                    const fpat = __ring_m74[0]._0; const ftype = __ring_m74[1]._0;
                     const field_type = ((_Map_len(inst_map) > 0) ? env$apply_subst_map(inst_map, ftype) : ftype);
                     bind_pattern(ctx, fpat, field_type, subst);
-                    break __ring_match73;
+                    break __ring_match74;
                   }
-                  break __ring_match73;
+                  break __ring_match74;
                 }
                 i = (i + 1);
               }
-              break __ring_match71;
+              break __ring_match72;
             }
-            if (__ring_m71._tag === "none") {
-              break __ring_match71;
+            if (__ring_m72._tag === "none") {
+              break __ring_match72;
             }
-            __match_fail(__ring_m71);
+            __match_fail(__ring_m72);
           }
-          break __ring_match70;
+          break __ring_match71;
         }
-        if (__ring_m70._tag === "none") {
-          break __ring_match70;
+        if (__ring_m71._tag === "none") {
+          break __ring_match71;
         }
-        __match_fail(__ring_m70);
+        __match_fail(__ring_m71);
       }
-      break __ring_match69;
+      break __ring_match70;
     }
-    if (__ring_m69._tag === "none") {
-      break __ring_match69;
+    if (__ring_m70._tag === "none") {
+      break __ring_match70;
     }
-    __match_fail(__ring_m69);
+    __match_fail(__ring_m70);
   }
 }
 
 function bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_type, subst, span) {
   let resolved_qualifier = qualifier;
-  __ring_match74: {
-    const __ring_m74 = qualifier;
-    if (__ring_m74._tag === "some") {
-      const q = __ring_m74._0;
+  __ring_match75: {
+    const __ring_m75 = qualifier;
+    if (__ring_m75._tag === "some") {
+      const q = __ring_m75._0;
       if (((q === "self") || Str_starts_with(q, "super"))) {
-        __ring_match75: {
-          const __ring_m75 = resolve_relative_qualifier(q, ctx.mod_path_stack);
-          if (__ring_m75._tag === "some") {
-            const prefix = __ring_m75._0;
+        __ring_match76: {
+          const __ring_m76 = resolve_relative_qualifier(q, ctx.mod_path_stack);
+          if (__ring_m76._tag === "some") {
+            const prefix = __ring_m76._0;
             if ((prefix === "")) {
               resolved_qualifier = Option_none;
             } else {
               resolved_qualifier = Option_some(prefix);
             }
-            break __ring_match75;
+            break __ring_match76;
           }
-          if (__ring_m75._tag === "none") {
+          if (__ring_m76._tag === "none") {
             const _ = type_error(ctx.sink, codes$E0705, `Cannot use '${q}' — relative path exceeds module nesting depth`, span, diagnostics$DiagnosticContext_OtherContext(Option_some("relative path out of scope")));
             return;
-            break __ring_match75;
+            break __ring_match76;
           }
-          __match_fail(__ring_m75);
+          __match_fail(__ring_m76);
         }
       }
-      break __ring_match74;
+      break __ring_match75;
     }
-    if (__ring_m74._tag === "none") {
-      break __ring_match74;
+    if (__ring_m75._tag === "none") {
+      break __ring_match75;
     }
-    __match_fail(__ring_m74);
+    __match_fail(__ring_m75);
   }
   const enum_name = try_resolve_pattern_enum(ctx, name, resolved_qualifier);
-  __ring_match76: {
-    const __ring_m76 = enum_name;
-    if (__ring_m76._tag === "some") {
-      const ename = __ring_m76._0;
-      __ring_match77: {
-        const __ring_m77 = _Map_get(ctx.env.types.enums, ename);
-        if (__ring_m77._tag === "some") {
-          const enum_def = __ring_m77._0;
+  __ring_match77: {
+    const __ring_m77 = enum_name;
+    if (__ring_m77._tag === "some") {
+      const ename = __ring_m77._0;
+      __ring_match78: {
+        const __ring_m78 = _Map_get(ctx.env.types.enums, ename);
+        if (__ring_m78._tag === "some") {
+          const enum_def = __ring_m78._0;
           const variant = ((__a) => { const __i = __a.findIndex((function(v) { return (v.name === name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(enum_def.variants);
-          __ring_match78: {
-            const __ring_m78 = variant;
-            if (__ring_m78._tag === "some") {
-              const v = __ring_m78._0;
-              __ring_match79: {
-                const __ring_m79 = v.field_names;
-                if (__ring_m79._tag === "some") {
-                  const vfield_names = __ring_m79._0;
+          __ring_match79: {
+            const __ring_m79 = variant;
+            if (__ring_m79._tag === "some") {
+              const v = __ring_m79._0;
+              __ring_match80: {
+                const __ring_m80 = v.field_names;
+                if (__ring_m80._tag === "some") {
+                  const vfield_names = __ring_m80._0;
                   const resolved_expected = env$apply_subst(subst, expected_type);
-                  __ring_match80: {
-                    const __ring_m80 = resolved_expected;
-                    if (__ring_m80._tag === "EnumType") {
-                      const rname = __ring_m80.name;
+                  __ring_match81: {
+                    const __ring_m81 = resolved_expected;
+                    if (__ring_m81._tag === "EnumType") {
+                      const rname = __ring_m81.name;
                       if ((rname !== ename)) {
                         const _ = type_error(ctx.sink, codes$E0301, `variant '${name}' belongs to enum '${ename}', not '${rname}'`, span, diagnostics$DiagnosticContext_TypeMismatch(rname, ename, Option_none));
                       }
-                      break __ring_match80;
+                      break __ring_match81;
                     }
-                    break __ring_match80;
+                    break __ring_match81;
                   }
                   const inst_map = build_instantiation_map(enum_def.type_param_vars, resolved_expected);
                   for (const field of fields) {
                     const field_idx = List_index_of(vfield_names, field.name, __Str_Eq);
-                    __ring_match81: {
-                      const __ring_m81 = field_idx;
-                      if (__ring_m81._tag === "some") {
-                        const idx = __ring_m81._0;
-                        __ring_match82: {
-                          const __ring_m82 = List_get(v.fields, idx);
-                          if (__ring_m82._tag === "some") {
-                            const ftype = __ring_m82._0;
+                    __ring_match82: {
+                      const __ring_m82 = field_idx;
+                      if (__ring_m82._tag === "some") {
+                        const idx = __ring_m82._0;
+                        __ring_match83: {
+                          const __ring_m83 = List_get(v.fields, idx);
+                          if (__ring_m83._tag === "some") {
+                            const ftype = __ring_m83._0;
                             const field_type = ((_Map_len(inst_map) > 0) ? env$apply_subst_map(inst_map, ftype) : ftype);
                             bind_pattern(ctx, field.pattern, field_type, subst);
-                            break __ring_match82;
+                            break __ring_match83;
                           }
-                          if (__ring_m82._tag === "none") {
-                            break __ring_match82;
+                          if (__ring_m83._tag === "none") {
+                            break __ring_match83;
                           }
-                          __match_fail(__ring_m82);
+                          __match_fail(__ring_m83);
                         }
-                        break __ring_match81;
+                        break __ring_match82;
                       }
-                      if (__ring_m81._tag === "none") {
+                      if (__ring_m82._tag === "none") {
                         const _ = type_error(ctx.sink, codes$E0301, `variant '${name}' has no field '${field.name}'`, field.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown field '${field.name}'`)));
-                        break __ring_match81;
+                        break __ring_match82;
                       }
-                      __match_fail(__ring_m81);
+                      __match_fail(__ring_m82);
                     }
                   }
-                  break __ring_match79;
+                  break __ring_match80;
                 }
-                if (__ring_m79._tag === "none") {
-                  break __ring_match79;
+                if (__ring_m80._tag === "none") {
+                  break __ring_match80;
                 }
-                __match_fail(__ring_m79);
+                __match_fail(__ring_m80);
               }
-              break __ring_match78;
+              break __ring_match79;
             }
-            if (__ring_m78._tag === "none") {
-              break __ring_match78;
+            if (__ring_m79._tag === "none") {
+              break __ring_match79;
             }
-            __match_fail(__ring_m78);
+            __match_fail(__ring_m79);
           }
-          break __ring_match77;
+          break __ring_match78;
         }
-        if (__ring_m77._tag === "none") {
-          break __ring_match77;
+        if (__ring_m78._tag === "none") {
+          break __ring_match78;
         }
-        __match_fail(__ring_m77);
+        __match_fail(__ring_m78);
       }
-      break __ring_match76;
+      break __ring_match77;
     }
-    if (__ring_m76._tag === "none") {
+    if (__ring_m77._tag === "none") {
       const struct_name = (function() {
   const __ring_m = resolved_qualifier;
   if (__ring_m._tag === "some") { const q = __ring_m._0; return `${q}::${name}`; }
@@ -1739,205 +1755,188 @@ function bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_t
   __match_fail(__ring_m);
 })();
       return bind_struct_pattern_fields(ctx, struct_name, name, fields, expected_type, subst, span);
-      break __ring_match76;
+      break __ring_match77;
     }
-    __match_fail(__ring_m76);
+    __match_fail(__ring_m77);
   }
 }
 
 function bind_struct_pattern_fields(ctx, struct_name, display_name, fields, expected_type, subst, span) {
-  __ring_match83: {
-    const __ring_m83 = _Map_get(ctx.env.types.structs, struct_name);
-    if (__ring_m83._tag === "some") {
-      const struct_def = __ring_m83._0;
+  __ring_match84: {
+    const __ring_m84 = _Map_get(ctx.env.types.structs, struct_name);
+    if (__ring_m84._tag === "some") {
+      const struct_def = __ring_m84._0;
       const resolved_expected = env$apply_subst(subst, expected_type);
       const inst_map = build_instantiation_map(struct_def.type_param_vars, resolved_expected);
       for (const field of fields) {
         const found = ((__a) => { const __i = __a.findIndex((function(sf) { return (sf.name === field.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(struct_def.fields);
-        __ring_match84: {
-          const __ring_m84 = found;
-          if (__ring_m84._tag === "some") {
-            const sf = __ring_m84._0;
+        __ring_match85: {
+          const __ring_m85 = found;
+          if (__ring_m85._tag === "some") {
+            const sf = __ring_m85._0;
             const field_type = ((_Map_len(inst_map) > 0) ? env$apply_subst_map(inst_map, sf.ty) : sf.ty);
             bind_pattern(ctx, field.pattern, field_type, subst);
-            break __ring_match84;
-          }
-          if (__ring_m84._tag === "none") {
-            const _ = type_error(ctx.sink, codes$E0301, `struct '${display_name}' has no field '${field.name}'`, field.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown field '${field.name}'`)));
-            break __ring_match84;
-          }
-          __match_fail(__ring_m84);
-        }
-      }
-      break __ring_match83;
-    }
-    if (__ring_m83._tag === "none") {
-      if ((List_len(ctx.mod_path_stack) > 0)) {
-        const mod_prefix = List_join(ctx.mod_path_stack, "::");
-        const full_name = `${mod_prefix}::${struct_name}`;
-        __ring_match85: {
-          const __ring_m85 = _Map_get(ctx.env.types.structs, full_name);
-          if (__ring_m85._tag === "some") {
-            const sdef = __ring_m85._0;
-            const resolved_expected = env$apply_subst(subst, expected_type);
-            const inst_map = build_instantiation_map(sdef.type_param_vars, resolved_expected);
-            for (const field of fields) {
-              const found = ((__a) => { const __i = __a.findIndex((function(sf) { return (sf.name === field.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(sdef.fields);
-              __ring_match86: {
-                const __ring_m86 = found;
-                if (__ring_m86._tag === "some") {
-                  const sf = __ring_m86._0;
-                  const field_type = ((_Map_len(inst_map) > 0) ? env$apply_subst_map(inst_map, sf.ty) : sf.ty);
-                  bind_pattern(ctx, field.pattern, field_type, subst);
-                  break __ring_match86;
-                }
-                if (__ring_m86._tag === "none") {
-                  break __ring_match86;
-                }
-                __match_fail(__ring_m86);
-              }
-            }
             break __ring_match85;
           }
           if (__ring_m85._tag === "none") {
+            const _ = type_error(ctx.sink, codes$E0301, `struct '${display_name}' has no field '${field.name}'`, field.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`unknown field '${field.name}'`)));
             break __ring_match85;
           }
           __match_fail(__ring_m85);
         }
       }
-      break __ring_match83;
+      break __ring_match84;
     }
-    __match_fail(__ring_m83);
+    if (__ring_m84._tag === "none") {
+      if ((List_len(ctx.mod_path_stack) > 0)) {
+        const mod_prefix = List_join(ctx.mod_path_stack, "::");
+        const full_name = `${mod_prefix}::${struct_name}`;
+        __ring_match86: {
+          const __ring_m86 = _Map_get(ctx.env.types.structs, full_name);
+          if (__ring_m86._tag === "some") {
+            const sdef = __ring_m86._0;
+            const resolved_expected = env$apply_subst(subst, expected_type);
+            const inst_map = build_instantiation_map(sdef.type_param_vars, resolved_expected);
+            for (const field of fields) {
+              const found = ((__a) => { const __i = __a.findIndex((function(sf) { return (sf.name === field.name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(sdef.fields);
+              __ring_match87: {
+                const __ring_m87 = found;
+                if (__ring_m87._tag === "some") {
+                  const sf = __ring_m87._0;
+                  const field_type = ((_Map_len(inst_map) > 0) ? env$apply_subst_map(inst_map, sf.ty) : sf.ty);
+                  bind_pattern(ctx, field.pattern, field_type, subst);
+                  break __ring_match87;
+                }
+                if (__ring_m87._tag === "none") {
+                  break __ring_match87;
+                }
+                __match_fail(__ring_m87);
+              }
+            }
+            break __ring_match86;
+          }
+          if (__ring_m86._tag === "none") {
+            break __ring_match86;
+          }
+          __match_fail(__ring_m86);
+        }
+      }
+      break __ring_match84;
+    }
+    __match_fail(__ring_m84);
   }
 }
 
 function try_resolve_pattern_enum(ctx, variant_name, qualifier) {
-  __ring_match87: {
-    const __ring_m87 = qualifier;
-    if (__ring_m87._tag === "some") {
-      const q = __ring_m87._0;
+  __ring_match88: {
+    const __ring_m88 = qualifier;
+    if (__ring_m88._tag === "some") {
+      const q = __ring_m88._0;
       const direct = _Map_get(ctx.env.types.enums, q);
-      __ring_match88: {
-        const __ring_m88 = direct;
-        if (__ring_m88._tag === "some") {
-          const enum_def = __ring_m88._0;
+      __ring_match89: {
+        const __ring_m89 = direct;
+        if (__ring_m89._tag === "some") {
+          const enum_def = __ring_m89._0;
           if (enum_def.variants.some((function(v) { return (v.name === variant_name); }))) {
             return Option_some(enum_def.name);
           }
           return Option_none;
-          break __ring_match88;
+          break __ring_match89;
         }
-        if (__ring_m88._tag === "none") {
-          break __ring_match88;
+        if (__ring_m89._tag === "none") {
+          break __ring_match89;
         }
-        __match_fail(__ring_m88);
+        __match_fail(__ring_m89);
       }
       if ((List_len(ctx.mod_path_stack) > 0)) {
         const mod_prefix = List_join(ctx.mod_path_stack, "::");
         const full_q = `${mod_prefix}::${q}`;
         const fallback = _Map_get(ctx.env.types.enums, full_q);
-        __ring_match89: {
-          const __ring_m89 = fallback;
-          if (__ring_m89._tag === "some") {
-            const enum_def2 = __ring_m89._0;
+        __ring_match90: {
+          const __ring_m90 = fallback;
+          if (__ring_m90._tag === "some") {
+            const enum_def2 = __ring_m90._0;
             if (enum_def2.variants.some((function(v) { return (v.name === variant_name); }))) {
               return Option_some(enum_def2.name);
             }
-            break __ring_match89;
+            break __ring_match90;
           }
-          if (__ring_m89._tag === "none") {
-            break __ring_match89;
+          if (__ring_m90._tag === "none") {
+            break __ring_match90;
           }
-          __match_fail(__ring_m89);
+          __match_fail(__ring_m90);
         }
       }
       return Option_none;
-      break __ring_match87;
+      break __ring_match88;
     }
-    if (__ring_m87._tag === "none") {
+    if (__ring_m88._tag === "none") {
       return _Map_get(ctx.env.types.variant_to_enum, variant_name);
-      break __ring_match87;
+      break __ring_match88;
     }
-    __match_fail(__ring_m87);
+    __match_fail(__ring_m88);
   }
 }
 
 function resolve_pattern_enum(ctx, variant_name, qualifier, span) {
-  __ring_match90: {
-    const __ring_m90 = qualifier;
-    if (__ring_m90._tag === "some") {
-      const q = __ring_m90._0;
+  __ring_match91: {
+    const __ring_m91 = qualifier;
+    if (__ring_m91._tag === "some") {
+      const q = __ring_m91._0;
       const direct = _Map_get(ctx.env.types.enums, q);
-      __ring_match91: {
-        const __ring_m91 = direct;
-        if (__ring_m91._tag === "some") {
-          const enum_def = __ring_m91._0;
+      __ring_match92: {
+        const __ring_m92 = direct;
+        if (__ring_m92._tag === "some") {
+          const enum_def = __ring_m92._0;
           if (enum_def.variants.some((function(v) { return (v.name === variant_name); }))) {
             return Option_some(enum_def.name);
           }
           const _ = type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none));
           return Option_none;
-          break __ring_match91;
+          break __ring_match92;
         }
-        if (__ring_m91._tag === "none") {
-          break __ring_match91;
+        if (__ring_m92._tag === "none") {
+          break __ring_match92;
         }
-        __match_fail(__ring_m91);
+        __match_fail(__ring_m92);
       }
       if ((List_len(ctx.mod_path_stack) > 0)) {
         const mod_prefix = List_join(ctx.mod_path_stack, "::");
         const full_q = `${mod_prefix}::${q}`;
         const fallback = _Map_get(ctx.env.types.enums, full_q);
-        __ring_match92: {
-          const __ring_m92 = fallback;
-          if (__ring_m92._tag === "some") {
-            const enum_def2 = __ring_m92._0;
+        __ring_match93: {
+          const __ring_m93 = fallback;
+          if (__ring_m93._tag === "some") {
+            const enum_def2 = __ring_m93._0;
             if (enum_def2.variants.some((function(v) { return (v.name === variant_name); }))) {
               return Option_some(enum_def2.name);
             }
-            break __ring_match92;
+            break __ring_match93;
           }
-          if (__ring_m92._tag === "none") {
-            break __ring_match92;
+          if (__ring_m93._tag === "none") {
+            break __ring_match93;
           }
-          __match_fail(__ring_m92);
+          __match_fail(__ring_m93);
         }
       }
       const _ = type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${variant_name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(variant_name, Option_none));
       return Option_none;
-      break __ring_match90;
+      break __ring_match91;
     }
-    if (__ring_m90._tag === "none") {
+    if (__ring_m91._tag === "none") {
       return _Map_get(ctx.env.types.variant_to_enum, variant_name);
-      break __ring_match90;
+      break __ring_match91;
     }
-    __match_fail(__ring_m90);
+    __match_fail(__ring_m91);
   }
 }
 
 function build_instantiation_map(type_param_vars, resolved_expected) {
   let inst_map = map_new();
-  __ring_match93: {
-    const __ring_m93 = resolved_expected;
-    if (__ring_m93._tag === "EnumType") {
-      const type_params = __ring_m93.type_params;
-      let i = 0;
-      while (((i < List_len(type_param_vars)) && (i < List_len(type_params)))) {
-        __ring_match94: {
-          const __ring_m94 = [List_get(type_param_vars, i), List_get(type_params, i)];
-          if (Array.isArray(__ring_m94) && __ring_m94.length === 2 && __ring_m94[0]._tag === "some" && __ring_m94[1]._tag === "some") {
-            const var_id = __ring_m94[0]._0; const tp = __ring_m94[1]._0;
-            _Map_insert(inst_map, var_id, tp);
-            break __ring_match94;
-          }
-          break __ring_match94;
-        }
-        i = (i + 1);
-      }
-      break __ring_match93;
-    }
-    if (__ring_m93._tag === "StructType") {
-      const type_params = __ring_m93.type_params;
+  __ring_match94: {
+    const __ring_m94 = resolved_expected;
+    if (__ring_m94._tag === "EnumType") {
+      const type_params = __ring_m94.type_params;
       let i = 0;
       while (((i < List_len(type_param_vars)) && (i < List_len(type_params)))) {
         __ring_match95: {
@@ -1951,9 +1950,26 @@ function build_instantiation_map(type_param_vars, resolved_expected) {
         }
         i = (i + 1);
       }
-      break __ring_match93;
+      break __ring_match94;
     }
-    break __ring_match93;
+    if (__ring_m94._tag === "StructType") {
+      const type_params = __ring_m94.type_params;
+      let i = 0;
+      while (((i < List_len(type_param_vars)) && (i < List_len(type_params)))) {
+        __ring_match96: {
+          const __ring_m96 = [List_get(type_param_vars, i), List_get(type_params, i)];
+          if (Array.isArray(__ring_m96) && __ring_m96.length === 2 && __ring_m96[0]._tag === "some" && __ring_m96[1]._tag === "some") {
+            const var_id = __ring_m96[0]._0; const tp = __ring_m96[1]._0;
+            _Map_insert(inst_map, var_id, tp);
+            break __ring_match96;
+          }
+          break __ring_match96;
+        }
+        i = (i + 1);
+      }
+      break __ring_match94;
+    }
+    break __ring_match94;
   }
   return inst_map;
 }

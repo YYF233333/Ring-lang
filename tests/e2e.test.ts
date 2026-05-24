@@ -504,6 +504,7 @@ const cases: TestCase[] = [
   { file: "assoc_type_qualified.ring", expected: "assoc type qualified: ok\n" },
   { file: "assoc_type_default.ring", expected: "assoc type default: ok\n" },
   { file: "assoc_type_constraint.ring", expected: "assoc type constraint: ok\n" },
+  { file: "assoc_type_qualified_multi.ring", expected: "assoc_type_qualified_multi: ok\n" },
   { file: "or_pattern.ring", expected: "or pattern: ok\n" },
 ];
 

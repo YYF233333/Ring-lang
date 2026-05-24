@@ -289,7 +289,7 @@ function new_infer_ctx(sink) {
   let env = env$new_type_env();
   builtins$register_builtins(env);
   builtins$register_hof_intrinsics(env);
-  return new infer_ctx$InferCtx(env, unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new(), set_new(), 0, map_new(), map_new(), map_new());
+  return new infer_ctx$InferCtx(env, unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new(), set_new(), 0, map_new(), map_new(), map_new(), map_new());
 }
 
 function check(program, sink) {

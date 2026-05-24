@@ -1297,6 +1297,8 @@ fn inject_assoc_types_from_bounds(mut ctx: InferCtx, type_params: List<TypeParam
             for ac in b.assoc_constraints {
                 let concrete_ty = resolve_type_expr(ctx, ac.ty)
                 ctx.type_param_scope.insert(ac.name, concrete_ty)
+                // Also insert into qualified_assoc_scope for disambiguation
+                ctx.qualified_assoc_scope.insert("${tp.name}::${ac.name}", concrete_ty)
             }
             // Then, inject remaining associated types from trait definition
             match ctx.env.trait_reg.traits.get(b.trait_name) {
@@ -1306,6 +1308,12 @@ fn inject_assoc_types_from_bounds(mut ctx: InferCtx, type_params: List<TypeParam
                         if !ctx.type_param_scope.contains_key(atdef.name) {
                             let at_var = ctx.env.fresh_var()
                             ctx.type_param_scope.insert(atdef.name, at_var)
+                            ctx.qualified_assoc_scope.insert("${tp.name}::${atdef.name}", at_var)
+                        } else {
+                            // Already in scope (another type param's bound injected it).
+                            // Still inject into qualified_assoc_scope with this type param's own fresh var.
+                            let at_var = ctx.env.fresh_var()
+                            ctx.qualified_assoc_scope.insert("${tp.name}::${atdef.name}", at_var)
                         }
                     }
                 },
@@ -1328,6 +1336,7 @@ fn register_fn_common(
 
     let mut type_vars: List<Int> = []
     let saved = map_clone(ctx.type_param_scope)
+    let saved_qualified = map_clone(ctx.qualified_assoc_scope)
     for tp in type_params {
         let tv = ctx.env.fresh_var()
         match tv { Type::TypeVar { id, .. } => { type_vars.push(id) }, _ => {} }
@@ -1425,6 +1434,7 @@ fn register_fn_common(
     }
 
     ctx.type_param_scope = saved
+    ctx.qualified_assoc_scope = saved_qualified
 
     if type_vars.len() > 0 {
         ctx.env.bind(name, TypeScheme { ty: fn_type, type_vars: type_vars, bounds: scheme_bounds, def_id: none })

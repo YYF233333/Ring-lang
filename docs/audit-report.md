@@ -28,7 +28,7 @@
 
 发现者：Opus
 
-### #115 E0513 dead error code: associated type bound not satisfied [medium] [open]
+### #115 E0513 dead error code: associated type bound not satisfied [medium] [doing]
 
 `E0513` is defined at `codes.ring:52` with description "Associated type bound not satisfied" but never emitted by any compiler pass. When a trait declares `type Item: Eq` (an associated type with bounds), `AssocTypeDef.bounds` stores the bound list but `register_impl` (`infer_register.ring:756-770`) only checks for missing/extra associated types, not whether concrete types satisfy declared bounds. For example `impl T for S { type Item = Int }` when `trait T { type Item: Clone }` would succeed without verifying `Int` satisfies `Clone`.
 
@@ -56,14 +56,6 @@
 发现者：Opus
 
 
-### #129 `resolve_assoc_type` 忽略限定的类型参数名 [medium] [open]
-
-`resolve_assoc_type(ctx, type_param_name, assoc_name, span)`（`infer_ctx.ring:818-828`）首先检查 `type_param_scope.get(assoc_name)`，若找到立即返回，**完全忽略 `type_param_name` 参数**。当两个类型参数 `T: TraitA` 和 `U: TraitB` 各有同名关联类型 `Item` 时，写 `U::Item` 会返回 `T` 的 `Item`（如果 `T` 的 bound 先被处理并将 `Item` 注入了共享的 `type_param_scope`）。
-
-**文件**：`compiler/infer_ctx.ring:821-826`
-**修复方向**：在 first-pass 检查中验证返回的类型是否来自特定 `type_param_name` 的 bound 注入。可能需要 per-type-param 的 scope 跟踪。
-
-发现者：Opus
 
 ### #121 `check_fn_body` Zonk names 不包含关联类型变量名 [low] [open]
 
@@ -243,7 +235,7 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 ## 模块/诊断
 
-### #126 `mut_methods` 多文件编译不导出/导入 [medium] [open]
+### #126 `mut_methods` 多文件编译不导出/导入 [medium] [doing]
 
 `TraitRegistry.mut_methods`（跟踪哪些方法是 `mut self`）在单文件编译中正确填充，但不包含在 `ModuleExports` 中，`inject_module_exports` 也不注入。在多文件模式下，对来自其他模块的类型调用 `mut self` 方法时：(1) 不会注入 `mut<T>` effect；(2) 不会检查不可变绑定调用 mutating 方法（E0208）。
 
@@ -252,7 +244,7 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：Opus
 
-### #127 `fn_mut_params` 多文件编译不导出/导入 [medium] [open]
+### #127 `fn_mut_params` 多文件编译不导出/导入 [medium] [doing]
 
 `fn_mut_params`（跟踪哪些函数参数是 `mut` 值类型参数以便自动 boxing）在单文件编译中正确填充，但不导出到 `ModuleExports`。在多文件模式下，调用来自其他模块的带 `mut` 值类型参数的函数时，调用点不生成 `{value: ...}` 包装，mutation 不会反映回调用方。
 
