@@ -937,7 +937,7 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
     __ring_match39: {
       const __ring_m39 = method;
       if (__ring_m39._tag === "Fn") {
-        const mname = __ring_m39.name; const method_tps = __ring_m39.type_params; const params = __ring_m39.params; const return_type = __ring_m39.return_type; const is_abstract = __ring_m39.is_abstract;
+        const mname = __ring_m39.name; const method_tps = __ring_m39.type_params; const params = __ring_m39.params; const return_type = __ring_m39.return_type; const declared_effects = __ring_m39.declared_effects; const is_abstract = __ring_m39.is_abstract;
         let param_types = [];
         let param_muts = [];
         for (const p of params) {
@@ -966,7 +966,13 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
   if (__ring_m._tag === "none") { return env$TypeEnv_fresh_var(ctx.env); }
   __match_fail(__ring_m);
 })();
-        const fn_type = types$Type_FnType(param_types, ret, types$EMPTY_ROW);
+        const method_effects = (function() {
+  const __ring_m = declared_effects;
+  if (__ring_m._tag === "some") { const de = __ring_m._0; return resolve_declared_effects(ctx, de); }
+  if (__ring_m._tag === "none") { return types$EMPTY_ROW; }
+  __match_fail(__ring_m);
+})();
+        const fn_type = types$Type_FnType(param_types, ret, method_effects);
         List_push(trait_methods, new env$TraitMethodDef(mname, fn_type, (!is_abstract), param_muts, method_tps));
         break __ring_match39;
       }

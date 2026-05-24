@@ -421,6 +421,9 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
             let mut all: List<Str> = []
             all.push(receiver_arg)
             all.extend(other_args)
+            // #77: Forward evidence params for dict dispatch calls with effects
+            let ev_args = get_callee_evidence_args(ctx, hexpr_type(callee), none)
+            if ev_args.len() > 0 { all.push(ev_args) }
             let all_str = all.join(", ")
             let meth = safe_ident(dd.method)
             return "${dd.dict_param}.${meth}(${all_str})"
