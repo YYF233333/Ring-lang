@@ -3,9 +3,9 @@ use types::{Type, Effect, EffectRow, StructField, EnumVariant,
 use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
     EnumVariantDecl, NamedEnumField, TypeBound, span_zero, EffectExpr, SigMember}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef, EffectOpDef,
-    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, mono, apply_subst, apply_subst_effect_map}
+    TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map}
 use diagnostics::{DiagnosticContext}
-use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509}
+use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0514}
 use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
 
 // ============================================================
@@ -117,6 +117,7 @@ pub fn prefix_decl_name(mod_name: Str, decl: Decl) -> Decl {
         Decl::ModBlock { name, uses, decls, required_effects, is_pub, span } =>
             Decl::ModBlock { name: "${mod_name}::${name}", uses: uses, decls: decls,
                             required_effects: required_effects, is_pub: is_pub, span: span },
+        Decl::AssocType { .. } => decl,  // Associated types are nested inside trait/impl, not prefixed
         _ => decl
     }
 }
@@ -595,6 +596,29 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
     }
 
     let self_var = ctx.env.fresh_var()
+
+    // Collect associated types first, inject into type_param_scope
+    let mut assoc_type_defs: List<AssocTypeDef> = []
+    for method in methods {
+        match method {
+            Decl::AssocType { name: aname, bounds: abounds, value: avalue, .. } => {
+                // Create a fresh type variable for this associated type
+                let at_var = ctx.env.fresh_var()
+                ctx.type_param_scope.insert(aname, at_var)
+                let mut bound_names: List<Str> = []
+                for b in abounds {
+                    bound_names.push(b.trait_name)
+                }
+                let default_ty = match avalue {
+                    some(v) => some(resolve_type_expr(ctx, v)),
+                    none => none
+                }
+                assoc_type_defs.push(AssocTypeDef { name: aname, bounds: bound_names, default_type: default_ty })
+            },
+            _ => {}
+        }
+    }
+
     let mut trait_methods: List<TraitMethodDef> = []
     for method in methods {
         match method {
@@ -629,7 +653,7 @@ fn register_trait(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, su
     }
 
     ctx.type_param_scope = saved
-    ctx.env.trait_reg.traits.insert(name, TraitDef { name: name, type_params: tp_names, type_param_vars: tp_vars, methods: trait_methods, supertraits: supertrait_names })
+    ctx.env.trait_reg.traits.insert(name, TraitDef { name: name, type_params: tp_names, type_param_vars: tp_vars, methods: trait_methods, supertraits: supertrait_names, assoc_types: assoc_type_defs })
 }
 
 // ============================================================
@@ -671,6 +695,30 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
         tp_idx = tp_idx + 1
     }
 
+    // Collect associated type assignments from impl
+    let mut assoc_type_map: Map<Str, Type> = map_new()
+    for method in methods {
+        match method {
+            Decl::AssocType { name: aname, value: avalue, span: aspan, .. } => {
+                match avalue {
+                    some(v) => {
+                        let resolved_ty = resolve_type_expr(ctx, v)
+                        assoc_type_map.insert(aname, resolved_ty)
+                        // Also inject into type_param_scope so method signatures can reference it
+                        ctx.type_param_scope.insert(aname, resolved_ty)
+                    },
+                    none => {
+                        // impl must provide a value
+                        let _ = type_error(ctx.sink, E0510,
+                            "Associated type '${aname}' must have a value in impl",
+                            aspan, DiagnosticContext::TraitError { detail: "missing associated type value" })
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+
     for method in methods {
         match method {
             Decl::Fn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
@@ -678,6 +726,7 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
             Decl::ExternFn { name: mname, type_params: mtps, params, return_type, declared_effects, .. } =>
                 register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params, true),
             Decl::Delegate { .. } => {},  // Deferred to register_phase3_delegate (needs complete struct fields)
+            Decl::AssocType { .. } => {},  // Already handled above
             _ => {}
         }
     }
@@ -697,6 +746,43 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                                 span, DiagnosticContext::TraitError { detail: "missing method '${tm.name}'" })
                         }
                     }
+
+                    // Validate associated types
+                    let mut impl_assoc_names: Set<Str> = set_new()
+                    for entry in assoc_type_map.entries() {
+                        let (aname, _) = entry
+                        impl_assoc_names.insert(aname)
+                    }
+                    // Check: every trait assoc type is provided (or has default)
+                    for atdef in trait_def.assoc_types {
+                        if !impl_assoc_names.contains(atdef.name) {
+                            match atdef.default_type {
+                                some(dt) => {
+                                    // Use the default
+                                    assoc_type_map.insert(atdef.name, dt)
+                                },
+                                none => {
+                                    let _ = type_error(ctx.sink, E0510,
+                                        "Missing associated type '${atdef.name}' in impl ${tname} for ${target_type}",
+                                        span, DiagnosticContext::TraitError { detail: "missing associated type '${atdef.name}'" })
+                                }
+                            }
+                        }
+                    }
+                    // Check: no extra assoc types in impl that trait doesn't declare
+                    let mut trait_assoc_names: Set<Str> = set_new()
+                    for atdef in trait_def.assoc_types {
+                        trait_assoc_names.insert(atdef.name)
+                    }
+                    for entry in assoc_type_map.entries() {
+                        let (aname, _) = entry
+                        if !trait_assoc_names.contains(aname) {
+                            let _ = type_error(ctx.sink, E0514,
+                                "Unexpected associated type '${aname}' in impl ${tname} for ${target_type}; trait '${tname}' does not declare it",
+                                span, DiagnosticContext::TraitError { detail: "unexpected associated type '${aname}'" })
+                        }
+                    }
+
                     // Validate supertrait impls exist (recursively)
                     let all_supertraits = collect_all_supertraits(ctx, tname)
                     for required_st in all_supertraits {
@@ -725,7 +811,8 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                     }
                     ctx.env.trait_reg.trait_impls.push(ImplEntry {
                         trait_name: tname, target_type_name: target_type,
-                        type_params: tp_names, method_names: method_names
+                        type_params: tp_names, method_names: method_names,
+                        assoc_types: map_clone(assoc_type_map)
                     })
                 },
                 none => { let _ = type_error(ctx.sink, E0501,
@@ -969,7 +1056,8 @@ fn register_delegate_traits(
                                 for tm in reg_trait_def.methods { method_names.push(tm.name) }
                                 ctx.env.trait_reg.trait_impls.push(ImplEntry {
                                     trait_name: reg_tname, target_type_name: target_type,
-                                    type_params: tp_names, method_names: method_names
+                                    type_params: tp_names, method_names: method_names,
+                                    assoc_types: map_new()
                                 })
 
                                 // Register forwarding methods for each trait method
@@ -1166,6 +1254,35 @@ fn is_register_value_type(t: Type) -> Bool {
     }
 }
 
+// Inject associated type variables into type_param_scope for type params with bounds.
+// This makes T::Item references resolve during registration (Pass 1).
+// Also resolves assoc_constraints (e.g., T: Trait<Item = Int>) by directly binding the
+// associated type name to the concrete type.
+fn inject_assoc_types_from_bounds(mut ctx: InferCtx, type_params: List<TypeParam>) {
+    for tp in type_params {
+        for b in tp.bounds {
+            // First, handle explicit assoc constraints (Item = Int)
+            for ac in b.assoc_constraints {
+                let concrete_ty = resolve_type_expr(ctx, ac.ty)
+                ctx.type_param_scope.insert(ac.name, concrete_ty)
+            }
+            // Then, inject remaining associated types from trait definition
+            match ctx.env.trait_reg.traits.get(b.trait_name) {
+                some(tdef) => {
+                    for atdef in tdef.assoc_types {
+                        // Only inject if not already in scope (avoid overwriting constraints)
+                        if !ctx.type_param_scope.contains_key(atdef.name) {
+                            let at_var = ctx.env.fresh_var()
+                            ctx.type_param_scope.insert(atdef.name, at_var)
+                        }
+                    }
+                },
+                none => {}
+            }
+        }
+    }
+}
+
 // Shared helper for register_fn and register_extern_fn.
 // - check_dup: call check_duplicate_def (true for fn, false for extern fn)
 // - track_mut_params: track fn_mut_params (true for fn, false for extern fn)
@@ -1184,6 +1301,10 @@ fn register_fn_common(
         match tv { Type::TypeVar { id, .. } => { type_vars.push(id) }, _ => {} }
         ctx.type_param_scope.insert(tp.name, tv)
     }
+
+    // Inject associated types from type param bounds into type_param_scope
+    // so that T::Item references in return types / param types resolve correctly.
+    inject_assoc_types_from_bounds(ctx, type_params)
 
     let mut param_types: List<Type> = []
     if track_mut_params {
@@ -1426,6 +1547,7 @@ fn register_decl(mut ctx: InferCtx, decl: Decl) {
         Decl::EffectAlias { name, type_params, effects, span, .. } =>
             register_effect_alias(ctx, name, type_params, effects, span),
         Decl::Delegate { .. } => {},  // Only valid inside impl blocks, handled by register_impl
+        Decl::AssocType { .. } => {},  // Only valid inside trait/impl blocks
         Decl::ModBlock { name: mod_name, decls: mod_decls, .. } => {
             register_mod_block_items(ctx, mod_name, mod_decls, none, none)
         }

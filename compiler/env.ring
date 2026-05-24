@@ -66,19 +66,27 @@ pub struct TraitMethodDef {
     pub method_type_params: List<TypeParam>
 }
 
+pub struct AssocTypeDef {
+    pub name: Str,
+    pub bounds: List<Str>,        // trait name bounds
+    pub default_type: Type?       // trait-level default value
+}
+
 pub struct TraitDef {
     pub name: Str,
     pub type_params: List<Str>,
     pub type_param_vars: List<Int>,
     pub methods: List<TraitMethodDef>,
-    pub supertraits: List<Str>
+    pub supertraits: List<Str>,
+    pub assoc_types: List<AssocTypeDef>
 }
 
 pub struct ImplEntry {
     pub trait_name: Str,
     pub target_type_name: Str,
     pub type_params: List<Str>,
-    pub method_names: List<Str>
+    pub method_names: List<Str>,
+    pub assoc_types: Map<Str, Type>
 }
 
 // ============================================================

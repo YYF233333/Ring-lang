@@ -6,7 +6,7 @@ use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
-use codes::{E0201, E0204, E0301, E0302, E0503, E0705}
+use codes::{E0201, E0204, E0301, E0302, E0503, E0511, E0512, E0705}
 use union_find::{UnionFind, new_union_find, uf_find}
 use env::{TypeEnv, TypeScheme, SchemeBound, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
@@ -730,31 +730,40 @@ pub fn resolve_type_expr(mut ctx: InferCtx, texpr: TypeExpr) -> Type {
         TypeExpr::Named { name, qualifier, type_args, span } =>
             match qualifier {
                 some(q) => {
-                    let mut resolved_q = q
-                    if q == "self" || q.starts_with("super") {
-                        match resolve_relative_qualifier(q, ctx.mod_path_stack) {
-                            some(prefix) => { resolved_q = prefix },
-                            none => { resolved_q = q }
-                        }
-                    }
-                    if resolved_q == "" {
-                        resolve_named_type(ctx, name, type_args, span)
-                    } else {
-                        let qualified_type_name = "${resolved_q}::${name}"
-                        // Try direct lookup first
-                        if ctx.env.types.structs.contains_key(qualified_type_name) || ctx.env.types.enums.contains_key(qualified_type_name) || ctx.env.types.type_aliases.contains_key(qualified_type_name) {
-                            resolve_named_type(ctx, qualified_type_name, type_args, span)
-                        } else if ctx.mod_path_stack.len() > 0 {
-                            // Fallback: try prepending current mod path for relative references
-                            let mod_prefix = ctx.mod_path_stack.join("::")
-                            let full_type_name = "${mod_prefix}::${qualified_type_name}"
-                            if ctx.env.types.structs.contains_key(full_type_name) || ctx.env.types.enums.contains_key(full_type_name) || ctx.env.types.type_aliases.contains_key(full_type_name) {
-                                resolve_named_type(ctx, full_type_name, type_args, span)
-                            } else {
-                                resolve_named_type(ctx, qualified_type_name, type_args, span)
+                    // Check if qualifier is a type parameter — if so, resolve as associated type
+                    match ctx.type_param_scope.get(q) {
+                        some(tp_type) => {
+                            // q is a type parameter, name is an associated type name
+                            resolve_assoc_type(ctx, q, name, span)
+                        },
+                        none => {
+                            let mut resolved_q = q
+                            if q == "self" || q.starts_with("super") {
+                                match resolve_relative_qualifier(q, ctx.mod_path_stack) {
+                                    some(prefix) => { resolved_q = prefix },
+                                    none => { resolved_q = q }
+                                }
                             }
-                        } else {
-                            resolve_named_type(ctx, qualified_type_name, type_args, span)
+                            if resolved_q == "" {
+                                resolve_named_type(ctx, name, type_args, span)
+                            } else {
+                                let qualified_type_name = "${resolved_q}::${name}"
+                                // Try direct lookup first
+                                if ctx.env.types.structs.contains_key(qualified_type_name) || ctx.env.types.enums.contains_key(qualified_type_name) || ctx.env.types.type_aliases.contains_key(qualified_type_name) {
+                                    resolve_named_type(ctx, qualified_type_name, type_args, span)
+                                } else if ctx.mod_path_stack.len() > 0 {
+                                    // Fallback: try prepending current mod path for relative references
+                                    let mod_prefix = ctx.mod_path_stack.join("::")
+                                    let full_type_name = "${mod_prefix}::${qualified_type_name}"
+                                    if ctx.env.types.structs.contains_key(full_type_name) || ctx.env.types.enums.contains_key(full_type_name) || ctx.env.types.type_aliases.contains_key(full_type_name) {
+                                        resolve_named_type(ctx, full_type_name, type_args, span)
+                                    } else {
+                                        resolve_named_type(ctx, qualified_type_name, type_args, span)
+                                    }
+                                } else {
+                                    resolve_named_type(ctx, qualified_type_name, type_args, span)
+                                }
+                            }
                         }
                     }
                 },
@@ -803,6 +812,87 @@ pub fn resolve_type_expr(mut ctx: InferCtx, texpr: TypeExpr) -> Type {
             Type::TupleType { elements: resolved_elems }
         }
     }
+}
+
+// Resolve associated type T::Item by searching the type parameter's trait bounds
+fn resolve_assoc_type(mut ctx: InferCtx, type_param_name: Str, assoc_name: Str, span: Span) -> Type {
+    // First check: is the assoc_name already directly in the type_param_scope?
+    // (This happens when trait body injects assoc type vars into scope during registration)
+    match ctx.type_param_scope.get(assoc_name) {
+        some(ty) => {
+            // Check if this is a legitimate associated type by verifying through bounds
+            // If we're in a trait body context, the associated type name is directly in scope
+            return ty
+        },
+        none => {}
+    }
+
+    // Look up the type param's bounds from current_fn_bounds
+    let mut found_types: List<Type> = []
+    let mut found_trait_names: List<Str> = []
+    for fb in ctx.current_fn_bounds {
+        if fb.type_param_name == type_param_name {
+            // Look up the trait definition for this bound
+            match ctx.env.trait_reg.traits.get(fb.trait_name) {
+                some(tdef) => {
+                    for atdef in tdef.assoc_types {
+                        if atdef.name == assoc_name {
+                            // Found a matching associated type; create a fresh type variable for it
+                            let at_var = ctx.env.fresh_var()
+                            found_types.push(at_var)
+                            found_trait_names.push(fb.trait_name)
+                        }
+                    }
+                },
+                none => {}
+            }
+        }
+    }
+
+    // Also check var_bounds for type variables
+    if found_types.len() == 0 {
+        match ctx.type_param_scope.get(type_param_name) {
+            some(tp_type) => match tp_type {
+                Type::TypeVar { id, .. } => {
+                    match ctx.env.scope.var_bounds.get(id) {
+                        some(bound_set) => {
+                            for bound_name in bound_set.to_list() {
+                                match ctx.env.trait_reg.traits.get(bound_name) {
+                                    some(tdef) => {
+                                        for atdef in tdef.assoc_types {
+                                            if atdef.name == assoc_name {
+                                                let at_var = ctx.env.fresh_var()
+                                                found_types.push(at_var)
+                                                found_trait_names.push(bound_name)
+                                            }
+                                        }
+                                    },
+                                    none => {}
+                                }
+                            }
+                        },
+                        none => {}
+                    }
+                },
+                _ => {}
+            },
+            none => {}
+        }
+    }
+
+    if found_types.len() == 0 {
+        let _ = type_error(ctx.sink, E0511,
+            "Type '${type_param_name}' has no associated type '${assoc_name}'",
+            span, DiagnosticContext::TraitError { detail: "unknown associated type '${assoc_name}'" })
+        return ctx.env.fresh_var()
+    }
+    if found_types.len() > 1 {
+        let traits_str = found_trait_names.join(", ")
+        let _ = type_error(ctx.sink, E0512,
+            "Ambiguous associated type '${assoc_name}' for '${type_param_name}': found in traits ${traits_str}",
+            span, DiagnosticContext::TraitError { detail: "ambiguous associated type" })
+    }
+    found_types.get(0).unwrap_or(ctx.env.fresh_var())
 }
 
 fn resolve_fn_type_effect(ctx: InferCtx, eff: EffectExpr) -> Effect {

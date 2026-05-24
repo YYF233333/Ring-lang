@@ -1,6 +1,6 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
 import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, effect_kind_name as types$effect_kind_name, effects_match_kind as types$effects_match_kind, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, effects_same_kind as types$effects_same_kind, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
-import { mono as env$mono, new_type_env as env$new_type_env, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __SchemeBound_Eq as env$__SchemeBound_Eq, __FnBound_Eq as env$__FnBound_Eq, __IdGen_Eq as env$__IdGen_Eq, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __SchemeBound_Clone as env$__SchemeBound_Clone, __ImplEntry_Clone as env$__ImplEntry_Clone, __FnBound_Clone as env$__FnBound_Clone, __IdGen_Clone as env$__IdGen_Clone, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __SchemeBound_Ord as env$__SchemeBound_Ord, __FnBound_Ord as env$__FnBound_Ord, __IdGen_Ord as env$__IdGen_Ord, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __SchemeBound_Debug as env$__SchemeBound_Debug, __ImplEntry_Debug as env$__ImplEntry_Debug, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
+import { mono as env$mono, new_type_env as env$new_type_env, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __SchemeBound_Eq as env$__SchemeBound_Eq, __FnBound_Eq as env$__FnBound_Eq, __IdGen_Eq as env$__IdGen_Eq, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __SchemeBound_Clone as env$__SchemeBound_Clone, __FnBound_Clone as env$__FnBound_Clone, __IdGen_Clone as env$__IdGen_Clone, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __SchemeBound_Ord as env$__SchemeBound_Ord, __FnBound_Ord as env$__FnBound_Ord, __IdGen_Ord as env$__IdGen_Ord, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __SchemeBound_Debug as env$__SchemeBound_Debug, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 
 function List_first(self) {
   if (List_is_empty(self)) {
@@ -292,9 +292,9 @@ function register_eq_trait(env) {
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const eq_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
   const ne_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Eq", new env$TraitDef("Eq", [], [self_var_id], [new env$TraitMethodDef("eq", eq_fn, false, [false, false], []), new env$TraitMethodDef("ne", ne_fn, true, [false, false], [])], []));
+  _Map_insert(env.trait_reg.traits, "Eq", new env$TraitDef("Eq", [], [self_var_id], [new env$TraitMethodDef("eq", eq_fn, false, [false, false], []), new env$TraitMethodDef("ne", ne_fn, true, [false, false], [])], [], []));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
-    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Eq", prim, [], ["eq", "ne"]));
+    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Eq", prim, [], ["eq", "ne"], map_new()));
   }
 }
 
@@ -306,19 +306,19 @@ function register_option_eq(env) {
   const eq_bounds = [new env$SchemeBound(t_id, "Eq")];
   _Map_insert(methods, "eq", new env$TypeScheme(types$Type_FnType([opt, opt], types$BOOL, types$EMPTY_ROW), [t_id], eq_bounds, Option_none));
   _Map_insert(methods, "ne", new env$TypeScheme(types$Type_FnType([opt, opt], types$BOOL, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Eq")], Option_none));
-  return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Eq", types$BUILTIN_OPTION, ["T"], ["eq", "ne"]));
+  return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Eq", types$BUILTIN_OPTION, ["T"], ["eq", "ne"], map_new()));
 }
 
 function register_clone_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const clone_fn = types$Type_FnType([self_var], self_var, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Clone", new env$TraitDef("Clone", [], [self_var_id], [new env$TraitMethodDef("clone", clone_fn, false, [false], [])], []));
+  _Map_insert(env.trait_reg.traits, "Clone", new env$TraitDef("Clone", [], [self_var_id], [new env$TraitMethodDef("clone", clone_fn, false, [false], [])], [], []));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
-    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Clone", prim, [], ["clone"]));
+    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Clone", prim, [], ["clone"], map_new()));
   }
   for (const coll of ["List", "Map", "Set"]) {
-    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Clone", coll, [], ["clone"]));
+    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Clone", coll, [], ["clone"], map_new()));
   }
 }
 
@@ -328,16 +328,16 @@ function register_option_clone(env) {
   const opt = types$make_option_type(t);
   let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   _Map_insert(methods, "clone", new env$TypeScheme(types$Type_FnType([opt], opt, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Clone")], Option_none));
-  return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Clone", types$BUILTIN_OPTION, ["T"], ["clone"]));
+  return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Clone", types$BUILTIN_OPTION, ["T"], ["clone"], map_new()));
 }
 
 function register_ord_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const cmp_fn = types$Type_FnType([self_var, self_var], types$INT, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Ord", new env$TraitDef("Ord", [], [self_var_id], [new env$TraitMethodDef("cmp", cmp_fn, false, [false, false], [])], []));
+  _Map_insert(env.trait_reg.traits, "Ord", new env$TraitDef("Ord", [], [self_var_id], [new env$TraitMethodDef("cmp", cmp_fn, false, [false, false], [])], [], []));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
-    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Ord", prim, [], ["cmp"]));
+    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Ord", prim, [], ["cmp"], map_new()));
   }
 }
 
@@ -345,9 +345,9 @@ function register_debug_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const debug_fn = types$Type_FnType([self_var], types$STR, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Debug", new env$TraitDef("Debug", [], [self_var_id], [new env$TraitMethodDef("debug", debug_fn, false, [false], [])], []));
+  _Map_insert(env.trait_reg.traits, "Debug", new env$TraitDef("Debug", [], [self_var_id], [new env$TraitMethodDef("debug", debug_fn, false, [false], [])], [], []));
   for (const prim of ["Int", "Float", "Str", "Bool"]) {
-    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", prim, [], ["debug"]));
+    List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", prim, [], ["debug"], map_new()));
   }
   let t_id = env$TypeEnv_fresh_var_id(env);
   let t = types$Type_TypeVar(t_id, Option_none);
@@ -355,7 +355,7 @@ function register_debug_trait(env) {
   const list_debug_fn = types$Type_FnType([list_self], types$STR, types$EMPTY_ROW);
   let list_methods = get_or_create_methods(env, types$BUILTIN_LIST);
   _Map_insert(list_methods, "debug", new env$TypeScheme(list_debug_fn, [t_id], [new env$SchemeBound(t_id, "Debug")], Option_none));
-  List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_LIST, ["T"], ["debug"]));
+  List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_LIST, ["T"], ["debug"], map_new()));
   const k_id = env$TypeEnv_fresh_var_id(env);
   const k = types$Type_TypeVar(k_id, Option_none);
   const v_id = env$TypeEnv_fresh_var_id(env);
@@ -364,14 +364,14 @@ function register_debug_trait(env) {
   const map_debug_fn = types$Type_FnType([map_self], types$STR, types$EMPTY_ROW);
   let map_methods = get_or_create_methods(env, types$BUILTIN_MAP);
   _Map_insert(map_methods, "debug", new env$TypeScheme(map_debug_fn, [k_id, v_id], [], Option_none));
-  List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_MAP, ["K", "V"], ["debug"]));
+  List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_MAP, ["K", "V"], ["debug"], map_new()));
   t_id = env$TypeEnv_fresh_var_id(env);
   t = types$Type_TypeVar(t_id, Option_none);
   const set_self = types$Type_StructType(types$BUILTIN_SET, [t], []);
   const set_debug_fn = types$Type_FnType([set_self], types$STR, types$EMPTY_ROW);
   let set_methods = get_or_create_methods(env, types$BUILTIN_SET);
   _Map_insert(set_methods, "debug", new env$TypeScheme(set_debug_fn, [t_id], [], Option_none));
-  return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_SET, ["T"], ["debug"]));
+  return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_SET, ["T"], ["debug"], map_new()));
 }
 
 function register_option_debug(env) {
@@ -380,7 +380,7 @@ function register_option_debug(env) {
   const opt = types$make_option_type(t);
   let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   _Map_insert(methods, "debug", new env$TypeScheme(types$Type_FnType([opt], types$STR, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Debug")], Option_none));
-  return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_OPTION, ["T"], ["debug"]));
+  return List_push(env.trait_reg.trait_impls, new env$ImplEntry("Debug", types$BUILTIN_OPTION, ["T"], ["debug"], map_new()));
 }
 
 function register_list_hof(env) {

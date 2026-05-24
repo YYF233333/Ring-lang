@@ -6,7 +6,7 @@ use ast::{
     Param, MatchArm, StructFieldInit, EffectHandler, StringInterpPart,
     Expr, Stmt, DestructureBinding,
     UsePath, NamedImport, UseImport, UseDecl,
-    TypeBound, TypeParam, StructFieldDecl, NamedEnumField, EnumVariantDecl, EffectOpDecl,
+    TypeBound, AssocConstraint, TypeParam, StructFieldDecl, NamedEnumField, EnumVariantDecl, EffectOpDecl,
     SigMember, Decl, Program
 }
 use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
@@ -1108,7 +1108,10 @@ impl Parser {
                 continue
             }
             let m_pub = self.try_consume(TokenKind::TkPub)
-            if self.check(TokenKind::TkExtern) {
+            // Check for associated type: `type Name = TypeExpr`
+            if self.check(TokenKind::TkIdent) && self.peek().value == "type" {
+                methods.push(self.parse_assoc_type_decl(m_pub))
+            } else if self.check(TokenKind::TkExtern) {
                 let m_start = self.current_span_start()
                 self.expect(TokenKind::TkExtern)
                 methods.push(self.parse_extern_fn_decl_body(m_pub, m_start))
@@ -1188,6 +1191,28 @@ impl Parser {
         Decl::Test { description: desc_tok.value, body: body, span: self.make_span(start, expr_span(body).end) }
     }
 
+    fn parse_assoc_type_decl(mut self, is_pub: Bool) -> Decl {
+        let start = self.current_span_start()
+        self.advance()  // consume 'type' keyword (TkIdent with value "type")
+        let name = self.expect(TokenKind::TkIdent).value
+        // Optional bounds: `: Trait1 + Trait2`
+        let mut bounds: List<TypeBound> = []
+        if self.try_consume(TokenKind::TkColon) {
+            bounds.push(self.parse_type_bound())
+            while self.check(TokenKind::TkPlus) {
+                self.advance()
+                bounds.push(self.parse_type_bound())
+            }
+        }
+        // Optional value: `= TypeExpr`
+        let mut value: TypeExpr? = none
+        if self.try_consume(TokenKind::TkEq) {
+            value = some(self.parse_type_expr())
+        }
+        let end = self.current_span_start()
+        Decl::AssocType { name: name, bounds: bounds, value: value, is_pub: is_pub, span: self.make_span(start, end) }
+    }
+
     fn parse_trait_decl(mut self, is_pub: Bool) -> Decl {
         let start = self.current_span_start()
         self.expect(TokenKind::TkTrait)
@@ -1205,7 +1230,12 @@ impl Parser {
         let mut methods: List<Decl> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
             let m_pub = self.try_consume(TokenKind::TkPub)
-            methods.push(self.parse_fn_decl(m_pub, true))
+            // Check for associated type declaration: `type Name`
+            if self.check(TokenKind::TkIdent) && self.peek().value == "type" {
+                methods.push(self.parse_assoc_type_decl(m_pub))
+            } else {
+                methods.push(self.parse_fn_decl(m_pub, true))
+            }
         }
         let rbrace = self.expect(TokenKind::TkRBrace)
         Decl::Trait {
@@ -2101,9 +2131,43 @@ impl Parser {
     pub fn parse_type_bound(mut self) -> TypeBound {
         let start = self.current_span_start()
         let trait_name = self.expect(TokenKind::TkIdent).value
-        let type_args = self.try_parse_type_args()
+        let mut type_args: List<TypeExpr> = []
+        let mut assoc_constraints: List<AssocConstraint> = []
+        // Parse optional <...> with type args or assoc constraints (Name = Type)
+        if self.check(TokenKind::TkLt) {
+            let save_pos = self.pos
+            let save_errors = self.error_count
+            let sink_checkpoint = self.sink.save()
+            self.advance()
+            while !self.check(TokenKind::TkGt) && !self.at_end() {
+                // Check for assoc constraint: Ident =
+                if self.check(TokenKind::TkIdent) && self.peek_at(1).kind == TokenKind::TkEq {
+                    let ac_start = self.current_span_start()
+                    let ac_name = self.advance().value
+                    self.advance()  // consume '='
+                    let ac_ty = self.parse_type_expr()
+                    let ac_end = self.current_span_start()
+                    assoc_constraints.push(AssocConstraint { name: ac_name, ty: ac_ty, span: self.make_span(ac_start, ac_end) })
+                } else {
+                    type_args.push(self.parse_type_expr())
+                }
+                if !self.check(TokenKind::TkGt) {
+                    self.try_consume(TokenKind::TkComma)
+                }
+            }
+            if !self.check(TokenKind::TkGt) {
+                // Rollback on failure
+                self.pos = save_pos
+                self.error_count = save_errors
+                self.sink.restore(sink_checkpoint)
+                type_args = []
+                assoc_constraints = []
+            } else {
+                let _ = self.advance()
+            }
+        }
         let end = self.current_span_start()
-        TypeBound { trait_name: trait_name, type_args: type_args, span: self.make_span(start, end) }
+        TypeBound { trait_name: trait_name, type_args: type_args, assoc_constraints: assoc_constraints, span: self.make_span(start, end) }
     }
 
     // ============================================================

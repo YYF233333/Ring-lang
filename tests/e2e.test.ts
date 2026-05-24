@@ -498,6 +498,10 @@ const cases: TestCase[] = [
   { file: "return_in_expr_block.ring", expected: "return_in_expr_block: ok\n" },
   { file: "trait_fn_param.ring", expected: "trait fn param: ok\n" },
   { file: "effect_merge_same_kind.ring", expected: "effect merge same kind: ok\n" },
+  { file: "assoc_type_basic.ring", expected: "assoc type basic: ok\n" },
+  { file: "assoc_type_qualified.ring", expected: "assoc type qualified: ok\n" },
+  { file: "assoc_type_default.ring", expected: "assoc type default: ok\n" },
+  { file: "assoc_type_constraint.ring", expected: "assoc type constraint: ok\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -576,6 +580,8 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "delegate_conflict.ring", error_pattern: "E0509" },
     { file: "error_default_effect_cycle.ring", error_pattern: "E0410" },
     { file: "error_default_effect_no_default.ring", error_pattern: "E0409" },
+    { file: "error_assoc_type_missing.ring", error_pattern: "E0510" },
+    { file: "error_assoc_type_unknown.ring", error_pattern: "E0511" },
   ];
 
   for (const tc of negative_cases) {

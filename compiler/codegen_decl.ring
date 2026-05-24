@@ -23,12 +23,12 @@ pub fn emit_decl(mut ctx: CodegenCtx, decl: HDecl) {
             emit_struct_decl(ctx, name, fields),
         HDecl::Enum { name, variants, .. } =>
             emit_enum_decl(ctx, name, variants),
-        HDecl::Impl { target_type, trait_name, methods, .. } =>
+        HDecl::Impl { target_type, trait_name, methods, assoc_types, .. } =>
             emit_impl_decl(ctx, target_type, trait_name, methods),
         HDecl::Effect { name, ops, .. } => emit_effect_decl(ctx, name, ops),
         HDecl::Test { description, body, .. } =>
             emit_test_decl(ctx, description, body),
-        HDecl::Trait { name, methods, supertraits, .. } =>
+        HDecl::Trait { name, methods, supertraits, assoc_types, .. } =>
             emit_trait_decl(ctx, name, methods, supertraits),
         HDecl::ExternFn { name, .. } =>
             emit_extern_fn_decl(ctx, name),

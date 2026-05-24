@@ -217,9 +217,16 @@ pub struct UseDecl {
 // Declarations
 // ============================================================
 
+pub struct AssocConstraint {
+    pub name: Str,       // "Item"
+    pub ty: TypeExpr,    // Int
+    pub span: Span
+}
+
 pub struct TypeBound {
     pub trait_name: Str,
     pub type_args: List<TypeExpr>,
+    pub assoc_constraints: List<AssocConstraint>,
     pub span: Span
 }
 
@@ -281,7 +288,8 @@ pub enum Decl {
     ModBlock { name: Str, uses: List<UseDecl>, decls: List<Decl>, required_effects: List<EffectExpr>?, is_pub: Bool, span: Span },
     Sig { name: Str, members: List<SigMember>, is_pub: Bool, span: Span },
     EffectAlias { name: Str, type_params: List<TypeParam>, effects: List<EffectExpr>, is_pub: Bool, span: Span },
-    Delegate { field: Str, trait_names: List<Str>, span: Span }
+    Delegate { field: Str, trait_names: List<Str>, span: Span },
+    AssocType { name: Str, bounds: List<TypeBound>, value: TypeExpr?, is_pub: Bool, span: Span }
 }
 
 // ============================================================

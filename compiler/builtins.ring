@@ -320,7 +320,8 @@ fn register_eq_trait(mut env: TypeEnv) {
             TraitMethodDef { name: "eq", ty: eq_fn, has_default: false, param_mutabilities: [false, false], method_type_params: [] },
             TraitMethodDef { name: "ne", ty: ne_fn, has_default: true, param_mutabilities: [false, false], method_type_params: [] }
         ],
-        supertraits: []
+        supertraits: [],
+        assoc_types: []
     })
 
     // Register Eq impls for primitive types
@@ -329,7 +330,8 @@ fn register_eq_trait(mut env: TypeEnv) {
             trait_name: "Eq",
             target_type_name: prim,
             type_params: [],
-            method_names: ["eq", "ne"]
+            method_names: ["eq", "ne"],
+            assoc_types: map_new()
         })
     }
 }
@@ -365,7 +367,8 @@ fn register_option_eq(mut env: TypeEnv) {
         trait_name: "Eq",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
-        method_names: ["eq", "ne"]
+        method_names: ["eq", "ne"],
+        assoc_types: map_new()
     })
 }
 
@@ -386,7 +389,8 @@ fn register_clone_trait(mut env: TypeEnv) {
         methods: [
             TraitMethodDef { name: "clone", ty: clone_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
         ],
-        supertraits: []
+        supertraits: [],
+        assoc_types: []
     })
 
     // Primitive impls
@@ -395,7 +399,8 @@ fn register_clone_trait(mut env: TypeEnv) {
             trait_name: "Clone",
             target_type_name: prim,
             type_params: [],
-            method_names: ["clone"]
+            method_names: ["clone"],
+            assoc_types: map_new()
         })
     }
 
@@ -405,7 +410,8 @@ fn register_clone_trait(mut env: TypeEnv) {
             trait_name: "Clone",
             target_type_name: coll,
             type_params: [],
-            method_names: ["clone"]
+            method_names: ["clone"],
+            assoc_types: map_new()
         })
     }
 }
@@ -432,7 +438,8 @@ fn register_option_clone(mut env: TypeEnv) {
         trait_name: "Clone",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
-        method_names: ["clone"]
+        method_names: ["clone"],
+        assoc_types: map_new()
     })
 }
 
@@ -453,7 +460,8 @@ fn register_ord_trait(mut env: TypeEnv) {
         methods: [
             TraitMethodDef { name: "cmp", ty: cmp_fn, has_default: false, param_mutabilities: [false, false], method_type_params: [] }
         ],
-        supertraits: []
+        supertraits: [],
+        assoc_types: []
     })
 
     for prim in ["Int", "Float", "Str", "Bool"] {
@@ -461,7 +469,8 @@ fn register_ord_trait(mut env: TypeEnv) {
             trait_name: "Ord",
             target_type_name: prim,
             type_params: [],
-            method_names: ["cmp"]
+            method_names: ["cmp"],
+            assoc_types: map_new()
         })
     }
 }
@@ -483,7 +492,8 @@ fn register_debug_trait(mut env: TypeEnv) {
         methods: [
             TraitMethodDef { name: "debug", ty: debug_fn, has_default: false, param_mutabilities: [false], method_type_params: [] }
         ],
-        supertraits: []
+        supertraits: [],
+        assoc_types: []
     })
 
     // Primitive impls
@@ -492,7 +502,8 @@ fn register_debug_trait(mut env: TypeEnv) {
             trait_name: "Debug",
             target_type_name: prim,
             type_params: [],
-            method_names: ["debug"]
+            method_names: ["debug"],
+            assoc_types: map_new()
         })
     }
 
@@ -512,7 +523,8 @@ fn register_debug_trait(mut env: TypeEnv) {
         trait_name: "Debug",
         target_type_name: BUILTIN_LIST,
         type_params: ["T"],
-        method_names: ["debug"]
+        method_names: ["debug"],
+        assoc_types: map_new()
     })
 
     // Map<K, V> Debug impl (no bounds required in TS source)
@@ -533,7 +545,8 @@ fn register_debug_trait(mut env: TypeEnv) {
         trait_name: "Debug",
         target_type_name: BUILTIN_MAP,
         type_params: ["K", "V"],
-        method_names: ["debug"]
+        method_names: ["debug"],
+        assoc_types: map_new()
     })
 
     // Set<T> Debug impl (no bounds required in TS source)
@@ -552,7 +565,8 @@ fn register_debug_trait(mut env: TypeEnv) {
         trait_name: "Debug",
         target_type_name: BUILTIN_SET,
         type_params: ["T"],
-        method_names: ["debug"]
+        method_names: ["debug"],
+        assoc_types: map_new()
     })
 }
 
@@ -578,7 +592,8 @@ fn register_option_debug(mut env: TypeEnv) {
         trait_name: "Debug",
         target_type_name: BUILTIN_OPTION,
         type_params: ["T"],
-        method_names: ["debug"]
+        method_names: ["debug"],
+        assoc_types: map_new()
     })
 }
 
