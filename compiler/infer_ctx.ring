@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, RecordField, StructField,
     INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW,
     type_to_string, types_equal, make_option_type, type_to_builtin_name,
-    row_merge}
+    row_merge, effects_match_kind}
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr}
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
@@ -9,7 +9,7 @@ use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Sugge
 use codes::{E0201, E0204, E0301, E0302, E0503}
 use union_find::{UnionFind, new_union_find, uf_find}
 use env::{TypeEnv, TypeScheme, SchemeBound, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map}
-use unify::{UnificationError, empty_subst, unify, occurs_in}
+use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
 
 // ============================================================
 // InferResult — return type for expression inference
@@ -260,13 +260,26 @@ pub fn type_error(sink: CollectingSink, code: Str, message: Str, span: Span, con
 pub fn merge_effects(env: TypeEnv, a: EffectRow, b: EffectRow, s: UnionFind) -> (EffectRow, UnionFind) {
     let m = row_merge(a, b)
     let mut result_s = s
+
+    // Unify type params for same-kind effects between a and b.
+    // Catch unification errors: if params can't unify (e.g. mut<Int> vs mut<Str>),
+    // keep the substitution unchanged — distinct effects stay separate.
+    for eff_b in b.effects {
+        for eff_a in a.effects {
+            if effects_match_kind(eff_a, eff_b) {
+                result_s = (unify_effect_params(eff_a, eff_b, result_s, env)) catch { _ => result_s }
+                break
+            }
+        }
+    }
+
     match m.tails_to_unify {
         some(pair) => {
             let (ta, tb) = pair
             result_s = unify(
                 Type::TypeVar { id: ta, name: none },
                 Type::TypeVar { id: tb, name: none },
-                s, env
+                result_s, env
             )
         },
         none => {}
