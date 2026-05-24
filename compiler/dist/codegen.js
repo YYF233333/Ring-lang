@@ -541,7 +541,22 @@ function register_decl_info(decls, ctx) {
         register_decl_info(mod_decls, ctx);
         break __ring_match15;
       }
-      break __ring_match15;
+      if (__ring_m15._tag === "Test") {
+        break __ring_match15;
+      }
+      if (__ring_m15._tag === "ExternFn") {
+        break __ring_match15;
+      }
+      if (__ring_m15._tag === "ExternType") {
+        break __ring_match15;
+      }
+      if (__ring_m15._tag === "TypeAlias") {
+        break __ring_match15;
+      }
+      if (__ring_m15._tag === "Sig") {
+        break __ring_match15;
+      }
+      __match_fail(__ring_m15);
     }
   }
 }
@@ -867,7 +882,37 @@ function scan_fn_mut_params(decls, ctx) {
         scan_fn_mut_params(mod_decls, ctx);
         break __ring_match34;
       }
-      break __ring_match34;
+      if (__ring_m34._tag === "Struct") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "Enum") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "Trait") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "Effect") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "Test") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "ExternFn") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "ExternType") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "TypeAlias") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "Const") {
+        break __ring_match34;
+      }
+      if (__ring_m34._tag === "Sig") {
+        break __ring_match34;
+      }
+      __match_fail(__ring_m34);
     }
   }
 }

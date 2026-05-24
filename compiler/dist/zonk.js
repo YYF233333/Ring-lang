@@ -326,7 +326,7 @@ function zonk_block(ctx, block) {
       return hir$HExpr_Block(z_stmts, z_tail, zonk_type(ctx, ty), zonk_row(ctx, effects), span);
       break __ring_match9;
     }
-    return panic("unreachable: zonk_block expected Block");
+    return zonk_expr(ctx, block);
     break __ring_match9;
   }
 }

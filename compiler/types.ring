@@ -89,10 +89,17 @@ fn is_type_var(t: Type) -> Bool {
 pub fn effects_match_kind(a: Effect, b: Effect) -> Bool {
     match a {
         Effect::IoEffect => match b { Effect::IoEffect => true, _ => false },
+        // is_type_var fallback: during row_merge, type vars may not yet be resolved.
+        // Without this, mut<?T> and mut<Int> (where ?T will resolve to Int) would be
+        // kept as separate effects. The broader match ensures deduplication in row_merge;
+        // effects_same_kind (used elsewhere) requires exact type equality for stricter checks.
         Effect::MutEffect { state_type: sa } => match b {
             Effect::MutEffect { state_type: sb } => is_type_var(sa) || is_type_var(sb) || types_equal(sa, sb),
             _ => false
         },
+        // Intentional: all FailEffects match regardless of error type parameter.
+        // Ring uses single-fail-effect design — the unification engine separately
+        // handles error type parameter merging during row unification.
         Effect::FailEffect { .. } => match b { Effect::FailEffect { .. } => true, _ => false },
         Effect::CustomEffect { name: na, .. } => match b {
             Effect::CustomEffect { name: nb, .. } => na == nb,

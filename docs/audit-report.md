@@ -76,23 +76,7 @@
 
 发现者：DS
 
-### #112 `zonk_block` 对非 Block 表达式 panic 而非报内部错误 [low] [doing]
 
-`zonk_block` 对非 Block HExpr 调用 `panic("unreachable: zonk_block expected Block")`。若编译器其他部分有 bug 传入非 Block 类型，编译器 crash 而非报 graceful internal error。
-
-**文件**：`compiler/zonk.ring:126`
-**修复方向**：转换为 compiler error 或使用 `zonk_expr` 作为 fallback。
-
-发现者：Opus
-
-### #119 `register_decl_info` + `scan_fn_mut_params` 使用 `_ => {}` 静默忽略 HDecl 变体 [low] [doing]
-
-`codegen.ring:299`（`register_decl_info`）显式处理 `Fn`、`Struct`、`Enum`、`Trait`、`Impl`、`Effect`、`Const`、`ModBlock`，然后 `_ => {}` 静默忽略 `Sig`、`ExternFn`、`ExternType`、`TypeAlias`、`AssocType`、`Test`。`codegen.ring:490`（`scan_fn_mut_params`）有相同模式。新增 HDecl 变体时编译器不会警告，违反 #19 的编译期保护原则。
-
-**文件**：`compiler/codegen.ring:299, 490`
-**修复方向**：显式列出每个被忽略的变体并加注释说明为何是 no-op。
-
-发现者：DS
 
 
 ## 架构债
@@ -145,23 +129,7 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：Worker Wave A+B
 
-### #130 `effects_match_kind` MutEffect 非对称 `is_type_var` 回退 [low] [doing]
 
-`effects_match_kind`（`types.ring:92-93`）对 `MutEffect` 使用 `is_type_var(sa) || is_type_var(sb) || types_equal(sa, sb)` 判断"同类"，而 `effects_same_kind`（`types.ring:199`）要求 `types_equal(sa, sb)`。前者用于 `row_merge` 去重——若有 `mut<Int>` 和 `mut<?T>`（未解析），`row_merge` 认为它们"同类"并可能丢弃一个，导致 effect 追踪精度下降。
-
-**文件**：`compiler/types.ring:89-102`
-**修复方向**：确认 `is_type_var` 回退是否仍需要（unification 阶段 type var 可能未解析）。若需要，添加注释说明理由；否则与 `effects_same_kind` 保持一致。
-
-发现者：Opus
-
-### #131 `FailEffect` 在 `effects_match_kind` 中忽略错误类型 [low] [doing]
-
-`effects_match_kind`（`types.ring:96`）对任意两个 `FailEffect` 均返回 `true`，不考虑错误类型参数。这意味着 `fail<Int>` 和 `fail<Str>` 被视为"同类"——`row_merge` 去重时可能丢弃其中一个。这是 single-fail-effect 设计的有意行为（unification 引擎单独处理类型参数合并），但缺少注释说明，可能误导未来开发者。
-
-**文件**：`compiler/types.ring:96`
-**修复方向**：添加注释说明此为 intentional——single fail effect 设计。
-
-发现者：Opus
 
 
 ### #113 `RecordType` `types_equal` 不检查 field 顺序 [low] [open]
