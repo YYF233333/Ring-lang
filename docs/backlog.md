@@ -616,22 +616,6 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 ## 性能优化
 
 
-### B-067 Checker 代码质量清理 [refactor] [P3] [S] [doing]
-B-066 调查中发现的 trivial 修复项，均为代码质量改善。
-
-**修改项**：
-
-1. **`infer_call` 消除重复 `apply_subst`**（`infer.ring:1341-1342`）：match 前后对同一表达式连续调用两次，绑定到变量即可
-2. **`collect_var_mappings` 的 `type_vars: List<Int>` 改为 `Set<Int>`**（`infer_ctx.ring:475`）：成员检查从 O(n) 到 O(1)
-3. **6 个比较运算符分支合并**（`infer.ring:1046-1080`）：Eq/Neq/Lt/Lte/Gt/Gte 逻辑几乎完全相同，提取 helper 消除 ~40 行重复
-4. **`infer_numeric_op` 避免遍历 `type_param_scope`**（`infer.ring:1103-1137`）：维护 `Set<Int>` rigid var ids 替代全量遍历
-5. **enum variant 查找索引化**（`infer.ring`、`infer_ctx.ring` 共 7 处）：给 EnumDef 加 `variant_index: Map<Str, Int>`
-6. **effect 去重改为 Set**（`infer_register.ring:1209-1226`）：O(n²) → O(n)
-
-**验收标准**：
-- 重复代码消除、数据结构合理化
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
 
 ## 架构：后端策略（2026-05-23 更新）
 

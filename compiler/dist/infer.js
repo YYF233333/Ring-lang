@@ -5,7 +5,7 @@ import { variant_js_name as hir$variant_js_name, trait_dict_name as hir$trait_di
 import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
 import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0409 as codes$E0409, E0410 as codes$E0410, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, error_description as codes$error_description, error_category as codes$error_category } from "./codes.js";
 import { new_union_find as union_find$new_union_find, uf_find as union_find$uf_find, uf_bind as union_find$uf_bind, uf_lookup as union_find$uf_lookup, uf_union as union_find$uf_union, uf_insert as union_find$uf_insert, UnionFind as union_find$UnionFind } from "./union_find.js";
-import { mono as env$mono, new_type_env as env$new_type_env, add_impl as env$add_impl, has_impl as env$has_impl, find_impl as env$find_impl, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, AssocConstraintEntry as env$AssocConstraintEntry, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
+import { lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, add_impl as env$add_impl, has_impl as env$has_impl, find_impl as env$find_impl, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, AssocConstraintEntry as env$AssocConstraintEntry, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 import { empty_subst as unify$empty_subst, occurs_in as unify$occurs_in, unify_effect_params as unify$unify_effect_params, unify_effect_rows as unify$unify_effect_rows, unify as unify$unify, UnificationError as unify$UnificationError, __UnificationError_Eq as unify$__UnificationError_Eq, __UnificationError_Clone as unify$__UnificationError_Clone, __UnificationError_Ord as unify$__UnificationError_Ord, __UnificationError_Debug as unify$__UnificationError_Debug } from "./unify.js";
 import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_error, merge_effects as infer_ctx$merge_effects, unify_at as infer_ctx$unify_at, free_type_vars as infer_ctx$free_type_vars, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, update_fn_effects as infer_ctx$update_fn_effects, build_scheme_var_map as infer_ctx$build_scheme_var_map, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_type_expr as infer_ctx$resolve_type_expr, resolve_self_type as infer_ctx$resolve_self_type, resolve_named_type as infer_ctx$resolve_named_type, bind_pattern as infer_ctx$bind_pattern, remove_fail_effect as infer_ctx$remove_fail_effect, resolve_relative_qualifier as infer_ctx$resolve_relative_qualifier, InferResult as infer_ctx$InferResult, FnBoundsEntry as infer_ctx$FnBoundsEntry, CompileError as infer_ctx$CompileError, InferCtx as infer_ctx$InferCtx, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug, __CompileError_Eq as infer_ctx$__CompileError_Eq, __CompileError_Clone as infer_ctx$__CompileError_Clone, __CompileError_Ord as infer_ctx$__CompileError_Ord, __CompileError_Debug as infer_ctx$__CompileError_Debug } from "./infer_ctx.js";
 import { check_exhaustive as exhaustive$check_exhaustive } from "./exhaustive.js";
@@ -1371,7 +1371,7 @@ function infer_ident(ctx, name, span, subst, qualifier) {
             const __ring_m65 = _Map_get(ctx.env.types.enums, q);
             if (__ring_m65._tag === "some") {
               const enum_def = __ring_m65._0;
-              if (enum_def.variants.some((function(v) { return (v.name === name); }))) {
+              if (_Map_contains_key(enum_def.variant_index, name)) {
                 enum_name = Option_some(enum_def.name);
               } else {
                 const _ = infer_ctx$type_error(ctx.sink, codes$E0201, `'${q}' has no variant '${name}'`, span, diagnostics$DiagnosticContext_UndefinedVariable(name, Option_none));
@@ -1445,48 +1445,31 @@ function infer_bin_op(ctx, op, left, right, span, subst, __ring_ev_fail) {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
       break __ring_match67;
     }
-    if (__ring_m67._tag === "Eq") {
+    if ((__ring_m67._tag === "Eq") || (__ring_m67._tag === "Neq")) {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
       result_type = types$BOOL;
       const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
       const is_builtin = (is_primitive_eq(resolved) || is_tuple_type(resolved));
-      eq_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Eq", codes$E0307, s, span, "==", is_builtin));
+      const op_sym = (function() {
+  const __ring_m = op;
+  if (__ring_m._tag === "Eq") { return "=="; }
+  return "!=";
+})();
+      eq_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Eq", codes$E0307, s, span, op_sym, is_builtin));
       break __ring_match67;
     }
-    if (__ring_m67._tag === "Neq") {
+    if ((__ring_m67._tag === "Lt") || (__ring_m67._tag === "Lte") || (__ring_m67._tag === "Gt") || (__ring_m67._tag === "Gte")) {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
       result_type = types$BOOL;
       const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
-      const is_builtin = (is_primitive_eq(resolved) || is_tuple_type(resolved));
-      eq_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Eq", codes$E0307, s, span, "!=", is_builtin));
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Lt") {
-      s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      result_type = types$BOOL;
-      const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
-      ord_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Ord", codes$E0308, s, span, "<", is_primitive_ord(resolved)));
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Lte") {
-      s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      result_type = types$BOOL;
-      const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
-      ord_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Ord", codes$E0308, s, span, "<=", is_primitive_ord(resolved)));
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Gt") {
-      s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      result_type = types$BOOL;
-      const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
-      ord_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Ord", codes$E0308, s, span, ">", is_primitive_ord(resolved)));
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Gte") {
-      s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      result_type = types$BOOL;
-      const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
-      ord_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Ord", codes$E0308, s, span, ">=", is_primitive_ord(resolved)));
+      const op_sym = (function() {
+  const __ring_m = op;
+  if (__ring_m._tag === "Lt") { return "<"; }
+  if (__ring_m._tag === "Lte") { return "<="; }
+  if (__ring_m._tag === "Gt") { return ">"; }
+  return ">=";
+})();
+      ord_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Ord", codes$E0308, s, span, op_sym, is_primitive_ord(resolved)));
       break __ring_match67;
     }
     if (__ring_m67._tag === "And") {
@@ -1515,21 +1498,20 @@ function infer_numeric_op(ctx, left, right, s, span, op_str) {
     const __ring_m68 = resolved;
     if (__ring_m68._tag === "TypeVar") {
       const tv_id = __ring_m68.id;
-      let is_rigid = false;
+      let rigid_ids = set_new();
       for (const entry of _Map_entries(ctx.type_param_scope)) {
         const tp_type = entry[1];
         __ring_match69: {
           const __ring_m69 = tp_type;
           if (__ring_m69._tag === "TypeVar") {
             const tp_id = __ring_m69.id;
-            if ((resolve_var_id(tp_id, s) === resolve_var_id(tv_id, s))) {
-              is_rigid = true;
-            }
+            _Set_insert(rigid_ids, resolve_var_id(tp_id, s));
             break __ring_match69;
           }
           break __ring_match69;
         }
       }
+      const is_rigid = _Set_contains(rigid_ids, resolve_var_id(tv_id, s), __Int_Eq);
       if (is_rigid) {
         return infer_ctx$type_error(ctx.sink, codes$E0303, `Operator ${op_str} requires numeric types (Int or Float), got unresolved type`, span, diagnostics$DiagnosticContext_TypeMismatch("Int or Float", "unresolved type", Option_none));
       } else {
@@ -1877,9 +1859,10 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
   const callee_r = infer_expr(ctx, callee, subst, __ring_ev_fail);
   let s = callee_r.subst;
   let effects = callee_r.effects;
+  const resolved_callee = env$apply_subst(s, hir$hexpr_type(callee_r.hexpr));
   const callee_fn_type = (function() {
-  const __ring_m = env$apply_subst(s, hir$hexpr_type(callee_r.hexpr));
-  if (__ring_m._tag === "FnType") { return Option_some(env$apply_subst(s, hir$hexpr_type(callee_r.hexpr))); }
+  const __ring_m = resolved_callee;
+  if (__ring_m._tag === "FnType") { return Option_some(resolved_callee); }
   return Option_none;
 })();
   let hargs = [];
@@ -3041,7 +3024,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
         const __ring_m160 = _Map_get(ctx.env.types.enums, q);
         if (__ring_m160._tag === "some") {
           const enum_def = __ring_m160._0;
-          if (enum_def.variants.some((function(v) { return (v.name === name); }))) {
+          if (_Map_contains_key(enum_def.variant_index, name)) {
             variant_enum = Option_some(enum_def.name);
           }
           break __ring_match160;
@@ -3054,7 +3037,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
               const __ring_m161 = _Map_get(ctx.env.types.enums, full_q);
               if (__ring_m161._tag === "some") {
                 const enum_def = __ring_m161._0;
-                if (enum_def.variants.some((function(v) { return (v.name === name); }))) {
+                if (_Map_contains_key(enum_def.variant_index, name)) {
                   variant_enum = Option_some(enum_def.name);
                 }
                 break __ring_match161;
@@ -3099,7 +3082,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
         const __ring_m164 = _Map_get(ctx.env.types.enums, ve);
         if (__ring_m164._tag === "some") {
           const enum_def = __ring_m164._0;
-          const variant = ((__a) => { const __i = __a.findIndex((function(v) { return (v.name === name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(enum_def.variants);
+          const variant = env$lookup_variant(enum_def, name);
           __ring_match165: {
             const __ring_m165 = variant;
             if (__ring_m165._tag === "some") {
@@ -3349,7 +3332,7 @@ function rewrite_bare_enum_bindings(env, pattern) {
             const __ring_m177 = _Map_get(env.types.enums, ve);
             if (__ring_m177._tag === "some") {
               const edef = __ring_m177._0;
-              const v = ((__a) => { const __i = __a.findIndex((function(v_) { return (v_.name === name); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(edef.variants);
+              const v = env$lookup_variant(edef, name);
               __ring_match178: {
                 const __ring_m178 = v;
                 if (__ring_m178._tag === "some") {

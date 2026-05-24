@@ -8,7 +8,7 @@ use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name
 use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
 use codes::{E0201, E0204, E0301, E0302, E0503, E0511, E0512, E0513, E0705}
 use union_find::{UnionFind, new_union_find, uf_find}
-use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl}
+use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl, lookup_variant}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
 
 // ============================================================
@@ -453,6 +453,7 @@ pub fn update_fn_effects(mut env: TypeEnv, name: Str, effects: EffectRow) {
 
 pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<Int, Type> {
     let mut result: Map<Int, Type> = map_new()
+    let type_var_set: Set<Int> = set_from(scheme.type_vars)
     match (scheme.ty, instantiated_type) {
         (Type::FnType { params: sp, return_type: sr, .. },
          Type::FnType { params: ip, return_type: ir, .. }) => {
@@ -461,19 +462,19 @@ pub fn build_scheme_var_map(scheme: TypeScheme, instantiated_type: Type) -> Map<
             while i < limit {
                 match (sp.get(i), ip.get(i)) {
                     (some(s_param), some(i_param)) =>
-                        collect_var_mappings(s_param, i_param, scheme.type_vars, result),
+                        collect_var_mappings(s_param, i_param, type_var_set, result),
                     _ => {}
                 }
                 i = i + 1
             }
-            collect_var_mappings(sr, ir, scheme.type_vars, result)
+            collect_var_mappings(sr, ir, type_var_set, result)
         },
         _ => {}
     }
     result
 }
 
-fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: List<Int>, mut result: Map<Int, Type>) {
+fn collect_var_mappings(scheme_type: Type, inst_type: Type, type_vars: Set<Int>, mut result: Map<Int, Type>) {
     match scheme_type {
         Type::TypeVar { id, .. } => {
             if type_vars.contains(id) {
@@ -1151,7 +1152,7 @@ fn bind_constructor_pattern(
     match enum_name {
         some(ename) => match ctx.env.types.enums.get(ename) {
             some(enum_def) => {
-                let variant = enum_def.variants.find(fn(v) { v.name == name })
+                let variant = lookup_variant(enum_def, name)
                 match variant {
                     some(v) => {
                         let resolved_expected = apply_subst(subst, expected_type)
@@ -1229,7 +1230,7 @@ fn bind_named_constructor_pattern(
     match enum_name {
         some(ename) => match ctx.env.types.enums.get(ename) {
             some(enum_def) => {
-                let variant = enum_def.variants.find(fn(v) { v.name == name })
+                let variant = lookup_variant(enum_def, name)
                 match variant {
                     some(v) => match v.field_names {
                         some(vfield_names) => {
@@ -1337,7 +1338,7 @@ fn try_resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?) -
             let direct = ctx.env.types.enums.get(q)
             match direct {
                 some(enum_def) => {
-                    if enum_def.variants.any(fn(v) { v.name == variant_name }) {
+                    if enum_def.variant_index.contains_key(variant_name) {
                         return some(enum_def.name)
                     }
                     return none
@@ -1350,7 +1351,7 @@ fn try_resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?) -
                 let fallback = ctx.env.types.enums.get(full_q)
                 match fallback {
                     some(enum_def2) => {
-                        if enum_def2.variants.any(fn(v) { v.name == variant_name }) {
+                        if enum_def2.variant_index.contains_key(variant_name) {
                             return some(enum_def2.name)
                         }
                     },
@@ -1370,7 +1371,7 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
             let direct = ctx.env.types.enums.get(q)
             match direct {
                 some(enum_def) => {
-                    if enum_def.variants.any(fn(v) { v.name == variant_name }) {
+                    if enum_def.variant_index.contains_key(variant_name) {
                         return some(enum_def.name)
                     }
                     let _ = type_error(ctx.sink, E0201,
@@ -1387,7 +1388,7 @@ fn resolve_pattern_enum(ctx: InferCtx, variant_name: Str, qualifier: Str?, span:
                 let fallback = ctx.env.types.enums.get(full_q)
                 match fallback {
                     some(enum_def2) => {
-                        if enum_def2.variants.any(fn(v) { v.name == variant_name }) {
+                        if enum_def2.variant_index.contains_key(variant_name) {
                             return some(enum_def2.name)
                         }
                     },

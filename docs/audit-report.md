@@ -38,14 +38,6 @@
 
 发现者：DS
 
-### #120 `resolve_assoc_type` 歧义时返回 fresh var 而非 ErrorType [low] [open]
-
-当关联类型名解析到多个 trait bound（E0512 歧义错误），`resolve_assoc_type`（`infer_ctx.ring:889-895`）报告错误后仍返回 `found_types.get(0)`（fresh type var），而非 `ErrorType`。这使 checker 在已报错后继续类型解析，可能导致后续级联错误信息。
-
-**文件**：`compiler/infer_ctx.ring:889-895`
-**修复方向**：歧义时返回 ErrorType 抑制级联错误。
-
-发现者：Opus
 
 
 
@@ -84,7 +76,7 @@
 
 发现者：DS
 
-### #112 `zonk_block` 对非 Block 表达式 panic 而非报内部错误 [low] [open]
+### #112 `zonk_block` 对非 Block 表达式 panic 而非报内部错误 [low] [doing]
 
 `zonk_block` 对非 Block HExpr 调用 `panic("unreachable: zonk_block expected Block")`。若编译器其他部分有 bug 传入非 Block 类型，编译器 crash 而非报 graceful internal error。
 
@@ -93,7 +85,7 @@
 
 发现者：Opus
 
-### #119 `register_decl_info` + `scan_fn_mut_params` 使用 `_ => {}` 静默忽略 HDecl 变体 [low] [open]
+### #119 `register_decl_info` + `scan_fn_mut_params` 使用 `_ => {}` 静默忽略 HDecl 变体 [low] [doing]
 
 `codegen.ring:299`（`register_decl_info`）显式处理 `Fn`、`Struct`、`Enum`、`Trait`、`Impl`、`Effect`、`Const`、`ModBlock`，然后 `_ => {}` 静默忽略 `Sig`、`ExternFn`、`ExternType`、`TypeAlias`、`AssocType`、`Test`。`codegen.ring:490`（`scan_fn_mut_params`）有相同模式。新增 HDecl 变体时编译器不会警告，违反 #19 的编译期保护原则。
 
@@ -153,7 +145,7 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：Worker Wave A+B
 
-### #130 `effects_match_kind` MutEffect 非对称 `is_type_var` 回退 [low] [open]
+### #130 `effects_match_kind` MutEffect 非对称 `is_type_var` 回退 [low] [doing]
 
 `effects_match_kind`（`types.ring:92-93`）对 `MutEffect` 使用 `is_type_var(sa) || is_type_var(sb) || types_equal(sa, sb)` 判断"同类"，而 `effects_same_kind`（`types.ring:199`）要求 `types_equal(sa, sb)`。前者用于 `row_merge` 去重——若有 `mut<Int>` 和 `mut<?T>`（未解析），`row_merge` 认为它们"同类"并可能丢弃一个，导致 effect 追踪精度下降。
 
@@ -162,7 +154,7 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：Opus
 
-### #131 `FailEffect` 在 `effects_match_kind` 中忽略错误类型 [low] [open]
+### #131 `FailEffect` 在 `effects_match_kind` 中忽略错误类型 [low] [doing]
 
 `effects_match_kind`（`types.ring:96`）对任意两个 `FailEffect` 均返回 `true`，不考虑错误类型参数。这意味着 `fail<Int>` 和 `fail<Str>` 被视为"同类"——`row_merge` 去重时可能丢弃其中一个。这是 single-fail-effect 设计的有意行为（unification 引擎单独处理类型参数合并），但缺少注释说明，可能误导未来开发者。
 
@@ -171,14 +163,6 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：Opus
 
-### #132 `exports.ring` ModBlock 不处理 ExternFn/ExternType 声明 [low] [open]
-
-`extract_exports` 处理 `ModBlock` 内的声明时（`exports.ring:178-260`），显式处理了 `Fn`、`Struct`、`Enum`、`Const`、`Effect`、`EffectAlias`、`Trait`、`Impl`、`ModBlock`，但遗漏了 `ExternFn` 和 `ExternType`。`pub mod foo { pub extern fn bar() ... }` 中的 `bar` 不会被导出，其他模块无法 import。顶层 `ExternFn`（`exports.ring:153`）处理正确。
-
-**文件**：`compiler/exports.ring:178-260`
-**修复方向**：在 ModBlock 处理中增加 `Decl::ExternFn` 和 `Decl::ExternType` 分支，与顶层处理逻辑一致。
-
-发现者：Opus
 
 ### #113 `RecordType` `types_equal` 不检查 field 顺序 [low] [open]
 
@@ -189,14 +173,6 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：Opus
 
-### #117 Magic number 10 硬编码证据前缀长度 [low] [open]
-
-`codegen_decl.ring:461, 495, 527` 三处使用 `dp.slice(10, dp.len())` 剥离 `__ring_ev_` 前缀。若 `evidence_param_name()`（`hir.ring:223-226`）的前缀格式变动，这些硬编码会无声断裂。
-
-**文件**：`compiler/codegen_decl.ring:461, 495, 527`
-**修复方向**：定义常量 `const EVIDENCE_PREFIX_LEN = "__ring_ev_".len()` 或抽取 helper 函数 `fn evidence_param_to_effect_name(dp: Str) -> Str`。
-
-发现者：DS
 
 ### #118 `collect_local_calls` 遗漏限定的调用路径 [low] [open]
 

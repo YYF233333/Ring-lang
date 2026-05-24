@@ -39,7 +39,15 @@ pub struct EnumDef {
     pub name: Str,
     pub type_params: List<Str>,
     pub type_param_vars: List<Int>,
-    pub variants: List<EnumVariant>
+    pub variants: List<EnumVariant>,
+    pub variant_index: Map<Str, Int>
+}
+
+pub fn lookup_variant(def: EnumDef, name: Str) -> EnumVariant? {
+    match def.variant_index.get(name) {
+        some(idx) => def.variants.get(idx),
+        none => none
+    }
 }
 
 pub struct EffectOpDef {

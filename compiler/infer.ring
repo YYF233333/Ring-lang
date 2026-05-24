@@ -20,7 +20,7 @@ use codes::{E0201, E0203, E0205, E0206, E0208, E0301, E0303, E0304, E0305, E0306
 use union_find::{UnionFind, uf_find, uf_lookup}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
-    BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl}
+    BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, lookup_variant}
 use unify::{unify, empty_subst}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, merge_effects, unify_at, update_fn_effects,
@@ -1006,7 +1006,7 @@ fn infer_ident(mut ctx: InferCtx, name: Str, span: Span, subst: UnionFind, quali
                 some(q) => {
                     match ctx.env.types.enums.get(q) {
                         some(enum_def) => {
-                            if enum_def.variants.any(fn(v) { v.name == name }) {
+                            if enum_def.variant_index.contains_key(name) {
                                 enum_name = some(enum_def.name)
                             } else {
                                 let _ = type_error(ctx.sink, E0201, "'${q}' has no variant '${name}'", span,
@@ -1049,43 +1049,20 @@ fn infer_bin_op(mut ctx: InferCtx, op: BinOp, left: Expr, right: Expr, span: Spa
         BinOp::Mul => { result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "*"); s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span) },
         BinOp::Div => { result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "/"); s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span) },
         BinOp::Mod => { result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "%"); s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span) },
-        BinOp::Eq => {
+        BinOp::Eq | BinOp::Neq => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
             result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
             let is_builtin = is_primitive_eq(resolved) || is_tuple_type(resolved)
-            eq_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Eq", E0307, s, span, "==", is_builtin))
+            let op_sym = match op { BinOp::Eq => "==", _ => "!=" }
+            eq_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Eq", E0307, s, span, op_sym, is_builtin))
         },
-        BinOp::Neq => {
+        BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
             result_type = BOOL
             let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            let is_builtin = is_primitive_eq(resolved) || is_tuple_type(resolved)
-            eq_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Eq", E0307, s, span, "!=", is_builtin))
-        },
-        BinOp::Lt => {
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL
-            let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, "<", is_primitive_ord(resolved)))
-        },
-        BinOp::Lte => {
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL
-            let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, "<=", is_primitive_ord(resolved)))
-        },
-        BinOp::Gt => {
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL
-            let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, ">", is_primitive_ord(resolved)))
-        },
-        BinOp::Gte => {
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), hexpr_type(rr.hexpr), s, span)
-            result_type = BOOL
-            let resolved = apply_subst(s, hexpr_type(lr.hexpr))
-            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, ">=", is_primitive_ord(resolved)))
+            let op_sym = match op { BinOp::Lt => "<", BinOp::Lte => "<=", BinOp::Gt => ">", _ => ">=" }
+            ord_dispatch = some(resolve_trait_dispatch(ctx, resolved, "Ord", E0308, s, span, op_sym, is_primitive_ord(resolved)))
         },
         BinOp::And => {
             s = unify_at(ctx.sink, ctx.env, hexpr_type(lr.hexpr), BOOL, s, span)
@@ -1115,18 +1092,17 @@ fn infer_numeric_op(ctx: InferCtx, left: HExpr, right: HExpr, s: UnionFind, span
             // Check if this TypeVar is a rigid type parameter (from fn<T> etc.)
             // Rigid type params should not silently unify to Int — report E0303.
             // Fresh inference variables (e.g. from fold callback) can unify to Int.
-            let mut is_rigid = false
+            let mut rigid_ids: Set<Int> = set_new()
             for entry in ctx.type_param_scope.entries() {
                 let tp_type = entry.1
                 match tp_type {
                     Type::TypeVar { id: tp_id, .. } => {
-                        if resolve_var_id(tp_id, s) == resolve_var_id(tv_id, s) {
-                            is_rigid = true
-                        }
+                        rigid_ids.insert(resolve_var_id(tp_id, s))
                     },
                     _ => {}
                 }
             }
+            let is_rigid = rigid_ids.contains(resolve_var_id(tv_id, s))
             if is_rigid {
                 type_error(ctx.sink, E0303,
                     "Operator ${op_str} requires numeric types (Int or Float), got unresolved type",
@@ -1346,8 +1322,9 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
     let mut effects = callee_r.effects
 
     // Resolve callee type for lambda bidirectional inference
-    let callee_fn_type: Type? = match apply_subst(s, hexpr_type(callee_r.hexpr)) {
-        Type::FnType { .. } => some(apply_subst(s, hexpr_type(callee_r.hexpr))),
+    let resolved_callee = apply_subst(s, hexpr_type(callee_r.hexpr))
+    let callee_fn_type: Type? = match resolved_callee {
+        Type::FnType { .. } => some(resolved_callee),
         _ => none
     }
 
@@ -2182,7 +2159,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         some(q) => {
             match ctx.env.types.enums.get(q) {
                 some(enum_def) => {
-                    if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(enum_def.name) }
+                    if enum_def.variant_index.contains_key(name) { variant_enum = some(enum_def.name) }
                 },
                 none => {
                     // Fallback: try prepending current mod path
@@ -2191,7 +2168,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
                         let full_q = "${mod_prefix}::${q}"
                         match ctx.env.types.enums.get(full_q) {
                             some(enum_def) => {
-                                if enum_def.variants.any(fn(v) { v.name == name }) { variant_enum = some(enum_def.name) }
+                                if enum_def.variant_index.contains_key(name) { variant_enum = some(enum_def.name) }
                             },
                             none => {}
                         }
@@ -2211,7 +2188,7 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
     match variant_enum {
         some(ve) => match ctx.env.types.enums.get(ve) {
             some(enum_def) => {
-                let variant = enum_def.variants.find(fn(v) { v.name == name })
+                let variant = lookup_variant(enum_def, name)
                 match variant {
                     some(v) => match v.field_names {
                         some(_) => { return infer_named_variant_construct(ctx, ve, name, v, enum_def, fields, spread, span, subst) },
@@ -2412,7 +2389,7 @@ fn rewrite_bare_enum_bindings(env: TypeEnv, pattern: Pattern) -> Pattern {
             match env.types.variant_to_enum.get(name) {
                 some(ve) => match env.types.enums.get(ve) {
                     some(edef) => {
-                        let v = edef.variants.find(fn(v_) { v_.name == name })
+                        let v = lookup_variant(edef, name)
                         match v {
                             some(found_v) => {
                                 if found_v.fields.len() == 0 {
