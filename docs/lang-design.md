@@ -1,6 +1,7 @@
-# Ring 类型系统设计文档
+# Ring 语言设计文档
 
-> 所有权、借用、推断、标注、安全性的完整设计记录。2026-05-24 确定。
+> 语言层面的设计决策追踪。已确定的决策 + 未成熟的研究方向。
+> 成熟后需要实施的条目转入 `backlog.md` 排队；backlog 只放 worker 拿起来就能跑的。
 
 ## 1. 所有权与参数传递模型
 
@@ -705,3 +706,91 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 { ... }
 - [ ] 方法名冲突的 qualified call 语法设计
 - [ ] 命名参数是否引入（实现默认参数时评估）
 - [ ] comptime 求值器实现策略（JS 后端执行 vs 内置解释器）
+
+---
+
+## 11. PL 理论前沿追踪
+
+> 未成熟的研究方向。观察、评估、记录，不排入 backlog。成熟后提取具体 spec 转 backlog。
+
+### 11.1 Algebraic Subtyping（MLsub）
+
+**来源**：Stephen Dolan, 2017, Cambridge PhD thesis
+
+**核心**：用 biunification（双向合一）替代标准 unification，在 HM 里加子类型 + union/intersection types，不丢 principal types，推断仍可判定。通过极性类型（polar types）保证唯一最优解存在。
+
+**与 Ring 的关系**：如果采用，union type 可以从匿名 enum sugar 升级为真正的类型系统概念，同时保留推断性质。当前 Ring 选择 enum sugar（design.md 1.1b）是因为假设子类型 = 丢 principal types——algebraic subtyping 打破了这个假设。
+
+**升级路径**：替换推断引擎（unification → biunification），union/intersection 成为一等类型。
+
+**风险**：
+- 整个推断引擎大重写
+- 错误信息生成更难（极性类型的报错比 unification 失败更抽象）
+- 工业验证不足（只有 MLsub 原型 + 少数后续实现，无工业语言采用）
+
+**成熟度**：★★☆☆ | **观察**，不投入。等有工业语言验证后重新评估。
+
+### 11.2 Liquid Types — 自动化 Refinement 推断
+
+**来源**：Rondon, Kawaguchi, Jhala 2008 (UCSD). 实现：Liquid Haskell, **Flux (Rust refinement types, 2023)**
+
+**核心**：不让用户写任意谓词——从程序中自动提取候选谓词（qualifiers），限制为 qualifier 模板的布尔组合，然后 SMT 自动求解。比完整依赖类型务实得多。
+
+**与 Ring 的关系**：直接适用于 B-001 refinement types。Ring 当前设计"编译器尽力静态验证 + 运行时兜底"和 liquid types 的 fallback 策略一致。Flux 已在 Rust 上验证——证明数组不越界、整数不溢出，和 ownership 系统共存。
+
+**升级路径**：B-001 实现时参考 Flux 的 qualifier 提取 + SMT 验证策略，不从零设计。
+
+**风险**：低——理论成熟，有 Rust 工程验证。
+
+**成熟度**：★★★☆ | **B-001 实施时直接参考 Flux**。最值得投资的前沿方向。
+
+### 11.3 Quantitative Type Theory (QTT)
+
+**来源**：Atkey 2018, McBride 2016. 实现：Idris 2
+
+**核心**：每个变量绑定带使用量注释——0（编译期擦除）、1（线性，恰好一次）、ω（不限）。线性类型、仿射类型、擦除类型全部是 usage annotation 的特例。
+
+**与 Ring 的关系**：Ring 的 ownership（move = 1, borrow = ω, Drop = 必须恰好 1）可以看作 QTT {0, 1, ω} 子集的工程实现。如果未来 ownership 模型表达力不足（如需要区分"恰好用 2 次"或"最多 N 次"），QTT 是理论上最干净的升级路径。
+
+**风险**：中——Idris 2 是唯一采用者，工程反馈不足。
+
+**成熟度**：★★☆☆ | **观察**。Ring 的 ownership 模型如果工程上够用就不迁移。
+
+### 11.4 Graded Modal Types — Effect + Linearity 统一
+
+**来源**：Orchard, Liepelt, Eades 2019. 实现：Granule 语言
+
+**核心**：用分级模态（graded modality）统一 effects、coeffects、linearity。每个绑定带一个来自半环的 grade——不同半环表达不同性质（使用次数、副作用、信息流、敏感度）。
+
+**与 Ring 的关系**：Ring 目前 effect system 和 ownership 是两套独立机制，B-043 交互矩阵定义了 6 条交互规则。Graded modal types 证明它们可以在同一个框架里统一。如果交互规则持续膨胀，可以考虑用 graded types 重新形式化。
+
+**风险**：高——纯研究原型，无工业验证。
+
+**成熟度**：★☆☆☆ | **纯理论关注**。
+
+### 11.5 Typed Multi-Stage Programming
+
+**来源**：Taha, Sheard 1997. 实现：MetaOCaml（成熟）
+
+**核心**：代码生成有类型安全保证。quote/splice 机制，类型系统保证生成的代码类型正确，不需要再过 type checker。
+
+**与 Ring 的关系**：Ring 的 comptime Phase E `emit(decls)` 生成声明后需要再过 type checker 验证。Typed staging 可以在生成时就保证正确——更高效，且消除了"生成的代码有类型错误"这一类 bug。
+
+**风险**：低——MetaOCaml 已有长期工程验证。
+
+**成熟度**：★★★☆ | **Phase E comptime 设计时参考**。
+
+### 11.6 为可判定性放弃的特性清单
+
+> 记录 Ring 为保持 HM 可判定推断而放弃的特性，以及替代方案。前沿研究可能恢复其中部分能力。
+
+| # | 放弃的特性 | 原因 | Ring 替代 | 可能的恢复路径 |
+|---|-----------|------|----------|--------------|
+| 1 | 函数重载 | 破坏 principal types | 不同名或泛型 | — |
+| 2 | 真 union type（子类型） | 等式→不等式 | 匿名 enum sugar | Algebraic Subtyping (11.1) |
+| 3 | Rank-2+ 多态 | 推断不可判定 | trait 对象 | — |
+| 4 | Trait overlap / specialization | solver 递归 + soundness | 默认方法 + 编译器优化 | — |
+| 5 | 隐式数值 widening | 推断复杂度 | 显式 .to_xxx() | — |
+| 6 | Impredicative 多态 | 推断不可判定 | struct/trait 包装 | — |
+| 7 | GADT 完整推断 | 不可判定 | scrutinee 需已知类型 | — |
+| 8 | FunDep | solver 复杂度 | 关联类型 | — |
