@@ -107,6 +107,43 @@ trait Collection {
 }
 ```
 
+### 1.1b Union Type（匿名 enum 语法糖，2026-05-25 决策）
+
+`A | B | C` 是匿名 enum 的语法糖。纯编译期展开，不引入子类型，HM 推断不受影响。
+
+```
+// 写法
+fn process(x: Str | I64) -> Str {
+    match x {
+        Str(s) => s,
+        I64(n) => n.to_str(),
+    }
+}
+process("hello")   // 编译器自动包装为 union 的 Str 分支
+process(42)        // 编译器自动包装为 union 的 I64 分支
+
+// 错误组合——核心用例
+fn load_config(path: Str) -> Config with {fail<IoError | ParseError>} {
+    let raw = read_file(path)        // fail<IoError>，自动包装进 union
+    let parsed = parse_json(raw)     // fail<ParseError>，自动包装进 union
+    parsed
+}
+```
+
+**语义规则**：
+- `A | B` 展开为编译器生成的匿名 enum，tag + payload 与普通 enum 相同
+- 归一化：按类型名字典序排列（`I64 | Str` = `Str | I64` 不成立，canonical form 按名字序）
+- 去重：`A | A` = `A`
+- 扁平化：`(A | B) | C` = `A | B | C`
+- 结构等价：两处写 `Str | I64` 是同一类型
+- 调用点隐式包装：传入 `Str` 值到 `Str | I64` 参数时编译器自动插入 enum 构造
+- match 使用类型名作为 pattern（具体语法待定，见 backlog）
+
+**不引入的东西**：
+- 无子类型关系（`Str` 不是 `Str | I64` 的子类型——是隐式包装，不是子类型）
+- 无运行时类型检查（tag 区分，同 enum）
+- 无 `Any` 类型
+
 ### 1.2 Refinement Types
 
 类型附带谓词，编译器尽力静态检查，无法证明时插入运行时检查：
@@ -156,27 +193,34 @@ fn head<T, const N where N > 0>(v: [T; N]) -> T {
 // fn matmul<const M, K, N>(a: Mat<M, K>, b: Mat<K, N>) -> Mat<M, N>
 ```
 
-### 1.4 Row Polymorphism
+### 1.4 Row Polymorphism（语法糖定位，2026-05-25 决策）
 
-无继承的结构化多态：
+结构化多态——函数参数按字段匹配，无需定义 trait。**定位为语法糖**：编译期通过单态化消除，不作为类型系统一等概念。
 
 ```
 fn greet(person: {name: Str, ..rest}) -> Str {
     "hello, ${person.name}"
 }
 
-struct User    { name: Str, age: Int, email: Str }
+struct User    { name: Str, age: I64, email: Str }
 struct Company { name: Str, industry: Str }
 
-greet(User { ... })       // ✓
-greet(Company { ... })    // ✓
-
-// 注意：spread 和 record 返回类型属于方案 B（未实现）
-// 当前实现为方案 A：row type 仅在参数类型中使用
-// fn with_timestamp(r: {..rest}) -> {timestamp: Int, ..rest} {
-//     { ...r, timestamp: now() }
-// }
+greet(User { ... })       // ✓ 单态化为 greet__User
+greet(Company { ... })    // ✓ 单态化为 greet__Company
 ```
+
+**编译策略**：
+- 编译器收集所有调用点的具体类型，为每个生成特化版本（同泛型单态化）
+- 如果存在覆盖所需字段的 trait，归化为 trait 约束（trait 归化）
+- `RecordType` 不出现在最终类型表示中——编译期消除
+- **pub fn 不允许 row poly 参数**——模块边界必须使用具名类型或 trait
+
+**签名显示**（lv2 formatter）：
+- 有匹配 trait → 显示 trait 约束：`fn greet<T: Named>(person: T) -> Str`
+- 无匹配 trait → 显示具体调用类型的 union：`fn greet(person: User | Company) -> Str`（使用 1.1b union type 语法）
+- pub fn → 不适用（已禁止 row poly）
+
+**实现时序**：当前 `RecordType` + row unification 实现保留，LLVM 后端阶段重构为单态化 pass。
 
 ### 1.5 错误的生命周期模型
 

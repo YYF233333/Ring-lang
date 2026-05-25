@@ -79,6 +79,37 @@ Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪
 
 
 
+### B-072 Union Type（匿名 enum 语法糖）[feature] [P2] [M] [judgment] [queued]
+`A | B | C` 作为匿名 enum 的语法糖。纯编译期展开，不引入子类型，HM 推断不受影响。详见 design.md 1.1b。
+
+**核心用例**：
+1. 错误组合：`fail<IoError | ParseError>` — 消除手写包装 enum 的 boilerplate
+2. Row poly 签名显示：`fn greet(person: User | Company)` — 单态化后的具体类型展示
+3. 多类型参数：`fn process(x: Str | I64)` — 轻量级 sum type
+
+**语义规则**：
+- 展开为匿名 enum（tagged，同 enum codegen）
+- 归一化：按类型名字典序、去重、扁平化
+- 结构等价：两处 `Str | I64` = 同一类型
+- 调用点隐式包装：传 `Str` 到 `Str | I64` 时编译器自动插入构造
+
+**待定**：match 语法——用类型名做 pattern（`Str(s) => ...`）的消歧规则，需后续 discussion 细化
+
+**涉及修改**：
+1. `parser.ring`：类型语法支持 `A | B`
+2. `types.ring`：`UnionType` 或复用 `EnumType` + 匿名 enum 生成
+3. `infer.ring`：调用点隐式包装推断
+4. `codegen.ring`：同 enum（tag + payload）
+
+**验收标准**：
+- `Str | I64` 可声明为参数/返回/变量类型
+- `fail<IoError | ParseError>` 可编译，catch 可按类型 match
+- 调用点自动包装
+- 归一化 + 去重 + 扁平化正确
+- 不影响 HM 推断
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
 ### B-033 GADTs（Generalized Algebraic Data Types）[feature] [P3] [L] [judgment] [queued]
 > 2026-05-24 从层 2 移出：无下游依赖，编译器自身不需要，推迟至 LLVM 之后。
 enum 变体可指定不同的返回类型约束，match 分支内编译器自动获得类型等式约束（完整方案：scoped unification）。
@@ -651,6 +682,24 @@ connect("localhost", 3000)     // timeout=30
 **验收标准**：
 - `impl<T> Foo for Bar<T>` 正常工作（现有行为不变）
 - `impl<T> Foo for Bar<Int>` 报编译错误
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
+
+### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
+Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。
+
+**涉及修改**：
+1. `unify.ring`：移除 row unification（~260 行），替换为"检查 struct 是否有所需字段"
+2. `types.ring`：`RecordType` 降级为 desugar 中间表示，不出现在最终类型
+3. `infer.ring`：row poly 函数标记为需单态化，收集调用点具体类型
+4. `codegen.ring`：为每个具体类型生成特化版本（同泛型单态化）
+5. `checker.ring`：pub fn 使用 row poly 参数 → 编译错误
+
+**验收标准**：
+- 现有 row poly 测试（row_basic/multi_field/generic/reject）全部通过
+- pub fn 使用 row poly → 编译错误
+- `RecordType` 不出现在 HIR 最终类型中
+- 如存在匹配 trait → trait 归化（可选，增量实现）
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
