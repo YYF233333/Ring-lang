@@ -103,7 +103,7 @@ Ring-lang/
 
 **遗留**：impl effect 传播修复、LSP 移植、技术债清理（见 `docs/audit-report.md`）
 
-**长期**：Dependent types lite、语义驱动编译优化（AOT + JIT）、Formatter 等级系统
+**长期**：语义驱动编译优化（AOT + JIT）、Formatter 等级系统
 
 ## 常用命令
 

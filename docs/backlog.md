@@ -55,6 +55,7 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 - **复杂度**：极大（SSA 约束传播 + 可选 Z3 集成）
 - **优先级**：Phase C 首要
 - **交互规则（B-043 决策）**：refinement 是值级谓词，不允许引用可变绑定；跨 effect/await 边界恒成立；handler resume 值须满足 refinement 约束；`mut` 参数带 refinement 时每次赋值重新验证（SSA 流分析，复杂度归入本 item）。详见 design.md 1.5
+- **含 const generic 参数谓词**（2026-05-25，原 B-003 吸收）：refinement predicates 作用于 const generic 参数（如 `where N > 0`）归入本 item 的 SSA 约束传播。详见 design.md 1.3
 
 ### B-002 Ownership + Drop（Rust 风格 RAII，无 borrow checker）[feature] [P2] [XL] [judgment] [queued]
 Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪值的所有权，确保 Drop 恰好执行一次。
@@ -76,12 +77,6 @@ Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪
 - **优先级**：Phase C 与 refinement 穿插
 - **交互规则（B-043 决策）**：RAII 模型——Drop 值在 abort/cancel 路径自动释放；Drop::drop 禁止 fail effect（允许 io）；spawn 为 move 语义，不可跨任务共享 Drop 值；`mut self` 调用 = 隐式借用（不消耗）。详见 design.md 1.5
 
-### B-003 Dependent Types Lite [feature] [P3] [XL] [judgment] [queued]
-design.md 1.3。类型可依赖特定值（`Vec<T, n: Nat>`），不要求完整依赖类型证明。
-
-- **前置依赖**：Refinement types
-- **复杂度**：极大（约束求解可能不可判定）
-- **优先级**：Phase D（研究向）
 
 
 ### B-033 GADTs（Generalized Algebraic Data Types）[feature] [P3] [L] [judgment] [queued]
@@ -710,8 +705,36 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
+### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [queued]
+HM 推断失败时的错误信息质量直接决定"像 Python"承诺的可信度。当前 checker 错误信息面向类型系统开发者，非面向终端用户。
 
+**核心问题**：HM unification 的错误位置和原因可能离实际 bug 很远。例如 row polymorphism 推断失败时，报错可能在 unify 点而非用户写错的位置。
 
+**目标**：
+1. **错误定位准确**：报错指向用户写错的位置，不是 unification 失败的位置
+2. **原因可理解**：解释"期望什么类型、为什么期望、实际是什么"，不暴露类型变量内部名（`_t42`）
+3. **修复建议可执行**：`--error-format=llm` 给出具体修复步骤（加标注、改类型、改函数签名）
+4. **常见场景覆盖**：空集合推断失败、row poly 字段缺失、effect 不匹配、泛型约束不满足
+
+**具体场景**：
+- 空集合直接返回（`fn f() { [] }`）→ "无法推断返回类型，请添加返回类型标注：`fn f() -> List<T>`"
+- Row poly 字段缺失 → "类型 `User` 缺少字段 `age`，因为在第 X 行 `x.age` 的使用要求该字段存在"
+- 多处使用类型冲突 → 指向第一个确定类型的位置 + 冲突位置，而非 unification 内部失败点
+- Effect 不匹配 → "函数 `f` 需要 `io` effect，但当前上下文未提供 handler"
+
+**涉及修改**：
+1. `diagnostic.ring`：错误信息模板重写，增加"原因链"（why chain）
+2. `infer.ring`：unification 失败时记录约束来源（哪一行的什么表达式引入了这个约束）
+3. `unify.ring`：`unify_error` 携带双侧来源 span（期望来源 + 实际来源）
+4. `checker.ring`：error-format=llm 的修复建议生成
+
+**验收标准**：
+- 空集合推断失败 → 报错指向定义点，建议加类型标注
+- Row poly 字段缺失 → 报错指向字段访问点，说明缺少的字段名
+- 类型冲突 → 报错展示两侧来源（不只是 unify 失败点）
+- `--error-format=llm` 对以上场景均给出可执行修复建议
+- 不引入新的公共 API / 不改变编译行为
+- 全部 E2E 测试通过
 
 
 
@@ -753,6 +776,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 值语义（赋值 = 拷贝）
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
+
+**等式约束（2026-05-25，原 B-003 吸收）**：const generic 参数支持等式 unification——`fn zip<T, U, const N>(a: [T; N], b: [U; N])` 要求两个 `N` 相等，由 HM unification 自然处理。用户自定义类型的 const generics（如 `struct Mat<const M, const K>`）为远期扩展。
 
 **前置依赖**：无
 **复杂度**：M（Parser + Checker const generic + Codegen）
@@ -797,6 +822,9 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ### `or` 兜底表达式
 design.md 2.3 层级 1。已被 Option 方法（`unwrap_or` / `unwrap_or_else`）取代，不再实现。
+
+### Dependent Types Lite（B-003）
+取消原因：功能与 Refinement Types（B-001）+ Const Generics（B-070）完全重叠。"依赖类型"的三个核心能力——值参数化类型（= const generics）、等式约束（= const generic unification）、值谓词约束（= refinement on const params）——已分别归入 B-070 和 B-001。不引入"依赖类型"概念，降低用户认知负担。
 
 ### Full Algebraic Effects（B-009）
 Post-resume handler + multi-resume。取消原因：tail-resumptive + abort 覆盖 95%+ 实际需求，剩余用例用 async effect + defer 解决更好。实现复杂度（delimited continuation + 资源安全）与工程价值不成比例。
