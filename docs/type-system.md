@@ -8,7 +8,7 @@
 
 | 类型分类 | `let b = a` | 理由 |
 |---------|-------------|------|
-| 值类型（Int/Float/Bool/Char） | auto copy（零成本 memcpy） | 栈上小数据，和 Rust Copy trait 等价 |
+| 值类型（I64/F64/Bool/Char 等固定宽度数值） | auto copy（零成本 memcpy） | 栈上小数据，和 Rust Copy trait 等价 |
 | 复合类型（List/Map/struct/enum） | move（a 不再有效） | 保留需显式 `.clone()` |
 
 ### 1.2 参数传递
@@ -99,7 +99,7 @@ COW（Copy-on-Write）退化为 Perceus RC 的内部 clone 优化，不是用户
 | move callsite | ❌ | 编译器 use-after-move 够用 |
 | local variable type | ❌ | 过于繁琐 |
 | borrow param | ❌ | 默认即 borrow |
-| 泛型实例化类型参数 | ❌ | `Vec.new()` 不写 `::<Int>` |
+| 泛型实例化类型参数 | ❌ | `Vec.new()` 不写 `::<I64>` |
 
 ### 2.3 模块边界标注
 
@@ -239,7 +239,7 @@ impl Storage for MemoryStorage {
 ### 4.4 默认参数
 
 ```ring
-fn connect(host: Str, port: Int = 8080, timeout: Int = 30) with {io} { ... }
+fn connect(host: Str, port: I64 = 8080, timeout: I64 = 30) with {io} { ... }
 connect("localhost")           // port=8080, timeout=30
 connect("localhost", 3000)     // timeout=30
 ```
@@ -286,7 +286,7 @@ x.push(42)         // α = Int（从 usage 消歧）
 | Refinement Types | C/D | 高（SMT 不可判定） | Z3 timeout → fallback runtime check |
 | GADTs | D | 中（推断不可判定） | GADT match scrutinee 需要已知类型 |
 | HKT | D | 中（高阶 unification） | 限制为 first-order（`* -> *`） |
-| Dependent Types Lite | D | 高（定理证明） | 限制为 Presburger arithmetic（可判定片段） |
+| Const Generics + Refinement | D | 高（定理证明） | 限制为 Presburger arithmetic（可判定片段） |
 
 **策略：每个高级特性限制在可判定片段内。超出片段 → 编译错误（要求标注或 runtime check），不允许编译器不终止。**
 
@@ -391,7 +391,7 @@ comptime if target.os == "windows" {
 
 ```ring
 @derive(Debug, Clone, Eq, Hash, Ord)
-struct User { name: Str, age: Int }
+struct User { name: Str, age: I64 }
 ```
 
 内置 derive 列表：Debug, Clone, Eq, Hash, Ord, Serialize, Deserialize
@@ -416,7 +416,7 @@ comptime fn my_derive(info: TypeInfo) -> List<Decl> {
 }
 
 @my_derive
-struct Config { host: Str, port: Int }
+struct Config { host: Str, port: I64 }
 // 生成：impl Config { fn host(self) -> Str { self.host } fn port(self) -> Int { self.port } }
 ```
 
@@ -472,7 +472,7 @@ ISize, USize
 
 - 字面量默认推断：`42` → `I64`，`3.14` → `F64`
 - 上下文需要固定宽度时推断为对应类型
-- 类型间无隐式转换（安全 widening 除外，见下文"隐式数值转换"）
+- 类型间零隐式转换（不同宽度之间无 widening、无 narrowing，全部显式 `.to_xxx()`）
 
 #### 内存布局控制
 
@@ -524,28 +524,21 @@ struct CacheLine { data: List<U8> }         // 显式对齐（cache line）
 **位运算**：`BitAnd`（`&`）、`BitOr`（`|`）、`BitXor`（`^`）、`BitNot`（`~`）、`Shl`（`<<`）、`Shr`（`>>`）
 **索引**：`Index`（`[]`）、`IndexMut`（`[]=`）
 
-- 不支持跨类型运算（`I32 + I64` 编译错误，需显式转换或依赖安全 widening）
+- 不支持跨类型运算（`I32 + I64` 编译错误，需显式 `.to_i64()` 转换）
 - 16 个数值类型各自 impl 全套 trait（编译器内置）
 
-#### 隐式数值转换
+#### 数值转换（2026-05-25 更新：零隐式转换）
 
-只做安全 widening，规则：**源类型所有可能值都能被目标类型无损表示 → 自动转换**。
+**不同宽度类型之间零隐式转换**——无 widening、无 narrowing，全部显式 `.to_xxx()`。
 
-同族 widening：
-- `I8 → I16 → I32 → I64 → I128`
-- `U8 → U16 → U32 → U64 → U128`
-- `F32 → F64`
+```ring
+let a: U8 = 42
+let b: I64 = a.to_i64()      // 显式 widening
+let c: U8 = b.to_u8()        // 显式 narrowing（运行时溢出 → fail）
+let d: U8 = 256.to_u8()      // 编译期范围检查 → 编译错误
+```
 
-跨族安全 widening（`U{N} → I{M}`，M > N）：
-- `U8 → I16, I32, I64, I128`
-- `U16 → I32, I64, I128`
-- `U32 → I64, I128`
-- `U64 → I128`
-
-不允许（需显式 `.to_xxx()`）：
-- 有符号 ↔ 无符号（同宽度或无符号更宽）
-- 整数 → 浮点（`I64 → F64` 可能丢精度）
-- 宽 → 窄（截断）
+理由：日常代码只用 `I64`/`F64`（字面量默认类型），不碰宽度转换问题。碰到窄类型说明在 FFI/性能关键层，显式转换是预期的。与 Rust 一致（Rust 也无隐式数值转换）。
 
 ### 9.2 Phase C/E 相关（2026-05-24 决策）
 
