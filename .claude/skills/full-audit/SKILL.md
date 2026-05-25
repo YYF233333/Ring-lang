@@ -76,7 +76,7 @@ Both agents output structured findings (严重度只允许 `critical` / `medium`
 1. **Deduplicate**: same finding from multiple agents → one entry
 2. **Verify critical findings**: for Critical severity, read code yourself to confirm
 3. **Check backlog overlap**: if finding matches a `planning`/`doing` item → skip or note "in progress"
-4. **Classify**:
+4. **Classify** (严重度 + dispatch):
 
 | Category | 严重度标记 | 写入位置 |
 |----------|-----------|---------|
@@ -88,6 +88,11 @@ Both agents output structured findings (严重度只允许 `critical` / `medium`
 
 **严重度只允许三级**：`critical` / `medium` / `low`。不使用 Important/Minor/Style 等其他词汇。
 
+5. **标注 dispatch**（每个写入 audit-report 的条目必须标注）：
+   - `mechanical`：修复方向唯一确定，spec 能完整描述"改哪里、怎么改"。典型：补递归遍历、加 null check、提取重复代码、补 match 分支。
+   - `judgment`：修复涉及设计选择、架构权衡、effect system 推理。典型：重构大文件结构、改变 dispatch 策略、修复 effect 传播。
+   - 判断依据：如果给一个不了解项目全局的开发者只看修复描述就能正确实现 → `mechanical`；需要理解项目约定或在多种方案中选择 → `judgment`。
+
 ### Phase 3: Update audit-report.md
 
 `docs/audit-report.md` 是**活的 bug 看板**——做完即删。
@@ -96,7 +101,7 @@ Both agents output structured findings (严重度只允许 `critical` / `medium`
 
 每个条目**必须**是 heading 格式：
 ```markdown
-### #xxx <标题> [严重度] [open]
+### #xxx <标题> [严重度] [dispatch] [open]
 
 <问题描述，含文件路径、行号、影响、建议修复方向>
 
@@ -105,6 +110,9 @@ Both agents output structured findings (严重度只允许 `critical` / `medium`
 
 - **`[open]` 标记不可省略**——没有 `[open]` 的条目 Worker 扫描不到
 - **严重度只能是 `critical` / `medium` / `low`**
+- **dispatch 只能是 `mechanical` / `judgment`**——Worker 据此决定执行者（DS 或 Claude）
+  - `mechanical`：修复方向唯一确定，不需要设计判断（如补递归遍历、提取公共 pattern、加 validation check）
+  - `judgment`：涉及设计选择、架构决策、effect system 推理、或多种可行方案需选择
 - **禁止使用表格格式**——必须用 `###` heading
 
 **追加规则**：

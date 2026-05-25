@@ -1,7 +1,8 @@
 # Audit Report
 
 > 活的 bug 看板。修复后删除条目，只在 git commit message 留记录。
-> 条目格式：`### #xxx <标题> [严重度] [状态]`
+> 条目格式：`### #xxx <标题> [严重度] [dispatch] [状态]`
+> dispatch 标记：`mechanical`（DS 可执行）/ `judgment`（Claude 执行）
 > 状态流转：`open` → `doing` → 删除
 > 工作流规范见 `docs/workflow.md`
 
@@ -11,13 +12,13 @@
 
 
 
-### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [open] [deferred: LLVM]
+### #45 `StructType`/`EnumType` 在 `apply_subst` 中不替换 fields [low] [judgment] [open] [deferred: LLVM]
 
 设计约束：fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16）。
 
 **决策（2026-05-23）**：长期容忍。当前方案正确且无性能问题，改动大（L-XL）收益主要在未来后端。等 LLVM 后端需要时与 #16 一并重构。
 
-### #108 Occurs check 对 StructType/EnumType 仅检查组 type_params，不检查 fields/variants [medium] [open]
+### #108 Occurs check 对 StructType/EnumType 仅检查组 type_params，不检查 fields/variants [medium] [mechanical] [open]
 
 `occurs_in` 函数（`unify.ring:55-58`）对 `StructType` 和 `EnumType` 仅递归到 `type_params`，不检查 `fields` 或 `variants` 中的类型。若一个 type variable 被统一到 struct 类型而其 field 类型中包含该 variable 自身，occurs check 会遗漏，理论上可构造无限类型。
 
@@ -37,11 +38,11 @@
 ## Codegen
 
 
-### #28 HOF inline 代码在 List/Map/Set/Option 间重复 [low] [open]
+### #28 HOF inline 代码在 List/Map/Set/Option 间重复 [low] [mechanical] [open]
 
 ~100 行重复。应抽象迭代模式。
 
-### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [open]
+### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
 可移植性问题。
 
@@ -51,15 +52,15 @@
 
 ## 代码质量 / 可维护性
 
-### #6 `runtime.ring` 用数百个 `.push()` 拼接 JS 运行时代码 [low] [open]
+### #6 `runtime.ring` 用数百个 `.push()` 拼接 JS 运行时代码 [low] [mechanical] [open]
 
 应改用 raw string 或外部 .js 文件。
 
-### #7 `infer.ring` 2826 行单文件 [low] [open]
+### #7 `infer.ring` 2826 行单文件 [low] [judgment] [open]
 
 编译器最大单文件，从 2565→2763→2826 行持续增长。应拆分为 infer_stmt/infer_expr/infer。
 
-### #111 `emit_if_as_assign` brace 耦合脆弱 [low] [open]
+### #111 `emit_if_as_assign` brace 耦合脆弱 [low] [mechanical] [open]
 
 `emit_if_as_assign` 以 `emit(ctx, "} else if (${cond}) {")` 开头，假设调用方已打开 `if` block 且未关闭 `}`。当前仅从 `gen_if:1150` 调用，正确但脆弱——若未来从其他路径调用可能产生悬空 `}`。
 
@@ -73,24 +74,24 @@
 
 ## 架构债
 
-### #16 StructType/EnumType 携带冗余 fields/variants 数据 [low] [open] [deferred: LLVM]
+### #16 StructType/EnumType 携带冗余 fields/variants 数据 [low] [judgment] [open] [deferred: LLVM]
 
 类型表示不一致。应改为 nominal 表示。
 
 **决策（2026-05-23）**：长期容忍，与 #45 一并推迟到 LLVM 后端阶段。
 
-### #19 Ring 编译器缺少 `assertNever` 等效编译期保护 [low] [open]
+### #19 Ring 编译器缺少 `assertNever` 等效编译期保护 [low] [mechanical] [open]
 
 新 variant 易遗漏。应确保所有 match 穷尽。
 
-### #20 HExpr/HStmt match 在 5+ pass 中重复 [low] [open]
+### #20 HExpr/HStmt match 在 5+ pass 中重复 [low] [judgment] [open]
 
 维护负担。应扩展 hir-visitor。
 
 ## Delegate 完整性（2026-05-23 审计发现）
 
 
-### #93 Delegate expansion 绕过类型推断直接合成 HIR [low] [open]
+### #93 Delegate expansion 绕过类型推断直接合成 HIR [low] [judgment] [open]
 
 `expand_delegate_impls` 直接合成 `HDecl::Fn`（HIR），绕过 `check_fn_decl` 的推断流程。当前所有被委托的 trait（Eq/Clone/Ord/Debug）均为无 effect 纯函数，因此无实际影响。但未来 `delegate` 用于带 effect 的自定义 trait 时，合成的 forwarding call 的 effect 仅取自 trait 声明而非实际推断，可能导致 effect 不匹配。
 
@@ -101,7 +102,7 @@
 
 发现者：Opus
 
-### #123 Delegate dict dispatch effect 转发在 catch 块内可能不足 [low] [open]
+### #123 Delegate dict dispatch effect 转发在 catch 块内可能不足 [low] [judgment] [open]
 
 `get_callee_evidence_args`（`codegen_expr.ring:352-393`）有两个路径：(1) callee_type 路径——从 FnType 提取 effect 并返回 evidence params；(2) callee_name 路径——从 `local_fn_effects` 查找实际 effect 并检查 `ctx.in_try_fail`。Delegate 的 dict dispatch 走路径 (1)（callee_name 为 `none`），其效应从 trait method 的 FnType 推导。路径 (1) 不检查 `ctx.in_try_fail`，这意味着如果在 `catch` 块内对 delegate field 调用带 `fail` 的 trait 方法，且该 `fail` effect 的 evidence 依赖 catch 上下文，evidence 可能不完整。当前实践中难触发—默认 trait（Eq/Clone/Ord/Debug）均无 `fail` effect，#77 修复后 trait method FnType 也正确携带 effect 信息。
 
@@ -110,7 +111,7 @@
 
 发现者：Opus
 
-### #103 Auto-boxing 仅 box 值类型依赖 JS 引用语义 [medium] [open] [deferred: LLVM]
+### #103 Auto-boxing 仅 box 值类型依赖 JS 引用语义 [medium] [judgment] [open] [deferred: LLVM]
 
 B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bool/Str）。引用类型（struct/List/Map/Set）的 `mut` 参数不 box，依赖 JS 按引用传递对象的语义。LLVM 后端无此语义——所有类型需要统一的 boxing/pointer 策略。
 
@@ -126,7 +127,7 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 
 
-### #118 `collect_local_calls` 遗漏限定的调用路径 [low] [open]
+### #118 `collect_local_calls` 遗漏限定的调用路径 [low] [mechanical] [open]
 
 `collect_local_calls`（`codegen.ring:336-340`）仅匹配 `HExpr::Ident` 作为 callee。若本地函数通过限定名调用（`mod_name::fn()` 或 `super::helper()`），callee 不匹配 `HExpr::Ident`，调用不会被记录。effect 传播优化可能遗漏通过限定路径的 effect 依赖。
 
@@ -135,7 +136,7 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 发现者：DS
 
-### #122 `gen_handle_body` IIFE 仅传递 handled effects 的 evidence，未 handling 的依赖闭包 [low] [open]
+### #122 `gen_handle_body` IIFE 仅传递 handled effects 的 evidence，未 handling 的依赖闭包 [low] [judgment] [open]
 
 `gen_handle_body`（`codegen_expr.ring:1421-1444`）的 IIFE 仅传 `by_effect.entries()` 中的 evidence params。若 body 中有 effect op 对应 unhandled effect（带默认 handler 但不在当前 `handle...with` 列表中），该 evidence 需通过 JS 闭包从外部作用域解析。嵌套 handle 时中间作用域若不保留 evidence 变量，闭包链可能断裂。
 

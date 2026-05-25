@@ -35,16 +35,21 @@ grep -n "\[open\]" docs/audit-report.md
 收集所有 `queued` (backlog) 和 `open` (audit-report) items。
 **跳过 `waiting-feedback` 状态的 item**——这些在等 Discussion agent 处理设计问题。
 
-### Step 2: 排序与分组
+### Step 2: 排序、分组与 Dispatch 核查
 
 **优先级排序**：P0 > Critical open > P1 > Important open > P2 > Minor open > P3 > Style open
+
+**Dispatch 核查**：对每个 item 检查 `dispatch` 标记（`mechanical` / `judgment`）：
+- `mechanical`：使用 `deepseek-dispatch` skill 派发给 DS 执行（成本低，适合解法唯一确定的任务）
+- `judgment`：使用 Claude worktree subagent 执行（需要设计判断力）
+- **核查规则**：Worker 在执行时独立判断 dispatch 标记是否合理——Discussion 出任务时的判断可能有误。如果 Worker 认为某个 `mechanical` item 实际需要 judgment（spec 模糊、涉及多种实现方式、需要理解 Ring 编译器约定），应**升级为 `judgment`** 并在 feedback 中说明原因。反之，`judgment` item 如果 plan 生成后发现实际只需机械执行，可**降级为 `mechanical`**。
 
 **分 Wave**：
 - 同一 Wave 的 items 无文件重叠，可安全并行
 - 有依赖的排后面的 Wave
-- 每 Wave 最多 3 个 worktree subagent
+- 每 Wave 最多 3 个 worktree subagent（含 DS subagent）
 
-向用户展示 Wave 计划，等用户一次性 approve。
+向用户展示 Wave 计划（含每个 item 的 dispatch 分配），等用户一次性 approve。
 
 ### Step 3: 执行 Wave
 
