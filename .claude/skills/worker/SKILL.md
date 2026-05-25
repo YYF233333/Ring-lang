@@ -80,7 +80,9 @@ Plan 通过后更新状态。
 git log --oneline -1   # EXPECTED_BASE
 ```
 
-**在同一条消息中并行发出所有 agent 调用：**
+根据 item 的 `dispatch` 标记选择执行者：
+
+**`judgment` → Claude Worktree Subagent（原有流程）**
 
 ```
 Agent({
@@ -111,6 +113,18 @@ Agent({
 3. 只做 spec 范围内的改动，不做额外重构
 4. 发现新 bug → 记录在 commit message 中，不自行修复
 ```
+
+**`mechanical` → DS Worktree Subagent**
+
+Orchestrator 手动建 worktree 提供隔离，然后按 `deepseek-dispatch` skill 标准流程派发：
+
+```bash
+git worktree add .worktrees/ds-<item-id> -b ds/<item-id> HEAD
+```
+
+DS prompt 中指定 worktree 绝对路径为工作目录，其余调用细节由 `deepseek-dispatch` skill 管理。DS 会读 AGENTS.md 获取项目约定。
+
+失败处理：(a) 同一 session 追加消息让 DS 修正；(b) 升级为 judgment 由 Claude 接手。
 
 #### 3e. 等待完成 + 验证
 
