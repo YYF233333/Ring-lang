@@ -121,6 +121,8 @@ pub fn/trait/type 必须有完整标注（`ring check` 缺失报 warning）：
 - lv0 能编译的代码加上任何标注后仍能编译
 - 编译错误只来自逻辑问题（use-after-move, 类型不匹配等）
 
+理论联系：此模型满足 Gradual Guarantee（Siek et al. 2015）的编译期变体——添加标注不改变编译行为，移除标注不引入编译错误，不一致标注仅产生 warning。这也意味着 Bidirectional Type Checking 不适用于 Ring——bidi check 依赖信任标注向下传播类型信息，但 Ring 的标注可能过时，编译器始终从函数体推断 truth。
+
 ### 2.5 Formatter 对 pub fn 的处理
 
 | 源码状态 | `ring fmt` | `ring fmt --force` | `ring check` |
@@ -780,7 +782,29 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 { ... }
 
 **成熟度**：★★★☆ | **Phase E comptime 设计时参考**。
 
-### 11.6 为可判定性放弃的特性清单
+### 11.6 Call-by-Push-Value（CBPV）
+
+**来源**：Paul Blain Levy 2001, Birmingham PhD thesis
+
+**核心**：显式区分**值（value）**和**计算（computation）**。值是已求值的数据，计算是待执行的代码（可能有 effect）。两个原语：`thunk`（冻结计算为值 = 闭包创建）、`force`（执行冻结的计算 = 闭包调用）。
+
+**与 Ring 的关系**：Ring 已有隐式的值/计算区分——`@value struct`/I64/F64（值类型，memcpy 语义）vs 带 effect 的函数（计算）。CBPV 将这个区分形式化，可以精确指导 HIR 设计：
+
+| CBPV 概念 | Ring 对应 |
+|---|---|
+| 值类型 A | `@value struct`、I64/F64/Bool |
+| 计算类型 B | `fn() -> T with {effects}` |
+| thunk: B → U(B) | 闭包捕获 |
+| force: U(B) → B | 函数调用 |
+| F(A)（值提升为计算） | 纯值 return 到 effect 上下文 |
+
+**升级路径**：HIR 重设计时，用 CBPV 的值/计算分类指导节点类型设计——哪些 HIR 节点是值节点（可 unbox、可内联存储、零 RC）、哪些是计算节点（可能分配、需要 thunk/force 消除优化）。GHC 的 Core 语言受 CBPV 影响，是成功的工程先例。
+
+**风险**：低——理论框架，纯编译器内部参考，不影响用户面语法。
+
+**成熟度**：★★★☆ | **HIR 重设计时参考**。理论成熟，GHC 验证，但作为 IR 设计方法论的显式落地案例不多。
+
+### 11.7 为可判定性放弃的特性清单
 
 > 记录 Ring 为保持 HM 可判定推断而放弃的特性，以及替代方案。前沿研究可能恢复其中部分能力。
 
