@@ -1193,65 +1193,84 @@ fn producer_consumer() with {async} {
 
 ---
 
-## 9. GPU 计算与可编程 Profiling ⚠️ 远期愿景
+## 9. GPU 计算与语义级 Profiling ⚠️ 远期愿景
 
-### 9.1 动机
+### 9.1 问题空间
 
-现有 GPU profiling 基础设施（NSight/nvprof、CUPTI）提供固定指标集，不可编程。NVIDIA 的 NVBit 提供二进制级动态插桩（类似 x86 的 Pin），但只有指令级语义（不知道一条 load 属于哪个算法阶段）、开销不可控、无安全验证。AI 系统开发者需要的是 eBPF 级别的可编程性 + 安全性 + 低开销，应用于 GPU kernel 内部。
+GPU profiling 存在根本矛盾：
 
-### 9.2 Effect system 作为编译期 probe verifier
+- **硬件计数器**（NSight Compute / CUPTI）：零扰动，但指标固定不可编程，且需要 kernel replay（同一 kernel 跑多遍收集不同 counter 组）
+- **软件插桩**（NVBit 二进制插桩）：可编程，但扰动不可控——额外指令改变 register allocation → occupancy 变化 → 调度行为变化 → profile 数据反映的不是原始 kernel 的行为
+- **PC sampling**（CUPTI warp-level）：低扰动，但只有 PC + stall reason，无内存地址、无寄存器值、无源码语义，粒度粗（数千 cycle 采样一次）
 
-Ring 的 effect handler 天然具备"安全地拦截操作并注入自定义逻辑"的能力——这正是 eBPF 做的事。如果 GPU 操作（内存访问、同步、共享内存分配）被建模为 effect，则 profiling 就是 effect handler composition：
+核心矛盾：**SIMT 执行模型和细粒度软件插桩天然冲突**。CPU 上插桩开销是加法型（probe 点加几条指令，其余不受影响）；GPU 上是乘法型（extra registers → lower occupancy → 影响所有 warp；extra memory writes → bandwidth 竞争 → 影响所有 warp；条件分支 → warp divergence）。
+
+AI 系统开发者的实际需求：不只是"哪里慢"，而是"attention 的 Q*K matmul 为什么 memory-bound，是 coalescing 问题还是 L2 capacity 不够"——需要源码语义和硬件指标的关联。
+
+### 9.2 Ring 的切入点：编译期语义 × 硬件数据关联
+
+Ring 不在数据采集层和硬件竞争（那是 NVIDIA 的领域），而是在**语义分析层**提供现有工具做不到的能力：
+
+**层 1：编译期标注（零开销）**
+
+编译器从 effect/type 信息自动生成 kernel 的语义 map——哪些代码区间属于哪个 effect scope，每个 scope 的内存访问模式（连续/strided/random），预测的 register pressure 和 occupancy。
 
 ```ring
-effect gpu_mem {
-    fn global_read<T>(addr: Ptr<T>) -> T
-    fn global_write<T>(addr: Ptr<T>, val: T) -> Unit
-    fn shared_alloc<T>(size: Int) -> SharedPtr<T>
-    fn barrier() -> Unit
-}
-
-// 正常执行
+// 编译器知道：
+// - matrix_mul 有 gpu_mem effect
+// - tile_load 区间做 N 次连续 global_read（可预测 coalescing）
+// - compute 区间是纯算术（可预测 ALU-bound）
 fn matrix_mul(a: Tensor, b: Tensor) -> Tensor with {gpu_mem} {
-    let tile = gpu_mem.shared_alloc(256)
-    gpu_mem.global_read(a.data_ptr())
+    let tile = gpu_mem.shared_alloc(256)    // shared memory 用量可静态算
+    gpu_mem.global_read(a.data_ptr())       // 访问模式从类型可推导
     gpu_mem.barrier()
     // ...
 }
+```
 
-// Profiling handler：叠加在正常 handler 之上，不改动 matrix_mul 代码
+**层 2：硬件计数器自动关联**
+
+编译器生成的语义 map + CUPTI/NSight 收集的硬件计数器数据 → 自动对齐。报告不是 "PC 0x1234 has 80% memory stall"，而是 "attention.Q_K_dot 的 global_read effect memory-bound（L2 miss 40%），建议 tile size 从 256 增加到 512"。
+
+**层 3：编译期性能预测（零运行时开销）**
+
+Ring 的 effect + type 信息足以在编译期预测部分性能特征：
+- 内存访问 coalescing（从类型的内存布局 + 循环 stride 推导）
+- Shared memory bank conflict（从 shared_alloc 大小 + 访问 pattern 推导）
+- Register pressure / occupancy（从 HIR 变量活跃性分析）
+- Warp divergence 热点（从分支条件的 thread-dependence 分析）
+
+这类似 NSight Compute 的 occupancy 静态分析，但扩展到更多维度，且带源码语义。
+
+### 9.3 Effect handler 插桩（有扰动，开发/调试用）
+
+对于不要求零扰动的场景（开发阶段调试、功能验证），effect handler composition 仍然有价值：
+
+```ring
+// 开发阶段：用 profiling handler 记录完整访问 trace
 handle { matrix_mul(a, b) } with {
     gpu_mem.global_read(addr) => {
-        profiler.record("read", addr)    // 自定义 probe 逻辑
-        cuda_read(addr)                  // 透传给真实实现
-    },
-    gpu_mem.global_write(addr, val) => {
-        profiler.record("write", addr)
-        cuda_write(addr, val)
-    },
-    gpu_mem.barrier() => {
-        profiler.record("barrier")
-        __syncthreads()
+        trace.record("read", addr)
+        cuda_read(addr)
     },
 }
 ```
 
-**相比 NVBit 的优势**：
-- **源码级语义**：编译器知道"这是 attention 的 Q*K 访问"而非"这是一条 LDG 指令"
-- **编译期安全验证**：effect type system 保证 probe 不改变计算语义（eBPF verifier 的类型论升级）
-- **零开销移除**：不 profile 时去掉 handler → 编译器消除全部 instrumentation 代码
-- **可组合**：多个 profiling 关注点（memory access + timing + divergence）作为独立 handler 叠加
+双版本编译 + warp 级采样可降低扰动：编译器生成生产版和插桩版两个 kernel variant，launch 时混合调度（95% warp 跑生产版，5% 跑插桩版），warp 内部零 divergence。但 register allocation 仍受插桩版影响（occupancy 按较差版本算），扰动不可完全消除。
 
-### 9.3 前置条件
+### 9.4 前置条件
 
 - LLVM 后端可用（NVPTX/AMDGPU target）
 - GPU 内存模型作为类型或 effect 建模
 - Kernel launch / grid / block 语义
 - 栈分配 + 固定大小数组（GPU 无 GC/RC）
+- CUPTI 集成（硬件计数器读取）
 
-### 9.4 与竞品的差异化
+### 9.5 与竞品的差异化
 
-Rust GPU / Mojo / Futhark 都在做"编译到 GPU"，但没有把 GPU 操作建模为 effect。Ring 的差异化是：**effect system 让 profiling/tracing/auditing 成为语言内置的 first-class 能力，而非外部工具链**。这是第二支柱"追踪一切"在 GPU 领域的自然延伸。
+Rust GPU / Mojo / Futhark 都在做"编译到 GPU"，但没有把 GPU 操作建模为 effect。NSight Compute 有硬件数据但无源码语义。NVBit 有可编程性但扰动大且只有指令级语义。
+
+Ring 的定位：**编译器的语义知识（effect/type）是连接"源码意图"和"硬件行为"的桥梁**。这是第二支柱"追踪一切"和第三支柱"语义驱动性能"在 GPU 领域的自然延伸。
 
 ---
 
