@@ -67,7 +67,7 @@ Ring-lang/
 ### Effect / Codegen
 
 - **Handler 只支持 tail-resumptive + abort**：非 abort effect 的 handler 返回值即 resume 值；`fail.raise` 为 abort。Full AE（post-resume / multi-resume）不计划实现
-- **Trait dictionary dispatch 不转发 evidence**：trait 方法带 effect 时缺少 evidence 参数
+- **Trait dictionary dispatch 的 evidence 转发已基本修复**（#77），delegate 复杂路径仍有低风险残留问题（见 audit-report #93/#123）
 - **`catch` 总是消除 fail effect**：完整捕获点，catch arms 经穷尽性检查。需要部分处理时在 catch 内部 match + re-raise
 
 ### 类型系统

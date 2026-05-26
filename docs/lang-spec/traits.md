@@ -361,4 +361,4 @@ impl Employee {
 
 - 不支持 `dyn Trait` 动态分发
 - 不支持 GATs（Generic Associated Types）
-- Trait dictionary dispatch 不转发 evidence（trait 方法带 effect 时缺少 evidence 参数）
+- Trait dictionary dispatch 的 evidence 转发已基本修复（#77），但 delegate 复杂路径仍有低风险残留问题（见 audit-report #93/#123）

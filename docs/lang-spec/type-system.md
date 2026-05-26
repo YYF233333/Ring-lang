@@ -27,7 +27,7 @@ FnType = (T₁, T₂, ..., Tₙ) -> R / ε
 - `R`：返回类型
 - `ε`：effect row（见 [Effect 系统](effects.md)）
 
-无 effect 的函数有空 effect row `{}`。
+**函数声明**省略 effect 标注时，编译器推断 effect row（可能为空 `{}` 或非空）。**函数类型表达式**（如 `fn(Int) -> Str`）省略 `with` 子句时为 open row（支持 effect 多态）。纯函数（无 effect）的 effect row 为 `{}`。
 
 ### Struct 类型
 

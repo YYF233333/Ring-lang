@@ -309,7 +309,6 @@ PrimaryExpr  ::= IntLit | FloatLit | StringLit | RawStringLit
                | IfExpr
                | MatchExpr
                | HandleExpr
-               | TryBlock
                | LambdaExpr
                | UnaryExpr
 
@@ -376,14 +375,6 @@ Handler      ::= Ident '.' Ident '(' Params ')' '=>' Expr
 
 每个 handler 绑定 `⟨effect⟩.⟨operation⟩(⟨params⟩)`。被处理的 effect 从 body 的 effect row 中移除。语义见 [Effect 系统](effects.md)。
 
-### Try 块
-
-```ebnf
-TryBlock     ::= 'try' Block
-```
-
-将块的结果包装为 `Option<T>`：成功 → `some(result)`，`fail` effect → `none`。
-
 ### Lambda 表达式
 
 ```ebnf
@@ -391,16 +382,6 @@ LambdaExpr   ::= 'fn' '(' Params ')' ('->' TypeExpr)? Block
 ```
 
 匿名函数。参数和返回类型注解可选。
-
-### Or 表达式
-
-```ebnf
-OrExpr       ::= Expr 'or' Expr
-```
-
-根据左操作数类型双用途：
-- 左操作数为 `Option<T>`：解包或使用默认值。结果类型为 `T`。
-- 左操作数有 `fail` effect：捕获错误，使用默认值。从 effect row 中移除 `fail`。
 
 ### Catch 表达式
 

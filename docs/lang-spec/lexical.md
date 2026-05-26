@@ -33,7 +33,7 @@ try    while  break  continue loop   use     as      extern
 mod    super  sig    requires
 ```
 
-注意：`or`、`type`、`delegate`、`self` 不是关键字——它们是标识符，在特定上下文中被 Parser 特殊解析。`try` 是保留关键字，使用时产生编译错误。
+注意：`type`、`delegate`、`self` 不是关键字——它们是标识符，在特定上下文中被 Parser 特殊解析。`try` 是保留关键字，使用时产生编译错误。
 
 ## 运算符和定界符
 
@@ -65,17 +65,16 @@ mod    super  sig    requires
 
 | 级别 | 名称 | 运算符 | 结合性 |
 |------|------|--------|--------|
-| 1 | Or | `or` | 左结合 |
-| 2 | Catch | `catch` | 左结合 |
-| 3 | LogicOr | `\|\|` | 左结合 |
-| 4 | LogicAnd | `&&` | 左结合 |
-| 5 | Equality | `==`  `!=` | 不可结合 |
-| 6 | Compare | `<`  `>`  `<=`  `>=` | 不可结合 |
-| 7 | Range | `..`  `..=` | 左结合 |
-| 8 | AddSub | `+`  `-` | 左结合 |
-| 9 | MulDiv | `*`  `/`  `%` | 左结合 |
-| 10 | Unary | `-`  `!`（前缀） | 右结合 |
-| 11 | Postfix | `.`  `()`  `[]`  `?` | 左结合 |
+| 1 | Catch | `catch` | 左结合 |
+| 2 | LogicOr | `\|\|` | 左结合 |
+| 3 | LogicAnd | `&&` | 左结合 |
+| 4 | Equality | `==`  `!=` | 不可结合 |
+| 5 | Compare | `<`  `>`  `<=`  `>=` | 不可结合 |
+| 6 | Range | `..`  `..=` | 左结合 |
+| 7 | AddSub | `+`  `-` | 左结合 |
+| 8 | MulDiv | `*`  `/`  `%` | 左结合 |
+| 9 | Unary | `-`  `!`（前缀） | 右结合 |
+| 10 | Postfix | `.`  `()`  `[]`  `?` | 左结合 |
 
 不可结合运算符不能链式使用：`a < b < c` 是解析错误。
 
