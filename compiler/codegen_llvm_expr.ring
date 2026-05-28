@@ -10,7 +10,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
-    llvm_resolve_fn}
+    llvm_resolve_fn, build_entry_alloca}
 use codegen_llvm_stmt::{emit_llvm_stmt}
 use codegen_ctx::{extract_effect_names}
 
@@ -1562,7 +1562,7 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
                                     Pattern::Binding { name: bname, .. } => {
                                         let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
                                         let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
-                                        let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
+                                        let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
                                         discard(LLVMBuildStore(ctx.builder, field_val, alloca))
                                         ctx.named_values.insert(bname, alloca)
                                     },
@@ -1605,7 +1605,7 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
                                     Pattern::Binding { name: bname, .. } => {
                                         let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
                                         let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
-                                        let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
+                                        let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
                                         discard(LLVMBuildStore(ctx.builder, field_val, alloca))
                                         ctx.named_values.insert(bname, alloca)
                                     },
@@ -1652,7 +1652,7 @@ fn gen_match_arm_wildcard(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValue
     // If it's a binding pattern, bind the scrutinee value
     match arm.pattern {
         Pattern::Binding { name: bname, .. } => {
-            let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
+            let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
             discard(LLVMBuildStore(ctx.builder, scrut_val, alloca))
             ctx.named_values.insert(bname, alloca)
         },
@@ -1670,7 +1670,7 @@ fn gen_match_arm_wildcard(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValue
 fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
     match pat {
         Pattern::Binding { name, .. } => {
-            let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, name)
+            let alloca = build_entry_alloca(ctx, ctx.ptr_type, name)
             discard(LLVMBuildStore(ctx.builder, val, alloca))
             ctx.named_values.insert(name, alloca)
         },
@@ -1765,7 +1765,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.bind")
                         discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-                        let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
+                        let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
                         discard(LLVMBuildStore(ctx.builder, scrut_val, alloca))
                         ctx.named_values.insert(bname, alloca)
                         let body_val = gen_llvm_expr(ctx, arm.body)
@@ -1808,7 +1808,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                                         Pattern::Binding { name: bname, .. } => {
                                             let idx = LLVMConstInt(ctx.i64_type, j, 0)
                                             let field_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, bname))
-                                            let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
+                                            let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
                                             discard(LLVMBuildStore(ctx.builder, field_val, alloca))
                                             ctx.named_values.insert(bname, alloca)
                                         },
@@ -2171,7 +2171,7 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
             some(cap_name) => {
                 let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_ptr, i, fresh_name(ctx, "ce"))
                 let cap_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, cap_ptr, fresh_name(ctx, cap_name))
-                let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, cap_name)
+                let alloca = build_entry_alloca(ctx, ctx.ptr_type, cap_name)
                 discard(LLVMBuildStore(ctx.builder, cap_val, alloca))
                 ctx.named_values.insert(cap_name, alloca)
             },
@@ -2184,7 +2184,7 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
         match params.get(i) {
             some(p) => {
                 let param_val = LLVMGetParam(lambda_fn, i + 1)
-                let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, p.name)
+                let alloca = build_entry_alloca(ctx, ctx.ptr_type, p.name)
                 discard(LLVMBuildStore(ctx.builder, param_val, alloca))
                 ctx.named_values.insert(p.name, alloca)
             },
@@ -2465,7 +2465,7 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
     for arm in arms {
         match arm.pattern {
             Pattern::Binding { name, .. } => {
-                let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, name)
+                let alloca = build_entry_alloca(ctx, ctx.ptr_type, name)
                 discard(LLVMBuildStore(ctx.builder, error_val, alloca))
                 ctx.named_values.insert(name, alloca)
                 return gen_llvm_expr(ctx, arm.body)
@@ -2528,7 +2528,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
 
         // Create evidence as a simple struct with function pointers
         // For now, store null as evidence — the effect operations will check
-        let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, ev_name)
+        let alloca = build_entry_alloca(ctx, ctx.ptr_type, ev_name)
         discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), alloca))
         ctx.named_values.insert(ev_name, alloca)
     }

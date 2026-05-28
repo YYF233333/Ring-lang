@@ -1,7 +1,7 @@
 use types::{Type, BUILTIN_RANGE}
 use ast::{Pattern, LiteralValue}
 use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type}
-use codegen_llvm_ctx::{LlvmCtx, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type}
+use codegen_llvm_ctx::{LlvmCtx, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca}
 
 // Re-declare LLVM types and functions to avoid ESM import issues
 extern type LLVMTypeRef
@@ -48,13 +48,13 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
     match stmt {
         HStmt::Let { name, init, .. } => {
             let val = gen_llvm_expr(ctx, init)
-            let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, name)
+            let alloca = build_entry_alloca(ctx, ctx.ptr_type, name)
             discard(LLVMBuildStore(ctx.builder, val, alloca))
             ctx.named_values.insert(name, alloca)
         },
         HStmt::Var { name, init, .. } => {
             let val = gen_llvm_expr(ctx, init)
-            let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, name)
+            let alloca = build_entry_alloca(ctx, ctx.ptr_type, name)
             discard(LLVMBuildStore(ctx.builder, val, alloca))
             ctx.named_values.insert(name, alloca)
         },
@@ -243,7 +243,7 @@ fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: H
     let end_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [end_val], fresh_name(ctx, "ei"))
 
     // Alloca for loop counter
-    let counter_alloca = LLVMBuildAlloca(ctx.builder, ctx.i64_type, fresh_name(ctx, "i"))
+    let counter_alloca = build_entry_alloca(ctx, ctx.i64_type, fresh_name(ctx, "i"))
     discard(LLVMBuildStore(ctx.builder, start_raw, counter_alloca))
 
     let cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "for.cond")
@@ -270,7 +270,7 @@ fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: H
     // Body: bind loop variable, execute body
     LLVMPositionBuilderAtEnd(ctx.builder, body_bb)
     let boxed_i = box_int(ctx, current_i)
-    let binding_alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, binding)
+    let binding_alloca = build_entry_alloca(ctx, ctx.ptr_type, binding)
     discard(LLVMBuildStore(ctx.builder, boxed_i, binding_alloca))
     ctx.named_values.insert(binding, binding_alloca)
     discard(gen_llvm_expr(ctx, body))
@@ -300,13 +300,13 @@ fn emit_for_in_range_var(mut ctx: LlvmCtx, binding: Str, iterable: HExpr, body: 
 
     let range_val = gen_llvm_expr(ctx, iterable)
     // Range struct: { ptr start, ptr end, ptr inclusive }
-    let range_ty = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, fresh_name(ctx, "rng"))
+    let range_ty = build_entry_alloca(ctx, ctx.ptr_type, fresh_name(ctx, "rng"))
     // For now, treat range as a 3-field struct: start, end, inclusive
     // Since range is stored as a ptr to struct, we need to extract fields
     // Using list_get as a workaround (range may be stored differently)
     // Actually, our gen_range_expr stores it as struct { ptr, ptr, ptr }
     // We need the struct type to GEP into it
-    let struct_ty = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, fresh_name(ctx, "dummy"))
+    let struct_ty = build_entry_alloca(ctx, ctx.ptr_type, fresh_name(ctx, "dummy"))
     // Simplification: Use the same approach as direct range but load from struct
     // For now, fallback to list iteration
     emit_for_in_list(ctx, binding, none, iterable, body)
@@ -327,7 +327,7 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
     let list_len = LLVMBuildCall2(ctx.builder, len_ty, len_fn, [list_val], fresh_name(ctx, "len"))
 
     // Alloca for index counter
-    let counter_alloca = LLVMBuildAlloca(ctx.builder, ctx.i64_type, fresh_name(ctx, "idx"))
+    let counter_alloca = build_entry_alloca(ctx, ctx.i64_type, fresh_name(ctx, "idx"))
     let zero = LLVMConstInt(ctx.i64_type, 0, 0)
     discard(LLVMBuildStore(ctx.builder, zero, counter_alloca))
 
@@ -366,7 +366,7 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
                         some(d) => {
                             let idx_val = LLVMConstInt(ctx.i64_type, i, 0)
                             let sub_elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [elem, idx_val], fresh_name(ctx, "de"))
-                            let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, d.name)
+                            let alloca = build_entry_alloca(ctx, ctx.ptr_type, d.name)
                             discard(LLVMBuildStore(ctx.builder, sub_elem, alloca))
                             ctx.named_values.insert(d.name, alloca)
                         },
@@ -374,13 +374,13 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
                     }
                 }
             } else {
-                let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, binding)
+                let alloca = build_entry_alloca(ctx, ctx.ptr_type, binding)
                 discard(LLVMBuildStore(ctx.builder, elem, alloca))
                 ctx.named_values.insert(binding, alloca)
             }
         },
         none => {
-            let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, binding)
+            let alloca = build_entry_alloca(ctx, ctx.ptr_type, binding)
             discard(LLVMBuildStore(ctx.builder, elem, alloca))
             ctx.named_values.insert(binding, alloca)
         },
@@ -459,7 +459,7 @@ fn emit_let_destructure(mut ctx: LlvmCtx, bindings: List<HLetDestructureBinding>
                 if b.name != "_" {
                     let idx = LLVMConstInt(ctx.i64_type, i, 0)
                     let elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [val, idx], fresh_name(ctx, "dt"))
-                    let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, b.name)
+                    let alloca = build_entry_alloca(ctx, ctx.ptr_type, b.name)
                     discard(LLVMBuildStore(ctx.builder, elem, alloca))
                     ctx.named_values.insert(b.name, alloca)
                 }
@@ -513,7 +513,7 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
                                             Pattern::Binding { name: bname, .. } => {
                                                 let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
                                                 let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
-                                                let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
+                                                let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
                                                 discard(LLVMBuildStore(ctx.builder, field_val, alloca))
                                                 ctx.named_values.insert(bname, alloca)
                                             },

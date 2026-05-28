@@ -127,14 +127,6 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 
 
-### #118 `collect_local_calls` 遗漏限定的调用路径 [low] [mechanical] [open]
-
-`collect_local_calls`（`codegen.ring:336-340`）仅匹配 `HExpr::Ident` 作为 callee。若本地函数通过限定名调用（`mod_name::fn()` 或 `super::helper()`），callee 不匹配 `HExpr::Ident`，调用不会被记录。effect 传播优化可能遗漏通过限定路径的 effect 依赖。
-
-**文件**：`compiler/codegen.ring:336-340`
-**修复方向**：同时检查 `FieldAccess` callee（receiver 为模块名）或使用 `resolved_name`（如可用）。
-
-发现者：DS
 
 ### #122 `gen_handle_body` IIFE 仅传递 handled effects 的 evidence，未 handling 的依赖闭包 [low] [judgment] [open]
 

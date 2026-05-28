@@ -329,7 +329,7 @@ fn test_fetch() {
   - ✅ 3b: 编译器 .o 已生成（`compiler/dist-llvm/main.o`，1.5MB，212K 行 LLVM IR，1560 函数）
   - ⏳ 3c: 链接为 native binary + 运行验证
   - ⏳ 3d: 双重自举 + E2E 全量测试
-- **剩余已知问题**：3 个 lambda capture domination error（alloca 需提升到 entry block）
+- ~~**剩余已知问题**：3 个 lambda capture domination error（alloca 需提升到 entry block）~~ ✅ B-075 已修复
 
 **验收标准**：
 - ~~Ring 编译器编译自身为 native .o~~ ✅ （2026-05-28）
@@ -481,16 +481,6 @@ connect("localhost", 3000)     // timeout=30
 **前置依赖**：无
 **复杂度**：M（Parser 扩展 + Checker 参数匹配 + Codegen 展开）
 
-### B-067 Tuple 类型支持 `?` Option sugar [feature] [P3] [S] [mechanical] [queued]
-`(K, V)?` 应等价于 `Option<(K, V)>`，当前不支持，只能写完整形式。影响 MapIterator 等场景的写作体验。
-
-**涉及修改**：
-1. `parser.ring`：类型解析中，tuple 类型后遇到 `?` token 时包装为 `Option<...>`
-
-**验收标准**：
-- `(Int, Str)?` 解析为 `Option<(Int, Str)>`
-- 嵌套场景 `((A, B), C)?` 正确处理
-- 全部 E2E 测试通过
 
 ## 已知 Bug / 技术债
 
@@ -671,6 +661,21 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 ## 关联类型修复依赖序（audit 建议）
 
 ~~B-062（#124 约束验证）~~ ✅ → ~~B-063（#125/#128 delegate 转发）~~ ✅ → ~~B-064（#129 scope 区分）~~ ✅ → ~~B-058（#115 bound 验证）~~ ✅ → ~~B-065（#121 显示改善）~~ ✅
+
+## LLVM 后端质量
+
+
+### B-076 跨模块函数查找精确化（消除 suffix fallback）[refactor] [P3] [S] [judgment] [queued]
+LLVM codegen 中 `find_fn_by_suffix` 用后缀匹配作为跨模块函数查找的 fallback，理论上可能在模块间存在同名函数时产生冲突。应改为精确的模块前缀匹配。
+
+**涉及修改**：
+1. `codegen_llvm.ring`：`find_fn_by_suffix` 改为优先用 `module_prefix + fn_name` 精确查找，仅在无匹配时 fallback 并发出警告
+
+**验收标准**：
+- 跨模块函数引用使用精确匹配
+- 同名函数在不同模块中不冲突
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ## 性能优化
 
