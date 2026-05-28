@@ -9,21 +9,17 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
-## B-011 LLVM Wave 2b
+## B-011 LLVM Wave 2c
 
-### 1. Lambda closure call fallback 已修复 [通知]
+### 1. N-API addon 的 LLVMVerifyModule 不支持非致命模式 [通知]
 
-合并后发现：标准库中 lambda 参数（如 `f`）被 `gen_direct_call` 当作全局函数查找（`ring_f`）导致 panic。修复：当函数名在 `ctx.functions` 中找不到时，检查 `ctx.named_values` 是否有同名的 closure 变量，有则走 `gen_closure_call` 路径。
+addon 的 `LLVMVerifyModule` wrapper 在验证失败时总是 `napi_throw_error`，不管 action 参数值。当前只能跳过验证。修复方案：(a) 改 addon 的 wrapper 使 action=2 时只返回错误码不 throw，或 (b) 等自举后直接调用 LLVM-C API。
 
-### 2. LLVM 验证仍然跳过 [通知]
+### 2. "Terminator in middle of basic block" 待修复 [通知]
 
-Wave 2b 实现了所有 HExpr/HStmt 模式，但部分生成的 IR 仍可能有验证问题（如 terminator 位置不当）。验证恢复推迟到 Wave 2c（effect evidence 精确传递完善后）。
+标准库某些函数（带 `return` 语句后有后续代码的路径）生成的 IR 有 terminator 位置错误。这些函数在 hello.ring 中不被调用所以不影响 .o 生成。Wave 3（bootstrap 尝试）时需要修复。根因是 `emit_return` 后当前 basic block 已终止，但后续语句仍在往同一个 block 写入。
 
-### 3. ring_bool_to_str 已添加到 ring_runtime.cpp [通知]
+### 3. Wave 2 codegen 全部完成 [通知]
 
-Wave 2a feedback 中提到的 `ring_bool_to_str` 缺失问题已解决。函数返回 `"true"` 或 `"false"`。
-
-### 4. Effect evidence 传递仍为 null [通知]
-
-当前所有 evidence 参数传递 null。对于 hello.ring 等简单程序不影响（runtime 函数不使用 evidence）。但编译器自身迁移需要完整的 evidence 传递。这是 Wave 2c 的重点。
+Wave 2 的全部子任务（2a-2g）已完成：编排器 + 全量 HExpr/HStmt + runtime 修正 + evidence threading + trait dict dispatch。下一阶段是 Wave 3（std lib C ABI 补全 → 首次 bootstrap 尝试）。
 

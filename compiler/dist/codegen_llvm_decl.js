@@ -294,6 +294,18 @@ function emit_llvm_decl(ctx, decl) {
           break __ring_match7;
         }
       }
+      __ring_match8: {
+        const __ring_m8 = trait_name;
+        if (__ring_m8._tag === "some") {
+          const tn = __ring_m8._0;
+          return emit_trait_dict(ctx, target_type, tn, methods);
+          break __ring_match8;
+        }
+        if (__ring_m8._tag === "none") {
+          break __ring_match8;
+        }
+        __match_fail(__ring_m8);
+      }
       break __ring_match6;
     }
     if (__ring_m6._tag === "Effect") {
@@ -418,16 +430,16 @@ function register_struct_info(ctx, name, fields) {
 
 function emit_struct_constructor(ctx, name, fields) {
   const ctor_name = codegen_llvm_ctx$llvm_mangle_fn(name);
-  __ring_match8: {
-    const __ring_m8 = _Map_get(ctx.functions, ctor_name);
-    if (__ring_m8._tag === "some") {
+  __ring_match9: {
+    const __ring_m9 = _Map_get(ctx.functions, ctor_name);
+    if (__ring_m9._tag === "some") {
       return;
-      break __ring_match8;
+      break __ring_match9;
     }
-    if (__ring_m8._tag === "none") {
-      break __ring_match8;
+    if (__ring_m9._tag === "none") {
+      break __ring_match9;
     }
-    __match_fail(__ring_m8);
+    __match_fail(__ring_m9);
   }
   let param_types = [];
   const __ring_iter_8 = __List_Iterable.iter(fields);
@@ -534,6 +546,99 @@ function emit_enum_constructors(ctx, name, variants) {
     }
     LLVMBuildRet(ctx.builder, enum_ptr);
     ctx.current_fn = saved_fn;
+  }
+}
+
+function emit_trait_dict(ctx, target_type, trait_name, methods) {
+  const dict_name = hir$trait_dict_name(target_type, trait_name);
+  let impl_methods = [];
+  const __ring_iter_14 = __List_Iterable.iter(methods);
+  while (true) {
+    const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+    if (__ring_next_14._tag === "none") break;
+    const m = __ring_next_14._0;
+    __ring_match10: {
+      const __ring_m10 = m;
+      if (__ring_m10._tag === "Fn") {
+        const name = __ring_m10.name;
+        List_push(impl_methods, name);
+        break __ring_match10;
+      }
+      break __ring_match10;
+    }
+  }
+  const method_order = (function() {
+  const __ring_m = _Map_get(ctx.trait_method_order, trait_name);
+  if (__ring_m._tag === "some") { const order = __ring_m._0; return order; }
+  if (__ring_m._tag === "none") { return impl_methods; }
+  __match_fail(__ring_m);
+})();
+  const method_count = List_len(method_order);
+  if ((method_count === 0)) {
+    return;
+  }
+  const init_fn_name = `ring_dict_init_${dict_name}`;
+  const init_fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0);
+  const init_fn = LLVMAddFunction(ctx.module, init_fn_name, init_fn_ty);
+  _Map_insert(ctx.functions, init_fn_name, init_fn);
+  _Map_insert(ctx.fn_types, init_fn_name, init_fn_ty);
+  const saved_fn = ctx.current_fn;
+  ctx.current_fn = Option_some(init_fn);
+  const entry = LLVMAppendBasicBlockInContext(ctx.context, init_fn, "entry");
+  LLVMPositionBuilderAtEnd(ctx.builder, entry);
+  let dict_elem_types = [];
+  const __ring_end15 = method_count;
+  for (let i = 0; i < __ring_end15; i++) {
+    List_push(dict_elem_types, ctx.ptr_type);
+  }
+  const dict_struct_ty = LLVMStructTypeInContext(ctx.context, dict_elem_types, 0);
+  const dict_size = LLVMSizeOf(dict_struct_ty);
+  const malloc_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type);
+  const malloc_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "malloc");
+  const dict_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [dict_size], "dict");
+  const closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0);
+  const closure_size = LLVMSizeOf(closure_ty);
+  const __ring_end16 = method_count;
+  for (let i = 0; i < __ring_end16; i++) {
+    __ring_match11: {
+      const __ring_m11 = List_get(method_order, i);
+      if (__ring_m11._tag === "some") {
+        const method_name = __ring_m11._0;
+        emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, malloc_fn, malloc_ty, i);
+        break __ring_match11;
+      }
+      if (__ring_m11._tag === "none") {
+        break __ring_match11;
+      }
+      __match_fail(__ring_m11);
+    }
+  }
+  LLVMBuildRet(ctx.builder, dict_ptr);
+  ctx.current_fn = saved_fn;
+  return _Map_insert(ctx.dict_globals, dict_name, init_fn);
+}
+
+function emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, malloc_fn, malloc_ty, slot_idx) {
+  const mangled = codegen_llvm_ctx$llvm_mangle_method(target_type, method_name);
+  __ring_match12: {
+    const __ring_m12 = _Map_get(ctx.functions, mangled);
+    if (__ring_m12._tag === "some") {
+      const method_fn = __ring_m12._0;
+      const closure_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [closure_size], codegen_llvm_ctx$fresh_name(ctx, "cls"));
+      const fn_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, codegen_llvm_ctx$fresh_name(ctx, "fps"));
+      LLVMBuildStore(ctx.builder, method_fn, fn_slot);
+      const env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, codegen_llvm_ctx$fresh_name(ctx, "eps"));
+      LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), env_slot);
+      const slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx, codegen_llvm_ctx$fresh_name(ctx, "ds"));
+      return LLVMBuildStore(ctx.builder, closure_ptr, slot_ptr);
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "none") {
+      const slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx, codegen_llvm_ctx$fresh_name(ctx, "ds"));
+      return LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot_ptr);
+      break __ring_match12;
+    }
+    __match_fail(__ring_m12);
   }
 }
 

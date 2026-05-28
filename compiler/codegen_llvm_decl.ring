@@ -61,6 +61,11 @@ pub fn emit_llvm_decl(mut ctx: LlvmCtx, decl: HDecl) {
                     _ => {},
                 }
             }
+            // Generate trait dictionary if this is a trait impl
+            match trait_name {
+                some(tn) => emit_trait_dict(ctx, target_type, tn, methods),
+                none => {},
+            }
         },
         HDecl::Effect { .. } => {
             // Effect declarations don't generate code directly
@@ -307,5 +312,101 @@ fn emit_enum_constructors(mut ctx: LlvmCtx, name: Str, variants: List<HEnumVaria
 
         LLVMBuildRet(ctx.builder, enum_ptr)
         ctx.current_fn = saved_fn
+    }
+}
+
+// ============================================================
+// Trait dictionary generation
+// ============================================================
+
+fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods: List<HDecl>) {
+    // Build dict name following hir.ring convention: __Type_Trait
+    let dict_name = trait_dict_name(target_type, trait_name)
+
+    // Collect impl method names in order
+    let mut impl_methods: List<Str> = []
+    for m in methods {
+        match m {
+            HDecl::Fn { name, .. } => impl_methods.push(name),
+            _ => {},
+        }
+    }
+
+    // Get trait method order if available
+    let method_order = match ctx.trait_method_order.get(trait_name) {
+        some(order) => order,
+        none => impl_methods,
+    }
+
+    let method_count = method_order.len()
+    if method_count == 0 { return }
+
+    // Generate a dict init function: ring_dict_init_<dictname>() -> ptr
+    // This function allocates a dict struct and fills it with closure pointers
+    let init_fn_name = "ring_dict_init_${dict_name}"
+    let init_fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+    let init_fn = LLVMAddFunction(ctx.module, init_fn_name, init_fn_ty)
+    ctx.functions.insert(init_fn_name, init_fn)
+    ctx.fn_types.insert(init_fn_name, init_fn_ty)
+
+    let saved_fn = ctx.current_fn
+    ctx.current_fn = some(init_fn)
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, init_fn, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Dict struct type: one ptr per method (each is a RingClosure)
+    let mut dict_elem_types: List<LLVMTypeRef> = []
+    for i in 0..method_count {
+        dict_elem_types.push(ctx.ptr_type)
+    }
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, dict_elem_types, 0)
+
+    // Allocate dict
+    let dict_size = LLVMSizeOf(dict_struct_ty)
+    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
+    let malloc_ty = get_rt_fn_type(ctx, "malloc")
+    let dict_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [dict_size], "dict")
+
+    // Closure struct type: { fn_ptr, env_ptr }
+    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let closure_size = LLVMSizeOf(closure_ty)
+
+    // For each method in the trait, find the corresponding impl method and create a closure
+    for i in 0..method_count {
+        match method_order.get(i) {
+            some(method_name) => {
+                emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, malloc_fn, malloc_ty, i)
+            },
+            none => {},
+        }
+    }
+
+    LLVMBuildRet(ctx.builder, dict_ptr)
+    ctx.current_fn = saved_fn
+
+    // Register the dict init function so it can be found by resolve_dict_ref
+    ctx.dict_globals.insert(dict_name, init_fn)
+}
+
+fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, dict_struct_ty: LLVMTypeRef, dict_ptr: LLVMValueRef, closure_ty: LLVMTypeRef, closure_size: LLVMValueRef, malloc_fn: LLVMValueRef, malloc_ty: LLVMTypeRef, slot_idx: Int) {
+    let mangled = llvm_mangle_method(target_type, method_name)
+    match ctx.functions.get(mangled) {
+        some(method_fn) => {
+            // Create a closure: { fn_ptr, null_env }
+            let closure_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [closure_size], fresh_name(ctx, "cls"))
+            let fn_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
+            LLVMBuildStore(ctx.builder, method_fn, fn_slot)
+            let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "eps"))
+            LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), env_slot)
+
+            // Store closure in dict slot
+            let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx, fresh_name(ctx, "ds"))
+            LLVMBuildStore(ctx.builder, closure_ptr, slot_ptr)
+        },
+        none => {
+            // Method not found — store null closure
+            let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx, fresh_name(ctx, "ds"))
+            LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot_ptr)
+        },
     }
 }

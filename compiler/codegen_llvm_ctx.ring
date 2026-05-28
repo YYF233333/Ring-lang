@@ -64,6 +64,12 @@ pub struct LlvmCtx {
     pub local_fn_effects: Map<Str, EffectRow>,
     pub fn_evidence_params: Map<Str, List<Str>>,
 
+    // Trait dict globals: maps dict name → LLVMValueRef (global ptr)
+    pub dict_globals: Map<Str, LLVMValueRef>,
+
+    // Trait method order: maps trait_name → [method_name, ...]
+    pub trait_method_order: Map<Str, List<Str>>,
+
     // Counters
     pub tmp_counter: Int,
     pub lambda_counter: Int,

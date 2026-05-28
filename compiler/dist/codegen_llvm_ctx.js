@@ -266,7 +266,7 @@ class EnumTypeInfo {
 }
 
 class LlvmCtx {
-  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, tmp_counter, lambda_counter, current_fn, loop_break_bb, loop_continue_bb) {
+  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, tmp_counter, lambda_counter, current_fn, loop_break_bb, loop_continue_bb) {
     this.context = context;
     this.module = module;
     this.builder = builder;
@@ -287,6 +287,8 @@ class LlvmCtx {
     this.rt_fn_types = rt_fn_types;
     this.local_fn_effects = local_fn_effects;
     this.fn_evidence_params = fn_evidence_params;
+    this.dict_globals = dict_globals;
+    this.trait_method_order = trait_method_order;
     this.tmp_counter = tmp_counter;
     this.lambda_counter = lambda_counter;
     this.current_fn = current_fn;

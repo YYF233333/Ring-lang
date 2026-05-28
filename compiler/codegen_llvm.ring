@@ -413,6 +413,41 @@ fn scan_fn_effects(decls: List<HDecl>, mut local_fn_effects: Map<Str, EffectRow>
 }
 
 // ============================================================
+// scan_trait_decls — collect trait method ordering for dict generation
+// ============================================================
+
+fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<Str>>) {
+    for decl in decls {
+        match decl {
+            HDecl::Trait { name, methods, .. } => {
+                let mut method_names: List<Str> = []
+                for m in methods {
+                    method_names.push(m.name)
+                }
+                trait_method_order.insert(name, method_names)
+            },
+            HDecl::ModBlock { decls: md, .. } => {
+                scan_trait_decls(md, trait_method_order)
+            },
+            _ => {},
+        }
+    }
+    // Register built-in traits that are not in HDecl
+    if trait_method_order.get("Eq").is_none() {
+        trait_method_order.insert("Eq", ["eq", "ne"])
+    }
+    if trait_method_order.get("Clone").is_none() {
+        trait_method_order.insert("Clone", ["clone"])
+    }
+    if trait_method_order.get("Ord").is_none() {
+        trait_method_order.insert("Ord", ["compare"])
+    }
+    if trait_method_order.get("Debug").is_none() {
+        trait_method_order.insert("Debug", ["debug"])
+    }
+}
+
+// ============================================================
 // emit_c_main — generate C main() wrapper that calls Ring main
 // ============================================================
 
@@ -432,11 +467,12 @@ fn emit_c_main(mut ctx: LlvmCtx) {
     let ring_main_name = llvm_mangle_fn("main")
     match ctx.functions.get(ring_main_name) {
         some(ring_main_fn) => {
-            // Check if ring_main needs evidence params (io)
+            // Check if ring_main needs evidence params (io, etc.)
             let mut call_args: List<LLVMValueRef> = []
             match ctx.fn_evidence_params.get(ring_main_name) {
                 some(ev_params) => {
-                    // Pass null for each evidence param
+                    // Pass null for each evidence param — top-level default evidence
+                    // io/mut/fail all use null at top level (runtime handles IO directly)
                     for ep in ev_params {
                         call_args.push(LLVMConstPointerNull(ptr))
                     }
@@ -514,6 +550,8 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         rt_fn_types: map_new(),
         local_fn_effects: map_new(),
         fn_evidence_params: map_new(),
+        dict_globals: map_new(),
+        trait_method_order: map_new(),
         tmp_counter: 0,
         lambda_counter: 0,
         current_fn: none,
@@ -524,10 +562,11 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // 6. Register built-in types (Option, Result — not in HDecl, handled by runtime)
     register_builtin_enums(ctx)
 
-    // 7. Scan function effects
+    // 7. Scan function effects and trait declarations
     scan_fn_effects(program.decls, ctx.local_fn_effects)
+    scan_trait_decls(program.decls, ctx.trait_method_order)
 
-    // 7. Declare runtime functions
+    // 7b. Declare runtime functions
     declare_runtime_fns(ctx)
 
     // 8. First pass: forward declare all Ring functions
@@ -541,10 +580,11 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // 10. Generate C main() wrapper
     emit_c_main(ctx)
 
-    // 11. Dump IR for debugging (skip verification for now — stubs cause errors)
+    // 11. Dump IR for debugging
     let ir = LLVMPrintModuleToString(module)
-    print("LLVM IR generated. Dumping to ring_output.ll for inspection...")
     write_file("ring_output.ll", ir)
+    // Skip LLVMVerifyModule — N-API addon throws on failure instead of returning status.
+    // Verification will be re-enabled when the addon is fixed or when targeting self-hosting.
 
     // 12. Emit object file
     // file_type: 1 = Object file

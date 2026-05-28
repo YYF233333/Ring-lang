@@ -641,6 +641,49 @@ function scan_fn_effects(decls, local_fn_effects) {
   }
 }
 
+function scan_trait_decls(decls, trait_method_order) {
+  const __ring_iter_12 = __List_Iterable.iter(decls);
+  while (true) {
+    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+    if (__ring_next_12._tag === "none") break;
+    const decl = __ring_next_12._0;
+    __ring_match10: {
+      const __ring_m10 = decl;
+      if (__ring_m10._tag === "Trait") {
+        const name = __ring_m10.name; const methods = __ring_m10.methods;
+        let method_names = [];
+        const __ring_iter_13 = __List_Iterable.iter(methods);
+        while (true) {
+          const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+          if (__ring_next_13._tag === "none") break;
+          const m = __ring_next_13._0;
+          List_push(method_names, m.name);
+        }
+        _Map_insert(trait_method_order, name, method_names);
+        break __ring_match10;
+      }
+      if (__ring_m10._tag === "ModBlock") {
+        const md = __ring_m10.decls;
+        scan_trait_decls(md, trait_method_order);
+        break __ring_match10;
+      }
+      break __ring_match10;
+    }
+  }
+  if (Option_is_none(_Map_get(trait_method_order, "Eq"))) {
+    _Map_insert(trait_method_order, "Eq", ["eq", "ne"]);
+  }
+  if (Option_is_none(_Map_get(trait_method_order, "Clone"))) {
+    _Map_insert(trait_method_order, "Clone", ["clone"]);
+  }
+  if (Option_is_none(_Map_get(trait_method_order, "Ord"))) {
+    _Map_insert(trait_method_order, "Ord", ["compare"]);
+  }
+  if (Option_is_none(_Map_get(trait_method_order, "Debug"))) {
+    return _Map_insert(trait_method_order, "Debug", ["debug"]);
+  }
+}
+
 function emit_c_main(ctx) {
   const i32_ty = ctx.i32_type;
   const ptr = ctx.ptr_type;
@@ -650,28 +693,28 @@ function emit_c_main(ctx) {
   const entry = LLVMAppendBasicBlockInContext(ctx.context, main_fn, "entry");
   LLVMPositionBuilderAtEnd(ctx.builder, entry);
   const ring_main_name = codegen_llvm_ctx$llvm_mangle_fn("main");
-  __ring_match10: {
-    const __ring_m10 = _Map_get(ctx.functions, ring_main_name);
-    if (__ring_m10._tag === "some") {
-      const ring_main_fn = __ring_m10._0;
+  __ring_match11: {
+    const __ring_m11 = _Map_get(ctx.functions, ring_main_name);
+    if (__ring_m11._tag === "some") {
+      const ring_main_fn = __ring_m11._0;
       let call_args = [];
-      __ring_match11: {
-        const __ring_m11 = _Map_get(ctx.fn_evidence_params, ring_main_name);
-        if (__ring_m11._tag === "some") {
-          const ev_params = __ring_m11._0;
-          const __ring_iter_12 = __List_Iterable.iter(ev_params);
+      __ring_match12: {
+        const __ring_m12 = _Map_get(ctx.fn_evidence_params, ring_main_name);
+        if (__ring_m12._tag === "some") {
+          const ev_params = __ring_m12._0;
+          const __ring_iter_14 = __List_Iterable.iter(ev_params);
           while (true) {
-            const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-            if (__ring_next_12._tag === "none") break;
-            const ep = __ring_next_12._0;
+            const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+            if (__ring_next_14._tag === "none") break;
+            const ep = __ring_next_14._0;
             List_push(call_args, LLVMConstPointerNull(ptr));
           }
-          break __ring_match11;
+          break __ring_match12;
         }
-        if (__ring_m11._tag === "none") {
-          break __ring_match11;
+        if (__ring_m12._tag === "none") {
+          break __ring_match12;
         }
-        __match_fail(__ring_m11);
+        __match_fail(__ring_m12);
       }
       const ring_main_ty = (function() {
   const __ring_m = _Map_get(ctx.fn_types, ring_main_name);
@@ -680,12 +723,12 @@ function emit_c_main(ctx) {
   __match_fail(__ring_m);
 })();
       discard(LLVMBuildCall2(ctx.builder, ring_main_ty, ring_main_fn, call_args, ""));
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "none") {
-      break __ring_match10;
+    if (__ring_m11._tag === "none") {
+      break __ring_match11;
     }
-    __match_fail(__ring_m10);
+    __match_fail(__ring_m11);
   }
   const zero = LLVMConstInt(i32_ty, 0, 0);
   return discard(LLVMBuildRet(ctx.builder, zero));
@@ -710,21 +753,21 @@ function generate_llvm(program, output_path, __ring_ev_io) {
   const i1_type = LLVMInt1TypeInContext(context);
   const void_type = LLVMVoidTypeInContext(context);
   const double_type = LLVMDoubleTypeInContext(context);
-  let ctx = new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), 0, 0, Option_none, Option_none, Option_none);
+  let ctx = new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), 0, 0, Option_none, Option_none, Option_none);
   register_builtin_enums(ctx);
   scan_fn_effects(program.decls, ctx.local_fn_effects);
+  scan_trait_decls(program.decls, ctx.trait_method_order);
   declare_runtime_fns(ctx);
   forward_declare_functions(ctx, program.decls);
-  const __ring_iter_13 = __List_Iterable.iter(program.decls);
+  const __ring_iter_15 = __List_Iterable.iter(program.decls);
   while (true) {
-    const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-    if (__ring_next_13._tag === "none") break;
-    const decl = __ring_next_13._0;
+    const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+    if (__ring_next_15._tag === "none") break;
+    const decl = __ring_next_15._0;
     codegen_llvm_decl$emit_llvm_decl(ctx, decl);
   }
   emit_c_main(ctx);
   const ir = LLVMPrintModuleToString(module);
-  print("LLVM IR generated. Dumping to ring_output.ll for inspection...", __ring_ev_io);
   write_file("ring_output.ll", ir);
   const emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1);
   if ((emit_result !== 0)) {

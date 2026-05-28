@@ -1,8 +1,8 @@
 use types::{Type, Effect, EffectRow, effect_kind_name, type_to_builtin_name}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
-    HStringInterpPart, HEffectHandler, DictRef, TraitDispatch,
-    evidence_param_name, trait_dict_name,
+    HStringInterpPart, HEffectHandler, DictRef, DictDispatchInfo, TraitDispatch,
+    evidence_param_name, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     BUILTIN_RANGE,
@@ -79,8 +79,8 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
         HExpr::Ident { name, resolved_name, .. } => gen_ident(ctx, name, resolved_name),
         HExpr::BinOp { op, left, right, ty, .. } => gen_binop(ctx, op, left, right, ty),
         HExpr::UnaryOp { op, operand, ty, .. } => gen_unaryop(ctx, op, operand, ty),
-        HExpr::Call { callee, args, dict_dispatch, ty, effects, .. } =>
-            gen_call(ctx, callee, args, ty, effects),
+        HExpr::Call { callee, args, resolved_dicts, dict_dispatch, ty, effects, .. } =>
+            gen_call(ctx, callee, args, resolved_dicts, dict_dispatch, ty, effects),
         HExpr::FieldAccess { receiver, field, ty, .. } =>
             gen_field_access(ctx, receiver, field, ty),
         HExpr::StructLit { name, fields, .. } =>
@@ -534,12 +534,23 @@ fn gen_unaryop(mut ctx: LlvmCtx, op: UnaryOp, operand: HExpr, ty: Type) -> LLVMV
 // Function calls
 // ============================================================
 
-fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, result_ty: Type, effects: EffectRow) -> LLVMValueRef {
+fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?, result_ty: Type, effects: EffectRow) -> LLVMValueRef {
+    // Handle dict dispatch (trait method call through dict parameter)
+    match dict_dispatch {
+        some(dd) => {
+            return gen_dict_dispatch_call(ctx, callee, args, dd)
+        },
+        none => {},
+    }
+
     // Evaluate all args first
     let mut arg_vals: List<LLVMValueRef> = []
     for a in args {
         arg_vals.push(gen_llvm_expr(ctx, a))
     }
+
+    // Resolve dict refs into LLVMValueRef
+    let dict_vals = resolve_dict_refs(ctx, resolved_dicts)
 
     // Determine function to call
     match callee {
@@ -548,13 +559,13 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, result_ty: Type,
                 some(rn) => rn,
                 none => name,
             }
-            gen_direct_call(ctx, call_name, arg_vals)
+            gen_direct_call(ctx, call_name, arg_vals, dict_vals)
         },
         HExpr::FieldAccess { receiver, field, .. } => {
             // Method call: receiver.method(args)
             let recv_val = gen_llvm_expr(ctx, receiver)
             let recv_type = hexpr_type(receiver)
-            gen_method_call(ctx, recv_val, recv_type, field, arg_vals)
+            gen_method_call(ctx, recv_val, recv_type, field, arg_vals, dict_vals)
         },
         _ => {
             // Unknown callee — might be a closure
@@ -562,6 +573,156 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, result_ty: Type,
             gen_closure_call(ctx, closure_val, arg_vals)
         },
     }
+}
+
+// ============================================================
+// Resolve DictRef list to LLVM values
+// ============================================================
+
+fn resolve_dict_refs(mut ctx: LlvmCtx, dicts: List<DictRef>) -> List<LLVMValueRef> {
+    let mut result: List<LLVMValueRef> = []
+    for d in dicts {
+        result.push(resolve_dict_ref(ctx, d))
+    }
+    result
+}
+
+fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
+    match dr {
+        DictRef::Simple(name) => {
+            // First check if it's a dict parameter in the current scope (e.g. __ring_T_Eq)
+            match ctx.named_values.get(name) {
+                some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "dict")),
+                none => {
+                    // Try as a dict init function (generated from impl Trait for Type)
+                    let init_fn_name = "ring_dict_init_${name}"
+                    match ctx.functions.get(init_fn_name) {
+                        some(init_fn) => {
+                            let init_fn_ty = match ctx.fn_types.get(init_fn_name) {
+                                some(t) => t,
+                                none => {
+                                    // Fallback: create a () -> ptr type
+                                    LLVMFunctionType(ctx.ptr_type, [], 0)
+                                },
+                            }
+                            // Call the init function to get the dict
+                            LLVMBuildCall2(ctx.builder, init_fn_ty, init_fn, [], fresh_name(ctx, "dict"))
+                        },
+                        none => {
+                            // Check dict_globals
+                            match ctx.dict_globals.get(name) {
+                                some(init_fn) => {
+                                    let ft = LLVMFunctionType(ctx.ptr_type, [], 0)
+                                    LLVMBuildCall2(ctx.builder, ft, init_fn, [], fresh_name(ctx, "dict"))
+                                },
+                                none => {
+                                    // Fallback: null ptr (dict not yet generated)
+                                    LLVMConstPointerNull(ctx.ptr_type)
+                                },
+                            }
+                        },
+                    }
+                },
+            }
+        },
+        DictRef::Wrapped { dict, trait_name, inner_dicts } => {
+            // Wrapped dict: need to construct a wrapper (complex case)
+            // For Wave 2c, pass null — full wrapper construction in future wave
+            LLVMConstPointerNull(ctx.ptr_type)
+        },
+    }
+}
+
+// ============================================================
+// Dict dispatch call (trait method through dict parameter)
+// ============================================================
+
+fn gen_dict_dispatch_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, dd: DictDispatchInfo) -> LLVMValueRef {
+    // Dict dispatch: call dd.dict_param.method(receiver, args...)
+    // The dict is a struct of closure pointers, one per method.
+    // We need to: 1) load the dict, 2) GEP to the method slot, 3) call through closure
+
+    // Get receiver from callee (if FieldAccess) or first arg
+    let mut recv_val: LLVMValueRef? = none
+    let mut other_arg_start = 0
+    match callee {
+        HExpr::FieldAccess { receiver, .. } => {
+            recv_val = some(gen_llvm_expr(ctx, receiver))
+        },
+        _ => {
+            match args.get(0) {
+                some(a) => {
+                    recv_val = some(gen_llvm_expr(ctx, a))
+                    other_arg_start = 1
+                },
+                none => {},
+            }
+        },
+    }
+
+    // Build call args: receiver first, then remaining args
+    let mut call_args: List<LLVMValueRef> = []
+    match recv_val {
+        some(rv) => call_args.push(rv),
+        none => {},
+    }
+    for i in other_arg_start..args.len() {
+        match args.get(i) {
+            some(a) => call_args.push(gen_llvm_expr(ctx, a)),
+            none => {},
+        }
+    }
+
+    // Look up the dict parameter in named_values
+    match ctx.named_values.get(dd.dict_param) {
+        some(dict_alloca) => {
+            let dict_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, dict_alloca, fresh_name(ctx, "dp"))
+            // The dict is a struct of ptr (one per method).
+            // We need the method index. For now, use method name to find index.
+            // In the dict struct, methods are stored in alphabetical order (matching JS backend convention).
+            // For simplicity in Wave 2c: we look up the method index from trait_dict_methods in ctx.
+            // Since we don't have that info readily, use a fixed scheme: try index 0 for common methods.
+            // Actually, for built-in traits we know the order:
+            //   Eq: { eq, ne } → 0, 1
+            //   Clone: { clone } → 0
+            //   Ord: { compare } → 0
+            //   Debug: { debug } → 0
+            let method_idx = get_trait_method_index(dd.dict_param, dd.method)
+
+            // Build dict struct type (all ptr fields)
+            // We don't know the exact field count, but we can use a conservative GEP
+            // with enough fields. For simplicity, use a 4-field dict type (covers Eq with eq+ne+...)
+            let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+
+            // GEP to the method slot
+            let method_slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, method_idx, fresh_name(ctx, "ms"))
+            let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, method_slot_ptr, fresh_name(ctx, "cp"))
+
+            // Call through closure (same as gen_closure_call)
+            gen_closure_call(ctx, closure_ptr, call_args)
+        },
+        none => {
+            // Dict parameter not found — return null
+            LLVMConstPointerNull(ctx.ptr_type)
+        },
+    }
+}
+
+// Get the index of a method within a trait's dict struct
+fn get_trait_method_index(dict_param: Str, method: Str) -> Int {
+    // Dict param names look like __ring_T_Eq, __ring_T_Clone, etc.
+    // We derive the trait name from the param name.
+    // Built-in trait method ordering (alphabetical, matching JS backend):
+    // Eq: eq=0, ne=1
+    // Clone: clone=0
+    // Ord: compare=0
+    // Debug: debug=0
+    if method == "eq" { 0 }
+    else { if method == "ne" { 1 }
+    else { if method == "clone" { 0 }
+    else { if method == "compare" { 0 }
+    else { if method == "debug" { 0 }
+    else { 0 } } } } } // fallback to 0
 }
 
 fn gen_closure_call(mut ctx: LlvmCtx, closure_ptr: LLVMValueRef, arg_vals: List<LLVMValueRef>) -> LLVMValueRef {
@@ -587,7 +748,7 @@ fn gen_closure_call(mut ctx: LlvmCtx, closure_ptr: LLVMValueRef, arg_vals: List<
     LLVMBuildCall2(ctx.builder, fn_ty, fn_ptr, call_args, fresh_name(ctx, "cc"))
 }
 
-fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>) -> LLVMValueRef {
+fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>, dict_vals: List<LLVMValueRef>) -> LLVMValueRef {
     // Check for known extern fn → runtime mapping
     let rt_name = extern_fn_to_runtime(name)
     match rt_name {
@@ -601,11 +762,16 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
     let mangled = llvm_mangle_fn(name)
     match ctx.functions.get(mangled) {
         some(fn_val) => {
-            // Add evidence params (null for now)
+            // Add trait dict params
+            for dv in dict_vals {
+                arg_vals.push(dv)
+            }
+
+            // Add evidence params — look up from named_values, fall back to null
             match ctx.fn_evidence_params.get(mangled) {
                 some(ev_params) => {
                     for ep in ev_params {
-                        arg_vals.push(LLVMConstPointerNull(ctx.ptr_type))
+                        arg_vals.push(lookup_evidence(ctx, ep))
                     }
                 },
                 none => {},
@@ -627,6 +793,22 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
                     LLVMConstPointerNull(ctx.ptr_type)
                 },
             }
+        },
+    }
+}
+
+// ============================================================
+// Evidence lookup — find evidence param in current scope or use default (null)
+// ============================================================
+
+fn lookup_evidence(mut ctx: LlvmCtx, ev_param_name: Str) -> LLVMValueRef {
+    // Look up the evidence parameter in current scope's named_values
+    match ctx.named_values.get(ev_param_name) {
+        some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "ev")),
+        none => {
+            // Not in scope — use default evidence (null ptr)
+            // This happens for top-level calls where no handler has been installed
+            LLVMConstPointerNull(ctx.ptr_type)
         },
     }
 }
@@ -737,7 +919,7 @@ fn rt_method_needs_recv_unbox_bool(name: Str) -> Bool {
     else { false }
 }
 
-fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method: Str, args: List<LLVMValueRef>) -> LLVMValueRef {
+fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method: Str, args: List<LLVMValueRef>, dict_vals: List<LLVMValueRef>) -> LLVMValueRef {
     let type_name = match type_to_builtin_name(recv_type) {
         some(n) => n,
         none => {
@@ -825,11 +1007,16 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
             let mangled = llvm_mangle_method(type_name, method)
             match ctx.functions.get(mangled) {
                 some(fn_val) => {
-                    // Add evidence params
+                    // Add trait dict params
+                    for dv in dict_vals {
+                        call_args.push(dv)
+                    }
+
+                    // Add evidence params — look up from scope
                     match ctx.fn_evidence_params.get(mangled) {
                         some(ev_params) => {
                             for ep in ev_params {
-                                call_args.push(LLVMConstPointerNull(ctx.ptr_type))
+                                call_args.push(lookup_evidence(ctx, ep))
                             }
                         },
                         none => {},
