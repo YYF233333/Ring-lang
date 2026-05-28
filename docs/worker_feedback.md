@@ -9,17 +9,25 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
-## B-011 LLVM Wave 2c
+## B-011 LLVM Wave 3a+3b
 
-### 1. N-API addon 的 LLVMVerifyModule 不支持非致命模式 [通知]
+### 1. 多文件 --target=llvm 已接通 [通知]
 
-addon 的 `LLVMVerifyModule` wrapper 在验证失败时总是 `napi_throw_error`，不管 action 参数值。当前只能跳过验证。修复方案：(a) 改 addon 的 wrapper 使 action=2 时只返回错误码不 throw，或 (b) 等自举后直接调用 LLVM-C API。
+`compile_project_llvm()` 新函数处理多模块编译。模块前缀通过 `llvm_mangle_fn_with_prefix` 处理。
 
-### 2. "Terminator in middle of basic block" 待修复 [通知]
+### 2. ring_runtime.cpp 新增约 30 个函数 [通知]
 
-标准库某些函数（带 `return` 语句后有后续代码的路径）生成的 IR 有 terminator 位置错误。这些函数在 hello.ring 中不被调用所以不影响 .o 生成。Wave 3（bootstrap 尝试）时需要修复。根因是 `emit_return` 后当前 basic block 已终止，但后续语句仍在往同一个 block 写入。
+path/file/集合/parse/字符串方法补全。总行数 ~650 → ~1100。
 
-### 3. Wave 2 codegen 全部完成 [通知]
+### 3. Bootstrap blocking issue: gen_field_access 对非 StructType panic [通知]
 
-Wave 2 的全部子任务（2a-2g）已完成：编排器 + 全量 HExpr/HStmt + runtime 修正 + evidence threading + trait dict dispatch。下一阶段是 Wave 3（std lib C ABI 补全 → 首次 bootstrap 尝试）。
+for-in 循环中 iterator 类型可能是 EnumType，`gen_field_access` 假设总是 StructType。下一 Wave 首要修复。
+
+### 4. Const 声明实现为零参 getter 函数 [通知]
+
+uniform boxing 下全局 const 需要 malloc，通过零参 getter 函数实现（首次调用初始化+缓存）。
+
+### 5. 跨模块 find_fn_by_suffix fallback [通知]
+
+后缀匹配 fallback 不精确（理论上可能有跨模块同名冲突），但编译器源码中未出现此问题。
 

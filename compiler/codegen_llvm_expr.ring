@@ -186,7 +186,23 @@ fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?) -> LLVMValueRef {
                                             let mangled_lu = llvm_mangle_fn(lookup_name)
                                             match ctx.functions.get(mangled_lu) {
                                                 some(fn_val) => call_zero_arg_or_return(ctx, fn_val, mangled_lu),
-                                                none => panic("LLVM codegen: undefined variable '${name}' (resolved: '${lookup_name}', tried: '${mangled_resolved}', '${mangled_bare}')"),
+                                                none => {
+                                            // Last resort: search all functions for suffix match
+                                            // This handles cross-module const/fn references
+                                            let suffix = "$$_${name}"
+                                            let found = find_fn_by_suffix(ctx, suffix)
+                                            match found {
+                                                some(fi) => call_zero_arg_or_return(ctx, fi.fn_val, fi.fn_mangled),
+                                                none => {
+                                                    let suffix2 = "$$_${lookup_name}"
+                                                    let found2 = find_fn_by_suffix(ctx, suffix2)
+                                                    match found2 {
+                                                        some(fi2) => call_zero_arg_or_return(ctx, fi2.fn_val, fi2.fn_mangled),
+                                                        none => panic("LLVM codegen: undefined variable '${name}' (resolved: '${lookup_name}')"),
+                                                    }
+                                                },
+                                            }
+                                        },
                                             }
                                         },
                                     }
@@ -819,6 +835,17 @@ struct FnLookupResult {
     fn_mangled: Str
 }
 
+// Helper to find a function by suffix match (for cross-module resolution)
+fn find_fn_by_suffix(ctx: LlvmCtx, suffix: Str) -> FnLookupResult? {
+    for entry in ctx.functions.entries() {
+        let (fn_name, fn_val) = entry
+        if fn_name.ends_with(suffix) {
+            return some(FnLookupResult { fn_val: fn_val, fn_mangled: fn_name })
+        }
+    }
+    none
+}
+
 // Helper to find a function in ctx using multiple resolution strategies
 fn find_function_in_ctx(ctx: LlvmCtx, mangled: Str, name: Str) -> FnLookupResult? {
     match ctx.functions.get(mangled) {
@@ -828,7 +855,11 @@ fn find_function_in_ctx(ctx: LlvmCtx, mangled: Str, name: Str) -> FnLookupResult
             let bare = llvm_mangle_fn(name)
             match ctx.functions.get(bare) {
                 some(fn_val) => some(FnLookupResult { fn_val: fn_val, fn_mangled: bare }),
-                none => none,
+                none => {
+                    // Try suffix search for cross-module references
+                    let suffix = "$$_${name}"
+                    find_fn_by_suffix(ctx, suffix)
+                },
             }
         },
     }
@@ -1667,11 +1698,11 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
             ctx.named_values.insert(name, alloca)
         },
         Pattern::Wildcard { .. } => {},
-        Pattern::Constructor { name, fields, .. } => {
-            // Nested enum: extract tag is not needed for binding, just bind fields
-            // If we know the enum type, we could GEP into it. For now, just bind fields positionally.
-            let enum_name = name
-            match ctx.enum_types.get(enum_name) {
+        Pattern::Constructor { name, qualifier, fields, .. } => {
+            // Nested enum: name is the variant name, qualifier might be the enum name
+            // Look up the enum type that contains this variant
+            let enum_info = find_enum_by_variant(ctx, name, qualifier)
+            match enum_info {
                 some(ei) => {
                     for i in 0..fields.len() {
                         match fields.get(i) {
@@ -1702,8 +1733,9 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
                 }
             }
         },
-        Pattern::NamedConstructor { name, fields, .. } => {
-            match ctx.enum_types.get(name) {
+        Pattern::NamedConstructor { name, qualifier, fields, .. } => {
+            let enum_info = find_enum_by_variant(ctx, name, qualifier)
+            match enum_info {
                 some(ei) => {
                     for i in 0..fields.len() {
                         match fields.get(i) {
@@ -1859,6 +1891,34 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
     } else {
         LLVMConstPointerNull(ctx.ptr_type)
     }
+}
+
+// Helper: find enum type info by variant name (or qualifier if present)
+fn find_enum_by_variant(ctx: LlvmCtx, variant_name: Str, qualifier: Str?) -> EnumTypeInfo? {
+    // If qualifier is present, use it as the enum name directly
+    match qualifier {
+        some(q) => {
+            match ctx.enum_types.get(q) {
+                some(ei) => { return some(ei) },
+                none => {},
+            }
+        },
+        none => {},
+    }
+    // Try variant name as enum name (for enum types where variant name = type name)
+    match ctx.enum_types.get(variant_name) {
+        some(ei) => { return some(ei) },
+        none => {},
+    }
+    // Search all registered enums for this variant
+    for entry in ctx.enum_types.entries() {
+        let (ename, einfo) = entry
+        match einfo.variants.get(variant_name) {
+            some(_) => { return some(einfo) },
+            none => {},
+        }
+    }
+    none
 }
 
 // Helper: get LLVM struct type for a tuple of N elements (all ptr)
