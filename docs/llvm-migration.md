@@ -336,6 +336,11 @@ struct LlvmCtx {
   - 所有参数类型 = `ptr`（uniform boxing）
   - 返回类型 = `ptr`（或 `void` 对 Unit 返回）
   - `LLVMAddFunction(module, mangled_name, fn_type)`
+  - **属性标注**（从第一天就做，成本极低收益大，见 design.md 13.6）：
+    - 检查 effect row：无 effect → 标 `readnone`；只有 fail → 不标（可能 longjmp）；有 io/mut → 不标
+    - 检查参数类型：非 Option 参数 → 标 `nonnull`
+    - 检查 fail 可能性：不 raise → 标 `nounwind`
+    - 穷尽 match 的 default 分支 → `unreachable`（在 codegen_llvm_expr 中处理）
 
 **名称 mangling 规则**：
 - 顶层函数：`ring_<name>`（避免与 C 符号冲突）
