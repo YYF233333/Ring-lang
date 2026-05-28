@@ -243,6 +243,11 @@ function to_result(f) {
 
 
 
+
+
+
+
+
 class StructFieldInfo {
   constructor(field_names, llvm_type) {
     this.field_names = field_names;
@@ -388,6 +393,16 @@ function get_rt_fn_type(ctx, name) {
     }
     __match_fail(__ring_m9);
   }
+}
+
+function build_entry_alloca(ctx, ty, name) {
+  const current_bb = LLVMGetInsertBlock(ctx.builder);
+  const fn_val = LLVMGetBasicBlockParent(current_bb);
+  const entry_bb = LLVMGetEntryBasicBlock(fn_val);
+  LLVMPositionBuilderAtEnd(ctx.builder, entry_bb);
+  const alloca = LLVMBuildAlloca(ctx.builder, ty, name);
+  LLVMPositionBuilderAtEnd(ctx.builder, current_bb);
+  return alloca;
 }
 
 function __StringBuilder_Eq_eq(self, other) {
@@ -655,4 +670,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, __EnumVariantInfo_Eq, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __EnumVariantInfo_Ord, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca, __EnumVariantInfo_Eq, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __EnumVariantInfo_Ord, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };

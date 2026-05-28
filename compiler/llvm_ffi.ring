@@ -118,6 +118,7 @@ pub extern fn LLVMSetLinkage(global: LLVMValueRef, linkage: Int) -> Unit
 pub extern fn LLVMSetFunctionCallConv(fn_val: LLVMValueRef, call_conv: Int) -> Unit
 
 pub extern fn LLVMGetEntryBasicBlock(fn_val: LLVMValueRef) -> LLVMBasicBlockRef
+pub extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
 
 // attr_index: Int (0 = return, 1.. = params, -1 = function)
 pub extern fn LLVMAddAttributeAtIndex(fn_val: LLVMValueRef, attr_index: Int, attr: LLVMAttributeRef) -> Unit

@@ -13,6 +13,11 @@ extern type LLVMTargetMachineRef
 // Re-declare LLVM functions used by utility functions
 extern fn LLVMFunctionType(ret: LLVMTypeRef, params: List<LLVMTypeRef>, is_var_arg: Int) -> LLVMTypeRef
 extern fn LLVMAddFunction(m: LLVMModuleRef, name: Str, fn_ty: LLVMTypeRef) -> LLVMValueRef
+extern fn LLVMBuildAlloca(builder: LLVMBuilderRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
+extern fn LLVMGetInsertBlock(builder: LLVMBuilderRef) -> LLVMBasicBlockRef
+extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
+extern fn LLVMGetEntryBasicBlock(fn_val: LLVMValueRef) -> LLVMBasicBlockRef
+extern fn LLVMPositionBuilderAtEnd(builder: LLVMBuilderRef, bb: LLVMBasicBlockRef) -> Unit
 
 // ============================================================
 // Shared data structures for LLVM codegen
@@ -167,4 +172,22 @@ pub fn get_rt_fn_type(ctx: LlvmCtx, name: Str) -> LLVMTypeRef {
         some(t) => t,
         none => panic("LLVM codegen: runtime function type not found: ${name}"),
     }
+}
+
+// ============================================================
+// build_entry_alloca — place alloca in function's entry block
+// ============================================================
+// LLVM best practice: all allocas go in the entry block so they
+// dominate all uses, preventing "instruction does not dominate
+// all uses" verify errors when allocas would otherwise be inside
+// loops, match arms, catch blocks, etc.
+
+pub fn build_entry_alloca(mut ctx: LlvmCtx, ty: LLVMTypeRef, name: Str) -> LLVMValueRef {
+    let current_bb = LLVMGetInsertBlock(ctx.builder)
+    let fn_val = LLVMGetBasicBlockParent(current_bb)
+    let entry_bb = LLVMGetEntryBasicBlock(fn_val)
+    LLVMPositionBuilderAtEnd(ctx.builder, entry_bb)
+    let alloca = LLVMBuildAlloca(ctx.builder, ty, name)
+    LLVMPositionBuilderAtEnd(ctx.builder, current_bb)
+    alloca
 }
