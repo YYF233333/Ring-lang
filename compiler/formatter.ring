@@ -1,5 +1,5 @@
 use ast::{Span}
-use diagnostics::{Diagnostic, DiagnosticContext, Suggestion, Severity, severity_to_str}
+use diagnostics::{Diagnostic, DiagnosticNote, DiagnosticContext, Suggestion, Severity, severity_to_str}
 
 // ============================================================
 // format_human — Rustc-style human-readable diagnostic output
@@ -43,6 +43,16 @@ pub fn format_human(diagnostics: List<Diagnostic>, source: Str) -> Str {
             none => {}
         }
 
+        for n in d.notes {
+            match n.span {
+                some(note_span) => {
+                    parts.push("   = note: ${n.message} (${note_span.file}:${note_span.start.line.to_str()}:${note_span.start.column.to_str()})")
+                },
+                none => {
+                    parts.push("   = note: ${n.message}")
+                }
+            }
+        }
         for s in d.suggestions {
             parts.push("   = help: ${s.message}")
         }
@@ -98,6 +108,7 @@ pub fn format_llm(diagnostics: List<Diagnostic>, file: Str) -> Str {
                 parts.push("        \"end_col\": ${diag.span.end.column.to_str()}\n")
                 parts.push("      },\n")
                 parts.push("      \"context\": ${context_to_json(diag.context)},\n")
+                parts.push("      \"notes\": ${notes_to_json(diag.notes)},\n")
                 parts.push("      \"suggestions\": ${suggestions_to_json(diag.suggestions)},\n")
                 match diag.category {
                     some(cat) => parts.push("      \"category\": ${jq(cat)}\n"),
@@ -203,6 +214,18 @@ fn context_to_json(ctx: DiagnosticContext) -> Str {
             }
         }
     }
+}
+
+fn notes_to_json(notes: List<DiagnosticNote>) -> Str {
+    if notes.is_empty() { return "[]" }
+    let mut items: List<Str> = []
+    for n in notes {
+        match n.span {
+            some(sp) => items.push("{ \"message\": ${jq(n.message)}, \"span\": { \"line\": ${sp.start.line.to_str()}, \"col\": ${sp.start.column.to_str()} } }"),
+            none => items.push("{ \"message\": ${jq(n.message)} }")
+        }
+    }
+    "[${items.join(", ")}]"
 }
 
 fn suggestions_to_json(suggestions: List<Suggestion>) -> Str {

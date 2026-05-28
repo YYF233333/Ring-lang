@@ -14,7 +14,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     variant_js_name, trait_dict_name, trait_bound_param_name,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
     hexpr_type, hexpr_effects, hexpr_span}
-use diagnostics::{DiagnosticContext, CollectingSink, Severity, make_diag}
+use diagnostics::{DiagnosticContext, DiagnosticNote, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0203, E0205, E0206, E0208, E0301, E0303, E0304, E0305, E0306,
     E0307, E0308, E0402, E0504, E0601, E0705, W0001}
 use union_find::{UnionFind, uf_find, uf_lookup}
@@ -23,7 +23,7 @@ use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, EffectDef,
     BuiltInKind, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl, lookup_variant}
 use unify::{unify, empty_subst}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
-    type_error, merge_effects, unify_at, update_fn_effects,
+    type_error, type_error_with_notes, merge_effects, unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type, resolve_named_type,
     bind_pattern, build_scheme_var_map, resolve_dicts_from_scheme,
     remove_fail_effect,
@@ -212,7 +212,11 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             match type_annotation {
                 some(ta) => {
                     let annotated = resolve_type_expr(ctx, ta)
-                    s = unify_at(ctx.sink, ctx.env, var_type, annotated, s, span)
+                    let notes: List<DiagnosticNote> = [
+                        DiagnosticNote { message: "expected '${type_to_string(annotated)}' because variable '${name}' is declared with this type", span: some(name_span) },
+                        DiagnosticNote { message: "initializer has type '${type_to_string(apply_subst(s, var_type))}'", span: some(hexpr_span(init_r.hexpr)) }
+                    ]
+                    s = unify_at_noted(ctx.sink, ctx.env, var_type, annotated, s, span, notes)
                     var_type = apply_subst(s, annotated)
                 },
                 none => {}
@@ -256,7 +260,11 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             match type_annotation {
                 some(ta) => {
                     let annotated = resolve_type_expr(ctx, ta)
-                    s = unify_at(ctx.sink, ctx.env, var_type, annotated, s, span)
+                    let notes: List<DiagnosticNote> = [
+                        DiagnosticNote { message: "expected '${type_to_string(annotated)}' because variable '${name}' is declared with this type", span: some(name_span) },
+                        DiagnosticNote { message: "initializer has type '${type_to_string(apply_subst(s, var_type))}'", span: some(hexpr_span(init_r.hexpr)) }
+                    ]
+                    s = unify_at_noted(ctx.sink, ctx.env, var_type, annotated, s, span, notes)
                     var_type = apply_subst(s, annotated)
                 },
                 none => {}
@@ -286,7 +294,11 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             check_assign_target_mutable(ctx, target)
             let target_r = infer_expr(ctx, target, subst)
             let value_r = infer_expr(ctx, value, target_r.subst)
-            let mut s = unify_at(ctx.sink, ctx.env, hexpr_type(target_r.hexpr), hexpr_type(value_r.hexpr), value_r.subst, span)
+            let assign_notes: List<DiagnosticNote> = [
+                DiagnosticNote { message: "target has type '${type_to_string(apply_subst(value_r.subst, hexpr_type(target_r.hexpr)))}'", span: some(hexpr_span(target_r.hexpr)) },
+                DiagnosticNote { message: "assigned value has type '${type_to_string(apply_subst(value_r.subst, hexpr_type(value_r.hexpr)))}'", span: some(hexpr_span(value_r.hexpr)) }
+            ]
+            let mut s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(target_r.hexpr), hexpr_type(value_r.hexpr), value_r.subst, span, assign_notes)
             let me = merge_effects(ctx.env, target_r.effects, value_r.effects, s)
             s = me.1
             StmtResult {
@@ -309,7 +321,11 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
                 let mut s = r.subst
                 match ctx.current_fn_return_type {
                     some(ret_type) => {
-                        s = unify_at(ctx.sink, ctx.env, hexpr_type(r.hexpr), ret_type, s, span)
+                        let return_notes: List<DiagnosticNote> = [
+                            DiagnosticNote { message: "function return type is '${type_to_string(apply_subst(s, ret_type))}'", span: none },
+                            DiagnosticNote { message: "return value has type '${type_to_string(apply_subst(s, hexpr_type(r.hexpr)))}'", span: some(hexpr_span(r.hexpr)) }
+                        ]
+                        s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(r.hexpr), ret_type, s, span, return_notes)
                     },
                     none => {}
                 }
@@ -1468,7 +1484,11 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
         effects: EffectRow { effects: [], tail: some(effect_tail) }
     }
 
-    s = unify_at(ctx.sink, ctx.env, hexpr_type(callee_r.hexpr), expected_fn, s, span)
+    let callee_name_for_note: Str = match callee { Expr::Ident { name: cn, .. } => cn, _ => "<expression>" }
+    let call_notes: List<DiagnosticNote> = [
+        DiagnosticNote { message: "calling '${callee_name_for_note}' with ${arg_types.len().to_str()} argument(s)", span: some(span) }
+    ]
+    s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(callee_r.hexpr), expected_fn, s, span, call_notes)
     let resolved_callee_type = apply_subst(s, hexpr_type(callee_r.hexpr))
 
     match resolved_callee_type {
@@ -1836,7 +1856,13 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
             Type::FnType { params: mt_params, .. } => {
                 if mt_params.len() > 0 {
                     match mt_params.first() {
-                        some(first_param) => { s = unify_at(ctx.sink, ctx.env, hexpr_type(recv_r.hexpr), first_param, s, span) },
+                        some(first_param) => {
+                            let recv_notes: List<DiagnosticNote> = [
+                                DiagnosticNote { message: "method '${method}' expects receiver of type '${type_to_string(apply_subst(s, first_param))}'", span: some(span) },
+                                DiagnosticNote { message: "receiver has type '${type_to_string(apply_subst(s, hexpr_type(recv_r.hexpr)))}'", span: some(hexpr_span(recv_r.hexpr)) }
+                            ]
+                            s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(recv_r.hexpr), first_param, s, span, recv_notes)
+                        },
                         none => {}
                     }
                 }
@@ -1893,7 +1919,14 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
                 for harg in hargs {
                     if i + 1 < mt_params.len() {
                         match mt_params.get(i + 1) {
-                            some(expected_param) => { s = unify_at(ctx.sink, ctx.env, hexpr_type(harg), expected_param, s, span) },
+                            some(expected_param) => {
+                                let arg_num = (i + 1).to_str()
+                                let marg_notes: List<DiagnosticNote> = [
+                                    DiagnosticNote { message: "argument ${arg_num} of method '${method}' expects type '${type_to_string(apply_subst(s, expected_param))}'", span: some(span) },
+                                    DiagnosticNote { message: "argument has type '${type_to_string(apply_subst(s, hexpr_type(harg)))}'", span: some(hexpr_span(harg)) }
+                                ]
+                                s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(harg), expected_param, s, span, marg_notes)
+                            },
                             none => {}
                         }
                     }
@@ -2356,7 +2389,11 @@ fn infer_struct_lit(mut ctx: InferCtx, name: Str, fields: List<StructFieldInit>,
         match def_field {
             some(df) => {
                 let ft = apply_subst_map(inst_map, df.ty)
-                s = unify_at(ctx.sink, ctx.env, hexpr_type(fr.hexpr), ft, s, span)
+                let field_notes: List<DiagnosticNote> = [
+                    DiagnosticNote { message: "field '${field.name}' of struct '${name}' expects type '${type_to_string(ft)}'", span: some(field.span) },
+                    DiagnosticNote { message: "provided value has type '${type_to_string(apply_subst(s, hexpr_type(fr.hexpr)))}'", span: some(hexpr_span(fr.hexpr)) }
+                ]
+                s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(fr.hexpr), ft, s, span, field_notes)
             },
             none => { let _ = type_error(ctx.sink, E0203,
                 "Struct '${name}' has no field '${field.name}'",
@@ -2567,7 +2604,11 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
             let me = merge_effects(ctx.env, effects, body_r.effects, s)
             effects = me.0
             s = me.1
-            s = unify_at(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span)
+            let match_notes: List<DiagnosticNote> = [
+                DiagnosticNote { message: "match arms must all have the same type", span: some(arm.span) },
+                DiagnosticNote { message: "this arm has type '${type_to_string(apply_subst(s, hexpr_type(body_r.hexpr)))}'", span: some(hexpr_span(body_r.hexpr)) }
+            ]
+            s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span, match_notes)
 
             harms.push(HMatchArm { pattern: match_pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
             true
@@ -2629,7 +2670,11 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
                 let me2 = merge_effects(ctx.env, effects, else_r.effects, s)
                 effects = me2.0
                 s = me2.1
-                s = unify_at(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_r.hexpr), s, span)
+                let if_notes: List<DiagnosticNote> = [
+                    DiagnosticNote { message: "then branch has type '${type_to_string(apply_subst(s, hexpr_type(then_r.hexpr)))}'", span: some(hexpr_span(then_r.hexpr)) },
+                    DiagnosticNote { message: "else branch has type '${type_to_string(apply_subst(s, hexpr_type(else_r.hexpr)))}'", span: some(hexpr_span(else_r.hexpr)) }
+                ]
+                s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_r.hexpr), s, span, if_notes)
                 result_type = apply_subst(s, hexpr_type(then_r.hexpr))
                 else_hexpr = some(else_r.hexpr)
             },
@@ -2639,7 +2684,11 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
                 let me2 = merge_effects(ctx.env, effects, else_if_r.effects, s)
                 effects = me2.0
                 s = me2.1
-                s = unify_at(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_if_r.hexpr), s, span)
+                let elif_notes: List<DiagnosticNote> = [
+                    DiagnosticNote { message: "then branch has type '${type_to_string(apply_subst(s, hexpr_type(then_r.hexpr)))}'", span: some(hexpr_span(then_r.hexpr)) },
+                    DiagnosticNote { message: "else branch has type '${type_to_string(apply_subst(s, hexpr_type(else_if_r.hexpr)))}'", span: some(hexpr_span(else_if_r.hexpr)) }
+                ]
+                s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(then_r.hexpr), hexpr_type(else_if_r.hexpr), s, span, elif_notes)
                 result_type = apply_subst(s, hexpr_type(then_r.hexpr))
                 else_hexpr = some(HExpr::Block {
                     stmts: [], tail: some(else_if_r.hexpr),

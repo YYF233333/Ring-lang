@@ -1,17 +1,17 @@
-use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, effect_to_string, effects_match_kind, effect_kind_name}
+use types::{Type, Effect, EffectRow, UNIT, EMPTY_ROW, type_to_string, effect_to_string, effects_match_kind, effect_kind_name}
 use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, EffectOpDecl, EffectExpr,
     UseDecl, UseImport, NamedImport, SigMember}
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
-    hexpr_type, hexpr_effects}
+    hexpr_type, hexpr_effects, hexpr_span}
 use env::{TypeScheme, apply_subst, find_impl}
 use unify::{empty_subst}
-use diagnostics::{DiagnosticContext}
+use diagnostics::{DiagnosticContext, DiagnosticNote}
 use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
-    type_error,
-    unify_at, update_fn_effects,
+    type_error, type_error_with_notes,
+    unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type,
     generalize, resolve_relative_qualifier}
 use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases, collect_all_supertraits, inject_assoc_types_from_bounds}
@@ -1142,7 +1142,11 @@ struct FnBodyResult {
 fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<HParam>, expected_ret: Type, body: Expr, saved_tp_scope: Map<Str, Type>, span: Span) -> FnBodyResult {
     let body_result = infer_block(ctx, body, some(ctx.subst))
     ctx.subst = body_result.subst
-    ctx.subst = unify_at(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span)
+    let fn_body_notes: List<DiagnosticNote> = [
+        DiagnosticNote { message: "function return type is declared as '${type_to_string(apply_subst(ctx.subst, expected_ret))}'", span: some(span) },
+        DiagnosticNote { message: "function body evaluates to '${type_to_string(apply_subst(ctx.subst, hexpr_type(body_result.hexpr)))}'", span: some(hexpr_span(body_result.hexpr)) }
+    ]
+    ctx.subst = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span, fn_body_notes)
 
     let mut local_names: Map<Int, Str> = map_new()
     for tp in type_params {
