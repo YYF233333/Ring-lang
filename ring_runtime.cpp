@@ -14,10 +14,17 @@
 #include <unordered_set>
 #include <algorithm>
 
+#include <cctype>
+#include <sstream>
+
 #ifdef _WIN32
 #include <direct.h>  // _getcwd
+#include <io.h>      // _access
+#include <windows.h> // GetFullPathName
+#define PATH_SEP '\\'
 #else
-#include <unistd.h>  // getcwd
+#include <unistd.h>  // getcwd, access
+#define PATH_SEP '/'
 #endif
 
 // ============================================================================
@@ -654,4 +661,457 @@ extern "C" void ring_catch_pop() {
     RingCatchFrame* frame = ring_catch_stack;
     ring_catch_stack = frame->prev;
     delete frame;
+}
+
+// ============================================================================
+// Path operations (~5)
+// ============================================================================
+
+extern "C" void* ring_path_join(void* a, void* b) {
+    std::string* sa = (std::string*)a;
+    std::string* sb = (std::string*)b;
+    if (sa->empty()) return (void*)new std::string(*sb);
+    if (sb->empty()) return (void*)new std::string(*sa);
+    char last = sa->back();
+    if (last == '/' || last == '\\') {
+        return (void*)new std::string(*sa + *sb);
+    }
+    return (void*)new std::string(*sa + PATH_SEP + *sb);
+}
+
+extern "C" void* ring_path_resolve(void* p) {
+    std::string* sp = (std::string*)p;
+#ifdef _WIN32
+    char buf[4096];
+    DWORD len = GetFullPathNameA(sp->c_str(), sizeof(buf), buf, nullptr);
+    if (len == 0 || len >= sizeof(buf)) {
+        return (void*)new std::string(*sp);
+    }
+    return (void*)new std::string(buf);
+#else
+    char* resolved = realpath(sp->c_str(), nullptr);
+    if (!resolved) {
+        return (void*)new std::string(*sp);
+    }
+    auto* result = new std::string(resolved);
+    free(resolved);
+    return (void*)result;
+#endif
+}
+
+extern "C" void* ring_path_dirname(void* p) {
+    std::string* sp = (std::string*)p;
+    size_t pos = sp->find_last_of("/\\");
+    if (pos == std::string::npos) return (void*)new std::string(".");
+    return (void*)new std::string(sp->substr(0, pos));
+}
+
+extern "C" void* ring_path_basename(void* p) {
+    std::string* sp = (std::string*)p;
+    size_t pos = sp->find_last_of("/\\");
+    if (pos == std::string::npos) return (void*)new std::string(*sp);
+    return (void*)new std::string(sp->substr(pos + 1));
+}
+
+extern "C" void* ring_path_extname(void* p) {
+    std::string* sp = (std::string*)p;
+    size_t slash = sp->find_last_of("/\\");
+    size_t dot = sp->rfind('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
+        return (void*)new std::string("");
+    }
+    return (void*)new std::string(sp->substr(dot));
+}
+
+// ============================================================================
+// File operations (additional)
+// ============================================================================
+
+extern "C" int64_t ring_file_exists(void* path) {
+    std::string* p = (std::string*)path;
+#ifdef _WIN32
+    return _access(p->c_str(), 0) == 0 ? 1 : 0;
+#else
+    return access(p->c_str(), F_OK) == 0 ? 1 : 0;
+#endif
+}
+
+extern "C" void* ring_delete_file(void* path) {
+    std::string* p = (std::string*)path;
+    remove(p->c_str());
+    return nullptr;
+}
+
+// ============================================================================
+// Collection clone / from
+// ============================================================================
+
+extern "C" void* ring_list_clone(void* list) {
+    auto* vec = (std::vector<void*>*)list;
+    return (void*)new std::vector<void*>(*vec);
+}
+
+extern "C" void* ring_map_clone(void* map) {
+    RingMap* m = (RingMap*)map;
+    return (void*)new RingMap(*m);
+}
+
+extern "C" void* ring_set_clone(void* set) {
+    RingSet* s = (RingSet*)set;
+    return (void*)new RingSet(*s);
+}
+
+extern "C" void* ring_map_from(void* entries) {
+    // entries is List<(K, V)> = List<List<void*>> where each inner list is [key, value]
+    auto* vec = (std::vector<void*>*)entries;
+    auto* result = new RingMap();
+    for (size_t i = 0; i < vec->size(); i++) {
+        auto* pair = (std::vector<void*>*)((*vec)[i]);
+        if (pair->size() >= 2) {
+            std::string* key = (std::string*)((*pair)[0]);
+            (*result)[*key] = (*pair)[1];
+        }
+    }
+    return (void*)result;
+}
+
+// ring_set_from_list already defined above
+
+// ============================================================================
+// String operations (additional)
+// ============================================================================
+
+extern "C" void* ring_str_trim(void* s) {
+    std::string* str = (std::string*)s;
+    size_t start = str->find_first_not_of(" \t\n\r\f\v");
+    size_t end = str->find_last_not_of(" \t\n\r\f\v");
+    if (start == std::string::npos) return (void*)new std::string("");
+    return (void*)new std::string(str->substr(start, end - start + 1));
+}
+
+extern "C" void* ring_str_trim_start(void* s) {
+    std::string* str = (std::string*)s;
+    size_t start = str->find_first_not_of(" \t\n\r\f\v");
+    if (start == std::string::npos) return (void*)new std::string("");
+    return (void*)new std::string(str->substr(start));
+}
+
+extern "C" void* ring_str_trim_end(void* s) {
+    std::string* str = (std::string*)s;
+    size_t end = str->find_last_not_of(" \t\n\r\f\v");
+    if (end == std::string::npos) return (void*)new std::string("");
+    return (void*)new std::string(str->substr(0, end + 1));
+}
+
+extern "C" void* ring_str_to_upper(void* s) {
+    std::string result = *(std::string*)s;
+    for (size_t i = 0; i < result.size(); i++) {
+        result[i] = (char)toupper((unsigned char)result[i]);
+    }
+    return (void*)new std::string(result);
+}
+
+extern "C" void* ring_str_to_lower(void* s) {
+    std::string result = *(std::string*)s;
+    for (size_t i = 0; i < result.size(); i++) {
+        result[i] = (char)tolower((unsigned char)result[i]);
+    }
+    return (void*)new std::string(result);
+}
+
+extern "C" void* ring_str_char_at(void* s, int64_t idx) {
+    std::string* str = (std::string*)s;
+    if (idx < 0 || idx >= (int64_t)str->size()) {
+        // Return Option::none — tag=1, no payload
+        // Option struct: {i64 tag, void* payload}
+        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+        opt[0] = 1; // none tag
+        opt[1] = 0;
+        return (void*)opt;
+    }
+    // Return Option::some(char_str) — tag=0
+    auto* ch = new std::string(1, (*str)[(size_t)idx]);
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+    opt[0] = 0; // some tag
+    *((void**)(opt + 1)) = (void*)ch;
+    return (void*)opt;
+}
+
+extern "C" void* ring_str_index_of(void* s, void* sub) {
+    std::string* str = (std::string*)s;
+    std::string* needle = (std::string*)sub;
+    size_t pos = str->find(*needle);
+    if (pos == std::string::npos) {
+        // Return Option::none
+        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+        opt[0] = 1; // none
+        opt[1] = 0;
+        return (void*)opt;
+    }
+    // Return Option::some(index)
+    auto* boxed = (int64_t*)malloc(sizeof(int64_t));
+    *boxed = (int64_t)pos;
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+    opt[0] = 0; // some
+    *((void**)(opt + 1)) = (void*)boxed;
+    return (void*)opt;
+}
+
+extern "C" void* ring_str_last_index_of(void* s, void* sub) {
+    std::string* str = (std::string*)s;
+    std::string* needle = (std::string*)sub;
+    size_t pos = str->rfind(*needle);
+    if (pos == std::string::npos) {
+        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+        opt[0] = 1;
+        opt[1] = 0;
+        return (void*)opt;
+    }
+    auto* boxed = (int64_t*)malloc(sizeof(int64_t));
+    *boxed = (int64_t)pos;
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+    opt[0] = 0;
+    *((void**)(opt + 1)) = (void*)boxed;
+    return (void*)opt;
+}
+
+extern "C" int64_t ring_str_is_empty(void* s) {
+    return ((std::string*)s)->empty() ? 1 : 0;
+}
+
+extern "C" void* ring_str_pad_start(void* s, int64_t length, void* fill) {
+    std::string* str = (std::string*)s;
+    std::string* filler = (std::string*)fill;
+    if ((int64_t)str->size() >= length || filler->empty()) {
+        return (void*)new std::string(*str);
+    }
+    std::string result;
+    while ((int64_t)(result.size() + str->size()) < length) {
+        result += *filler;
+    }
+    result = result.substr(0, (size_t)(length - (int64_t)str->size()));
+    result += *str;
+    return (void*)new std::string(result);
+}
+
+extern "C" void* ring_str_pad_end(void* s, int64_t length, void* fill) {
+    std::string* str = (std::string*)s;
+    std::string* filler = (std::string*)fill;
+    if ((int64_t)str->size() >= length || filler->empty()) {
+        return (void*)new std::string(*str);
+    }
+    std::string result = *str;
+    while ((int64_t)result.size() < length) {
+        result += *filler;
+    }
+    return (void*)new std::string(result.substr(0, (size_t)length));
+}
+
+extern "C" void* ring_str_repeat(void* s, int64_t count) {
+    std::string* str = (std::string*)s;
+    std::string result;
+    for (int64_t i = 0; i < count; i++) {
+        result += *str;
+    }
+    return (void*)new std::string(result);
+}
+
+extern "C" void* ring_str_char_code_at(void* s, int64_t idx) {
+    std::string* str = (std::string*)s;
+    if (idx < 0 || idx >= (int64_t)str->size()) {
+        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+        opt[0] = 1;
+        opt[1] = 0;
+        return (void*)opt;
+    }
+    auto* boxed = (int64_t*)malloc(sizeof(int64_t));
+    *boxed = (int64_t)(unsigned char)(*str)[(size_t)idx];
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+    opt[0] = 0;
+    *((void**)(opt + 1)) = (void*)boxed;
+    return (void*)opt;
+}
+
+// ============================================================================
+// StringBuilder (additional)
+// ============================================================================
+
+extern "C" void* ring_sb_line(void* sb, void* s) {
+    *(std::string*)sb += *(std::string*)s;
+    *(std::string*)sb += "\n";
+    return sb;
+}
+
+extern "C" void* ring_sb_add_int(void* sb, int64_t n) {
+    *(std::string*)sb += std::to_string(n);
+    return sb;
+}
+
+// ============================================================================
+// Parse functions
+// ============================================================================
+
+extern "C" void* ring_parse_int(void* s) {
+    std::string* str = (std::string*)s;
+    try {
+        size_t pos;
+        int64_t val = std::stoll(*str, &pos);
+        if (pos == str->size()) {
+            // Return Option::some(boxed_int)
+            auto* boxed = (int64_t*)malloc(sizeof(int64_t));
+            *boxed = val;
+            auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+            opt[0] = 0;
+            *((void**)(opt + 1)) = (void*)boxed;
+            return (void*)opt;
+        }
+    } catch (...) {}
+    // Return Option::none
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+    opt[0] = 1;
+    opt[1] = 0;
+    return (void*)opt;
+}
+
+extern "C" void* ring_parse_float(void* s) {
+    std::string* str = (std::string*)s;
+    try {
+        size_t pos;
+        double val = std::stod(*str, &pos);
+        if (pos == str->size()) {
+            auto* boxed = (double*)malloc(sizeof(double));
+            *boxed = val;
+            auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+            opt[0] = 0;
+            *((void**)(opt + 1)) = (void*)boxed;
+            return (void*)opt;
+        }
+    } catch (...) {}
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+    opt[0] = 1;
+    opt[1] = 0;
+    return (void*)opt;
+}
+
+// ============================================================================
+// Set operations (additional)
+// ============================================================================
+
+extern "C" void* ring_set_union(void* a, void* b) {
+    RingSet* sa = (RingSet*)a;
+    RingSet* sb = (RingSet*)b;
+    auto* result = new RingSet(*sa);
+    for (auto& elem : *sb) {
+        result->insert(elem);
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_set_intersect(void* a, void* b) {
+    RingSet* sa = (RingSet*)a;
+    RingSet* sb = (RingSet*)b;
+    auto* result = new RingSet();
+    for (auto& elem : *sa) {
+        if (sb->count(elem) > 0) {
+            result->insert(elem);
+        }
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_set_difference(void* a, void* b) {
+    RingSet* sa = (RingSet*)a;
+    RingSet* sb = (RingSet*)b;
+    auto* result = new RingSet();
+    for (auto& elem : *sa) {
+        if (sb->count(elem) == 0) {
+            result->insert(elem);
+        }
+    }
+    return (void*)result;
+}
+
+// ============================================================================
+// List operations (additional)
+// ============================================================================
+
+extern "C" void* ring_list_shift(void* list) {
+    auto* vec = (std::vector<void*>*)list;
+    if (vec->empty()) {
+        // Return Option::none
+        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+        opt[0] = 1;
+        opt[1] = 0;
+        return (void*)opt;
+    }
+    void* val = vec->front();
+    vec->erase(vec->begin());
+    // Return Option::some(val)
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+    opt[0] = 0;
+    *((void**)(opt + 1)) = val;
+    return (void*)opt;
+}
+
+extern "C" void* ring_list_clear(void* list) {
+    ((std::vector<void*>*)list)->clear();
+    return list;
+}
+
+extern "C" void* ring_list_extend(void* list, void* other) {
+    auto* va = (std::vector<void*>*)list;
+    auto* vb = (std::vector<void*>*)other;
+    va->insert(va->end(), vb->begin(), vb->end());
+    return list;
+}
+
+// ============================================================================
+// Map operations (additional)
+// ============================================================================
+
+extern "C" void* ring_map_clear(void* map) {
+    ((RingMap*)map)->clear();
+    return map;
+}
+
+// ============================================================================
+// Set operations (additional clear/remove)
+// ============================================================================
+
+extern "C" void* ring_set_clear(void* set) {
+    ((RingSet*)set)->clear();
+    return set;
+}
+
+// ============================================================================
+// Miscellaneous
+// ============================================================================
+
+extern "C" void* ring_assert(int64_t cond, void* msg) {
+    if (!cond) {
+        fprintf(stderr, "ring assertion failed: %s\n", ((std::string*)msg)->c_str());
+        fflush(stderr);
+        exit(1);
+    }
+    return nullptr;
+}
+
+extern "C" void* ring_json_stringify(void* val) {
+    // Stub: for bootstrap, just return a placeholder
+    return (void*)new std::string("[json_stringify not implemented]");
+}
+
+// ============================================================================
+// List operations (join already defined as ring_list_join)
+// ============================================================================
+
+extern "C" void* ring_list_join(void* list, void* sep) {
+    auto* vec = (std::vector<void*>*)list;
+    std::string* separator = (std::string*)sep;
+    auto* result = new std::string();
+    for (size_t i = 0; i < vec->size(); i++) {
+        if (i > 0) *result += *separator;
+        *result += *(std::string*)((*vec)[i]);
+    }
+    return (void*)result;
 }

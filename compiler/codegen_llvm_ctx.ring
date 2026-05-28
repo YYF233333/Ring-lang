@@ -70,6 +70,15 @@ pub struct LlvmCtx {
     // Trait method order: maps trait_name → [method_name, ...]
     pub trait_method_order: Map<Str, List<Str>>,
 
+    // Module prefix for multi-file compilation (e.g. "lexer" → functions prefixed "ring_lexer$_")
+    pub module_prefix: Str?,
+
+    // Imports map: maps imported names to their qualified LLVM names
+    pub imports_map: Map<Str, Str>,
+
+    // Local names: set of names defined in the current module
+    pub local_names: Set<Str>,
+
     // Counters
     pub tmp_counter: Int,
     pub lambda_counter: Int,
@@ -90,8 +99,40 @@ pub fn llvm_mangle_fn(name: Str) -> Str {
     "ring_${name}"
 }
 
+// Module-qualified mangling: ring_<prefix>$_<name>
+pub fn llvm_mangle_fn_with_prefix(prefix: Str, name: Str) -> Str {
+    "ring_${prefix}$$_${name}"
+}
+
 pub fn llvm_mangle_method(type_name: Str, method_name: Str) -> Str {
     "ring_${type_name}_${method_name}"
+}
+
+// Resolve a function name through module context: check imports_map, then qualify with prefix
+pub fn llvm_resolve_fn(ctx: LlvmCtx, name: Str) -> Str {
+    // Check imports_map first (cross-module references)
+    match ctx.imports_map.get(name) {
+        some(qualified) => qualified,
+        none => {
+            // If we have a module prefix and this is a local name, qualify it
+            match ctx.module_prefix {
+                some(prefix) => {
+                    if ctx.local_names.contains(name) {
+                        llvm_mangle_fn_with_prefix(prefix, name)
+                    } else {
+                        llvm_mangle_fn(name)
+                    }
+                },
+                none => llvm_mangle_fn(name),
+            }
+        },
+    }
+}
+
+// Resolve a method name through module context
+pub fn llvm_resolve_method(ctx: LlvmCtx, type_name: Str, method_name: Str) -> Str {
+    // Methods use type_name which is usually globally unique
+    llvm_mangle_method(type_name, method_name)
 }
 
 // ============================================================

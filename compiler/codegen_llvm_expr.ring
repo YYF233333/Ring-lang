@@ -9,7 +9,8 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
-    llvm_mangle_fn, llvm_mangle_method}
+    llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
+    llvm_resolve_fn}
 use codegen_llvm_stmt::{emit_llvm_stmt}
 use codegen_ctx::{extract_effect_names}
 
@@ -166,15 +167,30 @@ fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?) -> LLVMValueRef {
                     LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, name))
                 },
                 none => {
-                    // Try as function reference: first with resolved_name, then bare name
-                    let mangled_resolved = llvm_mangle_fn(lookup_name)
+                    // Try module-aware resolution: imports_map → module_prefix → bare
+                    let mangled_resolved = llvm_resolve_fn(ctx, lookup_name)
                     match ctx.functions.get(mangled_resolved) {
                         some(fn_val) => call_zero_arg_or_return(ctx, fn_val, mangled_resolved),
                         none => {
+                            // Try bare mangling (for builtins and cross-module names)
                             let mangled_bare = llvm_mangle_fn(name)
                             match ctx.functions.get(mangled_bare) {
                                 some(fn_val) => call_zero_arg_or_return(ctx, fn_val, mangled_bare),
-                                none => panic("LLVM codegen: undefined variable '${name}' (resolved: '${lookup_name}')"),
+                                none => {
+                                    // Also try with module prefix on name
+                                    let mangled_name_resolved = llvm_resolve_fn(ctx, name)
+                                    match ctx.functions.get(mangled_name_resolved) {
+                                        some(fn_val) => call_zero_arg_or_return(ctx, fn_val, mangled_name_resolved),
+                                        none => {
+                                            // Last resort: try bare lookup_name
+                                            let mangled_lu = llvm_mangle_fn(lookup_name)
+                                            match ctx.functions.get(mangled_lu) {
+                                                some(fn_val) => call_zero_arg_or_return(ctx, fn_val, mangled_lu),
+                                                none => panic("LLVM codegen: undefined variable '${name}' (resolved: '${lookup_name}', tried: '${mangled_resolved}', '${mangled_bare}')"),
+                                            }
+                                        },
+                                    }
+                                },
                             }
                         },
                     }
@@ -758,17 +774,18 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
         none => {},
     }
 
-    // Look up in functions map
-    let mangled = llvm_mangle_fn(name)
-    match ctx.functions.get(mangled) {
-        some(fn_val) => {
+    // Look up in functions map — try module-aware resolution first
+    let mangled = llvm_resolve_fn(ctx, name)
+    let found_fn = find_function_in_ctx(ctx, mangled, name)
+    match found_fn {
+        some(fn_info) => {
             // Add trait dict params
             for dv in dict_vals {
                 arg_vals.push(dv)
             }
 
             // Add evidence params — look up from named_values, fall back to null
-            match ctx.fn_evidence_params.get(mangled) {
+            match ctx.fn_evidence_params.get(fn_info.fn_mangled) {
                 some(ev_params) => {
                     for ep in ev_params {
                         arg_vals.push(lookup_evidence(ctx, ep))
@@ -776,11 +793,11 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
                 },
                 none => {},
             }
-            let fn_ty = match ctx.fn_types.get(mangled) {
+            let fn_ty = match ctx.fn_types.get(fn_info.fn_mangled) {
                 some(t) => t,
-                none => panic("LLVM codegen: fn type not found for ${mangled}"),
+                none => panic("LLVM codegen: fn type not found for ${fn_info.fn_mangled}"),
             }
-            LLVMBuildCall2(ctx.builder, fn_ty, fn_val, arg_vals, fresh_name(ctx, "call"))
+            LLVMBuildCall2(ctx.builder, fn_ty, fn_info.fn_val, arg_vals, fresh_name(ctx, "call"))
         },
         none => {
             // Not a known function — might be a closure variable (lambda parameter)
@@ -792,6 +809,26 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
                 none => {
                     LLVMConstPointerNull(ctx.ptr_type)
                 },
+            }
+        },
+    }
+}
+
+struct FnLookupResult {
+    fn_val: LLVMValueRef,
+    fn_mangled: Str
+}
+
+// Helper to find a function in ctx using multiple resolution strategies
+fn find_function_in_ctx(ctx: LlvmCtx, mangled: Str, name: Str) -> FnLookupResult? {
+    match ctx.functions.get(mangled) {
+        some(fn_val) => some(FnLookupResult { fn_val: fn_val, fn_mangled: mangled }),
+        none => {
+            // Try bare mangling
+            let bare = llvm_mangle_fn(name)
+            match ctx.functions.get(bare) {
+                some(fn_val) => some(FnLookupResult { fn_val: fn_val, fn_mangled: bare }),
+                none => none,
             }
         },
     }
@@ -1651,18 +1688,35 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
             }
         },
         Pattern::TuplePattern { elements, .. } => {
-            // Tuple is represented as List — use ring_list_get
+            // Tuple is represented as list — use ring_list_get
+            let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
+            let get_ty = get_rt_fn_type(ctx, "ring_list_get")
             for i in 0..elements.len() {
                 match elements.get(i) {
                     some(ep) => {
                         let idx = LLVMConstInt(ctx.i64_type, i, 0)
-                        let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
-                        let get_ty = get_rt_fn_type(ctx, "ring_list_get")
                         let elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [val, idx], fresh_name(ctx, "te"))
                         bind_nested_pattern(ctx, elem, ep)
                     },
                     none => {},
                 }
+            }
+        },
+        Pattern::NamedConstructor { name, fields, .. } => {
+            match ctx.enum_types.get(name) {
+                some(ei) => {
+                    for i in 0..fields.len() {
+                        match fields.get(i) {
+                            some(nf) => {
+                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, ei.llvm_type, val, i + 1, fresh_name(ctx, "nf"))
+                                let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "nv"))
+                                bind_nested_pattern(ctx, field_val, nf.pattern)
+                            },
+                            none => {},
+                        }
+                    }
+                },
+                none => {},
             }
         },
         _ => {},
@@ -1730,10 +1784,48 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                             LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
                         }
                     },
+                    Pattern::TuplePattern { elements, .. } => {
+                        // Tuple destructuring: tuples are lists, use ring_list_get
+                        let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.tuple")
+                        LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                        let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
+                        let get_ty = get_rt_fn_type(ctx, "ring_list_get")
+                        for j in 0..elements.len() {
+                            match elements.get(j) {
+                                some(elem_pat) => {
+                                    match elem_pat {
+                                        Pattern::Binding { name: bname, .. } => {
+                                            let idx = LLVMConstInt(ctx.i64_type, j, 0)
+                                            let field_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, bname))
+                                            let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
+                                            discard(LLVMBuildStore(ctx.builder, field_val, alloca))
+                                            ctx.named_values.insert(bname, alloca)
+                                        },
+                                        Pattern::Wildcard { .. } => {},
+                                        _ => {
+                                            let idx = LLVMConstInt(ctx.i64_type, j, 0)
+                                            let field_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tv"))
+                                            bind_nested_pattern(ctx, field_val, elem_pat)
+                                        },
+                                    }
+                                },
+                                none => {},
+                            }
+                        }
+                        let body_val = gen_llvm_expr(ctx, arm.body)
+                        let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
+                        discard(LLVMBuildBr(ctx.builder, merge_bb))
+                        phi_vals.push(body_val)
+                        phi_bbs.push(arm_end_bb)
+                        LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+                        discard(LLVMBuildBr(ctx.builder, arm_bb))
+                    },
                     _ => {
-                        // For other patterns in non-enum context, just emit body as wildcard
+                        // For other patterns in non-enum context, bind as wildcard
+                        // but also try to bind any pattern variables
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.other")
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                        bind_nested_pattern(ctx, scrut_val, arm.pattern)
                         let body_val = gen_llvm_expr(ctx, arm.body)
                         let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
                         discard(LLVMBuildBr(ctx.builder, merge_bb))
@@ -1767,6 +1859,15 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
     } else {
         LLVMConstPointerNull(ctx.ptr_type)
     }
+}
+
+// Helper: get LLVM struct type for a tuple of N elements (all ptr)
+fn get_tuple_llvm_type(mut ctx: LlvmCtx, count: Int) -> LLVMTypeRef {
+    let mut elem_types: List<LLVMTypeRef> = []
+    for i in 0..count {
+        elem_types.push(ctx.ptr_type)
+    }
+    LLVMStructTypeInContext(ctx.context, elem_types, 0)
 }
 
 fn gen_literal_pattern_cond(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, value: LiteralValue) -> LLVMValueRef {
@@ -2106,14 +2207,20 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
             }
             if is_param == false {
                 // Check if it's a known function (not a capture)
-                let mangled = llvm_mangle_fn(lookup_name)
+                let mangled = llvm_resolve_fn(ctx, lookup_name)
                 let is_fn = match ctx.functions.get(mangled) {
                     some(_) => true,
                     none => {
                         let mangled2 = llvm_mangle_fn(name)
                         match ctx.functions.get(mangled2) {
                             some(_) => true,
-                            none => false,
+                            none => {
+                                let mangled3 = llvm_resolve_fn(ctx, name)
+                                match ctx.functions.get(mangled3) {
+                                    some(_) => true,
+                                    none => false,
+                                }
+                            },
                         }
                     },
                 }

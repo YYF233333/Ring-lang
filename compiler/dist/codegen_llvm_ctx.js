@@ -266,7 +266,7 @@ class EnumTypeInfo {
 }
 
 class LlvmCtx {
-  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, tmp_counter, lambda_counter, current_fn, loop_break_bb, loop_continue_bb) {
+  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, current_fn, loop_break_bb, loop_continue_bb) {
     this.context = context;
     this.module = module;
     this.builder = builder;
@@ -289,6 +289,9 @@ class LlvmCtx {
     this.fn_evidence_params = fn_evidence_params;
     this.dict_globals = dict_globals;
     this.trait_method_order = trait_method_order;
+    this.module_prefix = module_prefix;
+    this.imports_map = imports_map;
+    this.local_names = local_names;
     this.tmp_counter = tmp_counter;
     this.lambda_counter = lambda_counter;
     this.current_fn = current_fn;
@@ -301,8 +304,48 @@ function llvm_mangle_fn(name) {
   return `ring_${name}`;
 }
 
+function llvm_mangle_fn_with_prefix(prefix, name) {
+  return `ring_${prefix}$$_${name}`;
+}
+
 function llvm_mangle_method(type_name, method_name) {
   return `ring_${type_name}_${method_name}`;
+}
+
+function llvm_resolve_fn(ctx, name) {
+  __ring_match6: {
+    const __ring_m6 = _Map_get(ctx.imports_map, name);
+    if (__ring_m6._tag === "some") {
+      const qualified = __ring_m6._0;
+      return qualified;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "none") {
+      __ring_match7: {
+        const __ring_m7 = ctx.module_prefix;
+        if (__ring_m7._tag === "some") {
+          const prefix = __ring_m7._0;
+          if (_Set_contains(ctx.local_names, name, __Str_Eq)) {
+            return llvm_mangle_fn_with_prefix(prefix, name);
+          } else {
+            return llvm_mangle_fn(name);
+          }
+          break __ring_match7;
+        }
+        if (__ring_m7._tag === "none") {
+          return llvm_mangle_fn(name);
+          break __ring_match7;
+        }
+        __match_fail(__ring_m7);
+      }
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+}
+
+function llvm_resolve_method(ctx, type_name, method_name) {
+  return llvm_mangle_method(type_name, method_name);
 }
 
 function fresh_name(ctx, prefix) {
@@ -312,38 +355,38 @@ function fresh_name(ctx, prefix) {
 }
 
 function get_or_declare_runtime_fn(ctx, name, param_types, ret_type) {
-  __ring_match6: {
-    const __ring_m6 = _Map_get(ctx.rt_fns, name);
-    if (__ring_m6._tag === "some") {
-      const f = __ring_m6._0;
+  __ring_match8: {
+    const __ring_m8 = _Map_get(ctx.rt_fns, name);
+    if (__ring_m8._tag === "some") {
+      const f = __ring_m8._0;
       return f;
-      break __ring_match6;
+      break __ring_match8;
     }
-    if (__ring_m6._tag === "none") {
+    if (__ring_m8._tag === "none") {
       const fn_ty = LLVMFunctionType(ret_type, param_types, 0);
       const fn_val = LLVMAddFunction(ctx.module, name, fn_ty);
       _Map_insert(ctx.rt_fns, name, fn_val);
       _Map_insert(ctx.rt_fn_types, name, fn_ty);
       return fn_val;
-      break __ring_match6;
+      break __ring_match8;
     }
-    __match_fail(__ring_m6);
+    __match_fail(__ring_m8);
   }
 }
 
 function get_rt_fn_type(ctx, name) {
-  __ring_match7: {
-    const __ring_m7 = _Map_get(ctx.rt_fn_types, name);
-    if (__ring_m7._tag === "some") {
-      const t = __ring_m7._0;
+  __ring_match9: {
+    const __ring_m9 = _Map_get(ctx.rt_fn_types, name);
+    if (__ring_m9._tag === "some") {
+      const t = __ring_m9._0;
       return t;
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "none") {
+    if (__ring_m9._tag === "none") {
       return panic(`LLVM codegen: runtime function type not found: ${name}`);
-      break __ring_match7;
+      break __ring_match9;
     }
-    __match_fail(__ring_m7);
+    __match_fail(__ring_m9);
   }
 }
 
@@ -612,4 +655,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, llvm_mangle_fn, llvm_mangle_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, __EnumVariantInfo_Eq, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __EnumVariantInfo_Ord, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, __EnumVariantInfo_Eq, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __EnumVariantInfo_Ord, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };

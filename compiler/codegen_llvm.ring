@@ -6,7 +6,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
-    llvm_mangle_fn, llvm_mangle_method}
+    llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method}
 use codegen_llvm_expr::{gen_llvm_expr}
 use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info}
 use codegen_ctx::{extract_effect_names}
@@ -188,6 +188,66 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     // File IO
     get_or_declare_runtime_fn(ctx, "ring_read_file", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_write_file", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_file_exists", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_delete_file", [ptr], ptr)
+
+    // Path
+    get_or_declare_runtime_fn(ctx, "ring_path_join", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_path_resolve", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_path_dirname", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_path_basename", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_path_extname", [ptr], ptr)
+
+    // Collection clone/from
+    get_or_declare_runtime_fn(ctx, "ring_list_clone", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_clone", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_clone", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_from", [ptr], ptr)
+
+    // Parse
+    get_or_declare_runtime_fn(ctx, "ring_parse_int", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_parse_float", [ptr], ptr)
+
+    // String (additional)
+    get_or_declare_runtime_fn(ctx, "ring_str_trim", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_trim_start", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_trim_end", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_to_upper", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_to_lower", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_char_at", [ptr, i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_index_of", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_last_index_of", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_is_empty", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_str_pad_start", [ptr, i64, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_pad_end", [ptr, i64, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_repeat", [ptr, i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_char_code_at", [ptr, i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_join", [ptr, ptr], ptr)
+
+    // StringBuilder (additional)
+    get_or_declare_runtime_fn(ctx, "ring_sb_line", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_sb_add_int", [ptr, i64], ptr)
+
+    // Set (additional)
+    get_or_declare_runtime_fn(ctx, "ring_set_union", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_intersect", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_difference", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_clear", [ptr], ptr)
+
+    // List (additional)
+    get_or_declare_runtime_fn(ctx, "ring_list_shift", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_clear", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_extend", [ptr, ptr], ptr)
+
+    // Map (additional)
+    get_or_declare_runtime_fn(ctx, "ring_map_clear", [ptr], ptr)
+
+    // Misc
+    get_or_declare_runtime_fn(ctx, "ring_assert", [i64, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_json_stringify", [ptr], ptr)
+
+    // CWD
+    get_or_declare_runtime_fn(ctx, "ring_cwd", [], ptr)
 }
 
 // ============================================================
@@ -195,10 +255,14 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
 // ============================================================
 
 fn forward_declare_functions(mut ctx: LlvmCtx, decls: List<HDecl>) {
+    forward_declare_functions_with_prefix(ctx, decls, none)
+}
+
+fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, prefix: Str?) {
     for decl in decls {
         match decl {
             HDecl::Fn { name, params, effects, trait_bounds, .. } => {
-                forward_declare_fn(ctx, name, params, effects, trait_bounds)
+                forward_declare_fn(ctx, name, params, effects, trait_bounds, prefix)
             },
             HDecl::Impl { target_type, methods, .. } => {
                 for method in methods {
@@ -221,11 +285,24 @@ fn forward_declare_functions(mut ctx: LlvmCtx, decls: List<HDecl>) {
             HDecl::Effect { .. } => {},
             HDecl::ExternFn { .. } => {},
             HDecl::ModBlock { decls: mod_decls, .. } => {
-                forward_declare_functions(ctx, mod_decls)
+                forward_declare_functions_with_prefix(ctx, mod_decls, prefix)
             },
             HDecl::ExternType { .. } => {},
             HDecl::TypeAlias { .. } => {},
-            HDecl::Const { .. } => {},
+            HDecl::Const { name, .. } => {
+                // Forward-declare const as a zero-arg function (lazy getter)
+                let const_fn_name = match prefix {
+                    some(p) => llvm_mangle_fn_with_prefix(p, name),
+                    none => llvm_mangle_fn(name),
+                }
+                let fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+                let fn_val = LLVMAddFunction(ctx.module, const_fn_name, fn_ty)
+                ctx.functions.insert(const_fn_name, fn_val)
+                ctx.fn_types.insert(const_fn_name, fn_ty)
+                // No evidence params for consts
+                let mut empty_ev: List<Str> = []
+                ctx.fn_evidence_params.insert(const_fn_name, empty_ev)
+            },
             HDecl::Trait { .. } => {},
             HDecl::Test { .. } => {},
             HDecl::Sig { .. } => {},
@@ -233,8 +310,11 @@ fn forward_declare_functions(mut ctx: LlvmCtx, decls: List<HDecl>) {
     }
 }
 
-fn forward_declare_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: EffectRow, trait_bounds: List<TraitBound>) {
-    let mangled = llvm_mangle_fn(name)
+fn forward_declare_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: EffectRow, trait_bounds: List<TraitBound>, prefix: Str?) {
+    let mangled = match prefix {
+        some(p) => llvm_mangle_fn_with_prefix(p, name),
+        none => llvm_mangle_fn(name),
+    }
     forward_declare_fn_with_name(ctx, mangled, name, params, effects, trait_bounds)
 }
 
@@ -552,6 +632,9 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         fn_evidence_params: map_new(),
         dict_globals: map_new(),
         trait_method_order: map_new(),
+        module_prefix: none,
+        imports_map: map_new(),
+        local_names: set_new(),
         tmp_counter: 0,
         lambda_counter: 0,
         current_fn: none,
@@ -600,4 +683,202 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     LLVMDisposeTargetMachine(tm)
     LLVMDisposeModule(module)
     LLVMContextDispose(context)
+}
+
+// ============================================================
+// generate_llvm_project — multi-module entry point
+// All modules' HIR merged into a single LLVM Module.
+// modules: List of (module_prefix, HProgram) in topo order
+// entry_prefix: module prefix of the entry module (contains main)
+// ============================================================
+
+pub fn generate_llvm_project(modules: List<(Str, HProgram)>, entry_prefix: Str, output_path: Str) -> Unit {
+    // 1. Initialize LLVM target
+    LLVMInitializeX86TargetInfo()
+    LLVMInitializeX86Target()
+    LLVMInitializeX86TargetMC()
+    LLVMInitializeX86AsmPrinter()
+
+    // 2. Create context, module, builder
+    let context = LLVMContextCreate()
+    let module = LLVMModuleCreateWithNameInContext("ring_project", context)
+    let builder = LLVMCreateBuilderInContext(context)
+
+    // 3. Set target triple and data layout
+    let triple = LLVMGetDefaultTargetTriple()
+    LLVMSetTarget(module, triple)
+
+    let target = LLVMGetTargetFromTriple(triple)
+    let tm = LLVMCreateTargetMachine(target, triple, "generic", "", 2, 0, 0)
+
+    // 4. Cache basic types
+    let ptr_type = LLVMPointerTypeInContext(context, 0)
+    let i64_type = LLVMInt64TypeInContext(context)
+    let i32_type = LLVMInt32TypeInContext(context)
+    let i8_type = LLVMInt8TypeInContext(context)
+    let i1_type = LLVMInt1TypeInContext(context)
+    let void_type = LLVMVoidTypeInContext(context)
+    let double_type = LLVMDoubleTypeInContext(context)
+
+    // 5. Build LlvmCtx
+    let mut ctx = LlvmCtx {
+        context: context,
+        module: module,
+        builder: builder,
+        target_machine: tm,
+        ptr_type: ptr_type,
+        i64_type: i64_type,
+        i32_type: i32_type,
+        i8_type: i8_type,
+        i1_type: i1_type,
+        void_type: void_type,
+        double_type: double_type,
+        named_values: map_new(),
+        functions: map_new(),
+        fn_types: map_new(),
+        struct_types: map_new(),
+        enum_types: map_new(),
+        rt_fns: map_new(),
+        rt_fn_types: map_new(),
+        local_fn_effects: map_new(),
+        fn_evidence_params: map_new(),
+        dict_globals: map_new(),
+        trait_method_order: map_new(),
+        module_prefix: none,
+        imports_map: map_new(),
+        local_names: set_new(),
+        tmp_counter: 0,
+        lambda_counter: 0,
+        current_fn: none,
+        loop_break_bb: none,
+        loop_continue_bb: none
+    }
+
+    // 6. Register built-in types
+    register_builtin_enums(ctx)
+
+    // 7. Scan all modules for function effects and trait declarations
+    for m in modules {
+        let (prefix, program) = m
+        scan_fn_effects(program.decls, ctx.local_fn_effects)
+        scan_trait_decls(program.decls, ctx.trait_method_order)
+    }
+
+    // 7b. Declare runtime functions
+    declare_runtime_fns(ctx)
+
+    // 8. First pass: forward declare all Ring functions in all modules
+    for m in modules {
+        let (prefix, program) = m
+        forward_declare_functions_with_prefix(ctx, program.decls, some(prefix))
+    }
+
+    // 9. Second pass: generate all function bodies for all modules
+    for m in modules {
+        let (prefix, program) = m
+        // Set the current module context
+        ctx.module_prefix = some(prefix)
+        // Collect local names for this module
+        ctx.local_names = collect_local_names(program.decls)
+        for decl in program.decls {
+            emit_llvm_decl(ctx, decl)
+        }
+    }
+
+    // Clear module prefix
+    ctx.module_prefix = none
+
+    // 10. Generate C main() wrapper — look for main in the entry module
+    emit_c_main_project(ctx, entry_prefix)
+
+    // 11. Dump IR for debugging
+    let ir = LLVMPrintModuleToString(module)
+    write_file("ring_output.ll", ir)
+
+    // 12. Emit object file
+    let emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1)
+    if emit_result != 0 {
+        eprintln("Failed to emit object file: ${output_path}")
+    } else {
+        print("Compiled: ${output_path}")
+    }
+
+    // 13. Cleanup
+    LLVMDisposeBuilder(builder)
+    LLVMDisposeTargetMachine(tm)
+    LLVMDisposeModule(module)
+    LLVMContextDispose(context)
+}
+
+// ============================================================
+// emit_c_main_project — entry point for multi-module projects
+// ============================================================
+
+fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
+    let i32_ty = ctx.i32_type
+    let ptr = ctx.ptr_type
+
+    let main_params: List<LLVMTypeRef> = [i32_ty, ptr]
+    let main_ty = LLVMFunctionType(i32_ty, main_params, 0)
+    let main_fn = LLVMAddFunction(ctx.module, "main", main_ty)
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, main_fn, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Look for ring_<prefix>$_main
+    let ring_main_name = llvm_mangle_fn_with_prefix(entry_prefix, "main")
+    match ctx.functions.get(ring_main_name) {
+        some(ring_main_fn) => {
+            let mut call_args: List<LLVMValueRef> = []
+            match ctx.fn_evidence_params.get(ring_main_name) {
+                some(ev_params) => {
+                    for ep in ev_params {
+                        call_args.push(LLVMConstPointerNull(ptr))
+                    }
+                },
+                none => {},
+            }
+            let ring_main_ty = match ctx.fn_types.get(ring_main_name) {
+                some(t) => t,
+                none => panic("LLVM codegen: ring_main fn type not found (project mode)"),
+            }
+            discard(LLVMBuildCall2(ctx.builder, ring_main_ty, ring_main_fn, call_args, ""))
+        },
+        none => {
+            eprintln("Warning: no main function found in entry module")
+        },
+    }
+
+    let zero = LLVMConstInt(i32_ty, 0, 0)
+    discard(LLVMBuildRet(ctx.builder, zero))
+}
+
+// ============================================================
+// collect_local_names — gather all declared names in a module
+// ============================================================
+
+fn collect_local_names(decls: List<HDecl>) -> Set<Str> {
+    let mut names: Set<Str> = set_new()
+    collect_local_names_rec(decls, names)
+    names
+}
+
+fn collect_local_names_rec(decls: List<HDecl>, mut names: Set<Str>) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, .. } => { names.insert(name) },
+            HDecl::Struct { name, .. } => { names.insert(name) },
+            HDecl::Enum { name, .. } => { names.insert(name) },
+            HDecl::Const { name, .. } => { names.insert(name) },
+            HDecl::Trait { name, .. } => { names.insert(name) },
+            HDecl::ExternFn { name, .. } => { names.insert(name) },
+            HDecl::ExternType { name, .. } => { names.insert(name) },
+            HDecl::TypeAlias { name, .. } => { names.insert(name) },
+            HDecl::Impl { .. } => {},
+            HDecl::Effect { name, .. } => { names.insert(name) },
+            HDecl::ModBlock { decls: md, .. } => { collect_local_names_rec(md, names) },
+            HDecl::Test { .. } => {},
+            HDecl::Sig { .. } => {},
+        }
+    }
 }

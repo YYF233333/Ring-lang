@@ -5,7 +5,7 @@ use formatter::{format_human, format_llm}
 use checker::{CheckResult, check as check_single}
 use codegen::{generate}
 use codegen_llvm::{generate_llvm}
-use compiler_mod::{compile_project, compile_project_esm}
+use compiler_mod::{compile_project, compile_project_esm, compile_project_llvm}
 use parser::{parse}
 
 pub fn cli_main() {
@@ -54,6 +54,34 @@ pub fn cli_main() {
 
     // Multi-file mode
     if ast.uses.len() > 0 {
+        if parsed.target == "llvm" {
+            // LLVM multi-file mode: all modules → single .o
+            if parsed.command == "check" {
+                let result = compile_project(file_path)
+                if result.success {
+                    print("OK")
+                } else {
+                    eprintln("Compilation failed")
+                    exit_process(1)
+                }
+            } else {
+                if parsed.command == "build" {
+                    let out_dir = path_resolve(parsed.out_dir)
+                    let out_path = path_join(out_dir, path_basename(file_path).replace(".ring", ".o"))
+                    let result = compile_project_llvm(file_path, out_path)
+                    if result.success {
+                        // success message printed by generate_llvm_project
+                    } else {
+                        eprintln("Compilation failed")
+                        exit_process(1)
+                    }
+                } else {
+                    eprintln("LLVM target only supports 'build' and 'check' commands")
+                    exit_process(1)
+                }
+            }
+            return
+        }
         if parsed.command == "check" {
             let result = compile_project(file_path)
             if result.success {

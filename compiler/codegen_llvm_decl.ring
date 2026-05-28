@@ -6,7 +6,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
-    llvm_mangle_fn, llvm_mangle_method}
+    llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method}
 use codegen_llvm_expr::{gen_llvm_expr}
 use codegen_ctx::{extract_effect_names}
 
@@ -82,9 +82,8 @@ pub fn emit_llvm_decl(mut ctx: LlvmCtx, decl: HDecl) {
         HDecl::ExternType { .. } => {},
         HDecl::TypeAlias { .. } => {},
         HDecl::Const { name, init, .. } => {
-            // Generate const as a global initialized via a constructor
-            // For now, skip — Wave 2a focuses on hello.ring
-            // panic("LLVM codegen: unsupported Const declaration")
+            // Generate const as a zero-arg function that returns the init value
+            emit_const_body(ctx, name, init)
         },
         HDecl::ModBlock { decls: mod_decls, .. } => {
             for subdecl in mod_decls {
@@ -102,7 +101,13 @@ pub fn emit_llvm_decl(mut ctx: LlvmCtx, decl: HDecl) {
 fn emit_fn_body(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: EffectRow, body: HExpr, trait_bounds: List<TraitBound>, impl_type: Str?) {
     let mangled = match impl_type {
         some(t) => llvm_mangle_method(t, name),
-        none => llvm_mangle_fn(name),
+        none => {
+            // Use module prefix if set
+            match ctx.module_prefix {
+                some(prefix) => llvm_mangle_fn_with_prefix(prefix, name),
+                none => llvm_mangle_fn(name),
+            }
+        },
     }
 
     let fn_val = match ctx.functions.get(mangled) {
@@ -165,6 +170,39 @@ fn emit_fn_body(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: Effe
     // Restore state
     ctx.named_values = saved_named
     ctx.current_fn = saved_fn
+}
+
+// ============================================================
+// Const body emission (emits as zero-arg getter function)
+// ============================================================
+
+fn emit_const_body(mut ctx: LlvmCtx, name: Str, init: HExpr) {
+    let const_fn_name = match ctx.module_prefix {
+        some(prefix) => llvm_mangle_fn_with_prefix(prefix, name),
+        none => llvm_mangle_fn(name),
+    }
+
+    match ctx.functions.get(const_fn_name) {
+        some(fn_val) => {
+            let saved_fn = ctx.current_fn
+            ctx.current_fn = some(fn_val)
+
+            let saved_named = ctx.named_values
+            ctx.named_values = map_new()
+
+            let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+            LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+            let val = gen_llvm_expr(ctx, init)
+            LLVMBuildRet(ctx.builder, val)
+
+            ctx.named_values = saved_named
+            ctx.current_fn = saved_fn
+        },
+        none => {
+            // Not forward-declared, skip
+        },
+    }
 }
 
 // ============================================================

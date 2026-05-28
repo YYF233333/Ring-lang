@@ -7,7 +7,7 @@ use formatter::{format_human}
 use env::{TypeEnv, add_impl}
 use checker::{CheckResult, check as check_single, check_module}
 use codegen::{generate}
-use codegen_llvm::{generate_llvm}
+use codegen_llvm::{generate_llvm, generate_llvm_project}
 use codegen_ctx::{safe_ident}
 use runtime::{RUNTIME_CODE, RUNTIME_EXPORT_NAMES, runtime_esm_code}
 use resolver::{ModuleGraph, ModuleId, module_key, module_prefix,
@@ -139,6 +139,44 @@ pub fn compile_project(entry_file: Str) -> CompileProjectResult {
                 js: js_parts.join("\n"),
                 success: true
             }
+        },
+    }
+}
+
+// ============================================================
+// LLVM multi-file compilation mode
+// All modules compiled into a single LLVM Module → single .o file
+// ============================================================
+
+pub struct LlvmCompileResult {
+    pub success: Bool
+}
+
+pub fn compile_project_llvm(entry_file: Str, output_path: Str) -> LlvmCompileResult {
+    match compile_phases(entry_file) {
+        none => LlvmCompileResult { success: false },
+        some(phases) => {
+            let entry_key = module_key(phases.graph.entry.path_segments)
+
+            // Build list of (module_prefix, HProgram) in topo order
+            let mut modules: List<(Str, HProgram)> = []
+            let mut entry_prefix = ""
+
+            for key in phases.graph.topo_order {
+                match (phases.graph.modules.get(key), phases.module_hirs.get(key)) {
+                    (some(mod_), some(hir)) => {
+                        let prefix = module_prefix(mod_.path_segments)
+                        modules.push((prefix, hir))
+                        if key == entry_key {
+                            entry_prefix = prefix
+                        }
+                    },
+                    _ => {},
+                }
+            }
+
+            generate_llvm_project(modules, entry_prefix, output_path)
+            LlvmCompileResult { success: true }
         },
     }
 }
