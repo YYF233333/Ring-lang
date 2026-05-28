@@ -8,7 +8,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     hexpr_type}
 use codegen_ctx::{CodegenCtx, emit, emit_raw, push_indent, pop_indent,
-    qualify, safe_ident, get_evidence_params, LIST_HOF_JS_METHOD}
+    qualify, safe_ident, get_evidence_params, is_imported_name, LIST_HOF_JS_METHOD}
 use codegen_stmt::{gen_pattern_condition, gen_pattern_bindings, pattern_is_catchall,
     emit_block_body, emit_block_in_stmt_context, emit_stmt, emit_in_stmt_context}
 
@@ -27,9 +27,12 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
                 some(rn) => qualify(ctx, rn),
                 none => qualify(ctx, name),
             }
-            // Auto-boxing: access .value for boxed variables
+            // Auto-boxing: access .value for boxed variables.
+            // Skip for cross-module references: their def_ids come from a foreign
+            // id-space and can collide with local boxed_vars def_ids (#B-077).
+            let is_imported = is_imported_name(ctx, name)
             let boxed_qname = match def_id {
-                some(did) => if ctx.boxed_vars.contains(did) { "${qname}.value" } else { qname },
+                some(did) => if !is_imported && ctx.boxed_vars.contains(did) { "${qname}.value" } else { qname },
                 none => qname
             }
             match dict_closure_dicts {
@@ -148,9 +151,11 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
 fn gen_mut_arg(mut ctx: CodegenCtx, arg: HExpr) -> Str {
     match arg {
         HExpr::Ident { name, resolved_name, def_id, .. } => {
+            // Skip boxed_vars for cross-module references (def_id collision, #B-077)
+            let is_imported = is_imported_name(ctx, name)
             match def_id {
                 some(did) => {
-                    if ctx.boxed_vars.contains(did) {
+                    if !is_imported && ctx.boxed_vars.contains(did) {
                         // Already boxed — pass the box itself (raw name, no .value)
                         match resolved_name {
                             some(rn) => qualify(ctx, rn),

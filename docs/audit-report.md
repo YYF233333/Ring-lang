@@ -37,15 +37,6 @@
 
 ## Codegen
 
-### #130 跨模块 pub const 引用生成 spurious `.value` suffix [medium] [judgment] [open]
-
-JS codegen 中，向 `codes.ring` 新增 `pub const` 后，跨模块常量引用生成 `codes$W0001.value` 而非 `codes$W0001`，导致运行时错误和 double-bootstrap 失败。可能与 ESM export 排列或 const 引用解析逻辑相关。B-066 中发现，用 string literal workaround 绕过。
-
-**文件**：`compiler/codegen.ring` 或 `compiler/codegen_expr.ring`（const export/reference 相关逻辑）
-**修复方向**：调查 const 导出的 JS codegen 是否在 export 数量变化时改变引用方式。
-
-发现者：Worker Wave B (B-066)
-
 ### #28 HOF inline 代码在 List/Map/Set/Option 间重复 [low] [mechanical] [open]
 
 ~100 行重复。应抽象迭代模式。

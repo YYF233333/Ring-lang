@@ -710,6 +710,7 @@ const module_cases: ModuleTestCase[] = [
   { dir: "esm_verify", expected: "hello, world\n3\n" },
   { dir: "mod_export_effect", expected: "Hello, World!\n" },
   { dir: "multifile_mut_export", expected: "multifile_mut_export: all tests passed\n" },
+  { dir: "cross_module_const", expected: "cross_module_const: all tests passed\n" },
 ];
 
 describe("e2e: multi-file modules (ring run)", { concurrency: true }, () => {

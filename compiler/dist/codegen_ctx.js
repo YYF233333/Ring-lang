@@ -313,46 +313,65 @@ function pop_indent(ctx) {
   ctx.indent_level = (ctx.indent_level - 1);
 }
 
-function qualify(ctx, name) {
+function is_imported_name(ctx, name) {
   __ring_match6: {
     const __ring_m6 = ctx.imports_map;
     if (__ring_m6._tag === "some") {
       const imap = __ring_m6._0;
       if ((!_Set_contains(ctx.local_names, name, __Str_Eq))) {
-        __ring_match7: {
-          const __ring_m7 = _Map_get(imap, name);
-          if (__ring_m7._tag === "some") {
-            const qualified = __ring_m7._0;
-            return qualified;
-            break __ring_match7;
-          }
-          if (__ring_m7._tag === "none") {
-            break __ring_match7;
-          }
-          __match_fail(__ring_m7);
-        }
+        return _Map_contains_key(imap, name);
       }
+      return false;
       break __ring_match6;
     }
     if (__ring_m6._tag === "none") {
+      return false;
       break __ring_match6;
     }
     __match_fail(__ring_m6);
   }
-  __ring_match8: {
-    const __ring_m8 = ctx.module_prefix;
-    if (__ring_m8._tag === "some") {
-      const prefix = __ring_m8._0;
+}
+
+function qualify(ctx, name) {
+  __ring_match7: {
+    const __ring_m7 = ctx.imports_map;
+    if (__ring_m7._tag === "some") {
+      const imap = __ring_m7._0;
+      if ((!_Set_contains(ctx.local_names, name, __Str_Eq))) {
+        __ring_match8: {
+          const __ring_m8 = _Map_get(imap, name);
+          if (__ring_m8._tag === "some") {
+            const qualified = __ring_m8._0;
+            return qualified;
+            break __ring_match8;
+          }
+          if (__ring_m8._tag === "none") {
+            break __ring_match8;
+          }
+          __match_fail(__ring_m8);
+        }
+      }
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "none") {
+      break __ring_match7;
+    }
+    __match_fail(__ring_m7);
+  }
+  __ring_match9: {
+    const __ring_m9 = ctx.module_prefix;
+    if (__ring_m9._tag === "some") {
+      const prefix = __ring_m9._0;
       if (_Set_contains(ctx.local_names, name, __Str_Eq)) {
         const safe = safe_ident(name);
         return `${prefix}$${safe}`;
       }
-      break __ring_match8;
+      break __ring_match9;
     }
-    if (__ring_m8._tag === "none") {
-      break __ring_match8;
+    if (__ring_m9._tag === "none") {
+      break __ring_match9;
     }
-    __match_fail(__ring_m8);
+    __match_fail(__ring_m9);
   }
   return safe_ident(name);
 }
@@ -364,16 +383,16 @@ function extract_effect_names(effects) {
     const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
     if (__ring_next_3._tag === "none") break;
     const e = __ring_next_3._0;
-    __ring_match9: {
-      const __ring_m9 = e;
-      if (__ring_m9._tag === "MutEffect") {
-        break __ring_match9;
+    __ring_match10: {
+      const __ring_m10 = e;
+      if (__ring_m10._tag === "MutEffect") {
+        break __ring_match10;
       }
       const n = types$effect_kind_name(e);
       if ((List_contains(names, n, __Str_Eq) === false)) {
         List_push(names, n);
       }
-      break __ring_match9;
+      break __ring_match10;
     }
   }
   List_sort(names);
@@ -490,4 +509,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { safe_ident, CodegenCtx, HTraitDeclInfo, new_codegen_ctx, emit, emit_raw, push_indent, pop_indent, qualify, extract_effect_names, get_evidence_params, LIST_HOF_JS_METHOD };
+export { safe_ident, CodegenCtx, HTraitDeclInfo, new_codegen_ctx, emit, emit_raw, push_indent, pop_indent, is_imported_name, qualify, extract_effect_names, get_evidence_params, LIST_HOF_JS_METHOD };

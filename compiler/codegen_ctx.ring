@@ -109,6 +109,21 @@ pub fn pop_indent(mut ctx: CodegenCtx) {
     ctx.indent_level = ctx.indent_level - 1
 }
 
+// Check if a name is imported from another module (cross-module reference).
+// Imported names carry def_ids from a foreign id-space that can collide with
+// local boxed_vars def_ids, so callers must skip boxed_vars checks for them.
+pub fn is_imported_name(ctx: CodegenCtx, name: Str) -> Bool {
+    match ctx.imports_map {
+        some(imap) => {
+            if !ctx.local_names.contains(name) {
+                return imap.contains_key(name)
+            }
+            false
+        },
+        none => false,
+    }
+}
+
 pub fn qualify(ctx: CodegenCtx, name: Str) -> Str {
     match ctx.imports_map {
         some(imap) => {

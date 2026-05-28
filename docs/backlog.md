@@ -573,7 +573,7 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
-### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [queued]
+### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [doing]
 HM 推断失败时的错误信息质量直接决定"像 Python"承诺的可信度。当前 checker 错误信息面向类型系统开发者，非面向终端用户。
 
 **核心问题**：HM unification 的错误位置和原因可能离实际 bug 很远。例如 row polymorphism 推断失败时，报错可能在 unify 点而非用户写错的位置。
@@ -655,18 +655,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 ~~B-062（#124 约束验证）~~ ✅ → ~~B-063（#125/#128 delegate 转发）~~ ✅ → ~~B-064（#129 scope 区分）~~ ✅ → ~~B-058（#115 bound 验证）~~ ✅ → ~~B-065（#121 显示改善）~~ ✅
 
 ## LLVM 后端质量
-
-### B-077 跨模块 `pub const` 引用 codegen `.value` suffix bug [bugfix] [P2] [S] [judgment] [queued]
-跨模块引用 `pub const` 时，codegen 生成 spurious `.value` suffix（如 `codes$W0001.value`），破坏 double-bootstrap。当前 B-066 用 string literal 绕过。Audit #130。
-
-**涉及修改**：
-1. `codegen.ring` 或 `codegen_expr.ring`：跨模块常量引用的 JS 代码生成，去掉错误的 `.value` 后缀
-
-**验收标准**：
-- `pub const` 跨模块引用生成正确的 JS 代码（无 `.value` suffix）
-- Double-bootstrap 不因跨模块 const 引用而失败
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
 
 ## 性能优化
 
