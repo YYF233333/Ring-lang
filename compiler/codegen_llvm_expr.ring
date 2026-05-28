@@ -187,15 +187,13 @@ fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?) -> LLVMValueRef {
                                             match ctx.functions.get(mangled_lu) {
                                                 some(fn_val) => call_zero_arg_or_return(ctx, fn_val, mangled_lu),
                                                 none => {
-                                            // Last resort: search all functions for suffix match
-                                            // This handles cross-module const/fn references
-                                            let suffix = "$$_${name}"
-                                            let found = find_fn_by_suffix(ctx, suffix)
+                                            // Last resort: precise cross-module lookup
+                                            // (imports_map → prefix enumeration → suffix fallback)
+                                            let found = find_fn_precise(ctx, name)
                                             match found {
                                                 some(fi) => call_zero_arg_or_return(ctx, fi.fn_val, fi.fn_mangled),
                                                 none => {
-                                                    let suffix2 = "$$_${lookup_name}"
-                                                    let found2 = find_fn_by_suffix(ctx, suffix2)
+                                                    let found2 = find_fn_precise(ctx, lookup_name)
                                                     match found2 {
                                                         some(fi2) => call_zero_arg_or_return(ctx, fi2.fn_val, fi2.fn_mangled),
                                                         none => panic("LLVM codegen: undefined variable '${name}' (resolved: '${lookup_name}')"),
@@ -839,8 +837,63 @@ struct FnLookupResult {
     fn_mangled: Str
 }
 
-// Helper to find a function by suffix match (for cross-module resolution)
-fn find_fn_by_suffix(ctx: LlvmCtx, suffix: Str) -> FnLookupResult? {
+// Precise function lookup: resolve by name using module infrastructure,
+// falling back to suffix match only as last resort.
+fn find_fn_precise(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
+    // 1. Precise match via llvm_resolve_fn (checks imports_map, module_prefix, bare)
+    let resolved = llvm_resolve_fn(ctx, name)
+    let step1 = ctx.functions.get(resolved)
+    match step1 {
+        some(fn_val) => { return some(FnLookupResult { fn_val: fn_val, fn_mangled: resolved }) },
+        none => {},
+    }
+    // 2. Bare mangling (for builtins / unqualified names)
+    let plain = llvm_mangle_fn(name)
+    let step2 = ctx.functions.get(plain)
+    match step2 {
+        some(fn_val) => { return some(FnLookupResult { fn_val: fn_val, fn_mangled: plain }) },
+        none => {},
+    }
+    // 3. Try all known module prefixes via imports_map values' prefixes
+    //    e.g. if imports_map has "foo" → "ring_mod$$_foo", try "ring_mod$$_<name>"
+    let step3 = find_fn_by_prefix_enumeration(ctx, name)
+    match step3 {
+        some(result) => { return some(result) },
+        none => {},
+    }
+    // 4. Suffix fallback (last resort) — find first function ending with $$_<name>
+    find_fn_by_suffix(ctx, name)
+}
+
+// Try all known module prefixes from imports_map to find a function
+fn find_fn_by_prefix_enumeration(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
+    let mut seen_prefixes: Set<Str> = set_new()
+    for entry in ctx.imports_map.entries() {
+        let (_, qualified) = entry
+        // Extract prefix: everything before "$$_"
+        let maybe_idx = qualified.index_of("$$_")
+        match maybe_idx {
+            some(sep_idx) => {
+                let prefix_part = qualified.slice(0, sep_idx)
+                if !seen_prefixes.contains(prefix_part) {
+                    seen_prefixes.insert(prefix_part)
+                    let candidate = "${prefix_part}$$_${name}"
+                    let found = ctx.functions.get(candidate)
+                    match found {
+                        some(fn_val) => { return some(FnLookupResult { fn_val: fn_val, fn_mangled: candidate }) },
+                        none => {},
+                    }
+                }
+            },
+            none => {},
+        }
+    }
+    none
+}
+
+// Last-resort suffix match for cross-module resolution
+fn find_fn_by_suffix(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
+    let suffix = "$$_${name}"
     for entry in ctx.functions.entries() {
         let (fn_name, fn_val) = entry
         if fn_name.ends_with(suffix) {
@@ -860,9 +913,8 @@ fn find_function_in_ctx(ctx: LlvmCtx, mangled: Str, name: Str) -> FnLookupResult
             match ctx.functions.get(bare) {
                 some(fn_val) => some(FnLookupResult { fn_val: fn_val, fn_mangled: bare }),
                 none => {
-                    // Try suffix search for cross-module references
-                    let suffix = "$$_${name}"
-                    find_fn_by_suffix(ctx, suffix)
+                    // Precise cross-module lookup (imports_map → prefix enumeration → suffix fallback)
+                    find_fn_precise(ctx, name)
                 },
             }
         },
