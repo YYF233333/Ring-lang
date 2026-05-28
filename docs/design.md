@@ -760,11 +760,75 @@ fn process(items) {
 // 推断: items: List<{age: Int, name: Str, ..rest}>
 ```
 
+**延迟解析（2026-05-24 确定）**：`let x = []` 允许——类型变量延迟到后续 usage 消歧。函数结束时类型变量仍未确定 → 报错（要求标注）。标准 HM unification 天然支持，无需特殊处理。
+
 ### 3.2 Formatter：标注密度管理器
 
 Ring 的 formatter 不只是语法格式化工具（缩进/空白/换行），它同时管理**标注密度**——基于编译器的类型推断结果，在源码上增删类型和 effect 标注。源码是规范形式，标注是可增减的文档层。
 
-#### 3.2.1 标注等级
+**核心设计原则：标注是文档，不是语义。** 编译器永远从函数体推断 convention，标注不改变编译行为。标注一致 = 无事；标注缺失/不一致 = warning（从不 error）。lv0 能编译的代码加上任何标注后仍能编译。编译错误只来自逻辑问题（use-after-move、类型不匹配等），不来自标注。
+
+#### 3.2.1 Git 存储模型：lv0 / lv2（2026-05-24 确定）
+
+Ring 采用两级标注模型管理源码的标注密度：
+
+| 等级 | 场景 | 标注密度 | 说明 |
+|------|------|----------|------|
+| **lv0** | 写时 | 零标注 | 编译器全推断。开发者本地编辑用 |
+| **lv2** | Git 存储/推荐 | 完整语义标注 | 所有标注项均为合法可选语法 |
+
+`ring fmt` 将 lv0 自动补全为 lv2，幂等确定性。
+
+**lv2 具体标注内容**：
+
+| 标注项 | lv2 标注 | 说明 |
+|--------|:---:|------|
+| 函数返回类型 | ✅ | `fn f(...) -> Int` |
+| effect row | ✅ | `with {io, fail<E>}` |
+| move 参数（声明） | ✅ | `fn f(move x: T)` |
+| mut callsite | ✅ | `f(mut list)` |
+| 闭包 effect | ✅ | 闭包的 effect 签名 |
+| move callsite | ❌ | 编译器 use-after-move 够用，标了噪音大 |
+| 局部变量类型 | ❌ | 过于繁琐（与 Rust/TS 一致） |
+| borrow 参数 | ❌ | 默认即 borrow，标了是噪音 |
+| 泛型实例化类型参数 | ❌ | `Vec.new()` 不写 `::<Int>` |
+
+纯函数省略 `with` = 空 effect。lv2 中纯函数和 lv0 写法相同（无冗余标注）。
+
+**模块边界标注（pub fn/trait/type）**：
+
+| 标注项 | 规则 | 说明 |
+|--------|------|------|
+| return type | 必须有 | `ring check` 缺失报 warning |
+| effect row | 必须有 | 纯函数省略 with = 空 effect |
+| move 参数 | 必须有 | 有 move 推断但无标注 → warning |
+| mut 参数 | 必须有 | 已有 |
+| 泛型约束 | 必须有 | `<T: Ord>` |
+| borrow 参数 | 不标注 | 默认 |
+
+**pub fn Formatter 策略**：
+
+| 源码状态 | `ring fmt` | `ring fmt --force` | `ring check` |
+|---------|-----------|-------------------|-------------|
+| 无标注（新 fn） | 直接补全 | 直接补全 | ⚠ warning "missing" |
+| 标注正确 | 无操作 | 无操作 | ✅ |
+| 标注 ≠ 推断 | 只报 warning，不改 | 更新标注 | ⚠ warning "stale" |
+
+Breaking change 附加提示（不影响编译，只影响 warning 措辞）：
+- borrow → move: ⚠ "breaking: callers' values will be consumed"
+- move → borrow: ℹ "non-breaking: callers retain ownership"
+- effect 新增: ⚠ "breaking: callers need additional effect"
+- effect 减少: ℹ "non-breaking: fewer requirements"
+
+**环境适配**：
+- IDE：clean view 写 lv0，保存/提交时 fmt 补全为 lv2
+- vim/emacs + LSP：inlay hints + 保存时 fmt
+- GitHub 网页端：直接看 lv2（Git 存的就是）
+- 纯文本编辑器：文件中是 lv2，手动 `ring fmt` 补全
+
+#### 3.2.2 扩展预设（不同上下文的查看模式）
+
+lv0/lv2 是 Git 存储模型。在此之上，formatter 提供更多预设用于不同查看场景：
 
 配置 `.ringfmt.toml`：
 
@@ -832,7 +896,7 @@ ring fmt                  # 使用 .ringfmt.toml 配置
 ring fmt --check          # CI 检查：是否符合配置（不修改文件）
 ```
 
-#### 3.2.2 标注语义：pub 契约 vs. 内部文档
+#### 3.2.3 标注语义：pub 契约 vs. 内部文档
 
 标注在两种位置有不同的语义强度：
 
@@ -851,7 +915,7 @@ ring fmt --check          # CI 检查：是否符合配置（不修改文件）
 
 关键区别：内部标注是 formatter 管辖范围，过期了直接刷新；pub 签名是 API 契约，可能是有意的 breaking change，也可能是无意的 body 改动，formatter 不替人做判断。
 
-#### 3.2.3 工作流
+#### 3.2.4 工作流
 
 ```
 编辑代码
@@ -867,7 +931,7 @@ ring fmt --check          # CI 检查：是否符合配置（不修改文件）
 
 **不想管标注的人**：工作在 Level 0，没标注就没不一致的问题。需要时一键 `ring fmt --level=4` 全量生成。
 
-#### 3.2.4 机械约束
+#### 3.2.5 机械约束
 
 三层保证标注与推断的一致性：
 
@@ -881,7 +945,7 @@ ring fmt --check          # CI 检查：是否符合配置（不修改文件）
 
 **3. CI**：`ring fmt --check` 验证文件是否符合配置等级，不符合 → 非零退出码。
 
-#### 3.2.5 架构：Formatter 是 Checker 的下游
+#### 3.2.6 架构：Formatter 是 Checker 的下游
 
 Formatter 需要类型推断结果才能生成标注，因此它在编译管线中的位置是 checker 之后：
 
@@ -948,6 +1012,38 @@ users.filter(pred).map(f).sort()
 ### 4.2 impl 的定位
 
 impl 不是 OOP——没有继承、没有 vtable、没有 this 指针。self 就是第一个参数，impl 就是给函数挂了个类型标签做查找。
+
+### 4.3 Trait Effect 子类型（2026-05-24 确定）
+
+Trait 方法声明 = effect 上界（契约）。实现可以更窄：
+
+- Implementer 的 effect 可以 ⊆ trait 声明（更窄有效）
+- 泛型调用（`S: Storage`）：编译器用 trait 声明的 effect（保守）
+- 具体类型调用（已知 `MemoryStorage`）：编译器用 impl 的实际 effect（精确）
+- 私有 trait：effect 完全推断（所有 impl 的并集）
+- impl effect 超出 trait 声明 → 编译错误
+
+### 4.4 Trait 系统约束（2026-05-24 确定）
+
+Ring 有意选择简单 trait 系统，换取更强推断能力：
+
+- 支持 blanket impl（`impl<T: A> B for T`），不允许 overlap
+- 不支持 specialization（blanket impl + 具体类型覆盖）
+- 性能特化由编译器单态化 + Phase E 热路径优化替代
+- Default 覆盖由 trait 默认方法替代
+- 不支持函数重载（破坏 HM principal types）
+
+### 4.5 泛型约束推断（2026-05-24 确定）
+
+所有函数（pub/私有）统一推断泛型约束（类型检查 + lv2 标注）。单态化是 codegen 优化，和类型系统无关。
+
+**推断算法**：方法调用 → 反查提供该方法的 trait → 添加约束。
+
+- 方法名全局唯一时 100% 能推断
+- 方法名冲突 = 语义错误（ambiguous method）
+- 最小约束 = 只含实际调用方法对应的 trait（不做 supertrait 归并）
+- 方法属于具体类型固有方法（非 trait）→ 推断为具体类型参数（非泛型）
+- 不需要 `impl Trait` 语法（推断比 impl Trait 更强）
 
 ---
 
@@ -1104,18 +1200,84 @@ pub use config
 
 ---
 
-## 7. 内存管理
+## 7. 内存管理与所有权（2026-05-24 确定）
 
 **当前状态**：JS 后端使用 V8 GC，开发者无需关心内存。
 
-**目标方向**：Perceus RC（精确引用计数 + 重用分析），不引入 GC。路线：LLVM 后端初期 malloc-only（bootstrap 阶段），之后过渡到 Perceus RC（B-012）。循环引用策略（B-042）为 Perceus 的前置决策。
+**目标方向**：Perceus RC（精确引用计数 + 重用分析），不引入 GC。路线：LLVM 后端初期 malloc-only（bootstrap 阶段），之后过渡到 Perceus RC（B-012）。循环引用策略（B-042）为 Perceus 的前置决策。COW（copy-on-write）为 Perceus 内部优化，不是用户可见语义。
+
+> **历史注记**：早期设计文档曾规划"分代并发 GC"，已被 Perceus RC 方向取代。
+
+### 7.1 所有权模型
 
 - Ownership + move 语义（move 后不可用、Drop 恰好一次）
 - 小 struct 自动值语义（栈分配，copy-on-assign），编译器按大小和递归性判断
 - 逃逸分析：短命对象不上堆
-- 无 borrow checker，mutable aliasing 语义由 Perceus COW 策略决定
+- 无 borrow checker——Perceus RC + Ownership + `mut<T>` + Drop 覆盖安全性（见 1.5 交互矩阵）
+- Mutable aliasing 语义由 Perceus 内部 clone 优化决定（非用户可见 COW 语义）
 
-> **历史注记**：早期设计文档曾规划"分代并发 GC"，已被 Perceus RC 方向取代。
+### 7.2 参数传递：Borrow-by-default
+
+Ring 的参数传递模型：默认只读借用，编译器推断 move，无 lifetime 标注。
+
+| 参数形式 | 语义 | 说明 |
+|----------|------|------|
+| `x: T` | 只读借用（默认） | 调用方保留所有权，被调用方不能逃逸 |
+| `mut x: T` | 可变借用 | 已有语义，不变 |
+| `move x: T`（推断） | 移动所有权 | 编译器从函数体推断（参数被返回/存入字段/跨 spawn） |
+
+**设计选择**：无 `&T` 语法，无 lifetime 标注。与 Rust 的核心区别——Ring 用 Perceus RC 代替 borrow checker 保证内存安全。
+
+### 7.3 Move 推断
+
+Move 由编译器从函数体推断，开发者不需要手动标注：
+
+- 参数被返回 → move
+- 参数被存入 struct 字段 → move
+- 参数跨 `spawn` 闭包边界 → move
+- 其他所有情况 → borrow（默认）
+
+推断结果可通过 lv2 标注显式写出（`fn f(move x: T)`），但标注不改变编译行为——标注是文档，不是语义（见 3.2 节标注等级规范）。
+
+### 7.4 逃逸规则
+
+借用值受以下逃逸约束：
+
+- 不能被返回
+- 不能存入更长生命周期的位置
+- 不能跨 `spawn` 闭包边界
+
+违反逃逸约束 → 编译错误。编译器不需要跨函数逃逸分析——类型系统自动处理传染性（见 7.6 Scoped Struct Borrow）。
+
+### 7.5 赋值语义
+
+| 类型 | 赋值行为 | 说明 |
+|------|----------|------|
+| 值类型（Int/Float/Bool/Char） | auto copy | 零成本 memcpy |
+| 复合类型（List/Map/struct/enum） | move | 保留需显式 `.clone()` |
+
+### 7.6 Scoped Struct Borrow
+
+含借用的类型自动标记为"不可存储"，传参时走 borrow 语义。传染性由类型系统自动处理：
+
+- 含 borrow 字段的 struct → 整个 struct 不可存储（不可返回、不可存入更长 scope）
+- 不需要跨函数逃逸分析——struct 的"可存储性"在类型定义时已确定
+- 典型用例：Iterator/Parser/Slice 等 "struct 持有引用" 模式可正常使用
+
+### 7.7 函数类型中的 Convention
+
+```ring
+fn(T) -> U          // T 为 borrow（默认，与参数 borrow-default 一致）
+fn(move T) -> U     // T 为 move（必须手写——唯一不可推断的 move 标注点）
+```
+
+大多数回调只读，极少需要 `fn(move T)`。函数类型中的 `move` 标注是唯一一个不可推断、必须显式写出的 move 标注点。
+
+### 7.8 闭包捕获
+
+- 同步闭包捕获借用 → OK（闭包生命周期不超过创建者 scope）
+- 逃逸闭包（如 spawn、存入字段）→ 需要 move/clone 捕获
+- 具体边界 case 待 B-002 实现阶段验证
 
 ---
 

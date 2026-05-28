@@ -293,7 +293,7 @@ fn test_fetch() {
 > 优化分两层：AOT（LLVM 编译期）和 JIT（运行时 PGO），很多优化两层都可以做。
 > 前置依赖链：LLVM backend → Perceus RC → 各项优化 pass → JIT（远期）。
 
-### B-011 LLVM Native Backend [feature] [P1] [XL] [judgment] [queued]
+### B-011 LLVM Native Backend [feature] [P1] [XL] [judgment] [doing]
 编译到 LLVM IR，所有后续优化的基础。**LLVM 落地后 JS 后端废弃。**
 
 - **前置依赖**：~~B-004（关联类型）~~ ✅ + ~~B-036（Iterator）~~ ✅ + ~~B-044 语义规范~~ ✅。**全部前置已完成，无阻塞。**
@@ -450,7 +450,7 @@ source-map 支持 + 断点调试。
 
 > 非实现任务，而是设计探针。在对应 XL 特性实现前完成，防止特性交互导致事后 breaking change。
 
-### B-068 Borrow-by-default 参数传递 + 标注等级规范 [design] [P1] [L] [judgment] [queued]
+### B-068 Borrow-by-default 参数传递 + 标注等级规范 [design] [P1] [L] [judgment] [doing]
 Ring 的参数传递模型：borrow-by-default + 编译器推断 move + 逃逸分析（非 lifetime，非 borrow checker）。配套标注等级规范（formatter 自动管理）。
 
 **已确定决策（2026-05-24）**：
