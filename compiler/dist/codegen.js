@@ -788,6 +788,13 @@ function collect_local_calls(expr, local_names, out) {
           }
           break __ring_match26;
         }
+        if (__ring_m26._tag === "FieldAccess") {
+          const field = __ring_m26.field;
+          if (_Set_contains(local_names, field, __Str_Eq)) {
+            _Set_insert(out, field);
+          }
+          break __ring_match26;
+        }
         break __ring_match26;
       }
       collect_local_calls(callee, local_names, out);

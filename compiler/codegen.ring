@@ -353,6 +353,9 @@ fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>) {
                 HExpr::Ident { name, .. } => {
                     if local_names.contains(name) { out.insert(name) }
                 },
+                HExpr::FieldAccess { field, .. } => {
+                    if local_names.contains(field) { out.insert(field) }
+                },
                 _ => {},
             }
             collect_local_calls(callee, local_names, out)
