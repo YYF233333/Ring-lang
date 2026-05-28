@@ -279,6 +279,7 @@ const cases: TestCase[] = [
   { file: "nested_match_stmt.ring", expected: "42\ndeep\n" },
   { file: "trait_alias.ring", expected: "num\n" },
   { file: "return_if.ring", expected: "5\n3\npositive\nnegative\nzero\n" },
+  { file: "if_else_if_return.ring", expected: "101\n-1\n51\n-2\n1\n" },
   { file: "while_basic.ring", expected: "10\n" },
   { file: "break_continue.ring", expected: "7\n" },
   { file: "for_range.ring", expected: "10\n" },

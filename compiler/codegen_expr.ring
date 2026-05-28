@@ -1087,9 +1087,12 @@ fn if_expr_contains_return(then_branch: HExpr, else_branch: HExpr?) -> Bool {
     }
 }
 
+// Emit an `else if` branch that assigns its value to `tmp`.
+// INVARIANT: caller must emit `}` to close the preceding block before calling this.
+// This function emits `else if (...) { ... }` and handles chained else-if / else.
 fn emit_if_as_assign(mut ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch: HExpr?, tmp: Str) {
     let cond = gen_expr(ctx, condition)
-    emit(ctx, "} else if (${cond}) {")
+    emit(ctx, "else if (${cond}) {")
     push_indent(ctx)
     emit_branch_as_assign(ctx, then_branch, tmp)
     pop_indent(ctx)
@@ -1097,6 +1100,7 @@ fn emit_if_as_assign(mut ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, 
         none => emit(ctx, "}"),
         some(eb) => match eb {
             HExpr::IfExpr { condition: ec, then_branch: et, else_branch: ee, .. } => {
+                emit(ctx, "}")
                 emit_if_as_assign(ctx, ec, et, ee, tmp)
             },
             _ => {
@@ -1147,6 +1151,7 @@ fn gen_if(mut ctx: CodegenCtx, condition: HExpr, then_branch: HExpr, else_branch
             none => emit(ctx, "}"),
             some(eb) => match eb {
                 HExpr::IfExpr { condition: ec, then_branch: et, else_branch: ee, .. } => {
+                    emit(ctx, "}")
                     emit_if_as_assign(ctx, ec, et, ee, tmp)
                 },
                 _ => {

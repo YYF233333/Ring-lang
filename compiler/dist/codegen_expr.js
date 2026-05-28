@@ -1989,7 +1989,7 @@ function if_expr_contains_return(then_branch, else_branch) {
 
 function emit_if_as_assign(ctx, condition, then_branch, else_branch, tmp) {
   const cond = gen_expr(ctx, condition);
-  codegen_ctx$emit(ctx, `} else if (${cond}) {`);
+  codegen_ctx$emit(ctx, `else if (${cond}) {`);
   codegen_ctx$push_indent(ctx);
   emit_branch_as_assign(ctx, then_branch, tmp);
   codegen_ctx$pop_indent(ctx);
@@ -2005,6 +2005,7 @@ function emit_if_as_assign(ctx, condition, then_branch, else_branch, tmp) {
         const __ring_m61 = eb;
         if (__ring_m61._tag === "IfExpr") {
           const ec = __ring_m61.condition; const et = __ring_m61.then_branch; const ee = __ring_m61.else_branch;
+          codegen_ctx$emit(ctx, "}");
           return emit_if_as_assign(ctx, ec, et, ee, tmp);
           break __ring_match61;
         }
@@ -2076,6 +2077,7 @@ function gen_if(ctx, condition, then_branch, else_branch) {
           const __ring_m65 = eb;
           if (__ring_m65._tag === "IfExpr") {
             const ec = __ring_m65.condition; const et = __ring_m65.then_branch; const ee = __ring_m65.else_branch;
+            codegen_ctx$emit(ctx, "}");
             emit_if_as_assign(ctx, ec, et, ee, tmp);
             break __ring_match65;
           }
