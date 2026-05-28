@@ -430,6 +430,7 @@ fn collect_pub_decl_exports(decl: Decl, mut export_names: List<Str>) {
             }
         },
         Decl::Const { name, is_pub, .. } => { if is_pub { export_names.push(safe_ident(name)) } },
+        Decl::ExternType { name, is_pub, .. } => { if is_pub { export_names.push(safe_ident(name)) } },
         Decl::ModBlock { name: mod_name, decls: mod_decls, is_pub: mpub, .. } => {
             if mpub {
                 for subdecl in mod_decls {

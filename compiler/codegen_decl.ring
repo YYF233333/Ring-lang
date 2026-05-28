@@ -32,7 +32,13 @@ pub fn emit_decl(mut ctx: CodegenCtx, decl: HDecl) {
             emit_trait_decl(ctx, name, methods, supertraits),
         HDecl::ExternFn { name, .. } =>
             emit_extern_fn_decl(ctx, name),
-        HDecl::ExternType { .. } => {},
+        HDecl::ExternType { name, is_pub, .. } => {
+            if is_pub {
+                let sn = safe_ident(name)
+                let qn = qualify(ctx, name)
+                emit(ctx, "const ${qn} = \"${sn}\";")
+            }
+        },
         HDecl::TypeAlias { .. } => {},
         HDecl::Const { name, init, .. } => emit_const_decl(ctx, name, init),
         HDecl::ModBlock { decls: mod_decls, .. } => {

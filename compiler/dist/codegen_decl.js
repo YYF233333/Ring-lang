@@ -283,6 +283,12 @@ function emit_decl(ctx, decl) {
       break __ring_match6;
     }
     if (__ring_m6._tag === "ExternType") {
+      const name = __ring_m6.name; const is_pub = __ring_m6.is_pub;
+      if (is_pub) {
+        const sn = codegen_ctx$safe_ident(name);
+        const qn = codegen_ctx$qualify(ctx, name);
+        return codegen_ctx$emit(ctx, `const ${qn} = "${sn}";`);
+      }
       break __ring_match6;
     }
     if (__ring_m6._tag === "TypeAlias") {

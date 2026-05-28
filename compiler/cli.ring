@@ -4,6 +4,7 @@ use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
 use formatter::{format_human, format_llm}
 use checker::{CheckResult, check as check_single}
 use codegen::{generate}
+use codegen_llvm::{generate_llvm}
 use compiler_mod::{compile_project, compile_project_esm}
 use parser::{parse}
 
@@ -112,6 +113,21 @@ pub fn cli_main() {
     // Print warnings (non-error diagnostics) even on success
     if sink.items.len() > 0 {
         eprintln(format_human(sink.items, source))
+    }
+
+    if parsed.target == "llvm" {
+        if parsed.command == "check" {
+            print("OK")
+        } else {
+            if parsed.command == "build" {
+                let out_path = file_path.replace(".ring", ".o")
+                generate_llvm(check_result.program, out_path)
+            } else {
+                eprintln("LLVM target only supports 'build' and 'check' commands")
+                exit_process(1)
+            }
+        }
+        return
     }
 
     let js = generate(check_result.program, false, false, none, none, none, none, none, none, none)

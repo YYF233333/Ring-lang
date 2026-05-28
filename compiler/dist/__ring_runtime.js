@@ -1,5 +1,6 @@
 import { createRequire as __cr } from "node:module";
 const __require = __cr(import.meta.url);
+try { Object.assign(globalThis, __require('../llvm-addon/build/Release/llvm_addon.node')); } catch(e) {}
 // === Ring-lang Runtime ===
 class __EffectAbort {
   constructor(effect, value) {

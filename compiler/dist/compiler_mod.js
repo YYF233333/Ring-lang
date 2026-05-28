@@ -841,6 +841,13 @@ function collect_pub_decl_exports(decl, export_names) {
       }
       break __ring_match25;
     }
+    if (__ring_m25._tag === "ExternType") {
+      const name = __ring_m25.name; const is_pub = __ring_m25.is_pub;
+      if (is_pub) {
+        return List_push(export_names, codegen_ctx$safe_ident(name));
+      }
+      break __ring_match25;
+    }
     if (__ring_m25._tag === "ModBlock") {
       const mod_name = __ring_m25.name; const mod_decls = __ring_m25.decls; const mpub = __ring_m25.is_pub;
       if (mpub) {

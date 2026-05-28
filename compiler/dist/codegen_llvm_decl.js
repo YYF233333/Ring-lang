@@ -1,13 +1,10 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
+import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, effect_kind_name as types$effect_kind_name, effects_match_kind as types$effects_match_kind, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, effects_same_kind as types$effects_same_kind, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
 import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, AssocConstraint as ast$AssocConstraint, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
 import { variant_js_name as hir$variant_js_name, trait_dict_name as hir$trait_dict_name, evidence_param_name as hir$evidence_param_name, default_evidence_name as hir$default_evidence_name, trait_bound_param_name as hir$trait_bound_param_name, default_method_self_name as hir$default_method_self_name, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, hexpr_type as hir$hexpr_type, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, STR_METHODS as hir$STR_METHODS, INT_METHODS as hir$INT_METHODS, FLOAT_METHODS as hir$FLOAT_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, SET_HOF_METHODS as hir$SET_HOF_METHODS, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, HParam as hir$HParam, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, DictDispatchInfo as hir$DictDispatchInfo, HStructFieldInit as hir$HStructFieldInit, HMatchArm as hir$HMatchArm, HEffectHandler as hir$HEffectHandler, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStructField as hir$HStructField, HEnumVariant as hir$HEnumVariant, HEffectOp as hir$HEffectOp, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, HAssocType as hir$HAssocType, HSigMember as hir$HSigMember, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, DerivedField as hir$DerivedField, DerivedVariant as hir$DerivedVariant, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, DerivedImpl as hir$DerivedImpl, HProgram as hir$HProgram, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug } from "./hir.js";
-import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
-import { format_human as formatter$format_human, format_llm as formatter$format_llm } from "./formatter.js";
-import { check as checker$check, check_module as checker$check_module, CheckResult as checker$CheckResult } from "./checker.js";
-import { generate as codegen$generate } from "./codegen.js";
-import { generate_llvm as codegen_llvm$generate_llvm } from "./codegen_llvm.js";
-import { compile_project as compiler_mod$compile_project, compile_project_esm as compiler_mod$compile_project_esm, CompileProjectResult as compiler_mod$CompileProjectResult, EsmCompileResult as compiler_mod$EsmCompileResult, __CompileProjectResult_Eq as compiler_mod$__CompileProjectResult_Eq, __CompileProjectResult_Clone as compiler_mod$__CompileProjectResult_Clone, __CompileProjectResult_Ord as compiler_mod$__CompileProjectResult_Ord, __CompileProjectResult_Debug as compiler_mod$__CompileProjectResult_Debug, __EsmCompileResult_Eq as compiler_mod$__EsmCompileResult_Eq, __EsmCompileResult_Clone as compiler_mod$__EsmCompileResult_Clone, __EsmCompileResult_Ord as compiler_mod$__EsmCompileResult_Ord, __EsmCompileResult_Debug as compiler_mod$__EsmCompileResult_Debug } from "./compiler_mod.js";
-import { PREC_NONE as parser$PREC_NONE, PREC_CATCH as parser$PREC_CATCH, PREC_LOGIC_OR as parser$PREC_LOGIC_OR, PREC_LOGIC_AND as parser$PREC_LOGIC_AND, PREC_EQUALITY as parser$PREC_EQUALITY, PREC_COMPARE as parser$PREC_COMPARE, PREC_RANGE as parser$PREC_RANGE, PREC_ADD_SUB as parser$PREC_ADD_SUB, PREC_MUL_DIV as parser$PREC_MUL_DIV, PREC_UNARY as parser$PREC_UNARY, PREC_POSTFIX as parser$PREC_POSTFIX, infix_precedence as parser$infix_precedence, type_expr_span as parser$type_expr_span, expr_span as parser$expr_span, pattern_span as parser$pattern_span, new_parser as parser$new_parser, parse as parser$parse, Parser as parser$Parser, __Parser_Clone as parser$__Parser_Clone, __Parser_Debug as parser$__Parser_Debug, Parser_peek as parser$Parser_peek, Parser_peek_at as parser$Parser_peek_at, Parser_advance as parser$Parser_advance, Parser_check as parser$Parser_check, Parser_try_consume as parser$Parser_try_consume, Parser_expect as parser$Parser_expect, Parser_at_end as parser$Parser_at_end, Parser_current_span_start as parser$Parser_current_span_start, Parser_make_span as parser$Parser_make_span, Parser_report_error as parser$Parser_report_error, Parser_error as parser$Parser_error, Parser_parse_program as parser$Parser_parse_program, Parser_parse_stmt as parser$Parser_parse_stmt, Parser_parse_while_stmt as parser$Parser_parse_while_stmt, Parser_parse_loop_stmt as parser$Parser_parse_loop_stmt, Parser_parse_for_in_stmt as parser$Parser_parse_for_in_stmt, Parser_parse_break_stmt as parser$Parser_parse_break_stmt, Parser_parse_continue_stmt as parser$Parser_parse_continue_stmt, Parser_parse_if_let_stmt as parser$Parser_parse_if_let_stmt, Parser_parse_binding_stmt as parser$Parser_parse_binding_stmt, Parser_parse_binding_body as parser$Parser_parse_binding_body, Parser_parse_return_stmt as parser$Parser_parse_return_stmt, Parser_parse_block_expr as parser$Parser_parse_block_expr, Parser_parse_use_decl as parser$Parser_parse_use_decl, Parser_parse_mod_block as parser$Parser_parse_mod_block, Parser_parse_decl as parser$Parser_parse_decl, Parser_parse_effect_list as parser$Parser_parse_effect_list, Parser_parse_effect_annotation as parser$Parser_parse_effect_annotation, Parser_parse_fn_decl as parser$Parser_parse_fn_decl, Parser_parse_const_decl as parser$Parser_parse_const_decl, Parser_parse_sig_block as parser$Parser_parse_sig_block, Parser_parse_extern_decl as parser$Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body as parser$Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body as parser$Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl as parser$Parser_parse_type_alias_decl, Parser_parse_struct_decl as parser$Parser_parse_struct_decl, Parser_parse_enum_decl as parser$Parser_parse_enum_decl, Parser_parse_impl_decl as parser$Parser_parse_impl_decl, Parser_parse_effect_alias_decl as parser$Parser_parse_effect_alias_decl, Parser_parse_effect_decl as parser$Parser_parse_effect_decl, Parser_parse_test_decl as parser$Parser_parse_test_decl, Parser_parse_assoc_type_decl as parser$Parser_parse_assoc_type_decl, Parser_parse_trait_decl as parser$Parser_parse_trait_decl, Parser_parse_expr as parser$Parser_parse_expr, Parser_parse_expr_no_struct as parser$Parser_parse_expr_no_struct, Parser_parse_expr_bp as parser$Parser_parse_expr_bp, Parser_parse_prefix as parser$Parser_parse_prefix, Parser_parse_dot_expr as parser$Parser_parse_dot_expr, Parser_parse_index_expr as parser$Parser_parse_index_expr, Parser_parse_call_expr as parser$Parser_parse_call_expr, Parser_parse_arg_list as parser$Parser_parse_arg_list, Parser_parse_catch_expr as parser$Parser_parse_catch_expr, Parser_parse_string_interp as parser$Parser_parse_string_interp, Parser_parse_if_expr as parser$Parser_parse_if_expr, Parser_parse_match_expr as parser$Parser_parse_match_expr, Parser_parse_match_arm as parser$Parser_parse_match_arm, Parser_parse_pattern as parser$Parser_parse_pattern, Parser_parse_handle_expr as parser$Parser_parse_handle_expr, Parser_parse_effect_handler as parser$Parser_parse_effect_handler, Parser_parse_lambda_expr as parser$Parser_parse_lambda_expr, Parser_parse_struct_literal as parser$Parser_parse_struct_literal, Parser_try_parse_type_args as parser$Parser_try_parse_type_args, Parser_parse_type_expr as parser$Parser_parse_type_expr, Parser_parse_record_type_expr as parser$Parser_parse_record_type_expr, Parser_parse_qualified_ident as parser$Parser_parse_qualified_ident, Parser_skip_type_args as parser$Parser_skip_type_args, Parser_parse_type_params as parser$Parser_parse_type_params, Parser_parse_type_bound as parser$Parser_parse_type_bound, Parser_parse_params as parser$Parser_parse_params, Parser_parse_param as parser$Parser_parse_param } from "./parser.js";
+import { llvm_mangle_fn as codegen_llvm_ctx$llvm_mangle_fn, llvm_mangle_method as codegen_llvm_ctx$llvm_mangle_method, fresh_name as codegen_llvm_ctx$fresh_name, get_or_declare_runtime_fn as codegen_llvm_ctx$get_or_declare_runtime_fn, get_rt_fn_type as codegen_llvm_ctx$get_rt_fn_type, StructFieldInfo as codegen_llvm_ctx$StructFieldInfo, EnumVariantInfo as codegen_llvm_ctx$EnumVariantInfo, EnumTypeInfo as codegen_llvm_ctx$EnumTypeInfo, LlvmCtx as codegen_llvm_ctx$LlvmCtx, __EnumVariantInfo_Eq as codegen_llvm_ctx$__EnumVariantInfo_Eq, __EnumVariantInfo_Clone as codegen_llvm_ctx$__EnumVariantInfo_Clone, __EnumVariantInfo_Ord as codegen_llvm_ctx$__EnumVariantInfo_Ord, __EnumVariantInfo_Debug as codegen_llvm_ctx$__EnumVariantInfo_Debug, __StructFieldInfo_Clone as codegen_llvm_ctx$__StructFieldInfo_Clone, __StructFieldInfo_Debug as codegen_llvm_ctx$__StructFieldInfo_Debug, __EnumTypeInfo_Clone as codegen_llvm_ctx$__EnumTypeInfo_Clone, __EnumTypeInfo_Debug as codegen_llvm_ctx$__EnumTypeInfo_Debug } from "./codegen_llvm_ctx.js";
+import { gen_llvm_expr as codegen_llvm_expr$gen_llvm_expr, box_int as codegen_llvm_expr$box_int, box_float as codegen_llvm_expr$box_float, box_bool as codegen_llvm_expr$box_bool, unbox_to_i1 as codegen_llvm_expr$unbox_to_i1 } from "./codegen_llvm_expr.js";
+import { safe_ident as codegen_ctx$safe_ident, new_codegen_ctx as codegen_ctx$new_codegen_ctx, emit as codegen_ctx$emit, emit_raw as codegen_ctx$emit_raw, push_indent as codegen_ctx$push_indent, pop_indent as codegen_ctx$pop_indent, qualify as codegen_ctx$qualify, extract_effect_names as codegen_ctx$extract_effect_names, get_evidence_params as codegen_ctx$get_evidence_params, LIST_HOF_JS_METHOD as codegen_ctx$LIST_HOF_JS_METHOD, CodegenCtx as codegen_ctx$CodegenCtx, HTraitDeclInfo as codegen_ctx$HTraitDeclInfo } from "./codegen_ctx.js";
 
 
 
@@ -242,200 +239,302 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
-function cli_main(__ring_ev_io) {
-  const args = argv();
-  const parsed = parse_cli_args(args);
-  if (((parsed.command === "help") || (parsed.command === ""))) {
-    usage(__ring_ev_io);
-    return;
-  }
-  if ((parsed.command === "lsp")) {
-    eprintln("LSP mode not available in Ring compiler");
-    exit_process(1);
-    return;
-  }
-  if ((parsed.file === "")) {
-    eprintln("Error: no input file specified.");
-    exit_process(1);
-    return;
-  }
-  const file_path = path_resolve(parsed.file);
-  if ((file_exists(file_path) === false)) {
-    eprintln(`Error: file not found: ${file_path}`);
-    exit_process(1);
-    return;
-  }
-  const source = read_file(file_path);
-  const parse_sink = diagnostics$new_collecting_sink();
-  const ast = parser$parse(source, file_path, parse_sink);
-  if (diagnostics$CollectingSink_has_errors(parse_sink)) {
-    const diagnostics = parse_sink.items;
-    if ((parsed.error_format === "llm")) {
-      print(formatter$format_llm(diagnostics, file_path), __ring_ev_io);
-    } else {
-      eprintln(formatter$format_human(diagnostics, source));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function emit_llvm_decl(ctx, decl) {
+  __ring_match6: {
+    const __ring_m6 = decl;
+    if (__ring_m6._tag === "Fn") {
+      const name = __ring_m6.name; const params = __ring_m6.params; const effects = __ring_m6.effects; const body = __ring_m6.body; const trait_bounds = __ring_m6.trait_bounds;
+      return emit_fn_body(ctx, name, params, effects, body, trait_bounds, Option_none);
+      break __ring_match6;
     }
-    exit_process(1);
-    return;
-  }
-  if ((List_len(ast.uses) > 0)) {
-    if ((parsed.command === "check")) {
-      const result = compiler_mod$compile_project(file_path);
-      if (result.success) {
-        print("OK", __ring_ev_io);
-      } else {
-        eprintln("Compilation failed");
-        exit_process(1);
-      }
-    } else {
-      if ((parsed.command === "build")) {
-        const out_dir = path_resolve(parsed.out_dir);
-        const result = compiler_mod$compile_project_esm(file_path, out_dir);
-        if (result.success) {
-          print(`Compiled: ${out_dir}/`, __ring_ev_io);
-        } else {
-          eprintln("Compilation failed");
-          exit_process(1);
-        }
-      } else {
-        if ((parsed.command === "run")) {
-          const tmp_dir = path_join(path_dirname(file_path), ".ring_tmp");
-          const result = compiler_mod$compile_project_esm(file_path, tmp_dir);
-          if (result.success) {
-            eprintln("Multi-file run not yet implemented in Ring bootstrap");
-            exit_process(1);
-          } else {
-            eprintln("Compilation failed");
-            exit_process(1);
+    if (__ring_m6._tag === "Struct") {
+      const name = __ring_m6.name; const fields = __ring_m6.fields;
+      return emit_struct_constructor(ctx, name, fields);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "Enum") {
+      const name = __ring_m6.name; const variants = __ring_m6.variants;
+      return emit_enum_constructors(ctx, name, variants);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "Impl") {
+      const target_type = __ring_m6.target_type; const trait_name = __ring_m6.trait_name; const methods = __ring_m6.methods;
+      const __ring_iter_2 = __List_Iterable.iter(methods);
+      while (true) {
+        const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+        if (__ring_next_2._tag === "none") break;
+        const method = __ring_next_2._0;
+        __ring_match7: {
+          const __ring_m7 = method;
+          if (__ring_m7._tag === "Fn") {
+            const mn = __ring_m7.name; const mp = __ring_m7.params; const me = __ring_m7.effects; const mb = __ring_m7.body; const mtb = __ring_m7.trait_bounds;
+            emit_fn_body(ctx, mn, mp, me, mb, mtb, Option_some(target_type));
+            break __ring_match7;
           }
-        } else {
-          eprintln(`Unknown command: ${parsed.command}`);
-          exit_process(1);
+          break __ring_match7;
         }
       }
+      break __ring_match6;
     }
-    return;
-  }
-  const sink = diagnostics$new_collecting_sink();
-  const check_result = checker$check(ast, sink);
-  if (diagnostics$CollectingSink_has_errors(sink)) {
-    const diagnostics = sink.items;
-    if ((parsed.error_format === "llm")) {
-      print(formatter$format_llm(diagnostics, file_path), __ring_ev_io);
-    } else {
-      eprintln(formatter$format_human(diagnostics, source));
+    if (__ring_m6._tag === "Effect") {
+      break __ring_match6;
     }
-    exit_process(1);
-    return;
-  }
-  if ((List_len(sink.items) > 0)) {
-    eprintln(formatter$format_human(sink.items, source));
-  }
-  if ((parsed.target === "llvm")) {
-    if ((parsed.command === "check")) {
-      print("OK", __ring_ev_io);
-    } else {
-      if ((parsed.command === "build")) {
-        const out_path = Str_replace(file_path, ".ring", ".o");
-        codegen_llvm$generate_llvm(check_result.program, out_path, __ring_ev_io);
-      } else {
-        eprintln("LLVM target only supports 'build' and 'check' commands");
-        exit_process(1);
+    if (__ring_m6._tag === "Test") {
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "Trait") {
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "ExternFn") {
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "ExternType") {
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "TypeAlias") {
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "Const") {
+      const name = __ring_m6.name; const init = __ring_m6.init;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "ModBlock") {
+      const mod_decls = __ring_m6.decls;
+      const __ring_iter_3 = __List_Iterable.iter(mod_decls);
+      while (true) {
+        const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+        if (__ring_next_3._tag === "none") break;
+        const subdecl = __ring_next_3._0;
+        emit_llvm_decl(ctx, subdecl);
       }
+      break __ring_match6;
     }
-    return;
-  }
-  const js = codegen$generate(check_result.program, false, false, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none, Option_none);
-  if ((parsed.command === "check")) {
-    return print("OK", __ring_ev_io);
-  } else {
-    if ((parsed.command === "build")) {
-      const out_path = Str_replace(file_path, ".ring", ".js");
-      write_file(out_path, js);
-      return print(`Compiled: ${out_path}`, __ring_ev_io);
-    } else {
-      if ((parsed.command === "run")) {
-        const tmp_file = path_join(path_dirname(file_path), ".ring_tmp_run.js");
-        write_file(tmp_file, js);
-        eprintln("Single-file run not yet implemented in Ring bootstrap");
-        return exit_process(1);
-      } else {
-        eprintln(`Unknown command: ${parsed.command}`);
-        return exit_process(1);
-      }
+    if (__ring_m6._tag === "Sig") {
+      break __ring_match6;
     }
+    __match_fail(__ring_m6);
   }
 }
 
-class CliArgs {
-  constructor(command, file, debug, error_format, out_dir, target) {
-    this.command = command;
-    this.file = file;
-    this.debug = debug;
-    this.error_format = error_format;
-    this.out_dir = out_dir;
-    this.target = target;
-  }
-}
-
-function parse_cli_args(args) {
-  let debug = false;
-  let error_format = "human";
-  let out_dir = "dist";
-  let target = "js";
-  let positional = [];
-  const __ring_iter_2 = __List_Iterable.iter(args);
-  while (true) {
-    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
-    if (__ring_next_2._tag === "none") break;
-    const arg = __ring_next_2._0;
-    if ((arg === "--debug")) {
-      debug = true;
-    } else {
-      if (Str_starts_with(arg, "--error-format=")) {
-        error_format = Str_slice(arg, 15, Str_len(arg));
-      } else {
-        if (Str_starts_with(arg, "--out-dir=")) {
-          out_dir = Str_slice(arg, 10, Str_len(arg));
-        } else {
-          if (Str_starts_with(arg, "--target=")) {
-            target = Str_slice(arg, 9, Str_len(arg));
-          } else {
-            List_push(positional, arg);
-          }
-        }
-      }
-    }
-  }
-  const command = (function() {
-  const __ring_m = List_get(positional, 0);
-  if (__ring_m._tag === "some") { const c = __ring_m._0; return c; }
-  if (__ring_m._tag === "none") { return "help"; }
+function emit_fn_body(ctx, name, params, effects, body, trait_bounds, impl_type) {
+  const mangled = (function() {
+  const __ring_m = impl_type;
+  if (__ring_m._tag === "some") { const t = __ring_m._0; return codegen_llvm_ctx$llvm_mangle_method(t, name); }
+  if (__ring_m._tag === "none") { return codegen_llvm_ctx$llvm_mangle_fn(name); }
   __match_fail(__ring_m);
 })();
-  const file = (function() {
-  const __ring_m = List_get(positional, 1);
+  const fn_val = (function() {
+  const __ring_m = _Map_get(ctx.functions, mangled);
   if (__ring_m._tag === "some") { const f = __ring_m._0; return f; }
-  if (__ring_m._tag === "none") { return ""; }
+  if (__ring_m._tag === "none") { return panic(`LLVM codegen: function '${mangled}' not forward-declared`); }
   __match_fail(__ring_m);
 })();
-  return new CliArgs(command, file, debug, error_format, out_dir, target);
+  const saved_fn = ctx.current_fn;
+  ctx.current_fn = Option_some(fn_val);
+  const saved_named = ctx.named_values;
+  ctx.named_values = map_new();
+  const entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry");
+  LLVMPositionBuilderAtEnd(ctx.builder, entry);
+  let param_idx = 0;
+  const __ring_iter_4 = __List_Iterable.iter(params);
+  while (true) {
+    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+    if (__ring_next_4._tag === "none") break;
+    const p = __ring_next_4._0;
+    const alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, p.name);
+    LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), alloca);
+    _Map_insert(ctx.named_values, p.name, alloca);
+    param_idx = (param_idx + 1);
+  }
+  const __ring_iter_5 = __List_Iterable.iter(trait_bounds);
+  while (true) {
+    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+    if (__ring_next_5._tag === "none") break;
+    const b = __ring_next_5._0;
+    const dict_name = hir$trait_bound_param_name(b.type_param, b.trait_name);
+    const alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, dict_name);
+    LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), alloca);
+    _Map_insert(ctx.named_values, dict_name, alloca);
+    param_idx = (param_idx + 1);
+  }
+  const effective_effects = (function() {
+  const __ring_m = _Map_get(ctx.local_fn_effects, name);
+  if (__ring_m._tag === "some") { const eff = __ring_m._0; return eff; }
+  if (__ring_m._tag === "none") { return effects; }
+  __match_fail(__ring_m);
+})();
+  const ev_names = codegen_ctx$extract_effect_names(effective_effects);
+  const __ring_iter_6 = __List_Iterable.iter(ev_names);
+  while (true) {
+    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+    if (__ring_next_6._tag === "none") break;
+    const en = __ring_next_6._0;
+    const ep_name = hir$evidence_param_name(en);
+    const alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, ep_name);
+    LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), alloca);
+    _Map_insert(ctx.named_values, ep_name, alloca);
+    param_idx = (param_idx + 1);
+  }
+  const body_val = codegen_llvm_expr$gen_llvm_expr(ctx, body);
+  LLVMBuildRet(ctx.builder, body_val);
+  ctx.named_values = saved_named;
+  ctx.current_fn = saved_fn;
 }
 
-function usage(__ring_ev_io) {
-  print("Ring-lang compiler v0.1.0 (Ring bootstrap)", __ring_ev_io);
-  print("", __ring_ev_io);
-  print("Usage:", __ring_ev_io);
-  print("  ring build <file.ring>    Compile to .js file(s)", __ring_ev_io);
-  print("  ring run <file.ring>      Compile and execute with Node.js", __ring_ev_io);
-  print("  ring check <file.ring>    Type-check only", __ring_ev_io);
-  print("  ring help                 Show this help", __ring_ev_io);
-  print("", __ring_ev_io);
-  print("Options:", __ring_ev_io);
-  print("  --debug                   Print intermediate info", __ring_ev_io);
-  print("  --error-format=human|llm  Error output format (default: human)", __ring_ev_io);
-  print("  --out-dir=<path>          Output directory (default: dist)", __ring_ev_io);
-  return print("  --target=js|llvm          Code generation target (default: js)", __ring_ev_io);
+function register_struct_info(ctx, name, fields) {
+  let field_names = [];
+  let field_types = [];
+  const __ring_iter_7 = __List_Iterable.iter(fields);
+  while (true) {
+    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+    if (__ring_next_7._tag === "none") break;
+    const f = __ring_next_7._0;
+    List_push(field_names, f.name);
+    List_push(field_types, ctx.ptr_type);
+  }
+  const struct_ty = LLVMStructTypeInContext(ctx.context, field_types, 0);
+  return _Map_insert(ctx.struct_types, name, new codegen_llvm_ctx$StructFieldInfo(field_names, struct_ty));
+}
+
+function emit_struct_constructor(ctx, name, fields) {
+  const ctor_name = codegen_llvm_ctx$llvm_mangle_fn(name);
+  __ring_match8: {
+    const __ring_m8 = _Map_get(ctx.functions, ctor_name);
+    if (__ring_m8._tag === "some") {
+      return;
+      break __ring_match8;
+    }
+    if (__ring_m8._tag === "none") {
+      break __ring_match8;
+    }
+    __match_fail(__ring_m8);
+  }
+  let param_types = [];
+  const __ring_iter_8 = __List_Iterable.iter(fields);
+  while (true) {
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const f = __ring_next_8._0;
+    List_push(param_types, ctx.ptr_type);
+  }
+  const fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0);
+  const fn_val = LLVMAddFunction(ctx.module, ctor_name, fn_ty);
+  _Map_insert(ctx.functions, ctor_name, fn_val);
+  _Map_insert(ctx.fn_types, ctor_name, fn_ty);
+  const saved_fn = ctx.current_fn;
+  ctx.current_fn = Option_some(fn_val);
+  const entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry");
+  LLVMPositionBuilderAtEnd(ctx.builder, entry);
+  const struct_info = (function() {
+  const __ring_m = _Map_get(ctx.struct_types, name);
+  if (__ring_m._tag === "some") { const info = __ring_m._0; return info; }
+  if (__ring_m._tag === "none") { return panic(`LLVM codegen: struct '${name}' not registered`); }
+  __match_fail(__ring_m);
+})();
+  const size = LLVMSizeOf(struct_info.llvm_type);
+  const malloc_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type);
+  const malloc_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "malloc");
+  const struct_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [size], "s");
+  const __ring_end9 = List_len(fields);
+  for (let i = 0; i < __ring_end9; i++) {
+    const param_val = LLVMGetParam(fn_val, i);
+    const field_ptr = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, struct_ptr, i, "fp");
+    LLVMBuildStore(ctx.builder, param_val, field_ptr);
+  }
+  LLVMBuildRet(ctx.builder, struct_ptr);
+  ctx.current_fn = saved_fn;
+}
+
+function register_enum_info(ctx, name, variants) {
+  let max_fields = 0;
+  let variant_map = map_new();
+  let tag = 0;
+  const __ring_iter_10 = __List_Iterable.iter(variants);
+  while (true) {
+    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+    if (__ring_next_10._tag === "none") break;
+    const v = __ring_next_10._0;
+    const fc = List_len(v.fields);
+    if ((fc > max_fields)) {
+      max_fields = fc;
+    }
+    _Map_insert(variant_map, v.name, new codegen_llvm_ctx$EnumVariantInfo(tag, fc));
+    tag = (tag + 1);
+  }
+  let elem_types = [ctx.i64_type];
+  const __ring_end11 = max_fields;
+  for (let i = 0; i < __ring_end11; i++) {
+    List_push(elem_types, ctx.ptr_type);
+  }
+  const enum_ty = LLVMStructTypeInContext(ctx.context, elem_types, 0);
+  return _Map_insert(ctx.enum_types, name, new codegen_llvm_ctx$EnumTypeInfo(variant_map, max_fields, enum_ty));
+}
+
+function emit_enum_constructors(ctx, name, variants) {
+  const enum_info = (function() {
+  const __ring_m = _Map_get(ctx.enum_types, name);
+  if (__ring_m._tag === "some") { const info = __ring_m._0; return info; }
+  if (__ring_m._tag === "none") { return panic(`LLVM codegen: enum '${name}' not registered`); }
+  __match_fail(__ring_m);
+})();
+  const __ring_iter_12 = __List_Iterable.iter(variants);
+  while (true) {
+    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+    if (__ring_next_12._tag === "none") break;
+    const v = __ring_next_12._0;
+    const ctor_name = `ring_${name}_${v.name}`;
+    const variant_info = (function() {
+  const __ring_m = _Map_get(enum_info.variants, v.name);
+  if (__ring_m._tag === "some") { const vi = __ring_m._0; return vi; }
+  if (__ring_m._tag === "none") { return panic(`LLVM codegen: variant '${v.name}' not found in enum '${name}'`); }
+  __match_fail(__ring_m);
+})();
+    const fn_val = (function() {
+  const __ring_m = _Map_get(ctx.functions, ctor_name);
+  if (__ring_m._tag === "some") { const fv = __ring_m._0; return fv; }
+  if (__ring_m._tag === "none") { return panic(`LLVM codegen: enum ctor '${ctor_name}' not forward-declared`); }
+  __match_fail(__ring_m);
+})();
+    const saved_fn = ctx.current_fn;
+    ctx.current_fn = Option_some(fn_val);
+    const entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry");
+    LLVMPositionBuilderAtEnd(ctx.builder, entry);
+    const size = LLVMSizeOf(enum_info.llvm_type);
+    const malloc_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type);
+    const malloc_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "malloc");
+    const enum_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [size], "e");
+    const tag_val = LLVMConstInt(ctx.i64_type, variant_info.tag, 0);
+    const tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, enum_ptr, 0, "tag");
+    LLVMBuildStore(ctx.builder, tag_val, tag_ptr);
+    const __ring_end13 = List_len(v.fields);
+    for (let i = 0; i < __ring_end13; i++) {
+      const param_val = LLVMGetParam(fn_val, i);
+      const field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, enum_ptr, (i + 1), "ef");
+      LLVMBuildStore(ctx.builder, param_val, field_ptr);
+    }
+    LLVMBuildRet(ctx.builder, enum_ptr);
+    ctx.current_fn = saved_fn;
+  }
 }
 
 function __StringBuilder_Eq_eq(self, other) {
@@ -443,10 +542,35 @@ function __StringBuilder_Eq_eq(self, other) {
 }
 const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
 
-function __CliArgs_Eq_eq(self, other) {
-  return (self.command === other.command) && (self.file === other.file) && (self.debug === other.debug) && (self.error_format === other.error_format) && (self.out_dir === other.out_dir) && (self.target === other.target);
+function __LLVMContextRef_Eq_eq(self, other) {
+  return true;
 }
-const __CliArgs_Eq = { eq: __CliArgs_Eq_eq, ne: function(self, other) { return !__CliArgs_Eq_eq(self, other); } };
+const __LLVMContextRef_Eq = { eq: __LLVMContextRef_Eq_eq, ne: function(self, other) { return !__LLVMContextRef_Eq_eq(self, other); } };
+
+function __LLVMModuleRef_Eq_eq(self, other) {
+  return true;
+}
+const __LLVMModuleRef_Eq = { eq: __LLVMModuleRef_Eq_eq, ne: function(self, other) { return !__LLVMModuleRef_Eq_eq(self, other); } };
+
+function __LLVMBuilderRef_Eq_eq(self, other) {
+  return true;
+}
+const __LLVMBuilderRef_Eq = { eq: __LLVMBuilderRef_Eq_eq, ne: function(self, other) { return !__LLVMBuilderRef_Eq_eq(self, other); } };
+
+function __LLVMTypeRef_Eq_eq(self, other) {
+  return true;
+}
+const __LLVMTypeRef_Eq = { eq: __LLVMTypeRef_Eq_eq, ne: function(self, other) { return !__LLVMTypeRef_Eq_eq(self, other); } };
+
+function __LLVMValueRef_Eq_eq(self, other) {
+  return true;
+}
+const __LLVMValueRef_Eq = { eq: __LLVMValueRef_Eq_eq, ne: function(self, other) { return !__LLVMValueRef_Eq_eq(self, other); } };
+
+function __LLVMBasicBlockRef_Eq_eq(self, other) {
+  return true;
+}
+const __LLVMBasicBlockRef_Eq = { eq: __LLVMBasicBlockRef_Eq_eq, ne: function(self, other) { return !__LLVMBasicBlockRef_Eq_eq(self, other); } };
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
@@ -473,10 +597,35 @@ function __StringBuilder_Clone_clone(self) {
 }
 const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
 
-function __CliArgs_Clone_clone(self) {
-  return new CliArgs(self.command, self.file, self.debug, self.error_format, self.out_dir, self.target);
+function __LLVMContextRef_Clone_clone(self) {
+  return new LLVMContextRef();
 }
-const __CliArgs_Clone = { clone: __CliArgs_Clone_clone };
+const __LLVMContextRef_Clone = { clone: __LLVMContextRef_Clone_clone };
+
+function __LLVMModuleRef_Clone_clone(self) {
+  return new LLVMModuleRef();
+}
+const __LLVMModuleRef_Clone = { clone: __LLVMModuleRef_Clone_clone };
+
+function __LLVMBuilderRef_Clone_clone(self) {
+  return new LLVMBuilderRef();
+}
+const __LLVMBuilderRef_Clone = { clone: __LLVMBuilderRef_Clone_clone };
+
+function __LLVMTypeRef_Clone_clone(self) {
+  return new LLVMTypeRef();
+}
+const __LLVMTypeRef_Clone = { clone: __LLVMTypeRef_Clone_clone };
+
+function __LLVMValueRef_Clone_clone(self) {
+  return new LLVMValueRef();
+}
+const __LLVMValueRef_Clone = { clone: __LLVMValueRef_Clone_clone };
+
+function __LLVMBasicBlockRef_Clone_clone(self) {
+  return new LLVMBasicBlockRef();
+}
+const __LLVMBasicBlockRef_Clone = { clone: __LLVMBasicBlockRef_Clone_clone };
 
 function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   switch (self._tag) {
@@ -492,21 +641,35 @@ function __StringBuilder_Ord_cmp(self, other) {
 }
 const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
 
-function __CliArgs_Ord_cmp(self, other) {
-  var c;
-  c = (self.command < other.command ? -1 : self.command > other.command ? 1 : 0);
-  if (c !== 0) return c;
-  c = (self.file < other.file ? -1 : self.file > other.file ? 1 : 0);
-  if (c !== 0) return c;
-  c = (self.debug < other.debug ? -1 : self.debug > other.debug ? 1 : 0);
-  if (c !== 0) return c;
-  c = (self.error_format < other.error_format ? -1 : self.error_format > other.error_format ? 1 : 0);
-  if (c !== 0) return c;
-  c = (self.out_dir < other.out_dir ? -1 : self.out_dir > other.out_dir ? 1 : 0);
-  if (c !== 0) return c;
-  return (self.target < other.target ? -1 : self.target > other.target ? 1 : 0);
+function __LLVMContextRef_Ord_cmp(self, other) {
+  return 0;
 }
-const __CliArgs_Ord = { cmp: __CliArgs_Ord_cmp };
+const __LLVMContextRef_Ord = { cmp: __LLVMContextRef_Ord_cmp };
+
+function __LLVMModuleRef_Ord_cmp(self, other) {
+  return 0;
+}
+const __LLVMModuleRef_Ord = { cmp: __LLVMModuleRef_Ord_cmp };
+
+function __LLVMBuilderRef_Ord_cmp(self, other) {
+  return 0;
+}
+const __LLVMBuilderRef_Ord = { cmp: __LLVMBuilderRef_Ord_cmp };
+
+function __LLVMTypeRef_Ord_cmp(self, other) {
+  return 0;
+}
+const __LLVMTypeRef_Ord = { cmp: __LLVMTypeRef_Ord_cmp };
+
+function __LLVMValueRef_Ord_cmp(self, other) {
+  return 0;
+}
+const __LLVMValueRef_Ord = { cmp: __LLVMValueRef_Ord_cmp };
+
+function __LLVMBasicBlockRef_Ord_cmp(self, other) {
+  return 0;
+}
+const __LLVMBasicBlockRef_Ord = { cmp: __LLVMBasicBlockRef_Ord_cmp };
 
 const __Result_tag_order = { "Ok": 0, "Err": 1 };
 function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
@@ -536,10 +699,35 @@ function __StringBuilder_Debug_debug(self) {
 }
 const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
-function __CliArgs_Debug_debug(self) {
-  return "CliArgs { " + "command: " + String(self.command) + ", " + "file: " + String(self.file) + ", " + "debug: " + String(self.debug) + ", " + "error_format: " + String(self.error_format) + ", " + "out_dir: " + String(self.out_dir) + ", " + "target: " + String(self.target) + " }";
+function __LLVMContextRef_Debug_debug(self) {
+  return "LLVMContextRef";
 }
-const __CliArgs_Debug = { debug: __CliArgs_Debug_debug };
+const __LLVMContextRef_Debug = { debug: __LLVMContextRef_Debug_debug };
+
+function __LLVMModuleRef_Debug_debug(self) {
+  return "LLVMModuleRef";
+}
+const __LLVMModuleRef_Debug = { debug: __LLVMModuleRef_Debug_debug };
+
+function __LLVMBuilderRef_Debug_debug(self) {
+  return "LLVMBuilderRef";
+}
+const __LLVMBuilderRef_Debug = { debug: __LLVMBuilderRef_Debug_debug };
+
+function __LLVMTypeRef_Debug_debug(self) {
+  return "LLVMTypeRef";
+}
+const __LLVMTypeRef_Debug = { debug: __LLVMTypeRef_Debug_debug };
+
+function __LLVMValueRef_Debug_debug(self) {
+  return "LLVMValueRef";
+}
+const __LLVMValueRef_Debug = { debug: __LLVMValueRef_Debug_debug };
+
+function __LLVMBasicBlockRef_Debug_debug(self) {
+  return "LLVMBasicBlockRef";
+}
+const __LLVMBasicBlockRef_Debug = { debug: __LLVMBasicBlockRef_Debug_debug };
 
 function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
   switch (self._tag) {
@@ -551,4 +739,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { cli_main };
+export { emit_llvm_decl, register_struct_info, register_enum_info };

@@ -237,6 +237,7 @@ function RUNTIME_CODE() {
   let lines = [];
   List_push(lines, "import { createRequire as __cr } from \"node:module\";");
   List_push(lines, "const __require = __cr(import.meta.url);");
+  List_push(lines, "try { Object.assign(globalThis, __require('../llvm-addon/build/Release/llvm_addon.node')); } catch(e) {}");
   List_push(lines, "// === Ring-lang Runtime ===");
   List_push(lines, "class __EffectAbort {");
   List_push(lines, "  constructor(effect, value) {");

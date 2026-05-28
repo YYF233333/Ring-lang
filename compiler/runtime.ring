@@ -2,6 +2,7 @@ pub fn RUNTIME_CODE() -> Str {
     let mut lines: List<Str> = []
     lines.push("import { createRequire as __cr } from \"node:module\";")
     lines.push("const __require = __cr(import.meta.url);")
+    lines.push("try { Object.assign(globalThis, __require('../llvm-addon/build/Release/llvm_addon.node')); } catch(e) {}")
     lines.push("// === Ring-lang Runtime ===")
     lines.push("class __EffectAbort {")
     lines.push("  constructor(effect, value) {")
