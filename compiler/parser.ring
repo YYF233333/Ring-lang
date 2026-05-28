@@ -2013,7 +2013,12 @@ impl Parser {
                     }
                 }
                 let end_tok = self.expect(TokenKind::TkRParen)
-                return TypeExpr::TupleType { elements: elements, span: self.make_span(start, end_tok.span.end) }
+                let mut result = TypeExpr::TupleType { elements: elements, span: self.make_span(start, end_tok.span.end) }
+                if self.try_consume(TokenKind::TkQuestion) {
+                    let opt_end = self.current_span_start()
+                    result = TypeExpr::OptionType { inner: result, span: self.make_span(start, opt_end) }
+                }
+                return result
             }
             self.expect(TokenKind::TkRParen)
             return first
