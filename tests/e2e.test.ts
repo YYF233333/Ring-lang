@@ -450,6 +450,7 @@ const cases: TestCase[] = [
   { file: "match_tuple_option.ring", expected: "pass: match tuple bare variant\n" },
   { file: "result_prelude.ring", expected: "pass: result prelude\n" },
   { file: "tuple_eq_struct.ring", expected: "pass: tuple eq struct\n" },
+  { file: "tuple_option_sugar.ring", expected: "pass: tuple option sugar\n" },
   { file: "set_struct_eq.ring", expected: "pass: set struct eq consistency\n" },
   { file: "catch_pure_expr.ring", expected: "pass: catch on pure warning\n" },
   { file: "set_ops_deep_eq.ring", expected: "Set ops deep equality: all passed\n" },

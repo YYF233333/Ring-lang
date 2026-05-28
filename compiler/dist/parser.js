@@ -2292,7 +2292,12 @@ function Parser_parse_type_expr(self) {
         }
       }
       const end_tok = Parser_expect(self, lexer$TokenKind_TkRParen);
-      return ast$TypeExpr_TupleType(elements, Parser_make_span(self, start, end_tok.span.end));
+      let result = ast$TypeExpr_TupleType(elements, Parser_make_span(self, start, end_tok.span.end));
+      if (Parser_try_consume(self, lexer$TokenKind_TkQuestion)) {
+        const opt_end = Parser_current_span_start(self);
+        result = ast$TypeExpr_OptionType(result, Parser_make_span(self, start, opt_end));
+      }
+      return result;
     }
     Parser_expect(self, lexer$TokenKind_TkRParen);
     return first;
