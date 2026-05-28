@@ -346,6 +346,12 @@ fn test_fetch() {
 ### B-012 Perceus 引用计数 [feature] [P3] [XL] [judgment] [queued]
 精确 RC + 就地复用分析（reuse analysis），消除 GC。
 
+**包含**：
+- Perceus RC 核心（精确引用计数 + 重用分析）
+- `Weak<T>` 库类型（`std/rc.ring`）：`Rc.downgrade()` + `.upgrade() -> T?`，确定性析构
+- COW 为内部优化（clone-on-write when refcount > 1），非用户可见语义
+- 循环引用策略：`Weak<T>` + arena+index 模式（设计见 design.md 7.9）
+
 - **前置依赖**：Linear types + B-011
 
 ### 语义驱动优化（AOT + JIT 共享）
@@ -450,45 +456,6 @@ source-map 支持 + 断点调试。
 
 > 非实现任务，而是设计探针。在对应 XL 特性实现前完成，防止特性交互导致事后 breaking change。
 
-### B-042 Perceus RC + 循环引用策略 [design] [P1] [M] [judgment] [queued]
-
-**已决策（2026-05-24）**：`Weak<T>` 库类型，确定性析构。
-
-**决策内容**：
-- `Weak<T>` 作为标准库类型（非关键字），配合 `Rc.downgrade()` 和 `.upgrade() -> T?`
-- 确定性析构——最后一个强引用 drop 时立即释放，Weak 引用变为 none
-- 不引入 cycle collector（破坏 RAII 确定性析构承诺）
-- 不做类型系统禁止循环（过于限制）
-- 图结构推荐 arena + index 模式（节点存 `List<Node>`，边用 `USize` index）
-
-**否决理由**：
-- Cycle collector：析构不确定，与 Ring 的 Drop/RAII 承诺冲突（Drop 延迟 = 资源泄漏风险）
-- 类型系统禁止循环：GUI/图/观察者全部写不了，限制过强
-- 混合方案：两套机制，复杂度高，收益不明显
-
-**场景覆盖**：
-
-| 场景 | 解法 |
-|------|------|
-| GUI 父子组件 | child 持有 `Weak<Parent>` |
-| 观察者模式 | listener 持有 `Weak<Emitter>` |
-| 双向链表 | prev 用 `Weak<Node>` |
-| 图结构 | arena + index（`List<Node>` + `List<USize>` 邻接表） |
-| 事件系统 | emitter 持有 `Weak<Listener>` |
-
-**涉及修改**：
-1. `std/rc.ring`：新增 `Weak<T>` 类型 + `Rc.downgrade()` + `Weak.upgrade()`
-2. design.md：写入循环引用策略
-3. B-012 Perceus spec：更新为包含 Weak 引用支持
-
-**验收标准**：
-- `Weak<T>` 类型可用，`.upgrade()` 返回 `T?`
-- 强引用归零后 Weak.upgrade() 返回 none
-- 确认与 Drop/RAII 不冲突
-- GUI 父子、观察者模式可写可编译
-
-**前置依赖**：无
-**阻塞**：B-012 Perceus RC
 
 
 ## 架构改进

@@ -1279,6 +1279,51 @@ fn(move T) -> U     // T 为 move（必须手写——唯一不可推断的 move
 - 逃逸闭包（如 spawn、存入字段）→ 需要 move/clone 捕获
 - 具体边界 case 待 B-002 实现阶段验证
 
+### 7.9 Perceus RC + 循环引用策略（2026-05-24 确定）
+
+Ring 采用 Perceus 精确引用计数（B-012），不引入 GC。循环引用通过 `Weak<T>` 库类型解决。
+
+**Perceus RC 路线**：
+- LLVM 后端初期：malloc-only（bootstrap 阶段，编译器是短命进程）
+- 正式阶段：Perceus RC（精确引用计数 + 重用分析 / reuse analysis）
+- COW（copy-on-write）为 Perceus 内部优化，不是用户可见语义
+
+**循环引用策略：`Weak<T>`**
+
+```ring
+// Weak<T> 是标准库类型（非关键字）
+let parent = Rc.new(Parent { ... })
+let child = Child { parent: Rc.downgrade(parent) }
+
+// 使用时升级
+match child.parent.upgrade() {
+    some(p) => p.name,
+    none => "parent already dropped"
+}
+```
+
+**决策内容**：
+- `Weak<T>` 作为标准库类型，配合 `Rc.downgrade()` 和 `.upgrade() -> T?`
+- 确定性析构——最后一个强引用 drop 时立即释放，Weak 引用变为 none
+- 不引入 cycle collector（破坏 RAII 确定性析构承诺——Drop 延迟 = 资源泄漏风险）
+- 不做类型系统禁止循环（GUI/图/观察者模式全部写不了，限制过强）
+- 图结构推荐 arena + index 模式（节点存 `List<Node>`，边用 `USize` index 邻接表）
+
+**场景覆盖**：
+
+| 场景 | 解法 |
+|------|------|
+| GUI 父子组件 | child 持有 `Weak<Parent>` |
+| 观察者模式 | listener 持有 `Weak<Emitter>` |
+| 双向链表 | prev 用 `Weak<Node>` |
+| 图结构 | arena + index（`List<Node>` + `List<USize>` 邻接表） |
+| 事件系统 | emitter 持有 `Weak<Listener>` |
+
+**否决方案**：
+- Cycle collector：析构不确定，与 Ring 的 Drop/RAII 承诺冲突
+- 类型系统禁止循环：限制过强
+- 混合方案（Perceus + cycle collector fallback）：两套机制，复杂度高
+
 ---
 
 ## 8. 并发模型 ⚠️ 设计愿景，尚未实现
