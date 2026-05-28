@@ -314,6 +314,64 @@ extern "C" void* ring_list_sort(void* list, void* closure) {
     return (void*)result;
 }
 
+static void* ring_enum_some(void* val) {
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+    opt[0] = 0;
+    *((void**)(opt + 1)) = val;
+    return (void*)opt;
+}
+
+static void* ring_enum_none() {
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+    opt[0] = 1;
+    opt[1] = 0;
+    return (void*)opt;
+}
+
+extern "C" void* ring_list_sort_default(void* list) {
+    auto* vec = (std::vector<void*>*)list;
+    auto* result = new std::vector<void*>(*vec);
+    std::sort(result->begin(), result->end(), [](void* a, void* b) -> bool {
+        return ring_unbox_int(a) < ring_unbox_int(b);
+    });
+    return (void*)result;
+}
+
+extern "C" void* ring_list_any(void* list, void* closure) {
+    auto* vec = (std::vector<void*>*)list;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (size_t i = 0; i < vec->size(); i++) {
+        void* r = fn(cls->env_ptr, (*vec)[i]);
+        if (ring_unbox_int(r) != 0) return ring_box_bool(1);
+    }
+    return ring_box_bool(0);
+}
+
+extern "C" void* ring_list_all(void* list, void* closure) {
+    auto* vec = (std::vector<void*>*)list;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (size_t i = 0; i < vec->size(); i++) {
+        void* r = fn(cls->env_ptr, (*vec)[i]);
+        if (ring_unbox_int(r) == 0) return ring_box_bool(0);
+    }
+    return ring_box_bool(1);
+}
+
+extern "C" void* ring_list_find(void* list, void* closure) {
+    auto* vec = (std::vector<void*>*)list;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (size_t i = 0; i < vec->size(); i++) {
+        void* r = fn(cls->env_ptr, (*vec)[i]);
+        if (ring_unbox_int(r) != 0) {
+            return ring_enum_some((*vec)[i]);
+        }
+    }
+    return ring_enum_none();
+}
+
 extern "C" void* ring_list_map(void* list, void* closure) {
     auto* vec = (std::vector<void*>*)list;
     auto* result = new std::vector<void*>();

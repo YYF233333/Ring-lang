@@ -18,6 +18,9 @@ extern fn LLVMGetInsertBlock(builder: LLVMBuilderRef) -> LLVMBasicBlockRef
 extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
 extern fn LLVMGetEntryBasicBlock(fn_val: LLVMValueRef) -> LLVMBasicBlockRef
 extern fn LLVMPositionBuilderAtEnd(builder: LLVMBuilderRef, bb: LLVMBasicBlockRef) -> Unit
+extern fn LLVMGetFirstInstruction(bb: LLVMBasicBlockRef) -> LLVMValueRef
+extern fn LLVMPositionBuilderBefore(builder: LLVMBuilderRef, instr: LLVMValueRef) -> Unit
+extern fn LLVMIsNullPtr(val: LLVMValueRef) -> Int
 
 // ============================================================
 // Shared data structures for LLVM codegen
@@ -186,7 +189,12 @@ pub fn build_entry_alloca(mut ctx: LlvmCtx, ty: LLVMTypeRef, name: Str) -> LLVMV
     let current_bb = LLVMGetInsertBlock(ctx.builder)
     let fn_val = LLVMGetBasicBlockParent(current_bb)
     let entry_bb = LLVMGetEntryBasicBlock(fn_val)
-    LLVMPositionBuilderAtEnd(ctx.builder, entry_bb)
+    let first_instr = LLVMGetFirstInstruction(entry_bb)
+    if LLVMIsNullPtr(first_instr) == 0 {
+        LLVMPositionBuilderBefore(ctx.builder, first_instr)
+    } else {
+        LLVMPositionBuilderAtEnd(ctx.builder, entry_bb)
+    }
     let alloca = LLVMBuildAlloca(ctx.builder, ty, name)
     LLVMPositionBuilderAtEnd(ctx.builder, current_bb)
     alloca

@@ -248,6 +248,9 @@ function to_result(f) {
 
 
 
+
+
+
 class StructFieldInfo {
   constructor(field_names, llvm_type) {
     this.field_names = field_names;
@@ -399,7 +402,12 @@ function build_entry_alloca(ctx, ty, name) {
   const current_bb = LLVMGetInsertBlock(ctx.builder);
   const fn_val = LLVMGetBasicBlockParent(current_bb);
   const entry_bb = LLVMGetEntryBasicBlock(fn_val);
-  LLVMPositionBuilderAtEnd(ctx.builder, entry_bb);
+  const first_instr = LLVMGetFirstInstruction(entry_bb);
+  if ((LLVMIsNullPtr(first_instr) === 0)) {
+    LLVMPositionBuilderBefore(ctx.builder, first_instr);
+  } else {
+    LLVMPositionBuilderAtEnd(ctx.builder, entry_bb);
+  }
   const alloca = LLVMBuildAlloca(ctx.builder, ty, name);
   LLVMPositionBuilderAtEnd(ctx.builder, current_bb);
   return alloca;

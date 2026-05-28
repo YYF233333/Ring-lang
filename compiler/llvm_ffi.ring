@@ -119,6 +119,9 @@ pub extern fn LLVMSetFunctionCallConv(fn_val: LLVMValueRef, call_conv: Int) -> U
 
 pub extern fn LLVMGetEntryBasicBlock(fn_val: LLVMValueRef) -> LLVMBasicBlockRef
 pub extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
+pub extern fn LLVMGetFirstInstruction(bb: LLVMBasicBlockRef) -> LLVMValueRef
+pub extern fn LLVMPositionBuilderBefore(builder: LLVMBuilderRef, instr: LLVMValueRef) -> Unit
+pub extern fn LLVMIsNullPtr(val: LLVMValueRef) -> Int
 
 // attr_index: Int (0 = return, 1.. = params, -1 = function)
 pub extern fn LLVMAddAttributeAtIndex(fn_val: LLVMValueRef, attr_index: Int, attr: LLVMAttributeRef) -> Unit

@@ -549,6 +549,29 @@ fn emit_c_main(mut ctx: LlvmCtx) {
     let entry = LLVMAppendBasicBlockInContext(ctx.context, main_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
+    // Call ring_runtime_init(argc, argv) to set up process args
+    let argc_val = LLVMGetParam(main_fn, 0)
+    let argv_val = LLVMGetParam(main_fn, 1)
+    let init_name = "ring_runtime_init"
+    match ctx.functions.get(init_name) {
+        some(init_fn) => {
+            let init_ty = match ctx.fn_types.get(init_name) {
+                some(t) => t,
+                none => {
+                    let init_params: List<LLVMTypeRef> = [i32_ty, ptr]
+                    LLVMFunctionType(ctx.void_type, init_params, 0)
+                },
+            }
+            discard(LLVMBuildCall2(ctx.builder, init_ty, init_fn, [argc_val, argv_val], ""))
+        },
+        none => {
+            let init_params: List<LLVMTypeRef> = [i32_ty, ptr]
+            let init_ty = LLVMFunctionType(ctx.void_type, init_params, 0)
+            let init_fn = LLVMAddFunction(ctx.module, init_name, init_ty)
+            discard(LLVMBuildCall2(ctx.builder, init_ty, init_fn, [argc_val, argv_val], ""))
+        },
+    }
+
     // Call ring_main() — find it in our functions map
     let ring_main_name = llvm_mangle_fn("main")
     match ctx.functions.get(ring_main_name) {
@@ -836,6 +859,15 @@ fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
 
     let entry = LLVMAppendBasicBlockInContext(ctx.context, main_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Call ring_runtime_init(argc, argv) to set up process args
+    let argc_val = LLVMGetParam(main_fn, 0)
+    let argv_val = LLVMGetParam(main_fn, 1)
+    let init_name = "ring_runtime_init"
+    let init_params: List<LLVMTypeRef> = [i32_ty, ptr]
+    let init_ty = LLVMFunctionType(ctx.void_type, init_params, 0)
+    let init_fn = LLVMAddFunction(ctx.module, init_name, init_ty)
+    discard(LLVMBuildCall2(ctx.builder, init_ty, init_fn, [argc_val, argv_val], ""))
 
     // Look for ring_<prefix>$_main
     let ring_main_name = llvm_mangle_fn_with_prefix(entry_prefix, "main")
