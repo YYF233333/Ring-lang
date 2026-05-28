@@ -338,7 +338,7 @@ fn test_fetch() {
   - ✅ ring_list_any/ring_list_all 返回 int64_t（修复 has_errors() false positive）
   - ✅ __ring_raise_fail 实现 + crash handler + panic fallback
   - ring.exe 现在成功执行：CLI 参数解析 → 文件读取 → lexer → parser → checker 入口
-  - **当前阻塞**：checker/inference 深层 crash（checkpoint ~35909），不是缺失函数而是 LLVM IR codegen 逻辑 bug（可能是 enum match 分支或 struct 字段偏移问题）
+  - **当前阻塞**：checker 初始化 crash（map_set #69，紧接 "print" 注册之后），key 参数不是有效 std::string（size=2.5T）。根因是 LLVM codegen 的 `TypeEnv.bind` 参数传递类型混淆——非 string 值被当作 Map key。需对比 `bind` 函数 IR 与源码定位参数错位
 
 **验收标准**：
 - ~~Ring 编译器编译自身为 native .o~~ ✅ （2026-05-28）
