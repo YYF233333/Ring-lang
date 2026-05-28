@@ -104,25 +104,90 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_str_concat", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_str_eq", [ptr, ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_str_lt", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_str_get", [ptr, i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_contains", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_str_starts_with", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_str_ends_with", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_str_slice", [ptr, i64, i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_split", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_replace", [ptr, ptr, ptr], ptr)
 
     // StringBuilder
     get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_sb_add", [ptr, ptr], void)
+    get_or_declare_runtime_fn(ctx, "ring_sb_add", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_sb_len", [ptr], i64)
 
-    // Int/Float/Bool to Str
-    get_or_declare_runtime_fn(ctx, "ring_int_to_str", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_float_to_str", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_bool_to_str", [ptr], ptr)
+    // Int/Float/Bool to Str — match C signatures: int64_t, double, ptr (boxed bool)
+    get_or_declare_runtime_fn(ctx, "ring_int_to_str", [i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_float_to_str", [dbl], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_bool_to_str", [i64], ptr)
 
-    // IO
-    get_or_declare_runtime_fn(ctx, "ring_print", [ptr], void)
-    get_or_declare_runtime_fn(ctx, "ring_eprintln", [ptr], void)
-    get_or_declare_runtime_fn(ctx, "ring_panic", [ptr], void)
-    get_or_declare_runtime_fn(ctx, "ring_exit", [i64], void)
+    // IO — C runtime returns void* (nullptr) for all of these
+    get_or_declare_runtime_fn(ctx, "ring_print", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_eprintln", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_panic", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_exit", [i64], ptr)
 
     // Memory allocation (for struct/enum construction)
     get_or_declare_runtime_fn(ctx, "malloc", [i64], ptr)
+
+    // List
+    get_or_declare_runtime_fn(ctx, "ring_list_new", [], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_push", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_get", [ptr, i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_list_join", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_concat", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_slice", [ptr, i64, i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_reverse", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_sort", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_pop", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_contains", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_list_index_of", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_list_is_empty", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_list_first", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_last", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_map", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_filter", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_for_each", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_set", [ptr, i64, ptr], ptr)
+
+    // Map
+    get_or_declare_runtime_fn(ctx, "ring_map_new", [], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_get", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_set", [ptr, ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_has", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_map_delete", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_keys", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_values", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_entries", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_map_for_each", [ptr, ptr], ptr)
+
+    // Set
+    get_or_declare_runtime_fn(ctx, "ring_set_new", [], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_add", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_has", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_set_delete", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_to_list", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_set_from_list", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_for_each", [ptr, ptr], ptr)
+
+    // Catch / raise (setjmp/longjmp based)
+    get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], void)
+    get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_raise", [ptr], void)
+
+    // Args
+    get_or_declare_runtime_fn(ctx, "ring_args", [], ptr)
+
+    // File IO
+    get_or_declare_runtime_fn(ctx, "ring_read_file", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_write_file", [ptr, ptr], ptr)
 }
 
 // ============================================================
@@ -450,7 +515,10 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         local_fn_effects: map_new(),
         fn_evidence_params: map_new(),
         tmp_counter: 0,
-        current_fn: none
+        lambda_counter: 0,
+        current_fn: none,
+        loop_break_bb: none,
+        loop_continue_bb: none
     }
 
     // 6. Register built-in types (Option, Result — not in HDecl, handled by runtime)

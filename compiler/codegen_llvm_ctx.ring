@@ -66,9 +66,14 @@ pub struct LlvmCtx {
 
     // Counters
     pub tmp_counter: Int,
+    pub lambda_counter: Int,
 
     // Current function being codegen'd
-    pub current_fn: LLVMValueRef?
+    pub current_fn: LLVMValueRef?,
+
+    // Loop context for break/continue
+    pub loop_break_bb: LLVMBasicBlockRef?,
+    pub loop_continue_bb: LLVMBasicBlockRef?
 }
 
 // ============================================================

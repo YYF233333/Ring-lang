@@ -203,6 +203,10 @@ extern "C" void* ring_float_to_str(double val) {
     return (void*)new std::string(std::to_string(val));
 }
 
+extern "C" void* ring_bool_to_str(int64_t val) {
+    return (void*)new std::string(val ? "true" : "false");
+}
+
 // ============================================================================
 // List (~18)
 // ============================================================================
