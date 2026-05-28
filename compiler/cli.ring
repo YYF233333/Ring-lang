@@ -147,13 +147,15 @@ struct CliArgs {
     file: Str,
     debug: Bool,
     error_format: Str,
-    out_dir: Str
+    out_dir: Str,
+    target: Str
 }
 
 fn parse_cli_args(args: List<Str>) -> CliArgs {
     let mut debug = false
     let mut error_format = "human"
     let mut out_dir = "dist"
+    let mut target = "js"
     let mut positional: List<Str> = []
 
     for arg in args {
@@ -166,7 +168,11 @@ fn parse_cli_args(args: List<Str>) -> CliArgs {
                 if arg.starts_with("--out-dir=") {
                     out_dir = arg.slice(10, arg.len())
                 } else {
-                    positional.push(arg)
+                    if arg.starts_with("--target=") {
+                        target = arg.slice(9, arg.len())
+                    } else {
+                        positional.push(arg)
+                    }
                 }
             }
         }
@@ -180,7 +186,8 @@ fn parse_cli_args(args: List<Str>) -> CliArgs {
         file: file,
         debug: debug,
         error_format: error_format,
-        out_dir: out_dir
+        out_dir: out_dir,
+        target: target
     }
 }
 
@@ -197,4 +204,5 @@ fn usage() {
     print("  --debug                   Print intermediate info")
     print("  --error-format=human|llm  Error output format (default: human)")
     print("  --out-dir=<path>          Output directory (default: dist)")
+    print("  --target=js|llvm          Code generation target (default: js)")
 }
