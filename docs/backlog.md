@@ -574,35 +574,19 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - 自举编译器正常编译自身
 
 ### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [doing]
-HM 推断失败时的错误信息质量直接决定"像 Python"承诺的可信度。当前 checker 错误信息面向类型系统开发者，非面向终端用户。
+> ✅ Phase 1 已完成（2026-05-29）：基础设施 + 10 个关键 unify 调用点 + notes 渲染。剩余场景（空集合、row poly、effect 不匹配专用消息）后续迭代。
 
-**核心问题**：HM unification 的错误位置和原因可能离实际 bug 很远。例如 row polymorphism 推断失败时，报错可能在 unify 点而非用户写错的位置。
+**已完成**：
+- `type_error_with_notes()` + `unify_at_noted()` 基础设施
+- 10 个 unify 调用点加了约束来源 notes（let/var/assign/return/call/method/struct-field/match/if-else）
+- `format_human` 渲染 `= note:` 行，`format_llm` 输出 `notes` 数组
+- 5 个新测试验证 notes 功能
 
-**目标**：
-1. **错误定位准确**：报错指向用户写错的位置，不是 unification 失败的位置
-2. **原因可理解**：解释"期望什么类型、为什么期望、实际是什么"，不暴露类型变量内部名（`_t42`）
-3. **修复建议可执行**：`--error-format=llm` 给出具体修复步骤（加标注、改类型、改函数签名）
-4. **常见场景覆盖**：空集合推断失败、row poly 字段缺失、effect 不匹配、泛型约束不满足
-
-**具体场景**：
-- 空集合直接返回（`fn f() { [] }`）→ "无法推断返回类型，请添加返回类型标注：`fn f() -> List<T>`"
-- Row poly 字段缺失 → "类型 `User` 缺少字段 `age`，因为在第 X 行 `x.age` 的使用要求该字段存在"
-- 多处使用类型冲突 → 指向第一个确定类型的位置 + 冲突位置，而非 unification 内部失败点
-- Effect 不匹配 → "函数 `f` 需要 `io` effect，但当前上下文未提供 handler"
-
-**涉及修改**：
-1. `diagnostic.ring`：错误信息模板重写，增加"原因链"（why chain）
-2. `infer.ring`：unification 失败时记录约束来源（哪一行的什么表达式引入了这个约束）
-3. `unify.ring`：`unify_error` 携带双侧来源 span（期望来源 + 实际来源）
-4. `checker.ring`：error-format=llm 的修复建议生成
-
-**验收标准**：
-- 空集合推断失败 → 报错指向定义点，建议加类型标注
-- Row poly 字段缺失 → 报错指向字段访问点，说明缺少的字段名
-- 类型冲突 → 报错展示两侧来源（不只是 unify 失败点）
-- `--error-format=llm` 对以上场景均给出可执行修复建议
-- 不引入新的公共 API / 不改变编译行为
-- 全部 E2E 测试通过
+**待做（后续迭代）**：
+- 空集合推断失败 → 建议加类型标注
+- Row poly 字段缺失 → 指向字段访问点
+- Effect 不匹配 → 说明缺少的 effect + handler
+- `--error-format=llm` 修复建议增强
 
 
 

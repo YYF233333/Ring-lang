@@ -431,6 +431,16 @@ function type_error(sink, code, message, span, context) {
   return types$Type_ErrorType;
 }
 
+function type_error_with_notes(sink, code, message, span, context, notes) {
+  let diag = diagnostics$make_diagnostic(code, diagnostics$Severity_SevError, message, span, context, notes);
+  const suggestions = infer_suggestion(code, message, context);
+  if ((List_len(suggestions) > 0)) {
+    diag = new diagnostics$Diagnostic(diag.severity, diag.code, diag.message, diag.span, diag.notes, diag.context, suggestions, diag.category);
+  }
+  diagnostics$CollectingSink_report(sink, diag);
+  return types$Type_ErrorType;
+}
+
 function merge_effects(env, a, b, s, __ring_ev_fail) {
   const resolved_a = env$apply_subst_row(s, a);
   const resolved_b = env$apply_subst_row(s, b);
@@ -475,6 +485,14 @@ function unify_at(sink, env, t1, t2, s, span) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return unify$unify(t1, t2, s, env, __ring_ev_fail); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return (function() {
   const code = (e.is_occurs_check ? codes$E0302 : codes$E0301);
   const _ = type_error(sink, code, e.message, span, diagnostics$DiagnosticContext_TypeMismatch(types$type_to_string(env$apply_subst(s, t1)), types$type_to_string(env$apply_subst(s, t2)), Option_none));
+  return s;
+})(); } else { throw __ring_e; } } throw __ring_e; } })();
+}
+
+function unify_at_noted(sink, env, t1, t2, s, span, notes) {
+  return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return unify$unify(t1, t2, s, env, __ring_ev_fail); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return (function() {
+  const code = (e.is_occurs_check ? codes$E0302 : codes$E0301);
+  const _ = type_error_with_notes(sink, code, e.message, span, diagnostics$DiagnosticContext_TypeMismatch(types$type_to_string(env$apply_subst(s, t1)), types$type_to_string(env$apply_subst(s, t2)), Option_none), notes);
   return s;
 })(); } else { throw __ring_e; } } throw __ring_e; } })();
 }
@@ -2398,4 +2416,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { InferResult, FnBoundsEntry, CompileError, InferCtx, new_infer_ctx, type_error, merge_effects, unify_at, free_type_vars, collect_free_vars, free_type_vars_in_env, generalize, update_fn_effects, build_scheme_var_map, resolve_dicts_from_scheme, resolve_type_expr, resolve_self_type, resolve_named_type, bind_pattern, remove_fail_effect, resolve_relative_qualifier, __FnBoundsEntry_Eq, __CompileError_Eq, __FnBoundsEntry_Clone, __CompileError_Clone, __FnBoundsEntry_Ord, __CompileError_Ord, __FnBoundsEntry_Debug, __CompileError_Debug };
+export { InferResult, FnBoundsEntry, CompileError, InferCtx, new_infer_ctx, type_error, type_error_with_notes, merge_effects, unify_at, unify_at_noted, free_type_vars, collect_free_vars, free_type_vars_in_env, generalize, update_fn_effects, build_scheme_var_map, resolve_dicts_from_scheme, resolve_type_expr, resolve_self_type, resolve_named_type, bind_pattern, remove_fail_effect, resolve_relative_qualifier, __FnBoundsEntry_Eq, __CompileError_Eq, __FnBoundsEntry_Clone, __CompileError_Clone, __FnBoundsEntry_Ord, __CompileError_Ord, __FnBoundsEntry_Debug, __CompileError_Debug };

@@ -5,7 +5,7 @@ use types::{Type, Effect, EffectRow, RecordField, StructField,
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr}
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
-use diagnostics::{DiagnosticContext, Diagnostic, CollectingSink, Severity, Suggestion, make_diag}
+use diagnostics::{DiagnosticContext, DiagnosticNote, Diagnostic, CollectingSink, Severity, Suggestion, make_diag, make_diagnostic}
 use codes::{E0201, E0204, E0301, E0302, E0503, E0511, E0512, E0513, E0705}
 use union_find::{UnionFind, new_union_find, uf_find}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl, lookup_variant}
@@ -257,6 +257,16 @@ pub fn type_error(mut sink: CollectingSink, code: Str, message: Str, span: Span,
     Type::ErrorType
 }
 
+pub fn type_error_with_notes(mut sink: CollectingSink, code: Str, message: Str, span: Span, context: DiagnosticContext, notes: List<DiagnosticNote>) -> Type {
+    let mut diag = make_diagnostic(code, Severity::SevError, message, span, context, notes)
+    let suggestions = infer_suggestion(code, message, context)
+    if suggestions.len() > 0 {
+        diag = Diagnostic { ..diag, suggestions: suggestions }
+    }
+    sink.report(diag)
+    Type::ErrorType
+}
+
 // ============================================================
 // Unification / effect helpers
 // ============================================================
@@ -304,6 +314,20 @@ pub fn unify_at(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: Union
                 actual: type_to_string(apply_subst(s, t2)),
                 expression: none
             })
+            s
+        }
+    }
+}
+
+pub fn unify_at_noted(sink: CollectingSink, env: TypeEnv, t1: Type, t2: Type, s: UnionFind, span: Span, notes: List<DiagnosticNote>) -> UnionFind {
+    unify(t1, t2, s, env) catch {
+        e => {
+            let code = if e.is_occurs_check { E0302 } else { E0301 }
+            let _ = type_error_with_notes(sink, code, e.message, span, DiagnosticContext::TypeMismatch {
+                expected: type_to_string(apply_subst(s, t1)),
+                actual: type_to_string(apply_subst(s, t2)),
+                expression: none
+            }, notes)
             s
         }
     }

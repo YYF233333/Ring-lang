@@ -7,7 +7,7 @@ import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104
 import { new_union_find as union_find$new_union_find, uf_find as union_find$uf_find, uf_bind as union_find$uf_bind, uf_lookup as union_find$uf_lookup, uf_union as union_find$uf_union, uf_insert as union_find$uf_insert, UnionFind as union_find$UnionFind } from "./union_find.js";
 import { lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, add_impl as env$add_impl, has_impl as env$has_impl, find_impl as env$find_impl, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, AssocConstraintEntry as env$AssocConstraintEntry, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 import { empty_subst as unify$empty_subst, occurs_in as unify$occurs_in, unify_effect_params as unify$unify_effect_params, unify_effect_rows as unify$unify_effect_rows, unify as unify$unify, UnificationError as unify$UnificationError, __UnificationError_Eq as unify$__UnificationError_Eq, __UnificationError_Clone as unify$__UnificationError_Clone, __UnificationError_Ord as unify$__UnificationError_Ord, __UnificationError_Debug as unify$__UnificationError_Debug } from "./unify.js";
-import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_error, merge_effects as infer_ctx$merge_effects, unify_at as infer_ctx$unify_at, free_type_vars as infer_ctx$free_type_vars, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, update_fn_effects as infer_ctx$update_fn_effects, build_scheme_var_map as infer_ctx$build_scheme_var_map, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_type_expr as infer_ctx$resolve_type_expr, resolve_self_type as infer_ctx$resolve_self_type, resolve_named_type as infer_ctx$resolve_named_type, bind_pattern as infer_ctx$bind_pattern, remove_fail_effect as infer_ctx$remove_fail_effect, resolve_relative_qualifier as infer_ctx$resolve_relative_qualifier, InferResult as infer_ctx$InferResult, FnBoundsEntry as infer_ctx$FnBoundsEntry, CompileError as infer_ctx$CompileError, InferCtx as infer_ctx$InferCtx, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug, __CompileError_Eq as infer_ctx$__CompileError_Eq, __CompileError_Clone as infer_ctx$__CompileError_Clone, __CompileError_Ord as infer_ctx$__CompileError_Ord, __CompileError_Debug as infer_ctx$__CompileError_Debug } from "./infer_ctx.js";
+import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_error, type_error_with_notes as infer_ctx$type_error_with_notes, merge_effects as infer_ctx$merge_effects, unify_at as infer_ctx$unify_at, unify_at_noted as infer_ctx$unify_at_noted, free_type_vars as infer_ctx$free_type_vars, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, update_fn_effects as infer_ctx$update_fn_effects, build_scheme_var_map as infer_ctx$build_scheme_var_map, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_type_expr as infer_ctx$resolve_type_expr, resolve_self_type as infer_ctx$resolve_self_type, resolve_named_type as infer_ctx$resolve_named_type, bind_pattern as infer_ctx$bind_pattern, remove_fail_effect as infer_ctx$remove_fail_effect, resolve_relative_qualifier as infer_ctx$resolve_relative_qualifier, InferResult as infer_ctx$InferResult, FnBoundsEntry as infer_ctx$FnBoundsEntry, CompileError as infer_ctx$CompileError, InferCtx as infer_ctx$InferCtx, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug, __CompileError_Eq as infer_ctx$__CompileError_Eq, __CompileError_Clone as infer_ctx$__CompileError_Clone, __CompileError_Ord as infer_ctx$__CompileError_Ord, __CompileError_Debug as infer_ctx$__CompileError_Debug } from "./infer_ctx.js";
 import { check_exhaustive as exhaustive$check_exhaustive } from "./exhaustive.js";
 
 
@@ -447,7 +447,8 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
         if (__ring_m16._tag === "some") {
           const ta = __ring_m16._0;
           const annotated = infer_ctx$resolve_type_expr(ctx, ta);
-          s = infer_ctx$unify_at(ctx.sink, ctx.env, var_type, annotated, s, span);
+          const notes = [new diagnostics$DiagnosticNote(`expected '${types$type_to_string(annotated)}' because variable '${name}' is declared with this type`, Option_some(name_span)), new diagnostics$DiagnosticNote(`initializer has type '${types$type_to_string(env$apply_subst(s, var_type))}'`, Option_some(hir$hexpr_span(init_r.hexpr)))];
+          s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, var_type, annotated, s, span, notes);
           var_type = env$apply_subst(s, annotated);
           break __ring_match16;
         }
@@ -490,7 +491,8 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
         if (__ring_m17._tag === "some") {
           const ta = __ring_m17._0;
           const annotated = infer_ctx$resolve_type_expr(ctx, ta);
-          s = infer_ctx$unify_at(ctx.sink, ctx.env, var_type, annotated, s, span);
+          const notes = [new diagnostics$DiagnosticNote(`expected '${types$type_to_string(annotated)}' because variable '${name}' is declared with this type`, Option_some(name_span)), new diagnostics$DiagnosticNote(`initializer has type '${types$type_to_string(env$apply_subst(s, var_type))}'`, Option_some(hir$hexpr_span(init_r.hexpr)))];
+          s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, var_type, annotated, s, span, notes);
           var_type = env$apply_subst(s, annotated);
           break __ring_match17;
         }
@@ -535,7 +537,8 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
       check_assign_target_mutable(ctx, target);
       const target_r = infer_expr(ctx, target, subst, __ring_ev_fail);
       const value_r = infer_expr(ctx, value, target_r.subst, __ring_ev_fail);
-      let s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(target_r.hexpr), hir$hexpr_type(value_r.hexpr), value_r.subst, span);
+      const assign_notes = [new diagnostics$DiagnosticNote(`target has type '${types$type_to_string(env$apply_subst(value_r.subst, hir$hexpr_type(target_r.hexpr)))}'`, Option_some(hir$hexpr_span(target_r.hexpr))), new diagnostics$DiagnosticNote(`assigned value has type '${types$type_to_string(env$apply_subst(value_r.subst, hir$hexpr_type(value_r.hexpr)))}'`, Option_some(hir$hexpr_span(value_r.hexpr)))];
+      let s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(target_r.hexpr), hir$hexpr_type(value_r.hexpr), value_r.subst, span, assign_notes);
       const me = infer_ctx$merge_effects(ctx.env, target_r.effects, value_r.effects, s, __ring_ev_fail);
       s = me[1];
       return new StmtResult(hir$HStmt_Assign(target_r.hexpr, value_r.hexpr, span), s, me[0]);
@@ -559,7 +562,8 @@ function infer_stmt(ctx, stmt, subst, __ring_ev_fail) {
             const __ring_m21 = ctx.current_fn_return_type;
             if (__ring_m21._tag === "some") {
               const ret_type = __ring_m21._0;
-              s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(r.hexpr), ret_type, s, span);
+              const return_notes = [new diagnostics$DiagnosticNote(`function return type is '${types$type_to_string(env$apply_subst(s, ret_type))}'`, Option_none), new diagnostics$DiagnosticNote(`return value has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(r.hexpr)))}'`, Option_some(hir$hexpr_span(r.hexpr)))];
+              s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(r.hexpr), ret_type, s, span, return_notes);
               break __ring_match21;
             }
             if (__ring_m21._tag === "none") {
@@ -2120,7 +2124,13 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
   const ret_var = env$TypeEnv_fresh_var(ctx.env);
   const effect_tail = env$TypeEnv_fresh_var_id(ctx.env);
   const expected_fn = types$Type_FnType(arg_types, ret_var, new types$EffectRow([], Option_some(effect_tail)));
-  s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(callee_r.hexpr), expected_fn, s, span);
+  const callee_name_for_note = (function() {
+  const __ring_m = callee;
+  if (__ring_m._tag === "Ident") { const cn = __ring_m.name; return cn; }
+  return "<expression>";
+})();
+  const call_notes = [new diagnostics$DiagnosticNote(`calling '${callee_name_for_note}' with ${Int_to_str(List_len(arg_types))} argument(s)`, Option_some(span))];
+  s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(callee_r.hexpr), expected_fn, s, span, call_notes);
   const resolved_callee_type = env$apply_subst(s, hir$hexpr_type(callee_r.hexpr));
   __ring_match95: {
     const __ring_m95 = resolved_callee_type;
@@ -2687,7 +2697,8 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
               const __ring_m134 = List_first(mt_params);
               if (__ring_m134._tag === "some") {
                 const first_param = __ring_m134._0;
-                s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(recv_r.hexpr), first_param, s, span);
+                const recv_notes = [new diagnostics$DiagnosticNote(`method '${method}' expects receiver of type '${types$type_to_string(env$apply_subst(s, first_param))}'`, Option_some(span)), new diagnostics$DiagnosticNote(`receiver has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(recv_r.hexpr)))}'`, Option_some(hir$hexpr_span(recv_r.hexpr)))];
+                s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(recv_r.hexpr), first_param, s, span, recv_notes);
                 break __ring_match134;
               }
               if (__ring_m134._tag === "none") {
@@ -2772,7 +2783,9 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
                 const __ring_m138 = List_get(mt_params, (i + 1));
                 if (__ring_m138._tag === "some") {
                   const expected_param = __ring_m138._0;
-                  s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(harg), expected_param, s, span);
+                  const arg_num = Int_to_str((i + 1));
+                  const marg_notes = [new diagnostics$DiagnosticNote(`argument ${arg_num} of method '${method}' expects type '${types$type_to_string(env$apply_subst(s, expected_param))}'`, Option_some(span)), new diagnostics$DiagnosticNote(`argument has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(harg)))}'`, Option_some(hir$hexpr_span(harg)))];
+                  s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(harg), expected_param, s, span, marg_notes);
                   break __ring_match138;
                 }
                 if (__ring_m138._tag === "none") {
@@ -3447,7 +3460,8 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
       if (__ring_m178._tag === "some") {
         const df = __ring_m178._0;
         const ft = env$apply_subst_map(inst_map, df.ty);
-        s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(fr.hexpr), ft, s, span);
+        const field_notes = [new diagnostics$DiagnosticNote(`field '${field.name}' of struct '${name}' expects type '${types$type_to_string(ft)}'`, Option_some(field.span)), new diagnostics$DiagnosticNote(`provided value has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(fr.hexpr)))}'`, Option_some(hir$hexpr_span(fr.hexpr)))];
+        s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(fr.hexpr), ft, s, span, field_notes);
         break __ring_match178;
       }
       if (__ring_m178._tag === "none") {
@@ -3738,7 +3752,8 @@ function infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail) {
   const me = infer_ctx$merge_effects(ctx.env, effects, body_r.effects, s, __ring_ev_fail);
   effects = me[0];
   s = me[1];
-  s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(body_r.hexpr), result_type, s, arm.span);
+  const match_notes = [new diagnostics$DiagnosticNote("match arms must all have the same type", Option_some(arm.span)), new diagnostics$DiagnosticNote(`this arm has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(body_r.hexpr)))}'`, Option_some(hir$hexpr_span(body_r.hexpr)))];
+  s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(body_r.hexpr), result_type, s, arm.span, match_notes);
   List_push(harms, new hir$HMatchArm(match_pattern, guard_hexpr, body_r.hexpr, arm.span));
   return true;
 })()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
@@ -3795,7 +3810,8 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
           const me2 = infer_ctx$merge_effects(ctx.env, effects, else_r.effects, s, __ring_ev_fail);
           effects = me2[0];
           s = me2[1];
-          s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(then_r.hexpr), hir$hexpr_type(else_r.hexpr), s, span);
+          const if_notes = [new diagnostics$DiagnosticNote(`then branch has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(then_r.hexpr)))}'`, Option_some(hir$hexpr_span(then_r.hexpr))), new diagnostics$DiagnosticNote(`else branch has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(else_r.hexpr)))}'`, Option_some(hir$hexpr_span(else_r.hexpr)))];
+          s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(then_r.hexpr), hir$hexpr_type(else_r.hexpr), s, span, if_notes);
           result_type = env$apply_subst(s, hir$hexpr_type(then_r.hexpr));
           else_hexpr = Option_some(else_r.hexpr);
           break __ring_match191;
@@ -3807,7 +3823,8 @@ function infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_
           const me2 = infer_ctx$merge_effects(ctx.env, effects, else_if_r.effects, s, __ring_ev_fail);
           effects = me2[0];
           s = me2[1];
-          s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(then_r.hexpr), hir$hexpr_type(else_if_r.hexpr), s, span);
+          const elif_notes = [new diagnostics$DiagnosticNote(`then branch has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(then_r.hexpr)))}'`, Option_some(hir$hexpr_span(then_r.hexpr))), new diagnostics$DiagnosticNote(`else branch has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(else_if_r.hexpr)))}'`, Option_some(hir$hexpr_span(else_if_r.hexpr)))];
+          s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(then_r.hexpr), hir$hexpr_type(else_if_r.hexpr), s, span, elif_notes);
           result_type = env$apply_subst(s, hir$hexpr_type(then_r.hexpr));
           else_hexpr = Option_some(hir$HExpr_Block([], Option_some(else_if_r.hexpr), hir$hexpr_type(else_if_r.hexpr), else_if_r.effects, espan));
           break __ring_match191;

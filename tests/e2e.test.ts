@@ -595,6 +595,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_assoc_type_bound.ring", error_pattern: "E0513" },
     { file: "error_assoc_type_name_display.ring", error_pattern: "Item" },
     { file: "error_impl_target_type_arg.ring", error_pattern: "E0105" },
+    { file: "error_diagnostic_notes.ring", error_pattern: "E0301" },
   ];
 
   for (const tc of negative_cases) {
@@ -682,6 +683,73 @@ describe("e2e: diagnostic suggestions and categories", { concurrency: true }, ()
     const human_output = format_human(sink.items, source);
     assert.ok(human_output.includes("help:"), `Expected 'help:' in human output, got: ${human_output.slice(0, 300)}`);
     assert.ok(human_output.includes("parse_int"), `Expected 'parse_int' in human output, got: ${human_output.slice(0, 300)}`);
+  });
+
+  test("type mismatch diagnostic includes notes with constraint source", () => {
+    const filePath = path.join(CASES_DIR, "error_with_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const diags = sink.items.filter((d: any) => d.severity._tag === "SevError");
+    assert.ok(diags.length > 0, "Expected at least one error diagnostic");
+    const d = diags[0] as any;
+    // Verify notes are present
+    assert.ok(d.notes.length >= 2, `Expected at least 2 notes, got ${d.notes.length}`);
+    // First note explains why the type was expected
+    assert.ok(d.notes[0].message.includes("expected") && d.notes[0].message.includes("Int"),
+      `Expected note about expected type, got: ${d.notes[0].message}`);
+    // Second note explains the actual type
+    assert.ok(d.notes[1].message.includes("Str"),
+      `Expected note about actual type Str, got: ${d.notes[1].message}`);
+  });
+
+  test("format_human renders note: lines", () => {
+    const filePath = path.join(CASES_DIR, "error_with_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const human_output = format_human(sink.items, source);
+    assert.ok(human_output.includes("note:"), `Expected 'note:' in human output, got: ${human_output.slice(0, 500)}`);
+    assert.ok(human_output.includes("expected"), `Expected 'expected' in note text, got: ${human_output.slice(0, 500)}`);
+  });
+
+  test("format_llm includes notes array in JSON output", () => {
+    const filePath = path.join(CASES_DIR, "error_with_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const json_output = format_llm(sink.items, filePath);
+    const parsed = JSON.parse(json_output);
+    assert.ok(parsed.diagnostics.length > 0, "Expected diagnostics in LLM output");
+    const d = parsed.diagnostics[0];
+    assert.ok(Array.isArray(d.notes), "Expected notes to be an array in LLM JSON");
+    assert.ok(d.notes.length >= 2, `Expected at least 2 notes in LLM JSON, got ${d.notes.length}`);
+    assert.ok(d.notes[0].message.includes("expected"), `Expected constraint source note, got: ${d.notes[0].message}`);
+  });
+
+  test("function return type mismatch includes constraint notes", () => {
+    const filePath = path.join(CASES_DIR, "error_diagnostic_notes.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const diags = sink.items.filter((d: any) => d.severity._tag === "SevError");
+    assert.ok(diags.length > 0, "Expected at least one error for return type mismatch");
+    const d = diags[0] as any;
+    assert.ok(d.notes.length >= 2, `Expected at least 2 notes for return type mismatch, got ${d.notes.length}`);
+    // Notes should explain the function return type and body type
+    const noteText = d.notes.map((n: any) => n.message).join(" ");
+    assert.ok(noteText.includes("return type") || noteText.includes("declared"),
+      `Expected note about declared return type, got: ${noteText}`);
+    assert.ok(noteText.includes("body") || noteText.includes("evaluates"),
+      `Expected note about function body type, got: ${noteText}`);
   });
 });
 
