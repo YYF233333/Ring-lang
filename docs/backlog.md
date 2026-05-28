@@ -303,7 +303,7 @@ fn test_fetch() {
   2. Effect-free 函数保证干净 C ABI，零成本互调
   3. 跨语言资源安全：Linear types + `defer` 清理 FFI 资源（Perceus RC 阶段实现）
 
-**环境（2026-05-28 确定）**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。N-API addon 放 `compiler/llvm-addon/`（.gitignore）。
+**环境（2026-05-28 确定）**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。N-API addon 放 `compiler/llvm-addon/`（已入 git，build/ 和 node_modules/ 除外）。
 
 **详细执行计划**：见 `docs/llvm-migration.md` "2026-05-28 详细执行计划"。
 
@@ -326,13 +326,16 @@ fn test_fetch() {
 - ~~**Wave 2（Codegen 核心）**~~：✅ codegen_llvm*.ring（5 模块，~3500 行）+ 全量 HExpr/HStmt + evidence threading + trait dict dispatch ✅
 - **Wave 3（迁移+自举）**：
   - ✅ 3a: 多文件 `--target=llvm` 接通 + std lib C ABI 补全（ring_runtime.cpp ~1100 行，~100 个函数）
-  - ✅ 3b: 编译器 .o 已生成（`compiler/dist-llvm/main.o`，1.5MB，212K 行 LLVM IR，1560 函数）
-  - ⏳ 3c: 链接为 native binary + 运行验证
+  - ✅ 3b: 编译器 .o 已生成（`compiler/dist-llvm/main.o`，1.19MB，零 verify error）
+  - 🔧 3c: ring.exe 已链接（0.8MB），CLI help/错误输出正常，文件编译 segfault（access violation in compilation pipeline）
   - ⏳ 3d: 双重自举 + E2E 全量测试
 - ~~**剩余已知问题**：3 个 lambda capture domination error（alloca 需提升到 entry block）~~ ✅ B-075 已修复
+- **当前阻塞**：ring.exe 编译文件时 segfault（exit code 5 = 0xC0000005），需定位 crash 点（path_resolve → read_file → lexer/parser 之间）
 
 **验收标准**：
 - ~~Ring 编译器编译自身为 native .o~~ ✅ （2026-05-28）
+- ~~ring.exe 链接成功~~ ✅（2026-05-28）
+- ~~ring.exe CLI 正常运行~~ ✅（2026-05-28）
 - Ring 编译器链接为 native binary 并可运行
 - Native 编译器编译自身（二次自举一致性）
 - E2E 测试在 native 编译器上全部通过

@@ -104,7 +104,7 @@ Ring-lang/
 
 ## 路线图
 
-**当前**：LLVM Native Backend — Wave 2 codegen 完成，编译器 .o 已生成，链接+运行验证中
+**当前**：LLVM Native Backend — ring.exe 已链接（0.8MB），CLI 正常运行，文件编译 segfault 调试中（Wave 3c）
 
 **后续**：Ownership + Perceus RC → async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
