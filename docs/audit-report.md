@@ -37,6 +37,14 @@
 
 ## Codegen
 
+### #130 跨模块 pub const 引用生成 spurious `.value` suffix [medium] [judgment] [open]
+
+JS codegen 中，向 `codes.ring` 新增 `pub const` 后，跨模块常量引用生成 `codes$W0001.value` 而非 `codes$W0001`，导致运行时错误和 double-bootstrap 失败。可能与 ESM export 排列或 const 引用解析逻辑相关。B-066 中发现，用 string literal workaround 绕过。
+
+**文件**：`compiler/codegen.ring` 或 `compiler/codegen_expr.ring`（const export/reference 相关逻辑）
+**修复方向**：调查 const 导出的 JS codegen 是否在 export 数量变化时改变引用方式。
+
+发现者：Worker Wave B (B-066)
 
 ### #28 HOF inline 代码在 List/Map/Set/Option 间重复 [low] [mechanical] [open]
 
@@ -60,14 +68,6 @@
 
 编译器最大单文件，从 2565→2763→2826 行持续增长。应拆分为 infer_stmt/infer_expr/infer。
 
-### #111 `emit_if_as_assign` brace 耦合脆弱 [low] [mechanical] [open]
-
-`emit_if_as_assign` 以 `emit(ctx, "} else if (${cond}) {")` 开头，假设调用方已打开 `if` block 且未关闭 `}`。当前仅从 `gen_if:1150` 调用，正确但脆弱——若未来从其他路径调用可能产生悬空 `}`。
-
-**文件**：`compiler/codegen_expr.ring:1093`
-**修复方向**：重构以明确 brace 不变式，或检查输出 buffer 中的 brace 平衡。
-
-发现者：DS
 
 
 

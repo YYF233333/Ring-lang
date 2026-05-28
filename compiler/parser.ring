@@ -1099,9 +1099,10 @@ impl Parser {
             self.advance()
             trait_name = some(first_name)
             target_type = self.parse_qualified_ident()
-            // Consume optional type arguments on target type (e.g., ListIterator<T>)
+            // Consume and validate optional type arguments on target type (e.g., ListIterator<T>)
             // These are redundant since the impl's own type_params bind the variables.
-            self.skip_type_args()
+            // Each arg must be a type variable declared in the impl's type_params.
+            self.validate_target_type_args(type_params)
         }
 
         self.expect(TokenKind::TkLBrace)
@@ -2133,18 +2134,33 @@ impl Parser {
     }
 
     // ============================================================
-    // Skip type arguments: consume <T, U, ...> if present
+    // Validate target type arguments: consume <T, U, ...> if present,
+    // checking each arg is a type variable declared in the impl's type_params.
     // Used in impl Trait for Type<T> where <T> on the target type is redundant.
     // ============================================================
 
-    fn skip_type_args(mut self) {
+    fn validate_target_type_args(mut self, type_params: List<TypeParam>) {
         if !self.check(TokenKind::TkLt) { return }
         self.advance()
-        let mut depth = 1
-        while depth > 0 && !self.at_end() {
-            if self.check(TokenKind::TkLt) { depth = depth + 1 }
-            if self.check(TokenKind::TkGt) { depth = depth - 1 }
-            if depth > 0 { self.advance() }
+        while !self.check(TokenKind::TkGt) && !self.at_end() {
+            let arg_tok = self.peek()
+            if arg_tok.kind == TokenKind::TkIdent {
+                let arg_name = arg_tok.value
+                let mut found = false
+                for tp in type_params {
+                    if tp.name == arg_name {
+                        found = true
+                    }
+                }
+                if !found {
+                    self.report_error("E0105", "type argument '${arg_name}' in target type is not a type parameter declared on the impl; expected one of the impl's type parameters", some(arg_tok.span))
+                }
+                self.advance()
+            } else {
+                self.report_error("E0105", "expected type parameter name in target type arguments, got '${arg_tok.value}'", some(arg_tok.span))
+                self.advance()
+            }
+            self.try_consume(TokenKind::TkComma)
         }
         if self.check(TokenKind::TkGt) { self.advance() }
     }
