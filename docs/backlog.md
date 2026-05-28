@@ -321,27 +321,21 @@ fn test_fetch() {
 10. **标准库/FFI**：按编译器自身迁移需求驱动，不追求完整迁移
 11. **目标**：编译器完整自举到 LLVM native，JS 后端归档
 
-**执行 Wave 概览**：
-- **Wave 1（地基层，~2-3 天）**：llvm_ffi.ring（FFI 声明）+ N-API addon + ring_runtime.cpp + CLI/pipeline 骨架。1a/1b/1c 可并行。
-- **Wave 2（Codegen 核心，~5-7 天）**：codegen_llvm.ring（编排器）+ codegen_llvm_expr.ring（表达式）+ codegen_llvm_decl.ring（声明）+ fail/catch + evidence threading + trait dict dispatch + 闭包。
-- **Wave 3（迁移+自举，~3-5 天）**：std lib C ABI 补全 → JS→native 首次编译 → 双重自举验证 → E2E 全量测试。
-
-**涉及修改**：
-1. `compiler/codegen_llvm.ring`（新增）：LLVM codegen 编排器 + LlvmCtx 数据结构
-2. `compiler/codegen_llvm_expr.ring`（新增）：表达式 → LLVM IR
-3. `compiler/codegen_llvm_decl.ring`（新增）：声明 → LLVM IR
-4. `compiler/llvm_ffi.ring`（新增）：~80 个 `extern fn` + ~15 个 `extern type` 包装 LLVM-C API
-5. `compiler/compiler_mod.ring`：编排器支持 `--target=llvm` 切换后端
-6. `compiler/cli.ring`：新增 `--target` 参数
-7. `ring_runtime.cpp`（新增，仓库内）：~70 个 C++ STL runtime 函数（Boxing + Str + List + Map + Set + IO + setjmp wrapper）
-8. `compiler/llvm-addon/`（新增，.gitignore）：N-API addon（~300 行 C++）+ binding.gyp
-9. `std/*.ring`：编译器用到的 extern fn 按需提供 C ABI 实现
+**执行进度（2026-05-28）**：
+- ~~**Wave 1（地基层）**~~：✅ llvm_ffi.ring + N-API addon + ring_runtime.cpp + CLI --target ✅
+- ~~**Wave 2（Codegen 核心）**~~：✅ codegen_llvm*.ring（5 模块，~3500 行）+ 全量 HExpr/HStmt + evidence threading + trait dict dispatch ✅
+- **Wave 3（迁移+自举）**：
+  - ✅ 3a: 多文件 `--target=llvm` 接通 + std lib C ABI 补全（ring_runtime.cpp ~1100 行，~100 个函数）
+  - ✅ 3b: 编译器 .o 已生成（`compiler/dist-llvm/main.o`，1.5MB，212K 行 LLVM IR，1560 函数）
+  - ⏳ 3c: 链接为 native binary + 运行验证
+  - ⏳ 3d: 双重自举 + E2E 全量测试
+- **剩余已知问题**：3 个 lambda capture domination error（alloca 需提升到 entry block）
 
 **验收标准**：
-- Ring 编译器编译自身为 native 二进制
+- ~~Ring 编译器编译自身为 native .o~~ ✅ （2026-05-28）
+- Ring 编译器链接为 native binary 并可运行
 - Native 编译器编译自身（二次自举一致性）
 - E2E 测试在 native 编译器上全部通过
-- 用户运行 `ring build` 产出 native 可执行文件，无需安装外部工具
 
 ### B-012 Perceus 引用计数 [feature] [P3] [XL] [judgment] [queued]
 精确 RC + 就地复用分析（reuse analysis），消除 GC。
@@ -500,6 +494,20 @@ connect("localhost", 3000)     // timeout=30
 
 ## 已知 Bug / 技术债
 
+### B-074 ESM extern type/fn 跨模块导入缺陷 [bugfix] [P3] [M] [judgment] [queued]
+Ring 的 ESM codegen 无法导出 extern type（它们没有 JS 值表示），导致 `use other_module::{SomeExternType}` 失败。当前 workaround：每个文件局部 re-declare 所需的 extern type/fn。不只影响 LLVM codegen，任何多文件项目用到 extern type 都会遇到。
+
+**涉及修改**：
+1. `codegen.ring`：extern type 生成某种占位导出（如 `export const SomeExternType = Symbol("SomeExternType")`），使 ESM import 不报错
+2. `codegen.ring`：extern fn 的导出机制确认——当前是否已正确导出？如否，同步修复
+3. 替代方案：模块系统层面允许 extern type 作为"类型级导出"（不生成运行时值），import 时跳过运行时绑定
+
+**验收标准**：
+- `use other_module::{SomeExternType, some_extern_fn}` 正常工作
+- extern type 可跨模块用于类型标注
+- 不影响 extern type 的运行时语义（仍然是 opaque）
+- 全部 E2E 测试通过
+- 自举编译器正常编译自身
 
 ### B-066 Parser `impl Trait for Type<T>` target 类型参数验证 [bugfix] [P3] [S] [mechanical] [queued]
 `skip_type_args()` 丢弃 target type 上的类型参数而不验证其与 impl 的 `type_params` 一致。`impl<T> Foo for Bar<Int>`（具体类型而非类型变量）不会报错，是类型安全漏洞。
