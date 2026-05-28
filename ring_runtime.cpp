@@ -149,7 +149,7 @@ extern "C" void* ring_str_concat(void* a, void* b) {
 
 extern "C" int64_t ring_str_eq(void* a, void* b) {
     CHK("str_eq");
-    if (g_chk >= 4610 && g_chk <= 4650) {
+    if (0) {
         fprintf(stderr, "  str_eq(a=%p, b=%p)\n", a, b);
         fflush(stderr);
         if (a && b) {
@@ -439,26 +439,26 @@ extern "C" void* ring_list_sort_default(void* list) {
     return (void*)result;
 }
 
-extern "C" void* ring_list_any(void* list, void* closure) {
+extern "C" int64_t ring_list_any(void* list, void* closure) {
     auto* vec = (std::vector<void*>*)list;
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
-        if (ring_unbox_int(r) != 0) return ring_box_bool(1);
+        if (ring_unbox_int(r) != 0) return 1;
     }
-    return ring_box_bool(0);
+    return 0;
 }
 
-extern "C" void* ring_list_all(void* list, void* closure) {
+extern "C" int64_t ring_list_all(void* list, void* closure) {
     auto* vec = (std::vector<void*>*)list;
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
-        if (ring_unbox_int(r) == 0) return ring_box_bool(0);
+        if (ring_unbox_int(r) == 0) return 0;
     }
-    return ring_box_bool(1);
+    return 1;
 }
 
 extern "C" void* ring_list_find(void* list, void* closure) {
@@ -705,7 +705,11 @@ extern "C" void* ring_eprintln(void* s) {
 
 extern "C" void* ring_panic(void* s) {
     CHK("PANIC");
-    fprintf(stderr, "ring panic: %s\n", ((std::string*)s)->c_str());
+    if (s) {
+        fprintf(stderr, "ring panic: %s\n", ((std::string*)s)->c_str());
+    } else {
+        fprintf(stderr, "ring panic: (null message)\n");
+    }
     fflush(stderr);
     exit(1);
     return nullptr;  // unreachable
