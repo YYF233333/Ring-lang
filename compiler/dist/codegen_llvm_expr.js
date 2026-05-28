@@ -1937,7 +1937,8 @@ function gen_field_access(ctx, receiver, field, ty) {
   const type_name = (function() {
   const __ring_m = recv_type;
   if (__ring_m._tag === "StructType") { const name = __ring_m.name; return name; }
-  return panic("LLVM codegen: field access on non-struct type");
+  if (__ring_m._tag === "EnumType") { const name = __ring_m.name; return name; }
+  return panic(`LLVM codegen: field access on non-struct type: ${types$type_to_string(recv_type)}, field: ${field}`);
 })();
   __ring_match49: {
     const __ring_m49 = _Map_get(ctx.struct_types, type_name);

@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, effect_kind_name, type_to_builtin_name}
+use types::{Type, Effect, EffectRow, effect_kind_name, type_to_builtin_name, type_to_string}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     HStringInterpPart, HEffectHandler, DictRef, DictDispatchInfo, TraitDispatch,
@@ -1197,7 +1197,8 @@ fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> 
 
     let type_name = match recv_type {
         Type::StructType { name, .. } => name,
-        _ => panic("LLVM codegen: field access on non-struct type"),
+        Type::EnumType { name, .. } => name,
+        _ => panic("LLVM codegen: field access on non-struct type: ${type_to_string(recv_type)}, field: ${field}"),
     }
 
     match ctx.struct_types.get(type_name) {
