@@ -825,6 +825,22 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
                     gen_closure_call(ctx, closure_ptr, arg_vals)
                 },
                 none => {
+                    // Try runtime function with ring_ prefix as final fallback
+                    let rt_fallback = "ring_${name}"
+                    match ctx.rt_fns.get(rt_fallback) {
+                        some(_) => {
+                            return gen_runtime_call(ctx, rt_fallback, arg_vals)
+                        },
+                        none => {},
+                    }
+                    eprintln("LLVM codegen warning: unknown function '${name}', generating panic")
+                    let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
+                    let panic_ty = get_rt_fn_type(ctx, "ring_panic")
+                    let msg = LLVMBuildGlobalStringPtr(ctx.builder, "LLVM: missing function '${name}'", fresh_name(ctx, "panicmsg"))
+                    let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
+                    let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
+                    let str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], fresh_name(ctx, "ps"))
+                    discard(LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [str_val], ""))
                     LLVMConstPointerNull(ctx.ptr_type)
                 },
             }
@@ -975,7 +991,21 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     else { if name == "set_new" { some("ring_set_new") }
     else { if name == "read_file" { some("ring_read_file") }
     else { if name == "write_file" { some("ring_write_file") }
-    else { none } } } } } } } } } }
+    else { if name == "file_exists" { some("ring_file_exists") }
+    else { if name == "delete_file" { some("ring_delete_file") }
+    else { if name == "path_join" { some("ring_path_join") }
+    else { if name == "path_resolve" { some("ring_path_resolve") }
+    else { if name == "path_dirname" { some("ring_path_dirname") }
+    else { if name == "path_basename" { some("ring_path_basename") }
+    else { if name == "path_extname" { some("ring_path_extname") }
+    else { if name == "cwd" { some("ring_cwd") }
+    else { if name == "parse_int" { some("ring_parse_int") }
+    else { if name == "parse_float" { some("ring_parse_float") }
+    else { if name == "set_from" { some("ring_set_from_list") }
+    else { if name == "list_new" { some("ring_list_new") }
+    else { if name == "map_from" { some("ring_map_from") }
+    else { if name == "__ring_raise_fail" { some("__ring_raise_fail") }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 // ============================================================
@@ -1013,7 +1043,9 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     else { if name == "ring_set_has" { true }
     else { if name == "ring_list_any" { true }
     else { if name == "ring_list_all" { true }
-    else { false } } } } } } } } }
+    else { if name == "ring_Option_is_some" { true }
+    else { if name == "ring_Option_is_none" { true }
+    else { false } } } } } } } } } } }
 }
 
 // Check if a runtime method needs special arg handling (some args need unboxing from ptr)
@@ -1026,7 +1058,12 @@ fn rt_method_needs_int_args(name: Str) -> Bool {
     else { if name == "ring_str_slice" { true }
     else { if name == "ring_list_slice" { true }
     else { if name == "ring_list_set" { true }
-    else { false } } } } } }
+    else { if name == "ring_str_char_at" { true }
+    else { if name == "ring_str_char_code_at" { true }
+    else { if name == "ring_str_pad_start" { true }
+    else { if name == "ring_str_pad_end" { true }
+    else { if name == "ring_str_repeat" { true }
+    else { false } } } } } } } } } } }
 }
 
 // Method needs receiver unboxed to i64 (Int.to_str)
@@ -1155,7 +1192,14 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                     LLVMBuildCall2(ctx.builder, fn_ty, fn_val, call_args, fresh_name(ctx, "mc"))
                 },
                 none => {
-                    // Stub: method not yet implemented, return null
+                    eprintln("LLVM codegen warning: unknown method '${type_name}.${method}' (mangled: ${mangled}), generating panic")
+                    let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
+                    let panic_ty = get_rt_fn_type(ctx, "ring_panic")
+                    let msg = LLVMBuildGlobalStringPtr(ctx.builder, "LLVM: missing method '${type_name}.${method}'", fresh_name(ctx, "panicmsg"))
+                    let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
+                    let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
+                    let str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], fresh_name(ctx, "ps"))
+                    discard(LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [str_val], ""))
                     LLVMConstPointerNull(ctx.ptr_type)
                 },
             }
@@ -1164,14 +1208,30 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
 }
 
 fn method_to_runtime(type_name: Str, method: Str) -> Str? {
-    // Str methods (len handled specially in gen_method_call)
-    if type_name == "Str" && method == "contains" { some("ring_str_contains") }
+    // Str methods
+    if type_name == "Str" && method == "len" { some("ring_str_len") }
+    else { if type_name == "Str" && method == "contains" { some("ring_str_contains") }
     else { if type_name == "Str" && method == "starts_with" { some("ring_str_starts_with") }
     else { if type_name == "Str" && method == "ends_with" { some("ring_str_ends_with") }
     else { if type_name == "Str" && method == "slice" { some("ring_str_slice") }
     else { if type_name == "Str" && method == "split" { some("ring_str_split") }
     else { if type_name == "Str" && method == "replace" { some("ring_str_replace") }
     else { if type_name == "Str" && method == "get" { some("ring_str_get") }
+    else { if type_name == "Str" && method == "trim" { some("ring_str_trim") }
+    else { if type_name == "Str" && method == "trim_start" { some("ring_str_trim_start") }
+    else { if type_name == "Str" && method == "trim_end" { some("ring_str_trim_end") }
+    else { if type_name == "Str" && method == "to_upper" { some("ring_str_to_upper") }
+    else { if type_name == "Str" && method == "to_lower" { some("ring_str_to_lower") }
+    else { if type_name == "Str" && method == "char_at" { some("ring_str_char_at") }
+    else { if type_name == "Str" && method == "char_code_at" { some("ring_str_char_code_at") }
+    else { if type_name == "Str" && method == "index_of" { some("ring_str_index_of") }
+    else { if type_name == "Str" && method == "to_int" { some("ring_str_to_int") }
+    else { if type_name == "Str" && method == "to_float" { some("ring_str_to_float") }
+    else { if type_name == "Str" && method == "pad_start" { some("ring_str_pad_start") }
+    else { if type_name == "Str" && method == "pad_end" { some("ring_str_pad_end") }
+    else { if type_name == "Str" && method == "repeat" { some("ring_str_repeat") }
+    else { if type_name == "Str" && method == "is_empty" { some("ring_str_is_empty") }
+    else { if type_name == "Str" && method == "last_index_of" { some("ring_str_last_index_of") }
     // Int methods
     else { if type_name == "Int" && method == "to_str" { some("ring_int_to_str") }
     // Float methods
@@ -1206,6 +1266,9 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "find" { some("ring_list_find") }
     else { if type_name == "List" && method == "flat_map" { some("ring_list_flat_map") }
     else { if type_name == "List" && method == "enumerate" { some("ring_list_enumerate") }
+    else { if type_name == "List" && method == "clear" { some("ring_list_clear") }
+    else { if type_name == "List" && method == "shift" { some("ring_list_shift") }
+    else { if type_name == "List" && method == "extend" { some("ring_list_extend") }
     // Map methods
     else { if type_name == "Map" && method == "get" { some("ring_map_get_opt") }
     else { if type_name == "Map" && method == "insert" { some("ring_map_set") }
@@ -1217,6 +1280,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Map" && method == "remove" { some("ring_map_delete") }
     else { if type_name == "Map" && method == "is_empty" { some("ring_map_is_empty") }
     else { if type_name == "Map" && method == "for_each" { some("ring_map_for_each") }
+    else { if type_name == "Map" && method == "clear" { some("ring_map_clear") }
     // Set methods
     else { if type_name == "Set" && method == "add" { some("ring_set_add") }
     else { if type_name == "Set" && method == "insert" { some("ring_set_add") }
@@ -1228,7 +1292,14 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Set" && method == "from_list" { some("ring_set_from_list") }
     else { if type_name == "Set" && method == "for_each" { some("ring_set_for_each") }
     else { if type_name == "Set" && method == "remove" { some("ring_set_delete") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    // Option methods
+    else { if type_name == "Option" && method == "unwrap_or" { some("ring_Option_unwrap_or") }
+    else { if type_name == "Option" && method == "unwrap" { some("ring_Option_unwrap") }
+    else { if type_name == "Option" && method == "is_some" { some("ring_Option_is_some") }
+    else { if type_name == "Option" && method == "is_none" { some("ring_Option_is_none") }
+    else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
+    else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {

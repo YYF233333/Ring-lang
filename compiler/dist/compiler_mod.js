@@ -453,11 +453,20 @@ function compile_project_llvm(entry_file, output_path, __ring_ev_io) {
         if (__ring_next_6._tag === "none") break;
         const key = __ring_next_6._0;
         __ring_match14: {
-          const __ring_m14 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key)];
-          if (Array.isArray(__ring_m14) && __ring_m14.length === 2 && __ring_m14[0]._tag === "some" && __ring_m14[1]._tag === "some") {
+          const __ring_m14 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key), _Map_get(phases.module_asts, key)];
+          if (Array.isArray(__ring_m14) && __ring_m14.length === 3 && __ring_m14[0]._tag === "some" && __ring_m14[1]._tag === "some" && __ring_m14[2]._tag === "some") {
+            const mod_ = __ring_m14[0]._0; const hir = __ring_m14[1]._0; const ast = __ring_m14[2]._0;
+            const prefix = resolver$module_prefix(mod_.path_segments);
+            List_push(modules, [prefix, hir, ast.uses]);
+            if ((key === entry_key)) {
+              entry_prefix = prefix;
+            }
+            break __ring_match14;
+          }
+          if (Array.isArray(__ring_m14) && __ring_m14.length === 3 && __ring_m14[0]._tag === "some" && __ring_m14[1]._tag === "some" && __ring_m14[2]._tag === "none") {
             const mod_ = __ring_m14[0]._0; const hir = __ring_m14[1]._0;
             const prefix = resolver$module_prefix(mod_.path_segments);
-            List_push(modules, [prefix, hir]);
+            List_push(modules, [prefix, hir, []]);
             if ((key === entry_key)) {
               entry_prefix = prefix;
             }

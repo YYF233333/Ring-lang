@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
-use ast::{TypeParam}
+use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
@@ -194,7 +194,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     // File IO
     get_or_declare_runtime_fn(ctx, "ring_read_file", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_write_file", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_file_exists", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_file_exists", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_delete_file", [ptr], ptr)
 
     // Path
@@ -254,6 +254,17 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
 
     // CWD
     get_or_declare_runtime_fn(ctx, "ring_cwd", [], ptr)
+
+    // Effect workaround
+    get_or_declare_runtime_fn(ctx, "__ring_raise_fail", [ptr], ptr)
+
+    // Option methods
+    get_or_declare_runtime_fn(ctx, "ring_Option_unwrap_or", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_Option_unwrap", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_Option_is_some", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_Option_is_none", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_Option_map", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_Option_unwrap_or_else", [ptr, ptr], ptr)
 }
 
 // ============================================================
@@ -721,7 +732,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
 // entry_prefix: module prefix of the entry module (contains main)
 // ============================================================
 
-pub fn generate_llvm_project(modules: List<(Str, HProgram)>, entry_prefix: Str, output_path: Str) -> Unit {
+pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entry_prefix: Str, output_path: Str) -> Unit {
     // 1. Initialize LLVM target
     LLVMInitializeX86TargetInfo()
     LLVMInitializeX86Target()
@@ -788,7 +799,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram)>, entry_prefix: Str, 
 
     // 7. Scan all modules for function effects and trait declarations
     for m in modules {
-        let (prefix, program) = m
+        let (prefix, program, _uses) = m
         scan_fn_effects(program.decls, ctx.local_fn_effects)
         scan_trait_decls(program.decls, ctx.trait_method_order)
     }
@@ -798,17 +809,19 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram)>, entry_prefix: Str, 
 
     // 8. First pass: forward declare all Ring functions in all modules
     for m in modules {
-        let (prefix, program) = m
+        let (prefix, program, _uses) = m
         forward_declare_functions_with_prefix(ctx, program.decls, some(prefix))
     }
 
     // 9. Second pass: generate all function bodies for all modules
     for m in modules {
-        let (prefix, program) = m
+        let (prefix, program, uses) = m
         // Set the current module context
         ctx.module_prefix = some(prefix)
         // Collect local names for this module
         ctx.local_names = collect_local_names(program.decls)
+        // Build imports map from use declarations
+        ctx.imports_map = build_imports_map(uses)
         for decl in program.decls {
             emit_llvm_decl(ctx, decl)
         }
@@ -895,6 +908,33 @@ fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
 
     let zero = LLVMConstInt(i32_ty, 0, 0)
     discard(LLVMBuildRet(ctx.builder, zero))
+}
+
+// ============================================================
+// build_imports_map — map imported names to mangled LLVM names
+// ============================================================
+
+fn build_imports_map(uses: List<UseDecl>) -> Map<Str, Str> {
+    let mut imap: Map<Str, Str> = map_new()
+    for u in uses {
+        let module_name = u.path.segments.join("_")
+        match u.imports {
+            UseImport::NamedItems { names } => {
+                for ni in names {
+                    let local_name = match ni.alias {
+                        some(a) => a,
+                        none => ni.name,
+                    }
+                    let qualified = llvm_mangle_fn_with_prefix(module_name, ni.name)
+                    imap.insert(local_name, qualified)
+                }
+            },
+            UseImport::Module => {
+                // Whole-module import — not used for function resolution
+            },
+        }
+    }
+    imap
 }
 
 // ============================================================

@@ -390,7 +390,7 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_args", [], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_read_file", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_write_file", [ptr, ptr], ptr);
-  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_file_exists", [ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_file_exists", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_delete_file", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_path_join", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_path_resolve", [ptr], ptr);
@@ -429,7 +429,14 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_clear", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_assert", [i64, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_json_stringify", [ptr], ptr);
-  return codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_cwd", [], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_cwd", [], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "__ring_raise_fail", [ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_Option_unwrap_or", [ptr, ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_Option_unwrap", [ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_Option_is_some", [ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_Option_is_none", [ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_Option_map", [ptr, ptr], ptr);
+  return codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_Option_unwrap_or_else", [ptr, ptr], ptr);
 }
 
 function forward_declare_functions(ctx, decls) {
@@ -906,6 +913,7 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
     const __ring_dt0 = m;
     const prefix = __ring_dt0[0];
     const program = __ring_dt0[1];
+    const _uses = __ring_dt0[2];
     scan_fn_effects(program.decls, ctx.local_fn_effects);
     scan_trait_decls(program.decls, ctx.trait_method_order);
   }
@@ -918,6 +926,7 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
     const __ring_dt1 = m;
     const prefix = __ring_dt1[0];
     const program = __ring_dt1[1];
+    const _uses = __ring_dt1[2];
     forward_declare_functions_with_prefix(ctx, program.decls, Option_some(prefix));
   }
   const __ring_iter_18 = __List_Iterable.iter(modules);
@@ -928,8 +937,10 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
     const __ring_dt2 = m;
     const prefix = __ring_dt2[0];
     const program = __ring_dt2[1];
+    const uses = __ring_dt2[2];
     ctx.module_prefix = Option_some(prefix);
     ctx.local_names = collect_local_names(program.decls);
+    ctx.imports_map = build_imports_map(uses);
     const __ring_iter_19 = __List_Iterable.iter(program.decls);
     while (true) {
       const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
@@ -1016,6 +1027,43 @@ function emit_c_main_project(ctx, entry_prefix) {
   return discard(LLVMBuildRet(ctx.builder, zero));
 }
 
+function build_imports_map(uses) {
+  let imap = map_new();
+  const __ring_iter_21 = __List_Iterable.iter(uses);
+  while (true) {
+    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+    if (__ring_next_21._tag === "none") break;
+    const u = __ring_next_21._0;
+    const module_name = List_join(u.path.segments, "_");
+    __ring_match16: {
+      const __ring_m16 = u.imports;
+      if (__ring_m16._tag === "NamedItems") {
+        const names = __ring_m16.names;
+        const __ring_iter_22 = __List_Iterable.iter(names);
+        while (true) {
+          const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+          if (__ring_next_22._tag === "none") break;
+          const ni = __ring_next_22._0;
+          const local_name = (function() {
+  const __ring_m = ni.alias;
+  if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
+  if (__ring_m._tag === "none") { return ni.name; }
+  __match_fail(__ring_m);
+})();
+          const qualified = codegen_llvm_ctx$llvm_mangle_fn_with_prefix(module_name, ni.name);
+          _Map_insert(imap, local_name, qualified);
+        }
+        break __ring_match16;
+      }
+      if (__ring_m16._tag === "Module") {
+        break __ring_match16;
+      }
+      __match_fail(__ring_m16);
+    }
+  }
+  return imap;
+}
+
 function collect_local_names(decls) {
   let names = set_new();
   collect_local_names_rec(decls, names);
@@ -1023,73 +1071,73 @@ function collect_local_names(decls) {
 }
 
 function collect_local_names_rec(decls, names) {
-  const __ring_iter_21 = __List_Iterable.iter(decls);
+  const __ring_iter_23 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
-    if (__ring_next_21._tag === "none") break;
-    const decl = __ring_next_21._0;
-    __ring_match16: {
-      const __ring_m16 = decl;
-      if (__ring_m16._tag === "Fn") {
-        const name = __ring_m16.name;
+    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+    if (__ring_next_23._tag === "none") break;
+    const decl = __ring_next_23._0;
+    __ring_match17: {
+      const __ring_m17 = decl;
+      if (__ring_m17._tag === "Fn") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "Struct") {
-        const name = __ring_m16.name;
+      if (__ring_m17._tag === "Struct") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "Enum") {
-        const name = __ring_m16.name;
+      if (__ring_m17._tag === "Enum") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "Const") {
-        const name = __ring_m16.name;
+      if (__ring_m17._tag === "Const") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "Trait") {
-        const name = __ring_m16.name;
+      if (__ring_m17._tag === "Trait") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "ExternFn") {
-        const name = __ring_m16.name;
+      if (__ring_m17._tag === "ExternFn") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "ExternType") {
-        const name = __ring_m16.name;
+      if (__ring_m17._tag === "ExternType") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "TypeAlias") {
-        const name = __ring_m16.name;
+      if (__ring_m17._tag === "TypeAlias") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "Impl") {
-        break __ring_match16;
+      if (__ring_m17._tag === "Impl") {
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "Effect") {
-        const name = __ring_m16.name;
+      if (__ring_m17._tag === "Effect") {
+        const name = __ring_m17.name;
         _Set_insert(names, name);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "ModBlock") {
-        const md = __ring_m16.decls;
+      if (__ring_m17._tag === "ModBlock") {
+        const md = __ring_m17.decls;
         collect_local_names_rec(md, names);
-        break __ring_match16;
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "Test") {
-        break __ring_match16;
+      if (__ring_m17._tag === "Test") {
+        break __ring_match17;
       }
-      if (__ring_m16._tag === "Sig") {
-        break __ring_match16;
+      if (__ring_m17._tag === "Sig") {
+        break __ring_match17;
       }
-      __match_fail(__ring_m16);
+      __match_fail(__ring_m17);
     }
   }
 }

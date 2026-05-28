@@ -1,5 +1,5 @@
 use types::{Type}
-use ast::{Program, Decl, UseImport, NamedImport}
+use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
 use infer_register::{prefix_decl_name}
 use hir::{HProgram, HDecl, trait_dict_name}
 use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
@@ -158,15 +158,22 @@ pub fn compile_project_llvm(entry_file: Str, output_path: Str) -> LlvmCompileRes
         some(phases) => {
             let entry_key = module_key(phases.graph.entry.path_segments)
 
-            // Build list of (module_prefix, HProgram) in topo order
-            let mut modules: List<(Str, HProgram)> = []
+            // Build list of (module_prefix, HProgram, uses) in topo order
+            let mut modules: List<(Str, HProgram, List<UseDecl>)> = []
             let mut entry_prefix = ""
 
             for key in phases.graph.topo_order {
-                match (phases.graph.modules.get(key), phases.module_hirs.get(key)) {
-                    (some(mod_), some(hir)) => {
+                match (phases.graph.modules.get(key), phases.module_hirs.get(key), phases.module_asts.get(key)) {
+                    (some(mod_), some(hir), some(ast)) => {
                         let prefix = module_prefix(mod_.path_segments)
-                        modules.push((prefix, hir))
+                        modules.push((prefix, hir, ast.uses))
+                        if key == entry_key {
+                            entry_prefix = prefix
+                        }
+                    },
+                    (some(mod_), some(hir), none) => {
+                        let prefix = module_prefix(mod_.path_segments)
+                        modules.push((prefix, hir, []))
                         if key == entry_key {
                             entry_prefix = prefix
                         }

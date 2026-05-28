@@ -62,9 +62,27 @@ static void* ring_enum_none();
 static int g_argc = 0;
 static char** g_argv = nullptr;
 
+static int g_chk = 0;
+static const char* g_last_fn = "";
+#define CHK(name) do { g_chk++; g_last_fn = name; } while(0)
+
+#ifdef _WIN32
+static LONG WINAPI crash_handler(EXCEPTION_POINTERS* ep) {
+    fprintf(stderr, "CRASH at checkpoint %d (last fn: %s), code=0x%08lx rip=%p\n",
+            g_chk, g_last_fn,
+            ep->ExceptionRecord->ExceptionCode,
+            (void*)ep->ContextRecord->Rip);
+    fflush(stderr);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
 extern "C" void ring_runtime_init(int argc, char** argv) {
     g_argc = argc;
     g_argv = argv;
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(crash_handler);
+#endif
 }
 
 // ============================================================================
@@ -72,12 +90,15 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
 // ============================================================================
 
 extern "C" void* ring_box_int(int64_t val) {
+    CHK("box_int");
     int64_t* p = (int64_t*)malloc(sizeof(int64_t));
     *p = val;
     return (void*)p;
 }
 
 extern "C" int64_t ring_unbox_int(void* p) {
+    CHK("unbox_int");
+    if (!p) { fprintf(stderr, "FATAL: ring_unbox_int(null) at chk %d\n", g_chk); fflush(stderr); *(volatile int*)0 = 0; }
     return *(int64_t*)p;
 }
 
@@ -92,12 +113,15 @@ extern "C" double ring_unbox_float(void* p) {
 }
 
 extern "C" void* ring_box_bool(int64_t val) {
+    CHK("box_bool");
     int64_t* p = (int64_t*)malloc(sizeof(int64_t));
     *p = (val != 0) ? 1 : 0;
     return (void*)p;
 }
 
 extern "C" int64_t ring_unbox_bool(void* p) {
+    CHK("unbox_bool");
+    if (!p) { fprintf(stderr, "FATAL: ring_unbox_bool(null) at chk %d\n", g_chk); fflush(stderr); *(volatile int*)0 = 0; }
     return *(int64_t*)p;
 }
 
@@ -110,10 +134,12 @@ extern "C" void* ring_str_new() {
 }
 
 extern "C" void* ring_str_from_cstr(const char* cstr) {
+    CHK("str_from_cstr");
     return (void*)new std::string(cstr);
 }
 
 extern "C" int64_t ring_str_len(void* s) {
+    CHK("str_len");
     return (int64_t)((std::string*)s)->size();
 }
 
@@ -122,6 +148,16 @@ extern "C" void* ring_str_concat(void* a, void* b) {
 }
 
 extern "C" int64_t ring_str_eq(void* a, void* b) {
+    CHK("str_eq");
+    if (g_chk >= 4610 && g_chk <= 4650) {
+        fprintf(stderr, "  str_eq(a=%p, b=%p)\n", a, b);
+        fflush(stderr);
+        if (a && b) {
+            fprintf(stderr, "  str_eq(\"%s\", \"%s\")\n", ((std::string*)a)->c_str(), ((std::string*)b)->c_str());
+            fflush(stderr);
+        }
+    }
+    if (!a || !b) { fprintf(stderr, "FATAL: str_eq null ptr a=%p b=%p at chk %d\n", a, b, g_chk); fflush(stderr); return 0; }
     return (*(std::string*)a == *(std::string*)b) ? 1 : 0;
 }
 
@@ -226,15 +262,18 @@ extern "C" void* ring_bool_to_str(int64_t val) {
 // ============================================================================
 
 extern "C" void* ring_list_new() {
+    CHK("list_new");
     return (void*)new std::vector<void*>();
 }
 
 extern "C" void* ring_list_push(void* list, void* val) {
+    CHK("list_push");
     ((std::vector<void*>*)list)->push_back(val);
     return list;
 }
 
 extern "C" void* ring_list_get(void* list, int64_t idx) {
+    CHK("list_get");
     auto* vec = (std::vector<void*>*)list;
     if (idx < 0 || idx >= (int64_t)vec->size()) {
         fprintf(stderr, "ring panic: list index %lld out of bounds (len %lld)\n",
@@ -341,6 +380,54 @@ static void* ring_enum_none() {
     opt[0] = 1;
     opt[1] = 0;
     return (void*)opt;
+}
+
+// ============================================================================
+// Option methods
+// Option layout: {tag: i64, payload: void*}  tag=0 → Some, tag=1 → None
+// ============================================================================
+
+extern "C" void* ring_Option_unwrap_or(void* opt, void* default_val) {
+    int64_t tag = *(int64_t*)opt;
+    if (tag == 0) return *((void**)((int64_t*)opt + 1));
+    return default_val;
+}
+
+extern "C" void* ring_Option_unwrap(void* opt) {
+    int64_t tag = *(int64_t*)opt;
+    if (tag == 0) return *((void**)((int64_t*)opt + 1));
+    fprintf(stderr, "ring panic: unwrap() called on None\n");
+    exit(1);
+    return nullptr;
+}
+
+extern "C" int64_t ring_Option_is_some(void* opt) {
+    return *(int64_t*)opt == 0 ? 1 : 0;
+}
+
+extern "C" int64_t ring_Option_is_none(void* opt) {
+    return *(int64_t*)opt == 1 ? 1 : 0;
+}
+
+extern "C" void* ring_Option_map(void* opt, void* closure) {
+    int64_t tag = *(int64_t*)opt;
+    if (tag == 0) {
+        void* val = *((void**)((int64_t*)opt + 1));
+        RingClosure* cl = (RingClosure*)closure;
+        ring_fn_1 fn = (ring_fn_1)cl->fn_ptr;
+        void* result = fn(cl->env_ptr, val);
+        return ring_enum_some(result);
+    }
+    return ring_enum_none();
+}
+
+extern "C" void* ring_Option_unwrap_or_else(void* opt, void* closure) {
+    int64_t tag = *(int64_t*)opt;
+    if (tag == 0) return *((void**)((int64_t*)opt + 1));
+    RingClosure* cl = (RingClosure*)closure;
+    typedef void* (*ring_fn_0)(void* env);
+    ring_fn_0 fn = (ring_fn_0)cl->fn_ptr;
+    return fn(cl->env_ptr);
 }
 
 extern "C" void* ring_list_sort_default(void* list) {
@@ -601,18 +688,23 @@ extern "C" void* ring_set_for_each(void* set, void* closure) {
 // ============================================================================
 
 extern "C" void* ring_print(void* s) {
+    CHK("PRINT");
+    fprintf(stderr, "[RING_PRINT] %s\n", ((std::string*)s)->c_str());
     printf("%s\n", ((std::string*)s)->c_str());
     fflush(stdout);
+    fflush(stderr);
     return nullptr;
 }
 
 extern "C" void* ring_eprintln(void* s) {
-    fprintf(stderr, "%s\n", ((std::string*)s)->c_str());
+    CHK("EPRINTLN");
+    fprintf(stderr, "[RING_EPRINTLN] %s\n", ((std::string*)s)->c_str());
     fflush(stderr);
     return nullptr;
 }
 
 extern "C" void* ring_panic(void* s) {
+    CHK("PANIC");
     fprintf(stderr, "ring panic: %s\n", ((std::string*)s)->c_str());
     fflush(stderr);
     exit(1);
@@ -648,7 +740,10 @@ extern "C" void* ring_write_file(void* path, void* content) {
     return nullptr;
 }
 
-extern "C" void* ring_exit(int64_t code) {
+extern "C" void* ring_exit(void* boxed_code) {
+    int64_t code = *(int64_t*)boxed_code;
+    fprintf(stderr, "[RING_EXIT] code=%lld\n", (long long)code);
+    fflush(stderr);
     exit((int)code);
     return nullptr;  // unreachable
 }
@@ -736,6 +831,11 @@ extern "C" void ring_raise(void* error) {
     longjmp(frame->buf, 1);
 }
 
+extern "C" void* __ring_raise_fail(void* msg) {
+    ring_raise(msg);
+    return nullptr;
+}
+
 extern "C" void* ring_catch_get_error(void* frame_ptr) {
     return ((RingCatchFrame*)frame_ptr)->error_value;
 }
@@ -810,13 +910,14 @@ extern "C" void* ring_path_extname(void* p) {
 // File operations (additional)
 // ============================================================================
 
-extern "C" int64_t ring_file_exists(void* path) {
+extern "C" void* ring_file_exists(void* path) {
     std::string* p = (std::string*)path;
 #ifdef _WIN32
-    return _access(p->c_str(), 0) == 0 ? 1 : 0;
+    int64_t exists = _access(p->c_str(), 0) == 0 ? 1 : 0;
 #else
-    return access(p->c_str(), F_OK) == 0 ? 1 : 0;
+    int64_t exists = access(p->c_str(), F_OK) == 0 ? 1 : 0;
 #endif
+    return ring_box_bool(exists);
 }
 
 extern "C" void* ring_delete_file(void* path) {
@@ -1000,6 +1101,7 @@ extern "C" void* ring_str_repeat(void* s, int64_t count) {
 }
 
 extern "C" void* ring_str_char_code_at(void* s, int64_t idx) {
+    CHK("str_char_code_at");
     std::string* str = (std::string*)s;
     if (idx < 0 || idx >= (int64_t)str->size()) {
         auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
