@@ -337,7 +337,7 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_print", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_eprintln", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_panic", [ptr], ptr);
-  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_exit", [i64], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_exit", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "malloc", [i64], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_new", [], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_push", [ptr, ptr], ptr);
@@ -348,6 +348,7 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_slice", [ptr, i64, i64], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_reverse", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_sort", [ptr, ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_sort_default", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_pop", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_contains", [ptr, ptr], i64);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_index_of", [ptr, ptr], i64);
@@ -358,6 +359,11 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_filter", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_for_each", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_set", [ptr, i64, ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_any", [ptr, ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_all", [ptr, ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_find", [ptr, ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_flat_map", [ptr, ptr], ptr);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_enumerate", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_new", [], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_get", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_set", [ptr, ptr, ptr], ptr);
@@ -908,6 +914,10 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
   emit_c_main_project(ctx, entry_prefix);
   const ir = LLVMPrintModuleToString(module);
   write_file("ring_output.ll", ir);
+  const verify_result = LLVMVerifyModule(module, 2);
+  if ((verify_result !== 0)) {
+    eprintln(`LLVM module verification failed (${verify_result} errors) — attempting emit anyway`);
+  }
   const emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1);
   if ((emit_result !== 0)) {
     eprintln(`Failed to emit object file: ${output_path}`);

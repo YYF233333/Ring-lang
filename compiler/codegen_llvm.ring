@@ -127,7 +127,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_print", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_eprintln", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_panic", [ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_exit", [i64], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_exit", [ptr], ptr)
 
     // Memory allocation (for struct/enum construction)
     get_or_declare_runtime_fn(ctx, "malloc", [i64], ptr)
@@ -142,6 +142,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_list_slice", [ptr, i64, i64], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_reverse", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_sort", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_sort_default", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_pop", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_contains", [ptr, ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_list_index_of", [ptr, ptr], i64)
@@ -152,6 +153,11 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_list_filter", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_for_each", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_set", [ptr, i64, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_any", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_list_all", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_list_find", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_flat_map", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_enumerate", [ptr], ptr)
 
     // Map
     get_or_declare_runtime_fn(ctx, "ring_map_new", [], ptr)
@@ -794,6 +800,12 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram)>, entry_prefix: Str, 
     // 11. Dump IR for debugging
     let ir = LLVMPrintModuleToString(module)
     write_file("ring_output.ll", ir)
+
+    // 11b. Verify module (action=2: ReturnStatusAction, prints to stderr)
+    let verify_result = LLVMVerifyModule(module, 2)
+    if verify_result != 0 {
+        eprintln("LLVM module verification failed (${verify_result} errors) — attempting emit anyway")
+    }
 
     // 12. Emit object file
     let emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1)

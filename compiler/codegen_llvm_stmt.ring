@@ -149,6 +149,14 @@ fn emit_return(mut ctx: LlvmCtx, value: HExpr?) {
             discard(LLVMBuildRet(ctx.builder, null))
         },
     }
+    // Create a dead block after return so subsequent code doesn't pollute the terminated block
+    match ctx.current_fn {
+        some(f) => {
+            let dead_bb = LLVMAppendBasicBlockInContext(ctx.context, f, "after.ret")
+            LLVMPositionBuilderAtEnd(ctx.builder, dead_bb)
+        },
+        none => {},
+    }
 }
 
 fn emit_while(mut ctx: LlvmCtx, condition: HExpr, body: HExpr) {

@@ -482,6 +482,9 @@ fn gen_and(mut ctx: LlvmCtx, left: HExpr, right: HExpr) -> LLVMValueRef {
     let lhs = gen_llvm_expr(ctx, left)
     let lhs_bool = unbox_to_i1(ctx, lhs)
 
+    // Generate false_val in the current block (before branching)
+    let false_val = gen_bool_lit(ctx, false)
+
     let rhs_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "and.rhs")
     let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "and.merge")
     let lhs_end_bb = LLVMGetInsertBlock(ctx.builder)
@@ -494,7 +497,6 @@ fn gen_and(mut ctx: LlvmCtx, left: HExpr, right: HExpr) -> LLVMValueRef {
     LLVMBuildBr(ctx.builder, merge_bb)
 
     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-    let false_val = gen_bool_lit(ctx, false)
     let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "and"))
     LLVMAddIncoming(phi, [false_val, rhs], [lhs_end_bb, rhs_end_bb])
     phi
@@ -509,6 +511,9 @@ fn gen_or(mut ctx: LlvmCtx, left: HExpr, right: HExpr) -> LLVMValueRef {
     let lhs = gen_llvm_expr(ctx, left)
     let lhs_bool = unbox_to_i1(ctx, lhs)
 
+    // Generate true_val in the current block (before branching)
+    let true_val = gen_bool_lit(ctx, true)
+
     let rhs_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "or.rhs")
     let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "or.merge")
     let lhs_end_bb = LLVMGetInsertBlock(ctx.builder)
@@ -521,7 +526,6 @@ fn gen_or(mut ctx: LlvmCtx, left: HExpr, right: HExpr) -> LLVMValueRef {
     LLVMBuildBr(ctx.builder, merge_bb)
 
     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-    let true_val = gen_bool_lit(ctx, true)
     let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "or"))
     LLVMAddIncoming(phi, [true_val, rhs], [lhs_end_bb, rhs_end_bb])
     phi
@@ -955,7 +959,9 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     else { if name == "ring_list_is_empty" { true }
     else { if name == "ring_map_has" { true }
     else { if name == "ring_set_has" { true }
-    else { false } } } } } } }
+    else { if name == "ring_list_any" { true }
+    else { if name == "ring_list_all" { true }
+    else { false } } } } } } } } }
 }
 
 // Check if a runtime method needs special arg handling (some args need unboxing from ptr)
@@ -1131,7 +1137,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "concat" { some("ring_list_concat") }
     else { if type_name == "List" && method == "slice" { some("ring_list_slice") }
     else { if type_name == "List" && method == "reverse" { some("ring_list_reverse") }
-    else { if type_name == "List" && method == "sort" { some("ring_list_sort") }
+    else { if type_name == "List" && method == "sort" { some("ring_list_sort_default") }
     else { if type_name == "List" && method == "is_empty" { some("ring_list_is_empty") }
     else { if type_name == "List" && method == "first" { some("ring_list_first") }
     else { if type_name == "List" && method == "last" { some("ring_list_last") }
@@ -1142,6 +1148,11 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "map" { some("ring_list_map") }
     else { if type_name == "List" && method == "filter" { some("ring_list_filter") }
     else { if type_name == "List" && method == "for_each" { some("ring_list_for_each") }
+    else { if type_name == "List" && method == "any" { some("ring_list_any") }
+    else { if type_name == "List" && method == "all" { some("ring_list_all") }
+    else { if type_name == "List" && method == "find" { some("ring_list_find") }
+    else { if type_name == "List" && method == "flat_map" { some("ring_list_flat_map") }
+    else { if type_name == "List" && method == "enumerate" { some("ring_list_enumerate") }
     // Map methods
     else { if type_name == "Map" && method == "get" { some("ring_map_get") }
     else { if type_name == "Map" && method == "insert" { some("ring_map_set") }
@@ -1164,7 +1175,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Set" && method == "from_list" { some("ring_set_from_list") }
     else { if type_name == "Set" && method == "for_each" { some("ring_set_for_each") }
     else { if type_name == "Set" && method == "remove" { some("ring_set_delete") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {
@@ -1194,6 +1205,22 @@ fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMVal
 fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> LLVMValueRef {
     let recv_val = gen_llvm_expr(ctx, receiver)
     let recv_type = hexpr_type(receiver)
+
+    // Handle tuple field access (field is a numeric index like "0", "1")
+    // Tuples are represented as Lists (runtime arrays), so use ring_list_get
+    match recv_type {
+        Type::TupleType { .. } => {
+            let field_idx = match parse_int(field) {
+                some(n) => n,
+                none => panic("LLVM codegen: non-numeric tuple field: ${field}"),
+            }
+            let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
+            let get_ty = get_rt_fn_type(ctx, "ring_list_get")
+            let idx_val = LLVMConstInt(ctx.i64_type, field_idx, 0)
+            return LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], fresh_name(ctx, "t"))
+        },
+        _ => {},
+    }
 
     let type_name = match recv_type {
         Type::StructType { name, .. } => name,
@@ -1468,18 +1495,32 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
 
                     let mut phi_vals: List<LLVMValueRef> = []
                     let mut phi_bbs: List<LLVMBasicBlockRef> = []
+                    let mut has_wildcard = false
 
                     for arm in arms {
-                        gen_match_arm_enum(ctx, arm, scrut_val, ename, enum_info, switch_val, merge_bb, current_fn, phi_vals, phi_bbs)
+                        let is_wild = match arm.pattern {
+                            Pattern::Wildcard { .. } => true,
+                            Pattern::Binding { .. } => true,
+                            _ => false,
+                        }
+                        if is_wild {
+                            has_wildcard = true
+                            // Wildcard/binding: emit body into the default block
+                            gen_match_arm_wildcard(ctx, arm, scrut_val, default_bb, merge_bb, phi_vals, phi_bbs)
+                        } else {
+                            gen_match_arm_enum(ctx, arm, scrut_val, ename, enum_info, switch_val, merge_bb, current_fn, phi_vals, phi_bbs)
+                        }
                     }
 
-                    // Default block: unreachable or panic
-                    LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
-                    let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
-                    let panic_ty = get_rt_fn_type(ctx, "ring_panic")
-                    let msg = gen_str_lit(ctx, "match exhaustion failure")
-                    LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [msg], fresh_name(ctx, "mp"))
-                    discard(LLVMBuildUnreachable(ctx.builder))
+                    // Default block: if no wildcard, emit unreachable panic
+                    if !has_wildcard {
+                        LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+                        let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
+                        let panic_ty = get_rt_fn_type(ctx, "ring_panic")
+                        let msg = gen_str_lit(ctx, "match exhaustion failure")
+                        LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [msg], fresh_name(ctx, "mp"))
+                        discard(LLVMBuildUnreachable(ctx.builder))
+                    }
 
                     // Merge
                     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
@@ -1590,104 +1631,39 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
             }
         },
         Pattern::Wildcard { .. } => {
-            // Wildcard matches all remaining tags — use the default block
-            // But we need to repoint the default to a real arm block
-            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.arm.wild")
-            // We can't change the default of a switch after creation, so use default_bb
-            // and branch from default_bb to this arm_bb
-            // Actually for wildcard we just use the switch default. We'll generate code
-            // into the default block later. For now, create arm_bb and handle it below.
-            // Since we can't reassign the default, let's use if-else fallthrough approach:
-            // Add all remaining tags as cases to this block
-            for entry in enum_info.variants.entries() {
-                let (vname, vi) = entry
-                // Add case for every variant that hasn't been specifically handled
-                // (simple approach: add all, LLVM will ignore duplicates or we handle)
-                // Actually we should just use the default block for wildcard.
-                // Let's create the body in a separate bb and branch from default.
-            }
-            // Use default_bb directly — since we created it as the switch default,
-            // any unmatched tag will land here. We'll override the default_bb content below.
-            // But the default_bb was already created with unreachable. We need to intercept it.
-            // Instead: just add to this arm_bb and the default will branch to unreachable.
-            // The simplest approach: for wildcard in enum match, replace the default block.
-            // We'll write the arm body directly into the switch's default destination.
-            // This works because the caller creates a "match.default" bb with unreachable.
-            // We can remove the unreachable and write our code there.
-            // But default_bb hasn't been filled yet at this point! The caller fills it after.
-            // So we need a different approach: we mark that we have a wildcard.
-            // Let's just add the wildcard arm to a separate bb, and have the default branch there.
-
-            // For simplicity: catch-all wildcard should be handled separately.
-            // We'll add the body to a new BB, and set up the default to go there.
-            // Since we don't have a direct way to change switch default, we'll do:
-            //   default_bb: br arm_bb
-            // But wait, default_bb is filled AFTER this function returns, with unreachable.
-            // Solution: we need to NOT fill default with unreachable if there's a wildcard.
-            // The cleanest approach: emit the wildcard body into default_bb directly.
-            // But default_bb is created by the caller... let's just put a dummy bb
-            // and handle default_bb as our wildcard body location.
-            // NOTE: The caller fills default_bb AFTER all arms. So if we write to default_bb
-            // here, the caller will overwrite with unreachable.
-            // Best approach: return a flag. But that complicates the interface.
-            // SIMPLEST VALID APPROACH: For the wildcard arm, DON'T use switch case.
-            // Instead, let the default_bb contain the wildcard arm body. We'll do this
-            // by setting phi_vals/phi_bbs for the default path.
-            // We'll handle this by adding a special entry and the caller checks.
-            // Actually, let me just store the wildcard body in default_bb later.
-            // For now, use: wildcard = all unmatched tags go to default_bb.
-
-            // REVISED APPROACH: skip adding a case. The switch default will fall through.
-            // We need to communicate to the caller that default_bb should have this arm body.
-            // But we can't easily do that. Let's just add the body to default_bb directly now,
-            // since it hasn't been filled yet.
-            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-            let body_val = gen_llvm_expr(ctx, arm.body)
-            let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
-            discard(LLVMBuildBr(ctx.builder, merge_bb))
-            phi_vals.push(body_val)
-            phi_bbs.push(arm_end_bb)
-            // We can't easily redirect the switch default here.
-            // The trick: add cases for ALL remaining variant tags to point to arm_bb.
-            // This is correct: wildcard matches everything not already matched.
-            for entry in enum_info.variants.entries() {
-                let (vn, vi) = entry
-                LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, vi.tag, 0), arm_bb)
-            }
+            // Wildcard/binding arms in enum match are now handled by the caller
+            // via gen_match_arm_wildcard. This branch should not be reached.
         },
         Pattern::Binding { name: bname, .. } => {
-            // Binding pattern: like wildcard but also binds the value
-            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.arm.bind")
-            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+            // Wildcard/binding arms in enum match are now handled by the caller
+            // via gen_match_arm_wildcard. This branch should not be reached.
+        },
+        _ => {
+            // Other pattern types in enum context - should not normally occur
+            // since wildcards/bindings are handled by gen_match_arm_wildcard
+        },
+    }
+}
+
+// Handle wildcard/binding arm in enum match — emits body into default_bb
+fn gen_match_arm_wildcard(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef, default_bb: LLVMBasicBlockRef, merge_bb: LLVMBasicBlockRef, mut phi_vals: List<LLVMValueRef>, mut phi_bbs: List<LLVMBasicBlockRef>) {
+    LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+
+    // If it's a binding pattern, bind the scrutinee value
+    match arm.pattern {
+        Pattern::Binding { name: bname, .. } => {
             let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
             discard(LLVMBuildStore(ctx.builder, scrut_val, alloca))
             ctx.named_values.insert(bname, alloca)
-            let body_val = gen_llvm_expr(ctx, arm.body)
-            let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
-            discard(LLVMBuildBr(ctx.builder, merge_bb))
-            phi_vals.push(body_val)
-            phi_bbs.push(arm_end_bb)
-            // Direct all variant tags to this arm
-            for entry in enum_info.variants.entries() {
-                let (vn, vi) = entry
-                LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, vi.tag, 0), arm_bb)
-            }
         },
-        _ => {
-            // Other pattern types in enum context (literal, tuple, etc.) — fallback
-            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.arm.other")
-            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-            let body_val = gen_llvm_expr(ctx, arm.body)
-            let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
-            discard(LLVMBuildBr(ctx.builder, merge_bb))
-            phi_vals.push(body_val)
-            phi_bbs.push(arm_end_bb)
-            for entry in enum_info.variants.entries() {
-                let (vn, vi) = entry
-                LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, vi.tag, 0), arm_bb)
-            }
-        },
+        _ => {},
     }
+
+    let body_val = gen_llvm_expr(ctx, arm.body)
+    let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+    phi_vals.push(body_val)
+    phi_bbs.push(arm_end_bb)
 }
 
 // Helper to bind nested patterns recursively
@@ -1760,6 +1736,7 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
 fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, arms: List<HMatchArm>, merge_bb: LLVMBasicBlockRef, default_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) -> LLVMValueRef {
     let mut phi_vals: List<LLVMValueRef> = []
     let mut phi_bbs: List<LLVMBasicBlockRef> = []
+    let mut has_wildcard = false
 
     let mut remaining_arms = arms
     let total = arms.len()
@@ -1769,7 +1746,9 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                 let is_last = i == total - 1
                 match arm.pattern {
                     Pattern::Wildcard { .. } => {
+                        has_wildcard = true
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.wild")
+                        discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                         // Branch from current block to this arm (unconditional)
                         // We need to be in the right block. If we just wrote the prev arm's else:
@@ -1780,12 +1759,11 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         discard(LLVMBuildBr(ctx.builder, merge_bb))
                         phi_vals.push(body_val)
                         phi_bbs.push(arm_end_bb)
-                        // Make default go here
-                        LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
-                        discard(LLVMBuildBr(ctx.builder, arm_bb))
                     },
                     Pattern::Binding { name: bname, .. } => {
+                        has_wildcard = true
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.bind")
+                        discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                         let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, bname)
                         discard(LLVMBuildStore(ctx.builder, scrut_val, alloca))
@@ -1795,8 +1773,6 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         discard(LLVMBuildBr(ctx.builder, merge_bb))
                         phi_vals.push(body_val)
                         phi_bbs.push(arm_end_bb)
-                        LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
-                        discard(LLVMBuildBr(ctx.builder, arm_bb))
                     },
                     Pattern::Literal { value, .. } => {
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.lit")
@@ -1819,7 +1795,9 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                     },
                     Pattern::TuplePattern { elements, .. } => {
                         // Tuple destructuring: tuples are lists, use ring_list_get
+                        // Branch from current block to arm_bb (unconditional for now)
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.tuple")
+                        discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                         let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
                         let get_ty = get_rt_fn_type(ctx, "ring_list_get")
@@ -1850,13 +1828,15 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         discard(LLVMBuildBr(ctx.builder, merge_bb))
                         phi_vals.push(body_val)
                         phi_bbs.push(arm_end_bb)
-                        LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
-                        discard(LLVMBuildBr(ctx.builder, arm_bb))
+                        // Position at a new next block for any following arms
+                        let next_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next")
+                        LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
                     },
                     _ => {
                         // For other patterns in non-enum context, bind as wildcard
                         // but also try to bind any pattern variables
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.other")
+                        discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                         bind_nested_pattern(ctx, scrut_val, arm.pattern)
                         let body_val = gen_llvm_expr(ctx, arm.body)
@@ -1864,8 +1844,9 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         discard(LLVMBuildBr(ctx.builder, merge_bb))
                         phi_vals.push(body_val)
                         phi_bbs.push(arm_end_bb)
-                        LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
-                        discard(LLVMBuildBr(ctx.builder, arm_bb))
+                        // Position at a new next block for any following arms
+                        let next_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next")
+                        LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
                     },
                 }
             },
@@ -1873,15 +1854,19 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
         }
     }
 
-    // Fill default_bb if not already filled (no wildcard/binding arm)
-    // default_bb might already have a terminator if wildcard/binding was found
+    // If no wildcard/binding arm was found, connect current block to default
+    if !has_wildcard {
+        discard(LLVMBuildBr(ctx.builder, default_bb))
+    }
+
+    // Always fill default_bb with panic + unreachable
+    // (if wildcard was handled, default_bb is unreachable but still needs a terminator)
     LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
-    // Check if default_bb has no terminator — add unreachable
-    // Since we might have already added a branch, we need to check.
-    // For simplicity: if no arms matched, panic.
-    // Note: if a wildcard arm was the last, default_bb already has a br instruction.
-    // If not, we need to add unreachable.
-    // We'll rely on the fact that pattern matching is exhaustive.
+    let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
+    let panic_ty = get_rt_fn_type(ctx, "ring_panic")
+    let msg = gen_str_lit(ctx, "match exhaustion failure")
+    LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [msg], fresh_name(ctx, "mp"))
+    discard(LLVMBuildUnreachable(ctx.builder))
 
     // Merge
     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
@@ -2166,9 +2151,10 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     let fn_ty = LLVMFunctionType(ctx.ptr_type, fn_param_types, 0)
     let lambda_fn = LLVMAddFunction(ctx.module, lambda_name, fn_ty)
 
-    // Save state
+    // Save state (including insert block so we can restore after lambda body generation)
     let saved_fn = ctx.current_fn
     let saved_named = ctx.named_values
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
     ctx.current_fn = some(lambda_fn)
     ctx.named_values = map_new()
 
@@ -2210,12 +2196,10 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     let body_val = gen_llvm_expr(ctx, body)
     discard(LLVMBuildRet(ctx.builder, body_val))
 
-    // Restore state
+    // Restore state and position builder back at the calling function's block
     ctx.named_values = saved_named
     ctx.current_fn = saved_fn
-
-    // Position builder back at the calling function
-    LLVMPositionBuilderAtEnd(ctx.builder, LLVMGetInsertBlock(ctx.builder))
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
 
     // At the call site: allocate env struct and store captures
     let env_size = LLVMSizeOf(env_ty)
