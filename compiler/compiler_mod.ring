@@ -7,6 +7,7 @@ use formatter::{format_human}
 use env::{TypeEnv, add_impl}
 use checker::{CheckResult, check as check_single, check_module}
 use codegen::{generate}
+use codegen_llvm::{generate_llvm}
 use codegen_ctx::{safe_ident}
 use runtime::{RUNTIME_CODE, RUNTIME_EXPORT_NAMES, runtime_esm_code}
 use resolver::{ModuleGraph, ModuleId, module_key, module_prefix,

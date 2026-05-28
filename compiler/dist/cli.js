@@ -353,12 +353,13 @@ function cli_main(__ring_ev_io) {
 }
 
 class CliArgs {
-  constructor(command, file, debug, error_format, out_dir) {
+  constructor(command, file, debug, error_format, out_dir, target) {
     this.command = command;
     this.file = file;
     this.debug = debug;
     this.error_format = error_format;
     this.out_dir = out_dir;
+    this.target = target;
   }
 }
 
@@ -366,6 +367,7 @@ function parse_cli_args(args) {
   let debug = false;
   let error_format = "human";
   let out_dir = "dist";
+  let target = "js";
   let positional = [];
   const __ring_iter_2 = __List_Iterable.iter(args);
   while (true) {
@@ -381,7 +383,11 @@ function parse_cli_args(args) {
         if (Str_starts_with(arg, "--out-dir=")) {
           out_dir = Str_slice(arg, 10, Str_len(arg));
         } else {
-          List_push(positional, arg);
+          if (Str_starts_with(arg, "--target=")) {
+            target = Str_slice(arg, 9, Str_len(arg));
+          } else {
+            List_push(positional, arg);
+          }
         }
       }
     }
@@ -398,7 +404,7 @@ function parse_cli_args(args) {
   if (__ring_m._tag === "none") { return ""; }
   __match_fail(__ring_m);
 })();
-  return new CliArgs(command, file, debug, error_format, out_dir);
+  return new CliArgs(command, file, debug, error_format, out_dir, target);
 }
 
 function usage(__ring_ev_io) {
@@ -413,7 +419,8 @@ function usage(__ring_ev_io) {
   print("Options:", __ring_ev_io);
   print("  --debug                   Print intermediate info", __ring_ev_io);
   print("  --error-format=human|llm  Error output format (default: human)", __ring_ev_io);
-  return print("  --out-dir=<path>          Output directory (default: dist)", __ring_ev_io);
+  print("  --out-dir=<path>          Output directory (default: dist)", __ring_ev_io);
+  return print("  --target=js|llvm          Code generation target (default: js)", __ring_ev_io);
 }
 
 function __StringBuilder_Eq_eq(self, other) {
@@ -422,7 +429,7 @@ function __StringBuilder_Eq_eq(self, other) {
 const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
 
 function __CliArgs_Eq_eq(self, other) {
-  return (self.command === other.command) && (self.file === other.file) && (self.debug === other.debug) && (self.error_format === other.error_format) && (self.out_dir === other.out_dir);
+  return (self.command === other.command) && (self.file === other.file) && (self.debug === other.debug) && (self.error_format === other.error_format) && (self.out_dir === other.out_dir) && (self.target === other.target);
 }
 const __CliArgs_Eq = { eq: __CliArgs_Eq_eq, ne: function(self, other) { return !__CliArgs_Eq_eq(self, other); } };
 
@@ -452,7 +459,7 @@ function __StringBuilder_Clone_clone(self) {
 const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
 
 function __CliArgs_Clone_clone(self) {
-  return new CliArgs(self.command, self.file, self.debug, self.error_format, self.out_dir);
+  return new CliArgs(self.command, self.file, self.debug, self.error_format, self.out_dir, self.target);
 }
 const __CliArgs_Clone = { clone: __CliArgs_Clone_clone };
 
@@ -480,7 +487,9 @@ function __CliArgs_Ord_cmp(self, other) {
   if (c !== 0) return c;
   c = (self.error_format < other.error_format ? -1 : self.error_format > other.error_format ? 1 : 0);
   if (c !== 0) return c;
-  return (self.out_dir < other.out_dir ? -1 : self.out_dir > other.out_dir ? 1 : 0);
+  c = (self.out_dir < other.out_dir ? -1 : self.out_dir > other.out_dir ? 1 : 0);
+  if (c !== 0) return c;
+  return (self.target < other.target ? -1 : self.target > other.target ? 1 : 0);
 }
 const __CliArgs_Ord = { cmp: __CliArgs_Ord_cmp };
 
@@ -513,7 +522,7 @@ function __StringBuilder_Debug_debug(self) {
 const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __CliArgs_Debug_debug(self) {
-  return "CliArgs { " + "command: " + String(self.command) + ", " + "file: " + String(self.file) + ", " + "debug: " + String(self.debug) + ", " + "error_format: " + String(self.error_format) + ", " + "out_dir: " + String(self.out_dir) + " }";
+  return "CliArgs { " + "command: " + String(self.command) + ", " + "file: " + String(self.file) + ", " + "debug: " + String(self.debug) + ", " + "error_format: " + String(self.error_format) + ", " + "out_dir: " + String(self.out_dir) + ", " + "target: " + String(self.target) + " }";
 }
 const __CliArgs_Debug = { debug: __CliArgs_Debug_debug };
 
