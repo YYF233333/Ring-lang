@@ -321,16 +321,24 @@ fn test_fetch() {
 10. **标准库/FFI**：按编译器自身迁移需求驱动，不追求完整迁移
 11. **目标**：编译器完整自举到 LLVM native，JS 后端归档
 
-**执行进度（2026-05-28）**：
+**执行进度（2026-05-29 更新）**：
 - ~~**Wave 1（地基层）**~~：✅ llvm_ffi.ring + N-API addon + ring_runtime.cpp + CLI --target ✅
 - ~~**Wave 2（Codegen 核心）**~~：✅ codegen_llvm*.ring（5 模块，~3500 行）+ 全量 HExpr/HStmt + evidence threading + trait dict dispatch ✅
 - **Wave 3（迁移+自举）**：
   - ✅ 3a: 多文件 `--target=llvm` 接通 + std lib C ABI 补全（ring_runtime.cpp ~1100 行，~100 个函数）
   - ✅ 3b: 编译器 .o 已生成（`compiler/dist-llvm/main.o`，1.19MB，零 verify error）
-  - 🔧 3c: ring.exe 已链接（0.8MB），CLI help/错误输出正常，文件编译 segfault（access violation in compilation pipeline）
+  - 🔧 3c: ring.exe 已链接（0.8MB），CLI + lexer + parser 正常，checker 阶段 crash
   - ⏳ 3d: 双重自举 + E2E 全量测试
 - ~~**剩余已知问题**：3 个 lambda capture domination error（alloca 需提升到 entry block）~~ ✅ B-075 已修复
-- **当前阻塞**：ring.exe 编译文件时 segfault（exit code 5 = 0xC0000005），需定位 crash 点（path_resolve → read_file → lexer/parser 之间）
+- **2026-05-29 修复进展**：
+  - ✅ 30+ 缺失的 extern fn / method 映射（path_resolve、file_exists、Str.len、Str.char_at、Str.char_code_at 等）
+  - ✅ Option runtime 方法实现（unwrap_or、unwrap、is_some、is_none、map、unwrap_or_else）
+  - ✅ imports_map 从 AST use 声明构建（修复 aliased import 解析如 `check as check_single`）
+  - ✅ ring_file_exists 返回 boxed bool、ring_exit 接收 boxed int
+  - ✅ ring_list_any/ring_list_all 返回 int64_t（修复 has_errors() false positive）
+  - ✅ __ring_raise_fail 实现 + crash handler + panic fallback
+  - ring.exe 现在成功执行：CLI 参数解析 → 文件读取 → lexer → parser → checker 入口
+  - **当前阻塞**：checker/inference 深层 crash（checkpoint ~35909），不是缺失函数而是 LLVM IR codegen 逻辑 bug（可能是 enum match 分支或 struct 字段偏移问题）
 
 **验收标准**：
 - ~~Ring 编译器编译自身为 native .o~~ ✅ （2026-05-28）
@@ -639,6 +647,17 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 ~~B-062（#124 约束验证）~~ ✅ → ~~B-063（#125/#128 delegate 转发）~~ ✅ → ~~B-064（#129 scope 区分）~~ ✅ → ~~B-058（#115 bound 验证）~~ ✅ → ~~B-065（#121 显示改善）~~ ✅
 
 ## LLVM 后端质量
+
+### B-078 清理 B-066 parser workaround（string literal → import）[refactor] [P3] [S] [mechanical] [queued]
+`parser.ring:998` 仍用 string literal `"W0001"` 而非 `import codes::{W0001}`，这是 B-066 实现时因 B-077 跨模块 const bug 而采用的 workaround。B-077 已修复，应改回正常 import。
+
+**涉及修改**：
+1. `compiler/parser.ring`：将 `"W0001"` string literal 改为 `use codes::{W0001}` + 直接引用 `W0001`
+
+**验收标准**：
+- `parser.ring` 不再使用 string literal 绕过 const import
+- Double-bootstrap 正常通过
+- 全部 E2E 测试通过
 
 ## 性能优化
 
