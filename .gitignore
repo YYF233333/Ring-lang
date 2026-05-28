@@ -12,3 +12,5 @@ Thumbs.db
 
 tests/scratch/
 tests/cases/**/*.js
+
+compiler/llvm-addon/

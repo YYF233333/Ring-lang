@@ -303,38 +303,39 @@ fn test_fetch() {
   2. Effect-free 函数保证干净 C ABI，零成本互调
   3. 跨语言资源安全：Linear types + `defer` 清理 FFI 资源（Perceus RC 阶段实现）
 
+**环境（2026-05-28 确定）**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。N-API addon 放 `compiler/llvm-addon/`（.gitignore）。
+
+**详细执行计划**：见 `docs/llvm-migration.md` "2026-05-28 详细执行计划"。
+
 **实现策略（2026-05-24 决策）**：
 
-1. **Codegen 只写一次**：LLVM codegen 用 Ring 编写，通过 `extern fn` 包装 LLVM-C API（~50-80 个核心函数）
-2. **Bootstrap 桥**：本地 N-API addon（~300 行 C++，纯机械转发 LLVM-C），不入仓库，自举后废弃
+1. **Codegen 只写一次**：LLVM codegen 用 Ring 编写，通过 `extern fn` 包装 LLVM-C API（~80 个核心函数）
+2. **Bootstrap 桥**：本地 N-API addon（~300 行 C++，纯机械转发 LLVM-C），`compiler/llvm-addon/`，自举后废弃
 3. **内存管理**：malloc 不回收 → 直接上 Perceus RC（B-012），无中间 GC
-4. **值表示**：Uniform boxing（一切皆 `void*`，含 Int/Float/Bool），极简 codegen，Perceus RC 阶段引入 unboxing
-5. **Runtime**：`ring_runtime.cpp`（~300 行 C++ STL wrapper，extern "C"），List→vector、Map→unordered_map（Str key）、Str→string
+4. **值表示**：Uniform boxing（一切皆 `ptr`（opaque pointer），含 Int/Float/Bool），极简 codegen，Perceus RC 阶段引入 unboxing
+5. **Runtime**：`ring_runtime.cpp`（~300-400 行 C++ STL wrapper，extern "C"），List→vector、Map→unordered_map（Str key）、Str→string
 6. **闭包**：`{fn_ptr, env_ptr}` 二元组，已知函数直接调用不走闭包
-7. **Enum 布局**：`{tag: i64, fields: void*[N]}`，N = 最大变体字段数，内联分配
+7. **Enum 布局**：`{tag: i64, fields: ptr[N]}`，N = 最大变体字段数，内联分配
 8. **fail/catch**：setjmp/longjmp（bootstrap 无 Drop 不需要栈展开），Ownership 阶段可切换
 9. **多文件编译**：bootstrap 阶段单 LLVM Module → 单 .o → 链接为单一二进制
 10. **标准库/FFI**：按编译器自身迁移需求驱动，不追求完整迁移
 11. **目标**：编译器完整自举到 LLVM native，JS 后端归档
 
-**Bootstrap 路径**：
-1. 声明 LLVM FFI 层（`extern fn` + `extern type`）
-2. 编写 Ring LLVM codegen 模块（`codegen_llvm*.ring`，消费 HProgram）
-3. 编写 `ring_runtime.cpp`（C++ STL wrapper，~300 行）
-4. 本地编译 N-API addon（不入仓库）
-5. JS 版编译器 + addon → 编译自身为 native
-6. Native 编译器编译自身（验证自举一致性）
-7. 废弃 addon + 归档 JS 后端
+**执行 Wave 概览**：
+- **Wave 1（地基层，~2-3 天）**：llvm_ffi.ring（FFI 声明）+ N-API addon + ring_runtime.cpp + CLI/pipeline 骨架。1a/1b/1c 可并行。
+- **Wave 2（Codegen 核心，~5-7 天）**：codegen_llvm.ring（编排器）+ codegen_llvm_expr.ring（表达式）+ codegen_llvm_decl.ring（声明）+ fail/catch + evidence threading + trait dict dispatch + 闭包。
+- **Wave 3（迁移+自举，~3-5 天）**：std lib C ABI 补全 → JS→native 首次编译 → 双重自举验证 → E2E 全量测试。
 
 **涉及修改**：
-1. `compiler/codegen_llvm.ring`（新增）：LLVM codegen 入口 + IR builder 调用
+1. `compiler/codegen_llvm.ring`（新增）：LLVM codegen 编排器 + LlvmCtx 数据结构
 2. `compiler/codegen_llvm_expr.ring`（新增）：表达式 → LLVM IR
 3. `compiler/codegen_llvm_decl.ring`（新增）：声明 → LLVM IR
-4. `compiler/llvm_ffi.ring`（新增）：`extern fn` + `extern type` 包装 LLVM-C API
+4. `compiler/llvm_ffi.ring`（新增）：~80 个 `extern fn` + ~15 个 `extern type` 包装 LLVM-C API
 5. `compiler/compiler_mod.ring`：编排器支持 `--target=llvm` 切换后端
 6. `compiler/cli.ring`：新增 `--target` 参数
-7. `ring_runtime.cpp`（新增，仓库内）：C++ STL runtime（List/Map/Set/Str/IO）
-8. `std/*.ring`：编译器用到的 extern fn 按需提供 C ABI 实现
+7. `ring_runtime.cpp`（新增，仓库内）：~70 个 C++ STL runtime 函数（Boxing + Str + List + Map + Set + IO + setjmp wrapper）
+8. `compiler/llvm-addon/`（新增，.gitignore）：N-API addon（~300 行 C++）+ binding.gyp
+9. `std/*.ring`：编译器用到的 extern fn 按需提供 C ABI 实现
 
 **验收标准**：
 - Ring 编译器编译自身为 native 二进制
