@@ -68,10 +68,14 @@ static const char* g_last_fn = "";
 
 #ifdef _WIN32
 static LONG WINAPI crash_handler(EXCEPTION_POINTERS* ep) {
-    fprintf(stderr, "CRASH at checkpoint %d (last fn: %s), code=0x%08lx rip=%p\n",
+    HMODULE mod = GetModuleHandle(NULL);
+    uintptr_t rva = ep->ContextRecord->Rip - (uintptr_t)mod;
+    fprintf(stderr, "CRASH chk=%d fn=%s code=0x%08lx rip=%p base=%p rva=0x%llx\n",
             g_chk, g_last_fn,
             ep->ExceptionRecord->ExceptionCode,
-            (void*)ep->ContextRecord->Rip);
+            (void*)ep->ContextRecord->Rip,
+            (void*)mod,
+            (unsigned long long)rva);
     fflush(stderr);
     return EXCEPTION_EXECUTE_HANDLER;
 }
@@ -554,6 +558,7 @@ extern "C" void* ring_map_get(void* map, void* key) {
 }
 
 extern "C" void* ring_map_get_opt(void* map, void* key) {
+    if (!key) { fprintf(stderr, "FATAL: ring_map_get_opt null key at chk %d\n", g_chk); fflush(stderr); return ring_enum_none(); }
     RingMap* m = (RingMap*)map;
     std::string* k = (std::string*)key;
     auto it = m->find(*k);
@@ -561,7 +566,22 @@ extern "C" void* ring_map_get_opt(void* map, void* key) {
     return ring_enum_some(it->second);
 }
 
+static int g_map_set_count = 0;
 extern "C" void* ring_map_set(void* map, void* key, void* val) {
+    CHK("map_set");
+    g_map_set_count++;
+    if (!key) {
+        fprintf(stderr, "FATAL: ring_map_set null key at map_set #%d chk %d\n", g_map_set_count, g_chk);
+        fflush(stderr);
+        return map;
+    }
+    // Validate key looks like a valid std::string by checking first 8 bytes
+    void** key_vtable = (void**)key;
+    if (g_map_set_count == 1 || (g_chk > 35960 && g_chk < 35990)) {
+        std::string* ks = (std::string*)key;
+        fprintf(stderr, "[map_set #%d] key_ptr=%p key_size=%llu key_data=\"%.50s\"\n", g_map_set_count, key, (unsigned long long)ks->size(), ks->c_str());
+        fflush(stderr);
+    }
     RingMap* m = (RingMap*)map;
     (*m)[*(std::string*)key] = val;
     return map;
