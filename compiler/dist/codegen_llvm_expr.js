@@ -1607,19 +1607,23 @@ function rt_method_needs_int_args(name) {
   if ((name === "ring_list_get")) {
     return true;
   } else {
-    if ((name === "ring_str_get")) {
+    if ((name === "ring_list_get_opt")) {
       return true;
     } else {
-      if ((name === "ring_str_slice")) {
+      if ((name === "ring_str_get")) {
         return true;
       } else {
-        if ((name === "ring_list_slice")) {
+        if ((name === "ring_str_slice")) {
           return true;
         } else {
-          if ((name === "ring_list_set")) {
+          if ((name === "ring_list_slice")) {
             return true;
           } else {
-            return false;
+            if ((name === "ring_list_set")) {
+              return true;
+            } else {
+              return false;
+            }
           }
         }
       }
@@ -1838,7 +1842,7 @@ function method_to_runtime(type_name, method) {
                                 return Option_some("ring_list_len");
                               } else {
                                 if (((type_name === "List") && (method === "get"))) {
-                                  return Option_some("ring_list_get");
+                                  return Option_some("ring_list_get_opt");
                                 } else {
                                   if (((type_name === "List") && (method === "join"))) {
                                     return Option_some("ring_list_join");
@@ -1901,7 +1905,7 @@ function method_to_runtime(type_name, method) {
                                                                           return Option_some("ring_list_enumerate");
                                                                         } else {
                                                                           if (((type_name === "Map") && (method === "get"))) {
-                                                                            return Option_some("ring_map_get");
+                                                                            return Option_some("ring_map_get_opt");
                                                                           } else {
                                                                             if (((type_name === "Map") && (method === "insert"))) {
                                                                               return Option_some("ring_map_set");
@@ -2029,10 +2033,15 @@ function ensure_runtime_method(ctx, name, arg_count) {
     }
     if (__ring_m53._tag === "none") {
       const ptr = ctx.ptr_type;
+      const needs_int = rt_method_needs_int_args(name);
       let param_types = [];
       const __ring_end16 = arg_count;
       for (let i = 0; i < __ring_end16; i++) {
-        List_push(param_types, ptr);
+        if ((needs_int && (i > 0))) {
+          List_push(param_types, ctx.i64_type);
+        } else {
+          List_push(param_types, ptr);
+        }
       }
       if (is_void_runtime_fn(name)) {
         return codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, name, param_types, ctx.void_type);

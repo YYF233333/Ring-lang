@@ -1021,11 +1021,12 @@ fn rt_method_returns_bool(name: Str) -> Bool {
 fn rt_method_needs_int_args(name: Str) -> Bool {
     // Methods that take int64_t args after the receiver (e.g. list_get(ptr, i64))
     if name == "ring_list_get" { true }
+    else { if name == "ring_list_get_opt" { true }
     else { if name == "ring_str_get" { true }
     else { if name == "ring_str_slice" { true }
     else { if name == "ring_list_slice" { true }
     else { if name == "ring_list_set" { true }
-    else { false } } } } }
+    else { false } } } } } }
 }
 
 // Method needs receiver unboxed to i64 (Int.to_str)
@@ -1184,7 +1185,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     // List methods
     else { if type_name == "List" && method == "push" { some("ring_list_push") }
     else { if type_name == "List" && method == "len" { some("ring_list_len") }
-    else { if type_name == "List" && method == "get" { some("ring_list_get") }
+    else { if type_name == "List" && method == "get" { some("ring_list_get_opt") }
     else { if type_name == "List" && method == "join" { some("ring_list_join") }
     else { if type_name == "List" && method == "concat" { some("ring_list_concat") }
     else { if type_name == "List" && method == "slice" { some("ring_list_slice") }
@@ -1206,7 +1207,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "flat_map" { some("ring_list_flat_map") }
     else { if type_name == "List" && method == "enumerate" { some("ring_list_enumerate") }
     // Map methods
-    else { if type_name == "Map" && method == "get" { some("ring_map_get") }
+    else { if type_name == "Map" && method == "get" { some("ring_map_get_opt") }
     else { if type_name == "Map" && method == "insert" { some("ring_map_set") }
     else { if type_name == "Map" && method == "contains_key" { some("ring_map_has") }
     else { if type_name == "Map" && method == "keys" { some("ring_map_keys") }
@@ -1234,11 +1235,15 @@ fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMVal
     match ctx.rt_fns.get(name) {
         some(f) => f,
         none => {
-            // Dynamically declare — most runtime methods take ptr args and return ptr
             let ptr = ctx.ptr_type
+            let needs_int = rt_method_needs_int_args(name)
             let mut param_types: List<LLVMTypeRef> = []
             for i in 0..arg_count {
-                param_types.push(ptr)
+                if needs_int && i > 0 {
+                    param_types.push(ctx.i64_type)
+                } else {
+                    param_types.push(ptr)
+                }
             }
             // Void-returning methods
             if is_void_runtime_fn(name) {

@@ -49,6 +49,13 @@ typedef void* (*ring_fn_1)(void* env, void* arg);
 typedef void* (*ring_fn_2)(void* env, void* a, void* b);
 
 // ============================================================================
+// Forward declarations
+// ============================================================================
+
+static void* ring_enum_some(void* val);
+static void* ring_enum_none();
+
+// ============================================================================
 // Global state
 // ============================================================================
 
@@ -296,6 +303,14 @@ extern "C" int64_t ring_list_index_of(void* list, void* val) {
     return -1;
 }
 
+extern "C" void* ring_list_get_opt(void* list, int64_t idx) {
+    auto* vec = (std::vector<void*>*)list;
+    if (idx < 0 || idx >= (int64_t)vec->size()) {
+        return ring_enum_none();
+    }
+    return ring_enum_some((*vec)[(size_t)idx]);
+}
+
 extern "C" void* ring_list_reverse(void* list) {
     auto* vec = (std::vector<void*>*)list;
     auto* result = new std::vector<void*>(vec->rbegin(), vec->rend());
@@ -449,6 +464,14 @@ extern "C" void* ring_map_get(void* map, void* key) {
         exit(1);
     }
     return it->second;
+}
+
+extern "C" void* ring_map_get_opt(void* map, void* key) {
+    RingMap* m = (RingMap*)map;
+    std::string* k = (std::string*)key;
+    auto it = m->find(*k);
+    if (it == m->end()) return ring_enum_none();
+    return ring_enum_some(it->second);
 }
 
 extern "C" void* ring_map_set(void* map, void* key, void* val) {
@@ -632,7 +655,9 @@ extern "C" void* ring_exit(int64_t code) {
 
 extern "C" void* ring_args() {
     auto* result = new std::vector<void*>();
-    for (int i = 0; i < g_argc; i++) {
+    // Skip argv[0] (program name) to match JS backend behavior
+    // where process.argv.slice(2) skips [node, script]
+    for (int i = 1; i < g_argc; i++) {
         result->push_back((void*)new std::string(g_argv[i]));
     }
     return (void*)result;
