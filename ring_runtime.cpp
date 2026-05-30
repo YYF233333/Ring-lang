@@ -32,7 +32,9 @@
 //   Str          = std::string*
 //   List         = std::vector<void*>*
 //   Map          = std::unordered_map<std::string, void*>*
+//   MapInt       = std::unordered_map<int64_t, void*>*
 //   Set          = std::unordered_set<std::string>*
+//   SetInt       = std::unordered_set<int64_t>*
 //   StringBuilder = std::string*
 // ============================================================================
 
@@ -541,6 +543,7 @@ extern "C" void* ring_list_first(void* list) {
 // ============================================================================
 
 typedef std::unordered_map<std::string, void*> RingMap;
+typedef std::unordered_map<int64_t, void*> RingMapInt;
 
 extern "C" void* ring_map_new() {
     return (void*)new RingMap();
@@ -558,7 +561,6 @@ extern "C" void* ring_map_get(void* map, void* key) {
 }
 
 extern "C" void* ring_map_get_opt(void* map, void* key) {
-    if (!key) { fprintf(stderr, "FATAL: ring_map_get_opt null key at chk %d\n", g_chk); fflush(stderr); return ring_enum_none(); }
     RingMap* m = (RingMap*)map;
     std::string* k = (std::string*)key;
     auto it = m->find(*k);
@@ -566,22 +568,8 @@ extern "C" void* ring_map_get_opt(void* map, void* key) {
     return ring_enum_some(it->second);
 }
 
-static int g_map_set_count = 0;
 extern "C" void* ring_map_set(void* map, void* key, void* val) {
     CHK("map_set");
-    g_map_set_count++;
-    if (!key) {
-        fprintf(stderr, "FATAL: ring_map_set null key at map_set #%d chk %d\n", g_map_set_count, g_chk);
-        fflush(stderr);
-        return map;
-    }
-    // Validate key looks like a valid std::string by checking first 8 bytes
-    void** key_vtable = (void**)key;
-    if (g_map_set_count == 1 || (g_chk > 35960 && g_chk < 35990)) {
-        std::string* ks = (std::string*)key;
-        fprintf(stderr, "[map_set #%d] key_ptr=%p key_size=%llu key_data=\"%.50s\"\n", g_map_set_count, key, (unsigned long long)ks->size(), ks->c_str());
-        fflush(stderr);
-    }
     RingMap* m = (RingMap*)map;
     (*m)[*(std::string*)key] = val;
     return map;
@@ -647,10 +635,129 @@ extern "C" void* ring_map_for_each(void* map, void* closure) {
 }
 
 // ============================================================================
+// Map<Int> — int64_t-keyed map
+// ============================================================================
+
+extern "C" void* ring_map_int_new() {
+    return (void*)new RingMapInt();
+}
+
+extern "C" void* ring_map_int_get(void* map, void* key) {
+    RingMapInt* m = (RingMapInt*)map;
+    int64_t k = *(int64_t*)key;
+    auto it = m->find(k);
+    if (it == m->end()) {
+        fprintf(stderr, "ring panic: map key not found: %lld\n", (long long)k);
+        exit(1);
+    }
+    return it->second;
+}
+
+extern "C" void* ring_map_int_get_opt(void* map, void* key) {
+    RingMapInt* m = (RingMapInt*)map;
+    int64_t k = *(int64_t*)key;
+    auto it = m->find(k);
+    if (it == m->end()) return ring_enum_none();
+    return ring_enum_some(it->second);
+}
+
+extern "C" void* ring_map_int_set(void* map, void* key, void* val) {
+    CHK("map_int_set");
+    RingMapInt* m = (RingMapInt*)map;
+    int64_t k = *(int64_t*)key;
+    (*m)[k] = val;
+    return map;
+}
+
+extern "C" int64_t ring_map_int_has(void* map, void* key) {
+    RingMapInt* m = (RingMapInt*)map;
+    int64_t k = *(int64_t*)key;
+    return m->count(k) > 0 ? 1 : 0;
+}
+
+extern "C" void* ring_map_int_delete(void* map, void* key) {
+    RingMapInt* m = (RingMapInt*)map;
+    int64_t k = *(int64_t*)key;
+    m->erase(k);
+    return map;
+}
+
+extern "C" void* ring_map_int_keys(void* map) {
+    RingMapInt* m = (RingMapInt*)map;
+    auto* result = new std::vector<void*>();
+    result->reserve(m->size());
+    for (auto& kv : *m) {
+        result->push_back(ring_box_int(kv.first));
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_map_int_values(void* map) {
+    RingMapInt* m = (RingMapInt*)map;
+    auto* result = new std::vector<void*>();
+    result->reserve(m->size());
+    for (auto& kv : *m) {
+        result->push_back(kv.second);
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_map_int_entries(void* map) {
+    RingMapInt* m = (RingMapInt*)map;
+    auto* result = new std::vector<void*>();
+    result->reserve(m->size());
+    for (auto& kv : *m) {
+        auto* pair = new std::vector<void*>();
+        pair->push_back(ring_box_int(kv.first));
+        pair->push_back(kv.second);
+        result->push_back((void*)pair);
+    }
+    return (void*)result;
+}
+
+extern "C" int64_t ring_map_int_len(void* map) {
+    return (int64_t)((RingMapInt*)map)->size();
+}
+
+extern "C" void* ring_map_int_for_each(void* map, void* closure) {
+    RingMapInt* m = (RingMapInt*)map;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    for (auto& kv : *m) {
+        fn(cls->env_ptr, ring_box_int(kv.first), kv.second);
+    }
+    return nullptr;
+}
+
+extern "C" void* ring_map_int_clone(void* map) {
+    RingMapInt* m = (RingMapInt*)map;
+    return (void*)new RingMapInt(*m);
+}
+
+extern "C" void* ring_map_int_from(void* entries) {
+    auto* vec = (std::vector<void*>*)entries;
+    auto* result = new RingMapInt();
+    for (size_t i = 0; i < vec->size(); i++) {
+        auto* pair = (std::vector<void*>*)((*vec)[i]);
+        if (pair->size() >= 2) {
+            int64_t key = *(int64_t*)((*pair)[0]);
+            (*result)[key] = (*pair)[1];
+        }
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_map_int_clear(void* map) {
+    ((RingMapInt*)map)->clear();
+    return map;
+}
+
+// ============================================================================
 // Set (~8)
 // ============================================================================
 
 typedef std::unordered_set<std::string> RingSet;
+typedef std::unordered_set<int64_t> RingSetInt;
 
 extern "C" void* ring_set_new() {
     return (void*)new RingSet();
@@ -701,6 +808,109 @@ extern "C" void* ring_set_for_each(void* set, void* closure) {
         fn(cls->env_ptr, (void*)new std::string(elem));
     }
     return nullptr;
+}
+
+// ============================================================================
+// Set<Int> — int64_t-element set
+// ============================================================================
+
+extern "C" void* ring_set_int_new() {
+    return (void*)new RingSetInt();
+}
+
+extern "C" void* ring_set_int_add(void* set, void* elem) {
+    int64_t k = *(int64_t*)elem;
+    ((RingSetInt*)set)->insert(k);
+    return set;
+}
+
+extern "C" int64_t ring_set_int_has(void* set, void* elem) {
+    int64_t k = *(int64_t*)elem;
+    return ((RingSetInt*)set)->count(k) > 0 ? 1 : 0;
+}
+
+extern "C" void* ring_set_int_delete(void* set, void* elem) {
+    int64_t k = *(int64_t*)elem;
+    ((RingSetInt*)set)->erase(k);
+    return set;
+}
+
+extern "C" void* ring_set_int_to_list(void* set) {
+    RingSetInt* s = (RingSetInt*)set;
+    auto* result = new std::vector<void*>();
+    result->reserve(s->size());
+    for (auto& elem : *s) {
+        result->push_back(ring_box_int(elem));
+    }
+    return (void*)result;
+}
+
+extern "C" int64_t ring_set_int_len(void* set) {
+    return (int64_t)((RingSetInt*)set)->size();
+}
+
+extern "C" void* ring_set_int_from_list(void* list) {
+    auto* vec = (std::vector<void*>*)list;
+    auto* result = new RingSetInt();
+    for (size_t i = 0; i < vec->size(); i++) {
+        int64_t k = *(int64_t*)((*vec)[i]);
+        result->insert(k);
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_set_int_for_each(void* set, void* closure) {
+    RingSetInt* s = (RingSetInt*)set;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& elem : *s) {
+        fn(cls->env_ptr, ring_box_int(elem));
+    }
+    return nullptr;
+}
+
+extern "C" void* ring_set_int_clone(void* set) {
+    RingSetInt* s = (RingSetInt*)set;
+    return (void*)new RingSetInt(*s);
+}
+
+extern "C" void* ring_set_int_union(void* a, void* b) {
+    RingSetInt* sa = (RingSetInt*)a;
+    RingSetInt* sb = (RingSetInt*)b;
+    auto* result = new RingSetInt(*sa);
+    for (auto& elem : *sb) {
+        result->insert(elem);
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_set_int_intersect(void* a, void* b) {
+    RingSetInt* sa = (RingSetInt*)a;
+    RingSetInt* sb = (RingSetInt*)b;
+    auto* result = new RingSetInt();
+    for (auto& elem : *sa) {
+        if (sb->count(elem) > 0) {
+            result->insert(elem);
+        }
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_set_int_difference(void* a, void* b) {
+    RingSetInt* sa = (RingSetInt*)a;
+    RingSetInt* sb = (RingSetInt*)b;
+    auto* result = new RingSetInt();
+    for (auto& elem : *sa) {
+        if (sb->count(elem) == 0) {
+            result->insert(elem);
+        }
+    }
+    return (void*)result;
+}
+
+extern "C" void* ring_set_int_clear(void* set) {
+    ((RingSetInt*)set)->clear();
+    return set;
 }
 
 // ============================================================================

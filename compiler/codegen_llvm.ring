@@ -171,6 +171,22 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_map_len", [ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_map_for_each", [ptr, ptr], ptr)
 
+    // Map<Int>
+    get_or_declare_runtime_fn(ctx, "ring_map_int_new", [], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_get", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_get_opt", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_set", [ptr, ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_has", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_delete", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_keys", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_values", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_entries", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_for_each", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_clone", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_from", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_clear", [ptr], ptr)
+
     // Set
     get_or_declare_runtime_fn(ctx, "ring_set_new", [], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_add", [ptr, ptr], ptr)
@@ -180,6 +196,21 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_set_len", [ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_set_from_list", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_for_each", [ptr, ptr], ptr)
+
+    // Set<Int>
+    get_or_declare_runtime_fn(ctx, "ring_set_int_new", [], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_add", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_has", [ptr, ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_delete", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_to_list", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_from_list", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_for_each", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_clone", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_union", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_intersect", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_difference", [ptr, ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_clear", [ptr], ptr)
 
     // Catch / raise (setjmp/longjmp based)
     get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ptr)

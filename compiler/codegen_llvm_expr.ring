@@ -68,6 +68,32 @@ extern fn LLVMBuildIntToPtr(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty:
 extern fn LLVMBuildPtrToInt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 
 // ============================================================
+// Type-aware map/set dispatch helpers
+// ============================================================
+
+fn is_int_keyed_map(ty: Type) -> Bool {
+    match ty {
+        Type::StructType { name, type_params, .. } =>
+            name == "Map" && type_params.len() > 0 && match type_params[0] {
+                Type::IntType => true,
+                _ => false,
+            },
+        _ => false,
+    }
+}
+
+fn is_int_set(ty: Type) -> Bool {
+    match ty {
+        Type::StructType { name, type_params, .. } =>
+            name == "Set" && type_params.len() > 0 && match type_params[0] {
+                Type::IntType => true,
+                _ => false,
+            },
+        _ => false,
+    }
+}
+
+// ============================================================
 // Main expression dispatch
 // ============================================================
 
@@ -593,7 +619,16 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
                 some(rn) => rn,
                 none => name,
             }
-            gen_direct_call(ctx, call_name, arg_vals, dict_vals)
+            let final_name = if call_name == "map_new" && is_int_keyed_map(result_ty) {
+                "map_int_new"
+            } else { if call_name == "set_new" && is_int_set(result_ty) {
+                "set_int_new"
+            } else { if call_name == "map_from" && is_int_keyed_map(result_ty) {
+                "map_int_from"
+            } else { if call_name == "set_from" && is_int_set(result_ty) {
+                "set_int_from"
+            } else { call_name } } } }
+            gen_direct_call(ctx, final_name, arg_vals, dict_vals)
         },
         HExpr::FieldAccess { receiver, field, .. } => {
             // Method call: receiver.method(args)
@@ -1005,7 +1040,11 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     else { if name == "list_new" { some("ring_list_new") }
     else { if name == "map_from" { some("ring_map_from") }
     else { if name == "__ring_raise_fail" { some("__ring_raise_fail") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } }
+    else { if name == "map_int_new" { some("ring_map_int_new") }
+    else { if name == "set_int_new" { some("ring_set_int_new") }
+    else { if name == "map_int_from" { some("ring_map_int_from") }
+    else { if name == "set_int_from" { some("ring_set_int_from_list") }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 // ============================================================
@@ -1029,7 +1068,11 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     else { if name == "ring_set_has" { true }
     else { if name == "ring_set_len" { true }
     else { if name == "ring_sb_len" { true }
-    else { false } } } } } } } } } } } } } } }
+    else { if name == "ring_map_int_has" { true }
+    else { if name == "ring_map_int_len" { true }
+    else { if name == "ring_set_int_has" { true }
+    else { if name == "ring_set_int_len" { true }
+    else { false } } } } } } } } } } } } } } } } } } }
 }
 
 // Check if a runtime method returns bool (i64 that needs boxing to Bool)
@@ -1045,7 +1088,9 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     else { if name == "ring_list_all" { true }
     else { if name == "ring_Option_is_some" { true }
     else { if name == "ring_Option_is_none" { true }
-    else { false } } } } } } } } } } }
+    else { if name == "ring_map_int_has" { true }
+    else { if name == "ring_set_int_has" { true }
+    else { false } } } } } } } } } } } } }
 }
 
 // Check if a runtime method needs special arg handling (some args need unboxing from ptr)
@@ -1099,7 +1144,39 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
     // Map to runtime function name
     let rt_method = method_to_runtime(type_name, method)
     match rt_method {
-        some(rt_name) => {
+        some(base_rt_name) => {
+            // Dispatch to int-keyed variants if applicable
+            let rt_name = if is_int_keyed_map(recv_type) {
+                match method {
+                    "get" => "ring_map_int_get_opt",
+                    "insert" => "ring_map_int_set",
+                    "contains_key" => "ring_map_int_has",
+                    "keys" => "ring_map_int_keys",
+                    "values" => "ring_map_int_values",
+                    "entries" => "ring_map_int_entries",
+                    "len" => "ring_map_int_len",
+                    "remove" => "ring_map_int_delete",
+                    "for_each" => "ring_map_int_for_each",
+                    "clear" => "ring_map_int_clear",
+                    "clone" => "ring_map_int_clone",
+                    _ => base_rt_name,
+                }
+            } else { if is_int_set(recv_type) {
+                match method {
+                    "add" => "ring_set_int_add",
+                    "insert" => "ring_set_int_add",
+                    "has" => "ring_set_int_has",
+                    "contains" => "ring_set_int_has",
+                    "to_list" => "ring_set_int_to_list",
+                    "len" => "ring_set_int_len",
+                    "from_list" => "ring_set_int_from_list",
+                    "for_each" => "ring_set_int_for_each",
+                    "remove" => "ring_set_int_delete",
+                    "clear" => "ring_set_int_clear",
+                    "clone" => "ring_set_int_clone",
+                    _ => base_rt_name,
+                }
+            } else { base_rt_name } }
             // Build call args with proper unboxing
             let mut call_args: List<LLVMValueRef> = []
 
@@ -2198,9 +2275,10 @@ fn gen_index_expr(mut ctx: LlvmCtx, receiver: HExpr, index: HExpr, ty: Type) -> 
             LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], fresh_name(ctx, "sg"))
         } else {
             if type_name == "Map" {
-                // Map.get takes ptr key (string)
-                let get_fn = get_or_declare_runtime_fn(ctx, "ring_map_get", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
-                let get_ty = get_rt_fn_type(ctx, "ring_map_get")
+                // Map subscript — use int-keyed variant if applicable
+                let map_get_name = if is_int_keyed_map(recv_type) { "ring_map_int_get" } else { "ring_map_get" }
+                let get_fn = get_or_declare_runtime_fn(ctx, map_get_name, [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+                let get_ty = get_rt_fn_type(ctx, map_get_name)
                 LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], fresh_name(ctx, "mg"))
             } else {
                 // Fallback: try list_get
