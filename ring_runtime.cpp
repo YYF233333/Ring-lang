@@ -21,6 +21,7 @@
 #include <direct.h>  // _getcwd
 #include <io.h>      // _access
 #include <windows.h> // GetFullPathName
+#include <intrin.h>  // _ReturnAddress
 #define PATH_SEP '\\'
 #else
 #include <unistd.h>  // getcwd, access
@@ -107,6 +108,68 @@ static LONG WINAPI crash_handler(EXCEPTION_POINTERS* ep) {
     fprintf(stderr, "  bytes at rip: ");
     for (int i = -5; i < 10; i++) fprintf(stderr, "%02x ", ip[i]);
     fprintf(stderr, "\n");
+    // Stack walk: dump potential return addresses and raw stack data
+    uintptr_t base = (uintptr_t)mod;
+    uintptr_t text_end = base + 0xB4000;
+    uintptr_t* sp = (uintptr_t*)ep->ContextRecord->Rsp;
+    fprintf(stderr, "  stack return addresses (RVA):\n");
+    int found = 0;
+    for (int i = 0; i < 128 && found < 20; i++) {
+        uintptr_t val = sp[i];
+        if (val > base && val < text_end) {
+            fprintf(stderr, "    [rsp+0x%x] = %p (rva=0x%llx)\n",
+                    i * 8, (void*)val, (unsigned long long)(val - base));
+            found++;
+        }
+    }
+    // Dump raw stack for manual inspection (first 128 qwords)
+    fprintf(stderr, "  raw stack dump:\n");
+    for (int i = 0; i < 128; i += 4) {
+        fprintf(stderr, "    [rsp+0x%03x] %016llx %016llx %016llx %016llx\n",
+                i * 8, (unsigned long long)sp[i], (unsigned long long)sp[i+1],
+                (unsigned long long)sp[i+2], (unsigned long long)sp[i+3]);
+    }
+    // Deep inspection: follow InferResult -> HExpr -> tag chain
+    // apply_subst frame: push rsi,rdi,rbx (24) + sub rsp,0x150 → 0x168 total + 8 for ret addr
+    uintptr_t caller_rsp = (uintptr_t)sp + 0x170;
+    // InferResult* at [caller_rsp+0x78]
+    fprintf(stderr, "  caller (infer_method_call) rsp=%p\n", (void*)caller_rsp);
+    __try {
+        uintptr_t infer_result_ptr = *(uintptr_t*)(caller_rsp + 0x78);
+        fprintf(stderr, "  InferResult* = %p\n", (void*)infer_result_ptr);
+        if (infer_result_ptr > 0x10000) {
+            uintptr_t hexpr_ptr = *(uintptr_t*)infer_result_ptr;
+            uintptr_t subst_ptr = *(uintptr_t*)(infer_result_ptr + 8);
+            uintptr_t effects_ptr = *(uintptr_t*)(infer_result_ptr + 16);
+            fprintf(stderr, "  InferResult.hexpr = %p, .subst = %p, .effects = %p\n",
+                    (void*)hexpr_ptr, (void*)subst_ptr, (void*)effects_ptr);
+            if (hexpr_ptr > 0x10000) {
+                int64_t hexpr_tag = *(int64_t*)hexpr_ptr;
+                fprintf(stderr, "  HExpr tag = %lld\n", (long long)hexpr_tag);
+                uintptr_t* hdata = (uintptr_t*)hexpr_ptr;
+                fprintf(stderr, "  HExpr data:");
+                for (int k = 0; k < 9; k++) {
+                    fprintf(stderr, " [%d]=%p", k, (void*)hdata[k]);
+                }
+                fprintf(stderr, "\n");
+                // If tag=4 (Ident), field[1] is name (Str = std::string*)
+                if (hexpr_tag == 4 && hdata[1] > 0x10000) {
+                    std::string* name = (std::string*)hdata[1];
+                    fprintf(stderr, "  Ident.name = \"%s\"\n", name->c_str());
+                    // field[2] = resolved_name (Option<Str>), field[3] = def_id (Option<Int>)
+                    if (hdata[2] > 0x10000) {
+                        int64_t opt_tag = *(int64_t*)hdata[2];
+                        if (opt_tag == 0 && ((uintptr_t*)hdata[2])[1] > 0x10000) {
+                            fprintf(stderr, "  Ident.resolved_name = some(\"%s\")\n",
+                                    ((std::string*)((uintptr_t*)hdata[2])[1])->c_str());
+                        }
+                    }
+                }
+            }
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        fprintf(stderr, "  [failed to read caller data]\n");
+    }
     fflush(stderr);
     dump_trace();
     return EXCEPTION_EXECUTE_HANDLER;
@@ -134,7 +197,12 @@ extern "C" void* ring_box_int(int64_t val) {
 
 extern "C" int64_t ring_unbox_int(void* p) {
     CHK("unbox_int");
-    if (!p) { fprintf(stderr, "FATAL: ring_unbox_int(null) at chk %d\n", g_chk); fflush(stderr); exit(1); }
+    if (!p) {
+        HMODULE mod = GetModuleHandle(NULL);
+        uintptr_t rva = (uintptr_t)_ReturnAddress() - (uintptr_t)mod;
+        fprintf(stderr, "FATAL: ring_unbox_int(null) at chk %d caller_rva=0x%llx\n", g_chk, (unsigned long long)rva);
+        fflush(stderr); dump_trace(); exit(1);
+    }
     if ((uintptr_t)p < 0x10000) {
         fprintf(stderr, "FATAL: ring_unbox_int raw_int_as_ptr=%p at chk %d\n", p, g_chk);
         fflush(stderr);
@@ -144,9 +212,8 @@ extern "C" int64_t ring_unbox_int(void* p) {
     __try {
         return *(int64_t*)p;
     } __except(EXCEPTION_EXECUTE_HANDLER) {
-        void* ret_addr = __builtin_return_address(0);
         HMODULE mod = GetModuleHandle(NULL);
-        uintptr_t rva = (uintptr_t)ret_addr - (uintptr_t)mod;
+        uintptr_t rva = (uintptr_t)_ReturnAddress() - (uintptr_t)mod;
         fprintf(stderr, "FATAL: ring_unbox_int access violation ptr=%p chk=%d caller_rva=0x%llx\n", p, g_chk, (unsigned long long)rva);
         fflush(stderr);
         dump_trace();
@@ -975,6 +1042,17 @@ extern "C" void* ring_set_int_clear(void* set) {
 // ============================================================================
 // IO / FS / Process (~8)
 // ============================================================================
+
+extern "C" void* ring_debug_assert_nonnull(void* ptr, void* msg) {
+    if (ptr == nullptr) {
+        fprintf(stderr, "ASSERT_NONNULL FAILED: %s (chk=%d)\n",
+                msg ? ((std::string*)msg)->c_str() : "(no msg)", g_chk);
+        fflush(stderr);
+        dump_trace();
+        exit(99);
+    }
+    return ptr;
+}
 
 extern "C" void* ring_print(void* s) {
     CHK("PRINT");

@@ -110,8 +110,8 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
             gen_call(ctx, callee, args, resolved_dicts, dict_dispatch, ty, effects),
         HExpr::FieldAccess { receiver, field, ty, .. } =>
             gen_field_access(ctx, receiver, field, ty),
-        HExpr::StructLit { name, fields, .. } =>
-            gen_struct_lit(ctx, name, fields),
+        HExpr::StructLit { name, fields, spread, .. } =>
+            gen_struct_lit(ctx, name, fields, spread),
         HExpr::Block { stmts, tail, .. } =>
             gen_block(ctx, stmts, tail),
         HExpr::IfExpr { condition, then_branch, else_branch, .. } =>
@@ -1459,19 +1459,31 @@ fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> 
 // Struct literal
 // ============================================================
 
-fn gen_struct_lit(mut ctx: LlvmCtx, name: Str, fields: List<HStructFieldInit>) -> LLVMValueRef {
+fn gen_struct_lit(mut ctx: LlvmCtx, name: Str, fields: List<HStructFieldInit>, spread: HExpr?) -> LLVMValueRef {
     match ctx.struct_types.get(name) {
         some(info) => {
-            // Allocate struct: malloc(sizeof(struct_type))
             let size = LLVMSizeOf(info.llvm_type)
             let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
             let malloc_ty = get_rt_fn_type(ctx, "malloc")
             let struct_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [size], fresh_name(ctx, "s"))
 
-            // Store each field in the correct position
+            // If spread expression exists, copy all fields from it first
+            match spread {
+                some(spread_expr) => {
+                    let spread_val = gen_llvm_expr(ctx, spread_expr)
+                    for i in 0..info.field_names.len() {
+                        let src_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, spread_val, i, fresh_name(ctx, "sfp"))
+                        let src_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, src_ptr, fresh_name(ctx, "sfv"))
+                        let dst_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, struct_ptr, i, fresh_name(ctx, "dfp"))
+                        discard(LLVMBuildStore(ctx.builder, src_val, dst_ptr))
+                    }
+                },
+                none => {},
+            }
+
+            // Store explicitly specified fields (overriding spread values)
             for f in fields {
                 let val = gen_llvm_expr(ctx, f.value)
-                // Find field index
                 let mut field_idx = -1
                 for i in 0..info.field_names.len() {
                     if info.field_names[i] == f.name {
