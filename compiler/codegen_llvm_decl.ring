@@ -289,7 +289,15 @@ pub fn register_enum_info(mut ctx: LlvmCtx, name: Str, variants: List<HEnumVaria
         if fc > max_fields {
             max_fields = fc
         }
-        variant_map.insert(v.name, EnumVariantInfo { tag: tag, field_count: fc })
+        let fnames = match v.field_names {
+            some(names) => names,
+            none => {
+                let mut ns: List<Str> = []
+                for j in 0..fc { ns.push("") }
+                ns
+            },
+        }
+        variant_map.insert(v.name, EnumVariantInfo { tag: tag, field_count: fc, field_names: fnames })
         tag = tag + 1
     }
 

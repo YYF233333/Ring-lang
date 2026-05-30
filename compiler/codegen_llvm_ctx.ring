@@ -33,7 +33,8 @@ pub struct StructFieldInfo {
 
 pub struct EnumVariantInfo {
     pub tag: Int,
-    pub field_count: Int
+    pub field_count: Int,
+    pub field_names: List<Str>
 }
 
 pub struct EnumTypeInfo {

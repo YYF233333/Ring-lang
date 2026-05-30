@@ -1802,13 +1802,19 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
 
                     LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                     // Named constructor fields: bind by field name
-                    // In the enum struct, fields are at position 1, 2, ... in order of definition
+                    // Look up each pattern field's position in the variant's declared field list
                     for i in 0..named_fields.len() {
                         match named_fields.get(i) {
                             some(nf) => {
+                                let mut field_idx = i
+                                for fi in 0..vi.field_names.len() {
+                                    if vi.field_names[fi] == nf.name {
+                                        field_idx = fi
+                                    }
+                                }
                                 match nf.pattern {
                                     Pattern::Binding { name: bname, .. } => {
-                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
+                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
                                         let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
                                         let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
                                         discard(LLVMBuildStore(ctx.builder, field_val, alloca))
@@ -1816,7 +1822,7 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
                                     },
                                     Pattern::Wildcard { .. } => {},
                                     _ => {
-                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
+                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
                                         let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
                                         bind_nested_pattern(ctx, field_val, nf.pattern)
                                     },
@@ -2173,12 +2179,18 @@ fn gen_named_variant_construct(mut ctx: LlvmCtx, enum_name: Str, variant_name: S
                     let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, enum_ptr, 0, fresh_name(ctx, "tag"))
                     discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, vi.tag, 0), tag_ptr))
 
-                    // Store fields (starting at index 1)
+                    // Store fields by name lookup in variant's field list
                     for i in 0..fields.len() {
                         match fields.get(i) {
                             some(f) => {
                                 let val = gen_llvm_expr(ctx, f.value)
-                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, enum_ptr, i + 1, fresh_name(ctx, "ef"))
+                                let mut field_idx = i
+                                for fi in 0..vi.field_names.len() {
+                                    if vi.field_names[fi] == f.name {
+                                        field_idx = fi
+                                    }
+                                }
+                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, enum_ptr, field_idx + 1, fresh_name(ctx, "ef"))
                                 discard(LLVMBuildStore(ctx.builder, val, field_ptr))
                             },
                             none => {},

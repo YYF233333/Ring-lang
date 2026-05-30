@@ -1331,8 +1331,7 @@ impl Parser {
             let operand = self.parse_expr_bp(PREC_UNARY, allow_struct_lit)
             return Expr::UnaryOp { op: str_to_unaryop(tok.value), operand: operand, span: self.make_span(start, expr_span(operand).end) }
         }
-
-        if self.check(TokenKind::TkIntLit) {
+if self.check(TokenKind::TkIntLit) {
             self.advance()
             return Expr::IntLit { value: parse_int(tok.value).unwrap_or(0), span: tok.span }
         }
@@ -1356,31 +1355,24 @@ impl Parser {
             self.advance()
             return Expr::BoolLit { value: false, span: tok.span }
         }
-
         if self.check(TokenKind::TkStringInterpStart) {
             return self.parse_string_interp()
         }
-
         if self.check(TokenKind::TkLBrace) {
             return self.parse_block_expr()
         }
-
         if self.check(TokenKind::TkIf) {
             return self.parse_if_expr()
         }
-
         if self.check(TokenKind::TkMatch) {
             return self.parse_match_expr()
         }
-
         if self.check(TokenKind::TkHandle) {
             return self.parse_handle_expr()
         }
-
         if self.check(TokenKind::TkFn) {
             return self.parse_lambda_expr()
         }
-
         if self.check(TokenKind::TkLBracket) {
             self.advance()
             let mut elements: List<Expr> = []
@@ -1395,7 +1387,6 @@ impl Parser {
             let end_tok = self.expect(TokenKind::TkRBracket)
             return Expr::ListLit { elements: elements, span: self.make_span(start, end_tok.span.end) }
         }
-
         if self.check(TokenKind::TkLParen) {
             self.advance()
             let first = self.parse_expr()
@@ -1416,7 +1407,6 @@ impl Parser {
             self.expect(TokenKind::TkRParen)
             return first
         }
-
         // super::name — relative path expression access
         if self.check(TokenKind::TkSuper) {
             self.advance()
@@ -1438,11 +1428,9 @@ impl Parser {
 
             return Expr::Ident { name: member_name, qualifier: some(qualifier_str), span: self.make_span(start, member_tok.span.end) }
         }
-
         if self.check(TokenKind::TkIdent) {
             self.advance()
             let name = tok.value
-
             if is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkColonColon) {
                 self.advance()
                 let variant_tok = self.expect(TokenKind::TkIdent)
@@ -1500,7 +1488,6 @@ impl Parser {
             if allow_struct_lit && is_uppercase(name.char_at(0).unwrap_or("")) && self.check(TokenKind::TkLBrace) {
                 return self.parse_struct_literal(name, start, none)
             }
-
             return Expr::Ident { name: name, qualifier: none, span: tok.span }
         }
 

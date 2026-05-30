@@ -431,8 +431,8 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     // Option<T>: { some(T), none } → { i64 tag, ptr payload }
     let option_ty = LLVMStructTypeInContext(ctx.context, [i64, ptr], 0)
     let mut option_variants: Map<Str, EnumVariantInfo> = map_new()
-    option_variants.insert("some", EnumVariantInfo { tag: 0, field_count: 1 })
-    option_variants.insert("none", EnumVariantInfo { tag: 1, field_count: 0 })
+    option_variants.insert("some", EnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"] })
+    option_variants.insert("none", EnumVariantInfo { tag: 1, field_count: 0, field_names: [] })
     ctx.enum_types.insert("Option", EnumTypeInfo {
         variants: option_variants, max_fields: 1, llvm_type: option_ty
     })
@@ -474,8 +474,8 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     // Result<T, E>: { Ok(T), Err(E) } → { i64 tag, ptr payload }
     let result_ty = LLVMStructTypeInContext(ctx.context, [i64, ptr], 0)
     let mut result_variants: Map<Str, EnumVariantInfo> = map_new()
-    result_variants.insert("Ok", EnumVariantInfo { tag: 0, field_count: 1 })
-    result_variants.insert("Err", EnumVariantInfo { tag: 1, field_count: 1 })
+    result_variants.insert("Ok", EnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"] })
+    result_variants.insert("Err", EnumVariantInfo { tag: 1, field_count: 1, field_names: ["value"] })
     ctx.enum_types.insert("Result", EnumTypeInfo {
         variants: result_variants, max_fields: 1, llvm_type: result_ty
     })

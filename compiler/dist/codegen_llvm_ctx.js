@@ -259,9 +259,10 @@ class StructFieldInfo {
 }
 
 class EnumVariantInfo {
-  constructor(tag, field_count) {
+  constructor(tag, field_count, field_names) {
     this.tag = tag;
     this.field_count = field_count;
+    this.field_names = field_names;
   }
 }
 
@@ -453,11 +454,6 @@ function __LLVMTargetMachineRef_Eq_eq(self, other) {
 }
 const __LLVMTargetMachineRef_Eq = { eq: __LLVMTargetMachineRef_Eq_eq, ne: function(self, other) { return !__LLVMTargetMachineRef_Eq_eq(self, other); } };
 
-function __EnumVariantInfo_Eq_eq(self, other) {
-  return (self.tag === other.tag) && (self.field_count === other.field_count);
-}
-const __EnumVariantInfo_Eq = { eq: __EnumVariantInfo_Eq_eq, ne: function(self, other) { return !__EnumVariantInfo_Eq_eq(self, other); } };
-
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
   switch (self._tag) {
@@ -524,7 +520,7 @@ function __StructFieldInfo_Clone_clone(self) {
 const __StructFieldInfo_Clone = { clone: __StructFieldInfo_Clone_clone };
 
 function __EnumVariantInfo_Clone_clone(self) {
-  return new EnumVariantInfo(self.tag, self.field_count);
+  return new EnumVariantInfo(self.tag, self.field_count, __List_Clone.clone(self.field_names, __Str_Clone));
 }
 const __EnumVariantInfo_Clone = { clone: __EnumVariantInfo_Clone_clone };
 
@@ -581,14 +577,6 @@ function __LLVMTargetMachineRef_Ord_cmp(self, other) {
   return 0;
 }
 const __LLVMTargetMachineRef_Ord = { cmp: __LLVMTargetMachineRef_Ord_cmp };
-
-function __EnumVariantInfo_Ord_cmp(self, other) {
-  var c;
-  c = (self.tag < other.tag ? -1 : self.tag > other.tag ? 1 : 0);
-  if (c !== 0) return c;
-  return (self.field_count < other.field_count ? -1 : self.field_count > other.field_count ? 1 : 0);
-}
-const __EnumVariantInfo_Ord = { cmp: __EnumVariantInfo_Ord_cmp };
 
 const __Result_tag_order = { "Ok": 0, "Err": 1 };
 function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
@@ -659,7 +647,7 @@ function __StructFieldInfo_Debug_debug(self) {
 const __StructFieldInfo_Debug = { debug: __StructFieldInfo_Debug_debug };
 
 function __EnumVariantInfo_Debug_debug(self) {
-  return "EnumVariantInfo { " + "tag: " + String(self.tag) + ", " + "field_count: " + String(self.field_count) + " }";
+  return "EnumVariantInfo { " + "tag: " + String(self.tag) + ", " + "field_count: " + String(self.field_count) + ", " + "field_names: " + __List_Debug.debug(self.field_names, __Str_Debug) + " }";
 }
 const __EnumVariantInfo_Debug = { debug: __EnumVariantInfo_Debug_debug };
 
@@ -678,4 +666,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca, __EnumVariantInfo_Eq, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __EnumVariantInfo_Ord, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };
