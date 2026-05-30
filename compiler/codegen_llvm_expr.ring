@@ -2017,43 +2017,70 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         }
                     },
                     Pattern::TuplePattern { elements, .. } => {
-                        // Tuple destructuring: tuples are lists, use ring_list_get
-                        // Branch from current block to arm_bb (unconditional for now)
-                        let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.tuple")
-                        discard(LLVMBuildBr(ctx.builder, arm_bb))
-                        LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                         let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
                         let get_ty = get_rt_fn_type(ctx, "ring_list_get")
+                        let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
+
+                        // Phase 1: Check Constructor sub-patterns' tags
                         for j in 0..elements.len() {
                             match elements.get(j) {
-                                some(elem_pat) => {
-                                    match elem_pat {
-                                        Pattern::Binding { name: bname, .. } => {
-                                            let idx = LLVMConstInt(ctx.i64_type, j, 0)
-                                            let field_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, bname))
-                                            let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
-                                            discard(LLVMBuildStore(ctx.builder, field_val, alloca))
-                                            ctx.named_values.insert(bname, alloca)
-                                        },
-                                        Pattern::Wildcard { .. } => {},
-                                        _ => {
-                                            let idx = LLVMConstInt(ctx.i64_type, j, 0)
-                                            let field_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tv"))
-                                            bind_nested_pattern(ctx, field_val, elem_pat)
-                                        },
-                                    }
+                                some(elem_pat) => match elem_pat {
+                                    Pattern::Constructor { name: cname, qualifier, .. } => {
+                                        let idx = LLVMConstInt(ctx.i64_type, j, 0)
+                                        let elem_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tc"))
+                                        let ei = find_enum_by_variant(ctx, cname, qualifier)
+                                        match ei {
+                                            some(enum_info) => match enum_info.variants.get(cname) {
+                                                some(vi) => {
+                                                    let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, elem_val, 0, fresh_name(ctx, "tp"))
+                                                    let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tv"))
+                                                    let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
+                                                    let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "tc"))
+                                                    let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tuple.check")
+                                                    discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, next_bb))
+                                                    LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
+                                                },
+                                                none => {},
+                                            },
+                                            none => {},
+                                        }
+                                    },
+                                    _ => {},
                                 },
                                 none => {},
                             }
                         }
+
+                        // Phase 2: All checks passed — bind variables
+                        for j in 0..elements.len() {
+                            match elements.get(j) {
+                                some(elem_pat) => match elem_pat {
+                                    Pattern::Binding { name: bname, .. } => {
+                                        let idx = LLVMConstInt(ctx.i64_type, j, 0)
+                                        let field_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, bname))
+                                        let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
+                                        discard(LLVMBuildStore(ctx.builder, field_val, alloca))
+                                        ctx.named_values.insert(bname, alloca)
+                                    },
+                                    Pattern::Wildcard { .. } => {},
+                                    _ => {
+                                        let idx = LLVMConstInt(ctx.i64_type, j, 0)
+                                        let field_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tv"))
+                                        bind_nested_pattern(ctx, field_val, elem_pat)
+                                    },
+                                },
+                                none => {},
+                            }
+                        }
+
                         let body_val = gen_llvm_expr(ctx, arm.body)
                         let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
                         discard(LLVMBuildBr(ctx.builder, merge_bb))
                         phi_vals.push(body_val)
                         phi_bbs.push(arm_end_bb)
-                        // Position at a new next block for any following arms
-                        let next_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next")
-                        LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                        if is_last == false {
+                            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                        }
                     },
                     _ => {
                         // For other patterns in non-enum context, bind as wildcard
