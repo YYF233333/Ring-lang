@@ -66,7 +66,25 @@ static char** g_argv = nullptr;
 
 static int g_chk = 0;
 static const char* g_last_fn = "";
-#define CHK(name) do { g_chk++; g_last_fn = name; } while(0)
+static const char* g_trace_buf[64];
+static void* g_trace_args[64];
+static int g_trace_idx = 0;
+#define CHK(name) do { g_chk++; g_last_fn = name; g_trace_buf[g_trace_idx & 63] = name; g_trace_args[g_trace_idx & 63] = nullptr; g_trace_idx++; } while(0)
+#define CHK_ARG(name, arg) do { g_chk++; g_last_fn = name; g_trace_buf[g_trace_idx & 63] = name; g_trace_args[g_trace_idx & 63] = arg; g_trace_idx++; } while(0)
+
+static void dump_trace() {
+    fprintf(stderr, "=== Last 64 calls (chk=%d) ===\n", g_chk);
+    for (int i = 0; i < 64; i++) {
+        int idx = (g_trace_idx - 64 + i) & 63;
+        if (g_trace_buf[idx]) {
+            if (g_trace_args[idx])
+                fprintf(stderr, "  [%d] %s ptr=%p\n", g_chk - 64 + i + 1, g_trace_buf[idx], g_trace_args[idx]);
+            else
+                fprintf(stderr, "  [%d] %s\n", g_chk - 64 + i + 1, g_trace_buf[idx]);
+        }
+    }
+    fflush(stderr);
+}
 
 #ifdef _WIN32
 static LONG WINAPI crash_handler(EXCEPTION_POINTERS* ep) {
@@ -78,7 +96,19 @@ static LONG WINAPI crash_handler(EXCEPTION_POINTERS* ep) {
             (void*)ep->ContextRecord->Rip,
             (void*)mod,
             (unsigned long long)rva);
+    fprintf(stderr, "  rax=%p rbx=%p rcx=%p rdx=%p\n  rsi=%p rdi=%p rsp=%p rbp=%p\n",
+            (void*)ep->ContextRecord->Rax, (void*)ep->ContextRecord->Rbx,
+            (void*)ep->ContextRecord->Rcx, (void*)ep->ContextRecord->Rdx,
+            (void*)ep->ContextRecord->Rsi, (void*)ep->ContextRecord->Rdi,
+            (void*)ep->ContextRecord->Rsp, (void*)ep->ContextRecord->Rbp);
+    fprintf(stderr, "  fault_addr=%p\n", (void*)ep->ExceptionRecord->ExceptionInformation[1]);
+    // Dump instruction bytes at crash point
+    unsigned char* ip = (unsigned char*)ep->ContextRecord->Rip;
+    fprintf(stderr, "  bytes at rip: ");
+    for (int i = -5; i < 10; i++) fprintf(stderr, "%02x ", ip[i]);
+    fprintf(stderr, "\n");
     fflush(stderr);
+    dump_trace();
     return EXCEPTION_EXECUTE_HANDLER;
 }
 #endif
@@ -104,8 +134,27 @@ extern "C" void* ring_box_int(int64_t val) {
 
 extern "C" int64_t ring_unbox_int(void* p) {
     CHK("unbox_int");
-    if (!p) { fprintf(stderr, "FATAL: ring_unbox_int(null) at chk %d\n", g_chk); fflush(stderr); *(volatile int*)0 = 0; }
+    if (!p) { fprintf(stderr, "FATAL: ring_unbox_int(null) at chk %d\n", g_chk); fflush(stderr); exit(1); }
+    if ((uintptr_t)p < 0x10000) {
+        fprintf(stderr, "FATAL: ring_unbox_int raw_int_as_ptr=%p at chk %d\n", p, g_chk);
+        fflush(stderr);
+        exit(1);
+    }
+#ifdef _WIN32
+    __try {
+        return *(int64_t*)p;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        void* ret_addr = __builtin_return_address(0);
+        HMODULE mod = GetModuleHandle(NULL);
+        uintptr_t rva = (uintptr_t)ret_addr - (uintptr_t)mod;
+        fprintf(stderr, "FATAL: ring_unbox_int access violation ptr=%p chk=%d caller_rva=0x%llx\n", p, g_chk, (unsigned long long)rva);
+        fflush(stderr);
+        dump_trace();
+        exit(1);
+    }
+#else
     return *(int64_t*)p;
+#endif
 }
 
 extern "C" void* ring_box_float(double val) {
@@ -126,8 +175,12 @@ extern "C" void* ring_box_bool(int64_t val) {
 }
 
 extern "C" int64_t ring_unbox_bool(void* p) {
-    CHK("unbox_bool");
-    if (!p) { fprintf(stderr, "FATAL: ring_unbox_bool(null) at chk %d\n", g_chk); fflush(stderr); *(volatile int*)0 = 0; }
+    CHK_ARG("unbox_bool", p);
+    if (!p) { fprintf(stderr, "FATAL: ring_unbox_bool(null) at chk %d\n", g_chk); fflush(stderr); dump_trace(); exit(1); }
+    if ((uintptr_t)p < 0x10000) {
+        fprintf(stderr, "FATAL: ring_unbox_bool raw_val_as_ptr=%p at chk %d\n", p, g_chk);
+        fflush(stderr); dump_trace(); exit(1);
+    }
     return *(int64_t*)p;
 }
 
@@ -155,7 +208,7 @@ extern "C" void* ring_str_concat(void* a, void* b) {
 
 extern "C" int64_t ring_str_eq(void* a, void* b) {
     CHK("str_eq");
-    if (0) {
+    if (g_chk >= 9688 && g_chk <= 9702) {
         fprintf(stderr, "  str_eq(a=%p, b=%p)\n", a, b);
         fflush(stderr);
         if (a && b) {
@@ -301,6 +354,7 @@ extern "C" void* ring_list_set(void* list, int64_t idx, void* val) {
 }
 
 extern "C" int64_t ring_list_len(void* list) {
+    CHK("list_len");
     return (int64_t)((std::vector<void*>*)list)->size();
 }
 
@@ -324,12 +378,17 @@ extern "C" void* ring_list_slice(void* list, int64_t start, int64_t end) {
 extern "C" void* ring_list_pop(void* list) {
     auto* vec = (std::vector<void*>*)list;
     if (vec->empty()) {
-        fprintf(stderr, "ring panic: pop on empty list\n");
-        exit(1);
+        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
+        opt[0] = 1; // None tag
+        opt[1] = 0;
+        return (void*)opt;
     }
     void* val = vec->back();
     vec->pop_back();
-    return val;
+    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
+    opt[0] = 0; // Some tag
+    *((void**)(opt + 1)) = val;
+    return (void*)opt;
 }
 
 extern "C" int64_t ring_list_contains(void* list, void* val) {
@@ -523,19 +582,17 @@ extern "C" int64_t ring_list_is_empty(void* list) {
 extern "C" void* ring_list_last(void* list) {
     auto* vec = (std::vector<void*>*)list;
     if (vec->empty()) {
-        fprintf(stderr, "ring panic: last on empty list\n");
-        exit(1);
+        return ring_enum_none();
     }
-    return vec->back();
+    return ring_enum_some(vec->back());
 }
 
 extern "C" void* ring_list_first(void* list) {
     auto* vec = (std::vector<void*>*)list;
     if (vec->empty()) {
-        fprintf(stderr, "ring panic: first on empty list\n");
-        exit(1);
+        return ring_enum_none();
     }
-    return vec->front();
+    return ring_enum_some(vec->front());
 }
 
 // ============================================================================
@@ -947,6 +1004,7 @@ extern "C" void* ring_panic(void* s) {
 
 extern "C" void* ring_read_file(void* path) {
     std::string* p = (std::string*)path;
+    fprintf(stderr, "[read_file] %s (chk=%d)\n", p->c_str(), g_chk); fflush(stderr);
     FILE* f = fopen(p->c_str(), "rb");
     if (!f) {
         fprintf(stderr, "ring panic: cannot open file: %s\n", p->c_str());
