@@ -355,15 +355,7 @@ extern "C" void* ring_list_set(void* list, int64_t idx, void* val) {
 
 extern "C" int64_t ring_list_len(void* list) {
     CHK("list_len");
-    if (!list) {
-        void* ret_addr = __builtin_return_address(0);
-        HMODULE mod = GetModuleHandle(NULL);
-        uintptr_t rva = (uintptr_t)ret_addr - (uintptr_t)mod;
-        fprintf(stderr, "FATAL: ring_list_len(null) at chk %d caller_rva=0x%llx\n", g_chk, (unsigned long long)rva);
-        fflush(stderr);
-        dump_trace();
-        exit(1);
-    }
+    if (!list) { return 0; }
     return (int64_t)((std::vector<void*>*)list)->size();
 }
 
@@ -549,6 +541,7 @@ extern "C" void* ring_list_find(void* list, void* closure) {
 }
 
 extern "C" void* ring_list_map(void* list, void* closure) {
+    if (!list) { return (void*)new std::vector<void*>(); }
     auto* vec = (std::vector<void*>*)list;
     auto* result = new std::vector<void*>();
     result->reserve(vec->size());
@@ -1011,11 +1004,8 @@ extern "C" void* ring_panic(void* s) {
     return nullptr;  // unreachable
 }
 
-static int g_read_count = 0;
 extern "C" void* ring_read_file(void* path) {
     std::string* p = (std::string*)path;
-    g_read_count++;
-    fprintf(stderr, "[read_file #%d] %s (chk=%d)\n", g_read_count, p->c_str(), g_chk); fflush(stderr);
     FILE* f = fopen(p->c_str(), "rb");
     if (!f) {
         fprintf(stderr, "ring panic: cannot open file: %s\n", p->c_str());
