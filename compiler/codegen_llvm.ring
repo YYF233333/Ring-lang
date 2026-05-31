@@ -708,6 +708,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         local_names: set_new(),
         tmp_counter: 0,
         lambda_counter: 0,
+        match_counter: 0,
         current_fn: none,
         loop_break_bb: none,
         loop_continue_bb: none
@@ -820,6 +821,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         local_names: set_new(),
         tmp_counter: 0,
         lambda_counter: 0,
+        match_counter: 0,
         current_fn: none,
         loop_break_bb: none,
         loop_continue_bb: none

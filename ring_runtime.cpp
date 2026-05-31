@@ -1040,6 +1040,56 @@ extern "C" void* ring_set_int_clear(void* set) {
 }
 
 // ============================================================================
+// Type sanitization (LLVM codegen workaround)
+// ============================================================================
+
+// ring_sanitize_type: workaround for LLVM codegen List<Type>-as-Type bug.
+// If the value is not a valid Type enum (tag outside 0..15) but looks like
+// a std::vector, return its first element instead.
+extern "C" void* ring_sanitize_type(void* t) {
+    if (!t) return t;
+    int64_t tag = *(int64_t*)t;
+    if (tag >= 0 && tag <= 15) return t;
+    __try {
+        auto* vec = (std::vector<void*>*)t;
+        if (vec->size() > 0) {
+            void* first = (*vec)[0];
+            if (first) {
+                int64_t ftag = *(int64_t*)first;
+                if (ftag >= 0 && ftag <= 15) return first;
+            }
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return t;
+}
+
+// ring_debug_verify_type: fallback diagnostic — panics if a Type value has
+// an invalid tag (called from match.default blocks in enum match codegen).
+extern "C" void* ring_debug_verify_type(void* t) {
+    if (!t) {
+        fprintf(stderr, "VERIFY: null Type pointer at chk=%d\n", g_chk);
+        fflush(stderr); dump_trace(); exit(99);
+    }
+    int64_t tag = *(int64_t*)t;
+    if (tag < 0 || tag > 15) {
+        fprintf(stderr, "VERIFY: bad Type tag=%lld (0x%llx) ptr=%p at chk=%d\n",
+                (long long)tag, (unsigned long long)tag, t, g_chk);
+        fflush(stderr); dump_trace(); exit(99);
+    }
+    if (tag == 7) { // TypeVar
+        void* id = ((void**)t)[1];
+        if (!id) {
+            fprintf(stderr, "VERIFY: TypeVar null id at chk=%d ptr=%p\n", g_chk, t);
+            void** data = (void**)t;
+            fprintf(stderr, "  TypeVar data: tag=%lld id=%p name=%p\n",
+                    (long long)data[0], data[1], data[2]);
+            fflush(stderr); dump_trace(); exit(99);
+        }
+    }
+    return t;
+}
+
+// ============================================================================
 // IO / FS / Process (~8)
 // ============================================================================
 

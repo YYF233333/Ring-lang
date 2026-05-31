@@ -2649,8 +2649,12 @@ function gen_match_expr(ctx, scrutinee, arms, result_ty) {
   if (__ring_m._tag === "none") { return panic("LLVM codegen: match expr outside function"); }
   __match_fail(__ring_m);
 })();
-  const scrut_val = gen_llvm_expr(ctx, scrutinee);
+  let scrut_val = gen_llvm_expr(ctx, scrutinee);
   const scrut_ty = hir$hexpr_type(scrutinee);
+  ctx.match_counter = (ctx.match_counter + 1);
+  const sanitize_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_sanitize_type", [ctx.ptr_type], ctx.ptr_type);
+  const sanitize_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_sanitize_type");
+  scrut_val = LLVMBuildCall2(ctx.builder, sanitize_ty, sanitize_fn, [scrut_val], codegen_llvm_ctx$fresh_name(ctx, "st"));
   const enum_name = (function() {
   const __ring_m = scrut_ty;
   if (__ring_m._tag === "EnumType") { const name = __ring_m.name; return Option_some(name); }
@@ -2692,9 +2696,13 @@ function gen_match_expr(ctx, scrutinee, arms, result_ty) {
           }
           if ((!has_wildcard)) {
             LLVMPositionBuilderAtEnd(ctx.builder, default_bb);
+            const verify_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_debug_verify_type", [ctx.ptr_type], ctx.ptr_type);
+            const verify_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_debug_verify_type");
+            discard(LLVMBuildCall2(ctx.builder, verify_ty, verify_fn, [scrut_val], ""));
             const panic_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type);
             const panic_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_panic");
-            const msg = gen_str_lit(ctx, "match exhaustion failure");
+            ctx.match_counter = (ctx.match_counter + 1);
+            const msg = gen_str_lit(ctx, `match exhaustion failure #${ctx.match_counter}`);
             LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [msg], codegen_llvm_ctx$fresh_name(ctx, "mp"));
             discard(LLVMBuildUnreachable(ctx.builder));
           }
@@ -3172,7 +3180,7 @@ function gen_match_if_else(ctx, scrut_val, scrut_ty, arms, merge_bb, default_bb,
   LLVMPositionBuilderAtEnd(ctx.builder, default_bb);
   const panic_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type);
   const panic_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_panic");
-  const msg = gen_str_lit(ctx, "match exhaustion failure");
+  const msg = gen_str_lit(ctx, `match exhaustion failure #${ctx.match_counter}`);
   LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [msg], codegen_llvm_ctx$fresh_name(ctx, "mp"));
   discard(LLVMBuildUnreachable(ctx.builder));
   LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);

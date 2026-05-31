@@ -91,6 +91,7 @@ pub struct LlvmCtx {
     // Counters
     pub tmp_counter: Int,
     pub lambda_counter: Int,
+    pub match_counter: Int,
 
     // Current function being codegen'd
     pub current_fn: LLVMValueRef?,

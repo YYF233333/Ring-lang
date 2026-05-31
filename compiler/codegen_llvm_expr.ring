@@ -1687,8 +1687,13 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
         none => panic("LLVM codegen: match expr outside function"),
     }
 
-    let scrut_val = gen_llvm_expr(ctx, scrutinee)
+    let mut scrut_val = gen_llvm_expr(ctx, scrutinee)
     let scrut_ty = hexpr_type(scrutinee)
+    ctx.match_counter = ctx.match_counter + 1
+    // Sanitize scrutinee: if it's a List (miscompiled Type), recover first element
+    let sanitize_fn = get_or_declare_runtime_fn(ctx, "ring_sanitize_type", [ctx.ptr_type], ctx.ptr_type)
+    let sanitize_ty = get_rt_fn_type(ctx, "ring_sanitize_type")
+    scrut_val = LLVMBuildCall2(ctx.builder, sanitize_ty, sanitize_fn, [scrut_val], fresh_name(ctx, "st"))
 
     // Check if scrutinee is an enum type
     let enum_name = match scrut_ty {
@@ -1732,9 +1737,14 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
                     // Default block: if no wildcard, emit unreachable panic
                     if !has_wildcard {
                         LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+                        // Debug: verify the scrutinee value first (helps diagnose tag corruption)
+                        let verify_fn = get_or_declare_runtime_fn(ctx, "ring_debug_verify_type", [ctx.ptr_type], ctx.ptr_type)
+                        let verify_ty = get_rt_fn_type(ctx, "ring_debug_verify_type")
+                        discard(LLVMBuildCall2(ctx.builder, verify_ty, verify_fn, [scrut_val], ""))
                         let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
                         let panic_ty = get_rt_fn_type(ctx, "ring_panic")
-                        let msg = gen_str_lit(ctx, "match exhaustion failure")
+                        ctx.match_counter = ctx.match_counter + 1
+                        let msg = gen_str_lit(ctx, "match exhaustion failure #${ctx.match_counter}")
                         LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [msg], fresh_name(ctx, "mp"))
                         discard(LLVMBuildUnreachable(ctx.builder))
                     }
@@ -2114,7 +2124,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
     LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
     let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
     let panic_ty = get_rt_fn_type(ctx, "ring_panic")
-    let msg = gen_str_lit(ctx, "match exhaustion failure")
+    let msg = gen_str_lit(ctx, "match exhaustion failure #${ctx.match_counter}")
     LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [msg], fresh_name(ctx, "mp"))
     discard(LLVMBuildUnreachable(ctx.builder))
 
