@@ -371,6 +371,8 @@ function emit_fn_body(ctx, name, params, effects, body, trait_bounds, impl_type)
 })();
   const saved_fn = ctx.current_fn;
   ctx.current_fn = Option_some(fn_val);
+  const saved_fn_name = ctx.current_fn_name;
+  ctx.current_fn_name = mangled;
   const saved_named = ctx.named_values;
   ctx.named_values = map_new();
   const entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry");
@@ -419,6 +421,7 @@ function emit_fn_body(ctx, name, params, effects, body, trait_bounds, impl_type)
   LLVMBuildRet(ctx.builder, body_val);
   ctx.named_values = saved_named;
   ctx.current_fn = saved_fn;
+  ctx.current_fn_name = saved_fn_name;
 }
 
 function emit_const_body(ctx, name, init) {

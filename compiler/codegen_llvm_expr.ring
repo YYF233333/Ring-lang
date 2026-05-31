@@ -104,7 +104,7 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
         HExpr::StrLit { value, .. } => gen_str_lit(ctx, value),
         HExpr::BoolLit { value, .. } => gen_bool_lit(ctx, value),
         HExpr::Ident { name, resolved_name, .. } => gen_ident(ctx, name, resolved_name),
-        HExpr::BinOp { op, left, right, ty, .. } => gen_binop(ctx, op, left, right, ty),
+        HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, .. } => gen_binop(ctx, op, left, right, eq_dispatch, ord_dispatch, ty),
         HExpr::UnaryOp { op, operand, ty, .. } => gen_unaryop(ctx, op, operand, ty),
         HExpr::Call { callee, args, resolved_dicts, dict_dispatch, ty, effects, .. } =>
             gen_call(ctx, callee, args, resolved_dicts, dict_dispatch, ty, effects),
@@ -291,7 +291,7 @@ fn operand_type_from_binop(left: HExpr) -> Type {
     hexpr_type(left)
 }
 
-fn gen_binop(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, result_ty: Type) -> LLVMValueRef {
+fn gen_binop(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?, ord_dispatch: TraitDispatch?, result_ty: Type) -> LLVMValueRef {
     let op_type = operand_type_from_binop(left)
 
     // Short-circuit And/Or
@@ -299,6 +299,34 @@ fn gen_binop(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, result_ty: 
         BinOp::And => { return gen_and(ctx, left, right) },
         BinOp::Or => { return gen_or(ctx, left, right) },
         _ => {},
+    }
+
+    // Trait-dispatched comparisons (Eq / Ord). The checker resolves a dispatch when
+    // the operand type is a generic type variable, a user struct/enum, or otherwise
+    // requires the trait. This MUST take precedence over the primitive fallback —
+    // otherwise a generic `x == item` would be miscompiled as an integer compare,
+    // which silently fails for heap-allocated (non-SSO) strings and for structs.
+    let is_eq_op = match op { BinOp::Eq => true, BinOp::Neq => true, _ => false }
+    let is_ord_op = match op {
+        BinOp::Lt => true, BinOp::Lte => true, BinOp::Gt => true, BinOp::Gte => true, _ => false,
+    }
+    if is_eq_op {
+        match eq_dispatch {
+            some(d) => match d {
+                TraitDispatch::Builtin => {},
+                _ => { return gen_eq_dispatch_llvm(ctx, op, left, right, d) },
+            },
+            none => {},
+        }
+    }
+    if is_ord_op {
+        match ord_dispatch {
+            some(d) => match d {
+                TraitDispatch::Builtin => {},
+                _ => { return gen_ord_dispatch_llvm(ctx, op, left, right, d) },
+            },
+            none => {},
+        }
     }
 
     let lhs = gen_llvm_expr(ctx, left)
@@ -322,6 +350,70 @@ fn gen_binop(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, result_ty: 
             }
         }
     }
+}
+
+// Resolve the dict value for a trait dispatch (Eq/Ord).
+fn resolve_dispatch_dict(mut ctx: LlvmCtx, dispatch: TraitDispatch) -> LLVMValueRef {
+    match dispatch {
+        TraitDispatch::Dict { param } => {
+            match ctx.named_values.get(param) {
+                some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "dp")),
+                none => LLVMConstPointerNull(ctx.ptr_type),
+            }
+        },
+        TraitDispatch::Direct { dict, .. } => resolve_dict_ref(ctx, DictRef::Simple(dict)),
+        TraitDispatch::Builtin => LLVMConstPointerNull(ctx.ptr_type),
+    }
+}
+
+// Load a method closure from a dict struct slot (dict is a struct of ptr closures).
+fn load_dict_method(mut ctx: LlvmCtx, dict_ptr: LLVMValueRef, slot: Int) -> LLVMValueRef {
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+    let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot, fresh_name(ctx, "ms"))
+    LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "mc"))
+}
+
+// Eq dispatch: call the dict's eq closure (method slot 0) on (lhs, rhs).
+fn gen_eq_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> LLVMValueRef {
+    let lhs = gen_llvm_expr(ctx, left)
+    let rhs = gen_llvm_expr(ctx, right)
+    let dict_ptr = resolve_dispatch_dict(ctx, dispatch)
+    let eq_closure = load_dict_method(ctx, dict_ptr, 0)
+    let result = gen_closure_call(ctx, eq_closure, [lhs, rhs])
+    match op {
+        BinOp::Neq => {
+            let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
+            let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
+            let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [result], fresh_name(ctx, "ub"))
+            let one = LLVMConstInt(ctx.i64_type, 1, 0)
+            let neg = LLVMBuildSub(ctx.builder, one, raw, fresh_name(ctx, "neg"))
+            box_bool(ctx, neg)
+        },
+        _ => result,
+    }
+}
+
+// Ord dispatch: call the dict's cmp closure (method slot 0); compare result to 0.
+fn gen_ord_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> LLVMValueRef {
+    let lhs = gen_llvm_expr(ctx, left)
+    let rhs = gen_llvm_expr(ctx, right)
+    let dict_ptr = resolve_dispatch_dict(ctx, dispatch)
+    let cmp_closure = load_dict_method(ctx, dict_ptr, 0)
+    let cmp_result = gen_closure_call(ctx, cmp_closure, [lhs, rhs])
+    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
+    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
+    let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [cmp_result], fresh_name(ctx, "uc"))
+    let zero = LLVMConstInt(ctx.i64_type, 0, 0)
+    let pred = match op {
+        BinOp::Lt => 40,
+        BinOp::Lte => 41,
+        BinOp::Gt => 38,
+        BinOp::Gte => 39,
+        _ => 32,
+    }
+    let cmp = LLVMBuildICmp(ctx.builder, pred, raw, zero, fresh_name(ctx, "ocmp"))
+    let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
+    box_bool(ctx, ext)
 }
 
 fn gen_int_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
@@ -685,8 +777,12 @@ fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
                                     LLVMBuildCall2(ctx.builder, ft, init_fn, [], fresh_name(ctx, "dict"))
                                 },
                                 none => {
-                                    // Fallback: null ptr (dict not yet generated)
-                                    LLVMConstPointerNull(ctx.ptr_type)
+                                    // Builtin primitive trait dicts (Eq for Str/Int/Float/Bool)
+                                    // are not emitted as Ring impls; construct them via the runtime.
+                                    let name_str = gen_str_lit(ctx, name)
+                                    let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
+                                    let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
+                                    LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
                                 },
                             }
                         },
@@ -1093,22 +1189,23 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     else { false } } } } } } } } } } } } }
 }
 
-// Check if a runtime method needs special arg handling (some args need unboxing from ptr)
-// Returns: (needs_recv_unbox_int, arg_indices_needing_unbox_int)
-fn rt_method_needs_int_args(name: Str) -> Bool {
-    // Methods that take int64_t args after the receiver (e.g. list_get(ptr, i64))
-    if name == "ring_list_get" { true }
-    else { if name == "ring_list_get_opt" { true }
-    else { if name == "ring_str_get" { true }
-    else { if name == "ring_str_slice" { true }
-    else { if name == "ring_list_slice" { true }
-    else { if name == "ring_list_set" { true }
-    else { if name == "ring_str_char_at" { true }
-    else { if name == "ring_str_char_code_at" { true }
-    else { if name == "ring_str_pad_start" { true }
-    else { if name == "ring_str_pad_end" { true }
-    else { if name == "ring_str_repeat" { true }
-    else { false } } } } } } } } } } }
+// Number of LEADING (post-receiver) args that must be unboxed from ptr to i64.
+// For these runtime methods the int args always come first; any remaining args stay
+// boxed (ptr). E.g. pad_start(length: Int, fill: Str) -> (ptr, i64, ptr): only the
+// first arg is unboxed, the fill string is passed as a ptr.
+fn rt_method_int_arg_count(name: Str) -> Int {
+    if name == "ring_list_get" { 1 }
+    else { if name == "ring_list_get_opt" { 1 }
+    else { if name == "ring_str_get" { 1 }
+    else { if name == "ring_str_slice" { 2 }
+    else { if name == "ring_list_slice" { 2 }
+    else { if name == "ring_list_set" { 1 }
+    else { if name == "ring_str_char_at" { 1 }
+    else { if name == "ring_str_char_code_at" { 1 }
+    else { if name == "ring_str_pad_start" { 1 }
+    else { if name == "ring_str_pad_end" { 1 }
+    else { if name == "ring_str_repeat" { 1 }
+    else { 0 } } } } } } } } } } }
 }
 
 // Method needs receiver unboxed to i64 (Int.to_str)
@@ -1204,18 +1301,20 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                 }
             }
 
-            // Handle remaining args - some need unboxing from ptr to i64
-            if rt_method_needs_int_args(rt_name) {
-                for a in args {
+            // Handle remaining args - the leading N need unboxing from ptr to i64,
+            // the rest stay boxed (ptr).
+            let int_arg_count = rt_method_int_arg_count(rt_name)
+            let mut ai_idx = 0
+            for a in args {
+                if ai_idx < int_arg_count {
                     let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
                     let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
                     let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [a], fresh_name(ctx, "ai"))
                     call_args.push(raw)
-                }
-            } else {
-                for a in args {
+                } else {
                     call_args.push(a)
                 }
+                ai_idx = ai_idx + 1
             }
 
             // Get or ensure the runtime function
@@ -1333,8 +1432,11 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "last" { some("ring_list_last") }
     else { if type_name == "List" && method == "pop" { some("ring_list_pop") }
     else { if type_name == "List" && method == "set" { some("ring_list_set") }
-    else { if type_name == "List" && method == "index_of" { some("ring_list_index_of") }
-    else { if type_name == "List" && method == "contains" { some("ring_list_contains") }
+    // NOTE: contains / index_of are intentionally NOT mapped to runtime functions.
+    // They live in `impl<T: Eq> List` and must dispatch element equality through the
+    // Eq trait dict (the runtime ring_list_contains only does pointer comparison,
+    // which is wrong for Str/struct elements). Falling through here routes the call
+    // to the generated Ring impl `ring_List_contains` / `ring_List_index_of`.
     else { if type_name == "List" && method == "map" { some("ring_list_map") }
     else { if type_name == "List" && method == "filter" { some("ring_list_filter") }
     else { if type_name == "List" && method == "for_each" { some("ring_list_for_each") }
@@ -1376,7 +1478,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Option" && method == "is_none" { some("ring_Option_is_none") }
     else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
     else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {
@@ -1384,10 +1486,12 @@ fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMVal
         some(f) => f,
         none => {
             let ptr = ctx.ptr_type
-            let needs_int = rt_method_needs_int_args(name)
+            // param index 0 is the receiver (ptr); args follow. The leading
+            // `int_count` args are i64, the rest stay ptr.
+            let int_count = rt_method_int_arg_count(name)
             let mut param_types: List<LLVMTypeRef> = []
             for i in 0..arg_count {
-                if needs_int && i > 0 {
+                if i > 0 && (i - 1) < int_count {
                     param_types.push(ctx.i64_type)
                 } else {
                     param_types.push(ptr)
@@ -1687,13 +1791,9 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
         none => panic("LLVM codegen: match expr outside function"),
     }
 
-    let mut scrut_val = gen_llvm_expr(ctx, scrutinee)
+    let scrut_val = gen_llvm_expr(ctx, scrutinee)
     let scrut_ty = hexpr_type(scrutinee)
     ctx.match_counter = ctx.match_counter + 1
-    // Sanitize scrutinee: if it's a List (miscompiled Type), recover first element
-    let sanitize_fn = get_or_declare_runtime_fn(ctx, "ring_sanitize_type", [ctx.ptr_type], ctx.ptr_type)
-    let sanitize_ty = get_rt_fn_type(ctx, "ring_sanitize_type")
-    scrut_val = LLVMBuildCall2(ctx.builder, sanitize_ty, sanitize_fn, [scrut_val], fresh_name(ctx, "st"))
 
     // Check if scrutinee is an enum type
     let enum_name = match scrut_ty {
@@ -1734,18 +1834,15 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
                         }
                     }
 
-                    // Default block: if no wildcard, emit unreachable panic
+                    // Default block: if no wildcard, report non-exhaustive match
+                    // with the enum name and the actual runtime tag.
                     if !has_wildcard {
                         LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
-                        // Debug: verify the scrutinee value first (helps diagnose tag corruption)
-                        let verify_fn = get_or_declare_runtime_fn(ctx, "ring_debug_verify_type", [ctx.ptr_type], ctx.ptr_type)
-                        let verify_ty = get_rt_fn_type(ctx, "ring_debug_verify_type")
-                        discard(LLVMBuildCall2(ctx.builder, verify_ty, verify_fn, [scrut_val], ""))
-                        let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
-                        let panic_ty = get_rt_fn_type(ctx, "ring_panic")
-                        ctx.match_counter = ctx.match_counter + 1
-                        let msg = gen_str_lit(ctx, "match exhaustion failure #${ctx.match_counter}")
-                        LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [msg], fresh_name(ctx, "mp"))
+                        let mf_fn = get_or_declare_runtime_fn(ctx, "ring_match_fail", [ctx.ptr_type, ctx.i64_type, ctx.i64_type, ctx.ptr_type], ctx.ptr_type)
+                        let mf_ty = get_rt_fn_type(ctx, "ring_match_fail")
+                        let ename_str = gen_str_lit(ctx, "${ename} in ${ctx.current_fn_name}")
+                        let site_val = LLVMConstInt(ctx.i64_type, ctx.match_counter, 0)
+                        discard(LLVMBuildCall2(ctx.builder, mf_ty, mf_fn, [ename_str, tag_val, site_val, scrut_val], fresh_name(ctx, "mf")))
                         discard(LLVMBuildUnreachable(ctx.builder))
                     }
 
@@ -1871,6 +1968,32 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
             // Wildcard/binding arms in enum match are now handled by the caller
             // via gen_match_arm_wildcard. This branch should not be reached.
         },
+        Pattern::OrPattern { patterns, .. } => {
+            // An OR pattern (A | B | ...) over enum variants: route every
+            // alternative's tag to the same arm body. Alternatives are field-less
+            // variants (field bindings across alternatives are not supported).
+            let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.arm.or")
+            for alt in patterns {
+                let alt_name = match alt {
+                    Pattern::Constructor { name, .. } => some(name),
+                    Pattern::NamedConstructor { name, .. } => some(name),
+                    _ => none,
+                }
+                match alt_name {
+                    some(an) => match enum_info.variants.get(an) {
+                        some(vi) => { LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, vi.tag, 0), arm_bb) },
+                        none => {},
+                    },
+                    none => {},
+                }
+            }
+            LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+            let body_val = gen_llvm_expr(ctx, arm.body)
+            let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
+            discard(LLVMBuildBr(ctx.builder, merge_bb))
+            phi_vals.push(body_val)
+            phi_bbs.push(arm_end_bb)
+        },
         _ => {
             // Other pattern types in enum context - should not normally occur
             // since wildcards/bindings are handled by gen_match_arm_wildcard
@@ -1947,10 +2070,22 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
             let enum_info = find_enum_by_variant(ctx, name, qualifier)
             match enum_info {
                 some(ei) => {
+                    // Bind by FIELD NAME (not pattern position): a named-constructor pattern may
+                    // list fields in any order, so map each pattern field to its declared slot.
+                    let fnames = match ei.variants.get(name) {
+                        some(vi) => vi.field_names,
+                        none => [],
+                    }
                     for i in 0..fields.len() {
                         match fields.get(i) {
                             some(nf) => {
-                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, ei.llvm_type, val, i + 1, fresh_name(ctx, "nf"))
+                                let mut field_idx = i
+                                for fi in 0..fnames.len() {
+                                    if fnames[fi] == nf.name {
+                                        field_idx = fi
+                                    }
+                                }
+                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, ei.llvm_type, val, field_idx + 1, fresh_name(ctx, "nf"))
                                 let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "nv"))
                                 bind_nested_pattern(ctx, field_val, nf.pattern)
                             },
@@ -1969,7 +2104,11 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
 fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, arms: List<HMatchArm>, merge_bb: LLVMBasicBlockRef, default_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) -> LLVMValueRef {
     let mut phi_vals: List<LLVMValueRef> = []
     let mut phi_bbs: List<LLVMBasicBlockRef> = []
-    let mut has_wildcard = false
+    // open_block tracks whether the builder is currently positioned at a basic
+    // block that has NOT yet been given a terminator. Only such a block needs the
+    // trailing `br default_bb`. Appending it to an already-terminated block produces
+    // invalid IR ("terminator in the middle of a basic block").
+    let mut open_block = false
 
     let mut remaining_arms = arms
     let total = arms.len()
@@ -1979,7 +2118,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                 let is_last = i == total - 1
                 match arm.pattern {
                     Pattern::Wildcard { .. } => {
-                        has_wildcard = true
+                        open_block = false
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.wild")
                         discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
@@ -1994,7 +2133,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         phi_bbs.push(arm_end_bb)
                     },
                     Pattern::Binding { name: bname, .. } => {
-                        has_wildcard = true
+                        open_block = false
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.bind")
                         discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
@@ -2023,7 +2162,13 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         phi_bbs.push(arm_end_bb)
 
                         if is_last == false {
+                            // Non-last: builder moves to the (empty, unterminated) fall-through block.
                             LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                            open_block = true
+                        } else {
+                            // Last: cond-false already branches to default_bb; builder stays on the
+                            // terminated arm block, so no trailing br is needed.
+                            open_block = false
                         }
                     },
                     Pattern::TuplePattern { elements, .. } => {
@@ -2031,31 +2176,43 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         let get_ty = get_rt_fn_type(ctx, "ring_list_get")
                         let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
 
-                        // Phase 1: Check Constructor sub-patterns' tags
+                        // Phase 1: Check constructor sub-patterns' tags. Both tuple-style
+                        // (Constructor) and struct-style (NamedConstructor) sub-patterns must
+                        // verify the element's tag — otherwise an arm like
+                        // `(Type::FnType { .. }, Type::FnType { .. })` would match ANY pair of
+                        // values, reading the wrong fields out of the actual variant.
                         for j in 0..elements.len() {
                             match elements.get(j) {
-                                some(elem_pat) => match elem_pat {
-                                    Pattern::Constructor { name: cname, qualifier, .. } => {
-                                        let idx = LLVMConstInt(ctx.i64_type, j, 0)
-                                        let elem_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tc"))
-                                        let ei = find_enum_by_variant(ctx, cname, qualifier)
-                                        match ei {
-                                            some(enum_info) => match enum_info.variants.get(cname) {
-                                                some(vi) => {
-                                                    let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, elem_val, 0, fresh_name(ctx, "tp"))
-                                                    let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tv"))
-                                                    let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                                                    let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "tc"))
-                                                    let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tuple.check")
-                                                    discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, next_bb))
-                                                    LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
+                                some(elem_pat) => {
+                                    let ctor_ref = match elem_pat {
+                                        Pattern::Constructor { name: cname, qualifier, .. } => some((cname, qualifier)),
+                                        Pattern::NamedConstructor { name: cname, qualifier, .. } => some((cname, qualifier)),
+                                        _ => none,
+                                    }
+                                    match ctor_ref {
+                                        some(cref) => {
+                                            let (cname, qualifier) = cref
+                                            let idx = LLVMConstInt(ctx.i64_type, j, 0)
+                                            let elem_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tc"))
+                                            let ei = find_enum_by_variant(ctx, cname, qualifier)
+                                            match ei {
+                                                some(enum_info) => match enum_info.variants.get(cname) {
+                                                    some(vi) => {
+                                                        let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, elem_val, 0, fresh_name(ctx, "tp"))
+                                                        let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tv"))
+                                                        let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
+                                                        let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "tc"))
+                                                        let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tuple.check")
+                                                        discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, next_bb))
+                                                        LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
+                                                    },
+                                                    none => {},
                                                 },
                                                 none => {},
-                                            },
-                                            none => {},
-                                        }
-                                    },
-                                    _ => {},
+                                            }
+                                        },
+                                        none => {},
+                                    }
                                 },
                                 none => {},
                             }
@@ -2090,6 +2247,9 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         phi_bbs.push(arm_end_bb)
                         if is_last == false {
                             LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                            open_block = true
+                        } else {
+                            open_block = false
                         }
                     },
                     _ => {
@@ -2104,9 +2264,11 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         discard(LLVMBuildBr(ctx.builder, merge_bb))
                         phi_vals.push(body_val)
                         phi_bbs.push(arm_end_bb)
-                        // Position at a new next block for any following arms
+                        // Position at a new (empty, unterminated) block for any following arms;
+                        // it needs the trailing br to default_bb.
                         let next_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next")
                         LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                        open_block = true
                     },
                 }
             },
@@ -2114,8 +2276,11 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
         }
     }
 
-    // If no wildcard/binding arm was found, connect current block to default
-    if !has_wildcard {
+    // Connect the trailing fall-through to default_bb only when the builder is at an
+    // open (unterminated) block. Arms that already terminated their block (wildcard,
+    // binding, or a last literal/tuple whose cond-false targets default_bb directly)
+    // leave open_block=false, so we must not append a second terminator here.
+    if open_block {
         discard(LLVMBuildBr(ctx.builder, default_bb))
     }
 
@@ -2651,75 +2816,104 @@ fn collect_captures_stmt(ctx: LlvmCtx, stmt: HStmt, params: List<HParam>, mut ca
 // ============================================================
 
 fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMValueRef {
-    let current_fn = match ctx.current_fn {
-        some(f) => f,
-        none => panic("LLVM codegen: try-catch outside function"),
+    // The body and catch arms are emitted as closures and handed to the runtime
+    // ring_try(), which owns the setjmp. This is required for correctness: setjmp
+    // must live in the frame that longjmp returns to, and ring_try keeps that frame
+    // alive while the body runs nested inside it. (Doing setjmp in a wrapper that
+    // returns leaves a dangling jmp_buf and corrupts deep unwinds.)
+    let body_ty = hexpr_type(body)
+    let body_closure = gen_lambda(ctx, [], body_ty, body, body_ty)
+    let catch_closure = gen_catch_closure(ctx, arms)
+    let try_fn = get_or_declare_runtime_fn(ctx, "ring_try", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let try_ty = get_rt_fn_type(ctx, "ring_try")
+    LLVMBuildCall2(ctx.builder, try_ty, try_fn, [body_closure, catch_closure], fresh_name(ctx, "try"))
+}
+
+// Build a 1-arg closure {fn(env, error) -> ptr, env} that runs the catch arms.
+// Mirrors gen_lambda but the body is the catch-arm matcher and the single param
+// is the caught error value.
+fn gen_catch_closure(mut ctx: LlvmCtx, arms: List<HMatchArm>) -> LLVMValueRef {
+    let fn_name = fresh_name(ctx, "ring_catch_")
+    ctx.lambda_counter = ctx.lambda_counter + 1
+
+    let err_param = HParam { name: "__catch_err", ty: Type::AnyType, def_id: none, is_mutable: false }
+    let params = [err_param]
+
+    // Collect captures referenced by the arm bodies (error param is excluded).
+    let mut captures: List<Str> = []
+    for arm in arms {
+        collect_captures(ctx, arm.body, params, captures)
     }
 
-    // ring_catch_push() -> frame_ptr
-    let push_fn = get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ctx.ptr_type)
-    let push_ty = get_rt_fn_type(ctx, "ring_catch_push")
-    let frame = LLVMBuildCall2(ctx.builder, push_ty, push_fn, [], fresh_name(ctx, "frame"))
+    let mut env_elem_types: List<LLVMTypeRef> = []
+    for c in captures { env_elem_types.push(ctx.ptr_type) }
+    let env_ty = if captures.len() > 0 {
+        LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
+    } else {
+        LLVMStructTypeInContext(ctx.context, [ctx.ptr_type], 0)
+    }
 
-    // ring_catch_setjmp(frame) -> i64 (0 = normal, 1 = caught)
-    let setjmp_fn = get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ctx.ptr_type], ctx.i64_type)
-    let setjmp_ty = get_rt_fn_type(ctx, "ring_catch_setjmp")
-    let setjmp_result = LLVMBuildCall2(ctx.builder, setjmp_ty, setjmp_fn, [frame], fresh_name(ctx, "sj"))
+    // catch fn: (env_ptr, error) -> ptr
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    let catch_fn = LLVMAddFunction(ctx.module, fn_name, fn_ty)
 
-    // Compare result == 0 (normal path)
-    let zero = LLVMConstInt(ctx.i64_type, 0, 0)
-    let is_normal = LLVMBuildICmp(ctx.builder, 32, setjmp_result, zero, fresh_name(ctx, "norm"))
+    let saved_fn = ctx.current_fn
+    let saved_named = ctx.named_values
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(catch_fn)
+    ctx.named_values = map_new()
 
-    let normal_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.normal")
-    let catch_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.catch")
-    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.merge")
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, catch_fn, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
-    discard(LLVMBuildCondBr(ctx.builder, is_normal, normal_bb, catch_bb))
+    let env_ptr = LLVMGetParam(catch_fn, 0)
+    for i in 0..captures.len() {
+        match captures.get(i) {
+            some(cap_name) => {
+                let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_ptr, i, fresh_name(ctx, "ce"))
+                let cap_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, cap_ptr, fresh_name(ctx, cap_name))
+                let alloca = build_entry_alloca(ctx, ctx.ptr_type, cap_name)
+                discard(LLVMBuildStore(ctx.builder, cap_val, alloca))
+                ctx.named_values.insert(cap_name, alloca)
+            },
+            none => {},
+        }
+    }
 
-    // Normal path: execute body, pop frame
-    LLVMPositionBuilderAtEnd(ctx.builder, normal_bb)
-
-    // Install fail evidence that calls ring_raise
-    let raise_fn = get_or_declare_runtime_fn(ctx, "ring_raise", [ctx.ptr_type], ctx.void_type)
-    // For the body, we need __ev_fail to call ring_raise
-    // Since the body references __ev_fail evidence, we store it as a named value
-    // that points to a struct with a raise method.
-    // In the LLVM backend, fail evidence is passed as a ptr to a struct with fn ptr.
-    // For now, the simplest approach: just store ring_raise fn ptr as the evidence.
-    // The body's EffectOp will call through the evidence.
-    // Actually, for try-catch, the body should call ring_raise when it calls fail.raise.
-    // Since evidence_param_name("fail") = "__ev_fail", we need to set that up.
-    // Let's create a simple evidence struct with a raise function pointer.
-    // But this is complex. For simplicity: just set __ev_fail in named_values to ring_raise fn ptr.
-    // The EffectOp codegen will read it and call it.
-
-    let body_val = gen_llvm_expr(ctx, body)
-
-    // Pop frame after normal execution
-    let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
-    let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
-    LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], "")
-    let normal_end_bb = LLVMGetInsertBlock(ctx.builder)
-    discard(LLVMBuildBr(ctx.builder, merge_bb))
-
-    // Catch path: get error, pop frame, match on error
-    LLVMPositionBuilderAtEnd(ctx.builder, catch_bb)
-    let get_error_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ctx.ptr_type], ctx.ptr_type)
-    let get_error_ty = get_rt_fn_type(ctx, "ring_catch_get_error")
-    let error_val = LLVMBuildCall2(ctx.builder, get_error_ty, get_error_fn, [frame], fresh_name(ctx, "err"))
-    LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], "")
-
-    // Match on error using the catch arms
-    // For now, simplified: just bind the error to the first arm's pattern variable and execute body
+    let error_val = LLVMGetParam(catch_fn, 1)
     let catch_val = gen_catch_arms(ctx, error_val, arms)
-    let catch_end_bb = LLVMGetInsertBlock(ctx.builder)
-    discard(LLVMBuildBr(ctx.builder, merge_bb))
+    discard(LLVMBuildRet(ctx.builder, catch_val))
 
-    // Merge
-    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "tc"))
-    LLVMAddIncoming(phi, [body_val, catch_val], [normal_end_bb, catch_end_bb])
-    phi
+    ctx.named_values = saved_named
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+
+    // Build env + closure pair at the call site.
+    let env_size = LLVMSizeOf(env_ty)
+    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
+    let malloc_ty = get_rt_fn_type(ctx, "malloc")
+    let env_alloc = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [env_size], fresh_name(ctx, "env"))
+    for i in 0..captures.len() {
+        match captures.get(i) {
+            some(cap_name) => {
+                let cap_val = match ctx.named_values.get(cap_name) {
+                    some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "cv")),
+                    none => LLVMConstPointerNull(ctx.ptr_type),
+                }
+                let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, i, fresh_name(ctx, "ep"))
+                discard(LLVMBuildStore(ctx.builder, cap_val, cap_ptr))
+            },
+            none => {},
+        }
+    }
+    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let closure_size = LLVMSizeOf(closure_ty)
+    let closure_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [closure_size], fresh_name(ctx, "cls"))
+    let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
+    discard(LLVMBuildStore(ctx.builder, catch_fn, fn_ptr_slot))
+    let env_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "eps"))
+    discard(LLVMBuildStore(ctx.builder, env_alloc, env_ptr_slot))
+    closure_ptr
 }
 
 fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchArm>) -> LLVMValueRef {
@@ -2762,11 +2956,6 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
 // ============================================================
 
 fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>) -> LLVMValueRef {
-    let current_fn = match ctx.current_fn {
-        some(f) => f,
-        none => panic("LLVM codegen: handle expr outside function"),
-    }
-
     // For each handler, create an evidence struct { fn_ptr }
     // Group handlers by effect name
     let mut by_effect: Map<Str, List<HEffectHandler>> = map_new()
@@ -2801,53 +2990,45 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
     }
 
     if has_fail_abort {
-        // Use try-catch mechanism for fail.raise handlers
-        // This is similar to TryCatch but with explicit evidence setup
-
-        let push_fn = get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ctx.ptr_type)
-        let push_ty = get_rt_fn_type(ctx, "ring_catch_push")
-        let frame = LLVMBuildCall2(ctx.builder, push_ty, push_fn, [], fresh_name(ctx, "frame"))
-
-        let setjmp_fn = get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ctx.ptr_type], ctx.i64_type)
-        let setjmp_ty = get_rt_fn_type(ctx, "ring_catch_setjmp")
-        let setjmp_result = LLVMBuildCall2(ctx.builder, setjmp_ty, setjmp_fn, [frame], fresh_name(ctx, "sj"))
-
-        let zero = LLVMConstInt(ctx.i64_type, 0, 0)
-        let is_normal = LLVMBuildICmp(ctx.builder, 32, setjmp_result, zero, fresh_name(ctx, "norm"))
-
-        let normal_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "handle.normal")
-        let catch_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "handle.catch")
-        let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "handle.merge")
-
-        discard(LLVMBuildCondBr(ctx.builder, is_normal, normal_bb, catch_bb))
-
-        LLVMPositionBuilderAtEnd(ctx.builder, normal_bb)
-        let body_val = gen_llvm_expr(ctx, body)
-        let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
-        let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
-        LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], "")
-        let normal_end_bb = LLVMGetInsertBlock(ctx.builder)
-        discard(LLVMBuildBr(ctx.builder, merge_bb))
-
-        // Catch path: the handler body IS the catch result
-        LLVMPositionBuilderAtEnd(ctx.builder, catch_bb)
-        let get_error_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ctx.ptr_type], ctx.ptr_type)
-        let get_error_ty = get_rt_fn_type(ctx, "ring_catch_get_error")
-        let error_val = LLVMBuildCall2(ctx.builder, get_error_ty, get_error_fn, [frame], fresh_name(ctx, "err"))
-        LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], "")
-
-        // The abort handler just returns error_val (the value passed to raise)
-        let catch_end_bb = LLVMGetInsertBlock(ctx.builder)
-        discard(LLVMBuildBr(ctx.builder, merge_bb))
-
-        LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-        let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "hd"))
-        LLVMAddIncoming(phi, [body_val, error_val], [normal_end_bb, catch_end_bb])
-        phi
+        // Abort (fail.raise) handler: same setjmp scoping requirement as try-catch,
+        // so route through the runtime ring_try(). The abort handler's result is the
+        // value passed to fail.raise, so the catch closure just returns its argument.
+        let body_ty = hexpr_type(body)
+        let body_closure = gen_lambda(ctx, [], body_ty, body, body_ty)
+        let catch_closure = gen_return_error_closure(ctx)
+        let try_fn = get_or_declare_runtime_fn(ctx, "ring_try", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+        let try_ty = get_rt_fn_type(ctx, "ring_try")
+        LLVMBuildCall2(ctx.builder, try_ty, try_fn, [body_closure, catch_closure], fresh_name(ctx, "hdl"))
     } else {
         // Non-abort handlers: just execute body with evidence set up
         gen_llvm_expr(ctx, body)
     }
+}
+
+// Build a closure {fn(env, error) -> error, null_env}: the abort handler result
+// is exactly the value passed to fail.raise.
+fn gen_return_error_closure(mut ctx: LlvmCtx) -> LLVMValueRef {
+    let fn_name = fresh_name(ctx, "ring_abort_")
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    let f = LLVMAddFunction(ctx.module, fn_name, fn_ty)
+    let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(f)
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, f, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+    discard(LLVMBuildRet(ctx.builder, LLVMGetParam(f, 1)))
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let closure_size = LLVMSizeOf(closure_ty)
+    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
+    let malloc_ty = get_rt_fn_type(ctx, "malloc")
+    let cp = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [closure_size], fresh_name(ctx, "cls"))
+    let s0 = LLVMBuildStructGEP2(ctx.builder, closure_ty, cp, 0, fresh_name(ctx, "fps"))
+    discard(LLVMBuildStore(ctx.builder, f, s0))
+    let s1 = LLVMBuildStructGEP2(ctx.builder, closure_ty, cp, 1, fresh_name(ctx, "eps"))
+    discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), s1))
+    cp
 }
 
 // ============================================================

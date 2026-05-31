@@ -742,3 +742,28 @@ ring.exe run tests/run_tests.ring  # 或等价的测试运行命令
 3. E2E 测试在 native 编译器上全部通过 ✅
 
 ---
+
+## 2026-05-31 Session 4：前端自举打通，卡在内存墙
+
+ring.exe 从"文件编译 segfault"推进到"编译单文件字节级一致 + 多模块端到端跑通"。方法论的关键转变：**不再加 runtime workaround 硬扛 800k 步的巨型 crash，而是用最小 repro + JS 对照逐个定位 codegen bug**——每个 bug 都先在几行的程序上复现，确认 JS 对、LLVM 错，再修根因。
+
+### 修掉的 9 个 codegen bug
+1. 移除上个 session 的 `ring_sanitize_type` workaround——它注入每个 enum match、无条件解引用指针，词法分析 chk=323 就自己炸了，是当时的真正 crash 源，把"List-as-Type in apply_subst"的诊断带偏了。
+2. **tuple-match Phase1 不检查 NamedConstructor 子模式的 tag**：`match (a,b) { (Type::FnType{..}, ..) => }` 会无条件匹配第一个 arm，把 list 字段当 Type 读出来喂给 apply_subst——这才是 List-as-Type 的根因。unify 大量用这个模式。
+3. OR-pattern（`A | B`）在 enum switch 路径不生成 case。
+4. gen_match_if_else 尾部向已终结 block 重复发 br（terminator-in-middle，LLVM verifier 抓到）。
+5. pad_start/pad_end/list_set 的参数 unbox 是 all-or-nothing，把 fill 字符串错 unbox 成 i64。
+6. `for x in set` 当 list 迭代——Set 是哈希表不是 vector。
+7. `List.contains`/`index_of` 映射到指针比较的 runtime——删掉映射走 Ring impl（用 Eq trait）。
+8. **泛型 `==` 落到整数比较**：SSO 短串巧合正确、堆分配长串比的是堆指针 → false。`gen_binop` 改用 HIR 的 `eq_dispatch`/`ord_dispatch` 经 dict 派发；runtime 补 `ring_get_builtin_dict`。
+9. **fail/catch 的 setjmp-in-wrapper**：`ring_catch_setjmp` 在 wrapper 函数里 setjmp 然后返回，longjmp 目标成死帧。改成 runtime `ring_try(body_closure, catch_closure)`——setjmp 在 ring_try 帧内、body 嵌套调用，longjmp 回的是活帧。20 万帧深栈 unwind 验证通过。
+
+### 最终阻塞：内存（非 bug）
+编译整个编译器峰值 **25.9GB**，在系统 commit 上限崩（0xC0000028）。1MB 和 512MB 栈同一步崩，排除栈深度。根因是 uniform boxing + 不回收：HM 推断的 apply_subst 疯狂造 Type（2.51 亿 chk），树/list/string 全 malloc 不 free，JS 后端靠 GC 没事。试过 box_int/box_bool 缓存无效（内存由结构体主导）。**codegen 已证明正确，内存归 Perceus RC 解决。**
+
+### 经验
+- 内存峰值监控（Start-Process + PeakWorkingSet64 轮询）是定位"非 codegen crash"的关键——0xC0000028 一开始误判成栈/longjmp，实际是 commit 耗尽。
+- 链接 map（`-Wl,/MAP`）+ VA=base+rva 把崩溃地址映射回函数名，确认 sanitize_type 自己是 crash 源。
+- "同一 bug 在 js 和 llvm 都触发"曾被误读成 apply_subst 逻辑 bug——实际是 ring.exe 自身（LLVM 编译的）在 checker 阶段崩，与它产出什么 target 无关。
+
+---

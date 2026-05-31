@@ -319,7 +319,29 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
         none => panic("LLVM codegen: for-in list outside function"),
     }
 
-    let list_val = gen_llvm_expr(ctx, iterable)
+    let list_val_raw = gen_llvm_expr(ctx, iterable)
+
+    // A Set is backed by a hash table, not a vector — convert it to a List before
+    // index-based iteration. List iterables pass through unchanged.
+    let list_val = match hexpr_type(iterable) {
+        Type::StructType { name, type_params, .. } => {
+            if name == "Set" {
+                let is_int_elem = if type_params.len() > 0 {
+                    match type_params[0] {
+                        Type::IntType => true,
+                        _ => false,
+                    }
+                } else { false }
+                let conv_name = if is_int_elem { "ring_set_int_to_list" } else { "ring_set_to_list" }
+                let conv_fn = get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type)
+                let conv_ty = get_rt_fn_type(ctx, conv_name)
+                LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "s2l"))
+            } else {
+                list_val_raw
+            }
+        },
+        _ => list_val_raw,
+    }
 
     // Get list length
     let len_fn = get_or_declare_runtime_fn(ctx, "ring_list_len", [ctx.ptr_type], ctx.i64_type)

@@ -95,6 +95,8 @@ pub struct LlvmCtx {
 
     // Current function being codegen'd
     pub current_fn: LLVMValueRef?,
+    // Name of the current function (for diagnostics, e.g. non-exhaustive match)
+    pub current_fn_name: Str,
 
     // Loop context for break/continue
     pub loop_break_bb: LLVMBasicBlockRef?,

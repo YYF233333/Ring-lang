@@ -571,7 +571,22 @@ function emit_for_in_list(ctx, binding, destructure, iterable, body) {
   if (__ring_m._tag === "none") { return panic("LLVM codegen: for-in list outside function"); }
   __match_fail(__ring_m);
 })();
-  const list_val = codegen_llvm_expr$gen_llvm_expr(ctx, iterable);
+  const list_val_raw = codegen_llvm_expr$gen_llvm_expr(ctx, iterable);
+  const list_val = (function() {
+  const __ring_m = hir$hexpr_type(iterable);
+  if (__ring_m._tag === "StructType") { const name = __ring_m.name; const type_params = __ring_m.type_params; return ((name === "Set") ? (function() {
+  const is_int_elem = ((List_len(type_params) > 0) ? (function() {
+  const __ring_m = __ring_index(type_params, 0);
+  if (__ring_m._tag === "IntType") { return true; }
+  return false;
+})() : false);
+  const conv_name = (is_int_elem ? "ring_set_int_to_list" : "ring_set_to_list");
+  const conv_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type);
+  const conv_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, conv_name);
+  return LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], codegen_llvm_ctx$fresh_name(ctx, "s2l"));
+})() : list_val_raw); }
+  return list_val_raw;
+})();
   const len_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_len", [ctx.ptr_type], ctx.i64_type);
   const len_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_list_len");
   const list_len = LLVMBuildCall2(ctx.builder, len_ty, len_fn, [list_val], codegen_llvm_ctx$fresh_name(ctx, "len"));

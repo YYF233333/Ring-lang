@@ -398,8 +398,26 @@ extern "C" void* ring_list_push(void* list, void* val) {
     return list;
 }
 
+// Validate that `p` is a readable List pointer; on failure report caller + value.
+static void ring_check_list_ptr(void* p, const char* who, void* ret) {
+    bool bad = false;
+    if ((uintptr_t)p < 0x10000) bad = true;
+    else {
+        __try { volatile size_t s = ((std::vector<void*>*)p)->size(); (void)s; }
+        __except(EXCEPTION_EXECUTE_HANDLER) { bad = true; }
+    }
+    if (bad) {
+        HMODULE mod = GetModuleHandle(NULL);
+        uintptr_t rva = (uintptr_t)ret - (uintptr_t)mod;
+        fprintf(stderr, "FATAL: %s got invalid list ptr=%p at chk=%d caller_rva=0x%llx\n",
+                who, p, g_chk, (unsigned long long)rva);
+        fflush(stderr); dump_trace(); exit(1);
+    }
+}
+
 extern "C" void* ring_list_get(void* list, int64_t idx) {
     CHK("list_get");
+    ring_check_list_ptr(list, "ring_list_get", _ReturnAddress());
     auto* vec = (std::vector<void*>*)list;
     if (idx < 0 || idx >= (int64_t)vec->size()) {
         fprintf(stderr, "ring panic: list index %lld out of bounds (len %lld)\n",
@@ -423,6 +441,7 @@ extern "C" void* ring_list_set(void* list, int64_t idx, void* val) {
 extern "C" int64_t ring_list_len(void* list) {
     CHK("list_len");
     if (!list) { return 0; }
+    ring_check_list_ptr(list, "ring_list_len", _ReturnAddress());
     return (int64_t)((std::vector<void*>*)list)->size();
 }
 
@@ -1132,6 +1151,34 @@ extern "C" void* ring_panic(void* s) {
     return nullptr;  // unreachable
 }
 
+// Diagnostic for non-exhaustive enum match: a value reached a match whose tag
+// matched no arm. Reports the enum name (known at codegen) and the runtime tag.
+extern "C" void* ring_match_fail(void* enum_name, int64_t tag, int64_t site, void* scrut) {
+    fprintf(stderr, "ring panic: non-exhaustive match on enum '%s' (runtime tag=%lld, site #%lld)\n",
+            enum_name ? ((std::string*)enum_name)->c_str() : "?",
+            (long long)tag, (long long)site);
+    // If the "tag" looks like a heap pointer, the scrutinee is probably a
+    // miscompiled value. Try to introspect it as a std::vector and dump shape.
+    if (tag > 0xffff) {
+        __try {
+            auto* vec = (std::vector<void*>*)scrut;
+            size_t n = vec->size();
+            fprintf(stderr, "  scrut looks like a List: size=%zu\n", n);
+            for (size_t i = 0; i < n && i < 6; i++) {
+                void* e = (*vec)[i];
+                int64_t etag = e ? *(int64_t*)e : -1;
+                fprintf(stderr, "    [%zu] ptr=%p tag=%lld\n", i, e, (long long)etag);
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            fprintf(stderr, "  (scrut not a readable vector)\n");
+        }
+    }
+    fflush(stderr);
+    dump_trace();
+    exit(1);
+    return nullptr;  // unreachable
+}
+
 extern "C" void* ring_read_file(void* path) {
     std::string* p = (std::string*)path;
     FILE* f = fopen(p->c_str(), "rb");
@@ -1265,6 +1312,33 @@ extern "C" void ring_catch_pop() {
     RingCatchFrame* frame = ring_catch_stack;
     ring_catch_stack = frame->prev;
     delete frame;
+}
+
+// ring_try: correct setjmp/longjmp scoping for `body catch { arms }`.
+// The catch frame and setjmp live in THIS function's stack frame, and the body
+// closure is invoked nested from here — so a longjmp (from a deeply-nested
+// fail.raise) returns into a frame that is still live, unlike a setjmp performed
+// inside a wrapper that has already returned.
+//   body_cl  : closure {fn(env)->ptr, env}
+//   catch_cl : closure {fn(env, error)->ptr, env}
+extern "C" void* ring_try(void* body_cl, void* catch_cl) {
+    RingCatchFrame frame;
+    frame.error_value = nullptr;
+    frame.prev = ring_catch_stack;
+    ring_catch_stack = &frame;
+    void** bc = (void**)body_cl;
+    void** cc = (void**)catch_cl;
+    if (setjmp(frame.buf) == 0) {
+        void* (*bfn)(void*) = (void* (*)(void*))bc[0];
+        void* result = bfn(bc[1]);
+        ring_catch_stack = frame.prev;   // normal completion: pop
+        return result;
+    } else {
+        ring_catch_stack = frame.prev;   // caught: pop, then run catch arm
+        void* err = frame.error_value;
+        void* (*cfn)(void*, void*) = (void* (*)(void*, void*))cc[0];
+        return cfn(cc[1], err);
+    }
 }
 
 // ============================================================================
@@ -1702,9 +1776,92 @@ extern "C" void* ring_assert(int64_t cond, void* msg) {
     return nullptr;
 }
 
+// JSON-stringify a value. The bootstrap compiler only ever calls this on Str
+// (to emit JS string literals), so the value is treated as a std::string and
+// rendered as a quoted, escaped JSON string. (General <T> serialization would
+// require runtime type tags, which the uniform-boxing runtime does not carry.)
 extern "C" void* ring_json_stringify(void* val) {
-    // Stub: for bootstrap, just return a placeholder
-    return (void*)new std::string("[json_stringify not implemented]");
+    if (!val) return (void*)new std::string("null");
+    std::string* s = (std::string*)val;
+    std::string out = "\"";
+    for (unsigned char c : *s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += (char)c;
+                }
+        }
+    }
+    out += "\"";
+    return (void*)new std::string(out);
+}
+
+// ============================================================================
+// Builtin primitive trait dictionaries (Eq for Str/Int/Float/Bool).
+// The bootstrap LLVM backend does not emit Ring impls for primitive Eq, so a
+// generic `x == item` (which dispatches through an Eq dict) needs a real dict.
+// Each dict is { eq_closure, ne_closure, null, null }; each closure is
+// { fn_ptr, null_env }; the closure ABI is fn(env, a, b) -> boxed value.
+// ============================================================================
+
+extern "C" void* ring_cl_eq_str(void* env, void* a, void* b) { return ring_box_bool(ring_str_eq(a, b)); }
+extern "C" void* ring_cl_ne_str(void* env, void* a, void* b) { return ring_box_bool(ring_str_eq(a, b) ? 0 : 1); }
+extern "C" void* ring_cl_eq_int(void* env, void* a, void* b) { return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 1 : 0); }
+extern "C" void* ring_cl_ne_int(void* env, void* a, void* b) { return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 0 : 1); }
+extern "C" void* ring_cl_eq_float(void* env, void* a, void* b) { return ring_box_bool((*(double*)a == *(double*)b) ? 1 : 0); }
+extern "C" void* ring_cl_ne_float(void* env, void* a, void* b) { return ring_box_bool((*(double*)a == *(double*)b) ? 0 : 1); }
+extern "C" void* ring_cl_eq_bool(void* env, void* a, void* b) { return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 1 : 0); }
+extern "C" void* ring_cl_ne_bool(void* env, void* a, void* b) { return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 0 : 1); }
+// Tag comparison for enum Eq dicts (correct for field-less enum variants, which
+// is what the bootstrap compiler compares with `==`). Reads the leading i64 tag.
+extern "C" void* ring_cl_eq_tag(void* env, void* a, void* b) {
+    if (!a || !b) return ring_box_bool((a == b) ? 1 : 0);
+    return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 1 : 0);
+}
+extern "C" void* ring_cl_ne_tag(void* env, void* a, void* b) {
+    if (!a || !b) return ring_box_bool((a == b) ? 0 : 1);
+    return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 0 : 1);
+}
+
+static void* ring_make_closure(void* fn) {
+    void** c = (void**)malloc(2 * sizeof(void*));
+    c[0] = fn; c[1] = nullptr;
+    return (void*)c;
+}
+static void* ring_make_eq_dict(void* eqfn, void* nefn) {
+    void** d = (void**)malloc(4 * sizeof(void*));
+    d[0] = ring_make_closure(eqfn);
+    d[1] = ring_make_closure(nefn);
+    d[2] = nullptr; d[3] = nullptr;
+    return (void*)d;
+}
+
+extern "C" void* ring_get_builtin_dict(void* name_ptr) {
+    if (!name_ptr) return nullptr;
+    std::string& n = *(std::string*)name_ptr;
+    // Only Eq dicts are constructed here (eq/ne). Ord dicts are not yet supported.
+    if (n.find("Eq") != std::string::npos) {
+        if (n.find("Str") != std::string::npos)   return ring_make_eq_dict((void*)ring_cl_eq_str,   (void*)ring_cl_ne_str);
+        if (n.find("Float") != std::string::npos) return ring_make_eq_dict((void*)ring_cl_eq_float, (void*)ring_cl_ne_float);
+        if (n.find("Int") != std::string::npos)   return ring_make_eq_dict((void*)ring_cl_eq_int,   (void*)ring_cl_ne_int);
+        if (n.find("Bool") != std::string::npos)  return ring_make_eq_dict((void*)ring_cl_eq_bool,  (void*)ring_cl_ne_bool);
+        // Any other Eq dict (user enums) → tag comparison.
+        return ring_make_eq_dict((void*)ring_cl_eq_tag, (void*)ring_cl_ne_tag);
+    }
+    fprintf(stderr, "ring: no builtin dict for '%s'\n", n.c_str());
+    fflush(stderr);
+    return nullptr;
 }
 
 // ============================================================================

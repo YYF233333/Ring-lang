@@ -104,9 +104,9 @@ Ring-lang/
 
 ## 路线图
 
-**当前**：LLVM Native Backend — ring.exe 已链接（0.8MB），CLI 正常运行，文件编译 segfault 调试中（Wave 3c）
+**当前**：LLVM Native Backend 前端自举打通 — ring.exe 编译单文件产出与参考编译器**字节级一致**的 JS；多模块程序（resolver→check→codegen）端到端跑通。fail/catch 用 runtime `ring_try` 闭包机制重写（setjmp 在 ring_try 帧内，深栈 unwind 已验证）。编译整个编译器（40 模块）前端能跑到 chk≈2.51 亿，**唯一阻塞是内存耗尽（峰值 25.9GB）**——uniform boxing + 不回收的固有限制，非 codegen bug，由 Perceus RC 解决。
 
-**后续**：Ownership + Perceus RC → async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
+**后续**：Ownership + Perceus RC（同时解掉自举的内存墙）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
 **遗留**：impl effect 传播修复、LSP 移植、技术债清理（见 `docs/audit-report.md`）
 

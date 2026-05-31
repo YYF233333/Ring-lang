@@ -122,6 +122,8 @@ fn emit_fn_body(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: Effe
     // Save and set current function
     let saved_fn = ctx.current_fn
     ctx.current_fn = some(fn_val)
+    let saved_fn_name = ctx.current_fn_name
+    ctx.current_fn_name = mangled
 
     // Save current named_values
     let saved_named = ctx.named_values
@@ -172,6 +174,7 @@ fn emit_fn_body(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: Effe
     // Restore state
     ctx.named_values = saved_named
     ctx.current_fn = saved_fn
+    ctx.current_fn_name = saved_fn_name
 }
 
 // ============================================================
