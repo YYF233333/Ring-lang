@@ -65,25 +65,17 @@ static void* ring_enum_none();
 static int g_argc = 0;
 static char** g_argv = nullptr;
 
+// Lightweight crash context: a step counter and the last runtime function entered.
+// Two stores per runtime call — cheap enough to leave on, and lets the SEH crash
+// handler / null guards report roughly where a fault occurred. (The previous
+// 64-entry ring buffer was debug-only scaffolding and has been removed.)
 static int g_chk = 0;
 static const char* g_last_fn = "";
-static const char* g_trace_buf[64];
-static void* g_trace_args[64];
-static int g_trace_idx = 0;
-#define CHK(name) do { g_chk++; g_last_fn = name; g_trace_buf[g_trace_idx & 63] = name; g_trace_args[g_trace_idx & 63] = nullptr; g_trace_idx++; } while(0)
-#define CHK_ARG(name, arg) do { g_chk++; g_last_fn = name; g_trace_buf[g_trace_idx & 63] = name; g_trace_args[g_trace_idx & 63] = arg; g_trace_idx++; } while(0)
+#define CHK(name) do { g_chk++; g_last_fn = (name); } while(0)
+#define CHK_ARG(name, arg) do { g_chk++; g_last_fn = (name); } while(0)
 
 static void dump_trace() {
-    fprintf(stderr, "=== Last 64 calls (chk=%d) ===\n", g_chk);
-    for (int i = 0; i < 64; i++) {
-        int idx = (g_trace_idx - 64 + i) & 63;
-        if (g_trace_buf[idx]) {
-            if (g_trace_args[idx])
-                fprintf(stderr, "  [%d] %s ptr=%p\n", g_chk - 64 + i + 1, g_trace_buf[idx], g_trace_args[idx]);
-            else
-                fprintf(stderr, "  [%d] %s\n", g_chk - 64 + i + 1, g_trace_buf[idx]);
-        }
-    }
+    fprintf(stderr, "=== ring: %d runtime calls, last = %s ===\n", g_chk, g_last_fn);
     fflush(stderr);
 }
 
@@ -197,31 +189,8 @@ extern "C" void* ring_box_int(int64_t val) {
 
 extern "C" int64_t ring_unbox_int(void* p) {
     CHK("unbox_int");
-    if (!p) {
-        HMODULE mod = GetModuleHandle(NULL);
-        uintptr_t rva = (uintptr_t)_ReturnAddress() - (uintptr_t)mod;
-        fprintf(stderr, "FATAL: ring_unbox_int(null) at chk %d caller_rva=0x%llx\n", g_chk, (unsigned long long)rva);
-        fflush(stderr); dump_trace(); exit(1);
-    }
-    if ((uintptr_t)p < 0x10000) {
-        fprintf(stderr, "FATAL: ring_unbox_int raw_int_as_ptr=%p at chk %d\n", p, g_chk);
-        fflush(stderr);
-        exit(1);
-    }
-#ifdef _WIN32
-    __try {
-        return *(int64_t*)p;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        HMODULE mod = GetModuleHandle(NULL);
-        uintptr_t rva = (uintptr_t)_ReturnAddress() - (uintptr_t)mod;
-        fprintf(stderr, "FATAL: ring_unbox_int access violation ptr=%p chk=%d caller_rva=0x%llx\n", p, g_chk, (unsigned long long)rva);
-        fflush(stderr);
-        dump_trace();
-        exit(1);
-    }
-#else
+    if (!p) { fprintf(stderr, "ring panic: unbox_int(null) (last=%s)\n", g_last_fn); exit(1); }
     return *(int64_t*)p;
-#endif
 }
 
 extern "C" void* ring_box_float(double val) {
@@ -242,12 +211,8 @@ extern "C" void* ring_box_bool(int64_t val) {
 }
 
 extern "C" int64_t ring_unbox_bool(void* p) {
-    CHK_ARG("unbox_bool", p);
-    if (!p) { fprintf(stderr, "FATAL: ring_unbox_bool(null) at chk %d\n", g_chk); fflush(stderr); dump_trace(); exit(1); }
-    if ((uintptr_t)p < 0x10000) {
-        fprintf(stderr, "FATAL: ring_unbox_bool raw_val_as_ptr=%p at chk %d\n", p, g_chk);
-        fflush(stderr); dump_trace(); exit(1);
-    }
+    CHK("unbox_bool");
+    if (!p) { fprintf(stderr, "ring panic: unbox_bool(null) (last=%s)\n", g_last_fn); exit(1); }
     return *(int64_t*)p;
 }
 
@@ -275,15 +240,7 @@ extern "C" void* ring_str_concat(void* a, void* b) {
 
 extern "C" int64_t ring_str_eq(void* a, void* b) {
     CHK("str_eq");
-    if (g_chk >= 9688 && g_chk <= 9702) {
-        fprintf(stderr, "  str_eq(a=%p, b=%p)\n", a, b);
-        fflush(stderr);
-        if (a && b) {
-            fprintf(stderr, "  str_eq(\"%s\", \"%s\")\n", ((std::string*)a)->c_str(), ((std::string*)b)->c_str());
-            fflush(stderr);
-        }
-    }
-    if (!a || !b) { fprintf(stderr, "FATAL: str_eq null ptr a=%p b=%p at chk %d\n", a, b, g_chk); fflush(stderr); return 0; }
+    if (!a || !b) return (a == b) ? 1 : 0;
     return (*(std::string*)a == *(std::string*)b) ? 1 : 0;
 }
 
@@ -398,26 +355,8 @@ extern "C" void* ring_list_push(void* list, void* val) {
     return list;
 }
 
-// Validate that `p` is a readable List pointer; on failure report caller + value.
-static void ring_check_list_ptr(void* p, const char* who, void* ret) {
-    bool bad = false;
-    if ((uintptr_t)p < 0x10000) bad = true;
-    else {
-        __try { volatile size_t s = ((std::vector<void*>*)p)->size(); (void)s; }
-        __except(EXCEPTION_EXECUTE_HANDLER) { bad = true; }
-    }
-    if (bad) {
-        HMODULE mod = GetModuleHandle(NULL);
-        uintptr_t rva = (uintptr_t)ret - (uintptr_t)mod;
-        fprintf(stderr, "FATAL: %s got invalid list ptr=%p at chk=%d caller_rva=0x%llx\n",
-                who, p, g_chk, (unsigned long long)rva);
-        fflush(stderr); dump_trace(); exit(1);
-    }
-}
-
 extern "C" void* ring_list_get(void* list, int64_t idx) {
     CHK("list_get");
-    ring_check_list_ptr(list, "ring_list_get", _ReturnAddress());
     auto* vec = (std::vector<void*>*)list;
     if (idx < 0 || idx >= (int64_t)vec->size()) {
         fprintf(stderr, "ring panic: list index %lld out of bounds (len %lld)\n",
@@ -441,7 +380,6 @@ extern "C" void* ring_list_set(void* list, int64_t idx, void* val) {
 extern "C" int64_t ring_list_len(void* list) {
     CHK("list_len");
     if (!list) { return 0; }
-    ring_check_list_ptr(list, "ring_list_len", _ReturnAddress());
     return (int64_t)((std::vector<void*>*)list)->size();
 }
 
@@ -1059,73 +997,11 @@ extern "C" void* ring_set_int_clear(void* set) {
 }
 
 // ============================================================================
-// Type sanitization (LLVM codegen workaround)
-// ============================================================================
-
-// ring_sanitize_type: workaround for LLVM codegen List<Type>-as-Type bug.
-// If the value is not a valid Type enum (tag outside 0..15) but looks like
-// a std::vector, return its first element instead.
-extern "C" void* ring_sanitize_type(void* t) {
-    if (!t) return t;
-    int64_t tag = *(int64_t*)t;
-    if (tag >= 0 && tag <= 15) return t;
-    __try {
-        auto* vec = (std::vector<void*>*)t;
-        if (vec->size() > 0) {
-            void* first = (*vec)[0];
-            if (first) {
-                int64_t ftag = *(int64_t*)first;
-                if (ftag >= 0 && ftag <= 15) return first;
-            }
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    return t;
-}
-
-// ring_debug_verify_type: fallback diagnostic — panics if a Type value has
-// an invalid tag (called from match.default blocks in enum match codegen).
-extern "C" void* ring_debug_verify_type(void* t) {
-    if (!t) {
-        fprintf(stderr, "VERIFY: null Type pointer at chk=%d\n", g_chk);
-        fflush(stderr); dump_trace(); exit(99);
-    }
-    int64_t tag = *(int64_t*)t;
-    if (tag < 0 || tag > 15) {
-        fprintf(stderr, "VERIFY: bad Type tag=%lld (0x%llx) ptr=%p at chk=%d\n",
-                (long long)tag, (unsigned long long)tag, t, g_chk);
-        fflush(stderr); dump_trace(); exit(99);
-    }
-    if (tag == 7) { // TypeVar
-        void* id = ((void**)t)[1];
-        if (!id) {
-            fprintf(stderr, "VERIFY: TypeVar null id at chk=%d ptr=%p\n", g_chk, t);
-            void** data = (void**)t;
-            fprintf(stderr, "  TypeVar data: tag=%lld id=%p name=%p\n",
-                    (long long)data[0], data[1], data[2]);
-            fflush(stderr); dump_trace(); exit(99);
-        }
-    }
-    return t;
-}
-
-// ============================================================================
 // IO / FS / Process (~8)
 // ============================================================================
 
-extern "C" void* ring_debug_assert_nonnull(void* ptr, void* msg) {
-    if (ptr == nullptr) {
-        fprintf(stderr, "ASSERT_NONNULL FAILED: %s (chk=%d)\n",
-                msg ? ((std::string*)msg)->c_str() : "(no msg)", g_chk);
-        fflush(stderr);
-        dump_trace();
-        exit(99);
-    }
-    return ptr;
-}
-
 extern "C" void* ring_print(void* s) {
     CHK("PRINT");
-    fprintf(stderr, "[RING_PRINT] %s\n", ((std::string*)s)->c_str());
     printf("%s\n", ((std::string*)s)->c_str());
     fflush(stdout);
     fflush(stderr);
@@ -1134,7 +1010,7 @@ extern "C" void* ring_print(void* s) {
 
 extern "C" void* ring_eprintln(void* s) {
     CHK("EPRINTLN");
-    fprintf(stderr, "[RING_EPRINTLN] %s\n", ((std::string*)s)->c_str());
+    fprintf(stderr, "%s\n", ((std::string*)s)->c_str());
     fflush(stderr);
     return nullptr;
 }
@@ -1152,29 +1028,14 @@ extern "C" void* ring_panic(void* s) {
 }
 
 // Diagnostic for non-exhaustive enum match: a value reached a match whose tag
-// matched no arm. Reports the enum name (known at codegen) and the runtime tag.
+// matched no arm. Reports the enum name + enclosing fn (baked in at codegen) and
+// the runtime tag. A tag outside the variant range means a miscompiled value.
 extern "C" void* ring_match_fail(void* enum_name, int64_t tag, int64_t site, void* scrut) {
+    (void)scrut;
     fprintf(stderr, "ring panic: non-exhaustive match on enum '%s' (runtime tag=%lld, site #%lld)\n",
             enum_name ? ((std::string*)enum_name)->c_str() : "?",
             (long long)tag, (long long)site);
-    // If the "tag" looks like a heap pointer, the scrutinee is probably a
-    // miscompiled value. Try to introspect it as a std::vector and dump shape.
-    if (tag > 0xffff) {
-        __try {
-            auto* vec = (std::vector<void*>*)scrut;
-            size_t n = vec->size();
-            fprintf(stderr, "  scrut looks like a List: size=%zu\n", n);
-            for (size_t i = 0; i < n && i < 6; i++) {
-                void* e = (*vec)[i];
-                int64_t etag = e ? *(int64_t*)e : -1;
-                fprintf(stderr, "    [%zu] ptr=%p tag=%lld\n", i, e, (long long)etag);
-            }
-        } __except(EXCEPTION_EXECUTE_HANDLER) {
-            fprintf(stderr, "  (scrut not a readable vector)\n");
-        }
-    }
     fflush(stderr);
-    dump_trace();
     exit(1);
     return nullptr;  // unreachable
 }

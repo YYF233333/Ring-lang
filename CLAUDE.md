@@ -68,6 +68,7 @@ Ring-lang/
 - **负面测试**（期望编译错误）：定义类型系统边界，含 pending 测试标记未来特性
 - **回归测试写 E2E 层**：不写 "第 X 行生成的 JS 应该是 Y"——codegen 实现可变
 - **度量语义覆盖**，不度量代码行覆盖
+- **LLVM 差分回归测试**（`tests/cases/llvm/*.ring` + `tests/llvm_diff.test.mjs`，`npm run test:llvm`）：每个用例用 JS 和 LLVM 两个后端编译运行，断言输出一致（JS 后端是 oracle）。锁定 LLVM codegen 修复（tuple-match tag、OR-pattern、Set 迭代、泛型 Eq/Ord dict 派发、List.contains、fail/catch via ring_try 等）。需本地 clang，无则自动 skip。
 
 ## 已知限制
 
@@ -127,8 +128,11 @@ node compiler/dist/main.js check examples/effects.ring
 # LLM 格式错误输出
 node compiler/dist/main.js check --error-format=llm examples/effects.ring
 
-# E2E 测试
+# E2E 测试（JS 后端）
 cd compiler && npm test
+
+# LLVM 后端差分回归测试（需 clang）
+cd compiler && npm run test:llvm
 
 # 重新编译编译器自身
 node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
