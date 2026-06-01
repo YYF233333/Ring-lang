@@ -13,6 +13,7 @@ import { safe_ident as codegen_ctx$safe_ident, new_codegen_ctx as codegen_ctx$ne
 import { RUNTIME_CODE as runtime$RUNTIME_CODE, RUNTIME_EXPORT_NAMES as runtime$RUNTIME_EXPORT_NAMES, runtime_esm_code as runtime$runtime_esm_code } from "./runtime.js";
 import { module_key as resolver$module_key, module_prefix as resolver$module_prefix, resolve_module_file as resolver$resolve_module_file, build_module_graph as resolver$build_module_graph, ModuleId as resolver$ModuleId, ModuleGraph as resolver$ModuleGraph, GraphError as resolver$GraphError, __ModuleId_Clone as resolver$__ModuleId_Clone, __ModuleId_Debug as resolver$__ModuleId_Debug, __GraphError_Clone as resolver$__GraphError_Clone, __GraphError_Debug as resolver$__GraphError_Debug } from "./resolver.js";
 import { extract_exports as exports$extract_exports, ModuleExports as exports$ModuleExports, TypeDef_StructDef_ as exports$TypeDef_StructDef_, TypeDef_EnumDef_ as exports$TypeDef_EnumDef_ } from "./exports.js";
+import { perceus_transform as perceus$perceus_transform } from "./perceus.js";
 
 
 
@@ -457,7 +458,8 @@ function compile_project_llvm(entry_file, output_path, __ring_ev_io) {
           if (Array.isArray(__ring_m14) && __ring_m14.length === 3 && __ring_m14[0]._tag === "some" && __ring_m14[1]._tag === "some" && __ring_m14[2]._tag === "some") {
             const mod_ = __ring_m14[0]._0; const hir = __ring_m14[1]._0; const ast = __ring_m14[2]._0;
             const prefix = resolver$module_prefix(mod_.path_segments);
-            List_push(modules, [prefix, hir, ast.uses]);
+            const rc_hir = perceus$perceus_transform(hir);
+            List_push(modules, [prefix, rc_hir, ast.uses]);
             if ((key === entry_key)) {
               entry_prefix = prefix;
             }
@@ -466,7 +468,8 @@ function compile_project_llvm(entry_file, output_path, __ring_ev_io) {
           if (Array.isArray(__ring_m14) && __ring_m14.length === 3 && __ring_m14[0]._tag === "some" && __ring_m14[1]._tag === "some" && __ring_m14[2]._tag === "none") {
             const mod_ = __ring_m14[0]._0; const hir = __ring_m14[1]._0;
             const prefix = resolver$module_prefix(mod_.path_segments);
-            List_push(modules, [prefix, hir, []]);
+            const rc_hir = perceus$perceus_transform(hir);
+            List_push(modules, [prefix, rc_hir, []]);
             if ((key === entry_key)) {
               entry_prefix = prefix;
             }

@@ -13,6 +13,7 @@ use runtime::{RUNTIME_CODE, RUNTIME_EXPORT_NAMES, runtime_esm_code}
 use resolver::{ModuleGraph, ModuleId, module_key, module_prefix,
     build_module_graph}
 use exports::{ModuleExports, TypeDef, extract_exports}
+use perceus::{perceus_transform}
 
 pub struct CompileProjectResult {
     pub js: Str,
@@ -166,14 +167,16 @@ pub fn compile_project_llvm(entry_file: Str, output_path: Str) -> LlvmCompileRes
                 match (phases.graph.modules.get(key), phases.module_hirs.get(key), phases.module_asts.get(key)) {
                     (some(mod_), some(hir), some(ast)) => {
                         let prefix = module_prefix(mod_.path_segments)
-                        modules.push((prefix, hir, ast.uses))
+                        let rc_hir = perceus_transform(hir)
+                        modules.push((prefix, rc_hir, ast.uses))
                         if key == entry_key {
                             entry_prefix = prefix
                         }
                     },
                     (some(mod_), some(hir), none) => {
                         let prefix = module_prefix(mod_.path_segments)
-                        modules.push((prefix, hir, []))
+                        let rc_hir = perceus_transform(hir)
+                        modules.push((prefix, rc_hir, []))
                         if key == entry_key {
                             entry_prefix = prefix
                         }

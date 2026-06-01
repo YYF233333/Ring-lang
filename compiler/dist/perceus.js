@@ -1,0 +1,1709 @@
+import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
+import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, AssocConstraint as ast$AssocConstraint, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
+import { variant_js_name as hir$variant_js_name, trait_dict_name as hir$trait_dict_name, evidence_param_name as hir$evidence_param_name, default_evidence_name as hir$default_evidence_name, trait_bound_param_name as hir$trait_bound_param_name, default_method_self_name as hir$default_method_self_name, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, hexpr_type as hir$hexpr_type, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, STR_METHODS as hir$STR_METHODS, INT_METHODS as hir$INT_METHODS, FLOAT_METHODS as hir$FLOAT_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, SET_HOF_METHODS as hir$SET_HOF_METHODS, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, HParam as hir$HParam, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, DictDispatchInfo as hir$DictDispatchInfo, HStructFieldInit as hir$HStructFieldInit, HMatchArm as hir$HMatchArm, HEffectHandler as hir$HEffectHandler, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStructField as hir$HStructField, HEnumVariant as hir$HEnumVariant, HEffectOp as hir$HEffectOp, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, HAssocType as hir$HAssocType, HSigMember as hir$HSigMember, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, DerivedField as hir$DerivedField, DerivedVariant as hir$DerivedVariant, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, DerivedImpl as hir$DerivedImpl, HProgram as hir$HProgram, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug } from "./hir.js";
+import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, effect_kind_name as types$effect_kind_name, effects_match_kind as types$effects_match_kind, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, effects_same_kind as types$effects_same_kind, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
+
+
+
+function List_first(self) {
+  if (List_is_empty(self)) {
+    return Option_none;
+  }
+  return List_get(self, 0);
+}
+function List_last(self) {
+  if (List_is_empty(self)) {
+    return Option_none;
+  }
+  return List_get(self, (List_len(self) - 1));
+}
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
+
+class ListIterator {
+  constructor(list, index) {
+    this.list = list;
+    this.index = index;
+  }
+}
+
+function __ListIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.list))) {
+    const v = List_get(self.list, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __ListIterator_Iterator = { next: __ListIterator_Iterator_next };
+
+function __List_Iterable_iter(self) {
+  return new ListIterator(self, 0);
+}
+const __List_Iterable = { iter: __List_Iterable_iter };
+
+function List_contains(self, item, __ring_T_Eq) {
+  const __ring_iter_0 = __List_Iterable.iter(self);
+  while (true) {
+    const __ring_next_0 = __ListIterator_Iterator.next(__ring_iter_0);
+    if (__ring_next_0._tag === "none") break;
+    const x = __ring_next_0._0;
+    if (__ring_T_Eq.eq(x, item)) {
+      return true;
+    }
+  }
+  return false;
+}
+function List_index_of(self, item, __ring_T_Eq) {
+  let i = 0;
+  while ((i < List_len(self))) {
+    __ring_match0: {
+      const __ring_m0 = List_get(self, i);
+      if (__ring_m0._tag === "some") {
+        const v = __ring_m0._0;
+        if (__ring_T_Eq.eq(v, item)) {
+          return Option_some(i);
+        }
+        break __ring_match0;
+      }
+      if (__ring_m0._tag === "none") {
+        break __ring_match0;
+      }
+      __match_fail(__ring_m0);
+    }
+    i = (i + 1);
+  }
+  return Option_none;
+}
+
+class MapIterator {
+  constructor(entries, index) {
+    this.entries = entries;
+    this.index = index;
+  }
+}
+
+function __MapIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.entries))) {
+    const v = List_get(self.entries, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __MapIterator_Iterator = { next: __MapIterator_Iterator_next };
+
+function ___Map_Iterable_iter(self) {
+  return new MapIterator(_Map_entries(self), 0);
+}
+const ___Map_Iterable = { iter: ___Map_Iterable_iter };
+
+function _Map_is_empty(self) {
+  return (_Map_len(self) === 0);
+}
+
+class SetIterator {
+  constructor(items, index) {
+    this.items = items;
+    this.index = index;
+  }
+}
+
+function __SetIterator_Iterator_next(self) {
+  if ((self.index < List_len(self.items))) {
+    const v = List_get(self.items, self.index);
+    self.index = (self.index + 1);
+    return v;
+  } else {
+    return Option_none;
+  }
+}
+const __SetIterator_Iterator = { next: __SetIterator_Iterator_next };
+
+function ___Set_Iterable_iter(self) {
+  return new SetIterator(_Set_to_list(self), 0);
+}
+const ___Set_Iterable = { iter: ___Set_Iterable_iter };
+
+function _Set_is_empty(self) {
+  return (_Set_len(self) === 0);
+}
+
+function _Set_contains(self, item, __ring_T_Eq) {
+  const items = _Set_to_list(self);
+  const __ring_iter_1 = __List_Iterable.iter(items);
+  while (true) {
+    const __ring_next_1 = __ListIterator_Iterator.next(__ring_iter_1);
+    if (__ring_next_1._tag === "none") break;
+    const x = __ring_next_1._0;
+    if (__ring_T_Eq.eq(x, item)) {
+      return true;
+    }
+  }
+  return false;
+}
+function _Set_has(self, item, __ring_T_Eq) {
+  return _Set_contains(self, item, __ring_T_Eq);
+}
+
+function Result_Ok(_0) {
+  return { _tag: "Ok", _0 };
+}
+function Result_Err(_0) {
+  return { _tag: "Err", _0 };
+}
+
+function Result_map(self, f) {
+  __ring_match1: {
+    const __ring_m1 = self;
+    if (__ring_m1._tag === "Ok") {
+      const v = __ring_m1._0;
+      return Result_Ok(f(v));
+      break __ring_match1;
+    }
+    if (__ring_m1._tag === "Err") {
+      const e = __ring_m1._0;
+      return Result_Err(e);
+      break __ring_match1;
+    }
+    __match_fail(__ring_m1);
+  }
+}
+function Result_and_then(self, f) {
+  __ring_match2: {
+    const __ring_m2 = self;
+    if (__ring_m2._tag === "Ok") {
+      const v = __ring_m2._0;
+      return f(v);
+      break __ring_match2;
+    }
+    if (__ring_m2._tag === "Err") {
+      const e = __ring_m2._0;
+      return Result_Err(e);
+      break __ring_match2;
+    }
+    __match_fail(__ring_m2);
+  }
+}
+function Result_unwrap_or(self, _default) {
+  __ring_match3: {
+    const __ring_m3 = self;
+    if (__ring_m3._tag === "Ok") {
+      const v = __ring_m3._0;
+      return v;
+      break __ring_match3;
+    }
+    if (__ring_m3._tag === "Err") {
+      return _default;
+      break __ring_match3;
+    }
+    __match_fail(__ring_m3);
+  }
+}
+function Result_is_ok(self) {
+  __ring_match4: {
+    const __ring_m4 = self;
+    if (__ring_m4._tag === "Ok") {
+      return true;
+      break __ring_match4;
+    }
+    if (__ring_m4._tag === "Err") {
+      return false;
+      break __ring_match4;
+    }
+    __match_fail(__ring_m4);
+  }
+}
+function Result_is_err(self) {
+  __ring_match5: {
+    const __ring_m5 = self;
+    if (__ring_m5._tag === "Ok") {
+      return false;
+      break __ring_match5;
+    }
+    if (__ring_m5._tag === "Err") {
+      return true;
+      break __ring_match5;
+    }
+    __match_fail(__ring_m5);
+  }
+}
+
+function to_result(f) {
+  return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
+}
+
+function synthetic_span() {
+  const pos = new ast$Position(0, 0, 0);
+  return new ast$Span("<perceus>", pos, pos);
+}
+
+function collect_expr_vars(expr, out) {
+  __ring_match6: {
+    const __ring_m6 = expr;
+    if (__ring_m6._tag === "Ident") {
+      const name = __ring_m6.name;
+      return _Set_insert(out, name);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "BinOp") {
+      const left = __ring_m6.left; const right = __ring_m6.right;
+      collect_expr_vars(left, out);
+      return collect_expr_vars(right, out);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "UnaryOp") {
+      const operand = __ring_m6.operand;
+      return collect_expr_vars(operand, out);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "Call") {
+      const callee = __ring_m6.callee; const args = __ring_m6.args;
+      collect_expr_vars(callee, out);
+      const __ring_iter_2 = __List_Iterable.iter(args);
+      while (true) {
+        const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+        if (__ring_next_2._tag === "none") break;
+        const a = __ring_next_2._0;
+        collect_expr_vars(a, out);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "FieldAccess") {
+      const receiver = __ring_m6.receiver;
+      return collect_expr_vars(receiver, out);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "StructLit") {
+      const fields = __ring_m6.fields; const spread = __ring_m6.spread;
+      const __ring_iter_3 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+        if (__ring_next_3._tag === "none") break;
+        const f = __ring_next_3._0;
+        collect_expr_vars(f.value, out);
+      }
+      __ring_match7: {
+        const __ring_m7 = spread;
+        if (__ring_m7._tag === "some") {
+          const s = __ring_m7._0;
+          return collect_expr_vars(s, out);
+          break __ring_match7;
+        }
+        if (__ring_m7._tag === "none") {
+          break __ring_match7;
+        }
+        __match_fail(__ring_m7);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "NamedVariantConstruct") {
+      const fields = __ring_m6.fields; const spread = __ring_m6.spread;
+      const __ring_iter_4 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+        if (__ring_next_4._tag === "none") break;
+        const f = __ring_next_4._0;
+        collect_expr_vars(f.value, out);
+      }
+      __ring_match8: {
+        const __ring_m8 = spread;
+        if (__ring_m8._tag === "some") {
+          const s = __ring_m8._0;
+          return collect_expr_vars(s, out);
+          break __ring_match8;
+        }
+        if (__ring_m8._tag === "none") {
+          break __ring_match8;
+        }
+        __match_fail(__ring_m8);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "MatchExpr") {
+      const scrutinee = __ring_m6.scrutinee; const arms = __ring_m6.arms;
+      collect_expr_vars(scrutinee, out);
+      const __ring_iter_5 = __List_Iterable.iter(arms);
+      while (true) {
+        const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+        if (__ring_next_5._tag === "none") break;
+        const arm = __ring_next_5._0;
+        collect_expr_vars(arm.body, out);
+        __ring_match9: {
+          const __ring_m9 = arm.guard;
+          if (__ring_m9._tag === "some") {
+            const g = __ring_m9._0;
+            collect_expr_vars(g, out);
+            break __ring_match9;
+          }
+          if (__ring_m9._tag === "none") {
+            break __ring_match9;
+          }
+          __match_fail(__ring_m9);
+        }
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "Block") {
+      const stmts = __ring_m6.stmts; const tail = __ring_m6.tail;
+      const __ring_iter_6 = __List_Iterable.iter(stmts);
+      while (true) {
+        const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+        if (__ring_next_6._tag === "none") break;
+        const s = __ring_next_6._0;
+        collect_stmt_vars(s, out);
+      }
+      __ring_match10: {
+        const __ring_m10 = tail;
+        if (__ring_m10._tag === "some") {
+          const t = __ring_m10._0;
+          return collect_expr_vars(t, out);
+          break __ring_match10;
+        }
+        if (__ring_m10._tag === "none") {
+          break __ring_match10;
+        }
+        __match_fail(__ring_m10);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "IfExpr") {
+      const condition = __ring_m6.condition; const then_branch = __ring_m6.then_branch; const else_branch = __ring_m6.else_branch;
+      collect_expr_vars(condition, out);
+      collect_expr_vars(then_branch, out);
+      __ring_match11: {
+        const __ring_m11 = else_branch;
+        if (__ring_m11._tag === "some") {
+          const eb = __ring_m11._0;
+          return collect_expr_vars(eb, out);
+          break __ring_match11;
+        }
+        if (__ring_m11._tag === "none") {
+          break __ring_match11;
+        }
+        __match_fail(__ring_m11);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "StringInterp") {
+      const parts = __ring_m6.parts;
+      const __ring_iter_7 = __List_Iterable.iter(parts);
+      while (true) {
+        const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+        if (__ring_next_7._tag === "none") break;
+        const p = __ring_next_7._0;
+        __ring_match12: {
+          const __ring_m12 = p;
+          if (__ring_m12._tag === "Expression") {
+            const e = __ring_m12._0;
+            collect_expr_vars(e, out);
+            break __ring_match12;
+          }
+          if (__ring_m12._tag === "Literal") {
+            break __ring_match12;
+          }
+          __match_fail(__ring_m12);
+        }
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "TryCatch") {
+      const body = __ring_m6.body; const arms = __ring_m6.arms;
+      collect_expr_vars(body, out);
+      const __ring_iter_8 = __List_Iterable.iter(arms);
+      while (true) {
+        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+        if (__ring_next_8._tag === "none") break;
+        const arm = __ring_next_8._0;
+        collect_expr_vars(arm.body, out);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "HandleExpr") {
+      const body = __ring_m6.body; const handlers = __ring_m6.handlers;
+      collect_expr_vars(body, out);
+      const __ring_iter_9 = __List_Iterable.iter(handlers);
+      while (true) {
+        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+        if (__ring_next_9._tag === "none") break;
+        const h = __ring_next_9._0;
+        collect_expr_vars(h.body, out);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "Lambda") {
+      const body = __ring_m6.body;
+      return collect_expr_vars(body, out);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "EffectOp") {
+      const args = __ring_m6.args;
+      const __ring_iter_10 = __List_Iterable.iter(args);
+      while (true) {
+        const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+        if (__ring_next_10._tag === "none") break;
+        const a = __ring_next_10._0;
+        collect_expr_vars(a, out);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "RangeExpr") {
+      const start = __ring_m6.start; const end = __ring_m6.end;
+      collect_expr_vars(start, out);
+      return collect_expr_vars(end, out);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "ListLit") {
+      const elements = __ring_m6.elements;
+      const __ring_iter_11 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+        if (__ring_next_11._tag === "none") break;
+        const e = __ring_next_11._0;
+        collect_expr_vars(e, out);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "TupleLit") {
+      const elements = __ring_m6.elements;
+      const __ring_iter_12 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+        if (__ring_next_12._tag === "none") break;
+        const e = __ring_next_12._0;
+        collect_expr_vars(e, out);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "IndexExpr") {
+      const receiver = __ring_m6.receiver; const index = __ring_m6.index;
+      collect_expr_vars(receiver, out);
+      return collect_expr_vars(index, out);
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "IntLit") {
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "FloatLit") {
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "StrLit") {
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "BoolLit") {
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+}
+
+function collect_stmt_vars(stmt, out) {
+  __ring_match13: {
+    const __ring_m13 = stmt;
+    if (__ring_m13._tag === "Let") {
+      const init = __ring_m13.init;
+      return collect_expr_vars(init, out);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Var") {
+      const init = __ring_m13.init;
+      return collect_expr_vars(init, out);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Assign") {
+      const target = __ring_m13.target; const value = __ring_m13.value;
+      collect_expr_vars(target, out);
+      return collect_expr_vars(value, out);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "ExprStmt") {
+      const expr = __ring_m13.expr;
+      return collect_expr_vars(expr, out);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Return") {
+      const value = __ring_m13.value;
+      __ring_match14: {
+        const __ring_m14 = value;
+        if (__ring_m14._tag === "some") {
+          const v = __ring_m14._0;
+          return collect_expr_vars(v, out);
+          break __ring_match14;
+        }
+        if (__ring_m14._tag === "none") {
+          break __ring_match14;
+        }
+        __match_fail(__ring_m14);
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "While") {
+      const condition = __ring_m13.condition; const body = __ring_m13.body;
+      collect_expr_vars(condition, out);
+      return collect_expr_vars(body, out);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "ForIn") {
+      const iterable = __ring_m13.iterable; const body = __ring_m13.body;
+      collect_expr_vars(iterable, out);
+      return collect_expr_vars(body, out);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "LetDestructure") {
+      const init = __ring_m13.init;
+      return collect_expr_vars(init, out);
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "IfLet") {
+      const expr = __ring_m13.expr; const then_block = __ring_m13.then_block; const else_block = __ring_m13.else_block;
+      collect_expr_vars(expr, out);
+      collect_expr_vars(then_block, out);
+      __ring_match15: {
+        const __ring_m15 = else_block;
+        if (__ring_m15._tag === "some") {
+          const eb = __ring_m15._0;
+          return collect_expr_vars(eb, out);
+          break __ring_match15;
+        }
+        if (__ring_m15._tag === "none") {
+          break __ring_match15;
+        }
+        __match_fail(__ring_m15);
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Break") {
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Continue") {
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Drop") {
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Dup") {
+      break __ring_match13;
+    }
+    __match_fail(__ring_m13);
+  }
+}
+
+function pattern_binding_names(pat, out) {
+  __ring_match16: {
+    const __ring_m16 = pat;
+    if (__ring_m16._tag === "Wildcard") {
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "Literal") {
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "Binding") {
+      const name = __ring_m16.name;
+      return List_push(out, name);
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "Constructor") {
+      const fields = __ring_m16.fields;
+      const __ring_iter_13 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+        if (__ring_next_13._tag === "none") break;
+        const f = __ring_next_13._0;
+        pattern_binding_names(f, out);
+      }
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "NamedConstructor") {
+      const fields = __ring_m16.fields;
+      const __ring_iter_14 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+        if (__ring_next_14._tag === "none") break;
+        const f = __ring_next_14._0;
+        pattern_binding_names(f.pattern, out);
+      }
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "TuplePattern") {
+      const elements = __ring_m16.elements;
+      const __ring_iter_15 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+        if (__ring_next_15._tag === "none") break;
+        const e = __ring_next_15._0;
+        pattern_binding_names(e, out);
+      }
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "OrPattern") {
+      const patterns = __ring_m16.patterns;
+      if ((List_len(patterns) > 0)) {
+        __ring_match17: {
+          const __ring_m17 = List_get(patterns, 0);
+          if (__ring_m17._tag === "some") {
+            const p = __ring_m17._0;
+            return pattern_binding_names(p, out);
+            break __ring_match17;
+          }
+          if (__ring_m17._tag === "none") {
+            break __ring_match17;
+          }
+          __match_fail(__ring_m17);
+        }
+      }
+      break __ring_match16;
+    }
+    __match_fail(__ring_m16);
+  }
+}
+
+function perceus_transform(program) {
+  const new_decls = transform_decls(program.decls);
+  return new hir$HProgram(new_decls, program.derived_impls, program.boxed_vars);
+}
+
+function transform_decls(decls) {
+  let result = [];
+  const __ring_iter_16 = __List_Iterable.iter(decls);
+  while (true) {
+    const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+    if (__ring_next_16._tag === "none") break;
+    const d = __ring_next_16._0;
+    List_push(result, transform_decl(d));
+  }
+  return result;
+}
+
+function transform_decl(decl) {
+  __ring_match18: {
+    const __ring_m18 = decl;
+    if (__ring_m18._tag === "Fn") {
+      const name = __ring_m18.name; const def_id = __ring_m18.def_id; const type_params = __ring_m18.type_params; const params = __ring_m18.params; const return_type = __ring_m18.return_type; const effects = __ring_m18.effects; const body = __ring_m18.body; const is_pub = __ring_m18.is_pub; const trait_bounds = __ring_m18.trait_bounds; const span = __ring_m18.span;
+      const new_body = transform_fn_body(params, body);
+      return hir$HDecl_Fn(name, def_id, type_params, params, return_type, effects, new_body, is_pub, trait_bounds, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Impl") {
+      const target_type = __ring_m18.target_type; const type_params = __ring_m18.type_params; const trait_name = __ring_m18.trait_name; const methods = __ring_m18.methods; const assoc_types = __ring_m18.assoc_types; const span = __ring_m18.span;
+      const new_methods = transform_decls(methods);
+      return hir$HDecl_Impl(target_type, type_params, trait_name, new_methods, assoc_types, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Test") {
+      const description = __ring_m18.description; const body = __ring_m18.body; const span = __ring_m18.span;
+      const new_body = transform_fn_body([], body);
+      return hir$HDecl_Test(description, new_body, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Const") {
+      const name = __ring_m18.name; const def_id = __ring_m18.def_id; const ty = __ring_m18.ty; const init = __ring_m18.init; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      const live = set_new();
+      const result = rc_expr(init, live);
+      return hir$HDecl_Const(name, def_id, ty, result.expr, is_pub, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "ModBlock") {
+      const name = __ring_m18.name; const mod_decls = __ring_m18.decls; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      return hir$HDecl_ModBlock(name, transform_decls(mod_decls), is_pub, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Struct") {
+      return decl;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Enum") {
+      return decl;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Effect") {
+      return decl;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Trait") {
+      return decl;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "ExternFn") {
+      return decl;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "ExternType") {
+      return decl;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "TypeAlias") {
+      return decl;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Sig") {
+      return decl;
+      break __ring_match18;
+    }
+    __match_fail(__ring_m18);
+  }
+}
+
+function transform_fn_body(params, body) {
+  const live = set_new();
+  const result = rc_expr(body, live);
+  const remaining_live = result.live;
+  let param_drops = [];
+  const __ring_iter_17 = __List_Iterable.iter(params);
+  while (true) {
+    const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+    if (__ring_next_17._tag === "none") break;
+    const p = __ring_next_17._0;
+    if ((_Set_contains(remaining_live, p.name, __Str_Eq) === false)) {
+      List_push(param_drops, hir$HStmt_Drop(p.name, p.ty, synthetic_span()));
+    }
+  }
+  if ((List_len(param_drops) === 0)) {
+    return result.expr;
+  }
+  __ring_match19: {
+    const __ring_m19 = result.expr;
+    if (__ring_m19._tag === "Block") {
+      const stmts = __ring_m19.stmts; const tail = __ring_m19.tail; const ty = __ring_m19.ty; const effects = __ring_m19.effects; const span = __ring_m19.span;
+      const new_stmts = List_concat(param_drops, stmts);
+      return hir$HExpr_Block(new_stmts, tail, ty, effects, span);
+      break __ring_match19;
+    }
+    const ty = hir$hexpr_type(result.expr);
+    const effects = hir$hexpr_effects(result.expr);
+    const span = hir$hexpr_span(result.expr);
+    return hir$HExpr_Block(param_drops, Option_some(result.expr), ty, effects, span);
+    break __ring_match19;
+  }
+}
+
+class RcResult {
+  constructor(expr, live) {
+    this.expr = expr;
+    this.live = live;
+  }
+}
+
+class RcStmtsResult {
+  constructor(stmts, live) {
+    this.stmts = stmts;
+    this.live = live;
+  }
+}
+
+function rc_stmts(stmts, live) {
+  let result = [];
+  let cur_live = live;
+  let i = (List_len(stmts) - 1);
+  while ((i >= 0)) {
+    __ring_match20: {
+      const __ring_m20 = List_get(stmts, i);
+      if (__ring_m20._tag === "some") {
+        const stmt = __ring_m20._0;
+        const r = rc_stmt(stmt, cur_live);
+        let j = (List_len(r.stmts) - 1);
+        while ((j >= 0)) {
+          __ring_match21: {
+            const __ring_m21 = List_get(r.stmts, j);
+            if (__ring_m21._tag === "some") {
+              const s = __ring_m21._0;
+              List_push(result, s);
+              break __ring_match21;
+            }
+            if (__ring_m21._tag === "none") {
+              break __ring_match21;
+            }
+            __match_fail(__ring_m21);
+          }
+          j = (j - 1);
+        }
+        cur_live = r.live;
+        break __ring_match20;
+      }
+      if (__ring_m20._tag === "none") {
+        break __ring_match20;
+      }
+      __match_fail(__ring_m20);
+    }
+    i = (i - 1);
+  }
+  List_reverse(result);
+  return new RcStmtsResult(result, cur_live);
+}
+
+function rc_stmt(stmt, live) {
+  __ring_match22: {
+    const __ring_m22 = stmt;
+    if (__ring_m22._tag === "Let") {
+      const name = __ring_m22.name; const name_span = __ring_m22.name_span; const def_id = __ring_m22.def_id; const ty = __ring_m22.ty; const init = __ring_m22.init; const span = __ring_m22.span;
+      const init_result = rc_expr(init, live);
+      let cur_live = init_result.live;
+      let out = [];
+      List_push(out, hir$HStmt_Let(name, name_span, def_id, ty, init_result.expr, span));
+      if (_Set_contains(cur_live, name, __Str_Eq)) {
+        _Set_remove(cur_live, name);
+      } else {
+        List_push(out, hir$HStmt_Drop(name, ty, synthetic_span()));
+      }
+      return new RcStmtsResult(out, cur_live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "Var") {
+      const name = __ring_m22.name; const name_span = __ring_m22.name_span; const def_id = __ring_m22.def_id; const ty = __ring_m22.ty; const init = __ring_m22.init; const span = __ring_m22.span;
+      const init_result = rc_expr(init, live);
+      let cur_live = init_result.live;
+      let out = [];
+      List_push(out, hir$HStmt_Var(name, name_span, def_id, ty, init_result.expr, span));
+      if (_Set_contains(cur_live, name, __Str_Eq)) {
+        _Set_remove(cur_live, name);
+      } else {
+        List_push(out, hir$HStmt_Drop(name, ty, synthetic_span()));
+      }
+      return new RcStmtsResult(out, cur_live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "Assign") {
+      const target = __ring_m22.target; const value = __ring_m22.value; const span = __ring_m22.span;
+      const val_result = rc_expr(value, live);
+      const tgt_result = rc_expr(target, val_result.live);
+      let out = [];
+      __ring_match23: {
+        const __ring_m23 = target;
+        if (__ring_m23._tag === "Ident") {
+          const name = __ring_m23.name; const ty = __ring_m23.ty;
+          List_push(out, hir$HStmt_Drop(name, ty, synthetic_span()));
+          break __ring_match23;
+        }
+        break __ring_match23;
+      }
+      List_push(out, hir$HStmt_Assign(tgt_result.expr, val_result.expr, span));
+      return new RcStmtsResult(out, tgt_result.live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "ExprStmt") {
+      const expr = __ring_m22.expr; const span = __ring_m22.span;
+      const r = rc_expr(expr, live);
+      return new RcStmtsResult([hir$HStmt_ExprStmt(r.expr, span)], r.live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "Return") {
+      const value = __ring_m22.value; const span = __ring_m22.span;
+      __ring_match24: {
+        const __ring_m24 = value;
+        if (__ring_m24._tag === "some") {
+          const v = __ring_m24._0;
+          const r = rc_expr(v, live);
+          let out = [];
+          const __ring_iter_18 = ___Set_Iterable.iter(r.live);
+          while (true) {
+            const __ring_next_18 = __SetIterator_Iterator.next(__ring_iter_18);
+            if (__ring_next_18._tag === "none") break;
+            const name = __ring_next_18._0;
+            List_push(out, hir$HStmt_Drop(name, types$Type_UnitType, synthetic_span()));
+          }
+          List_push(out, hir$HStmt_Return(Option_some(r.expr), span));
+          return new RcStmtsResult(out, set_new());
+          break __ring_match24;
+        }
+        if (__ring_m24._tag === "none") {
+          let out = [];
+          const __ring_iter_19 = ___Set_Iterable.iter(live);
+          while (true) {
+            const __ring_next_19 = __SetIterator_Iterator.next(__ring_iter_19);
+            if (__ring_next_19._tag === "none") break;
+            const name = __ring_next_19._0;
+            List_push(out, hir$HStmt_Drop(name, types$Type_UnitType, synthetic_span()));
+          }
+          List_push(out, hir$HStmt_Return(Option_none, span));
+          return new RcStmtsResult(out, set_new());
+          break __ring_match24;
+        }
+        __match_fail(__ring_m24);
+      }
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "While") {
+      const condition = __ring_m22.condition; const body = __ring_m22.body; const span = __ring_m22.span;
+      let loop_vars = set_new();
+      collect_expr_vars(condition, loop_vars);
+      collect_expr_vars(body, loop_vars);
+      const body_result = rc_expr(body, live);
+      const cond_result = rc_expr(condition, body_result.live);
+      let cur_live = cond_result.live;
+      let out = [];
+      const __ring_iter_20 = ___Set_Iterable.iter(loop_vars);
+      while (true) {
+        const __ring_next_20 = __SetIterator_Iterator.next(__ring_iter_20);
+        if (__ring_next_20._tag === "none") break;
+        const v = __ring_next_20._0;
+        if (_Set_contains(cur_live, v, __Str_Eq)) {
+          List_push(out, hir$HStmt_Dup(v, types$Type_UnitType, synthetic_span()));
+        }
+      }
+      List_push(out, hir$HStmt_While(cond_result.expr, body_result.expr, span));
+      return new RcStmtsResult(out, cur_live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "ForIn") {
+      const binding = __ring_m22.binding; const binding_span = __ring_m22.binding_span; const def_id = __ring_m22.def_id; const destructure = __ring_m22.destructure; const iterable = __ring_m22.iterable; const body = __ring_m22.body; const iterable_type_name = __ring_m22.iterable_type_name; const iter_type_name = __ring_m22.iter_type_name; const span = __ring_m22.span;
+      let loop_vars = set_new();
+      collect_expr_vars(iterable, loop_vars);
+      collect_expr_vars(body, loop_vars);
+      const body_result = rc_expr(body, live);
+      const iter_result = rc_expr(iterable, body_result.live);
+      let cur_live = iter_result.live;
+      _Set_remove(cur_live, binding);
+      __ring_match25: {
+        const __ring_m25 = destructure;
+        if (__ring_m25._tag === "some") {
+          const ds = __ring_m25._0;
+          const __ring_iter_21 = __List_Iterable.iter(ds);
+          while (true) {
+            const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+            if (__ring_next_21._tag === "none") break;
+            const d = __ring_next_21._0;
+            _Set_remove(cur_live, d.name);
+          }
+          break __ring_match25;
+        }
+        if (__ring_m25._tag === "none") {
+          break __ring_match25;
+        }
+        __match_fail(__ring_m25);
+      }
+      let out = [];
+      const __ring_iter_22 = ___Set_Iterable.iter(loop_vars);
+      while (true) {
+        const __ring_next_22 = __SetIterator_Iterator.next(__ring_iter_22);
+        if (__ring_next_22._tag === "none") break;
+        const v = __ring_next_22._0;
+        if (_Set_contains(cur_live, v, __Str_Eq)) {
+          List_push(out, hir$HStmt_Dup(v, types$Type_UnitType, synthetic_span()));
+        }
+      }
+      List_push(out, hir$HStmt_ForIn(binding, binding_span, def_id, destructure, iter_result.expr, body_result.expr, iterable_type_name, iter_type_name, span));
+      return new RcStmtsResult(out, cur_live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "Break") {
+      const span = __ring_m22.span;
+      return new RcStmtsResult([hir$HStmt_Break(span)], live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "Continue") {
+      const span = __ring_m22.span;
+      return new RcStmtsResult([hir$HStmt_Continue(span)], live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "LetDestructure") {
+      const pattern = __ring_m22.pattern; const bindings = __ring_m22.bindings; const init = __ring_m22.init; const span = __ring_m22.span;
+      const init_result = rc_expr(init, live);
+      let cur_live = init_result.live;
+      let bound = [];
+      const __ring_iter_23 = __List_Iterable.iter(bindings);
+      while (true) {
+        const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+        if (__ring_next_23._tag === "none") break;
+        const b = __ring_next_23._0;
+        List_push(bound, b.name);
+      }
+      let out = [];
+      List_push(out, hir$HStmt_LetDestructure(pattern, bindings, init_result.expr, span));
+      const __ring_iter_24 = __List_Iterable.iter(bindings);
+      while (true) {
+        const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+        if (__ring_next_24._tag === "none") break;
+        const b = __ring_next_24._0;
+        if (_Set_contains(cur_live, b.name, __Str_Eq)) {
+          _Set_remove(cur_live, b.name);
+        } else {
+          List_push(out, hir$HStmt_Drop(b.name, b.ty, synthetic_span()));
+        }
+      }
+      return new RcStmtsResult(out, cur_live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "IfLet") {
+      const pattern = __ring_m22.pattern; const expr = __ring_m22.expr; const then_block = __ring_m22.then_block; const else_block = __ring_m22.else_block; const span = __ring_m22.span;
+      const then_result = rc_expr(then_block, set_clone(live));
+      const else_result = (function() {
+  const __ring_m = else_block;
+  if (__ring_m._tag === "some") { const eb = __ring_m._0; return (function() {
+  const r = rc_expr(eb, set_clone(live));
+  return Option_some(r);
+})(); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+      const live_then = then_result.live;
+      const live_else = (function() {
+  const __ring_m = else_result;
+  if (__ring_m._tag === "some") { const r = __ring_m._0; return r.live; }
+  if (__ring_m._tag === "none") { return set_clone(live); }
+  __match_fail(__ring_m);
+})();
+      const balanced_then = balance_branch(then_result.expr, live_then, live_else);
+      const balanced_else = (function() {
+  const __ring_m = else_result;
+  if (__ring_m._tag === "some") { const r = __ring_m._0; return Option_some(balance_branch(r.expr, live_else, live_then)); }
+  if (__ring_m._tag === "none") { return (function() {
+  const drops = make_drop_list(_Set_difference(live_then, live_else));
+  if ((List_len(drops) > 0)) {
+    const ty = hir$hexpr_type(then_result.expr);
+    const effects = hir$hexpr_effects(then_result.expr);
+    return Option_some(hir$HExpr_Block(drops, Option_none, types$Type_UnitType, effects, synthetic_span()));
+  } else {
+    return Option_none;
+  }
+})(); }
+  __match_fail(__ring_m);
+})();
+      const merged_live = _Set_union(live_then, live_else);
+      let pat_names = [];
+      pattern_binding_names(pattern, pat_names);
+      let final_live = merged_live;
+      const __ring_iter_25 = __List_Iterable.iter(pat_names);
+      while (true) {
+        const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+        if (__ring_next_25._tag === "none") break;
+        const pn = __ring_next_25._0;
+        _Set_remove(final_live, pn);
+      }
+      const expr_result = rc_expr(expr, final_live);
+      return new RcStmtsResult([hir$HStmt_IfLet(pattern, expr_result.expr, balanced_then, balanced_else, span)], expr_result.live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "Drop") {
+      return new RcStmtsResult([stmt], live);
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "Dup") {
+      return new RcStmtsResult([stmt], live);
+      break __ring_match22;
+    }
+    __match_fail(__ring_m22);
+  }
+}
+
+function rc_expr(expr, live) {
+  __ring_match26: {
+    const __ring_m26 = expr;
+    if (__ring_m26._tag === "Ident") {
+      const name = __ring_m26.name; const resolved_name = __ring_m26.resolved_name; const def_id = __ring_m26.def_id; const dict_closure_dicts = __ring_m26.dict_closure_dicts; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      if (_Set_contains(live, name, __Str_Eq)) {
+        const dup_stmt = hir$HStmt_Dup(name, ty, synthetic_span());
+        const ident = hir$HExpr_Ident(name, resolved_name, def_id, dict_closure_dicts, ty, effects, span);
+        const block = hir$HExpr_Block([dup_stmt], Option_some(ident), ty, effects, span);
+        return new RcResult(block, live);
+      } else {
+        _Set_insert(live, name);
+        return new RcResult(hir$HExpr_Ident(name, resolved_name, def_id, dict_closure_dicts, ty, effects, span), live);
+      }
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "IntLit") {
+      return new RcResult(expr, live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "FloatLit") {
+      return new RcResult(expr, live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "StrLit") {
+      return new RcResult(expr, live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "BoolLit") {
+      return new RcResult(expr, live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "BinOp") {
+      const op = __ring_m26.op; const left = __ring_m26.left; const right = __ring_m26.right; const eq_dispatch = __ring_m26.eq_dispatch; const ord_dispatch = __ring_m26.ord_dispatch; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const r_result = rc_expr(right, live);
+      const l_result = rc_expr(left, r_result.live);
+      return new RcResult(hir$HExpr_BinOp(op, l_result.expr, r_result.expr, eq_dispatch, ord_dispatch, ty, effects, span), l_result.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "UnaryOp") {
+      const op = __ring_m26.op; const operand = __ring_m26.operand; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const r = rc_expr(operand, live);
+      return new RcResult(hir$HExpr_UnaryOp(op, r.expr, ty, effects, span), r.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "Call") {
+      const callee = __ring_m26.callee; const args = __ring_m26.args; const type_args = __ring_m26.type_args; const resolved_dicts = __ring_m26.resolved_dicts; const dict_dispatch = __ring_m26.dict_dispatch; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let cur_live = live;
+      let new_args = [];
+      let i = (List_len(args) - 1);
+      while ((i >= 0)) {
+        __ring_match27: {
+          const __ring_m27 = List_get(args, i);
+          if (__ring_m27._tag === "some") {
+            const a = __ring_m27._0;
+            const r = rc_expr(a, cur_live);
+            List_push(new_args, r.expr);
+            cur_live = r.live;
+            break __ring_match27;
+          }
+          if (__ring_m27._tag === "none") {
+            break __ring_match27;
+          }
+          __match_fail(__ring_m27);
+        }
+        i = (i - 1);
+      }
+      List_reverse(new_args);
+      const callee_result = rc_expr(callee, cur_live);
+      return new RcResult(hir$HExpr_Call(callee_result.expr, new_args, type_args, resolved_dicts, dict_dispatch, ty, effects, span), callee_result.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "FieldAccess") {
+      const receiver = __ring_m26.receiver; const field = __ring_m26.field; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const r = rc_expr(receiver, live);
+      return new RcResult(hir$HExpr_FieldAccess(r.expr, field, ty, effects, span), r.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "StructLit") {
+      const name = __ring_m26.name; const type_args = __ring_m26.type_args; const fields = __ring_m26.fields; const spread = __ring_m26.spread; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let cur_live = live;
+      const new_spread = (function() {
+  const __ring_m = spread;
+  if (__ring_m._tag === "some") { const s = __ring_m._0; return (function() {
+  const r = rc_expr(s, cur_live);
+  cur_live = r.live;
+  return Option_some(r.expr);
+})(); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+      let new_fields = [];
+      let i = (List_len(fields) - 1);
+      while ((i >= 0)) {
+        __ring_match28: {
+          const __ring_m28 = List_get(fields, i);
+          if (__ring_m28._tag === "some") {
+            const f = __ring_m28._0;
+            const r = rc_expr(f.value, cur_live);
+            List_push(new_fields, new hir$HStructFieldInit(f.name, r.expr));
+            cur_live = r.live;
+            break __ring_match28;
+          }
+          if (__ring_m28._tag === "none") {
+            break __ring_match28;
+          }
+          __match_fail(__ring_m28);
+        }
+        i = (i - 1);
+      }
+      List_reverse(new_fields);
+      return new RcResult(hir$HExpr_StructLit(name, type_args, new_fields, new_spread, ty, effects, span), cur_live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "NamedVariantConstruct") {
+      const enum_name = __ring_m26.enum_name; const variant_name = __ring_m26.variant_name; const fields = __ring_m26.fields; const spread = __ring_m26.spread; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let cur_live = live;
+      const new_spread = (function() {
+  const __ring_m = spread;
+  if (__ring_m._tag === "some") { const s = __ring_m._0; return (function() {
+  const r = rc_expr(s, cur_live);
+  cur_live = r.live;
+  return Option_some(r.expr);
+})(); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+      let new_fields = [];
+      let i = (List_len(fields) - 1);
+      while ((i >= 0)) {
+        __ring_match29: {
+          const __ring_m29 = List_get(fields, i);
+          if (__ring_m29._tag === "some") {
+            const f = __ring_m29._0;
+            const r = rc_expr(f.value, cur_live);
+            List_push(new_fields, new hir$HStructFieldInit(f.name, r.expr));
+            cur_live = r.live;
+            break __ring_match29;
+          }
+          if (__ring_m29._tag === "none") {
+            break __ring_match29;
+          }
+          __match_fail(__ring_m29);
+        }
+        i = (i - 1);
+      }
+      List_reverse(new_fields);
+      return new RcResult(hir$HExpr_NamedVariantConstruct(enum_name, variant_name, new_fields, new_spread, ty, effects, span), cur_live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "Block") {
+      const stmts = __ring_m26.stmts; const tail = __ring_m26.tail; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let cur_live = live;
+      const new_tail = (function() {
+  const __ring_m = tail;
+  if (__ring_m._tag === "some") { const t = __ring_m._0; return (function() {
+  const r = rc_expr(t, cur_live);
+  cur_live = r.live;
+  return Option_some(r.expr);
+})(); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+      const stmts_result = rc_stmts(stmts, cur_live);
+      return new RcResult(hir$HExpr_Block(stmts_result.stmts, new_tail, ty, effects, span), stmts_result.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "IfExpr") {
+      const condition = __ring_m26.condition; const then_branch = __ring_m26.then_branch; const else_branch = __ring_m26.else_branch; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const then_result = rc_expr(then_branch, set_clone(live));
+      const else_result = (function() {
+  const __ring_m = else_branch;
+  if (__ring_m._tag === "some") { const eb = __ring_m._0; return (function() {
+  const r = rc_expr(eb, set_clone(live));
+  return Option_some(r);
+})(); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+      const live_then = then_result.live;
+      const live_else = (function() {
+  const __ring_m = else_result;
+  if (__ring_m._tag === "some") { const r = __ring_m._0; return r.live; }
+  if (__ring_m._tag === "none") { return set_clone(live); }
+  __match_fail(__ring_m);
+})();
+      const balanced_then = balance_branch(then_result.expr, live_then, live_else);
+      const balanced_else = (function() {
+  const __ring_m = else_result;
+  if (__ring_m._tag === "some") { const r = __ring_m._0; return Option_some(balance_branch(r.expr, live_else, live_then)); }
+  if (__ring_m._tag === "none") { return else_branch; }
+  __match_fail(__ring_m);
+})();
+      const merged_live = _Set_union(live_then, live_else);
+      const cond_result = rc_expr(condition, merged_live);
+      return new RcResult(hir$HExpr_IfExpr(cond_result.expr, balanced_then, balanced_else, ty, effects, span), cond_result.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "MatchExpr") {
+      const scrutinee = __ring_m26.scrutinee; const arms = __ring_m26.arms; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let arm_results = [];
+      const __ring_iter_26 = __List_Iterable.iter(arms);
+      while (true) {
+        const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+        if (__ring_next_26._tag === "none") break;
+        const arm = __ring_next_26._0;
+        const arm_live = set_clone(live);
+        const body_result = rc_expr(arm.body, arm_live);
+        const guard_result = (function() {
+  const __ring_m = arm.guard;
+  if (__ring_m._tag === "some") { const g = __ring_m._0; return (function() {
+  const r = rc_expr(g, body_result.live);
+  return Option_some(r);
+})(); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+        let arm_final_live = (function() {
+  const __ring_m = guard_result;
+  if (__ring_m._tag === "some") { const r = __ring_m._0; return r.live; }
+  if (__ring_m._tag === "none") { return body_result.live; }
+  __match_fail(__ring_m);
+})();
+        let pat_names = [];
+        pattern_binding_names(arm.pattern, pat_names);
+        const __ring_iter_27 = __List_Iterable.iter(pat_names);
+        while (true) {
+          const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+          if (__ring_next_27._tag === "none") break;
+          const pn = __ring_next_27._0;
+          _Set_remove(arm_final_live, pn);
+        }
+        const new_guard = (function() {
+  const __ring_m = guard_result;
+  if (__ring_m._tag === "some") { const r = __ring_m._0; return Option_some(r.expr); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+        const new_arm = new hir$HMatchArm(arm.pattern, new_guard, body_result.expr, arm.span);
+        List_push(arm_results, [new_arm, arm_final_live]);
+      }
+      let merged_live = set_new();
+      const __ring_iter_28 = __List_Iterable.iter(arm_results);
+      while (true) {
+        const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+        if (__ring_next_28._tag === "none") break;
+        const ar = __ring_next_28._0;
+        merged_live = _Set_union(merged_live, ar[1]);
+      }
+      let balanced_arms = [];
+      const __ring_iter_29 = __List_Iterable.iter(arm_results);
+      while (true) {
+        const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+        if (__ring_next_29._tag === "none") break;
+        const ar = __ring_next_29._0;
+        const arm = ar[0];
+        const arm_live = ar[1];
+        const need_drop = _Set_difference(merged_live, arm_live);
+        if ((_Set_len(need_drop) > 0)) {
+          const drops = make_drop_list(need_drop);
+          const balanced_body = prepend_stmts_to_expr(arm.body, drops);
+          List_push(balanced_arms, new hir$HMatchArm(arm.pattern, arm.guard, balanced_body, arm.span));
+        } else {
+          List_push(balanced_arms, arm);
+        }
+      }
+      const scrut_result = rc_expr(scrutinee, merged_live);
+      return new RcResult(hir$HExpr_MatchExpr(scrut_result.expr, balanced_arms, ty, effects, span), scrut_result.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "StringInterp") {
+      const parts = __ring_m26.parts; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let cur_live = live;
+      let new_parts = [];
+      let i = (List_len(parts) - 1);
+      while ((i >= 0)) {
+        __ring_match30: {
+          const __ring_m30 = List_get(parts, i);
+          if (__ring_m30._tag === "some") {
+            const p = __ring_m30._0;
+            __ring_match31: {
+              const __ring_m31 = p;
+              if (__ring_m31._tag === "Expression") {
+                const e = __ring_m31._0;
+                const r = rc_expr(e, cur_live);
+                List_push(new_parts, hir$HStringInterpPart_Expression(r.expr));
+                cur_live = r.live;
+                break __ring_match31;
+              }
+              if (__ring_m31._tag === "Literal") {
+                const s = __ring_m31._0;
+                List_push(new_parts, hir$HStringInterpPart_Literal(s));
+                break __ring_match31;
+              }
+              __match_fail(__ring_m31);
+            }
+            break __ring_match30;
+          }
+          if (__ring_m30._tag === "none") {
+            break __ring_match30;
+          }
+          __match_fail(__ring_m30);
+        }
+        i = (i - 1);
+      }
+      List_reverse(new_parts);
+      return new RcResult(hir$HExpr_StringInterp(new_parts, ty, effects, span), cur_live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "TryCatch") {
+      const body = __ring_m26.body; const arms = __ring_m26.arms; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const body_result = rc_expr(body, set_clone(live));
+      let arm_results = [];
+      const __ring_iter_30 = __List_Iterable.iter(arms);
+      while (true) {
+        const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+        if (__ring_next_30._tag === "none") break;
+        const arm = __ring_next_30._0;
+        const arm_live = set_clone(live);
+        const body_r = rc_expr(arm.body, arm_live);
+        let arm_final = body_r.live;
+        let pat_names = [];
+        pattern_binding_names(arm.pattern, pat_names);
+        const __ring_iter_31 = __List_Iterable.iter(pat_names);
+        while (true) {
+          const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+          if (__ring_next_31._tag === "none") break;
+          const pn = __ring_next_31._0;
+          _Set_remove(arm_final, pn);
+        }
+        List_push(arm_results, [new hir$HMatchArm(arm.pattern, arm.guard, body_r.expr, arm.span), arm_final]);
+      }
+      let merged = body_result.live;
+      const __ring_iter_32 = __List_Iterable.iter(arm_results);
+      while (true) {
+        const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+        if (__ring_next_32._tag === "none") break;
+        const ar = __ring_next_32._0;
+        merged = _Set_union(merged, ar[1]);
+      }
+      const balanced_body = balance_branch(body_result.expr, body_result.live, merged);
+      let balanced_arms = [];
+      const __ring_iter_33 = __List_Iterable.iter(arm_results);
+      while (true) {
+        const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+        if (__ring_next_33._tag === "none") break;
+        const ar = __ring_next_33._0;
+        const need_drop = _Set_difference(merged, ar[1]);
+        if ((_Set_len(need_drop) > 0)) {
+          const drops = make_drop_list(need_drop);
+          List_push(balanced_arms, new hir$HMatchArm(ar[0].pattern, ar[0].guard, prepend_stmts_to_expr(ar[0].body, drops), ar[0].span));
+        } else {
+          List_push(balanced_arms, ar[0]);
+        }
+      }
+      return new RcResult(hir$HExpr_TryCatch(balanced_body, balanced_arms, ty, effects, span), merged);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "HandleExpr") {
+      const body = __ring_m26.body; const handlers = __ring_m26.handlers; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const body_result = rc_expr(body, live);
+      let new_handlers = [];
+      const __ring_iter_34 = __List_Iterable.iter(handlers);
+      while (true) {
+        const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+        if (__ring_next_34._tag === "none") break;
+        const h = __ring_next_34._0;
+        const h_live = set_new();
+        const h_result = rc_expr(h.body, h_live);
+        List_push(new_handlers, new hir$HEffectHandler(h.effect_name, h.op_name, h.params, h.resume_name, h_result.expr));
+      }
+      return new RcResult(hir$HExpr_HandleExpr(body_result.expr, new_handlers, ty, effects, span), body_result.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "Lambda") {
+      const params = __ring_m26.params; const return_type = __ring_m26.return_type; const body = __ring_m26.body; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const inner_live = set_new();
+      const body_result = rc_expr(body, inner_live);
+      let param_names = set_new();
+      const __ring_iter_35 = __List_Iterable.iter(params);
+      while (true) {
+        const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+        if (__ring_next_35._tag === "none") break;
+        const p = __ring_next_35._0;
+        _Set_insert(param_names, p.name);
+      }
+      let outer_live = live;
+      const __ring_iter_36 = ___Set_Iterable.iter(body_result.live);
+      while (true) {
+        const __ring_next_36 = __SetIterator_Iterator.next(__ring_iter_36);
+        if (__ring_next_36._tag === "none") break;
+        const v = __ring_next_36._0;
+        if ((_Set_contains(param_names, v, __Str_Eq) === false)) {
+          _Set_insert(outer_live, v);
+        }
+      }
+      const new_body = transform_fn_body(params, body);
+      return new RcResult(hir$HExpr_Lambda(params, return_type, new_body, ty, effects, span), outer_live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "EffectOp") {
+      const effect_name = __ring_m26.effect_name; const op_name = __ring_m26.op_name; const args = __ring_m26.args; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let cur_live = live;
+      let new_args = [];
+      let i = (List_len(args) - 1);
+      while ((i >= 0)) {
+        __ring_match32: {
+          const __ring_m32 = List_get(args, i);
+          if (__ring_m32._tag === "some") {
+            const a = __ring_m32._0;
+            const r = rc_expr(a, cur_live);
+            List_push(new_args, r.expr);
+            cur_live = r.live;
+            break __ring_match32;
+          }
+          if (__ring_m32._tag === "none") {
+            break __ring_match32;
+          }
+          __match_fail(__ring_m32);
+        }
+        i = (i - 1);
+      }
+      List_reverse(new_args);
+      return new RcResult(hir$HExpr_EffectOp(effect_name, op_name, new_args, ty, effects, span), cur_live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "RangeExpr") {
+      const start = __ring_m26.start; const end = __ring_m26.end; const inclusive = __ring_m26.inclusive; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const end_r = rc_expr(end, live);
+      const start_r = rc_expr(start, end_r.live);
+      return new RcResult(hir$HExpr_RangeExpr(start_r.expr, end_r.expr, inclusive, ty, effects, span), start_r.live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "ListLit") {
+      const elements = __ring_m26.elements; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let cur_live = live;
+      let new_elems = [];
+      let i = (List_len(elements) - 1);
+      while ((i >= 0)) {
+        __ring_match33: {
+          const __ring_m33 = List_get(elements, i);
+          if (__ring_m33._tag === "some") {
+            const e = __ring_m33._0;
+            const r = rc_expr(e, cur_live);
+            List_push(new_elems, r.expr);
+            cur_live = r.live;
+            break __ring_match33;
+          }
+          if (__ring_m33._tag === "none") {
+            break __ring_match33;
+          }
+          __match_fail(__ring_m33);
+        }
+        i = (i - 1);
+      }
+      List_reverse(new_elems);
+      return new RcResult(hir$HExpr_ListLit(new_elems, ty, effects, span), cur_live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "TupleLit") {
+      const elements = __ring_m26.elements; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      let cur_live = live;
+      let new_elems = [];
+      let i = (List_len(elements) - 1);
+      while ((i >= 0)) {
+        __ring_match34: {
+          const __ring_m34 = List_get(elements, i);
+          if (__ring_m34._tag === "some") {
+            const e = __ring_m34._0;
+            const r = rc_expr(e, cur_live);
+            List_push(new_elems, r.expr);
+            cur_live = r.live;
+            break __ring_match34;
+          }
+          if (__ring_m34._tag === "none") {
+            break __ring_match34;
+          }
+          __match_fail(__ring_m34);
+        }
+        i = (i - 1);
+      }
+      List_reverse(new_elems);
+      return new RcResult(hir$HExpr_TupleLit(new_elems, ty, effects, span), cur_live);
+      break __ring_match26;
+    }
+    if (__ring_m26._tag === "IndexExpr") {
+      const receiver = __ring_m26.receiver; const index = __ring_m26.index; const ty = __ring_m26.ty; const effects = __ring_m26.effects; const span = __ring_m26.span;
+      const idx_r = rc_expr(index, live);
+      const recv_r = rc_expr(receiver, idx_r.live);
+      return new RcResult(hir$HExpr_IndexExpr(recv_r.expr, idx_r.expr, ty, effects, span), recv_r.live);
+      break __ring_match26;
+    }
+    __match_fail(__ring_m26);
+  }
+}
+
+function make_drop_list(names) {
+  let drops = [];
+  const __ring_iter_37 = ___Set_Iterable.iter(names);
+  while (true) {
+    const __ring_next_37 = __SetIterator_Iterator.next(__ring_iter_37);
+    if (__ring_next_37._tag === "none") break;
+    const name = __ring_next_37._0;
+    List_push(drops, hir$HStmt_Drop(name, types$Type_UnitType, synthetic_span()));
+  }
+  return drops;
+}
+
+function balance_branch(body, my_live, other_live) {
+  const need_drop = _Set_difference(other_live, my_live);
+  if ((_Set_len(need_drop) === 0)) {
+    return body;
+  }
+  const drops = make_drop_list(need_drop);
+  return prepend_stmts_to_expr(body, drops);
+}
+
+function prepend_stmts_to_expr(expr, stmts) {
+  if ((List_len(stmts) === 0)) {
+    return expr;
+  }
+  __ring_match35: {
+    const __ring_m35 = expr;
+    if (__ring_m35._tag === "Block") {
+      const existing = __ring_m35.stmts; const tail = __ring_m35.tail; const ty = __ring_m35.ty; const effects = __ring_m35.effects; const span = __ring_m35.span;
+      const new_stmts = List_concat(stmts, existing);
+      return hir$HExpr_Block(new_stmts, tail, ty, effects, span);
+      break __ring_match35;
+    }
+    const ty = hir$hexpr_type(expr);
+    const effects = hir$hexpr_effects(expr);
+    const span = hir$hexpr_span(expr);
+    return hir$HExpr_Block(stmts, Option_some(expr), ty, effects, span);
+    break __ring_match35;
+  }
+}
+
+function __StringBuilder_Eq_eq(self, other) {
+  return true;
+}
+const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
+
+function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
+  if (self._tag !== other._tag) return false;
+  switch (self._tag) {
+    case "Ok": return __ring_T_Eq.eq(self._0, other._0);
+    case "Err": return __ring_E_Eq.eq(self._0, other._0);
+    default: return true;
+  }
+}
+const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
+
+function __ListIterator_Clone_clone(self, __ring_T_Clone) {
+  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
+}
+const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
+
+function __StringBuilder_Clone_clone(self) {
+  return new StringBuilder();
+}
+const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
+
+function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
+  switch (self._tag) {
+    case "Ok": return Result_Ok(__ring_T_Clone.clone(self._0));
+    case "Err": return Result_Err(__ring_E_Clone.clone(self._0));
+    default: return self;
+  }
+}
+const __Result_Clone = { clone: __Result_Clone_clone };
+
+function __StringBuilder_Ord_cmp(self, other) {
+  return 0;
+}
+const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
+
+const __Result_tag_order = { "Ok": 0, "Err": 1 };
+function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
+  var t1 = __Result_tag_order[self._tag];
+  var t2 = __Result_tag_order[other._tag];
+  if (t1 !== t2) return (t1 < t2 ? -1 : 1);
+  switch (self._tag) {
+    case "Ok": return __ring_T_Ord.cmp(self._0, other._0);
+    case "Err": return __ring_E_Ord.cmp(self._0, other._0);
+    default: return 0;
+  }
+}
+const __Result_Ord = { cmp: __Result_Ord_cmp };
+
+function __ListIterator_Debug_debug(self, __ring_T_Debug) {
+  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
+
+function __StringBuilder_Debug_debug(self) {
+  return "StringBuilder";
+}
+const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
+
+function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
+  switch (self._tag) {
+    case "Ok": return "Ok(" + __ring_T_Debug.debug(self._0) + ")";
+    case "Err": return "Err(" + __ring_E_Debug.debug(self._0) + ")";
+    default: return self._tag;
+  }
+}
+const __Result_Debug = { debug: __Result_Debug_debug };
+
+
+export { perceus_transform };

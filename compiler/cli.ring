@@ -7,6 +7,7 @@ use codegen::{generate}
 use codegen_llvm::{generate_llvm}
 use compiler_mod::{compile_project, compile_project_esm, compile_project_llvm}
 use parser::{parse}
+use perceus::{perceus_transform}
 
 pub fn cli_main() {
     let args = argv()
@@ -149,7 +150,8 @@ pub fn cli_main() {
         } else {
             if parsed.command == "build" {
                 let out_path = file_path.replace(".ring", ".o")
-                generate_llvm(check_result.program, out_path)
+                let rc_program = perceus_transform(check_result.program)
+                generate_llvm(rc_program, out_path)
             } else {
                 eprintln("LLVM target only supports 'build' and 'check' commands")
                 exit_process(1)
