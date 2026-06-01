@@ -6,7 +6,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
-    llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method}
+    llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
+    get_or_assign_typeid}
 use codegen_llvm_expr::{gen_llvm_expr}
 use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info}
 use codegen_ctx::{extract_effect_names}
@@ -61,6 +62,13 @@ extern fn LLVMGetTargetFromTriple(triple: Str) -> LLVMTargetRef
 extern fn LLVMCreateTargetMachine(target: LLVMTargetRef, triple: Str, cpu: Str, features: Str, codegen: Int, reloc: Int, code_model: Int) -> LLVMTargetMachineRef
 extern fn LLVMDisposeTargetMachine(tm: LLVMTargetMachineRef) -> Unit
 extern fn LLVMTargetMachineEmitToFile(tm: LLVMTargetMachineRef, m: LLVMModuleRef, filename: Str, file_type: Int) -> Int
+
+// Additional LLVM functions for Perceus RC drop function generation
+extern fn LLVMBuildLoad2(builder: LLVMBuilderRef, ty: LLVMTypeRef, ptr: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildBr(builder: LLVMBuilderRef, dest: LLVMBasicBlockRef) -> LLVMValueRef
+extern fn LLVMBuildRetVoid(builder: LLVMBuilderRef) -> LLVMValueRef
+extern fn LLVMBuildSwitch(builder: LLVMBuilderRef, val: LLVMValueRef, default_dest: LLVMBasicBlockRef, num_cases: Int) -> LLVMValueRef
+extern fn LLVMAddCase(switch_val: LLVMValueRef, on_val: LLVMValueRef, dest: LLVMBasicBlockRef) -> Unit
 
 // Discard an LLVMValueRef (to avoid type mismatch in Unit-returning contexts)
 fn discard(v: LLVMValueRef) {
@@ -129,8 +137,13 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_panic", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_exit", [ptr], ptr)
 
-    // Memory allocation (for struct/enum construction)
-    get_or_declare_runtime_fn(ctx, "malloc", [i64], ptr)
+    // Memory allocation (Perceus RC: ring_alloc with typeid header)
+    get_or_declare_runtime_fn(ctx, "ring_alloc", [i64, i64], ptr)
+
+    // Perceus RC: reference counting
+    get_or_declare_runtime_fn(ctx, "ring_dup", [ptr], void)
+    get_or_declare_runtime_fn(ctx, "ring_drop", [ptr], void)
+    get_or_declare_runtime_fn(ctx, "ring_register_drop", [i64, ptr], void)
 
     // List
     get_or_declare_runtime_fn(ctx, "ring_list_new", [], ptr)
@@ -453,9 +466,10 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     let some_entry = LLVMAppendBasicBlockInContext(ctx.context, some_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, some_entry)
     let some_size = LLVMSizeOf(option_ty)
-    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ptr)
-    let malloc_ty = get_rt_fn_type(ctx, "malloc")
-    let some_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [some_size], "opt")
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ptr)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let option_typeid = LLVMConstInt(i64, 8, 0)  // RING_TYPEID_OPTION
+    let some_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [some_size, option_typeid], "opt")
     let some_tag_ptr = LLVMBuildStructGEP2(ctx.builder, option_ty, some_ptr, 0, "tag")
     discard(LLVMBuildStore(ctx.builder, LLVMConstInt(i64, 0, 0), some_tag_ptr))
     let some_val_ptr = LLVMBuildStructGEP2(ctx.builder, option_ty, some_ptr, 1, "val")
@@ -466,7 +480,7 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     let none_entry = LLVMAppendBasicBlockInContext(ctx.context, none_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, none_entry)
     let none_size = LLVMSizeOf(option_ty)
-    let none_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [none_size], "opt")
+    let none_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [none_size, option_typeid], "opt")
     let none_tag_ptr = LLVMBuildStructGEP2(ctx.builder, option_ty, none_ptr, 0, "tag")
     discard(LLVMBuildStore(ctx.builder, LLVMConstInt(i64, 1, 0), none_tag_ptr))
     discard(LLVMBuildRet(ctx.builder, none_ptr))
@@ -481,13 +495,15 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     })
 
     // Result_Ok and Result_Err constructors
+    let result_tid = get_or_assign_typeid(ctx, "Result")
+    let result_typeid = LLVMConstInt(i64, result_tid, 0)
     let ok_fn_ty = LLVMFunctionType(ptr, [ptr], 0)
     let ok_fn = LLVMAddFunction(ctx.module, "ring_Result_Ok", ok_fn_ty)
     ctx.functions.insert("ring_Result_Ok", ok_fn)
     ctx.fn_types.insert("ring_Result_Ok", ok_fn_ty)
     let ok_entry = LLVMAppendBasicBlockInContext(ctx.context, ok_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, ok_entry)
-    let ok_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [LLVMSizeOf(result_ty)], "res")
+    let ok_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [LLVMSizeOf(result_ty), result_typeid], "res")
     let ok_tag_ptr = LLVMBuildStructGEP2(ctx.builder, result_ty, ok_ptr, 0, "tag")
     discard(LLVMBuildStore(ctx.builder, LLVMConstInt(i64, 0, 0), ok_tag_ptr))
     let ok_val_ptr = LLVMBuildStructGEP2(ctx.builder, result_ty, ok_ptr, 1, "val")
@@ -500,7 +516,7 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     ctx.fn_types.insert("ring_Result_Err", err_fn_ty)
     let err_entry = LLVMAppendBasicBlockInContext(ctx.context, err_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, err_entry)
-    let err_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [LLVMSizeOf(result_ty)], "res")
+    let err_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [LLVMSizeOf(result_ty), result_typeid], "res")
     let err_tag_ptr = LLVMBuildStructGEP2(ctx.builder, result_ty, err_ptr, 0, "tag")
     discard(LLVMBuildStore(ctx.builder, LLVMConstInt(i64, 1, 0), err_tag_ptr))
     let err_val_ptr = LLVMBuildStructGEP2(ctx.builder, result_ty, err_ptr, 1, "val")
@@ -576,6 +592,169 @@ fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<St
 }
 
 // ============================================================
+// emit_drop_functions — generate per-type drop_T functions and register them
+// ============================================================
+
+fn emit_drop_functions(mut ctx: LlvmCtx) {
+    let ptr = ctx.ptr_type
+    let i64 = ctx.i64_type
+    let void = ctx.void_type
+
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ptr], void)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+    let register_fn = get_or_declare_runtime_fn(ctx, "ring_register_drop", [i64, ptr], void)
+    let register_ty = get_rt_fn_type(ctx, "ring_register_drop")
+
+    // Generate drop functions for user structs
+    let struct_names = ctx.struct_types.keys()
+    for sname in struct_names {
+        match ctx.struct_types.get(sname) {
+            some(info) => {
+                let drop_name = "ring_drop_${sname}"
+                // drop_T: (ptr) -> void
+                let fn_ty = LLVMFunctionType(void, [ptr], 0)
+                let fn_val = LLVMAddFunction(ctx.module, drop_name, fn_ty)
+
+                let saved_fn = ctx.current_fn
+                ctx.current_fn = some(fn_val)
+                let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+                LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+                let data_ptr = LLVMGetParam(fn_val, 0)
+
+                // For each field, GEP + load + ring_drop
+                for i in 0..info.field_names.len() {
+                    let field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, data_ptr, i, fresh_name(ctx, "fp"))
+                    let field_val = LLVMBuildLoad2(ctx.builder, ptr, field_ptr, fresh_name(ctx, "fv"))
+                    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [field_val], ""))
+                }
+
+                discard(LLVMBuildRetVoid(ctx.builder))
+                ctx.current_fn = saved_fn
+
+                // Register: ring_register_drop(typeid, drop_fn_ptr)
+                let tid = get_or_assign_typeid(ctx, sname)
+                let tid_val = LLVMConstInt(i64, tid, 0)
+                // Registration calls are emitted into a global init function below
+                ctx.dict_globals.insert(drop_name, fn_val)
+            },
+            none => {},
+        }
+    }
+
+    // Generate drop functions for user enums
+    let enum_names = ctx.enum_types.keys()
+    for ename in enum_names {
+        // Skip built-in enums (Option, Result) — they use generic ring_drop recursion
+        if ename == "Option" { continue }
+        if ename == "Result" { continue }
+
+        match ctx.enum_types.get(ename) {
+            some(enum_info) => {
+                let drop_name = "ring_drop_${ename}"
+                let fn_ty = LLVMFunctionType(void, [ptr], 0)
+                let fn_val = LLVMAddFunction(ctx.module, drop_name, fn_ty)
+
+                let saved_fn = ctx.current_fn
+                ctx.current_fn = some(fn_val)
+                let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+                LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+                let data_ptr = LLVMGetParam(fn_val, 0)
+
+                // Read tag (field 0)
+                let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, data_ptr, 0, "tag_ptr")
+                let tag_val = LLVMBuildLoad2(ctx.builder, i64, tag_ptr, "tag")
+
+                // Build switch over variants
+                let done_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "done")
+                let default_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "default")
+
+                // Collect variant info to build switch
+                let variant_keys = enum_info.variants.keys()
+                let num_variants = variant_keys.len()
+
+                if num_variants == 0 {
+                    discard(LLVMBuildBr(ctx.builder, done_bb))
+                } else {
+                    let switch_val = LLVMBuildSwitch(ctx.builder, tag_val, default_bb, num_variants)
+                    for vname in variant_keys {
+                        match enum_info.variants.get(vname) {
+                            some(vi) => {
+                                let variant_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "v_${vname}")
+                                LLVMAddCase(switch_val, LLVMConstInt(i64, vi.tag, 0), variant_bb)
+
+                                LLVMPositionBuilderAtEnd(ctx.builder, variant_bb)
+                                // Drop each field (fields start at index 1 in the enum struct)
+                                for fi in 0..vi.field_count {
+                                    let fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, data_ptr, fi + 1, fresh_name(ctx, "efp"))
+                                    let fv = LLVMBuildLoad2(ctx.builder, ptr, fp, fresh_name(ctx, "efv"))
+                                    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [fv], ""))
+                                }
+                                discard(LLVMBuildBr(ctx.builder, done_bb))
+                            },
+                            none => {},
+                        }
+                    }
+                }
+
+                // Default: just branch to done
+                LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+                discard(LLVMBuildBr(ctx.builder, done_bb))
+
+                LLVMPositionBuilderAtEnd(ctx.builder, done_bb)
+                discard(LLVMBuildRetVoid(ctx.builder))
+                ctx.current_fn = saved_fn
+
+                ctx.dict_globals.insert(drop_name, fn_val)
+            },
+            none => {},
+        }
+    }
+}
+
+// emit_drop_registrations — called from C main after runtime init
+// Registers all per-type drop functions with the RC runtime.
+fn emit_drop_registrations(mut ctx: LlvmCtx) {
+    let ptr = ctx.ptr_type
+    let i64 = ctx.i64_type
+    let void = ctx.void_type
+
+    let register_fn = get_or_declare_runtime_fn(ctx, "ring_register_drop", [i64, ptr], void)
+    let register_ty = get_rt_fn_type(ctx, "ring_register_drop")
+
+    // Register struct drop functions
+    let struct_names = ctx.struct_types.keys()
+    for sname in struct_names {
+        let drop_name = "ring_drop_${sname}"
+        match ctx.dict_globals.get(drop_name) {
+            some(drop_fn_val) => {
+                let tid = get_or_assign_typeid(ctx, sname)
+                let tid_val = LLVMConstInt(i64, tid, 0)
+                discard(LLVMBuildCall2(ctx.builder, register_ty, register_fn, [tid_val, drop_fn_val], ""))
+            },
+            none => {},
+        }
+    }
+
+    // Register enum drop functions
+    let enum_names = ctx.enum_types.keys()
+    for ename in enum_names {
+        if ename == "Option" { continue }
+        if ename == "Result" { continue }
+        let drop_name = "ring_drop_${ename}"
+        match ctx.dict_globals.get(drop_name) {
+            some(drop_fn_val) => {
+                let tid = get_or_assign_typeid(ctx, ename)
+                let tid_val = LLVMConstInt(i64, tid, 0)
+                discard(LLVMBuildCall2(ctx.builder, register_ty, register_fn, [tid_val, drop_fn_val], ""))
+            },
+            none => {},
+        }
+    }
+}
+
+// ============================================================
 // emit_c_main — generate C main() wrapper that calls Ring main
 // ============================================================
 
@@ -613,6 +792,9 @@ fn emit_c_main(mut ctx: LlvmCtx) {
             discard(LLVMBuildCall2(ctx.builder, init_ty, init_fn, [argc_val, argv_val], ""))
         },
     }
+
+    // Register per-type drop functions with RC runtime
+    emit_drop_registrations(ctx)
 
     // Call ring_main() — find it in our functions map
     let ring_main_name = llvm_mangle_fn("main")
@@ -712,7 +894,9 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         current_fn: none,
         current_fn_name: "",
         loop_break_bb: none,
-        loop_continue_bb: none
+        loop_continue_bb: none,
+        next_user_typeid: 64,
+        type_to_typeid: map_new()
     }
 
     // 6. Register built-in types (Option, Result — not in HDecl, handled by runtime)
@@ -732,6 +916,9 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     for decl in program.decls {
         emit_llvm_decl(ctx, decl)
     }
+
+    // 9b. Generate per-type drop functions and register them
+    emit_drop_functions(ctx)
 
     // 10. Generate C main() wrapper
     emit_c_main(ctx)
@@ -826,7 +1013,9 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         current_fn: none,
         current_fn_name: "",
         loop_break_bb: none,
-        loop_continue_bb: none
+        loop_continue_bb: none,
+        next_user_typeid: 64,
+        type_to_typeid: map_new()
     }
 
     // 6. Register built-in types
@@ -864,6 +1053,9 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
 
     // Clear module prefix
     ctx.module_prefix = none
+
+    // 9b. Generate per-type drop functions and register them
+    emit_drop_functions(ctx)
 
     // 10. Generate C main() wrapper — look for main in the entry module
     emit_c_main_project(ctx, entry_prefix)
@@ -916,6 +1108,9 @@ fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
     let init_ty = LLVMFunctionType(ctx.void_type, init_params, 0)
     let init_fn = LLVMAddFunction(ctx.module, init_name, init_ty)
     discard(LLVMBuildCall2(ctx.builder, init_ty, init_fn, [argc_val, argv_val], ""))
+
+    // Register per-type drop functions with RC runtime
+    emit_drop_registrations(ctx)
 
     // Look for ring_<prefix>$_main
     let ring_main_name = llvm_mangle_fn_with_prefix(entry_prefix, "main")

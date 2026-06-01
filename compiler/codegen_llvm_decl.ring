@@ -6,7 +6,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
-    llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method}
+    llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
+    get_or_assign_typeid}
 use codegen_llvm_expr::{gen_llvm_expr}
 use codegen_ctx::{extract_effect_names}
 
@@ -261,11 +262,12 @@ fn emit_struct_constructor(mut ctx: LlvmCtx, name: Str, fields: List<HStructFiel
         none => panic("LLVM codegen: struct '${name}' not registered"),
     }
 
-    // Allocate struct
+    // Allocate struct via ring_alloc with typeid
     let size = LLVMSizeOf(struct_info.llvm_type)
-    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-    let malloc_ty = get_rt_fn_type(ctx, "malloc")
-    let struct_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [size], "s")
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let typeid_val = LLVMConstInt(ctx.i64_type, get_or_assign_typeid(ctx, name), 0)
+    let struct_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [size, typeid_val], "s")
 
     // Store each field
     for i in 0..fields.len() {
@@ -343,11 +345,12 @@ fn emit_enum_constructors(mut ctx: LlvmCtx, name: Str, variants: List<HEnumVaria
         let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
         LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
-        // Allocate enum struct
+        // Allocate enum struct via ring_alloc with typeid
         let size = LLVMSizeOf(enum_info.llvm_type)
-        let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-        let malloc_ty = get_rt_fn_type(ctx, "malloc")
-        let enum_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [size], "e")
+        let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+        let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+        let enum_typeid_val = LLVMConstInt(ctx.i64_type, get_or_assign_typeid(ctx, name), 0)
+        let enum_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [size, enum_typeid_val], "e")
 
         // Store tag (field 0)
         let tag_val = LLVMConstInt(ctx.i64_type, variant_info.tag, 0)
@@ -412,11 +415,12 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     }
     let dict_struct_ty = LLVMStructTypeInContext(ctx.context, dict_elem_types, 0)
 
-    // Allocate dict
+    // Allocate dict via ring_alloc (use TUPLE typeid for trait dicts)
     let dict_size = LLVMSizeOf(dict_struct_ty)
-    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-    let malloc_ty = get_rt_fn_type(ctx, "malloc")
-    let dict_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [dict_size], "dict")
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let dict_typeid = LLVMConstInt(ctx.i64_type, 10, 0)  // RING_TYPEID_TUPLE
+    let dict_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [dict_size, dict_typeid], "dict")
 
     // Closure struct type: { fn_ptr, env_ptr }
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
@@ -426,7 +430,7 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     for i in 0..method_count {
         match method_order.get(i) {
             some(method_name) => {
-                emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, malloc_fn, malloc_ty, i)
+                emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, alloc_fn, alloc_ty, i)
             },
             none => {},
         }
@@ -439,12 +443,13 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     ctx.dict_globals.insert(dict_name, init_fn)
 }
 
-fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, dict_struct_ty: LLVMTypeRef, dict_ptr: LLVMValueRef, closure_ty: LLVMTypeRef, closure_size: LLVMValueRef, malloc_fn: LLVMValueRef, malloc_ty: LLVMTypeRef, slot_idx: Int) {
+fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, dict_struct_ty: LLVMTypeRef, dict_ptr: LLVMValueRef, closure_ty: LLVMTypeRef, closure_size: LLVMValueRef, alloc_fn: LLVMValueRef, alloc_ty: LLVMTypeRef, slot_idx: Int) {
     let mangled = llvm_mangle_method(target_type, method_name)
+    let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
     match ctx.functions.get(mangled) {
         some(method_fn) => {
             // Create a closure: { fn_ptr, null_env }
-            let closure_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [closure_size], fresh_name(ctx, "cls"))
+            let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], fresh_name(ctx, "cls"))
             let fn_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
             LLVMBuildStore(ctx.builder, method_fn, fn_slot)
             let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "eps"))

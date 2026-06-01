@@ -100,7 +100,11 @@ pub struct LlvmCtx {
 
     // Loop context for break/continue
     pub loop_break_bb: LLVMBasicBlockRef?,
-    pub loop_continue_bb: LLVMBasicBlockRef?
+    pub loop_continue_bb: LLVMBasicBlockRef?,
+
+    // Perceus RC: typeid allocation for user-defined types
+    pub next_user_typeid: Int,         // starts at 64 (USER_BASE), increments per type
+    pub type_to_typeid: Map<Str, Int>  // type name -> typeid mapping
 }
 
 // ============================================================
@@ -188,6 +192,49 @@ pub fn get_rt_fn_type(ctx: LlvmCtx, name: Str) -> LLVMTypeRef {
 // dominate all uses, preventing "instruction does not dominate
 // all uses" verify errors when allocas would otherwise be inside
 // loops, match arms, catch blocks, etc.
+
+// ============================================================
+// Perceus RC: typeid helpers
+// ============================================================
+
+// Assign (or retrieve existing) typeid for a user-defined type name.
+pub fn get_or_assign_typeid(mut ctx: LlvmCtx, type_name: Str) -> Int {
+    match ctx.type_to_typeid.get(type_name) {
+        some(id) => id,
+        none => {
+            let id = ctx.next_user_typeid
+            ctx.next_user_typeid = id + 1
+            ctx.type_to_typeid.insert(type_name, id)
+            id
+        },
+    }
+}
+
+// Return the built-in typeid constant for primitive / well-known types.
+// Returns -1 for types that should use get_or_assign_typeid instead.
+pub fn get_builtin_typeid(ty: Type) -> Int {
+    match ty {
+        Type::IntType => 0,        // RING_TYPEID_INT
+        Type::FloatType => 1,      // RING_TYPEID_FLOAT
+        Type::BoolType => 2,       // RING_TYPEID_BOOL
+        Type::StrType => 3,        // RING_TYPEID_STR
+        Type::UnitType => 9,       // RING_TYPEID_UNIT
+        Type::TupleType { .. } => 10,  // RING_TYPEID_TUPLE
+        Type::StructType { name, .. } => {
+            if name == "List" { 4 }        // RING_TYPEID_LIST
+            else if name == "Map" { 5 }    // RING_TYPEID_MAP
+            else if name == "Set" { 6 }    // RING_TYPEID_SET
+            else if name == "StringBuilder" { 13 }  // RING_TYPEID_SB
+            else { -1 }  // user struct — use get_or_assign_typeid
+        },
+        Type::EnumType { name, .. } => {
+            if name == "Option" { 8 }  // RING_TYPEID_OPTION
+            else { -1 }  // user enum — use get_or_assign_typeid
+        },
+        Type::FnType { .. } => 7,  // RING_TYPEID_CLOSURE
+        _ => -1,
+    }
+}
 
 pub fn build_entry_alloca(mut ctx: LlvmCtx, ty: LLVMTypeRef, name: Str) -> LLVMValueRef {
     let current_bb = LLVMGetInsertBlock(ctx.builder)

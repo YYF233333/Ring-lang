@@ -10,7 +10,8 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
-    llvm_resolve_fn, build_entry_alloca}
+    llvm_resolve_fn, build_entry_alloca,
+    get_or_assign_typeid}
 use codegen_llvm_stmt::{emit_llvm_stmt}
 use codegen_ctx::{extract_effect_names}
 
@@ -1567,9 +1568,10 @@ fn gen_struct_lit(mut ctx: LlvmCtx, name: Str, fields: List<HStructFieldInit>, s
     match ctx.struct_types.get(name) {
         some(info) => {
             let size = LLVMSizeOf(info.llvm_type)
-            let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-            let malloc_ty = get_rt_fn_type(ctx, "malloc")
-            let struct_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [size], fresh_name(ctx, "s"))
+            let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+            let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+            let typeid_val = LLVMConstInt(ctx.i64_type, get_or_assign_typeid(ctx, name), 0)
+            let struct_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [size, typeid_val], fresh_name(ctx, "s"))
 
             // If spread expression exists, copy all fields from it first
             match spread {
@@ -2383,11 +2385,12 @@ fn gen_named_variant_construct(mut ctx: LlvmCtx, enum_name: Str, variant_name: S
         some(enum_info) => {
             match enum_info.variants.get(variant_name) {
                 some(vi) => {
-                    // Allocate enum struct
+                    // Allocate enum struct via ring_alloc with typeid
                     let size = LLVMSizeOf(enum_info.llvm_type)
-                    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-                    let malloc_ty = get_rt_fn_type(ctx, "malloc")
-                    let enum_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [size], fresh_name(ctx, "ev"))
+                    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+                    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+                    let enum_tid_val = LLVMConstInt(ctx.i64_type, get_or_assign_typeid(ctx, enum_name), 0)
+                    let enum_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [size, enum_tid_val], fresh_name(ctx, "ev"))
 
                     // Store tag (field 0)
                     let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, enum_ptr, 0, fresh_name(ctx, "tag"))
@@ -2527,9 +2530,10 @@ fn gen_range_expr(mut ctx: LlvmCtx, start: HExpr, end: HExpr, inclusive: Bool) -
     // But for LLVM it's simpler to use a struct with i64/i64/i64
     let range_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
     let size = LLVMSizeOf(range_ty)
-    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-    let malloc_ty = get_rt_fn_type(ctx, "malloc")
-    let range_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [size], fresh_name(ctx, "rng"))
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let range_typeid = LLVMConstInt(ctx.i64_type, 10, 0)  // RING_TYPEID_TUPLE (range is tuple-like)
+    let range_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [size, range_typeid], fresh_name(ctx, "rng"))
 
     let start_val = gen_llvm_expr(ctx, start)
     let end_val = gen_llvm_expr(ctx, end)
@@ -2635,9 +2639,10 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
 
     // At the call site: allocate env struct and store captures
     let env_size = LLVMSizeOf(env_ty)
-    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-    let malloc_ty = get_rt_fn_type(ctx, "malloc")
-    let env_alloc = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [env_size], fresh_name(ctx, "env"))
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
+    let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [env_size, closure_typeid], fresh_name(ctx, "env"))
 
     // Store each capture into env
     for i in 0..captures.len() {
@@ -2659,7 +2664,7 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     // RingClosure struct: { void* fn_ptr, void* env_ptr }
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let closure_size = LLVMSizeOf(closure_ty)
-    let closure_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [closure_size], fresh_name(ctx, "cls"))
+    let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], fresh_name(ctx, "cls"))
 
     let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
     discard(LLVMBuildStore(ctx.builder, lambda_fn, fn_ptr_slot))
@@ -2890,9 +2895,10 @@ fn gen_catch_closure(mut ctx: LlvmCtx, arms: List<HMatchArm>) -> LLVMValueRef {
 
     // Build env + closure pair at the call site.
     let env_size = LLVMSizeOf(env_ty)
-    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-    let malloc_ty = get_rt_fn_type(ctx, "malloc")
-    let env_alloc = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [env_size], fresh_name(ctx, "env"))
+    let alloc_fn2 = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty2 = get_rt_fn_type(ctx, "ring_alloc")
+    let catch_closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
+    let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty2, alloc_fn2, [env_size, catch_closure_typeid], fresh_name(ctx, "env"))
     for i in 0..captures.len() {
         match captures.get(i) {
             some(cap_name) => {
@@ -2908,7 +2914,7 @@ fn gen_catch_closure(mut ctx: LlvmCtx, arms: List<HMatchArm>) -> LLVMValueRef {
     }
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let closure_size = LLVMSizeOf(closure_ty)
-    let closure_ptr = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [closure_size], fresh_name(ctx, "cls"))
+    let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty2, alloc_fn2, [closure_size, catch_closure_typeid], fresh_name(ctx, "cls"))
     let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
     discard(LLVMBuildStore(ctx.builder, catch_fn, fn_ptr_slot))
     let env_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "eps"))
@@ -3021,9 +3027,10 @@ fn gen_return_error_closure(mut ctx: LlvmCtx) -> LLVMValueRef {
     LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let closure_size = LLVMSizeOf(closure_ty)
-    let malloc_fn = get_or_declare_runtime_fn(ctx, "malloc", [ctx.i64_type], ctx.ptr_type)
-    let malloc_ty = get_rt_fn_type(ctx, "malloc")
-    let cp = LLVMBuildCall2(ctx.builder, malloc_ty, malloc_fn, [closure_size], fresh_name(ctx, "cls"))
+    let alloc_fn3 = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty3 = get_rt_fn_type(ctx, "ring_alloc")
+    let fn_ref_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
+    let cp = LLVMBuildCall2(ctx.builder, alloc_ty3, alloc_fn3, [closure_size, fn_ref_typeid], fresh_name(ctx, "cls"))
     let s0 = LLVMBuildStructGEP2(ctx.builder, closure_ty, cp, 0, fresh_name(ctx, "fps"))
     discard(LLVMBuildStore(ctx.builder, f, s0))
     let s1 = LLVMBuildStructGEP2(ctx.builder, closure_ty, cp, 1, fresh_name(ctx, "eps"))

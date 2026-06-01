@@ -85,9 +85,29 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
         HStmt::IfLet { pattern, expr, then_block, else_block, .. } => {
             emit_if_let(ctx, pattern, expr, then_block, else_block)
         },
-        // TODO: Perceus L0 — emit ring_drop/ring_dup
-        HStmt::Drop { .. } => {},
-        HStmt::Dup { .. } => {},
+        // Perceus L0 — emit ring_drop / ring_dup
+        HStmt::Drop { name, .. } => {
+            match ctx.named_values.get(name) {
+                some(var_ptr) => {
+                    let val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, fresh_name(ctx, "drop_val"))
+                    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+                    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+                    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""))
+                },
+                none => {},
+            }
+        },
+        HStmt::Dup { name, .. } => {
+            match ctx.named_values.get(name) {
+                some(var_ptr) => {
+                    let val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, fresh_name(ctx, "dup_val"))
+                    let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
+                    let dup_ty = get_rt_fn_type(ctx, "ring_dup")
+                    discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""))
+                },
+                none => {},
+            }
+        },
     }
 }
 
