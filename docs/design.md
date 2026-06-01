@@ -1324,6 +1324,29 @@ match child.parent.upgrade() {
 - 类型系统禁止循环：限制过强
 - 混合方案（Perceus + cycle collector fallback）：两套机制，复杂度高
 
+### 7.10 Perceus 分层实现路线（2026-06-01 确定）
+
+Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 core dup/drop，再 borrowing，再 reuse）。Ring 切成可独立测试、独立 merge 的序列：
+
+| 层 | 内容 | 作用 | backlog |
+|----|------|------|---------|
+| **L0 RC 核心** | dup/drop 插入，owned-everywhere，归零即 free | 释放堆内存 → 打破自举内存墙 → 完成全 native 自举 | B-012 |
+| **L1 借用优化** | 借用推断消除借用参数上的 dup/drop | 大幅减 RC 流量 | B-068（§7.2–7.8）|
+| **L2 Drop/RAII** | 用户 `impl Drop`、全路径 RAII、fail/catch 改 drop-aware unwind、`Weak<T>` | 资源安全 + 循环引用 | B-002 |
+| **L3 Reuse (FBIP)** | `rc==1` 时就地改写，drop-reuse 配对、reuse specialization、COW | 性能核爆（函数式零拷贝）| B-079 |
+| **L4 Unboxing** | 标量进寄存器不上堆 | 减 alloc + RC 流量 | B-080 |
+
+**关键性质**：L0 单独即可解锁全自举，**无硬前置**——owned-everywhere 模型只需 pass 内部的反向 last-use 分析，不需要先实现借用推断（L1）。L1/L2 是叠加的优化与安全层。
+
+**L0 架构决策**：
+- **对象头**：每个堆对象 offset 0 为 `{rc: u32, typeid: u32}`，dup/drop 类型无关（读 `*(u32*)ptr` 加减）。
+- **drop dispatch**：per-type drop 函数 + typeid 全局派发表；内建类型 runtime 手写，用户 struct/enum 由 codegen 生成 `drop_T`（Koka 风格 per-type drop/scan）。
+- **IR**：HIR 扩展显式 `Drop`/dup 节点（RC 行为可 dump/测试），仅 `--target=llvm` pass 产出，JS 路径跳过。
+- **算法**：反向 liveness + branch-balancing，翻译 Koka Perceus（POPL'21）`⟦·⟧`。
+- **范围边界**：L0 不处理 abort 路径 drop（longjmp 跳过 = 泄漏，非 UAF，安全；留 L2 drop-aware unwind）；不处理循环引用（树/DAG 自举无环；`Weak<T>` 在 L2）。
+
+**Ring 相对 Koka 的简化**：effect 仅 tail-resumptive + abort（无 multi-resume）→ 无 reified continuation 复制问题，handler 的 RC 退化为普通作用域 backward liveness。
+
 ---
 
 ## 8. 并发模型 ⚠️ 设计愿景，尚未实现
@@ -2025,6 +2048,10 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | LLVM 闭包表示 | `{fn_ptr, env_ptr}` 二元组 + 已知函数直接调用 | 标准方案；uniform boxing 下捕获统一为 void* |
 | LLVM fail/catch | setjmp/longjmp | bootstrap 无 Drop/RAII 不需要栈展开；Ownership 阶段可切换 |
 | LLVM 多文件编译 | bootstrap 阶段单 LLVM Module，单 .o 输出 | 不需要跨模块符号解析；增量编译留给后续 |
+| Perceus 分层路线 | L0 RC核心(B-012) → L1 借用(B-068) → L2 Drop/RAII+Weak(B-002) → L3 reuse(B-079) → L4 unboxing(B-080) | 可独立测试/merge 的序列；L0 单独解锁全自举且无硬前置 |
+| Perceus L0 对象头 | 每堆对象 offset 0 `{rc:u32, typeid:u32}`；per-type drop 函数 + typeid 派发表 | dup/drop 类型无关；用户类型 drop 由 codegen 生成（Koka 风格 per-type drop/scan）|
+| Perceus L0 范围 | 不处理 abort 路径 drop（留 L2 drop-aware unwind）/ 循环引用（留 L2 Weak） | longjmp 跳过 drop = 泄漏非 UAF（安全）；自举走成功路径 + 树形数据无环；先解内存墙 |
+| Perceus dup/drop IR | HIR 显式 Drop/dup 节点 + 反向 liveness pass（仅 llvm） | RC 行为落 IR 可 dump/测试；翻译 Koka Perceus POPL'21 |
 
 ### 幽灵功能（已解析但无语义效果）
 

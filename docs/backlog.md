@@ -29,7 +29,7 @@
 - ~~B-044 Ring 语义规范 [M]~~ ✅ 已完成（2026-05-24）
 
 **关键路径（2026-05-24 更新）**：
-- ~~B-004~~ → ~~B-036~~ → B-011 LLVM（~~关联类型~~ ✅ → ~~Iterator~~ ✅ → LLVM 基础后端）
+- ~~B-004~~ → ~~B-036~~ → ~~B-011 LLVM~~ ✅（~~关联类型~~ ✅ → ~~Iterator~~ ✅ → LLVM 基础后端）
 - ~~B-036 不再阻塞 LLVM~~
 - Linear types 不阻塞基础 LLVM，是 Perceus RC 的前置
 - B-042 与关键路径并行，阻塞 B-012 Perceus 但不阻塞 LLVM 基础
@@ -59,6 +59,8 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 
 ### B-002 Ownership + Drop（Rust 风格 RAII，无 borrow checker）[feature] [P2] [XL] [judgment] [queued]
 Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪值的所有权，确保 Drop 恰好执行一次。
+
+> **Perceus 分层角色 = L2**（见 §7.10 / B-012）：在 L0 RC 核心（B-012）之上实现用户 `impl Drop` + 正常/abort/cancel 全路径 RAII。**两个并入项**：(1) fail/catch 从 setjmp/longjmp 切换到 **drop-aware unwind**（longjmp 会跳过 drop → 改成栈展开时逐帧 drop）；(2) `Weak<T>` 库类型实现（`Rc.downgrade()` + `.upgrade() -> T?`，循环引用解法，设计见 §7.9）。
 
 **模型**：
 - 所有值 scope 结束自动 drop（RAII，正常路径 + abort 路径均自动）
@@ -293,71 +295,54 @@ fn test_fetch() {
 > 优化分两层：AOT（LLVM 编译期）和 JIT（运行时 PGO），很多优化两层都可以做。
 > 前置依赖链：LLVM backend → Perceus RC → 各项优化 pass → JIT（远期）。
 
-### B-011 LLVM Native Backend [feature] [P1] [XL] [judgment] [doing]
-编译到 LLVM IR，所有后续优化的基础。**LLVM 落地后 JS 后端废弃。**
+> **B-011 LLVM Native Backend 已完成（2026-06-01）** — 前端自举打通：ring.exe 单文件产出与参考编译器字节级一致，多模块端到端跑通，所有 codegen bug + fail/catch 已修（见 `tests/cases/llvm/` 回归套件）。**完整 native 自举的剩余两条验收（二次自举一致性 + native E2E 全过）受内存墙（25.9GB，no-GC）阻塞，已并入 B-012——Perceus RC 是解锁它们的唯一路径。**
 
-- **前置依赖**：~~B-004（关联类型）~~ ✅ + ~~B-036（Iterator）~~ ✅ + ~~B-044 语义规范~~ ✅。**全部前置已完成，无阻塞。**
-- **不阻塞基础 LLVM**：Linear types / Perceus RC（后续增量添加）
-- **FFI 边界 effect 设计**：
-  1. Evidence 传递：LLVM 端用 TLS handler stack，C 函数无需感知
-  2. Effect-free 函数保证干净 C ABI，零成本互调
-  3. 跨语言资源安全：Linear types + `defer` 清理 FFI 资源（Perceus RC 阶段实现）
+### B-012 Perceus RC 核心 (L0) [feature] [P1] [XL] [judgment] [queued]
+精确引用计数的最小正确实现——dup/drop 插入 + 归零即 free，消除 uniform-boxing「不回收」导致的内存墙。**完成全 native 自举的唯一路径**（继承 B-011 剩余两条验收）。仅 `--target=llvm`。
 
-**环境（2026-05-28 确定）**：LLVM 22 + Windows MSVC + `x86_64-pc-windows-msvc`。N-API addon 放 `compiler/llvm-addon/`（已入 git，build/ 和 node_modules/ 除外）。
+> **Perceus 分层（2026-06-01 确定，见 design.md §7.10）**：
+> **L0 RC 核心（本 item）** → L1 借用优化（B-068，设计见 §7.2–7.8）→ L2 Drop/RAII + drop-aware unwind + `Weak<T>`（B-002）→ L3 reuse/FBIP（B-079）→ L4 标量 unboxing（B-080）。
+> L0 单独即可解锁全自举，**无硬前置**（owned-everywhere 不需要先做借用推断；B-011 已完成）。
 
-**详细执行计划**：见 `docs/llvm-migration.md` "2026-05-28 详细执行计划"。
+**架构决策（2026-06-01）**：
+1. **对象头**：每个堆对象 offset 0 为 `{rc: u32, typeid: u32}`（8 字节）。dup/drop 类型无关——读 `*(u32*)ptr` 加减即可。
+2. **drop dispatch**：per-type drop 函数 + typeid 全局派发表。内建类型（List/Map/Set/Str/closure）runtime 手写 drop；用户 struct/enum 由 **codegen 生成 `drop_T(ptr)`**（按 tag 精确递归 drop owned 字段后 free）。`ring_drop` 归零时按 typeid 派发。（Koka 风格 per-type drop/scan 函数）
+3. **IR 表示**：HIR 扩展显式 `HStmt::Drop(var)` + dup 机制（`Dup` 节点或变量引用 `consume` 标记）。RC 行为落在 IR 里 → 可 dump / eyeball / 写 E2E 断言。codegen 见到即 emit `ring_dup`/`ring_drop`。
+4. **Pass 放置**：`HIR → [Perceus RC pass，仅 llvm] → RC 标注 HIR → codegen`。JS 后端有 GC，整 pass 跳过（Dup/Drop 在 JS 路径不产出）。
+5. **last-use 算法**：函数体**反向 liveness**。逆序遍历维护 `live` 集：变量逆序首遇 = 正序最后一次用 = move 不 dup，加入 live；已在 live = 需 dup。作用域退出时已死的 owned var 插 drop。分支（if/match）用 **branch-balancing**（在该 var dead 的分支插 drop）。**翻译 Koka Perceus（POPL'21）的 `⟦·⟧` 转换 + 分支平衡规则，代码标注来源。**
+6. **uniform，无特殊 case**：Int/Float/Bool 等标量在 L0 仍 boxed 且照常 RC（unboxing 是 L4）。不引入任何标量旁路 workaround。
+7. **handler（tail-resumptive）**：不做 multi-resume → 无 reified continuation 复制；handler body + resume 退化成普通作用域的 backward liveness。impl 时确认即可，非算法分叉。
 
-**实现策略（2026-05-24 决策）**：
+**范围边界（明确划出，非遗漏——no-silent-bypass）**：
+- **abort 路径不 drop**：fail/catch 现为 setjmp/longjmp，longjmp 跳过中间帧的 drop 调用 = **泄漏**（非 double-free/UAF：longjmp 只放弃栈帧，不会重复执行 drop）。自举走成功路径不触发；用户报错 abort 后进程退出 OS 回收。drop-aware unwind 留 **L2（B-002）**。
+- **循环引用泄漏**：L0 精确 RC，环泄漏。编译器自身数据结构为树/DAG，预期无环。`Weak<T>` 解法在 L2。
+- **不含借用优化 / reuse / unboxing**：分别在 L1 / L3 / L4。
 
-1. **Codegen 只写一次**：LLVM codegen 用 Ring 编写，通过 `extern fn` 包装 LLVM-C API（~80 个核心函数）
-2. **Bootstrap 桥**：本地 N-API addon（~300 行 C++，纯机械转发 LLVM-C），`compiler/llvm-addon/`，自举后废弃
-3. **内存管理**：malloc 不回收 → 直接上 Perceus RC（B-012），无中间 GC
-4. **值表示**：Uniform boxing（一切皆 `ptr`（opaque pointer），含 Int/Float/Bool），极简 codegen，Perceus RC 阶段引入 unboxing
-5. **Runtime**：`ring_runtime.cpp`（~300-400 行 C++ STL wrapper，extern "C"），List→vector、Map→unordered_map（Str key）、Str→string
-6. **闭包**：`{fn_ptr, env_ptr}` 二元组，已知函数直接调用不走闭包
-7. **Enum 布局**：`{tag: i64, fields: ptr[N]}`，N = 最大变体字段数，内联分配
-8. **fail/catch**：setjmp/longjmp（bootstrap 无 Drop 不需要栈展开），Ownership 阶段可切换
-9. **多文件编译**：bootstrap 阶段单 LLVM Module → 单 .o → 链接为单一二进制
-10. **标准库/FFI**：按编译器自身迁移需求驱动，不追求完整迁移
-11. **目标**：编译器完整自举到 LLVM native，JS 后端归档
-
-**执行进度（2026-05-29 更新）**：
-- ~~**Wave 1（地基层）**~~：✅ llvm_ffi.ring + N-API addon + ring_runtime.cpp + CLI --target ✅
-- ~~**Wave 2（Codegen 核心）**~~：✅ codegen_llvm*.ring（5 模块，~3500 行）+ 全量 HExpr/HStmt + evidence threading + trait dict dispatch ✅
-- **Wave 3（迁移+自举）**：
-  - ✅ 3a: 多文件 `--target=llvm` 接通 + std lib C ABI 补全（ring_runtime.cpp ~1100 行，~100 个函数）
-  - ✅ 3b: 编译器 .o 已生成（`compiler/dist-llvm/main.o`，1.19MB，零 verify error）
-  - 🔧 3c: ring.exe 已链接（0.8MB），CLI + lexer + parser 正常，checker 阶段 crash
-  - ⏳ 3d: 双重自举 + E2E 全量测试
-- ~~**剩余已知问题**：3 个 lambda capture domination error（alloca 需提升到 entry block）~~ ✅ B-075 已修复
-- **2026-05-29 修复进展**：
-  - ✅ 30+ 缺失的 extern fn / method 映射（path_resolve、file_exists、Str.len、Str.char_at、Str.char_code_at 等）
-  - ✅ Option runtime 方法实现（unwrap_or、unwrap、is_some、is_none、map、unwrap_or_else）
-  - ✅ imports_map 从 AST use 声明构建（修复 aliased import 解析如 `check as check_single`）
-  - ✅ ring_file_exists 返回 boxed bool、ring_exit 接收 boxed int
-  - ✅ ring_list_any/ring_list_all 返回 int64_t（修复 has_errors() false positive）
-  - ✅ __ring_raise_fail 实现 + crash handler + panic fallback
-  - ring.exe 现在成功执行：CLI 参数解析 → 文件读取 → lexer → parser → checker 入口
-  - **当前阻塞**：checker 初始化 crash（map_set #69，紧接 "print" 注册之后），key 参数不是有效 std::string（size=2.5T）。根因是 LLVM codegen 的 `TypeEnv.bind` 参数传递类型混淆——非 string 值被当作 Map key。需对比 `bind` 函数 IR 与源码定位参数错位
+**涉及修改**：
+1. `ring_runtime.cpp`：对象头 `{rc, typeid}` 加到每个堆分配；`ring_dup`/`ring_drop`；内建类型 drop 函数 + typeid 派发表；现有 alloc 函数补头。
+2. `hir.ring`：新增 `HStmt::Drop` + dup 表示；所有穷尽 match 补分支。
+3. 新增 Perceus RC pass（codegen_llvm 之前）：reverse-liveness + dup/drop 插入，翻译 Koka。
+4. `codegen_llvm*.ring`：emit `ring_dup`/`ring_drop`；为每个 struct/enum 生成 `drop_T` 并注册 typeid。
+5. JS codegen：`Dup`/`Drop` 走 no-op 分支（或确认 llvm-only pass 不产出到 JS 路径）。
 
 **验收标准**：
-- ~~Ring 编译器编译自身为 native .o~~ ✅ （2026-05-28）
-- ~~ring.exe 链接成功~~ ✅（2026-05-28）
-- ~~ring.exe CLI 正常运行~~ ✅（2026-05-28）
-- Ring 编译器链接为 native binary 并可运行
-- Native 编译器编译自身（二次自举一致性）
-- E2E 测试在 native 编译器上全部通过
+- 编译整个编译器内存峰值从 25.9GB 大幅下降（目标：普通内存机器可完成全程）。
+- **完整 native 自举打通**（继承 B-011）：native ring.exe 编译自身 → 二次自举字节级一致。
+- E2E 全量测试在 native 编译器上通过。
+- `llvm_diff` 差分套件全过（JS 后端为 oracle，输出一致）。
+- 728 JS e2e 不回归；自举编译器正常编译自身。
 
-### B-012 Perceus 引用计数 [feature] [P3] [XL] [judgment] [queued]
-精确 RC + 就地复用分析（reuse analysis），消除 GC。
+### B-079 Perceus Reuse Analysis / FBIP (L3) [feature] [P3] [XL] [judgment] [queued]
+就地复用分析（functional but in-place）：`rc == 1` 时 match 解构 + 同尺寸重构 → 就地改写，drop-reuse 配对消除分配。Perceus 的性能核爆点（函数式写法零拷贝：list map、tree rebalance/insert）。含 reuse specialization（为有/无 reuse token 特化函数）+ COW（`rc > 1` 时 clone-on-write，内部优化非用户可见语义）。
+- **前置依赖**：B-012（L0 RC 核心）
+- **参考**：Koka Perceus reuse pass
+- **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；全 E2E + `llvm_diff` 不回归；自举一致
 
-**包含**：
-- Perceus RC 核心（精确引用计数 + 重用分析）
-- `Weak<T>` 库类型（`std/rc.ring`）：`Rc.downgrade()` + `.upgrade() -> T?`，确定性析构
-- COW 为内部优化（clone-on-write when refcount > 1），非用户可见语义
-- 循环引用策略：`Weak<T>` + arena+index 模式（设计见 design.md 7.9）
-
-- **前置依赖**：Linear types + B-011
+### B-080 标量 Unboxing (L4) [feature] [P3] [L] [judgment] [queued]
+Int/Float/Bool 从 uniform-boxed 堆 ptr 改为寄存器内联值，消除标量的 alloc + RC 流量。当前 uniform boxing 一切皆 `void*`（含标量）。
+- **前置依赖**：B-012（L0）。与 L1/L3 正交
+- **注**：内存墙主要由结构体/list/string 主导（box_int 缓存实测无效），unboxing 是性能优化，非内存墙解法
+- **验收**：标量不再堆分配；算术热路径无 box/unbox；全 E2E + `llvm_diff` 不回归；自举一致
 
 ### 语义驱动优化（AOT + JIT 共享）
 
@@ -581,7 +566,7 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
-### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [doing]
+### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [queued]
 > ✅ Phase 1 已完成（2026-05-29）：基础设施 + 10 个关键 unify 调用点 + notes 渲染。剩余场景（空集合、row poly、effect 不匹配专用消息）后续迭代。
 
 **已完成**：
