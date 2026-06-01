@@ -300,6 +300,8 @@ fn test_fetch() {
 ### B-012 Perceus RC 核心 (L0) [feature] [P1] [XL] [judgment] [doing]
 精确引用计数的最小正确实现——dup/drop 插入 + 归零即 free，消除 uniform-boxing「不回收」导致的内存墙。**完成全 native 自举的唯一路径**（继承 B-011 剩余两条验收）。仅 `--target=llvm`。
 
+> **实现进度（2026-06-01）**：基础设施全部落地，简单程序端到端正确（11 LLVM diff 全过）。**剩余阻塞 = Perceus pass correctness gap**：反向 liveness 的表达式层 Block 包装方案在编译器自身的复杂代码（深嵌套 closure + try/catch + 大量 pattern matching）上产生错误 dup/drop 序列 → heap corruption。Runtime 层已验证正确（禁用 pass 后 ring.exe 正常运行）。修复方向：将 dup 插入从表达式层 Block 包装改为语句层 emit，加强 liveness 分析对嵌套作用域的覆盖。
+
 > **Perceus 分层（2026-06-01 确定，见 design.md §7.10）**：
 > **L0 RC 核心（本 item）** → L1 借用优化（B-068，设计见 §7.2–7.8）→ L2 Drop/RAII + drop-aware unwind + `Weak<T>`（B-002）→ L3 reuse/FBIP（B-079）→ L4 标量 unboxing（B-080）。
 > L0 单独即可解锁全自举，**无硬前置**（owned-everywhere 不需要先做借用推断；B-011 已完成）。
