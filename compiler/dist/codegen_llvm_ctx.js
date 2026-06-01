@@ -275,7 +275,7 @@ class EnumTypeInfo {
 }
 
 class LlvmCtx {
-  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb) {
+  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid) {
     this.context = context;
     this.module = module;
     this.builder = builder;
@@ -308,6 +308,8 @@ class LlvmCtx {
     this.current_fn_name = current_fn_name;
     this.loop_break_bb = loop_break_bb;
     this.loop_continue_bb = loop_continue_bb;
+    this.next_user_typeid = next_user_typeid;
+    this.type_to_typeid = type_to_typeid;
   }
 }
 
@@ -398,6 +400,91 @@ function get_rt_fn_type(ctx, name) {
       break __ring_match9;
     }
     __match_fail(__ring_m9);
+  }
+}
+
+function get_or_assign_typeid(ctx, type_name) {
+  __ring_match10: {
+    const __ring_m10 = _Map_get(ctx.type_to_typeid, type_name);
+    if (__ring_m10._tag === "some") {
+      const id = __ring_m10._0;
+      return id;
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "none") {
+      const id = ctx.next_user_typeid;
+      ctx.next_user_typeid = (id + 1);
+      _Map_insert(ctx.type_to_typeid, type_name, id);
+      return id;
+      break __ring_match10;
+    }
+    __match_fail(__ring_m10);
+  }
+}
+
+function get_builtin_typeid(ty) {
+  __ring_match11: {
+    const __ring_m11 = ty;
+    if (__ring_m11._tag === "IntType") {
+      return 0;
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "FloatType") {
+      return 1;
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "BoolType") {
+      return 2;
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "StrType") {
+      return 3;
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "UnitType") {
+      return 9;
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TupleType") {
+      return 10;
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "StructType") {
+      const name = __ring_m11.name;
+      if ((name === "List")) {
+        return 4;
+      } else {
+        if ((name === "Map")) {
+          return 5;
+        } else {
+          if ((name === "Set")) {
+            return 6;
+          } else {
+            if ((name === "StringBuilder")) {
+              return 13;
+            } else {
+              return (-1);
+            }
+          }
+        }
+      }
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "EnumType") {
+      const name = __ring_m11.name;
+      if ((name === "Option")) {
+        return 8;
+      } else {
+        return (-1);
+      }
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "FnType") {
+      return 7;
+      break __ring_match11;
+    }
+    return (-1);
+    break __ring_match11;
   }
 }
 
@@ -668,4 +755,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, get_builtin_typeid, build_entry_alloca, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };
