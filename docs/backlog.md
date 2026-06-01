@@ -633,6 +633,23 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
+### B-081 Perceus dup 从表达式层 Block 包装迁移到语句层 emit [refactor] [P1] [M] [judgment] [queued]
+当前 dup 通过 `HExpr::Block { stmts: [Dup], tail: Ident }` 在表达式层插入，改变了 HIR 树结构。codegen 多处假设特定节点类型（如 `gen_call` 期望 callee 是 `Ident`，`emit_assign` 期望 target 是 `Ident`/`FieldAccess`），Block 包装会触发 panic 或错误行为。L0 已通过 `locals` 集合规避了全局函数问题，但随着 L1 借用优化和更复杂的 RC 场景，隐患会扩大。
+
+**修复方向**：将 dup 收集到语句层统一 emit——Perceus pass 输出 `HStmt::Dup(var)` 而非在表达式中插入 Block 包装。codegen 在语句层 emit `ring_dup` 调用，表达式树结构不变。
+
+**涉及修改**：
+1. `compiler/perceus.ring`：`rc_expr` 不再生成 `Block { [Dup], Ident }` 包装，改为在语句层收集需 dup 的变量列表
+2. `compiler/hir.ring`：确认 `HStmt::Dup` 已有（或新增），作为语句层 dup 的唯一表示
+3. `compiler/codegen_llvm*.ring`：语句层 `Dup` emit `ring_dup`，移除对 Block 包装的兼容处理
+4. `compiler/perceus.ring`：验证 branch-balancing 在语句层 dup 方案下仍正确
+
+**验收标准**：
+- Perceus pass 不再生成 `HExpr::Block` 包装来插入 dup
+- 所有 dup 通过 `HStmt::Dup` 在语句层表示
+- 728 E2E + LLVM diff 全过
+- 自举编译器正常编译自身
+
 ### B-078 清理 B-066 parser workaround（string literal → import）[refactor] [P3] [S] [mechanical] [queued]
 `parser.ring:998` 仍用 string literal `"W0001"` 而非 `import codes::{W0001}`，这是 B-066 实现时因 B-077 跨模块 const bug 而采用的 workaround。B-077 已修复，应改回正常 import。
 
