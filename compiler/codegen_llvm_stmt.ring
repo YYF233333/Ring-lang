@@ -94,7 +94,9 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
                     let drop_ty = get_rt_fn_type(ctx, "ring_drop")
                     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""))
                 },
-                none => {},
+                none => {
+                    eprintln("[rc-warn] Drop: variable '${name}' not found in named_values")
+                },
             }
         },
         HStmt::Dup { name, .. } => {
@@ -105,7 +107,9 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
                     let dup_ty = get_rt_fn_type(ctx, "ring_dup")
                     discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""))
                 },
-                none => {},
+                none => {
+                    eprintln("[rc-warn] Dup: variable '${name}' not found in named_values")
+                },
             }
         },
     }

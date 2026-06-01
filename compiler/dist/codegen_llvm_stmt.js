@@ -346,6 +346,7 @@ function emit_llvm_stmt(ctx, stmt) {
           break __ring_match7;
         }
         if (__ring_m7._tag === "none") {
+          return eprintln(`[rc-warn] Drop: variable '${name}' not found in named_values`);
           break __ring_match7;
         }
         __match_fail(__ring_m7);
@@ -365,6 +366,7 @@ function emit_llvm_stmt(ctx, stmt) {
           break __ring_match8;
         }
         if (__ring_m8._tag === "none") {
+          return eprintln(`[rc-warn] Dup: variable '${name}' not found in named_values`);
           break __ring_match8;
         }
         __match_fail(__ring_m8);

@@ -30,7 +30,7 @@
 
 **关键路径（2026-06-01 更新）**：
 - ~~B-004~~ → ~~B-036~~ → ~~B-011 LLVM~~ ✅ → ~~B-012 Perceus RC L0 基础设施~~ ✅
-- **当前关键路径**：B-082（RC 诊断）→ B-081（dup 架构迁移）→ B-083（RC 正确性）→ 带 RC 全自举验证
+- **当前关键路径**：~~B-082（RC 诊断）~~ ✅ → B-081（dup 架构迁移）→ B-083（RC 正确性）→ 带 RC 全自举验证
 - B-042 / B-068 阻塞 L1/L2，不阻塞 L0 正确性修复
 - B-033 GADTs 推迟至 LLVM 之后（无下游依赖）
 - 层 3（Refinement/Linear/async）在全自举验证通过后启动
@@ -609,21 +609,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-082 Perceus RC 诊断基础设施 [feature] [P1] [S] [judgment] [queued]
-
-为 RC pass 调试提供精确崩溃信号，消除盲调。执行顺序：B-082 → B-081 → B-083。
-
-**涉及修改**：
-1. `ring_runtime.cpp`：`ring_drop` 加 `rc > 0` 断言（drop 时 rc 已为 0 = double-free）；free 后写 magic sentinel（`0xDEADBEEF`）检测 UAF；`ring_dup` 加 rc 上溢检测
-2. `compiler/codegen_llvm_stmt.ring`：Drop/Dup 节点的 `none => {}` 静默跳过改为 emit stderr 警告（变量名 + "not found in named_values"），开发阶段暴露 Perceus pass 与 codegen 的不一致
-
-**验收标准**：
-- double-free 场景触发 assertion failure 而非静默 heap corruption
-- UAF 场景读到 sentinel 值而非随机数据
-- codegen 遇到未知变量的 Drop/Dup 时输出警告而非静默跳过
-- 728 E2E + LLVM diff 不回归（正常路径不触发断言）
-- 自举编译器正常编译自身
-
 ### B-081 Perceus dup 从表达式层 Block 包装迁移到语句层 emit [refactor] [P1] [M] [judgment] [queued]
 当前 dup 通过 `HExpr::Block { stmts: [Dup], tail: Ident }` 在表达式层插入，改变了 HIR 树结构。codegen 多处假设特定节点类型（如 `gen_call` 期望 callee 是 `Ident`，`emit_assign` 期望 target 是 `Ident`/`FieldAccess`），Block 包装会触发 panic 或错误行为。L0 已通过 `locals` 集合规避了全局函数问题，但随着 L1 借用优化和更复杂的 RC 场景，隐患会扩大。
 
@@ -645,7 +630,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 B-012 L0 基础设施已落地，但 RC pass 在编译器自身的复杂代码上产生错误 dup/drop 序列 → heap corruption（premature free）。不带 RC pass 可自举，带 RC pass 崩溃。本 item 修复所有已知正确性 gap。
 
-**前置依赖**：B-082（诊断基础设施，提供精确崩溃信号）、B-081（dup 语句层迁移，避免在旧架构上修）
+**前置依赖**：~~B-082~~ ✅、B-081（dup 语句层迁移，避免在旧架构上修）
 
 **已知问题（按崩溃频率排序）**：
 

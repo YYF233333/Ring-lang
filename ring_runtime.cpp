@@ -96,15 +96,56 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
 extern "C" void ring_dup(void* ptr) {
     if (!ptr) return;
     uint32_t* rc = (uint32_t*)((char*)ptr - 8);
+
+    // UAF detection: sentinel means this memory was freed
+    if (*rc == 0xDEADBEEF) {
+        fprintf(stderr, "ring panic: dup on freed memory! ptr=%p (use-after-free)\n", ptr);
+        fflush(stderr);
+        abort();
+    }
+
+    // rc==0 should never happen for live objects (alloc sets rc=1)
+    if (*rc == 0) {
+        fprintf(stderr, "ring panic: dup on zero-rc object! ptr=%p (likely double-free or corruption)\n", ptr);
+        fflush(stderr);
+        abort();
+    }
+
+    // Overflow detection
+    if (*rc >= 0xFFFFFFF0) {
+        fprintf(stderr, "ring panic: rc overflow! ptr=%p, rc=%u\n", ptr, *rc);
+        fflush(stderr);
+        abort();
+    }
+
     *rc += 1;
 }
 
 extern "C" void ring_drop(void* ptr) {
     if (!ptr) return;
     uint32_t* rc = (uint32_t*)((char*)ptr - 8);
+
+    // Double-free detection: rc==0 means already freed (or UAF sentinel hit)
+    if (*rc == 0) {
+        uint32_t tid = *(uint32_t*)((char*)ptr - 4);
+        fprintf(stderr, "ring panic: double-free detected! ptr=%p, typeid=%u\n", ptr, tid);
+        fflush(stderr);
+        abort();
+    }
+
+    // UAF sentinel detection: 0xDEADBEEF in rc slot means freed memory
+    if (*rc == 0xDEADBEEF) {
+        fprintf(stderr, "ring panic: use-after-free detected! ptr=%p (freed memory sentinel)\n", ptr);
+        fflush(stderr);
+        abort();
+    }
+
     if (*rc <= 1) {
         uint32_t tid = *(uint32_t*)((char*)ptr - 4);
         ring_drop_by_typeid(tid, ptr);
+        // Write sentinel before free to detect UAF on this block
+        *(uint32_t*)((char*)ptr - 8) = 0xDEADBEEF;
+        *(uint32_t*)((char*)ptr - 4) = 0xDEADBEEF;
         free((char*)ptr - 8);
     } else {
         *rc -= 1;
