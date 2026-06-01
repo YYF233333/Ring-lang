@@ -1,7 +1,9 @@
 // ring_runtime.cpp — C ABI runtime for Ring LLVM native backend
 // Target: x86_64-pc-windows-msvc (MSVC compatible)
 // Convention: all functions extern "C", void* in/out (or int64_t/double for unboxing)
-// Memory: malloc-only, no free (bootstrap compiler is short-lived)
+// Memory: Perceus RC (L0) — every heap object has an 8-byte header [rc:u32 | typeid:u32]
+//         before the data pointer.  ring_alloc returns data ptr; ring_dup/ring_drop
+//         manage the refcount; ring_drop dispatches per-type destructors via drop_table.
 
 #include <cstdint>
 #include <cstdlib>
@@ -30,14 +32,125 @@
 
 // ============================================================================
 // Type aliases (documentation only — all cross-boundary types are void*)
-//   Str          = std::string*
+//   Str          = std::string*     (data ptr into ring_alloc'd block)
 //   List         = std::vector<void*>*
 //   Map          = std::unordered_map<std::string, void*>*
 //   MapInt       = std::unordered_map<int64_t, void*>*
 //   Set          = std::unordered_set<std::string>*
 //   SetInt       = std::unordered_set<int64_t>*
 //   StringBuilder = std::string*
+//
+// Object layout (after ring_alloc):
+//   [rc:u32 | typeid:u32 | ...data...]
+//    ^                     ^
+//    ptr-8                 ptr  (returned by ring_alloc, used everywhere)
 // ============================================================================
+
+// ============================================================================
+// Perceus RC L0 — TypeID constants
+// ============================================================================
+
+#define RING_TYPEID_INT       0
+#define RING_TYPEID_FLOAT     1
+#define RING_TYPEID_BOOL      2
+#define RING_TYPEID_STR       3
+#define RING_TYPEID_LIST      4
+#define RING_TYPEID_MAP       5
+#define RING_TYPEID_SET       6
+#define RING_TYPEID_CLOSURE   7
+#define RING_TYPEID_OPTION    8
+#define RING_TYPEID_UNIT      9
+#define RING_TYPEID_TUPLE    10
+#define RING_TYPEID_MAP_INT  11
+#define RING_TYPEID_SET_INT  12
+#define RING_TYPEID_SB       13   // StringBuilder (same underlying type as Str)
+#define RING_TYPEID_USER_BASE 64  // user-defined types start here
+
+// ============================================================================
+// Perceus RC L0 — drop dispatch table
+// ============================================================================
+
+typedef void (*ring_drop_fn)(void* data);
+static ring_drop_fn drop_table[4096];
+static int drop_table_size = RING_TYPEID_USER_BASE;
+
+// Forward declarations for RC infrastructure
+static void ring_drop_by_typeid(uint32_t tid, void* data);
+
+// ============================================================================
+// Perceus RC L0 — ring_alloc / ring_dup / ring_drop
+// ============================================================================
+
+extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
+    char* raw = (char*)malloc(8 + (size_t)size);
+    if (!raw) {
+        fprintf(stderr, "ring panic: ring_alloc failed (size=%lld, typeid=%lld)\n",
+                (long long)size, (long long)typeid_val);
+        exit(1);
+    }
+    *(uint32_t*)(raw)     = 1;                    // rc = 1 (new allocation)
+    *(uint32_t*)(raw + 4) = (uint32_t)typeid_val; // typeid
+    return raw + 8;                               // return data pointer
+}
+
+extern "C" void ring_dup(void* ptr) {
+    if (!ptr) return;
+    uint32_t* rc = (uint32_t*)((char*)ptr - 8);
+    *rc += 1;
+}
+
+extern "C" void ring_drop(void* ptr) {
+    if (!ptr) return;
+    uint32_t* rc = (uint32_t*)((char*)ptr - 8);
+    if (*rc <= 1) {
+        uint32_t tid = *(uint32_t*)((char*)ptr - 4);
+        ring_drop_by_typeid(tid, ptr);
+        free((char*)ptr - 8);
+    } else {
+        *rc -= 1;
+    }
+}
+
+extern "C" void ring_register_drop(int64_t typeid_val, void* drop_fn_ptr) {
+    if (typeid_val >= 0 && typeid_val < 4096) {
+        drop_table[(int)typeid_val] = (ring_drop_fn)drop_fn_ptr;
+    }
+}
+
+static void ring_drop_by_typeid(uint32_t tid, void* data) {
+    if (tid < 4096 && drop_table[tid]) {
+        drop_table[tid](data);
+    }
+    // If no drop function registered (e.g. user types without fields to drop),
+    // the raw block is still freed by ring_drop — the destructor is a no-op.
+}
+
+// ============================================================================
+// Perceus RC L0 — per-builtin drop functions (scalars + Str)
+// Container drops are defined after RingClosure / Map / Set typedefs.
+// ============================================================================
+
+static void drop_int(void* /*data*/)   { /* no-op, scalar */ }
+static void drop_float(void* /*data*/) { /* no-op, scalar */ }
+static void drop_bool(void* /*data*/)  { /* no-op, scalar */ }
+static void drop_unit(void* /*data*/)  { /* no-op, no payload */ }
+
+static void drop_str(void* data) {
+    // data points at an in-place std::string; destruct but don't free
+    // (the whole block including header is freed by ring_drop).
+    ((std::string*)data)->~basic_string();
+}
+
+// Forward-declared; defined after container typedefs are available.
+static void drop_list(void* data);
+static void drop_map(void* data);
+static void drop_map_int(void* data);
+static void drop_set(void* data);
+static void drop_set_int(void* data);
+static void drop_closure(void* data);
+static void drop_option(void* data);
+static void drop_tuple(void* data);
+static void drop_sb(void* data);
 
 // ============================================================================
 // RingClosure — closure representation for higher-order functions
@@ -174,6 +287,22 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
 #ifdef _WIN32
     SetUnhandledExceptionFilter(crash_handler);
 #endif
+
+    // Perceus L0: register builtin drop functions
+    drop_table[RING_TYPEID_INT]     = drop_int;
+    drop_table[RING_TYPEID_FLOAT]   = drop_float;
+    drop_table[RING_TYPEID_BOOL]    = drop_bool;
+    drop_table[RING_TYPEID_STR]     = drop_str;
+    drop_table[RING_TYPEID_LIST]    = drop_list;
+    drop_table[RING_TYPEID_MAP]     = drop_map;
+    drop_table[RING_TYPEID_SET]     = drop_set;
+    drop_table[RING_TYPEID_CLOSURE] = drop_closure;
+    drop_table[RING_TYPEID_OPTION]  = drop_option;
+    drop_table[RING_TYPEID_UNIT]    = drop_unit;
+    drop_table[RING_TYPEID_TUPLE]   = drop_tuple;
+    drop_table[RING_TYPEID_MAP_INT] = drop_map_int;
+    drop_table[RING_TYPEID_SET_INT] = drop_set_int;
+    drop_table[RING_TYPEID_SB]      = drop_sb;
 }
 
 // ============================================================================
@@ -182,9 +311,9 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
 
 extern "C" void* ring_box_int(int64_t val) {
     CHK("box_int");
-    int64_t* p = (int64_t*)malloc(sizeof(int64_t));
-    *p = val;
-    return (void*)p;
+    void* data = ring_alloc(sizeof(int64_t), RING_TYPEID_INT);
+    *(int64_t*)data = val;
+    return data;
 }
 
 extern "C" int64_t ring_unbox_int(void* p) {
@@ -194,9 +323,9 @@ extern "C" int64_t ring_unbox_int(void* p) {
 }
 
 extern "C" void* ring_box_float(double val) {
-    double* p = (double*)malloc(sizeof(double));
-    *p = val;
-    return (void*)p;
+    void* data = ring_alloc(sizeof(double), RING_TYPEID_FLOAT);
+    *(double*)data = val;
+    return data;
 }
 
 extern "C" double ring_unbox_float(void* p) {
@@ -205,9 +334,9 @@ extern "C" double ring_unbox_float(void* p) {
 
 extern "C" void* ring_box_bool(int64_t val) {
     CHK("box_bool");
-    int64_t* p = (int64_t*)malloc(sizeof(int64_t));
-    *p = (val != 0) ? 1 : 0;
-    return (void*)p;
+    void* data = ring_alloc(sizeof(int64_t), RING_TYPEID_BOOL);
+    *(int64_t*)data = (val != 0) ? 1 : 0;
+    return data;
 }
 
 extern "C" int64_t ring_unbox_bool(void* p) {
@@ -221,12 +350,16 @@ extern "C" int64_t ring_unbox_bool(void* p) {
 // ============================================================================
 
 extern "C" void* ring_str_new() {
-    return (void*)new std::string();
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string();
+    return data;
 }
 
 extern "C" void* ring_str_from_cstr(const char* cstr) {
     CHK("str_from_cstr");
-    return (void*)new std::string(cstr);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(cstr);
+    return data;
 }
 
 extern "C" int64_t ring_str_len(void* s) {
@@ -235,7 +368,9 @@ extern "C" int64_t ring_str_len(void* s) {
 }
 
 extern "C" void* ring_str_concat(void* a, void* b) {
-    return (void*)new std::string(*(std::string*)a + *(std::string*)b);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(*(std::string*)a + *(std::string*)b);
+    return data;
 }
 
 extern "C" int64_t ring_str_eq(void* a, void* b) {
@@ -255,15 +390,23 @@ extern "C" void* ring_str_get(void* s, int64_t idx) {
                 (long long)idx, (long long)str->size());
         exit(1);
     }
-    return (void*)new std::string(1, (*str)[(size_t)idx]);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(1, (*str)[(size_t)idx]);
+    return data;
 }
 
 extern "C" void* ring_str_slice(void* s, int64_t start, int64_t end) {
     std::string* str = (std::string*)s;
     if (start < 0) start = 0;
     if (end > (int64_t)str->size()) end = (int64_t)str->size();
-    if (start >= end) return (void*)new std::string();
-    return (void*)new std::string(str->substr((size_t)start, (size_t)(end - start)));
+    if (start >= end) {
+        void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (data) std::string();
+        return data;
+    }
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(str->substr((size_t)start, (size_t)(end - start)));
+    return data;
 }
 
 extern "C" int64_t ring_str_contains(void* s, void* sub) {
@@ -287,57 +430,77 @@ extern "C" int64_t ring_str_ends_with(void* s, void* suffix) {
 extern "C" void* ring_str_split(void* s, void* delim) {
     std::string* str = (std::string*)s;
     std::string* del = (std::string*)delim;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     if (del->empty()) {
         // Split into individual characters
         for (size_t i = 0; i < str->size(); i++) {
-            result->push_back((void*)new std::string(1, (*str)[i]));
+            void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+            new (sd) std::string(1, (*str)[i]);
+            result->push_back(sd);
         }
-        return (void*)result;
+        return ldata;
     }
     size_t pos = 0, found;
     while ((found = str->find(*del, pos)) != std::string::npos) {
-        result->push_back((void*)new std::string(str->substr(pos, found - pos)));
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(str->substr(pos, found - pos));
+        result->push_back(sd);
         pos = found + del->size();
     }
-    result->push_back((void*)new std::string(str->substr(pos)));
-    return (void*)result;
+    void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (sd) std::string(str->substr(pos));
+    result->push_back(sd);
+    return ldata;
 }
 
 extern "C" void* ring_str_join(void* sep, void* list) {
     std::string* separator = (std::string*)sep;
     auto* vec = (std::vector<void*>*)list;
-    auto* result = new std::string();
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    auto* result = new (data) std::string();
     for (size_t i = 0; i < vec->size(); i++) {
         if (i > 0) *result += *separator;
         *result += *(std::string*)((*vec)[i]);
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_str_replace(void* s, void* from, void* to) {
     std::string result = *(std::string*)s;
     std::string* f = (std::string*)from;
     std::string* t = (std::string*)to;
-    if (f->empty()) return (void*)new std::string(result);
+    if (f->empty()) {
+        void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (data) std::string(result);
+        return data;
+    }
     size_t pos = 0;
     while ((pos = result.find(*f, pos)) != std::string::npos) {
         result.replace(pos, f->size(), *t);
         pos += t->size();
     }
-    return (void*)new std::string(result);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(result);
+    return data;
 }
 
 extern "C" void* ring_int_to_str(int64_t val) {
-    return (void*)new std::string(std::to_string(val));
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(std::to_string(val));
+    return data;
 }
 
 extern "C" void* ring_float_to_str(double val) {
-    return (void*)new std::string(std::to_string(val));
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(std::to_string(val));
+    return data;
 }
 
 extern "C" void* ring_bool_to_str(int64_t val) {
-    return (void*)new std::string(val ? "true" : "false");
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(val ? "true" : "false");
+    return data;
 }
 
 // ============================================================================
@@ -346,7 +509,9 @@ extern "C" void* ring_bool_to_str(int64_t val) {
 
 extern "C" void* ring_list_new() {
     CHK("list_new");
-    return (void*)new std::vector<void*>();
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    new (data) std::vector<void*>();
+    return data;
 }
 
 extern "C" void* ring_list_push(void* list, void* val) {
@@ -386,9 +551,10 @@ extern "C" int64_t ring_list_len(void* list) {
 extern "C" void* ring_list_concat(void* a, void* b) {
     auto* va = (std::vector<void*>*)a;
     auto* vb = (std::vector<void*>*)b;
-    auto* result = new std::vector<void*>(*va);
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (data) std::vector<void*>(*va);
     result->insert(result->end(), vb->begin(), vb->end());
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_list_slice(void* list, int64_t start, int64_t end) {
@@ -396,24 +562,30 @@ extern "C" void* ring_list_slice(void* list, int64_t start, int64_t end) {
     int64_t len = (int64_t)vec->size();
     if (start < 0) start = 0;
     if (end > len) end = len;
-    if (start >= end) return (void*)new std::vector<void*>();
-    return (void*)new std::vector<void*>(vec->begin() + start, vec->begin() + end);
+    if (start >= end) {
+        void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+        new (data) std::vector<void*>();
+        return data;
+    }
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    new (data) std::vector<void*>(vec->begin() + start, vec->begin() + end);
+    return data;
 }
 
 extern "C" void* ring_list_pop(void* list) {
     auto* vec = (std::vector<void*>*)list;
     if (vec->empty()) {
-        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-        opt[0] = 1; // None tag
-        opt[1] = 0;
-        return (void*)opt;
+        void* data = ring_alloc(sizeof(int64_t) * 2, RING_TYPEID_OPTION);
+        ((int64_t*)data)[0] = 1; // None tag
+        ((int64_t*)data)[1] = 0;
+        return data;
     }
     void* val = vec->back();
     vec->pop_back();
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-    opt[0] = 0; // Some tag
-    *((void**)(opt + 1)) = val;
-    return (void*)opt;
+    void* data = ring_alloc(sizeof(int64_t) + sizeof(void*), RING_TYPEID_OPTION);
+    ((int64_t*)data)[0] = 0; // Some tag
+    *((void**)((int64_t*)data + 1)) = val;
+    return data;
 }
 
 extern "C" int64_t ring_list_contains(void* list, void* val) {
@@ -442,34 +614,36 @@ extern "C" void* ring_list_get_opt(void* list, int64_t idx) {
 
 extern "C" void* ring_list_reverse(void* list) {
     auto* vec = (std::vector<void*>*)list;
-    auto* result = new std::vector<void*>(vec->rbegin(), vec->rend());
-    return (void*)result;
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    new (data) std::vector<void*>(vec->rbegin(), vec->rend());
+    return data;
 }
 
 extern "C" void* ring_list_sort(void* list, void* closure) {
     auto* vec = (std::vector<void*>*)list;
-    auto* result = new std::vector<void*>(*vec);
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (data) std::vector<void*>(*vec);
     RingClosure* cmp = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cmp->fn_ptr);
     std::sort(result->begin(), result->end(), [fn, cmp](void* a, void* b) -> bool {
         void* r = fn(cmp->env_ptr, a, b);
         return ring_unbox_int(r) < 0;
     });
-    return (void*)result;
+    return data;
 }
 
 static void* ring_enum_some(void* val) {
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-    opt[0] = 0;
-    *((void**)(opt + 1)) = val;
-    return (void*)opt;
+    void* data = ring_alloc(sizeof(int64_t) + sizeof(void*), RING_TYPEID_OPTION);
+    ((int64_t*)data)[0] = 0;
+    *((void**)((int64_t*)data + 1)) = val;
+    return data;
 }
 
 static void* ring_enum_none() {
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-    opt[0] = 1;
-    opt[1] = 0;
-    return (void*)opt;
+    void* data = ring_alloc(sizeof(int64_t) * 2, RING_TYPEID_OPTION);
+    ((int64_t*)data)[0] = 1;
+    ((int64_t*)data)[1] = 0;
+    return data;
 }
 
 // ============================================================================
@@ -522,11 +696,12 @@ extern "C" void* ring_Option_unwrap_or_else(void* opt, void* closure) {
 
 extern "C" void* ring_list_sort_default(void* list) {
     auto* vec = (std::vector<void*>*)list;
-    auto* result = new std::vector<void*>(*vec);
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (data) std::vector<void*>(*vec);
     std::sort(result->begin(), result->end(), [](void* a, void* b) -> bool {
         return ring_unbox_int(a) < ring_unbox_int(b);
     });
-    return (void*)result;
+    return data;
 }
 
 extern "C" int64_t ring_list_any(void* list, void* closure) {
@@ -565,21 +740,27 @@ extern "C" void* ring_list_find(void* list, void* closure) {
 }
 
 extern "C" void* ring_list_map(void* list, void* closure) {
-    if (!list) { return (void*)new std::vector<void*>(); }
+    if (!list) {
+        void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+        new (data) std::vector<void*>();
+        return data;
+    }
     auto* vec = (std::vector<void*>*)list;
-    auto* result = new std::vector<void*>();
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (data) std::vector<void*>();
     result->reserve(vec->size());
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         result->push_back(fn(cls->env_ptr, (*vec)[i]));
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_list_filter(void* list, void* closure) {
     auto* vec = (std::vector<void*>*)list;
-    auto* result = new std::vector<void*>();
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (data) std::vector<void*>();
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
@@ -588,7 +769,7 @@ extern "C" void* ring_list_filter(void* list, void* closure) {
             result->push_back((*vec)[i]);
         }
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_list_for_each(void* list, void* closure) {
@@ -629,7 +810,9 @@ typedef std::unordered_map<std::string, void*> RingMap;
 typedef std::unordered_map<int64_t, void*> RingMapInt;
 
 extern "C" void* ring_map_new() {
-    return (void*)new RingMap();
+    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
+    new (data) RingMap();
+    return data;
 }
 
 extern "C" void* ring_map_get(void* map, void* key) {
@@ -671,36 +854,44 @@ extern "C" void* ring_map_delete(void* map, void* key) {
 
 extern "C" void* ring_map_keys(void* map) {
     RingMap* m = (RingMap*)map;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
-        result->push_back((void*)new std::string(kv.first));
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(kv.first);
+        result->push_back(sd);
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" void* ring_map_values(void* map) {
     RingMap* m = (RingMap*)map;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
         result->push_back(kv.second);
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" void* ring_map_entries(void* map) {
     // Returns List of {key, value} pairs, each pair as a 2-element List
     RingMap* m = (RingMap*)map;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
-        auto* pair = new std::vector<void*>();
-        pair->push_back((void*)new std::string(kv.first));
+        void* pdata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+        auto* pair = new (pdata) std::vector<void*>();
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(kv.first);
+        pair->push_back(sd);
         pair->push_back(kv.second);
-        result->push_back((void*)pair);
+        result->push_back(pdata);
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" int64_t ring_map_len(void* map) {
@@ -712,7 +903,9 @@ extern "C" void* ring_map_for_each(void* map, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     for (auto& kv : *m) {
-        fn(cls->env_ptr, (void*)new std::string(kv.first), kv.second);
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(kv.first);
+        fn(cls->env_ptr, sd, kv.second);
     }
     return nullptr;
 }
@@ -722,7 +915,9 @@ extern "C" void* ring_map_for_each(void* map, void* closure) {
 // ============================================================================
 
 extern "C" void* ring_map_int_new() {
-    return (void*)new RingMapInt();
+    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
+    new (data) RingMapInt();
+    return data;
 }
 
 extern "C" void* ring_map_int_get(void* map, void* key) {
@@ -767,35 +962,39 @@ extern "C" void* ring_map_int_delete(void* map, void* key) {
 
 extern "C" void* ring_map_int_keys(void* map) {
     RingMapInt* m = (RingMapInt*)map;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
         result->push_back(ring_box_int(kv.first));
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" void* ring_map_int_values(void* map) {
     RingMapInt* m = (RingMapInt*)map;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
         result->push_back(kv.second);
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" void* ring_map_int_entries(void* map) {
     RingMapInt* m = (RingMapInt*)map;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
-        auto* pair = new std::vector<void*>();
+        void* pdata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+        auto* pair = new (pdata) std::vector<void*>();
         pair->push_back(ring_box_int(kv.first));
         pair->push_back(kv.second);
-        result->push_back((void*)pair);
+        result->push_back(pdata);
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" int64_t ring_map_int_len(void* map) {
@@ -814,12 +1013,15 @@ extern "C" void* ring_map_int_for_each(void* map, void* closure) {
 
 extern "C" void* ring_map_int_clone(void* map) {
     RingMapInt* m = (RingMapInt*)map;
-    return (void*)new RingMapInt(*m);
+    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
+    new (data) RingMapInt(*m);
+    return data;
 }
 
 extern "C" void* ring_map_int_from(void* entries) {
     auto* vec = (std::vector<void*>*)entries;
-    auto* result = new RingMapInt();
+    void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
+    auto* result = new (data) RingMapInt();
     for (size_t i = 0; i < vec->size(); i++) {
         auto* pair = (std::vector<void*>*)((*vec)[i]);
         if (pair->size() >= 2) {
@@ -827,7 +1029,7 @@ extern "C" void* ring_map_int_from(void* entries) {
             (*result)[key] = (*pair)[1];
         }
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_map_int_clear(void* map) {
@@ -843,7 +1045,9 @@ typedef std::unordered_set<std::string> RingSet;
 typedef std::unordered_set<int64_t> RingSetInt;
 
 extern "C" void* ring_set_new() {
-    return (void*)new RingSet();
+    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
+    new (data) RingSet();
+    return data;
 }
 
 extern "C" void* ring_set_add(void* set, void* elem) {
@@ -862,12 +1066,15 @@ extern "C" void* ring_set_delete(void* set, void* elem) {
 
 extern "C" void* ring_set_to_list(void* set) {
     RingSet* s = (RingSet*)set;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     result->reserve(s->size());
     for (auto& elem : *s) {
-        result->push_back((void*)new std::string(elem));
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(elem);
+        result->push_back(sd);
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" int64_t ring_set_len(void* set) {
@@ -876,11 +1083,12 @@ extern "C" int64_t ring_set_len(void* set) {
 
 extern "C" void* ring_set_from_list(void* list) {
     auto* vec = (std::vector<void*>*)list;
-    auto* result = new RingSet();
+    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
+    auto* result = new (data) RingSet();
     for (size_t i = 0; i < vec->size(); i++) {
         result->insert(*(std::string*)((*vec)[i]));
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_set_for_each(void* set, void* closure) {
@@ -888,7 +1096,9 @@ extern "C" void* ring_set_for_each(void* set, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (auto& elem : *s) {
-        fn(cls->env_ptr, (void*)new std::string(elem));
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(elem);
+        fn(cls->env_ptr, sd);
     }
     return nullptr;
 }
@@ -898,7 +1108,9 @@ extern "C" void* ring_set_for_each(void* set, void* closure) {
 // ============================================================================
 
 extern "C" void* ring_set_int_new() {
-    return (void*)new RingSetInt();
+    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
+    new (data) RingSetInt();
+    return data;
 }
 
 extern "C" void* ring_set_int_add(void* set, void* elem) {
@@ -920,12 +1132,13 @@ extern "C" void* ring_set_int_delete(void* set, void* elem) {
 
 extern "C" void* ring_set_int_to_list(void* set) {
     RingSetInt* s = (RingSetInt*)set;
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     result->reserve(s->size());
     for (auto& elem : *s) {
         result->push_back(ring_box_int(elem));
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" int64_t ring_set_int_len(void* set) {
@@ -934,12 +1147,13 @@ extern "C" int64_t ring_set_int_len(void* set) {
 
 extern "C" void* ring_set_int_from_list(void* list) {
     auto* vec = (std::vector<void*>*)list;
-    auto* result = new RingSetInt();
+    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
+    auto* result = new (data) RingSetInt();
     for (size_t i = 0; i < vec->size(); i++) {
         int64_t k = *(int64_t*)((*vec)[i]);
         result->insert(k);
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_set_int_for_each(void* set, void* closure) {
@@ -954,41 +1168,46 @@ extern "C" void* ring_set_int_for_each(void* set, void* closure) {
 
 extern "C" void* ring_set_int_clone(void* set) {
     RingSetInt* s = (RingSetInt*)set;
-    return (void*)new RingSetInt(*s);
+    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
+    new (data) RingSetInt(*s);
+    return data;
 }
 
 extern "C" void* ring_set_int_union(void* a, void* b) {
     RingSetInt* sa = (RingSetInt*)a;
     RingSetInt* sb = (RingSetInt*)b;
-    auto* result = new RingSetInt(*sa);
+    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
+    auto* result = new (data) RingSetInt(*sa);
     for (auto& elem : *sb) {
         result->insert(elem);
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_set_int_intersect(void* a, void* b) {
     RingSetInt* sa = (RingSetInt*)a;
     RingSetInt* sb = (RingSetInt*)b;
-    auto* result = new RingSetInt();
+    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
+    auto* result = new (data) RingSetInt();
     for (auto& elem : *sa) {
         if (sb->count(elem) > 0) {
             result->insert(elem);
         }
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_set_int_difference(void* a, void* b) {
     RingSetInt* sa = (RingSetInt*)a;
     RingSetInt* sb = (RingSetInt*)b;
-    auto* result = new RingSetInt();
+    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
+    auto* result = new (data) RingSetInt();
     for (auto& elem : *sa) {
         if (sb->count(elem) == 0) {
             result->insert(elem);
         }
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_set_int_clear(void* set) {
@@ -1050,10 +1269,11 @@ extern "C" void* ring_read_file(void* path) {
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    auto* result = new std::string((size_t)size, '\0');
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    auto* result = new (data) std::string((size_t)size, '\0');
     fread(&(*result)[0], 1, (size_t)size, f);
     fclose(f);
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_write_file(void* path, void* content) {
@@ -1078,13 +1298,16 @@ extern "C" void* ring_exit(void* boxed_code) {
 }
 
 extern "C" void* ring_args() {
-    auto* result = new std::vector<void*>();
+    void* ldata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (ldata) std::vector<void*>();
     // Skip argv[0] (program name) to match JS backend behavior
     // where process.argv.slice(2) skips [node, script]
     for (int i = 1; i < g_argc; i++) {
-        result->push_back((void*)new std::string(g_argv[i]));
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(g_argv[i]);
+        result->push_back(sd);
     }
-    return (void*)result;
+    return ldata;
 }
 
 extern "C" void* ring_cwd() {
@@ -1097,7 +1320,9 @@ extern "C" void* ring_cwd() {
         fprintf(stderr, "ring panic: getcwd failed\n");
         exit(1);
     }
-    return (void*)new std::string(buf);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(buf);
+    return data;
 }
 
 // ============================================================================
@@ -1105,7 +1330,9 @@ extern "C" void* ring_cwd() {
 // ============================================================================
 
 extern "C" void* ring_sb_new() {
-    return (void*)new std::string();
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_SB);
+    new (data) std::string();
+    return data;
 }
 
 extern "C" void* ring_sb_add(void* sb, void* s) {
@@ -1114,7 +1341,9 @@ extern "C" void* ring_sb_add(void* sb, void* s) {
 }
 
 extern "C" void* ring_sb_to_str(void* sb) {
-    return (void*)new std::string(*(std::string*)sb);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(*(std::string*)sb);
+    return data;
 }
 
 extern "C" int64_t ring_sb_len(void* sb) {
@@ -1209,57 +1438,91 @@ extern "C" void* ring_try(void* body_cl, void* catch_cl) {
 extern "C" void* ring_path_join(void* a, void* b) {
     std::string* sa = (std::string*)a;
     std::string* sb = (std::string*)b;
-    if (sa->empty()) return (void*)new std::string(*sb);
-    if (sb->empty()) return (void*)new std::string(*sa);
+    void* data;
+    if (sa->empty()) {
+        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (data) std::string(*sb);
+        return data;
+    }
+    if (sb->empty()) {
+        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (data) std::string(*sa);
+        return data;
+    }
     char last = sa->back();
     if (last == '/' || last == '\\') {
-        return (void*)new std::string(*sa + *sb);
+        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (data) std::string(*sa + *sb);
+        return data;
     }
-    return (void*)new std::string(*sa + PATH_SEP + *sb);
+    data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(*sa + PATH_SEP + *sb);
+    return data;
 }
 
 extern "C" void* ring_path_resolve(void* p) {
     std::string* sp = (std::string*)p;
+    void* data;
 #ifdef _WIN32
     char buf[4096];
     DWORD len = GetFullPathNameA(sp->c_str(), sizeof(buf), buf, nullptr);
     if (len == 0 || len >= sizeof(buf)) {
-        return (void*)new std::string(*sp);
+        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (data) std::string(*sp);
+        return data;
     }
-    return (void*)new std::string(buf);
+    data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(buf);
+    return data;
 #else
     char* resolved = realpath(sp->c_str(), nullptr);
     if (!resolved) {
-        return (void*)new std::string(*sp);
+        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (data) std::string(*sp);
+        return data;
     }
-    auto* result = new std::string(resolved);
+    data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(resolved);
     free(resolved);
-    return (void*)result;
+    return data;
 #endif
 }
 
 extern "C" void* ring_path_dirname(void* p) {
     std::string* sp = (std::string*)p;
     size_t pos = sp->find_last_of("/\\");
-    if (pos == std::string::npos) return (void*)new std::string(".");
-    return (void*)new std::string(sp->substr(0, pos));
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    if (pos == std::string::npos) {
+        new (data) std::string(".");
+    } else {
+        new (data) std::string(sp->substr(0, pos));
+    }
+    return data;
 }
 
 extern "C" void* ring_path_basename(void* p) {
     std::string* sp = (std::string*)p;
     size_t pos = sp->find_last_of("/\\");
-    if (pos == std::string::npos) return (void*)new std::string(*sp);
-    return (void*)new std::string(sp->substr(pos + 1));
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    if (pos == std::string::npos) {
+        new (data) std::string(*sp);
+    } else {
+        new (data) std::string(sp->substr(pos + 1));
+    }
+    return data;
 }
 
 extern "C" void* ring_path_extname(void* p) {
     std::string* sp = (std::string*)p;
     size_t slash = sp->find_last_of("/\\");
     size_t dot = sp->rfind('.');
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
     if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
-        return (void*)new std::string("");
+        new (data) std::string("");
+    } else {
+        new (data) std::string(sp->substr(dot));
     }
-    return (void*)new std::string(sp->substr(dot));
+    return data;
 }
 
 // ============================================================================
@@ -1288,23 +1551,30 @@ extern "C" void* ring_delete_file(void* path) {
 
 extern "C" void* ring_list_clone(void* list) {
     auto* vec = (std::vector<void*>*)list;
-    return (void*)new std::vector<void*>(*vec);
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    new (data) std::vector<void*>(*vec);
+    return data;
 }
 
 extern "C" void* ring_map_clone(void* map) {
     RingMap* m = (RingMap*)map;
-    return (void*)new RingMap(*m);
+    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
+    new (data) RingMap(*m);
+    return data;
 }
 
 extern "C" void* ring_set_clone(void* set) {
     RingSet* s = (RingSet*)set;
-    return (void*)new RingSet(*s);
+    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
+    new (data) RingSet(*s);
+    return data;
 }
 
 extern "C" void* ring_map_from(void* entries) {
     // entries is List<(K, V)> = List<List<void*>> where each inner list is [key, value]
     auto* vec = (std::vector<void*>*)entries;
-    auto* result = new RingMap();
+    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
+    auto* result = new (data) RingMap();
     for (size_t i = 0; i < vec->size(); i++) {
         auto* pair = (std::vector<void*>*)((*vec)[i]);
         if (pair->size() >= 2) {
@@ -1312,7 +1582,7 @@ extern "C" void* ring_map_from(void* entries) {
             (*result)[*key] = (*pair)[1];
         }
     }
-    return (void*)result;
+    return data;
 }
 
 // ring_set_from_list already defined above
@@ -1325,22 +1595,37 @@ extern "C" void* ring_str_trim(void* s) {
     std::string* str = (std::string*)s;
     size_t start = str->find_first_not_of(" \t\n\r\f\v");
     size_t end = str->find_last_not_of(" \t\n\r\f\v");
-    if (start == std::string::npos) return (void*)new std::string("");
-    return (void*)new std::string(str->substr(start, end - start + 1));
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    if (start == std::string::npos) {
+        new (data) std::string("");
+    } else {
+        new (data) std::string(str->substr(start, end - start + 1));
+    }
+    return data;
 }
 
 extern "C" void* ring_str_trim_start(void* s) {
     std::string* str = (std::string*)s;
     size_t start = str->find_first_not_of(" \t\n\r\f\v");
-    if (start == std::string::npos) return (void*)new std::string("");
-    return (void*)new std::string(str->substr(start));
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    if (start == std::string::npos) {
+        new (data) std::string("");
+    } else {
+        new (data) std::string(str->substr(start));
+    }
+    return data;
 }
 
 extern "C" void* ring_str_trim_end(void* s) {
     std::string* str = (std::string*)s;
     size_t end = str->find_last_not_of(" \t\n\r\f\v");
-    if (end == std::string::npos) return (void*)new std::string("");
-    return (void*)new std::string(str->substr(0, end + 1));
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    if (end == std::string::npos) {
+        new (data) std::string("");
+    } else {
+        new (data) std::string(str->substr(0, end + 1));
+    }
+    return data;
 }
 
 extern "C" void* ring_str_to_upper(void* s) {
@@ -1348,7 +1633,9 @@ extern "C" void* ring_str_to_upper(void* s) {
     for (size_t i = 0; i < result.size(); i++) {
         result[i] = (char)toupper((unsigned char)result[i]);
     }
-    return (void*)new std::string(result);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(result);
+    return data;
 }
 
 extern "C" void* ring_str_to_lower(void* s) {
@@ -1356,25 +1643,19 @@ extern "C" void* ring_str_to_lower(void* s) {
     for (size_t i = 0; i < result.size(); i++) {
         result[i] = (char)tolower((unsigned char)result[i]);
     }
-    return (void*)new std::string(result);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(result);
+    return data;
 }
 
 extern "C" void* ring_str_char_at(void* s, int64_t idx) {
     std::string* str = (std::string*)s;
     if (idx < 0 || idx >= (int64_t)str->size()) {
-        // Return Option::none — tag=1, no payload
-        // Option struct: {i64 tag, void* payload}
-        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-        opt[0] = 1; // none tag
-        opt[1] = 0;
-        return (void*)opt;
+        return ring_enum_none();
     }
-    // Return Option::some(char_str) — tag=0
-    auto* ch = new std::string(1, (*str)[(size_t)idx]);
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-    opt[0] = 0; // some tag
-    *((void**)(opt + 1)) = (void*)ch;
-    return (void*)opt;
+    void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (sd) std::string(1, (*str)[(size_t)idx]);
+    return ring_enum_some(sd);
 }
 
 extern "C" void* ring_str_index_of(void* s, void* sub) {
@@ -1382,19 +1663,9 @@ extern "C" void* ring_str_index_of(void* s, void* sub) {
     std::string* needle = (std::string*)sub;
     size_t pos = str->find(*needle);
     if (pos == std::string::npos) {
-        // Return Option::none
-        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-        opt[0] = 1; // none
-        opt[1] = 0;
-        return (void*)opt;
+        return ring_enum_none();
     }
-    // Return Option::some(index)
-    auto* boxed = (int64_t*)malloc(sizeof(int64_t));
-    *boxed = (int64_t)pos;
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-    opt[0] = 0; // some
-    *((void**)(opt + 1)) = (void*)boxed;
-    return (void*)opt;
+    return ring_enum_some(ring_box_int((int64_t)pos));
 }
 
 extern "C" void* ring_str_last_index_of(void* s, void* sub) {
@@ -1402,17 +1673,9 @@ extern "C" void* ring_str_last_index_of(void* s, void* sub) {
     std::string* needle = (std::string*)sub;
     size_t pos = str->rfind(*needle);
     if (pos == std::string::npos) {
-        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-        opt[0] = 1;
-        opt[1] = 0;
-        return (void*)opt;
+        return ring_enum_none();
     }
-    auto* boxed = (int64_t*)malloc(sizeof(int64_t));
-    *boxed = (int64_t)pos;
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-    opt[0] = 0;
-    *((void**)(opt + 1)) = (void*)boxed;
-    return (void*)opt;
+    return ring_enum_some(ring_box_int((int64_t)pos));
 }
 
 extern "C" int64_t ring_str_is_empty(void* s) {
@@ -1422,8 +1685,10 @@ extern "C" int64_t ring_str_is_empty(void* s) {
 extern "C" void* ring_str_pad_start(void* s, int64_t length, void* fill) {
     std::string* str = (std::string*)s;
     std::string* filler = (std::string*)fill;
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
     if ((int64_t)str->size() >= length || filler->empty()) {
-        return (void*)new std::string(*str);
+        new (data) std::string(*str);
+        return data;
     }
     std::string result;
     while ((int64_t)(result.size() + str->size()) < length) {
@@ -1431,20 +1696,24 @@ extern "C" void* ring_str_pad_start(void* s, int64_t length, void* fill) {
     }
     result = result.substr(0, (size_t)(length - (int64_t)str->size()));
     result += *str;
-    return (void*)new std::string(result);
+    new (data) std::string(result);
+    return data;
 }
 
 extern "C" void* ring_str_pad_end(void* s, int64_t length, void* fill) {
     std::string* str = (std::string*)s;
     std::string* filler = (std::string*)fill;
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
     if ((int64_t)str->size() >= length || filler->empty()) {
-        return (void*)new std::string(*str);
+        new (data) std::string(*str);
+        return data;
     }
     std::string result = *str;
     while ((int64_t)result.size() < length) {
         result += *filler;
     }
-    return (void*)new std::string(result.substr(0, (size_t)length));
+    new (data) std::string(result.substr(0, (size_t)length));
+    return data;
 }
 
 extern "C" void* ring_str_repeat(void* s, int64_t count) {
@@ -1453,24 +1722,18 @@ extern "C" void* ring_str_repeat(void* s, int64_t count) {
     for (int64_t i = 0; i < count; i++) {
         result += *str;
     }
-    return (void*)new std::string(result);
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(result);
+    return data;
 }
 
 extern "C" void* ring_str_char_code_at(void* s, int64_t idx) {
     CHK("str_char_code_at");
     std::string* str = (std::string*)s;
     if (idx < 0 || idx >= (int64_t)str->size()) {
-        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-        opt[0] = 1;
-        opt[1] = 0;
-        return (void*)opt;
+        return ring_enum_none();
     }
-    auto* boxed = (int64_t*)malloc(sizeof(int64_t));
-    *boxed = (int64_t)(unsigned char)(*str)[(size_t)idx];
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-    opt[0] = 0;
-    *((void**)(opt + 1)) = (void*)boxed;
-    return (void*)opt;
+    return ring_enum_some(ring_box_int((int64_t)(unsigned char)(*str)[(size_t)idx]));
 }
 
 // ============================================================================
@@ -1498,20 +1761,10 @@ extern "C" void* ring_parse_int(void* s) {
         size_t pos;
         int64_t val = std::stoll(*str, &pos);
         if (pos == str->size()) {
-            // Return Option::some(boxed_int)
-            auto* boxed = (int64_t*)malloc(sizeof(int64_t));
-            *boxed = val;
-            auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-            opt[0] = 0;
-            *((void**)(opt + 1)) = (void*)boxed;
-            return (void*)opt;
+            return ring_enum_some(ring_box_int(val));
         }
     } catch (...) {}
-    // Return Option::none
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-    opt[0] = 1;
-    opt[1] = 0;
-    return (void*)opt;
+    return ring_enum_none();
 }
 
 extern "C" void* ring_parse_float(void* s) {
@@ -1520,18 +1773,10 @@ extern "C" void* ring_parse_float(void* s) {
         size_t pos;
         double val = std::stod(*str, &pos);
         if (pos == str->size()) {
-            auto* boxed = (double*)malloc(sizeof(double));
-            *boxed = val;
-            auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-            opt[0] = 0;
-            *((void**)(opt + 1)) = (void*)boxed;
-            return (void*)opt;
+            return ring_enum_some(ring_box_float(val));
         }
     } catch (...) {}
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-    opt[0] = 1;
-    opt[1] = 0;
-    return (void*)opt;
+    return ring_enum_none();
 }
 
 // ============================================================================
@@ -1541,35 +1786,38 @@ extern "C" void* ring_parse_float(void* s) {
 extern "C" void* ring_set_union(void* a, void* b) {
     RingSet* sa = (RingSet*)a;
     RingSet* sb = (RingSet*)b;
-    auto* result = new RingSet(*sa);
+    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
+    auto* result = new (data) RingSet(*sa);
     for (auto& elem : *sb) {
         result->insert(elem);
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_set_intersect(void* a, void* b) {
     RingSet* sa = (RingSet*)a;
     RingSet* sb = (RingSet*)b;
-    auto* result = new RingSet();
+    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
+    auto* result = new (data) RingSet();
     for (auto& elem : *sa) {
         if (sb->count(elem) > 0) {
             result->insert(elem);
         }
     }
-    return (void*)result;
+    return data;
 }
 
 extern "C" void* ring_set_difference(void* a, void* b) {
     RingSet* sa = (RingSet*)a;
     RingSet* sb = (RingSet*)b;
-    auto* result = new RingSet();
+    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
+    auto* result = new (data) RingSet();
     for (auto& elem : *sa) {
         if (sb->count(elem) == 0) {
             result->insert(elem);
         }
     }
-    return (void*)result;
+    return data;
 }
 
 // ============================================================================
@@ -1579,19 +1827,11 @@ extern "C" void* ring_set_difference(void* a, void* b) {
 extern "C" void* ring_list_shift(void* list) {
     auto* vec = (std::vector<void*>*)list;
     if (vec->empty()) {
-        // Return Option::none
-        auto* opt = (int64_t*)malloc(sizeof(int64_t) * 2);
-        opt[0] = 1;
-        opt[1] = 0;
-        return (void*)opt;
+        return ring_enum_none();
     }
     void* val = vec->front();
     vec->erase(vec->begin());
-    // Return Option::some(val)
-    auto* opt = (int64_t*)malloc(sizeof(int64_t) + sizeof(void*));
-    opt[0] = 0;
-    *((void**)(opt + 1)) = val;
-    return (void*)opt;
+    return ring_enum_some(val);
 }
 
 extern "C" void* ring_list_clear(void* list) {
@@ -1642,7 +1882,12 @@ extern "C" void* ring_assert(int64_t cond, void* msg) {
 // rendered as a quoted, escaped JSON string. (General <T> serialization would
 // require runtime type tags, which the uniform-boxing runtime does not carry.)
 extern "C" void* ring_json_stringify(void* val) {
-    if (!val) return (void*)new std::string("null");
+    void* data;
+    if (!val) {
+        data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (data) std::string("null");
+        return data;
+    }
     std::string* s = (std::string*)val;
     std::string out = "\"";
     for (unsigned char c : *s) {
@@ -1665,7 +1910,9 @@ extern "C" void* ring_json_stringify(void* val) {
         }
     }
     out += "\"";
-    return (void*)new std::string(out);
+    data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string(out);
+    return data;
 }
 
 // ============================================================================
@@ -1696,16 +1943,92 @@ extern "C" void* ring_cl_ne_tag(void* env, void* a, void* b) {
 }
 
 static void* ring_make_closure(void* fn) {
-    void** c = (void**)malloc(2 * sizeof(void*));
+    void* data = ring_alloc(2 * sizeof(void*), RING_TYPEID_CLOSURE);
+    void** c = (void**)data;
     c[0] = fn; c[1] = nullptr;
-    return (void*)c;
+    return data;
 }
 static void* ring_make_eq_dict(void* eqfn, void* nefn) {
-    void** d = (void**)malloc(4 * sizeof(void*));
+    // Dict struct is 4 void* slots: [eq_closure, ne_closure, null, null]
+    // Treated as TUPLE for RC purposes (fields are ring_alloc'd closures).
+    void* data = ring_alloc(4 * sizeof(void*), RING_TYPEID_TUPLE);
+    void** d = (void**)data;
     d[0] = ring_make_closure(eqfn);
     d[1] = ring_make_closure(nefn);
     d[2] = nullptr; d[3] = nullptr;
-    return (void*)d;
+    return data;
+}
+
+// ============================================================================
+// Perceus RC L0 — container drop functions
+// ============================================================================
+
+static void drop_list(void* data) {
+    auto* v = (std::vector<void*>*)data;
+    for (void* elem : *v) {
+        ring_drop(elem);
+    }
+    v->~vector();
+}
+
+static void drop_map(void* data) {
+    auto* m = (RingMap*)data;
+    // Str keys are std::string (value type, not pointer), destructor handles them.
+    // Values are void* pointing to Ring heap objects, need ring_drop.
+    for (auto& kv : *m) {
+        ring_drop(kv.second);
+    }
+    m->~unordered_map();
+}
+
+static void drop_map_int(void* data) {
+    auto* m = (RingMapInt*)data;
+    for (auto& kv : *m) {
+        ring_drop(kv.second);
+    }
+    m->~unordered_map();
+}
+
+static void drop_set(void* data) {
+    // Set<Str> — std::unordered_set<std::string>, elements are value types.
+    // Destructor auto-releases, no recursive ring_drop needed.
+    ((RingSet*)data)->~unordered_set();
+}
+
+static void drop_set_int(void* data) {
+    ((RingSetInt*)data)->~unordered_set();
+}
+
+static void drop_closure(void* data) {
+    // RingClosure = { fn_ptr: void*, env_ptr: void* }
+    // fn_ptr is a function pointer, don't drop.
+    // env_ptr if non-null is a ring_alloc'd env struct, needs ring_drop.
+    void** cls = (void**)data;
+    if (cls[1]) {  // env_ptr
+        ring_drop(cls[1]);
+    }
+}
+
+static void drop_option(void* data) {
+    // Option = { tag: i64, payload: void* }
+    // tag==0 => Some(payload), tag==1 => None
+    int64_t tag = *(int64_t*)data;
+    if (tag == 0) {
+        void* payload = *(void**)((int64_t*)data + 1);
+        if (payload) ring_drop(payload);
+    }
+}
+
+static void drop_tuple(void* data) {
+    // Tuple/struct fields are contiguous void* pointers.
+    // L0 simplification: tuple drop handled by codegen-generated per-type drop_T.
+    // Runtime fallback is a no-op.
+    (void)data;
+}
+
+static void drop_sb(void* data) {
+    // StringBuilder is just a std::string underneath.
+    ((std::string*)data)->~basic_string();
 }
 
 extern "C" void* ring_get_builtin_dict(void* name_ptr) {
@@ -1732,10 +2055,11 @@ extern "C" void* ring_get_builtin_dict(void* name_ptr) {
 extern "C" void* ring_list_join(void* list, void* sep) {
     auto* vec = (std::vector<void*>*)list;
     std::string* separator = (std::string*)sep;
-    auto* result = new std::string();
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    auto* result = new (data) std::string();
     for (size_t i = 0; i < vec->size(); i++) {
         if (i > 0) *result += *separator;
         *result += *(std::string*)((*vec)[i]);
     }
-    return (void*)result;
+    return data;
 }
