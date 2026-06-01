@@ -28,13 +28,12 @@
 - ~~B-043 Refinement × Linear × Effects 交互矩阵 [M]~~ ✅ 已完成（2026-05-24）
 - ~~B-044 Ring 语义规范 [M]~~ ✅ 已完成（2026-05-24）
 
-**关键路径（2026-05-24 更新）**：
-- ~~B-004~~ → ~~B-036~~ → ~~B-011 LLVM~~ ✅（~~关联类型~~ ✅ → ~~Iterator~~ ✅ → LLVM 基础后端）
-- ~~B-036 不再阻塞 LLVM~~
-- Linear types 不阻塞基础 LLVM，是 Perceus RC 的前置
-- B-042 与关键路径并行，阻塞 B-012 Perceus 但不阻塞 LLVM 基础
-- B-033 GADTs 移出层 2，推迟至 LLVM 之后（无下游依赖，非编译器自举需求）
-- 层 3（Refinement/Linear/async）在 LLVM 基础后端可用后启动
+**关键路径（2026-06-01 更新）**：
+- ~~B-004~~ → ~~B-036~~ → ~~B-011 LLVM~~ ✅ → ~~B-012 Perceus RC L0 基础设施~~ ✅
+- **当前关键路径**：B-082（RC 诊断）→ B-081（dup 架构迁移）→ B-083（RC 正确性）→ 带 RC 全自举验证
+- B-042 / B-068 阻塞 L1/L2，不阻塞 L0 正确性修复
+- B-033 GADTs 推迟至 LLVM 之后（无下游依赖）
+- 层 3（Refinement/Linear/async）在全自举验证通过后启动
 - **LLVM 落地后 JS 后端废弃**
 
 ---
@@ -297,42 +296,17 @@ fn test_fetch() {
 
 > **B-011 LLVM Native Backend 已完成（2026-06-01）** — 前端自举打通：ring.exe 单文件产出与参考编译器字节级一致，多模块端到端跑通，所有 codegen bug + fail/catch 已修（见 `tests/cases/llvm/` 回归套件）。**完整 native 自举的剩余两条验收（二次自举一致性 + native E2E 全过）受内存墙（25.9GB，no-GC）阻塞，已并入 B-012——Perceus RC 是解锁它们的唯一路径。**
 
-### B-012 Perceus RC 核心 (L0) [feature] [P1] [XL] [judgment] [doing]
-精确引用计数的最小正确实现——dup/drop 插入 + 归零即 free，消除 uniform-boxing「不回收」导致的内存墙。**完成全 native 自举的唯一路径**（继承 B-011 剩余两条验收）。仅 `--target=llvm`。
+### ~~B-012 Perceus RC 核心 (L0)~~ ✅ 已完成（2026-06-01）
 
-> **实现进度（2026-06-01）**：基础设施全部落地，简单程序端到端正确（11 LLVM diff 全过）。**剩余阻塞 = Perceus pass correctness gap**：反向 liveness 的表达式层 Block 包装方案在编译器自身的复杂代码（深嵌套 closure + try/catch + 大量 pattern matching）上产生错误 dup/drop 序列 → heap corruption。Runtime 层已验证正确（禁用 pass 后 ring.exe 正常运行）。修复方向：将 dup 插入从表达式层 Block 包装改为语句层 emit，加强 liveness 分析对嵌套作用域的覆盖。
+基础设施全部落地：runtime RC（ring_alloc/dup/drop + typeid dispatch + builtin drops）、HIR Drop/Dup 节点、Perceus pass（backward liveness + branch-balancing）、LLVM codegen 集成。不带 RC pass 可自举且功能正常。728 E2E + 11 LLVM diff 全过。
 
-> **Perceus 分层（2026-06-01 确定，见 design.md §7.10）**：
-> **L0 RC 核心（本 item）** → L1 借用优化（B-068，设计见 §7.2–7.8）→ L2 Drop/RAII + drop-aware unwind + `Weak<T>`（B-002）→ L3 reuse/FBIP（B-079）→ L4 标量 unboxing（B-080）。
-> L0 单独即可解锁全自举，**无硬前置**（owned-everywhere 不需要先做借用推断；B-011 已完成）。
+**Perceus 分层不变**：L0 ✅ → L1 借用优化（B-068）→ L2 Drop/RAII（B-002）→ L3 reuse/FBIP（B-079）→ L4 标量 unboxing（B-080）。
 
-**架构决策（2026-06-01）**：
-1. **对象头**：每个堆对象 offset 0 为 `{rc: u32, typeid: u32}`（8 字节）。dup/drop 类型无关——读 `*(u32*)ptr` 加减即可。
-2. **drop dispatch**：per-type drop 函数 + typeid 全局派发表。内建类型（List/Map/Set/Str/closure）runtime 手写 drop；用户 struct/enum 由 **codegen 生成 `drop_T(ptr)`**（按 tag 精确递归 drop owned 字段后 free）。`ring_drop` 归零时按 typeid 派发。（Koka 风格 per-type drop/scan 函数）
-3. **IR 表示**：HIR 扩展显式 `HStmt::Drop(var)` + dup 机制（`Dup` 节点或变量引用 `consume` 标记）。RC 行为落在 IR 里 → 可 dump / eyeball / 写 E2E 断言。codegen 见到即 emit `ring_dup`/`ring_drop`。
-4. **Pass 放置**：`HIR → [Perceus RC pass，仅 llvm] → RC 标注 HIR → codegen`。JS 后端有 GC，整 pass 跳过（Dup/Drop 在 JS 路径不产出）。
-5. **last-use 算法**：函数体**反向 liveness**。逆序遍历维护 `live` 集：变量逆序首遇 = 正序最后一次用 = move 不 dup，加入 live；已在 live = 需 dup。作用域退出时已死的 owned var 插 drop。分支（if/match）用 **branch-balancing**（在该 var dead 的分支插 drop）。**翻译 Koka Perceus（POPL'21）的 `⟦·⟧` 转换 + 分支平衡规则，代码标注来源。**
-6. **uniform，无特殊 case**：Int/Float/Bool 等标量在 L0 仍 boxed 且照常 RC（unboxing 是 L4）。不引入任何标量旁路 workaround。
-7. **handler（tail-resumptive）**：不做 multi-resume → 无 reified continuation 复制；handler body + resume 退化成普通作用域的 backward liveness。impl 时确认即可，非算法分叉。
-
-**范围边界（明确划出，非遗漏——no-silent-bypass）**：
-- **abort 路径不 drop**：fail/catch 现为 setjmp/longjmp，longjmp 跳过中间帧的 drop 调用 = **泄漏**（非 double-free/UAF：longjmp 只放弃栈帧，不会重复执行 drop）。自举走成功路径不触发；用户报错 abort 后进程退出 OS 回收。drop-aware unwind 留 **L2（B-002）**。
-- **循环引用泄漏**：L0 精确 RC，环泄漏。编译器自身数据结构为树/DAG，预期无环。`Weak<T>` 解法在 L2。
-- **不含借用优化 / reuse / unboxing**：分别在 L1 / L3 / L4。
-
-**涉及修改**：
-1. `ring_runtime.cpp`：对象头 `{rc, typeid}` 加到每个堆分配；`ring_dup`/`ring_drop`；内建类型 drop 函数 + typeid 派发表；现有 alloc 函数补头。
-2. `hir.ring`：新增 `HStmt::Drop` + dup 表示；所有穷尽 match 补分支。
-3. 新增 Perceus RC pass（codegen_llvm 之前）：reverse-liveness + dup/drop 插入，翻译 Koka。
-4. `codegen_llvm*.ring`：emit `ring_dup`/`ring_drop`；为每个 struct/enum 生成 `drop_T` 并注册 typeid。
-5. JS codegen：`Dup`/`Drop` 走 no-op 分支（或确认 llvm-only pass 不产出到 JS 路径）。
-
-**验收标准**：
-- 编译整个编译器内存峰值从 25.9GB 大幅下降（目标：普通内存机器可完成全程）。
-- **完整 native 自举打通**（继承 B-011）：native ring.exe 编译自身 → 二次自举字节级一致。
-- E2E 全量测试在 native 编译器上通过。
-- `llvm_diff` 差分套件全过（JS 后端为 oracle，输出一致）。
-- 728 JS e2e 不回归；自举编译器正常编译自身。
+**L0 剩余收尾**（从 B-012 拆出为独立 item）：
+- B-082：RC 诊断基础设施（runtime 断言 + codegen 警告）
+- B-081：dup 从表达式层 Block 包装迁移到语句层 emit
+- B-083：RC pass 正确性修复（闭包捕获 / try-catch / 循环+闭包 / match guard）
+- 全部完成后：带 RC pass 编译编译器自身，验证内存下降 + 二次自举一致性
 
 ### B-079 Perceus Reuse Analysis / FBIP (L3) [feature] [P3] [XL] [judgment] [queued]
 就地复用分析（functional but in-place）：`rc == 1` 时 match 解构 + 同尺寸重构 → 就地改写，drop-reuse 配对消除分配。Perceus 的性能核爆点（函数式写法零拷贝：list map、tree rebalance/insert）。含 reuse specialization（为有/无 reuse token 特化函数）+ COW（`rc > 1` 时 clone-on-write，内部优化非用户可见语义）。
@@ -635,6 +609,21 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
+### B-082 Perceus RC 诊断基础设施 [feature] [P1] [S] [judgment] [queued]
+
+为 RC pass 调试提供精确崩溃信号，消除盲调。执行顺序：B-082 → B-081 → B-083。
+
+**涉及修改**：
+1. `ring_runtime.cpp`：`ring_drop` 加 `rc > 0` 断言（drop 时 rc 已为 0 = double-free）；free 后写 magic sentinel（`0xDEADBEEF`）检测 UAF；`ring_dup` 加 rc 上溢检测
+2. `compiler/codegen_llvm_stmt.ring`：Drop/Dup 节点的 `none => {}` 静默跳过改为 emit stderr 警告（变量名 + "not found in named_values"），开发阶段暴露 Perceus pass 与 codegen 的不一致
+
+**验收标准**：
+- double-free 场景触发 assertion failure 而非静默 heap corruption
+- UAF 场景读到 sentinel 值而非随机数据
+- codegen 遇到未知变量的 Drop/Dup 时输出警告而非静默跳过
+- 728 E2E + LLVM diff 不回归（正常路径不触发断言）
+- 自举编译器正常编译自身
+
 ### B-081 Perceus dup 从表达式层 Block 包装迁移到语句层 emit [refactor] [P1] [M] [judgment] [queued]
 当前 dup 通过 `HExpr::Block { stmts: [Dup], tail: Ident }` 在表达式层插入，改变了 HIR 树结构。codegen 多处假设特定节点类型（如 `gen_call` 期望 callee 是 `Ident`，`emit_assign` 期望 target 是 `Ident`/`FieldAccess`），Block 包装会触发 panic 或错误行为。L0 已通过 `locals` 集合规避了全局函数问题，但随着 L1 借用优化和更复杂的 RC 场景，隐患会扩大。
 
@@ -651,6 +640,32 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 所有 dup 通过 `HStmt::Dup` 在语句层表示
 - 728 E2E + LLVM diff 全过
 - 自举编译器正常编译自身
+
+### B-083 Perceus RC pass 正确性修复 [bugfix] [P1] [L] [judgment] [queued]
+
+B-012 L0 基础设施已落地，但 RC pass 在编译器自身的复杂代码上产生错误 dup/drop 序列 → heap corruption（premature free）。不带 RC pass 可自举，带 RC pass 崩溃。本 item 修复所有已知正确性 gap。
+
+**前置依赖**：B-082（诊断基础设施，提供精确崩溃信号）、B-081（dup 语句层迁移，避免在旧架构上修）
+
+**已知问题（按崩溃频率排序）**：
+
+1. **Lambda 捕获未插入 Dup**（CRITICAL）：`perceus.ring` 闭包捕获变量只 `outer_live.insert(v)` 标记活跃，未生成 `HStmt::Dup`。外层分析将闭包构造视为 last-use → drop，闭包内部 UAF。编译器自身大量用闭包，命中率极高。
+2. **TryCatch 未处理异常传播路径**（CRITICAL）：只考虑 body 正常完成 + catch arm 匹配，未处理异常不匹配直接传播的路径。branch-balancing 在不该 drop 的路径插了 drop。
+3. **循环内闭包捕获**（CRITICAL）：循环外 dup 一次，但每次迭代创建的闭包都引用同一值。循环结束后 drop → 之前迭代的闭包持有野指针。
+4. **Match guard 分析顺序**（HIGH）：guard 在 body 之后分析但运行时先执行，嵌套模式匹配时 live set 计算错误。
+
+**涉及修改**：
+1. `compiler/perceus.ring`：Lambda 分支——闭包构造前对每个 captured var emit `HStmt::Dup`
+2. `compiler/perceus.ring`：TryCatch 分支——三路分析（成功 / catch 匹配 / 异常传播）
+3. `compiler/perceus.ring`：ForIn/While 分支——每次迭代对闭包捕获变量 dup
+4. `compiler/perceus.ring`：Match 分支——guard/body 作为独立分支分析，合并 live set
+
+**验收标准**：
+- 带 RC pass 编译编译器自身不崩溃，内存峰值从 25.9GB 大幅下降
+- 二次自举一致性（native ring.exe 编译自身 → 字节级一致）
+- E2E 全量测试在 native 编译器上通过
+- `llvm_diff` 差分套件全过
+- 728 JS E2E 不回归；自举编译器正常编译自身
 
 ### B-078 清理 B-066 parser workaround（string literal → import）[refactor] [P3] [S] [mechanical] [queued]
 `parser.ring:998` 仍用 string literal `"W0001"` 而非 `import codes::{W0001}`，这是 B-066 实现时因 B-077 跨模块 const bug 而采用的 workaround。B-077 已修复，应改回正常 import。
