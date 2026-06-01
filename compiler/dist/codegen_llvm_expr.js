@@ -3978,13 +3978,25 @@ function collect_captures(ctx, expr, params, captures) {
       break __ring_match108;
     }
     if (__ring_m108._tag === "StructLit") {
-      const fields = __ring_m108.fields;
+      const fields = __ring_m108.fields; const spread = __ring_m108.spread;
       const __ring_iter_51 = __List_Iterable.iter(fields);
       while (true) {
         const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
         if (__ring_next_51._tag === "none") break;
         const f = __ring_next_51._0;
         collect_captures(ctx, f.value, params, captures);
+      }
+      __ring_match114: {
+        const __ring_m114 = spread;
+        if (__ring_m114._tag === "some") {
+          const sp = __ring_m114._0;
+          return collect_captures(ctx, sp, params, captures);
+          break __ring_match114;
+        }
+        if (__ring_m114._tag === "none") {
+          break __ring_match114;
+        }
+        __match_fail(__ring_m114);
       }
       break __ring_match108;
     }
@@ -4021,41 +4033,20 @@ function collect_captures(ctx, expr, params, captures) {
       return collect_captures(ctx, lb, params, captures);
       break __ring_match108;
     }
-    break __ring_match108;
-  }
-}
-
-function collect_captures_stmt(ctx, stmt, params, captures) {
-  __ring_match114: {
-    const __ring_m114 = stmt;
-    if (__ring_m114._tag === "Let") {
-      const init = __ring_m114.init;
-      return collect_captures(ctx, init, params, captures);
-      break __ring_match114;
-    }
-    if (__ring_m114._tag === "Var") {
-      const init = __ring_m114.init;
-      return collect_captures(ctx, init, params, captures);
-      break __ring_match114;
-    }
-    if (__ring_m114._tag === "Assign") {
-      const target = __ring_m114.target; const value = __ring_m114.value;
-      collect_captures(ctx, target, params, captures);
-      return collect_captures(ctx, value, params, captures);
-      break __ring_match114;
-    }
-    if (__ring_m114._tag === "ExprStmt") {
-      const expr = __ring_m114.expr;
-      return collect_captures(ctx, expr, params, captures);
-      break __ring_match114;
-    }
-    if (__ring_m114._tag === "Return") {
-      const value = __ring_m114.value;
+    if (__ring_m108._tag === "NamedVariantConstruct") {
+      const nvc_fields = __ring_m108.fields; const nvc_spread = __ring_m108.spread;
+      const __ring_iter_54 = __List_Iterable.iter(nvc_fields);
+      while (true) {
+        const __ring_next_54 = __ListIterator_Iterator.next(__ring_iter_54);
+        if (__ring_next_54._tag === "none") break;
+        const f = __ring_next_54._0;
+        collect_captures(ctx, f.value, params, captures);
+      }
       __ring_match115: {
-        const __ring_m115 = value;
+        const __ring_m115 = nvc_spread;
         if (__ring_m115._tag === "some") {
-          const v = __ring_m115._0;
-          return collect_captures(ctx, v, params, captures);
+          const sp = __ring_m115._0;
+          return collect_captures(ctx, sp, params, captures);
           break __ring_match115;
         }
         if (__ring_m115._tag === "none") {
@@ -4063,21 +4054,122 @@ function collect_captures_stmt(ctx, stmt, params, captures) {
         }
         __match_fail(__ring_m115);
       }
-      break __ring_match114;
+      break __ring_match108;
     }
-    if (__ring_m114._tag === "While") {
-      const condition = __ring_m114.condition; const body = __ring_m114.body;
+    if (__ring_m108._tag === "TryCatch") {
+      const tc_body = __ring_m108.body; const tc_arms = __ring_m108.arms;
+      collect_captures(ctx, tc_body, params, captures);
+      const __ring_iter_55 = __List_Iterable.iter(tc_arms);
+      while (true) {
+        const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
+        if (__ring_next_55._tag === "none") break;
+        const arm = __ring_next_55._0;
+        collect_captures(ctx, arm.body, params, captures);
+      }
+      break __ring_match108;
+    }
+    if (__ring_m108._tag === "HandleExpr") {
+      const he_body = __ring_m108.body;
+      return collect_captures(ctx, he_body, params, captures);
+      break __ring_match108;
+    }
+    if (__ring_m108._tag === "EffectOp") {
+      const eo_args = __ring_m108.args;
+      const __ring_iter_56 = __List_Iterable.iter(eo_args);
+      while (true) {
+        const __ring_next_56 = __ListIterator_Iterator.next(__ring_iter_56);
+        if (__ring_next_56._tag === "none") break;
+        const a = __ring_next_56._0;
+        collect_captures(ctx, a, params, captures);
+      }
+      break __ring_match108;
+    }
+    if (__ring_m108._tag === "RangeExpr") {
+      const rs = __ring_m108.start; const re = __ring_m108.end;
+      collect_captures(ctx, rs, params, captures);
+      return collect_captures(ctx, re, params, captures);
+      break __ring_match108;
+    }
+    break __ring_match108;
+  }
+}
+
+function collect_captures_stmt(ctx, stmt, params, captures) {
+  __ring_match116: {
+    const __ring_m116 = stmt;
+    if (__ring_m116._tag === "Let") {
+      const init = __ring_m116.init;
+      return collect_captures(ctx, init, params, captures);
+      break __ring_match116;
+    }
+    if (__ring_m116._tag === "Var") {
+      const init = __ring_m116.init;
+      return collect_captures(ctx, init, params, captures);
+      break __ring_match116;
+    }
+    if (__ring_m116._tag === "Assign") {
+      const target = __ring_m116.target; const value = __ring_m116.value;
+      collect_captures(ctx, target, params, captures);
+      return collect_captures(ctx, value, params, captures);
+      break __ring_match116;
+    }
+    if (__ring_m116._tag === "ExprStmt") {
+      const expr = __ring_m116.expr;
+      return collect_captures(ctx, expr, params, captures);
+      break __ring_match116;
+    }
+    if (__ring_m116._tag === "Return") {
+      const value = __ring_m116.value;
+      __ring_match117: {
+        const __ring_m117 = value;
+        if (__ring_m117._tag === "some") {
+          const v = __ring_m117._0;
+          return collect_captures(ctx, v, params, captures);
+          break __ring_match117;
+        }
+        if (__ring_m117._tag === "none") {
+          break __ring_match117;
+        }
+        __match_fail(__ring_m117);
+      }
+      break __ring_match116;
+    }
+    if (__ring_m116._tag === "While") {
+      const condition = __ring_m116.condition; const body = __ring_m116.body;
       collect_captures(ctx, condition, params, captures);
       return collect_captures(ctx, body, params, captures);
-      break __ring_match114;
+      break __ring_match116;
     }
-    if (__ring_m114._tag === "ForIn") {
-      const iterable = __ring_m114.iterable; const body = __ring_m114.body;
+    if (__ring_m116._tag === "ForIn") {
+      const iterable = __ring_m116.iterable; const body = __ring_m116.body;
       collect_captures(ctx, iterable, params, captures);
       return collect_captures(ctx, body, params, captures);
-      break __ring_match114;
+      break __ring_match116;
     }
-    break __ring_match114;
+    if (__ring_m116._tag === "LetDestructure") {
+      const init = __ring_m116.init;
+      return collect_captures(ctx, init, params, captures);
+      break __ring_match116;
+    }
+    if (__ring_m116._tag === "IfLet") {
+      const expr = __ring_m116.expr; const then_block = __ring_m116.then_block; const else_block = __ring_m116.else_block;
+      collect_captures(ctx, expr, params, captures);
+      collect_captures(ctx, then_block, params, captures);
+      __ring_match118: {
+        const __ring_m118 = else_block;
+        if (__ring_m118._tag === "some") {
+          const eb = __ring_m118._0;
+          return collect_captures(ctx, eb, params, captures);
+          break __ring_match118;
+        }
+        if (__ring_m118._tag === "none") {
+          break __ring_match118;
+        }
+        __match_fail(__ring_m118);
+      }
+      break __ring_match116;
+    }
+    break __ring_match116;
   }
 }
 
@@ -4096,19 +4188,19 @@ function gen_catch_closure(ctx, arms) {
   const err_param = new hir$HParam("__catch_err", types$Type_AnyType, Option_none, false);
   const params = [err_param];
   let captures = [];
-  const __ring_iter_54 = __List_Iterable.iter(arms);
+  const __ring_iter_57 = __List_Iterable.iter(arms);
   while (true) {
-    const __ring_next_54 = __ListIterator_Iterator.next(__ring_iter_54);
-    if (__ring_next_54._tag === "none") break;
-    const arm = __ring_next_54._0;
+    const __ring_next_57 = __ListIterator_Iterator.next(__ring_iter_57);
+    if (__ring_next_57._tag === "none") break;
+    const arm = __ring_next_57._0;
     collect_captures(ctx, arm.body, params, captures);
   }
   let env_elem_types = [];
-  const __ring_iter_55 = __List_Iterable.iter(captures);
+  const __ring_iter_58 = __List_Iterable.iter(captures);
   while (true) {
-    const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
-    if (__ring_next_55._tag === "none") break;
-    const c = __ring_next_55._0;
+    const __ring_next_58 = __ListIterator_Iterator.next(__ring_iter_58);
+    if (__ring_next_58._tag === "none") break;
+    const c = __ring_next_58._0;
     List_push(env_elem_types, ctx.ptr_type);
   }
   const env_ty = ((List_len(captures) > 0) ? LLVMStructTypeInContext(ctx.context, env_elem_types, 0) : LLVMStructTypeInContext(ctx.context, [ctx.ptr_type], 0));
@@ -4122,23 +4214,23 @@ function gen_catch_closure(ctx, arms) {
   const entry = LLVMAppendBasicBlockInContext(ctx.context, catch_fn, "entry");
   LLVMPositionBuilderAtEnd(ctx.builder, entry);
   const env_ptr = LLVMGetParam(catch_fn, 0);
-  const __ring_end56 = List_len(captures);
-  for (let i = 0; i < __ring_end56; i++) {
-    __ring_match116: {
-      const __ring_m116 = List_get(captures, i);
-      if (__ring_m116._tag === "some") {
-        const cap_name = __ring_m116._0;
+  const __ring_end59 = List_len(captures);
+  for (let i = 0; i < __ring_end59; i++) {
+    __ring_match119: {
+      const __ring_m119 = List_get(captures, i);
+      if (__ring_m119._tag === "some") {
+        const cap_name = __ring_m119._0;
         const cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_ptr, i, codegen_llvm_ctx$fresh_name(ctx, "ce"));
         const cap_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, cap_ptr, codegen_llvm_ctx$fresh_name(ctx, cap_name));
         const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, cap_name);
         discard(LLVMBuildStore(ctx.builder, cap_val, alloca));
         _Map_insert(ctx.named_values, cap_name, alloca);
-        break __ring_match116;
+        break __ring_match119;
       }
-      if (__ring_m116._tag === "none") {
-        break __ring_match116;
+      if (__ring_m119._tag === "none") {
+        break __ring_match119;
       }
-      __match_fail(__ring_m116);
+      __match_fail(__ring_m119);
     }
   }
   const error_val = LLVMGetParam(catch_fn, 1);
@@ -4152,12 +4244,12 @@ function gen_catch_closure(ctx, arms) {
   const alloc_ty2 = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_alloc");
   const catch_closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0);
   const env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty2, alloc_fn2, [env_size, catch_closure_typeid], codegen_llvm_ctx$fresh_name(ctx, "env"));
-  const __ring_end57 = List_len(captures);
-  for (let i = 0; i < __ring_end57; i++) {
-    __ring_match117: {
-      const __ring_m117 = List_get(captures, i);
-      if (__ring_m117._tag === "some") {
-        const cap_name = __ring_m117._0;
+  const __ring_end60 = List_len(captures);
+  for (let i = 0; i < __ring_end60; i++) {
+    __ring_match120: {
+      const __ring_m120 = List_get(captures, i);
+      if (__ring_m120._tag === "some") {
+        const cap_name = __ring_m120._0;
         const cap_val = (function() {
   const __ring_m = _Map_get(ctx.named_values, cap_name);
   if (__ring_m._tag === "some") { const alloca = __ring_m._0; return LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, codegen_llvm_ctx$fresh_name(ctx, "cv")); }
@@ -4166,12 +4258,12 @@ function gen_catch_closure(ctx, arms) {
 })();
         const cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, i, codegen_llvm_ctx$fresh_name(ctx, "ep"));
         discard(LLVMBuildStore(ctx.builder, cap_val, cap_ptr));
-        break __ring_match117;
+        break __ring_match120;
       }
-      if (__ring_m117._tag === "none") {
-        break __ring_match117;
+      if (__ring_m120._tag === "none") {
+        break __ring_match120;
       }
-      __match_fail(__ring_m117);
+      __match_fail(__ring_m120);
     }
   }
   const closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0);
@@ -4188,33 +4280,33 @@ function gen_catch_arms(ctx, error_val, arms) {
   if ((List_len(arms) === 0)) {
     return LLVMConstPointerNull(ctx.ptr_type);
   }
-  const __ring_iter_58 = __List_Iterable.iter(arms);
+  const __ring_iter_61 = __List_Iterable.iter(arms);
   while (true) {
-    const __ring_next_58 = __ListIterator_Iterator.next(__ring_iter_58);
-    if (__ring_next_58._tag === "none") break;
-    const arm = __ring_next_58._0;
-    __ring_match118: {
-      const __ring_m118 = arm.pattern;
-      if (__ring_m118._tag === "Binding") {
-        const name = __ring_m118.name;
+    const __ring_next_61 = __ListIterator_Iterator.next(__ring_iter_61);
+    if (__ring_next_61._tag === "none") break;
+    const arm = __ring_next_61._0;
+    __ring_match121: {
+      const __ring_m121 = arm.pattern;
+      if (__ring_m121._tag === "Binding") {
+        const name = __ring_m121.name;
         const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, name);
         discard(LLVMBuildStore(ctx.builder, error_val, alloca));
         _Map_insert(ctx.named_values, name, alloca);
         return gen_llvm_expr(ctx, arm.body);
-        break __ring_match118;
+        break __ring_match121;
       }
-      if (__ring_m118._tag === "Wildcard") {
+      if (__ring_m121._tag === "Wildcard") {
         return gen_llvm_expr(ctx, arm.body);
-        break __ring_match118;
+        break __ring_match121;
       }
-      if (__ring_m118._tag === "Constructor") {
-        const name = __ring_m118.name; const fields = __ring_m118.fields;
+      if (__ring_m121._tag === "Constructor") {
+        const name = __ring_m121.name; const fields = __ring_m121.fields;
         bind_nested_pattern(ctx, error_val, arm.pattern);
         return gen_llvm_expr(ctx, arm.body);
-        break __ring_match118;
+        break __ring_match121;
       }
       return gen_llvm_expr(ctx, arm.body);
-      break __ring_match118;
+      break __ring_match121;
     }
   }
   return LLVMConstPointerNull(ctx.ptr_type);
@@ -4222,40 +4314,40 @@ function gen_catch_arms(ctx, error_val, arms) {
 
 function gen_handle_expr(ctx, body, handlers) {
   let by_effect = map_new();
-  const __ring_iter_59 = __List_Iterable.iter(handlers);
+  const __ring_iter_62 = __List_Iterable.iter(handlers);
   while (true) {
-    const __ring_next_59 = __ListIterator_Iterator.next(__ring_iter_59);
-    if (__ring_next_59._tag === "none") break;
-    const h = __ring_next_59._0;
-    __ring_match119: {
-      const __ring_m119 = _Map_get(by_effect, h.effect_name);
-      if (__ring_m119._tag === "some") {
-        const existing = __ring_m119._0;
+    const __ring_next_62 = __ListIterator_Iterator.next(__ring_iter_62);
+    if (__ring_next_62._tag === "none") break;
+    const h = __ring_next_62._0;
+    __ring_match122: {
+      const __ring_m122 = _Map_get(by_effect, h.effect_name);
+      if (__ring_m122._tag === "some") {
+        const existing = __ring_m122._0;
         List_push(existing, h);
-        break __ring_match119;
+        break __ring_match122;
       }
-      if (__ring_m119._tag === "none") {
+      if (__ring_m122._tag === "none") {
         _Map_insert(by_effect, h.effect_name, [h]);
-        break __ring_match119;
+        break __ring_match122;
       }
-      __match_fail(__ring_m119);
+      __match_fail(__ring_m122);
     }
   }
   let has_fail_abort = false;
-  const __ring_iter_60 = __List_Iterable.iter(_Map_entries(by_effect));
+  const __ring_iter_63 = __List_Iterable.iter(_Map_entries(by_effect));
   while (true) {
-    const __ring_next_60 = __ListIterator_Iterator.next(__ring_iter_60);
-    if (__ring_next_60._tag === "none") break;
-    const entry = __ring_next_60._0;
+    const __ring_next_63 = __ListIterator_Iterator.next(__ring_iter_63);
+    if (__ring_next_63._tag === "none") break;
+    const entry = __ring_next_63._0;
     const __ring_dt4 = entry;
     const effect_name = __ring_dt4[0];
     const hs = __ring_dt4[1];
     const ev_name = hir$evidence_param_name(effect_name);
-    const __ring_iter_61 = __List_Iterable.iter(hs);
+    const __ring_iter_64 = __List_Iterable.iter(hs);
     while (true) {
-      const __ring_next_61 = __ListIterator_Iterator.next(__ring_iter_61);
-      if (__ring_next_61._tag === "none") break;
-      const h = __ring_next_61._0;
+      const __ring_next_64 = __ListIterator_Iterator.next(__ring_iter_64);
+      if (__ring_next_64._tag === "none") break;
+      const h = __ring_next_64._0;
       if (((effect_name === "fail") && (h.op_name === "raise"))) {
         has_fail_abort = true;
       }
@@ -4304,11 +4396,11 @@ function gen_return_error_closure(ctx) {
 function gen_effect_op(ctx, effect_name, op_name, args) {
   if (((effect_name === "fail") && (op_name === "raise"))) {
     let arg_vals = [];
-    const __ring_iter_62 = __List_Iterable.iter(args);
+    const __ring_iter_65 = __List_Iterable.iter(args);
     while (true) {
-      const __ring_next_62 = __ListIterator_Iterator.next(__ring_iter_62);
-      if (__ring_next_62._tag === "none") break;
-      const a = __ring_next_62._0;
+      const __ring_next_65 = __ListIterator_Iterator.next(__ring_iter_65);
+      if (__ring_next_65._tag === "none") break;
+      const a = __ring_next_65._0;
       List_push(arg_vals, gen_llvm_expr(ctx, a));
     }
     const raise_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_raise", [ctx.ptr_type], ctx.void_type);
@@ -4328,26 +4420,26 @@ function gen_effect_op(ctx, effect_name, op_name, args) {
   } else {
     const ev_name = hir$evidence_param_name(effect_name);
     let arg_vals = [];
-    const __ring_iter_63 = __List_Iterable.iter(args);
+    const __ring_iter_66 = __List_Iterable.iter(args);
     while (true) {
-      const __ring_next_63 = __ListIterator_Iterator.next(__ring_iter_63);
-      if (__ring_next_63._tag === "none") break;
-      const a = __ring_next_63._0;
+      const __ring_next_66 = __ListIterator_Iterator.next(__ring_iter_66);
+      if (__ring_next_66._tag === "none") break;
+      const a = __ring_next_66._0;
       List_push(arg_vals, gen_llvm_expr(ctx, a));
     }
-    __ring_match120: {
-      const __ring_m120 = _Map_get(ctx.named_values, ev_name);
-      if (__ring_m120._tag === "some") {
-        const ev_alloca = __ring_m120._0;
+    __ring_match123: {
+      const __ring_m123 = _Map_get(ctx.named_values, ev_name);
+      if (__ring_m123._tag === "some") {
+        const ev_alloca = __ring_m123._0;
         const ev_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, ev_alloca, codegen_llvm_ctx$fresh_name(ctx, "ev"));
         return LLVMConstPointerNull(ctx.ptr_type);
-        break __ring_match120;
+        break __ring_match123;
       }
-      if (__ring_m120._tag === "none") {
+      if (__ring_m123._tag === "none") {
         return LLVMConstPointerNull(ctx.ptr_type);
-        break __ring_match120;
+        break __ring_match123;
       }
-      __match_fail(__ring_m120);
+      __match_fail(__ring_m123);
     }
   }
 }

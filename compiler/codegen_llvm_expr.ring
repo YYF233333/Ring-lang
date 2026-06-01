@@ -2771,8 +2771,12 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
                 }
             }
         },
-        HExpr::StructLit { fields, .. } => {
+        HExpr::StructLit { fields, spread, .. } => {
             for f in fields { collect_captures(ctx, f.value, params, captures) }
+            match spread {
+                some(sp) => collect_captures(ctx, sp, params, captures),
+                none => {},
+            }
         },
         HExpr::ListLit { elements, .. } => {
             for e in elements { collect_captures(ctx, e, params, captures) }
@@ -2786,6 +2790,27 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
         },
         HExpr::Lambda { body: lb, .. } => {
             collect_captures(ctx, lb, params, captures)
+        },
+        HExpr::NamedVariantConstruct { fields: nvc_fields, spread: nvc_spread, .. } => {
+            for f in nvc_fields { collect_captures(ctx, f.value, params, captures) }
+            match nvc_spread {
+                some(sp) => collect_captures(ctx, sp, params, captures),
+                none => {},
+            }
+        },
+        HExpr::TryCatch { body: tc_body, arms: tc_arms, .. } => {
+            collect_captures(ctx, tc_body, params, captures)
+            for arm in tc_arms { collect_captures(ctx, arm.body, params, captures) }
+        },
+        HExpr::HandleExpr { body: he_body, .. } => {
+            collect_captures(ctx, he_body, params, captures)
+        },
+        HExpr::EffectOp { args: eo_args, .. } => {
+            for a in eo_args { collect_captures(ctx, a, params, captures) }
+        },
+        HExpr::RangeExpr { start: rs, end: re, .. } => {
+            collect_captures(ctx, rs, params, captures)
+            collect_captures(ctx, re, params, captures)
         },
         _ => {},
     }
@@ -2811,6 +2836,17 @@ fn collect_captures_stmt(ctx: LlvmCtx, stmt: HStmt, params: List<HParam>, mut ca
         HStmt::ForIn { iterable, body, .. } => {
             collect_captures(ctx, iterable, params, captures)
             collect_captures(ctx, body, params, captures)
+        },
+        HStmt::LetDestructure { init, .. } => {
+            collect_captures(ctx, init, params, captures)
+        },
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            collect_captures(ctx, expr, params, captures)
+            collect_captures(ctx, then_block, params, captures)
+            match else_block {
+                some(eb) => collect_captures(ctx, eb, params, captures),
+                none => {},
+            }
         },
         _ => {},
     }
