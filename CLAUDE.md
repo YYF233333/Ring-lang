@@ -43,6 +43,7 @@ Ring-lang/
 - **HIR**：独立数据结构，每个表达式带推断的 Type + EffectRow，语法糖已展开
 - **DiagnosticSink**：Lexer/Parser/Checker 错误统一收集，支持多错误报告
 - HIR 独立于 AST，后续优化 pass 在 HIR → Codegen 之间插入
+- **Perceus RC pass**（`perceus.ring`，仅 `--target=llvm`）：HIR → [dup/drop 插入] → RC 标注 HIR → Codegen LLVM。反向 liveness + branch-balancing，翻译 Koka POPL'21
 - **双后端**：`--target=js`（默认，bootstrap）和 `--target=llvm`（native，开发中）共享同一 HIR
 
 ## 开发约定
@@ -105,9 +106,9 @@ Ring-lang/
 
 ## 路线图
 
-**当前**：LLVM Native Backend 前端自举打通 — ring.exe 编译单文件产出与参考编译器**字节级一致**的 JS；多模块程序（resolver→check→codegen）端到端跑通。fail/catch 用 runtime `ring_try` 闭包机制重写（setjmp 在 ring_try 帧内，深栈 unwind 已验证）。编译整个编译器（40 模块）前端能跑到 chk≈2.51 亿，**唯一阻塞是内存耗尽（峰值 25.9GB）**——uniform boxing + 不回收的固有限制，非 codegen bug，由 Perceus RC 解决。
+**当前**：Perceus RC L0 基础设施已落地（2026-06-01）—— `ring_runtime.cpp` 全量改造为 RC 分配（ring_alloc + 8 字节 header + typeid 派发 + per-type drop）；`perceus.ring` 实现反向 liveness + branch-balancing + locals-aware dup/drop 插入；LLVM codegen 全量 malloc→ring_alloc + emit Drop/Dup + 生成 per-type drop_T。**待验证**：在足够内存机器上编译编译器自身（40 模块）观察内存峰值下降，完成 B-012 最终验收（二次自举一致性 + native E2E 全过）。
 
-**后续**：Ownership + Perceus RC（同时解掉自举的内存墙）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
+**后续**：B-012 端到端验证 → L1 借用优化（B-068）→ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
 **遗留**：impl effect 传播修复、LSP 移植、技术债清理（见 `docs/audit-report.md`）
 

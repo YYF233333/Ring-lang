@@ -297,7 +297,7 @@ fn test_fetch() {
 
 > **B-011 LLVM Native Backend 已完成（2026-06-01）** — 前端自举打通：ring.exe 单文件产出与参考编译器字节级一致，多模块端到端跑通，所有 codegen bug + fail/catch 已修（见 `tests/cases/llvm/` 回归套件）。**完整 native 自举的剩余两条验收（二次自举一致性 + native E2E 全过）受内存墙（25.9GB，no-GC）阻塞，已并入 B-012——Perceus RC 是解锁它们的唯一路径。**
 
-### B-012 Perceus RC 核心 (L0) [feature] [P1] [XL] [judgment] [queued]
+### B-012 Perceus RC 核心 (L0) [feature] [P1] [XL] [judgment] [doing]
 精确引用计数的最小正确实现——dup/drop 插入 + 归零即 free，消除 uniform-boxing「不回收」导致的内存墙。**完成全 native 自举的唯一路径**（继承 B-011 剩余两条验收）。仅 `--target=llvm`。
 
 > **Perceus 分层（2026-06-01 确定，见 design.md §7.10）**：

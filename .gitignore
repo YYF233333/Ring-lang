@@ -20,6 +20,9 @@ compiler/llvm-addon/build/
 /ring_runtime.o
 /compiler/dist-llvm/ring.exe
 /ring_output.ll
+compiler/ring_output.ll
 tests/cases/**/*.o
 tests/cases/**/*.exe
+examples/*.o
 /test_minimal.o
+/test_minimal.ring
