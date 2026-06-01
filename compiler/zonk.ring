@@ -163,6 +163,10 @@ fn zonk_stmt(ctx: ZonkCtx, stmt: HStmt) -> HStmt {
             }
             HStmt::IfLet { pattern: pattern, expr: zonk_expr(ctx, expr), then_block: zonk_block(ctx, then_block), else_block: z_else, span: span }
         },
+        HStmt::Drop { name, ty, span } =>
+            HStmt::Drop { name: name, ty: zonk_type(ctx, ty), span: span },
+        HStmt::Dup { name, ty, span } =>
+            HStmt::Dup { name: name, ty: zonk_type(ctx, ty), span: span },
     }
 }
 

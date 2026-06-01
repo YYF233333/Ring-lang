@@ -394,6 +394,9 @@ pub fn emit_stmt(mut ctx: CodegenCtx, stmt: HStmt) {
             let v = gen_expr(ctx, value)
             emit(ctx, "${t} = ${v};")
         },
+        // Perceus RC ops — no-op for JS backend (GC handles memory)
+        HStmt::Drop { .. } => {},
+        HStmt::Dup { .. } => {},
     }
 }
 

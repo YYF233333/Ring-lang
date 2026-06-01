@@ -85,6 +85,9 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
         HStmt::IfLet { pattern, expr, then_block, else_block, .. } => {
             emit_if_let(ctx, pattern, expr, then_block, else_block)
         },
+        // TODO: Perceus L0 — emit ring_drop/ring_dup
+        HStmt::Drop { .. } => {},
+        HStmt::Dup { .. } => {},
     }
 }
 
