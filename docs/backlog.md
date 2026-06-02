@@ -609,31 +609,16 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-083 Perceus RC pass 正确性修复 [bugfix] [P1] [L] [judgment] [queued]
+### B-083 Perceus RC pass 正确性修复 — 剩余 #2/#4 [bugfix] [P1] [L] [judgment] [waiting-feedback]
 
-B-012 L0 基础设施已落地，但 RC pass 在编译器自身的复杂代码上产生错误 dup/drop 序列 → heap corruption（premature free）。不带 RC pass 可自举，带 RC pass 崩溃。本 item 修复所有已知正确性 gap。
+原列 4 个 RC bug。**#1（Lambda 捕获 dup）、#3（循环内闭包 per-iteration dup）已修复合入**（commit 0095c59；728 JS + 14/14 llvm_diff 全过，含 3 个新 closure_capture 用例）。剩余 #2/#4 经 Worker 复核发现 spec 框架与现状不符，退回 Discussion 重新设计（详见 worker_feedback.md）：
 
-**前置依赖**：~~B-082~~ ✅、B-081（dup 语句层迁移，避免在旧架构上修）
+- **#2 TryCatch**（CRITICAL）：spec 的"异常不匹配直接传播"前提与 Ring 穷尽 catch 不符；真正难点是 body 中途 abort 时已分配局部值的清理（abort 经 `ring_try` longjmp 绕过 drop 序列 → 泄漏），疑似与 B-002（Drop/RAII）重叠。
+- **#4 Match guard**（HIGH）：spec 的"分析顺序"前提不符（当前 backward body-先-guard-后对 guard-真路径正确，简单反转会引入 bug）；真正 bug 是 guard 为假 fall-through 到下一 arm 的路径未建模（guard 可能已消费/dup 变量而 body 没跑）。
 
-**已知问题（按崩溃频率排序）**：
+**关联**：runtime 闭包 env drop 缺陷见 audit #130（#1/#3 修复后捕获泄漏，影响 native 内存）。
 
-1. **Lambda 捕获未插入 Dup**（CRITICAL）：`perceus.ring` 闭包捕获变量只 `outer_live.insert(v)` 标记活跃，未生成 `HStmt::Dup`。外层分析将闭包构造视为 last-use → drop，闭包内部 UAF。编译器自身大量用闭包，命中率极高。
-2. **TryCatch 未处理异常传播路径**（CRITICAL）：只考虑 body 正常完成 + catch arm 匹配，未处理异常不匹配直接传播的路径。branch-balancing 在不该 drop 的路径插了 drop。
-3. **循环内闭包捕获**（CRITICAL）：循环外 dup 一次，但每次迭代创建的闭包都引用同一值。循环结束后 drop → 之前迭代的闭包持有野指针。
-4. **Match guard 分析顺序**（HIGH）：guard 在 body 之后分析但运行时先执行，嵌套模式匹配时 live set 计算错误。
-
-**涉及修改**：
-1. `compiler/perceus.ring`：Lambda 分支——闭包构造前对每个 captured var emit `HStmt::Dup`
-2. `compiler/perceus.ring`：TryCatch 分支——三路分析（成功 / catch 匹配 / 异常传播）
-3. `compiler/perceus.ring`：ForIn/While 分支——每次迭代对闭包捕获变量 dup
-4. `compiler/perceus.ring`：Match 分支——guard/body 作为独立分支分析，合并 live set
-
-**验收标准**：
-- 带 RC pass 编译编译器自身不崩溃，内存峰值从 25.9GB 大幅下降
-- 二次自举一致性（native ring.exe 编译自身 → 字节级一致）
-- E2E 全量测试在 native 编译器上通过
-- `llvm_diff` 差分套件全过
-- 728 JS E2E 不回归；自举编译器正常编译自身
+**native 终验**（fix-forward，待大内存机）：带 RC pass 编译编译器自身内存峰值下降 + 二次自举字节级一致 + native E2E 全过。
 
 ### B-078 清理 B-066 parser workaround（string literal → import）[refactor] [P3] [S] [mechanical] [queued]
 `parser.ring:998` 仍用 string literal `"W0001"` 而非 `import codes::{W0001}`，这是 B-066 实现时因 B-077 跨模块 const bug 而采用的 workaround。B-077 已修复，应改回正常 import。

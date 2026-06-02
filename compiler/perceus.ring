@@ -171,6 +171,174 @@ fn collect_stmt_vars(stmt: HStmt, mut out: Set<Str>) {
 }
 
 // ============================================================
+// B-083 #3: collect the free variables captured by any lambda that appears
+// (at any nesting depth) inside an expression / statement.
+//
+// A "capture" of a lambda is a name referenced in its body that is neither one
+// of its parameters nor a variable defined inside the lambda body.  These are
+// exactly the names the LLVM codegen stores into the closure env (filtered to
+// owned locals at the dup site).  The loop handlers need this set so that, for
+// a closure CREATED INSIDE a loop body, the captured outer variable is dup-ed
+// once PER ITERATION (each iteration builds a fresh closure that takes its own
+// reference) rather than (a) moved — single-pass backward analysis cannot see
+// the next iteration, so it would wrongly treat the capture as a last use — or
+// (b) dup-ed once before the loop by the conservative loop-var dup, which is one
+// total dup, not one per iteration.
+//
+// We deliberately reuse collect_expr_vars (records bare `name`, matching the RC
+// tracking + the loop-var dup) so the produced names key the same named_values
+// slot the emitted HStmt::Dup will look up.
+// ============================================================
+
+fn collect_lambda_captures_expr(expr: HExpr, mut out: Set<Str>) {
+    match expr {
+        HExpr::Lambda { params, body, .. } => {
+            let mut bound: Set<Str> = set_new()
+            for p in params { bound.insert(p.name) }
+            collect_local_defs_expr(body, bound)
+            let mut body_vars: Set<Str> = set_new()
+            collect_expr_vars(body, body_vars)
+            for v in body_vars {
+                if bound.contains(v) == false { out.insert(v) }
+            }
+            // Recurse into the body too: a lambda nested inside this lambda's
+            // body whose captures escape THIS lambda would be reachable, but its
+            // captures relative to the outer loop are already covered by the
+            // body_vars scan above (nested-lambda free vars surface as free vars
+            // of the enclosing lambda body via collect_expr_vars).  Still recurse
+            // so sibling lambdas inside the body are not missed.
+            collect_lambda_captures_expr(body, out)
+        },
+        HExpr::BinOp { left, right, .. } => {
+            collect_lambda_captures_expr(left, out)
+            collect_lambda_captures_expr(right, out)
+        },
+        HExpr::UnaryOp { operand, .. } => collect_lambda_captures_expr(operand, out),
+        HExpr::Call { callee, args, .. } => {
+            collect_lambda_captures_expr(callee, out)
+            for a in args { collect_lambda_captures_expr(a, out) }
+        },
+        HExpr::FieldAccess { receiver, .. } => collect_lambda_captures_expr(receiver, out),
+        HExpr::StructLit { fields, spread, .. } => {
+            for f in fields { collect_lambda_captures_expr(f.value, out) }
+            match spread {
+                some(s) => collect_lambda_captures_expr(s, out),
+                none => {},
+            }
+        },
+        HExpr::NamedVariantConstruct { fields, spread, .. } => {
+            for f in fields { collect_lambda_captures_expr(f.value, out) }
+            match spread {
+                some(s) => collect_lambda_captures_expr(s, out),
+                none => {},
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_lambda_captures_expr(scrutinee, out)
+            for arm in arms {
+                collect_lambda_captures_expr(arm.body, out)
+                match arm.guard {
+                    some(g) => collect_lambda_captures_expr(g, out),
+                    none => {},
+                }
+            }
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for s in stmts { collect_lambda_captures_stmt(s, out) }
+            match tail {
+                some(t) => collect_lambda_captures_expr(t, out),
+                none => {},
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            collect_lambda_captures_expr(condition, out)
+            collect_lambda_captures_expr(then_branch, out)
+            match else_branch {
+                some(eb) => collect_lambda_captures_expr(eb, out),
+                none => {},
+            }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for p in parts {
+                match p {
+                    HStringInterpPart::Expression(e) => collect_lambda_captures_expr(e, out),
+                    HStringInterpPart::Literal(_) => {},
+                }
+            }
+        },
+        HExpr::TryCatch { body, arms, .. } => {
+            collect_lambda_captures_expr(body, out)
+            for arm in arms { collect_lambda_captures_expr(arm.body, out) }
+        },
+        HExpr::HandleExpr { body, handlers, .. } => {
+            collect_lambda_captures_expr(body, out)
+            for h in handlers { collect_lambda_captures_expr(h.body, out) }
+        },
+        HExpr::EffectOp { args, .. } => {
+            for a in args { collect_lambda_captures_expr(a, out) }
+        },
+        HExpr::RangeExpr { start, end, .. } => {
+            collect_lambda_captures_expr(start, out)
+            collect_lambda_captures_expr(end, out)
+        },
+        HExpr::ListLit { elements, .. } => {
+            for e in elements { collect_lambda_captures_expr(e, out) }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for e in elements { collect_lambda_captures_expr(e, out) }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_lambda_captures_expr(receiver, out)
+            collect_lambda_captures_expr(index, out)
+        },
+        HExpr::Ident { .. } => {},
+        HExpr::IntLit { .. } => {},
+        HExpr::FloatLit { .. } => {},
+        HExpr::StrLit { .. } => {},
+        HExpr::BoolLit { .. } => {},
+    }
+}
+
+fn collect_lambda_captures_stmt(stmt: HStmt, mut out: Set<Str>) {
+    match stmt {
+        HStmt::Let { init, .. } => collect_lambda_captures_expr(init, out),
+        HStmt::Var { init, .. } => collect_lambda_captures_expr(init, out),
+        HStmt::Assign { target, value, .. } => {
+            collect_lambda_captures_expr(target, out)
+            collect_lambda_captures_expr(value, out)
+        },
+        HStmt::ExprStmt { expr, .. } => collect_lambda_captures_expr(expr, out),
+        HStmt::Return { value, .. } => {
+            match value {
+                some(v) => collect_lambda_captures_expr(v, out),
+                none => {},
+            }
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_lambda_captures_expr(condition, out)
+            collect_lambda_captures_expr(body, out)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            collect_lambda_captures_expr(iterable, out)
+            collect_lambda_captures_expr(body, out)
+        },
+        HStmt::LetDestructure { init, .. } => collect_lambda_captures_expr(init, out),
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            collect_lambda_captures_expr(expr, out)
+            collect_lambda_captures_expr(then_block, out)
+            match else_block {
+                some(eb) => collect_lambda_captures_expr(eb, out),
+                none => {},
+            }
+        },
+        HStmt::Break { .. } => {},
+        HStmt::Continue { .. } => {},
+        HStmt::Drop { .. } => {},
+        HStmt::Dup { .. } => {},
+    }
+}
+
+// ============================================================
 // Collect pattern binding names
 // ============================================================
 
@@ -584,8 +752,29 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             collect_expr_vars(condition, loop_vars)
             collect_expr_vars(body, loop_vars)
 
+            // B-083 #3: variables captured by closures created inside the loop
+            // need a dup PER ITERATION (each iteration builds a fresh closure
+            // taking its own reference), not the single conservative pre-loop dup.
+            // Restrict to owned locals — globals/functions are not RC-tracked.
+            let mut loop_captures: Set<Str> = set_new()
+            collect_lambda_captures_expr(condition, loop_captures)
+            collect_lambda_captures_expr(body, loop_captures)
+            let mut local_loop_captures: Set<Str> = set_new()
+            for v in loop_captures {
+                if locals.contains(v) { local_loop_captures.insert(v) }
+            }
+
+            // Seed the body's incoming live set with the loop captures so each
+            // lambda's last-use check treats them as live → it reports a dup via
+            // the dups channel (flushed into the body = per-iteration) instead of
+            // moving the single owned reference into the first iteration's
+            // closure (which single-pass backward analysis would otherwise do,
+            // leaving later iterations + the post-loop drop double-freeing).
+            let mut seeded_live = set_clone(live)
+            for v in local_loop_captures { seeded_live.insert(v) }
+
             // Transform body and condition
-            let body_result = rc_expr(body, live, locals)
+            let body_result = rc_expr(body, seeded_live, locals)
             let cond_result = rc_expr(condition, body_result.live, locals)
             let mut cur_live = cond_result.live
 
@@ -599,10 +788,22 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             let cond_flushed = flush_dups_into_expr(cond_result.expr, cond_result.dups)
             let body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups)
 
-            // External vars used in the loop that are still live → need Dup
+            // Restore the seeded captures' liveness to their true pre-loop state:
+            // seeding only forced per-iteration dups, it must not make the
+            // surrounding scope believe a capture is live after the loop (which
+            // would suppress its drop and leak it).  The loop neither defines nor
+            // outlives these outer bindings, so their post-loop liveness equals
+            // their pre-loop liveness.
+            for v in local_loop_captures {
+                if live.contains(v) { cur_live.insert(v) } else { cur_live.remove(v) }
+            }
+
+            // External vars used in the loop that are still live → need Dup,
+            // EXCEPT loop captures: those are already dup-ed per iteration via the
+            // body flush, so a conservative pre-loop dup would over-count (leak).
             let mut out: List<HStmt> = []
             for v in loop_vars {
-                if cur_live.contains(v) {
+                if cur_live.contains(v) && local_loop_captures.contains(v) == false {
                     out.push(HStmt::Dup { name: v, ty: Type::UnitType, span: synthetic_span() })
                 }
             }
@@ -617,7 +818,30 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             collect_expr_vars(iterable, loop_vars)
             collect_expr_vars(body, loop_vars)
 
-            let body_result = rc_expr(body, live, locals)
+            // B-083 #3: closures created inside the loop body capture outer
+            // owned locals; each iteration's fresh closure needs its own dup of
+            // the capture.  Mirror the While handling: seed + per-iteration flush
+            // + exclude from the conservative pre-loop dup.  The for-in binding
+            // (and any destructure names) are per-iteration locals, never outer
+            // captures, so they are naturally excluded by the locals filter below
+            // only if shadowed — guard explicitly for safety.
+            let mut loop_captures: Set<Str> = set_new()
+            collect_lambda_captures_expr(body, loop_captures)
+            let mut local_loop_captures: Set<Str> = set_new()
+            for v in loop_captures {
+                if locals.contains(v) && v != binding { local_loop_captures.insert(v) }
+            }
+            match destructure {
+                some(ds) => {
+                    for d in ds { local_loop_captures.remove(d.name) }
+                },
+                none => {},
+            }
+
+            let mut seeded_live = set_clone(live)
+            for v in local_loop_captures { seeded_live.insert(v) }
+
+            let body_result = rc_expr(body, seeded_live, locals)
             let iter_result = rc_expr(iterable, body_result.live, locals)
             let mut cur_live = iter_result.live
 
@@ -630,13 +854,18 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
                 none => {},
             }
 
+            // Restore loop captures to their true pre-loop liveness (see While).
+            for v in local_loop_captures {
+                if live.contains(v) { cur_live.insert(v) } else { cur_live.remove(v) }
+            }
+
             // B-081: the iterable is evaluated exactly once (before the loop),
             // so its dups are emitted before the ForIn statement (alongside the
             // conservative loop-var dup).  The body is re-evaluated per
             // iteration, so its dups flush INTO the body expression.
             let mut out: List<HStmt> = dups_to_stmts(iter_result.dups)
             for v in loop_vars {
-                if cur_live.contains(v) {
+                if cur_live.contains(v) && local_loop_captures.contains(v) == false {
                     out.push(HStmt::Dup { name: v, ty: Type::UnitType, span: synthetic_span() })
                 }
             }
@@ -1229,27 +1458,56 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
         },
 
         HExpr::Lambda { params, return_type, body, ty, effects, span } => {
-            // Lambda has its own locals scope
-            let mut lambda_locals: Set<Str> = set_new()
-            for p in params { lambda_locals.insert(p.name) }
-            collect_local_defs_expr(body, lambda_locals)
+            // B-083 #1: a lambda CAPTURES every free variable it references from
+            // the enclosing scope.  The LLVM codegen (gen_lambda /
+            // collect_captures) stores each captured variable's pointer into the
+            // closure env struct WITHOUT a ring_dup — it just copies the bare
+            // pointer (borrow-style store).  So the dup responsibility lives in
+            // this pass: a capture is a *use* of the outer variable and the
+            // closure now holds its own reference, which must be balanced by a
+            // dup at closure-construction time.  Missing this is a UAF (the env
+            // outlives the original binding's drop).
+            //
+            // Compute the captures the same way codegen does: free identifiers in
+            // the body that are owned locals of the *enclosing* scope and are
+            // neither lambda params nor lambda-internal local definitions.  We do
+            // NOT recurse into the body with rc_expr to discover them, because
+            // rc_expr only tracks names present in the scope's `locals`; an outer
+            // local is (correctly) absent from the lambda's own `lambda_locals`,
+            // so it would never surface in body_result.live.  Hence we collect
+            // free vars structurally and intersect with the enclosing `locals`.
+            let mut lambda_bound: Set<Str> = set_new()
+            for p in params { lambda_bound.insert(p.name) }
+            collect_local_defs_expr(body, lambda_bound)
 
-            // Lambda captures: every free variable reference from outer scope needs Dup.
-            // Transform the lambda body in its own scope.
-            let inner_live: Set<Str> = set_new()
-            let body_result = rc_expr(body, inner_live, lambda_locals)
+            let mut body_vars: Set<Str> = set_new()
+            collect_expr_vars(body, body_vars)
 
-            // Variables in body_result.live that are NOT lambda params are captures.
-            // They need Dup in the outer scope.
-            let mut param_names: Set<Str> = set_new()
-            for p in params { param_names.insert(p.name) }
+            // Snapshot the incoming live membership BEFORE we mutate the live set:
+            // in Ring a Set is reference-typed, so `outer_live = live` aliases the
+            // same object and a later outer_live.insert(v) would perturb the
+            // last-use decision for a subsequently-iterated capture.  `incoming`
+            // is the frozen entry-state we make the move/dup decision against;
+            // `outer_live` is the (separately-owned) result we mutate.
+            let incoming = set_clone(live)
+            let mut outer_live = set_clone(live)
 
-            let mut outer_live = live
-            for v in body_result.live {
-                if param_names.contains(v) == false {
-                    // This is a captured variable — it needs a Dup in outer scope
-                    // Mark it as live in the outer scope (it was already live, needs Dup)
-                    outer_live.insert(v)
+            // A capture v is an enclosing owned local not bound inside the lambda.
+            let mut capture_dups: List<Str> = []
+            for v in body_vars {
+                if lambda_bound.contains(v) == false && locals.contains(v) {
+                    // Standard Perceus last-use, decided against the entry state.
+                    if incoming.contains(v) {
+                        // v is still live after the lambda (used again in the
+                        // enclosing scope) → non-last use → the closure's copy
+                        // needs its own dup, reported via the dups channel.
+                        capture_dups.push(v)
+                    } else {
+                        // The lambda is the last use of v in this scope → move the
+                        // single owned reference into the closure (no dup).  Mark
+                        // it live so the enclosing scope does not also drop it.
+                        outer_live.insert(v)
+                    }
                 }
             }
 
@@ -1261,7 +1519,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
                 expr: HExpr::Lambda { params: params, return_type: return_type,
                     body: new_body, ty: ty, effects: effects, span: span },
                 live: outer_live,
-                dups: []
+                dups: capture_dups
             }
         },
 

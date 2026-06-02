@@ -45,6 +45,15 @@
 
 可移植性问题。
 
+### #130 闭包 env 捕获指针未被 drop（typeid 复用导致 RC 泄漏）[medium] [judgment] [open]
+
+`ring_runtime.cpp` 的 `drop_closure`（~2043）把所有 `RING_TYPEID_CLOSURE`（typeid 7）block 当作 `{fn_ptr, env_ptr}` pair 处理，只 drop slot[1]。但闭包 env struct 也用同一 typeid 分配，其捕获指针（尤其单捕获 env 的 slot[0]）不被单独 drop。B-083 #1/#3（commit 0095c59）修复后 perceus 正确对闭包捕获 emit dup，但 runtime 缺少配套 drop → 捕获值**泄漏**（不再 UAF，方向安全，但占内存）。
+
+**文件**：`ring_runtime.cpp:2043`（drop_closure）、`compiler/codegen_llvm_expr.ring:2647`（gen_lambda env 分配）
+**修复方向**：env struct 用独立 typeid（区别于 closure `{fn_ptr,env_ptr}` pair），按 env 实际捕获布局生成 per-capture drop。可能并入 L2 Drop/RAII（B-002）。
+**影响**：泄漏不崩溃、差分测试抓不到，但拉高 native 自编译内存峰值——B-083 native 终验前应修。
+发现者：B-083 #1/#3 worktree agent（Opus）
+
 
 
 
