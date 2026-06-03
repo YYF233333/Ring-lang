@@ -473,7 +473,11 @@ fn collect_local_defs_expr(expr: HExpr, mut out: Set<Str>) {
 // ============================================================
 
 pub fn perceus_transform(program: HProgram) -> HProgram {
-    let new_decls = transform_decls(program.decls)
+    // B-091: `boxed_vars` (def_ids of `let mut` vars auto-boxed for write-through
+    // closure capture) is threaded through the RC pass so the Assign old-value
+    // Drop is suppressed for them — a boxed write mutates `cell.value`, it does
+    // NOT consume/free the shared cell pointer.
+    let new_decls = transform_decls(program.decls, program.boxed_vars)
     HProgram {
         decls: new_decls,
         derived_impls: program.derived_impls,
@@ -481,18 +485,18 @@ pub fn perceus_transform(program: HProgram) -> HProgram {
     }
 }
 
-fn transform_decls(decls: List<HDecl>) -> List<HDecl> {
+fn transform_decls(decls: List<HDecl>, boxed: Set<Int>) -> List<HDecl> {
     let mut result: List<HDecl> = []
     for d in decls {
-        result.push(transform_decl(d))
+        result.push(transform_decl(d, boxed))
     }
     result
 }
 
-fn transform_decl(decl: HDecl) -> HDecl {
+fn transform_decl(decl: HDecl, boxed: Set<Int>) -> HDecl {
     match decl {
         HDecl::Fn { name, def_id, type_params, params, return_type, effects, body, is_pub, trait_bounds, span } => {
-            let new_body = transform_fn_body(params, body)
+            let new_body = transform_fn_body(params, body, boxed)
             HDecl::Fn {
                 name: name, def_id: def_id, type_params: type_params,
                 params: params, return_type: return_type, effects: effects,
@@ -500,7 +504,7 @@ fn transform_decl(decl: HDecl) -> HDecl {
             }
         },
         HDecl::Impl { target_type, type_params, trait_name, methods, assoc_types, span } => {
-            let new_methods = transform_decls(methods)
+            let new_methods = transform_decls(methods, boxed)
             HDecl::Impl {
                 target_type: target_type, type_params: type_params,
                 trait_name: trait_name, methods: new_methods,
@@ -509,7 +513,7 @@ fn transform_decl(decl: HDecl) -> HDecl {
         },
         HDecl::Test { description, body, span } => {
             // Transform test bodies as parameterless functions
-            let new_body = transform_fn_body([], body)
+            let new_body = transform_fn_body([], body, boxed)
             HDecl::Test { description: description, body: new_body, span: span }
         },
         HDecl::Const { name, def_id, ty, init, is_pub, span } => {
@@ -519,12 +523,12 @@ fn transform_decl(decl: HDecl) -> HDecl {
             // explicit and is harmless (flush_dups_into_expr is a no-op on []).
             let live: Set<Str> = set_new()
             let locals: Set<Str> = set_new()
-            let result = rc_expr(init, live, locals)
+            let result = rc_expr(init, live, locals, boxed)
             let init_flushed = flush_dups_into_expr(result.expr, result.dups)
             HDecl::Const { name: name, def_id: def_id, ty: ty, init: init_flushed, is_pub: is_pub, span: span }
         },
         HDecl::ModBlock { name, decls: mod_decls, is_pub, span } => {
-            HDecl::ModBlock { name: name, decls: transform_decls(mod_decls), is_pub: is_pub, span: span }
+            HDecl::ModBlock { name: name, decls: transform_decls(mod_decls, boxed), is_pub: is_pub, span: span }
         },
         // Non-function declarations pass through unchanged
         HDecl::Struct { .. } => decl,
@@ -542,14 +546,14 @@ fn transform_decl(decl: HDecl) -> HDecl {
 // Transform a function body: analyze body, then drop unused params
 // ============================================================
 
-fn transform_fn_body(params: List<HParam>, body: HExpr) -> HExpr {
+fn transform_fn_body(params: List<HParam>, body: HExpr, boxed: Set<Int>) -> HExpr {
     // Collect all locally-defined variable names in this function
     let mut locals: Set<Str> = set_new()
     for p in params { locals.insert(p.name) }
     collect_local_defs_expr(body, locals)
 
     let live: Set<Str> = set_new()
-    let result = rc_expr(body, live, locals)
+    let result = rc_expr(body, live, locals, boxed)
     let remaining_live = result.live
 
     // B-081: the function body root is a statement-sequence boundary. Any dups
@@ -615,7 +619,7 @@ struct RcStmtsResult {
 // RC transform for a list of statements (backward traversal)
 // ============================================================
 
-fn rc_stmts(stmts: List<HStmt>, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
+fn rc_stmts(stmts: List<HStmt>, live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -> RcStmtsResult {
     // Process statements from last to first.
     // We iterate forward over a reversed copy, building the result list,
     // then reverse the result at the end.
@@ -627,7 +631,7 @@ fn rc_stmts(stmts: List<HStmt>, live: Set<Str>, locals: Set<Str>) -> RcStmtsResu
     while i >= 0 {
         match stmts.get(i) {
             some(stmt) => {
-                let r = rc_stmt(stmt, cur_live, locals)
+                let r = rc_stmt(stmt, cur_live, locals, boxed)
                 // r.stmts are in forward order for this stmt position;
                 // prepend them (they go before anything we've accumulated)
                 // Since we're building backward, we push them and reverse later
@@ -655,11 +659,11 @@ fn rc_stmts(stmts: List<HStmt>, live: Set<Str>, locals: Set<Str>) -> RcStmtsResu
 // Returns: (replacement stmts, updated live set)
 // ============================================================
 
-fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
+fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -> RcStmtsResult {
     match stmt {
         HStmt::Let { name, name_span, def_id, ty, init, span } => {
             // Process the initializer expression
-            let init_result = rc_expr(init, live, locals)
+            let init_result = rc_expr(init, live, locals, boxed)
             let mut cur_live = init_result.live
 
             // The variable `name` is defined here.
@@ -682,7 +686,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
         },
 
         HStmt::Var { name, name_span, def_id, ty, init, span } => {
-            let init_result = rc_expr(init, live, locals)
+            let init_result = rc_expr(init, live, locals, boxed)
             let mut cur_live = init_result.live
             let mut out: List<HStmt> = dups_to_stmts(init_result.dups)
             out.push(HStmt::Var { name: name, name_span: name_span, def_id: def_id, ty: ty, init: init_result.expr, span: span })
@@ -699,15 +703,28 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
         HStmt::Assign { target, value, span } => {
             // Target is an L-value (write destination) — do NOT rc_expr it.
             // Only the value (R-value) is consumed.
-            let val_result = rc_expr(value, live, locals)
+            let val_result = rc_expr(value, live, locals, boxed)
             // B-081: flush the value's reported dups before the old-value Drop
             // and the Assign itself.
             let mut out: List<HStmt> = dups_to_stmts(val_result.dups)
 
-            // Drop the old value before the assignment overwrites it
+            // Drop the old value before the assignment overwrites it.
+            // B-091: EXCEPT when the target is an auto-boxed mut-cell.  A write to
+            // such a var stores into `cell.value` (LLVM codegen), it does NOT
+            // overwrite the alloca's cell pointer — so dropping `name` here would
+            // `ring_drop` the *shared* cell ptr on every write, freeing a cell the
+            // outer scope and the capturing closure still hold (deterministic UAF).
+            // The old `cell.value` is leaked, matching the L0 struct-field-assign
+            // convention (field assigns also do not drop the overwritten value).
             match target {
-                HExpr::Ident { name, ty, .. } => {
-                    out.push(HStmt::Drop { name: name, ty: ty, span: synthetic_span() })
+                HExpr::Ident { name, def_id, ty, .. } => {
+                    let is_boxed = match def_id {
+                        some(did) => boxed.contains(did),
+                        none => false,
+                    }
+                    if is_boxed == false {
+                        out.push(HStmt::Drop { name: name, ty: ty, span: synthetic_span() })
+                    }
                 },
                 _ => {},
             }
@@ -717,7 +734,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
         },
 
         HStmt::ExprStmt { expr, span } => {
-            let r = rc_expr(expr, live, locals)
+            let r = rc_expr(expr, live, locals, boxed)
             // B-081: flush reported dups before the expression statement.
             let mut out: List<HStmt> = dups_to_stmts(r.dups)
             out.push(HStmt::ExprStmt { expr: r.expr, span: span })
@@ -727,7 +744,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
         HStmt::Return { value, span } => {
             match value {
                 some(v) => {
-                    let r = rc_expr(v, live, locals)
+                    let r = rc_expr(v, live, locals, boxed)
                     // On return, drop all live variables (they won't be used after).
                     // B-081: flush the return value's reported dups before both
                     // the drop-all-live and the Return.
@@ -786,8 +803,8 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             for v in local_loop_captures { seeded_live.insert(v) }
 
             // Transform body and condition
-            let body_result = rc_expr(body, seeded_live, locals)
-            let cond_result = rc_expr(condition, body_result.live, locals)
+            let body_result = rc_expr(body, seeded_live, locals, boxed)
+            let cond_result = rc_expr(condition, body_result.live, locals, boxed)
             let mut cur_live = cond_result.live
 
             // B-081: condition and body are re-evaluated each iteration, so any
@@ -854,8 +871,8 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             let mut seeded_live = set_clone(live)
             for v in local_loop_captures { seeded_live.insert(v) }
 
-            let body_result = rc_expr(body, seeded_live, locals)
-            let iter_result = rc_expr(iterable, body_result.live, locals)
+            let body_result = rc_expr(body, seeded_live, locals, boxed)
+            let iter_result = rc_expr(iterable, body_result.live, locals, boxed)
             let mut cur_live = iter_result.live
 
             // Remove the binding variable (it's defined by the for-in)
@@ -903,7 +920,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
         },
 
         HStmt::LetDestructure { pattern, bindings, init, span } => {
-            let init_result = rc_expr(init, live, locals)
+            let init_result = rc_expr(init, live, locals, boxed)
             let mut cur_live = init_result.live
 
             // Collect binding names
@@ -931,10 +948,10 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             // evaluated, so their dups flush INTO each branch body (before
             // balancing).  The scrutinee (always evaluated) emits its dups as
             // statements before the IfLet.
-            let then_result = rc_expr(then_block, set_clone(live), locals)
+            let then_result = rc_expr(then_block, set_clone(live), locals, boxed)
             let else_result = match else_block {
                 some(eb) => {
-                    let r = rc_expr(eb, set_clone(live), locals)
+                    let r = rc_expr(eb, set_clone(live), locals, boxed)
                     some(r)
                 },
                 none => none,
@@ -979,7 +996,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             for pn in pat_names { final_live.remove(pn) }
 
             // Transform the scrutinee expression
-            let expr_result = rc_expr(expr, final_live, locals)
+            let expr_result = rc_expr(expr, final_live, locals, boxed)
 
             // B-081: flush the scrutinee's reported dups before the IfLet stmt.
             let mut out: List<HStmt> = dups_to_stmts(expr_result.dups)
@@ -1004,7 +1021,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
 // RC transform for expressions
 // ============================================================
 
-fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
+fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -> RcResult {
     match expr {
         HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } => {
             // Only track RC for locally-defined variables (params + let/var bindings).
@@ -1038,8 +1055,8 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
 
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
             // Process right first, then left (right-to-left evaluation for backward analysis)
-            let r_result = rc_expr(right, live, locals)
-            let l_result = rc_expr(left, r_result.live, locals)
+            let r_result = rc_expr(right, live, locals, boxed)
+            let l_result = rc_expr(left, r_result.live, locals, boxed)
 
             // Short-circuit operators (&&, ||): the RHS is conditionally
             // evaluated, so its dups must be flushed INTO the RHS expression
@@ -1082,7 +1099,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
         },
 
         HExpr::UnaryOp { op, operand, ty, effects, span } => {
-            let r = rc_expr(operand, live, locals)
+            let r = rc_expr(operand, live, locals, boxed)
             RcResult {
                 expr: HExpr::UnaryOp { op: op, operand: r.expr, ty: ty, effects: effects, span: span },
                 live: r.live,
@@ -1102,7 +1119,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             while i >= 0 {
                 match args.get(i) {
                     some(a) => {
-                        let r = rc_expr(a, cur_live, locals)
+                        let r = rc_expr(a, cur_live, locals, boxed)
                         new_args.push(r.expr)
                         for d in r.dups { arg_dups_rev.push(d) }
                         cur_live = r.live
@@ -1114,7 +1131,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             new_args.reverse()
             arg_dups_rev.reverse()
 
-            let callee_result = rc_expr(callee, cur_live, locals)
+            let callee_result = rc_expr(callee, cur_live, locals, boxed)
             RcResult {
                 expr: HExpr::Call { callee: callee_result.expr, args: new_args,
                     type_args: type_args, resolved_dicts: resolved_dicts,
@@ -1125,7 +1142,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
         },
 
         HExpr::FieldAccess { receiver, field, ty, effects, span } => {
-            let r = rc_expr(receiver, live, locals)
+            let r = rc_expr(receiver, live, locals, boxed)
             RcResult {
                 expr: HExpr::FieldAccess { receiver: r.expr, field: field, ty: ty, effects: effects, span: span },
                 live: r.live,
@@ -1139,7 +1156,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             let mut spread_dups: List<Str> = []
             let new_spread = match spread {
                 some(s) => {
-                    let r = rc_expr(s, cur_live, locals)
+                    let r = rc_expr(s, cur_live, locals, boxed)
                     cur_live = r.live
                     spread_dups = r.dups
                     some(r.expr)
@@ -1153,7 +1170,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             while i >= 0 {
                 match fields.get(i) {
                     some(f) => {
-                        let r = rc_expr(f.value, cur_live, locals)
+                        let r = rc_expr(f.value, cur_live, locals, boxed)
                         new_fields.push(HStructFieldInit { name: f.name, value: r.expr })
                         for d in r.dups { field_dups_rev.push(d) }
                         cur_live = r.live
@@ -1178,7 +1195,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             let mut spread_dups: List<Str> = []
             let new_spread = match spread {
                 some(s) => {
-                    let r = rc_expr(s, cur_live, locals)
+                    let r = rc_expr(s, cur_live, locals, boxed)
                     cur_live = r.live
                     spread_dups = r.dups
                     some(r.expr)
@@ -1191,7 +1208,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             while i >= 0 {
                 match fields.get(i) {
                     some(f) => {
-                        let r = rc_expr(f.value, cur_live, locals)
+                        let r = rc_expr(f.value, cur_live, locals, boxed)
                         new_fields.push(HStructFieldInit { name: f.name, value: r.expr })
                         for d in r.dups { field_dups_rev.push(d) }
                         cur_live = r.live
@@ -1218,7 +1235,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             let mut tail_dups: List<Str> = []
             let new_tail = match tail {
                 some(t) => {
-                    let r = rc_expr(t, cur_live, locals)
+                    let r = rc_expr(t, cur_live, locals, boxed)
                     cur_live = r.live
                     tail_dups = r.dups
                     some(r.expr)
@@ -1226,7 +1243,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
                 none => none,
             }
             // Then process statements backward
-            let stmts_result = rc_stmts(stmts, cur_live, locals)
+            let stmts_result = rc_stmts(stmts, cur_live, locals, boxed)
 
             // The tail's dups must execute after all statements but before the
             // tail expression — append them to the end of the statement list.
@@ -1245,10 +1262,10 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             // conditionally evaluated, so their dups must be flushed INTO the
             // branch body (before balancing).  Only the condition (always
             // evaluated) reports its dups upward.
-            let then_result = rc_expr(then_branch, set_clone(live), locals)
+            let then_result = rc_expr(then_branch, set_clone(live), locals, boxed)
             let else_result = match else_branch {
                 some(eb) => {
-                    let r = rc_expr(eb, set_clone(live), locals)
+                    let r = rc_expr(eb, set_clone(live), locals, boxed)
                     some(r)
                 },
                 none => none,
@@ -1274,7 +1291,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             let merged_live = live_then.union(live_else)
 
             // Transform condition with merged live set
-            let cond_result = rc_expr(condition, merged_live, locals)
+            let cond_result = rc_expr(condition, merged_live, locals, boxed)
 
             RcResult {
                 expr: HExpr::IfExpr { condition: cond_result.expr,
@@ -1323,11 +1340,11 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             while ai >= 0 {
                 match arms.get(ai) {
                     some(arm) => {
-                        let body_result = rc_expr(arm.body, set_clone(live), locals)
+                        let body_result = rc_expr(arm.body, set_clone(live), locals, boxed)
                         let mut arm_ext = match arm.guard {
                             some(g) => {
                                 let guard_live_out = body_result.live.union(fallthrough_live)
-                                let gr = rc_expr(g, guard_live_out, locals)
+                                let gr = rc_expr(g, guard_live_out, locals, boxed)
                                 set_clone(gr.live)
                             },
                             none => set_clone(body_result.live),
@@ -1370,11 +1387,11 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             for i in 0..arms.len() {
                 match arms.get(i) {
                     some(arm) => {
-                        let body_result = rc_expr(arm.body, set_clone(live), locals)
+                        let body_result = rc_expr(arm.body, set_clone(live), locals, boxed)
                         let new_guard = match arm.guard {
                             some(g) => {
                                 let guard_live_out = merged_live.union(body_result.live)
-                                let gr = rc_expr(g, guard_live_out, locals)
+                                let gr = rc_expr(g, guard_live_out, locals, boxed)
                                 some(flush_dups_into_expr(gr.expr, gr.dups))
                             },
                             none => none,
@@ -1403,7 +1420,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             }
 
             // Transform scrutinee
-            let scrut_result = rc_expr(scrutinee, merged_live, locals)
+            let scrut_result = rc_expr(scrutinee, merged_live, locals, boxed)
 
             RcResult {
                 expr: HExpr::MatchExpr { scrutinee: scrut_result.expr, arms: balanced_arms,
@@ -1424,7 +1441,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
                     some(p) => {
                         match p {
                             HStringInterpPart::Expression(e) => {
-                                let r = rc_expr(e, cur_live, locals)
+                                let r = rc_expr(e, cur_live, locals, boxed)
                                 new_parts.push(HStringInterpPart::Expression(r.expr))
                                 for d in r.dups { part_dups_rev.push(d) }
                                 cur_live = r.live
@@ -1452,13 +1469,13 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             // Conditional-evaluation boundary: body and each catch arm body are
             // conditionally evaluated, so their dups are flushed into their own
             // expressions. Report no dups upward.
-            let body_result = rc_expr(body, set_clone(live), locals)
+            let body_result = rc_expr(body, set_clone(live), locals, boxed)
             let body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups)
             let mut arm_results: List<(HMatchArm, Set<Str>)> = []
 
             for arm in arms {
                 let arm_live = set_clone(live)
-                let body_r = rc_expr(arm.body, arm_live, locals)
+                let body_r = rc_expr(arm.body, arm_live, locals, boxed)
                 let arm_body_flushed = flush_dups_into_expr(body_r.expr, body_r.dups)
                 let mut arm_final = body_r.live
                 let mut pat_names: List<Str> = []
@@ -1495,7 +1512,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
         HExpr::HandleExpr { body, handlers, ty, effects, span } => {
             // Conditional-evaluation boundary: body and handlers are flushed in
             // their own expressions; report no dups upward.
-            let body_result = rc_expr(body, live, locals)
+            let body_result = rc_expr(body, live, locals, boxed)
             let body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups)
             let mut new_handlers: List<HEffectHandler> = []
             for h in handlers {
@@ -1508,7 +1525,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
                     none => {},
                 }
                 collect_local_defs_expr(h.body, h_locals)
-                let h_result = rc_expr(h.body, h_live, h_locals)
+                let h_result = rc_expr(h.body, h_live, h_locals, boxed)
                 let h_body_flushed = flush_dups_into_expr(h_result.expr, h_result.dups)
                 new_handlers.push(HEffectHandler {
                     effect_name: h.effect_name, op_name: h.op_name,
@@ -1580,7 +1597,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
 
             // Build new body with param drops for unused params
             // (transform_fn_body collects its own locals internally)
-            let new_body = transform_fn_body(params, body)
+            let new_body = transform_fn_body(params, body, boxed)
 
             RcResult {
                 expr: HExpr::Lambda { params: params, return_type: return_type,
@@ -1598,7 +1615,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             while i >= 0 {
                 match args.get(i) {
                     some(a) => {
-                        let r = rc_expr(a, cur_live, locals)
+                        let r = rc_expr(a, cur_live, locals, boxed)
                         new_args.push(r.expr)
                         for d in r.dups { arg_dups_rev.push(d) }
                         cur_live = r.live
@@ -1618,8 +1635,8 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
         },
 
         HExpr::RangeExpr { start, end, inclusive, ty, effects, span } => {
-            let end_r = rc_expr(end, live, locals)
-            let start_r = rc_expr(start, end_r.live, locals)
+            let end_r = rc_expr(end, live, locals, boxed)
+            let start_r = rc_expr(start, end_r.live, locals, boxed)
             RcResult {
                 expr: HExpr::RangeExpr { start: start_r.expr, end: end_r.expr,
                     inclusive: inclusive, ty: ty, effects: effects, span: span },
@@ -1636,7 +1653,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             while i >= 0 {
                 match elements.get(i) {
                     some(e) => {
-                        let r = rc_expr(e, cur_live, locals)
+                        let r = rc_expr(e, cur_live, locals, boxed)
                         new_elems.push(r.expr)
                         for d in r.dups { elem_dups_rev.push(d) }
                         cur_live = r.live
@@ -1662,7 +1679,7 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             while i >= 0 {
                 match elements.get(i) {
                     some(e) => {
-                        let r = rc_expr(e, cur_live, locals)
+                        let r = rc_expr(e, cur_live, locals, boxed)
                         new_elems.push(r.expr)
                         for d in r.dups { elem_dups_rev.push(d) }
                         cur_live = r.live
@@ -1681,8 +1698,8 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
         },
 
         HExpr::IndexExpr { receiver, index, ty, effects, span } => {
-            let idx_r = rc_expr(index, live, locals)
-            let recv_r = rc_expr(receiver, idx_r.live, locals)
+            let idx_r = rc_expr(index, live, locals, boxed)
+            let recv_r = rc_expr(receiver, idx_r.live, locals, boxed)
             RcResult {
                 expr: HExpr::IndexExpr { receiver: recv_r.expr, index: idx_r.expr,
                     ty: ty, effects: effects, span: span },
