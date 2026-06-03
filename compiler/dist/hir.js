@@ -616,6 +616,34 @@ function default_evidence_name(effect_name) {
   return `__ring_default_ev_${safe}`;
 }
 
+function effect_op_slot(effect_ops, effect_name, op_name) {
+  __ring_match6: {
+    const __ring_m6 = _Map_get(effect_ops, effect_name);
+    if (__ring_m6._tag === "some") {
+      const ops = __ring_m6._0;
+      let idx = 0;
+      let found = (-1);
+      const __ring_iter_2 = __List_Iterable.iter(ops);
+      while (true) {
+        const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+        if (__ring_next_2._tag === "none") break;
+        const o = __ring_next_2._0;
+        if (((o.name === op_name) && (found === (-1)))) {
+          found = idx;
+        }
+        idx = (idx + 1);
+      }
+      return found;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "none") {
+      return (-1);
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+}
+
 function trait_bound_param_name(type_param, trait_name) {
   const safe_trait = (Str_contains(trait_name, "::") ? Str_replace(trait_name, "::", "$") : trait_name);
   return `__ring_${type_param}_${safe_trait}`;
@@ -638,368 +666,368 @@ const RUNTIME_EFFECT_ABORT = "__EffectAbort";
 const RUNTIME_MATCH_FAIL = "__match_fail";
 
 function hexpr_type(e) {
-  __ring_match6: {
-    const __ring_m6 = e;
-    if (__ring_m6._tag === "IntLit") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "FloatLit") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "StrLit") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "BoolLit") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "Ident") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "BinOp") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "UnaryOp") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "Call") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "FieldAccess") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "StructLit") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "NamedVariantConstruct") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "MatchExpr") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "Block") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "IfExpr") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "StringInterp") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TryCatch") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "HandleExpr") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "Lambda") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "EffectOp") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "RangeExpr") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "ListLit") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TupleLit") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "IndexExpr") {
-      const ty = __ring_m6.ty;
-      return ty;
-      break __ring_match6;
-    }
-    __match_fail(__ring_m6);
-  }
-}
-
-function hexpr_effects(e) {
   __ring_match7: {
     const __ring_m7 = e;
     if (__ring_m7._tag === "IntLit") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "FloatLit") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "StrLit") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "BoolLit") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "Ident") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "BinOp") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "UnaryOp") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "Call") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "FieldAccess") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "StructLit") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "NamedVariantConstruct") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "MatchExpr") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "Block") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "IfExpr") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "StringInterp") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "TryCatch") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "HandleExpr") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "Lambda") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "EffectOp") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "RangeExpr") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "ListLit") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "TupleLit") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     if (__ring_m7._tag === "IndexExpr") {
-      const effects = __ring_m7.effects;
-      return effects;
+      const ty = __ring_m7.ty;
+      return ty;
       break __ring_match7;
     }
     __match_fail(__ring_m7);
   }
 }
 
-function hexpr_span(e) {
+function hexpr_effects(e) {
   __ring_match8: {
     const __ring_m8 = e;
     if (__ring_m8._tag === "IntLit") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "FloatLit") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "StrLit") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "BoolLit") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "Ident") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "BinOp") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "UnaryOp") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "Call") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "FieldAccess") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "StructLit") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "NamedVariantConstruct") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "MatchExpr") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "Block") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "IfExpr") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "StringInterp") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "TryCatch") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "HandleExpr") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "Lambda") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "EffectOp") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "RangeExpr") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "ListLit") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "TupleLit") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     if (__ring_m8._tag === "IndexExpr") {
-      const span = __ring_m8.span;
-      return span;
+      const effects = __ring_m8.effects;
+      return effects;
       break __ring_match8;
     }
     __match_fail(__ring_m8);
+  }
+}
+
+function hexpr_span(e) {
+  __ring_match9: {
+    const __ring_m9 = e;
+    if (__ring_m9._tag === "IntLit") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "FloatLit") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "StrLit") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "BoolLit") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "Ident") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "BinOp") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "UnaryOp") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "Call") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "FieldAccess") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "StructLit") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "NamedVariantConstruct") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "MatchExpr") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "Block") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "IfExpr") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "StringInterp") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "TryCatch") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "HandleExpr") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "Lambda") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "EffectOp") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "RangeExpr") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "ListLit") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "TupleLit") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "IndexExpr") {
+      const span = __ring_m9.span;
+      return span;
+      break __ring_match9;
+    }
+    __match_fail(__ring_m9);
   }
 }
 
@@ -1249,4 +1277,4 @@ function __DerivedImpl_Debug_debug(self) {
 const __DerivedImpl_Debug = { debug: __DerivedImpl_Debug_debug };
 
 
-export { HParam, DictRef_Simple, DictRef_Wrapped, TraitDispatch_Builtin, TraitDispatch_Direct, TraitDispatch_Dict, DictDispatchInfo, HStructFieldInit, HMatchArm, HEffectHandler, HStringInterpPart_Literal, HStringInterpPart_Expression, HExpr_IntLit, HExpr_FloatLit, HExpr_StrLit, HExpr_BoolLit, HExpr_Ident, HExpr_BinOp, HExpr_UnaryOp, HExpr_Call, HExpr_FieldAccess, HExpr_StructLit, HExpr_NamedVariantConstruct, HExpr_MatchExpr, HExpr_Block, HExpr_IfExpr, HExpr_StringInterp, HExpr_TryCatch, HExpr_HandleExpr, HExpr_Lambda, HExpr_EffectOp, HExpr_RangeExpr, HExpr_ListLit, HExpr_TupleLit, HExpr_IndexExpr, HForInDestructure, HLetDestructureBinding, HStmt_Let, HStmt_Var, HStmt_Assign, HStmt_ExprStmt, HStmt_Return, HStmt_While, HStmt_ForIn, HStmt_Break, HStmt_Continue, HStmt_LetDestructure, HStmt_IfLet, HStmt_Drop, HStmt_Dup, HStructField, HEnumVariant, HEffectOp, HTraitMethod, TraitBound, HAssocType, HSigMember, HDecl_Fn, HDecl_Struct, HDecl_Enum, HDecl_Impl, HDecl_Effect, HDecl_Test, HDecl_Trait, HDecl_ExternFn, HDecl_ExternType, HDecl_TypeAlias, HDecl_Const, HDecl_ModBlock, HDecl_Sig, FieldAction_Identity, FieldAction_Call, FieldAction_Tuple, FieldAction_FnLiteral, DerivedField, DerivedVariant, TypeKind_StructKind, TypeKind_EnumKind, DerivedImpl, HProgram, variant_js_name, trait_dict_name, evidence_param_name, default_evidence_name, trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL, hexpr_type, hexpr_effects, hexpr_span, __DictDispatchInfo_Eq, __HForInDestructure_Eq, __TraitBound_Eq, __TypeKind_Eq, __DictDispatchInfo_Clone, __HForInDestructure_Clone, __TraitBound_Clone, __DictRef_Clone, __TraitDispatch_Clone, __FieldAction_Clone, __TypeKind_Clone, __DerivedField_Clone, __DerivedVariant_Clone, __DerivedImpl_Clone, __DictDispatchInfo_Ord, __TraitBound_Ord, __TypeKind_Ord, __DictDispatchInfo_Debug, __HForInDestructure_Debug, __TraitBound_Debug, __DictRef_Debug, __TraitDispatch_Debug, __FieldAction_Debug, __TypeKind_Debug, __DerivedField_Debug, __DerivedVariant_Debug, __DerivedImpl_Debug, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS, MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS, OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS, STRINGBUILDER_METHODS };
+export { HParam, DictRef_Simple, DictRef_Wrapped, TraitDispatch_Builtin, TraitDispatch_Direct, TraitDispatch_Dict, DictDispatchInfo, HStructFieldInit, HMatchArm, HEffectHandler, HStringInterpPart_Literal, HStringInterpPart_Expression, HExpr_IntLit, HExpr_FloatLit, HExpr_StrLit, HExpr_BoolLit, HExpr_Ident, HExpr_BinOp, HExpr_UnaryOp, HExpr_Call, HExpr_FieldAccess, HExpr_StructLit, HExpr_NamedVariantConstruct, HExpr_MatchExpr, HExpr_Block, HExpr_IfExpr, HExpr_StringInterp, HExpr_TryCatch, HExpr_HandleExpr, HExpr_Lambda, HExpr_EffectOp, HExpr_RangeExpr, HExpr_ListLit, HExpr_TupleLit, HExpr_IndexExpr, HForInDestructure, HLetDestructureBinding, HStmt_Let, HStmt_Var, HStmt_Assign, HStmt_ExprStmt, HStmt_Return, HStmt_While, HStmt_ForIn, HStmt_Break, HStmt_Continue, HStmt_LetDestructure, HStmt_IfLet, HStmt_Drop, HStmt_Dup, HStructField, HEnumVariant, HEffectOp, HTraitMethod, TraitBound, HAssocType, HSigMember, HDecl_Fn, HDecl_Struct, HDecl_Enum, HDecl_Impl, HDecl_Effect, HDecl_Test, HDecl_Trait, HDecl_ExternFn, HDecl_ExternType, HDecl_TypeAlias, HDecl_Const, HDecl_ModBlock, HDecl_Sig, FieldAction_Identity, FieldAction_Call, FieldAction_Tuple, FieldAction_FnLiteral, DerivedField, DerivedVariant, TypeKind_StructKind, TypeKind_EnumKind, DerivedImpl, HProgram, variant_js_name, trait_dict_name, evidence_param_name, default_evidence_name, effect_op_slot, trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL, hexpr_type, hexpr_effects, hexpr_span, __DictDispatchInfo_Eq, __HForInDestructure_Eq, __TraitBound_Eq, __TypeKind_Eq, __DictDispatchInfo_Clone, __HForInDestructure_Clone, __TraitBound_Clone, __DictRef_Clone, __TraitDispatch_Clone, __FieldAction_Clone, __TypeKind_Clone, __DerivedField_Clone, __DerivedVariant_Clone, __DerivedImpl_Clone, __DictDispatchInfo_Ord, __TraitBound_Ord, __TypeKind_Ord, __DictDispatchInfo_Debug, __HForInDestructure_Debug, __TraitBound_Debug, __DictRef_Debug, __TraitDispatch_Debug, __FieldAction_Debug, __TypeKind_Debug, __DerivedField_Debug, __DerivedVariant_Debug, __DerivedImpl_Debug, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS, MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS, OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS, STRINGBUILDER_METHODS };

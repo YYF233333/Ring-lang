@@ -591,6 +591,25 @@ fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<St
     }
 }
 
+// B-090: collect each effect's ops in declaration order into the registry so
+// gen_handle_expr (evidence-struct construction) and gen_effect_op (dispatch)
+// agree on slot layout via effect_op_slot. Mirrors the JS backend's
+// emit_effect_decl(ctx.effect_ops.insert). Recurses into ModBlocks like the
+// other scan passes.
+fn register_effect_ops_llvm(decls: List<HDecl>, mut effect_ops: Map<Str, List<HEffectOp>>) {
+    for decl in decls {
+        match decl {
+            HDecl::Effect { name, ops, .. } => {
+                effect_ops.insert(name, ops)
+            },
+            HDecl::ModBlock { decls: md, .. } => {
+                register_effect_ops_llvm(md, effect_ops)
+            },
+            _ => {},
+        }
+    }
+}
+
 // ============================================================
 // scan_fn_mut_params — collect per-function mut value-type param flags (#B-087 gap 5)
 // ============================================================
@@ -954,7 +973,8 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         next_user_typeid: 64,
         type_to_typeid: map_new(),
         boxed_vars: set_new(),
-        fn_mut_params: map_new()
+        fn_mut_params: map_new(),
+        effect_ops: map_new()
     }
 
     // B-091: thread the auto-boxed mut-cell def_ids through so Var/read/write
@@ -968,6 +988,9 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     scan_fn_effects(program.decls, ctx.local_fn_effects)
     scan_trait_decls(program.decls, ctx.trait_method_order)
     scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
+    // B-090: register effect-op declaration order so gen_handle_expr /
+    // gen_effect_op share the evidence-struct slot layout via effect_op_slot.
+    register_effect_ops_llvm(program.decls, ctx.effect_ops)
 
     // 7b. Declare runtime functions
     declare_runtime_fns(ctx)
@@ -1080,7 +1103,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         next_user_typeid: 64,
         type_to_typeid: map_new(),
         boxed_vars: set_new(),
-        fn_mut_params: map_new()
+        fn_mut_params: map_new(),
+        effect_ops: map_new()
     }
 
     // 6. Register built-in types
@@ -1092,6 +1116,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         scan_fn_effects(program.decls, ctx.local_fn_effects)
         scan_trait_decls(program.decls, ctx.trait_method_order)
         scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
+        // B-090: register effect-op declaration order (shared by all modules).
+        register_effect_ops_llvm(program.decls, ctx.effect_ops)
         // B-091: union every module's auto-boxed mut-cell def_ids.
         for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
     }

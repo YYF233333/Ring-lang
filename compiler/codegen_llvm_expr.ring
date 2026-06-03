@@ -6,6 +6,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     BUILTIN_RANGE,
+    effect_op_slot,
     hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
@@ -3640,8 +3641,16 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
         HExpr::HandleExpr { body: he_body, .. } => {
             collect_captures(ctx, he_body, params, captures)
         },
-        HExpr::EffectOp { args: eo_args, .. } => {
+        HExpr::EffectOp { effect_name: eo_eff, args: eo_args, .. } => {
             for a in eo_args { collect_captures(ctx, a, params, captures) }
+            // B-090 (D3 natural nesting): a closure body that performs a non-fail
+            // effect dispatches through that effect's evidence (gen_effect_op →
+            // lookup_evidence(__ring_ev_<eff>)). That evidence param must be
+            // captured into the closure env, else the lambda can't find it.
+            // fail.raise routes through ring_raise (ambient setjmp), no evidence.
+            if eo_eff != "fail" {
+                consider_capture_name(ctx, evidence_param_name(eo_eff), none, params, captures)
+            }
         },
         HExpr::RangeExpr { start: rs, end: re, .. } => {
             collect_captures(ctx, rs, params, captures)
@@ -3864,17 +3873,31 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         let ev_name = evidence_param_name(effect_name)
 
         // For fail.raise (abort handler), we need try-catch semantics
+        let mut is_fail_abort = false
         for h in hs {
             if effect_name == "fail" && h.op_name == "raise" {
                 has_fail_abort = true
+                is_fail_abort = true
             }
         }
 
-        // Create evidence as a simple struct with function pointers
-        // For now, store null as evidence — the effect operations will check
-        let alloca = build_entry_alloca(ctx, ctx.ptr_type, ev_name)
-        discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), alloca))
-        ctx.named_values.insert(ev_name, alloca)
+        if is_fail_abort {
+            // fail.raise routes through ring_try/ring_raise (setjmp/longjmp), not
+            // evidence — gen_effect_op never reads this slot. Keep the null
+            // placeholder for ABI uniformity (callees still receive an evidence
+            // ptr param for the effect).
+            let alloca = build_entry_alloca(ctx, ctx.ptr_type, ev_name)
+            discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), alloca))
+            ctx.named_values.insert(ev_name, alloca)
+        } else {
+            // B-090 (D1): build the real N-slot evidence struct. N = number of ops
+            // declared on this effect (effect_op_slot). Slot k holds op k's
+            // {fn_ptr, env} closure (mirrors JS oracle's `{op: closure}`).
+            let ev_struct = build_handler_evidence(ctx, effect_name, hs)
+            let alloca = build_entry_alloca(ctx, ctx.ptr_type, ev_name)
+            discard(LLVMBuildStore(ctx.builder, ev_struct, alloca))
+            ctx.named_values.insert(ev_name, alloca)
+        }
     }
 
     if has_fail_abort {
@@ -3891,6 +3914,71 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         // Non-abort handlers: just execute body with evidence set up
         gen_llvm_expr(ctx, body)
     }
+}
+
+// B-090 (D1): construct the N-slot evidence struct for one handled effect.
+//
+//   { ptr slot0, ptr slot1, ... }   // N = #ops declared on the effect
+//
+// Slot k = the {fn_ptr, env} closure for op k (op order = declaration order,
+// via effect_op_slot). Each handler arm becomes a closure built by gen_lambda
+// (params = arm params, body = arm body), so it captures the surrounding scope
+// exactly like the JS oracle's `(params) => (body)`. Tail-resumptive: the arm's
+// return value IS the resume value, so gen_effect_op returns the closure call
+// result directly.
+//
+// Unhandled ops (no arm in `hs`) keep a null slot — out of scope for B-090
+// (default-body injection #72 is B-097). Well-typed in-scope code only performs
+// handled ops, so the null slot is never GEP'd/loaded for those programs.
+//
+// D2: the evidence struct + handler closures are intentionally leaked (same as
+// ring_try's body closure) — proper drop is B-096. Pure leak, not UAF.
+fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHandler>) -> LLVMValueRef {
+    // Slot count = number of ops declared on the effect. Fall back to the
+    // handler count only if the effect is unregistered (shouldn't happen for
+    // checked code), so the struct is always large enough for every handled op.
+    let n_slots = match ctx.effect_ops.get(effect_name) {
+        some(ops) => ops.len(),
+        none => hs.len(),
+    }
+
+    let mut slot_types: List<LLVMTypeRef> = []
+    for i in 0..n_slots { slot_types.push(ctx.ptr_type) }
+    let ev_ty = LLVMStructTypeInContext(ctx.context, slot_types, 0)
+    let ev_size = LLVMSizeOf(ev_ty)
+
+    // typeid 7 (RING_TYPEID_CLOSURE). Per D2 the evidence struct is never
+    // ring_drop'd (proper drop is B-096), so the typeid only matters as a tag;
+    // 7 is a safe choice that the drop path never reaches for evidence. We do
+    // NOT use the closure-env typeid (15) because drop_closure_env expects a
+    // leading i64 count header this struct does not have.
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let ev_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE (no drop emitted for evidence)
+    let ev_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [ev_size, ev_typeid], fresh_name(ctx, "ev_st"))
+
+    // Initialize every slot to null first (unhandled ops stay null).
+    for i in 0..n_slots {
+        let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, i, fresh_name(ctx, "evs"))
+        discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot))
+    }
+
+    // Build a closure per handler arm and store it at its declared op slot.
+    for h in hs {
+        let slot_idx = effect_op_slot(ctx.effect_ops, effect_name, h.op_name)
+        // slot_idx == -1 only when the effect/op is unregistered (e.g. the
+        // unregistered-effect fallback above used hs order). Map to the handler's
+        // position within hs as a defensive fallback so codegen never GEPs OOB.
+        let idx = if slot_idx >= 0 { slot_idx } else { 0 }
+        // The arm body's return value is the resume value (tail-resumptive), so
+        // the closure simply returns gen_expr(body). Lambda params = arm params.
+        let arm_ret_ty = hexpr_type(h.body)
+        let arm_closure = gen_lambda(ctx, h.params, arm_ret_ty, h.body, arm_ret_ty)
+        let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx, fresh_name(ctx, "evset"))
+        discard(LLVMBuildStore(ctx.builder, arm_closure, slot))
+    }
+
+    ev_ptr
 }
 
 // Build a closure {fn(env, error) -> error, null_env}: the abort handler result
@@ -3945,26 +4033,34 @@ fn gen_effect_op(mut ctx: LlvmCtx, effect_name: Str, op_name: Str, args: List<HE
         LLVMPositionBuilderAtEnd(ctx.builder, dummy_bb)
         LLVMConstPointerNull(ctx.ptr_type)
     } else {
-        // For other effects: look up evidence and call the handler
-        // Evidence is stored as a named value __ev_<effect_name>
+        // B-090 (D1): non-abort effect op — dispatch through the evidence struct.
+        // Evidence (built by build_handler_evidence) is an N-slot { ptr, ... }
+        // struct; slot effect_op_slot(effect, op) holds this op's {fn_ptr, env}
+        // closure. Load it and call via gen_closure_call (tail-resumptive: the
+        // closure's return value is the resume value, returned directly).
         let ev_name = evidence_param_name(effect_name)
         let mut arg_vals: List<LLVMValueRef> = []
         for a in args { arg_vals.push(gen_llvm_expr(ctx, a)) }
 
-        // Try to find the evidence in named_values
-        match ctx.named_values.get(ev_name) {
-            some(ev_alloca) => {
-                let ev_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, ev_alloca, fresh_name(ctx, "ev"))
-                // Evidence is a struct with method function pointers
-                // For now, just call through the evidence
-                // This is simplified — in a full implementation we'd extract the method ptr
-                LLVMConstPointerNull(ctx.ptr_type)
-            },
-            none => {
-                // No evidence available — this shouldn't happen in well-typed code
-                // Return null as fallback
-                LLVMConstPointerNull(ctx.ptr_type)
-            },
+        // Evidence ptr: from the current handle's alloca or a forwarded fn param
+        // (lookup_evidence handles both, falling back to null off-scope).
+        let ev_val = lookup_evidence(ctx, ev_name)
+
+        // Slot index = op's declaration order. The struct type used for the GEP
+        // must have at least slot_idx+1 elements; size it to the effect's full op
+        // count (same layout build_handler_evidence allocated).
+        let slot_idx = effect_op_slot(ctx.effect_ops, effect_name, op_name)
+        let n_slots = match ctx.effect_ops.get(effect_name) {
+            some(ops) => ops.len(),
+            none => slot_idx + 1,
         }
+        let idx = if slot_idx >= 0 { slot_idx } else { 0 }
+        let mut slot_types: List<LLVMTypeRef> = []
+        for i in 0..n_slots { slot_types.push(ctx.ptr_type) }
+        let ev_ty = LLVMStructTypeInContext(ctx.context, slot_types, 0)
+
+        let slot_ptr = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_val, idx, fresh_name(ctx, "evslot"))
+        let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "evcl"))
+        gen_closure_call(ctx, closure_ptr, arg_vals)
     }
 }

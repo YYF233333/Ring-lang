@@ -1,4 +1,5 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
+use hir::{HEffectOp}
 
 // Re-declare LLVM opaque types to avoid cross-module ESM import issues.
 // These match the declarations in llvm_ffi.ring and unify to the same types.
@@ -117,7 +118,13 @@ pub struct LlvmCtx {
     // ones the callee receives as a CELL pointer and the caller must box. Mirrors the
     // JS backend's CodegenCtx.fn_mut_params (scan_fn_mut_params). Keyed by both the
     // bare fn name and the UFCS method name (Type_method) for method-call lookup.
-    pub fn_mut_params: Map<Str, List<Bool>>
+    pub fn_mut_params: Map<Str, List<Bool>>,
+
+    // B-090: effect declaration registry, keyed by effect name → ops in
+    // declaration order. gen_handle_expr lays the evidence struct out in this
+    // order; gen_effect_op dispatches via effect_op_slot (hir.ring) using the
+    // same registry. Mirrors the JS backend's CodegenCtx.effect_ops.
+    pub effect_ops: Map<Str, List<HEffectOp>>
 }
 
 // B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).

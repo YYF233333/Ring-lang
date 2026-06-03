@@ -234,6 +234,29 @@ pub fn default_evidence_name(effect_name: Str) -> Str {
     "__ring_default_ev_${safe}"
 }
 
+// B-090: declaration-order index of an op within its effect. This is the
+// cross-phase contract between gen_handle_expr (which lays out the N-slot
+// evidence struct, slot k = op k's {fn_ptr, env} closure) and gen_effect_op
+// (which GEPs to this slot to dispatch). Slot order = op order in the effect
+// declaration. Property is identical to variant_js_name: a naming/layout
+// convention shared across codegen phases that must never be hardcoded per-site.
+// Returns -1 if the op is not found (well-typed code never hits this — the
+// checker rejects ops not declared on the effect).
+pub fn effect_op_slot(effect_ops: Map<Str, List<HEffectOp>>, effect_name: Str, op_name: Str) -> Int {
+    match effect_ops.get(effect_name) {
+        some(ops) => {
+            let mut idx = 0
+            let mut found = -1
+            for o in ops {
+                if o.name == op_name && found == -1 { found = idx }
+                idx = idx + 1
+            }
+            found
+        },
+        none => -1,
+    }
+}
+
 pub fn trait_bound_param_name(type_param: Str, trait_name: Str) -> Str {
     let safe_trait = if trait_name.contains("::") { trait_name.replace("::", "$") } else { trait_name }
     "__ring_${type_param}_${safe_trait}"
