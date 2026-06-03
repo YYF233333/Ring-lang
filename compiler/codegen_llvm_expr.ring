@@ -1806,6 +1806,21 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
     let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.merge")
     let default_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.default")
 
+    // A switch routes each tag to exactly one case with no fall-through between
+    // cases. That is incompatible with guards: a false guard must fall through to
+    // the NEXT arm, which may share the same constructor/tag. So any match that
+    // contains a guarded arm — enum or not — is lowered via the if-else chain
+    // (gen_match_if_else), which emits explicit tag tests and re-tests each arm's
+    // pattern+guard on fall-through, exactly matching the JS oracle. The switch is
+    // kept purely as an optimization for guard-free enum matches.
+    let mut any_guard = false
+    for arm in arms {
+        match arm.guard { some(_) => { any_guard = true }, none => {} }
+    }
+    if any_guard {
+        return gen_match_if_else(ctx, scrut_val, scrut_ty, arms, merge_bb, default_bb, current_fn)
+    }
+
     // For enum types: extract tag and use switch
     match enum_name {
         some(ename) => {
@@ -2102,7 +2117,37 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
     }
 }
 
-// Non-enum match: if-else chain
+// Emit the guard check (if any) and the arm body, branching to merge_bb on
+// success. The builder must already be positioned at the block where the
+// pattern matched and its variables are bound. When the arm has a guard, the
+// guard is evaluated here; a false guard falls through to next_bb (re-testing
+// the following arm's pattern+guard), mirroring the JS oracle. Arms without a
+// guard branch unconditionally to the body, preserving prior behavior.
+fn emit_match_arm_body(mut ctx: LlvmCtx, arm: HMatchArm, merge_bb: LLVMBasicBlockRef, next_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef, mut phi_vals: List<LLVMValueRef>, mut phi_bbs: List<LLVMBasicBlockRef>) {
+    match arm.guard {
+        some(g) => {
+            let body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.body")
+            let guard_val = gen_llvm_expr(ctx, g)
+            let guard_i1 = unbox_to_i1(ctx, guard_val)
+            discard(LLVMBuildCondBr(ctx.builder, guard_i1, body_bb, next_bb))
+            LLVMPositionBuilderAtEnd(ctx.builder, body_bb)
+        },
+        none => {},
+    }
+    let body_val = gen_llvm_expr(ctx, arm.body)
+    let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+    phi_vals.push(body_val)
+    phi_bbs.push(arm_end_bb)
+}
+
+// Non-enum match: if-else chain.
+// Also used for enum matches that contain at least one guarded arm: a switch
+// gives each tag exactly one target with no fall-through between cases, but a
+// false guard must fall through to the NEXT arm (which may share the same
+// constructor/tag), so guarded enum matches are lowered through this chain
+// instead of via gen_match_arm_enum's switch. Constructor / NamedConstructor /
+// OrPattern arms therefore emit explicit tag tests here.
 fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, arms: List<HMatchArm>, merge_bb: LLVMBasicBlockRef, default_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) -> LLVMValueRef {
     let mut phi_vals: List<LLVMValueRef> = []
     let mut phi_bbs: List<LLVMBasicBlockRef> = []
@@ -2118,35 +2163,44 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
         match arms.get(i) {
             some(arm) => {
                 let is_last = i == total - 1
+                // A guarded arm is never an unconditional match even when its
+                // pattern is irrefutable (wildcard/binding): a false guard must
+                // be able to fall through to the next arm, so it always needs a
+                // next_bb. Compute one up front for the irrefutable cases.
+                let has_guard = match arm.guard { some(_) => true, none => false }
                 match arm.pattern {
                     Pattern::Wildcard { .. } => {
                         open_block = false
+                        // An unguarded wildcard is irrefutable and matches
+                        // unconditionally (no fall-through), so it needs no fresh
+                        // next_bb — default_bb is used as the (unreachable) guard-
+                        // false target placeholder only when guarded+last. A fresh
+                        // fall-through block is allocated only for a guarded non-
+                        // last wildcard.
+                        let next_bb = if has_guard && is_last == false { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") } else { default_bb }
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.wild")
                         discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-                        // Branch from current block to this arm (unconditional)
-                        // We need to be in the right block. If we just wrote the prev arm's else:
-                        // Actually for if-else chain, we use condBr each time.
-                        // Let's restructure: for if-else chain, we emit condBr chaining.
-                        let body_val = gen_llvm_expr(ctx, arm.body)
-                        let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
-                        discard(LLVMBuildBr(ctx.builder, merge_bb))
-                        phi_vals.push(body_val)
-                        phi_bbs.push(arm_end_bb)
+                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                        if has_guard && is_last == false {
+                            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                            open_block = true
+                        }
                     },
                     Pattern::Binding { name: bname, .. } => {
                         open_block = false
+                        let next_bb = if has_guard && is_last == false { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") } else { default_bb }
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.bind")
                         discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                         let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
                         discard(LLVMBuildStore(ctx.builder, scrut_val, alloca))
                         ctx.named_values.insert(bname, alloca)
-                        let body_val = gen_llvm_expr(ctx, arm.body)
-                        let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
-                        discard(LLVMBuildBr(ctx.builder, merge_bb))
-                        phi_vals.push(body_val)
-                        phi_bbs.push(arm_end_bb)
+                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                        if has_guard && is_last == false {
+                            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                            open_block = true
+                        }
                     },
                     Pattern::Literal { value, .. } => {
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.lit")
@@ -2157,11 +2211,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         discard(LLVMBuildCondBr(ctx.builder, cond_i1, arm_bb, next_bb))
 
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-                        let body_val = gen_llvm_expr(ctx, arm.body)
-                        let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
-                        discard(LLVMBuildBr(ctx.builder, merge_bb))
-                        phi_vals.push(body_val)
-                        phi_bbs.push(arm_end_bb)
+                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
 
                         if is_last == false {
                             // Non-last: builder moves to the (empty, unterminated) fall-through block.
@@ -2170,6 +2220,79 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         } else {
                             // Last: cond-false already branches to default_bb; builder stays on the
                             // terminated arm block, so no trailing br is needed.
+                            open_block = false
+                        }
+                    },
+                    Pattern::Constructor { name: cname, qualifier, fields, .. } => {
+                        // Enum constructor in if-else chain (taken for guarded enum
+                        // matches). Test the runtime tag, then bind fields.
+                        let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
+                        let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.ctor.${cname}")
+                        gen_ctor_tag_test(ctx, scrut_val, cname, qualifier, arm_bb, next_bb, current_fn)
+                        LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                        bind_constructor_fields(ctx, scrut_val, cname, qualifier, fields)
+                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                        if is_last == false {
+                            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                            open_block = true
+                        } else {
+                            open_block = false
+                        }
+                    },
+                    Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
+                        let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
+                        let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.ctor.${cname}")
+                        gen_ctor_tag_test(ctx, scrut_val, cname, qualifier, arm_bb, next_bb, current_fn)
+                        LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                        bind_named_constructor_fields(ctx, scrut_val, cname, qualifier, nfields)
+                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                        if is_last == false {
+                            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                            open_block = true
+                        } else {
+                            open_block = false
+                        }
+                    },
+                    Pattern::OrPattern { patterns, .. } => {
+                        // OR pattern over enum variants in the if-else chain:
+                        // match if ANY alternative's tag matches. Chain the tag
+                        // tests so the first match jumps to arm_bb; all-miss goes
+                        // to next_bb. Field-less alternatives only (same constraint
+                        // as the switch path).
+                        let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
+                        let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.or")
+                        let palts = patterns
+                        let nalts = palts.len()
+                        for k in 0..nalts {
+                            match palts.get(k) {
+                                some(alt) => {
+                                    let alt_ref = match alt {
+                                        Pattern::Constructor { name: an, qualifier: aq, .. } => some((an, aq)),
+                                        Pattern::NamedConstructor { name: an, qualifier: aq, .. } => some((an, aq)),
+                                        _ => none,
+                                    }
+                                    match alt_ref {
+                                        some(ar) => {
+                                            let (an, aq) = ar
+                                            // On the last alternative, a miss goes to next_bb;
+                                            // earlier misses go to a fresh test block.
+                                            let miss_bb = if k == nalts - 1 { next_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.or.alt") }
+                                            gen_ctor_tag_test(ctx, scrut_val, an, aq, arm_bb, miss_bb, current_fn)
+                                            LLVMPositionBuilderAtEnd(ctx.builder, miss_bb)
+                                        },
+                                        none => {},
+                                    }
+                                },
+                                none => {},
+                            }
+                        }
+                        // Builder is now at the last miss target (== next_bb). Emit the body.
+                        LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                        if is_last == false {
+                            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                            open_block = true
+                        } else {
                             open_block = false
                         }
                     },
@@ -2242,11 +2365,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                             }
                         }
 
-                        let body_val = gen_llvm_expr(ctx, arm.body)
-                        let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
-                        discard(LLVMBuildBr(ctx.builder, merge_bb))
-                        phi_vals.push(body_val)
-                        phi_bbs.push(arm_end_bb)
+                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
                         if is_last == false {
                             LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
                             open_block = true
@@ -2255,22 +2374,24 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         }
                     },
                     _ => {
-                        // For other patterns in non-enum context, bind as wildcard
-                        // but also try to bind any pattern variables
+                        // For other patterns in non-enum context, bind any pattern
+                        // variables and treat the pattern as irrefutable. Without a
+                        // guard it matches unconditionally; only a false guard falls
+                        // through to the next arm. A fresh fall-through block is
+                        // allocated only when this arm can actually fall through
+                        // (guarded non-last); otherwise default_bb is the (unused or
+                        // exhaustion) placeholder.
+                        open_block = false
+                        let next_bb = if has_guard && is_last == false { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") } else { default_bb }
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.other")
                         discard(LLVMBuildBr(ctx.builder, arm_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
                         bind_nested_pattern(ctx, scrut_val, arm.pattern)
-                        let body_val = gen_llvm_expr(ctx, arm.body)
-                        let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
-                        discard(LLVMBuildBr(ctx.builder, merge_bb))
-                        phi_vals.push(body_val)
-                        phi_bbs.push(arm_end_bb)
-                        // Position at a new (empty, unterminated) block for any following arms;
-                        // it needs the trailing br to default_bb.
-                        let next_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next")
-                        LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
-                        open_block = true
+                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
+                        if has_guard && is_last == false {
+                            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                            open_block = true
+                        }
                     },
                 }
             },
@@ -2303,6 +2424,105 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
         phi
     } else {
         LLVMConstPointerNull(ctx.ptr_type)
+    }
+}
+
+// Helper: emit a runtime-tag test for an enum constructor in the if-else chain.
+// If the scrutinee's tag equals the variant's tag, branch to match_bb, else to
+// miss_bb. Used by guarded enum matches (which can't use the switch path because
+// a false guard must fall through to the next arm). If the variant cannot be
+// resolved, branch unconditionally to match_bb (best-effort, mirrors the
+// switch path's silent skip).
+fn gen_ctor_tag_test(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qualifier: Str?, match_bb: LLVMBasicBlockRef, miss_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) {
+    let ei = find_enum_by_variant(ctx, cname, qualifier)
+    match ei {
+        some(enum_info) => match enum_info.variants.get(cname) {
+            some(vi) => {
+                let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, 0, fresh_name(ctx, "tp"))
+                let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tag"))
+                let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
+                let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "tc"))
+                discard(LLVMBuildCondBr(ctx.builder, cmp, match_bb, miss_bb))
+            },
+            none => { discard(LLVMBuildBr(ctx.builder, match_bb)) },
+        },
+        none => { discard(LLVMBuildBr(ctx.builder, match_bb)) },
+    }
+}
+
+// Helper: bind a positional constructor pattern's fields (after its tag was
+// verified). Mirrors the field-binding logic of gen_match_arm_enum's switch
+// path so the if-else chain produces identical bindings.
+fn bind_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qualifier: Str?, fields: List<Pattern>) {
+    let ei = find_enum_by_variant(ctx, cname, qualifier)
+    match ei {
+        some(enum_info) => {
+            for i in 0..fields.len() {
+                match fields.get(i) {
+                    some(field_pat) => {
+                        match field_pat {
+                            Pattern::Binding { name: bname, .. } => {
+                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
+                                let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
+                                let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
+                                discard(LLVMBuildStore(ctx.builder, field_val, alloca))
+                                ctx.named_values.insert(bname, alloca)
+                            },
+                            Pattern::Wildcard { .. } => {},
+                            _ => {
+                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
+                                let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
+                                bind_nested_pattern(ctx, field_val, field_pat)
+                            },
+                        }
+                    },
+                    none => {},
+                }
+            }
+        },
+        none => {},
+    }
+}
+
+// Helper: bind a named-constructor pattern's fields by field name (after its
+// tag was verified). Mirrors gen_match_arm_enum's named-constructor path.
+fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qualifier: Str?, named_fields: List<NamedPatternField>) {
+    let ei = find_enum_by_variant(ctx, cname, qualifier)
+    match ei {
+        some(enum_info) => match enum_info.variants.get(cname) {
+            some(vi) => {
+                for i in 0..named_fields.len() {
+                    match named_fields.get(i) {
+                        some(nf) => {
+                            let mut field_idx = i
+                            for fi in 0..vi.field_names.len() {
+                                if vi.field_names[fi] == nf.name {
+                                    field_idx = fi
+                                }
+                            }
+                            match nf.pattern {
+                                Pattern::Binding { name: bname, .. } => {
+                                    let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
+                                    let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
+                                    let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
+                                    discard(LLVMBuildStore(ctx.builder, field_val, alloca))
+                                    ctx.named_values.insert(bname, alloca)
+                                },
+                                Pattern::Wildcard { .. } => {},
+                                _ => {
+                                    let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
+                                    let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
+                                    bind_nested_pattern(ctx, field_val, nf.pattern)
+                                },
+                            }
+                        },
+                        none => {},
+                    }
+                }
+            },
+            none => {},
+        },
+        none => {},
     }
 }
 

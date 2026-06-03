@@ -2006,71 +2006,88 @@ function rc_expr(expr, live, locals) {
     }
     if (__ring_m43._tag === "MatchExpr") {
       const scrutinee = __ring_m43.scrutinee; const arms = __ring_m43.arms; const ty = __ring_m43.ty; const effects = __ring_m43.effects; const span = __ring_m43.span;
-      let arm_results = [];
+      let arm_exts = [];
+      let fallthrough_live = set_new();
       const __ring_iter_57 = __List_Iterable.iter(arms);
       while (true) {
         const __ring_next_57 = __ListIterator_Iterator.next(__ring_iter_57);
         if (__ring_next_57._tag === "none") break;
         const arm = __ring_next_57._0;
-        const arm_live = set_clone(live);
-        const body_result = rc_expr(arm.body, arm_live, locals);
-        const guard_result = (function() {
+        List_push(arm_exts, set_new());
+      }
+      let ai = (List_len(arms) - 1);
+      while ((ai >= 0)) {
+        __ring_match48: {
+          const __ring_m48 = List_get(arms, ai);
+          if (__ring_m48._tag === "some") {
+            const arm = __ring_m48._0;
+            const body_result = rc_expr(arm.body, set_clone(live), locals);
+            let arm_ext = (function() {
   const __ring_m = arm.guard;
   if (__ring_m._tag === "some") { const g = __ring_m._0; return (function() {
-  const r = rc_expr(g, body_result.live, locals);
-  return Option_some(r);
+  const guard_live_out = _Set_union(body_result.live, fallthrough_live);
+  const gr = rc_expr(g, guard_live_out, locals);
+  return set_clone(gr.live);
+})(); }
+  if (__ring_m._tag === "none") { return set_clone(body_result.live); }
+  __match_fail(__ring_m);
+})();
+            let pat_names = [];
+            pattern_binding_names(arm.pattern, pat_names);
+            const __ring_iter_58 = __List_Iterable.iter(pat_names);
+            while (true) {
+              const __ring_next_58 = __ListIterator_Iterator.next(__ring_iter_58);
+              if (__ring_next_58._tag === "none") break;
+              const pn = __ring_next_58._0;
+              _Set_remove(arm_ext, pn);
+            }
+            List_set(arm_exts, ai, set_clone(arm_ext));
+            fallthrough_live = arm_ext;
+            break __ring_match48;
+          }
+          if (__ring_m48._tag === "none") {
+            break __ring_match48;
+          }
+          __match_fail(__ring_m48);
+        }
+        ai = (ai - 1);
+      }
+      let merged_live = set_new();
+      const __ring_iter_59 = __List_Iterable.iter(arm_exts);
+      while (true) {
+        const __ring_next_59 = __ListIterator_Iterator.next(__ring_iter_59);
+        if (__ring_next_59._tag === "none") break;
+        const ae = __ring_next_59._0;
+        merged_live = _Set_union(merged_live, ae);
+      }
+      let balanced_arms = [];
+      const __ring_end60 = List_len(arms);
+      for (let i = 0; i < __ring_end60; i++) {
+        __ring_match49: {
+          const __ring_m49 = List_get(arms, i);
+          if (__ring_m49._tag === "some") {
+            const arm = __ring_m49._0;
+            const body_result = rc_expr(arm.body, set_clone(live), locals);
+            const new_guard = (function() {
+  const __ring_m = arm.guard;
+  if (__ring_m._tag === "some") { const g = __ring_m._0; return (function() {
+  const guard_live_out = _Set_union(merged_live, body_result.live);
+  const gr = rc_expr(g, guard_live_out, locals);
+  return Option_some(flush_dups_into_expr(gr.expr, gr.dups));
 })(); }
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-        let arm_final_live = (function() {
-  const __ring_m = guard_result;
-  if (__ring_m._tag === "some") { const r = __ring_m._0; return r.live; }
-  if (__ring_m._tag === "none") { return body_result.live; }
-  __match_fail(__ring_m);
-})();
-        let pat_names = [];
-        pattern_binding_names(arm.pattern, pat_names);
-        const __ring_iter_58 = __List_Iterable.iter(pat_names);
-        while (true) {
-          const __ring_next_58 = __ListIterator_Iterator.next(__ring_iter_58);
-          if (__ring_next_58._tag === "none") break;
-          const pn = __ring_next_58._0;
-          _Set_remove(arm_final_live, pn);
-        }
-        const body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups);
-        const new_guard = (function() {
-  const __ring_m = guard_result;
-  if (__ring_m._tag === "some") { const r = __ring_m._0; return Option_some(flush_dups_into_expr(r.expr, r.dups)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
-        const new_arm = new hir$HMatchArm(arm.pattern, new_guard, body_flushed, arm.span);
-        List_push(arm_results, [new_arm, arm_final_live]);
-      }
-      let merged_live = set_new();
-      const __ring_iter_59 = __List_Iterable.iter(arm_results);
-      while (true) {
-        const __ring_next_59 = __ListIterator_Iterator.next(__ring_iter_59);
-        if (__ring_next_59._tag === "none") break;
-        const ar = __ring_next_59._0;
-        merged_live = _Set_union(merged_live, ar[1]);
-      }
-      let balanced_arms = [];
-      const __ring_iter_60 = __List_Iterable.iter(arm_results);
-      while (true) {
-        const __ring_next_60 = __ListIterator_Iterator.next(__ring_iter_60);
-        if (__ring_next_60._tag === "none") break;
-        const ar = __ring_next_60._0;
-        const arm = ar[0];
-        const arm_live = ar[1];
-        const need_drop = _Set_difference(merged_live, arm_live);
-        if ((_Set_len(need_drop) > 0)) {
-          const drops = make_drop_list(need_drop);
-          const balanced_body = prepend_stmts_to_expr(arm.body, drops);
-          List_push(balanced_arms, new hir$HMatchArm(arm.pattern, arm.guard, balanced_body, arm.span));
-        } else {
-          List_push(balanced_arms, arm);
+            const need_drop = _Set_difference(merged_live, body_result.live);
+            const body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups);
+            const body_balanced = ((_Set_len(need_drop) > 0) ? prepend_stmts_to_expr(body_flushed, make_drop_list(need_drop)) : body_flushed);
+            List_push(balanced_arms, new hir$HMatchArm(arm.pattern, new_guard, body_balanced, arm.span));
+            break __ring_match49;
+          }
+          if (__ring_m49._tag === "none") {
+            break __ring_match49;
+          }
+          __match_fail(__ring_m49);
         }
       }
       const scrut_result = rc_expr(scrutinee, merged_live, locals);
@@ -2084,14 +2101,14 @@ function rc_expr(expr, live, locals) {
       let part_dups_rev = [];
       let i = (List_len(parts) - 1);
       while ((i >= 0)) {
-        __ring_match48: {
-          const __ring_m48 = List_get(parts, i);
-          if (__ring_m48._tag === "some") {
-            const p = __ring_m48._0;
-            __ring_match49: {
-              const __ring_m49 = p;
-              if (__ring_m49._tag === "Expression") {
-                const e = __ring_m49._0;
+        __ring_match50: {
+          const __ring_m50 = List_get(parts, i);
+          if (__ring_m50._tag === "some") {
+            const p = __ring_m50._0;
+            __ring_match51: {
+              const __ring_m51 = p;
+              if (__ring_m51._tag === "Expression") {
+                const e = __ring_m51._0;
                 const r = rc_expr(e, cur_live, locals);
                 List_push(new_parts, hir$HStringInterpPart_Expression(r.expr));
                 const __ring_iter_61 = __List_Iterable.iter(r.dups);
@@ -2102,21 +2119,21 @@ function rc_expr(expr, live, locals) {
                   List_push(part_dups_rev, d);
                 }
                 cur_live = r.live;
-                break __ring_match49;
+                break __ring_match51;
               }
-              if (__ring_m49._tag === "Literal") {
-                const s = __ring_m49._0;
+              if (__ring_m51._tag === "Literal") {
+                const s = __ring_m51._0;
                 List_push(new_parts, hir$HStringInterpPart_Literal(s));
-                break __ring_match49;
+                break __ring_match51;
               }
-              __match_fail(__ring_m49);
+              __match_fail(__ring_m51);
             }
-            break __ring_match48;
+            break __ring_match50;
           }
-          if (__ring_m48._tag === "none") {
-            break __ring_match48;
+          if (__ring_m50._tag === "none") {
+            break __ring_match50;
           }
-          __match_fail(__ring_m48);
+          __match_fail(__ring_m50);
         }
         i = (i - 1);
       }
@@ -2195,17 +2212,17 @@ function rc_expr(expr, live, locals) {
           const hp = __ring_next_67._0;
           _Set_insert(h_locals, hp.name);
         }
-        __ring_match50: {
-          const __ring_m50 = h.resume_name;
-          if (__ring_m50._tag === "some") {
-            const rn = __ring_m50._0;
+        __ring_match52: {
+          const __ring_m52 = h.resume_name;
+          if (__ring_m52._tag === "some") {
+            const rn = __ring_m52._0;
             _Set_insert(h_locals, rn);
-            break __ring_match50;
+            break __ring_match52;
           }
-          if (__ring_m50._tag === "none") {
-            break __ring_match50;
+          if (__ring_m52._tag === "none") {
+            break __ring_match52;
           }
-          __match_fail(__ring_m50);
+          __match_fail(__ring_m52);
         }
         collect_local_defs_expr(h.body, h_locals);
         const h_result = rc_expr(h.body, h_live, h_locals);
@@ -2255,10 +2272,10 @@ function rc_expr(expr, live, locals) {
       let arg_dups_rev = [];
       let i = (List_len(args) - 1);
       while ((i >= 0)) {
-        __ring_match51: {
-          const __ring_m51 = List_get(args, i);
-          if (__ring_m51._tag === "some") {
-            const a = __ring_m51._0;
+        __ring_match53: {
+          const __ring_m53 = List_get(args, i);
+          if (__ring_m53._tag === "some") {
+            const a = __ring_m53._0;
             const r = rc_expr(a, cur_live, locals);
             List_push(new_args, r.expr);
             const __ring_iter_70 = __List_Iterable.iter(r.dups);
@@ -2269,12 +2286,12 @@ function rc_expr(expr, live, locals) {
               List_push(arg_dups_rev, d);
             }
             cur_live = r.live;
-            break __ring_match51;
+            break __ring_match53;
           }
-          if (__ring_m51._tag === "none") {
-            break __ring_match51;
+          if (__ring_m53._tag === "none") {
+            break __ring_match53;
           }
-          __match_fail(__ring_m51);
+          __match_fail(__ring_m53);
         }
         i = (i - 1);
       }
@@ -2297,10 +2314,10 @@ function rc_expr(expr, live, locals) {
       let elem_dups_rev = [];
       let i = (List_len(elements) - 1);
       while ((i >= 0)) {
-        __ring_match52: {
-          const __ring_m52 = List_get(elements, i);
-          if (__ring_m52._tag === "some") {
-            const e = __ring_m52._0;
+        __ring_match54: {
+          const __ring_m54 = List_get(elements, i);
+          if (__ring_m54._tag === "some") {
+            const e = __ring_m54._0;
             const r = rc_expr(e, cur_live, locals);
             List_push(new_elems, r.expr);
             const __ring_iter_71 = __List_Iterable.iter(r.dups);
@@ -2311,12 +2328,12 @@ function rc_expr(expr, live, locals) {
               List_push(elem_dups_rev, d);
             }
             cur_live = r.live;
-            break __ring_match52;
+            break __ring_match54;
           }
-          if (__ring_m52._tag === "none") {
-            break __ring_match52;
+          if (__ring_m54._tag === "none") {
+            break __ring_match54;
           }
-          __match_fail(__ring_m52);
+          __match_fail(__ring_m54);
         }
         i = (i - 1);
       }
@@ -2332,10 +2349,10 @@ function rc_expr(expr, live, locals) {
       let elem_dups_rev = [];
       let i = (List_len(elements) - 1);
       while ((i >= 0)) {
-        __ring_match53: {
-          const __ring_m53 = List_get(elements, i);
-          if (__ring_m53._tag === "some") {
-            const e = __ring_m53._0;
+        __ring_match55: {
+          const __ring_m55 = List_get(elements, i);
+          if (__ring_m55._tag === "some") {
+            const e = __ring_m55._0;
             const r = rc_expr(e, cur_live, locals);
             List_push(new_elems, r.expr);
             const __ring_iter_72 = __List_Iterable.iter(r.dups);
@@ -2346,12 +2363,12 @@ function rc_expr(expr, live, locals) {
               List_push(elem_dups_rev, d);
             }
             cur_live = r.live;
-            break __ring_match53;
+            break __ring_match55;
           }
-          if (__ring_m53._tag === "none") {
-            break __ring_match53;
+          if (__ring_m55._tag === "none") {
+            break __ring_match55;
           }
-          __match_fail(__ring_m53);
+          __match_fail(__ring_m55);
         }
         i = (i - 1);
       }
@@ -2396,19 +2413,19 @@ function prepend_stmts_to_expr(expr, stmts) {
   if ((List_len(stmts) === 0)) {
     return expr;
   }
-  __ring_match54: {
-    const __ring_m54 = expr;
-    if (__ring_m54._tag === "Block") {
-      const existing = __ring_m54.stmts; const tail = __ring_m54.tail; const ty = __ring_m54.ty; const effects = __ring_m54.effects; const span = __ring_m54.span;
+  __ring_match56: {
+    const __ring_m56 = expr;
+    if (__ring_m56._tag === "Block") {
+      const existing = __ring_m56.stmts; const tail = __ring_m56.tail; const ty = __ring_m56.ty; const effects = __ring_m56.effects; const span = __ring_m56.span;
       const new_stmts = List_concat(stmts, existing);
       return hir$HExpr_Block(new_stmts, tail, ty, effects, span);
-      break __ring_match54;
+      break __ring_match56;
     }
     const ty = hir$hexpr_type(expr);
     const effects = hir$hexpr_effects(expr);
     const span = hir$hexpr_span(expr);
     return hir$HExpr_Block(stmts, Option_some(expr), ty, effects, span);
-    break __ring_match54;
+    break __ring_match56;
   }
 }
 
