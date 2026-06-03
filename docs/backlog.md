@@ -673,14 +673,6 @@ LLVM 后端基本没实现自定义 effect handler（tail-resumptive，非 fail/
 **涉及修改**：`codegen_llvm_expr.ring` 的 HandleExpr/EffectOp lowering + evidence 传递（对照 JS `gen_handle_*`）；可能涉及 runtime resume 机制。
 **验收标准**：B-088 #1/#4 的最小复现 JS/LLVM 一致；custom-effect 类差分用例可锁 parity；全 E2E + llvm_diff 通过；自举一致。
 
-### B-092 泛型 trait-method dispatch 经 `<T: Trait>`（LLVM）[bugfix] [P2] [L] [judgment] [doing]
-
-> 2026-06-03 B-088 立项。优先级暂定。
-
-`fn f<T: Trait>(x: T) { x.method() }`（dict-passing 单态化派发）用户 trait 经类型参数派发在 LLVM 崩 `str_from_cstr`（哪怕单方法）。worker_feedback B-088 #3。好路径（`==` 操作符 Eq 派发、string-key Map 派发）正常；坏的是用户 trait 经 `<T: Trait>` 的方法派发。（注：`Ord` builtin dict 缺失那半已归 B-086。）
-**涉及修改**：`codegen_llvm_expr.ring` dict-passing dispatch（对照 JS）。
-**验收标准**：B-088 #3 复现 JS/LLVM 一致；泛型用户 trait 方法派发差分用例可锁 parity；全 E2E + llvm_diff 通过；自举一致。
-
 ### B-096 Perceus 闭包 RC 完整收口（A 波）[bugfix] [P3] [L] [judgment] [queued]
 
 > 2026-06-03 从 B-084 拆出。B-084 的 #130 C 增量落地后的完整收口。**依赖大内存机**（能实测 double-free / 内存峰值才放心动 `ring_try` 闭包 drop）。纯泄漏方向，差分测试比输出非内存，抓不到对错——做了之后差分全绿。见 design.md §7.10 闭包 capture 所有权。
