@@ -667,18 +667,21 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - **closure 捕获 dict/evidence 参数**：`collect_captures` 不收 dict_params/evidence params，多态闭包可能丢 dict。
 - **range 变量 for-in**（`codegen_llvm_stmt.ring:322-340` 有 fallback 注释，struct GEP 不全）：`for x in range_var` 可能错。
 - **#103 mut 参数统一 boxing**（已 audit-tracked，原 deferred-LLVM）：JS 对值类型 mut 参数 box `.value`，引用类型靠 JS 引用语义；LLVM 需所有 mut 参数统一指针-to-box，否则重赋值不反映调用方。此处一并落地，解除 deferred 状态。
+- **LLVM print Int parity（#132）**：`ring_print` 期望实参已是 Str，对 Int 等不做 Int→Str 强制转换，`print(intExpr)` 误打印；JS 后端对任意类型字符串化。修：LLVM print lowering 对非 Str 实参插 to_string（对照 JS 字符串化路径），或 runtime `ring_print` 按 typeid 派发打印。详见 audit #132。
 
 - **待 B-088 差分确认后再修**（Agent 报告 hedged，未亲核）：if-let 复杂模式、tuple 内字面量模式 unbox、handler resume 捕获、HOF 方法闭包传递。
 
 **涉及修改**：
 1. `compiler/codegen_llvm_expr.ring`：gen_ident 处理 dict_closure_dicts；DictRef::Wrapped 构造真实 wrapper；collect_captures 收 dict/evidence；mut 参数 boxing
 2. `compiler/codegen_llvm_stmt.ring`：range 变量 for-in 完整 GEP；mut 参数指针传递
-3. 按 B-088 差分结果补修确认的发散
+3. `ring_runtime.cpp` / `codegen_llvm_expr.ring`：print 非 Str 实参 Int→Str 强制转换（#132）
+4. 按 B-088 差分结果补修确认的发散
 
 **验收标准**：
 - 上述确认 gap 的差分用例 JS/LLVM 一致
 - 多态/泛型/trait dispatch 的非平凡用例（含一等多态函数值、嵌套 trait bound）native 行为与 JS 一致
 - #103 mut 参数重赋值在 LLVM 反映到调用方
+- `print(intExpr)` 等非 Str 实参 LLVM 输出与 JS 一致（#132）
 - 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-090 自定义 effect handler LLVM codegen [feature] [P1] [XL] [judgment] [queued]
