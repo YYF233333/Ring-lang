@@ -713,7 +713,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - #103 mut 参数重赋值在 LLVM 反映到调用方
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-088 双后端差分测试覆盖扩展 [feature] [P1] [L] [judgment] [queued]
+### B-088 双后端差分测试覆盖扩展 [feature] [P1] [L] [judgment] [doing]
 
 `tests/cases/llvm/` 仅 14 例（覆盖 pattern/recursion/closure-RC/generic-eq/fail-catch），E2E 363 例的多数特性零差分覆盖。这是 G-c「双后端行为对比」的核心交付 + 发现引擎：失败的 diff 用例喂给 B-083/B-087，通过的锁定 parity。
 
