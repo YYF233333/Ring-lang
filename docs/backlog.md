@@ -660,7 +660,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 所有堆分配类型有注册的正确 drop_T
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-085 Perceus 发射 determinism（双 bootstrap 字节级一致）[bugfix] [P2] [S] [judgment] [queued]
+### B-085 Perceus 发射 determinism（双 bootstrap 字节级一致）[bugfix] [P2] [S] [judgment] [doing]
 
 `perceus.ring:1633 make_drop_list` 对 `Set<Str>` 直接 `for name in names` 生成 drop，**不排序**。JS 后端 Set 是插入序（确定），LLVM 后端 Set 是 `std::unordered_set`（hash 序）——两后端迭代序不同。当某点 drop 多个变量（Set size > 1）时，native 编译器与 JS 参考编译器生成的 drop 顺序不同 → IR/.o 字节级不一致 → 破坏 G-b 双 bootstrap。注：drop 顺序不影响**行为**（正确性上可交换），只影响字节一致——不阻塞 G-c。
 
@@ -673,23 +673,28 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 同源 + 同 args 下 native 编译器与 JS 参考编译器对同一输入产出字节一致（drop 序部分）
 - 全部 E2E + llvm_diff 通过
 
-### B-086 LLVM 缺失 runtime 原语 — find_index / fold [feature] [P2] [M] [judgment] [queued]
+### B-086 LLVM 缺失 runtime 方法/dict — find_index/fold + Ord dict + Option.to_fail [feature] [P2] [M] [judgment] [doing]
 
 > **flat_map ✅ 已完成**（commit a93b19c）：补 `ring_list_flat_map` + 差分用例 `tests/cases/llvm/list_flat_map.ring`，JS/LLVM 一致。
 >
 > **enumerate / to_int / to_float 撤出本项**：Worker 核查发现 Agent D 审计有误——这三个方法 checker **根本没注册**（`.enumerate()/.to_int()/.to_float()` 在两后端都 E0305 "no method"，JS oracle 自己就拒绝），codegen 映射是死映射，无法做差分测试。是否给 Ring 加这三个方法是**设计决策**（见 worker_feedback），决策前不实现；已撤回它们的 runtime stub。
 
-**真正剩余的 E2E-阻塞 gap**：`find_index`（List）和 `fold`（List）—— 两者在 JS 后端是真 builtin（E2E 用、能跑），但 LLVM 后端**既没 codegen 映射也没 runtime**。它们阻塞验收 E2E `list_flat_map.ring`（用 find_index）和 `list_method_chain.ring`（用 fold）在 native 跑通。dispatch 升级为 judgment——需改编译器源码（要 rebuild dist）+ runtime + 差分。
+**剩余的"缺方法/runtime/dict"同类 gap（归并本项）**：
+- `find_index` / `fold`（List）—— JS 真 builtin、LLVM 既没 codegen 映射也没 runtime；阻塞验收 E2E `list_flat_map.ring`（find_index）/ `list_method_chain.ring`（fold）。
+- **`Ord` builtin dict 缺失**（B-088 #3）—— 泛型 `Ord` 派发报 `ring: no builtin dict '__Int_Ord'`，runtime 只注册了 Eq dict。补 Ord builtin dict（参考 Eq dict 注册）。
+- **`Option.to_fail()` 未实现**（B-088 #5）—— `none.to_fail("msg")`（none→fail effect）JS 正常、LLVM `missing method 'Option.to_fail'`。补 codegen 映射 + runtime。
+
+dispatch judgment——改编译器源码（rebuild dist 到不动点）+ runtime + 差分。
 
 **涉及修改**：
-1. `compiler/codegen_llvm_expr.ring`：方法映射加 `find_index` → `ring_list_find_index`、`fold` → `ring_list_fold`（以 JS 后端语义/签名为 oracle）
-2. `ring_runtime.cpp`：实现 `ring_list_find_index` / `ring_list_fold`（参考 `ring_list_find` / `ring_list_for_each` 的 closure pattern）
-3. `tests/cases/llvm/`：find_index / fold 差分用例
-4. rebuild dist（改了编译器源码）
+1. `compiler/codegen_llvm_expr.ring`：方法映射加 `find_index`/`fold`/`Option.to_fail`（以 JS 语义为 oracle）
+2. `ring_runtime.cpp`：`ring_list_find_index`/`ring_list_fold`（参考 `ring_list_find`/`ring_list_for_each`）+ `Ord` builtin dict（参考 Eq dict）+ Option.to_fail 的 fail 路径
+3. `tests/cases/llvm/`：find_index/fold/Ord-泛型派发/Option.to_fail 差分用例
+4. rebuild dist 到不动点
 
 **验收标准**：
 - `list_flat_map.ring` / `list_method_chain.ring` 在 LLVM 后端通过
-- find_index / fold 差分用例 JS/LLVM 一致
+- find_index/fold/Ord 泛型派发/Option.to_fail 差分用例 JS/LLVM 一致
 - 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-087 LLVM codegen 双后端 parity 修复 [bugfix] [P2] [L] [judgment] [queued]
@@ -714,6 +719,39 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 多态/泛型/trait dispatch 的非平凡用例（含一等多态函数值、嵌套 trait bound）native 行为与 JS 一致
 - #103 mut 参数重赋值在 LLVM 反映到调用方
 - 全部 E2E + llvm_diff 通过；自举一致
+
+### B-090 自定义 effect handler LLVM codegen [feature] [P1] [XL] [judgment] [queued]
+
+> 2026-06-03 B-088 立项。优先级暂定，可调。**G-c 最大块**。
+
+LLVM 后端基本没实现自定义 effect handler（tail-resumptive，非 fail/catch 路径）。worker_feedback B-088 #1：返回值 op 的 handler resume 崩 `str_from_cstr`；Unit op + 副作用 body **静默丢输出**；多 op / 嵌套 handler 同样崩。68 E2E 用 custom effect、零 native 覆盖。delegate 转发 effect（B-088 #4）是同一根因的 delegate 表现。JS 后端 evidence-passing handler lowering 是 oracle。最小复现见 worker_feedback B-088 #1/#4。
+
+**涉及修改**：`codegen_llvm_expr.ring` 的 HandleExpr/EffectOp lowering + evidence 传递（对照 JS `gen_handle_*`）；可能涉及 runtime resume 机制。
+**验收标准**：B-088 #1/#4 的最小复现 JS/LLVM 一致；custom-effect 类差分用例可锁 parity；全 E2E + llvm_diff 通过；自举一致。
+
+### B-091 boxed mut-cell 闭包捕获 UAF（LLVM）[bugfix] [P1] [L] [judgment] [queued]
+
+> 2026-06-03 B-088 立项。优先级暂定。确定性 UAF（正确性 bug，非泄漏）。
+
+闭包写穿捕获 `let mut`（auto-boxing cell）在 LLVM 确定性 UAF——最简 `let mut c = 0; let inc = fn() { c = c + 1 }; inc()` 崩 `use-after-free`。根因方向：Perceus 把 boxed mut cell 当 last-use move 了，闭包还持引用 → 释放后再用。现有 closure 差分用例只覆盖**不可变**堆值捕获。worker_feedback B-088 #2 有最简复现。
+**涉及修改**：`perceus.ring`（boxed mut-cell capture 的 RC，不能 move）+ `codegen_llvm_expr.ring` 闭包 env。
+**验收标准**：B-088 #2 复现 + 工厂 counter / 跨调用边界传闭包场景无 UAF，JS/LLVM 一致；全 E2E + llvm_diff 通过；自举一致。
+
+### B-092 泛型 trait-method dispatch 经 `<T: Trait>`（LLVM）[bugfix] [P2] [L] [judgment] [queued]
+
+> 2026-06-03 B-088 立项。优先级暂定。
+
+`fn f<T: Trait>(x: T) { x.method() }`（dict-passing 单态化派发）用户 trait 经类型参数派发在 LLVM 崩 `str_from_cstr`（哪怕单方法）。worker_feedback B-088 #3。好路径（`==` 操作符 Eq 派发、string-key Map 派发）正常；坏的是用户 trait 经 `<T: Trait>` 的方法派发。（注：`Ord` builtin dict 缺失那半已归 B-086。）
+**涉及修改**：`codegen_llvm_expr.ring` dict-passing dispatch（对照 JS）。
+**验收标准**：B-088 #3 复现 JS/LLVM 一致；泛型用户 trait 方法派发差分用例可锁 parity；全 E2E + llvm_diff 通过；自举一致。
+
+### B-093 enum 高阶组合子间歇 double-free（LLVM RC）[bugfix] [P2] [L] [judgment] [queued]
+
+> 2026-06-03 B-088 立项。优先级暂定。**间歇 bug，必须压测复现**。
+
+用户 enum 的 `and_then`/`map_ok` 接 `fn(v){}` 闭包链式，在 LLVM **间歇** double-free / `str_from_cstr` 崩（standalone 压测 ~2/200，full-suite ~1/3 整跑挂）。enum payload + 闭包参数的 RC 不平衡（dup/drop 竞态/重复 drop）。worker_feedback B-088 #6（含已用 first-order 锁住的 `result_enum_chain.ring`）。**单跑会误判通过，必须 200-300x 压测确认**。
+**涉及修改**：`perceus.ring` RC（enum payload + 闭包参数）+ `codegen_llvm_expr.ring`。
+**验收标准**：B-088 #6 复现 200x 压测零失败，JS/LLVM 一致；全 E2E + llvm_diff 通过；自举一致。
 
 ### B-089 Native 自举终验 capstone [bugfix] [P1] [L] [judgment] [queued]
 
