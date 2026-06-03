@@ -680,14 +680,6 @@ LLVM 后端基本没实现自定义 effect handler（tail-resumptive，非 fail/
 **涉及修改**：`codegen_llvm_expr.ring` dict-passing dispatch（对照 JS）。
 **验收标准**：B-088 #3 复现 JS/LLVM 一致；泛型用户 trait 方法派发差分用例可锁 parity；全 E2E + llvm_diff 通过；自举一致。
 
-### B-093 enum 高阶组合子间歇 double-free（LLVM RC）[bugfix] [P2] [L] [judgment] [doing]
-
-> 2026-06-03 B-088 立项。优先级暂定。**间歇 bug，必须压测复现**。
-
-用户 enum 的 `and_then`/`map_ok` 接 `fn(v){}` 闭包链式，在 LLVM **间歇** double-free / `str_from_cstr` 崩（standalone 压测 ~2/200，full-suite ~1/3 整跑挂）。enum payload + 闭包参数的 RC 不平衡（dup/drop 竞态/重复 drop）。worker_feedback B-088 #6（含已用 first-order 锁住的 `result_enum_chain.ring`）。**单跑会误判通过，必须 200-300x 压测确认**。
-**涉及修改**：`perceus.ring` RC（enum payload + 闭包参数）+ `codegen_llvm_expr.ring`。
-**验收标准**：B-088 #6 复现 200x 压测零失败，JS/LLVM 一致；全 E2E + llvm_diff 通过；自举一致。
-
 ### B-096 Perceus 闭包 RC 完整收口（A 波）[bugfix] [P3] [L] [judgment] [queued]
 
 > 2026-06-03 从 B-084 拆出。B-084 的 #130 C 增量落地后的完整收口。**依赖大内存机**（能实测 double-free / 内存峰值才放心动 `ring_try` 闭包 drop）。纯泄漏方向，差分测试比输出非内存，抓不到对错——做了之后差分全绿。见 design.md §7.10 闭包 capture 所有权。
