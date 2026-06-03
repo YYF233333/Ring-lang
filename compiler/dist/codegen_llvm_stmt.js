@@ -274,6 +274,8 @@ function to_result(f) {
 
 
 
+
+
 function discard(v) {
 }
 
@@ -617,9 +619,53 @@ function emit_for_in_range_var(ctx, binding, iterable, body) {
   __match_fail(__ring_m);
 })();
   const range_val = codegen_llvm_expr$gen_llvm_expr(ctx, iterable);
-  const range_ty = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, codegen_llvm_ctx$fresh_name(ctx, "rng"));
-  const struct_ty = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, codegen_llvm_ctx$fresh_name(ctx, "dummy"));
-  return emit_for_in_list(ctx, binding, Option_none, iterable, body);
+  const range_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0);
+  const start_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 0, codegen_llvm_ctx$fresh_name(ctx, "rs"));
+  const start_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, start_slot, codegen_llvm_ctx$fresh_name(ctx, "sb"));
+  const end_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 1, codegen_llvm_ctx$fresh_name(ctx, "re"));
+  const end_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, end_slot, codegen_llvm_ctx$fresh_name(ctx, "eb"));
+  const incl_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 2, codegen_llvm_ctx$fresh_name(ctx, "ri"));
+  const incl_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, incl_slot, codegen_llvm_ctx$fresh_name(ctx, "ib"));
+  const unbox_int_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
+  const unbox_int_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
+  const start_raw = LLVMBuildCall2(ctx.builder, unbox_int_ty, unbox_int_fn, [start_box], codegen_llvm_ctx$fresh_name(ctx, "si"));
+  const end_raw = LLVMBuildCall2(ctx.builder, unbox_int_ty, unbox_int_fn, [end_box], codegen_llvm_ctx$fresh_name(ctx, "ei"));
+  const unbox_bool_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
+  const unbox_bool_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
+  const incl_raw = LLVMBuildCall2(ctx.builder, unbox_bool_ty, unbox_bool_fn, [incl_box], codegen_llvm_ctx$fresh_name(ctx, "ic"));
+  const one = LLVMConstInt(ctx.i64_type, 1, 0);
+  const one_minus_incl = LLVMBuildSub(ctx.builder, one, incl_raw, codegen_llvm_ctx$fresh_name(ctx, "omi"));
+  const end_bound = LLVMBuildSub(ctx.builder, end_raw, one_minus_incl, codegen_llvm_ctx$fresh_name(ctx, "eb2"));
+  const counter_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "i"));
+  discard(LLVMBuildStore(ctx.builder, start_raw, counter_alloca));
+  const cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.cond");
+  const body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.body");
+  const incr_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.incr");
+  const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.merge");
+  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, cond_bb);
+  const current_i = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
+  const cond = LLVMBuildICmp(ctx.builder, 41, current_i, end_bound, codegen_llvm_ctx$fresh_name(ctx, "cmp"));
+  discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
+  const saved_break = ctx.loop_break_bb;
+  const saved_continue = ctx.loop_continue_bb;
+  ctx.loop_break_bb = Option_some(merge_bb);
+  ctx.loop_continue_bb = Option_some(incr_bb);
+  LLVMPositionBuilderAtEnd(ctx.builder, body_bb);
+  const boxed_i = codegen_llvm_expr$box_int(ctx, current_i);
+  const binding_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
+  discard(LLVMBuildStore(ctx.builder, boxed_i, binding_alloca));
+  _Map_insert(ctx.named_values, binding, binding_alloca);
+  discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
+  discard(LLVMBuildBr(ctx.builder, incr_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, incr_bb);
+  const current_i2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
+  const next_i = LLVMBuildAdd(ctx.builder, current_i2, one, codegen_llvm_ctx$fresh_name(ctx, "ni"));
+  discard(LLVMBuildStore(ctx.builder, next_i, counter_alloca));
+  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  ctx.loop_break_bb = saved_break;
+  ctx.loop_continue_bb = saved_continue;
+  return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
 }
 
 function emit_for_in_list(ctx, binding, destructure, iterable, body) {

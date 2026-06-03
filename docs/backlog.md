@@ -52,7 +52,7 @@
 | ~~B-084~~ ✅ | #130 闭包 owned-capture drop（typeid 15 CLOSURE_ENV + count-prefixed env + 通用 drop_closure_env；catch/handle + guard-false → B-096）| G-a/b | P2 |
 | ~~B-085~~ ✅ | Perceus 发射 determinism（sort Set names before emit）| G-b | P2 |
 | ~~B-086~~ ✅ | LLVM 缺失方法/runtime/dict（flat_map/find_index/fold/Ord dict/Option.to_fail）| G-c | P2 |
-| B-087 | LLVM codegen 双后端 parity（dict 多态 / Wrapped / range / #103 mut 等）| G-c | P2 |
+| ~~B-087~~ ✅ | LLVM codegen 双后端 parity — 6 确认 gap + tuple-literal pattern 全修（dict_closure_dicts / Wrapped dict / 闭包捕获 dict / range var for-in / #103 mut writeback / #132 print Int）；llvm_diff 39→46 | G-c | P2 |
 | B-002 | abort-unwind drop（#2 TryCatch + handler abort）并入 Drop/RAII | G-a/c | P2 |
 | B-096 | Perceus 闭包 RC 完整收口 A 波（borrowed建模+ring_try drop+#4 guard-false+Range/dict drop_T）| G-a | P3（依赖大内存机）|
 | B-089 | Native 终验 capstone（跑通 G-a/b/c，待大内存机 + 前置项）| 全部 | P1（阻塞中）|
@@ -636,32 +636,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 ~~B-062（#124 约束验证）~~ ✅ → ~~B-063（#125/#128 delegate 转发）~~ ✅ → ~~B-064（#129 scope 区分）~~ ✅ → ~~B-058（#115 bound 验证）~~ ✅ → ~~B-065（#121 显示改善）~~ ✅
 
 ## LLVM 后端质量
-
-### B-087 LLVM codegen 双后端 parity 修复 [bugfix] [P2] [L] [judgment] [doing]
-
-编译器自身不触发故自编译字节级一致，但特定模式下 LLVM 后端与 JS oracle 发散，阻塞 G-c 双后端 parity。**方法论**：B-088 的差分用例复现发散 → 在此修。**已亲自核实**的 gap：
-
-- **dict_closure_dicts 不处理**（`codegen_llvm_expr.ring:107` gen_ident 签名只收 name/resolved_name，`dict_closure_dicts` 被 `..` 丢）：多态函数标识符作为一等值带 dict 包装时，LLVM 不生成 wrapper → 调用签名错。JS 见 `codegen_expr.ring:38-62`。
-- **DictRef::Wrapped 返回 null**（`codegen_llvm_expr.ring:794-797` 自承认 TODO "pass null — future wave"）：嵌套/wrapped trait dict 派发拿到 null → 方法派发错。
-- **closure 捕获 dict/evidence 参数**：`collect_captures` 不收 dict_params/evidence params，多态闭包可能丢 dict。
-- **range 变量 for-in**（`codegen_llvm_stmt.ring:322-340` 有 fallback 注释，struct GEP 不全）：`for x in range_var` 可能错。
-- **#103 mut 参数统一 boxing**（已 audit-tracked，原 deferred-LLVM）：JS 对值类型 mut 参数 box `.value`，引用类型靠 JS 引用语义；LLVM 需所有 mut 参数统一指针-to-box，否则重赋值不反映调用方。此处一并落地，解除 deferred 状态。
-- **LLVM print Int parity（#132）**：`ring_print` 期望实参已是 Str，对 Int 等不做 Int→Str 强制转换，`print(intExpr)` 误打印；JS 后端对任意类型字符串化。修：LLVM print lowering 对非 Str 实参插 to_string（对照 JS 字符串化路径），或 runtime `ring_print` 按 typeid 派发打印。详见 audit #132。
-
-- **待 B-088 差分确认后再修**（Agent 报告 hedged，未亲核）：if-let 复杂模式、tuple 内字面量模式 unbox、handler resume 捕获、HOF 方法闭包传递。
-
-**涉及修改**：
-1. `compiler/codegen_llvm_expr.ring`：gen_ident 处理 dict_closure_dicts；DictRef::Wrapped 构造真实 wrapper；collect_captures 收 dict/evidence；mut 参数 boxing
-2. `compiler/codegen_llvm_stmt.ring`：range 变量 for-in 完整 GEP；mut 参数指针传递
-3. `ring_runtime.cpp` / `codegen_llvm_expr.ring`：print 非 Str 实参 Int→Str 强制转换（#132）
-4. 按 B-088 差分结果补修确认的发散
-
-**验收标准**：
-- 上述确认 gap 的差分用例 JS/LLVM 一致
-- 多态/泛型/trait dispatch 的非平凡用例（含一等多态函数值、嵌套 trait bound）native 行为与 JS 一致
-- #103 mut 参数重赋值在 LLVM 反映到调用方
-- `print(intExpr)` 等非 Str 实参 LLVM 输出与 JS 一致（#132）
-- 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-090 自定义 effect handler LLVM codegen（核心：单 effect multi-op tail-resumptive）[feature] [P1] [L] [judgment] [queued]
 > **2026-06-03 Discussion 定契约 + 分期，转 queued**。Threshold：维持 **hybrid**（fail/abort=handler stack/setjmp ambient，tail-resumptive=evidence 函数参数 lexical），完成已铺的函数参数 evidence threading；design.md 原 TLS 决策收窄为 FFI-callback 边界专属条款（见 design.md §9.4 effect handler + 决策表）。**现状**：脚手架全铺好（`codegen_llvm_decl.ring:161-167` 签名加 evidence param、`codegen_llvm_expr.ring:1022/1441` call site push `lookup_evidence`），但 `gen_handle_expr` 存 null（3367）、`gen_effect_op` 不派发（3452）。本项把 null 换成真 struct + 真派发。
