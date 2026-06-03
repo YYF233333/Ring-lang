@@ -663,7 +663,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - `print(intExpr)` 等非 Str 实参 LLVM 输出与 JS 一致（#132）
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-090 自定义 effect handler LLVM codegen [feature] [P1] [XL] [judgment] [queued]
+### B-090 自定义 effect handler LLVM codegen [feature] [P1] [XL] [judgment] [waiting-feedback]
+> **2026-06-03 转 waiting-feedback**（Worker scoping）：脚手架（evidence threading）已铺好，现状全程喂 null。三个待决策（D1 evidence struct 表示 + op-slot 跨阶段契约 / D2 handler 闭包 RC 与 B-084/B-091 交互 / D3 范围分期：default body / custom abort / delegate）。详见 worker_feedback.md。Sizing 修正：核心 L、全 parity 才 XL，倾向 Discussion 定契约 + 分期。B-087 parity 独立，可先行。
 
 > 2026-06-03 B-088 立项。优先级暂定，可调。**G-c 最大块**。
 
