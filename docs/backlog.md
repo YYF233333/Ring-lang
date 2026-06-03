@@ -50,8 +50,8 @@
 | ~~B-083~~ ✅ | LLVM match guard 完整实现（codegen + perceus RC + diff）| G-c + G-a/b(RC) | P1 |
 | ~~B-088~~ ✅ | 双后端差分覆盖扩展 — 锁 6 parity 用例 + 发现 6 处 LLVM 发散喂 B-087 | G-c | P1 |
 | B-084 | Perceus drop 精度（#131 ✅ 96→0 · #3 ✅ · #130+#4 待 capture 所有权决策）| G-a/b | P2 |
-| B-085 | Perceus 发射 determinism（drop/dup 顺序独立于 Set 迭代序）| G-b | P2 |
-| B-086 | LLVM 缺失 runtime 原语（flat_map/enumerate/str_to_int/float）| G-c | P2 |
+| ~~B-085~~ ✅ | Perceus 发射 determinism（sort Set names before emit）| G-b | P2 |
+| ~~B-086~~ ✅ | LLVM 缺失方法/runtime/dict（flat_map/find_index/fold/Ord dict/Option.to_fail）| G-c | P2 |
 | B-087 | LLVM codegen 双后端 parity（dict 多态 / Wrapped / range / #103 mut 等）| G-c | P2 |
 | B-002 | abort-unwind drop（#2 TryCatch + handler abort）并入 Drop/RAII | G-a/c | P2 |
 | B-089 | Native 终验 capstone（跑通 G-a/b/c，待大内存机 + 前置项）| 全部 | P1（阻塞中）|
@@ -658,43 +658,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 带 RC pass 自编译 rc-warn 数降为 0（或只剩明确正确的豁免）
 - 闭包捕获值在 env drop 时正确释放（per-capture）
 - 所有堆分配类型有注册的正确 drop_T
-- 全部 E2E + llvm_diff 通过；自举一致
-
-### B-085 Perceus 发射 determinism（双 bootstrap 字节级一致）[bugfix] [P2] [S] [judgment] [doing]
-
-`perceus.ring:1633 make_drop_list` 对 `Set<Str>` 直接 `for name in names` 生成 drop，**不排序**。JS 后端 Set 是插入序（确定），LLVM 后端 Set 是 `std::unordered_set`（hash 序）——两后端迭代序不同。当某点 drop 多个变量（Set size > 1）时，native 编译器与 JS 参考编译器生成的 drop 顺序不同 → IR/.o 字节级不一致 → 破坏 G-b 双 bootstrap。注：drop 顺序不影响**行为**（正确性上可交换），只影响字节一致——不阻塞 G-c。
-
-**涉及修改**：
-1. `compiler/perceus.ring`：`make_drop_list`（及任何从 Set 迭代生成发射的点：dup 列表、branch-balancing 的 difference 迭代）对变量名排序后再发射
-2. 排查 perceus 是否还有其他依赖 Set/Map 迭代序的发射点
-
-**验收标准**：
-- perceus 发射的 drop/dup 顺序只依赖变量名（确定），不依赖 Set 迭代序
-- 同源 + 同 args 下 native 编译器与 JS 参考编译器对同一输入产出字节一致（drop 序部分）
-- 全部 E2E + llvm_diff 通过
-
-### B-086 LLVM 缺失 runtime 方法/dict — find_index/fold + Ord dict + Option.to_fail [feature] [P2] [M] [judgment] [doing]
-
-> **flat_map ✅ 已完成**（commit a93b19c）：补 `ring_list_flat_map` + 差分用例 `tests/cases/llvm/list_flat_map.ring`，JS/LLVM 一致。
->
-> **enumerate / to_int / to_float 撤出本项**：Worker 核查发现 Agent D 审计有误——这三个方法 checker **根本没注册**（`.enumerate()/.to_int()/.to_float()` 在两后端都 E0305 "no method"，JS oracle 自己就拒绝），codegen 映射是死映射，无法做差分测试。是否给 Ring 加这三个方法是**设计决策**（见 worker_feedback），决策前不实现；已撤回它们的 runtime stub。
-
-**剩余的"缺方法/runtime/dict"同类 gap（归并本项）**：
-- `find_index` / `fold`（List）—— JS 真 builtin、LLVM 既没 codegen 映射也没 runtime；阻塞验收 E2E `list_flat_map.ring`（find_index）/ `list_method_chain.ring`（fold）。
-- **`Ord` builtin dict 缺失**（B-088 #3）—— 泛型 `Ord` 派发报 `ring: no builtin dict '__Int_Ord'`，runtime 只注册了 Eq dict。补 Ord builtin dict（参考 Eq dict 注册）。
-- **`Option.to_fail()` 未实现**（B-088 #5）—— `none.to_fail("msg")`（none→fail effect）JS 正常、LLVM `missing method 'Option.to_fail'`。补 codegen 映射 + runtime。
-
-dispatch judgment——改编译器源码（rebuild dist 到不动点）+ runtime + 差分。
-
-**涉及修改**：
-1. `compiler/codegen_llvm_expr.ring`：方法映射加 `find_index`/`fold`/`Option.to_fail`（以 JS 语义为 oracle）
-2. `ring_runtime.cpp`：`ring_list_find_index`/`ring_list_fold`（参考 `ring_list_find`/`ring_list_for_each`）+ `Ord` builtin dict（参考 Eq dict）+ Option.to_fail 的 fail 路径
-3. `tests/cases/llvm/`：find_index/fold/Ord-泛型派发/Option.to_fail 差分用例
-4. rebuild dist 到不动点
-
-**验收标准**：
-- `list_flat_map.ring` / `list_method_chain.ring` 在 LLVM 后端通过
-- find_index/fold/Ord 泛型派发/Option.to_fail 差分用例 JS/LLVM 一致
 - 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-087 LLVM codegen 双后端 parity 修复 [bugfix] [P2] [L] [judgment] [queued]
