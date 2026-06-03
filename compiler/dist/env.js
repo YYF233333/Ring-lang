@@ -261,11 +261,12 @@ class TypeScheme {
 }
 
 class StructDef {
-  constructor(name, type_params, type_param_vars, fields) {
+  constructor(name, type_params, type_param_vars, fields, is_extern) {
     this.name = name;
     this.type_params = type_params;
     this.type_param_vars = type_param_vars;
     this.fields = fields;
+    this.is_extern = is_extern;
   }
 }
 
@@ -1102,11 +1103,6 @@ function apply_subst_row(subst, row) {
   }
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __FnBound_Eq_eq(self, other) {
   return (self.type_param === other.type_param) && (self.trait_name === other.trait_name);
 }
@@ -1143,11 +1139,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
-
 function __FnBound_Clone_clone(self) {
   return new FnBound(self.type_param, self.trait_name);
 }
@@ -1176,11 +1167,6 @@ function __BuiltInKind_Clone_clone(self) {
   }
 }
 const __BuiltInKind_Clone = { clone: __BuiltInKind_Clone_clone };
-
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
 
 function __FnBound_Ord_cmp(self, other) {
   var c;
@@ -1229,11 +1215,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __FnBound_Debug_debug(self) {
   return "FnBound { " + "type_param: " + String(self.type_param) + ", " + "trait_name: " + String(self.trait_name) + " }";

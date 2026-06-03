@@ -466,11 +466,6 @@ function usage(__ring_ev_io) {
   return print("  --target=js|llvm          Code generation target (default: js)", __ring_ev_io);
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __CliArgs_Eq_eq(self, other) {
   return (self.command === other.command) && (self.file === other.file) && (self.debug === other.debug) && (self.error_format === other.error_format) && (self.out_dir === other.out_dir) && (self.target === other.target);
 }
@@ -496,11 +491,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
-
 function __CliArgs_Clone_clone(self) {
   return new CliArgs(self.command, self.file, self.debug, self.error_format, self.out_dir, self.target);
 }
@@ -514,11 +504,6 @@ function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   }
 }
 const __Result_Clone = { clone: __Result_Clone_clone };
-
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
 
 function __CliArgs_Ord_cmp(self, other) {
   var c;
@@ -558,11 +543,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __CliArgs_Debug_debug(self) {
   return "CliArgs { " + "command: " + String(self.command) + ", " + "file: " + String(self.file) + ", " + "debug: " + String(self.debug) + ", " + "error_format: " + String(self.error_format) + ", " + "out_dir: " + String(self.out_dir) + ", " + "target: " + String(self.target) + " }";

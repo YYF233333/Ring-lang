@@ -656,11 +656,6 @@ class Program {
   }
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __Position_Eq_eq(self, other) {
   return (self.line === other.line) && (self.column === other.column) && (self.offset === other.offset);
 }
@@ -719,11 +714,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
   return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
-
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
 
 function __Position_Clone_clone(self) {
   return new Position(self.line, self.column, self.offset);
@@ -813,11 +803,6 @@ function __UseDecl_Clone_clone(self) {
 }
 const __UseDecl_Clone = { clone: __UseDecl_Clone_clone };
 
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
-
 function __Position_Ord_cmp(self, other) {
   var c;
   c = (self.line < other.line ? -1 : self.line > other.line ? 1 : 0);
@@ -893,11 +878,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __Position_Debug_debug(self) {
   return "Position { " + "line: " + String(self.line) + ", " + "column: " + String(self.column) + ", " + "offset: " + String(self.offset) + " }";

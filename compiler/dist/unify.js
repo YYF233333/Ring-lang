@@ -969,11 +969,6 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
   }
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __UnificationError_Eq_eq(self, other) {
   return (self.message === other.message) && (self.is_occurs_check === other.is_occurs_check);
 }
@@ -999,11 +994,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
-
 function __UnificationError_Clone_clone(self) {
   return new UnificationError(self.message, self.is_occurs_check);
 }
@@ -1017,11 +1007,6 @@ function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   }
 }
 const __Result_Clone = { clone: __Result_Clone_clone };
-
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
 
 function __UnificationError_Ord_cmp(self, other) {
   var c;
@@ -1053,11 +1038,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __UnificationError_Debug_debug(self) {
   return "UnificationError { " + "message: " + String(self.message) + ", " + "is_occurs_check: " + String(self.is_occurs_check) + " }";
