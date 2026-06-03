@@ -637,7 +637,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-087 LLVM codegen 双后端 parity 修复 [bugfix] [P2] [L] [judgment] [queued]
+### B-087 LLVM codegen 双后端 parity 修复 [bugfix] [P2] [L] [judgment] [doing]
 
 编译器自身不触发故自编译字节级一致，但特定模式下 LLVM 后端与 JS oracle 发散，阻塞 G-c 双后端 parity。**方法论**：B-088 的差分用例复现发散 → 在此修。**已亲自核实**的 gap：
 
