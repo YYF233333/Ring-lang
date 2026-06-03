@@ -1344,6 +1344,7 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 - **IR**：HIR 扩展显式 `Drop`/dup 节点（RC 行为可 dump/测试），仅 `--target=llvm` pass 产出，JS 路径跳过。
 - **算法**：反向 liveness + branch-balancing，翻译 Koka Perceus（POPL'21）`⟦·⟧`。
 - **范围边界**：L0 不处理 abort 路径 drop（longjmp 跳过 = 泄漏，非 UAF，安全；留 L2 drop-aware unwind）；不处理循环引用（树/DAG 自举无环；`Weak<T>` 在 L2）。
+- **闭包 capture 所有权（2026-06-03）**：capture 进 env 有两种所有权语义——**owned capture**（gen_lambda 普通闭包；perceus 对 non-last-use 发 dup、last-use move-in，env 死时**该** drop）与 **borrowed capture**（catch/handle 闭包为让分支平衡 `Drop` 能执行而捕入，所有权不在 env，由 arm 内的显式 `Drop` 释放，env 死时**不该** drop）。当前 env struct 复用 closure typeid（7），`drop_closure` 只 drop slot[1] → 捕获 ≥2 时泄漏 + 误递归。落地分两步：**C 增量（#130，B-084）**先给普通闭包 env 独立 typeid + per-env `drop_env_T` 释放 owned captures，catch/handle 闭包显式排除（维持现状泄漏，本就如此，因 `ring_try` 不 drop 闭包）；**A 波（B-096）**再正式建模 borrowed capture（不进 env 或标 no-drop）+ `ring_try` 后 drop body/catch 闭包。差分测试抓 double-free（crash）抓不到泄漏 → owned-capture drop 可验证安全，遗留 catch 泄漏不退化。
 
 **Ring 相对 Koka 的简化**：effect 仅 tail-resumptive + abort（无 multi-resume）→ 无 reified continuation 复制问题，handler 的 RC 退化为普通作用域 backward liveness。
 
@@ -2052,6 +2053,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | Perceus L0 对象头 | 每堆对象 offset 0 `{rc:u32, typeid:u32}`；per-type drop 函数 + typeid 派发表 | dup/drop 类型无关；用户类型 drop 由 codegen 生成（Koka 风格 per-type drop/scan）|
 | Perceus L0 范围 | 不处理 abort 路径 drop（留 L2 drop-aware unwind）/ 循环引用（留 L2 Weak） | longjmp 跳过 drop = 泄漏非 UAF（安全）；自举走成功路径 + 树形数据无环；先解内存墙 |
 | Perceus dup/drop IR | HIR 显式 Drop/dup 节点 + 反向 liveness pass（仅 llvm） | RC 行为落 IR 可 dump/测试；翻译 Koka Perceus POPL'21 |
+| Perceus L0 闭包 capture 所有权（2026-06-03） | owned capture（普通闭包，env 死时 drop）vs borrowed capture（catch/handle 为平衡 Drop 捕入，env 死时不 drop）；#130 走 C 增量（普通闭包 env 独立 typeid + drop_env_T，catch/handle 排除），A 波（B-096）完整收口（borrowed 建模 + ring_try drop 闭包 + #4 guard-false + Range/dict drop_T） | env 复用 closure typeid 致 ≥2 captures 泄漏+误递归；#131 借 catch env 整体泄漏安全引入 borrowed capture，裸加 auto-drop 会 double-drop；差分抓 crash 不抓泄漏 → C 增量可验证安全 |
 
 ### 幽灵功能（已解析但无语义效果）
 

@@ -49,11 +49,12 @@
 |------|------|-----|--------|
 | ~~B-083~~ ✅ | LLVM match guard 完整实现（codegen + perceus RC + diff）| G-c + G-a/b(RC) | P1 |
 | ~~B-088~~ ✅ | 双后端差分覆盖扩展 — 锁 6 parity 用例 + 发现 6 处 LLVM 发散喂 B-087 | G-c | P1 |
-| B-084 | Perceus drop 精度（#131 ✅ 96→0 · #3 ✅ · #130+#4 待 capture 所有权决策）| G-a/b | P2 |
+| B-084 | #130 闭包 owned-capture drop（C 增量；#131✅ #3✅核查 · #4+A波→B-096）| G-a/b | P2 |
 | ~~B-085~~ ✅ | Perceus 发射 determinism（sort Set names before emit）| G-b | P2 |
 | ~~B-086~~ ✅ | LLVM 缺失方法/runtime/dict（flat_map/find_index/fold/Ord dict/Option.to_fail）| G-c | P2 |
 | B-087 | LLVM codegen 双后端 parity（dict 多态 / Wrapped / range / #103 mut 等）| G-c | P2 |
 | B-002 | abort-unwind drop（#2 TryCatch + handler abort）并入 Drop/RAII | G-a/c | P2 |
+| B-096 | Perceus 闭包 RC 完整收口 A 波（borrowed建模+ring_try drop+#4 guard-false+Range/dict drop_T）| G-a | P3（依赖大内存机）|
 | B-089 | Native 终验 capstone（跑通 G-a/b/c，待大内存机 + 前置项）| 全部 | P1（阻塞中）|
 
 依赖：B-089 依赖前述全部；B-088 是 G-c 的发现+锁定引擎（失败的 diff 用例喂给 B-083/B-087，通过的锁定 parity）。**关键认识**：编译器自身重度用 trait/泛型/dict 且 LLVM 自编译字节级一致——故 B-087 那些 dict/多态发散**不阻塞自举**（编译器不触发），只阻塞 G-c E2E parity（特定模式触发）。
@@ -311,6 +312,23 @@ fn test_fetch() {
 
 ## 迭代与集合
 
+### B-095 List.enumerate 方法 [feature] [P3] [M] [judgment] [queued]
+
+> 2026-06-03 立项备忘，低优先（B-086 #1 决策）。当前拿索引迭代只能 `for i in 0..xs.len()` 再索引，啰嗦。enumerate 是高频糖但不阻塞自举（全代码库零调用），按需再做。与 B-094（清死映射）耦合：B-094 删了 LLVM 死映射，本项真做时需重新补齐 checker + runtime + codegen 全套。
+
+`List.enumerate() -> List<(Int, T)>`：返回带索引的元素对。
+
+**涉及修改**：
+1. `compiler/builtins.ring`：注册 `List.enumerate` 方法签名 `(self) -> List<(Int, T)>`
+2. `ring_runtime.cpp`：实现 `ring_list_enumerate`（构造 `(Int, T)` tuple 列表）
+3. `compiler/codegen.ring`：JS 后端映射
+4. `compiler/codegen_llvm_expr.ring`：LLVM 映射（恢复 B-094 删除的行）
+5. `tests/cases/llvm/`：差分用例
+
+**验收标准**：
+- `for (i, x) in xs.enumerate()` 两后端可用且行为一致
+- 全部 E2E + llvm_diff 通过；自举一致
+
 ## 性能优化（愿景：语义驱动的编译优化）
 
 > **核心论点**：Ring 的类型系统（effect + refinement + linear）不仅用于安全性，还为编译器提供其他语言没有的优化信息。性能是 Ring 的核心卖点之一——目标不是"接近 C++/Rust"而是在特定场景**超越**。
@@ -480,6 +498,20 @@ connect("localhost", 3000)     // timeout=30
 
 ## 已知 Bug / 技术债
 
+### B-094 清理 to_int/to_float/enumerate 死映射 [refactor] [P3] [S] [mechanical] [queued]
+
+> 2026-06-03 立项（B-086 #1 决策）。`.to_int()/.to_float()/.enumerate()` 在 checker 未注册为方法（`builtins.ring` 无），任何调用必报 E0305，全代码库（编译器/std/tests/examples）零调用，但 LLVM codegen 仍留死映射。`to_int/to_float` 与 `parse_int/parse_float`（`std/num.ring`，返回 `Option` 失败安全）冗余，**确定不加**；`enumerate` 暂不加（备忘见 B-095）。清掉死映射避免误导后续。
+
+**涉及修改**：
+1. `compiler/codegen_llvm_expr.ring`：删行 1405（`Str.to_int`→`ring_str_to_int`）、1406（`Str.to_float`→`ring_str_to_float`）、1450（`List.enumerate`→`ring_list_enumerate`）
+2. 核查 JS 后端 codegen（`codegen_expr.ring` / `codegen.ring`）是否有对应死映射，一并删
+3. 若 `ring_runtime.cpp` 残留 `ring_str_to_int`/`ring_str_to_float`/`ring_list_enumerate` 声明，确认无引用后清理
+
+**验收标准**：
+- 三处死映射移除，两后端无残留映射
+- 全部 E2E + llvm_diff 通过
+- 重新编译 dist + 自举一致
+
 ### B-074 ESM extern type/fn 跨模块导入缺陷 [bugfix] [P3] [M] [judgment] [queued]
 Ring 的 ESM codegen 无法导出 extern type（它们没有 JS 值表示），导致 `use other_module::{SomeExternType}` 失败。当前 workaround：每个文件局部 re-declare 所需的 extern type/fn。不只影响 LLVM codegen，任何多文件项目用到 extern type 都会遇到。
 
@@ -633,32 +665,26 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-084 Perceus drop 精度 + drop_T 完整性 [bugfix] [P2] [L] [judgment] [waiting-feedback]
+### B-084 Perceus 闭包 owned-capture drop（#130 C 增量）[bugfix] [P2] [M] [judgment] [queued]
 
-> **进度（2026-06-03，commit a8fef7c）**：**#131 ✅ 完整修复**（rc-warn 96→0：`_` 通配符跳过 + catch/handle 独立闭包 capture drop 目标；dist 不动点；728+27 测试过）。**#3 ✅ 核查结论「基本已正确」**（drop_T 类型擦除、tuple 走 List drop、单态化泛型不破坏；仅 Range/Eq-dict process-lifetime 极小残留，无需大改）。**#130 + #4 退回 Discussion**——Worker 实证发现裸加 env auto-drop 会与 #131 的 catch borrow-capture 冲突、把安全泄漏变 double-free，需先定 capture 所有权模型（owned vs borrowed），详见 worker_feedback `[决策]`。待该决策后重新排队做 #130/#4。
+> **进度**：#131 ✅（rc-warn 96→0：`_` 通配符跳过 + catch/handle 独立闭包 capture drop 目标；dist 不动点；728+27 测试过）。#3 ✅ 核查「基本正确」（drop_T 类型擦除、tuple 走 List drop、单态化泛型不破坏；仅 Range/Eq-dict process-lifetime 极小残留 → 并入 B-096）。#4 guard-false 泄漏 + A 波完整收口 → **B-096**。本项收口 **#130 的 C 安全增量**（2026-06-03 决策，详见 design.md §7.10 闭包 capture 所有权）。
 
-带 RC pass 自编译暴露的 drop 精度问题，方向安全（泄漏，非 UAF），但拉高 native 内存峰值（G-a）并可能漏 drop。四块（原 audit #130/#131 + B-083 guard-false 残留归此）：
+#130：闭包 env struct 复用 `RING_TYPEID_CLOSURE`（typeid 7，本是 `{fn_ptr,env_ptr}` pair），`drop_closure`（`ring_runtime.cpp:2136`）只 `ring_drop(cls[1])` 当 env_ptr → 捕获 ≥2 时 slot[0] 泄漏、slot[1] 误递归 drop。
 
-**1. #131 drop 落不了地**（`perceus.ring` drop 生成 / `codegen_llvm_stmt.ring` Drop emit）：带 RC pass 自编译报 **96 处** `[rc-warn] Drop: variable 'X' not found in named_values`——perceus 给某些变量插 `HStmt::Drop` 但 codegen 在 `named_values` 找不到 → 跳过（fail-safe 不崩，但漏 drop）。变量含通配符 `_`（不该 drop）及大量真实局部（decl/ctx/f/body/span/arm/env/then_block/methods/hparams/expected_ret…）。修：(a) perceus 不对 `_`/已 move/模式绑定变量生成 drop；(b) 核对 named_values 作用域覆盖（destructure 绑定 + 嵌套作用域）。
-
-**2. #130 闭包 env drop**（`ring_runtime.cpp:2043` drop_closure / `codegen_llvm_expr.ring:2647` gen_lambda env 分配）：env struct 复用 `RING_TYPEID_CLOSURE`（typeid 7，本是 `{fn_ptr,env_ptr}` pair），drop_closure 只 drop slot[1]，捕获指针不 drop → 泄漏。B-083 #1/#3 修了 perceus 对闭包捕获 emit dup，但 runtime 缺配套 drop。修：env struct 用独立 typeid + 按捕获布局生成 per-capture `drop_env_T`。
-
-**3. drop_T 完整性核查**：runtime `drop_tuple` 是 no-op（L0 简化，靠 codegen 生成 per-type drop_T）。需核查每个 StructType/EnumType/TupleType + 单态化泛型实例都生成并注册了正确布局的 drop_T，否则 fields 漏 drop。B-082 的 rc-warn 是发现面。
-
-**4. guard-false 边 pattern 绑定泄漏**（B-083 残留，2026-06-03）：带 guard 的 arm，其 pattern 绑定若被 body 用到会为 body dup，但 guard 为假 fall-through 时 body 不跑 → 该 dup 泄漏。B-083 为消除 UAF 选了保守安全策略（match 消费变量跨 guard fork 全程 dup 不 move），代价即此泄漏。需在 HIR 给 guard-false 边加 drop slot 才能根治。纯泄漏无 UAF，差分测试（比输出非内存）抓不到。
+**C 方案（owned-capture 安全增量，catch/handle 显式排除）**：
+- gen_lambda 普通闭包的 env struct 用**独立 typeid**（不再复用 7），codegen 按捕获布局生成 per-env `drop_env_T` 逐个 drop owned captures。
+- catch/handle 闭包（gen_catch_closure 及 handler 闭包）**显式排除**——它们 env 当前整体泄漏（`ring_try`，`ring_runtime.cpp:1517`，调完不 drop 闭包），且 #131 往 catch env 塞的 `f` 是 borrowed capture（靠 catch arm 内显式 `Drop f` 释放），裸加 env-drop 会 double-drop。这部分留 B-096 A 波。
+- 普通闭包是 capture 泄漏大头；引入的 double-free 风险可被 llvm_diff 的 `closure_capture_*` 用例抓到（crash），遗留 catch 泄漏不退化（本就泄漏）。
 
 **涉及修改**：
-1. `compiler/perceus.ring`：drop 生成排除 `_`/已 move/模式变量；guard-false 边 drop slot
-2. `compiler/codegen_llvm_stmt.ring`：named_values 覆盖 destructure/嵌套作用域绑定
-3. `ring_runtime.cpp`：closure env 独立 typeid + per-capture drop
-4. `compiler/codegen_llvm_expr.ring`：gen_lambda env 用新 typeid
-5. `compiler/codegen_llvm*.ring`：核查 drop_T 对所有 allocatable 类型（含单态化泛型）生成
+1. `ring_runtime.cpp`：新增闭包 env 专属 typeid（区别于 7）+ 注册 drop_table（其 drop_T 由 codegen 生成）
+2. `compiler/codegen_llvm_expr.ring`：gen_lambda env 分配改用新 typeid + 生成 per-env `drop_env_T`；gen_catch_closure / handler 闭包 env 维持现状（排除，不动）
+3. 确认 closure 本体 `{fn_ptr,env_ptr}` 仍用 typeid 7，`drop_closure` 看到 env_ptr 走新 typeid 的 `drop_env_T`
 
 **验收标准**：
-- 带 RC pass 自编译 rc-warn 数降为 0（或只剩明确正确的豁免）
-- 闭包捕获值在 env drop 时正确释放（per-capture）
-- 所有堆分配类型有注册的正确 drop_T
-- 全部 E2E + llvm_diff 通过；自举一致
+- 普通闭包多捕获（≥2）场景 env drop 时所有 owned captures 正确释放，无泄漏无 double-free
+- catch/handle 路径行为不变（维持现状）
+- 全部 E2E + llvm_diff 通过（含 `closure_capture_*`）；重编 dist + 自举一致
 
 ### B-087 LLVM codegen 双后端 parity 修复 [bugfix] [P2] [L] [judgment] [queued]
 
@@ -715,6 +741,29 @@ LLVM 后端基本没实现自定义 effect handler（tail-resumptive，非 fail/
 用户 enum 的 `and_then`/`map_ok` 接 `fn(v){}` 闭包链式，在 LLVM **间歇** double-free / `str_from_cstr` 崩（standalone 压测 ~2/200，full-suite ~1/3 整跑挂）。enum payload + 闭包参数的 RC 不平衡（dup/drop 竞态/重复 drop）。worker_feedback B-088 #6（含已用 first-order 锁住的 `result_enum_chain.ring`）。**单跑会误判通过，必须 200-300x 压测确认**。
 **涉及修改**：`perceus.ring` RC（enum payload + 闭包参数）+ `codegen_llvm_expr.ring`。
 **验收标准**：B-088 #6 复现 200x 压测零失败，JS/LLVM 一致；全 E2E + llvm_diff 通过；自举一致。
+
+### B-096 Perceus 闭包 RC 完整收口（A 波）[bugfix] [P3] [L] [judgment] [queued]
+
+> 2026-06-03 从 B-084 拆出。B-084 的 #130 C 增量落地后的完整收口。**依赖大内存机**（能实测 double-free / 内存峰值才放心动 `ring_try` 闭包 drop）。纯泄漏方向，差分测试比输出非内存，抓不到对错——做了之后差分全绿。见 design.md §7.10 闭包 capture 所有权。
+
+B-084 C 增量只修普通闭包 owned-capture drop，catch/handle 闭包仍整体泄漏。A 波收口剩余四块：
+
+1. **borrowed capture 正式建模**：perceus 区分 owned vs borrowed capture（#131 给 catch env 塞的 borrow-for-drop），borrowed 不进 env 或标记 no-drop。
+2. **ring_try 闭包 drop**：`ring_try`（`ring_runtime.cpp:1517`）调完 body/catch 闭包后 drop 两者（连 env），消除整体泄漏。**必须与 borrowed capture 建模配套**，否则 double-drop catch arm 的 `f`。
+3. **#4 guard-false 边泄漏**（B-083 残留）：带 guard 的 arm，pattern 绑定被 body dup 但 guard 假 fall-through → 该 dup 无人 drop（泄漏）。B-083 为消除 UAF 选保守策略（match 消费变量跨 guard fork 全程 dup 不 move），代价即此。修：perceus 产出 guard-false 边 drop 列表 + codegen 在 guard cond-false 目标前插 cleanup block 绑定并 drop。纯泄漏无 UAF。
+4. **#3 残留 drop_T**：Range struct（start/end）+ Eq/Ord-dict struct（2 closures）当前共用 no-op TUPLE typeid，process-lifetime 极小泄漏。给各自专属 drop_T（与 env typeid 方案一并设计）。
+
+**涉及修改**：
+1. `compiler/perceus.ring`：owned/borrowed capture 区分；guard-false 边 drop 列表
+2. `ring_runtime.cpp`：`ring_try` 后 drop body/catch 闭包；Range/dict struct 专属 drop_T
+3. `compiler/codegen_llvm_expr.ring`：borrowed capture env 处理；guard cond-false cleanup block
+
+**验收标准**：
+- catch/handle 闭包 env 无泄漏；`ring_try` 后两闭包释放，无 double-drop（catch arm `f` 仅释放一次）
+- guard-false 边 pattern 绑定 dup 正确 drop
+- Range/dict struct 有注册的专属 drop_T
+- 大内存机实测无 double-free；带 RC 自编译内存峰值进一步下降
+- 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-089 Native 自举终验 capstone [bugfix] [P1] [L] [judgment] [queued]
 
