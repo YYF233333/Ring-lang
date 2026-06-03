@@ -54,6 +54,15 @@
 **影响**：泄漏不崩溃、差分测试抓不到，但拉高 native 自编译内存峰值——B-083 native 终验前应修。
 发现者：B-083 #1/#3 worktree agent（Opus）
 
+### #131 Perceus 生成 codegen 无法落地的 Drop（变量不在 named_values）[medium] [judgment] [open]
+
+带 RC pass 编译编译器自身（`build --target=llvm`，生成 1.91MB whole-program main.o，compile-time 峰值 0.56GB / 47.6s）时，B-082 RC 诊断报告 **96 处** `[rc-warn] Drop: variable 'X' not found in named_values`——perceus 为某些变量插入了 `HStmt::Drop`，但 codegen 在当前 `named_values` 找不到该变量 → drop 被跳过（fail-safe，不崩溃）。变量含通配符 `_`（明显不该 drop）及大量真实局部（decl / ctx / f / body / span / arm / env / then_block / methods / hparams / expected_ret …）。
+
+**影响**：被跳过的 drop = 潜在漏 drop（泄漏）；`_` 等说明 perceus drop 生成对部分模式/作用域不精确。fail-safe 跳过避免了 double-free，方向安全。差分测试抓不到（泄漏不崩溃）。
+**文件**：`compiler/perceus.ring`（drop 生成）、`compiler/codegen_llvm_stmt.ring`（Drop emit + rc-warn）
+**修复方向**：(1) perceus 不对 `_` / 已 move / 模式绑定变量生成 drop；(2) 核对 named_values 作用域覆盖。可能与剩余 RC 正确性工作（B-083 #2/#4）或 B-002 一并处理。
+发现者：B-083 native 自编译测试（Opus）
+
 
 
 
