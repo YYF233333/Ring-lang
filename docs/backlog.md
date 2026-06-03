@@ -633,7 +633,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-084 Perceus drop 精度 + drop_T 完整性 [bugfix] [P2] [L] [judgment] [queued]
+### B-084 Perceus drop 精度 + drop_T 完整性 [bugfix] [P2] [L] [judgment] [doing]
 
 带 RC pass 自编译暴露的 drop 精度问题，方向安全（泄漏，非 UAF），但拉高 native 内存峰值（G-a）并可能漏 drop。四块（原 audit #130/#131 + B-083 guard-false 残留归此）：
 
