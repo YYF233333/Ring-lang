@@ -680,7 +680,7 @@ LLVM 后端基本没实现自定义 effect handler（tail-resumptive，非 fail/
 **涉及修改**：`codegen_llvm_expr.ring` dict-passing dispatch（对照 JS）。
 **验收标准**：B-088 #3 复现 JS/LLVM 一致；泛型用户 trait 方法派发差分用例可锁 parity；全 E2E + llvm_diff 通过；自举一致。
 
-### B-093 enum 高阶组合子间歇 double-free（LLVM RC）[bugfix] [P2] [L] [judgment] [queued]
+### B-093 enum 高阶组合子间歇 double-free（LLVM RC）[bugfix] [P2] [L] [judgment] [doing]
 
 > 2026-06-03 B-088 立项。优先级暂定。**间歇 bug，必须压测复现**。
 
