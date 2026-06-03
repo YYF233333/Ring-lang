@@ -45,23 +45,7 @@
 
 可移植性问题。
 
-### #130 闭包 env 捕获指针未被 drop（typeid 复用导致 RC 泄漏）[medium] [judgment] [open]
-
-`ring_runtime.cpp` 的 `drop_closure`（~2043）把所有 `RING_TYPEID_CLOSURE`（typeid 7）block 当作 `{fn_ptr, env_ptr}` pair 处理，只 drop slot[1]。但闭包 env struct 也用同一 typeid 分配，其捕获指针（尤其单捕获 env 的 slot[0]）不被单独 drop。B-083 #1/#3（commit 0095c59）修复后 perceus 正确对闭包捕获 emit dup，但 runtime 缺少配套 drop → 捕获值**泄漏**（不再 UAF，方向安全，但占内存）。
-
-**文件**：`ring_runtime.cpp:2043`（drop_closure）、`compiler/codegen_llvm_expr.ring:2647`（gen_lambda env 分配）
-**修复方向**：env struct 用独立 typeid（区别于 closure `{fn_ptr,env_ptr}` pair），按 env 实际捕获布局生成 per-capture drop。可能并入 L2 Drop/RAII（B-002）。
-**影响**：泄漏不崩溃、差分测试抓不到，但拉高 native 自编译内存峰值——B-083 native 终验前应修。
-发现者：B-083 #1/#3 worktree agent（Opus）
-
-### #131 Perceus 生成 codegen 无法落地的 Drop（变量不在 named_values）[medium] [judgment] [open]
-
-带 RC pass 编译编译器自身（`build --target=llvm`，生成 1.91MB whole-program main.o，compile-time 峰值 0.56GB / 47.6s）时，B-082 RC 诊断报告 **96 处** `[rc-warn] Drop: variable 'X' not found in named_values`——perceus 为某些变量插入了 `HStmt::Drop`，但 codegen 在当前 `named_values` 找不到该变量 → drop 被跳过（fail-safe，不崩溃）。变量含通配符 `_`（明显不该 drop）及大量真实局部（decl / ctx / f / body / span / arm / env / then_block / methods / hparams / expected_ret …）。
-
-**影响**：被跳过的 drop = 潜在漏 drop（泄漏）；`_` 等说明 perceus drop 生成对部分模式/作用域不精确。fail-safe 跳过避免了 double-free，方向安全。差分测试抓不到（泄漏不崩溃）。
-**文件**：`compiler/perceus.ring`（drop 生成）、`compiler/codegen_llvm_stmt.ring`（Drop emit + rc-warn）
-**修复方向**：(1) perceus 不对 `_` / 已 move / 模式绑定变量生成 drop；(2) 核对 named_values 作用域覆盖。可能与剩余 RC 正确性工作（B-083 #2/#4）或 B-002 一并处理。
-发现者：B-083 native 自编译测试（Opus）
+> #130（闭包 env 捕获泄漏）/ #131（perceus drop 落不了地，96 rc-warn）已于 2026-06-03 并入 backlog **B-084**（Perceus drop 精度 + drop_T 完整性），详见 backlog。
 
 
 
@@ -128,6 +112,8 @@ B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bo
 
 **文件**：`compiler/codegen_stmt.ring`、`compiler/codegen_expr.ring`（auto-boxing 相关逻辑）
 **修复方向**：LLVM 后端实现时，所有 `mut` 参数统一使用指针传递。JS 后端保持现状。
+
+**2026-06-03**：纳入 backlog **B-087**（LLVM codegen 双后端 parity），作为 G-c parity 的一部分落地，解除 deferred-LLVM 状态。
 
 发现者：Worker Wave A+B
 

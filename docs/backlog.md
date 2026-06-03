@@ -28,13 +28,35 @@
 - ~~B-043 Refinement × Linear × Effects 交互矩阵 [M]~~ ✅ 已完成（2026-05-24）
 - ~~B-044 Ring 语义规范 [M]~~ ✅ 已完成（2026-05-24）
 
-**关键路径（2026-06-01 更新）**：
-- ~~B-004~~ → ~~B-036~~ → ~~B-011 LLVM~~ ✅ → ~~B-012 Perceus RC L0 基础设施~~ ✅
-- **当前关键路径**：~~B-082（RC 诊断）~~ ✅ → B-081（dup 架构迁移）→ B-083（RC 正确性）→ 带 RC 全自举验证
-- B-042 / B-068 阻塞 L1/L2，不阻塞 L0 正确性修复
-- B-033 GADTs 推迟至 LLVM 之后（无下游依赖）
-- 层 3（Refinement/Linear/async）在全自举验证通过后启动
+**关键路径（2026-06-03 更新）**：
+- ~~B-004~~ → ~~B-036~~ → ~~B-011 LLVM~~ ✅ → ~~B-012 Perceus RC L0 基础设施~~ ✅ → ~~B-082 RC 诊断~~ ✅ → ~~B-081 dup 架构迁移~~ ✅
+- **当前目标：native 自举 + E2E + 双后端行为对比全过**（2026-06-03 规划，见下「Native 自举路线图」）
+- B-042 / B-068 阻塞 L1/L2，不阻塞 native 自举（L0 正确性即可）
+- B-033 GADTs 推迟至 native 自举之后（无下游依赖）
+- 层 3（Refinement/Linear/async）在 native 自举验证通过后启动
 - **LLVM 落地后 JS 后端废弃**
+
+### Native 自举路线图（2026-06-03 规划）
+
+> 来源：本次 Discussion 4 路只读调研（codegen gap / 差分覆盖 / RC gap / runtime 完整性）+ 亲自贴码核查 load-bearing 断言。子 agent 报告按核过的可信度分档落项；hedged 断言走差分验证（B-088）再修。
+
+三个验收门：
+- **G-a 内存**：带 RC pass 自编译，内存峰值从 no-GC 的 25.9GB 降至机器可运行
+- **G-b 双 bootstrap 一致**：native 二进制重编译编译器，字节级一致
+- **G-c 双后端 parity**：native E2E + llvm_diff 全过，行为与 JS oracle 一致
+
+| Item | 内容 | 门 | 优先级 |
+|------|------|-----|--------|
+| B-083 | LLVM match guard 完整实现（codegen + perceus RC + diff）| G-c + G-a/b(RC) | P1 |
+| B-088 | 双后端差分覆盖扩展（14 → 覆盖 effects/guard/interp/generics/delegate）| G-c | P1 |
+| B-084 | Perceus drop 精度（#131 落地 + #130 env drop + drop_T 完整性）| G-a/b | P2 |
+| B-085 | Perceus 发射 determinism（drop/dup 顺序独立于 Set 迭代序）| G-b | P2 |
+| B-086 | LLVM 缺失 runtime 原语（flat_map/enumerate/str_to_int/float）| G-c | P2 |
+| B-087 | LLVM codegen 双后端 parity（dict 多态 / Wrapped / range / #103 mut 等）| G-c | P2 |
+| B-002 | abort-unwind drop（#2 TryCatch + handler abort）并入 Drop/RAII | G-a/c | P2 |
+| B-089 | Native 终验 capstone（跑通 G-a/b/c，待大内存机 + 前置项）| 全部 | P1（阻塞中）|
+
+依赖：B-089 依赖前述全部；B-088 是 G-c 的发现+锁定引擎（失败的 diff 用例喂给 B-083/B-087，通过的锁定 parity）。**关键认识**：编译器自身重度用 trait/泛型/dict 且 LLVM 自编译字节级一致——故 B-087 那些 dict/多态发散**不阻塞自举**（编译器不触发），只阻塞 G-c E2E parity（特定模式触发）。
 
 ---
 
@@ -60,6 +82,8 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪值的所有权，确保 Drop 恰好执行一次。
 
 > **Perceus 分层角色 = L2**（见 §7.10 / B-012）：在 L0 RC 核心（B-012）之上实现用户 `impl Drop` + 正常/abort/cancel 全路径 RAII。**两个并入项**：(1) fail/catch 从 setjmp/longjmp 切换到 **drop-aware unwind**（longjmp 会跳过 drop → 改成栈展开时逐帧 drop）；(2) `Weak<T>` 库类型实现（`Rc.downgrade()` + `.upgrade() -> T?`，循环引用解法，设计见 §7.9）。
+>
+> **#2 TryCatch / handler abort 的 abort-unwind drop 泄漏并入本项（2026-06-03 决策）**：try body 中途 `fail.raise`（经 `ring_try` longjmp）绕过正常 drop 序列，已分配局部值 + 未调用的 resume 闭包 + handler param 捕获全泄漏（方向安全）。perceus 静态 pass 插不进 longjmp 边——必须靠上面的 drop-aware unwind 在栈展开时逐帧 drop。涉及 `perceus.ring`（TryCatch/HandleExpr 分支）+ `ring_runtime.cpp`（ring_try/raise unwind）+ codegen_llvm。影响 G-a 内存 + G-c 正确性。原 B-083 #2 退回后归此。
 
 **模型**：
 - 所有值 scope 结束自动 drop（RAII，正常路径 + abort 路径均自动）
@@ -609,16 +633,142 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-083 Perceus RC pass 正确性修复 — 剩余 #2/#4 [bugfix] [P1] [L] [judgment] [waiting-feedback]
+### B-083 LLVM match guard 完整实现（codegen + RC + 差分）[bugfix] [P1] [L] [judgment] [queued]
 
-原列 4 个 RC bug。**#1（Lambda 捕获 dup）、#3（循环内闭包 per-iteration dup）已修复合入**（commit 0095c59；728 JS + 14/14 llvm_diff 全过，含 3 个新 closure_capture 用例）。剩余 #2/#4 经 Worker 复核发现 spec 框架与现状不符，退回 Discussion 重新设计（详见 worker_feedback.md）：
+**根因（2026-06-03 重新定位）**：原 spec 以为是 perceus RC fall-through bug，Worker 复核 + Discussion 贴码核查后发现真实主 bug 更深——**LLVM 后端根本没实现 match guard codegen**。`gen_match_arm_enum` / `gen_match_if_else` / `gen_match_arm_wildcard`（`codegen_llvm_expr.ring`）无一引用 `arm.guard`，带 guard 的 arm 在 native 后端等于"无条件按 pattern 匹配"——`P if cond => body` 在 `P` 匹配时直接跑 `body`，`cond` 被忽略 → **静默算错**。guard 是正式语言特性（`parser.ring:1688`），JS 后端正确处理（`codegen_expr.ring:869/927/1283`），有 E2E 覆盖（`match_guard.ring` / `match_guard_multi.ring` / `match_nested.ring` / `match_tuple_pattern.ring`），但 `tests/cases/llvm/` 零 guard 覆盖故一直没抓到。
 
-- **#2 TryCatch**（CRITICAL）：spec 的"异常不匹配直接传播"前提与 Ring 穷尽 catch 不符；真正难点是 body 中途 abort 时已分配局部值的清理（abort 经 `ring_try` longjmp 绕过 drop 序列 → 泄漏），疑似与 B-002（Drop/RAII）重叠。
-- **#4 Match guard**（HIGH）：spec 的"分析顺序"前提不符（当前 backward body-先-guard-后对 guard-真路径正确，简单反转会引入 bug）；真正 bug 是 guard 为假 fall-through 到下一 arm 的路径未建模（guard 可能已消费/dup 变量而 body 没跑）。
+perceus RC fall-through（原 #4）是**潜伏**问题：guard 表达式没生成 → perceus 灌进 guard 的 dup 也被丢；只有 guard 真正下沉后 RC 错乱才激活。一旦 guard 生成，guard1 里对"后续 arm 还要用的外层变量"的 move 会变成真 **UAF**（guard1 假 → fall-through → arm2 用已 move 的变量）。三段必须一起进（解耦会留 UAF 中间态）：
 
-**关联**：runtime 闭包 env drop 缺陷见 audit #130（#1/#3 修复后捕获泄漏，影响 native 内存）。
+**1. LLVM guard codegen** —— 三条 match lowering 路径 lower guard：pattern 匹配后求值 guard，真 → arm body，假 → fall-through 到下一 arm 的 pattern 测试。enum switch 路径需特别改造：case 命中后不能直进 body，要先测 guard，假则跳"继续尝试后续 arm"的链（switch 本身无 fall-through 语义）。
 
-**native 终验**（fix-forward，待大内存机）：带 RC pass 编译编译器自身内存峰值下降 + 二次自举字节级一致 + native E2E 全过。
+**2. perceus guard-false fall-through RC**（`perceus.ring:1274-1347`）—— 当前 guard 只对着 `body_result.live` 反向分析（行 1285），只建模 guard-真。改为按 arm 链反向 fold，维护 fall-through live set：guard 的 live-out = body live-in ∪ fall-through live-in（下一 arm 入口 live）。变量在任一后继仍 live → 不能 move，dup/保留；两条后继都 dead 且 guard 内 last-use → move。guard-真路径（body 跑）drop 那些只为 fall-through 保留、body 不用的变量；guard-假路径把保留的引用交给下一 arm。
+
+**3. llvm_diff 回归** —— 新增覆盖 guard 的差分用例：基础 guard、guard 多 arm、guard + 或模式、guard 消费外层变量后 fall-through（专门锁 RC fall-through UAF）、guard 在 effect/recursion 上下文。
+
+**涉及修改**：
+1. `compiler/codegen_llvm_expr.ring`：`gen_match_arm_enum` / `gen_match_if_else` / `gen_match_arm_wildcard` 加 guard lowering
+2. `compiler/perceus.ring`：MatchExpr 分支 RC 改为 arm 链反向 fold + fall-through live 建模
+3. `tests/cases/llvm/`：新增 guard 差分用例
+
+**验收标准**：
+- 带 guard 的 match 在 LLVM 后端语义正确（guard 假不跑 body，正确 fall-through）
+- guard 差分用例 JS/LLVM 输出一致
+- guard 消费外层变量 + fall-through 场景无 UAF/泄漏（RC 平衡）
+- 全部 E2E + llvm_diff 通过；自举一致
+
+### B-084 Perceus drop 精度 + drop_T 完整性 [bugfix] [P2] [L] [judgment] [queued]
+
+带 RC pass 自编译暴露的 drop 精度问题，方向安全（泄漏，非 UAF），但拉高 native 内存峰值（G-a）并可能漏 drop。三块（原 audit #130/#131 归此）：
+
+**1. #131 drop 落不了地**（`perceus.ring` drop 生成 / `codegen_llvm_stmt.ring` Drop emit）：带 RC pass 自编译报 **96 处** `[rc-warn] Drop: variable 'X' not found in named_values`——perceus 给某些变量插 `HStmt::Drop` 但 codegen 在 `named_values` 找不到 → 跳过（fail-safe 不崩，但漏 drop）。变量含通配符 `_`（不该 drop）及大量真实局部（decl/ctx/f/body/span/arm/env/then_block/methods/hparams/expected_ret…）。修：(a) perceus 不对 `_`/已 move/模式绑定变量生成 drop；(b) 核对 named_values 作用域覆盖（destructure 绑定 + 嵌套作用域）。
+
+**2. #130 闭包 env drop**（`ring_runtime.cpp:2043` drop_closure / `codegen_llvm_expr.ring:2647` gen_lambda env 分配）：env struct 复用 `RING_TYPEID_CLOSURE`（typeid 7，本是 `{fn_ptr,env_ptr}` pair），drop_closure 只 drop slot[1]，捕获指针不 drop → 泄漏。B-083 #1/#3 修了 perceus 对闭包捕获 emit dup，但 runtime 缺配套 drop。修：env struct 用独立 typeid + 按捕获布局生成 per-capture `drop_env_T`。
+
+**3. drop_T 完整性核查**：runtime `drop_tuple` 是 no-op（L0 简化，靠 codegen 生成 per-type drop_T）。需核查每个 StructType/EnumType/TupleType + 单态化泛型实例都生成并注册了正确布局的 drop_T，否则 fields 漏 drop。B-082 的 rc-warn 是发现面。
+
+**涉及修改**：
+1. `compiler/perceus.ring`：drop 生成排除 `_`/已 move/模式变量
+2. `compiler/codegen_llvm_stmt.ring`：named_values 覆盖 destructure/嵌套作用域绑定
+3. `ring_runtime.cpp`：closure env 独立 typeid + per-capture drop
+4. `compiler/codegen_llvm_expr.ring`：gen_lambda env 用新 typeid
+5. `compiler/codegen_llvm*.ring`：核查 drop_T 对所有 allocatable 类型（含单态化泛型）生成
+
+**验收标准**：
+- 带 RC pass 自编译 rc-warn 数降为 0（或只剩明确正确的豁免）
+- 闭包捕获值在 env drop 时正确释放（per-capture）
+- 所有堆分配类型有注册的正确 drop_T
+- 全部 E2E + llvm_diff 通过；自举一致
+
+### B-085 Perceus 发射 determinism（双 bootstrap 字节级一致）[bugfix] [P2] [S] [judgment] [queued]
+
+`perceus.ring:1633 make_drop_list` 对 `Set<Str>` 直接 `for name in names` 生成 drop，**不排序**。JS 后端 Set 是插入序（确定），LLVM 后端 Set 是 `std::unordered_set`（hash 序）——两后端迭代序不同。当某点 drop 多个变量（Set size > 1）时，native 编译器与 JS 参考编译器生成的 drop 顺序不同 → IR/.o 字节级不一致 → 破坏 G-b 双 bootstrap。注：drop 顺序不影响**行为**（正确性上可交换），只影响字节一致——不阻塞 G-c。
+
+**涉及修改**：
+1. `compiler/perceus.ring`：`make_drop_list`（及任何从 Set 迭代生成发射的点：dup 列表、branch-balancing 的 difference 迭代）对变量名排序后再发射
+2. 排查 perceus 是否还有其他依赖 Set/Map 迭代序的发射点
+
+**验收标准**：
+- perceus 发射的 drop/dup 顺序只依赖变量名（确定），不依赖 Set 迭代序
+- 同源 + 同 args 下 native 编译器与 JS 参考编译器对同一输入产出字节一致（drop 序部分）
+- 全部 E2E + llvm_diff 通过
+
+### B-086 LLVM 缺失 runtime 原语 [feature] [P2] [S] [mechanical] [queued]
+
+`ring_runtime.cpp` 缺 4 个 codegen 已映射但未实现的 runtime fn，照现有 pattern 补：
+- `ring_list_flat_map`（`codegen_llvm_expr.ring:1447`）—— 阻塞 E2E `list_flat_map.ring` / `list_method_chain.ring`。参考 `ring_list_map`。
+- `ring_list_enumerate`（:1448）—— 返回 `List<(Int, T)>`。
+- `ring_str_to_int`（:1405）/ `ring_str_to_float`（:1406）—— 返回 Option，参考 `ring_parse_int`/`ring_parse_float`。
+- （可选）`ring_map_is_empty`（:1461）/ `ring_set_is_empty`（:1471）—— stdlib 当前内联 `len()==0`，非阻塞，按需补。
+
+编译器自身不调这些（自举不阻塞），但 G-c E2E 全过需要。
+
+**涉及修改**：
+1. `ring_runtime.cpp`：实现上述 fn（extern "C"）
+
+**验收标准**：
+- `list_flat_map.ring` / `list_method_chain.ring` 在 LLVM 后端通过
+- 这些方法的 llvm_diff 用例 JS/LLVM 一致
+- 全部 E2E + llvm_diff 通过
+
+### B-087 LLVM codegen 双后端 parity 修复 [bugfix] [P2] [L] [judgment] [queued]
+
+编译器自身不触发故自编译字节级一致，但特定模式下 LLVM 后端与 JS oracle 发散，阻塞 G-c 双后端 parity。**方法论**：B-088 的差分用例复现发散 → 在此修。**已亲自核实**的 gap：
+
+- **dict_closure_dicts 不处理**（`codegen_llvm_expr.ring:107` gen_ident 签名只收 name/resolved_name，`dict_closure_dicts` 被 `..` 丢）：多态函数标识符作为一等值带 dict 包装时，LLVM 不生成 wrapper → 调用签名错。JS 见 `codegen_expr.ring:38-62`。
+- **DictRef::Wrapped 返回 null**（`codegen_llvm_expr.ring:794-797` 自承认 TODO "pass null — future wave"）：嵌套/wrapped trait dict 派发拿到 null → 方法派发错。
+- **closure 捕获 dict/evidence 参数**：`collect_captures` 不收 dict_params/evidence params，多态闭包可能丢 dict。
+- **range 变量 for-in**（`codegen_llvm_stmt.ring:322-340` 有 fallback 注释，struct GEP 不全）：`for x in range_var` 可能错。
+- **#103 mut 参数统一 boxing**（已 audit-tracked，原 deferred-LLVM）：JS 对值类型 mut 参数 box `.value`，引用类型靠 JS 引用语义；LLVM 需所有 mut 参数统一指针-to-box，否则重赋值不反映调用方。此处一并落地，解除 deferred 状态。
+
+- **待 B-088 差分确认后再修**（Agent 报告 hedged，未亲核）：if-let 复杂模式、tuple 内字面量模式 unbox、handler resume 捕获、HOF 方法闭包传递。
+
+**涉及修改**：
+1. `compiler/codegen_llvm_expr.ring`：gen_ident 处理 dict_closure_dicts；DictRef::Wrapped 构造真实 wrapper；collect_captures 收 dict/evidence；mut 参数 boxing
+2. `compiler/codegen_llvm_stmt.ring`：range 变量 for-in 完整 GEP；mut 参数指针传递
+3. 按 B-088 差分结果补修确认的发散
+
+**验收标准**：
+- 上述确认 gap 的差分用例 JS/LLVM 一致
+- 多态/泛型/trait dispatch 的非平凡用例（含一等多态函数值、嵌套 trait bound）native 行为与 JS 一致
+- #103 mut 参数重赋值在 LLVM 反映到调用方
+- 全部 E2E + llvm_diff 通过；自举一致
+
+### B-088 双后端差分测试覆盖扩展 [feature] [P1] [L] [judgment] [queued]
+
+`tests/cases/llvm/` 仅 14 例（覆盖 pattern/recursion/closure-RC/generic-eq/fail-catch），E2E 363 例的多数特性零差分覆盖。这是 G-c「双后端行为对比」的核心交付 + 发现引擎：失败的 diff 用例喂给 B-083/B-087，通过的锁定 parity。
+
+**零/薄覆盖的高发散风险区**（差分审计）：custom effects/handlers（68 E2E，0 diff）、match guard（→ B-083）、string interp（13，0）、mutable closure + generics（RC 敏感）、delegate + effects（37 trait，0）、option/result chain、struct update。
+
+**分阶段新增 diff 用例**（filename + 覆盖点）：
+- P1 关键：effect_custom_catch_recursive、match_guard_in_effect（依赖 B-083）、string_interp_in_match、closure_capture_mutable_generic、delegate_with_custom_effect
+- P2：effect_default_and_custom_mixed、generic_struct_field_closure_capture、match_guard_complex_enum、trait_hof_with_generic_closure
+- P3：or_pattern_with_guard、closure_capture_in_list_hof、option_chain_with_guard、recursive_enum_match_with_interp
+
+**涉及修改**：
+1. `tests/cases/llvm/`：按上述新增用例（JS oracle vs LLVM 输出断言一致）
+2. 发散用例 → 记录到对应 codegen item（B-083/B-087）
+
+**验收标准**：
+- 每个 E2E 特性大类在 llvm_diff 至少一个代表用例
+- 新增用例全部 JS/LLVM 一致（依赖的 codegen 修复落地后）
+- 覆盖 effects/handlers、guard、string interp、generics+closures、delegate
+
+### B-089 Native 自举终验 capstone [bugfix] [P1] [L] [judgment] [queued]
+
+> **阻塞中**：依赖 B-083/B-084/B-085/B-086/B-087/B-088（+ B-002 若内存实测需要 abort-unwind）全部落地 + 大内存机（no-GC 基线 25.9GB）。
+
+合 B-012 遗留的两条验收 + 内存门。三门：
+- **G-a 内存**：带 RC pass 自编译，内存峰值降至机器可运行（验证 RC 有效）
+- **G-b 双 bootstrap**：native 二进制重编译编译器，与参考产出字节级一致（依赖 B-085 determinism）
+- **G-c parity**：native E2E + llvm_diff 全过，行为与 JS oracle 一致
+
+**验收标准**：
+- 带 RC pass native 自编译跑通且内存峰值 << 25.9GB
+- double-bootstrap 字节级一致
+- native E2E + llvm_diff 全过
+- 全过后：CLAUDE.md 标 native 自举完成，启动 JS 后端归档 + 层 3
+
+> fix-forward：跑通过程中暴露的新泄漏/发散就地开 audit/backlog，不预设"全绿才动"。
 
 ### B-078 清理 B-066 parser workaround（string literal → import）[refactor] [P3] [S] [mechanical] [queued]
 `parser.ring:998` 仍用 string literal `"W0001"` 而非 `import codes::{W0001}`，这是 B-066 实现时因 B-077 跨模块 const bug 而采用的 workaround。B-077 已修复，应改回正常 import。
