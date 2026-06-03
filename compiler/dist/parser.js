@@ -1434,7 +1434,7 @@ function Parser_parse_struct_decl(self, is_pub) {
     const type_annotation = Parser_parse_type_expr(self);
     if (Parser_check(self, lexer$TokenKind_TkWhere)) {
       const where_span = Parser_peek(self).span;
-      diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag("W0001", diagnostics$Severity_SevWarning, "Refinement types are not yet implemented; 'where' clause is ignored", where_span, diagnostics$DiagnosticContext_OtherContext(Option_some("where clause parsed but not enforced"))));
+      diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$W0001, diagnostics$Severity_SevWarning, "Refinement types are not yet implemented; 'where' clause is ignored", where_span, diagnostics$DiagnosticContext_OtherContext(Option_some("where clause parsed but not enforced"))));
       Parser_advance(self);
       let depth = 0;
       while ((!Parser_at_end(self))) {
