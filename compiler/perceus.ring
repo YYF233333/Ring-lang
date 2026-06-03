@@ -1276,62 +1276,115 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
             // only conditionally evaluated, so their dups are flushed INTO the
             // respective expressions.  Only the scrutinee (always evaluated)
             // reports its dups upward.
-            let mut arm_results: List<(HMatchArm, Set<Str>)> = []
-            for arm in arms {
-                let arm_live = set_clone(live)
-                let body_result = rc_expr(arm.body, arm_live, locals)
-                let guard_result = match arm.guard {
-                    some(g) => {
-                        let r = rc_expr(g, body_result.live, locals)
-                        some(r)
+            //
+            // GUARD FALL-THROUGH (B-083): a guarded arm `P if g => body` only
+            // commits when both the pattern matches AND `g` is true; a false `g`
+            // falls through to re-test the NEXT arm's pattern+guard.  So the
+            // guard sits on a control-flow fork with two live-out edges:
+            //   * guard-true  -> this arm's body         (needs body_result.live)
+            //   * guard-false -> the next arm's entry     (needs fallthrough_live)
+            // The guard must therefore preserve (dup, not move) any variable
+            // needed on EITHER edge — moving a fall-through-needed variable would
+            // be a use-after-free in a later arm.  We model this by analysing the
+            // guard with live-out = union(body_result.live, fallthrough_live) and
+            // walking the arms in REVERSE so each arm sees the next arm's entry
+            // live set.  The last arm has an empty fallthrough_live (falling past
+            // it is a non-exhaustive panic / unreachable).
+            //
+            // For an UNGUARDED arm fallthrough_live is irrelevant: the pattern
+            // test has no RC side effect, so the arm behaves exactly as before
+            // (arm_ext = body_result.live minus bindings), preserving the existing
+            // flat-merge balancing for non-guarded matches.
+            // --- Phase 1 (reverse): gather each arm's body live-in and external
+            // live-in, chaining fallthrough_live so each arm sees the next arm's
+            // entry needs.  The arm_ext SET membership is what feeds merged_live;
+            // it is independent of the guard's dup/move bookkeeping (a referenced
+            // variable is referenced regardless of live-out), so this single pass
+            // yields a stable merged_live.
+            let mut arm_exts: List<Set<Str>> = []     // forward order
+            let mut fallthrough_live: Set<Str> = set_new()
+            // Pre-size with placeholders so we can write by index in reverse.
+            for arm in arms { arm_exts.push(set_new()) }
+            let mut ai = arms.len() - 1
+            while ai >= 0 {
+                match arms.get(ai) {
+                    some(arm) => {
+                        let body_result = rc_expr(arm.body, set_clone(live), locals)
+                        let mut arm_ext = match arm.guard {
+                            some(g) => {
+                                let guard_live_out = body_result.live.union(fallthrough_live)
+                                let gr = rc_expr(g, guard_live_out, locals)
+                                set_clone(gr.live)
+                            },
+                            none => set_clone(body_result.live),
+                        }
+                        // Pattern bindings are arm-local: they do not exist at the
+                        // arm's entry / fall-through point, so they are excluded
+                        // from the external live set propagated to earlier arms.
+                        let mut pat_names: List<Str> = []
+                        pattern_binding_names(arm.pattern, pat_names)
+                        for pn in pat_names { arm_ext.remove(pn) }
+
+                        arm_exts.set(ai, set_clone(arm_ext))
+                        fallthrough_live = arm_ext
                     },
-                    none => none,
+                    none => {},
                 }
-
-                let mut arm_final_live = match guard_result {
-                    some(r) => r.live,
-                    none => body_result.live,
-                }
-
-                // Remove pattern-bound variables from live set
-                let mut pat_names: List<Str> = []
-                pattern_binding_names(arm.pattern, pat_names)
-                for pn in pat_names { arm_final_live.remove(pn) }
-
-                // Flush body and guard dups into their own expressions.
-                let body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups)
-                let new_guard = match guard_result {
-                    some(r) => some(flush_dups_into_expr(r.expr, r.dups)),
-                    none => none,
-                }
-                let new_arm = HMatchArm {
-                    pattern: arm.pattern, guard: new_guard,
-                    body: body_flushed, span: arm.span
-                }
-                arm_results.push((new_arm, arm_final_live))
+                ai = ai - 1
             }
 
-            // Compute merged live = union of all arm live sets
+            // merged_live = union of every arm's external live-in.  This is the
+            // set the whole match consumes (the scrutinee is analysed against it).
+            // Because earlier arms' arm_ext already absorb later arms' needs via
+            // fallthrough_live, the first arm's arm_ext alone equals this union;
+            // the explicit union is kept for clarity and to match the previous
+            // (unguarded) behaviour exactly.
             let mut merged_live: Set<Str> = set_new()
-            for ar in arm_results {
-                merged_live = merged_live.union(ar.1)
+            for ae in arm_exts {
+                merged_live = merged_live.union(ae)
             }
 
-            // Balance each arm: drop vars that are in merged but not in this arm's live
+            // --- Phase 2 (forward): emit each arm.  Guards are re-analysed with
+            // live-out = union(merged_live, body_result.live): every variable the
+            // match consumes (merged_live) is kept alive (dup-ed, never moved)
+            // across the guard fork, so the owned set entering EVERY arm body is
+            // merged_live (plus this arm's bindings the body uses).  That makes
+            // the body balance below uniformly safe — it can never drop a variable
+            // the guard already moved.  Moving only this-arm's bindings the body
+            // does not use is fine (they are arm-local).
             let mut balanced_arms: List<HMatchArm> = []
-            for ar in arm_results {
-                let arm = ar.0
-                let arm_live = ar.1
-                let need_drop = merged_live.difference(arm_live)
-                if need_drop.len() > 0 {
-                    let drops = make_drop_list(need_drop)
-                    let balanced_body = prepend_stmts_to_expr(arm.body, drops)
-                    balanced_arms.push(HMatchArm {
-                        pattern: arm.pattern, guard: arm.guard,
-                        body: balanced_body, span: arm.span
-                    })
-                } else {
-                    balanced_arms.push(arm)
+            for i in 0..arms.len() {
+                match arms.get(i) {
+                    some(arm) => {
+                        let body_result = rc_expr(arm.body, set_clone(live), locals)
+                        let new_guard = match arm.guard {
+                            some(g) => {
+                                let guard_live_out = merged_live.union(body_result.live)
+                                let gr = rc_expr(g, guard_live_out, locals)
+                                some(flush_dups_into_expr(gr.expr, gr.dups))
+                            },
+                            none => none,
+                        }
+                        // Balance the BODY (guard-true / pattern-matched path):
+                        // drop everything live entering the match (merged_live)
+                        // that this body does not itself keep alive.  Covers vars
+                        // other arms need AND vars this arm's guard kept purely for
+                        // the fall-through edge.  Pattern bindings are never in
+                        // merged_live, so unguarded arms reduce exactly to the
+                        // prior `merged \ (body.live - bindings)` behaviour.
+                        let need_drop = merged_live.difference(body_result.live)
+                        let body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups)
+                        let body_balanced = if need_drop.len() > 0 {
+                            prepend_stmts_to_expr(body_flushed, make_drop_list(need_drop))
+                        } else {
+                            body_flushed
+                        }
+                        balanced_arms.push(HMatchArm {
+                            pattern: arm.pattern, guard: new_guard,
+                            body: body_balanced, span: arm.span
+                        })
+                    },
+                    none => {},
                 }
             }
 
