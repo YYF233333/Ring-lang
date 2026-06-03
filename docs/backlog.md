@@ -585,21 +585,6 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - local cancellation 规则仍生效（局部变量 mutation 不传播）
 - 全部 E2E 测试通过
 
-### B-057 occurs check + apply_subst fields 遍历互锁修复 [bugfix] [P3] [M] [judgment] [waiting-feedback]
-> **2026-06-03 转 waiting-feedback**：与 #45 已决策冲突（#45 决定 apply_subst 不递归 fields，递归类型会栈溢出），且单修 occurs_in 不完备。非 mechanical，已升 judgment。详见 worker_feedback.md，等 Discussion agent 评估 nominal 重构方案。
-
-`occurs_in`（`unify.ring`）不检查 StructType/EnumType 的 fields/variants 中的类型；`apply_subst`（#45）同样不替换 fields 中的类型。两者互锁——当前安全但不完备。需同时修复。
-
-**涉及修改**：
-1. `unify.ring`：`occurs_in` 递归检查 fields/variants 中的类型
-2. `unify.ring`：`apply_subst` 递归替换 fields/variants 中的类型
-
-**验收标准**：
-- 涉及 struct/enum 字段类型变量的统一场景正确处理
-- 不引入无限类型（occurs check 正确拒绝）
-- 全部 E2E 测试通过
-- 自举编译器正常编译自身
-
 ### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [queued]
 > ✅ Phase 1 已完成（2026-05-29）：基础设施 + 10 个关键 unify 调用点 + notes 渲染。剩余场景（空集合、row poly、effect 不匹配专用消息）后续迭代。
 

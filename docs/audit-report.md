@@ -18,16 +18,13 @@
 
 **决策（2026-05-23）**：长期容忍。当前方案正确且无性能问题，改动大（L-XL）收益主要在未来后端。等 LLVM 后端需要时与 #16 一并重构。
 
-### #108 Occurs check 对 StructType/EnumType 仅检查组 type_params，不检查 fields/variants [medium] [mechanical] [open]
+### #108 Occurs check 对 StructType/EnumType 仅检查 type_params [low] [judgment] [wontfix]
 
-`occurs_in` 函数（`unify.ring:55-58`）对 `StructType` 和 `EnumType` 仅递归到 `type_params`，不检查 `fields` 或 `variants` 中的类型。若一个 type variable 被统一到 struct 类型而其 field 类型中包含该 variable 自身，occurs check 会遗漏，理论上可构造无限类型。
+`occurs_in`（`unify.ring:55-58`）只递归 `type_params`，不查 `fields`/`variants`——经 2026-06-03 Discussion 贴码核查，确认这是**正确的 nominal 语义，非 bug**。
 
-**现实触发难度**：struct/enum 是 nominal 类型且 fields 在 `apply_subst` 中也不被替换（#45），实际很少触发。与 #45 相关——两者均需 fields 遍历才能完整修复。
+`StructType.fields`/`EnumType.variants` 自始至终是**声明模板**：`apply_subst` 原样保留 fields（`env.ring:525-536`），字段类型实例化走**局部 `inst_map`** 在读字段时进行、不写回（`infer_ctx.ring:1206/1319/1343`、`infer.ring:2166`）；类型相等也只比 `name + type_params`（`types.ring:319-325`，identity 已是 nominal）。因此无限类型的环只能经 `type_params` 形成（实例化传入的实际类型），occurs check **已覆盖**；fields 里是声明模板 var（与查询 var 不同 id），递归查反而误判。
 
-**文件**：`compiler/unify.ring:55-58`
-**修复方向**：在 `occurs_in` 中递归到每个 field 的 `.ty` 和每个 variant 的 `.fields`。需与 #45 修复协调（否则 fields 含未替换 type var，occurs check 会看到错误的变量）。
-
-> **2026-06-03 阻塞**：与 #45 已决策冲突（apply_subst 不递归 fields），单修 occurs_in 不完备。已并入 backlog B-057（waiting-feedback），等 Discussion agent 评估 nominal 重构方案。详见 worker_feedback.md。
+原 B-057「同时补 occurs_in + apply_subst 的 fields 遍历」基于误解已撤销：补 `apply_subst` → 递归类型栈溢出（见 #45）；补 `occurs_in` → 误判模板 var。真正的表示统一是 **#16 nominal 重构**（已 deferred），届时此条自然消解。
 
 发现者：Opus
 
@@ -73,7 +70,7 @@
 
 类型表示不一致。应改为 nominal 表示。
 
-**决策（2026-05-23）**：长期容忍，与 #45 一并推迟到 LLVM 后端阶段。
+**决策（2026-05-23）**：长期容忍，与 #45 一并推迟到 LLVM 后端阶段。改 nominal 表示（只存 `name + type_args`，fields 走 registry 查）后，#45（apply_subst 不递归 fields）/ #108（occurs check 不查 fields）随之一并消解——它们都是当前 fields-as-template 表示的衍生现象。
 
 ### #19 Ring 编译器缺少 `assertNever` 等效编译期保护 [low] [mechanical] [open]
 

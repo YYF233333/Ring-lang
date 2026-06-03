@@ -2054,6 +2054,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | Perceus L0 范围 | 不处理 abort 路径 drop（留 L2 drop-aware unwind）/ 循环引用（留 L2 Weak） | longjmp 跳过 drop = 泄漏非 UAF（安全）；自举走成功路径 + 树形数据无环；先解内存墙 |
 | Perceus dup/drop IR | HIR 显式 Drop/dup 节点 + 反向 liveness pass（仅 llvm） | RC 行为落 IR 可 dump/测试；翻译 Koka Perceus POPL'21 |
 | Perceus L0 闭包 capture 所有权（2026-06-03） | owned capture（普通闭包，env 死时 drop）vs borrowed capture（catch/handle 为平衡 Drop 捕入，env 死时不 drop）；#130 走 C 增量（普通闭包 env 独立 typeid + drop_env_T，catch/handle 排除），A 波（B-096）完整收口（borrowed 建模 + ring_try drop 闭包 + #4 guard-false + Range/dict drop_T） | env 复用 closure typeid 致 ≥2 captures 泄漏+误递归；#131 借 catch env 整体泄漏安全引入 borrowed capture，裸加 auto-drop 会 double-drop；差分抓 crash 不抓泄漏 → C 增量可验证安全 |
+| occurs_in/apply_subst 对 struct/enum fields 一致忽略（2026-06-03） | 维持现状（只处理 type_params，fields/variants 原样保留）= 正确 nominal 语义，非 bug；撤销 B-057（错误立项）；#108 标 wontfix；彻底统一留 #16 nominal 重构 | fields 自始至终是声明模板（apply_subst 原样保留 + 字段实例化走局部 inst_map 不写回 + type identity 只比 name+type_params），无限类型的环只能经 type_params 形成、已被 occurs check 覆盖；补 fields 遍历 → apply_subst 递归类型栈溢出 / occurs_in 误判模板 var |
 
 ### 幽灵功能（已解析但无语义效果）
 
