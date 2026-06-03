@@ -637,7 +637,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-084 Perceus 闭包 owned-capture drop（#130 C 增量）[bugfix] [P2] [M] [judgment] [queued]
+### B-084 Perceus 闭包 owned-capture drop（#130 C 增量）[bugfix] [P2] [M] [judgment] [doing]
 
 > **进度**：#131 ✅（rc-warn 96→0：`_` 通配符跳过 + catch/handle 独立闭包 capture drop 目标；dist 不动点；728+27 测试过）。#3 ✅ 核查「基本正确」（drop_T 类型擦除、tuple 走 List drop、单态化泛型不破坏；仅 Range/Eq-dict process-lifetime 极小残留 → 并入 B-096）。#4 guard-false 泄漏 + A 波完整收口 → **B-096**。本项收口 **#130 的 C 安全增量**（2026-06-03 决策，详见 design.md §7.10 闭包 capture 所有权）。
 
