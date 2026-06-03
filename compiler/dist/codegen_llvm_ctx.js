@@ -316,6 +316,8 @@ class LlvmCtx {
 
 const RING_TYPEID_CELL = 14;
 
+const RING_TYPEID_CLOSURE_ENV = 15;
+
 function llvm_mangle_fn(name) {
   return `ring_${name}`;
 }
@@ -578,4 +580,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, RING_TYPEID_CELL, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, get_builtin_typeid, build_entry_alloca, __EnumVariantInfo_Clone, __EnumVariantInfo_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, get_builtin_typeid, build_entry_alloca, __EnumVariantInfo_Clone, __EnumVariantInfo_Debug };

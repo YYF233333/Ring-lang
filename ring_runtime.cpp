@@ -65,6 +65,7 @@
 #define RING_TYPEID_SET_INT  12
 #define RING_TYPEID_SB       13   // StringBuilder (same underlying type as Str)
 #define RING_TYPEID_CELL     14   // boxed mut-cell: { void* value } — write-through closure capture (B-091)
+#define RING_TYPEID_CLOSURE_ENV 15 // closure env struct: { int64 count, void* cap0, ... } — owned-capture drop (B-084)
 #define RING_TYPEID_USER_BASE 64  // user-defined types start here
 
 // ============================================================================
@@ -201,6 +202,7 @@ static void drop_map_int(void* data);
 static void drop_set(void* data);
 static void drop_set_int(void* data);
 static void drop_closure(void* data);
+static void drop_closure_env(void* data);
 static void drop_option(void* data);
 static void drop_tuple(void* data);
 static void drop_sb(void* data);
@@ -358,6 +360,7 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
     drop_table[RING_TYPEID_SET_INT] = drop_set_int;
     drop_table[RING_TYPEID_SB]      = drop_sb;
     drop_table[RING_TYPEID_CELL]    = drop_cell;
+    drop_table[RING_TYPEID_CLOSURE_ENV] = drop_closure_env;
 }
 
 // ============================================================================
@@ -2150,9 +2153,29 @@ static void drop_closure(void* data) {
     // RingClosure = { fn_ptr: void*, env_ptr: void* }
     // fn_ptr is a function pointer, don't drop.
     // env_ptr if non-null is a ring_alloc'd env struct, needs ring_drop.
+    // The env carries its own typeid (RING_TYPEID_CLOSURE_ENV for gen_lambda
+    // closures → drop_closure_env; RING_TYPEID_CLOSURE for catch/handle envs,
+    // which ring_try leaks and never drops), so ring_drop dispatches correctly.
     void** cls = (void**)data;
     if (cls[1]) {  // env_ptr
         ring_drop(cls[1]);
+    }
+}
+
+static void drop_closure_env(void* data) {
+    // Closure env struct (B-084): { int64 count, void* cap0, void* cap1, ... }.
+    // gen_lambda gives every general-purpose closure env this dedicated typeid
+    // (NOT RING_TYPEID_CLOSURE, which drop_closure mis-reads as a {fn,env} pair).
+    // Each captured slot holds an OWNED RC reference — Perceus emits a ring_dup at
+    // capture (non-last-use) or moves the sole owned ref in (last-use), so the
+    // enclosing scope does not also drop it.  Releasing the env therefore drops
+    // every slot exactly once: ring_drop dispatches on each slot's own typeid, so
+    // mut-cells (RING_TYPEID_CELL, B-091) and plain owned heap values are handled
+    // uniformly and stay RC-balanced (no double-free, no leak).
+    int64_t count = *(int64_t*)data;
+    void** slots = (void**)((char*)data + 8);
+    for (int64_t i = 0; i < count; i++) {
+        if (slots[i]) ring_drop(slots[i]);
     }
 }
 

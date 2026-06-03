@@ -11,7 +11,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     llvm_resolve_fn, build_entry_alloca,
-    get_or_assign_typeid, RING_TYPEID_CELL}
+    get_or_assign_typeid, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV}
 use codegen_llvm_stmt::{emit_llvm_stmt}
 use codegen_ctx::{extract_effect_names}
 
@@ -2841,17 +2841,17 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     let mut captures: List<Str> = []
     collect_captures(ctx, body, params, captures)
 
-    // Create the closure environment type: { ptr, ptr, ... } one per capture
-    let mut env_elem_types: List<LLVMTypeRef> = []
+    // B-084: closure env layout is { i64 count, ptr cap0, ptr cap1, ... }.  The
+    // leading count lets the runtime's generic drop_closure_env (typeid 15) iterate
+    // and ring_drop every owned capture slot when the env dies, instead of the old
+    // CLOSURE-typeid (7) reuse that only dropped slot[1] and leaked/mis-recursed the
+    // rest.  Capture slots therefore live at GEP index i+1.
+    let mut env_elem_types: List<LLVMTypeRef> = [ctx.i64_type]  // slot 0: capture count
     for c in captures {
         env_elem_types.push(ctx.ptr_type)
     }
-    let env_ty = if captures.len() > 0 {
-        LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
-    } else {
-        // Even with no captures, we need an env struct for the closure pair
-        LLVMStructTypeInContext(ctx.context, [ctx.ptr_type], 0)
-    }
+    // Always at least { i64 count } even with no captures (closure pair needs an env).
+    let env_ty = LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
 
     // Create the lambda function: fn(env_ptr, param0, param1, ...) -> ptr
     let mut fn_param_types: List<LLVMTypeRef> = [ctx.ptr_type]  // env_ptr first
@@ -2875,11 +2875,11 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     // Bind env parameter (index 0)
     let env_ptr = LLVMGetParam(lambda_fn, 0)
 
-    // Extract captures from env
+    // Extract captures from env (slot i+1 — slot 0 is the i64 count, B-084)
     for i in 0..captures.len() {
         match captures.get(i) {
             some(cap_name) => {
-                let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_ptr, i, fresh_name(ctx, "ce"))
+                let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_ptr, i + 1, fresh_name(ctx, "ce"))
                 let cap_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, cap_ptr, fresh_name(ctx, cap_name))
                 let alloca = build_entry_alloca(ctx, ctx.ptr_type, cap_name)
                 discard(LLVMBuildStore(ctx.builder, cap_val, alloca))
@@ -2911,14 +2911,23 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     ctx.current_fn = saved_fn
     LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
 
-    // At the call site: allocate env struct and store captures
+    // At the call site: allocate env struct and store captures.
+    // B-084: env uses its OWN typeid (RING_TYPEID_CLOSURE_ENV) so that when the
+    // closure dies, drop_closure's ring_drop(env_ptr) dispatches to
+    // drop_closure_env, which reads the leading count and ring_drops each owned
+    // capture slot.  The closure PAIR below stays RING_TYPEID_CLOSURE (7).
     let env_size = LLVMSizeOf(env_ty)
     let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
     let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let env_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE_ENV, 0)
     let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
-    let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [env_size, closure_typeid], fresh_name(ctx, "env"))
+    let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [env_size, env_typeid], fresh_name(ctx, "env"))
 
-    // Store each capture into env
+    // Store the capture count into slot 0 (B-084: drop_closure_env iterates it).
+    let count_slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, 0, fresh_name(ctx, "cnt"))
+    discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, captures.len(), 0), count_slot))
+
+    // Store each capture into env (slot i+1 — slot 0 is the count)
     for i in 0..captures.len() {
         match captures.get(i) {
             some(cap_name) => {
@@ -2927,7 +2936,7 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
                     some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "cv")),
                     none => LLVMConstPointerNull(ctx.ptr_type),
                 }
-                let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, i, fresh_name(ctx, "ep"))
+                let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, i + 1, fresh_name(ctx, "ep"))
                 discard(LLVMBuildStore(ctx.builder, cap_val, cap_ptr))
             },
             none => {},
