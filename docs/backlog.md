@@ -49,7 +49,7 @@
 |------|------|-----|--------|
 | ~~B-083~~ ✅ | LLVM match guard 完整实现（codegen + perceus RC + diff）| G-c + G-a/b(RC) | P1 |
 | ~~B-088~~ ✅ | 双后端差分覆盖扩展 — 锁 6 parity 用例 + 发现 6 处 LLVM 发散喂 B-087 | G-c | P1 |
-| B-084 | #130 闭包 owned-capture drop（C 增量；#131✅ #3✅核查 · #4+A波→B-096）| G-a/b | P2 |
+| ~~B-084~~ ✅ | #130 闭包 owned-capture drop（typeid 15 CLOSURE_ENV + count-prefixed env + 通用 drop_closure_env；catch/handle + guard-false → B-096）| G-a/b | P2 |
 | ~~B-085~~ ✅ | Perceus 发射 determinism（sort Set names before emit）| G-b | P2 |
 | ~~B-086~~ ✅ | LLVM 缺失方法/runtime/dict（flat_map/find_index/fold/Ord dict/Option.to_fail）| G-c | P2 |
 | B-087 | LLVM codegen 双后端 parity（dict 多态 / Wrapped / range / #103 mut 等）| G-c | P2 |
@@ -636,27 +636,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 ~~B-062（#124 约束验证）~~ ✅ → ~~B-063（#125/#128 delegate 转发）~~ ✅ → ~~B-064（#129 scope 区分）~~ ✅ → ~~B-058（#115 bound 验证）~~ ✅ → ~~B-065（#121 显示改善）~~ ✅
 
 ## LLVM 后端质量
-
-### B-084 Perceus 闭包 owned-capture drop（#130 C 增量）[bugfix] [P2] [M] [judgment] [doing]
-
-> **进度**：#131 ✅（rc-warn 96→0：`_` 通配符跳过 + catch/handle 独立闭包 capture drop 目标；dist 不动点；728+27 测试过）。#3 ✅ 核查「基本正确」（drop_T 类型擦除、tuple 走 List drop、单态化泛型不破坏；仅 Range/Eq-dict process-lifetime 极小残留 → 并入 B-096）。#4 guard-false 泄漏 + A 波完整收口 → **B-096**。本项收口 **#130 的 C 安全增量**（2026-06-03 决策，详见 design.md §7.10 闭包 capture 所有权）。
-
-#130：闭包 env struct 复用 `RING_TYPEID_CLOSURE`（typeid 7，本是 `{fn_ptr,env_ptr}` pair），`drop_closure`（`ring_runtime.cpp:2136`）只 `ring_drop(cls[1])` 当 env_ptr → 捕获 ≥2 时 slot[0] 泄漏、slot[1] 误递归 drop。
-
-**C 方案（owned-capture 安全增量，catch/handle 显式排除）**：
-- gen_lambda 普通闭包的 env struct 用**独立 typeid**（不再复用 7），codegen 按捕获布局生成 per-env `drop_env_T` 逐个 drop owned captures。
-- catch/handle 闭包（gen_catch_closure 及 handler 闭包）**显式排除**——它们 env 当前整体泄漏（`ring_try`，`ring_runtime.cpp:1517`，调完不 drop 闭包），且 #131 往 catch env 塞的 `f` 是 borrowed capture（靠 catch arm 内显式 `Drop f` 释放），裸加 env-drop 会 double-drop。这部分留 B-096 A 波。
-- 普通闭包是 capture 泄漏大头；引入的 double-free 风险可被 llvm_diff 的 `closure_capture_*` 用例抓到（crash），遗留 catch 泄漏不退化（本就泄漏）。
-
-**涉及修改**：
-1. `ring_runtime.cpp`：新增闭包 env 专属 typeid（区别于 7）+ 注册 drop_table（其 drop_T 由 codegen 生成）
-2. `compiler/codegen_llvm_expr.ring`：gen_lambda env 分配改用新 typeid + 生成 per-env `drop_env_T`；gen_catch_closure / handler 闭包 env 维持现状（排除，不动）
-3. 确认 closure 本体 `{fn_ptr,env_ptr}` 仍用 typeid 7，`drop_closure` 看到 env_ptr 走新 typeid 的 `drop_env_T`
-
-**验收标准**：
-- 普通闭包多捕获（≥2）场景 env drop 时所有 owned captures 正确释放，无泄漏无 double-free
-- catch/handle 路径行为不变（维持现状）
-- 全部 E2E + llvm_diff 通过（含 `closure_capture_*`）；重编 dist + 自举一致
 
 ### B-087 LLVM codegen 双后端 parity 修复 [bugfix] [P2] [L] [judgment] [queued]
 
