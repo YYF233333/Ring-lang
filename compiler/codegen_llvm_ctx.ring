@@ -104,8 +104,17 @@ pub struct LlvmCtx {
 
     // Perceus RC: typeid allocation for user-defined types
     pub next_user_typeid: Int,         // starts at 64 (USER_BASE), increments per type
-    pub type_to_typeid: Map<Str, Int>  // type name -> typeid mapping
+    pub type_to_typeid: Map<Str, Int>, // type name -> typeid mapping
+
+    // B-091: def_ids of `let mut` variables auto-boxed into heap mut-cells because
+    // a closure writes through them.  Mirrors the JS backend's `{value: ...}` cell.
+    // Such a var's alloca holds the CELL pointer; reads/writes go through field 0;
+    // closures capture the (shared) cell pointer so write-through is observed.
+    pub boxed_vars: Set<Int>
 }
+
+// B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).
+pub const RING_TYPEID_CELL: Int = 14
 
 // ============================================================
 // LLVM name mangling

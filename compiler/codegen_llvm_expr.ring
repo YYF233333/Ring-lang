@@ -11,7 +11,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     llvm_resolve_fn, build_entry_alloca,
-    get_or_assign_typeid}
+    get_or_assign_typeid, RING_TYPEID_CELL}
 use codegen_llvm_stmt::{emit_llvm_stmt}
 use codegen_ctx::{extract_effect_names}
 
@@ -104,7 +104,7 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
         HExpr::FloatLit { value, .. } => gen_float_lit(ctx, value),
         HExpr::StrLit { value, .. } => gen_str_lit(ctx, value),
         HExpr::BoolLit { value, .. } => gen_bool_lit(ctx, value),
-        HExpr::Ident { name, resolved_name, .. } => gen_ident(ctx, name, resolved_name),
+        HExpr::Ident { name, resolved_name, def_id, .. } => gen_ident(ctx, name, resolved_name, def_id),
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, .. } => gen_binop(ctx, op, left, right, eq_dispatch, ord_dispatch, ty),
         HExpr::UnaryOp { op, operand, ty, .. } => gen_unaryop(ctx, op, operand, ty),
         HExpr::Call { callee, args, resolved_dicts, dict_dispatch, ty, effects, .. } =>
@@ -178,20 +178,71 @@ fn gen_bool_lit(mut ctx: LlvmCtx, value: Bool) -> LLVMValueRef {
 // Identifiers
 // ============================================================
 
-fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?) -> LLVMValueRef {
+// B-091: boxed mut-cell support.  A `let mut` variable that a closure writes
+// through is auto-boxed (def_id ∈ ctx.boxed_vars) into a single-slot heap cell
+// `{ ptr value }` so the outer scope and the captured closure env share one
+// mutable container.  The variable's alloca holds the CELL pointer; reads load
+// `cell.value`, writes store into it, and closures capture the (shared) cell
+// pointer.  Mirrors the JS backend's `let c = {value: init}` + `c.value`.
+
+pub fn is_boxed_def(ctx: LlvmCtx, def_id: Int?) -> Bool {
+    match def_id {
+        some(did) => ctx.boxed_vars.contains(did),
+        none => false,
+    }
+}
+
+// The cell's LLVM struct type: { ptr value }.
+fn cell_struct_ty(ctx: LlvmCtx) -> LLVMTypeRef {
+    LLVMStructTypeInContext(ctx.context, [ctx.ptr_type], 0)
+}
+
+// Allocate a fresh mut-cell holding `init_val` and return the cell pointer.
+pub fn build_cell_alloc(mut ctx: LlvmCtx, init_val: LLVMValueRef) -> LLVMValueRef {
+    let cell_ty = cell_struct_ty(ctx)
+    let size = LLVMSizeOf(cell_ty)
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let typeid_val = LLVMConstInt(ctx.i64_type, RING_TYPEID_CELL, 0)
+    let cell_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [size, typeid_val], fresh_name(ctx, "cell"))
+    let value_slot = LLVMBuildStructGEP2(ctx.builder, cell_ty, cell_ptr, 0, fresh_name(ctx, "cellv"))
+    discard(LLVMBuildStore(ctx.builder, init_val, value_slot))
+    cell_ptr
+}
+
+// Read `cell.value` given the cell pointer.  Borrow semantics (no dup), matching
+// the field-access read convention used elsewhere in the L0 backend.
+fn build_cell_load(mut ctx: LlvmCtx, cell_ptr: LLVMValueRef, name: Str) -> LLVMValueRef {
+    let cell_ty = cell_struct_ty(ctx)
+    let value_slot = LLVMBuildStructGEP2(ctx.builder, cell_ty, cell_ptr, 0, fresh_name(ctx, "cellr"))
+    LLVMBuildLoad2(ctx.builder, ctx.ptr_type, value_slot, fresh_name(ctx, name))
+}
+
+// Store `new_val` into `cell.value`.  Leak-on-overwrite, matching the struct
+// field-assign convention in the L0 backend (no drop of the old value).
+pub fn build_cell_store(mut ctx: LlvmCtx, cell_ptr: LLVMValueRef, new_val: LLVMValueRef) {
+    let cell_ty = cell_struct_ty(ctx)
+    let value_slot = LLVMBuildStructGEP2(ctx.builder, cell_ty, cell_ptr, 0, fresh_name(ctx, "cellw"))
+    discard(LLVMBuildStore(ctx.builder, new_val, value_slot))
+}
+
+fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?) -> LLVMValueRef {
     let lookup_name = match resolved_name {
         some(rn) => rn,
         none => name,
     }
+    let boxed = is_boxed_def(ctx, def_id)
     // First check local variables
     match ctx.named_values.get(lookup_name) {
         some(alloca) => {
-            LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, lookup_name))
+            let cur = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, lookup_name))
+            if boxed { build_cell_load(ctx, cur, lookup_name) } else { cur }
         },
         none => {
             match ctx.named_values.get(name) {
                 some(alloca) => {
-                    LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, name))
+                    let cur = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, name))
+                    if boxed { build_cell_load(ctx, cur, name) } else { cur }
                 },
                 none => {
                     // Try module-aware resolution: imports_map → module_prefix → bare

@@ -34,6 +34,10 @@ extern fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef
 extern fn unbox_to_i1(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef
 extern fn box_int(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef
 extern fn box_bool(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef
+// B-091: boxed mut-cell helpers (defined in codegen_llvm_expr).
+extern fn is_boxed_def(ctx: LlvmCtx, def_id: Int?) -> Bool
+extern fn build_cell_alloc(mut ctx: LlvmCtx, init_val: LLVMValueRef) -> LLVMValueRef
+extern fn build_cell_store(mut ctx: LlvmCtx, cell_ptr: LLVMValueRef, new_val: LLVMValueRef) -> Unit
 
 // Discard an LLVMValueRef (to avoid type mismatch in Unit-returning match arms)
 fn discard(v: LLVMValueRef) {
@@ -52,10 +56,15 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
             discard(LLVMBuildStore(ctx.builder, val, alloca))
             ctx.named_values.insert(name, alloca)
         },
-        HStmt::Var { name, init, .. } => {
+        HStmt::Var { name, def_id, init, .. } => {
             let val = gen_llvm_expr(ctx, init)
+            // B-091: if this `let mut` is captured-and-written by a closure it was
+            // auto-boxed (def_id ∈ boxed_vars).  Box the init into a shared heap
+            // cell; the alloca then holds the cell pointer, so reads/writes route
+            // through `cell.value` and closures capture the same cell.
+            let stored = if is_boxed_def(ctx, def_id) { build_cell_alloc(ctx, val) } else { val }
             let alloca = build_entry_alloca(ctx, ctx.ptr_type, name)
-            discard(LLVMBuildStore(ctx.builder, val, alloca))
+            discard(LLVMBuildStore(ctx.builder, stored, alloca))
             ctx.named_values.insert(name, alloca)
         },
         HStmt::Assign { target, value, .. } => {
@@ -118,19 +127,34 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
 fn emit_assign(mut ctx: LlvmCtx, target: HExpr, value: HExpr) {
     let val = gen_llvm_expr(ctx, value)
     match target {
-        HExpr::Ident { name, resolved_name, .. } => {
+        HExpr::Ident { name, resolved_name, def_id, .. } => {
             let lookup = match resolved_name {
                 some(rn) => rn,
                 none => name,
             }
+            // B-091: a write to a boxed mut-cell stores into `cell.value` (the
+            // alloca holds the shared cell pointer), so the write is observed by
+            // the outer scope and the capturing closure alike.  A plain mut var
+            // overwrites the alloca slot as before.
+            let boxed = is_boxed_def(ctx, def_id)
             match ctx.named_values.get(lookup) {
                 some(alloca) => {
-                    discard(LLVMBuildStore(ctx.builder, val, alloca))
+                    if boxed {
+                        let cell_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "cellp"))
+                        build_cell_store(ctx, cell_ptr, val)
+                    } else {
+                        discard(LLVMBuildStore(ctx.builder, val, alloca))
+                    }
                 },
                 none => {
                     match ctx.named_values.get(name) {
                         some(alloca) => {
-                            discard(LLVMBuildStore(ctx.builder, val, alloca))
+                            if boxed {
+                                let cell_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "cellp"))
+                                build_cell_store(ctx, cell_ptr, val)
+                            } else {
+                                discard(LLVMBuildStore(ctx.builder, val, alloca))
+                            }
                         },
                         none => panic("LLVM codegen: assign to undefined variable '${name}'"),
                     }

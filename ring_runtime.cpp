@@ -64,6 +64,7 @@
 #define RING_TYPEID_MAP_INT  11
 #define RING_TYPEID_SET_INT  12
 #define RING_TYPEID_SB       13   // StringBuilder (same underlying type as Str)
+#define RING_TYPEID_CELL     14   // boxed mut-cell: { void* value } — write-through closure capture (B-091)
 #define RING_TYPEID_USER_BASE 64  // user-defined types start here
 
 // ============================================================================
@@ -180,6 +181,17 @@ static void drop_str(void* data) {
     // data points at an in-place std::string; destruct but don't free
     // (the whole block including header is freed by ring_drop).
     ((std::string*)data)->~basic_string();
+}
+
+static void drop_cell(void* data) {
+    // Boxed mut-cell (B-091): { void* value }.  A `let mut` captured by a
+    // write-through closure is auto-boxed into this single-slot heap cell so the
+    // outer scope and the closure env share one mutable container.  When the cell
+    // itself dies, release the value it currently holds.  Must NOT reuse the
+    // CLOSURE typeid: drop_closure reads field[1] (env_ptr) which is OOB for a
+    // 1-slot cell.
+    void* value = *(void**)data;
+    if (value) ring_drop(value);
 }
 
 // Forward-declared; defined after container typedefs are available.
@@ -345,6 +357,7 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
     drop_table[RING_TYPEID_MAP_INT] = drop_map_int;
     drop_table[RING_TYPEID_SET_INT] = drop_set_int;
     drop_table[RING_TYPEID_SB]      = drop_sb;
+    drop_table[RING_TYPEID_CELL]    = drop_cell;
 }
 
 // ============================================================================
