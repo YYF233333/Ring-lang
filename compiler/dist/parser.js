@@ -2519,11 +2519,6 @@ function Parser_parse_param(self) {
   return new ast$Param(name, is_mutable, type_annotation, Parser_make_span(self, start, end));
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
   switch (self._tag) {
@@ -2544,11 +2539,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
-
 function __Parser_Clone_clone(self) {
   return new Parser(__List_Clone.clone(self.tokens, __Token_Clone), self.pos, self.file, __CollectingSink_Clone.clone(self.sink), self.error_count);
 }
@@ -2562,11 +2552,6 @@ function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   }
 }
 const __Result_Clone = { clone: __Result_Clone_clone };
-
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
 
 const __Result_tag_order = { "Ok": 0, "Err": 1 };
 function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
@@ -2590,11 +2575,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __Parser_Debug_debug(self) {
   return "Parser { " + "tokens: " + __List_Debug.debug(self.tokens, __Token_Debug) + ", " + "pos: " + String(self.pos) + ", " + "file: " + String(self.file) + ", " + "sink: " + __CollectingSink_Debug.debug(self.sink) + ", " + "error_count: " + String(self.error_count) + " }";

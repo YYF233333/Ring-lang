@@ -428,7 +428,7 @@ Or-pattern 合并的 GADT 变体必须携带兼容的类型等式。`Lit(n) | Ad
 
 **Auto-Boxing × Linear（透明）**
 
-Auto-boxing（`mut` 参数的 `{value: x}` 包装）是 codegen 实现细节，对 linearity checker 透明。Linearity check 在 HIR 层完成，auto-boxing 在 codegen 层完成，两层不交叉。LLVM 后端 `mut` 参数直接传指针，不需要 boxing。但**被闭包写穿捕获的 `let mut` 局部**（`boxed_vars`，checker 标记 def_id）在 LLVM 后端会 auto-box 成一个单槽堆 cell（`RING_TYPEID_CELL`，`{ ptr value }`），镜像 JS 后端的 `{value: ...}`：外层作用域和闭包 env 共享同一 cell 指针，读/写走 `cell.value`，从而实现写穿（B-091）。Perceus 对 boxed cell 的赋值**不**插入旧值 Drop——写只覆写 `cell.value`，不消费共享的 cell 指针，否则每次写都会 `ring_drop` 一个外层和闭包仍持有的 cell（确定性 UAF）。cell 指针本身按普通 owned 堆值参与 RC（捕获点 dup、作用域末 drop / 工厂场景 move 进闭包）。
+Auto-boxing（`mut` 参数的 `{value: x}` 包装）是 JS 后端的 codegen 实现细节，对 linearity checker 透明。Linearity check 在 HIR 层完成，auto-boxing 在 codegen 层完成，两层不交叉。LLVM 后端 `mut` 参数直接传指针，不需要 boxing。
 
 **delegate × Associated Types（自动继承）**
 

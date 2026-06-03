@@ -506,46 +506,6 @@ function build_entry_alloca(ctx, ty, name) {
   return alloca;
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
-function __LLVMContextRef_Eq_eq(self, other) {
-  return true;
-}
-const __LLVMContextRef_Eq = { eq: __LLVMContextRef_Eq_eq, ne: function(self, other) { return !__LLVMContextRef_Eq_eq(self, other); } };
-
-function __LLVMModuleRef_Eq_eq(self, other) {
-  return true;
-}
-const __LLVMModuleRef_Eq = { eq: __LLVMModuleRef_Eq_eq, ne: function(self, other) { return !__LLVMModuleRef_Eq_eq(self, other); } };
-
-function __LLVMBuilderRef_Eq_eq(self, other) {
-  return true;
-}
-const __LLVMBuilderRef_Eq = { eq: __LLVMBuilderRef_Eq_eq, ne: function(self, other) { return !__LLVMBuilderRef_Eq_eq(self, other); } };
-
-function __LLVMTypeRef_Eq_eq(self, other) {
-  return true;
-}
-const __LLVMTypeRef_Eq = { eq: __LLVMTypeRef_Eq_eq, ne: function(self, other) { return !__LLVMTypeRef_Eq_eq(self, other); } };
-
-function __LLVMValueRef_Eq_eq(self, other) {
-  return true;
-}
-const __LLVMValueRef_Eq = { eq: __LLVMValueRef_Eq_eq, ne: function(self, other) { return !__LLVMValueRef_Eq_eq(self, other); } };
-
-function __LLVMBasicBlockRef_Eq_eq(self, other) {
-  return true;
-}
-const __LLVMBasicBlockRef_Eq = { eq: __LLVMBasicBlockRef_Eq_eq, ne: function(self, other) { return !__LLVMBasicBlockRef_Eq_eq(self, other); } };
-
-function __LLVMTargetMachineRef_Eq_eq(self, other) {
-  return true;
-}
-const __LLVMTargetMachineRef_Eq = { eq: __LLVMTargetMachineRef_Eq_eq, ne: function(self, other) { return !__LLVMTargetMachineRef_Eq_eq(self, other); } };
-
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
   switch (self._tag) {
@@ -566,60 +526,10 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
-
-function __LLVMContextRef_Clone_clone(self) {
-  return new LLVMContextRef();
-}
-const __LLVMContextRef_Clone = { clone: __LLVMContextRef_Clone_clone };
-
-function __LLVMModuleRef_Clone_clone(self) {
-  return new LLVMModuleRef();
-}
-const __LLVMModuleRef_Clone = { clone: __LLVMModuleRef_Clone_clone };
-
-function __LLVMBuilderRef_Clone_clone(self) {
-  return new LLVMBuilderRef();
-}
-const __LLVMBuilderRef_Clone = { clone: __LLVMBuilderRef_Clone_clone };
-
-function __LLVMTypeRef_Clone_clone(self) {
-  return new LLVMTypeRef();
-}
-const __LLVMTypeRef_Clone = { clone: __LLVMTypeRef_Clone_clone };
-
-function __LLVMValueRef_Clone_clone(self) {
-  return new LLVMValueRef();
-}
-const __LLVMValueRef_Clone = { clone: __LLVMValueRef_Clone_clone };
-
-function __LLVMBasicBlockRef_Clone_clone(self) {
-  return new LLVMBasicBlockRef();
-}
-const __LLVMBasicBlockRef_Clone = { clone: __LLVMBasicBlockRef_Clone_clone };
-
-function __LLVMTargetMachineRef_Clone_clone(self) {
-  return new LLVMTargetMachineRef();
-}
-const __LLVMTargetMachineRef_Clone = { clone: __LLVMTargetMachineRef_Clone_clone };
-
-function __StructFieldInfo_Clone_clone(self) {
-  return new StructFieldInfo(__List_Clone.clone(self.field_names, __Str_Clone), __LLVMTypeRef_Clone.clone(self.llvm_type));
-}
-const __StructFieldInfo_Clone = { clone: __StructFieldInfo_Clone_clone };
-
 function __EnumVariantInfo_Clone_clone(self) {
   return new EnumVariantInfo(self.tag, self.field_count, __List_Clone.clone(self.field_names, __Str_Clone));
 }
 const __EnumVariantInfo_Clone = { clone: __EnumVariantInfo_Clone_clone };
-
-function __EnumTypeInfo_Clone_clone(self) {
-  return new EnumTypeInfo(__Map_Clone.clone(self.variants, __Str_Clone, __EnumVariantInfo_Clone), self.max_fields, __LLVMTypeRef_Clone.clone(self.llvm_type));
-}
-const __EnumTypeInfo_Clone = { clone: __EnumTypeInfo_Clone_clone };
 
 function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   switch (self._tag) {
@@ -629,46 +539,6 @@ function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   }
 }
 const __Result_Clone = { clone: __Result_Clone_clone };
-
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
-
-function __LLVMContextRef_Ord_cmp(self, other) {
-  return 0;
-}
-const __LLVMContextRef_Ord = { cmp: __LLVMContextRef_Ord_cmp };
-
-function __LLVMModuleRef_Ord_cmp(self, other) {
-  return 0;
-}
-const __LLVMModuleRef_Ord = { cmp: __LLVMModuleRef_Ord_cmp };
-
-function __LLVMBuilderRef_Ord_cmp(self, other) {
-  return 0;
-}
-const __LLVMBuilderRef_Ord = { cmp: __LLVMBuilderRef_Ord_cmp };
-
-function __LLVMTypeRef_Ord_cmp(self, other) {
-  return 0;
-}
-const __LLVMTypeRef_Ord = { cmp: __LLVMTypeRef_Ord_cmp };
-
-function __LLVMValueRef_Ord_cmp(self, other) {
-  return 0;
-}
-const __LLVMValueRef_Ord = { cmp: __LLVMValueRef_Ord_cmp };
-
-function __LLVMBasicBlockRef_Ord_cmp(self, other) {
-  return 0;
-}
-const __LLVMBasicBlockRef_Ord = { cmp: __LLVMBasicBlockRef_Ord_cmp };
-
-function __LLVMTargetMachineRef_Ord_cmp(self, other) {
-  return 0;
-}
-const __LLVMTargetMachineRef_Ord = { cmp: __LLVMTargetMachineRef_Ord_cmp };
 
 const __Result_tag_order = { "Ok": 0, "Err": 1 };
 function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
@@ -693,60 +563,10 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
-
-function __LLVMContextRef_Debug_debug(self) {
-  return "LLVMContextRef";
-}
-const __LLVMContextRef_Debug = { debug: __LLVMContextRef_Debug_debug };
-
-function __LLVMModuleRef_Debug_debug(self) {
-  return "LLVMModuleRef";
-}
-const __LLVMModuleRef_Debug = { debug: __LLVMModuleRef_Debug_debug };
-
-function __LLVMBuilderRef_Debug_debug(self) {
-  return "LLVMBuilderRef";
-}
-const __LLVMBuilderRef_Debug = { debug: __LLVMBuilderRef_Debug_debug };
-
-function __LLVMTypeRef_Debug_debug(self) {
-  return "LLVMTypeRef";
-}
-const __LLVMTypeRef_Debug = { debug: __LLVMTypeRef_Debug_debug };
-
-function __LLVMValueRef_Debug_debug(self) {
-  return "LLVMValueRef";
-}
-const __LLVMValueRef_Debug = { debug: __LLVMValueRef_Debug_debug };
-
-function __LLVMBasicBlockRef_Debug_debug(self) {
-  return "LLVMBasicBlockRef";
-}
-const __LLVMBasicBlockRef_Debug = { debug: __LLVMBasicBlockRef_Debug_debug };
-
-function __LLVMTargetMachineRef_Debug_debug(self) {
-  return "LLVMTargetMachineRef";
-}
-const __LLVMTargetMachineRef_Debug = { debug: __LLVMTargetMachineRef_Debug_debug };
-
-function __StructFieldInfo_Debug_debug(self) {
-  return "StructFieldInfo { " + "field_names: " + __List_Debug.debug(self.field_names, __Str_Debug) + ", " + "llvm_type: " + __LLVMTypeRef_Debug.debug(self.llvm_type) + " }";
-}
-const __StructFieldInfo_Debug = { debug: __StructFieldInfo_Debug_debug };
-
 function __EnumVariantInfo_Debug_debug(self) {
   return "EnumVariantInfo { " + "tag: " + String(self.tag) + ", " + "field_count: " + String(self.field_count) + ", " + "field_names: " + __List_Debug.debug(self.field_names, __Str_Debug) + " }";
 }
 const __EnumVariantInfo_Debug = { debug: __EnumVariantInfo_Debug_debug };
-
-function __EnumTypeInfo_Debug_debug(self) {
-  return "EnumTypeInfo { " + "variants: " + __Map_Debug.debug(self.variants, __Str_Debug, __EnumVariantInfo_Debug) + ", " + "max_fields: " + String(self.max_fields) + ", " + "llvm_type: " + __LLVMTypeRef_Debug.debug(self.llvm_type) + " }";
-}
-const __EnumTypeInfo_Debug = { debug: __EnumTypeInfo_Debug_debug };
 
 function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
   switch (self._tag) {
@@ -758,4 +578,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, RING_TYPEID_CELL, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, get_builtin_typeid, build_entry_alloca, __StructFieldInfo_Clone, __EnumVariantInfo_Clone, __EnumTypeInfo_Clone, __StructFieldInfo_Debug, __EnumVariantInfo_Debug, __EnumTypeInfo_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, RING_TYPEID_CELL, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, get_builtin_typeid, build_entry_alloca, __EnumVariantInfo_Clone, __EnumVariantInfo_Debug };

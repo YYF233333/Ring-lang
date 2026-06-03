@@ -2289,11 +2289,6 @@ function resolve_relative_qualifier(qualifier, mod_path_stack) {
   return Option_some(List_join(resolved_parts, "::"));
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __FnBoundsEntry_Eq_eq(self, other) {
   return (self.type_param_var_id === other.type_param_var_id) && (self.trait_name === other.trait_name) && (self.type_param_name === other.type_param_name);
 }
@@ -2324,11 +2319,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
-
 function __FnBoundsEntry_Clone_clone(self) {
   return new FnBoundsEntry(self.type_param_var_id, self.trait_name, self.type_param_name);
 }
@@ -2347,11 +2337,6 @@ function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   }
 }
 const __Result_Clone = { clone: __Result_Clone_clone };
-
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
 
 function __FnBoundsEntry_Ord_cmp(self, other) {
   var c;
@@ -2390,11 +2375,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __FnBoundsEntry_Debug_debug(self) {
   return "FnBoundsEntry { " + "type_param_var_id: " + String(self.type_param_var_id) + ", " + "trait_name: " + String(self.trait_name) + ", " + "type_param_name: " + String(self.type_param_name) + " }";

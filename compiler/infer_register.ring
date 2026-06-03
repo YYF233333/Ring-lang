@@ -356,7 +356,7 @@ fn preregister_struct(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>
         match tv { Type::TypeVar { id, .. } => { tp_vars.push(id) }, _ => {} }
         ctx.type_param_scope.insert(tp.name, tv)
     }
-    let def = StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [] }
+    let def = StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [], is_extern: false }
     ctx.env.types.structs.insert(name, def)
 }
 
@@ -1486,7 +1486,10 @@ fn register_extern_type(mut ctx: InferCtx, name: Str, type_params: List<TypePara
         ctx.type_param_scope.insert(tp.name, tv)
     }
     ctx.type_param_scope = saved
-    ctx.env.types.structs.insert(name, StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [] })
+    // is_extern: true marks this as an opaque FFI type so trait derivation skips
+    // it (B-074). An opaque type has no fields to compare/clone/order/debug, and
+    // a derived dict would reference a non-existent runtime constructor.
+    ctx.env.types.structs.insert(name, StructDef { name: name, type_params: tp_names, type_param_vars: tp_vars, fields: [], is_extern: true })
 }
 
 fn register_type_alias(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, type_expr: TypeExpr) {

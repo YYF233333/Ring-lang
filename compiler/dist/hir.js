@@ -1003,11 +1003,6 @@ function hexpr_span(e) {
   }
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __DictDispatchInfo_Eq_eq(self, other) {
   return (self.dict_param === other.dict_param) && (self.method === other.method);
 }
@@ -1048,11 +1043,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
   return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
-
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
 
 function __DictDispatchInfo_Clone_clone(self) {
   return new DictDispatchInfo(self.dict_param, self.method);
@@ -1132,11 +1122,6 @@ function __DerivedImpl_Clone_clone(self) {
 }
 const __DerivedImpl_Clone = { clone: __DerivedImpl_Clone_clone };
 
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
-
 function __DictDispatchInfo_Ord_cmp(self, other) {
   var c;
   c = (self.dict_param < other.dict_param ? -1 : self.dict_param > other.dict_param ? 1 : 0);
@@ -1184,11 +1169,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __DictDispatchInfo_Debug_debug(self) {
   return "DictDispatchInfo { " + "dict_param: " + String(self.dict_param) + ", " + "method: " + String(self.method) + " }";

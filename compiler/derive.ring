@@ -54,6 +54,9 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
         let (name, def) = entry
         // Skip mod aliases (e.g. "Point" aliasing "geo::Point") to avoid duplicate derives
         if name != def.name { continue }
+        // Skip opaque extern types (B-074): registered as zero-field structs for
+        // type-checking, but they have no observable runtime structure to derive.
+        if def.is_extern { continue }
         if builtins.contains(name) == false {
             result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none })
         }

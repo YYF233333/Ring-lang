@@ -399,11 +399,6 @@ function make_diag(code, severity, message, span, context) {
   return make_diagnostic(code, severity, message, span, context, []);
 }
 
-function __StringBuilder_Eq_eq(self, other) {
-  return true;
-}
-const __StringBuilder_Eq = { eq: __StringBuilder_Eq_eq, ne: function(self, other) { return !__StringBuilder_Eq_eq(self, other); } };
-
 function __DiagnosticNote_Eq_eq(self, other) {
   return (self.message === other.message) && __Option_Eq.eq(self.span, other.span, __Span_Eq);
 }
@@ -439,11 +434,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
   return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
-
-function __StringBuilder_Clone_clone(self) {
-  return new StringBuilder();
-}
-const __StringBuilder_Clone = { clone: __StringBuilder_Clone_clone };
 
 function __DiagnosticNote_Clone_clone(self) {
   return new DiagnosticNote(self.message, __Option_Clone.clone(self.span, __Span_Clone));
@@ -500,11 +490,6 @@ function __CollectingSink_Clone_clone(self) {
 }
 const __CollectingSink_Clone = { clone: __CollectingSink_Clone_clone };
 
-function __StringBuilder_Ord_cmp(self, other) {
-  return 0;
-}
-const __StringBuilder_Ord = { cmp: __StringBuilder_Ord_cmp };
-
 const __Result_tag_order = { "Ok": 0, "Err": 1 };
 function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
   var t1 = __Result_tag_order[self._tag];
@@ -536,11 +521,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __StringBuilder_Debug_debug(self) {
-  return "StringBuilder";
-}
-const __StringBuilder_Debug = { debug: __StringBuilder_Debug_debug };
 
 function __DiagnosticNote_Debug_debug(self) {
   return "DiagnosticNote { " + "message: " + String(self.message) + ", " + "span: " + __Option_Debug.debug(self.span, __Span_Debug) + " }";

@@ -155,7 +155,8 @@ fn register_cell(mut env: TypeEnv) {
         name: BUILTIN_CELL,
         type_params: ["T"],
         type_param_vars: [cell_t_id],
-        fields: [StructField { name: "value", ty: cell_t, is_pub: true }]
+        fields: [StructField { name: "value", ty: cell_t, is_pub: true }],
+        is_extern: false
     })
 
     // Register Cell constructor function
