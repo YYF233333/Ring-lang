@@ -48,7 +48,7 @@
 | Item | 内容 | 门 | 优先级 |
 |------|------|-----|--------|
 | ~~B-083~~ ✅ | LLVM match guard 完整实现（codegen + perceus RC + diff）| G-c + G-a/b(RC) | P1 |
-| B-088 | 双后端差分覆盖扩展（14 → 覆盖 effects/guard/interp/generics/delegate）| G-c | P1 |
+| ~~B-088~~ ✅ | 双后端差分覆盖扩展 — 锁 6 parity 用例 + 发现 6 处 LLVM 发散喂 B-087 | G-c | P1 |
 | B-084 | Perceus drop 精度（#131 落地 + #130 env drop + drop_T 完整性）| G-a/b | P2 |
 | B-085 | Perceus 发射 determinism（drop/dup 顺序独立于 Set 迭代序）| G-b | P2 |
 | B-086 | LLVM 缺失 runtime 原语（flat_map/enumerate/str_to_int/float）| G-c | P2 |
@@ -712,26 +712,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 多态/泛型/trait dispatch 的非平凡用例（含一等多态函数值、嵌套 trait bound）native 行为与 JS 一致
 - #103 mut 参数重赋值在 LLVM 反映到调用方
 - 全部 E2E + llvm_diff 通过；自举一致
-
-### B-088 双后端差分测试覆盖扩展 [feature] [P1] [L] [judgment] [doing]
-
-`tests/cases/llvm/` 仅 14 例（覆盖 pattern/recursion/closure-RC/generic-eq/fail-catch），E2E 363 例的多数特性零差分覆盖。这是 G-c「双后端行为对比」的核心交付 + 发现引擎：失败的 diff 用例喂给 B-083/B-087，通过的锁定 parity。
-
-**零/薄覆盖的高发散风险区**（差分审计）：custom effects/handlers（68 E2E，0 diff）、match guard（→ B-083）、string interp（13，0）、mutable closure + generics（RC 敏感）、delegate + effects（37 trait，0）、option/result chain、struct update。
-
-**分阶段新增 diff 用例**（filename + 覆盖点）：
-- P1 关键：effect_custom_catch_recursive、match_guard_in_effect（依赖 B-083）、string_interp_in_match、closure_capture_mutable_generic、delegate_with_custom_effect
-- P2：effect_default_and_custom_mixed、generic_struct_field_closure_capture、match_guard_complex_enum、trait_hof_with_generic_closure
-- P3：or_pattern_with_guard、closure_capture_in_list_hof、option_chain_with_guard、recursive_enum_match_with_interp
-
-**涉及修改**：
-1. `tests/cases/llvm/`：按上述新增用例（JS oracle vs LLVM 输出断言一致）
-2. 发散用例 → 记录到对应 codegen item（B-083/B-087）
-
-**验收标准**：
-- 每个 E2E 特性大类在 llvm_diff 至少一个代表用例
-- 新增用例全部 JS/LLVM 一致（依赖的 codegen 修复落地后）
-- 覆盖 effects/handlers、guard、string interp、generics+closures、delegate
 
 ### B-089 Native 自举终验 capstone [bugfix] [P1] [L] [judgment] [queued]
 
