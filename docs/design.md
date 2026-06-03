@@ -1610,6 +1610,8 @@ Bootstrap 阶段（编译器跑在 JS/V8 上）：
 
 **fail/catch 机制**：`setjmp`/`longjmp`。bootstrap 阶段无 Drop/RAII，不需要栈展开。`fail.raise` → evidence 函数内部 `longjmp`；`catch` → `setjmp` + handler 栈。Ownership/RAII 上来后可切换为 C++ exceptions 或自定义 unwind。
 
+**Effect handler（tail-resumptive）**：evidence passing，镜像 JS oracle，与上面的 fail/abort 形成 **hybrid**（2026-06-03 决策）。带 effect 的 fn 签名尾部追加 evidence ptr 参数（`codegen_llvm_decl.ring`），call site `push(lookup_evidence)`（`codegen_llvm_expr.ring`）。evidence = `ring_alloc` 的 N-slot struct，slot k 放第 k 个 op 的 `{fn_ptr, env}` 闭包，**slot 顺序 = op 在 effect 声明里的顺序**——这是 `gen_handle_expr`（构造）与 `gen_effect_op`（派发）之间的跨阶段契约，放共享 helper `effect_op_slot(effect, op)`，性质同 `variant_js_name`。`gen_handle_expr` 造 struct，`gen_effect_op` load slot k 走 `gen_closure_call`。handler 闭包 + evidence struct 的 RC drop 暂泄漏（同 `ring_try` 闭包，纯泄漏非 UAF），收口并入 B-096 A 波。**hybrid 的原则**：fail/abort 绑定是 ambient（栈上随处 catch → handler stack + setjmp），tail-resumptive 绑定是 lexical（类型定向 → evidence value）；两类语义本就不同，且 JS oracle 自身就是此 hybrid（fail=try/catch、tail-resumptive=evidence passing），故 LLVM 镜像它 → parity 结构性。详见 backlog B-090。
+
 **多文件编译**：bootstrap 阶段所有 .ring 文件编译到一个 LLVM Module，输出单个 .o 文件，链接为单一二进制。不需要跨模块符号解析。未来再做增量编译（每个 .ring → 一个 .o）。
 
 **标准库迁移**：以编译器自身迁移为目标驱动，按需将 `extern fn` 从 JS 实现切换到 C ABI 实现。不追求标准库完整迁移——编译器用到什么就迁移什么。
@@ -2032,7 +2034,8 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | Raw string | `r"..."` 和 `r#"..."#`，无转义无插值 | 正则表达式/codegen 场景减少转义噪音 |
 | JS 为 bootstrap 后端 | JS 是自举过渡方案；LLVM 是目标后端 | 编译器自举需要 JS 运行时；LLVM 才能完全发挥 linear types / Perceus RC / full AE；生态通过 RIIR 策略自建 |
 | Int/Str 语义独立于 JS | Int = 64-bit signed（JS 用 BigInt），Str = UTF-8 code point 语义 | JS 是部署目标不是设计来源；Ring 语义独立定义，JS 端付性能代价适配 |
-| LLVM FFI effect 穿透 | TLS handler stack 存储 evidence，非函数参数传递 | C 函数无需感知 evidence；与 JS try/catch 的 ambient 语义对齐；x86-64 TLS 访问接近零成本 |
+| LLVM effect 派发 hybrid（2026-06-03 修正）| fail/abort → 运行时 handler stack + setjmp（ambient 绑定）；tail-resumptive → evidence 当值线程化为函数参数 + 可捕获进闭包 env（lexical 绑定）。镜像 JS oracle（fail=try/catch、tail-resumptive=evidence passing）| 两类 effect 绑定语义本就不同（abort 栈上随处 catch=ambient，tail-resumptive 类型定向=lexical）；值携带的 evidence 保留优化器可见性（evidence 特化 / dict 反虚化）+ async 线程迁移安全；与 JS oracle 同构故 parity 结构性 |
+| LLVM FFI effect 穿透（§原 TLS 决策收窄，2026-06-03）| FFI-callback 用 evidence 捕获进闭包 env + 裸 C callback 边界 thunk 摆渡 env 指针；TLS 仅作 context-less C callback 的 env 摆渡机制，**非 effect 派发统一方案**；abort 跨 C 帧（longjmp UB）另议（禁 raise 或转 error-return）| C 回调 Ring 闭包时 env 自带 evidence，无需 TLS 查派发；归并 TLS 会让 tail-resumptive 变 ambient（语义改变）+ 杀掉优化可见性 + 撞结构化并发线程迁移，故维持分离 |
 | 类型系统代价分配 | 复杂度由 LLM 承担（编译器错误循环），收益由用户享受（零 runtime surprise） | runtime error = 用户受害 = 体验降级；LLM 不是人、不领工资，编译器搏斗十轮也无所谓 |
 | Refinement × Ownership × Effects 交互 | 详见 1.5 交互矩阵 | 三系统正交 + RAII（Drop trait）处理 Drop 值在所有路径的释放 |
 | Ownership 模型 | Rust 风格 RAII，无 borrow checker；`impl Drop` = 所有权约束入口；Drop 与 Clone 互斥；所有路径自动 drop | LLM 从 Rust 训练数据天然理解 move/drop/RAII；无 `linear` 关键字——少一个概念 |
@@ -2055,6 +2058,9 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | Perceus dup/drop IR | HIR 显式 Drop/dup 节点 + 反向 liveness pass（仅 llvm） | RC 行为落 IR 可 dump/测试；翻译 Koka Perceus POPL'21 |
 | Perceus L0 闭包 capture 所有权（2026-06-03） | owned capture（普通闭包，env 死时 drop）vs borrowed capture（catch/handle 为平衡 Drop 捕入，env 死时不 drop）；#130 走 C 增量（普通闭包 env 独立 typeid + drop_env_T，catch/handle 排除），A 波（B-096）完整收口（borrowed 建模 + ring_try drop 闭包 + #4 guard-false + Range/dict drop_T） | env 复用 closure typeid 致 ≥2 captures 泄漏+误递归；#131 借 catch env 整体泄漏安全引入 borrowed capture，裸加 auto-drop 会 double-drop；差分抓 crash 不抓泄漏 → C 增量可验证安全 |
 | occurs_in/apply_subst 对 struct/enum fields 一致忽略（2026-06-03） | 维持现状（只处理 type_params，fields/variants 原样保留）= 正确 nominal 语义，非 bug；撤销 B-057（错误立项）；#108 标 wontfix；彻底统一留 #16 nominal 重构 | fields 自始至终是声明模板（apply_subst 原样保留 + 字段实例化走局部 inst_map 不写回 + type identity 只比 name+type_params），无限类型的环只能经 type_params 形成、已被 occurs check 覆盖；补 fields 遍历 → apply_subst 递归类型栈溢出 / occurs_in 误判模板 var |
+| LLVM evidence 表示 D1（2026-06-03 B-090）| `{fn_ptr, env}` 闭包 struct，slot = op 在 effect 声明里的顺序；共享 helper `effect_op_slot` 给 gen_handle_expr/gen_effect_op 共用 | 与 JS oracle（`{op: closure}`）语义同构 → parity 结构性；复用现有闭包表示；跨阶段契约进共享层符合约定。否决 effect-as-trait（搅入 supertrait/关联类型包袱）|
+| LLVM handler 闭包 RC D2（2026-06-03 B-090）| evidence struct + handler 闭包暂泄漏，drop 收口并入 B-096 A 波 | B-090 价值是 parity（差分可验），泄漏是正交问题且已有归宿；耦合大内存机 double-free 实测会让 P1 卡在 P3 后 |
+| B-090 范围分期 D3（2026-06-03）| core（B-090，L）= 单 effect multi-op tail-resumptive + 自然涵盖的 nesting；phase 2（B-097，P2）= custom-abort + default body(#72) + delegate(B-088#4) + nesting/multi-effect edge | 单 op 是玩具（真实 effect 都多 op）；custom-abort 需独立 setjmp 落点、default 需注入默认 evidence、delegate 是派发通后的扩展，均与核心机制不同 |
 
 ### 幽灵功能（已解析但无语义效果）
 
