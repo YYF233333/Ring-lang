@@ -637,7 +637,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-090 自定义 effect handler LLVM codegen（核心：单 effect multi-op tail-resumptive）[feature] [P1] [L] [judgment] [queued]
+### B-090 自定义 effect handler LLVM codegen（核心：单 effect multi-op tail-resumptive）[feature] [P1] [L] [judgment] [doing]
 > **2026-06-03 Discussion 定契约 + 分期，转 queued**。Threshold：维持 **hybrid**（fail/abort=handler stack/setjmp ambient，tail-resumptive=evidence 函数参数 lexical），完成已铺的函数参数 evidence threading；design.md 原 TLS 决策收窄为 FFI-callback 边界专属条款（见 design.md §9.4 effect handler + 决策表）。**现状**：脚手架全铺好（`codegen_llvm_decl.ring:161-167` 签名加 evidence param、`codegen_llvm_expr.ring:1022/1441` call site push `lookup_evidence`），但 `gen_handle_expr` 存 null（3367）、`gen_effect_op` 不派发（3452）。本项把 null 换成真 struct + 真派发。
 
 > 2026-06-03 B-088 立项。**G-c 最大块**。JS 后端 evidence-passing handler lowering 是 oracle。最小复现见原 worker_feedback B-088 #1/#4（B-088 已闭，复现归此）：返回值 op 的 handler resume 崩 `str_from_cstr`；Unit op + 副作用 body 静默丢输出；多 op 崩。68 E2E 用 custom effect、零 native 覆盖。
