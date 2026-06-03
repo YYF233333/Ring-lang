@@ -261,6 +261,7 @@ function to_result(f) {
 
 
 
+
 function emit_llvm_decl(ctx, decl) {
   __ring_match6: {
     const __ring_m6 = decl;
@@ -682,9 +683,10 @@ function emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, di
     const __ring_m13 = _Map_get(ctx.functions, mangled);
     if (__ring_m13._tag === "some") {
       const method_fn = __ring_m13._0;
+      const thunk_fn = emit_dict_method_thunk(ctx, mangled, method_fn);
       const closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], codegen_llvm_ctx$fresh_name(ctx, "cls"));
       const fn_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, codegen_llvm_ctx$fresh_name(ctx, "fps"));
-      LLVMBuildStore(ctx.builder, method_fn, fn_slot);
+      LLVMBuildStore(ctx.builder, thunk_fn, fn_slot);
       const env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, codegen_llvm_ctx$fresh_name(ctx, "eps"));
       LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), env_slot);
       const slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx, codegen_llvm_ctx$fresh_name(ctx, "ds"));
@@ -698,6 +700,57 @@ function emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, di
     }
     __match_fail(__ring_m13);
   }
+}
+
+function emit_dict_method_thunk(ctx, mangled, method_fn) {
+  const thunk_name = `${mangled}__dictthunk`;
+  __ring_match14: {
+    const __ring_m14 = _Map_get(ctx.functions, thunk_name);
+    if (__ring_m14._tag === "some") {
+      const existing = __ring_m14._0;
+      return existing;
+      break __ring_match14;
+    }
+    if (__ring_m14._tag === "none") {
+      break __ring_match14;
+    }
+    __match_fail(__ring_m14);
+  }
+  const method_arity = LLVMCountParams(method_fn);
+  let thunk_param_types = [ctx.ptr_type];
+  const __ring_end18 = method_arity;
+  for (let i = 0; i < __ring_end18; i++) {
+    List_push(thunk_param_types, ctx.ptr_type);
+  }
+  const thunk_ty = LLVMFunctionType(ctx.ptr_type, thunk_param_types, 0);
+  const thunk_fn = LLVMAddFunction(ctx.module, thunk_name, thunk_ty);
+  _Map_insert(ctx.functions, thunk_name, thunk_fn);
+  _Map_insert(ctx.fn_types, thunk_name, thunk_ty);
+  const method_ty = (function() {
+  const __ring_m = _Map_get(ctx.fn_types, mangled);
+  if (__ring_m._tag === "some") { const t = __ring_m._0; return t; }
+  if (__ring_m._tag === "none") { return (function() {
+  let method_param_types = [];
+  const __ring_end19 = method_arity;
+  for (let i = 0; i < __ring_end19; i++) {
+    List_push(method_param_types, ctx.ptr_type);
+  }
+  return LLVMFunctionType(ctx.ptr_type, method_param_types, 0);
+})(); }
+  __match_fail(__ring_m);
+})();
+  const saved_block = LLVMGetInsertBlock(ctx.builder);
+  const entry = LLVMAppendBasicBlockInContext(ctx.context, thunk_fn, "entry");
+  LLVMPositionBuilderAtEnd(ctx.builder, entry);
+  let fwd_args = [];
+  const __ring_end20 = method_arity;
+  for (let i = 0; i < __ring_end20; i++) {
+    List_push(fwd_args, LLVMGetParam(thunk_fn, (i + 1)));
+  }
+  const call_res = LLVMBuildCall2(ctx.builder, method_ty, method_fn, fwd_args, codegen_llvm_ctx$fresh_name(ctx, "tk"));
+  LLVMBuildRet(ctx.builder, call_res);
+  LLVMPositionBuilderAtEnd(ctx.builder, saved_block);
+  return thunk_fn;
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

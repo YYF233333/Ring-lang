@@ -904,7 +904,7 @@ fn gen_dict_dispatch_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, dd
             //   Clone: { clone } → 0
             //   Ord: { compare } → 0
             //   Debug: { debug } → 0
-            let method_idx = get_trait_method_index(dd.dict_param, dd.method)
+            let method_idx = get_trait_method_index(ctx, dd.dict_param, dd.method)
 
             // Build dict struct type (all ptr fields)
             // We don't know the exact field count, but we can use a conservative GEP
@@ -925,15 +925,49 @@ fn gen_dict_dispatch_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, dd
     }
 }
 
-// Get the index of a method within a trait's dict struct
-fn get_trait_method_index(dict_param: Str, method: Str) -> Int {
-    // Dict param names look like __ring_T_Eq, __ring_T_Clone, etc.
-    // We derive the trait name from the param name.
-    // Built-in trait method ordering (alphabetical, matching JS backend):
-    // Eq: eq=0, ne=1
-    // Clone: clone=0
-    // Ord: compare=0
-    // Debug: debug=0
+// Get the index of a method within a trait's dict struct.
+// Dict params are named __ring_<typeparam>_<Trait> (see trait_bound_param_name).
+// The authoritative slot ordering lives in ctx.trait_method_order (populated by
+// scan_trait_decls, with builtins Eq/Clone/Ord/Debug pre-seeded) and MUST match the
+// order emit_trait_dict uses when filling the dict — otherwise multi-method user
+// traits dispatch to the wrong slot.
+fn get_trait_method_index(mut ctx: LlvmCtx, dict_param: Str, method: Str) -> Int {
+    match trait_name_from_dict_param(dict_param) {
+        some(trait_name) => {
+            match ctx.trait_method_order.get(trait_name) {
+                some(order) => {
+                    let mut idx = 0
+                    for m in order {
+                        if m == method { return idx }
+                        idx = idx + 1
+                    }
+                    // Method not in recorded order — fall through to builtin guess.
+                    get_builtin_method_index(method)
+                },
+                none => get_builtin_method_index(method),
+            }
+        },
+        none => get_builtin_method_index(method),
+    }
+}
+
+// Extract the trait name from a dict param name __ring_<typeparam>_<Trait>.
+// typeparam is a single type-variable token (no underscore), so the trait name is
+// everything after the first underscore past the "__ring_" prefix.
+fn trait_name_from_dict_param(dict_param: Str) -> Str? {
+    let prefix = "__ring_"
+    if !dict_param.starts_with(prefix) { return none }
+    let rest = dict_param.slice(prefix.len(), dict_param.len())
+    // rest = "<typeparam>_<Trait>" — split off the first segment (typeparam).
+    match rest.index_of("_") {
+        some(us) => some(rest.slice(us + 1, rest.len())),
+        none => none,
+    }
+}
+
+// Fallback ordering for built-in traits (alphabetical, matching JS backend):
+// Eq: eq=0, ne=1; Clone: clone=0; Ord: compare=0; Debug: debug=0.
+fn get_builtin_method_index(method: Str) -> Int {
     if method == "eq" { 0 }
     else { if method == "ne" { 1 }
     else { if method == "clone" { 0 }

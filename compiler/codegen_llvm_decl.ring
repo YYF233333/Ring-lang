@@ -22,6 +22,7 @@ extern type LLVMBasicBlockRef
 extern fn LLVMConstInt(ty: LLVMTypeRef, val: Int, sign_extend: Int) -> LLVMValueRef
 extern fn LLVMConstPointerNull(ty: LLVMTypeRef) -> LLVMValueRef
 extern fn LLVMGetParam(fn_val: LLVMValueRef, index: Int) -> LLVMValueRef
+extern fn LLVMCountParams(fn_val: LLVMValueRef) -> Int
 extern fn LLVMAppendBasicBlockInContext(ctx: LLVMContextRef, fn_val: LLVMValueRef, name: Str) -> LLVMBasicBlockRef
 extern fn LLVMPositionBuilderAtEnd(builder: LLVMBuilderRef, bb: LLVMBasicBlockRef) -> Unit
 extern fn LLVMGetInsertBlock(builder: LLVMBuilderRef) -> LLVMBasicBlockRef
@@ -448,10 +449,20 @@ fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, d
     let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
     match ctx.functions.get(mangled) {
         some(method_fn) => {
-            // Create a closure: { fn_ptr, null_env }
+            // The dict slot must conform to the uniform closure ABI: a RingClosure
+            // { fn_ptr, env_ptr } whose fn_ptr is called as fn(env, args...). But the
+            // impl method `ring_<Type>_<method>` is generated with the *direct* ABI
+            // fn(self, args...) — it has no leading env parameter. Storing the bare
+            // method fn here makes gen_closure_call pass env (=null) as the receiver,
+            // corrupting `self` (B-092: crashes in str_from_cstr on self.<field>).
+            // Emit a thin env-first thunk that drops env and forwards to the method,
+            // mirroring the runtime's ring_cl_eq_str(env, a, b) wrappers.
+            let thunk_fn = emit_dict_method_thunk(ctx, mangled, method_fn)
+
+            // Create a closure: { thunk_fn, null_env }
             let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], fresh_name(ctx, "cls"))
             let fn_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
-            LLVMBuildStore(ctx.builder, method_fn, fn_slot)
+            LLVMBuildStore(ctx.builder, thunk_fn, fn_slot)
             let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "eps"))
             LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), env_slot)
 
@@ -465,4 +476,58 @@ fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, d
             LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot_ptr)
         },
     }
+}
+
+// Emit (once) an env-first thunk wrapping a direct-ABI impl method, so it can be
+// stored in a trait dict and invoked through the uniform closure ABI fn(env, args...).
+// The thunk has type (env, p0, ..., p_{n-1}) -> ptr where n is the method's param
+// count; it ignores env and tail-forwards (p0, ..., p_{n-1}) to the method.
+fn emit_dict_method_thunk(mut ctx: LlvmCtx, mangled: Str, method_fn: LLVMValueRef) -> LLVMValueRef {
+    let thunk_name = "${mangled}__dictthunk"
+    // Reuse if already emitted (one impl method may seed multiple dict inits).
+    match ctx.functions.get(thunk_name) {
+        some(existing) => { return existing },
+        none => {},
+    }
+
+    let method_arity = LLVMCountParams(method_fn)
+
+    // Thunk param types: leading env ptr + one ptr per method param.
+    let mut thunk_param_types: List<LLVMTypeRef> = [ctx.ptr_type]
+    for i in 0..method_arity {
+        thunk_param_types.push(ctx.ptr_type)
+    }
+    let thunk_ty = LLVMFunctionType(ctx.ptr_type, thunk_param_types, 0)
+    let thunk_fn = LLVMAddFunction(ctx.module, thunk_name, thunk_ty)
+    ctx.functions.insert(thunk_name, thunk_fn)
+    ctx.fn_types.insert(thunk_name, thunk_ty)
+
+    // Method fn type: (p0, ..., p_{n-1}) -> ptr.
+    let method_ty = match ctx.fn_types.get(mangled) {
+        some(t) => t,
+        none => {
+            let mut method_param_types: List<LLVMTypeRef> = []
+            for i in 0..method_arity {
+                method_param_types.push(ctx.ptr_type)
+            }
+            LLVMFunctionType(ctx.ptr_type, method_param_types, 0)
+        },
+    }
+
+    // Emit the thunk body in its own block, then restore the builder position so the
+    // surrounding dict-init emission continues uninterrupted.
+    let saved_block = LLVMGetInsertBlock(ctx.builder)
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, thunk_fn, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Forward thunk params 1..arity (skip param 0 = env) to the method.
+    let mut fwd_args: List<LLVMValueRef> = []
+    for i in 0..method_arity {
+        fwd_args.push(LLVMGetParam(thunk_fn, i + 1))
+    }
+    let call_res = LLVMBuildCall2(ctx.builder, method_ty, method_fn, fwd_args, fresh_name(ctx, "tk"))
+    LLVMBuildRet(ctx.builder, call_res)
+
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_block)
+    thunk_fn
 }
