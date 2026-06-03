@@ -843,6 +843,25 @@ extern "C" void* ring_list_first(void* list) {
     return ring_enum_some(vec->front());
 }
 
+// flat_map: apply closure (returns List) to each element, concatenate results.
+// Mirrors ring_list_map's closure-call pattern but flattens each returned List.
+extern "C" void* ring_list_flat_map(void* list, void* closure) {
+    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
+    auto* result = new (data) std::vector<void*>();
+    if (!list) return data;
+    auto* vec = (std::vector<void*>*)list;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (size_t i = 0; i < vec->size(); i++) {
+        void* sub = fn(cls->env_ptr, (*vec)[i]);
+        if (sub) {
+            auto* svec = (std::vector<void*>*)sub;
+            result->insert(result->end(), svec->begin(), svec->end());
+        }
+    }
+    return data;
+}
+
 // ============================================================================
 // Map (~10)
 // ============================================================================
