@@ -211,6 +211,7 @@ typedef void* (*ring_fn_2)(void* env, void* a, void* b);
 
 static void* ring_enum_some(void* val);
 static void* ring_enum_none();
+extern "C" void ring_raise(void* error);
 
 // ============================================================================
 // Global state
@@ -726,6 +727,18 @@ extern "C" void* ring_Option_map(void* opt, void* closure) {
     return ring_enum_none();
 }
 
+// to_fail: Some(v) -> v; None -> raise the fail effect with `err` as the error
+// value. The LLVM backend lowers `fail.raise` to a direct ring_raise (longjmp
+// into the enclosing ring_try set up by `catch`), so to_fail can raise here
+// without threading the fail evidence. Returns nullptr on the None branch only
+// for type-correctness; ring_raise never returns.
+extern "C" void* ring_Option_to_fail(void* opt, void* err) {
+    int64_t tag = *(int64_t*)opt;
+    if (tag == 0) return *((void**)((int64_t*)opt + 1));
+    ring_raise(err);
+    return nullptr;
+}
+
 extern "C" void* ring_Option_unwrap_or_else(void* opt, void* closure) {
     int64_t tag = *(int64_t*)opt;
     if (tag == 0) return *((void**)((int64_t*)opt + 1));
@@ -778,6 +791,36 @@ extern "C" void* ring_list_find(void* list, void* closure) {
         }
     }
     return ring_enum_none();
+}
+
+// find_index: return Some(boxed index) of the first element satisfying the
+// predicate, else None. Mirrors ring_list_find but boxes the index instead of
+// returning the element (matches the JS backend's List.find_index semantics).
+extern "C" void* ring_list_find_index(void* list, void* closure) {
+    auto* vec = (std::vector<void*>*)list;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (size_t i = 0; i < vec->size(); i++) {
+        void* r = fn(cls->env_ptr, (*vec)[i]);
+        if (ring_unbox_int(r) != 0) {
+            return ring_enum_some(ring_box_int((int64_t)i));
+        }
+    }
+    return ring_enum_none();
+}
+
+// fold: left fold with an explicit accumulator initial value. The closure is
+// binary: fn(env, acc, elem) -> acc. Matches the JS backend's
+// `list.reduce(cb, init)` lowering (acc is the first closure argument).
+extern "C" void* ring_list_fold(void* list, void* init, void* closure) {
+    auto* vec = (std::vector<void*>*)list;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    void* acc = init;
+    for (size_t i = 0; i < vec->size(); i++) {
+        acc = fn(cls->env_ptr, acc, (*vec)[i]);
+    }
+    return acc;
 }
 
 extern "C" void* ring_list_map(void* list, void* closure) {
@@ -2002,6 +2045,28 @@ extern "C" void* ring_cl_ne_tag(void* env, void* a, void* b) {
     return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 0 : 1);
 }
 
+// Ord cmp closures: return a boxed Int in {-1, 0, 1}. The Ord trait has a single
+// method `cmp` at dict slot 0; the LLVM backend lowers a generic `a < b` / `a > b`
+// to load_dict_method(dict, 0) + compare the unboxed result against 0. The same
+// closure ABI as Eq: fn(env, a, b) -> boxed value.
+extern "C" void* ring_cl_cmp_int(void* env, void* a, void* b) {
+    int64_t x = *(int64_t*)a, y = *(int64_t*)b;
+    return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
+}
+extern "C" void* ring_cl_cmp_float(void* env, void* a, void* b) {
+    double x = *(double*)a, y = *(double*)b;
+    return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
+}
+extern "C" void* ring_cl_cmp_str(void* env, void* a, void* b) {
+    const std::string& x = *(std::string*)a;
+    const std::string& y = *(std::string*)b;
+    return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
+}
+extern "C" void* ring_cl_cmp_bool(void* env, void* a, void* b) {
+    int64_t x = *(int64_t*)a, y = *(int64_t*)b;
+    return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
+}
+
 static void* ring_make_closure(void* fn) {
     void* data = ring_alloc(2 * sizeof(void*), RING_TYPEID_CLOSURE);
     void** c = (void**)data;
@@ -2016,6 +2081,15 @@ static void* ring_make_eq_dict(void* eqfn, void* nefn) {
     d[0] = ring_make_closure(eqfn);
     d[1] = ring_make_closure(nefn);
     d[2] = nullptr; d[3] = nullptr;
+    return data;
+}
+static void* ring_make_ord_dict(void* cmpfn) {
+    // Ord dict: 4 void* slots with the single `cmp` closure at slot 0 (matching
+    // the trait's method order). Same TUPLE layout/RC handling as the Eq dict.
+    void* data = ring_alloc(4 * sizeof(void*), RING_TYPEID_TUPLE);
+    void** d = (void**)data;
+    d[0] = ring_make_closure(cmpfn);
+    d[1] = nullptr; d[2] = nullptr; d[3] = nullptr;
     return data;
 }
 
@@ -2094,7 +2168,18 @@ static void drop_sb(void* data) {
 extern "C" void* ring_get_builtin_dict(void* name_ptr) {
     if (!name_ptr) return nullptr;
     std::string& n = *(std::string*)name_ptr;
-    // Only Eq dicts are constructed here (eq/ne). Ord dicts are not yet supported.
+    // Ord dicts (single `cmp` method). Check before Eq: an Ord dict name never
+    // contains "Eq", but keeping it first keeps the intent explicit.
+    if (n.find("Ord") != std::string::npos) {
+        if (n.find("Str") != std::string::npos)   return ring_make_ord_dict((void*)ring_cl_cmp_str);
+        if (n.find("Float") != std::string::npos) return ring_make_ord_dict((void*)ring_cl_cmp_float);
+        if (n.find("Int") != std::string::npos)   return ring_make_ord_dict((void*)ring_cl_cmp_int);
+        if (n.find("Bool") != std::string::npos)  return ring_make_ord_dict((void*)ring_cl_cmp_bool);
+        fprintf(stderr, "ring: no builtin Ord dict for '%s'\n", n.c_str());
+        fflush(stderr);
+        return nullptr;
+    }
+    // Eq dicts (eq/ne).
     if (n.find("Eq") != std::string::npos) {
         if (n.find("Str") != std::string::npos)   return ring_make_eq_dict((void*)ring_cl_eq_str,   (void*)ring_cl_ne_str);
         if (n.find("Float") != std::string::npos) return ring_make_eq_dict((void*)ring_cl_eq_float, (void*)ring_cl_ne_float);

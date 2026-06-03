@@ -1444,6 +1444,8 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "any" { some("ring_list_any") }
     else { if type_name == "List" && method == "all" { some("ring_list_all") }
     else { if type_name == "List" && method == "find" { some("ring_list_find") }
+    else { if type_name == "List" && method == "find_index" { some("ring_list_find_index") }
+    else { if type_name == "List" && method == "fold" { some("ring_list_fold") }
     else { if type_name == "List" && method == "flat_map" { some("ring_list_flat_map") }
     else { if type_name == "List" && method == "enumerate" { some("ring_list_enumerate") }
     else { if type_name == "List" && method == "clear" { some("ring_list_clear") }
@@ -1479,7 +1481,8 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Option" && method == "is_none" { some("ring_Option_is_none") }
     else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
     else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { if type_name == "Option" && method == "to_fail" { some("ring_Option_to_fail") }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {

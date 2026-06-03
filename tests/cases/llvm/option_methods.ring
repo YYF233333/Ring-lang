@@ -2,9 +2,9 @@
 // chained Option lookups via nested match. Locks Option-builtin parity on the
 // LLVM backend. JS backend is the oracle.
 //
-// NOTE: Option.to_fail() (none -> fail effect) is unimplemented on LLVM ("missing
-// method Option.to_fail"), and mixing Option-method chains with user-enum result
-// chaining in one program intermittently double-frees on LLVM — both recorded
+// NOTE: Option.to_fail() (none -> fail effect) is now covered separately by
+// option_to_fail.ring (B-086). Mixing Option-method chains with user-enum result
+// chaining in one program still intermittently double-frees on LLVM — recorded
 // under B-087 in docs/worker_feedback.md.
 
 fn find_user(id: Int) -> Option<Str> {
