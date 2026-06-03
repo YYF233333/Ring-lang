@@ -637,27 +637,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-090 自定义 effect handler LLVM codegen（核心：单 effect multi-op tail-resumptive）[feature] [P1] [L] [judgment] [doing]
-> **2026-06-03 Discussion 定契约 + 分期，转 queued**。Threshold：维持 **hybrid**（fail/abort=handler stack/setjmp ambient，tail-resumptive=evidence 函数参数 lexical），完成已铺的函数参数 evidence threading；design.md 原 TLS 决策收窄为 FFI-callback 边界专属条款（见 design.md §9.4 effect handler + 决策表）。**现状**：脚手架全铺好（`codegen_llvm_decl.ring:161-167` 签名加 evidence param、`codegen_llvm_expr.ring:1022/1441` call site push `lookup_evidence`），但 `gen_handle_expr` 存 null（3367）、`gen_effect_op` 不派发（3452）。本项把 null 换成真 struct + 真派发。
-
-> 2026-06-03 B-088 立项。**G-c 最大块**。JS 后端 evidence-passing handler lowering 是 oracle。最小复现见原 worker_feedback B-088 #1/#4（B-088 已闭，复现归此）：返回值 op 的 handler resume 崩 `str_from_cstr`；Unit op + 副作用 body 静默丢输出；多 op 崩。68 E2E 用 custom effect、零 native 覆盖。
-
-**范围（D3 core）**：tail-resumptive 非 abort、**单 effect 多 op**、自然涵盖的 nesting（`named_values` shadowing 落出的部分）。**不含**（拆 B-097）：custom-abort effect（非 fail）、default body(#72)、delegate 转发(B-088#4)、nested/multi-effect edge case。
-
-**D1 evidence 表示（契约）**：evidence = `ring_alloc` 的 N-slot struct，slot k 放第 k 个 op 的 `{fn_ptr, env}` 闭包（复用现有闭包表示 `codegen_llvm_expr.ring:980`）。**slot 顺序 = op 在 effect 声明里的顺序**——跨阶段契约，新增共享 helper `effect_op_slot(effect, op) -> Int`（基于 effect_ops registry，放共享层如 `hir.ring`），`gen_handle_expr`（构造）与 `gen_effect_op`（派发）共用。性质同 `variant_js_name`。
-
-**D2 RC 生命周期**：handler 闭包 + evidence struct 的 drop **本项暂泄漏**（同 `ring_try` 闭包，纯泄漏非 UAF，差分测试照常全绿），proper drop 收口并入 B-096 A 波（已在 B-096 spec 吸收）。本项不碰大内存机依赖。
-
-**涉及修改**：
-1. `compiler/hir.ring`（或共享层）：新增 `effect_op_slot(effect, op) -> Int`，基于 effect_ops registry 给出 op 的声明顺序索引
-2. `compiler/codegen_llvm_expr.ring`：`gen_handle_expr` 构造真实 evidence struct（N slot，每 slot 一个 handler op 闭包，闭包 body = handler arm body，捕获外层作用域）；`gen_effect_op` 非 fail 路径 load slot k → `gen_closure_call`（替换 3452/3457 的 null 返回）
-3. 必要时 `ring_runtime.cpp`：evidence struct 的 typeid（drop 留 B-096）
-
-**验收标准**：
-- 原 B-088 #1/#4 的最小复现（返回值 op resume / Unit op + 副作用 body / 多 op）JS/LLVM 输出一致
-- 单 effect 多 op custom-effect 差分用例锁 parity（`tests/cases/llvm/`）
-- 全 E2E + llvm_diff 通过；重新编译 dist + 自举一致
-
 ### B-097 自定义 effect handler LLVM — phase 2（custom-abort / default / delegate / nesting）[feature] [P2] [M] [judgment] [queued]
 > 2026-06-03 从 B-090 拆出（D3 分期）。B-090 核心（单 effect multi-op tail-resumptive）落地后的全 parity 收口。复杂度 M-L。**依赖 B-090**。
 
