@@ -27,6 +27,16 @@ fn synthetic_span() -> Span {
     Span { file: "<perceus>", start: pos, end: pos }
 }
 
+// B-084 #131(a): the wildcard `_` is never bound to a real named_values slot
+// (codegen's destructure / for-in / let lowering deliberately skips `_`), so a
+// Drop/Dup naming `_` is unrunnable RC noise (a fail-safe codegen skip + rc-warn).
+// `_` also has no observable binding to release — it is a discard, the value
+// flows through the enclosing scrutinee's own RC. Centralise the skip so every
+// drop/dup emission site is consistent.
+fn rc_name_skippable(name: Str) -> Bool {
+    name == "_"
+}
+
 // ============================================================
 // Collect all variable references in an expression (names only)
 // This is used to determine which variables are "used" in an expr.
@@ -551,7 +561,7 @@ fn transform_fn_body(params: List<HParam>, body: HExpr) -> HExpr {
     // Insert drops at the beginning of the function body.
     let mut param_drops: List<HStmt> = []
     for p in params {
-        if remaining_live.contains(p.name) == false {
+        if remaining_live.contains(p.name) == false && rc_name_skippable(p.name) == false {
             param_drops.push(HStmt::Drop { name: p.name, ty: p.ty, span: synthetic_span() })
         }
     }
@@ -663,7 +673,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             if cur_live.contains(name) {
                 // Variable is used later — remove from live set (it was just defined)
                 cur_live.remove(name)
-            } else {
+            } else if rc_name_skippable(name) == false {
                 // Variable is never used → drop immediately after definition
                 out.push(HStmt::Drop { name: name, ty: ty, span: synthetic_span() })
             }
@@ -679,7 +689,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
 
             if cur_live.contains(name) {
                 cur_live.remove(name)
-            } else {
+            } else if rc_name_skippable(name) == false {
                 out.push(HStmt::Drop { name: name, ty: ty, span: synthetic_span() })
             }
 
@@ -803,7 +813,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             // body flush, so a conservative pre-loop dup would over-count (leak).
             let mut out: List<HStmt> = []
             for v in loop_vars {
-                if cur_live.contains(v) && local_loop_captures.contains(v) == false {
+                if cur_live.contains(v) && local_loop_captures.contains(v) == false && rc_name_skippable(v) == false {
                     out.push(HStmt::Dup { name: v, ty: Type::UnitType, span: synthetic_span() })
                 }
             }
@@ -865,7 +875,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             // iteration, so its dups flush INTO the body expression.
             let mut out: List<HStmt> = dups_to_stmts(iter_result.dups)
             for v in loop_vars {
-                if cur_live.contains(v) && local_loop_captures.contains(v) == false {
+                if cur_live.contains(v) && local_loop_captures.contains(v) == false && rc_name_skippable(v) == false {
                     out.push(HStmt::Dup { name: v, ty: Type::UnitType, span: synthetic_span() })
                 }
             }
@@ -904,7 +914,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             for b in bindings {
                 if cur_live.contains(b.name) {
                     cur_live.remove(b.name)
-                } else {
+                } else if rc_name_skippable(b.name) == false {
                     out.push(HStmt::Drop { name: b.name, ty: b.ty, span: synthetic_span() })
                 }
             }
@@ -1686,7 +1696,9 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
 fn make_drop_list(names: Set<Str>) -> List<HStmt> {
     let mut drops: List<HStmt> = []
     for name in names {
-        drops.push(HStmt::Drop { name: name, ty: Type::UnitType, span: synthetic_span() })
+        if rc_name_skippable(name) == false {
+            drops.push(HStmt::Drop { name: name, ty: Type::UnitType, span: synthetic_span() })
+        }
     }
     drops
 }
@@ -1736,7 +1748,9 @@ fn prepend_stmts_to_expr(expr: HExpr, stmts: List<HStmt>) -> HExpr {
 fn dups_to_stmts(dups: List<Str>) -> List<HStmt> {
     let mut out: List<HStmt> = []
     for name in dups {
-        out.push(HStmt::Dup { name: name, ty: Type::UnitType, span: synthetic_span() })
+        if rc_name_skippable(name) == false {
+            out.push(HStmt::Dup { name: name, ty: Type::UnitType, span: synthetic_span() })
+        }
     }
     out
 }

@@ -49,7 +49,7 @@
 |------|------|-----|--------|
 | ~~B-083~~ ✅ | LLVM match guard 完整实现（codegen + perceus RC + diff）| G-c + G-a/b(RC) | P1 |
 | ~~B-088~~ ✅ | 双后端差分覆盖扩展 — 锁 6 parity 用例 + 发现 6 处 LLVM 发散喂 B-087 | G-c | P1 |
-| B-084 | Perceus drop 精度（#131 落地 + #130 env drop + drop_T 完整性）| G-a/b | P2 |
+| B-084 | Perceus drop 精度（#131 ✅ 96→0 · #3 ✅ · #130+#4 待 capture 所有权决策）| G-a/b | P2 |
 | B-085 | Perceus 发射 determinism（drop/dup 顺序独立于 Set 迭代序）| G-b | P2 |
 | B-086 | LLVM 缺失 runtime 原语（flat_map/enumerate/str_to_int/float）| G-c | P2 |
 | B-087 | LLVM codegen 双后端 parity（dict 多态 / Wrapped / range / #103 mut 等）| G-c | P2 |
@@ -633,7 +633,9 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-084 Perceus drop 精度 + drop_T 完整性 [bugfix] [P2] [L] [judgment] [doing]
+### B-084 Perceus drop 精度 + drop_T 完整性 [bugfix] [P2] [L] [judgment] [waiting-feedback]
+
+> **进度（2026-06-03，commit a8fef7c）**：**#131 ✅ 完整修复**（rc-warn 96→0：`_` 通配符跳过 + catch/handle 独立闭包 capture drop 目标；dist 不动点；728+27 测试过）。**#3 ✅ 核查结论「基本已正确」**（drop_T 类型擦除、tuple 走 List drop、单态化泛型不破坏；仅 Range/Eq-dict process-lifetime 极小残留，无需大改）。**#130 + #4 退回 Discussion**——Worker 实证发现裸加 env auto-drop 会与 #131 的 catch borrow-capture 冲突、把安全泄漏变 double-free，需先定 capture 所有权模型（owned vs borrowed），详见 worker_feedback `[决策]`。待该决策后重新排队做 #130/#4。
 
 带 RC pass 自编译暴露的 drop 精度问题，方向安全（泄漏，非 UAF），但拉高 native 内存峰值（G-a）并可能漏 drop。四块（原 audit #130/#131 + B-083 guard-false 残留归此）：
 

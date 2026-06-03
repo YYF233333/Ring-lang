@@ -4067,63 +4067,59 @@ function gen_lambda(ctx, params, return_type, body, ty) {
   return closure_ptr;
 }
 
-function collect_captures(ctx, expr, params, captures) {
-  __ring_match121: {
-    const __ring_m121 = expr;
-    if (__ring_m121._tag === "Ident") {
-      const name = __ring_m121.name; const resolved_name = __ring_m121.resolved_name;
-      const lookup_name = (function() {
+function consider_capture_name(ctx, name, resolved_name, params, captures) {
+  const lookup_name = (function() {
   const __ring_m = resolved_name;
   if (__ring_m._tag === "some") { const rn = __ring_m._0; return rn; }
   if (__ring_m._tag === "none") { return name; }
   __match_fail(__ring_m);
 })();
-      let is_param = false;
-      const __ring_iter_50 = __List_Iterable.iter(params);
-      while (true) {
-        const __ring_next_50 = __ListIterator_Iterator.next(__ring_iter_50);
-        if (__ring_next_50._tag === "none") break;
-        const p = __ring_next_50._0;
-        if (((p.name === lookup_name) || (p.name === name))) {
-          is_param = true;
-        }
-      }
-      if ((is_param === false)) {
-        const mangled = codegen_llvm_ctx$llvm_resolve_fn(ctx, lookup_name);
-        const is_fn = (function() {
+  let is_param = false;
+  const __ring_iter_50 = __List_Iterable.iter(params);
+  while (true) {
+    const __ring_next_50 = __ListIterator_Iterator.next(__ring_iter_50);
+    if (__ring_next_50._tag === "none") break;
+    const p = __ring_next_50._0;
+    if (((p.name === lookup_name) || (p.name === name))) {
+      is_param = true;
+    }
+  }
+  if ((is_param === false)) {
+    const mangled = codegen_llvm_ctx$llvm_resolve_fn(ctx, lookup_name);
+    const is_fn = (function() {
   const __ring_m = _Map_get(ctx.functions, mangled);
   if (__ring_m._tag === "some") { return true; }
   if (__ring_m._tag === "none") { return (function() {
   const mangled2 = codegen_llvm_ctx$llvm_mangle_fn(name);
-  __ring_match122: {
-    const __ring_m122 = _Map_get(ctx.functions, mangled2);
-    if (__ring_m122._tag === "some") {
+  __ring_match121: {
+    const __ring_m121 = _Map_get(ctx.functions, mangled2);
+    if (__ring_m121._tag === "some") {
       return true;
-      break __ring_match122;
+      break __ring_match121;
     }
-    if (__ring_m122._tag === "none") {
+    if (__ring_m121._tag === "none") {
       const mangled3 = codegen_llvm_ctx$llvm_resolve_fn(ctx, name);
-      __ring_match123: {
-        const __ring_m123 = _Map_get(ctx.functions, mangled3);
-        if (__ring_m123._tag === "some") {
+      __ring_match122: {
+        const __ring_m122 = _Map_get(ctx.functions, mangled3);
+        if (__ring_m122._tag === "some") {
           return true;
-          break __ring_match123;
+          break __ring_match122;
         }
-        if (__ring_m123._tag === "none") {
+        if (__ring_m122._tag === "none") {
           return false;
-          break __ring_match123;
+          break __ring_match122;
         }
-        __match_fail(__ring_m123);
+        __match_fail(__ring_m122);
       }
-      break __ring_match122;
+      break __ring_match121;
     }
-    __match_fail(__ring_m122);
+    __match_fail(__ring_m121);
   }
 })(); }
   __match_fail(__ring_m);
 })();
-        if ((is_fn === false)) {
-          const is_local = (function() {
+    if ((is_fn === false)) {
+      const is_local = (function() {
   const __ring_m = _Map_get(ctx.named_values, lookup_name);
   if (__ring_m._tag === "some") { return true; }
   if (__ring_m._tag === "none") { return (function() {
@@ -4134,38 +4130,46 @@ function collect_captures(ctx, expr, params, captures) {
 })(); }
   __match_fail(__ring_m);
 })();
-          if (is_local) {
-            let already = false;
-            const __ring_iter_51 = __List_Iterable.iter(captures);
-            while (true) {
-              const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
-              if (__ring_next_51._tag === "none") break;
-              const c = __ring_next_51._0;
-              if (((c === lookup_name) || (c === name))) {
-                already = true;
-              }
-            }
-            if ((already === false)) {
-              return List_push(captures, lookup_name);
-            }
+      if (is_local) {
+        let already = false;
+        const __ring_iter_51 = __List_Iterable.iter(captures);
+        while (true) {
+          const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
+          if (__ring_next_51._tag === "none") break;
+          const c = __ring_next_51._0;
+          if (((c === lookup_name) || (c === name))) {
+            already = true;
           }
         }
+        if ((already === false)) {
+          return List_push(captures, lookup_name);
+        }
       }
-      break __ring_match121;
     }
-    if (__ring_m121._tag === "BinOp") {
-      const left = __ring_m121.left; const right = __ring_m121.right;
+  }
+}
+
+function collect_captures(ctx, expr, params, captures) {
+  __ring_match123: {
+    const __ring_m123 = expr;
+    if (__ring_m123._tag === "Ident") {
+      const name = __ring_m123.name; const resolved_name = __ring_m123.resolved_name;
+      return consider_capture_name(ctx, name, resolved_name, params, captures);
+      break __ring_match123;
+    }
+    if (__ring_m123._tag === "BinOp") {
+      const left = __ring_m123.left; const right = __ring_m123.right;
       collect_captures(ctx, left, params, captures);
       return collect_captures(ctx, right, params, captures);
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "UnaryOp") {
-      const operand = __ring_m121.operand;
+    if (__ring_m123._tag === "UnaryOp") {
+      const operand = __ring_m123.operand;
       return collect_captures(ctx, operand, params, captures);
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "Call") {
-      const callee = __ring_m121.callee; const args = __ring_m121.args;
+    if (__ring_m123._tag === "Call") {
+      const callee = __ring_m123.callee; const args = __ring_m123.args;
       collect_captures(ctx, callee, params, captures);
       const __ring_iter_52 = __List_Iterable.iter(args);
       while (true) {
@@ -4174,15 +4178,15 @@ function collect_captures(ctx, expr, params, captures) {
         const a = __ring_next_52._0;
         collect_captures(ctx, a, params, captures);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "FieldAccess") {
-      const receiver = __ring_m121.receiver;
+    if (__ring_m123._tag === "FieldAccess") {
+      const receiver = __ring_m123.receiver;
       return collect_captures(ctx, receiver, params, captures);
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "Block") {
-      const stmts = __ring_m121.stmts; const tail = __ring_m121.tail;
+    if (__ring_m123._tag === "Block") {
+      const stmts = __ring_m123.stmts; const tail = __ring_m123.tail;
       const __ring_iter_53 = __List_Iterable.iter(stmts);
       while (true) {
         const __ring_next_53 = __ListIterator_Iterator.next(__ring_iter_53);
@@ -4202,10 +4206,10 @@ function collect_captures(ctx, expr, params, captures) {
         }
         __match_fail(__ring_m124);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "IfExpr") {
-      const condition = __ring_m121.condition; const then_branch = __ring_m121.then_branch; const else_branch = __ring_m121.else_branch;
+    if (__ring_m123._tag === "IfExpr") {
+      const condition = __ring_m123.condition; const then_branch = __ring_m123.then_branch; const else_branch = __ring_m123.else_branch;
       collect_captures(ctx, condition, params, captures);
       collect_captures(ctx, then_branch, params, captures);
       __ring_match125: {
@@ -4220,10 +4224,10 @@ function collect_captures(ctx, expr, params, captures) {
         }
         __match_fail(__ring_m125);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "MatchExpr") {
-      const scrutinee = __ring_m121.scrutinee; const arms = __ring_m121.arms;
+    if (__ring_m123._tag === "MatchExpr") {
+      const scrutinee = __ring_m123.scrutinee; const arms = __ring_m123.arms;
       collect_captures(ctx, scrutinee, params, captures);
       const __ring_iter_54 = __List_Iterable.iter(arms);
       while (true) {
@@ -4232,10 +4236,10 @@ function collect_captures(ctx, expr, params, captures) {
         const arm = __ring_next_54._0;
         collect_captures(ctx, arm.body, params, captures);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "StringInterp") {
-      const parts = __ring_m121.parts;
+    if (__ring_m123._tag === "StringInterp") {
+      const parts = __ring_m123.parts;
       const __ring_iter_55 = __List_Iterable.iter(parts);
       while (true) {
         const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
@@ -4251,10 +4255,10 @@ function collect_captures(ctx, expr, params, captures) {
           break __ring_match126;
         }
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "StructLit") {
-      const fields = __ring_m121.fields; const spread = __ring_m121.spread;
+    if (__ring_m123._tag === "StructLit") {
+      const fields = __ring_m123.fields; const spread = __ring_m123.spread;
       const __ring_iter_56 = __List_Iterable.iter(fields);
       while (true) {
         const __ring_next_56 = __ListIterator_Iterator.next(__ring_iter_56);
@@ -4274,10 +4278,10 @@ function collect_captures(ctx, expr, params, captures) {
         }
         __match_fail(__ring_m127);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "ListLit") {
-      const elements = __ring_m121.elements;
+    if (__ring_m123._tag === "ListLit") {
+      const elements = __ring_m123.elements;
       const __ring_iter_57 = __List_Iterable.iter(elements);
       while (true) {
         const __ring_next_57 = __ListIterator_Iterator.next(__ring_iter_57);
@@ -4285,10 +4289,10 @@ function collect_captures(ctx, expr, params, captures) {
         const e = __ring_next_57._0;
         collect_captures(ctx, e, params, captures);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "TupleLit") {
-      const elements = __ring_m121.elements;
+    if (__ring_m123._tag === "TupleLit") {
+      const elements = __ring_m123.elements;
       const __ring_iter_58 = __List_Iterable.iter(elements);
       while (true) {
         const __ring_next_58 = __ListIterator_Iterator.next(__ring_iter_58);
@@ -4296,21 +4300,21 @@ function collect_captures(ctx, expr, params, captures) {
         const e = __ring_next_58._0;
         collect_captures(ctx, e, params, captures);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "IndexExpr") {
-      const receiver = __ring_m121.receiver; const index = __ring_m121.index;
+    if (__ring_m123._tag === "IndexExpr") {
+      const receiver = __ring_m123.receiver; const index = __ring_m123.index;
       collect_captures(ctx, receiver, params, captures);
       return collect_captures(ctx, index, params, captures);
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "Lambda") {
-      const lb = __ring_m121.body;
+    if (__ring_m123._tag === "Lambda") {
+      const lb = __ring_m123.body;
       return collect_captures(ctx, lb, params, captures);
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "NamedVariantConstruct") {
-      const nvc_fields = __ring_m121.fields; const nvc_spread = __ring_m121.spread;
+    if (__ring_m123._tag === "NamedVariantConstruct") {
+      const nvc_fields = __ring_m123.fields; const nvc_spread = __ring_m123.spread;
       const __ring_iter_59 = __List_Iterable.iter(nvc_fields);
       while (true) {
         const __ring_next_59 = __ListIterator_Iterator.next(__ring_iter_59);
@@ -4330,10 +4334,10 @@ function collect_captures(ctx, expr, params, captures) {
         }
         __match_fail(__ring_m128);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "TryCatch") {
-      const tc_body = __ring_m121.body; const tc_arms = __ring_m121.arms;
+    if (__ring_m123._tag === "TryCatch") {
+      const tc_body = __ring_m123.body; const tc_arms = __ring_m123.arms;
       collect_captures(ctx, tc_body, params, captures);
       const __ring_iter_60 = __List_Iterable.iter(tc_arms);
       while (true) {
@@ -4342,15 +4346,15 @@ function collect_captures(ctx, expr, params, captures) {
         const arm = __ring_next_60._0;
         collect_captures(ctx, arm.body, params, captures);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "HandleExpr") {
-      const he_body = __ring_m121.body;
+    if (__ring_m123._tag === "HandleExpr") {
+      const he_body = __ring_m123.body;
       return collect_captures(ctx, he_body, params, captures);
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "EffectOp") {
-      const eo_args = __ring_m121.args;
+    if (__ring_m123._tag === "EffectOp") {
+      const eo_args = __ring_m123.args;
       const __ring_iter_61 = __List_Iterable.iter(eo_args);
       while (true) {
         const __ring_next_61 = __ListIterator_Iterator.next(__ring_iter_61);
@@ -4358,15 +4362,15 @@ function collect_captures(ctx, expr, params, captures) {
         const a = __ring_next_61._0;
         collect_captures(ctx, a, params, captures);
       }
-      break __ring_match121;
+      break __ring_match123;
     }
-    if (__ring_m121._tag === "RangeExpr") {
-      const rs = __ring_m121.start; const re = __ring_m121.end;
+    if (__ring_m123._tag === "RangeExpr") {
+      const rs = __ring_m123.start; const re = __ring_m123.end;
       collect_captures(ctx, rs, params, captures);
       return collect_captures(ctx, re, params, captures);
-      break __ring_match121;
+      break __ring_match123;
     }
-    break __ring_match121;
+    break __ring_match123;
   }
 }
 
@@ -4443,6 +4447,16 @@ function collect_captures_stmt(ctx, stmt, params, captures) {
         }
         __match_fail(__ring_m131);
       }
+      break __ring_match129;
+    }
+    if (__ring_m129._tag === "Drop") {
+      const name = __ring_m129.name;
+      return consider_capture_name(ctx, name, Option_none, params, captures);
+      break __ring_match129;
+    }
+    if (__ring_m129._tag === "Dup") {
+      const name = __ring_m129.name;
+      return consider_capture_name(ctx, name, Option_none, params, captures);
       break __ring_match129;
     }
     break __ring_match129;

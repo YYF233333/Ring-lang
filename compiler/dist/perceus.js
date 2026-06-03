@@ -241,6 +241,10 @@ function synthetic_span() {
   return new ast$Span("<perceus>", pos, pos);
 }
 
+function rc_name_skippable(name) {
+  return (name === "_");
+}
+
 function collect_expr_vars(expr, out) {
   __ring_match6: {
     const __ring_m6 = expr;
@@ -1330,7 +1334,7 @@ function transform_fn_body(params, body) {
     const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
     if (__ring_next_38._tag === "none") break;
     const p = __ring_next_38._0;
-    if ((_Set_contains(remaining_live, p.name, __Str_Eq) === false)) {
+    if (((_Set_contains(remaining_live, p.name, __Str_Eq) === false) && (rc_name_skippable(p.name) === false))) {
       List_push(param_drops, hir$HStmt_Drop(p.name, p.ty, synthetic_span()));
     }
   }
@@ -1420,7 +1424,9 @@ function rc_stmt(stmt, live, locals) {
       if (_Set_contains(cur_live, name, __Str_Eq)) {
         _Set_remove(cur_live, name);
       } else {
-        List_push(out, hir$HStmt_Drop(name, ty, synthetic_span()));
+        if ((rc_name_skippable(name) === false)) {
+          List_push(out, hir$HStmt_Drop(name, ty, synthetic_span()));
+        }
       }
       return new RcStmtsResult(out, cur_live);
       break __ring_match38;
@@ -1434,7 +1440,9 @@ function rc_stmt(stmt, live, locals) {
       if (_Set_contains(cur_live, name, __Str_Eq)) {
         _Set_remove(cur_live, name);
       } else {
-        List_push(out, hir$HStmt_Drop(name, ty, synthetic_span()));
+        if ((rc_name_skippable(name) === false)) {
+          List_push(out, hir$HStmt_Drop(name, ty, synthetic_span()));
+        }
       }
       return new RcStmtsResult(out, cur_live);
       break __ring_match38;
@@ -1548,7 +1556,7 @@ function rc_stmt(stmt, live, locals) {
         const __ring_next_44 = __SetIterator_Iterator.next(__ring_iter_44);
         if (__ring_next_44._tag === "none") break;
         const v = __ring_next_44._0;
-        if ((_Set_contains(cur_live, v, __Str_Eq) && (_Set_contains(local_loop_captures, v, __Str_Eq) === false))) {
+        if (((_Set_contains(cur_live, v, __Str_Eq) && (_Set_contains(local_loop_captures, v, __Str_Eq) === false)) && (rc_name_skippable(v) === false))) {
           List_push(out, hir$HStmt_Dup(v, types$Type_UnitType, synthetic_span()));
         }
       }
@@ -1638,7 +1646,7 @@ function rc_stmt(stmt, live, locals) {
         const __ring_next_50 = __SetIterator_Iterator.next(__ring_iter_50);
         if (__ring_next_50._tag === "none") break;
         const v = __ring_next_50._0;
-        if ((_Set_contains(cur_live, v, __Str_Eq) && (_Set_contains(local_loop_captures, v, __Str_Eq) === false))) {
+        if (((_Set_contains(cur_live, v, __Str_Eq) && (_Set_contains(local_loop_captures, v, __Str_Eq) === false)) && (rc_name_skippable(v) === false))) {
           List_push(out, hir$HStmt_Dup(v, types$Type_UnitType, synthetic_span()));
         }
       }
@@ -1679,7 +1687,9 @@ function rc_stmt(stmt, live, locals) {
         if (_Set_contains(cur_live, b.name, __Str_Eq)) {
           _Set_remove(cur_live, b.name);
         } else {
-          List_push(out, hir$HStmt_Drop(b.name, b.ty, synthetic_span()));
+          if ((rc_name_skippable(b.name) === false)) {
+            List_push(out, hir$HStmt_Drop(b.name, b.ty, synthetic_span()));
+          }
         }
       }
       return new RcStmtsResult(out, cur_live);
@@ -2395,7 +2405,9 @@ function make_drop_list(names) {
     const __ring_next_73 = __SetIterator_Iterator.next(__ring_iter_73);
     if (__ring_next_73._tag === "none") break;
     const name = __ring_next_73._0;
-    List_push(drops, hir$HStmt_Drop(name, types$Type_UnitType, synthetic_span()));
+    if ((rc_name_skippable(name) === false)) {
+      List_push(drops, hir$HStmt_Drop(name, types$Type_UnitType, synthetic_span()));
+    }
   }
   return drops;
 }
@@ -2436,7 +2448,9 @@ function dups_to_stmts(dups) {
     const __ring_next_74 = __ListIterator_Iterator.next(__ring_iter_74);
     if (__ring_next_74._tag === "none") break;
     const name = __ring_next_74._0;
-    List_push(out, hir$HStmt_Dup(name, types$Type_UnitType, synthetic_span()));
+    if ((rc_name_skippable(name) === false)) {
+      List_push(out, hir$HStmt_Dup(name, types$Type_UnitType, synthetic_span()));
+    }
   }
   return out;
 }

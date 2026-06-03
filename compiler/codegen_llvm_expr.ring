@@ -2894,59 +2894,68 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     closure_ptr
 }
 
+// Decide whether a bare variable name (no resolved_name) should be captured into
+// the enclosing closure's env, and if so append it to `captures`. Factored out of
+// collect_captures' Ident arm so the RC-stmt (Drop/Dup) path can reuse the exact
+// same param/function/local classification — a Drop must capture the variable it
+// names, otherwise the closure body cannot find it in named_values (B-084 #131).
+fn consider_capture_name(ctx: LlvmCtx, name: Str, resolved_name: Str?, params: List<HParam>, mut captures: List<Str>) {
+    let lookup_name = match resolved_name {
+        some(rn) => rn,
+        none => name,
+    }
+    // Check if it's a param
+    let mut is_param = false
+    for p in params {
+        if p.name == lookup_name || p.name == name { is_param = true }
+    }
+    if is_param == false {
+        // Check if it's a known function (not a capture)
+        let mangled = llvm_resolve_fn(ctx, lookup_name)
+        let is_fn = match ctx.functions.get(mangled) {
+            some(_) => true,
+            none => {
+                let mangled2 = llvm_mangle_fn(name)
+                match ctx.functions.get(mangled2) {
+                    some(_) => true,
+                    none => {
+                        let mangled3 = llvm_resolve_fn(ctx, name)
+                        match ctx.functions.get(mangled3) {
+                            some(_) => true,
+                            none => false,
+                        }
+                    },
+                }
+            },
+        }
+        if is_fn == false {
+            // Check if it's a local variable (potential capture)
+            let is_local = match ctx.named_values.get(lookup_name) {
+                some(_) => true,
+                none => match ctx.named_values.get(name) {
+                    some(_) => true,
+                    none => false,
+                },
+            }
+            if is_local {
+                // Add to captures if not already present
+                let mut already = false
+                for c in captures {
+                    if c == lookup_name || c == name { already = true }
+                }
+                if already == false {
+                    captures.push(lookup_name)
+                }
+            }
+        }
+    }
+}
+
 // Collect variable names referenced in an expression that are not params or global functions
 fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut captures: List<Str>) {
     match expr {
         HExpr::Ident { name, resolved_name, .. } => {
-            let lookup_name = match resolved_name {
-                some(rn) => rn,
-                none => name,
-            }
-            // Check if it's a param
-            let mut is_param = false
-            for p in params {
-                if p.name == lookup_name || p.name == name { is_param = true }
-            }
-            if is_param == false {
-                // Check if it's a known function (not a capture)
-                let mangled = llvm_resolve_fn(ctx, lookup_name)
-                let is_fn = match ctx.functions.get(mangled) {
-                    some(_) => true,
-                    none => {
-                        let mangled2 = llvm_mangle_fn(name)
-                        match ctx.functions.get(mangled2) {
-                            some(_) => true,
-                            none => {
-                                let mangled3 = llvm_resolve_fn(ctx, name)
-                                match ctx.functions.get(mangled3) {
-                                    some(_) => true,
-                                    none => false,
-                                }
-                            },
-                        }
-                    },
-                }
-                if is_fn == false {
-                    // Check if it's a local variable (potential capture)
-                    let is_local = match ctx.named_values.get(lookup_name) {
-                        some(_) => true,
-                        none => match ctx.named_values.get(name) {
-                            some(_) => true,
-                            none => false,
-                        },
-                    }
-                    if is_local {
-                        // Add to captures if not already present
-                        let mut already = false
-                        for c in captures {
-                            if c == lookup_name || c == name { already = true }
-                        }
-                        if already == false {
-                            captures.push(lookup_name)
-                        }
-                    }
-                }
-            }
+            consider_capture_name(ctx, name, resolved_name, params, captures)
         },
         HExpr::BinOp { left, right, .. } => {
             collect_captures(ctx, left, params, captures)
@@ -3067,6 +3076,17 @@ fn collect_captures_stmt(ctx: LlvmCtx, stmt: HStmt, params: List<HParam>, mut ca
                 some(eb) => collect_captures(ctx, eb, params, captures),
                 none => {},
             }
+        },
+        // B-084 #131: Perceus branch-balancing can place a Drop/Dup for an
+        // outer-scope variable inside a branch that codegen lowers to a separate
+        // closure (try/catch body+arms, handle body). The closure must capture
+        // that variable so the RC op can load it from named_values; treat the
+        // RC-stmt's target name as a use for capture purposes.
+        HStmt::Drop { name, .. } => {
+            consider_capture_name(ctx, name, none, params, captures)
+        },
+        HStmt::Dup { name, .. } => {
+            consider_capture_name(ctx, name, none, params, captures)
         },
         _ => {},
     }
