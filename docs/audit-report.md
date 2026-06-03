@@ -27,6 +27,8 @@
 **文件**：`compiler/unify.ring:55-58`
 **修复方向**：在 `occurs_in` 中递归到每个 field 的 `.ty` 和每个 variant 的 `.fields`。需与 #45 修复协调（否则 fields 含未替换 type var，occurs check 会看到错误的变量）。
 
+> **2026-06-03 阻塞**：与 #45 已决策冲突（apply_subst 不递归 fields），单修 occurs_in 不完备。已并入 backlog B-057（waiting-feedback），等 Discussion agent 评估 nominal 重构方案。详见 worker_feedback.md。
+
 发现者：Opus
 
 
