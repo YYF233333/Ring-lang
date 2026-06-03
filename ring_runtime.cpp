@@ -549,9 +549,71 @@ extern "C" void* ring_int_to_str(int64_t val) {
     return data;
 }
 
+// JS-parity double formatting: ECMAScript Number→String (String(x) / console.log)
+// produces the *shortest* decimal that round-trips back to the same double
+// (3.5 → "3.5", 3.0 → "3", 100.0 → "100", not std::to_string's "3.500000"), and
+// chooses fixed vs exponential notation by the ECMA-262 §6.1.6.1.20 rules — NOT by
+// printf's "%g" thresholds, which diverge (e.g. "%g" of 100.0 at 1 sig-fig is
+// "1e+02" but JS yields "100"). Used by Float.to_str and by print() of a Float arg
+// so the LLVM backend matches the JS oracle.
+//
+// Algorithm: (1) find the fewest significant digits (1..17) whose decimal rendering
+// round-trips, capturing the digit string `digits` (no '.') and the base-10 point
+// exponent `n` such that value = sign * digits * 10^(n - k) where k=len(digits).
+// (2) Apply the ECMAScript ToString(Number) case split on n and k.
+static std::string js_double_to_string(double val) {
+    if (val != val) return "NaN";
+    if (val == 0.0) return "0";          // -0.0 → "0" too (String(-0) === "0")
+    bool neg = val < 0.0;
+    double a = neg ? -val : val;
+    if (a == 1.0/0.0) return neg ? "-Infinity" : "Infinity";
+
+    // Find shortest round-tripping significant-digit string via "%.*e".
+    char buf[40];
+    int prec = 0;                         // digits after the decimal point in %e
+    for (prec = 0; prec <= 16; prec++) {
+        snprintf(buf, sizeof(buf), "%.*e", prec, a);
+        if (strtod(buf, nullptr) == a) break;
+    }
+    // buf looks like "d.ddde±XX". Extract significant digits and exponent E
+    // (the power of ten of the leading digit).
+    std::string s(buf);
+    size_t epos = s.find('e');
+    std::string mant = s.substr(0, epos);
+    int E = atoi(s.c_str() + epos + 1);
+    std::string digits;
+    for (char c : mant) { if (c >= '0' && c <= '9') digits.push_back(c); }
+    // Strip trailing zeros (shortest form); keep at least one digit.
+    while (digits.size() > 1 && digits.back() == '0') digits.pop_back();
+    int k = (int)digits.size();           // number of significant digits
+    int n = E + 1;                        // ECMA's n: value = digits * 10^(n-k)
+
+    std::string out;
+    if (k <= n && n <= 21) {
+        // Integer with trailing zeros: digits followed by (n-k) zeros.
+        out = digits;
+        out.append(n - k, '0');
+    } else if (0 < n && n <= 21) {
+        // Decimal point inside the digit string.
+        out = digits.substr(0, n) + "." + digits.substr(n);
+    } else if (-6 < n && n <= 0) {
+        // 0.00…digits
+        out = "0.";
+        out.append(-n, '0');
+        out += digits;
+    } else {
+        // Exponential form: d[.ddd]e±(n-1)
+        std::string m = digits.substr(0, 1);
+        if (k > 1) m += "." + digits.substr(1);
+        int exp = n - 1;
+        out = m + "e" + (exp >= 0 ? "+" : "-") + std::to_string(exp >= 0 ? exp : -exp);
+    }
+    return neg ? ("-" + out) : out;
+}
+
 extern "C" void* ring_float_to_str(double val) {
     void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
-    new (data) std::string(std::to_string(val));
+    new (data) std::string(js_double_to_string(val));
     return data;
 }
 

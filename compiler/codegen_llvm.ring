@@ -592,6 +592,62 @@ fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<St
 }
 
 // ============================================================
+// scan_fn_mut_params — collect per-function mut value-type param flags (#B-087 gap 5)
+// ============================================================
+
+// A value type (Int/Float/Bool/Str) is the only kind a `mut` param boxes into a CELL.
+// Reference types (List/Map/Set/struct/enum) already share via the ptr, so a mut on
+// them needs no cell. Mirrors codegen.ring's is_codegen_value_type.
+fn llvm_is_value_type(t: Type) -> Bool {
+    match t {
+        Type::IntType => true,
+        Type::FloatType => true,
+        Type::BoolType => true,
+        Type::StrType => true,
+        _ => false,
+    }
+}
+
+fn mut_param_flags(params: List<HParam>) -> List<Bool> {
+    let mut flags: List<Bool> = []
+    for p in params {
+        // self and non-mut params are never boxed; only mut value-type params are.
+        if p.name == "self" || !p.is_mutable {
+            flags.push(false)
+        } else {
+            flags.push(llvm_is_value_type(p.ty))
+        }
+    }
+    flags
+}
+
+fn scan_fn_mut_params_llvm(decls: List<HDecl>, mut fn_mut_params: Map<Str, List<Bool>>) {
+    for decl in decls {
+        match decl {
+            HDecl::Fn { name, params, .. } => {
+                fn_mut_params.insert(name, mut_param_flags(params))
+            },
+            HDecl::Impl { target_type, methods, .. } => {
+                for m in methods {
+                    match m {
+                        HDecl::Fn { name: mn, params: mp, .. } => {
+                            // UFCS key (Type_method) for method-call dispatch lookup.
+                            let ufcs_name = "${target_type}_${mn}"
+                            fn_mut_params.insert(ufcs_name, mut_param_flags(mp))
+                        },
+                        _ => {},
+                    }
+                }
+            },
+            HDecl::ModBlock { decls: md, .. } => {
+                scan_fn_mut_params_llvm(md, fn_mut_params)
+            },
+            _ => {},
+        }
+    }
+}
+
+// ============================================================
 // emit_drop_functions — generate per-type drop_T functions and register them
 // ============================================================
 
@@ -897,7 +953,8 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         loop_continue_bb: none,
         next_user_typeid: 64,
         type_to_typeid: map_new(),
-        boxed_vars: set_new()
+        boxed_vars: set_new(),
+        fn_mut_params: map_new()
     }
 
     // B-091: thread the auto-boxed mut-cell def_ids through so Var/read/write
@@ -910,6 +967,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // 7. Scan function effects and trait declarations
     scan_fn_effects(program.decls, ctx.local_fn_effects)
     scan_trait_decls(program.decls, ctx.trait_method_order)
+    scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
 
     // 7b. Declare runtime functions
     declare_runtime_fns(ctx)
@@ -1021,7 +1079,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         loop_continue_bb: none,
         next_user_typeid: 64,
         type_to_typeid: map_new(),
-        boxed_vars: set_new()
+        boxed_vars: set_new(),
+        fn_mut_params: map_new()
     }
 
     // 6. Register built-in types
@@ -1032,6 +1091,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         let (prefix, program, _uses) = m
         scan_fn_effects(program.decls, ctx.local_fn_effects)
         scan_trait_decls(program.decls, ctx.trait_method_order)
+        scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
         // B-091: union every module's auto-boxed mut-cell def_ids.
         for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
     }

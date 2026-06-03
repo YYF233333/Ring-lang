@@ -104,7 +104,7 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
         HExpr::FloatLit { value, .. } => gen_float_lit(ctx, value),
         HExpr::StrLit { value, .. } => gen_str_lit(ctx, value),
         HExpr::BoolLit { value, .. } => gen_bool_lit(ctx, value),
-        HExpr::Ident { name, resolved_name, def_id, .. } => gen_ident(ctx, name, resolved_name, def_id),
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, .. } => gen_ident(ctx, name, resolved_name, def_id, dict_closure_dicts, ty),
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, .. } => gen_binop(ctx, op, left, right, eq_dispatch, ord_dispatch, ty),
         HExpr::UnaryOp { op, operand, ty, .. } => gen_unaryop(ctx, op, operand, ty),
         HExpr::Call { callee, args, resolved_dicts, dict_dispatch, ty, effects, .. } =>
@@ -226,7 +226,23 @@ pub fn build_cell_store(mut ctx: LlvmCtx, cell_ptr: LLVMValueRef, new_val: LLVMV
     discard(LLVMBuildStore(ctx.builder, new_val, value_slot))
 }
 
-fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?) -> LLVMValueRef {
+fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?, dict_closure_dicts: List<Str>?, ty: Type) -> LLVMValueRef {
+    // #B-087 gap 1: a polymorphic function used as a first-class value carries
+    // dict_closure_dicts (the resolved trait dicts for its bounds). The function is
+    // generated with the dicts as trailing params (fn(args, dict...)), but a bare
+    // function value would be called through the uniform closure ABI fn(env, args)
+    // without supplying the dicts. So we build a real closure {fn_ptr, env_ptr} whose
+    // fn_ptr is a thunk that drops env and forwards (args, captured dicts) to the real
+    // function. Mirrors the JS backend's `(p0..) => fn(p0.., dict..)` wrapper.
+    match dict_closure_dicts {
+        some(dicts) => {
+            if dicts.len() > 0 {
+                let lk = match resolved_name { some(rn) => rn, none => name }
+                return gen_dict_closure_wrapper(ctx, lk, name, dicts, ty)
+            }
+        },
+        none => {},
+    }
     let lookup_name = match resolved_name {
         some(rn) => rn,
         none => name,
@@ -305,6 +321,124 @@ fn call_zero_arg_or_return(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled: Str)
         },
         none => fn_val,
     }
+}
+
+// #B-087 gap 1: build a closure value for a polymorphic function used as a first-class
+// value. The function `real_fn` is generated as fn(args, dict0..dictM, ev0..evK) -> ptr
+// (direct ABI). A bare function value is invoked through the uniform closure ABI
+// fn(env, args) without dicts. We therefore emit a thunk
+//   ring_<fn>__dictwrap(env, p0..pN) -> ptr
+// that loads the captured dicts/evidence from env and forwards
+//   real_fn(p0..pN, dict0..dictM, ev0..evK)
+// then return a {fn_ptr=thunk, env_ptr} closure pair (typeid 7). The env stores the
+// resolved dicts (and evidence) with leading count=0 so drop_closure_env never tries
+// to RC-drop them (they are shared/builtin dicts, not owned captures). Mirrors the JS
+// backend's `(p0..) => fn(p0.., dict.., ev..)` wrapper (codegen_expr.ring:38-62).
+fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_names: List<Str>, ty: Type) -> LLVMValueRef {
+    // Resolve the real function.
+    let mangled = llvm_resolve_fn(ctx, lookup_name)
+    let found = find_function_in_ctx(ctx, mangled, name)
+    let fn_info = match found {
+        some(fi) => fi,
+        none => panic("LLVM codegen: dict-closure wrapper: function '${name}' not found"),
+    }
+    let real_fn = fn_info.fn_val
+    let real_fn_ty = match ctx.fn_types.get(fn_info.fn_mangled) {
+        some(t) => t,
+        none => panic("LLVM codegen: dict-closure wrapper: fn type not found for ${fn_info.fn_mangled}"),
+    }
+
+    // Param count of the FUNCTION VALUE (without dicts/evidence) from its FnType.
+    let param_count = match ty {
+        Type::FnType { params, .. } => params.len(),
+        _ => 0,
+    }
+
+    // Resolve the dicts at this site (current scope) into LLVMValueRefs.
+    let mut dict_vals: List<LLVMValueRef> = []
+    for dn in dict_names {
+        dict_vals.push(resolve_dict_ref(ctx, DictRef::Simple(dn)))
+    }
+
+    // Evidence values for the function's effects (looked up in current scope).
+    let mut ev_vals: List<LLVMValueRef> = []
+    match ctx.fn_evidence_params.get(fn_info.fn_mangled) {
+        some(ev_params) => {
+            for ep in ev_params { ev_vals.push(lookup_evidence(ctx, ep)) }
+        },
+        none => {},
+    }
+
+    let captured_count = dict_vals.len() + ev_vals.len()
+
+    // Env layout: { i64 count(=0), ptr slot0, ... }. count=0 so drop_closure_env skips.
+    let mut env_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
+    for i in 0..captured_count { env_elem_types.push(ctx.ptr_type) }
+    let env_ty = LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
+
+    // Thunk signature: fn(env, p0..pN) -> ptr.
+    let thunk_name = fresh_name(ctx, "ring_dictwrap_")
+    let mut thunk_param_types: List<LLVMTypeRef> = [ctx.ptr_type]
+    for i in 0..param_count { thunk_param_types.push(ctx.ptr_type) }
+    let thunk_ty = LLVMFunctionType(ctx.ptr_type, thunk_param_types, 0)
+    let thunk_fn = LLVMAddFunction(ctx.module, thunk_name, thunk_ty)
+
+    // Emit the thunk body (save/restore builder position).
+    let saved_fn = ctx.current_fn
+    let saved_named = ctx.named_values
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(thunk_fn)
+    ctx.named_values = map_new()
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, thunk_fn, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    let env_param = LLVMGetParam(thunk_fn, 0)
+    // Forward args: p0..pN, then dicts/evidence loaded from env.
+    let mut call_args: List<LLVMValueRef> = []
+    for i in 0..param_count { call_args.push(LLVMGetParam(thunk_fn, i + 1)) }
+    for i in 0..captured_count {
+        let slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_param, i + 1, fresh_name(ctx, "ws"))
+        call_args.push(LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot, fresh_name(ctx, "wd")))
+    }
+    let ret = LLVMBuildCall2(ctx.builder, real_fn_ty, real_fn, call_args, fresh_name(ctx, "wcall"))
+    discard(LLVMBuildRet(ctx.builder, ret))
+
+    // Restore state.
+    ctx.named_values = saved_named
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+
+    // Allocate env and store count + captured dicts/evidence.
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let env_size = LLVMSizeOf(env_ty)
+    let env_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE_ENV, 0)
+    let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [env_size, env_typeid], fresh_name(ctx, "wenv"))
+    let count_slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, 0, fresh_name(ctx, "wcnt"))
+    discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, 0, 0), count_slot))
+    let mut slot_idx = 0
+    for dv in dict_vals {
+        let slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, slot_idx + 1, fresh_name(ctx, "wstore"))
+        discard(LLVMBuildStore(ctx.builder, dv, slot))
+        slot_idx = slot_idx + 1
+    }
+    for ev in ev_vals {
+        let slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, slot_idx + 1, fresh_name(ctx, "wstore"))
+        discard(LLVMBuildStore(ctx.builder, ev, slot))
+        slot_idx = slot_idx + 1
+    }
+
+    // Closure pair { fn_ptr=thunk, env_ptr } (typeid 7).
+    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let closure_size = LLVMSizeOf(closure_ty)
+    let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)
+    let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], fresh_name(ctx, "wcls"))
+    let fp_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "wfp"))
+    discard(LLVMBuildStore(ctx.builder, thunk_fn, fp_slot))
+    let ep_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "wep"))
+    discard(LLVMBuildStore(ctx.builder, env_alloc, ep_slot))
+    closure_ptr
 }
 
 // ============================================================
@@ -738,6 +872,99 @@ fn gen_unaryop(mut ctx: LlvmCtx, op: UnaryOp, operand: HExpr, ty: Type) -> LLVMV
 // Function calls
 // ============================================================
 
+// #B-087 gap 5 (#103): return the mut value-type flag list for this call's args,
+// aligned to the `args` list (i.e. excluding the receiver/self). For a bare Ident
+// callee, fn_mut_params is keyed by the call name and already aligns with args. For
+// a method call (FieldAccess), the scanned flags include self at index 0, so we drop
+// the leading flag to align with the receiver-less args. Returns none when the callee
+// has no recorded mut params (the common case → no boxing overhead).
+fn lookup_call_mut_flags(ctx: LlvmCtx, callee: HExpr) -> List<Bool>? {
+    match callee {
+        HExpr::Ident { name, resolved_name, .. } => {
+            let call_name = match resolved_name {
+                some(rn) => rn,
+                none => name,
+            }
+            ctx.fn_mut_params.get(call_name)
+        },
+        HExpr::FieldAccess { receiver, field, .. } => {
+            let recv_type = hexpr_type(receiver)
+            let type_name = match type_to_builtin_name(recv_type) {
+                some(n) => n,
+                none => match recv_type {
+                    Type::StructType { name, .. } => name,
+                    Type::EnumType { name, .. } => name,
+                    _ => "",
+                },
+            }
+            if type_name == "" {
+                none
+            } else {
+                let ufcs_name = "${type_name}_${field}"
+                match ctx.fn_mut_params.get(ufcs_name) {
+                    some(flags) => {
+                        // Drop the leading self flag so the list aligns with `args`.
+                        let mut shifted: List<Bool> = []
+                        let mut i = 1
+                        while i < flags.len() {
+                            match flags.get(i) {
+                                some(f) => shifted.push(f),
+                                none => {},
+                            }
+                            i = i + 1
+                        }
+                        some(shifted)
+                    },
+                    none => none,
+                }
+            }
+        },
+        _ => none,
+    }
+}
+
+// #B-087 gap 5 (#103): produce the value to pass for a `mut` value-type argument.
+// The callee expects a CELL pointer (ptr-to-box) it can write through. If the arg is
+// an Ident whose def is already auto-boxed (boxed_vars — a `let mut` written through
+// by a closure), its alloca already holds the shared cell; pass that cell directly so
+// the callee's writes are observed by the caller. Otherwise wrap the evaluated value
+// in a fresh cell (mirrors the JS backend's `{value: expr}` temporary box: a fresh
+// cell still gives correct in-callee mutation semantics; write-back to a non-boxed
+// caller var is not expected, matching JS).
+fn gen_mut_arg_llvm(mut ctx: LlvmCtx, arg: HExpr) -> LLVMValueRef {
+    match arg {
+        HExpr::Ident { name, resolved_name, def_id, .. } => {
+            if is_boxed_def(ctx, def_id) {
+                // Already a shared cell: load the cell pointer from its alloca (do NOT
+                // go through build_cell_load, which would read field 0). The alloca
+                // holds the cell ptr itself.
+                let lookup_name = match resolved_name {
+                    some(rn) => rn,
+                    none => name,
+                }
+                match ctx.named_values.get(lookup_name) {
+                    some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "mcell")),
+                    none => match ctx.named_values.get(name) {
+                        some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "mcell")),
+                        none => {
+                            // Fallback: evaluate and box fresh.
+                            let v = gen_llvm_expr(ctx, arg)
+                            build_cell_alloc(ctx, v)
+                        },
+                    },
+                }
+            } else {
+                let v = gen_llvm_expr(ctx, arg)
+                build_cell_alloc(ctx, v)
+            }
+        },
+        _ => {
+            let v = gen_llvm_expr(ctx, arg)
+            build_cell_alloc(ctx, v)
+        },
+    }
+}
+
 fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: List<DictRef>, dict_dispatch: DictDispatchInfo?, result_ty: Type, effects: EffectRow) -> LLVMValueRef {
     // Handle dict dispatch (trait method call through dict parameter)
     match dict_dispatch {
@@ -747,10 +974,27 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
         none => {},
     }
 
-    // Evaluate all args first
+    // #B-087 gap 5 (#103): determine which args land in a `mut` value-type param so
+    // they are passed as a shared CELL (ptr-to-box) instead of the bare boxed value.
+    // The callee receives those params as a cell and reads/writes go through field 0,
+    // so a reassignment `x = new_val` writes through to the caller's cell. Look up the
+    // flag list by callee name (bare fn) or UFCS Type_method (method call).
+    let mut_flags = lookup_call_mut_flags(ctx, callee)
+
+    // Evaluate all args first (boxing mut value-type positions into cells).
     let mut arg_vals: List<LLVMValueRef> = []
+    let mut argi = 0
     for a in args {
-        arg_vals.push(gen_llvm_expr(ctx, a))
+        let is_mut = match mut_flags {
+            some(flags) => match flags.get(argi) { some(f) => f, none => false },
+            none => false,
+        }
+        if is_mut {
+            arg_vals.push(gen_mut_arg_llvm(ctx, a))
+        } else {
+            arg_vals.push(gen_llvm_expr(ctx, a))
+        }
+        argi = argi + 1
     }
 
     // Resolve dict refs into LLVMValueRef
@@ -762,6 +1006,33 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
             let call_name = match resolved_name {
                 some(rn) => rn,
                 none => name,
+            }
+            // #132 print parity: `print<T>` accepts any type and the JS oracle
+            // stringifies it (console.log). The runtime ring_print expects its arg
+            // to already be a Str (casts to std::string*), so a boxed Int/Float/Bool
+            // would crash / mis-print. Coerce a non-Str arg to its Str rendering via
+            // the same convert_to_str path string interpolation uses. (resolved_name
+            // for the builtin is "print"; guard on a single arg.)
+            if call_name == "print" && args.len() == 1 {
+                match args.get(0) {
+                    some(arg0) => {
+                        let arg_ty = hexpr_type(arg0)
+                        // Only coerce the scalar boxed primitives (Int/Float/Bool):
+                        // these are the cases ring_print would mis-cast. Str passes
+                        // through; other types (struct/list/enum) keep prior behavior
+                        // (structural display is out of #132's scope).
+                        if is_int_type(arg_ty) || is_float_type(arg_ty) || is_bool_type(arg_ty) {
+                            match arg_vals.get(0) {
+                                some(av) => {
+                                    let coerced = convert_to_str(ctx, av, arg_ty)
+                                    return gen_runtime_call(ctx, "ring_print", [coerced])
+                                },
+                                none => {},
+                            }
+                        }
+                    },
+                    none => {},
+                }
             }
             let final_name = if call_name == "map_new" && is_int_keyed_map(result_ty) {
                 "map_int_new"
@@ -843,11 +1114,176 @@ fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
             }
         },
         DictRef::Wrapped { dict, trait_name, inner_dicts } => {
-            // Wrapped dict: need to construct a wrapper (complex case)
-            // For Wave 2c, pass null — full wrapper construction in future wave
-            LLVMConstPointerNull(ctx.ptr_type)
+            // #B-087 gap 2: a wrapped dict for a parameterized type whose trait impl
+            // needs the inner type-param dicts bound. Build a real wrapper dict (see
+            // build_wrapped_dict). Previously returned null → dispatch crash.
+            build_wrapped_dict(ctx, dict, trait_name, inner_dicts)
         },
     }
+}
+
+// #B-087 gap 2: construct a wrapper trait dict for a parameterized type (e.g.
+// Pair<Int, Str>) whose Eq impl method `ring_Pair_eq(self, other, A_Eq, B_Eq)` takes
+// the inner type-param dicts as trailing params. A consumer that dispatches through
+// this dict only passes (self, other), so we cannot store the base method directly.
+// Instead, for each trait method we emit a thunk
+//   ring_<Type>_<m>__wrapthunk(env, a0..aK) -> ptr
+// that loads the inner dicts captured in env and calls the real method
+//   ring_<Type>_<m>(a0..aK, inner0..innerM).
+// The wrapper dict has the same { ptr-per-method } layout as a normal dict, with each
+// slot a { thunk, env } closure. Mirrors codegen_expr.ring's dict_ref_to_js wrapper.
+fn build_wrapped_dict(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>) -> LLVMValueRef {
+    // Resolve the inner dicts at this site.
+    let mut inner_vals: List<LLVMValueRef> = []
+    for d in inner_dicts {
+        inner_vals.push(resolve_dict_ref(ctx, d))
+    }
+
+    // Recover the target type name from the dict name "__<Type>_<Trait>".
+    let target_type = wrapped_dict_target_type(dict_name, trait_name)
+
+    // Trait method order determines the slots (must match emit_trait_dict).
+    let method_order = match ctx.trait_method_order.get(trait_name) {
+        some(order) => order,
+        none => [],
+    }
+    let method_count = method_order.len()
+
+    // Dict struct: one ptr (RingClosure) per method.
+    let mut dict_elem_types: List<LLVMTypeRef> = []
+    for i in 0..method_count { dict_elem_types.push(ctx.ptr_type) }
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, dict_elem_types, 0)
+
+    let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+    let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+    let dict_size = LLVMSizeOf(dict_struct_ty)
+    let dict_typeid = LLVMConstInt(ctx.i64_type, 10, 0)  // RING_TYPEID_TUPLE
+    let dict_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [dict_size, dict_typeid], fresh_name(ctx, "wdict"))
+
+    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let closure_size = LLVMSizeOf(closure_ty)
+    let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)
+
+    let inner_count = inner_vals.len()
+
+    for i in 0..method_count {
+        match method_order.get(i) {
+            some(method_name) => {
+                let mangled = llvm_mangle_method(target_type, method_name)
+                match ctx.functions.get(mangled) {
+                    some(method_fn) => {
+                        // Base method arity includes the trailing inner dicts; the
+                        // dispatch passes (arity - inner_count) leading args.
+                        let base_arity = LLVMCountParams(method_fn)
+                        let dispatch_arity = base_arity - inner_count
+                        let thunk_fn = emit_wrapped_method_thunk(ctx, mangled, method_fn, method_name, dispatch_arity, inner_count)
+
+                        // env: { i64 count(=0), inner0, inner1, ... }.
+                        let mut env_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
+                        for j in 0..inner_count { env_elem_types.push(ctx.ptr_type) }
+                        let env_ty = LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
+                        let env_size = LLVMSizeOf(env_ty)
+                        let env_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE_ENV, 0)
+                        let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [env_size, env_typeid], fresh_name(ctx, "wmenv"))
+                        let cnt_slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, 0, fresh_name(ctx, "wmc"))
+                        discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, 0, 0), cnt_slot))
+                        let mut sj = 0
+                        for iv in inner_vals {
+                            let s = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, sj + 1, fresh_name(ctx, "wmi"))
+                            discard(LLVMBuildStore(ctx.builder, iv, s))
+                            sj = sj + 1
+                        }
+
+                        // closure { thunk, env }
+                        let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], fresh_name(ctx, "wmcls"))
+                        let fp = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "wmfp"))
+                        discard(LLVMBuildStore(ctx.builder, thunk_fn, fp))
+                        let ep = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "wmep"))
+                        discard(LLVMBuildStore(ctx.builder, env_alloc, ep))
+
+                        let slot = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, i, fresh_name(ctx, "wmds"))
+                        discard(LLVMBuildStore(ctx.builder, closure_ptr, slot))
+                    },
+                    none => {
+                        let slot = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, i, fresh_name(ctx, "wmds"))
+                        discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot))
+                    },
+                }
+            },
+            none => {},
+        }
+    }
+
+    dict_ptr
+}
+
+// Recover "<Type>" from a dict name "__<Type>_<Trait>" by stripping the leading "__"
+// and the trailing "_<trait_name>".
+fn wrapped_dict_target_type(dict_name: Str, trait_name: Str) -> Str {
+    let mut s = dict_name
+    if s.starts_with("__") { s = s.slice(2, s.len()) }
+    let suffix = "_${trait_name}"
+    if s.ends_with(suffix) {
+        s.slice(0, s.len() - suffix.len())
+    } else {
+        s
+    }
+}
+
+// Emit the per-method wrapper thunk: fn(env, a0..a_{K-1}) -> ptr that loads the inner
+// dicts captured in env (slots 1..inner_count) and calls the real method
+// ring_<Type>_<m>(a0.., inner0..). Memoized by name (one impl method + inner-dict set
+// → at most one thunk per distinct wrapped-dict construction site is fine; we include
+// the inner_count to disambiguate, but the method mangling + suffix already differs
+// from the plain dict thunk).
+fn emit_wrapped_method_thunk(mut ctx: LlvmCtx, mangled: Str, method_fn: LLVMValueRef, method_name: Str, dispatch_arity: Int, inner_count: Int) -> LLVMValueRef {
+    let thunk_name = "${mangled}__wrapthunk"
+    match ctx.functions.get(thunk_name) {
+        some(existing) => { return existing },
+        none => {},
+    }
+
+    // Thunk: (env, a0..a_{K-1}) -> ptr.
+    let mut thunk_param_types: List<LLVMTypeRef> = [ctx.ptr_type]
+    for i in 0..dispatch_arity { thunk_param_types.push(ctx.ptr_type) }
+    let thunk_ty = LLVMFunctionType(ctx.ptr_type, thunk_param_types, 0)
+    let thunk_fn = LLVMAddFunction(ctx.module, thunk_name, thunk_ty)
+    ctx.functions.insert(thunk_name, thunk_fn)
+    ctx.fn_types.insert(thunk_name, thunk_ty)
+
+    // env struct type (must match build_wrapped_dict's env layout).
+    let mut env_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
+    for j in 0..inner_count { env_elem_types.push(ctx.ptr_type) }
+    let env_ty = LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
+
+    // Real method fn type (a0.., inner0..) -> ptr.
+    let method_ty = match ctx.fn_types.get(mangled) {
+        some(t) => t,
+        none => {
+            let mut mp: List<LLVMTypeRef> = []
+            for i in 0..(dispatch_arity + inner_count) { mp.push(ctx.ptr_type) }
+            LLVMFunctionType(ctx.ptr_type, mp, 0)
+        },
+    }
+
+    let saved_block = LLVMGetInsertBlock(ctx.builder)
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, thunk_fn, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    let env_param = LLVMGetParam(thunk_fn, 0)
+    let mut fwd_args: List<LLVMValueRef> = []
+    // Leading dispatch args (skip param 0 = env).
+    for i in 0..dispatch_arity { fwd_args.push(LLVMGetParam(thunk_fn, i + 1)) }
+    // Inner dicts loaded from env (slots 1..inner_count).
+    for j in 0..inner_count {
+        let s = LLVMBuildStructGEP2(ctx.builder, env_ty, env_param, j + 1, fresh_name(ctx, "wti"))
+        fwd_args.push(LLVMBuildLoad2(ctx.builder, ctx.ptr_type, s, fresh_name(ctx, "wtd")))
+    }
+    let res = LLVMBuildCall2(ctx.builder, method_ty, method_fn, fwd_args, fresh_name(ctx, "wtcall"))
+    discard(LLVMBuildRet(ctx.builder, res))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_block)
+    thunk_fn
 }
 
 // ============================================================
@@ -2389,11 +2825,16 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         let get_ty = get_rt_fn_type(ctx, "ring_list_get")
                         let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
 
-                        // Phase 1: Check constructor sub-patterns' tags. Both tuple-style
-                        // (Constructor) and struct-style (NamedConstructor) sub-patterns must
-                        // verify the element's tag — otherwise an arm like
+                        // Phase 1: Check constructor sub-patterns' tags AND literal
+                        // sub-patterns' values. Both tuple-style (Constructor) and
+                        // struct-style (NamedConstructor) sub-patterns must verify the
+                        // element's tag — otherwise an arm like
                         // `(Type::FnType { .. }, Type::FnType { .. })` would match ANY pair of
                         // values, reading the wrong fields out of the actual variant.
+                        // #B-087 (B-088 hedged #2): a literal element such as `(0, s)` must
+                        // also compare the element against the literal — previously skipped,
+                        // so `(0, s)` matched ANY first element (every arm collapsed to the
+                        // first literal arm).
                         for j in 0..elements.len() {
                             match elements.get(j) {
                                 some(elem_pat) => {
@@ -2424,7 +2865,21 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                                                 none => {},
                                             }
                                         },
-                                        none => {},
+                                        none => {
+                                            // Literal element: compare the tuple element against the literal.
+                                            match elem_pat {
+                                                Pattern::Literal { value, .. } => {
+                                                    let idx = LLVMConstInt(ctx.i64_type, j, 0)
+                                                    let elem_val = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [scrut_val, idx], fresh_name(ctx, "tl"))
+                                                    let elem_ty = tuple_element_type(scrut_ty, j)
+                                                    let cmp = gen_literal_pattern_cond(ctx, elem_val, elem_ty, value)
+                                                    let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tuple.litcheck")
+                                                    discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, next_bb))
+                                                    LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
+                                                },
+                                                _ => {},
+                                            }
+                                        },
                                     }
                                 },
                                 none => {},
@@ -2649,6 +3104,19 @@ fn get_tuple_llvm_type(mut ctx: LlvmCtx, count: Int) -> LLVMTypeRef {
         elem_types.push(ctx.ptr_type)
     }
     LLVMStructTypeInContext(ctx.context, elem_types, 0)
+}
+
+// Element type at position `idx` of a tuple scrutinee type (for literal sub-pattern
+// comparison). Falls back to ErrorType when not a tuple / out of range — harmless
+// because gen_literal_pattern_cond dispatches on the LiteralValue, not this type.
+fn tuple_element_type(ty: Type, idx: Int) -> Type {
+    match ty {
+        Type::TupleType { elements } => match elements.get(idx) {
+            some(t) => t,
+            none => Type::ErrorType,
+        },
+        _ => Type::ErrorType,
+    }
 }
 
 fn gen_literal_pattern_cond(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, value: LiteralValue) -> LLVMValueRef {
@@ -3048,22 +3516,63 @@ fn consider_capture_name(ctx: LlvmCtx, name: Str, resolved_name: Str?, params: L
     }
 }
 
+// #B-087 gap 3: capture the dict param a trait dispatch routes through, so a closure
+// whose body does a generic ==/</method-call carries the dict in its env. Only the
+// Dict variant names a param (Builtin/Direct resolve statically — no capture needed).
+fn collect_dispatch_dict(ctx: LlvmCtx, dispatch: TraitDispatch?, params: List<HParam>, mut captures: List<Str>) {
+    match dispatch {
+        some(d) => match d {
+            TraitDispatch::Dict { param } => consider_capture_name(ctx, param, none, params, captures),
+            TraitDispatch::Direct { dict, extra_dicts } => {
+                consider_capture_name(ctx, dict, none, params, captures)
+                for ed in extra_dicts { collect_dictref_names(ctx, ed, params, captures) }
+            },
+            TraitDispatch::Builtin => {},
+        },
+        none => {},
+    }
+}
+
+// #B-087 gap 3: capture the dict-param names a DictRef references (Simple → the name;
+// Wrapped → the base dict plus its inner dicts, recursively).
+fn collect_dictref_names(ctx: LlvmCtx, dr: DictRef, params: List<HParam>, mut captures: List<Str>) {
+    match dr {
+        DictRef::Simple(name) => consider_capture_name(ctx, name, none, params, captures),
+        DictRef::Wrapped { dict, inner_dicts, .. } => {
+            consider_capture_name(ctx, dict, none, params, captures)
+            for inner in inner_dicts { collect_dictref_names(ctx, inner, params, captures) }
+        },
+    }
+}
+
 // Collect variable names referenced in an expression that are not params or global functions
 fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut captures: List<Str>) {
     match expr {
         HExpr::Ident { name, resolved_name, .. } => {
             consider_capture_name(ctx, name, resolved_name, params, captures)
         },
-        HExpr::BinOp { left, right, .. } => {
+        HExpr::BinOp { left, right, eq_dispatch, ord_dispatch, .. } => {
             collect_captures(ctx, left, params, captures)
             collect_captures(ctx, right, params, captures)
+            // #B-087 gap 3: a trait-dispatched ==/< inside a closure body resolves
+            // through a dict param (TraitDispatch::Dict { param }). That param must be
+            // captured into the closure env, else the lambda can't find it.
+            collect_dispatch_dict(ctx, eq_dispatch, params, captures)
+            collect_dispatch_dict(ctx, ord_dispatch, params, captures)
         },
         HExpr::UnaryOp { operand, .. } => {
             collect_captures(ctx, operand, params, captures)
         },
-        HExpr::Call { callee, args, .. } => {
+        HExpr::Call { callee, args, resolved_dicts, dict_dispatch, .. } => {
             collect_captures(ctx, callee, params, captures)
             for a in args { collect_captures(ctx, a, params, captures) }
+            // #B-087 gap 3: a generic call inside a closure forwards dict params
+            // (resolved_dicts) or dispatches through one (dict_dispatch); capture them.
+            for d in resolved_dicts { collect_dictref_names(ctx, d, params, captures) }
+            match dict_dispatch {
+                some(dd) => consider_capture_name(ctx, dd.dict_param, none, params, captures),
+                none => {},
+            }
         },
         HExpr::FieldAccess { receiver, .. } => {
             collect_captures(ctx, receiver, params, captures)

@@ -275,7 +275,7 @@ class EnumTypeInfo {
 }
 
 class LlvmCtx {
-  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars) {
+  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params) {
     this.context = context;
     this.module = module;
     this.builder = builder;
@@ -311,6 +311,7 @@ class LlvmCtx {
     this.next_user_typeid = next_user_typeid;
     this.type_to_typeid = type_to_typeid;
     this.boxed_vars = boxed_vars;
+    this.fn_mut_params = fn_mut_params;
   }
 }
 

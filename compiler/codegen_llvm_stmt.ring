@@ -23,6 +23,8 @@ extern fn LLVMConstPointerNull(ty: LLVMTypeRef) -> LLVMValueRef
 extern fn LLVMBuildStructGEP2(builder: LLVMBuilderRef, ty: LLVMTypeRef, ptr: LLVMValueRef, index: Int, name: Str) -> LLVMValueRef
 extern fn LLVMConstInt(ty: LLVMTypeRef, val: Int, sign_extend: Int) -> LLVMValueRef
 extern fn LLVMBuildAdd(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildSub(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMStructTypeInContext(ctx: LLVMContextRef, elems: List<LLVMTypeRef>, packed: Int) -> LLVMTypeRef
 extern fn LLVMBuildICmp(builder: LLVMBuilderRef, predicate: Int, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildCall2(builder: LLVMBuilderRef, fn_ty: LLVMTypeRef, fn_val: LLVMValueRef, args: List<LLVMValueRef>, name: Str) -> LLVMValueRef
 extern fn LLVMBuildPhi(builder: LLVMBuilderRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
@@ -342,7 +344,15 @@ fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: H
     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
 }
 
-// for x in range_var { body } — range stored in a variable
+// for x in range_var { body } — range stored in a variable.
+// The range value is the struct gen_range_expr produces: { ptr start, ptr end,
+// ptr inclusive } (typeid TUPLE), where start/end are boxed Ints and inclusive is a
+// boxed Bool. We GEP each field, unbox start/end to i64 and inclusive to i64, then
+// run the same counted loop as emit_for_in_range_direct. `inclusive` is a *runtime*
+// value here, so instead of a compile-time predicate we fold it into the upper
+// bound: end_bound = end - (1 - inclusive)  (== end when inclusive, end-1 otherwise)
+// and always compare i <= end_bound. (#B-087 gap 4 — previously a stub that fell
+// back to list iteration and called ring_list_len on the range struct → crash.)
 fn emit_for_in_range_var(mut ctx: LlvmCtx, binding: Str, iterable: HExpr, body: HExpr) {
     let current_fn = match ctx.current_fn {
         some(f) => f,
@@ -350,17 +360,69 @@ fn emit_for_in_range_var(mut ctx: LlvmCtx, binding: Str, iterable: HExpr, body: 
     }
 
     let range_val = gen_llvm_expr(ctx, iterable)
-    // Range struct: { ptr start, ptr end, ptr inclusive }
-    let range_ty = build_entry_alloca(ctx, ctx.ptr_type, fresh_name(ctx, "rng"))
-    // For now, treat range as a 3-field struct: start, end, inclusive
-    // Since range is stored as a ptr to struct, we need to extract fields
-    // Using list_get as a workaround (range may be stored differently)
-    // Actually, our gen_range_expr stores it as struct { ptr, ptr, ptr }
-    // We need the struct type to GEP into it
-    let struct_ty = build_entry_alloca(ctx, ctx.ptr_type, fresh_name(ctx, "dummy"))
-    // Simplification: Use the same approach as direct range but load from struct
-    // For now, fallback to list iteration
-    emit_for_in_list(ctx, binding, none, iterable, body)
+    // Range struct layout must match gen_range_expr: { ptr start, ptr end, ptr inclusive }.
+    let range_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+
+    let start_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 0, fresh_name(ctx, "rs"))
+    let start_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, start_slot, fresh_name(ctx, "sb"))
+    let end_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 1, fresh_name(ctx, "re"))
+    let end_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, end_slot, fresh_name(ctx, "eb"))
+    let incl_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 2, fresh_name(ctx, "ri"))
+    let incl_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, incl_slot, fresh_name(ctx, "ib"))
+
+    let unbox_int_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
+    let unbox_int_ty = get_rt_fn_type(ctx, "ring_unbox_int")
+    let start_raw = LLVMBuildCall2(ctx.builder, unbox_int_ty, unbox_int_fn, [start_box], fresh_name(ctx, "si"))
+    let end_raw = LLVMBuildCall2(ctx.builder, unbox_int_ty, unbox_int_fn, [end_box], fresh_name(ctx, "ei"))
+    let unbox_bool_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
+    let unbox_bool_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
+    let incl_raw = LLVMBuildCall2(ctx.builder, unbox_bool_ty, unbox_bool_fn, [incl_box], fresh_name(ctx, "ic"))
+
+    // end_bound = end_raw - (1 - incl_raw): when inclusive (incl=1) → end; else end-1.
+    let one = LLVMConstInt(ctx.i64_type, 1, 0)
+    let one_minus_incl = LLVMBuildSub(ctx.builder, one, incl_raw, fresh_name(ctx, "omi"))
+    let end_bound = LLVMBuildSub(ctx.builder, end_raw, one_minus_incl, fresh_name(ctx, "eb2"))
+
+    // Counter starts at start_raw; loop while i <= end_bound.
+    let counter_alloca = build_entry_alloca(ctx, ctx.i64_type, fresh_name(ctx, "i"))
+    discard(LLVMBuildStore(ctx.builder, start_raw, counter_alloca))
+
+    let cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.cond")
+    let body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.body")
+    let incr_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.incr")
+    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forv.merge")
+
+    discard(LLVMBuildBr(ctx.builder, cond_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, cond_bb)
+    let current_i = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
+    // 41 = sle
+    let cond = LLVMBuildICmp(ctx.builder, 41, current_i, end_bound, fresh_name(ctx, "cmp"))
+    discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb))
+
+    let saved_break = ctx.loop_break_bb
+    let saved_continue = ctx.loop_continue_bb
+    ctx.loop_break_bb = some(merge_bb)
+    ctx.loop_continue_bb = some(incr_bb)
+
+    LLVMPositionBuilderAtEnd(ctx.builder, body_bb)
+    let boxed_i = box_int(ctx, current_i)
+    let binding_alloca = build_entry_alloca(ctx, ctx.ptr_type, binding)
+    discard(LLVMBuildStore(ctx.builder, boxed_i, binding_alloca))
+    ctx.named_values.insert(binding, binding_alloca)
+    discard(gen_llvm_expr(ctx, body))
+    discard(LLVMBuildBr(ctx.builder, incr_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, incr_bb)
+    let current_i2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
+    let next_i = LLVMBuildAdd(ctx.builder, current_i2, one, fresh_name(ctx, "ni"))
+    discard(LLVMBuildStore(ctx.builder, next_i, counter_alloca))
+    discard(LLVMBuildBr(ctx.builder, cond_bb))
+
+    ctx.loop_break_bb = saved_break
+    ctx.loop_continue_bb = saved_continue
+
+    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
 }
 
 // for x in list { body } — index-based while loop

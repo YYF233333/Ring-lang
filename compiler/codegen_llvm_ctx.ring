@@ -110,7 +110,14 @@ pub struct LlvmCtx {
     // a closure writes through them.  Mirrors the JS backend's `{value: ...}` cell.
     // Such a var's alloca holds the CELL pointer; reads/writes go through field 0;
     // closures capture the (shared) cell pointer so write-through is observed.
-    pub boxed_vars: Set<Int>
+    pub boxed_vars: Set<Int>,
+
+    // #B-087 gap 5 (#103): per-function list of param mutability flags. A flag is
+    // true only for params that are `mut` AND value-type (Int/Float/Bool/Str) — the
+    // ones the callee receives as a CELL pointer and the caller must box. Mirrors the
+    // JS backend's CodegenCtx.fn_mut_params (scan_fn_mut_params). Keyed by both the
+    // bare fn name and the UFCS method name (Type_method) for method-call lookup.
+    pub fn_mut_params: Map<Str, List<Bool>>
 }
 
 // B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).
