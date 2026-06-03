@@ -1480,9 +1480,9 @@ function rc_stmt(stmt, live, locals) {
           const v = __ring_m40._0;
           const r = rc_expr(v, live, locals);
           let out = dups_to_stmts(r.dups);
-          const __ring_iter_39 = ___Set_Iterable.iter(r.live);
+          const __ring_iter_39 = __List_Iterable.iter(sorted_set_names(r.live));
           while (true) {
-            const __ring_next_39 = __SetIterator_Iterator.next(__ring_iter_39);
+            const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
             if (__ring_next_39._tag === "none") break;
             const name = __ring_next_39._0;
             List_push(out, hir$HStmt_Drop(name, types$Type_UnitType, synthetic_span()));
@@ -1493,9 +1493,9 @@ function rc_stmt(stmt, live, locals) {
         }
         if (__ring_m40._tag === "none") {
           let out = [];
-          const __ring_iter_40 = ___Set_Iterable.iter(live);
+          const __ring_iter_40 = __List_Iterable.iter(sorted_set_names(live));
           while (true) {
-            const __ring_next_40 = __SetIterator_Iterator.next(__ring_iter_40);
+            const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
             if (__ring_next_40._tag === "none") break;
             const name = __ring_next_40._0;
             List_push(out, hir$HStmt_Drop(name, types$Type_UnitType, synthetic_span()));
@@ -1551,9 +1551,9 @@ function rc_stmt(stmt, live, locals) {
         }
       }
       let out = [];
-      const __ring_iter_44 = ___Set_Iterable.iter(loop_vars);
+      const __ring_iter_44 = __List_Iterable.iter(sorted_set_names(loop_vars));
       while (true) {
-        const __ring_next_44 = __SetIterator_Iterator.next(__ring_iter_44);
+        const __ring_next_44 = __ListIterator_Iterator.next(__ring_iter_44);
         if (__ring_next_44._tag === "none") break;
         const v = __ring_next_44._0;
         if (((_Set_contains(cur_live, v, __Str_Eq) && (_Set_contains(local_loop_captures, v, __Str_Eq) === false)) && (rc_name_skippable(v) === false))) {
@@ -1641,9 +1641,9 @@ function rc_stmt(stmt, live, locals) {
         }
       }
       let out = dups_to_stmts(iter_result.dups);
-      const __ring_iter_50 = ___Set_Iterable.iter(loop_vars);
+      const __ring_iter_50 = __List_Iterable.iter(sorted_set_names(loop_vars));
       while (true) {
-        const __ring_next_50 = __SetIterator_Iterator.next(__ring_iter_50);
+        const __ring_next_50 = __ListIterator_Iterator.next(__ring_iter_50);
         if (__ring_next_50._tag === "none") break;
         const v = __ring_next_50._0;
         if (((_Set_contains(cur_live, v, __Str_Eq) && (_Set_contains(local_loop_captures, v, __Str_Eq) === false)) && (rc_name_skippable(v) === false))) {
@@ -2398,11 +2398,17 @@ function rc_expr(expr, live, locals) {
   }
 }
 
+function sorted_set_names(names) {
+  let out = _Set_to_list(names);
+  List_sort(out);
+  return out;
+}
+
 function make_drop_list(names) {
   let drops = [];
-  const __ring_iter_73 = ___Set_Iterable.iter(names);
+  const __ring_iter_73 = __List_Iterable.iter(sorted_set_names(names));
   while (true) {
-    const __ring_next_73 = __SetIterator_Iterator.next(__ring_iter_73);
+    const __ring_next_73 = __ListIterator_Iterator.next(__ring_iter_73);
     if (__ring_next_73._tag === "none") break;
     const name = __ring_next_73._0;
     if ((rc_name_skippable(name) === false)) {

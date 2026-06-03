@@ -732,7 +732,8 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
                     // B-081: flush the return value's reported dups before both
                     // the drop-all-live and the Return.
                     let mut out: List<HStmt> = dups_to_stmts(r.dups)
-                    for name in r.live {
+                    // B-085: sort so the drop-all-live order is backend-independent.
+                    for name in sorted_set_names(r.live) {
                         // We don't have the type info for these vars easily here,
                         // so use UnitType as a placeholder. The LLVM codegen for Drop
                         // uses the variable's actual runtime type via the refcount header.
@@ -745,7 +746,8 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
                 none => {
                     // void return — drop all live variables
                     let mut out: List<HStmt> = []
-                    for name in live {
+                    // B-085: sort so the drop-all-live order is backend-independent.
+                    for name in sorted_set_names(live) {
                         out.push(HStmt::Drop { name: name, ty: Type::UnitType, span: synthetic_span() })
                     }
                     out.push(HStmt::Return { value: none, span: span })
@@ -812,7 +814,8 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             // EXCEPT loop captures: those are already dup-ed per iteration via the
             // body flush, so a conservative pre-loop dup would over-count (leak).
             let mut out: List<HStmt> = []
-            for v in loop_vars {
+            // B-085: sort loop-var dups so the pre-loop dup order is backend-independent.
+            for v in sorted_set_names(loop_vars) {
                 if cur_live.contains(v) && local_loop_captures.contains(v) == false && rc_name_skippable(v) == false {
                     out.push(HStmt::Dup { name: v, ty: Type::UnitType, span: synthetic_span() })
                 }
@@ -874,7 +877,8 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>) -> RcStmtsResult {
             // conservative loop-var dup).  The body is re-evaluated per
             // iteration, so its dups flush INTO the body expression.
             let mut out: List<HStmt> = dups_to_stmts(iter_result.dups)
-            for v in loop_vars {
+            // B-085: sort loop-var dups so the pre-loop dup order is backend-independent.
+            for v in sorted_set_names(loop_vars) {
                 if cur_live.contains(v) && local_loop_captures.contains(v) == false && rc_name_skippable(v) == false {
                     out.push(HStmt::Dup { name: v, ty: Type::UnitType, span: synthetic_span() })
                 }
@@ -1690,12 +1694,30 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>) -> RcResult {
 }
 
 // ============================================================
+// Helper: deterministic iteration order for a Set<Str>
+// ============================================================
+//
+// B-085: Set iteration order is backend-dependent — the JS backend (Set
+// insertion order) and the LLVM backend (std::unordered_set hash order)
+// disagree.  Any RC emission (drop/dup) that walks a Set directly therefore
+// produces a different statement order under the two backends, which breaks
+// double-bootstrap byte equivalence when several variables drop/dup at the
+// same program point.  Sorting the names by their string value makes the
+// emission order depend only on the variable names (deterministic) and thus
+// identical across backends.
+fn sorted_set_names(names: Set<Str>) -> List<Str> {
+    let mut out: List<Str> = names.to_list()
+    out.sort()
+    out
+}
+
+// ============================================================
 // Helper: create Drop stmts for a set of variable names
 // ============================================================
 
 fn make_drop_list(names: Set<Str>) -> List<HStmt> {
     let mut drops: List<HStmt> = []
-    for name in names {
+    for name in sorted_set_names(names) {
         if rc_name_skippable(name) == false {
             drops.push(HStmt::Drop { name: name, ty: Type::UnitType, span: synthetic_span() })
         }
