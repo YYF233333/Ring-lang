@@ -79,28 +79,6 @@ static int drop_table_size = RING_TYPEID_USER_BASE;
 // Forward declarations for RC infrastructure
 static void ring_drop_by_typeid(uint32_t tid, void* data);
 
-// Crash context (defined here so the RC guards below can reference it; the CHK
-// macro that mutates these lives further down, before the first runtime fn).
-static int g_chk = 0;
-static const char* g_last_fn = "";
-
-// Diagnostic: print the call stack (as module RVAs) at an RC guard abort so the
-// triggering Ring function can be mapped via the linker .map.  #134 hunt only.
-#ifdef _WIN32
-static void dump_rc_backtrace(const char* tag) {
-    void* frames[40];
-    USHORT n = CaptureStackBackTrace(2, 40, frames, NULL);  // skip this fn + the guard
-    uintptr_t base = (uintptr_t)GetModuleHandle(NULL);
-    fprintf(stderr, "  %s backtrace (RVA):", tag);
-    for (USHORT i = 0; i < n; i++) {
-        fprintf(stderr, " 0x%llx", (unsigned long long)((uintptr_t)frames[i] - base));
-    }
-    fprintf(stderr, "\n");
-}
-#else
-static void dump_rc_backtrace(const char*) {}
-#endif
-
 // ============================================================================
 // Perceus RC L0 — ring_alloc / ring_dup / ring_drop
 // ============================================================================
@@ -120,76 +98,15 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
 extern "C" void ring_dup(void* ptr) {
     if (!ptr) return;
     uint32_t* rc = (uint32_t*)((char*)ptr - 8);
-
-    // UAF detection: sentinel means this memory was freed
-    if (*rc == 0xDEADBEEF) {
-        uint32_t freed_tid = *(uint32_t*)((char*)ptr - 4);  // preserved by ring_drop (diag)
-        void* ret = __builtin_return_address(0);
-#ifdef _WIN32
-        uintptr_t base = (uintptr_t)GetModuleHandle(NULL);
-        fprintf(stderr, "ring panic: dup on freed memory! ptr=%p freed_tid=%u chk=%d last_fn=%s caller=%p rva=0x%llx (use-after-free)\n",
-                ptr, freed_tid, g_chk, g_last_fn, ret, (unsigned long long)((uintptr_t)ret - base));
-#else
-        fprintf(stderr, "ring panic: dup on freed memory! ptr=%p freed_tid=%u chk=%d last_fn=%s caller=%p (use-after-free)\n",
-                ptr, freed_tid, g_chk, g_last_fn, ret);
-#endif
-        fflush(stderr);
-        abort();
-    }
-
-    // rc==0 should never happen for live objects (alloc sets rc=1)
-    if (*rc == 0) {
-        fprintf(stderr, "ring panic: dup on zero-rc object! ptr=%p (likely double-free or corruption)\n", ptr);
-        fflush(stderr);
-        abort();
-    }
-
-    // Overflow detection
-    if (*rc >= 0xFFFFFFF0) {
-        fprintf(stderr, "ring panic: rc overflow! ptr=%p, rc=%u\n", ptr, *rc);
-        fflush(stderr);
-        abort();
-    }
-
     *rc += 1;
 }
 
 extern "C" void ring_drop(void* ptr) {
     if (!ptr) return;
     uint32_t* rc = (uint32_t*)((char*)ptr - 8);
-
-    // Double-free detection: rc==0 means already freed (or UAF sentinel hit)
-    if (*rc == 0) {
-        uint32_t tid = *(uint32_t*)((char*)ptr - 4);
-        fprintf(stderr, "ring panic: double-free detected! ptr=%p, typeid=%u\n", ptr, tid);
-        fflush(stderr);
-        abort();
-    }
-
-    // UAF sentinel detection: 0xDEADBEEF in rc slot means freed memory
-    if (*rc == 0xDEADBEEF) {
-        uint32_t freed_tid = *(uint32_t*)((char*)ptr - 4);  // preserved by ring_drop (diag)
-        void* ret = __builtin_return_address(0);
-#ifdef _WIN32
-        uintptr_t base = (uintptr_t)GetModuleHandle(NULL);
-        fprintf(stderr, "ring panic: use-after-free detected! ptr=%p freed_tid=%u chk=%d last_fn=%s caller=%p rva=0x%llx (drop on freed)\n",
-                ptr, freed_tid, g_chk, g_last_fn, ret, (unsigned long long)((uintptr_t)ret - base));
-        dump_rc_backtrace("drop-uaf");
-#else
-        fprintf(stderr, "ring panic: use-after-free detected! ptr=%p freed_tid=%u chk=%d last_fn=%s caller=%p (drop on freed)\n",
-                ptr, freed_tid, g_chk, g_last_fn, ret);
-#endif
-        fflush(stderr);
-        abort();
-    }
-
     if (*rc <= 1) {
         uint32_t tid = *(uint32_t*)((char*)ptr - 4);
         ring_drop_by_typeid(tid, ptr);
-        // Write sentinel before free to detect UAF on this block.  Only the rc
-        // slot (-8) gets the sentinel; the typeid slot (-4) is preserved so the
-        // dup/drop UAF guards can report what kind of object was freed (diag).
-        *(uint32_t*)((char*)ptr - 8) = 0xDEADBEEF;
         free((char*)ptr - 8);
     } else {
         *rc -= 1;
@@ -200,12 +117,6 @@ extern "C" void ring_register_drop(int64_t typeid_val, void* drop_fn_ptr) {
     if (typeid_val >= 0 && typeid_val < 4096) {
         drop_table[(int)typeid_val] = (ring_drop_fn)drop_fn_ptr;
     }
-#ifdef _WIN32
-    if (getenv("RING_DUMP_TIDS")) {  // #134 diag: map typeid → drop_<Type> via ring.map
-        fprintf(stderr, "regdrop tid=%lld rva=0x%llx\n", (long long)typeid_val,
-                (unsigned long long)((uintptr_t)drop_fn_ptr - (uintptr_t)GetModuleHandle(NULL)));
-    }
-#endif
 }
 
 static void ring_drop_by_typeid(uint32_t tid, void* data) {
@@ -282,114 +193,16 @@ extern "C" void ring_raise(void* error);
 static int g_argc = 0;
 static char** g_argv = nullptr;
 
-// Lightweight crash context: a step counter and the last runtime function entered.
-// Two stores per runtime call — cheap enough to leave on, and lets the SEH crash
-// handler / null guards report roughly where a fault occurred. (The previous
-// 64-entry ring buffer was debug-only scaffolding and has been removed.)
-// (g_chk / g_last_fn are defined above, near the RC guards that read them.)
-#define CHK(name) do { g_chk++; g_last_fn = (name); } while(0)
-#define CHK_ARG(name, arg) do { g_chk++; g_last_fn = (name); } while(0)
-
-static void dump_trace() {
-    fprintf(stderr, "=== ring: %d runtime calls, last = %s ===\n", g_chk, g_last_fn);
-    fflush(stderr);
-}
-
-#ifdef _WIN32
-static LONG WINAPI crash_handler(EXCEPTION_POINTERS* ep) {
-    HMODULE mod = GetModuleHandle(NULL);
-    uintptr_t rva = ep->ContextRecord->Rip - (uintptr_t)mod;
-    fprintf(stderr, "CRASH chk=%d fn=%s code=0x%08lx rip=%p base=%p rva=0x%llx\n",
-            g_chk, g_last_fn,
-            ep->ExceptionRecord->ExceptionCode,
-            (void*)ep->ContextRecord->Rip,
-            (void*)mod,
-            (unsigned long long)rva);
-    fprintf(stderr, "  rax=%p rbx=%p rcx=%p rdx=%p\n  rsi=%p rdi=%p rsp=%p rbp=%p\n",
-            (void*)ep->ContextRecord->Rax, (void*)ep->ContextRecord->Rbx,
-            (void*)ep->ContextRecord->Rcx, (void*)ep->ContextRecord->Rdx,
-            (void*)ep->ContextRecord->Rsi, (void*)ep->ContextRecord->Rdi,
-            (void*)ep->ContextRecord->Rsp, (void*)ep->ContextRecord->Rbp);
-    fprintf(stderr, "  fault_addr=%p\n", (void*)ep->ExceptionRecord->ExceptionInformation[1]);
-    // Dump instruction bytes at crash point
-    unsigned char* ip = (unsigned char*)ep->ContextRecord->Rip;
-    fprintf(stderr, "  bytes at rip: ");
-    for (int i = -5; i < 10; i++) fprintf(stderr, "%02x ", ip[i]);
-    fprintf(stderr, "\n");
-    // Stack walk: dump potential return addresses and raw stack data
-    uintptr_t base = (uintptr_t)mod;
-    uintptr_t text_end = base + 0xB4000;
-    uintptr_t* sp = (uintptr_t*)ep->ContextRecord->Rsp;
-    fprintf(stderr, "  stack return addresses (RVA):\n");
-    int found = 0;
-    for (int i = 0; i < 128 && found < 20; i++) {
-        uintptr_t val = sp[i];
-        if (val > base && val < text_end) {
-            fprintf(stderr, "    [rsp+0x%x] = %p (rva=0x%llx)\n",
-                    i * 8, (void*)val, (unsigned long long)(val - base));
-            found++;
-        }
-    }
-    // Dump raw stack for manual inspection (first 128 qwords)
-    fprintf(stderr, "  raw stack dump:\n");
-    for (int i = 0; i < 128; i += 4) {
-        fprintf(stderr, "    [rsp+0x%03x] %016llx %016llx %016llx %016llx\n",
-                i * 8, (unsigned long long)sp[i], (unsigned long long)sp[i+1],
-                (unsigned long long)sp[i+2], (unsigned long long)sp[i+3]);
-    }
-    // Deep inspection: follow InferResult -> HExpr -> tag chain
-    // apply_subst frame: push rsi,rdi,rbx (24) + sub rsp,0x150 → 0x168 total + 8 for ret addr
-    uintptr_t caller_rsp = (uintptr_t)sp + 0x170;
-    // InferResult* at [caller_rsp+0x78]
-    fprintf(stderr, "  caller (infer_method_call) rsp=%p\n", (void*)caller_rsp);
-    __try {
-        uintptr_t infer_result_ptr = *(uintptr_t*)(caller_rsp + 0x78);
-        fprintf(stderr, "  InferResult* = %p\n", (void*)infer_result_ptr);
-        if (infer_result_ptr > 0x10000) {
-            uintptr_t hexpr_ptr = *(uintptr_t*)infer_result_ptr;
-            uintptr_t subst_ptr = *(uintptr_t*)(infer_result_ptr + 8);
-            uintptr_t effects_ptr = *(uintptr_t*)(infer_result_ptr + 16);
-            fprintf(stderr, "  InferResult.hexpr = %p, .subst = %p, .effects = %p\n",
-                    (void*)hexpr_ptr, (void*)subst_ptr, (void*)effects_ptr);
-            if (hexpr_ptr > 0x10000) {
-                int64_t hexpr_tag = *(int64_t*)hexpr_ptr;
-                fprintf(stderr, "  HExpr tag = %lld\n", (long long)hexpr_tag);
-                uintptr_t* hdata = (uintptr_t*)hexpr_ptr;
-                fprintf(stderr, "  HExpr data:");
-                for (int k = 0; k < 9; k++) {
-                    fprintf(stderr, " [%d]=%p", k, (void*)hdata[k]);
-                }
-                fprintf(stderr, "\n");
-                // If tag=4 (Ident), field[1] is name (Str = std::string*)
-                if (hexpr_tag == 4 && hdata[1] > 0x10000) {
-                    std::string* name = (std::string*)hdata[1];
-                    fprintf(stderr, "  Ident.name = \"%s\"\n", name->c_str());
-                    // field[2] = resolved_name (Option<Str>), field[3] = def_id (Option<Int>)
-                    if (hdata[2] > 0x10000) {
-                        int64_t opt_tag = *(int64_t*)hdata[2];
-                        if (opt_tag == 0 && ((uintptr_t*)hdata[2])[1] > 0x10000) {
-                            fprintf(stderr, "  Ident.resolved_name = some(\"%s\")\n",
-                                    ((std::string*)((uintptr_t*)hdata[2])[1])->c_str());
-                        }
-                    }
-                }
-            }
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        fprintf(stderr, "  [failed to read caller data]\n");
-    }
-    fflush(stderr);
-    dump_trace();
-    return EXCEPTION_EXECUTE_HANDLER;
-}
-#endif
+// CHK / CHK_ARG were a lightweight per-call crash-context tracer used during the
+// #134 native RC double-free hunt (B-098).  The hunt is closed; they are now
+// no-ops (left at call sites so the diagnostic can be re-enabled in one place if
+// ever needed).  Normal null / bounds / key-not-found panics remain (below).
+#define CHK(name) do { } while(0)
+#define CHK_ARG(name, arg) do { } while(0)
 
 extern "C" void ring_runtime_init(int argc, char** argv) {
     g_argc = argc;
     g_argv = argv;
-#ifdef _WIN32
-    SetUnhandledExceptionFilter(crash_handler);
-#endif
 
     // Perceus L0: register builtin drop functions
     drop_table[RING_TYPEID_INT]     = drop_int;
@@ -423,7 +236,7 @@ extern "C" void* ring_box_int(int64_t val) {
 
 extern "C" int64_t ring_unbox_int(void* p) {
     CHK("unbox_int");
-    if (!p) { fprintf(stderr, "ring panic: unbox_int(null) chk=%d (last=%s)\n", g_chk, g_last_fn); dump_rc_backtrace("unbox-null"); exit(1); }
+    if (!p) { fprintf(stderr, "ring panic: unbox_int(null)\n"); exit(1); }
     return *(int64_t*)p;
 }
 
@@ -446,7 +259,7 @@ extern "C" void* ring_box_bool(int64_t val) {
 
 extern "C" int64_t ring_unbox_bool(void* p) {
     CHK("unbox_bool");
-    if (!p) { fprintf(stderr, "ring panic: unbox_bool(null) (last=%s)\n", g_last_fn); exit(1); }
+    if (!p) { fprintf(stderr, "ring panic: unbox_bool(null)\n"); exit(1); }
     return *(int64_t*)p;
 }
 
