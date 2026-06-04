@@ -2095,6 +2095,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | LLVM evidence 表示 D1（2026-06-03 B-090）| `{fn_ptr, env}` 闭包 struct，slot = op 在 effect 声明里的顺序；共享 helper `effect_op_slot` 给 gen_handle_expr/gen_effect_op 共用 | 与 JS oracle（`{op: closure}`）语义同构 → parity 结构性；复用现有闭包表示；跨阶段契约进共享层符合约定。否决 effect-as-trait（搅入 supertrait/关联类型包袱）|
 | LLVM handler 闭包 RC D2（2026-06-03 B-090）| evidence struct + handler 闭包暂泄漏，drop 收口并入 B-096 A 波 | B-090 价值是 parity（差分可验），泄漏是正交问题且已有归宿；耦合大内存机 double-free 实测会让 P1 卡在 P3 后 |
 | B-090 范围分期 D3（2026-06-03）| core（B-090，L）= 单 effect multi-op tail-resumptive + 自然涵盖的 nesting；phase 2（B-097，P2）= custom-abort + default body(#72) + delegate(B-088#4) + nesting/multi-effect edge | 单 op 是玩具（真实 effect 都多 op）；custom-abort 需独立 setjmp 落点、default 需注入默认 evidence、delegate 是派发通后的扩展，均与核心机制不同 |
+| JS 后端归档策略 (Z)（2026-06-04，B-100）| 删 JS 前先**证明**两后端 feature 完全一致零 bug（parity 认证门：穷举覆盖矩阵 + 关 B-097/B-096 + 复数轮对抗 review，loop-until-dry），再 golden 快照保存量回归网，然后删 codegen.ring/JS runtime/addon。删除点 = 层 3 之前 | JS 后端是 LLVM codegen 的差分 oracle，简单删会摧毁它；但 oracle 价值 = 抓发散，parity 一旦被证明且 feature 集冻结，oracle 即用尽 → 删除无损。否决「层 3 后删」（async/unwind/refinement 要双实现，成本过高，且 JS 实现层 3 亦可能有 bug、oracle 非真值）|
 
 ### 幽灵功能（已解析但无语义效果）
 
