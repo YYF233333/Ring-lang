@@ -1331,12 +1331,13 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 | 层 | 内容 | 作用 | backlog |
 |----|------|------|---------|
 | **L0 RC 核心** | dup/drop 插入，owned-everywhere，归零即 free | 释放堆内存 → 打破自举内存墙 → 完成全 native 自举 | B-012 |
-| **L1 借用优化** | 借用推断消除借用参数上的 dup/drop | 大幅减 RC 流量 | B-068（§7.2–7.8）|
+| **L1 借用推断引擎** | borrow-default + 逃逸点推断 owned；读取默认 borrow、escape-clone、scope-end-drop | 消除 owned-everywhere 的 move-analysis double-free + 泄漏；大幅减 RC 流量 | B-098（引擎）|
+| **L1 用户面** | `fn(move T)` 语法、lv2 标注、fmt 策略、pub 规则 | 文档化借用语义（不改编译行为）| B-068（§7.2–7.8，deferred）|
 | **L2 Drop/RAII** | 用户 `impl Drop`、全路径 RAII、fail/catch 改 drop-aware unwind、`Weak<T>` | 资源安全 + 循环引用 | B-002 |
 | **L3 Reuse (FBIP)** | `rc==1` 时就地改写，drop-reuse 配对、reuse specialization、COW | 性能核爆（函数式零拷贝）| B-079 |
 | **L4 Unboxing** | 标量进寄存器不上堆 | 减 alloc + RC 流量 | B-080 |
 
-**关键性质**：L0 单独即可解锁全自举，**无硬前置**——owned-everywhere 模型只需 pass 内部的反向 last-use 分析，不需要先实现借用推断（L1）。L1/L2 是叠加的优化与安全层。
+**关键性质（2026-06-04 订正，#134 证伪原断言）**：原设计假设「L0 owned-everywhere 单独即可解锁全自举，无硬前置」——**错误**。owned-everywhere 对「循环内条件 move」（如 `register_impl_method` 的 `self_type` 在 for 循环里被条件 `push`）是 **double-free（崩溃，非泄漏）**：branch-balancing 给未消费分支强插 `drop`，单值多次 free；Perceus 三套循环机制（pre-loop single-dup / 闭包 per-iteration seeding / branch-balancing）均不覆盖此缝。逐点 always-own sweep 修了 7 处推进 2400×（chk 144→347K）后仍残留同类崩点，本质 = 每个循环/条件 move 需深层 Perceus 手术、站点未知。**结论**：借用推断引擎（L1 的 B-098）被提前到 native-working **之前**——borrow-default 不要求每路径消费 → 未消费分支不再插 spurious drop，从根上消除整类崩溃。L1 用户面（B-068）+ L2 仍是叠加层。
 
 **L0 架构决策**：
 - **对象头**：每个堆对象 offset 0 为 `{rc: u32, typeid: u32}`，dup/drop 类型无关（读 `*(u32*)ptr` 加减）。
@@ -2052,7 +2053,8 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | LLVM 闭包表示 | `{fn_ptr, env_ptr}` 二元组 + 已知函数直接调用 | 标准方案；uniform boxing 下捕获统一为 void* |
 | LLVM fail/catch | setjmp/longjmp | bootstrap 无 Drop/RAII 不需要栈展开；Ownership 阶段可切换 |
 | LLVM 多文件编译 | bootstrap 阶段单 LLVM Module，单 .o 输出 | 不需要跨模块符号解析；增量编译留给后续 |
-| Perceus 分层路线 | L0 RC核心(B-012) → L1 借用(B-068) → L2 Drop/RAII+Weak(B-002) → L3 reuse(B-079) → L4 unboxing(B-080) | 可独立测试/merge 的序列；L0 单独解锁全自举且无硬前置 |
+| Perceus 分层路线 | L0 RC核心(B-012) → L1 引擎(B-098) → L1 用户面(B-068,deferred) → L2 Drop/RAII+Weak(B-002) → L3 reuse(B-079) → L4 unboxing(B-080) | 可独立测试/merge 的序列 |
+| Perceus L1 引擎提前（2026-06-04，#134 证伪 L0-only 自举）| 原断言「L0 owned-everywhere 单独解锁全自举、无硬前置」**错误**——对「循环内条件 move」是 double-free（崩溃非泄漏）。借用推断引擎（B-098）提前到 native-working 之前：borrow-default + escape-clone + scope-end-drop，撤销 always-own 读取补丁。仅引擎，用户面（move 语法/lv2/fmt/pub）留 B-068 deferred | branch-balancing 给未消费分支强插 drop → 单值多次 free；三套循环机制不覆盖此缝；逐点 always-own sweep 是站点未知的 whack-a-mole + 每个 move 需深层 Perceus 手术。borrow 不要求每路径消费 → 整类崩溃从根消除 |
 | Perceus L0 对象头 | 每堆对象 offset 0 `{rc:u32, typeid:u32}`；per-type drop 函数 + typeid 派发表 | dup/drop 类型无关；用户类型 drop 由 codegen 生成（Koka 风格 per-type drop/scan）|
 | Perceus L0 范围 | 不处理 abort 路径 drop（留 L2 drop-aware unwind）/ 循环引用（留 L2 Weak） | longjmp 跳过 drop = 泄漏非 UAF（安全）；自举走成功路径 + 树形数据无环；先解内存墙 |
 | Perceus dup/drop IR | HIR 显式 Drop/dup 节点 + 反向 liveness pass（仅 llvm） | RC 行为落 IR 可 dump/测试；翻译 Koka Perceus POPL'21 |

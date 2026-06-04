@@ -10,9 +10,9 @@
 
 ## 🔴 Critical（阻塞 native 自举）
 
-### #134 native 二进制运行时 RC 损坏 — 系统性 L0 borrow-vs-own 缺口 [Critical] [judgment] [open] [deferred: L0-RC-完成]
+### #134 native 二进制运行时 RC 损坏 — 系统性 L0 borrow-vs-own 缺口 [Critical] [judgment] [open] [deferred: B-098]
 
-**决策（2026-06-04，用户选 C）**：本步收口。已修 7 个缺陷推进 2400×（chk 144→347K）全部提交持久化；剩余 = **完成 L0 RC 正确性**（注意：是 native 自举 B-012 的前置正确性工作，**不是** B-068 借用优化——backlog 明确「B-068 不阻塞 native 自举，L0 正确性即可」；B-068 只是会顺带消除 always-own 留下的泄漏）。native-working 留作后续 L0-RC 专项推进。下方记录完整根因与定位方法，供恢复时直接接力（`tmp134/a_empty.ring` + `RING_DUMP_TIDS` + `ring.map` 确定性复现下一崩点 register_impl_method）。
+**决策（2026-06-04 二次 Discussion，用户选 B′，接续前次 C）**：前次「本步收口 C」已修 7 缺陷推进 2400×（chk 144→347K）全部提交持久化。本次重新激活 native-working 为 P1，**A/B 取舍已拍板：走 B′（借用推断引擎）= 新立项 B-098**——不走 (a) always-own 逐点 sweep（whack-a-mole + 每个循环/条件 move 需深层 Perceus 手术），而是 borrow-default + escape-clone + scope-end-drop 从根消除整类 move-analysis double-free。⚠️ 旧表述「**不是** B-068」已订正：剩余崩点的根因正是缺借用推断，B-098 是 B-068 的引擎部分（用户面 #2 仍留 B-068 deferred）。此条 deferred 标记改为 `deferred: B-098`。下方根因与定位方法供 B-098 实现时接力（`tmp134/a_empty.ring` + `RING_DUMP_TIDS` + `ring.map` 确定性复现崩点 register_impl_method）。
 
 **首次实跑 native 二进制即暴露**——历史只验过 `--target=llvm` 的 `.o` 生成 EXIT 0，从未运行过链接后的 `ring.exe`。native 二进制自 self-hosting 初期就一直崩、从未成功运行过。
 
@@ -27,10 +27,10 @@
 5. **容器元素读取 borrow**：`ring_list_get`/`_opt`/`map_get(_opt)`/`map_int_get(_opt)`/`map_values`/`map_entries` 返回时 dup。
 6. **read-then-reassign 可变变量 double-free**（`parse_expr_bp` 的 `last_was_comparison`）：Assign drop 旧值时把 target 加入返回 live → 之前读取改 dup。
 
-**仍残留（同一系统性根因的其余表现，B-068 借用推断范畴）**：
+**仍残留（同一系统性根因的其余表现，由 B-098 借用推断引擎统一消除）**：
 - 当前确定性崩点：`register_impl_method`（chk=347204，tid-103=**`Type`** double-drop，已用 `RING_DUMP_TIDS` 环境变量 + ring.map 确认）。**精确根因**：`self_type`（Type）在 `for p in params` 循环体的 `none => if p.name=="self" { param_types.push(self_type) }` 里**条件 consume**；分支平衡给 else 分支插 `drop(self_type)`（对单次 if/else 正确）。但循环内：迭代0(self)consume 了它，迭代1+(非self)的 else 又 drop → double-free。Perceus 的循环保守 dup（`ForIn`/`While` handler）只对「循环后仍 live」的 loop_var 插 pre-loop dup，**没覆盖「循环内被条件 consume」的值**——需扩展为 per-iteration dup（类似 closure-capture 处理）。属深层 Perceus 循环语义手术，有回归风险。
 - 还会有更多：mut-param 跨模块所有权语义、方法接收者借用、更多条件/循环 move。
-- **本质 = 完成 L0 所有权模型**。两条路：(a) 继续逐点 "always-own" sweep（每个读取/move 站点补 dup/修 liveness，已覆盖字段+容器+read-reassign，收敛中但站点多、且 move-analysis 类需逐个 Perceus 改）；(b) 正式做 **B-068 借用推断**（一次性区分 borrow/owned，消除全部 dup 与泄漏）。**(a)/(b) 取舍需用户定**——见 worker_feedback.md。
+- **本质 = 完成 L0 所有权模型**。已拍板走 **B-098 借用推断引擎**（borrow-default + escape-clone + scope-end-drop，一次性区分 borrow/owned，整类消除 double-free + 泄漏），不走 always-own 逐点 sweep。`self_type` 在 B-098 下：循环内 borrow，push 逃逸点 dup 一份存入 list，scope 末尾 drop 原值一次——无 spurious else-drop（borrow 不要求每路径消费），无 double-free。
 
 **代价说明**：当前 "always-own" 修复在 borrow 位置（算术/条件操作数、只读 for-in 绑定）会泄漏（L0 correct-over-leak 容忍，B-068 后消除）。
 
