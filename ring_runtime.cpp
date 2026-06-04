@@ -200,6 +200,12 @@ extern "C" void ring_register_drop(int64_t typeid_val, void* drop_fn_ptr) {
     if (typeid_val >= 0 && typeid_val < 4096) {
         drop_table[(int)typeid_val] = (ring_drop_fn)drop_fn_ptr;
     }
+#ifdef _WIN32
+    if (getenv("RING_DUMP_TIDS")) {  // #134 diag: map typeid → drop_<Type> via ring.map
+        fprintf(stderr, "regdrop tid=%lld rva=0x%llx\n", (long long)typeid_val,
+                (unsigned long long)((uintptr_t)drop_fn_ptr - (uintptr_t)GetModuleHandle(NULL)));
+    }
+#endif
 }
 
 static void ring_drop_by_typeid(uint32_t tid, void* data) {

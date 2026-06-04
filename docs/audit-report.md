@@ -26,7 +26,7 @@
 6. **read-then-reassign 可变变量 double-free**（`parse_expr_bp` 的 `last_was_comparison`）：Assign drop 旧值时把 target 加入返回 live → 之前读取改 dup。
 
 **仍残留（同一系统性根因的其余表现，B-068 借用推断范畴）**：
-- 当前确定性崩点：`register_impl_method`（chk=347204，tid-103 double-drop）。疑为 **`self_type` 在 `for p in params` 循环内条件 move**（`if p.name=="self"` 分支 push）后 epilogue 又 drop——Perceus move 分析在「循环+条件 move」下的后续 liveness 缺陷。
+- 当前确定性崩点：`register_impl_method`（chk=347204，tid-103=**`Type`** double-drop，已用 `RING_DUMP_TIDS` 环境变量 + ring.map 确认）。**精确根因**：`self_type`（Type）在 `for p in params` 循环体的 `none => if p.name=="self" { param_types.push(self_type) }` 里**条件 consume**；分支平衡给 else 分支插 `drop(self_type)`（对单次 if/else 正确）。但循环内：迭代0(self)consume 了它，迭代1+(非self)的 else 又 drop → double-free。Perceus 的循环保守 dup（`ForIn`/`While` handler）只对「循环后仍 live」的 loop_var 插 pre-loop dup，**没覆盖「循环内被条件 consume」的值**——需扩展为 per-iteration dup（类似 closure-capture 处理）。属深层 Perceus 循环语义手术，有回归风险。
 - 还会有更多：mut-param 跨模块所有权语义、方法接收者借用、更多条件/循环 move。
 - **本质 = 完成 L0 所有权模型**。两条路：(a) 继续逐点 "always-own" sweep（每个读取/move 站点补 dup/修 liveness，已覆盖字段+容器+read-reassign，收敛中但站点多、且 move-analysis 类需逐个 Perceus 改）；(b) 正式做 **B-068 借用推断**（一次性区分 borrow/owned，消除全部 dup 与泄漏）。**(a)/(b) 取舍需用户定**——见 worker_feedback.md。
 
