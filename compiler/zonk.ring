@@ -317,6 +317,10 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             HExpr::TupleLit { elements: elements.map(fn(e) { zonk_expr(ctx, e) }), ty: z_ty, effects: z_eff, span: z_span },
         HExpr::IndexExpr { receiver, index, .. } =>
             HExpr::IndexExpr { receiver: zonk_expr(ctx, receiver), index: zonk_expr(ctx, index), ty: z_ty, effects: z_eff, span: z_span },
+        // B-098: Clone is inserted by the Perceus pass (post-zonk), so it never
+        // reaches zonk in practice; the arm exists only for match exhaustiveness.
+        HExpr::Clone { inner, .. } =>
+            HExpr::Clone { inner: zonk_expr(ctx, inner), ty: z_ty, effects: z_eff, span: z_span },
     }
 }
 

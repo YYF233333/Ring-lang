@@ -695,11 +695,10 @@ extern "C" void* ring_list_get(void* list, int64_t idx) {
                 (long long)idx, (long long)vec->size());
         exit(1);
     }
-    // #134: a read borrows the element; the L0 callee-owns convention means the
-    // caller will eventually drop it, so hand back an OWNED reference (the
-    // container keeps its own).  Mirrors the field-access dup in gen_field_access.
+    // B-098: a list element read is a BORROW — return the element WITHOUT
+    // bumping its refcount (it still belongs to the list).  The borrow-inference
+    // pass clones (ring_dup) it only when it escapes into an owned sink.
     void* elem = (*vec)[(size_t)idx];
-    ring_dup(elem);
     return elem;
 }
 
@@ -781,7 +780,12 @@ extern "C" void* ring_list_get_opt(void* list, int64_t idx) {
     if (idx < 0 || idx >= (int64_t)vec->size()) {
         return ring_enum_none();
     }
-    void* elem = (*vec)[(size_t)idx];  // #134: own the element (see ring_list_get)
+    // B-098: `.get()` builds a FRESH owned Option (ring_enum_some) that co-owns
+    // the element — same owned-container-constructor rule as map_values: dup the
+    // element so drop_option (which drops the payload) is balanced.  (The DIRECT
+    // element reads — ring_list_get / map_get / IndexExpr — return a borrow and
+    // are the ones whose always-own dup is reverted.)
+    void* elem = (*vec)[(size_t)idx];
     ring_dup(elem);
     return ring_enum_some(elem);
 }
@@ -1058,8 +1062,7 @@ extern "C" void* ring_map_get(void* map, void* key) {
         fprintf(stderr, "ring panic: map key not found: %s\n", k->c_str());
         exit(1);
     }
-    ring_dup(it->second);  // #134: own the read value (see ring_list_get)
-    return it->second;
+    return it->second;  // B-098: borrow (no dup); clone on escape
 }
 
 extern "C" void* ring_map_get_opt(void* map, void* key) {
@@ -1067,7 +1070,7 @@ extern "C" void* ring_map_get_opt(void* map, void* key) {
     std::string* k = (std::string*)key;
     auto it = m->find(*k);
     if (it == m->end()) return ring_enum_none();
-    ring_dup(it->second);  // #134: own the read value
+    ring_dup(it->second);  // B-098: fresh Option co-owns the value (see ring_list_get_opt)
     return ring_enum_some(it->second);
 }
 
@@ -1108,7 +1111,10 @@ extern "C" void* ring_map_values(void* map) {
     auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
-        ring_dup(kv.second);  // #134: the returned list owns its elements
+        ring_dup(kv.second);  // B-098: the FRESH list co-owns its elements (the
+                              // map keeps its own copy) — this is the model's
+                              // "escape into a container = clone" inlined into the
+                              // owned-container constructor, NOT a read-borrow dup.
         result->push_back(kv.second);
     }
     return ldata;
@@ -1126,7 +1132,8 @@ extern "C" void* ring_map_entries(void* map) {
         void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
         new (sd) std::string(kv.first);
         pair->push_back(sd);
-        ring_dup(kv.second);  // #134: the entry pair owns the value
+        ring_dup(kv.second);  // B-098: the fresh entry pair (a List) co-owns the
+                              // value; owned-container constructor, not a borrow.
         pair->push_back(kv.second);
         result->push_back(pdata);
     }
@@ -1167,8 +1174,7 @@ extern "C" void* ring_map_int_get(void* map, void* key) {
         fprintf(stderr, "ring panic: map key not found: %lld\n", (long long)k);
         exit(1);
     }
-    ring_dup(it->second);  // #134: own the read value (see ring_list_get)
-    return it->second;
+    return it->second;  // B-098: borrow (no dup); clone on escape
 }
 
 extern "C" void* ring_map_int_get_opt(void* map, void* key) {
@@ -1176,7 +1182,7 @@ extern "C" void* ring_map_int_get_opt(void* map, void* key) {
     int64_t k = *(int64_t*)key;
     auto it = m->find(k);
     if (it == m->end()) return ring_enum_none();
-    ring_dup(it->second);  // #134: own the read value
+    ring_dup(it->second);  // B-098: fresh Option co-owns the value (see ring_list_get_opt)
     return ring_enum_some(it->second);
 }
 

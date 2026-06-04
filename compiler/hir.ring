@@ -83,7 +83,14 @@ pub enum HExpr {
     RangeExpr { start: HExpr, end: HExpr, inclusive: Bool, ty: Type, effects: EffectRow, span: Span },
     ListLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
     TupleLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
-    IndexExpr { receiver: HExpr, index: HExpr, ty: Type, effects: EffectRow, span: Span }
+    IndexExpr { receiver: HExpr, index: HExpr, ty: Type, effects: EffectRow, span: Span },
+    // B-098: value-level clone inserted by the Perceus L1 borrow-inference pass
+    // (clone-all-escape) for --target=llvm only.  Wraps an escaping value that
+    // already has an independent owner (Ident binding / FieldAccess / IndexExpr /
+    // container read result) so the escape gets its own owned reference rather
+    // than aliasing the still-live source.  codegen lowers `Clone{inner}` to
+    // eval inner -> ring_dup(result) -> result (ty/effects/span taken from inner).
+    Clone { inner: HExpr, ty: Type, effects: EffectRow, span: Span }
 }
 
 pub struct HForInDestructure {
@@ -297,7 +304,8 @@ pub fn hexpr_type(e: HExpr) -> Type {
         HExpr::RangeExpr { ty, .. } => ty,
         HExpr::ListLit { ty, .. } => ty,
         HExpr::TupleLit { ty, .. } => ty,
-        HExpr::IndexExpr { ty, .. } => ty
+        HExpr::IndexExpr { ty, .. } => ty,
+        HExpr::Clone { ty, .. } => ty
     }
 }
 
@@ -325,7 +333,8 @@ pub fn hexpr_effects(e: HExpr) -> EffectRow {
         HExpr::RangeExpr { effects, .. } => effects,
         HExpr::ListLit { effects, .. } => effects,
         HExpr::TupleLit { effects, .. } => effects,
-        HExpr::IndexExpr { effects, .. } => effects
+        HExpr::IndexExpr { effects, .. } => effects,
+        HExpr::Clone { effects, .. } => effects
     }
 }
 
@@ -353,6 +362,7 @@ pub fn hexpr_span(e: HExpr) -> Span {
         HExpr::RangeExpr { span, .. } => span,
         HExpr::ListLit { span, .. } => span,
         HExpr::TupleLit { span, .. } => span,
-        HExpr::IndexExpr { span, .. } => span
+        HExpr::IndexExpr { span, .. } => span,
+        HExpr::Clone { span, .. } => span
     }
 }

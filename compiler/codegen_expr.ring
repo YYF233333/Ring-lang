@@ -138,6 +138,10 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
                 _ => "__ring_index(${r}, ${i})"
             }
         },
+        // B-098: Clone is an LLVM-only Perceus node (RC dup); the JS backend is GC'd
+        // and never runs the Perceus pass, so this is unreachable — pass the inner
+        // expression through transparently for exhaustiveness.
+        HExpr::Clone { inner, .. } => gen_expr(ctx, inner),
     }
 }
 

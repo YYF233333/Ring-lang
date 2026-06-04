@@ -140,7 +140,26 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
             gen_tuple_lit(ctx, elements),
         HExpr::IndexExpr { receiver, index, ty, .. } =>
             gen_index_expr(ctx, receiver, index, ty),
+        HExpr::Clone { inner, .. } =>
+            gen_clone(ctx, inner),
     }
+}
+
+// ============================================================
+// B-098: value-level clone (clone-all-escape borrow model)
+// ============================================================
+//
+// Perceus wraps an escaping value that already has an independent owner (an
+// Ident binding, a FieldAccess / IndexExpr projection, or a container read
+// result) in `Clone{inner}`.  Under the borrow model, reads do NOT dup, so the
+// projected/read value is a borrow that still belongs to its source aggregate.
+// When such a value escapes into an owned slot (container push, struct field,
+// return, let binding, closure capture), it needs its own owned reference, or
+// the sink and the source would double-free the one allocation.  Lowering:
+// evaluate inner, ring_dup the result, return the (now owned) pointer.
+fn gen_clone(mut ctx: LlvmCtx, inner: HExpr) -> LLVMValueRef {
+    let val = gen_llvm_expr(ctx, inner)
+    gen_dup_value(ctx, val)
 }
 
 // ============================================================
@@ -2037,16 +2056,13 @@ fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMVal
 // Field access
 // ============================================================
 
-// #134: emit ring_dup(val) and return val.  Field projection reads a field
-// pointer WITHOUT bumping its refcount (a borrow).  The L0 backend's calling
-// convention is callee-owns (transform_fn_body drops unconsumed params), and
-// bindings / struct fields / returns all take ownership too — so a borrowed
-// field value flowing into ANY of those owned slots is freed twice (once by the
-// new owner, once by the receiver it was projected from).  Dup'ing every field
-// read makes the result OWNED, so each owner's drop is balanced.  The cost is a
-// leak when the value flows into a transient borrow position (binop / condition
-// operand) that never drops it — acceptable under the L0 correct-over-leak
-// policy; B-068 (borrow inference) will remove both the dup and the leak.
+// B-098: ring_dup(val); return val.  This is the lowering primitive for the
+// value-level clone (HExpr::Clone, gen_clone): the borrow-inference pass wraps an
+// escaping owner-bearing value (Ident / field / index / container read) in Clone,
+// and codegen bumps its refcount so the sink owns an independent reference.  Under
+// the clone-all-escape model READS no longer dup — only escapes do (here) — so
+// there is no always-own field/read dup left to balance (that L0 patch is
+// reverted in B-098).
 fn gen_dup_value(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef {
     let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
     let dup_ty = get_rt_fn_type(ctx, "ring_dup")
@@ -2069,7 +2085,8 @@ fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> 
             let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
             let get_ty = get_rt_fn_type(ctx, "ring_list_get")
             let idx_val = LLVMConstInt(ctx.i64_type, field_idx, 0)
-            // ring_list_get itself dups the element (#134), so no extra dup here.
+            // B-098: tuple field read is a BORROW (ring_list_get no longer dups);
+            // the borrow-inference pass clones it if it escapes.
             return LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], fresh_name(ctx, "t"))
         },
         _ => {},
@@ -2093,10 +2110,12 @@ fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> 
             if field_idx < 0 {
                 panic("LLVM codegen: field '${field}' not found in struct '${type_name}'")
             }
-            // GEP into struct to get field pointer, then load
+            // GEP into struct to get field pointer, then load.
+            // B-098: a struct field read is a BORROW (no dup); the field value
+            // still belongs to the struct.  If it escapes, the borrow-inference
+            // pass wraps it in HExpr::Clone (gen_clone) to bump the refcount.
             let field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, recv_val, field_idx, fresh_name(ctx, "fp"))
-            let loaded = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, field))
-            gen_dup_value(ctx, loaded)  // #134: own the projected field (see gen_dup_value)
+            LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, field))
         },
         none => {
             panic("LLVM codegen: struct type '${type_name}' not registered")
@@ -2117,13 +2136,25 @@ fn gen_struct_lit(mut ctx: LlvmCtx, name: Str, fields: List<HStructFieldInit>, s
             let typeid_val = LLVMConstInt(ctx.i64_type, get_or_assign_typeid(ctx, name), 0)
             let struct_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [size, typeid_val], fresh_name(ctx, "s"))
 
-            // If spread expression exists, copy all fields from it first
+            // If spread expression exists, copy all fields from it first.
+            // B-098: the spread COPIES the source struct's field pointers into the
+            // NEW struct (which will be dropped via drop_<T>, freeing every field).
+            // Those copied fields alias the source's owned references, so the new
+            // struct must take its OWN reference (ring_dup) to avoid a double-free
+            // when both structs are dropped — UNLESS the field is immediately
+            // overridden by an explicit field init below (then the spread copy is
+            // dead; skip the dup to avoid leaking it).
             match spread {
                 some(spread_expr) => {
+                    let mut overridden: Set<Str> = set_new()
+                    for f in fields { overridden.insert(f.name) }
                     let spread_val = gen_llvm_expr(ctx, spread_expr)
                     for i in 0..info.field_names.len() {
                         let src_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, spread_val, i, fresh_name(ctx, "sfp"))
                         let src_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, src_ptr, fresh_name(ctx, "sfv"))
+                        if overridden.contains(info.field_names[i]) == false {
+                            discard(gen_dup_value(ctx, src_val))
+                        }
                         let dst_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, struct_ptr, i, fresh_name(ctx, "dfp"))
                         discard(LLVMBuildStore(ctx.builder, src_val, dst_ptr))
                     }
@@ -3449,7 +3480,15 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     let count_slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, 0, fresh_name(ctx, "cnt"))
     discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, captures.len(), 0), count_slot))
 
-    // Store each capture into env (slot i+1 — slot 0 is the count)
+    // Store each capture into env (slot i+1 — slot 0 is the count).
+    // B-098: the borrow-inference model treats every closure capture as OWNED —
+    // the env takes its OWN reference (ring_dup at construction), released by
+    // drop_closure_env when the env dies.  This must happen HERE (construction
+    // time, in the enclosing scope) and NOT inside the body: the enclosing scope
+    // scope-end-drops the captured binding (e.g. `build()` returning the closure
+    // drops its local `payload`), so without the construction dup the env would
+    // hold a freed pointer.  rc balance: binding rc=1 → capture dup → 2 → env
+    // drop → 1 → binding scope-end drop → 0.
     for i in 0..captures.len() {
         match captures.get(i) {
             some(cap_name) => {
@@ -3458,6 +3497,8 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
                     some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "cv")),
                     none => LLVMConstPointerNull(ctx.ptr_type),
                 }
+                // Own the capture: bump its refcount for the env's reference.
+                discard(gen_dup_value(ctx, cap_val))
                 let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, i + 1, fresh_name(ctx, "ep"))
                 discard(LLVMBuildStore(ctx.builder, cap_val, cap_ptr))
             },
@@ -3675,6 +3716,10 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
             collect_captures(ctx, rs, params, captures)
             collect_captures(ctx, re, params, captures)
         },
+        // B-098: a Clone-wrapped escape inside a closure body (e.g. the lambda
+        // returns a captured outer local) still references its inner expression's
+        // free variables — recurse so the capture is collected into the env.
+        HExpr::Clone { inner, .. } => collect_captures(ctx, inner, params, captures),
         _ => {},
     }
 }

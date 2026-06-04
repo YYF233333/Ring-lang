@@ -1380,6 +1380,10 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 
 **内存**：clone-all-escape 的 dup 次数 < always-own（读取远多于逃逸），预期满足 G-a 内存门（带 RC native 自编译峰值 << 25.9GB）。
 
+**实现订正（2026-06-04，B-098 落地）**：字面模型对**树形 owner**成立；编译器自身的 HIR / inference 是**共享图（DAG）**，落地时两处必要收紧（均保守、crash-free，见 worker_feedback）：
+1. **owned-container 构造器 ≠ read-borrow**：`map.values()` / `map.entries()` / `.get()`（`ring_map_values` / `ring_map_entries` / `ring_list_get_opt` / `ring_map_get_opt` / `ring_map_int_get_opt`）新建 owned 容器（List / Option）并把元素 dup 进去——这 dup 是「逃逸进容器=clone」的运行时内联，**保留**。只有**直接返回元素指针**的读取（`ring_list_get` / `ring_map_get` / `ring_map_int_get`，供 IndexExpr / for-in / tuple-field / `m[k]`）+ `gen_field_access` struct 投影撤销 dup（borrow）。`.unwrap` / `.to_fail` / `.unwrap_or_else` 返回 Option 载荷借用 → owner-bearing（逃逸 clone）。
+2. **`let x = <Call 结果>` 保守不 drop**：callee 可能返回与共享状态别名的值（`InferResult.subst` 别名线程化 `UnionFind`；pass-through HIR 节点），故 scope-end drop 仅对 init 为 **fresh 构造器或 owner-bearing（→Clone）** 的绑定发出；Call/EffectOp/BinOp/控制流结果绑定**不 drop**（泄漏，crash-free）。精确 DAG-aware ownership 留 L3-reuse / B-096。闭包捕获在 `gen_lambda` **构造时** dup（env 取得自己的 owned 引用，`drop_closure_env` 释放），非 body 内 clone。
+
 ---
 
 ## 8. 并发模型 ⚠️ 设计愿景，尚未实现
