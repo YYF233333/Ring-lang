@@ -1451,6 +1451,7 @@ function rc_stmt(stmt, live, locals, boxed) {
       const target = __ring_m38.target; const value = __ring_m38.value; const span = __ring_m38.span;
       const val_result = rc_expr(value, live, locals, boxed);
       let out = dups_to_stmts(val_result.dups);
+      let result_live = val_result.live;
       __ring_match39: {
         const __ring_m39 = target;
         if (__ring_m39._tag === "Ident") {
@@ -1463,13 +1464,16 @@ function rc_stmt(stmt, live, locals, boxed) {
 })();
           if ((is_boxed === false)) {
             List_push(out, hir$HStmt_Drop(name, ty, synthetic_span()));
+            if ((rc_name_skippable(name) === false)) {
+              _Set_insert(result_live, name);
+            }
           }
           break __ring_match39;
         }
         break __ring_match39;
       }
       List_push(out, hir$HStmt_Assign(target, val_result.expr, span));
-      return new RcStmtsResult(out, val_result.live);
+      return new RcStmtsResult(out, result_live);
       break __ring_match38;
     }
     if (__ring_m38._tag === "ExprStmt") {

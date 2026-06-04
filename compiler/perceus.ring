@@ -707,6 +707,7 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -> Rc
             // B-081: flush the value's reported dups before the old-value Drop
             // and the Assign itself.
             let mut out: List<HStmt> = dups_to_stmts(val_result.dups)
+            let mut result_live = val_result.live
 
             // Drop the old value before the assignment overwrites it.
             // B-091: EXCEPT when the target is an auto-boxed mut-cell.  A write to
@@ -724,13 +725,20 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -> Rc
                     }
                     if is_boxed == false {
                         out.push(HStmt::Drop { name: name, ty: ty, span: synthetic_span() })
+                        // #134: the assign READS (drops) the old value, so the
+                        // target is live entering this statement.  Mark it live so
+                        // reads of it in EARLIER statements borrow (dup) instead of
+                        // moving the value out — otherwise the last read before the
+                        // reassign consumes the box and this drop double-frees it
+                        // (parse_expr_bp's `last_was_comparison` in the bp loop).
+                        if rc_name_skippable(name) == false { result_live.insert(name) }
                     }
                 },
                 _ => {},
             }
             out.push(HStmt::Assign { target: target, value: val_result.expr, span: span })
 
-            RcStmtsResult { stmts: out, live: val_result.live }
+            RcStmtsResult { stmts: out, live: result_live }
         },
 
         HStmt::ExprStmt { expr, span } => {
