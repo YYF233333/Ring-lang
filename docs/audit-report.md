@@ -8,6 +8,28 @@
 
 ---
 
+## 🔴 Critical（阻塞 native 自举）
+
+### #133 B-087 引入间歇堆内存损坏（LLVM RC，全局污染）[Critical] [judgment] [open]
+
+**bisection 已定位元凶 = B-087（Wave 8）**：
+- Wave 6（`89d039a`）：3x full-suite 干净（B-093 agent 验 111/111）
+- Wave 7（`38fe1a8`，B-092）：**3x = 39/39/39 全干净**
+- Wave 8（`18901cf`，B-087）：3x 间歇失败（非 effect 用例 5/2/0：closure_captures_dict / guard_or_pattern / option_to_fail / set_iteration / string_interp / closure_capture_nonloop / fail_catch，每次不同）
+- 当前 main（含 B-090 `4f9cbf9`）：3x = 49/47/44，同样间歇。**B-090 经 bisection 排除**（pre-B-090 dist 同样间歇）
+
+**症状**：随机用例间歇失败，值是垃圾（`total=16`/`total=65` vs 期望 `38`），失败率随重复跑递增（0→2→5→8），偶发异常超时（96s/387s，正常 ~600ms）。典型堆损坏——`ring_alloc` free-list 被 double-free/UAF 污染 → 后续随机分配读到垃圾。单跑 ~1/3 概率命中，故 Wave 4-8 单跑全漏过（含 B-087 自身 agent 的 46/46）。
+
+**首要嫌疑**：B-087 的 **#103 mut 参数 boxing**——新建 LLVM `fn_mut_params` 基础设施 + "shared CELL writeback"（`scan_fn_mut_params_llvm` + `gen_mut_arg_llvm`，操作 cell typeid 14 的 RC）。double-free 一个共享 cell 全局污染堆。次嫌疑：`collect_captures` 收 dict/evidence 后的 dup/drop 不平衡。
+
+**文件**：`compiler/codegen_llvm.ring`（`scan_fn_mut_params_llvm`）、`compiler/codegen_llvm_expr.ring`（`gen_mut_arg_llvm` / `collect_captures`）、可能 `perceus.ring`。
+
+**复现**：`cd compiler && npm run test:llvm` 连跑 3x，看非 effect 用例间歇失败 + `total` 垃圾值。
+
+**修复方向**：bisect B-087 内部 6 个 gap（最快路径：临时 revert mut-param-boxing 那部分，3x 看是否变干净 → 锁定 → 修 double-free / RC 平衡）。**Critical 理由：阻塞 G-c parity 验收（B-089），且 native 自编译大概率也踩（编译器自身重度用 mut 参数）——可能威胁 G-b 双 bootstrap 一致性。**
+
+发现者：Worker Wave 9 收尾（3x 压测暴露，单跑漏网）
+
 ## Checker
 
 
