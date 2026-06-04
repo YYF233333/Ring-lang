@@ -33,3 +33,21 @@ audit 记 Wave 8 失败的是非 effect 用例（closure_captures_dict/guard_or_
 ### 3. 验收数据 [通知]
 
 JS E2E 731/731 · llvm_diff full-suite 9x 全绿（49/49）· effect_handler_multi_op 隔离 60x 全对 · 6 个非 effect 用例隔离 180x 零失配 · dist 双 bootstrap fixpoint 字节一致。
+
+## #134 native 二进制段错误（新 Critical，B-089 G-a 首次实跑暴露）
+
+### 1. 史上第一次实跑 native 二进制 → 段错误，已立项 + 已定位 [通知]
+
+按你的 roadmap commit"修完 #133 → 本机实跑 native 自编译看峰值"执行 B-089 G-a，**第一次真正运行链接后的 native ring.exe**（历史只验过 .o 生成 EXIT 0，runtime 从 self-hosting 初期就崩、加了仪表但没修，一直"未测"）。结果：**native 编译器编译 hello/极小程序都 `0xC0000005` 段错误**。
+
+你让我"先亲自快速排查"，已缩到固定点：**所有 `fn main` 程序崩在完全相同的 chk=144 / rva=0xfd797 / unbox_int，与函数体无关** → 早期声明管线**单一被误编指令**，一个结构性裸 int(57) 漏装箱被当指针解引用。**类别 = LLVM codegen boxing/ABI 误编，非 RC 堆损坏（与 #133 不同类）**。完整定位（栈回溯 RVA、机制、历史）见 **audit #134**。
+
+### 2. 待你定 fix 策略 [决策]
+
+**现状**：#134 已缩到单点确定性误编，但修复策略未定。下一步是反汇编 rva 0xfd797 的调用者（RVA 已记）映射到具体 Ring 函数 → 找漏装箱的 int → 对照 JS codegen。
+**原因**：这是 native 自举核心硬骨头，缩到单点后仍需定调查/修复方式。
+**待决策**：
+- (A) 派 worktree subagent 接力反汇编定位 + 修
+- (B) 你/我继续亲自深挖到 Ring 函数级再定
+- (C) 暂搁 #134，先推进 B-097（effect handler phase 2，contained P2）保持节奏
+**附带**：native 二进制还无法自托管 LLVM 后端（`llvm_ffi.ring` 的 LLVM-C extern fn 被塞 panic stub），属架构 gap，见 audit #134 末。
