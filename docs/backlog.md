@@ -638,7 +638,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-098 借用推断引擎（B-068 引擎部分，L1 核心）[feature] [P1] [L] [judgment] [queued]
+### B-098 借用推断引擎（B-068 引擎部分，L1 核心）[feature] [P1] [L] [judgment] [doing]
 
 > 2026-06-04 立项 + Discussion 落定实现模型（design.md §7.11）。把 L0 always-own 改为 clone-all-escape borrow 模型，从根上消除 move-analysis double-free（native 崩溃，#134 剩余崩点根因）+ always-own 泄漏。**仅引擎**——不含 B-068 用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则，继续推迟）。native-working 关键路径。**完整实现模型见 design.md §7.11**，本项按其实现。
 
