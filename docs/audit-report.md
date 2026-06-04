@@ -8,6 +8,32 @@
 
 ---
 
+## 🔴 Critical（阻塞 native 自举）
+
+### #134 native 二进制运行时段错误（unbox_int on 裸 Int，infer_method_call）[Critical] [judgment] [open]
+
+**首次实跑 native 二进制即暴露**——历史只验过 `--target=llvm` 的 `.o` 生成 EXIT 0，从未运行过链接后的 `ring.exe`（runtime "未测"）。2026-06-04 修完 #133 后本机首跑：native 编译器**编译 hello.ring / 极小程序都段错误**。
+
+**症状**：`ring-native.exe build <任意程序>`（`--target=js`）→ `0xC0000005` ACCESS_VIOLATION。崩溃确定性（极小程序 144 calls、hello 1203 calls 都崩），偶发先写出正确 .js 再崩（非确定，典型堆/指针损坏）。
+
+**崩溃 dump（精确定位）**：
+- `CRASH fn=unbox_int code=0xc0000005 fault_addr=0x39`，`rax=rcx=rsi=0x39`。
+- `bytes at rip: 48 8b 44 24 30 48 8b 00` = `mov rax,[rsp+0x30]; mov rax,[rax]`——取一个"指针"再解引用，但其值是 **0x39（裸整数 57），非堆指针** → `unbox_int` 收到未装箱的 Int 当指针。
+- `InferResult* = 0x7FF6C71ECA03` **指向代码段**（base+rva 0xECA03），`.hexpr=8C8B487824448948` 是 x86 指令字节——InferResult 是**野指针**。
+- 调用链（RVA）：`infer_method_call` → ... → `unbox_int`。
+
+**性质**：native 二进制（被自己的 LLVM backend 编译）在 `infer_method_call` 路径上有 LLVM codegen 正确性 bug——把裸 Int 当 boxed 指针 unbox，或 InferResult 指针被损坏成野指针。**JS 后端正常**（731 E2E 全过），**llvm_diff 49 全过**（小用例不触发该路径的分配/装箱模式）。只有"编译器自身"这个最复杂输入才暴露。
+
+**阻塞**：B-089 G-a 内存峰值无法测（崩在完成前）、G-b 双 bootstrap、G-c native E2E 全部卡死。
+
+**复现**：`build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm` → `clang dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt -Wl,/STACK:536870912` → `ring.exe build examples/hello.ring` → 段错误。
+
+**调查方向（待讨论，非 trivial）**：(a) 缩到最小触发——找 `infer_method_call` 里哪个具体构造被 LLVM 误编（boxing 不匹配 / 返回值 ABI / mut 参数 / dict 派发）；(b) 对照 JS codegen 同一函数；(c) 可能与 B-087 #103 mut boxing 或 dict 派发 silent-miscompile（memory 记过"不阻塞自举但阻塞 parity"——此处恰是反例：确实阻塞了运行）相关。**这是 native 自举的核心硬骨头，需用户定调查策略。**
+
+**附带发现（同次实跑）**：`build compiler/main.ring --target=llvm` 有 7 条 `LLVM codegen warning: unknown function 'LLVMFunctionType'/'LLVMAddFunction'/'LLVMBuildCall2'/'LLVMConstPointerNull'/'LLVMConstInt'/'LLVMBuildRet', generating panic`——编译器自身的 `llvm_ffi.ring` LLVM-C extern fn 被 LLVM codegen 塞 panic stub。含义：native 二进制即使运行正常也**无法自托管 LLVM 后端**（`--target=llvm` 路径 panic），完整 native 自举需 native 直接 link LLVM-C。属架构 gap，非本 bug，单列待规划。
+
+发现者：Worker（#133 修复后 B-089 G-a 首次本机实跑 native）
+
 ## Checker
 
 
