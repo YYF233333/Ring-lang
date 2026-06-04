@@ -1357,7 +1357,7 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 
 **实现模型 = clone-all-escape（保守版，正确性优先，无崩无泄漏）**：
 
-1. **读取 borrow**：撤销 always-own 读取 dup——`gen_field_access`、`ring_list_get`/`_opt`、`map_get(_opt)`、`map_int_get(_opt)`、`map_values`、`map_entries` 等返回**不 dup**（borrow）。
+1. **读取 borrow**：撤销 always-own 读取 dup——`gen_field_access`、`ring_list_get`/`_opt`、`map_get(_opt)`、`map_int_get(_opt)` 等返回容器**内元素指针**的读取**不 dup**（borrow）。**例外（2026-06-04 worker [决策] 订正）：`map_values`/`map_entries`（及 `map_keys`）不是读取，是 owned-容器构造**——`ring_alloc` 新建 List 后把元素 `ring_dup` 进去，这个 dup 是 point 2「逃逸进容器 = clone」的**运行时内联**，**保留**。撤销会让新 List 持借用元素，作 fresh temp（`let v = map.values()`）scope 末 `drop_list` 逐元素 `ring_drop`、map 仍持有 → **double-free**。从 codegen/perceus 视角，`map.values()` 是返回 fresh owned List 的普通调用，元素 dup 是 runtime 内部细节。
 
 2. **逃逸点 clone-or-move**（区分依据 = 逃逸值是否有**独立 owner**）：
    - **有独立 owner → clone**：Ident 绑定（绑定仍持有，scope 末 drop）、FieldAccess/IndexExpr/容器读取结果（aggregate 仍持有）。
