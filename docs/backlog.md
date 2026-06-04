@@ -638,7 +638,9 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-098 借用推断引擎（B-068 引擎部分，L1 核心）[feature] [P1] [L] [judgment] [doing]
+### B-098 借用推断引擎（B-068 引擎部分，L1 核心）[feature] [P1] [L] [judgment] [waiting-feedback]
+
+> **2026-06-04 waiting-feedback**：实现 subagent 发现 spec 字面模型不完整——`HStmt::Dup` 只能按名 dup，无法对 FieldAccess/IndexExpr 非 Ident 逃逸值发 dup → 撤销 read-dup 后这类逃逸 double-free。详见 `docs/worker_feedback.md`「B-098 escape-clone 层放置」。Orchestrator 核实诊断属实，并细化：sink 无条件 dup 会致 fresh-temp pervasive 泄漏（威胁 G-a），正确解 = 条件式 escape-clone（owned move / borrowed clone + 非 Ident 值层 clone 机制）。等用户拍板 escape-clone 落点 + 是否接受值层 clone 的 IR 增量后重排队。
 
 > 2026-06-04 立项（Discussion）。把 L0 always-own 改为 borrow-by-default + 逃逸点推断 owned，从根上消除 move-analysis double-free（native 崩溃，#134 剩余崩点根因）+ always-own 泄漏。**仅引擎**——不含 B-068 用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则，继续推迟，留缩减后的 B-068）。native-working 关键路径，激活决策 C 推迟的 native 自举目标。用户面语义已在 design.md §7.2–7.8 定死，本项只做实现。
 
