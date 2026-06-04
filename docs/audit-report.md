@@ -10,34 +10,35 @@
 
 ## 🔴 Critical（阻塞 native 自举）
 
-### #134 native 二进制运行时段错误（unbox_int on 裸 Int，infer_method_call）[Critical] [judgment] [open]
+### #134 native 二进制运行时 RC 损坏 — 系统性 L0 borrow-vs-own 缺口 [Critical] [judgment] [open]
 
-**首次实跑 native 二进制即暴露**——历史只验过 `--target=llvm` 的 `.o` 生成 EXIT 0，从未运行过链接后的 `ring.exe`（runtime "未测"）。2026-06-04 修完 #133 后本机首跑：native 编译器**编译 hello.ring / 极小程序都段错误**。
+**首次实跑 native 二进制即暴露**——历史只验过 `--target=llvm` 的 `.o` 生成 EXIT 0，从未运行过链接后的 `ring.exe`。native 二进制自 self-hosting 初期就一直崩、从未成功运行过。
 
-**症状**：`ring-native.exe build <任意程序>`（`--target=js`）→ `0xC0000005` ACCESS_VIOLATION。崩溃确定性（极小程序 144 calls、hello 1203 calls 都崩），偶发先写出正确 .js 再崩（非确定，典型堆/指针损坏）。
+**⚠️ 原"dropped boxing / 裸 int 57"假设已证伪**：那是更早一个 RC 损坏（次生堆破坏后 unbox 读到垃圾）的表象。深挖根因 = **系统性 L0 所有权模型缺口**：读取（字段访问 `gen_field_access`、容器元素 `ring_list_get`/`map_get`）按 **borrow（不 dup）** 返回，但 L0 的 callee-owns 约定（`transform_fn_body` 在退出 drop 未消费的参数）+ 绑定/struct 字段/返回/push 都取所有权 → 借用值流入 owned 槽位即被**双 free**。`fn main(){}` 也崩因编译器先解析含 extern fn 的 prelude。
 
-**崩溃 dump（精确定位）**：
-- `CRASH fn=unbox_int code=0xc0000005 fault_addr=0x39`，`rax=rcx=rsi=0x39`。
-- `bytes at rip: 48 8b 44 24 30 48 8b 00` = `mov rax,[rsp+0x30]; mov rax,[rax]`——取一个"指针"再解引用，但其值是 **0x39（裸整数 57），非堆指针** → `unbox_int` 收到未装箱的 Int 当指针。
-- `InferResult* = 0x7FF6C71ECA03` **指向代码段**（base+rva 0xECA03），`.hexpr=8C8B487824448948` 是 x86 指令字节——InferResult 是**野指针**。
-- 调用链（RVA）：`infer_method_call` → ... → `unbox_int`。
+**进展（2026-06-04，Worker 持续修复，7 个 RC 缺陷已修，chk 144→347K，约 2400×）**：
+已修并提交（`82c472e` 5 连修 + `36e6c98`）；全程 JS E2E 731/731 · llvm_diff 49/49 ×3 零回归：
+1. **perceus 分支平衡漏发散分支**（`balance_branch` 对 return/break/continue 结尾分支也插平衡 drop，发散分支已自清理 → 重复 drop 后 dup UAF）。新增 `expr_diverges`，4 个 balance 点跳过发散分支。
+2. **Return handler drop-all-live 用 `r.live` 误 drop 被 move 进返回值的 var**（`return make_token(..,end)`）。改用 incoming `live`。
+3. **boxed_vars 跨模块 def_id 冲突**（def_id 仅模块内唯一，LLVM 后端全局 union → `code_in_range` 的 `high` 误判 boxed → 双 unbox）。改 per-module。
+4. **字段访问 borrow 逃逸**：`gen_field_access` 统一 dup 返回值。
+5. **容器元素读取 borrow**：`ring_list_get`/`_opt`/`map_get(_opt)`/`map_int_get(_opt)`/`map_values`/`map_entries` 返回时 dup。
+6. **read-then-reassign 可变变量 double-free**（`parse_expr_bp` 的 `last_was_comparison`）：Assign drop 旧值时把 target 加入返回 live → 之前读取改 dup。
 
-**性质**：native 二进制（被自己的 LLVM backend 编译）在 `infer_method_call` 路径上有 LLVM codegen 正确性 bug——把裸 Int 当 boxed 指针 unbox，或 InferResult 指针被损坏成野指针。**JS 后端正常**（731 E2E 全过），**llvm_diff 49 全过**（小用例不触发该路径的分配/装箱模式）。只有"编译器自身"这个最复杂输入才暴露。
+**仍残留（同一系统性根因的其余表现，B-068 借用推断范畴）**：
+- 当前确定性崩点：`register_impl_method`（chk=347204，tid-103 double-drop）。疑为 **`self_type` 在 `for p in params` 循环内条件 move**（`if p.name=="self"` 分支 push）后 epilogue 又 drop——Perceus move 分析在「循环+条件 move」下的后续 liveness 缺陷。
+- 还会有更多：mut-param 跨模块所有权语义、方法接收者借用、更多条件/循环 move。
+- **本质 = 完成 L0 所有权模型**。两条路：(a) 继续逐点 "always-own" sweep（每个读取/move 站点补 dup/修 liveness，已覆盖字段+容器+read-reassign，收敛中但站点多、且 move-analysis 类需逐个 Perceus 改）；(b) 正式做 **B-068 借用推断**（一次性区分 borrow/owned，消除全部 dup 与泄漏）。**(a)/(b) 取舍需用户定**——见 worker_feedback.md。
 
-**阻塞**：B-089 G-a 内存峰值无法测（崩在完成前）、G-b 双 bootstrap、G-c native E2E 全部卡死。
+**代价说明**：当前 "always-own" 修复在 borrow 位置（算术/条件操作数、只读 for-in 绑定）会泄漏（L0 correct-over-leak 容忍，B-068 后消除）。
 
-**复现**：`build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm` → `clang dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt -Wl,/STACK:536870912` → `ring.exe build examples/hello.ring` → 段错误。
+**复现**：`build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm` → `clang dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt -Wl,/STACK:536870912 -Wl,/MAP:ring.map` → `ring.exe build tmp134/a_empty.ring`（`fn main(){}`，确定性崩 chk=347204）。`ring_runtime.cpp` 已含 #134 调试仪表（栈回溯 `dump_rc_backtrace`、保留 freed typeid、guard 打印 chk/caller-rva，仅 abort 路径，native 工作后清理）。RVA→Ring 函数用 `ring.map`（lld /MAP）查。
 
-**定位进展（2026-06-04 quick investigation，已缩到固定确定性点）**：
-- **崩溃确定且输入无关**：`fn main(){}` / `fn main(){print("hi")}` / `fn main(){let x=5}` 三者**崩在完全相同的固定点——chk=144、同一指令 rva=0xfd797、fn=unbox_int**，与函数体内容无关。空文件走不同的干净 no-main 错误路径（`0xC0000409`，非本 bug）。→ 崩溃在**处理 `fn main` 声明的早期管线**（chk=144 很早，body 还没影响），是**单一被误编的指令**，不是复杂构造，也不是 RC 堆损坏。
-- **机制**：`mov rax,[rsp+0x30]; mov rax,[rax]`——从栈取一个本应是 boxed 指针的局部、解引用，但其值是 `0x39`（裸 int 57）。`57` 是处理 `fn main(){}` 时一个**结构性小整数**（三个程序都一样，与字面量无关——可能是 AST/HIR tag、def_id、Span 位置、token kind），**本应装箱却以裸 i64 存在** → boxing 被 LLVM codegen 丢了一次。
-- **类别确定 = LLVM codegen 的 boxing/ABI 误编（dropped boxing，raw-int-as-pointer）**，与 #133 的 RC UAF 是两类 bug。
-- **历史**：crash handler（`ring_runtime.cpp` SEH，手调死偏移 0x170/0x78）引入于 `e4138b6`、`infer_method_call` 调试见 `fbe3c9a`/`b911932`（front-end self-hosting 初期）→ **native 二进制自 self-hosting 初期就一直崩、从未成功运行过**；memory 的"runtime 未测"实为"崩了加仪表但没修"。⚠️ dump 里的 `InferResult.hexpr=...` 来自旧 build 的死偏移，对当前 build **不可信**，"infer_method_call" 标签仅供参考。
-- **下一步（待定 fix 策略）**：反汇编 rva 0xfd797 的调用者（栈回溯 RVA：0x21896 immediate / 0x21937 / 0x25f57 / 0x22123 / 0x21ba3 / 0x4cdf6）映射到具体 Ring 函数 → 找该函数里哪个 int 值漏装箱 → 对照 JS codegen 同函数。**这是 native 自举核心硬骨头，缩到单点后修复策略仍需用户定。**
+**阻塞**：B-089 G-a/b/c（内存峰值、双 bootstrap、native E2E）全部待此解锁。
 
-**附带发现（同次实跑）**：`build compiler/main.ring --target=llvm` 有 7 条 `LLVM codegen warning: unknown function 'LLVMFunctionType'/'LLVMAddFunction'/'LLVMBuildCall2'/'LLVMConstPointerNull'/'LLVMConstInt'/'LLVMBuildRet', generating panic`——编译器自身的 `llvm_ffi.ring` LLVM-C extern fn 被 LLVM codegen 塞 panic stub。含义：native 二进制即使运行正常也**无法自托管 LLVM 后端**（`--target=llvm` 路径 panic），完整 native 自举需 native 直接 link LLVM-C。属架构 gap，非本 bug，单列待规划。
+**附带（架构 gap，非本 bug）**：`build compiler/main.ring --target=llvm` 有 `LLVMBuildRet` 等 LLVM-C extern fn 被塞 panic stub——native 二进制无法自托管 LLVM 后端（`--target=llvm` 路径 panic），完整 native 自举需 native 直接 link LLVM-C。单列待规划。
 
-发现者：Worker（#133 修复后 B-089 G-a 首次本机实跑 native）
+发现者：Worker（#133 修复后 B-089 G-a 首次本机实跑 native；2026-06-04 7 修推进）
 
 ## Checker
 
