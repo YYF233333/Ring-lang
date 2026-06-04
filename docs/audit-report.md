@@ -78,13 +78,6 @@
 
 可移植性问题。
 
-### #132 LLVM `ring_print` 对非 Str 实参不做强制转换（双后端 parity gap）[medium] [judgment] [open]
-
-**文件**：`ring_runtime.cpp`（`ring_print`）、`compiler/codegen_llvm_expr.ring`（print 调用 lowering）
-**描述**：JS 后端 `print(x)` 对任意类型字符串化（Int/Float/Bool → 文本），LLVM 后端 `ring_print` 期望实参已是 `Str`，对 Int 等不做 Int→Str 强制转换，`print(intExpr)` 误打印。B-091 实现中发现（其测试改用 `print("${x}")` 字符串插值绕过，与现有 llvm 用例一致）。属 G-c 双后端 parity，可并入 B-087 一并修。
-**修复方向**：LLVM print lowering 对非 Str 实参插入 to_string 转换（对照 JS codegen 字符串化路径），或 runtime `ring_print` 按 typeid 分派打印。
-发现者：Worker Wave 4（B-091）
-
 > #130（闭包 env 捕获泄漏）/ #131（perceus drop 落不了地，96 rc-warn）已于 2026-06-03 并入 backlog **B-084**（Perceus drop 精度 + drop_T 完整性），详见 backlog。
 
 
@@ -143,22 +136,6 @@
 **修复方向**：在 callee_type 路径中也注入 `ctx.in_try_fail` 的 `fail` evidence（与 callee_name 路径一致）。
 
 发现者：Opus
-
-### #103 Auto-boxing 仅 box 值类型依赖 JS 引用语义 [medium] [judgment] [open] [deferred: LLVM]
-
-B-047 实现中，`mut` 参数的自动 boxing 仅针对值类型（Int/Float/Bool/Str）。引用类型（struct/List/Map/Set）的 `mut` 参数不 box，依赖 JS 按引用传递对象的语义。LLVM 后端无此语义——所有类型需要统一的 boxing/pointer 策略。
-
-**已知限制**：引用类型 `mut` 参数的重赋值（`list = new_list`）不会反映到调用方。
-
-**文件**：`compiler/codegen_stmt.ring`、`compiler/codegen_expr.ring`（auto-boxing 相关逻辑）
-**修复方向**：LLVM 后端实现时，所有 `mut` 参数统一使用指针传递。JS 后端保持现状。
-
-**2026-06-03**：纳入 backlog **B-087**（LLVM codegen 双后端 parity），作为 G-c parity 的一部分落地，解除 deferred-LLVM 状态。
-
-发现者：Worker Wave A+B
-
-
-
 
 
 

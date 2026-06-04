@@ -23,7 +23,7 @@
 - ~~B-010 `delegate` 关键字 [M]~~ ✅ 已完成（2026-05-23）
 
 **设计验证（Stabilize 前置，阻塞层 3）**：
-- B-042 Perceus 循环引用策略 [M]（阻塞 B-012）
+- ~~B-042 Perceus 循环引用策略 [M]~~ ✅ 吸收（2026-06-04）：设计已在 design.md §7.9 定案（`Weak<T>`），实现归 B-002 (L2)；B-012 已完成，无独立 item 必要
 - B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（native-working 关键路径，2026-06-04）**；B-068 缩减为用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则），仍 deferred、不阻塞 native
 - ~~B-043 Refinement × Linear × Effects 交互矩阵 [M]~~ ✅ 已完成（2026-05-24）
 - ~~B-044 Ring 语义规范 [M]~~ ✅ 已完成（2026-05-24）
@@ -31,7 +31,7 @@
 **关键路径（2026-06-03 更新）**：
 - ~~B-004~~ → ~~B-036~~ → ~~B-011 LLVM~~ ✅ → ~~B-012 Perceus RC L0 基础设施~~ ✅ → ~~B-082 RC 诊断~~ ✅ → ~~B-081 dup 架构迁移~~ ✅
 - **当前目标：native 自举 + E2E + 双后端行为对比全过**（2026-06-03 规划，见下「Native 自举路线图」）
-- **订正（2026-06-04，#134 证伪）**：「L0 owned-everywhere 即可自举」的原假设错误——L0 对「循环内条件 move」是 double-free（崩溃，非泄漏），不能干净自举。借用推断引擎（B-098，原 B-068 引擎部分）被提前到 native-working **之前**，是 native 自举关键路径。B-068 用户面 + B-042 仍不阻塞 native
+- **订正（2026-06-04，#134 证伪）**：「L0 owned-everywhere 即可自举」的原假设错误——L0 对「循环内条件 move」是 double-free（崩溃，非泄漏），不能干净自举。借用推断引擎（B-098，原 B-068 引擎部分）被提前到 native-working **之前**，是 native 自举关键路径。B-068 用户面仍不阻塞 native（B-042 已吸收入 B-002 L2）
 - B-033 GADTs 推迟至 native 自举之后（无下游依赖）
 - 层 3（Refinement/Linear/async）在 native 自举验证通过后启动
 - **LLVM 落地后 JS 后端废弃**
