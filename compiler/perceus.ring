@@ -1514,6 +1514,55 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -
             // their own expressions; report no dups upward.
             let body_result = rc_expr(body, live, locals, boxed)
             let body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups)
+
+            // B-087/#133: each handler arm becomes a CLOSURE at codegen time
+            // (build_handler_evidence → gen_lambda), capturing every enclosing-scope
+            // local its body references into the closure env WITHOUT a ring_dup —
+            // exactly like the Lambda case.  The dup/move responsibility therefore
+            // lives here: an arm capture is a *use* of the outer variable, so the
+            // enclosing scope must NOT prematurely drop it.  Without this, an arm
+            // that references an outer `let x` (e.g. `Calc.add(a,b) => a+b+base`)
+            // hits a drop(base) emitted right after `base`'s binding (base looks
+            // dead from the handle body's view) → the arm closure then captures a
+            // freed pointer → intermittent heap corruption / garbage reads.
+            //
+            // Mirror the Lambda capture decision against the incoming live set:
+            //   - capture still live after the handle  → closure needs its own dup;
+            //   - last use is the handle               → move it in (mark live so the
+            //                                             enclosing scope won't drop).
+            // The evidence struct + arm closures are intentionally leaked at L0 (D2),
+            // so a moved/dup'd capture simply leaks with the env — never freed-then-used.
+            let incoming = set_clone(live)
+            let mut outer_live = set_clone(body_result.live)
+            let mut capture_dups: List<Str> = []
+            for h in handlers {
+                let mut h_bound: Set<Str> = set_new()
+                for hp in h.params { h_bound.insert(hp.name) }
+                match h.resume_name {
+                    some(rn) => h_bound.insert(rn),
+                    none => {},
+                }
+                collect_local_defs_expr(h.body, h_bound)
+
+                let mut h_body_vars: Set<Str> = set_new()
+                collect_expr_vars(h.body, h_body_vars)
+                for v in h_body_vars {
+                    if h_bound.contains(v) == false && locals.contains(v) {
+                        if incoming.contains(v) {
+                            // Used again after the handle → the arm closure's copy
+                            // needs an independent reference; dup at construction.
+                            let mut seen = false
+                            for d in capture_dups { if d == v { seen = true } }
+                            if seen == false { capture_dups.push(v) }
+                        } else {
+                            // Last use is this handle → move the single owned ref into
+                            // the arm closure; the enclosing scope must not drop it.
+                            outer_live.insert(v)
+                        }
+                    }
+                }
+            }
+
             let mut new_handlers: List<HEffectHandler> = []
             for h in handlers {
                 let h_live: Set<Str> = set_new()
@@ -1536,8 +1585,8 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -
             RcResult {
                 expr: HExpr::HandleExpr { body: body_flushed, handlers: new_handlers,
                     ty: ty, effects: effects, span: span },
-                live: body_result.live,
-                dups: []
+                live: outer_live,
+                dups: capture_dups
             }
         },
 
