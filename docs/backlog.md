@@ -638,36 +638,42 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-098 借用推断引擎（B-068 引擎部分，L1 核心）[feature] [P1] [L] [judgment] [waiting-feedback]
+### B-098 借用推断引擎（B-068 引擎部分，L1 核心）[feature] [P1] [L] [judgment] [queued]
 
-> **2026-06-04 waiting-feedback**：实现 subagent 发现 spec 字面模型不完整——`HStmt::Dup` 只能按名 dup，无法对 FieldAccess/IndexExpr 非 Ident 逃逸值发 dup → 撤销 read-dup 后这类逃逸 double-free。详见 `docs/worker_feedback.md`「B-098 escape-clone 层放置」。Orchestrator 核实诊断属实，并细化：sink 无条件 dup 会致 fresh-temp pervasive 泄漏（威胁 G-a），正确解 = 条件式 escape-clone（owned move / borrowed clone + 非 Ident 值层 clone 机制）。等用户拍板 escape-clone 落点 + 是否接受值层 clone 的 IR 增量后重排队。
+> 2026-06-04 立项 + Discussion 落定实现模型（design.md §7.11）。把 L0 always-own 改为 clone-all-escape borrow 模型，从根上消除 move-analysis double-free（native 崩溃，#134 剩余崩点根因）+ always-own 泄漏。**仅引擎**——不含 B-068 用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则，继续推迟）。native-working 关键路径。**完整实现模型见 design.md §7.11**，本项按其实现。
 
-> 2026-06-04 立项（Discussion）。把 L0 always-own 改为 borrow-by-default + 逃逸点推断 owned，从根上消除 move-analysis double-free（native 崩溃，#134 剩余崩点根因）+ always-own 泄漏。**仅引擎**——不含 B-068 用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则，继续推迟，留缩减后的 B-068）。native-working 关键路径，激活决策 C 推迟的 native 自举目标。用户面语义已在 design.md §7.2–7.8 定死，本项只做实现。
+**根因**：L0 owned-everywhere 对「循环内条件 move」是 double-free 而非泄漏——`register_impl_method`（`infer_register.ring:915-922`）的 `self_type` 在 for 循环里被条件 `push`，branch-balancing 给 else 分支插 `drop(self_type)`，单值多次 free。Perceus 三套循环机制（`perceus.ring:793-928`）均不覆盖此缝。always-own 逐点 sweep 是 whack-a-mole。clone-all-escape 从根消除：逃逸 clone 而非 consume → 绑定永不按路径消费 → branch-balancing 不需要 → else 不再插 spurious drop。
 
-**根因**：L0 owned-everywhere 对「循环内条件 move」是 double-free 而非泄漏——`register_impl_method`（`infer_register.ring:915-922`）的 `self_type` 在 for 循环里被条件 `push`，branch-balancing 给 else 分支插 `drop(self_type)`，单值多次 free。Perceus 三套循环机制（pre-loop single-dup / 闭包 per-iteration seeding / branch-balancing，`perceus.ring:793-928`）均不覆盖此缝。always-own 逐点 sweep 是 whack-a-mole（站点未知 + 每个循环/条件 move 需深层 Perceus 手术）。借用模型从根上消除：borrow 不要求每路径消费 → else 不再插 spurious drop。
+**实现模型 = clone-all-escape（design.md §7.11 定案，保守版无崩无泄漏）**：
+1. **读取 borrow**：撤销 always-own 读取 dup（`gen_field_access` + 容器读取），返回不 dup。
+2. **逃逸点 clone-or-move**：有独立 owner 的值（Ident 绑定 / FieldAccess / IndexExpr / 容器读取结果）→ **clone**；fresh 临时值（调用结果 / 字面量 / 构造）→ **move**（sink 唯一 owner）。逃逸点 = 容器 push/insert、struct/variant 字段存储、list/tuple 元素、return/尾位置、绑定到更长 scope 的 let、逃逸闭包捕获。
+3. **值层 clone = 新增 `HExpr::Clone{inner}` HIR 节点**：perceus 对「有独立 owner」逃逸值包 `Clone`；codegen lower 成 eval inner → `ring_dup` → 返回。Ident 逃逸亦走 `HExpr::Clone`（或现有 `HStmt::Dup`，等价）。
+4. **scope-end-drop-once**：owned local scope 末 drop 一次；return 路径 clone 返回值后 drop live locals。**删除 branch-balancing**。
+5. **所有参数 borrow**：callee 永不 drop 参数（撤销 `transform_fn_body:567-571` 无条件 param drop）；参数逃逸时 clone。move-参数推断 = 纯优化，本项不做。
+6. **不做 last-use→move**（留 L3）：连 last-use Ident 逃逸也 clone。比 always-own 少 dup（读取≫逃逸）、无泄漏。
 
-**正确性内核（保守版即无崩溃无泄漏，不需先做 last-use→move 优化）**：
-1. 使用默认 borrow（不 dup / 不消费）。逃逸点才 owned：容器 push/insert、struct 字段存储、return/尾位置、逃逸闭包捕获、跨 spawn、绑定到会逃逸的 let（传染）。
-2. owned 逃逸点若值之后仍 live → 插 dup（clone）。
-3. owned local 在 scope 末尾 drop 恰好一次——**不再 per-path branch-balancing**。
-4. 参数默认 borrow，callee 永不 drop 未消费参数（撤销 `transform_fn_body:567-571` 无条件 param drop）；仅 move-推断的参数由 callee drop。
+self_type 验证：rc=1 → self 迭代 push 处 `Clone`（rc 1→2，list 存入）→ 非 self 迭代不碰（else 无 spurious drop）→ 循环末 scope drop 一次（rc 2→1，list 留 1）。无 double-free 无泄漏，不依赖循环嵌套层数。
 
-self_type 验证：创建 rc=1 → self 迭代 push 前 dup（rc=2）存入 list → 非 self 迭代不碰（else 无 spurious drop）→ 循环末 scope drop 一次（rc 2→1，list 持有剩余 1）。无 double-free 无泄漏，且不依赖循环嵌套层数。
+**闭包边界（vs B-096）**：B-098 把所有闭包捕获保守当 **owned**（捕获 clone + env drop，复用 B-084 `drop_env_T`），leak-free+crash-free。**不碰** catch/handle 闭包、`ring_try` drop、borrowed-capture 优化——归 B-096。
 
 **涉及修改**：
-1. `compiler/perceus.ring`：`rc_expr`/`rc_stmt` 从 owned-everywhere backward-balancing 改为 borrow-default + escape-clone + scope-end-drop；`transform_fn_body` 参数 drop 改为仅 move-推断参数；`balance_branch` 弱化（borrow 值不跨分支配平）；新增逃逸点分类。算法翻译 Koka borrowing 扩展（Perceus POPL'21 + borrowed-param inference），标注来源。
-2. `compiler/codegen_llvm_expr.ring`：**撤销 always-own 补丁**——`gen_field_access` 统一 dup、容器读取（`ring_list_get`/`_opt`/`map_get(_opt)`/`map_int_get(_opt)`/`map_values`/`map_entries`）dup 改回 borrow（不 dup），由引擎在逃逸点决定；codegen 感知 borrow 值（不发 drop）。
-3. `ring_runtime.cpp`：容器读取 runtime 端配合不 dup；清理 #134 调试仪表（`dump_rc_backtrace` / guard / 保留 freed typeid，native 工作后）。
+1. `compiler/hir.ring`：新增 `HExpr::Clone{inner, ty, effects, span}` 节点（处理所有穷尽 match）。
+2. `compiler/perceus.ring`：`rc_expr`/`rc_stmt` 改 clone-all-escape——逃逸点分类（有独立 owner→`Clone` 包裹 / fresh 临时→move）、owned 绑定 scope-end-drop-once、**删除 `balance_branch` 分支配平**、`transform_fn_body` 删除无条件 param drop、闭包捕获保守 clone。算法翻译 Koka Perceus POPL'21 borrowing 扩展，标注来源。
+3. `compiler/codegen_llvm_expr.ring`：`HExpr::Clone` lowering（eval→ring_dup→返回）；**撤销 always-own 补丁**——`gen_field_access`（`gen_dup_value`）+ 容器读取 dup 改回 borrow。
+4. `compiler/codegen_llvm_stmt.ring` / `zonk.ring` / `codegen_stmt.ring`：`HExpr::Clone` 的穷尽分支处理。
+5. `ring_runtime.cpp`：容器读取（`ring_list_get`/`_opt`/`map_get(_opt)`/`map_int_get(_opt)`/`map_values`/`map_entries`）撤销 `ring_dup`；清理 #134 调试仪表（`dump_rc_backtrace` / guard / `RING_DUMP_TIDS` / 保留 freed typeid，native 工作后，保留正常 panic）。
 
-**验收标准**：
-- `tmp134/a_empty.ring` native 跑通（当前 chk=347204 `register_impl_method` 崩点消除）
-- 完整 native 自举跑通；double-bootstrap 字节级一致
+**验收标准（核心门，本项必达）**：
+- `tmp134/a_empty.ring`（`fn main(){}`）native 跑通 EXIT 0（chk=347204 `register_impl_method` 崩点消除）
 - always-own 读取补丁全撤销，读取默认 borrow
 - 全 E2E 731 + llvm_diff 49 **×3**（间歇堆损坏防假绿）零回归
-- 带 RC native 自编译内存峰值实测 << 25.9GB（解锁 B-089 G-a）
-- 自举编译器正常编译自身
+- `HExpr::Clone` 节点所有穷尽 match 处理完整（编译器自检）
 
-**依赖**：解锁 B-089（G-a/b/c）。与 B-096（闭包 RC 收口）正交但相邻——borrowed capture 建模两边都碰，实现时注意不重复。
+**验收标准（capstone，与 B-089 联合验，本项尽力跑通并报告）**：
+- 完整 native 自举跑通（native ring.exe 编 compiler/main.ring）+ 内存峰值 << 25.9GB（解锁 B-089 G-a）
+- double-bootstrap 字节级一致（B-089 G-b）
+
+**依赖**：解锁 B-089（G-a/b/c）。闭包 borrowed-capture 优化与 B-096 正交（B-098 保守全 owned，B-096 做优化，零重叠，见上「闭包边界」）。
 
 ### B-097 自定义 effect handler LLVM — phase 2（custom-abort / default / delegate / nesting）[feature] [P2] [M] [judgment] [queued]
 > 2026-06-03 从 B-090 拆出（D3 分期）。B-090 核心（单 effect multi-op tail-resumptive）落地后的全 parity 收口。复杂度 M-L。**依赖 B-090**。

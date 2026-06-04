@@ -1331,7 +1331,7 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 | 层 | 内容 | 作用 | backlog |
 |----|------|------|---------|
 | **L0 RC 核心** | dup/drop 插入，owned-everywhere，归零即 free | 释放堆内存 → 打破自举内存墙 → 完成全 native 自举 | B-012 |
-| **L1 借用推断引擎** | borrow-default + 逃逸点推断 owned；读取默认 borrow、escape-clone、scope-end-drop | 消除 owned-everywhere 的 move-analysis double-free + 泄漏；大幅减 RC 流量 | B-098（引擎）|
+| **L1 借用推断引擎** | borrow-default + 逃逸点推断 owned；读取默认 borrow、escape-clone、scope-end-drop（实现模型见 §7.11）| 消除 owned-everywhere 的 move-analysis double-free + 泄漏；大幅减 RC 流量 | B-098（引擎）|
 | **L1 用户面** | `fn(move T)` 语法、lv2 标注、fmt 策略、pub 规则 | 文档化借用语义（不改编译行为）| B-068（§7.2–7.8，deferred）|
 | **L2 Drop/RAII** | 用户 `impl Drop`、全路径 RAII、fail/catch 改 drop-aware unwind、`Weak<T>` | 资源安全 + 循环引用 | B-002 |
 | **L3 Reuse (FBIP)** | `rc==1` 时就地改写，drop-reuse 配对、reuse specialization、COW | 性能核爆（函数式零拷贝）| B-079 |
@@ -1348,6 +1348,37 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 - **闭包 capture 所有权（2026-06-03）**：capture 进 env 有两种所有权语义——**owned capture**（gen_lambda 普通闭包；perceus 对 non-last-use 发 dup、last-use move-in，env 死时**该** drop）与 **borrowed capture**（catch/handle 闭包为让分支平衡 `Drop` 能执行而捕入，所有权不在 env，由 arm 内的显式 `Drop` 释放，env 死时**不该** drop）。当前 env struct 复用 closure typeid（7），`drop_closure` 只 drop slot[1] → 捕获 ≥2 时泄漏 + 误递归。落地分两步：**C 增量（#130，B-084）**先给普通闭包 env 独立 typeid + per-env `drop_env_T` 释放 owned captures，catch/handle 闭包显式排除（维持现状泄漏，本就如此，因 `ring_try` 不 drop 闭包）；**A 波（B-096）**再正式建模 borrowed capture（不进 env 或标 no-drop）+ `ring_try` 后 drop body/catch 闭包。差分测试抓 double-free（crash）抓不到泄漏 → owned-capture drop 可验证安全，遗留 catch 泄漏不退化。
 
 **Ring 相对 Koka 的简化**：effect 仅 tail-resumptive + abort（无 multi-resume）→ 无 reified continuation 复制问题，handler 的 RC 退化为普通作用域 backward liveness。
+
+### 7.11 L1 借用推断引擎实现模型（B-098，2026-06-04 确定）
+
+§7.2–7.8 定义**用户面 borrow 语义**（`x:T` 默认借用、move 推断规则、逃逸约束），§7.10 L1 行给出高层方向。本节定义 B-098 的 **IR 级实现模型**——用户面语义不变，本节只定「RC 行为如何落到 HIR/codegen」。
+
+**为何 spec 字面模型不完整**：§7.10 L1 原述「读取默认 borrow、escape-clone、scope-end-drop」未指明 escape-clone 的 IR 承载层。`HStmt::Dup{name}` / `HStmt::Drop{name}` 只能按**名**操作（codegen 查 `named_values` alloca）。撤销 always-own 读取 dup 后，非 Ident 逃逸（`list.push(parser.tokens)`、`return node.children` 等 FieldAccess/IndexExpr）的值**没有名字**，perceus 无法对其发 name-level Dup → 该值成纯 borrow → 持有它的 aggregate 与存入它的容器双 drop → **double-free（崩溃）**。故需一个**按值**的 clone 原语。
+
+**实现模型 = clone-all-escape（保守版，正确性优先，无崩无泄漏）**：
+
+1. **读取 borrow**：撤销 always-own 读取 dup——`gen_field_access`、`ring_list_get`/`_opt`、`map_get(_opt)`、`map_int_get(_opt)`、`map_values`、`map_entries` 等返回**不 dup**（borrow）。
+
+2. **逃逸点 clone-or-move**（区分依据 = 逃逸值是否有**独立 owner**）：
+   - **有独立 owner → clone**：Ident 绑定（绑定仍持有，scope 末 drop）、FieldAccess/IndexExpr/容器读取结果（aggregate 仍持有）。
+   - **fresh 临时值 → move**（无独立 owner，sink 成唯一 owner，clone 会泄漏）：函数调用结果、字面量、struct/variant 构造。
+   - 逃逸点 = 容器 push/insert、struct/variant 字段存储、list/tuple 元素存储、return/尾位置、绑定到更长 scope 的 let、逃逸闭包捕获。
+
+3. **值层 clone IR = `HExpr::Clone{inner}`**：perceus 判定逃逸值为「有独立 owner」时把表达式包成 `Clone{inner}`；codegen lower 成 eval inner → `ring_dup(结果)` → 返回结果。携带标准 HExpr 元数据（type 取自 inner）。Ident 逃逸亦统一走 `HExpr::Clone`（或现有 statement-level `HStmt::Dup`，两者对 Ident 等价）。
+
+4. **scope-end-drop-once**：每个 owned local 绑定在 scope 末 drop **恰好一次**；return 路径在 clone 返回值后 drop 所有 live locals。**无 per-path branch-balancing**。
+
+5. **所有参数 borrow**：callee **永不 drop 参数**（撤销 `transform_fn_body` 无条件 param drop）。参数逃逸时 clone（调用方保留所有权）。§7.3 的 move-参数推断是**纯优化**，B-098 **不做**（留后续）。
+
+6. **无 last-use→move 优化**（留 L3 reuse）：连 last-use 的 Ident 逃逸也 clone（再 scope-end drop）。代价是 churn，但**比 always-own 少 dup**（读取 ≫ 逃逸）、**无泄漏**。
+
+**为何从根消除 #134**：逃逸 **clone 而非 consume** → 绑定/参数**永不被按路径消费** → 不存在每路径消费不平衡 → branch-balancing 整个不需要 → 未消费分支不再插 spurious drop → 循环内条件逃逸不再 double-free。`self_type` 验证：`resolve_impl_self_type` 创建 rc=1 → self 迭代 push 处 `Clone`（rc 1→2，list 存入）→ 非 self 迭代不碰（else 无 spurious drop）→ 循环末 scope drop 一次（rc 2→1，list 留 1）。无 double-free 无泄漏，不依赖循环/分支嵌套层数。
+
+**闭包捕获边界（B-098 vs B-096）**：B-098 把**所有闭包捕获保守当 owned**——捕获处 clone，env 死时 drop（复用 B-084 已落地的独立 typeid + per-env `drop_env_T`）。leak-free + crash-free（绑定 rc=1 → 捕获 clone → rc=2 → env drop → rc=1 → 绑定 scope-end drop → 0，配平）。B-098 **不碰** catch/handle 闭包、`ring_try` drop、borrowed-capture 优化——这些归 **B-096**（在 B-098 之上做 sync-闭包 borrowed-capture 优化 + `ring_try` 后 drop body/catch 闭包 + guard-false 边 + Range/dict `drop_T` + evidence struct）。
+
+**范围边界**：B-098 **仅引擎**。用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则）= B-068（§7.2–7.8，deferred，不阻塞 native）。abort 路径 drop = B-002（§7.10 范围边界，longjmp 跳过 = 泄漏非 UAF，安全）。闭包 RC 收口 = B-096。
+
+**内存**：clone-all-escape 的 dup 次数 < always-own（读取远多于逃逸），预期满足 G-a 内存门（带 RC native 自编译峰值 << 25.9GB）。
 
 ---
 
@@ -2058,6 +2089,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | Perceus L0 对象头 | 每堆对象 offset 0 `{rc:u32, typeid:u32}`；per-type drop 函数 + typeid 派发表 | dup/drop 类型无关；用户类型 drop 由 codegen 生成（Koka 风格 per-type drop/scan）|
 | Perceus L0 范围 | 不处理 abort 路径 drop（留 L2 drop-aware unwind）/ 循环引用（留 L2 Weak） | longjmp 跳过 drop = 泄漏非 UAF（安全）；自举走成功路径 + 树形数据无环；先解内存墙 |
 | Perceus dup/drop IR | HIR 显式 Drop/dup 节点 + 反向 liveness pass（仅 llvm） | RC 行为落 IR 可 dump/测试；翻译 Koka Perceus POPL'21 |
+| Perceus L1 实现模型 = clone-all-escape（2026-06-04，§7.11）| 读取 borrow；逃逸点对「有独立 owner 的值」（Ident/字段/元素/容器读取）clone、对 fresh 临时值 move；值层 clone = 新增 `HExpr::Clone{inner}`（codegen eval→ring_dup→返回）；owned 绑定 scope-end-drop 一次、**删 branch-balancing**；所有参数 borrow（callee 不 drop）；不做 last-use→move（留 L3）| `HStmt::Dup{name}` 只能按名 dup，非 Ident 逃逸无名 → 字面 perceus-escape-clone 会 double-free（崩溃）。逃逸 clone 而非 consume → 绑定永不按路径消费 → branch-balancing 不需要 → 整类循环条件 move double-free 从根消除。clone-all dup 次数 < always-own（读取≫逃逸）故内存更优。闭包保守全 owned，borrow 优化留 B-096 |
 | Perceus L0 闭包 capture 所有权（2026-06-03） | owned capture（普通闭包，env 死时 drop）vs borrowed capture（catch/handle 为平衡 Drop 捕入，env 死时不 drop）；#130 走 C 增量（普通闭包 env 独立 typeid + drop_env_T，catch/handle 排除），A 波（B-096）完整收口（borrowed 建模 + ring_try drop 闭包 + #4 guard-false + Range/dict drop_T） | env 复用 closure typeid 致 ≥2 captures 泄漏+误递归；#131 借 catch env 整体泄漏安全引入 borrowed capture，裸加 auto-drop 会 double-drop；差分抓 crash 不抓泄漏 → C 增量可验证安全 |
 | occurs_in/apply_subst 对 struct/enum fields 一致忽略（2026-06-03） | 维持现状（只处理 type_params，fields/variants 原样保留）= 正确 nominal 语义，非 bug；撤销 B-057（错误立项）；#108 标 wontfix；彻底统一留 #16 nominal 重构 | fields 自始至终是声明模板（apply_subst 原样保留 + 字段实例化走局部 inst_map 不写回 + type identity 只比 name+type_params），无限类型的环只能经 type_params 形成、已被 occurs check 覆盖；补 fields 遍历 → apply_subst 递归类型栈溢出 / occurs_in 误判模板 var |
 | LLVM evidence 表示 D1（2026-06-03 B-090）| `{fn_ptr, env}` 闭包 struct，slot = op 在 effect 声明里的顺序；共享 helper `effect_op_slot` 给 gen_handle_expr/gen_effect_op 共用 | 与 JS oracle（`{op: closure}`）语义同构 → parity 结构性；复用现有闭包表示；跨阶段契约进共享层符合约定。否决 effect-as-trait（搅入 supertrait/关联类型包袱）|
