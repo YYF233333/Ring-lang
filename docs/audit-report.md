@@ -10,7 +10,7 @@
 
 ## 🔴 Critical（阻塞 native 自举）
 
-### #133 B-087 引入间歇堆内存损坏（LLVM RC，全局污染）[Critical] [judgment] [open]
+### #133 B-087 引入间歇堆内存损坏（LLVM RC，全局污染）[Critical] [judgment] [doing]
 
 **bisection 已定位元凶 = B-087（Wave 8）**：
 - Wave 6（`89d039a`）：3x full-suite 干净（B-093 agent 验 111/111）
