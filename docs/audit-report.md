@@ -10,7 +10,9 @@
 
 ## 🔴 Critical（阻塞 native 自举）
 
-### #134 native 二进制运行时 RC 损坏 — 系统性 L0 borrow-vs-own 缺口 [Critical] [judgment] [open]
+### #134 native 二进制运行时 RC 损坏 — 系统性 L0 borrow-vs-own 缺口 [Critical] [judgment] [open] [deferred: L0-RC-完成]
+
+**决策（2026-06-04，用户选 C）**：本步收口。已修 7 个缺陷推进 2400×（chk 144→347K）全部提交持久化；剩余 = **完成 L0 RC 正确性**（注意：是 native 自举 B-012 的前置正确性工作，**不是** B-068 借用优化——backlog 明确「B-068 不阻塞 native 自举，L0 正确性即可」；B-068 只是会顺带消除 always-own 留下的泄漏）。native-working 留作后续 L0-RC 专项推进。下方记录完整根因与定位方法，供恢复时直接接力（`tmp134/a_empty.ring` + `RING_DUMP_TIDS` + `ring.map` 确定性复现下一崩点 register_impl_method）。
 
 **首次实跑 native 二进制即暴露**——历史只验过 `--target=llvm` 的 `.o` 生成 EXIT 0，从未运行过链接后的 `ring.exe`。native 二进制自 self-hosting 初期就一直崩、从未成功运行过。
 

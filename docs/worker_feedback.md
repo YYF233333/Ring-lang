@@ -42,7 +42,10 @@ JS E2E 731/731 · llvm_diff full-suite 9x 全绿（49/49）· effect_handler_mul
 
 定位方法（留给后续/你参考）：`ring_runtime.cpp` 加了 `dump_rc_backtrace`（abort 时 `CaptureStackBackTrace` 打 RVA）+ ring_drop/dup guard 打 chk/freed_tid/caller-rva + 不再覆盖 freed typeid；链接加 `-Wl,/MAP:ring.map`，RVA→Ring 函数用 map 查。`tmp134/a_empty.ring`（`fn main(){}`）确定性复现下一个崩点。native 工作后清理仪表。
 
-### 2. 范围已增长到「完成 L0 所有权模型」(B-068)——继续路线需你定 [决策]
+### 2. 范围已增长到「完成 L0 RC 正确性」——你已选 (C) 本步收口 [通知，决策已解]
+
+**已选 (C)**：接受当前 2400× 进展（已提交），native-working 留作后续 L0-RC 专项。我转去推进其他 backlog/audit 项。⚠️ 框架订正：剩余是 **L0 RC 正确性**（native 自举 B-012 前置），不是 B-068（B-068 只顺带清泄漏，backlog 明确「不阻塞 native 自举」）。原决策选项存档于下：
+
 
 **现状**：剩余崩点（`register_impl_method` chk=347204 起）是**同一系统性根因的其余表现**，但属 Perceus move 分析的深层缺陷（循环内条件 move、mut-param 所有权语义、方法接收者借用…）。逐个仍可修，但**站点多、move-analysis 类要逐个改 Perceus**，本质 = 把 L0 所有权模型补完整。
 **原因**：「fix 一个 crash」已演变为「实现借用/所有权正确性」——这是 roadmap 的 B-068（借用推断）里程碑。我已自主推进了 7 修（符合你"持续修"的指示），但完整收口的路线是设计决策。
