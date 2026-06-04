@@ -28,7 +28,12 @@
 
 **复现**：`build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm` → `clang dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt -Wl,/STACK:536870912` → `ring.exe build examples/hello.ring` → 段错误。
 
-**调查方向（待讨论，非 trivial）**：(a) 缩到最小触发——找 `infer_method_call` 里哪个具体构造被 LLVM 误编（boxing 不匹配 / 返回值 ABI / mut 参数 / dict 派发）；(b) 对照 JS codegen 同一函数；(c) 可能与 B-087 #103 mut boxing 或 dict 派发 silent-miscompile（memory 记过"不阻塞自举但阻塞 parity"——此处恰是反例：确实阻塞了运行）相关。**这是 native 自举的核心硬骨头，需用户定调查策略。**
+**定位进展（2026-06-04 quick investigation，已缩到固定确定性点）**：
+- **崩溃确定且输入无关**：`fn main(){}` / `fn main(){print("hi")}` / `fn main(){let x=5}` 三者**崩在完全相同的固定点——chk=144、同一指令 rva=0xfd797、fn=unbox_int**，与函数体内容无关。空文件走不同的干净 no-main 错误路径（`0xC0000409`，非本 bug）。→ 崩溃在**处理 `fn main` 声明的早期管线**（chk=144 很早，body 还没影响），是**单一被误编的指令**，不是复杂构造，也不是 RC 堆损坏。
+- **机制**：`mov rax,[rsp+0x30]; mov rax,[rax]`——从栈取一个本应是 boxed 指针的局部、解引用，但其值是 `0x39`（裸 int 57）。`57` 是处理 `fn main(){}` 时一个**结构性小整数**（三个程序都一样，与字面量无关——可能是 AST/HIR tag、def_id、Span 位置、token kind），**本应装箱却以裸 i64 存在** → boxing 被 LLVM codegen 丢了一次。
+- **类别确定 = LLVM codegen 的 boxing/ABI 误编（dropped boxing，raw-int-as-pointer）**，与 #133 的 RC UAF 是两类 bug。
+- **历史**：crash handler（`ring_runtime.cpp` SEH，手调死偏移 0x170/0x78）引入于 `e4138b6`、`infer_method_call` 调试见 `fbe3c9a`/`b911932`（front-end self-hosting 初期）→ **native 二进制自 self-hosting 初期就一直崩、从未成功运行过**；memory 的"runtime 未测"实为"崩了加仪表但没修"。⚠️ dump 里的 `InferResult.hexpr=...` 来自旧 build 的死偏移，对当前 build **不可信**，"infer_method_call" 标签仅供参考。
+- **下一步（待定 fix 策略）**：反汇编 rva 0xfd797 的调用者（栈回溯 RVA：0x21896 immediate / 0x21937 / 0x25f57 / 0x22123 / 0x21ba3 / 0x4cdf6）映射到具体 Ring 函数 → 找该函数里哪个 int 值漏装箱 → 对照 JS codegen 同函数。**这是 native 自举核心硬骨头，缩到单点后修复策略仍需用户定。**
 
 **附带发现（同次实跑）**：`build compiler/main.ring --target=llvm` 有 7 条 `LLVM codegen warning: unknown function 'LLVMFunctionType'/'LLVMAddFunction'/'LLVMBuildCall2'/'LLVMConstPointerNull'/'LLVMConstInt'/'LLVMBuildRet', generating panic`——编译器自身的 `llvm_ffi.ring` LLVM-C extern fn 被 LLVM codegen 塞 panic stub。含义：native 二进制即使运行正常也**无法自托管 LLVM 后端**（`--target=llvm` 路径 panic），完整 native 自举需 native 直接 link LLVM-C。属架构 gap，非本 bug，单列待规划。
 
