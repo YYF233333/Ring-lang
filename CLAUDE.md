@@ -43,7 +43,7 @@ Ring-lang/
 - **HIR**：独立数据结构，每个表达式带推断的 Type + EffectRow，语法糖已展开
 - **DiagnosticSink**：Lexer/Parser/Checker 错误统一收集，支持多错误报告
 - HIR 独立于 AST，后续优化 pass 在 HIR → Codegen 之间插入
-- **Perceus RC pass**（`perceus.ring`，仅 `--target=llvm`）：HIR → [dup/drop 插入] → RC 标注 HIR → Codegen LLVM。反向 liveness + branch-balancing，翻译 Koka POPL'21
+- **Perceus RC pass**（`perceus.ring`，仅 `--target=llvm`）：HIR → [escape-clone/drop 插入] → RC 标注 HIR → Codegen LLVM。**L1 借用引擎 clone-all-escape**（读取 borrow、逃逸点 `HExpr::Clone`、scope-end-drop-once，已撤 branch-balancing），翻译 Koka POPL'21 borrowing 扩展。实现模型见 design.md §7.11
 - **双后端**：`--target=js`（默认，bootstrap）和 `--target=llvm`（native，开发中）共享同一 HIR
 
 ## 开发约定
@@ -106,9 +106,9 @@ Ring-lang/
 
 ## 路线图
 
-**当前**：Perceus RC L0 基础设施已落地（2026-06-01）—— `ring_runtime.cpp` 全量改造为 RC 分配（ring_alloc + 8 字节 header + typeid 派发 + per-type drop）；`perceus.ring` 实现反向 liveness + branch-balancing + locals-aware dup/drop 插入；LLVM codegen 全量 malloc→ring_alloc + emit Drop/Dup + 生成 per-type drop_T。**待验证**：在足够内存机器上编译编译器自身（40 模块）观察内存峰值下降，完成 B-012 最终验收（二次自举一致性 + native E2E 全过）。
+**当前**：L0 RC 基础设施（B-012，2026-06-01）+ **L1 借用引擎（B-098，2026-06-04）已落地**——`perceus.ring` 从 owned-everywhere 改为 clone-all-escape（读取 borrow、逃逸点 `HExpr::Clone`、scope-end-drop-once、删 branch-balancing），**从根消除 #134 系统性 move-analysis double-free 崩溃类**：native ring.exe 编 `a_empty.ring` EXIT 0、JS 731×3 + llvm_diff 49×3 全绿、dist double-bootstrap 字节一致。**推进中**：B-089 native 自举终验 capstone——定位 native `print` builtin bug（可能残留 RC over-free builtins 环境，待 native 调试）、内存峰值实测（G-a）、native LLVM-C 链接（B-099）。
 
-**后续**：B-012 端到端验证 → L1 借用优化（B-068）→ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
+**后续**：B-089 native 自举终验（G-a/b/c）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
 **遗留**：impl effect 传播修复、LSP 移植、技术债清理（见 `docs/audit-report.md`）
 
