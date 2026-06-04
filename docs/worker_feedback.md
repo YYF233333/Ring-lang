@@ -57,3 +57,15 @@ ownership 转移（escape-clone）对**非 Ident 逃逸值**必须发生在**值
 - perceus：owned 绑定 scope-end drop 一次（去 branch-balancing）+ 撤销无条件 param drop。
 
 此解满足 GATE 1 崩溃门，且因 owned 逃逸 move（dup 比 always-own 少）大概率满足 G-a 内存门。代价：需小 IR 增量（值层 clone）+ perceus last-use/escape 分析覆盖非 Ident。**Orchestrator 推荐此解，不推荐无条件 sink dup。**
+
+### 用户裁决（2026-06-04）：先 Discussion 落定完整 borrow 设计再实现
+
+用户选择不直接拍实现解，而是先在 Discussion 把完整 borrow 模型设计落 design.md §7 再开 B-098 实现。**Discussion 需落定的设计决策**：
+
+1. **escape-clone 落点 + 值层 clone 机制**：非 Ident（FieldAccess/IndexExpr）borrowed 逃逸如何 clone？候选：(a) 新增 `HExpr::Clone{inner}` 节点（codegen lower 成 eval→ring_dup→返回值）；(b) clone-on-bind 临时 let（perceus 把非 Ident 逃逸 hoist 成 owned 临时绑定）；(c) sink 条件式 dup（codegen 在 sink 处按 perceus 标注的 borrow-vs-owned 决定是否 dup）。定 IR 形态。
+2. **borrow-vs-owned 判定**：perceus 在逃逸点如何区分「值是 borrowed（源仍持有 → 需 clone）」vs「owned（fresh temp / last-use var → move）」？复用现有 backward last-use 分析到什么程度。
+3. **move 推断边界**：spec 原说「保守版不需 last-use→move」，但 fresh-temp 入 sink 必须 move（否则泄漏）。落定本期做哪些 move（至少：fresh temp 入 sink + last-use Ident 入 sink），哪些推迟。
+4. **design.md §7.2–7.8 增订**：原 spec 称语义已「定死」，但**实现模型**（escape-clone 由哪层承载）未定且字面版会崩。需在 §7 补「escape-clone 的 IR 承载层 + borrow/owned 判定 + move 边界」一节。
+5. **与 B-096 边界**：borrowed capture 建模两项都碰，落定各自范围避免重复/冲突。
+
+落定后 B-098 重排队（waiting-feedback → queued），按定案实现 + 跑三门 ×3。
