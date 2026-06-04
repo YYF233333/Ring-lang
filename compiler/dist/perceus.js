@@ -1486,9 +1486,10 @@ function rc_stmt(stmt, live, locals, boxed) {
         const __ring_m40 = value;
         if (__ring_m40._tag === "some") {
           const v = __ring_m40._0;
+          const live_at_return = set_clone(live);
           const r = rc_expr(v, live, locals, boxed);
           let out = dups_to_stmts(r.dups);
-          const __ring_iter_39 = __List_Iterable.iter(sorted_set_names(r.live));
+          const __ring_iter_39 = __List_Iterable.iter(sorted_set_names(live_at_return));
           while (true) {
             const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
             if (__ring_next_39._tag === "none") break;
@@ -1723,12 +1724,16 @@ function rc_stmt(stmt, live, locals, boxed) {
   __match_fail(__ring_m);
 })();
       const then_flushed = flush_dups_into_expr(then_result.expr, then_result.dups);
-      const balanced_then = balance_branch(then_flushed, live_then, live_else);
+      const balanced_then = (expr_diverges(then_result.expr) ? then_flushed : balance_branch(then_flushed, live_then, live_else));
       const balanced_else = (function() {
   const __ring_m = else_result;
   if (__ring_m._tag === "some") { const r = __ring_m._0; return (function() {
   const else_flushed = flush_dups_into_expr(r.expr, r.dups);
-  return Option_some(balance_branch(else_flushed, live_else, live_then));
+  if (expr_diverges(r.expr)) {
+    return Option_some(else_flushed);
+  } else {
+    return Option_some(balance_branch(else_flushed, live_else, live_then));
+  }
 })(); }
   if (__ring_m._tag === "none") { return (function() {
   const drops = make_drop_list(_Set_difference(live_then, live_else));
@@ -2007,12 +2012,16 @@ function rc_expr(expr, live, locals, boxed) {
   __match_fail(__ring_m);
 })();
       const then_flushed = flush_dups_into_expr(then_result.expr, then_result.dups);
-      const balanced_then = balance_branch(then_flushed, live_then, live_else);
+      const balanced_then = (expr_diverges(then_result.expr) ? then_flushed : balance_branch(then_flushed, live_then, live_else));
       const balanced_else = (function() {
   const __ring_m = else_result;
   if (__ring_m._tag === "some") { const r = __ring_m._0; return (function() {
   const else_flushed = flush_dups_into_expr(r.expr, r.dups);
-  return Option_some(balance_branch(else_flushed, live_else, live_then));
+  if (expr_diverges(r.expr)) {
+    return Option_some(else_flushed);
+  } else {
+    return Option_some(balance_branch(else_flushed, live_else, live_then));
+  }
 })(); }
   if (__ring_m._tag === "none") { return else_branch; }
   __match_fail(__ring_m);
@@ -2098,7 +2107,7 @@ function rc_expr(expr, live, locals, boxed) {
 })();
             const need_drop = _Set_difference(merged_live, body_result.live);
             const body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups);
-            const body_balanced = ((_Set_len(need_drop) > 0) ? prepend_stmts_to_expr(body_flushed, make_drop_list(need_drop)) : body_flushed);
+            const body_balanced = (((_Set_len(need_drop) > 0) && (expr_diverges(body_result.expr) === false)) ? prepend_stmts_to_expr(body_flushed, make_drop_list(need_drop)) : body_flushed);
             List_push(balanced_arms, new hir$HMatchArm(arm.pattern, new_guard, body_balanced, arm.span));
             break __ring_match49;
           }
@@ -2193,7 +2202,7 @@ function rc_expr(expr, live, locals, boxed) {
         const ar = __ring_next_64._0;
         merged = _Set_union(merged, ar[1]);
       }
-      const balanced_body = balance_branch(body_flushed, body_result.live, merged);
+      const balanced_body = (expr_diverges(body_result.expr) ? body_flushed : balance_branch(body_flushed, body_result.live, merged));
       let balanced_arms = [];
       const __ring_iter_65 = __List_Iterable.iter(arm_results);
       while (true) {
@@ -2201,7 +2210,7 @@ function rc_expr(expr, live, locals, boxed) {
         if (__ring_next_65._tag === "none") break;
         const ar = __ring_next_65._0;
         const need_drop = _Set_difference(merged, ar[1]);
-        if ((_Set_len(need_drop) > 0)) {
+        if (((_Set_len(need_drop) > 0) && (expr_diverges(ar[0].body) === false))) {
           const drops = make_drop_list(need_drop);
           List_push(balanced_arms, new hir$HMatchArm(ar[0].pattern, ar[0].guard, prepend_stmts_to_expr(ar[0].body, drops), ar[0].span));
         } else {
@@ -2483,6 +2492,102 @@ function make_drop_list(names) {
   return drops;
 }
 
+function stmt_diverges(stmt) {
+  __ring_match57: {
+    const __ring_m57 = stmt;
+    if (__ring_m57._tag === "Return") {
+      return true;
+      break __ring_match57;
+    }
+    if (__ring_m57._tag === "Break") {
+      return true;
+      break __ring_match57;
+    }
+    if (__ring_m57._tag === "Continue") {
+      return true;
+      break __ring_match57;
+    }
+    if (__ring_m57._tag === "ExprStmt") {
+      const expr = __ring_m57.expr;
+      return expr_diverges(expr);
+      break __ring_match57;
+    }
+    return false;
+    break __ring_match57;
+  }
+}
+
+function expr_diverges(expr) {
+  __ring_match58: {
+    const __ring_m58 = expr;
+    if (__ring_m58._tag === "Block") {
+      const stmts = __ring_m58.stmts; const tail = __ring_m58.tail;
+      let any = false;
+      const __ring_iter_78 = __List_Iterable.iter(stmts);
+      while (true) {
+        const __ring_next_78 = __ListIterator_Iterator.next(__ring_iter_78);
+        if (__ring_next_78._tag === "none") break;
+        const s = __ring_next_78._0;
+        if (stmt_diverges(s)) {
+          any = true;
+        }
+      }
+      if (any) {
+        return true;
+      } else {
+        __ring_match59: {
+          const __ring_m59 = tail;
+          if (__ring_m59._tag === "some") {
+            const t = __ring_m59._0;
+            return expr_diverges(t);
+            break __ring_match59;
+          }
+          if (__ring_m59._tag === "none") {
+            return false;
+            break __ring_match59;
+          }
+          __match_fail(__ring_m59);
+        }
+      }
+      break __ring_match58;
+    }
+    if (__ring_m58._tag === "IfExpr") {
+      const then_branch = __ring_m58.then_branch; const else_branch = __ring_m58.else_branch;
+      __ring_match60: {
+        const __ring_m60 = else_branch;
+        if (__ring_m60._tag === "some") {
+          const eb = __ring_m60._0;
+          return (expr_diverges(then_branch) && expr_diverges(eb));
+          break __ring_match60;
+        }
+        if (__ring_m60._tag === "none") {
+          return false;
+          break __ring_match60;
+        }
+        __match_fail(__ring_m60);
+      }
+      break __ring_match58;
+    }
+    if (__ring_m58._tag === "MatchExpr") {
+      const arms = __ring_m58.arms;
+      let all = (List_len(arms) > 0);
+      const __ring_iter_79 = __List_Iterable.iter(arms);
+      while (true) {
+        const __ring_next_79 = __ListIterator_Iterator.next(__ring_iter_79);
+        if (__ring_next_79._tag === "none") break;
+        const arm = __ring_next_79._0;
+        if ((expr_diverges(arm.body) === false)) {
+          all = false;
+        }
+      }
+      return all;
+      break __ring_match58;
+    }
+    return false;
+    break __ring_match58;
+  }
+}
+
 function balance_branch(body, my_live, other_live) {
   const need_drop = _Set_difference(other_live, my_live);
   if ((_Set_len(need_drop) === 0)) {
@@ -2496,29 +2601,29 @@ function prepend_stmts_to_expr(expr, stmts) {
   if ((List_len(stmts) === 0)) {
     return expr;
   }
-  __ring_match57: {
-    const __ring_m57 = expr;
-    if (__ring_m57._tag === "Block") {
-      const existing = __ring_m57.stmts; const tail = __ring_m57.tail; const ty = __ring_m57.ty; const effects = __ring_m57.effects; const span = __ring_m57.span;
+  __ring_match61: {
+    const __ring_m61 = expr;
+    if (__ring_m61._tag === "Block") {
+      const existing = __ring_m61.stmts; const tail = __ring_m61.tail; const ty = __ring_m61.ty; const effects = __ring_m61.effects; const span = __ring_m61.span;
       const new_stmts = List_concat(stmts, existing);
       return hir$HExpr_Block(new_stmts, tail, ty, effects, span);
-      break __ring_match57;
+      break __ring_match61;
     }
     const ty = hir$hexpr_type(expr);
     const effects = hir$hexpr_effects(expr);
     const span = hir$hexpr_span(expr);
     return hir$HExpr_Block(stmts, Option_some(expr), ty, effects, span);
-    break __ring_match57;
+    break __ring_match61;
   }
 }
 
 function dups_to_stmts(dups) {
   let out = [];
-  const __ring_iter_78 = __List_Iterable.iter(dups);
+  const __ring_iter_80 = __List_Iterable.iter(dups);
   while (true) {
-    const __ring_next_78 = __ListIterator_Iterator.next(__ring_iter_78);
-    if (__ring_next_78._tag === "none") break;
-    const name = __ring_next_78._0;
+    const __ring_next_80 = __ListIterator_Iterator.next(__ring_iter_80);
+    if (__ring_next_80._tag === "none") break;
+    const name = __ring_next_80._0;
     if ((rc_name_skippable(name) === false)) {
       List_push(out, hir$HStmt_Dup(name, types$Type_UnitType, synthetic_span()));
     }

@@ -744,13 +744,22 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -> Rc
         HStmt::Return { value, span } => {
             match value {
                 some(v) => {
+                    // #134: drop the vars owned at the return point — i.e. the
+                    // INCOMING live set — NOT r.live.  r.live additionally contains
+                    // the vars the return VALUE consumes as a last use (moved into
+                    // the call / the returned struct); dropping those double-frees
+                    // (e.g. `return self.make_token(.., end)` moves `end` into the
+                    // Token, but r.live still lists it).  A var that v dups instead
+                    // (non-last use) is in the incoming live set, so its original
+                    // reference is still dropped here — balance preserved.  Clone
+                    // before rc_expr in case it mutates the live set in place.
+                    let live_at_return = set_clone(live)
                     let r = rc_expr(v, live, locals, boxed)
-                    // On return, drop all live variables (they won't be used after).
                     // B-081: flush the return value's reported dups before both
                     // the drop-all-live and the Return.
                     let mut out: List<HStmt> = dups_to_stmts(r.dups)
-                    // B-085: sort so the drop-all-live order is backend-independent.
-                    for name in sorted_set_names(r.live) {
+                    // B-085: sort so the drop order is backend-independent.
+                    for name in sorted_set_names(live_at_return) {
                         // We don't have the type info for these vars easily here,
                         // so use UnitType as a placeholder. The LLVM codegen for Drop
                         // uses the variable's actual runtime type via the refcount header.
@@ -966,12 +975,21 @@ fn rc_stmt(stmt: HStmt, live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -> Rc
             // Flush branch dups before balancing.
             let then_flushed = flush_dups_into_expr(then_result.expr, then_result.dups)
 
-            // Branch balance: insert drops for variables live in one branch but not the other
-            let balanced_then = balance_branch(then_flushed, live_then, live_else)
+            // Branch balance: insert drops for variables live in one branch but not the other.
+            // #134: diverging branches (return/break/continue) self-clean — skip balancing.
+            let balanced_then = if expr_diverges(then_result.expr) {
+                then_flushed
+            } else {
+                balance_branch(then_flushed, live_then, live_else)
+            }
             let balanced_else = match else_result {
                 some(r) => {
                     let else_flushed = flush_dups_into_expr(r.expr, r.dups)
-                    some(balance_branch(else_flushed, live_else, live_then))
+                    if expr_diverges(r.expr) {
+                        some(else_flushed)
+                    } else {
+                        some(balance_branch(else_flushed, live_else, live_then))
+                    }
                 },
                 none => {
                     // No else branch — need to drop vars that are live in then but not here
@@ -1278,12 +1296,22 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -
             }
 
             // Flush dups into each branch body BEFORE balancing.
+            // #134: skip balancing a diverging branch — it cleans up via its own
+            // return/break/continue, so prepended balance drops would double-free.
             let then_flushed = flush_dups_into_expr(then_result.expr, then_result.dups)
-            let balanced_then = balance_branch(then_flushed, live_then, live_else)
+            let balanced_then = if expr_diverges(then_result.expr) {
+                then_flushed
+            } else {
+                balance_branch(then_flushed, live_then, live_else)
+            }
             let balanced_else = match else_result {
                 some(r) => {
                     let else_flushed = flush_dups_into_expr(r.expr, r.dups)
-                    some(balance_branch(else_flushed, live_else, live_then))
+                    if expr_diverges(r.expr) {
+                        some(else_flushed)
+                    } else {
+                        some(balance_branch(else_flushed, live_else, live_then))
+                    }
                 },
                 none => else_branch,
             }
@@ -1405,7 +1433,9 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -
                         // prior `merged \ (body.live - bindings)` behaviour.
                         let need_drop = merged_live.difference(body_result.live)
                         let body_flushed = flush_dups_into_expr(body_result.expr, body_result.dups)
-                        let body_balanced = if need_drop.len() > 0 {
+                        // #134: a diverging arm body (break/continue) self-cleans; do not
+                        // prepend balance drops it would never reach, double-freeing.
+                        let body_balanced = if need_drop.len() > 0 && expr_diverges(body_result.expr) == false {
                             prepend_stmts_to_expr(body_flushed, make_drop_list(need_drop))
                         } else {
                             body_flushed
@@ -1488,12 +1518,17 @@ fn rc_expr(expr: HExpr, mut live: Set<Str>, locals: Set<Str>, boxed: Set<Int>) -
             let mut merged = body_result.live
             for ar in arm_results { merged = merged.union(ar.1) }
 
-            // Balance body and arms
-            let balanced_body = balance_branch(body_flushed, body_result.live, merged)
+            // Balance body and arms.
+            // #134: diverging body/arms (return/break/continue) self-clean — skip balancing.
+            let balanced_body = if expr_diverges(body_result.expr) {
+                body_flushed
+            } else {
+                balance_branch(body_flushed, body_result.live, merged)
+            }
             let mut balanced_arms: List<HMatchArm> = []
             for ar in arm_results {
                 let need_drop = merged.difference(ar.1)
-                if need_drop.len() > 0 {
+                if need_drop.len() > 0 && expr_diverges(ar.0.body) == false {
                     let drops = make_drop_list(need_drop)
                     balanced_arms.push(HMatchArm { pattern: ar.0.pattern, guard: ar.0.guard,
                         body: prepend_stmts_to_expr(ar.0.body, drops), span: ar.0.span })
@@ -1789,6 +1824,69 @@ fn make_drop_list(names: Set<Str>) -> List<HStmt> {
         }
     }
     drops
+}
+
+// ============================================================
+// Divergence analysis (#134): a branch that unconditionally transfers control
+// away — return / break / continue — never reaches the enclosing merge point.
+// Such a branch must be EXEMPT from branch balancing: its live variables are
+// already released by the diverging terminator's own handling (e.g. the Return
+// case's drop-all-live).  Balancing it double-frees — it prepends `Drop(x)` for
+// vars the sibling branch keeps live, but the diverging path already released
+// them, so a later dup/drop on `x` hits freed memory (the next_token UAF).
+//
+// NOTE: the empty live-set a diverging branch reports already makes merged_live
+// and the SIBLING branch's balancing come out correct (a diverging branch
+// contributes nothing to the merge).  The only thing that must change is not
+// prepending balance drops to the diverging branch itself.
+// ============================================================
+
+fn stmt_diverges(stmt: HStmt) -> Bool {
+    match stmt {
+        HStmt::Return { .. } => true,
+        HStmt::Break { .. } => true,
+        HStmt::Continue { .. } => true,
+        HStmt::ExprStmt { expr, .. } => expr_diverges(expr),
+        _ => false,
+    }
+}
+
+fn expr_diverges(expr: HExpr) -> Bool {
+    match expr {
+        HExpr::Block { stmts, tail, .. } => {
+            // Diverges if any top-level statement diverges (statements after it
+            // are dead) or, failing that, the tail expression diverges.
+            let mut any = false
+            for s in stmts {
+                if stmt_diverges(s) { any = true }
+            }
+            if any {
+                true
+            } else {
+                match tail {
+                    some(t) => expr_diverges(t),
+                    none => false,
+                }
+            }
+        },
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            // Diverges only if BOTH arms diverge; a missing else leaves a
+            // fall-through path that reaches the merge.
+            match else_branch {
+                some(eb) => expr_diverges(then_branch) && expr_diverges(eb),
+                none => false,
+            }
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            // Diverges if every arm body diverges (match is exhaustive).
+            let mut all = arms.len() > 0
+            for arm in arms {
+                if expr_diverges(arm.body) == false { all = false }
+            }
+            all
+        },
+        _ => false,
+    }
 }
 
 // ============================================================

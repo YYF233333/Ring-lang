@@ -1118,8 +1118,13 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
         // B-090: register effect-op declaration order (shared by all modules).
         register_effect_ops_llvm(program.decls, ctx.effect_ops)
-        // B-091: union every module's auto-boxed mut-cell def_ids.
-        for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
+        // #134: do NOT union boxed_vars across modules here.  def_ids are minted
+        // per-module (each module is checked with a fresh InferCtx whose
+        // next_def_id restarts at 0 — see checker.ring::new_infer_ctx), so a
+        // global union makes a boxed mut-cell def_id from one module spuriously
+        // mark a same-numbered plain local in another (e.g. lexer's `high` param
+        // of code_in_range got double-unboxed).  boxed_vars is set per-module in
+        // the body-generation pass below instead.
     }
 
     // 7b. Declare runtime functions
@@ -1136,6 +1141,11 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         let (prefix, program, uses) = m
         // Set the current module context
         ctx.module_prefix = some(prefix)
+        // #134: scope boxed_vars to THIS module's def_id space.  def_ids are
+        // module-local (next_def_id restarts per module), so each module's
+        // auto-boxed mut-cell set must only apply while emitting that module's
+        // own bodies — a global union collides across modules' id-spaces.
+        ctx.boxed_vars = program.boxed_vars
         // Collect local names for this module
         ctx.local_names = collect_local_names(program.decls)
         // Build imports map from use declarations

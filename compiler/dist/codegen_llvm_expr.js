@@ -3112,6 +3112,13 @@ function ensure_runtime_method(ctx, name, arg_count) {
   }
 }
 
+function gen_dup_value(ctx, val) {
+  const dup_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type);
+  const dup_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_dup");
+  discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""));
+  return val;
+}
+
 function gen_field_access(ctx, receiver, field, ty) {
   const recv_val = gen_llvm_expr(ctx, receiver);
   const recv_type = hir$hexpr_type(receiver);
@@ -3153,7 +3160,8 @@ function gen_field_access(ctx, receiver, field, ty) {
         panic(`LLVM codegen: field '${field}' not found in struct '${type_name}'`);
       }
       const field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, recv_val, field_idx, codegen_llvm_ctx$fresh_name(ctx, "fp"));
-      return LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, codegen_llvm_ctx$fresh_name(ctx, field));
+      const loaded = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, codegen_llvm_ctx$fresh_name(ctx, field));
+      return gen_dup_value(ctx, loaded);
       break __ring_match82;
     }
     if (__ring_m82._tag === "none") {

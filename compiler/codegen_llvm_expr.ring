@@ -2037,6 +2037,23 @@ fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMVal
 // Field access
 // ============================================================
 
+// #134: emit ring_dup(val) and return val.  Field projection reads a field
+// pointer WITHOUT bumping its refcount (a borrow).  The L0 backend's calling
+// convention is callee-owns (transform_fn_body drops unconsumed params), and
+// bindings / struct fields / returns all take ownership too — so a borrowed
+// field value flowing into ANY of those owned slots is freed twice (once by the
+// new owner, once by the receiver it was projected from).  Dup'ing every field
+// read makes the result OWNED, so each owner's drop is balanced.  The cost is a
+// leak when the value flows into a transient borrow position (binop / condition
+// operand) that never drops it — acceptable under the L0 correct-over-leak
+// policy; B-068 (borrow inference) will remove both the dup and the leak.
+fn gen_dup_value(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef {
+    let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
+    let dup_ty = get_rt_fn_type(ctx, "ring_dup")
+    discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""))
+    val
+}
+
 fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> LLVMValueRef {
     let recv_val = gen_llvm_expr(ctx, receiver)
     let recv_type = hexpr_type(receiver)
@@ -2052,6 +2069,7 @@ fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> 
             let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
             let get_ty = get_rt_fn_type(ctx, "ring_list_get")
             let idx_val = LLVMConstInt(ctx.i64_type, field_idx, 0)
+            // ring_list_get itself dups the element (#134), so no extra dup here.
             return LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], fresh_name(ctx, "t"))
         },
         _ => {},
@@ -2077,7 +2095,8 @@ fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> 
             }
             // GEP into struct to get field pointer, then load
             let field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, recv_val, field_idx, fresh_name(ctx, "fp"))
-            LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, field))
+            let loaded = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, field))
+            gen_dup_value(ctx, loaded)  // #134: own the projected field (see gen_dup_value)
         },
         none => {
             panic("LLVM codegen: struct type '${type_name}' not registered")

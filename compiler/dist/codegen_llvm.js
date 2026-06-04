@@ -1254,43 +1254,37 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
     scan_trait_decls(program.decls, ctx.trait_method_order);
     scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params);
     register_effect_ops_llvm(program.decls, ctx.effect_ops);
-    const __ring_iter_29 = ___Set_Iterable.iter(program.boxed_vars);
-    while (true) {
-      const __ring_next_29 = __SetIterator_Iterator.next(__ring_iter_29);
-      if (__ring_next_29._tag === "none") break;
-      const did = __ring_next_29._0;
-      _Set_insert(ctx.boxed_vars, did);
-    }
   }
   declare_runtime_fns(ctx);
-  const __ring_iter_30 = __List_Iterable.iter(modules);
+  const __ring_iter_29 = __List_Iterable.iter(modules);
   while (true) {
-    const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
-    if (__ring_next_30._tag === "none") break;
-    const m = __ring_next_30._0;
+    const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+    if (__ring_next_29._tag === "none") break;
+    const m = __ring_next_29._0;
     const __ring_dt1 = m;
     const prefix = __ring_dt1[0];
     const program = __ring_dt1[1];
     const _uses = __ring_dt1[2];
     forward_declare_functions_with_prefix(ctx, program.decls, Option_some(prefix));
   }
-  const __ring_iter_31 = __List_Iterable.iter(modules);
+  const __ring_iter_30 = __List_Iterable.iter(modules);
   while (true) {
-    const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
-    if (__ring_next_31._tag === "none") break;
-    const m = __ring_next_31._0;
+    const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+    if (__ring_next_30._tag === "none") break;
+    const m = __ring_next_30._0;
     const __ring_dt2 = m;
     const prefix = __ring_dt2[0];
     const program = __ring_dt2[1];
     const uses = __ring_dt2[2];
     ctx.module_prefix = Option_some(prefix);
+    ctx.boxed_vars = program.boxed_vars;
     ctx.local_names = collect_local_names(program.decls);
     ctx.imports_map = build_imports_map(uses);
-    const __ring_iter_32 = __List_Iterable.iter(program.decls);
+    const __ring_iter_31 = __List_Iterable.iter(program.decls);
     while (true) {
-      const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
-      if (__ring_next_32._tag === "none") break;
-      const decl = __ring_next_32._0;
+      const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+      if (__ring_next_31._tag === "none") break;
+      const decl = __ring_next_31._0;
       codegen_llvm_decl$emit_llvm_decl(ctx, decl);
     }
   }
@@ -1341,11 +1335,11 @@ function emit_c_main_project(ctx, entry_prefix) {
         const __ring_m24 = _Map_get(ctx.fn_evidence_params, ring_main_name);
         if (__ring_m24._tag === "some") {
           const ev_params = __ring_m24._0;
-          const __ring_iter_33 = __List_Iterable.iter(ev_params);
+          const __ring_iter_32 = __List_Iterable.iter(ev_params);
           while (true) {
-            const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
-            if (__ring_next_33._tag === "none") break;
-            const ep = __ring_next_33._0;
+            const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+            if (__ring_next_32._tag === "none") break;
+            const ep = __ring_next_32._0;
             List_push(call_args, LLVMConstPointerNull(ptr));
           }
           break __ring_match24;
@@ -1376,21 +1370,21 @@ function emit_c_main_project(ctx, entry_prefix) {
 
 function build_imports_map(uses) {
   let imap = map_new();
-  const __ring_iter_34 = __List_Iterable.iter(uses);
+  const __ring_iter_33 = __List_Iterable.iter(uses);
   while (true) {
-    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
-    if (__ring_next_34._tag === "none") break;
-    const u = __ring_next_34._0;
+    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+    if (__ring_next_33._tag === "none") break;
+    const u = __ring_next_33._0;
     const module_name = List_join(u.path.segments, "_");
     __ring_match25: {
       const __ring_m25 = u.imports;
       if (__ring_m25._tag === "NamedItems") {
         const names = __ring_m25.names;
-        const __ring_iter_35 = __List_Iterable.iter(names);
+        const __ring_iter_34 = __List_Iterable.iter(names);
         while (true) {
-          const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
-          if (__ring_next_35._tag === "none") break;
-          const ni = __ring_next_35._0;
+          const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+          if (__ring_next_34._tag === "none") break;
+          const ni = __ring_next_34._0;
           const local_name = (function() {
   const __ring_m = ni.alias;
   if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
@@ -1418,11 +1412,11 @@ function collect_local_names(decls) {
 }
 
 function collect_local_names_rec(decls, names) {
-  const __ring_iter_36 = __List_Iterable.iter(decls);
+  const __ring_iter_35 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
-    if (__ring_next_36._tag === "none") break;
-    const decl = __ring_next_36._0;
+    const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+    if (__ring_next_35._tag === "none") break;
+    const decl = __ring_next_35._0;
     __ring_match26: {
       const __ring_m26 = decl;
       if (__ring_m26._tag === "Fn") {

@@ -79,6 +79,28 @@ static int drop_table_size = RING_TYPEID_USER_BASE;
 // Forward declarations for RC infrastructure
 static void ring_drop_by_typeid(uint32_t tid, void* data);
 
+// Crash context (defined here so the RC guards below can reference it; the CHK
+// macro that mutates these lives further down, before the first runtime fn).
+static int g_chk = 0;
+static const char* g_last_fn = "";
+
+// Diagnostic: print the call stack (as module RVAs) at an RC guard abort so the
+// triggering Ring function can be mapped via the linker .map.  #134 hunt only.
+#ifdef _WIN32
+static void dump_rc_backtrace(const char* tag) {
+    void* frames[40];
+    USHORT n = CaptureStackBackTrace(2, 40, frames, NULL);  // skip this fn + the guard
+    uintptr_t base = (uintptr_t)GetModuleHandle(NULL);
+    fprintf(stderr, "  %s backtrace (RVA):", tag);
+    for (USHORT i = 0; i < n; i++) {
+        fprintf(stderr, " 0x%llx", (unsigned long long)((uintptr_t)frames[i] - base));
+    }
+    fprintf(stderr, "\n");
+}
+#else
+static void dump_rc_backtrace(const char*) {}
+#endif
+
 // ============================================================================
 // Perceus RC L0 — ring_alloc / ring_dup / ring_drop
 // ============================================================================
@@ -101,7 +123,16 @@ extern "C" void ring_dup(void* ptr) {
 
     // UAF detection: sentinel means this memory was freed
     if (*rc == 0xDEADBEEF) {
-        fprintf(stderr, "ring panic: dup on freed memory! ptr=%p (use-after-free)\n", ptr);
+        uint32_t freed_tid = *(uint32_t*)((char*)ptr - 4);  // preserved by ring_drop (diag)
+        void* ret = __builtin_return_address(0);
+#ifdef _WIN32
+        uintptr_t base = (uintptr_t)GetModuleHandle(NULL);
+        fprintf(stderr, "ring panic: dup on freed memory! ptr=%p freed_tid=%u chk=%d last_fn=%s caller=%p rva=0x%llx (use-after-free)\n",
+                ptr, freed_tid, g_chk, g_last_fn, ret, (unsigned long long)((uintptr_t)ret - base));
+#else
+        fprintf(stderr, "ring panic: dup on freed memory! ptr=%p freed_tid=%u chk=%d last_fn=%s caller=%p (use-after-free)\n",
+                ptr, freed_tid, g_chk, g_last_fn, ret);
+#endif
         fflush(stderr);
         abort();
     }
@@ -137,7 +168,17 @@ extern "C" void ring_drop(void* ptr) {
 
     // UAF sentinel detection: 0xDEADBEEF in rc slot means freed memory
     if (*rc == 0xDEADBEEF) {
-        fprintf(stderr, "ring panic: use-after-free detected! ptr=%p (freed memory sentinel)\n", ptr);
+        uint32_t freed_tid = *(uint32_t*)((char*)ptr - 4);  // preserved by ring_drop (diag)
+        void* ret = __builtin_return_address(0);
+#ifdef _WIN32
+        uintptr_t base = (uintptr_t)GetModuleHandle(NULL);
+        fprintf(stderr, "ring panic: use-after-free detected! ptr=%p freed_tid=%u chk=%d last_fn=%s caller=%p rva=0x%llx (drop on freed)\n",
+                ptr, freed_tid, g_chk, g_last_fn, ret, (unsigned long long)((uintptr_t)ret - base));
+        dump_rc_backtrace("drop-uaf");
+#else
+        fprintf(stderr, "ring panic: use-after-free detected! ptr=%p freed_tid=%u chk=%d last_fn=%s caller=%p (drop on freed)\n",
+                ptr, freed_tid, g_chk, g_last_fn, ret);
+#endif
         fflush(stderr);
         abort();
     }
@@ -145,9 +186,10 @@ extern "C" void ring_drop(void* ptr) {
     if (*rc <= 1) {
         uint32_t tid = *(uint32_t*)((char*)ptr - 4);
         ring_drop_by_typeid(tid, ptr);
-        // Write sentinel before free to detect UAF on this block
+        // Write sentinel before free to detect UAF on this block.  Only the rc
+        // slot (-8) gets the sentinel; the typeid slot (-4) is preserved so the
+        // dup/drop UAF guards can report what kind of object was freed (diag).
         *(uint32_t*)((char*)ptr - 8) = 0xDEADBEEF;
-        *(uint32_t*)((char*)ptr - 4) = 0xDEADBEEF;
         free((char*)ptr - 8);
     } else {
         *rc -= 1;
@@ -238,8 +280,7 @@ static char** g_argv = nullptr;
 // Two stores per runtime call — cheap enough to leave on, and lets the SEH crash
 // handler / null guards report roughly where a fault occurred. (The previous
 // 64-entry ring buffer was debug-only scaffolding and has been removed.)
-static int g_chk = 0;
-static const char* g_last_fn = "";
+// (g_chk / g_last_fn are defined above, near the RC guards that read them.)
 #define CHK(name) do { g_chk++; g_last_fn = (name); } while(0)
 #define CHK_ARG(name, arg) do { g_chk++; g_last_fn = (name); } while(0)
 
@@ -376,7 +417,7 @@ extern "C" void* ring_box_int(int64_t val) {
 
 extern "C" int64_t ring_unbox_int(void* p) {
     CHK("unbox_int");
-    if (!p) { fprintf(stderr, "ring panic: unbox_int(null) (last=%s)\n", g_last_fn); exit(1); }
+    if (!p) { fprintf(stderr, "ring panic: unbox_int(null) chk=%d (last=%s)\n", g_chk, g_last_fn); dump_rc_backtrace("unbox-null"); exit(1); }
     return *(int64_t*)p;
 }
 
@@ -648,7 +689,12 @@ extern "C" void* ring_list_get(void* list, int64_t idx) {
                 (long long)idx, (long long)vec->size());
         exit(1);
     }
-    return (*vec)[(size_t)idx];
+    // #134: a read borrows the element; the L0 callee-owns convention means the
+    // caller will eventually drop it, so hand back an OWNED reference (the
+    // container keeps its own).  Mirrors the field-access dup in gen_field_access.
+    void* elem = (*vec)[(size_t)idx];
+    ring_dup(elem);
+    return elem;
 }
 
 extern "C" void* ring_list_set(void* list, int64_t idx, void* val) {
@@ -729,7 +775,9 @@ extern "C" void* ring_list_get_opt(void* list, int64_t idx) {
     if (idx < 0 || idx >= (int64_t)vec->size()) {
         return ring_enum_none();
     }
-    return ring_enum_some((*vec)[(size_t)idx]);
+    void* elem = (*vec)[(size_t)idx];  // #134: own the element (see ring_list_get)
+    ring_dup(elem);
+    return ring_enum_some(elem);
 }
 
 extern "C" void* ring_list_reverse(void* list) {
@@ -1004,6 +1052,7 @@ extern "C" void* ring_map_get(void* map, void* key) {
         fprintf(stderr, "ring panic: map key not found: %s\n", k->c_str());
         exit(1);
     }
+    ring_dup(it->second);  // #134: own the read value (see ring_list_get)
     return it->second;
 }
 
@@ -1012,6 +1061,7 @@ extern "C" void* ring_map_get_opt(void* map, void* key) {
     std::string* k = (std::string*)key;
     auto it = m->find(*k);
     if (it == m->end()) return ring_enum_none();
+    ring_dup(it->second);  // #134: own the read value
     return ring_enum_some(it->second);
 }
 
@@ -1052,6 +1102,7 @@ extern "C" void* ring_map_values(void* map) {
     auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
+        ring_dup(kv.second);  // #134: the returned list owns its elements
         result->push_back(kv.second);
     }
     return ldata;
@@ -1069,6 +1120,7 @@ extern "C" void* ring_map_entries(void* map) {
         void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
         new (sd) std::string(kv.first);
         pair->push_back(sd);
+        ring_dup(kv.second);  // #134: the entry pair owns the value
         pair->push_back(kv.second);
         result->push_back(pdata);
     }
@@ -1109,6 +1161,7 @@ extern "C" void* ring_map_int_get(void* map, void* key) {
         fprintf(stderr, "ring panic: map key not found: %lld\n", (long long)k);
         exit(1);
     }
+    ring_dup(it->second);  // #134: own the read value (see ring_list_get)
     return it->second;
 }
 
@@ -1117,6 +1170,7 @@ extern "C" void* ring_map_int_get_opt(void* map, void* key) {
     int64_t k = *(int64_t*)key;
     auto it = m->find(k);
     if (it == m->end()) return ring_enum_none();
+    ring_dup(it->second);  // #134: own the read value
     return ring_enum_some(it->second);
 }
 
