@@ -208,6 +208,64 @@ fn is_borrow_returning_call(callee: HExpr) -> Bool {
     }
 }
 
+// B-101: drop-WHITELIST — the DUAL of is_borrow_returning_call.  A Call whose
+// result is GUARANTEED to be a FRESH, UNSHARED owned value (a brand-new
+// allocation that aliases NOTHING reachable from the caller or any global) is
+// safe to scope-end-drop: the binding is the sole owner, so its drop frees
+// exactly its own allocation.  Listing such a call here recovers droppability
+// for the binding (closing the §7.11-correction-#2 "Call result conservatively
+// not dropped → LEAK" hole — G-a memory pressure).
+//
+// ⚠️ SAFETY ASYMMETRY (the MIRROR of is_borrow_returning_call, and far more
+// dangerous): mis-listing a call here whose result ALIASES live shared state
+// makes the scope-end drop free STILL-LIVE memory → UAF / double-free (CRASH).
+// Omitting a genuinely-fresh call only LEAKS (crash-free).  So this list must err
+// toward EXCLUSION: a call qualifies ONLY when EVERY return path of the callee
+// allocates anew with NO shared substructure and NO input/global passthrough.
+//
+// B-101 per-arm audit of the spec's candidate functions (env.ring / zonk.ring) —
+// ALL FAIL the "every-arm-fresh" bar, so NONE are listed (whitelist stays empty):
+//
+//   apply_subst (env.ring 506-586): scalar arms `=> t` (508-514) and the
+//     unresolved-TypeVar `if root == id { t }` arm (520) return the INPUT verbatim
+//     (alias); StructType `{ fields: fields }` (533) and EnumType
+//     `{ variants: variants }` (539) reuse the input's field/variant substructure
+//     (alias); ErrorType `=> t` (584) aliases.  → NOT all-arm-fresh → EXCLUDED.
+//   apply_subst_map (env.ring 394-461): same structure — scalar `=> t` (396-402),
+//     StructType.fields / EnumType.variants substructure share, ErrorType `=> t`
+//     (459).  → EXCLUDED.
+//   apply_subst_row / apply_subst_effect_map (env.ring 600 / 463): the EffectRow /
+//     Effect is freshly mapped at the top, but apply_subst_effect's `_ => e`
+//     (598) and apply_subst_effect_map's `_ => e` pass the input Effect through
+//     (alias of an element).  → EXCLUDED.
+//   zonk_type / zonk_row (zonk.ring 15 / 102): wrap apply_subst(+label_vars);
+//     label_vars (zonk.ring 39-100) has the SAME scalar `=> t` / StructType.fields
+//     / EnumType.variants / unresolved-TypeVar passthroughs.  → EXCLUDED.
+//
+// Container element accessors (`.get()` → ring_list_get_opt etc.) DO build a fresh
+// owned Option (the element is ring_dup'd into it) and WOULD be drop-safe — BUT
+// they cannot be matched by field name alone: a user type may define its own
+// `.get()` returning a BORROW, and matching `field == "get"` would then drop a
+// borrow → UAF.  Distinguishing builtin-container `.get()` requires receiver-type
+// resolution (List/Map/Set), which is precise-escape-analysis territory (L3 /
+// B-096), not the field-name style of this predicate.  So `.get()` is EXCLUDED
+// here too — its fresh owned Option LEAKS (crash-free), pending L3.
+//
+// RESULT: the whitelist is presently EMPTY.  The apply_subst-family leak (G-a) is
+// NOT closable at this granularity — the compiler's own Type tree is a shared DAG
+// (immutable substructure deliberately aliased), so a per-arm-fresh guarantee is
+// impossible for the substitution functions.  Precise DAG-aware escape analysis
+// (which CAN drop the genuinely-fresh subset) is L3-reuse / B-096.  Until then we
+// retain the leak (memory cost) rather than introduce a UAF.  The hook below lets
+// a future safe candidate be added in one place.
+fn is_fresh_owned_returning_call(callee: HExpr) -> Bool {
+    match callee {
+        // No call currently qualifies (see audit above).  Field-name matching is
+        // unsafe for the drop-whitelist: any user-shadowable name risks UAF.
+        _ => false,
+    }
+}
+
 // Wrap an escaping expression: clone it iff it has an independent owner; the
 // inner expression is processed in VALUE (borrow) position so its own reads do
 // not clone.  Carries inner's type/effects/span on the Clone node.
@@ -377,6 +435,18 @@ fn direct_block_locals(stmts: List<HStmt>) -> List<Str> {
 fn is_droppable_init(init: HExpr) -> Bool {
     match init {
         // Owner-bearing reads → rc_escape wraps in a fresh Clone.
+        //
+        // B-101 element-read-projection UAF audit: a `let x = list[i]` / `let x =
+        // m[k]` / `let x = obj.field` binds an element/field READ.  The runtime read
+        // (ring_list_get / ring_map_get / struct-GEP) returns a BORROW (no dup —
+        // B-098).  Naively scope-end-dropping x would free the container's element
+        // → UAF.  But these are owner-bearing, so rc_stmt's rc_escape wraps the init
+        // in HExpr::Clone (gen_clone → ring_dup): the binding then owns an
+        // INDEPENDENT dup'd reference, NOT the container's element.  The scope-end
+        // Drop releases that dup (rc N+1 → N); the container's own reference (and its
+        // later element drop) is untouched.  Balanced — NO UAF, NO leak.  (This is
+        // why is_droppable_init and is_owner_bearing agree on these arms: every
+        // droppable-as-owner-bearing init is Clone-wrapped before it is dropped.)
         HExpr::Ident { .. } => true,
         HExpr::FieldAccess { .. } => true,
         HExpr::IndexExpr { .. } => true,
@@ -393,8 +463,12 @@ fn is_droppable_init(init: HExpr) -> Bool {
         HExpr::StrLit { .. } => true,
         HExpr::BoolLit { .. } => true,
         HExpr::Clone { .. } => true,
-        // A borrow-returning method call (.unwrap…) becomes a Clone via rc_escape.
-        HExpr::Call { callee, .. } => is_borrow_returning_call(callee),
+        // A borrow-returning method call (.unwrap…) becomes a Clone via rc_escape,
+        // so its binding owns a fresh dup → droppable.  A fresh-owned-returning
+        // call (B-101 whitelist — currently empty, see is_fresh_owned_returning_call)
+        // moves a sole-owned allocation in → also droppable.
+        HExpr::Call { callee, .. } =>
+            is_borrow_returning_call(callee) || is_fresh_owned_returning_call(callee),
         // Call (general) / EffectOp / BinOp / UnaryOp / control-flow: may alias
         // shared state or be a non-owning scalar — conservatively not dropped.
         _ => false,
