@@ -120,6 +120,16 @@ extern "C" void ring_dup(void* ptr) {
 extern "C" void ring_drop(void* ptr) {
     if (!ptr) return;
     uint32_t tid = *(uint32_t*)((char*)ptr - 4);
+#ifdef RING_RC_DEBUG
+    {
+        uint32_t rcv = *(uint32_t*)((char*)ptr - 8);
+        if (tid >= 4096u || rcv == 0u || rcv > 1000000u) {
+            fprintf(stderr, "[rc-debug] suspicious ring_drop ptr=%p tid=%u rc=%u ra=%p\n",
+                    ptr, tid, rcv, _ReturnAddress());
+            fflush(stderr);
+        }
+    }
+#endif
     if (tid < 4096 && never_drop_table[tid]) return; // B-101: interned, never freed
     uint32_t* rc = (uint32_t*)((char*)ptr - 8);
     if (*rc <= 1) {
@@ -1928,7 +1938,17 @@ extern "C" void* ring_list_clear(void* list) {
 extern "C" void* ring_list_extend(void* list, void* other) {
     auto* va = (std::vector<void*>*)list;
     auto* vb = (std::vector<void*>*)other;
-    va->insert(va->end(), vb->begin(), vb->end());
+    // B-102: each element of `other` ESCAPES into `list` (the destination co-owns
+    // it), so dup it — exactly like push (the clone-all-escape "escape into a
+    // container = clone" rule, inlined at runtime, same as map.values()/entries()).
+    // Without this, `list` and `other` would share the same element pointers; when
+    // both lists are scope-end-dropped (e.g. emit_fn_decl's `all.extend(param_names)`
+    // then both `all` and `param_names` drop), drop_list would free each shared
+    // element TWICE → native self-compile over-free (B-102 layer 5).
+    for (void* e : *vb) {
+        ring_dup(e);
+        va->push_back(e);
+    }
     return list;
 }
 

@@ -295,24 +295,51 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<St
     // Bindings defined directly by these statements (not nested loop/branch scopes).
     let block_locals = direct_block_locals(stmts)
 
-    // The owned set visible to statements/tail = enclosing owned ++ this block's
-    // bindings (each binding becomes visible from its definition onward; using
-    // the full set is safe because a `return`/scope-end drop of a not-yet-defined
-    // binding cannot occur — the binding's Let precedes any use that could return).
-    let inner_owned = owned.concat(block_locals)
-
+    // The owned set visible to each statement = enclosing owned ++ the bindings of
+    // THIS block declared BEFORE that statement.  This must be built INCREMENTALLY
+    // (not the full block_locals up front): a binding only becomes visible from its
+    // `let` onward.  Codegen lowers every same-named local to one shared function-
+    // entry alloca, so a `return` placed in an EARLIER statement that drops a
+    // not-yet-declared name would free that alloca's stale/garbage contents — and,
+    // when an outer block-local name collides with an inner-branch local of the same
+    // name (e.g. two `let mut result` in disjoint `parse_type_expr` arms), the outer
+    // declaration would be dropped in a branch where it was never constructed
+    // (native self-compile UAF in resolve_type_expr's parsed TypeExpr, B-102 layer 3).
+    // Names already in `owned` (a shadowing inner binding) are NOT re-added: the one
+    // shared alloca must be dropped exactly once per control-flow path.
+    //
+    // NB: `concat` builds a FRESH list — we must NOT alias the caller's `owned`
+    // (List is a reference type), or pushing a this-block local would mutate the
+    // enclosing block's owned set and leak the name into sibling branches' drop
+    // sets (B-102 layer 4: `let a` in an `if` arm leaking into a later arm's
+    // `return`, freeing the never-initialised alloca).
+    let mut visible_owned = owned.concat([])
     let mut new_stmts: List<HStmt> = []
     for s in stmts {
-        for ns in rc_stmt(s, inner_owned, boxed, gensym) { new_stmts.push(ns) }
+        // A statement (or any early return inside it) sees only locals already declared.
+        for ns in rc_stmt(s, visible_owned, boxed, gensym) { new_stmts.push(ns) }
+        // After processing, this statement's own droppable binding (if any, and not
+        // already owned by an enclosing scope) becomes visible to later statements.
+        for n in stmt_droppable_locals(s) {
+            if visible_owned.contains(n) == false { visible_owned.push(n) }
+        }
     }
 
+    // The tail sees every block-local (all `let`s precede the tail).
     let new_tail = match tail {
-        some(t) => some(rc_escape_or_value(t, escape, inner_owned, boxed, gensym)),
+        some(t) => some(rc_escape_or_value(t, escape, visible_owned, boxed, gensym)),
         none => none,
     }
 
-    // Scope-end drops for this block's own bindings, on the fall-through path.
-    if block_locals.len() == 0 {
+    // Scope-end drops for this block's OWN fresh bindings, on the fall-through path.
+    // A block-local that shadows an enclosing owned name (same flat alloca) is NOT
+    // re-dropped here — the enclosing scope owns that drop; re-dropping would free
+    // the one shared alloca twice (B-102 layer-3 over-free).
+    let mut own_block_locals: List<Str> = []
+    for n in block_locals {
+        if owned.contains(n) == false { own_block_locals.push(n) }
+    }
+    if own_block_locals.len() == 0 {
         ((new_stmts, new_tail))
     } else if block_diverges(new_stmts, new_tail) {
         // Diverging block: a return/break/continue already handled cleanup; the
@@ -320,7 +347,7 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<St
         // / double-free on the diverging path).
         ((new_stmts, new_tail))
     } else {
-        let drops = drops_for(block_locals)
+        let drops = drops_for(own_block_locals)
         match new_tail {
             some(t) => {
                 // Hoist the tail so the drops run AFTER it is evaluated.
@@ -385,20 +412,30 @@ fn fresh_scope_tmp(mut gensym: List<Int>) -> Str {
 fn direct_block_locals(stmts: List<HStmt>) -> List<Str> {
     let mut out: List<Str> = []
     for s in stmts {
-        match s {
-            HStmt::Let { name, ty, init, .. } => {
-                // B-101: Type-DAG bindings are interned / never-dropped (the runtime
-                // marks their typeids never-drop; a Drop here would be a no-op anyway).
-                // Suppressing the Drop keeps RC traffic off the immutable Type DAG.
-                if rc_name_skippable(name) == false && is_type_dag_type(ty) == false && is_droppable_init(init) { out.push(name) }
-            },
-            HStmt::Var { name, ty, init, .. } => {
-                if rc_name_skippable(name) == false && is_type_dag_type(ty) == false && is_droppable_init(init) { out.push(name) }
-            },
-            _ => {},
+        for n in stmt_droppable_locals(s) {
+            if out.contains(n) == false { out.push(n) }
         }
     }
     out
+}
+
+// The droppable owned local(s) a SINGLE statement introduces (0 or 1).  Same
+// classification as direct_block_locals, factored out so rc_block_inner can grow
+// the visible-owned set incrementally (a binding is only droppable from its `let`
+// onward — see rc_block_inner).
+fn stmt_droppable_locals(s: HStmt) -> List<Str> {
+    match s {
+        HStmt::Let { name, ty, init, .. } => {
+            // B-101: Type-DAG bindings are interned / never-dropped (the runtime
+            // marks their typeids never-drop; a Drop here would be a no-op anyway).
+            // Suppressing the Drop keeps RC traffic off the immutable Type DAG.
+            if rc_name_skippable(name) == false && is_type_dag_type(ty) == false && is_droppable_init(init) { [name] } else { [] }
+        },
+        HStmt::Var { name, ty, init, .. } => {
+            if rc_name_skippable(name) == false && is_type_dag_type(ty) == false && is_droppable_init(init) { [name] } else { [] }
+        },
+        _ => [],
+    }
 }
 
 // Whether a `let`/`var` initialiser yields a fresh, solely-owned value safe to
