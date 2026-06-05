@@ -31,3 +31,30 @@ perceus 对部分嵌套作用域 `let` 绑定发的 Drop，codegen 在该点的 
 2. **native `--target=js` 对用 builtin 的程序报 `Undefined variable: print`**：`./ring.exe build examples/hello.ring`（JS 路径）误报 `print` 未定义，而 node oracle 正常编译。a_empty.ring（无 builtin）则 EXIT 0。这是 native 编译器自身执行的一个 **correctness 差异**（builtin 环境解析），可能是 RC 释放了 builtins 环境的某共享结构，也可能是 pre-existing native 限制（native 自托管前端从未真正跑通过——L0 在 chk=347204 更早就崩，无可对比基线）。**需进一步定位**，但属 B-089「native 自举终验」范畴（G-c parity）。建议：B-089 阶段重新加诊断仪表（或 -g + windbg）定位 native builtin 解析 + RC 共享释放，与 #2 的精确 DAG ownership 一并做。
 
 **结论**：B-098 的 GATE 1（a_empty.ring native EXIT 0，消除 #134 register_impl_method 崩点）+ GATE 2（731×3 + 49×3 零回归）达成；CAPSTONE 的两个卡点都在 B-098 范围之外（B-099 LLVM 链接 + B-089 native parity），未硬凑。内存峰值未能观测（native 自编未跑通）。
+
+## [决策] B-101 简单白/黑名单是死路 — native UAF 确证在 Type-DAG/apply_subst，需 full implementation
+
+> 2026-06-05 Worker Wave A：subagent 静态逐-arm 核查 + orchestrator 主仓 native 实证（决定性实验）。用户已拍板「simple fix 有问题 → 直接 full implementation 彻底解决」。上面 CAPSTONE [通知] #2 的「native `print` undefined / builtin 异常」由本次实证**锐化为确证**：是 apply_subst UAF 损坏类型/env 的下游表现。
+
+**simple fix（务实白/黑名单）= 确认死路，净行为变化 ZERO：**
+- **drop-白名单 `is_fresh_owned_returning_call` 必为空**：`apply_subst`/`apply_subst_map`/`apply_subst_row`/`zonk` 全族**无一满足「全 arm fresh unshared」**——每个都有 alias-返回 arm（scalar `=> t` 原样返回入参、unresolved-TypeVar 透传、`StructType { fields: fields }` / `EnumType { variants: variants }` 共享子结构）。编译器 Type tree 是**故意不可变共享的 DAG**，函数级粒度不可能 per-arm-fresh → G-a 泄漏在此粒度关不掉。
+- **borrow-黑名单（元素读取投影 drop）= 假命题**：subagent-1 诊断的「`let x = list[i]` 被 drop 而底层是 borrow」**不存在**——owner-bearing init 经 `rc_escape` 已包 `HExpr::Clone`（`ring_dup`），绑定持有独立 dup，scope-end drop 平衡（`is_droppable_init` 与 `is_owner_bearing` 全 arm 一致）。
+
+**native UAF 实证精确定位（ring.exe 编真实程序 3×）：**
+```
+Run 1: ring panic: non-exhaustive match on enum 'Type in ring_env$$_apply_subst' (tag=499850898502, site #145)
+Run 2: ring panic: non-exhaustive match on enum 'Type in ring_env$$_apply_subst' (tag=7500883, site #145)
+Run 3: BUILD_EXIT=-1073741819 (0xC0000005 段错误)
+```
+崩溃**就在 `apply_subst` 内**读 `Type` enum；tag 每次不同的十亿级垃圾 = 教科书 UAF 签名。subagent 静态「无 UAF」在 scope 上不全（清了 element-read 路径，**没分析 Type-DAG 子结构 drop 路径**——真 over-free 在那）。实证验证不可省。
+
+**根因 = Type-DAG 所有权模型结构性不健全（非白/黑名单可修）：**
+`ring_dup`（runtime:98）浅 RC bump（gen_clone 只 +1 最外层 Type），但 `Type` 的 `drop_T` 深递归 drop（drop type_params/fields/variants），而 `apply_subst` 故意共享子结构（`StructType { fields: fields }` 透传不 dup）→ 某 droppable Type 绑定 scope-end-drop 深递归 over-free DAG 共享子结构 → `apply_subst` 后续 `uf_lookup` 遍历到悬垂 Type → 读垃圾 tag → 崩。
+
+**待决策：full implementation 的 DAG-aware Type 所有权方案**（架构级，影响整个编译器如何持有 Type，选项见与用户讨论）：
+- (A) **Type intern / hash-cons + 永不 drop**：Type 作不可变驻留值，从不 RC/释放 → 一举消除 UAF（不 drop 就不 over-free）**且**泄漏被去重界定（≈ 不同 Type 数，有界）。最贴合 DAG-不可变现实，改动相对集中。
+- (B) **全子结构 RC**：所有 Type 共享点（apply_subst 等）改 `ring_dup` 子结构，每 alias 计数。健全但侵入广。
+- (C) **逃逸时深 clone Type**：gen_clone 对 Type 深拷。健全但 Type 树频繁深拷 → 很可能打垮 G-a。
+- (D) **原则化 escape/alias 分析（Koka borrowing+reuse，L3/原 B-096 scope）**：最通用，工作量最大。
+
+建议先过 `/discussion` 锁方案（架构岔路，选错浪费「多花的时间」），subagent 逐-arm DAG-aliasing 结论 + 本 native 实证作设计输入。**harness（`tests/native_selfcompile.test.mjs` + `real_program.ring`）已建——它本次即实证抓到此 bug，是 full implementation 的永久回归网，应落地。**
