@@ -76,6 +76,20 @@ typedef void (*ring_drop_fn)(void* data);
 static ring_drop_fn drop_table[4096];
 static int drop_table_size = RING_TYPEID_USER_BASE;
 
+// B-101 — never-drop (interned / arena) typeids.  The compiler's own `Type` DAG
+// (Type / Effect / EffectRow / StructField / EnumVariant / RecordField / ...) is an
+// immutable SHARED graph: `apply_subst` deliberately aliases substructure (e.g. the
+// `StructType{fields:fields}` passthrough) instead of dup'ing children.  The shallow
+// `ring_dup` (+1 on the outermost block only) is therefore NOT balanced by the deep,
+// recursive `ring_drop_Type` (which would free type_params/fields/variants) — a
+// scope-end drop of any Type binding over-frees DAG-shared substructure, and the next
+// `uf_lookup` reads a dangling Type and crashes (the pre-existing L0 prelude UAF that
+// blocked native self-compile).  Fix (Type-DAG ownership special case, design §7.11):
+// treat these typeids as interned arena values whose lifetime is the whole process —
+// dup and drop become no-ops, the blocks are never freed.  Structurally eliminates the
+// UAF (A1); hash-consing the constructors bounds the memory (A2).
+static bool never_drop_table[4096];
+
 // Forward declarations for RC infrastructure
 static void ring_drop_by_typeid(uint32_t tid, void* data);
 
@@ -97,15 +111,18 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
 
 extern "C" void ring_dup(void* ptr) {
     if (!ptr) return;
+    uint32_t tid = *(uint32_t*)((char*)ptr - 4);
+    if (tid < 4096 && never_drop_table[tid]) return; // B-101: interned, no RC
     uint32_t* rc = (uint32_t*)((char*)ptr - 8);
     *rc += 1;
 }
 
 extern "C" void ring_drop(void* ptr) {
     if (!ptr) return;
+    uint32_t tid = *(uint32_t*)((char*)ptr - 4);
+    if (tid < 4096 && never_drop_table[tid]) return; // B-101: interned, never freed
     uint32_t* rc = (uint32_t*)((char*)ptr - 8);
     if (*rc <= 1) {
-        uint32_t tid = *(uint32_t*)((char*)ptr - 4);
         ring_drop_by_typeid(tid, ptr);
         free((char*)ptr - 8);
     } else {
@@ -116,6 +133,15 @@ extern "C" void ring_drop(void* ptr) {
 extern "C" void ring_register_drop(int64_t typeid_val, void* drop_fn_ptr) {
     if (typeid_val >= 0 && typeid_val < 4096) {
         drop_table[(int)typeid_val] = (ring_drop_fn)drop_fn_ptr;
+    }
+}
+
+// B-101 — mark a typeid as never-drop (interned / arena lifetime).  ring_dup and
+// ring_drop become no-ops for such blocks; they live until process exit.  Used for
+// the compiler's immutable shared `Type` DAG (see never_drop_table above).
+extern "C" void ring_register_never_drop(int64_t typeid_val) {
+    if (typeid_val >= 0 && typeid_val < 4096) {
+        never_drop_table[(int)typeid_val] = true;
     }
 }
 

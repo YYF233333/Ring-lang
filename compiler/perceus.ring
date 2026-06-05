@@ -14,7 +14,7 @@
 use ast::{Span, Position, Pattern}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler,
-    hexpr_type, hexpr_span, hexpr_effects}
+    hexpr_type, hexpr_span, hexpr_effects, is_type_dag_type}
 use types::{Type}
 
 // ============================================================
@@ -208,69 +208,42 @@ fn is_borrow_returning_call(callee: HExpr) -> Bool {
     }
 }
 
-// B-101: drop-WHITELIST — the DUAL of is_borrow_returning_call.  A Call whose
-// result is GUARANTEED to be a FRESH, UNSHARED owned value (a brand-new
-// allocation that aliases NOTHING reachable from the caller or any global) is
-// safe to scope-end-drop: the binding is the sole owner, so its drop frees
-// exactly its own allocation.  Listing such a call here recovers droppability
-// for the binding (closing the §7.11-correction-#2 "Call result conservatively
-// not dropped → LEAK" hole — G-a memory pressure).
+// ─────────────────────────────────────────────────────────────────────────────
+// B-101 DEAD ROAD (Wave A,证伪 2026-06-05) — DO NOT re-introduce a function-level
+// drop-WHITELIST for the substitution family.  Recorded here so the trap is not
+// re-dug.
 //
-// ⚠️ SAFETY ASYMMETRY (the MIRROR of is_borrow_returning_call, and far more
-// dangerous): mis-listing a call here whose result ALIASES live shared state
-// makes the scope-end drop free STILL-LIVE memory → UAF / double-free (CRASH).
-// Omitting a genuinely-fresh call only LEAKS (crash-free).  So this list must err
-// toward EXCLUSION: a call qualifies ONLY when EVERY return path of the callee
-// allocates anew with NO shared substructure and NO input/global passthrough.
-//
-// B-101 per-arm audit of the spec's candidate functions (env.ring / zonk.ring) —
-// ALL FAIL the "every-arm-fresh" bar, so NONE are listed (whitelist stays empty):
-//
-//   apply_subst (env.ring 506-586): scalar arms `=> t` (508-514) and the
-//     unresolved-TypeVar `if root == id { t }` arm (520) return the INPUT verbatim
-//     (alias); StructType `{ fields: fields }` (533) and EnumType
-//     `{ variants: variants }` (539) reuse the input's field/variant substructure
-//     (alias); ErrorType `=> t` (584) aliases.  → NOT all-arm-fresh → EXCLUDED.
-//   apply_subst_map (env.ring 394-461): same structure — scalar `=> t` (396-402),
-//     StructType.fields / EnumType.variants substructure share, ErrorType `=> t`
-//     (459).  → EXCLUDED.
-//   apply_subst_row / apply_subst_effect_map (env.ring 600 / 463): the EffectRow /
-//     Effect is freshly mapped at the top, but apply_subst_effect's `_ => e`
-//     (598) and apply_subst_effect_map's `_ => e` pass the input Effect through
-//     (alias of an element).  → EXCLUDED.
-//   zonk_type / zonk_row (zonk.ring 15 / 102): wrap apply_subst(+label_vars);
-//     label_vars (zonk.ring 39-100) has the SAME scalar `=> t` / StructType.fields
-//     / EnumType.variants / unresolved-TypeVar passthroughs.  → EXCLUDED.
-//
-// Container element accessors (`.get()` → ring_list_get_opt etc.) DO build a fresh
-// owned Option (the element is ring_dup'd into it) and WOULD be drop-safe — BUT
-// they cannot be matched by field name alone: a user type may define its own
-// `.get()` returning a BORROW, and matching `field == "get"` would then drop a
-// borrow → UAF.  Distinguishing builtin-container `.get()` requires receiver-type
-// resolution (List/Map/Set), which is precise-escape-analysis territory (L3 /
-// B-096), not the field-name style of this predicate.  So `.get()` is EXCLUDED
-// here too — its fresh owned Option LEAKS (crash-free), pending L3.
-//
-// RESULT: the whitelist is presently EMPTY.  The apply_subst-family leak (G-a) is
-// NOT closable at this granularity — the compiler's own Type tree is a shared DAG
-// (immutable substructure deliberately aliased), so a per-arm-fresh guarantee is
-// impossible for the substitution functions.  Precise DAG-aware escape analysis
-// (which CAN drop the genuinely-fresh subset) is L3-reuse / B-096.  Until then we
-// retain the leak (memory cost) rather than introduce a UAF.  The hook below lets
-// a future safe candidate be added in one place.
-fn is_fresh_owned_returning_call(callee: HExpr) -> Bool {
-    match callee {
-        // No call currently qualifies (see audit above).  Field-name matching is
-        // unsafe for the drop-whitelist: any user-shadowable name risks UAF.
-        _ => false,
-    }
-}
+// The tempting fix for the apply_subst-family LEAK (§7.11-correction-#2: "Call
+// result conservatively not dropped") is a DUAL of is_borrow_returning_call: a
+// whitelist of calls whose result is a FRESH, UNSHARED owned value, safe to
+// scope-end-drop.  Wave A proved this whitelist must be EMPTY:
+//   - apply_subst / apply_subst_map (env.ring): scalar `=> t` arms and the
+//     unresolved-TypeVar `if root == id { t }` arm return the INPUT verbatim
+//     (alias); StructType `{ fields: fields }` / EnumType `{ variants: variants }`
+//     reuse the input's substructure (alias); ErrorType `=> t` aliases.
+//   - apply_subst_row / apply_subst_effect(_map): `_ => e` passes the input
+//     Effect through (alias of an element).
+//   - zonk_type / zonk_row: wrap apply_subst + label_vars, same passthroughs.
+// Type tree is a deliberately-shared IMMUTABLE DAG, so NO function-level grain can
+// certify "every arm fresh".  Mis-listing → drop of live shared state → UAF/CRASH;
+// omitting → leak.  The real fix is NOT this whitelist but the Type-DAG ownership
+// special case (B-101 方案 A, design §7.11): Type is INTERNED + NEVER DROPPED, so
+// the substitution leak and the prelude over-free UAF are BOTH eliminated at the
+// runtime/typeid level (ring_register_never_drop + is_type_dag_type below), with
+// no per-call escape analysis at all.  Precise DAG-aware escape for the *other*
+// shared returns (subst / UnionFind / pass-through HIR) stays B-096/L3.
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Wrap an escaping expression: clone it iff it has an independent owner; the
 // inner expression is processed in VALUE (borrow) position so its own reads do
 // not clone.  Carries inner's type/effects/span on the Clone node.
 fn rc_escape(expr: HExpr, owned: List<Str>, boxed: Set<Int>, mut gensym: List<Int>) -> HExpr {
-    if is_owner_bearing(expr) {
+    // B-101: a Type-DAG value is interned (never dup'd, never dropped) — escaping it
+    // needs no Clone (the runtime no-ops ring_dup for its typeid).  Process in value
+    // position so nested escapes are still handled; emit no Clone wrapper.
+    if is_type_dag_type(hexpr_type(expr)) {
+        rc_expr(expr, false, owned, boxed, gensym)
+    } else if is_owner_bearing(expr) {
         let inner = rc_expr(expr, false, owned, boxed, gensym)
         HExpr::Clone {
             inner: inner,
@@ -413,11 +386,14 @@ fn direct_block_locals(stmts: List<HStmt>) -> List<Str> {
     let mut out: List<Str> = []
     for s in stmts {
         match s {
-            HStmt::Let { name, init, .. } => {
-                if rc_name_skippable(name) == false && is_droppable_init(init) { out.push(name) }
+            HStmt::Let { name, ty, init, .. } => {
+                // B-101: Type-DAG bindings are interned / never-dropped (the runtime
+                // marks their typeids never-drop; a Drop here would be a no-op anyway).
+                // Suppressing the Drop keeps RC traffic off the immutable Type DAG.
+                if rc_name_skippable(name) == false && is_type_dag_type(ty) == false && is_droppable_init(init) { out.push(name) }
             },
-            HStmt::Var { name, init, .. } => {
-                if rc_name_skippable(name) == false && is_droppable_init(init) { out.push(name) }
+            HStmt::Var { name, ty, init, .. } => {
+                if rc_name_skippable(name) == false && is_type_dag_type(ty) == false && is_droppable_init(init) { out.push(name) }
             },
             _ => {},
         }
@@ -464,11 +440,12 @@ fn is_droppable_init(init: HExpr) -> Bool {
         HExpr::BoolLit { .. } => true,
         HExpr::Clone { .. } => true,
         // A borrow-returning method call (.unwrap…) becomes a Clone via rc_escape,
-        // so its binding owns a fresh dup → droppable.  A fresh-owned-returning
-        // call (B-101 whitelist — currently empty, see is_fresh_owned_returning_call)
-        // moves a sole-owned allocation in → also droppable.
+        // so its binding owns a fresh dup → droppable.  General Call results are NOT
+        // dropped here (may alias shared state — see the B-101 DEAD ROAD note above:
+        // the substitution-family leak is handled by Type interning, not a
+        // call-level whitelist).
         HExpr::Call { callee, .. } =>
-            is_borrow_returning_call(callee) || is_fresh_owned_returning_call(callee),
+            is_borrow_returning_call(callee),
         // Call (general) / EffectOp / BinOp / UnaryOp / control-flow: may alias
         // shared state or be a non-owning scalar — conservatively not dropped.
         _ => false,
@@ -646,14 +623,27 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, mut gen
 
         HExpr::Call { callee, args, type_args, resolved_dicts, dict_dispatch, ty, effects, span } => {
             // Callee is a borrow.  Arguments BORROW by default (the callee does not
-            // drop them — point 4) EXCEPT a known container-sink: the value pushed
-            // into a container escapes (it must co-own with the container).
+            // drop them — point 4) EXCEPT two ownership-taking sinks:
+            //   1. a known container-sink (push/insert/set): the value escapes into
+            //      the container (it must co-own with the container);
+            //   2. an ENUM VARIANT CONSTRUCTOR call (`some(x)` / `ok(v)` / `err(e)` /
+            //      a user `Variant(payload)` written in call syntax): the runtime
+            //      constructor (`ring_enum_some` / `gen_named_variant_construct`)
+            //      STORES the argument pointer WITHOUT a dup, exactly like a
+            //      StructLit/NamedVariantConstruct field store.  So every value arg
+            //      escapes and must be Clone'd if owner-bearing — otherwise the
+            //      argument's own scope-end drop frees the payload the new enum holds
+            //      (the native prelude `match find_std_dir() { some(std_dir) => … }`
+            //      UAF, B-101).  The literal-syntax forms already escape their fields
+            //      (StructLit / NamedVariantConstruct arms below); this closes the
+            //      call-syntax gap so both lower identically.
             let new_callee = rc_expr(callee, false, owned, boxed, gensym)
+            let ctor_sink = is_variant_constructor_call(callee, ty)
             let sink = sink_arg_indices(callee, args.len())
             let mut new_args: List<HExpr> = []
             let mut i = 0
             for a in args {
-                let new_a = if list_contains_int(sink, i) {
+                let new_a = if ctor_sink || list_contains_int(sink, i) {
                     rc_escape(a, owned, boxed, gensym)
                 } else {
                     rc_expr(a, false, owned, boxed, gensym)
@@ -885,6 +875,37 @@ fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
             }
         },
         _ => [],
+    }
+}
+
+// Whether a Call is an enum VARIANT CONSTRUCTOR written in call syntax
+// (`some(x)`, `ok(v)`, `err(e)`, or a user `Variant(payload)`).  Such a call
+// lowers to `ring_enum_some` / a `gen_named_variant_construct`-style store that
+// takes the argument BY OWNERSHIP without a dup — so its value args are escape
+// (sink) positions, like StructLit / NamedVariantConstruct fields.
+//
+// Detection (no enum-registry access in perceus): the callee is a BARE Ident
+// (not a method / FieldAccess) whose `resolved_name` is the variant's JS name
+// `${Enum}_${variant}` (set by infer when the call name resolves through
+// `variant_to_enum`), AND the call's result type is that EnumType.  Requiring
+// resolved_name to start with the result enum's `${name}_` distinguishes a
+// constructor from an ordinary function that merely returns an enum (whose
+// callee resolved_name is its own mangled fn name, not `${Enum}_…`).
+//
+// Safety asymmetry (mirrors sink_arg_indices): a false POSITIVE only adds an
+// extra Clone on an already-owned arg → a leak (crash-free); a false NEGATIVE
+// (missing a real constructor) leaves the arg un-cloned → UAF.  The predicate
+// therefore errs toward inclusion for enum-returning bare-Ident calls.
+fn is_variant_constructor_call(callee: HExpr, result_ty: Type) -> Bool {
+    match callee {
+        HExpr::Ident { resolved_name, .. } => match resolved_name {
+            some(rn) => match result_ty {
+                Type::EnumType { name, .. } => rn.starts_with("${name}_"),
+                _ => false,
+            },
+            none => false,
+        },
+        _ => false,
     }
 }
 
