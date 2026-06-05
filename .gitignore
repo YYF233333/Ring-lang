@@ -26,3 +26,9 @@ tests/cases/**/*.exe
 examples/*.o
 /test_minimal.o
 /test_minimal.ring
+
+# native self-host build / debug scratch (repo root) — 链接产物 + 调试变体 + tmp 复现目录
+/ring*.exe
+/ring*.map
+/ring*.o
+/tmp*/
