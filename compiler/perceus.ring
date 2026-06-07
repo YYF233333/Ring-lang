@@ -670,13 +670,31 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HEx
         },
 
         HExpr::MatchExpr { scrutinee, arms, ty, effects, span } => {
-            // Scrutinee is evaluated once → its own nested operands hoist into the
-            // enclosing list.  The scrutinee itself is NOT materialised: an arm pattern
-            // PROJECTS borrows of it, and an arm body may RETURN it (`_ => scrut`) or a
-            // projected binding, so a materialised+dropped scrutinee would double-free a
-            // box the result/binding aliases — same hazard as a call arg (anf_arg).
+            // B-104 W2: materialise a FRESH-OWNED scrutinee (`match map.get(k) {…}`,
+            // `match find(…) {…}` — the dominant residual OPTION leak: fresh Option
+            // temporaries read once by the match and never dropped).  anf_operand
+            // hoists `let __anf = <scrutinee>` before the enclosing statement, so the
+            // RC pass scope-end-drops it.  Only fresh-owned scrutinees materialise
+            // (anf_should_materialize): an Ident / FieldAccess / IndexExpr scrutinee is
+            // a borrow and stays inline.
+            //
+            // SOUND WITHOUT match-arm return-value analysis — the earlier `_ => scrut`
+            // double-free fear is already neutralised by clone-all-escape.  When the
+            // match is in escape position, EACH arm tail is rc_escape'd individually:
+            // an arm that returns the scrutinee (`x => x`), a pattern binding (`some(v)
+            // => v`, a borrow projection of the scrutinee's interior), or any owner-
+            // bearing projection is Clone-wrapped (ring_dup) → the result binding owns
+            // a FRESH dup, and the scrutinee's scope-end Drop releases the original —
+            // balanced (rc bumped before either drop, drop order-independent).  When
+            // the match is NOT in escape position (statement / borrow arg), arm tails
+            // are borrows and nothing else takes ownership, so the scrutinee's single
+            // scope-end Drop is still balanced.  Same Clone-wrap balance that makes
+            // W1's unwrap_or arg safe.  Unlike `fold` (W1 is_arg_returning_call), a
+            // match never MOVES the scrutinee out un-dup'd — arm tails always route
+            // through rc_escape, which Clones owner-bearing returns.  ASan-verified
+            // (real_program matches + self-compile).
             // Arm bodies + guards are their own scopes (R2).
-            let new_scrutinee = anf_arg(scrutinee, hoists, counter)
+            let new_scrutinee = anf_operand(scrutinee, hoists, counter)
             let mut new_arms: List<HMatchArm> = []
             for arm in arms {
                 let new_guard = match arm.guard {

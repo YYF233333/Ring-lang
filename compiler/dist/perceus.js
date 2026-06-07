@@ -867,7 +867,7 @@ function anf_expr(expr, hoists, counter) {
     }
     if (__ring_m13._tag === "MatchExpr") {
       const scrutinee = __ring_m13.scrutinee; const arms = __ring_m13.arms; const ty = __ring_m13.ty; const effects = __ring_m13.effects; const span = __ring_m13.span;
-      const new_scrutinee = anf_arg(scrutinee, hoists, counter);
+      const new_scrutinee = anf_operand(scrutinee, hoists, counter);
       let new_arms = [];
       const __ring_iter_14 = __List_Iterable.iter(arms);
       while (true) {

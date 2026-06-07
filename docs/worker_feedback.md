@@ -9,7 +9,15 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
-## B-104 W1 — Call 实参 materialize（native 攻坚 session，2026-06-07）
+## B-104 W1+W2 — Call 实参 + scrutinee materialize（native 攻坚 session，2026-06-07）
+
+### 0. W2 落地：scrutinee materialize 无需 match-arm 分析，OPTION −65%，轨迹压平 [通知]
+
+W2（MatchExpr scrutinee materialize）已落地 + 全验证（JS 733 / llvm_diff 52×3 / native harness 3/3 / ASan real_program + self-compile(13GB) 全 clean）。**两个发现**：
+1. **backlog 担心的「match-arm return-value 分析」不需要**——`match scrut{_=>scrut}` 的 double-free 已被 clone-all-escape 中和：match 在 escape 位时每 arm tail 单独 rc_escape，返回 scrutinee/pattern 绑定/投影皆 owner-bearing → Clone-wrap（ring_dup）→ 结果持 fresh dup、scrutinee scope-drop 释原件，平衡。与 W1 unwrap_or 同源。逐案 + ASan 实证。scrutinee 改 `anf_arg`→`anf_operand` 一行即可。
+2. **效果**：leak ~52%→~39%@268M，**OPTION 65.8M→22.6M（−65%）**，**轨迹由 W1 的爬升（42→55%）转为平稳下降（42→38%），近 live plateau**。W1+W2 合计 ~69%→~39%@268M。
+
+但 peak 仍 OOM（>15GB）。**剩余主导转为 INT（64M@402M，现最大 typeid）+ BOOL 27M = 标量装箱**。下一步：W3（control-flow-init + receiver/And-Or/EffectOp）后需**评估 B-080 标量 unboxing 是否为达 G-a 的必需叠加**——精确 RC 已把可回收临时砍掉大半，剩余 INT/BOOL 大块可能含「合法存活的装箱标量」，纯 RC 到不了 <<25.9GB。这是给后续决策的输入。
 
 ### 1. W1 落地 + 实测：W1 是真胜利，但 leak 归因数字此前偏乐观 [通知]
 
