@@ -1290,9 +1290,63 @@ fn is_droppable_init(init: HExpr) -> Bool {
         // mirrors anf_should_materialize's And/Or exclusion.
         HExpr::BinOp { op, .. } => match op { BinOp::And => false, BinOp::Or => false, _ => true },
         HExpr::UnaryOp { .. } => true,
-        // EffectOp / control-flow (Block / If / Match): value may alias shared state
-        // or be a branch-dependent borrow — conservatively NOT dropped (leak, crash-free).
+        // B-104 W3a: control-flow value (If / Match / Block) is droppable IFF every
+        // value-producing branch yields a droppable owned value.  Each branch / arm /
+        // block tail is in ESCAPE position (rc_block_root/rc_block_inner thread escape
+        // down), so rc_escape already makes an owner-bearing tail (Ident / field /
+        // borrow-call) a fresh Clone and a fresh tail (constructor / Call / arith) a
+        // move — both OWNED.  So `let x = if/match/block` binds an owned value,
+        // balanced by the scope-end Drop — same reasoning as the Call arm (B-103),
+        // reclaiming the `let x = if c {…} else {…}` / `let x = match …` residual.
+        //
+        // ⚠️ BUT NOT a blanket true — branch values are MIXED-ownership.  A branch
+        // whose tail is `&&` / `||` (BinOp And/Or) yields the RHS box VERBATIM, which
+        // may be a BORROW (`if c { a && obj.field } else { d }` → obj.field on the
+        // taken edge); rc_escape MOVES it (And/Or ∉ is_owner_bearing) rather than
+        // Cloning, so scope-end-dropping x would over-free obj.field → UAF.  Likewise
+        // an EffectOp / TryCatch / HandleExpr tail can alias.  So we RECURSE: the
+        // control-flow value is droppable only if each non-diverging branch tail is
+        // itself is_droppable_init (And/Or tail → false → whole node not dropped).  A
+        // DIVERGING branch (return/break/continue) yields no value to the binding, so
+        // it never constrains droppability.  (This IS the "branch-value analysis"; it
+        // bottoms out on the same per-expr classification, recursively.)
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            match else_branch {
+                // No else → the if is statement-typed (Unit value), not a fresh owned
+                // value worth dropping; conservatively not droppable.
+                none => false,
+                some(eb) => is_droppable_branch_value(then_branch) && is_droppable_branch_value(eb),
+            }
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            let mut all = arms.len() > 0
+            for arm in arms {
+                if is_droppable_branch_value(arm.body) == false { all = false }
+            }
+            all
+        },
+        HExpr::Block { tail, .. } => {
+            match tail { some(t) => is_droppable_init(t), none => false }
+        },
+        // EffectOp / HandleExpr / TryCatch: value may alias resumed/handler state or
+        // sit on an abort path (B-002) — conservatively NOT dropped (leak, crash-free).
         _ => false,
+    }
+}
+
+// Whether a branch / arm body (a Block, or a bare single-expr body) yields a
+// DROPPABLE owned value.  A diverging branch (return/break/continue) yields no
+// value to the enclosing binding, so it never vetoes droppability.  Otherwise the
+// branch value is its tail expression, classified by is_droppable_init (recursing
+// through nested control flow; an And/Or or EffectOp tail → not droppable).
+fn is_droppable_branch_value(body: HExpr) -> Bool {
+    if expr_diverges(body) {
+        true
+    } else {
+        match body {
+            HExpr::Block { tail, .. } => match tail { some(t) => is_droppable_init(t), none => false },
+            _ => is_droppable_init(body),
+        }
     }
 }
 

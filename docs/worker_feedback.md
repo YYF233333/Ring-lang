@@ -9,7 +9,19 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
-## B-104 W1+W2 — Call 实参 + scrutinee materialize（native 攻坚 session，2026-06-07）
+## B-104 W1+W2+W3a — precise Perceus RC 多波（native 攻坚 session，2026-06-07）
+
+### 00. W3a 落地 + 决定性发现：精确-RC 临时回收触顶，INT 64M 唯 B-080 可解 [决策]
+
+W3a（control-flow-init droppable，branch-value 分析）已落地 + 全验证（JS 733 / llvm_diff 52×3 / native harness 3/3 / ASan real_program + self-compile 13GB clean）。is_droppable_init 对 If/Match/Block 递归判（每非发散分支 tail 自身 droppable；And/Or-tail → false 保守，否则 `if c{a&&obj.field}` drop=UAF）。leak ~39%→~33.5%@268M、~30%@大规模，轨迹更强平稳。
+
+**决定性发现（三波数据支撑）**：W1（Call-arg）/W2（scrutinee）/W3a（control-flow）回收了 OPTION（−65%）/BOOL（27→18M）/STR（19→13M）/容器临时，但 **INT 卡死 64M，三波纹丝不动，且随 allocs ~线性增长**。→ **精确-RC 临时-materialize 已近收益上限**；残留绝对主导 INT 不在任何「临时」位置，而是：①mut-var 重赋值泄漏（`x=x+1` 泄漏旧 Int box，按 L0/L1 约定）②合法存活装箱标量（HIR/AST 的 Span/def_id/type-var-id 等 Int 字段）。
+
+**待决策（达 G-a 的下一步）**：
+- (A) **B-080 标量 unboxing**（推荐）：Int/Bool 不装箱 → INT/BOOL 堆对象整类消失 → 同时根除①②+装箱开销。是 INT 64M 的唯一杠杆。backlog 原定「A(精确RC)先、B(unboxing)后叠加」，三波已证 A 对 INT 触顶 → 该上 B 了。
+- (B) **scalar-reassign-drop 子波**：精确化 mut-var 重赋值（标量值语义不共享 → drop 旧值安全），回收①。但②（合法装箱标量）仍只能 B-080 解，且 peak 已知 OOM → 单 B 多半不够达 G-a。
+- (C) **先做 W3b receiver 收口**：`f(x).field` owned receiver——但 receiver 多是 struct/Option 非 INT，对 INT 64M 贡献小。
+建议 (A)。peak 仍 OOM（>15GB），精确-RC 单独到不了 G-a（<<25.9GB）已是数据结论。
 
 ### 0. W2 落地：scrutinee materialize 无需 match-arm 分析，OPTION −65%，轨迹压平 [通知]
 
