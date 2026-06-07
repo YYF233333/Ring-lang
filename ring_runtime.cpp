@@ -1138,7 +1138,10 @@ extern "C" void* ring_map_int_for_each(void* map, void* closure) {
 extern "C" void* ring_map_int_clone(void* map) {
     RingMapInt* m = (RingMapInt*)map;
     void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
-    new (data) RingMapInt(*m);
+    RingMapInt* nm = new (data) RingMapInt(*m);
+    // B-104 (#135): dup each value — clone must co-own values (keys inline int64,
+    // values RC void*). Same class as ring_list_clone / ring_map_clone.
+    for (auto& kv : *nm) ring_dup(kv.second);
     return data;
 }
 
@@ -1689,7 +1692,12 @@ extern "C" void* ring_list_clone(void* list) {
 extern "C" void* ring_map_clone(void* map) {
     RingMap* m = (RingMap*)map;
     void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
-    new (data) RingMap(*m);
+    RingMap* nm = new (data) RingMap(*m);
+    // B-104 (#135): same as ring_list_clone — a clone must co-own its values
+    // (keys are std::string, inline; values are RC void*). dup each value so the
+    // clone is an independent owner; without it both maps deep-drop the same
+    // values under Perceus RC -> over-free. Latent until temp-drop activates.
+    for (auto& kv : *nm) ring_dup(kv.second);
     return data;
 }
 

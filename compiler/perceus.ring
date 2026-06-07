@@ -11,7 +11,7 @@
 //   - Lambda captures: always dup.
 //   - Complex nested exprs: conservatively dup.
 
-use ast::{Span, Position, Pattern}
+use ast::{Span, Position, Pattern, BinOp}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler,
     hexpr_type, hexpr_span, hexpr_effects}
@@ -41,16 +41,634 @@ fn rc_name_skippable(name: Str) -> Bool {
 // ============================================================
 
 pub fn perceus_transform(program: HProgram) -> HProgram {
+    // B-104: ANF/materialize pre-pass — hoist every FRESH-OWNED intermediate
+    // temporary (call args / operands / conditions / subexprs that are not bound
+    // by a `let`) into a `let __anf_N = <expr>` statement so the clone-all-escape
+    // RC machinery below reclaims it via the normal scope-end-drop (its `let`
+    // binding is droppable per is_droppable_init).  Without this, intermediate
+    // owned temporaries (`i < len`, `i + 1`, the `g(x)` in `f(g(x))`, every boxed
+    // Int/Bool/Option/Str call-arg) have no binding and no one drops them — the
+    // diagnosed 88% never-freed leak (live ≈ allocs 1:1).  Run BEFORE the RC pass.
+    let anf_program = anf_normalize(program)
     // B-091: `boxed_vars` (def_ids of `let mut` vars auto-boxed for write-through
     // closure capture) is threaded through the RC pass so the Assign old-value
     // Drop is suppressed for them — a boxed write mutates `cell.value`, it does
     // NOT consume/free the shared cell pointer.
-    let new_decls = transform_decls(program.decls, program.boxed_vars)
+    let new_decls = transform_decls(anf_program.decls, anf_program.boxed_vars)
+    HProgram {
+        decls: new_decls,
+        derived_impls: anf_program.derived_impls,
+        boxed_vars: anf_program.boxed_vars
+    }
+}
+
+// ============================================================
+// B-104: ANF / materialize pre-pass
+// ============================================================
+//
+// Goal: give every FRESH-OWNED intermediate temporary a `let` binding so the
+// clone-all-escape RC pass below reclaims it via scope-end-drop.  An intermediate
+// temporary is a sub-expression in a NON-binding position (a call/ctor argument,
+// an arithmetic/comparison operand, a loop/branch condition, an interpolation
+// piece, …) that allocates a fresh owned value (boxed Int/Bool, Option, Str,
+// container, struct/variant) and whose result has no `let` to own it — so the
+// RC pass never drops it and it leaks (the diagnosed live≈allocs 1:1).
+//
+// Strategy: walk each statement list, and for every hoistable sub-expression
+// position materialise the value into a fresh `let __anf_N = <expr>` emitted
+// immediately before the using statement, replacing the sub-expression with an
+// Ident referencing __anf_N.  The RC pass then sees a droppable `let` (Call /
+// BinOp / UnaryOp / constructor / StringInterp / Lambda all satisfy
+// is_droppable_init) and inserts the scope-end Drop.  This is plain A-normal-form
+// applied only to fresh-owned subexprs; it does NOT introduce backward-liveness
+// (the #134 risk) — it reuses the existing forward scope-end-drop.
+//
+// HARD RULES (a violation = UAF or changed behaviour):
+//   R1 ONLY materialise FRESH-OWNED compounds: BinOp / UnaryOp / non-borrow Call /
+//      StructLit / NamedVariantConstruct / ListLit / TupleLit / RangeExpr /
+//      StringInterp / Lambda.  NEVER Ident / FieldAccess / IndexExpr /
+//      borrow-returning Call (is_borrow_returning_call) — those are BORROWS;
+//      materialise+drop would UAF.  Literals are skipped (no heap to reclaim) but
+//      they are harmless if bound; we skip them for cleanliness.
+//   R2 DO NOT hoist past a short-circuit / branch boundary.  The RIGHT operand of
+//      `&&` / `||` and the per-branch values of if/match are evaluated
+//      conditionally; their temporaries are materialised INSIDE a self-contained
+//      scope (a Block tail, or the branch body block), never lifted to the outer
+//      statement list.
+//   R3 LOOP conditions materialise + drop PER ITERATION.  `while c`'s `c` is
+//      re-evaluated each round; its temporaries are wrapped in a Block so the
+//      scope-end Drop runs every iteration (lifting them to before the loop would
+//      evaluate once and leak each round).
+//   R4 EVALUATION ORDER preserved: multiple operands materialise left→right, and a
+//      child's own nested hoists precede the child's own materialisation.
+//   R5 ESCAPE handled downstream: a materialised binding that later escapes is
+//      Clone'd by clone-all-escape and its `let` is scope-dropped — no special
+//      casing here.
+
+fn anf_normalize(program: HProgram) -> HProgram {
+    // Per-program monotonic temp counter (single-element mutable cell, same idiom
+    // as perceus's gensym).  Identical across runs of the same source, so it does
+    // not perturb double-bootstrap byte-equivalence.
+    let mut counter: List<Int> = [0]
+    let mut new_decls: List<HDecl> = []
+    for d in program.decls {
+        new_decls.push(anf_decl(d, counter))
+    }
     HProgram {
         decls: new_decls,
         derived_impls: program.derived_impls,
         boxed_vars: program.boxed_vars
     }
+}
+
+fn fresh_anf_tmp(mut counter: List<Int>) -> Str {
+    let n = match counter.get(0) { some(v) => v, none => 0 }
+    counter.set(0, n + 1)
+    "__anf_${n + 1}"
+}
+
+fn anf_decl(decl: HDecl, mut counter: List<Int>) -> HDecl {
+    match decl {
+        HDecl::Fn { name, def_id, type_params, params, return_type, effects, body, is_pub, trait_bounds, span } => {
+            HDecl::Fn {
+                name: name, def_id: def_id, type_params: type_params,
+                params: params, return_type: return_type, effects: effects,
+                body: anf_fn_body(body, counter), is_pub: is_pub,
+                trait_bounds: trait_bounds, span: span
+            }
+        },
+        HDecl::Impl { target_type, type_params, trait_name, methods, assoc_types, span } => {
+            let mut new_methods: List<HDecl> = []
+            for m in methods { new_methods.push(anf_decl(m, counter)) }
+            HDecl::Impl {
+                target_type: target_type, type_params: type_params,
+                trait_name: trait_name, methods: new_methods,
+                assoc_types: assoc_types, span: span
+            }
+        },
+        HDecl::Test { description, body, span } => {
+            HDecl::Test { description: description, body: anf_fn_body(body, counter), span: span }
+        },
+        HDecl::Const { name, def_id, ty, init, is_pub, span } => {
+            // Const init is in escape position with no enclosing statement list to
+            // hoist into; normalise its nested subexprs into a Block tail if any
+            // materialisation is needed.
+            HDecl::Const { name: name, def_id: def_id, ty: ty,
+                init: anf_value_in_own_scope(init, counter), is_pub: is_pub, span: span }
+        },
+        HDecl::ModBlock { name, decls: mod_decls, is_pub, span } => {
+            let mut new_mod: List<HDecl> = []
+            for md in mod_decls { new_mod.push(anf_decl(md, counter)) }
+            HDecl::ModBlock { name: name, decls: new_mod, is_pub: is_pub, span: span }
+        },
+        HDecl::Struct { .. } => decl,
+        HDecl::Enum { .. } => decl,
+        HDecl::Effect { .. } => decl,
+        HDecl::Trait { .. } => decl,
+        HDecl::ExternFn { .. } => decl,
+        HDecl::ExternType { .. } => decl,
+        HDecl::TypeAlias { .. } => decl,
+        HDecl::Sig { .. } => decl,
+    }
+}
+
+// A function/lambda body: a Block (or a single tail expr) in escape position.
+fn anf_fn_body(body: HExpr, mut counter: List<Int>) -> HExpr {
+    anf_block_expr(body, counter)
+}
+
+// Whether an expression is a FRESH-OWNED compound that should be materialised when
+// it sits in a hoistable (non-binding) position (R1).  A borrow-returning Call is
+// excluded — its result aliases a live reference, so binding+dropping it would UAF.
+fn anf_should_materialize(expr: HExpr) -> Bool {
+    match expr {
+        // Arithmetic / comparison BinOps box a FRESH result (gen_int_binop /
+        // gen_*_binop → box_int/box_bool/box_float).  But `&&` / `||` (BinOp::And /
+        // Or) DO NOT: gen_and/gen_or emit a phi that yields the RHS operand VERBATIM
+        // on the short-circuit-taken path (`a && b` returns b's own box when a is
+        // true).  That box may be a BORROW (e.g. `obj.is_mutable`), so materialising
+        // the `&&`/`||` and scope-dropping it would free a value owned elsewhere →
+        // UAF (ASan: register_impl_method freeing parse_param's is_mutable Bool).
+        // Therefore NEVER materialise And/Or — only the arithmetic/comparison
+        // BinOps, whose result is genuinely fresh.
+        HExpr::BinOp { op, .. } => match op { BinOp::And => false, BinOp::Or => false, _ => true },
+        HExpr::UnaryOp { .. } => true,
+        HExpr::Call { callee, .. } => is_borrow_returning_call(callee) == false,
+        HExpr::StructLit { .. } => true,
+        HExpr::NamedVariantConstruct { .. } => true,
+        HExpr::ListLit { .. } => true,
+        HExpr::TupleLit { .. } => true,
+        HExpr::RangeExpr { .. } => true,
+        HExpr::StringInterp { .. } => true,
+        HExpr::Lambda { .. } => true,
+        // NEVER materialise: Ident / FieldAccess / IndexExpr (borrows), literals
+        // (no heap), control-flow (Block/If/Match — handled structurally),
+        // EffectOp / HandleExpr / TryCatch / Clone.
+        _ => false,
+    }
+}
+
+// Materialise `expr` (already normalised) into a fresh `let __anf_N = expr`
+// appended to `hoists`, returning an Ident referencing it.  Caller guarantees
+// anf_should_materialize(expr) — i.e. fresh-owned, droppable.
+fn anf_materialize(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
+    let tmp = fresh_anf_tmp(counter)
+    let t = hexpr_type(expr)
+    let e = hexpr_effects(expr)
+    let s = hexpr_span(expr)
+    hoists.push(HStmt::Let { name: tmp, name_span: synthetic_span(),
+        def_id: none, ty: t, init: expr, span: synthetic_span() })
+    HExpr::Ident { name: tmp, resolved_name: none, def_id: none,
+        dict_closure_dicts: none, ty: t, effects: e, span: s }
+}
+
+// Normalise a sub-expression that sits in a HOISTABLE operand position (call arg,
+// arith/compare operand, condition, interpolation piece, container/ctor element):
+// recurse into it, then materialise it if it is a fresh-owned compound (R1/R4).
+fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
+    let normalized = anf_expr(expr, hoists, counter)
+    if anf_should_materialize(normalized) {
+        anf_materialize(normalized, hoists, counter)
+    } else {
+        normalized
+    }
+}
+
+// A Block (or non-block single expr) used as a function/branch/loop body or value.
+// Normalises its statement list and tail in place; no hoisting escapes the block.
+fn anf_block_expr(body: HExpr, mut counter: List<Int>) -> HExpr {
+    match body {
+        HExpr::Block { stmts, tail, ty, effects, span } => {
+            let new_stmts = anf_stmt_list(stmts, counter)
+            let new_tail = match tail {
+                // The tail is in escape position; its OWN nested subexprs are
+                // hoisted into a trailing fragment appended to this block (the
+                // hoists precede the tail value, preserving order + scope).
+                some(t) => {
+                    let mut tail_hoists: List<HStmt> = []
+                    let nt = anf_tail_value(t, tail_hoists, counter)
+                    if tail_hoists.len() == 0 {
+                        (new_stmts, some(nt))
+                    } else {
+                        let mut merged = new_stmts.concat([])
+                        for h in tail_hoists { merged.push(h) }
+                        (merged, some(nt))
+                    }
+                },
+                none => (new_stmts, none),
+            }
+            HExpr::Block { stmts: new_tail.0, tail: new_tail.1, ty: ty, effects: effects, span: span }
+        },
+        // Single-expression body (no block): treat as a tail value in its own
+        // scope (materialised temps wrap into a Block so they are scope-dropped).
+        _ => anf_value_in_own_scope(body, counter),
+    }
+}
+
+// A value expression that has NO enclosing statement list to hoist into (a const
+// init, a single-expr body).  If normalising it produces hoists, wrap them in a
+// fresh Block whose tail is the value — the temps are then scope-end-dropped by
+// the RC pass.  The value itself is NOT materialised (it is the escaping result).
+fn anf_value_in_own_scope(expr: HExpr, mut counter: List<Int>) -> HExpr {
+    let mut hoists: List<HStmt> = []
+    let nv = anf_tail_value(expr, hoists, counter)
+    if hoists.len() == 0 {
+        nv
+    } else {
+        HExpr::Block { stmts: hoists, tail: some(nv),
+            ty: hexpr_type(expr), effects: hexpr_effects(expr), span: hexpr_span(expr) }
+    }
+}
+
+// Normalise an expression in TAIL / escape position (a block tail, a let init, an
+// assign/return value): recurse into its subexprs (which DO hoist into `hoists`),
+// but DO NOT materialise the expression itself — it escapes into the owning slot
+// and the RC pass handles that binding directly.  Control-flow tails (if/match/
+// block) recurse into their branches structurally (R2).
+fn anf_tail_value(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
+    anf_expr(expr, hoists, counter)
+}
+
+// Normalise a statement list, returning a new list with __anf_ hoists inserted
+// before each statement that needs them.
+fn anf_stmt_list(stmts: List<HStmt>, mut counter: List<Int>) -> List<HStmt> {
+    let mut out: List<HStmt> = []
+    for s in stmts {
+        for ns in anf_stmt(s, counter) { out.push(ns) }
+    }
+    out
+}
+
+// Normalise a single statement, returning [hoisted lets..., transformed stmt].
+fn anf_stmt(stmt: HStmt, mut counter: List<Int>) -> List<HStmt> {
+    match stmt {
+        HStmt::Let { name, name_span, def_id, ty, init, span } => {
+            let mut hoists: List<HStmt> = []
+            let new_init = anf_tail_value(init, hoists, counter)
+            hoists.push(HStmt::Let { name: name, name_span: name_span, def_id: def_id, ty: ty, init: new_init, span: span })
+            hoists
+        },
+        HStmt::Var { name, name_span, def_id, ty, init, span } => {
+            let mut hoists: List<HStmt> = []
+            let new_init = anf_tail_value(init, hoists, counter)
+            hoists.push(HStmt::Var { name: name, name_span: name_span, def_id: def_id, ty: ty, init: new_init, span: span })
+            hoists
+        },
+        HStmt::Assign { target, value, span } => {
+            let mut hoists: List<HStmt> = []
+            // The target is a write destination (lvalue) — recurse to normalise any
+            // index/receiver subexprs, but it is not a value to materialise.
+            let new_target = anf_lvalue(target, hoists, counter)
+            let new_value = anf_tail_value(value, hoists, counter)
+            hoists.push(HStmt::Assign { target: new_target, value: new_value, span: span })
+            hoists
+        },
+        HStmt::ExprStmt { expr, span } => {
+            let mut hoists: List<HStmt> = []
+            // Statement position: the value is discarded.  Normalise nested
+            // subexprs (their temps hoist + scope-drop); the top expr itself is in
+            // value (non-escaping) position — recurse, do not materialise the whole.
+            let new_expr = anf_expr(expr, hoists, counter)
+            hoists.push(HStmt::ExprStmt { expr: new_expr, span: span })
+            hoists
+        },
+        HStmt::Return { value, span } => {
+            match value {
+                some(v) => {
+                    let mut hoists: List<HStmt> = []
+                    let new_v = anf_tail_value(v, hoists, counter)
+                    hoists.push(HStmt::Return { value: some(new_v), span: span })
+                    hoists
+                },
+                none => [HStmt::Return { value: none, span: span }],
+            }
+        },
+        HStmt::While { condition, body, span } => {
+            // R3: the condition is re-evaluated each iteration.  Materialised temps
+            // from the condition must be dropped PER ITERATION, so they wrap into a
+            // Block whose tail is the condition (the Block is re-run each round, and
+            // the RC pass scope-end-drops its temps each round).  They must NOT be
+            // hoisted before the loop.
+            let new_cond = anf_cond_in_own_scope(condition, counter)
+            let new_body = anf_block_expr(body, counter)
+            [HStmt::While { condition: new_cond, body: new_body, span: span }]
+        },
+        HStmt::ForIn { binding, binding_span, def_id, destructure, iterable, body, iterable_type_name, iter_type_name, span } => {
+            // The iterable is evaluated ONCE before the loop → its temps may hoist
+            // before the ForIn statement.  The body is its own per-iteration scope.
+            let mut hoists: List<HStmt> = []
+            let new_iter = anf_expr(iterable, hoists, counter)
+            let new_body = anf_block_expr(body, counter)
+            hoists.push(HStmt::ForIn {
+                binding: binding, binding_span: binding_span, def_id: def_id,
+                destructure: destructure, iterable: new_iter, body: new_body,
+                iterable_type_name: iterable_type_name, iter_type_name: iter_type_name, span: span
+            })
+            hoists
+        },
+        HStmt::LetDestructure { pattern, bindings, init, span } => {
+            let mut hoists: List<HStmt> = []
+            let new_init = anf_tail_value(init, hoists, counter)
+            hoists.push(HStmt::LetDestructure { pattern: pattern, bindings: bindings, init: new_init, span: span })
+            hoists
+        },
+        HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
+            // Scrutinee evaluated once → hoist before the IfLet.  Branch blocks are
+            // their own scopes (R2).
+            let mut hoists: List<HStmt> = []
+            let new_expr = anf_expr(expr, hoists, counter)
+            let new_then = anf_block_expr(then_block, counter)
+            let new_else = match else_block {
+                some(eb) => some(anf_block_expr(eb, counter)),
+                none => none,
+            }
+            hoists.push(HStmt::IfLet { pattern: pattern, expr: new_expr, then_block: new_then, else_block: new_else, span: span })
+            hoists
+        },
+        HStmt::Break { span } => [HStmt::Break { span: span }],
+        HStmt::Continue { span } => [HStmt::Continue { span: span }],
+        // Drop / Dup are not present in the input HIR to the ANF pass (perceus runs
+        // after); pass through idempotently if ever seen.
+        HStmt::Drop { .. } => [stmt],
+        HStmt::Dup { .. } => [stmt],
+    }
+}
+
+// A while/if/match condition that is evaluated potentially repeatedly (loop cond)
+// or in a position where its temps must be self-contained: normalise it, and if
+// any temps are produced, wrap them in a Block whose tail is the condition value
+// so they are scope-end-dropped at each evaluation (R3).
+fn anf_cond_in_own_scope(cond: HExpr, mut counter: List<Int>) -> HExpr {
+    let mut hoists: List<HStmt> = []
+    let nc = anf_expr(cond, hoists, counter)
+    if hoists.len() == 0 {
+        nc
+    } else {
+        HExpr::Block { stmts: hoists, tail: some(nc),
+            ty: hexpr_type(cond), effects: hexpr_effects(cond), span: hexpr_span(cond) }
+    }
+}
+
+// Normalise an lvalue (Assign target): descend into receiver/index subexprs but
+// never materialise — a write destination is a place, not an owned value.
+fn anf_lvalue(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
+    match expr {
+        HExpr::FieldAccess { receiver, field, ty, effects, span } => {
+            HExpr::FieldAccess { receiver: anf_lvalue(receiver, hoists, counter),
+                field: field, ty: ty, effects: effects, span: span }
+        },
+        HExpr::IndexExpr { receiver, index, ty, effects, span } => {
+            // The index expression IS a read operand — it can be materialised.
+            HExpr::IndexExpr { receiver: anf_lvalue(receiver, hoists, counter),
+                index: anf_operand(index, hoists, counter),
+                ty: ty, effects: effects, span: span }
+        },
+        // Ident lvalue (plain variable) — nothing to normalise.
+        _ => expr,
+    }
+}
+
+// The core expression normaliser.  Recurses into every sub-expression; hoistable
+// operand positions go through anf_operand (which may materialise), tail/escape
+// positions through anf_tail_value/anf_expr (no top-level materialisation), and
+// control-flow branches are normalised structurally (no hoisting across the
+// boundary — R2).  `hoists` accumulates `let __anf_N` statements emitted before
+// the enclosing statement.
+fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
+    match expr {
+        // Leaves — nothing to normalise.
+        HExpr::IntLit { .. } => expr,
+        HExpr::FloatLit { .. } => expr,
+        HExpr::StrLit { .. } => expr,
+        HExpr::BoolLit { .. } => expr,
+        HExpr::Ident { .. } => expr,
+
+        HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
+            match op {
+                // R2: `&&` / `||` short-circuit.  The LEFT operand is always
+                // evaluated → its temps hoist normally.  The RIGHT operand is
+                // evaluated conditionally → its temps must NOT hoist past the
+                // boundary; they wrap into a self-contained Block (lazy + scoped).
+                BinOp::And => {
+                    let new_left = anf_operand(left, hoists, counter)
+                    let new_right = anf_cond_in_own_scope(right, counter)
+                    HExpr::BinOp { op: op, left: new_left, right: new_right,
+                        eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
+                        ty: ty, effects: effects, span: span }
+                },
+                BinOp::Or => {
+                    let new_left = anf_operand(left, hoists, counter)
+                    let new_right = anf_cond_in_own_scope(right, counter)
+                    HExpr::BinOp { op: op, left: new_left, right: new_right,
+                        eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
+                        ty: ty, effects: effects, span: span }
+                },
+                // Eager arithmetic/comparison: both operands always evaluated
+                // left→right → materialise fresh-owned operands (R4).
+                _ => {
+                    let new_left = anf_operand(left, hoists, counter)
+                    let new_right = anf_operand(right, hoists, counter)
+                    HExpr::BinOp { op: op, left: new_left, right: new_right,
+                        eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
+                        ty: ty, effects: effects, span: span }
+                },
+            }
+        },
+
+        HExpr::UnaryOp { op, operand, ty, effects, span } => {
+            HExpr::UnaryOp { op: op, operand: anf_operand(operand, hoists, counter),
+                ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::Call { callee, args, type_args, resolved_dicts, dict_dispatch, ty, effects, span } => {
+            // Callee is a borrow read (FieldAccess receiver / Ident) — normalise its
+            // subexprs but it is not itself a materialisable value.
+            let new_callee = anf_callee(callee, hoists, counter)
+            // Args are operands, evaluated left→right → materialise each fresh-owned
+            // arg (R1/R4).  borrow-returning args are NOT materialised (R1).
+            let mut new_args: List<HExpr> = []
+            for a in args { new_args.push(anf_operand(a, hoists, counter)) }
+            HExpr::Call { callee: new_callee, args: new_args, type_args: type_args,
+                resolved_dicts: resolved_dicts, dict_dispatch: dict_dispatch,
+                ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::FieldAccess { receiver, field, ty, effects, span } => {
+            // A read projection: receiver is a borrow.  Normalise its subexprs but
+            // do NOT materialise the receiver (materialising a borrow source would
+            // bind + later drop a value that aliases live state — and the projection
+            // itself is a borrow, never materialised by callers via R1).
+            HExpr::FieldAccess { receiver: anf_borrow(receiver, hoists, counter),
+                field: field, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::IndexExpr { receiver, index, ty, effects, span } => {
+            // Read: receiver is a borrow source; index is a read operand.
+            HExpr::IndexExpr { receiver: anf_borrow(receiver, hoists, counter),
+                index: anf_operand(index, hoists, counter),
+                ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::StructLit { name, type_args, fields, spread, ty, effects, span } => {
+            // Each field value escapes into the struct → tail/escape position; its
+            // OWN nested subexprs hoist, but the field value itself is not
+            // materialised (it is stored directly into the struct by the RC pass).
+            let mut new_fields: List<HStructFieldInit> = []
+            for f in fields {
+                new_fields.push(HStructFieldInit { name: f.name, value: anf_tail_value(f.value, hoists, counter) })
+            }
+            let new_spread = match spread {
+                some(s) => some(anf_borrow(s, hoists, counter)),
+                none => none,
+            }
+            HExpr::StructLit { name: name, type_args: type_args, fields: new_fields,
+                spread: new_spread, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::NamedVariantConstruct { enum_name, variant_name, fields, spread, ty, effects, span } => {
+            let mut new_fields: List<HStructFieldInit> = []
+            for f in fields {
+                new_fields.push(HStructFieldInit { name: f.name, value: anf_tail_value(f.value, hoists, counter) })
+            }
+            let new_spread = match spread {
+                some(s) => some(anf_borrow(s, hoists, counter)),
+                none => none,
+            }
+            HExpr::NamedVariantConstruct { enum_name: enum_name, variant_name: variant_name,
+                fields: new_fields, spread: new_spread, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::ListLit { elements, ty, effects, span } => {
+            let mut new_elems: List<HExpr> = []
+            for e in elements { new_elems.push(anf_tail_value(e, hoists, counter)) }
+            HExpr::ListLit { elements: new_elems, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::TupleLit { elements, ty, effects, span } => {
+            let mut new_elems: List<HExpr> = []
+            for e in elements { new_elems.push(anf_tail_value(e, hoists, counter)) }
+            HExpr::TupleLit { elements: new_elems, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::RangeExpr { start, end, inclusive, ty, effects, span } => {
+            HExpr::RangeExpr { start: anf_tail_value(start, hoists, counter),
+                end: anf_tail_value(end, hoists, counter),
+                inclusive: inclusive, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::StringInterp { parts, ty, effects, span } => {
+            // Interpolated expressions are read (stringified) operands — materialise
+            // each fresh-owned piece so it is reclaimed (the boxed temps that feed
+            // string building are a notable Str-leak source).
+            let mut new_parts: List<HStringInterpPart> = []
+            for p in parts {
+                match p {
+                    HStringInterpPart::Expression(e) =>
+                        new_parts.push(HStringInterpPart::Expression(anf_operand(e, hoists, counter))),
+                    HStringInterpPart::Literal(s) =>
+                        new_parts.push(HStringInterpPart::Literal(s)),
+                }
+            }
+            HExpr::StringInterp { parts: new_parts, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::Block { stmts, tail, ty, effects, span } => {
+            // A nested block expression: it is its own scope (R2) — normalise its
+            // statements/tail in place; nothing escapes to the outer `hoists`.
+            anf_block_expr(expr, counter)
+        },
+
+        HExpr::IfExpr { condition, then_branch, else_branch, ty, effects, span } => {
+            // Condition is ALWAYS evaluated → its temps hoist into the enclosing
+            // statement list (R4).  Each branch is its own scope (R2) — branch
+            // values are materialised inside the branch block, never lifted out.
+            let new_cond = anf_operand(condition, hoists, counter)
+            let new_then = anf_block_expr(then_branch, counter)
+            let new_else = match else_branch {
+                some(eb) => some(anf_block_expr(eb, counter)),
+                none => none,
+            }
+            HExpr::IfExpr { condition: new_cond, then_branch: new_then,
+                else_branch: new_else, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::MatchExpr { scrutinee, arms, ty, effects, span } => {
+            // Scrutinee is evaluated once → hoists into the enclosing list.  Arm
+            // bodies + guards are their own scopes (R2).
+            let new_scrutinee = anf_operand(scrutinee, hoists, counter)
+            let mut new_arms: List<HMatchArm> = []
+            for arm in arms {
+                let new_guard = match arm.guard {
+                    some(g) => some(anf_cond_in_own_scope(g, counter)),
+                    none => none,
+                }
+                let new_body = anf_block_expr(arm.body, counter)
+                new_arms.push(HMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body, span: arm.span })
+            }
+            HExpr::MatchExpr { scrutinee: new_scrutinee, arms: new_arms, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::TryCatch { body, arms, ty, effects, span } => {
+            // body + catch arms are their own scopes (R2); abort-path RC is out of
+            // scope (B-002).
+            let new_body = anf_block_expr(body, counter)
+            let mut new_arms: List<HMatchArm> = []
+            for arm in arms {
+                let new_body_arm = anf_block_expr(arm.body, counter)
+                new_arms.push(HMatchArm { pattern: arm.pattern, guard: arm.guard, body: new_body_arm, span: arm.span })
+            }
+            HExpr::TryCatch { body: new_body, arms: new_arms, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::HandleExpr { body, handlers, ty, effects, span } => {
+            let new_body = anf_block_expr(body, counter)
+            let mut new_handlers: List<HEffectHandler> = []
+            for h in handlers {
+                let h_body = anf_block_expr(h.body, counter)
+                new_handlers.push(HEffectHandler {
+                    effect_name: h.effect_name, op_name: h.op_name,
+                    params: h.params, resume_name: h.resume_name, body: h_body
+                })
+            }
+            HExpr::HandleExpr { body: new_body, handlers: new_handlers, ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::Lambda { params, return_type, body, ty, effects, span } => {
+            // The lambda body is its own function scope.  Captures are dup'd by
+            // gen_lambda; perceus handles the body.  Normalise the body in place.
+            HExpr::Lambda { params: params, return_type: return_type,
+                body: anf_block_expr(body, counter),
+                ty: ty, effects: effects, span: span }
+        },
+
+        HExpr::EffectOp { effect_name, op_name, args, ty, effects, span } => {
+            // Effect-op args behave like call args — operands; materialise fresh.
+            let mut new_args: List<HExpr> = []
+            for a in args { new_args.push(anf_operand(a, hoists, counter)) }
+            HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: new_args,
+                ty: ty, effects: effects, span: span }
+        },
+
+        // Clone is inserted by perceus (after ANF); never present in input.
+        HExpr::Clone { .. } => expr,
+    }
+}
+
+// Normalise a callee expression (the function/method being called): an Ident or a
+// FieldAccess (method receiver).  Its subexprs are normalised but the callee
+// itself is a borrow read — never materialised.
+fn anf_callee(callee: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
+    anf_borrow(callee, hoists, counter)
+}
+
+// Normalise an expression that is a BORROW SOURCE (a FieldAccess/Call receiver, a
+// callee, a spread source): recurse into its subexprs (which still hoist their own
+// fresh operands), but NEVER materialise the top expression — it is read in place
+// and the projection above it is itself a borrow.  Materialising a borrow source
+// would bind a fresh `let` that the RC pass might clone/drop, perturbing the
+// borrow chain; keeping it a plain in-place read preserves the existing semantics.
+fn anf_borrow(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
+    anf_expr(expr, hoists, counter)
 }
 
 fn transform_decls(decls: List<HDecl>, boxed: Set<Int>) -> List<HDecl> {
@@ -523,9 +1141,23 @@ fn is_droppable_init(init: HExpr) -> Bool {
         // self-compile) is the completeness safety net: an over-free pinpoints the
         // missed leaf, which is then added to is_borrow_returning_call.
         HExpr::Call { .. } => true,
-        // EffectOp / BinOp / UnaryOp / control-flow (Block / If / Match): may alias
-        // shared state or be a non-owning scalar, and their value may be a Call
-        // result on some path — conservatively NOT dropped (leak, crash-free).
+        // B-104: arithmetic/comparison BinOp + UnaryOp results are FRESH owned
+        // (builtin arith/compare/negate box a new value via box_int/box_bool/
+        // box_float; user operator overloads lower to Call, covered above) — never a
+        // borrow, so safe to scope-end-drop.  Reclaims the boxed Int/Bool arithmetic
+        // flood (diag: tid=0 INT 86M + tid=2 BOOL 43M live).
+        //
+        // EXCEPTION — `&&` / `||` (BinOp::And / Or) are NOT fresh: gen_and/gen_or
+        // emit a phi whose short-circuit-taken edge is the RHS operand VERBATIM
+        // (`a && b` yields b's own box when a is true).  That box may be a BORROW
+        // (e.g. a `let x = a && obj.is_mutable` binding aliases obj.is_mutable on the
+        // taken path), so scope-end-dropping such a binding would over-free a value
+        // owned elsewhere → UAF.  Conservatively NOT droppable (leak, crash-free) —
+        // mirrors anf_should_materialize's And/Or exclusion.
+        HExpr::BinOp { op, .. } => match op { BinOp::And => false, BinOp::Or => false, _ => true },
+        HExpr::UnaryOp { .. } => true,
+        // EffectOp / control-flow (Block / If / Match): value may alias shared state
+        // or be a branch-dependent borrow — conservatively NOT dropped (leak, crash-free).
         _ => false,
     }
 }
