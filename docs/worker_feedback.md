@@ -9,4 +9,4 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
-_（当前无待处理反馈。）_
+_（当前无待处理反馈。B-102 Phase 2 A2 的 Struct/Enum 健全性 [决策] 已于 2026-06-07 拍板方案 A 并折进 backlog D3 / design.md §7.11。）_
