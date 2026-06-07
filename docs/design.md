@@ -1648,7 +1648,7 @@ Bootstrap 阶段（编译器跑在 JS/V8 上）：
 
 **Runtime**：`ring_runtime.cpp`（~300 行），用 C++ STL 实现核心数据结构，`extern "C"` 暴露给 Ring：
 - `List<T>` → `std::vector<void*>`
-- `Map<K,V>` → `std::unordered_map<std::string, void*>`（bootstrap 阶段 key 统一为 Str）
+- `Map<K,V>` → `std::unordered_map<std::string, void*>`（bootstrap 阶段 key 统一为 Str；泛型 key 经 Hash trait → B-107）
 - `Set<T>` → `std::unordered_set<std::string>`
 - `Str` → `std::string*`
 - 零额外依赖（libstdc++ 随 clang 自带）
@@ -1661,7 +1661,7 @@ Bootstrap 阶段（编译器跑在 JS/V8 上）：
 
 **Effect handler（tail-resumptive）**：evidence passing，镜像 JS oracle，与上面的 fail/abort 形成 **hybrid**（2026-06-03 决策）。带 effect 的 fn 签名尾部追加 evidence ptr 参数（`codegen_llvm_decl.ring`），call site `push(lookup_evidence)`（`codegen_llvm_expr.ring`）。evidence = `ring_alloc` 的 N-slot struct，slot k 放第 k 个 op 的 `{fn_ptr, env}` 闭包，**slot 顺序 = op 在 effect 声明里的顺序**——这是 `gen_handle_expr`（构造）与 `gen_effect_op`（派发）之间的跨阶段契约，放共享 helper `effect_op_slot(effect, op)`，性质同 `variant_js_name`。`gen_handle_expr` 造 struct，`gen_effect_op` load slot k 走 `gen_closure_call`。handler 闭包 + evidence struct 的 RC drop 暂泄漏（同 `ring_try` 闭包，纯泄漏非 UAF），收口并入 B-096 A 波。**hybrid 的原则**：fail/abort 绑定是 ambient（栈上随处 catch → handler stack + setjmp），tail-resumptive 绑定是 lexical（类型定向 → evidence value）；两类语义本就不同，且 JS oracle 自身就是此 hybrid（fail=try/catch、tail-resumptive=evidence passing），故 LLVM 镜像它 → parity 结构性。详见 backlog B-090。
 
-**多文件编译**：bootstrap 阶段所有 .ring 文件编译到一个 LLVM Module，输出单个 .o 文件，链接为单一二进制。不需要跨模块符号解析。未来再做增量编译（每个 .ring → 一个 .o）。
+**多文件编译**：bootstrap 阶段所有 .ring 文件编译到一个 LLVM Module，输出单个 .o 文件，链接为单一二进制。不需要跨模块符号解析。未来再做增量编译（每个 .ring → 一个 .o，→ B-105，deferred 至 native 成主工具链；真难点 = 跨模块单态化）。
 
 **标准库迁移**：以编译器自身迁移为目标驱动，按需将 `extern fn` 从 JS 实现切换到 C ABI 实现。不追求标准库完整迁移——编译器用到什么就迁移什么。
 
@@ -1688,6 +1688,8 @@ extern "c" fn fread(ptr: Ptr, size: Int, count: Int, stream: FilePtr) -> Int
 ```
 
 FFI 边界是 RIIR 的退缩前线——随着更多标准库用纯 Ring 重写，extern fn 数量持续减少。纯 Ring 代码天然跨后端。
+
+**runtime 核心容器的 RIIR**（`vector`/`unordered_map`/`std::string` → 纯 Ring）前置于**低层内存原语决策**（→ B-106 design-probe）：纯 Ring 重写容器需裸内存操作，与「无裸指针 / manual malloc」哲学存在张力，须先决策 Ring 是否/以何形式提供低层原语（value types / region effect / 受控 unsafe / 维持 C FFI 为永久退缩前线），再评估容器底层是否、在哪层 RIIR。
 
 ---
 
@@ -2114,6 +2116,9 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | B-090 范围分期 D3（2026-06-03）| core（B-090，L）= 单 effect multi-op tail-resumptive + 自然涵盖的 nesting；phase 2（B-097，P2）= custom-abort + default body(#72) + delegate(B-088#4) + nesting/multi-effect edge | 单 op 是玩具（真实 effect 都多 op）；custom-abort 需独立 setjmp 落点、default 需注入默认 evidence、delegate 是派发通后的扩展，均与核心机制不同 |
 | JS 后端归档策略 (Z)（2026-06-04，B-100）| 删 JS 前先**证明**两后端 feature 完全一致零 bug（parity 认证门：穷举覆盖矩阵 + 关 B-097/B-096 + 复数轮对抗 review，loop-until-dry），再 golden 快照保存量回归网，然后删 codegen.ring/JS runtime/addon。删除点 = 层 3 之前 | JS 后端是 LLVM codegen 的差分 oracle，简单删会摧毁它；但 oracle 价值 = 抓发散，parity 一旦被证明且 feature 集冻结，oracle 即用尽 → 删除无损。否决「层 3 后删」（async/unwind/refinement 要双实现，成本过高，且 JS 实现层 3 亦可能有 bug、oracle 非真值）|
 | A2 Type hash-cons 边界（2026-06-07，B-102 Phase 2）| 只在 `apply_subst` **5 个**复合 arm intern（Fn/Generic/Record/EffectRow/Tuple，**排除 Struct/Enum**），表塞 `UnionFind`（零线程化）；**含未解析 TypeVar 不入表**（`type_intern_key -> Str?`，订正旧述「输出已 resolve」）；key 逐字对齐 `types_equal`（Record/EffectRow 无序排序、**FnType effects 有序**、不复用有损 `type_to_string`）；O(1) 相等彩蛋解耦另立项 | apply_subst 每次重建 spine = 2.51亿洪流；intern 去重达 G-a（A1 never-drop 不去重仍 ~25.9GB）。**Struct/Enum 排除**：nominal-shallow key 不健全——apply_subst 不代换 variants/fields、exhaustive.ring 却结构化读，intern 任选缓存致 stale payload（回归 tuple_option_sugar）；否决代换 variants（爆栈，见 occurs_in/apply_subst 忽略 fields 一条）/deep key（违反 key==types_equal） |
+| 泛型 Map key（2026-06-07，B-107，P2）| 加 `Hash` trait + derive，runtime Map key 改 void* 经 Eq/Hash dict 派发（复用 `ring_get_builtin_dict`）| 类型层 `Map<K,V>` 全泛型但 runtime 只兑现 Str key（两后端，LLVM 具体化）= 类型系统说谎；bootstrap 编译器全 `Map<Str,..>` 故未暴露。镜像 Eq/Ord/Clone derive 机制；与 B-080 unboxing 协同 |
+| LLVM 增量编译 deferred（2026-06-07，B-105）| 维持单 Module/单 .o；增量（每 .ring→.o）deferred 至 native 成主工具链（B-099 后）+ 编译时间成实测痛点 | 当初为省跨模块符号解析；不阻塞 B-089/099/100。真难点 = 跨模块单态化（泛型实例 emit 何处，Rust/C++ 模板问题），非 link，具体方案真做时再 Discussion |
+| 低层内存原语 = design-probe 前置（2026-06-07，B-106）| RIIR（runtime C++ STL→纯 Ring）立 design-probe 而非实现项：先决「Ring 是否/以何形式提供低层内存原语」| 纯 Ring 重写 vector/map/string 需裸内存操作，与哲学「不做裸指针/manual malloc」冲突；张力不解 RIIR 无从落地。候选：value types / region effect / 受控 unsafe / 维持 C FFI 永久退缩前线 |
 
 ### 幽灵功能（已解析但无语义效果）
 
