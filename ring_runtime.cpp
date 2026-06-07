@@ -76,18 +76,16 @@ typedef void (*ring_drop_fn)(void* data);
 static ring_drop_fn drop_table[4096];
 static int drop_table_size = RING_TYPEID_USER_BASE;
 
-// B-101 — never-drop (interned / arena) typeids.  The compiler's own `Type` DAG
-// (Type / Effect / EffectRow / StructField / EnumVariant / RecordField / ...) is an
-// immutable SHARED graph: `apply_subst` deliberately aliases substructure (e.g. the
-// `StructType{fields:fields}` passthrough) instead of dup'ing children.  The shallow
-// `ring_dup` (+1 on the outermost block only) is therefore NOT balanced by the deep,
-// recursive `ring_drop_Type` (which would free type_params/fields/variants) — a
-// scope-end drop of any Type binding over-frees DAG-shared substructure, and the next
-// `uf_lookup` reads a dangling Type and crashes (the pre-existing L0 prelude UAF that
-// blocked native self-compile).  Fix (Type-DAG ownership special case, design §7.11):
-// treat these typeids as interned arena values whose lifetime is the whole process —
-// dup and drop become no-ops, the blocks are never freed.  Structurally eliminates the
-// UAF (A1); hash-consing the constructors bounds the memory (A2).
+// B-101 never-drop (interned / arena) typeids — RETIRED by B-102 R-clean
+// (2026-06-07).  The compiler's `Type` DAG now participates in ordinary Perceus
+// RC: the codegen no longer registers any typeid as never-drop, so this table
+// stays all-false and the dup/drop guards below are inert.  The mechanism
+// (ring_register_never_drop + this table + the two guard checks) is kept as a
+// cheap, currently-unused hook should an arena/interned value class be wanted
+// later; with no registrations it has zero effect.  The original A1 over-free
+// (shallow ring_dup vs deep recursive drop_Type on aliased substructure) is now
+// fixed at the source: perceus Clone-wraps every escaping shared Type
+// substructure, balancing the recursive drop (design §7.11 "pure Perceus RC").
 static bool never_drop_table[4096];
 
 // Forward declarations for RC infrastructure

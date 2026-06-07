@@ -14,7 +14,7 @@
 use ast::{Span, Position, Pattern}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler,
-    hexpr_type, hexpr_span, hexpr_effects, is_type_dag_type}
+    hexpr_type, hexpr_span, hexpr_effects}
 use types::{Type}
 
 // ============================================================
@@ -226,24 +226,31 @@ fn is_borrow_returning_call(callee: HExpr) -> Bool {
 //   - zonk_type / zonk_row: wrap apply_subst + label_vars, same passthroughs.
 // Type tree is a deliberately-shared IMMUTABLE DAG, so NO function-level grain can
 // certify "every arm fresh".  Mis-listing → drop of live shared state → UAF/CRASH;
-// omitting → leak.  The real fix is NOT this whitelist but the Type-DAG ownership
-// special case (B-101 方案 A, design §7.11): Type is INTERNED + NEVER DROPPED, so
-// the substitution leak and the prelude over-free UAF are BOTH eliminated at the
-// runtime/typeid level (ring_register_never_drop + is_type_dag_type below), with
-// no per-call escape analysis at all.  Precise DAG-aware escape for the *other*
-// shared returns (subst / UnionFind / pass-through HIR) stays B-096/L3.
+// omitting → leak.
+//
+// B-102 R-clean (2026-06-07) — the substitution aliasing is resolved NOT by a
+// call-level whitelist but by clone-all-escape itself: each place that stores an
+// EXISTING Type substructure into a freshly-built Type is an escape position, so
+// rc_escape Clone-wraps it (ring_dup).  A scalar `=> t` return aliases the
+// borrowed param `t`, but `t` is in TAIL (escape) position → rc_escape Clones it,
+// so the caller's `let x = apply_subst(...)` owns a fresh dup, balanced by the
+// scope-end drop_T.  StructType `{ fields: fields }` Clone-wraps `fields` (a
+// borrowed List<StructField>): the new Type owns its own shallow reference,
+// released by the recursive drop_T symmetrically.  No function-level escape
+// analysis, no never-drop special case — Type is ordinary RC'd data again.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Wrap an escaping expression: clone it iff it has an independent owner; the
 // inner expression is processed in VALUE (borrow) position so its own reads do
 // not clone.  Carries inner's type/effects/span on the Clone node.
 fn rc_escape(expr: HExpr, owned: List<Str>, boxed: Set<Int>, mut gensym: List<Int>) -> HExpr {
-    // B-101: a Type-DAG value is interned (never dup'd, never dropped) — escaping it
-    // needs no Clone (the runtime no-ops ring_dup for its typeid).  Process in value
-    // position so nested escapes are still handled; emit no Clone wrapper.
-    if is_type_dag_type(hexpr_type(expr)) {
-        rc_expr(expr, false, owned, boxed, gensym)
-    } else if is_owner_bearing(expr) {
+    // B-102 R-clean: Type-DAG values participate in normal clone-all-escape RC —
+    // an escaping owner-bearing Type substructure (e.g. apply_subst's
+    // `Type::StructType { ..., fields: fields }`, where `fields` is a borrowed
+    // List<StructField> from the input) is Clone-wrapped (ring_dup) so the new
+    // parent Type owns its own (shallow) reference, symmetric with the recursive
+    // drop_T that releases it.  (A1's never-drop special case is removed.)
+    if is_owner_bearing(expr) {
         let inner = rc_expr(expr, false, owned, boxed, gensym)
         HExpr::Clone {
             inner: inner,
@@ -425,14 +432,16 @@ fn direct_block_locals(stmts: List<HStmt>) -> List<Str> {
 // onward — see rc_block_inner).
 fn stmt_droppable_locals(s: HStmt) -> List<Str> {
     match s {
-        HStmt::Let { name, ty, init, .. } => {
-            // B-101: Type-DAG bindings are interned / never-dropped (the runtime
-            // marks their typeids never-drop; a Drop here would be a no-op anyway).
-            // Suppressing the Drop keeps RC traffic off the immutable Type DAG.
-            if rc_name_skippable(name) == false && is_type_dag_type(ty) == false && is_droppable_init(init) { [name] } else { [] }
+        HStmt::Let { name, init, .. } => {
+            // B-102 R-clean: Type-DAG bindings participate in normal RC — a
+            // droppable Type binding is scope-end-dropped (recursive drop_T), and
+            // its owner-bearing init was Clone-wrapped at the escape site, so the
+            // drop releases the binding's own (dup'd) reference.  (A1's
+            // is_type_dag_type suppression is removed.)
+            if rc_name_skippable(name) == false && is_droppable_init(init) { [name] } else { [] }
         },
-        HStmt::Var { name, ty, init, .. } => {
-            if rc_name_skippable(name) == false && is_type_dag_type(ty) == false && is_droppable_init(init) { [name] } else { [] }
+        HStmt::Var { name, init, .. } => {
+            if rc_name_skippable(name) == false && is_droppable_init(init) { [name] } else { [] }
         },
         _ => [],
     }

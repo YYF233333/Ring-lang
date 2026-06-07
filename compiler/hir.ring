@@ -220,36 +220,13 @@ pub struct HProgram {
     pub boxed_vars: Set<Int>
 }
 
-// B-101 — Type-DAG ownership special case (design §7.11).  The compiler's own
-// type representation (`Type` and the structs/enums reachable from it) is an
-// IMMUTABLE SHARED graph: `apply_subst` deliberately aliases substructure rather
-// than dup'ing children, so the shallow `ring_dup` is never balanced by the deep
-// recursive drop — a scope-end drop over-frees DAG-shared substructure (the
-// pre-existing L0 prelude UAF that blocked native self-compile).  These typeids
-// are treated as interned / arena values: never dup'd, never dropped, never freed
-// (lifetime = process).  Both perceus (suppress Clone/Drop) and codegen_llvm
-// (register `ring_register_never_drop` instead of a recursive `ring_drop_T`)
-// consult this single cross-phase predicate so the type set is defined once.
-//
-// The set is named by type NAME (the checker produces concrete
-// EnumType{name:"Type"} / StructType{name:"StructField"} … for these in the
-// compiler's own HIR).  Membership is intentionally conservative-superset: every
-// node that participates in the shared Type DAG.
-pub fn is_type_dag_type_name(name: Str) -> Bool {
-    name == "Type" || name == "Effect" || name == "EffectRow" ||
-    name == "StructField" || name == "EnumVariant" || name == "RecordField" ||
-    name == "RowMergeResult"
-}
-
-// Whether a HIR-level Type denotes a value living in the never-drop Type DAG
-// (used by perceus to suppress Clone/Drop on Type-typed bindings).
-pub fn is_type_dag_type(t: Type) -> Bool {
-    match t {
-        Type::StructType { name, .. } => is_type_dag_type_name(name),
-        Type::EnumType { name, .. } => is_type_dag_type_name(name),
-        _ => false,
-    }
-}
+// B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case
+// (is_type_dag_type_name / is_type_dag_type) is REMOVED.  Type and the
+// structs/enums reachable from it now participate in ordinary Perceus RC:
+// codegen_llvm generates a recursive ring_drop_T for them, perceus Clone-wraps
+// every escaping owner-bearing Type substructure (so the shallow ring_dup is
+// balanced by the deep recursive drop), and the working-set is reclaimed at
+// scope end.  See design.md §7.11 "Type-DAG 内存回收：pure Perceus RC".
 
 // JS codegen naming conventions
 pub fn variant_js_name(enum_name: Str, variant_name: Str) -> Str {

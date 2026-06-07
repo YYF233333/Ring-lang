@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT, fn_intern_key, struct_intern_key, enum_intern_key, generic_intern_key, record_intern_key, effect_row_intern_key, tuple_intern_key}
+use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use ast::{Span, EffectExpr, TypeParam}
 
@@ -498,38 +498,12 @@ pub fn apply_subst_row_map(subst: Map<Int, Type>, row: EffectRow) -> EffectRow {
 }
 
 // ============================================================
-// Type interning / hash-cons (B-102 Phase 2 / A2)
-//
-// Collapses structurally-equal Types to a single shared pointer. Each call to
-// apply_subst rebuilds composite Type spines from scratch; without interning the
-// same structural type is re-allocated millions of times.
-//
-// LOOKUP-BEFORE-BUILD: the intern probe is inlined into each composite arm of
-// apply_subst below (FnType/StructType/EnumType/GenericType/RecordType/
-// EffectRowType/TupleType). Each arm applies subst to its children, computes the
-// parent key FROM the (already-interned) children via the component-level key
-// helpers in types.ring (fn_intern_key / struct_intern_key / ...), and only
-// constructs the parent Type on a table MISS. A HIT returns the cached node with
-// zero parent allocation. This replaces the old wrap-after-build intern_type
-// helper, which built the parent first and discarded HIT copies — under A1
-// never-drop those copies are never freed, yielding zero memory benefit.
-//
-// D1: types containing an unresolved Type::TypeVar yield a none key (apply_subst
-//     already chases all resolvable vars, so a residual TypeVar node is genuinely
-//     unresolved) -> such a type is built and returned as-is, never cached.
-// D4: the intern table lives inside the UnionFind that apply_subst already
-//     threads, so no extra plumbing is needed. Map is a reference type, so the
-//     insert persists across apply_subst calls sharing this UnionFind even though
-//     apply_subst takes a non-mut binding (same as uf_find path compression).
-// ============================================================
-
-// ============================================================
 // Union-Find substitution: apply UnionFind-based substitution to a type.
 // This is the primary apply_subst used by the type inference engine.
 // Uses uf_find for O(alpha(n)) path-compressed type variable resolution.
 // ============================================================
 
-pub fn apply_subst(mut subst: UnionFind, t: Type) -> Type {
+pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
     match t {
         Type::IntType => t,
         Type::FloatType => t,
@@ -546,104 +520,34 @@ pub fn apply_subst(mut subst: UnionFind, t: Type) -> Type {
                 if root == id { t } else { Type::TypeVar { id: root, name: none } }
             }
         },
-        // B-102 Phase 2 / A2: all 7 composite arms use LOOKUP-BEFORE-BUILD
-        // hash-cons. We first apply_subst the child components (which are already
-        // interned), compute the parent key FROM those components (no parent
-        // allocation), then probe the table: a HIT returns the cached node with
-        // ZERO parent allocation; only a MISS (or none key — unresolved var, D1)
-        // constructs the parent. This is the fix over the old wrap-after-build
-        // (intern_type-after-construct), which always allocated the parent and —
-        // under A1 never-drop — discarded HIT copies that are never freed, giving
-        // zero memory benefit.
-        Type::FnType { params, return_type, effects } => {
-            // Use explicit for-loops (not .map closures): apply_subst now takes a
-            // `mut subst`, and the auto-boxing pass boxes any mutable binding
-            // captured by a closure (infer.ring:1092). subst is a reference type
-            // whose writes (intern_table.insert) persist through the reference
-            // without boxing (like uf_find), so we must avoid capturing it in a
-            // closure — a for-loop references it directly. (CLAUDE.md: .map closure
-            // cannot capture let mut — use a for loop.)
-            let mut s_params: List<Type> = []
-            for p in params { s_params.push(apply_subst(subst, p)) }
-            let s_ret = apply_subst(subst, return_type)
-            let s_effects = apply_subst_row(subst, effects)
-            match fn_intern_key(s_params, s_ret, s_effects) {
-                none => Type::FnType { params: s_params, return_type: s_ret, effects: s_effects },
-                some(k) => match subst.intern_table.get(k) {
-                    some(existing) => existing,
-                    none => {
-                        let built = Type::FnType { params: s_params, return_type: s_ret, effects: s_effects }
-                        subst.intern_table.insert(k, built)
-                        built
-                    }
-                }
-            }
-        },
-        // StructType/EnumType ARE interned (B-102 Phase 2 / A2). They are the bulk
-        // of the apply_subst type flood, so interning them is required to meet the
-        // memory gate. Their nominal-shallow key (name + concrete type_params) is
-        // sound because exhaustive.ring no longer reads template variants/fields
-        // structurally — it re-derives payloads from the node's own type_params via
-        // inst_map (see exhaustive.ring instantiate_enum_variants /
-        // instantiate_struct_fields). So a cached node shared across two reads with
-        // the same name+type_params is safe: variants/fields carry the (template)
-        // payload but every reader re-instantiates from type_params.
-        Type::StructType { name, type_params, fields } => {
-            let mut s_params: List<Type> = []
-            for p in type_params { s_params.push(apply_subst(subst, p)) }
-            match struct_intern_key(name, s_params) {
-                none => Type::StructType { name: name, type_params: s_params, fields: fields },
-                some(k) => match subst.intern_table.get(k) {
-                    some(existing) => existing,
-                    none => {
-                        let built = Type::StructType { name: name, type_params: s_params, fields: fields }
-                        subst.intern_table.insert(k, built)
-                        built
-                    }
-                }
-            }
-        },
-        Type::EnumType { name, type_params, variants } => {
-            let mut s_params: List<Type> = []
-            for p in type_params { s_params.push(apply_subst(subst, p)) }
-            match enum_intern_key(name, s_params) {
-                none => Type::EnumType { name: name, type_params: s_params, variants: variants },
-                some(k) => match subst.intern_table.get(k) {
-                    some(existing) => existing,
-                    none => {
-                        let built = Type::EnumType { name: name, type_params: s_params, variants: variants }
-                        subst.intern_table.insert(k, built)
-                        built
-                    }
-                }
-            }
-        },
-        Type::GenericType { base, args } => {
-            let s_base = apply_subst(subst, base)
-            let mut s_args: List<Type> = []
-            for a in args { s_args.push(apply_subst(subst, a)) }
-            match generic_intern_key(s_base, s_args) {
-                none => Type::GenericType { base: s_base, args: s_args },
-                some(k) => match subst.intern_table.get(k) {
-                    some(existing) => existing,
-                    none => {
-                        let built = Type::GenericType { base: s_base, args: s_args }
-                        subst.intern_table.insert(k, built)
-                        built
-                    }
-                }
-            }
-        },
+        Type::FnType { params, return_type, effects } =>
+            Type::FnType {
+                params: params.map(fn(p) { apply_subst(subst, p) }),
+                return_type: apply_subst(subst, return_type),
+                effects: apply_subst_row(subst, effects)
+            },
+        Type::StructType { name, type_params, fields } =>
+            Type::StructType {
+                name: name,
+                type_params: type_params.map(fn(p) { apply_subst(subst, p) }),
+                fields: fields
+            },
+        Type::EnumType { name, type_params, variants } =>
+            Type::EnumType {
+                name: name,
+                type_params: type_params.map(fn(p) { apply_subst(subst, p) }),
+                variants: variants
+            },
+        Type::GenericType { base, args } =>
+            Type::GenericType {
+                base: apply_subst(subst, base),
+                args: args.map(fn(a) { apply_subst(subst, a) })
+            },
         Type::RecordType { fields, tail, tail_name } => {
-            let mut mapped_fields: List<RecordField> = []
-            for f in fields { mapped_fields.push(RecordField { name: f.name, ty: apply_subst(subst, f.ty) }) }
-            // Resolve the record's tail-chasing ONCE to obtain the FINAL components
-            // (final_fields/final_tail/final_tail_name), then run lookup-before-build
-            // keyed on those components (key from components, no parent alloc).
-            // record_result is a lightweight RecordType used only as a carrier for
-            // the resolved components; the actual interned node is (re)built below
-            // only on MISS, so a HIT pays no allocation here.
-            let record_result = match tail {
+            let mapped_fields = fields.map(fn(f) {
+                RecordField { name: f.name, ty: apply_subst(subst, f.ty) }
+            })
+            match tail {
                 some(t_id) => {
                     let root_id = uf_find(subst, t_id)
                     match uf_lookup(subst, root_id) {
@@ -670,51 +574,13 @@ pub fn apply_subst(mut subst: UnionFind, t: Type) -> Type {
                 },
                 none => Type::RecordType { fields: mapped_fields, tail: none, tail_name: tail_name }
             }
-            match record_result {
-                Type::RecordType { fields: rf, tail: rt, tail_name: rtn } =>
-                    match record_intern_key(rf, rt) {
-                        none => Type::RecordType { fields: rf, tail: rt, tail_name: rtn },
-                        some(k) => match subst.intern_table.get(k) {
-                            some(existing) => existing,
-                            none => {
-                                let built = Type::RecordType { fields: rf, tail: rt, tail_name: rtn }
-                                subst.intern_table.insert(k, built)
-                                built
-                            }
-                        }
-                    },
-                _ => record_result
-            }
         },
         Type::EffectRowType { effects, tail } => {
             let row = apply_subst_row(subst, EffectRow { effects: effects, tail: tail })
-            match effect_row_intern_key(row.effects, row.tail) {
-                none => Type::EffectRowType { effects: row.effects, tail: row.tail },
-                some(k) => match subst.intern_table.get(k) {
-                    some(existing) => existing,
-                    none => {
-                        let built = Type::EffectRowType { effects: row.effects, tail: row.tail }
-                        subst.intern_table.insert(k, built)
-                        built
-                    }
-                }
-            }
+            Type::EffectRowType { effects: row.effects, tail: row.tail }
         },
-        Type::TupleType { elements } => {
-            let mut s_elements: List<Type> = []
-            for e in elements { s_elements.push(apply_subst(subst, e)) }
-            match tuple_intern_key(s_elements) {
-                none => Type::TupleType { elements: s_elements },
-                some(k) => match subst.intern_table.get(k) {
-                    some(existing) => existing,
-                    none => {
-                        let built = Type::TupleType { elements: s_elements }
-                        subst.intern_table.insert(k, built)
-                        built
-                    }
-                }
-            }
-        },
+        Type::TupleType { elements } =>
+            Type::TupleType { elements: elements.map(fn(e) { apply_subst(subst, e) }) },
         Type::ErrorType => t
     }
 }

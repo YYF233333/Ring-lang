@@ -3,7 +3,7 @@ use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
-    hexpr_type, hexpr_effects, is_type_dag_type_name}
+    hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
@@ -684,9 +684,9 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
     // Generate drop functions for user structs
     let struct_names = ctx.struct_types.keys()
     for sname in struct_names {
-        // B-101: Type-DAG types are interned / never-dropped — no recursive
-        // ring_drop_T is generated; emit_drop_registrations marks them never-drop.
-        if is_type_dag_type_name(sname) { continue }
+        // B-102 R-clean: Type-DAG structs get a normal recursive ring_drop_T
+        // (per-field GEP + ring_drop), so the Type DAG is reclaimed by RC like any
+        // other data.  (A1's never-drop skip is removed.)
         match ctx.struct_types.get(sname) {
             some(info) => {
                 let drop_name = "ring_drop_${sname}"
@@ -727,8 +727,9 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
         // Skip built-in enums (Option, Result) — they use generic ring_drop recursion
         if ename == "Option" { continue }
         if ename == "Result" { continue }
-        // B-101: Type-DAG enums (Type / Effect) are interned / never-dropped.
-        if is_type_dag_type_name(ename) { continue }
+        // B-102 R-clean: Type-DAG enums (Type / Effect / EffectRow) get a normal
+        // recursive ring_drop_T (per-variant per-field ring_drop).  (A1's
+        // never-drop skip is removed.)
 
         match ctx.enum_types.get(ename) {
             some(enum_info) => {
@@ -803,29 +804,20 @@ fn emit_drop_registrations(mut ctx: LlvmCtx) {
 
     let register_fn = get_or_declare_runtime_fn(ctx, "ring_register_drop", [i64, ptr], void)
     let register_ty = get_rt_fn_type(ctx, "ring_register_drop")
-    // B-101: never-drop registration for the interned Type DAG.
-    let never_fn = get_or_declare_runtime_fn(ctx, "ring_register_never_drop", [i64], void)
-    let never_ty = get_rt_fn_type(ctx, "ring_register_never_drop")
 
     // Register struct drop functions
+    // B-102 R-clean: Type-DAG types now have a normal recursive drop_T registered
+    // here like any other type (A1's never-drop registration is removed).
     let struct_names = ctx.struct_types.keys()
     for sname in struct_names {
-        // B-101: Type-DAG types are interned — mark never-drop (no recursive drop_T
-        // exists for them).  ring_dup/ring_drop become no-ops for these typeids.
-        if is_type_dag_type_name(sname) {
-            let tid = get_or_assign_typeid(ctx, sname)
-            let tid_val = LLVMConstInt(i64, tid, 0)
-            discard(LLVMBuildCall2(ctx.builder, never_ty, never_fn, [tid_val], ""))
-        } else {
-            let drop_name = "ring_drop_${sname}"
-            match ctx.dict_globals.get(drop_name) {
-                some(drop_fn_val) => {
-                    let tid = get_or_assign_typeid(ctx, sname)
-                    let tid_val = LLVMConstInt(i64, tid, 0)
-                    discard(LLVMBuildCall2(ctx.builder, register_ty, register_fn, [tid_val, drop_fn_val], ""))
-                },
-                none => {},
-            }
+        let drop_name = "ring_drop_${sname}"
+        match ctx.dict_globals.get(drop_name) {
+            some(drop_fn_val) => {
+                let tid = get_or_assign_typeid(ctx, sname)
+                let tid_val = LLVMConstInt(i64, tid, 0)
+                discard(LLVMBuildCall2(ctx.builder, register_ty, register_fn, [tid_val, drop_fn_val], ""))
+            },
+            none => {},
         }
     }
 
@@ -834,21 +826,14 @@ fn emit_drop_registrations(mut ctx: LlvmCtx) {
     for ename in enum_names {
         if ename == "Option" { continue }
         if ename == "Result" { continue }
-        // B-101: Type-DAG enums (Type / Effect) are interned — mark never-drop.
-        if is_type_dag_type_name(ename) {
-            let tid = get_or_assign_typeid(ctx, ename)
-            let tid_val = LLVMConstInt(i64, tid, 0)
-            discard(LLVMBuildCall2(ctx.builder, never_ty, never_fn, [tid_val], ""))
-        } else {
-            let drop_name = "ring_drop_${ename}"
-            match ctx.dict_globals.get(drop_name) {
-                some(drop_fn_val) => {
-                    let tid = get_or_assign_typeid(ctx, ename)
-                    let tid_val = LLVMConstInt(i64, tid, 0)
-                    discard(LLVMBuildCall2(ctx.builder, register_ty, register_fn, [tid_val, drop_fn_val], ""))
-                },
-                none => {},
-            }
+        let drop_name = "ring_drop_${ename}"
+        match ctx.dict_globals.get(drop_name) {
+            some(drop_fn_val) => {
+                let tid = get_or_assign_typeid(ctx, ename)
+                let tid_val = LLVMConstInt(i64, tid, 0)
+                discard(LLVMBuildCall2(ctx.builder, register_ty, register_fn, [tid_val, drop_fn_val], ""))
+            },
+            none => {},
         }
     }
 }
