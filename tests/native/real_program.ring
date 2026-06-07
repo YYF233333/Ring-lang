@@ -45,6 +45,16 @@ fn score_lookup(rs: List<Record>) -> Int {
     direct + safe                // 75 + 88 = 163
 }
 
+// B-103: .first / .last build a FRESH owned Option (ring_dup'd element); their
+// result bound to a `let` is now droppable (is_droppable_init(Call)=true), and the
+// borrow-returning Option accessors (.unwrap_or) are Clone-balanced.  Exercises the
+// owned-container-constructor dups (ring_list_first/last) + the unwrap_or borrow leaf.
+fn name_endpoints(ns: List<Str>) -> Str {
+    let f = ns.first().unwrap_or("?")    // .first() owned Option; .unwrap_or borrow -> Clone
+    let l = ns.last().unwrap_or("?")     // .last()  owned Option; .unwrap_or borrow -> Clone
+    "${f}..${l}"
+}
+
 fn main() {
     let rs = build_records()
 
@@ -52,6 +62,9 @@ fn main() {
 
     let ns = names(rs)
     print(ns.join(","))                             // ada,bob,cleo
+
+    // .first / .last (owned Option) + .unwrap_or (borrow leaf, Clone-balanced).
+    print("ends=${name_endpoints(ns)}")             // ends=ada..cleo
 
     // List index read bound + string interpolation.
     let top = rs[0]                                 // IndexExpr read -> Clone

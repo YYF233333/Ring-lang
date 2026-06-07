@@ -770,7 +770,17 @@ extern "C" void* ring_list_find(void* list, void* closure) {
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
         if (ring_unbox_int(r) != 0) {
-            return ring_enum_some((*vec)[i]);
+            // B-103: .find builds a FRESH owned Option that co-owns the matched
+            // element (same owned-container-constructor rule as ring_list_get_opt /
+            // first / last — dup the element so drop_option is balanced).  Was a
+            // latent un-dup'd borrow: `let f = xs.find(p)` is now droppable
+            // (is_droppable_init(Call)=true), so without this dup, scope-end-dropping
+            // the Option frees the list's element → UAF (native self-compile
+            // over-free in infer_field_access: struct_def.fields.find(...) freeing a
+            // registered StructField).
+            void* elem = (*vec)[i];
+            ring_dup(elem);
+            return ring_enum_some(elem);
         }
     }
     return ring_enum_none();
@@ -858,7 +868,17 @@ extern "C" void* ring_list_last(void* list) {
     if (vec->empty()) {
         return ring_enum_none();
     }
-    return ring_enum_some(vec->back());
+    // B-103: like ring_list_get_opt, .last() builds a FRESH owned Option that
+    // co-owns the element (the Ring-source `self.get(self.len()-1)` goes through
+    // ring_list_get_opt, which dups).  The LLVM backend shortcuts `.last` straight
+    // to this runtime fn (codegen_llvm_expr.ring), so it must dup the element too —
+    // otherwise the returned Option's payload aliases the container element and
+    // scope-end-dropping the Option (now droppable: is_droppable_init(Call)=true)
+    // double-frees it.  Owned-container-constructor rule (design §7.11): dup on
+    // co-own, balanced by drop_option.
+    void* elem = vec->back();
+    ring_dup(elem);
+    return ring_enum_some(elem);
 }
 
 extern "C" void* ring_list_first(void* list) {
@@ -866,7 +886,11 @@ extern "C" void* ring_list_first(void* list) {
     if (vec->empty()) {
         return ring_enum_none();
     }
-    return ring_enum_some(vec->front());
+    // B-103: see ring_list_last — fresh owned Option co-owns the element (dup),
+    // matching ring_list_get_opt and the Ring-source `self.get(0)`.
+    void* elem = vec->front();
+    ring_dup(elem);
+    return ring_enum_some(elem);
 }
 
 // flat_map: apply closure (returns List) to each element, concatenate results.
@@ -1071,6 +1095,10 @@ extern "C" void* ring_map_int_values(void* map) {
     auto* result = new (ldata) std::vector<void*>();
     result->reserve(m->size());
     for (auto& kv : *m) {
+        ring_dup(kv.second);  // B-103: fresh List co-owns the value (same
+                              // owned-container-constructor rule as ring_map_values;
+                              // was a latent un-dup'd borrow, now droppable via
+                              // is_droppable_init(Call)=true).
         result->push_back(kv.second);
     }
     return ldata;
@@ -1085,6 +1113,8 @@ extern "C" void* ring_map_int_entries(void* map) {
         void* pdata = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
         auto* pair = new (pdata) std::vector<void*>();
         pair->push_back(ring_box_int(kv.first));
+        ring_dup(kv.second);  // B-103: fresh entry pair co-owns the value (same as
+                              // ring_map_entries); was a latent un-dup'd borrow.
         pair->push_back(kv.second);
         result->push_back(pdata);
     }

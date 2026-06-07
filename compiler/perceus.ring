@@ -186,16 +186,26 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
     }
 }
 
-// A method call whose result is a BORROW of (an inner reference of) its receiver,
-// returned WITHOUT a dup by the runtime — so escaping it needs a Clone.  These
-// are the extern Option projection accessors:
-//   .unwrap / .to_fail / .unwrap_or_else  → return the Option payload (a borrow).
+// A method call whose result is a BORROW of (an inner reference of) its receiver
+// or an argument, returned WITHOUT a dup by the runtime — so escaping it needs a
+// Clone, AND scope-end-dropping its binding would free a reference owned elsewhere.
+// These are the extern Option projection accessors (the LLVM backend shortcuts
+// them straight to ring_Option_* runtime fns, so their borrow-ness does NOT
+// propagate through any Ring body — they MUST be listed here):
+//   .unwrap          (ring_Option_unwrap)         → returns the Some payload (a
+//                                                    borrow of the Option's slot).
+//   .unwrap_or       (ring_Option_unwrap_or)      → Some → payload borrow; None →
+//                                                    the `default` ARGUMENT verbatim
+//                                                    (a borrow of the caller's value).
+//   .unwrap_or_else  (ring_Option_unwrap_or_else) → Some → payload borrow; None →
+//                                                    the closure's result (forwarded).
+//   .to_fail         (ring_Option_to_fail)        → Some → payload borrow (None
+//                                                    raises, never returns a value).
 // NOTE: `.get()` is NOT here — list.get / map.get build a FRESH owned Option
-// (ring_enum_some, which co-owns a dup'd element), so their result is a fresh
-// temporary, not a borrow.  `.values()` / `.entries()` likewise build fresh owned
-// Lists.  Ring-level accessors (.first / .last / .unwrap_or) get the Perceus
-// transform on their own bodies, so their borrow-ness propagates automatically
-// (their `return` goes through rc_escape) — only the extern ones are listed here.
+// (ring_*_get_opt, which ring_dup's the element into the Option), so their result
+// is a fresh owned temporary, not a borrow.  `.first` / `.last` (B-103: now
+// ring_dup in ring_list_first/last) and `.values()` / `.entries()` / `.keys()` /
+// `.pop` / `.shift` likewise build FRESH owned containers — not borrows.
 //
 // Safety asymmetry: mis-listing a fresh-temp call here only LEAKS (an extra dup
 // whose source leaks); OMITTING a genuine borrow-returner CRASHES (UAF when the
@@ -203,7 +213,8 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 fn is_borrow_returning_call(callee: HExpr) -> Bool {
     match callee {
         HExpr::FieldAccess { field, .. } =>
-            field == "unwrap" || field == "to_fail" || field == "unwrap_or_else",
+            field == "unwrap" || field == "to_fail"
+            || field == "unwrap_or" || field == "unwrap_or_else",
         _ => false,
     }
 }
@@ -238,6 +249,15 @@ fn is_borrow_returning_call(callee: HExpr) -> Bool {
 // borrowed List<StructField>): the new Type owns its own shallow reference,
 // released by the recursive drop_T symmetrically.  No function-level escape
 // analysis, no never-drop special case — Type is ordinary RC'd data again.
+//
+// B-103 (2026-06-07) — the ban above still holds (no per-call FRESH-vs-aliased
+// whitelist), but is_droppable_init's Call arm now returns `true` UNIVERSALLY, not
+// just for borrow-returners.  This is sound WITHOUT a whitelist precisely because
+// of the clone-all-escape reasoning above: every apply_subst-family return value
+// reaches its caller's `let x = ...` already Clone-wrapped (the aliased arm's value
+// is in tail/escape position → rc_escape Clones it), so `x` owns a FRESH dup,
+// safely released by the scope-end drop_T.  The flood of 167 `let x = apply_subst`
+// bindings is thereby reclaimed (G-a memory gate) with no function-grain analysis.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Wrap an escaping expression: clone it iff it has an independent owner; the
@@ -485,15 +505,27 @@ fn is_droppable_init(init: HExpr) -> Bool {
         HExpr::StrLit { .. } => true,
         HExpr::BoolLit { .. } => true,
         HExpr::Clone { .. } => true,
-        // A borrow-returning method call (.unwrap…) becomes a Clone via rc_escape,
-        // so its binding owns a fresh dup → droppable.  General Call results are NOT
-        // dropped here (may alias shared state — see the B-101 DEAD ROAD note above:
-        // the substitution-family leak is handled by Type interning, not a
-        // call-level whitelist).
-        HExpr::Call { callee, .. } =>
-            is_borrow_returning_call(callee),
-        // Call (general) / EffectOp / BinOp / UnaryOp / control-flow: may alias
-        // shared state or be a non-owning scalar — conservatively not dropped.
+        // B-103: every Call result is droppable.  Two sub-cases, both safe:
+        //   (a) BORROW-returning call (.unwrap / .unwrap_or / .unwrap_or_else /
+        //       .to_fail, per is_borrow_returning_call): is_owner_bearing(Call) is
+        //       also true, so rc_stmt's rc_escape wraps the init in HExpr::Clone
+        //       (ring_dup) — the binding owns a fresh dup, and the scope-end Drop
+        //       releases that dup, NOT the borrowed source.  Balanced.
+        //   (b) OWNED-returning call (apply_subst & the 167-site substitution flood,
+        //       map_new, list_clone, .get/.first/.last/.values/.entries, string
+        //       ops, ctor calls, …): the result is a fresh, solely-owned value moved
+        //       into the binding; the scope-end Drop releases it (rc N→N-1).  This is
+        //       what finally RECLAIMS the apply_subst transients (G-a memory gate).
+        // PRE-CONDITION: the borrow-leaf classification in is_borrow_returning_call
+        // (+ the owned-container-constructor dups in ring_runtime.cpp: list_first/
+        // last, map_int_values/entries — B-103) must be COMPLETE, else a missed
+        // borrow leaf would be scope-end-dropped → UAF.  ASan (real_program ×3 +
+        // self-compile) is the completeness safety net: an over-free pinpoints the
+        // missed leaf, which is then added to is_borrow_returning_call.
+        HExpr::Call { .. } => true,
+        // EffectOp / BinOp / UnaryOp / control-flow (Block / If / Match): may alias
+        // shared state or be a non-owning scalar, and their value may be a Call
+        // result on some path — conservatively NOT dropped (leak, crash-free).
         _ => false,
     }
 }

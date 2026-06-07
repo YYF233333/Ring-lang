@@ -368,7 +368,7 @@ function is_borrow_returning_call(callee) {
     const __ring_m8 = callee;
     if (__ring_m8._tag === "FieldAccess") {
       const field = __ring_m8.field;
-      return (((field === "unwrap") || (field === "to_fail")) || (field === "unwrap_or_else"));
+      return ((((field === "unwrap") || (field === "to_fail")) || (field === "unwrap_or")) || (field === "unwrap_or_else"));
       break __ring_match8;
     }
     return false;
@@ -614,8 +614,7 @@ function is_droppable_init(init) {
       break __ring_match12;
     }
     if (__ring_m12._tag === "Call") {
-      const callee = __ring_m12.callee;
-      return is_borrow_returning_call(callee);
+      return true;
       break __ring_match12;
     }
     return false;

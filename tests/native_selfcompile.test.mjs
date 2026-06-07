@@ -65,6 +65,7 @@ const PROG = path.join(REPO, "tests", "native", "real_program.ring");
 const EXPECTED_STDOUT = [
   "count=3",
   "ada,bob,cleo",
+  "ends=ada..cleo",
   "top=ada (90)",
   "sum=163",
   "first=r len=4",
