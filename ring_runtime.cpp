@@ -95,6 +95,46 @@ static void ring_drop_by_typeid(uint32_t tid, void* data);
 // Perceus RC L0 — ring_alloc / ring_dup / ring_drop
 // ============================================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Alloc/free leak counter (opt-in diagnostic, -DRING_ALLOC_STATS).  Inert in
+// normal builds.  Tracks `live = allocs - frees` overall and per-typeid; a leaking
+// program has live ≈ allocs (1:1, never plateaus), a reclaiming one has live
+// plateau (frees keep pace).  Periodic stderr reports (every ~32M allocs) + atexit
+// give a leak% trajectory even when a self-compile is memory-capped before exit.
+// typeid quick-ref: 0=INT 2=BOOL 3=STR 4=LIST 7=CLOSURE 8=OPTION 10=TUPLE 64+=user.
+// Used to attribute the G-a memory wall (B-104): the precise-Perceus waves drive
+// the leak% down by dropping owned temporaries that clone-all-escape leaves alive.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifdef RING_ALLOC_STATS
+static uint64_t g_allocs = 0;
+static uint64_t g_frees  = 0;
+static int64_t  g_live_tid[4096] = {0};
+static uint64_t g_next_report = (1ULL << 25); // first report at 32M allocs
+static void ring_alloc_stats_report() {
+    uint64_t live = g_allocs - g_frees;
+    double pct = g_allocs ? (100.0 * (double)live / (double)g_allocs) : 0.0;
+    // top-6 live typeids
+    int top[6]; for (int i = 0; i < 6; i++) top[i] = -1;
+    for (int t = 0; t < 4096; t++) {
+        if (g_live_tid[t] <= 0) continue;
+        for (int s = 0; s < 6; s++) {
+            if (top[s] < 0 || g_live_tid[t] > g_live_tid[top[s]]) {
+                for (int k = 5; k > s; k--) top[k] = top[k-1];
+                top[s] = t; break;
+            }
+        }
+    }
+    fprintf(stderr, "[alloc-stats] allocs=%llu frees=%llu live=%llu (%.1f%% leak) | top:",
+            (unsigned long long)g_allocs, (unsigned long long)g_frees,
+            (unsigned long long)live, pct);
+    for (int s = 0; s < 6; s++) {
+        if (top[s] >= 0) fprintf(stderr, " tid%d=%lld", top[s], (long long)g_live_tid[top[s]]);
+    }
+    fprintf(stderr, "\n"); fflush(stderr);
+}
+static bool g_stats_atexit = (atexit(ring_alloc_stats_report), true);
+#endif
+
 extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
     char* raw = (char*)malloc(8 + (size_t)size);
     if (!raw) {
@@ -104,6 +144,11 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
     }
     *(uint32_t*)(raw)     = 1;                    // rc = 1 (new allocation)
     *(uint32_t*)(raw + 4) = (uint32_t)typeid_val; // typeid
+#ifdef RING_ALLOC_STATS
+    g_allocs++;
+    if (typeid_val >= 0 && typeid_val < 4096) g_live_tid[typeid_val]++;
+    if (g_allocs >= g_next_report) { ring_alloc_stats_report(); g_next_report += (1ULL << 25); }
+#endif
     return raw + 8;                               // return data pointer
 }
 
@@ -133,6 +178,10 @@ extern "C" void ring_drop(void* ptr) {
     if (*rc <= 1) {
         ring_drop_by_typeid(tid, ptr);
         free((char*)ptr - 8);
+#ifdef RING_ALLOC_STATS
+        g_frees++;
+        if (tid < 4096) g_live_tid[tid]--;
+#endif
     } else {
         *rc -= 1;
     }

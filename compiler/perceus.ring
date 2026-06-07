@@ -272,21 +272,21 @@ fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> 
     }
 }
 
-// Normalise a sub-expression in an ARGUMENT / SCRUTINEE position: recurse into its
-// own nested CONSUMING operands (which still hoist + materialise normally), but
-// NEVER materialise the top-level expression itself.  Rationale (B-104 task-1
-// finding, list_fold.ring heap-corruption regression): a call argument is passed by
-// BORROW (rc_expr value position — the callee does not drop it), and a callee may
-// alias an argument into its RETURN value without a dup:
-//   * `list.fold(init, f)` / `Option.unwrap_or(default)` / min/max-style helpers
-//     return an ARGUMENT verbatim on some path → the result box IS the arg box;
-//   * a `match scrut { … => scrut }` arm returns the scrutinee.
-// If the arg/scrutinee were a materialised `let __anf = <fresh>`, BOTH __anf and the
-// result's binding would scope-end-drop the same box → double-free (heap
-// corruption).  Safely materialising here requires callee RETURN-MODE analysis
-// (does the callee return an argument? is the result owned or an arg-alias?), which
-// is out of scope for this pass — recorded as residual leak in the B-104 report,
-// candidate for a future return-mode wave.  Crash-free leak > unsound drop.
+// Normalise a sub-expression in a CONSERVATIVE arg-aliasing position: recurse into
+// its own nested CONSUMING operands (which still hoist + materialise normally), but
+// NEVER materialise the top-level expression itself.  Used where the value may be
+// aliased verbatim into the enclosing expression's result with a MOVED (not Clone-
+// wrapped) binding, so materialising + scope-dropping it would double-free:
+//   * a MATCH SCRUTINEE — a `match scrut { … => scrut }` arm returns the scrutinee
+//     verbatim (W2: needs arm return-value analysis);
+//   * an EFFECTOP arg — a handler may resume with / return an arg verbatim (W3);
+//   * a `fold`-family CALL arg — fold returns `init` verbatim on an empty list with
+//     a moved result (is_arg_returning_call; list_fold.ring heap-corruption
+//     regression).
+// (B-104 W1 reclaimed the general Call-arg position — see the Call arm + anf_operand
+// — leaving only these aliasing-hazard positions on the conservative path.  Their
+// residual leak needs callee/arm return-mode analysis to reclaim safely; crash-free
+// leak > unsound drop.)
 fn anf_arg(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
     anf_expr(expr, hoists, counter)
 }
@@ -541,16 +541,30 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HEx
             // Callee is a borrow read (FieldAccess receiver / Ident) — normalise its
             // subexprs but it is not itself a materialisable value.
             let new_callee = anf_callee(callee, hoists, counter)
-            // Args are BORROW-passed (callee does not drop them).  A callee may alias
-            // an arg into its return value WITHOUT a dup (`list.fold(init, …)` returns
-            // `init` on an empty list; `Option.unwrap_or(default)` returns `default`),
-            // so a materialised+dropped fresh-owned arg would double-free the box the
-            // result binding also owns (list_fold.ring heap corruption).  Recurse into
-            // each arg's own nested consuming operands, but DO NOT materialise the
-            // top-level arg — see anf_arg.  (Residual arg-position leak documented in
-            // the B-104 report; needs return-mode analysis to reclaim safely.)
+            // B-104 W1: args are BORROW-passed (the callee never drops them).  A
+            // fresh-owned arg (`f(some(x))`, `f(xs.get(i))`, `f(a+b)`, `f(5)`) is
+            // otherwise read by the callee and never dropped → the big residual
+            // arg-position leak (OPTION / boxed-INT bulk).  Materialise + scope-end-
+            // drop it (anf_operand) so it is reclaimed — SOUND because every Ring
+            // function return-clones its tail (clone-all-escape) so it never hands
+            // back an un-dup'd arg, and owned/borrow builtins are likewise safe (a
+            // borrow-returning result is Clone-wrapped at the binding, balancing the
+            // materialised arg's drop — see is_arg_returning_call).
+            //
+            // EXCEPTION — a callee that returns an arg VERBATIM with a MOVED result
+            // (`fold`, per is_arg_returning_call): materialising its args would
+            // double-free the arg box the result binding also moves.  Keep those args
+            // UN-materialised borrows (anf_arg, recurse-only) — residual crash-free
+            // leak, the cost of no full return-mode analysis.
+            let arg_returning = is_arg_returning_call(new_callee)
             let mut new_args: List<HExpr> = []
-            for a in args { new_args.push(anf_arg(a, hoists, counter)) }
+            for a in args {
+                if arg_returning {
+                    new_args.push(anf_arg(a, hoists, counter))
+                } else {
+                    new_args.push(anf_operand(a, hoists, counter))
+                }
+            }
             HExpr::Call { callee: new_callee, args: new_args, type_args: type_args,
                 resolved_dicts: resolved_dicts, dict_dispatch: dict_dispatch,
                 ty: ty, effects: effects, span: span }
@@ -903,6 +917,38 @@ fn is_borrow_returning_call(callee: HExpr) -> Bool {
         HExpr::FieldAccess { field, .. } =>
             field == "unwrap" || field == "to_fail"
             || field == "unwrap_or" || field == "unwrap_or_else",
+        _ => false,
+    }
+}
+
+// B-104 W1 (arg materialise): a call whose result may be ONE OF ITS ARGUMENTS
+// returned VERBATIM (no dup) AND whose result is NOT Clone-wrapped on escape
+// (callee ∉ is_borrow_returning_call → is_owner_bearing(Call) is false → the
+// binding MOVES the result).  For such a callee, MATERIALISING an argument into a
+// `let __anf` and scope-end-dropping it would double-free: on the arg-returning
+// path the result IS the arg box, the result binding also owns it (move), so both
+// drop the same allocation (list_fold.ring empty-list heap corruption).  Args to
+// these callees must therefore stay UN-materialised borrows (anf_arg, recurse-only)
+// — a residual crash-free leak, the cost of not having full callee return-mode
+// analysis.
+//
+// Membership is NARROW by design.  An arg-returning callee that IS borrow-returning
+// (e.g. `Option.unwrap_or` returns the `default` ARGUMENT on None) does NOT belong
+// here: its result is Clone-wrapped on escape (is_owner_bearing(Call)=true via
+// is_borrow_returning_call), and that dup exactly balances the materialised arg's
+// scope-end drop — so materialising unwrap_or's arg is SOUND, no double-free.  Only
+// `fold` qualifies: it returns `init` verbatim on an empty list AND its result is
+// MOVED (it cannot join is_borrow_returning_call — on the common non-empty path it
+// returns the closure's FRESH owned accumulator, which Clone-wrapping would leak).
+//
+// Safety asymmetry (mirrors is_borrow_returning_call, opposite direction): OMITTING
+// a genuine return-arg-and-move callee → a materialised arg double-frees → CRASH.
+// Mis-INCLUDING a callee → its args stay borrows → LEAK (crash-free).  So this list
+// errs toward INCLUSION.  ASan (real_program ×3 + self-compile) is the completeness
+// net: a double-free pinpoints a missed callee, which is then added here.
+fn is_arg_returning_call(callee: HExpr) -> Bool {
+    match callee {
+        HExpr::FieldAccess { field, .. } => field == "fold",
         _ => false,
     }
 }

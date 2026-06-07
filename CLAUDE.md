@@ -106,7 +106,7 @@ Ring-lang/
 
 ## 路线图
 
-**当前**：L0 RC 基础设施（B-012，2026-06-01）+ **L1 借用引擎（B-098，2026-06-04）已落地**——`perceus.ring` 从 owned-everywhere 改为 clone-all-escape（读取 borrow、逃逸点 `HExpr::Clone`、scope-end-drop-once、删 branch-balancing），**从根消除 #134 系统性 move-analysis double-free 崩溃类**：native ring.exe 编 `a_empty.ring` EXIT 0、JS 731×3 + llvm_diff 49×3 全绿、dist double-bootstrap 字节一致。**推进中**：B-089 native 自举终验 capstone——定位 native `print` builtin bug（可能残留 RC over-free builtins 环境，待 native 调试）、内存峰值实测（G-a）、native LLVM-C 链接（B-099）。
+**当前**：L0 RC 基础设施（B-012，2026-06-01）+ **L1 借用引擎（B-098，2026-06-04）已落地**——`perceus.ring` 从 owned-everywhere 改为 clone-all-escape（读取 borrow、逃逸点 `HExpr::Clone`、scope-end-drop-once、删 branch-balancing），**从根消除 #134 系统性 move-analysis double-free 崩溃类**：native ring.exe 编 `a_empty.ring` EXIT 0、JS 731×3 + llvm_diff 49×3 全绿、dist double-bootstrap 字节一致。**推进中**：**B-104 精确 Perceus RC 里程碑（专门 session，G-a 内存墙真解）**——over-free 链已终结（B-101 A1→B-102 R-clean→B-103 borrow-builtin 分类，原 native `print` bug 查实为 enum ctor-arg over-free 已修），但 G-a 主因是 incomplete RC（中间临时从不 drop）+ 标量装箱，非 over-free。分波 drop owned 临时：ANF 易类 + W1 Call-arg materialize 已落地（leak 88%→~52%@268M，同计数器严测；W2 = scrutinee/OPTION 大块）。后续 native 终验 B-089（G-a/b/c）+ native LLVM-C 链接（B-099）。
 
 **后续**：B-089 native 自举终验（G-a/b/c）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
