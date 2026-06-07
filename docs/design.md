@@ -1395,6 +1395,8 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 
 **⚠️⚠️ 最终转向 = R-clean pure Perceus RC（2026-06-07，lookup-before-build 也 FAIL G-a，用户拍板放弃 never-drop+intern 全套）= 现行机制**：lookup-before-build 命中虽零分配，但 **A1 never-drop 漏掉的非-interned 类型（含-var transient + 非-apply_subst 构造的 Type）无界泄漏**——intern 只去重可达性、不回收，native 自编译仍 20-21s 线性爬 15GB。**根因 = never-drop 本身不回收内存**。完整解 = **撤销 A1 never-drop，让 Type-DAG 正确参与 Perceus RC**：删 perceus/codegen/runtime 的 Type-DAG 排除 hook → Type 回到 clone-all-escape（逃逸 Clone + 深递归 `drop_T` + scope-end drop）；**补全 dup-on-share**（`apply_subst` 的 fields/variants 透传 + `make_option_type` 等 intra-node 共享须 `HExpr::Clone`，与深 drop 对称——正是 B-098 当年没盖全 → over-free 的命门，ASan 驱动逐点验）；**撤掉 A2 intern**（纯 RC 靠 working-set bound 内存，不需 intern；intern 留作后续纯性能优化）。Type-DAG 是真 DAG（递归 enum 按名引用不嵌入 → 深 drop 无限递归风险无）。peak = 存活集（瞬态随 drop 回收 + HIR 按程序规模有界），非累积 → 预期 << 25.9GB。这是 Perceus-native 答案（Type 当初被 A1 错误特例排除）。详见 backlog B-102 Phase 2 (rev)。
 
+**R-clean 正确性 DONE + G-a 经 return-mode 推断（2026-06-07，git `27fe62d`）**：撤 A1 hook + 撤 A2 intern + Type 回 clone-all-escape 已落地——**dup-on-share 由 clone-all-escape 自动盖全**（apply_subst 透传 + intra-node 共享走字段 escape→`HExpr::Clone`，无需手写），native real_program ×3 ASan-clean。**但 G-a 未自动达成**：`is_droppable_init` 通用 `Call` arm 保守不 drop → `let x=call()`（含 apply_subst）结果瞬态不回收；激进放开 = UAF（borrow-返回 call 如 `ring_unbox_int` 结果被提前 drop）。**根因 = 缺函数 return-mode（owned vs borrowed）知识**——贯穿 B-098/B-101/B-102 的「fresh vs alias」根问题。**最终解（用户拍板）= 完整 return-mode 借用推断（B-103）**：每函数推断返回 owned/borrowed-of-param（builtin 手工标 + Ring 函数调用图 fixpoint，参考 Koka borrowing），`is_droppable_init` 据此正确回收 owned-call 结果、不误 drop borrow。G-a 现 gate 在 B-103。
+
 ---
 
 ## 8. 并发模型 ⚠️ 设计愿景，尚未实现
