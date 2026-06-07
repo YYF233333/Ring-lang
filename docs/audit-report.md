@@ -50,6 +50,8 @@
 
 > #130（闭包 env 捕获泄漏）/ #131（perceus drop 落不了地，96 rc-warn）已于 2026-06-03 并入 backlog **B-084**（Perceus drop 精度 + drop_T 完整性），详见 backlog。
 
+> #135（`ring_map_clone` / `ring_map_int_clone` 浅拷不 dup value，同 `ring_list_clone` 类）已于 2026-06-07 在 B-104 工作树修复（深拷 + 逐 value `ring_dup`）；`ring_set_clone`/`ring_set_int_clone` 核为非 bug（值内联）。
+
 
 
 
