@@ -1569,6 +1569,169 @@ function type_intern_key(t) {
   }
 }
 
+function fn_intern_key(params, return_type, effects) {
+  __ring_match70: {
+    const __ring_m70 = type_list_intern_key(params);
+    if (__ring_m70._tag === "some") {
+      const pk = __ring_m70._0;
+      __ring_match71: {
+        const __ring_m71 = type_intern_key(return_type);
+        if (__ring_m71._tag === "some") {
+          const rk = __ring_m71._0;
+          __ring_match72: {
+            const __ring_m72 = effect_list_intern_keys(effects.effects);
+            if (__ring_m72._tag === "some") {
+              const ek = __ring_m72._0;
+              return Option_some(`Fn(${pk})->${rk}/${List_join(ek, ",")}${tail_intern_key(effects.tail)}`);
+              break __ring_match72;
+            }
+            if (__ring_m72._tag === "none") {
+              return Option_none;
+              break __ring_match72;
+            }
+            __match_fail(__ring_m72);
+          }
+          break __ring_match71;
+        }
+        if (__ring_m71._tag === "none") {
+          return Option_none;
+          break __ring_match71;
+        }
+        __match_fail(__ring_m71);
+      }
+      break __ring_match70;
+    }
+    if (__ring_m70._tag === "none") {
+      return Option_none;
+      break __ring_match70;
+    }
+    __match_fail(__ring_m70);
+  }
+}
+
+function struct_intern_key(name, type_params) {
+  __ring_match73: {
+    const __ring_m73 = type_list_intern_key(type_params);
+    if (__ring_m73._tag === "some") {
+      const k = __ring_m73._0;
+      return Option_some(`St:${name}<${k}>`);
+      break __ring_match73;
+    }
+    if (__ring_m73._tag === "none") {
+      return Option_none;
+      break __ring_match73;
+    }
+    __match_fail(__ring_m73);
+  }
+}
+
+function enum_intern_key(name, type_params) {
+  __ring_match74: {
+    const __ring_m74 = type_list_intern_key(type_params);
+    if (__ring_m74._tag === "some") {
+      const k = __ring_m74._0;
+      return Option_some(`En:${name}<${k}>`);
+      break __ring_match74;
+    }
+    if (__ring_m74._tag === "none") {
+      return Option_none;
+      break __ring_match74;
+    }
+    __match_fail(__ring_m74);
+  }
+}
+
+function generic_intern_key(base, args) {
+  __ring_match75: {
+    const __ring_m75 = type_intern_key(base);
+    if (__ring_m75._tag === "some") {
+      const bk = __ring_m75._0;
+      __ring_match76: {
+        const __ring_m76 = type_list_intern_key(args);
+        if (__ring_m76._tag === "some") {
+          const ak = __ring_m76._0;
+          return Option_some(`Ge:${bk}<${ak}>`);
+          break __ring_match76;
+        }
+        if (__ring_m76._tag === "none") {
+          return Option_none;
+          break __ring_match76;
+        }
+        __match_fail(__ring_m76);
+      }
+      break __ring_match75;
+    }
+    if (__ring_m75._tag === "none") {
+      return Option_none;
+      break __ring_match75;
+    }
+    __match_fail(__ring_m75);
+  }
+}
+
+function record_intern_key(fields, tail) {
+  let field_keys = [];
+  let has_var = false;
+  const __ring_iter_6 = __List_Iterable.iter(fields);
+  while (true) {
+    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+    if (__ring_next_6._tag === "none") break;
+    const f = __ring_next_6._0;
+    __ring_match77: {
+      const __ring_m77 = type_intern_key(f.ty);
+      if (__ring_m77._tag === "some") {
+        const k = __ring_m77._0;
+        List_push(field_keys, `${f.name}:${k}`);
+        break __ring_match77;
+      }
+      if (__ring_m77._tag === "none") {
+        has_var = true;
+        break __ring_match77;
+      }
+      __match_fail(__ring_m77);
+    }
+  }
+  if (has_var) {
+    return Option_none;
+  }
+  List_sort(field_keys);
+  return Option_some(`Re:{${List_join(field_keys, ",")}}${tail_intern_key(tail)}`);
+}
+
+function effect_row_intern_key(effects, tail) {
+  __ring_match78: {
+    const __ring_m78 = effect_list_intern_keys(effects);
+    if (__ring_m78._tag === "some") {
+      const ek = __ring_m78._0;
+      let sorted_ek = list_clone(ek);
+      List_sort(sorted_ek);
+      return Option_some(`Er:<${List_join(sorted_ek, ",")}>${tail_intern_key(tail)}`);
+      break __ring_match78;
+    }
+    if (__ring_m78._tag === "none") {
+      return Option_none;
+      break __ring_match78;
+    }
+    __match_fail(__ring_m78);
+  }
+}
+
+function tuple_intern_key(elements) {
+  __ring_match79: {
+    const __ring_m79 = type_list_intern_key(elements);
+    if (__ring_m79._tag === "some") {
+      const k = __ring_m79._0;
+      return Option_some(`Tu:(${k})`);
+      break __ring_match79;
+    }
+    if (__ring_m79._tag === "none") {
+      return Option_none;
+      break __ring_match79;
+    }
+    __match_fail(__ring_m79);
+  }
+}
+
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
   switch (self._tag) {
@@ -1631,4 +1794,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, StructField, EnumVariant, RecordField, Type_IntType, Type_FloatType, Type_StrType, Type_BoolType, Type_UnitType, Type_NeverType, Type_AnyType, Type_TypeVar, Type_FnType, Type_StructType, Type_EnumType, Type_GenericType, Type_RecordType, Type_EffectRowType, Type_TupleType, Type_ErrorType, Effect_IoEffect, Effect_FailEffect, Effect_MutEffect, Effect_CustomEffect, EffectRow, RowMergeResult, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW, effect_kind_name, effects_match_kind, type_to_builtin_name, make_option_type, is_option_type, option_inner, make_list_type, is_list_type, list_element, make_map_type, is_map_type, make_set_type, is_set_type, effect_row, open_effect_row, row_contains, effects_same_kind, row_merge, effects_equal, types_equal, type_to_string, effect_to_string, effect_row_to_string, type_intern_key };
+export { BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, StructField, EnumVariant, RecordField, Type_IntType, Type_FloatType, Type_StrType, Type_BoolType, Type_UnitType, Type_NeverType, Type_AnyType, Type_TypeVar, Type_FnType, Type_StructType, Type_EnumType, Type_GenericType, Type_RecordType, Type_EffectRowType, Type_TupleType, Type_ErrorType, Effect_IoEffect, Effect_FailEffect, Effect_MutEffect, Effect_CustomEffect, EffectRow, RowMergeResult, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW, effect_kind_name, effects_match_kind, type_to_builtin_name, make_option_type, is_option_type, option_inner, make_list_type, is_list_type, list_element, make_map_type, is_map_type, make_set_type, is_set_type, effect_row, open_effect_row, row_contains, effects_same_kind, row_merge, effects_equal, types_equal, type_to_string, effect_to_string, effect_row_to_string, type_intern_key, fn_intern_key, struct_intern_key, enum_intern_key, generic_intern_key, record_intern_key, effect_row_intern_key, tuple_intern_key };

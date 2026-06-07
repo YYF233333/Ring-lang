@@ -511,6 +511,7 @@ const cases: TestCase[] = [
   { file: "assoc_type_bound.ring", expected: "assoc type bound: ok\n" },
   { file: "assoc_type_self_item.ring", expected: "assoc_type_self_item: ok\n" },
   { file: "or_pattern.ring", expected: "or pattern: ok\n" },
+  { file: "exhaustive_generic_payload.ring", expected: "exhaustive_generic_payload: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {

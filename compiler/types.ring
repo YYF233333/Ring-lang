@@ -597,3 +597,88 @@ pub fn type_intern_key(t: Type) -> Str? {
         }
     }
 }
+
+// ============================================================
+// Component-level intern keys (B-102 Phase 2 / A2: lookup-before-build).
+//
+// apply_subst must compute the parent's canonical key from its (already-interned)
+// child components WITHOUT first allocating the parent Type node — otherwise a
+// table HIT would still pay the parent allocation (wrap-after-build), which under
+// A1 never-drop yields zero memory benefit. Each helper below mirrors exactly the
+// corresponding arm of type_intern_key above (same prefix, same ordering/sorting
+// rules), so a key computed from components is byte-identical to the key that
+// type_intern_key(parent) would produce. Children are already interned, so calling
+// type_intern_key on them is cheap.
+//
+// All return none if any component contains an unresolved TypeVar (D1) — the
+// caller then builds-and-returns the parent without caching.
+// ============================================================
+
+pub fn fn_intern_key(params: List<Type>, return_type: Type, effects: EffectRow) -> Str? {
+    match type_list_intern_key(params) {
+        some(pk) => match type_intern_key(return_type) {
+            some(rk) => match effect_list_intern_keys(effects.effects) {
+                some(ek) => some("Fn(${pk})->${rk}/${ek.join(",")}${tail_intern_key(effects.tail)}"),
+                none => none
+            },
+            none => none
+        },
+        none => none
+    }
+}
+
+pub fn struct_intern_key(name: Str, type_params: List<Type>) -> Str? {
+    match type_list_intern_key(type_params) {
+        some(k) => some("St:${name}<${k}>"),
+        none => none
+    }
+}
+
+pub fn enum_intern_key(name: Str, type_params: List<Type>) -> Str? {
+    match type_list_intern_key(type_params) {
+        some(k) => some("En:${name}<${k}>"),
+        none => none
+    }
+}
+
+pub fn generic_intern_key(base: Type, args: List<Type>) -> Str? {
+    match type_intern_key(base) {
+        some(bk) => match type_list_intern_key(args) {
+            some(ak) => some("Ge:${bk}<${ak}>"),
+            none => none
+        },
+        none => none
+    }
+}
+
+pub fn record_intern_key(fields: List<RecordField>, tail: Int?) -> Str? {
+    let mut field_keys: List<Str> = []
+    let mut has_var = false
+    for f in fields {
+        match type_intern_key(f.ty) {
+            some(k) => field_keys.push("${f.name}:${k}"),
+            none => { has_var = true }
+        }
+    }
+    if has_var { return none }
+    field_keys.sort()
+    some("Re:{${field_keys.join(",")}}${tail_intern_key(tail)}")
+}
+
+pub fn effect_row_intern_key(effects: List<Effect>, tail: Int?) -> Str? {
+    match effect_list_intern_keys(effects) {
+        some(ek) => {
+            let mut sorted_ek = list_clone(ek)
+            sorted_ek.sort()
+            some("Er:<${sorted_ek.join(",")}>${tail_intern_key(tail)}")
+        },
+        none => none
+    }
+}
+
+pub fn tuple_intern_key(elements: List<Type>) -> Str? {
+    match type_list_intern_key(elements) {
+        some(k) => some("Tu:(${k})"),
+        none => none
+    }
+}

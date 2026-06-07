@@ -1,7 +1,7 @@
 use ast::{Pattern, NamedPatternField, span_zero, LiteralValue}
-use types::{Type, StructField, type_to_string}
+use types::{Type, StructField, EnumVariant, type_to_string}
 use union_find::{UnionFind}
-use env::{apply_subst}
+use env::{apply_subst, apply_subst_map, TypeEnv}
 use hir::{HMatchArm}
 
 struct Ctor {
@@ -10,6 +10,73 @@ struct Ctor {
     field_types: List<Type>,
     field_names: List<Str>?,
     is_tuple: Bool
+}
+
+// ============================================================
+// B-102 Phase 2 / A2 soundness fix: instantiate variant/field templates.
+//
+// apply_subst substitutes a composite type's `type_params` but leaves its
+// `variants` / `fields` as the original (generic) templates — those payload
+// types reference the enum/struct definition's `type_param_vars`. exhaustive.ring
+// reads those payload types structurally to derive payload constructors, so it
+// MUST first re-derive them from THIS node's concrete `type_params`. Doing so
+// also makes the read self-contained (independent of the ambient UnionFind),
+// which is what lets apply_subst safely hash-cons (intern) EnumType/StructType:
+// the cached node's template payloads no longer leak across instantiations.
+//
+// The inst_map pattern mirrors infer.ring (field access ~2157, struct lit ~2344,
+// variant construct ~2431) and infer_ctx.ring's build_instantiation_map: a
+// while-indexed Map<Int,Type> from type_param_vars[i] -> type_params[i], then
+// apply_subst_map over each payload. (while loop, not .enumerate() — B-095.)
+// ============================================================
+fn build_inst_map(type_param_vars: List<Int>, type_params: List<Type>) -> Map<Int, Type> {
+    let mut inst_map: Map<Int, Type> = map_new()
+    let mut i = 0
+    while i < type_param_vars.len() && i < type_params.len() {
+        match (type_param_vars.get(i), type_params.get(i)) {
+            (some(var_id), some(tp)) => { inst_map.insert(var_id, tp) },
+            _ => {}
+        }
+        i = i + 1
+    }
+    inst_map
+}
+
+// Re-derive an enum's variants with this instantiation's concrete type_params
+// substituted into every variant field. Falls back to the (template) variants
+// passed in if the enum definition is unknown (builtins / cross-module).
+fn instantiate_enum_variants(env: TypeEnv, name: Str, type_params: List<Type>, template_variants: List<EnumVariant>) -> List<EnumVariant> {
+    match env.types.enums.get(name) {
+        some(enum_def) => {
+            let inst_map = build_inst_map(enum_def.type_param_vars, type_params)
+            if inst_map.len() == 0 { return template_variants }
+            let mut result: List<EnumVariant> = []
+            for v in enum_def.variants {
+                let inst_fields = v.fields.map(fn(f) { apply_subst_map(inst_map, f) })
+                result.push(EnumVariant { name: v.name, fields: inst_fields, field_names: v.field_names })
+            }
+            result
+        },
+        none => template_variants
+    }
+}
+
+// Re-derive a struct's fields with this instantiation's concrete type_params
+// substituted into every field type. Falls back to the (template) fields passed
+// in if the struct definition is unknown (builtins / cross-module).
+fn instantiate_struct_fields(env: TypeEnv, name: Str, type_params: List<Type>, template_fields: List<StructField>) -> List<StructField> {
+    match env.types.structs.get(name) {
+        some(struct_def) => {
+            let inst_map = build_inst_map(struct_def.type_param_vars, type_params)
+            if inst_map.len() == 0 { return template_fields }
+            let mut result: List<StructField> = []
+            for f in struct_def.fields {
+                result.push(StructField { name: f.name, ty: apply_subst_map(inst_map, f.ty), is_pub: f.is_pub })
+            }
+            result
+        },
+        none => template_fields
+    }
 }
 
 fn pat_at(list: List<Pattern>, i: Int) -> Pattern {
@@ -33,14 +100,15 @@ fn ctor_at(list: List<Ctor>, i: Int) -> Ctor {
 }
 
 // Check if a type recursively contains itself (used to decide expanding set)
-fn type_is_recursive(ty: Type, key: Str) -> Bool {
+fn type_is_recursive(env: TypeEnv, ty: Type, key: Str) -> Bool {
     match ty {
-        Type::EnumType { variants, .. } => {
+        Type::EnumType { name, type_params, variants } => {
+            let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
             let mut visited: Set<Str> = set_new()
             visited.insert(key)
-            for v in variants {
+            for v in inst_variants {
                 for ft in v.fields {
-                    if type_contains_key(ft, key, visited) { return true }
+                    if type_contains_key(env, ft, key, visited) { return true }
                 }
             }
             false
@@ -49,43 +117,45 @@ fn type_is_recursive(ty: Type, key: Str) -> Bool {
     }
 }
 
-fn type_contains_key(ty: Type, key: Str, mut visited: Set<Str>) -> Bool {
+fn type_contains_key(env: TypeEnv, ty: Type, key: Str, mut visited: Set<Str>) -> Bool {
     let ty_str = type_to_string(ty)
     if ty_str == key { return true }
     if visited.contains(ty_str) { return false }
     visited.insert(ty_str)
     match ty {
-        Type::EnumType { variants, .. } => {
-            for v in variants {
+        Type::EnumType { name, type_params, variants } => {
+            let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
+            for v in inst_variants {
                 for ft in v.fields {
-                    if type_contains_key(ft, key, visited) { return true }
+                    if type_contains_key(env, ft, key, visited) { return true }
                 }
             }
             false
         },
-        Type::StructType { fields, .. } => {
-            for f in fields {
-                if type_contains_key(f.ty, key, visited) { return true }
+        Type::StructType { name, type_params, fields } => {
+            let inst_fields = instantiate_struct_fields(env, name, type_params, fields)
+            for f in inst_fields {
+                if type_contains_key(env, f.ty, key, visited) { return true }
             }
             false
         },
         Type::TupleType { elements } => {
             for e in elements {
-                if type_contains_key(e, key, visited) { return true }
+                if type_contains_key(env, e, key, visited) { return true }
             }
             false
         },
         Type::FnType { params, return_type, .. } => {
             for p in params {
-                if type_contains_key(p, key, visited) { return true }
+                if type_contains_key(env, p, key, visited) { return true }
             }
-            type_contains_key(return_type, key, visited)
+            type_contains_key(env, return_type, key, visited)
         },
         _ => false,
     }
 }
 
-pub fn check_exhaustive(arms: List<HMatchArm>, scrutinee_type: Type, subst: UnionFind) -> Str? {
+pub fn check_exhaustive(env: TypeEnv, arms: List<HMatchArm>, scrutinee_type: Type, subst: UnionFind) -> Str? {
     let mut patterns: List<Pattern> = []
     for arm in arms {
         match arm.guard {
@@ -93,7 +163,7 @@ pub fn check_exhaustive(arms: List<HMatchArm>, scrutinee_type: Type, subst: Unio
             none => patterns.push(arm.pattern),
         }
     }
-    check_patterns(patterns, scrutinee_type, subst)
+    check_patterns(env, patterns, scrutinee_type, subst)
 }
 
 // Expand or-patterns into flat list of patterns for exhaustiveness checking
@@ -112,7 +182,7 @@ fn expand_or_patterns(patterns: List<Pattern>) -> List<Pattern> {
     result
 }
 
-fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
+fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
     let resolved = apply_subst(subst, ty)
     let expanded = expand_or_patterns(patterns)
 
@@ -126,10 +196,13 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
 
     match resolved {
         Type::EnumType { name, type_params, variants } => {
-            let variant_names = variants.map(fn(v) { v.name })
+            // Re-derive variant payloads with this instantiation's type_params
+            // (A2 soundness: template variants reference the enum def's vars).
+            let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
+            let variant_names = inst_variants.map(fn(v) { v.name })
             let mut covered = set_new()
 
-            for v in variants {
+            for v in inst_variants {
                 let mut sub_patterns_for_variant: List<List<Pattern>> = []
                 for p in expanded {
                     match p {
@@ -170,7 +243,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
                         }
                         let mut expanding = set_new()
                         expanding.insert(type_to_string(resolved))
-                        let missing_fields = check_matrix(normalized, v.fields, subst, expanding)
+                        let missing_fields = check_matrix(env, normalized, v.fields, subst, expanding)
                         match missing_fields {
                             some(mf) => {
                                 let joined = join_strs(mf, ", ")
@@ -213,12 +286,14 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
                 some("true")
             }
         },
-        Type::StructType { name: sname, fields: sfields, .. } => {
+        Type::StructType { name: sname, type_params: stp, fields: sfields } => {
+            // Re-derive field types with this instantiation's type_params (A2 soundness).
+            let inst_fields = instantiate_struct_fields(env, sname, stp, sfields)
             let mut covered = false
             let mut sub_patterns: List<List<Pattern>> = []
             let mut field_names: List<Str> = []
             let mut field_types: List<Type> = []
-            for f in sfields {
+            for f in inst_fields {
                 field_names.push(f.name)
                 field_types.push(f.ty)
             }
@@ -243,19 +318,19 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
             if covered == false {
                 return some(sname)
             }
-            if sfields.len() > 0 {
+            if inst_fields.len() > 0 {
                 let wild = Pattern::Wildcard { span: span_zero() }
                 let mut normalized: List<List<Pattern>> = []
                 for row in sub_patterns {
                     let mut padded = list_clone(row)
-                    while padded.len() < sfields.len() {
+                    while padded.len() < inst_fields.len() {
                         padded.push(wild)
                     }
                     normalized.push(padded)
                 }
                 let mut expanding = set_new()
                 expanding.insert(type_to_string(resolved))
-                let missing_fields = check_matrix(normalized, field_types, subst, expanding)
+                let missing_fields = check_matrix(env, normalized, field_types, subst, expanding)
                 match missing_fields {
                     some(mf) => {
                         let joined = join_strs(mf, ", ")
@@ -284,7 +359,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
                 let joined = join_strs(underscores, ", ")
                 return some("(${joined})")
             }
-            let missing = check_matrix(matrix, elements, subst, set_new())
+            let missing = check_matrix(env, matrix, elements, subst, set_new())
             match missing {
                 some(m) => {
                     let joined = join_strs(m, ", ")
@@ -299,7 +374,7 @@ fn check_patterns(patterns: List<Pattern>, ty: Type, subst: UnionFind) -> Str? {
 
 // === Maranget-style pattern matrix exhaustiveness ===
 
-fn finite_type_ctors(ty: Type) -> List<Ctor>? {
+fn finite_type_ctors(env: TypeEnv, ty: Type) -> List<Ctor>? {
     match ty {
         Type::BoolType => {
             let mut result: List<Ctor> = []
@@ -307,22 +382,26 @@ fn finite_type_ctors(ty: Type) -> List<Ctor>? {
             result.push(Ctor { name: "false", arity: 0, field_types: [], field_names: none, is_tuple: false })
             some(result)
         },
-        Type::EnumType { variants, .. } => {
+        Type::EnumType { name, type_params, variants } => {
+            // Re-derive variant payloads with this instantiation's type_params (A2 soundness).
+            let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
             let mut result: List<Ctor> = []
-            for v in variants {
+            for v in inst_variants {
                 result.push(Ctor { name: v.name, arity: v.fields.len(), field_types: v.fields, field_names: v.field_names, is_tuple: false })
             }
             some(result)
         },
-        Type::StructType { name, fields, .. } => {
+        Type::StructType { name, type_params, fields } => {
+            // Re-derive field types with this instantiation's type_params (A2 soundness).
+            let inst_fields = instantiate_struct_fields(env, name, type_params, fields)
             let mut field_types: List<Type> = []
             let mut field_names: List<Str> = []
-            for f in fields {
+            for f in inst_fields {
                 field_types.push(f.ty)
                 field_names.push(f.name)
             }
             let mut result: List<Ctor> = []
-            result.push(Ctor { name: name, arity: fields.len(), field_types: field_types, field_names: some(field_names), is_tuple: false })
+            result.push(Ctor { name: name, arity: inst_fields.len(), field_types: field_types, field_names: some(field_names), is_tuple: false })
             some(result)
         },
         Type::UnitType => {
@@ -474,7 +553,7 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
     }
 }
 
-fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFind, expanding: Set<Str>) -> List<Str>? {
+fn check_matrix(env: TypeEnv, rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFind, expanding: Set<Str>) -> List<Str>? {
     if col_types.len() == 0 {
         if rows.len() > 0 {
             return none
@@ -495,13 +574,13 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFi
         _ => "",
     }
     let is_reentrant = if type_key != "" { expanding.contains(type_key) } else { false }
-    let ctors = if is_reentrant { none } else { finite_type_ctors(first_type) }
+    let ctors = if is_reentrant { none } else { finite_type_ctors(env, first_type) }
 
     match ctors {
         some(ctor_list) => {
             let mut new_expanding = set_clone(expanding)
             if type_key != "" {
-                if type_is_recursive(first_type, type_key) {
+                if type_is_recursive(env, first_type, type_key) {
                     new_expanding.insert(type_key)
                 }
             }
@@ -516,7 +595,7 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFi
                 let mut new_types: List<Type> = []
                 new_types.extend(ctor.field_types)
                 new_types.extend(rest_types)
-                let sub = check_matrix(specialized, new_types, subst, new_expanding)
+                let sub = check_matrix(env, specialized, new_types, subst, new_expanding)
                 match sub {
                     some(sub_result) => {
                         let mut ctor_sub: List<Str> = []
@@ -576,7 +655,7 @@ fn check_matrix(rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFi
                     defaults.push(tail)
                 }
             }
-            let sub = check_matrix(defaults, rest_types, subst, expanding)
+            let sub = check_matrix(env, defaults, rest_types, subst, expanding)
             match sub {
                 some(s) => {
                     let mut result: List<Str> = []
