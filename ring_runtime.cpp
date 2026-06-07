@@ -1676,7 +1676,13 @@ extern "C" void* ring_delete_file(void* path) {
 extern "C" void* ring_list_clone(void* list) {
     auto* vec = (std::vector<void*>*)list;
     void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    new (data) std::vector<void*>(*vec);
+    auto* nv = new (data) std::vector<void*>(*vec);
+    // B-103: a clone must co-own its elements (deep RC). The shallow copy above
+    // shares element pointers with the source; under Perceus RC both lists would
+    // deep-drop the same elements -> over-free. dup each so the clone is an
+    // independent owner (latent double-free masked by never-drop / the
+    // conservative is_droppable_init Call=false gate before B-102/B-103).
+    for (void* el : *nv) ring_dup(el);
     return data;
 }
 
