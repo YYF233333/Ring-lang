@@ -1230,6 +1230,345 @@ function effect_row_to_string(row) {
   return List_join(parts, ", ");
 }
 
+function tail_intern_key(tail) {
+  __ring_match54: {
+    const __ring_m54 = tail;
+    if (__ring_m54._tag === "some") {
+      const id = __ring_m54._0;
+      return `|${Int_to_str(id)}`;
+      break __ring_match54;
+    }
+    if (__ring_m54._tag === "none") {
+      return "|n";
+      break __ring_match54;
+    }
+    __match_fail(__ring_m54);
+  }
+}
+
+function type_list_intern_key(ts) {
+  let parts = [];
+  let has_var = false;
+  const __ring_iter_3 = __List_Iterable.iter(ts);
+  while (true) {
+    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+    if (__ring_next_3._tag === "none") break;
+    const t = __ring_next_3._0;
+    {
+      const __ring_t = type_intern_key(t);
+      if (__ring_t._tag === "some") {
+        const k = __ring_t._0;
+        List_push(parts, k);
+      } else {
+        has_var = true;
+      }
+    }
+  }
+  if (has_var) {
+    return Option_none;
+  }
+  return Option_some(List_join(parts, ","));
+}
+
+function effect_intern_key(e) {
+  __ring_match55: {
+    const __ring_m55 = e;
+    if (__ring_m55._tag === "IoEffect") {
+      return Option_some("io");
+      break __ring_match55;
+    }
+    if (__ring_m55._tag === "MutEffect") {
+      const state_type = __ring_m55.state_type;
+      __ring_match56: {
+        const __ring_m56 = type_intern_key(state_type);
+        if (__ring_m56._tag === "some") {
+          const k = __ring_m56._0;
+          return Option_some(`mut(${k})`);
+          break __ring_match56;
+        }
+        if (__ring_m56._tag === "none") {
+          return Option_none;
+          break __ring_match56;
+        }
+        __match_fail(__ring_m56);
+      }
+      break __ring_match55;
+    }
+    if (__ring_m55._tag === "FailEffect") {
+      const error_type = __ring_m55.error_type;
+      __ring_match57: {
+        const __ring_m57 = type_intern_key(error_type);
+        if (__ring_m57._tag === "some") {
+          const k = __ring_m57._0;
+          return Option_some(`fail(${k})`);
+          break __ring_match57;
+        }
+        if (__ring_m57._tag === "none") {
+          return Option_none;
+          break __ring_match57;
+        }
+        __match_fail(__ring_m57);
+      }
+      break __ring_match55;
+    }
+    if (__ring_m55._tag === "CustomEffect") {
+      const name = __ring_m55.name; const type_args = __ring_m55.type_args;
+      __ring_match58: {
+        const __ring_m58 = type_list_intern_key(type_args);
+        if (__ring_m58._tag === "some") {
+          const k = __ring_m58._0;
+          return Option_some(`${name}(${k})`);
+          break __ring_match58;
+        }
+        if (__ring_m58._tag === "none") {
+          return Option_none;
+          break __ring_match58;
+        }
+        __match_fail(__ring_m58);
+      }
+      break __ring_match55;
+    }
+    __match_fail(__ring_m55);
+  }
+}
+
+function effect_list_intern_keys(es) {
+  let parts = [];
+  let has_var = false;
+  const __ring_iter_4 = __List_Iterable.iter(es);
+  while (true) {
+    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+    if (__ring_next_4._tag === "none") break;
+    const e = __ring_next_4._0;
+    {
+      const __ring_t = effect_intern_key(e);
+      if (__ring_t._tag === "some") {
+        const k = __ring_t._0;
+        List_push(parts, k);
+      } else {
+        has_var = true;
+      }
+    }
+  }
+  if (has_var) {
+    return Option_none;
+  }
+  return Option_some(parts);
+}
+
+function type_intern_key(t) {
+  __ring_match59: {
+    const __ring_m59 = t;
+    if (__ring_m59._tag === "IntType") {
+      return Option_some("I");
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "FloatType") {
+      return Option_some("F");
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "StrType") {
+      return Option_some("S");
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "BoolType") {
+      return Option_some("B");
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "UnitType") {
+      return Option_some("U");
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "NeverType") {
+      return Option_some("N");
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "AnyType") {
+      return Option_some("A");
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "ErrorType") {
+      return Option_some("E");
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "TypeVar") {
+      return Option_none;
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "FnType") {
+      const params = __ring_m59.params; const return_type = __ring_m59.return_type; const effects = __ring_m59.effects;
+      __ring_match60: {
+        const __ring_m60 = type_list_intern_key(params);
+        if (__ring_m60._tag === "some") {
+          const pk = __ring_m60._0;
+          __ring_match61: {
+            const __ring_m61 = type_intern_key(return_type);
+            if (__ring_m61._tag === "some") {
+              const rk = __ring_m61._0;
+              __ring_match62: {
+                const __ring_m62 = effect_list_intern_keys(effects.effects);
+                if (__ring_m62._tag === "some") {
+                  const ek = __ring_m62._0;
+                  return Option_some(`Fn(${pk})->${rk}/${List_join(ek, ",")}${tail_intern_key(effects.tail)}`);
+                  break __ring_match62;
+                }
+                if (__ring_m62._tag === "none") {
+                  return Option_none;
+                  break __ring_match62;
+                }
+                __match_fail(__ring_m62);
+              }
+              break __ring_match61;
+            }
+            if (__ring_m61._tag === "none") {
+              return Option_none;
+              break __ring_match61;
+            }
+            __match_fail(__ring_m61);
+          }
+          break __ring_match60;
+        }
+        if (__ring_m60._tag === "none") {
+          return Option_none;
+          break __ring_match60;
+        }
+        __match_fail(__ring_m60);
+      }
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "StructType") {
+      const name = __ring_m59.name; const type_params = __ring_m59.type_params;
+      __ring_match63: {
+        const __ring_m63 = type_list_intern_key(type_params);
+        if (__ring_m63._tag === "some") {
+          const k = __ring_m63._0;
+          return Option_some(`St:${name}<${k}>`);
+          break __ring_match63;
+        }
+        if (__ring_m63._tag === "none") {
+          return Option_none;
+          break __ring_match63;
+        }
+        __match_fail(__ring_m63);
+      }
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "EnumType") {
+      const name = __ring_m59.name; const type_params = __ring_m59.type_params;
+      __ring_match64: {
+        const __ring_m64 = type_list_intern_key(type_params);
+        if (__ring_m64._tag === "some") {
+          const k = __ring_m64._0;
+          return Option_some(`En:${name}<${k}>`);
+          break __ring_match64;
+        }
+        if (__ring_m64._tag === "none") {
+          return Option_none;
+          break __ring_match64;
+        }
+        __match_fail(__ring_m64);
+      }
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "GenericType") {
+      const base = __ring_m59.base; const args = __ring_m59.args;
+      __ring_match65: {
+        const __ring_m65 = type_intern_key(base);
+        if (__ring_m65._tag === "some") {
+          const bk = __ring_m65._0;
+          __ring_match66: {
+            const __ring_m66 = type_list_intern_key(args);
+            if (__ring_m66._tag === "some") {
+              const ak = __ring_m66._0;
+              return Option_some(`Ge:${bk}<${ak}>`);
+              break __ring_match66;
+            }
+            if (__ring_m66._tag === "none") {
+              return Option_none;
+              break __ring_match66;
+            }
+            __match_fail(__ring_m66);
+          }
+          break __ring_match65;
+        }
+        if (__ring_m65._tag === "none") {
+          return Option_none;
+          break __ring_match65;
+        }
+        __match_fail(__ring_m65);
+      }
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "RecordType") {
+      const fields = __ring_m59.fields; const tail = __ring_m59.tail;
+      let field_keys = [];
+      let has_var = false;
+      const __ring_iter_5 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+        if (__ring_next_5._tag === "none") break;
+        const f = __ring_next_5._0;
+        __ring_match67: {
+          const __ring_m67 = type_intern_key(f.ty);
+          if (__ring_m67._tag === "some") {
+            const k = __ring_m67._0;
+            List_push(field_keys, `${f.name}:${k}`);
+            break __ring_match67;
+          }
+          if (__ring_m67._tag === "none") {
+            has_var = true;
+            break __ring_match67;
+          }
+          __match_fail(__ring_m67);
+        }
+      }
+      if (has_var) {
+        return Option_none;
+      }
+      List_sort(field_keys);
+      return Option_some(`Re:{${List_join(field_keys, ",")}}${tail_intern_key(tail)}`);
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "EffectRowType") {
+      const effects = __ring_m59.effects; const tail = __ring_m59.tail;
+      __ring_match68: {
+        const __ring_m68 = effect_list_intern_keys(effects);
+        if (__ring_m68._tag === "some") {
+          const ek = __ring_m68._0;
+          let sorted_ek = list_clone(ek);
+          List_sort(sorted_ek);
+          return Option_some(`Er:<${List_join(sorted_ek, ",")}>${tail_intern_key(tail)}`);
+          break __ring_match68;
+        }
+        if (__ring_m68._tag === "none") {
+          return Option_none;
+          break __ring_match68;
+        }
+        __match_fail(__ring_m68);
+      }
+      break __ring_match59;
+    }
+    if (__ring_m59._tag === "TupleType") {
+      const elements = __ring_m59.elements;
+      __ring_match69: {
+        const __ring_m69 = type_list_intern_key(elements);
+        if (__ring_m69._tag === "some") {
+          const k = __ring_m69._0;
+          return Option_some(`Tu:(${k})`);
+          break __ring_match69;
+        }
+        if (__ring_m69._tag === "none") {
+          return Option_none;
+          break __ring_match69;
+        }
+        __match_fail(__ring_m69);
+      }
+      break __ring_match59;
+    }
+    __match_fail(__ring_m59);
+  }
+}
+
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
   switch (self._tag) {
@@ -1292,4 +1631,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, StructField, EnumVariant, RecordField, Type_IntType, Type_FloatType, Type_StrType, Type_BoolType, Type_UnitType, Type_NeverType, Type_AnyType, Type_TypeVar, Type_FnType, Type_StructType, Type_EnumType, Type_GenericType, Type_RecordType, Type_EffectRowType, Type_TupleType, Type_ErrorType, Effect_IoEffect, Effect_FailEffect, Effect_MutEffect, Effect_CustomEffect, EffectRow, RowMergeResult, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW, effect_kind_name, effects_match_kind, type_to_builtin_name, make_option_type, is_option_type, option_inner, make_list_type, is_list_type, list_element, make_map_type, is_map_type, make_set_type, is_set_type, effect_row, open_effect_row, row_contains, effects_same_kind, row_merge, effects_equal, types_equal, type_to_string, effect_to_string, effect_row_to_string };
+export { BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, StructField, EnumVariant, RecordField, Type_IntType, Type_FloatType, Type_StrType, Type_BoolType, Type_UnitType, Type_NeverType, Type_AnyType, Type_TypeVar, Type_FnType, Type_StructType, Type_EnumType, Type_GenericType, Type_RecordType, Type_EffectRowType, Type_TupleType, Type_ErrorType, Effect_IoEffect, Effect_FailEffect, Effect_MutEffect, Effect_CustomEffect, EffectRow, RowMergeResult, INT, FLOAT, STR, BOOL, UNIT, NEVER, ANY, EMPTY_ROW, effect_kind_name, effects_match_kind, type_to_builtin_name, make_option_type, is_option_type, option_inner, make_list_type, is_list_type, list_element, make_map_type, is_map_type, make_set_type, is_set_type, effect_row, open_effect_row, row_contains, effects_same_kind, row_merge, effects_equal, types_equal, type_to_string, effect_to_string, effect_row_to_string, type_intern_key };

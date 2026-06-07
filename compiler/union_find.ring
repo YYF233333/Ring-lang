@@ -8,14 +8,21 @@ use types::{Type}
 pub struct UnionFind {
     pub parent: Map<Int, Int>,
     pub rank: Map<Int, Int>,
-    pub types: Map<Int, Type>
+    pub types: Map<Int, Type>,
+    // B-102 Phase 2 / A2: hash-cons intern table. Maps canonical structural key
+    // (type_intern_key) -> shared Type pointer. Populated lazily by intern_type
+    // during apply_subst so that structurally equal Types collapse to one node,
+    // bounding the type set apply_subst rebuilds each call. Reference type, so
+    // inserts persist across apply_subst calls that share this UnionFind.
+    pub intern_table: Map<Str, Type>
 }
 
 pub fn new_union_find() -> UnionFind {
     UnionFind {
         parent: map_new(),
         rank: map_new(),
-        types: map_new()
+        types: map_new(),
+        intern_table: map_new()
     }
 }
 

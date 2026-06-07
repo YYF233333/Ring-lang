@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT}
+use types::{Type, Effect, EffectRow, StructField, EnumVariant, RecordField, INT, type_intern_key}
 use union_find::{UnionFind, uf_find, uf_lookup}
 use ast::{Span, EffectExpr, TypeParam}
 
@@ -498,6 +498,36 @@ pub fn apply_subst_row_map(subst: Map<Int, Type>, row: EffectRow) -> EffectRow {
 }
 
 // ============================================================
+// Type interning / hash-cons (B-102 Phase 2 / A2)
+//
+// Collapses structurally-equal Types to a single shared pointer. Each call to
+// apply_subst rebuilds composite Type spines from scratch; without interning the
+// same structural type is re-allocated millions of times. intern_type keys each
+// rebuilt composite by its canonical structural key (type_intern_key) and returns
+// the previously-built node when one exists.
+//
+// D1: types containing an unresolved Type::TypeVar yield a none key (apply_subst
+//     already chases all resolvable vars, so a residual TypeVar node is genuinely
+//     unresolved) -> such a type is returned as-is (the freshly built node),
+//     never cached.
+// D4: the intern table lives inside the UnionFind that apply_subst already
+//     threads, so no extra plumbing is needed. Map is a reference type, so the
+//     insert below persists across apply_subst calls sharing this UnionFind.
+// ============================================================
+pub fn intern_type(mut subst: UnionFind, t: Type) -> Type {
+    match type_intern_key(t) {
+        none => t,
+        some(k) => match subst.intern_table.get(k) {
+            some(existing) => existing,
+            none => {
+                subst.intern_table.insert(k, t)
+                t
+            }
+        }
+    }
+}
+
+// ============================================================
 // Union-Find substitution: apply UnionFind-based substitution to a type.
 // This is the primary apply_subst used by the type inference engine.
 // Uses uf_find for O(alpha(n)) path-compressed type variable resolution.
@@ -521,11 +551,17 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
             }
         },
         Type::FnType { params, return_type, effects } =>
-            Type::FnType {
+            intern_type(subst, Type::FnType {
                 params: params.map(fn(p) { apply_subst(subst, p) }),
                 return_type: apply_subst(subst, return_type),
                 effects: apply_subst_row(subst, effects)
-            },
+            }),
+        // NOTE: StructType/EnumType are deliberately NOT interned (B-102 Phase 2 / A2).
+        // Their nominal-shallow intern key (name + type_params only) is unsound here:
+        // apply_subst does not substitute into variants/fields, but exhaustive.ring
+        // reads variants structurally — interning to any one cached node would leak a
+        // stale generic payload across distinct instantiations. So return a freshly
+        // built node directly. The other 5 composite arms remain interned.
         Type::StructType { name, type_params, fields } =>
             Type::StructType {
                 name: name,
@@ -539,15 +575,15 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
                 variants: variants
             },
         Type::GenericType { base, args } =>
-            Type::GenericType {
+            intern_type(subst, Type::GenericType {
                 base: apply_subst(subst, base),
                 args: args.map(fn(a) { apply_subst(subst, a) })
-            },
+            }),
         Type::RecordType { fields, tail, tail_name } => {
             let mapped_fields = fields.map(fn(f) {
                 RecordField { name: f.name, ty: apply_subst(subst, f.ty) }
             })
-            match tail {
+            let record_result = match tail {
                 some(t_id) => {
                     let root_id = uf_find(subst, t_id)
                     match uf_lookup(subst, root_id) {
@@ -574,13 +610,14 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
                 },
                 none => Type::RecordType { fields: mapped_fields, tail: none, tail_name: tail_name }
             }
+            intern_type(subst, record_result)
         },
         Type::EffectRowType { effects, tail } => {
             let row = apply_subst_row(subst, EffectRow { effects: effects, tail: tail })
-            Type::EffectRowType { effects: row.effects, tail: row.tail }
+            intern_type(subst, Type::EffectRowType { effects: row.effects, tail: row.tail })
         },
         Type::TupleType { elements } =>
-            Type::TupleType { elements: elements.map(fn(e) { apply_subst(subst, e) }) },
+            intern_type(subst, Type::TupleType { elements: elements.map(fn(e) { apply_subst(subst, e) }) }),
         Type::ErrorType => t
     }
 }

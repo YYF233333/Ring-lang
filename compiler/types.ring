@@ -435,3 +435,165 @@ pub fn effect_row_to_string(row: EffectRow) -> Str {
     }
     parts.join(", ")
 }
+
+// ============================================================
+// Type intern key (B-102 Phase 2 / A2 hash-cons)
+//
+// Produces a canonical Str key for structural deduplication of Type values.
+// Returns none if the type contains any unresolved Type::TypeVar node (D1):
+//   such types must NOT be interned (sharing a snapshot containing a free var
+//   would freeze a structure that apply_subst will produce differently once the
+//   var resolves).
+//
+// The key MUST be injective with respect to types_equal: two types share a key
+// iff types_equal considers them equal. Each arm below mirrors the corresponding
+// types_equal arm exactly:
+//   - scalars: fixed tag
+//   - StructType/EnumType: nominal-shallow (name + type_params; fields/variants
+//     ignored, matching the `..` in types_equal:319-328)
+//   - FnType: params + return + effects (ORDERED — types_equal uses
+//     effects_list_equal which is position-wise) + tail (exact id)
+//   - GenericType/TupleType: ordered children
+//   - RecordType: fields unordered (sorted by name) + tail (exact id)
+//   - EffectRowType: effects unordered (sorted) + tail (exact id)
+// Open-row tails (some(id)) are encoded by exact id, matching optional_ids_equal;
+// they do not count as "unresolved TypeVar nodes" and do not block interning.
+//
+// Do NOT use type_to_string for keys: it is lossy / non-injective (e.g. it
+// renders open record/effect tails the same way regardless of distinct ids in
+// some paths, and collapses Option specially).
+// ============================================================
+
+fn tail_intern_key(tail: Int?) -> Str {
+    match tail {
+        some(id) => "|${id.to_str()}",
+        none => "|n"
+    }
+}
+
+// Map a list of types to a single key fragment. Returns none if ANY element
+// contains an unresolved TypeVar (none propagates upward).
+fn type_list_intern_key(ts: List<Type>) -> Str? {
+    let mut parts: List<Str> = []
+    let mut has_var = false
+    for t in ts {
+        if let some(k) = type_intern_key(t) {
+            parts.push(k)
+        } else {
+            has_var = true
+        }
+    }
+    if has_var { return none }
+    some(parts.join(","))
+}
+
+fn effect_intern_key(e: Effect) -> Str? {
+    match e {
+        Effect::IoEffect => some("io"),
+        Effect::MutEffect { state_type } => match type_intern_key(state_type) {
+            some(k) => some("mut(${k})"),
+            none => none
+        },
+        Effect::FailEffect { error_type } => match type_intern_key(error_type) {
+            some(k) => some("fail(${k})"),
+            none => none
+        },
+        Effect::CustomEffect { name, type_args } => match type_list_intern_key(type_args) {
+            some(k) => some("${name}(${k})"),
+            none => none
+        }
+    }
+}
+
+// Map a list of effects to key fragments. Returns none if ANY contains a var.
+fn effect_list_intern_keys(es: List<Effect>) -> List<Str>? {
+    let mut parts: List<Str> = []
+    let mut has_var = false
+    for e in es {
+        if let some(k) = effect_intern_key(e) {
+            parts.push(k)
+        } else {
+            has_var = true
+        }
+    }
+    if has_var { return none }
+    some(parts)
+}
+
+pub fn type_intern_key(t: Type) -> Str? {
+    match t {
+        Type::IntType => some("I"),
+        Type::FloatType => some("F"),
+        Type::StrType => some("S"),
+        Type::BoolType => some("B"),
+        Type::UnitType => some("U"),
+        Type::NeverType => some("N"),
+        Type::AnyType => some("A"),
+        Type::ErrorType => some("E"),
+        // D1: any unresolved type variable blocks interning of the enclosing type.
+        Type::TypeVar { .. } => none,
+        // FnType effects are compared ORDERED by types_equal (effects_list_equal),
+        // so the key preserves order (no sort). Tail compared by exact id.
+        Type::FnType { params, return_type, effects } => {
+            match type_list_intern_key(params) {
+                some(pk) => match type_intern_key(return_type) {
+                    some(rk) => match effect_list_intern_keys(effects.effects) {
+                        some(ek) => some("Fn(${pk})->${rk}/${ek.join(",")}${tail_intern_key(effects.tail)}"),
+                        none => none
+                    },
+                    none => none
+                },
+                none => none
+            }
+        },
+        // Struct/Enum are NOT interned by apply_subst (B-102 Phase 2 / A2): this
+        // nominal-shallow key (name + type_params, fields/variants ignored like
+        // types_equal `..`) is unsound because exhaustive.ring reads variants
+        // structurally while apply_subst leaves them un-substituted — interning would
+        // leak a stale generic payload across instantiations. These arms are kept for
+        // key totality (and any future structural-key user) but are dead on the
+        // current intern path.
+        Type::StructType { name, type_params, .. } => match type_list_intern_key(type_params) {
+            some(k) => some("St:${name}<${k}>"),
+            none => none
+        },
+        Type::EnumType { name, type_params, .. } => match type_list_intern_key(type_params) {
+            some(k) => some("En:${name}<${k}>"),
+            none => none
+        },
+        Type::GenericType { base, args } => match type_intern_key(base) {
+            some(bk) => match type_list_intern_key(args) {
+                some(ak) => some("Ge:${bk}<${ak}>"),
+                none => none
+            },
+            none => none
+        },
+        // Record fields are unordered (row semantics) -> sort field key fragments.
+        Type::RecordType { fields, tail, .. } => {
+            let mut field_keys: List<Str> = []
+            let mut has_var = false
+            for f in fields {
+                match type_intern_key(f.ty) {
+                    some(k) => field_keys.push("${f.name}:${k}"),
+                    none => { has_var = true }
+                }
+            }
+            if has_var { return none }
+            field_keys.sort()
+            some("Re:{${field_keys.join(",")}}${tail_intern_key(tail)}")
+        },
+        // EffectRowType effects are unordered (types_equal uses .all/.any) -> sort.
+        Type::EffectRowType { effects, tail } => match effect_list_intern_keys(effects) {
+            some(ek) => {
+                let mut sorted_ek = list_clone(ek)
+                sorted_ek.sort()
+                some("Er:<${sorted_ek.join(",")}>${tail_intern_key(tail)}")
+            },
+            none => none
+        },
+        Type::TupleType { elements } => match type_list_intern_key(elements) {
+            some(k) => some("Tu:(${k})"),
+            none => none
+        }
+    }
+}
