@@ -1393,6 +1393,8 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 
 **⚠️ 重设计 = lookup-before-build（2026-06-07，wrap-after-build 内存门 FAIL）**：上述 5-arm intern 实现成 wrap-after-build（`intern_type(subst, Type::FnType{...})` 父节点先构造再查表）。**A1 never-drop 下命中时丢弃的副本永不释放 → intern 零内存收益**（native 自编译 5-arm 与 7-arm 诊断版都 20-21s 线性爬到 15GB，曲线重合）。intern 只去重可达性（O(1) 相等），不去重分配——2.51 亿次 apply_subst 照旧全分配全泄漏。**修法（用户拍板 fix-forward）= lookup-before-build hash-cons**：apply_subst 各 arm 先 apply_subst 子节点 → 从子节点算 key → 查表 → 命中返缓存（零分配）/ miss 才构造父 + 插表。且**必须 sound 地 intern Struct/Enum**（洪流主体，排除即零收益）——健全性洞（apply_subst 不代换 variants、exhaustive.ring 结构化读）拟用 inst_map 按需代换解耦（复用「字段实例化走局部 inst_map」pattern）。详见 backlog B-102「A2 重设计」节。
 
+**⚠️⚠️ 最终转向 = R-clean pure Perceus RC（2026-06-07，lookup-before-build 也 FAIL G-a，用户拍板放弃 never-drop+intern 全套）= 现行机制**：lookup-before-build 命中虽零分配，但 **A1 never-drop 漏掉的非-interned 类型（含-var transient + 非-apply_subst 构造的 Type）无界泄漏**——intern 只去重可达性、不回收，native 自编译仍 20-21s 线性爬 15GB。**根因 = never-drop 本身不回收内存**。完整解 = **撤销 A1 never-drop，让 Type-DAG 正确参与 Perceus RC**：删 perceus/codegen/runtime 的 Type-DAG 排除 hook → Type 回到 clone-all-escape（逃逸 Clone + 深递归 `drop_T` + scope-end drop）；**补全 dup-on-share**（`apply_subst` 的 fields/variants 透传 + `make_option_type` 等 intra-node 共享须 `HExpr::Clone`，与深 drop 对称——正是 B-098 当年没盖全 → over-free 的命门，ASan 驱动逐点验）；**撤掉 A2 intern**（纯 RC 靠 working-set bound 内存，不需 intern；intern 留作后续纯性能优化）。Type-DAG 是真 DAG（递归 enum 按名引用不嵌入 → 深 drop 无限递归风险无）。peak = 存活集（瞬态随 drop 回收 + HIR 按程序规模有界），非累积 → 预期 << 25.9GB。这是 Perceus-native 答案（Type 当初被 A1 错误特例排除）。详见 backlog B-102 Phase 2 (rev)。
+
 ---
 
 ## 8. 并发模型 ⚠️ 设计愿景，尚未实现
