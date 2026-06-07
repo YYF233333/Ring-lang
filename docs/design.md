@@ -1397,6 +1397,8 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 
 **R-clean 正确性 DONE + G-a 经 return-mode 推断（2026-06-07，git `27fe62d`）**：撤 A1 hook + 撤 A2 intern + Type 回 clone-all-escape 已落地——**dup-on-share 由 clone-all-escape 自动盖全**（apply_subst 透传 + intra-node 共享走字段 escape→`HExpr::Clone`，无需手写），native real_program ×3 ASan-clean。**但 G-a 未自动达成**：`is_droppable_init` 通用 `Call` arm 保守不 drop → `let x=call()`（含 apply_subst）结果瞬态不回收；激进放开 = UAF（borrow-返回 call 如 `ring_unbox_int` 结果被提前 drop）。**根因 = 缺函数 return-mode（owned vs borrowed）知识**——贯穿 B-098/B-101/B-102 的「fresh vs alias」根问题。**最终解（用户拍板）= 完整 return-mode 借用推断（B-103）**：每函数推断返回 owned/borrowed-of-param（builtin 手工标 + Ring 函数调用图 fixpoint，参考 Koka borrowing），`is_droppable_init` 据此正确回收 owned-call 结果、不误 drop borrow。G-a 现 gate 在 B-103。
 
+**G-a 归因终订 + 升里程碑（2026-06-07，监督 native 自编译 + alloc/free 计数器实测）**：B-103 后自编译仍线性爬 15GB；`live=allocs-frees` 实测 **88% 从不释放**（主体装箱 INT/BOOL/Option/Str）。**归因终订：内存墙 = incomplete Perceus RC（中间临时从不 drop）+ 标量 uniform-boxing，非 Type-DAG over-free**（B-098/B-101/B-102/B-103 修的 over-free 是真崩溃 bug 但非内存墙主因）。**真解 = precise Perceus RC（drop owned 临时）= B-104 里程碑**：ANF/materialize 已安全覆盖易类（消费位+字面量，88%→~50%，`6ec870c`/`f16ffe0`，含一串 clone/over-free 隐崩修复）；难类（arg/scrutinee 临时需 return-mode 分析、control-flow-as-init 需 branch-value 分析、receiver/And-Or）需多波核心工程，开专门 session。详见 backlog B-104。
+
 ---
 
 ## 8. 并发模型 ⚠️ 设计愿景，尚未实现
