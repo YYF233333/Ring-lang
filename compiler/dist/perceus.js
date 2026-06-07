@@ -416,6 +416,22 @@ function anf_should_materialize(expr) {
       return true;
       break __ring_match7;
     }
+    if (__ring_m7._tag === "IntLit") {
+      return true;
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "FloatLit") {
+      return true;
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "StrLit") {
+      return true;
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "BoolLit") {
+      return true;
+      break __ring_match7;
+    }
     return false;
     break __ring_match7;
   }
@@ -437,6 +453,10 @@ function anf_operand(expr, hoists, counter) {
   } else {
     return normalized;
   }
+}
+
+function anf_arg(expr, hoists, counter) {
+  return anf_expr(expr, hoists, counter);
 }
 
 function anf_block_expr(body, counter) {
@@ -712,7 +732,7 @@ function anf_expr(expr, hoists, counter) {
         const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
         if (__ring_next_8._tag === "none") break;
         const a = __ring_next_8._0;
-        List_push(new_args, anf_operand(a, hoists, counter));
+        List_push(new_args, anf_arg(a, hoists, counter));
       }
       return hir$HExpr_Call(new_callee, new_args, type_args, resolved_dicts, dict_dispatch, ty, effects, span);
       break __ring_match13;
@@ -842,7 +862,7 @@ function anf_expr(expr, hoists, counter) {
     }
     if (__ring_m13._tag === "MatchExpr") {
       const scrutinee = __ring_m13.scrutinee; const arms = __ring_m13.arms; const ty = __ring_m13.ty; const effects = __ring_m13.effects; const span = __ring_m13.span;
-      const new_scrutinee = anf_operand(scrutinee, hoists, counter);
+      const new_scrutinee = anf_arg(scrutinee, hoists, counter);
       let new_arms = [];
       const __ring_iter_14 = __List_Iterable.iter(arms);
       while (true) {
@@ -904,7 +924,7 @@ function anf_expr(expr, hoists, counter) {
         const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
         if (__ring_next_17._tag === "none") break;
         const a = __ring_next_17._0;
-        List_push(new_args, anf_operand(a, hoists, counter));
+        List_push(new_args, anf_arg(a, hoists, counter));
       }
       return hir$HExpr_EffectOp(effect_name, op_name, new_args, ty, effects, span);
       break __ring_match13;

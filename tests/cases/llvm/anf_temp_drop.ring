@@ -59,6 +59,27 @@ fn label(f: Flagged) -> Str {
     "${f.name}=${f.on}"
 }
 
+// B-104 task-1: a `&&` / `||` whose RHS is a bare LITERAL must NOT materialise the
+// literal (it would become the phi-result box on the short-circuit-taken edge and be
+// double-freed).  The RHS top expression is normalised by anf_cond_in_own_scope →
+// anf_expr (not anf_operand), so a bare literal stays INLINE — these must round-trip.
+fn lit_short_circuit(p: Bool) -> Bool {
+    let x = p && true       // RHS literal — stays inline, phi yields it verbatim
+    let y = p || false      // RHS literal — stays inline
+    x && y
+}
+
+// B-104 task-1 REGRESSION (list_fold heap corruption): a callee that returns an
+// ARGUMENT verbatim (fold over an empty list returns `init` unchanged) must not have
+// its literal/fresh-owned arg materialised+dropped — the result binding aliases the
+// same box → double-free.  Args are recurse-only (anf_arg), never materialised.
+fn fold_init_passthrough() -> Int {
+    let empty: List<Int> = []
+    // `99` is a literal ARG; fold returns it verbatim (empty list).  z aliases it.
+    let z = empty.fold(99, fn(acc, x) { acc + x })
+    z
+}
+
 fn main() {
     let items = [
         Flagged { name: "alpha", on: true },
@@ -79,4 +100,17 @@ fn main() {
     let a = items[0].on && items[2].on
     let b = items[1].on || items[0].on
     print("a=${a} b=${b}")                          // a=true b=true
+
+    // `&&` / `||` with a bare LITERAL RHS (must not materialise the literal).
+    print("sc=${lit_short_circuit(true)}")          // sc=true
+
+    // Callee returning an arg verbatim (fold-init passthrough) — must not double-free.
+    print("fip=${fold_init_passthrough()}")         // fip=99
+
+    // Literal args in a plain call position (borrow-passed, recurse-only).
+    print("max=${nums_max(3, 9)}")                  // max=9
+}
+
+fn nums_max(a: Int, b: Int) -> Int {
+    if a > b { a } else { b }
 }

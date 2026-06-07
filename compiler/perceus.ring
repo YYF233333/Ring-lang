@@ -201,9 +201,36 @@ fn anf_should_materialize(expr: HExpr) -> Bool {
         HExpr::RangeExpr { .. } => true,
         HExpr::StringInterp { .. } => true,
         HExpr::Lambda { .. } => true,
-        // NEVER materialise: Ident / FieldAccess / IndexExpr (borrows), literals
-        // (no heap), control-flow (Block/If/Match — handled structurally),
-        // EffectOp / HandleExpr / TryCatch / Clone.
+        // B-104 task-1: scalar literals are NOT free — uniform-BOXED (B-080 unboxing
+        // not done), so every IntLit / StrLit / BoolLit / FloatLit is a FRESH heap box
+        // (gen_int_lit → box_int, gen_str_lit → ring_str_new, etc.).  A literal in an
+        // operand position (`f(5)`, `code: E0301` as arg, `acc + 1`'s `1`, an interp
+        // piece) is borrowed by the consumer and never dropped → leak (the residual
+        // tid=0 INT / tid=3 STR / tid=2 BOOL bulk).  Materialise + scope-end-drop them.
+        //
+        // ⚠️ &&-RHS PHI-ALIAS SAFETY (same trap as And/Or, parse_param is_mutable UAF):
+        // gen_and/gen_or yield the RHS operand box VERBATIM on the short-circuit-taken
+        // edge.  If a materialised literal box became that phi result, scope-dropping
+        // the __anf binding AND the && result would double-free.  This is STRUCTURALLY
+        // prevented WITHOUT a special case here: a literal only reaches
+        // anf_should_materialize via anf_operand, but the &&/|| RHS TOP expression is
+        // normalised by anf_cond_in_own_scope → anf_expr (NOT anf_operand), and a bare
+        // literal passes through anf_expr unchanged with zero hoists → it stays INLINE,
+        // never materialised (`a && true` remains `a && true`).  Likewise if/match/block
+        // branch TAILS go through anf_tail_value → anf_expr (no top-level materialise),
+        // so a literal that becomes a branch phi result is never bound either.  The only
+        // materialisation site is a genuine eager operand (call arg / arith operand /
+        // condition / interp piece), whose box is consumed by the operation, not aliased
+        // back out as the enclosing expression's value.  R5 escape (a materialised
+        // literal that later escapes, e.g. `let x = f(5)` where 5 is the only arg path)
+        // is handled by clone-all-escape exactly as for any other fresh-owned binding.
+        HExpr::IntLit { .. } => true,
+        HExpr::FloatLit { .. } => true,
+        HExpr::StrLit { .. } => true,
+        HExpr::BoolLit { .. } => true,
+        // NEVER materialise: Ident / FieldAccess / IndexExpr (borrows), control-flow
+        // (Block/If/Match — handled structurally), EffectOp / HandleExpr / TryCatch /
+        // Clone.
         _ => false,
     }
 }
@@ -222,9 +249,20 @@ fn anf_materialize(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>)
         dict_closure_dicts: none, ty: t, effects: e, span: s }
 }
 
-// Normalise a sub-expression that sits in a HOISTABLE operand position (call arg,
-// arith/compare operand, condition, interpolation piece, container/ctor element):
-// recurse into it, then materialise it if it is a fresh-owned compound (R1/R4).
+// Normalise a sub-expression that sits in a CONSUMING operand position — one where
+// the value is read/unboxed and the operation produces a FRESH result that CANNOT
+// alias the operand (arith/compare BinOp operand, UnaryOp operand, if/while
+// condition, index expression, interpolation piece).  Here materialise+scope-drop
+// is SOUND: the fresh-owned box is consumed by the op (box_int/box_bool/unbox/
+// stringify) and never aliased back out as the enclosing expression's value, so the
+// caller's scope-end Drop is balanced.  Recurse, then materialise if fresh-owned
+// (R1/R4).
+//
+// ⚠️ NOT for CALL / EFFECTOP arguments or a MATCH SCRUTINEE — see anf_arg.  Those
+// positions can ALIAS the operand into the result (a callee that returns an arg
+// verbatim, e.g. `list.fold(init, …)` returns `init` unchanged on an empty list →
+// the result box IS the arg box; a match arm that returns the scrutinee), so
+// materialising+dropping the arg double-frees the box the result binding also owns.
 fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
     let normalized = anf_expr(expr, hoists, counter)
     if anf_should_materialize(normalized) {
@@ -232,6 +270,25 @@ fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> 
     } else {
         normalized
     }
+}
+
+// Normalise a sub-expression in an ARGUMENT / SCRUTINEE position: recurse into its
+// own nested CONSUMING operands (which still hoist + materialise normally), but
+// NEVER materialise the top-level expression itself.  Rationale (B-104 task-1
+// finding, list_fold.ring heap-corruption regression): a call argument is passed by
+// BORROW (rc_expr value position — the callee does not drop it), and a callee may
+// alias an argument into its RETURN value without a dup:
+//   * `list.fold(init, f)` / `Option.unwrap_or(default)` / min/max-style helpers
+//     return an ARGUMENT verbatim on some path → the result box IS the arg box;
+//   * a `match scrut { … => scrut }` arm returns the scrutinee.
+// If the arg/scrutinee were a materialised `let __anf = <fresh>`, BOTH __anf and the
+// result's binding would scope-end-drop the same box → double-free (heap
+// corruption).  Safely materialising here requires callee RETURN-MODE analysis
+// (does the callee return an argument? is the result owned or an arg-alias?), which
+// is out of scope for this pass — recorded as residual leak in the B-104 report,
+// candidate for a future return-mode wave.  Crash-free leak > unsound drop.
+fn anf_arg(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HExpr {
+    anf_expr(expr, hoists, counter)
 }
 
 // A Block (or non-block single expr) used as a function/branch/loop body or value.
@@ -484,10 +541,16 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HEx
             // Callee is a borrow read (FieldAccess receiver / Ident) — normalise its
             // subexprs but it is not itself a materialisable value.
             let new_callee = anf_callee(callee, hoists, counter)
-            // Args are operands, evaluated left→right → materialise each fresh-owned
-            // arg (R1/R4).  borrow-returning args are NOT materialised (R1).
+            // Args are BORROW-passed (callee does not drop them).  A callee may alias
+            // an arg into its return value WITHOUT a dup (`list.fold(init, …)` returns
+            // `init` on an empty list; `Option.unwrap_or(default)` returns `default`),
+            // so a materialised+dropped fresh-owned arg would double-free the box the
+            // result binding also owns (list_fold.ring heap corruption).  Recurse into
+            // each arg's own nested consuming operands, but DO NOT materialise the
+            // top-level arg — see anf_arg.  (Residual arg-position leak documented in
+            // the B-104 report; needs return-mode analysis to reclaim safely.)
             let mut new_args: List<HExpr> = []
-            for a in args { new_args.push(anf_operand(a, hoists, counter)) }
+            for a in args { new_args.push(anf_arg(a, hoists, counter)) }
             HExpr::Call { callee: new_callee, args: new_args, type_args: type_args,
                 resolved_dicts: resolved_dicts, dict_dispatch: dict_dispatch,
                 ty: ty, effects: effects, span: span }
@@ -593,9 +656,13 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HEx
         },
 
         HExpr::MatchExpr { scrutinee, arms, ty, effects, span } => {
-            // Scrutinee is evaluated once → hoists into the enclosing list.  Arm
-            // bodies + guards are their own scopes (R2).
-            let new_scrutinee = anf_operand(scrutinee, hoists, counter)
+            // Scrutinee is evaluated once → its own nested operands hoist into the
+            // enclosing list.  The scrutinee itself is NOT materialised: an arm pattern
+            // PROJECTS borrows of it, and an arm body may RETURN it (`_ => scrut`) or a
+            // projected binding, so a materialised+dropped scrutinee would double-free a
+            // box the result/binding aliases — same hazard as a call arg (anf_arg).
+            // Arm bodies + guards are their own scopes (R2).
+            let new_scrutinee = anf_arg(scrutinee, hoists, counter)
             let mut new_arms: List<HMatchArm> = []
             for arm in arms {
                 let new_guard = match arm.guard {
@@ -642,9 +709,12 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>) -> HEx
         },
 
         HExpr::EffectOp { effect_name, op_name, args, ty, effects, span } => {
-            // Effect-op args behave like call args — operands; materialise fresh.
+            // Effect-op args behave like call args: BORROW-passed, and a handler may
+            // resume with / return an arg verbatim → same arg-aliasing hazard as
+            // anf_arg.  Recurse into nested operands but do NOT materialise the
+            // top-level arg.  (Residual leak; needs return-mode analysis.)
             let mut new_args: List<HExpr> = []
-            for a in args { new_args.push(anf_operand(a, hoists, counter)) }
+            for a in args { new_args.push(anf_arg(a, hoists, counter)) }
             HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: new_args,
                 ty: ty, effects: effects, span: span }
         },
