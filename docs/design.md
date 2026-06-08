@@ -1335,7 +1335,7 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 | **L1 用户面** | `fn(move T)` 语法、lv2 标注、fmt 策略、pub 规则 | 文档化借用语义（不改编译行为）| B-068（§7.2–7.8，deferred）|
 | **L2 Drop/RAII** | 用户 `impl Drop`、全路径 RAII、fail/catch 改 drop-aware unwind、`Weak<T>` | 资源安全 + 循环引用 | B-002 |
 | **L3 Reuse (FBIP)** | `rc==1` 时就地改写，drop-reuse 配对、reuse specialization、COW | 性能核爆（函数式零拷贝）| B-079 |
-| **L4 Unboxing** | 标量进寄存器不上堆 | 减 alloc + RC 流量 | B-080 |
+| **L4 标量标记指针** | 标量低位 tag 编码进字，所有位置不进堆（局部/临时/字段/容器/Option/泛型/dict 槽）；RC op `if(w&1)return` 跳过标量 | **G-a 内存墙真解**（box-at-boundary 实测证伪，边界 box 消不掉）+ 减 alloc/RC 流量 | B-080 |
 
 **关键性质（2026-06-04 订正，#134 证伪原断言）**：原设计假设「L0 owned-everywhere 单独即可解锁全自举，无硬前置」——**错误**。owned-everywhere 对「循环内条件 move」（如 `register_impl_method` 的 `self_type` 在 for 循环里被条件 `push`）是 **double-free（崩溃，非泄漏）**：branch-balancing 给未消费分支强插 `drop`，单值多次 free；Perceus 三套循环机制（pre-loop single-dup / 闭包 per-iteration seeding / branch-balancing）均不覆盖此缝。逐点 always-own sweep 修了 7 处推进 2400×（chk 144→347K）后仍残留同类崩点，本质 = 每个循环/条件 move 需深层 Perceus 手术、站点未知。**结论**：借用推断引擎（L1 的 B-098）被提前到 native-working **之前**——borrow-default 不要求每路径消费 → 未消费分支不再插 spurious drop，从根上消除整类崩溃。L1 用户面（B-068）+ L2 仍是叠加层。
 
@@ -1646,7 +1646,7 @@ Bootstrap 阶段（编译器跑在 JS/V8 上）：
 
 **内存管理**：LLVM 后端初期不回收（malloc only），直接过渡到 Perceus RC（B-012），无中间 GC 方案。编译器是短命进程，不回收不影响正确性。
 
-**值表示**：Uniform boxing——所有 Ring 值在 LLVM 层面统一为 `ptr`（opaque pointer，含 Int/Float/Bool）。极简 codegen，容器天然类型擦除，闭包捕获统一，递归类型自然工作。性能不是 bootstrap 阶段的目标。Perceus RC 阶段再引入 unboxing 优化。
+**值表示**：Uniform boxing——所有 Ring 值在 LLVM 层面统一为 `ptr`（opaque pointer，含 Int/Float/Bool）。极简 codegen，容器天然类型擦除，闭包捕获统一，递归类型自然工作。性能不是 bootstrap 阶段的目标。**标量表示演进（B-080，2026-06-08 拍板标记指针）**：bootstrap 后 Int/Bool 改 **低位 tag 编码进指针大小的字**（`int=(n<<1)|1`，真指针 8 对齐低位 0），标量在任何位置都不进堆——uniform word 表示完全保留，RC op `if(w&1)return` 跳过标量。这是 G-a 内存墙真解（OCaml/V8 标准做法）；原 box-at-boundary unboxing 实测证伪（多态边界 box 消不掉）。Float 暂留 box。
 
 **Runtime**：`ring_runtime.cpp`（~300 行），用 C++ STL 实现核心数据结构，`extern "C"` 暴露给 Ring：
 - `List<T>` → `std::vector<void*>`
@@ -2121,6 +2121,8 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | 泛型 Map key（2026-06-07，B-107，P2）| 加 `Hash` trait + derive，runtime Map key 改 void* 经 Eq/Hash dict 派发（复用 `ring_get_builtin_dict`）| 类型层 `Map<K,V>` 全泛型但 runtime 只兑现 Str key（两后端，LLVM 具体化）= 类型系统说谎；bootstrap 编译器全 `Map<Str,..>` 故未暴露。镜像 Eq/Ord/Clone derive 机制；与 B-080 unboxing 协同 |
 | LLVM 增量编译 deferred（2026-06-07，B-105）| 维持单 Module/单 .o；增量（每 .ring→.o）deferred 至 native 成主工具链（B-099 后）+ 编译时间成实测痛点 | 当初为省跨模块符号解析；不阻塞 B-089/099/100。真难点 = 跨模块单态化（泛型实例 emit 何处，Rust/C++ 模板问题），非 link，具体方案真做时再 Discussion |
 | 低层内存原语 = design-probe 前置（2026-06-07，B-106）| RIIR（runtime C++ STL→纯 Ring）立 design-probe 而非实现项：先决「Ring 是否/以何形式提供低层内存原语」| 纯 Ring 重写 vector/map/string 需裸内存操作，与哲学「不做裸指针/manual malloc」冲突；张力不解 RIIR 无从落地。候选：value types / region effect / 受控 unsafe / 维持 C FFI 永久退缩前线 |
+| native on-par 统一规划 = Level 1（2026-06-08）| 终点 = native 前端+JS 后端与 node 版对等（三门走 js 路径），**B-099（自产 .o / Node 消除 / JS 归档）= Level 2，本轮 out-of-scope**。剩余工作收编为 P0 诊断 → P1 标记指针（B-080）→ P2 三门（B-089），绕掉 B-104 后续碎波 + B-080 box-at-boundary 拆分 | 用户拍板「绕中间 milestone 直达 on-par」；碎波可绕但依赖序+验证关卡（每改一类位置 llvm_diff+ASan）不可绕，否则大改裸奔全崩无从二分 |
+| 标量表示 = 标记指针（2026-06-08，B-080 重定义）| Int/Bool 低位 tag，所有位置不进堆；取代 box-at-boundary/inline-A1。Float 暂留 box | box-at-boundary 工作树实测证伪：inline 标量字段后 `a1d @402M` INT=63.3M≈W4 基线，字段 box 拆了 INT 没降→残留 INT 在多态边界（List<Int>/Option<Int>/泛型/dict 槽），uniform void* 必须 box，RC 波/inline 都消不掉；精确-RC 四波回收非标量临时后 INT 纹丝不动。标记指针让标量哪都不进堆 = 唯一结构性解，patch treadmill 终结 |
 
 ### 幽灵功能（已解析但无语义效果）
 
