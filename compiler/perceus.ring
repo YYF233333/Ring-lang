@@ -1373,6 +1373,53 @@ fn block_diverges(stmts: List<HStmt>, tail: HExpr?) -> Bool {
     }
 }
 
+// B-104 W4 — scalar mut-var reassignment: classify whether an Assign target is a
+// plain (non-auto-boxed) mut variable holding a SCALAR (Int/Bool/Float).  Such a
+// reassignment leaks the old boxed scalar today (L0/L1 convention: the old value is
+// overwritten and never dropped — the diagnosed INT① mut-counter leak, `i = i + 1`).
+//
+// Dropping the old box on reassignment is SOUND only for scalars: they have value
+// semantics with NO interior aliasing, and at the Assign statement no transient
+// borrow of the variable is live (scalar borrows do not span statements; every
+// cross-statement holder dup'd the box via clone-all-escape's escape→Clone).  So the
+// old box is either rc=1 (freed — the leak we reclaim) or rc>1 (decremented, sharers
+// stay valid).  ring_box_int allocates fresh (no interning) and INT/BOOL/FLOAT are
+// not never-drop, so the drop is real and safe.  Returns the binding name to drop
+// (the source `name` — codegen keys named_values and the scope-end drops by it, and
+// emit_assign's store resolves to the same alloca via its `name` fallback), or none.
+//
+// Excluded (out of W4 scope, conservatively left to leak):
+//   - auto-boxed mut cells (def_id ∈ boxed, B-091): the write stores into cell.value
+//     and the alloca holds the SHARED cell pointer — dropping it would free the cell
+//     other holders still reference.
+//   - non-scalar lvalues (struct/list/string/Option, FieldAccess/IndexExpr targets):
+//     interior borrows may alias the old value; needs stronger analysis (later wave).
+fn scalar_reassign_drop_name(target: HExpr, boxed: Set<Int>) -> Str? {
+    match target {
+        HExpr::Ident { name, def_id, ty, .. } => {
+            let not_boxed = match def_id {
+                some(did) => boxed.contains(did) == false,
+                none => true,
+            }
+            if not_boxed && is_scalar_type(ty) {
+                some(name)
+            } else {
+                none
+            }
+        },
+        _ => none,
+    }
+}
+
+fn is_scalar_type(ty: Type) -> Bool {
+    match ty {
+        Type::IntType => true,
+        Type::FloatType => true,
+        Type::BoolType => true,
+        _ => false,
+    }
+}
+
 // ============================================================
 // Statement transform
 // ============================================================
@@ -1391,13 +1438,32 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, mut gensym: List<Int>
         HStmt::Assign { target, value, span } => {
             // The R-value escapes into the assigned location (it takes ownership).
             // The L-value (target) is a write destination — not rc-transformed.
-            // B-091: a write to an auto-boxed mut-cell stores into cell.value; the
-            // old value is leaked (matching the field-assign convention), so we do
-            // NOT drop the overwritten value here.  Reassigning a plain mut var
-            // overwrites the alloca; the old value also leaks (L0/L1 convention),
-            // avoiding the need to know whether the old reference is shared.
             let new_value = rc_escape(value, owned, boxed, gensym)
-            [HStmt::Assign { target: target, value: new_value, span: span }]
+            // B-104 W4: a plain mut var holding a SCALAR (Int/Bool/Float) — drop the
+            // old boxed scalar before overwriting (reclaims the INT① mut-counter leak,
+            // `i = i + 1`).  Order is critical: materialise the (already-escaped) RHS
+            // FIRST — it may read the old target (`x = x + 1`) — THEN drop the old
+            // value, THEN store the temp.  Dropping first would UAF the RHS read.
+            // Non-scalar / auto-boxed targets keep the leak-on-overwrite behaviour
+            // (see scalar_reassign_drop_name for the soundness argument).
+            match scalar_reassign_drop_name(target, boxed) {
+                some(dname) => {
+                    let tmp = fresh_scope_tmp(gensym)
+                    let vt = hexpr_type(value)
+                    let tmp_id = HExpr::Ident {
+                        name: tmp, resolved_name: none, def_id: none,
+                        dict_closure_dicts: none, ty: vt,
+                        effects: hexpr_effects(value), span: hexpr_span(value)
+                    }
+                    [
+                        HStmt::Let { name: tmp, name_span: synthetic_span(), def_id: none,
+                            ty: vt, init: new_value, span: synthetic_span() },
+                        HStmt::Drop { name: dname, ty: Type::UnitType, span: synthetic_span() },
+                        HStmt::Assign { target: target, value: tmp_id, span: span },
+                    ]
+                },
+                none => [HStmt::Assign { target: target, value: new_value, span: span }],
+            }
         },
         HStmt::ExprStmt { expr, span } => {
             // Statement position: the value is discarded (borrow / fresh-temp that
