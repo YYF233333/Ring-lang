@@ -280,6 +280,24 @@ fn emit_for_in(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDestructu
 }
 
 // for x in start..end { body }
+// Drop the per-iteration boxed loop counter of a range for-loop (B-104b).  The
+// counter is a FRESH box_int each round (emit_for_in_range_direct/_var), NOT a
+// borrowed container element — but perceus treats every for-binding as a borrow
+// and never drops it, so without this every iteration leaks one Int box (P0 diag:
+// 97% of residual native INT lived in exhaustive.ring's range loops via this path).
+// Emitted at the top of the increment block, which BOTH normal fall-through and
+// `continue` pass through (loop_continue_bb = incr_bb).  Sound: body escapes of the
+// counter are dup'd by perceus's clone-all-escape, so this single drop balances the
+// box_int (+1).  Residual: a `break`/`return` mid-iteration still leaks the current
+// box — bounded O(loop-runs), not O(iterations); the hot range loops run to
+// completion so this is negligible for the G-a wall.
+fn emit_range_counter_drop(mut ctx: LlvmCtx, binding_alloca: LLVMValueRef) {
+    let iter_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, binding_alloca, fresh_name(ctx, "ibx"))
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [iter_box], ""))
+}
+
 fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: HExpr, inclusive: Bool, body: HExpr) {
     let current_fn = match ctx.current_fn {
         some(f) => f,
@@ -331,6 +349,7 @@ fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: H
 
     // Increment
     LLVMPositionBuilderAtEnd(ctx.builder, incr_bb)
+    emit_range_counter_drop(ctx, binding_alloca)
     let current_i2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
     let one = LLVMConstInt(ctx.i64_type, 1, 0)
     let next_i = LLVMBuildAdd(ctx.builder, current_i2, one, fresh_name(ctx, "ni"))
@@ -414,6 +433,7 @@ fn emit_for_in_range_var(mut ctx: LlvmCtx, binding: Str, iterable: HExpr, body: 
     discard(LLVMBuildBr(ctx.builder, incr_bb))
 
     LLVMPositionBuilderAtEnd(ctx.builder, incr_bb)
+    emit_range_counter_drop(ctx, binding_alloca)
     let current_i2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
     let next_i = LLVMBuildAdd(ctx.builder, current_i2, one, fresh_name(ctx, "ni"))
     discard(LLVMBuildStore(ctx.builder, next_i, counter_alloca))

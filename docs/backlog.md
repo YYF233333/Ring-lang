@@ -405,7 +405,10 @@ fn test_fetch() {
 
 ### B-080 标量标记指针表示（tagged pointer）— G-a 内存墙真解 [feature] [P1] [XL] [judgment] [doing]
 
-> **进度（2026-06-09）**：P0 决定性诊断 instrumentation 已落地（`ring_runtime.cpp` `#ifdef RING_BOX_PROFILE`）——`ring_box_int` 采样 1/64 记 `(box ptr → IR 返回地址)` 侧表，`ring_drop` 释放 INT 时擦除，周期/atexit 按返回地址聚合存活样本打印 top 站点 RVA。inert without flag，已 clang 语法验证（EXIT 0）。待跑监督式 self-compile（`-DRING_ALLOC_STATS -DRING_BOX_PROFILE`）出 call-site 归因，拍板残留 INT = 边界 box / RC gap，再进 P1 runtime tag/untag。
+> **进度（2026-06-09）**：
+> **P0 决定性诊断 DONE（反预期结果）**——监督式 self-compile（`RING_BOX_PROFILE` 采样侧表）测出：残留存活 INT **97% 集中在 `exhaustive.ring` 一个模块**（`check_matrix` 66.8% + `specialize_row` 26.7% + `finite_type_ctors` 3.8%，全站点 `born==live` 纯泄漏），**不是 spec 假设的多态边界装箱分散**。机制 = `for i in a..b` range 计数器每轮 `box_int` 新装箱、perceus 把 for-binding 统一当借用从不 drop → 每轮漏一个 Int box，exhaustive 递归 checker 迭代量最大故集中爆。标量可兑现幅度 INT 47.8%+BOOL 10.4%=**58.1%**（标记指针上限），非标量 42%（STR/OPTION/CLOSURE/TUPLE）**同样线性泄漏**→ 标记指针单独破不了 G-a，需配精确 RC。轨迹线性无界无 plateau，15GB 时 allocs 1.31B/live 400M。
+> **用户拍板（避免第四次误判）：先修 loop-var RC gap 再重测**，不直接上 XL 标记指针。
+> **loop-var 修复 DONE**（`codegen_llvm_stmt.ring` `emit_range_counter_drop`）：range for-loop 在 `incr_bb` 开头 drop 上轮 boxed 计数器（normal fall-through + continue 都经此；perceus borrow→escape dup 平衡 box_int，无双重释放）。残留 break/return 中途退出漏 1 box/loop-run（O(loop)非 O(迭代)，热点不 early-exit 故≈0）。**JS 733 + llvm_diff 53×3 全绿**。待 native re-measure 确认 exhaustive INT 漏掉幅度 + 非标量 42% 浮出全貌，再排序标记指针 vs 继续精确 RC。
 
 Int/Bool（及可选 Float）从 uniform-boxed 堆 ptr 改为 **低位 tag 编码进指针大小的字**——标量在**任何位置都不进堆**（局部/临时/结构体字段/容器元素/Option 载荷/泛型槽/dict 槽）。OCaml/V8/LuaJIT 标准做法。uniform 表示完全保留（一切仍是一个字），只是这个字可能是标记标量或真指针。当前 uniform boxing 一切皆 `void*`（含标量：Int=boxed i64、Bool=boxed i1，各带 typeid header）。
 
