@@ -403,7 +403,26 @@ fn test_fetch() {
 - **参考**：Koka Perceus reuse pass
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；全 E2E + `llvm_diff` 不回归；自举一致
 
-### B-080 标量标记指针表示（tagged pointer）— G-a 内存墙真解 [feature] [P1] [XL] [judgment] [doing]
+### B-109 非标量精确-RC（STR/OPTION/CLOSURE/TUPLE）— G-a 真驱动 [bugfix] [P1] [L] [judgment] [doing]
+
+> 2026-06-09 立项（B-080 P0 重测 redirect）。两个 range-loop 标量修复（counter `15b5318` + bound `40ebf23`）把 INT 压到 1.6% plateau 后，G-a 墙的 **74.5% 由非标量 incomplete-RC 主导**：STR 24.3% / OPTION 22.1% / CLOSURE 16.7% / TUPLE 8.4%（+BOOL 19.3% 标量留 B-080）。**B-080 标记指针碰不到非标量，只能精确-RC**。这是 G-a 的真驱动，本里程碑取代 B-080 成为 native-working 关键路径。
+
+**已知根因（重测 disasm，待 box-profile 确认主导）**：
+1. **struct-field 重赋值漏**：`self.pos = self.pos + 1` 存新 box 进 struct 字段、旧 box 不 drop（W4 标量 mut-var reassignment 的 struct-field 兄弟）。Lexer/Parser 热路径。
+2. **call-result Option/STR temp 不 drop**：`str_char_code_at` 返 `Some(box_int)`，调用方在 scrutinee/comparison 位不 drop。incomplete-RC 非 over-free。
+
+**计划**：
+1. **扩 RING_BOX_PROFILE 到 STR/OPTION**（`ring_enum_some` 接 `_ReturnAddress`→IR 站点；`ring_alloc` STR typeid 接调用方 RA→string-op 种类），监督式 self-compile 拿 call-site 归因，确认主导漏（**非标量 RC 有别名 soundness 风险，见 B-101 教训——不猜，先诊断**）。
+2. 按归因修主导漏：struct-field 重赋值 drop-old（codegen，类比 range box）+ call-result Option/STR temp drop（perceus，注意 borrow-vs-owned 分类 + apply_subst DAG 别名坑）。
+3. 每改一类 → JS + llvm_diff 53×3 + ASan + native re-measure（live plateau 验证）。
+
+**验收**：非标量 typeid（STR/OPTION/CLOSURE/TUPLE）live 趋 plateau；leak% 大幅下降；native self-compile peak << 25.9GB 本机可跑（G-a 判据）；全 E2E + llvm_diff 不回归；ASan-clean；double-bootstrap 一致。
+
+**工具链 = B-104 配方**（RING_BOX_PROFILE + alloc-stats 计数器 `-DRING_ALLOC_STATS` + ASan 链 + 监督 self-compile 15GB kill），**native-worktree-unfriendly（主仓做，长任务尽早 commit）**。
+
+### B-080 标量标记指针表示（tagged pointer）— 消残余标量(BOOL+INT churn)+perf [feature] [P2] [XL] [judgment] [queued] [deferred: B-109 非标量精确-RC 先行]
+
+> **⚠️ 降级（2026-06-09，重测数据推翻原定位）**：原立为「G-a 内存墙真解/唯一结构性解」，前提=「墙=标量装箱」。**两个 range-loop RC 修复 + 3 次重测证伪**：INT 47.8%→1.6% plateau（精确-RC 解决），墙现在 74.5% 是非标量。**B-080 标记指针只消 ~21%（BOOL 19.3%+INT 1.6%）、非墙驱动**。降级为后续优化（消残余标量 BOOL + INT/BOOL alloc churn + 干净标量 repr/perf），**G-a 终解改由 B-109 非标量精确-RC 承担**。技术内容（标记指针实现配方）仍有效，见下文 P1 实现序 + memory `llvm-debug-state`。
 
 > **进度（2026-06-09）**：
 > **P0 决定性诊断 DONE（反预期结果）**——监督式 self-compile（`RING_BOX_PROFILE` 采样侧表）测出：残留存活 INT **97% 集中在 `exhaustive.ring` 一个模块**（`check_matrix` 66.8% + `specialize_row` 26.7% + `finite_type_ctors` 3.8%，全站点 `born==live` 纯泄漏），**不是 spec 假设的多态边界装箱分散**。机制 = `for i in a..b` range 计数器每轮 `box_int` 新装箱、perceus 把 for-binding 统一当借用从不 drop → 每轮漏一个 Int box，exhaustive 递归 checker 迭代量最大故集中爆。标量可兑现幅度 INT 47.8%+BOOL 10.4%=**58.1%**（标记指针上限），非标量 42%（STR/OPTION/CLOSURE/TUPLE）**同样线性泄漏**→ 标记指针单独破不了 G-a，需配精确 RC。轨迹线性无界无 plateau，15GB 时 allocs 1.31B/live 400M。
@@ -411,7 +430,7 @@ fn test_fetch() {
 > **loop-var counter 修复 DONE**（git `15b5318`，`codegen_llvm_stmt.ring` `emit_range_counter_drop`）：range for-loop 在 `incr_bb` 开头 drop 上轮 boxed 计数器（normal fall-through + continue 都经此；perceus borrow→escape dup 平衡 box_int，无双重释放）。残留 break/return 中途退出漏 1 box/loop-run（O(loop)非 O(迭代)，热点不 early-exit 故≈0）。
 > **re-measure 确认（scale）**：INT @可比 alloc 减半（~191M→~96M），live 400M→305M（−24%），leak 30%→23.3%，到 15GB 用时 98s→125s（+27%）。但暴露 range preamble **bound box** 新漏：`for i in 1..xs.len()` 把 start 字面量 + `.len()` 结果各 box_int→unbox→不 drop，O(loop 入口) 但 check_matrix 深递归 → 数千万 INT box（修复后 top INT 站点）。
 > **bound-box 修复 DONE**（`emit_for_in_range_direct` unbox 后 `emit_drop_value(start_val/end_val)`）：perceus rc_expr(RangeExpr) 一律 rc_escape 边界 → start/end 值总是 owned（字面量/call fresh box，Ident→Clone dup +1）→ unbox 消费后无条件 drop sound（Ident dup rc 2→1 留源变量）。**JS 733 + llvm_diff 53×3 全绿**。
-> **战略确认（re-measure）**：精确-RC 单独到不了 G-a（peak 量级没变）。标量~50%（INT+BOOL）+ 非标量~45%（OPTION15.6/STR14.7/CLOSURE9.7/TUPLE4.9）都线性漏。下一步 = 用户拍板：继续精确-RC fix-forward（bound-box 已修，下个杠杆非标量 OPTION/TUPLE 临时）vs 转 B-080 标记指针（结构性消标量 50% 含 bound box，但非标量 45% 仍需精确-RC）。combined re-measure 待跑。
+> **combined re-measure（决定性，2026-06-09）→ 里程碑 redirect**：counter+bound 合并后 INT **47.8%→1.6% 且 plateau**（~4.99M 恒定，box-profile check_matrix/specialize_row 站点全消，bound 修复证实有效）。**墙现在 74.5% 是非标量**（STR 24.3/OPTION 22.1/BOOL 19.3[标量,非range驱动]/CLOSURE 16.7/TUPLE 8.4/INT 1.6），墙外推 P0 98s/1.31B→146s/2.147B。**B-080 标记指针只消 ~21%（BOOL+INT）、非墙驱动 → 降级**（见上）。disasm 挖出 2 个非标量根因：①struct-field 重赋值漏（旧 box 不 drop）②call-result Option/STR temp 不 drop。**用户拍板：里程碑转 B-109 非标量精确-RC**（P0 的 P1 标记指针实现序保留于下，B-080 deferred）。
 
 Int/Bool（及可选 Float）从 uniform-boxed 堆 ptr 改为 **低位 tag 编码进指针大小的字**——标量在**任何位置都不进堆**（局部/临时/结构体字段/容器元素/Option 载荷/泛型槽/dict 槽）。OCaml/V8/LuaJIT 标准做法。uniform 表示完全保留（一切仍是一个字），只是这个字可能是标记标量或真指针。当前 uniform boxing 一切皆 `void*`（含标量：Int=boxed i64、Bool=boxed i1，各带 typeid header）。
 
