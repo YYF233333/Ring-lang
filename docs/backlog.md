@@ -403,7 +403,10 @@ fn test_fetch() {
 - **参考**：Koka Perceus reuse pass
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；全 E2E + `llvm_diff` 不回归；自举一致
 
-### B-080 标量标记指针表示（tagged pointer）— G-a 内存墙真解 [feature] [P1] [XL] [judgment] [queued]
+### B-080 标量标记指针表示（tagged pointer）— G-a 内存墙真解 [feature] [P1] [XL] [judgment] [doing]
+
+> **进度（2026-06-09）**：P0 决定性诊断 instrumentation 已落地（`ring_runtime.cpp` `#ifdef RING_BOX_PROFILE`）——`ring_box_int` 采样 1/64 记 `(box ptr → IR 返回地址)` 侧表，`ring_drop` 释放 INT 时擦除，周期/atexit 按返回地址聚合存活样本打印 top 站点 RVA。inert without flag，已 clang 语法验证（EXIT 0）。待跑监督式 self-compile（`-DRING_ALLOC_STATS -DRING_BOX_PROFILE`）出 call-site 归因，拍板残留 INT = 边界 box / RC gap，再进 P1 runtime tag/untag。
+
 Int/Bool（及可选 Float）从 uniform-boxed 堆 ptr 改为 **低位 tag 编码进指针大小的字**——标量在**任何位置都不进堆**（局部/临时/结构体字段/容器元素/Option 载荷/泛型槽/dict 槽）。OCaml/V8/LuaJIT 标准做法。uniform 表示完全保留（一切仍是一个字），只是这个字可能是标记标量或真指针。当前 uniform boxing 一切皆 `void*`（含标量：Int=boxed i64、Bool=boxed i1，各带 typeid header）。
 
 > **2026-06-08 拍板标记指针（用户拍板，native on-par 统一规划 P1，见上「native on-par 统一规划」块）。取代原 box-at-boundary 方案**——后者已在工作树实测证伪：
