@@ -564,11 +564,15 @@ function emit_for_in(ctx, binding, destructure, iterable, body, iterable_type_na
   }
 }
 
-function emit_range_counter_drop(ctx, binding_alloca) {
-  const iter_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, binding_alloca, codegen_llvm_ctx$fresh_name(ctx, "ibx"));
+function emit_drop_value(ctx, val) {
   const drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
   const drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
-  return discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [iter_box], ""));
+  return discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""));
+}
+
+function emit_range_counter_drop(ctx, binding_alloca) {
+  const iter_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, binding_alloca, codegen_llvm_ctx$fresh_name(ctx, "ibx"));
+  return emit_drop_value(ctx, iter_box);
 }
 
 function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
@@ -584,6 +588,8 @@ function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
   const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
   const start_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [start_val], codegen_llvm_ctx$fresh_name(ctx, "si"));
   const end_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [end_val], codegen_llvm_ctx$fresh_name(ctx, "ei"));
+  emit_drop_value(ctx, start_val);
+  emit_drop_value(ctx, end_val);
   const counter_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "i"));
   discard(LLVMBuildStore(ctx.builder, start_raw, counter_alloca));
   const cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "for.cond");

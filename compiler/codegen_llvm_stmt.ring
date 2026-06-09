@@ -291,11 +291,15 @@ fn emit_for_in(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDestructu
 // box_int (+1).  Residual: a `break`/`return` mid-iteration still leaks the current
 // box — bounded O(loop-runs), not O(iterations); the hot range loops run to
 // completion so this is negligible for the G-a wall.
-fn emit_range_counter_drop(mut ctx: LlvmCtx, binding_alloca: LLVMValueRef) {
-    let iter_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, binding_alloca, fresh_name(ctx, "ibx"))
+fn emit_drop_value(mut ctx: LlvmCtx, val: LLVMValueRef) {
     let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
     let drop_ty = get_rt_fn_type(ctx, "ring_drop")
-    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [iter_box], ""))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""))
+}
+
+fn emit_range_counter_drop(mut ctx: LlvmCtx, binding_alloca: LLVMValueRef) {
+    let iter_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, binding_alloca, fresh_name(ctx, "ibx"))
+    emit_drop_value(ctx, iter_box)
 }
 
 fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: HExpr, inclusive: Bool, body: HExpr) {
@@ -312,6 +316,18 @@ fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: H
     let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
     let start_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [start_val], fresh_name(ctx, "si"))
     let end_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [end_val], fresh_name(ctx, "ei"))
+
+    // B-104b: start_val/end_val are OWNED boxes — perceus rc_expr(RangeExpr) always
+    // rc_escapes the bounds (fresh literal/call boxes stay owned; Ident/field/index
+    // bounds become HExpr::Clone → ring_dup, a +1 reference owned here).  They are
+    // CONSUMED by the unbox above (only the i64 start_raw/end_raw feed the loop), so
+    // drop them now; without this every loop ENTRY leaks 2 Int boxes (P0 re-measure:
+    // the dominant residual INT after the counter fix — O(loop-entries) in
+    // exhaustive.ring's recursive check_matrix/specialize_row, `for i in 1..xs.len()`
+    // boxing the `1` and the `.len()` result).  Sound for Clone'd Ident bounds:
+    // dropping the dup (rc 2→1) leaves the source variable's own reference intact.
+    emit_drop_value(ctx, start_val)
+    emit_drop_value(ctx, end_val)
 
     // Alloca for loop counter
     let counter_alloca = build_entry_alloca(ctx, ctx.i64_type, fresh_name(ctx, "i"))
