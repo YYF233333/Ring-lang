@@ -1335,7 +1335,8 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 | **L1 用户面** | `fn(move T)` 语法、lv2 标注、fmt 策略、pub 规则 | 文档化借用语义（不改编译行为）| B-068（§7.2–7.8，deferred）|
 | **L2 Drop/RAII** | 用户 `impl Drop`、全路径 RAII、fail/catch 改 drop-aware unwind、`Weak<T>` | 资源安全 + 循环引用 | B-002 |
 | **L3 Reuse (FBIP)** | `rc==1` 时就地改写，drop-reuse 配对、reuse specialization、COW | 性能核爆（函数式零拷贝）| B-079 |
-| **L4 标量标记指针** | 标量低位 tag 编码进字，所有位置不进堆（局部/临时/字段/容器/Option/泛型/dict 槽）；RC op `if(w&1)return` 跳过标量 | **G-a 内存墙真解**（box-at-boundary 实测证伪，边界 box 消不掉）+ 减 alloc/RC 流量 | B-080 |
+| **L0/L1 完整化** | total return-mode drop pass（drop 所有 fresh-owned 临时）+ 静态 leak verifier；完整 Perceus（Koka POPL'21 garbage-free 定理）| **G-a 内存墙真解**（2026-06-09 数据订正：墙主体 74.5% 是非标量临时，唯完整 RC 可消）+ 编译期证明 0 泄露/0 UAF | B-104 |
+| **L4 标量标记指针** | 标量低位 tag 编码进字，所有位置不进堆（局部/临时/字段/容器/Option/泛型/dict 槽）；RC op `if(w&1)return` 跳过标量 | **降级为 peak/perf 优化**（2026-06-09：只消 ~21% BOOL+INT 装箱 churn，非泄漏驱动；G-a 由 B-104 完整 RC 达成）+ 减 alloc/RC 流量 | B-080 |
 
 **关键性质（2026-06-04 订正，#134 证伪原断言）**：原设计假设「L0 owned-everywhere 单独即可解锁全自举，无硬前置」——**错误**。owned-everywhere 对「循环内条件 move」（如 `register_impl_method` 的 `self_type` 在 for 循环里被条件 `push`）是 **double-free（崩溃，非泄漏）**：branch-balancing 给未消费分支强插 `drop`，单值多次 free；Perceus 三套循环机制（pre-loop single-dup / 闭包 per-iteration seeding / branch-balancing）均不覆盖此缝。逐点 always-own sweep 修了 7 处推进 2400×（chk 144→347K）后仍残留同类崩点，本质 = 每个循环/条件 move 需深层 Perceus 手术、站点未知。**结论**：借用推断引擎（L1 的 B-098）被提前到 native-working **之前**——borrow-default 不要求每路径消费 → 未消费分支不再插 spurious drop，从根上消除整类崩溃。L1 用户面（B-068）+ L2 仍是叠加层。
 
@@ -1398,6 +1399,22 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 **R-clean 正确性 DONE + G-a 经 return-mode 推断（2026-06-07，git `27fe62d`）**：撤 A1 hook + 撤 A2 intern + Type 回 clone-all-escape 已落地——**dup-on-share 由 clone-all-escape 自动盖全**（apply_subst 透传 + intra-node 共享走字段 escape→`HExpr::Clone`，无需手写），native real_program ×3 ASan-clean。**但 G-a 未自动达成**：`is_droppable_init` 通用 `Call` arm 保守不 drop → `let x=call()`（含 apply_subst）结果瞬态不回收；激进放开 = UAF（borrow-返回 call 如 `ring_unbox_int` 结果被提前 drop）。**根因 = 缺函数 return-mode（owned vs borrowed）知识**——贯穿 B-098/B-101/B-102 的「fresh vs alias」根问题。**最终解（用户拍板）= 完整 return-mode 借用推断（B-103）**：每函数推断返回 owned/borrowed-of-param（builtin 手工标 + Ring 函数调用图 fixpoint，参考 Koka borrowing），`is_droppable_init` 据此正确回收 owned-call 结果、不误 drop borrow。G-a 现 gate 在 B-103。
 
 **G-a 归因终订 + 升里程碑（2026-06-07，监督 native 自编译 + alloc/free 计数器实测）**：B-103 后自编译仍线性爬 15GB；`live=allocs-frees` 实测 **88% 从不释放**（主体装箱 INT/BOOL/Option/Str）。**归因终订：内存墙 = incomplete Perceus RC（中间临时从不 drop）+ 标量 uniform-boxing，非 Type-DAG over-free**（B-098/B-101/B-102/B-103 修的 over-free 是真崩溃 bug 但非内存墙主因）。**真解 = precise Perceus RC（drop owned 临时）= B-104 里程碑**：ANF/materialize 已安全覆盖易类（消费位+字面量，88%→~50%，`6ec870c`/`f16ffe0`，含一串 clone/over-free 隐崩修复）；难类（arg/scrutinee 临时需 return-mode 分析、control-flow-as-init 需 branch-value 分析、receiver/And-Or）需多波核心工程，开专门 session。详见 backlog B-104。
+
+**⭐ 完整 Perceus RC = total drop pass + 静态 leak verifier（2026-06-09 确定，G-a 真解，取代「标记指针 = 真解」，先读本段）**：
+
+B-104 四波（W1/W2/W3a/W4）+ 两个 range-loop 修复（counter `15b5318` / bound `40ebf23`）**证伪了** 2026-06-08「精确-RC 已尽、INT 残留 = irreducible 存活装箱、G-a 交棒标记指针」的判断——range-loop 修复把 INT leak **47.8%→1.6% plateau**，证明 INT 残留是 precise-RC 没盖到的 **loop-var 临时**（一修就掉），非 irreducible。重测后墙主体 **74.5% 是非标量临时**（STR 24% / OPTION 22% / CLOSURE 17% / TUPLE 8%）+ BOOL 19%；标记指针（B-080）只消 ~21%（BOOL+INT）、**非墙驱动 → 「标记指针 = G-a 真解」被数据推翻**。
+
+**根因（用户诊断准确）= clone-all-escape 只实现半套 Perceus**：只 drop named let-绑定 + 逃逸，**不 drop 中间临时、不做 backward-liveness**。wave 式按语法位置一个个补临时**无完整性不变量** = "哪里漏堵哪里"的 debug 心态打地鼠，永远不知道补完没有，只能跑 self-compile 看 OOM。
+
+**真解 = 把 Perceus 做完整（garbage-free by construction）**：Perceus 论文（Koka POPL'21）的 garbage-free 定理——完整算法下对象在**不可达瞬间精确释放一次** → 0 泄露 + 0 UAF。漏的是"半套实现"，不是 RC 解决不了。三件事收口（D1/D2/D3，2026-06-09 用户拍板）：
+
+1. **完整 return-mode 驱动的 total drop pass（D1，取代 wave）**：地基 = **B-103 完整 return-mode 分类**（owned vs borrowed-of-param，每个 call/builtin 叶子；提前为硬前置——total pass 的 drop 决策全靠它）。规则 = 每个 **fresh-owned 临时**（子表达式产 owned 且父节点借用/丢弃它）在 last-use 后 drop，**统一覆盖所有子表达式位置**（arg / scrutinee / condition / receiver / subexpr / control-flow-init），不再一波一个位置。**为何不重蹈 #134**：临时天然**单次使用**（被父节点用恰一次）→ "何时 drop"是 **per-subexpr 局部判定**（父消费/逃逸→不 drop；父借用/丢弃→用完即 drop），给定 B-103 分类即确定，**不需要** owned-everywhere 的 per-path 消费平衡（#134 的来源）。W1/W2/W3a/W4 是本 pass 的**前身**（手工按位置版）→ 收编为统一算法，不废弃已验证的安全性。
+
+2. **静态 leak verifier（D2，"保证 0 泄露"的机制，新增）**：post-RC HIR 上的线性检查器——断言**每个 owned 值恰好被消费一次**（逃逸 / return / drop 三选一）+ **每个 drop 目标非 borrow**。通过 = **编译期证明** 0 泄露 + 0 UAF（不靠跑 self-compile 看 OOM）；不通过 = 编译器直接指出"第 X 行临时 owned 但无人消费"。翻译 Perceus 论文的 well-formedness judgment，挂进 `npm test`（`--verify-rc` 模式）→ 让 0 泄露被**强制**而非祈祷；同时是 total pass 重写的**编译期 UAF 安全网**（比裸跑 ASan 早，正面回应曾被 owned-everywhere double-free 烧过的风险）。这是"debug 心态"与"完整功能"的分界线。
+
+3. **"0 泄露"的精确范围（D3）= 无环 0 泄露 + 环用 `Weak<T>`（承 §7.9）**：RC 物理收不了环 → Ring 答案是 `Weak<T>`（§7.9 已定案，不引入 cycle collector）。"0 泄露" = 无环数据**字面 0** + 环由程序员用 `Weak<T>` 打破（Swift / Rust `Rc` / Koka 同级标准保证）。自举工作负载（HIR 树/DAG，无环，§7.10 已确认）→ **字面意义的 0 泄露**。
+
+**标记指针（B-080）降级**：从「G-a 真解」降为后续 **peak/perf 优化**（消 ~21% BOOL+INT 装箱 churn + 标量分配，**非泄漏驱动**）；condition-result Bool box 由 total pass drop（precise RC），BOOL 装箱本身的 churn 留 B-080。**G-a 经 B-104 完整 RC 达成，不依赖 B-080。**
 
 ---
 
@@ -2106,6 +2123,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | LLVM fail/catch | setjmp/longjmp | bootstrap 无 Drop/RAII 不需要栈展开；Ownership 阶段可切换 |
 | LLVM 多文件编译 | bootstrap 阶段单 LLVM Module，单 .o 输出 | 不需要跨模块符号解析；增量编译留给后续 |
 | Perceus 分层路线 | L0 RC核心(B-012) → L1 引擎(B-098) → L1 用户面(B-068,deferred) → L2 Drop/RAII+Weak(B-002) → L3 reuse(B-079) → L4 unboxing(B-080) | 可独立测试/merge 的序列 |
+| 完整 Perceus RC（2026-06-09，G-a 真解）| L0/L1 完整化 = total return-mode drop pass（drop 所有 fresh-owned 临时，地基 B-103）+ 静态 leak verifier（post-RC HIR 线性检查，编译期证明 owned 消费一次 + drop 非 borrow）；0 泄露 = 无环 by-construction（garbage-free 定理）+ 环用 Weak<T>（§7.9）。标记指针(B-080)降级为 peak/perf | 取代 wave 式打地鼠（无完整性不变量 = debug 心态）；数据订正墙主体 74.5% 是非标量临时、标记指针仅消 ~21% 非泄漏驱动；verifier 把 0 泄露从经验观察变可检查不变量 + 当 total pass 重写的编译期 UAF 安全网 |
 | Perceus L1 引擎提前（2026-06-04，#134 证伪 L0-only 自举）| 原断言「L0 owned-everywhere 单独解锁全自举、无硬前置」**错误**——对「循环内条件 move」是 double-free（崩溃非泄漏）。借用推断引擎（B-098）提前到 native-working 之前：borrow-default + escape-clone + scope-end-drop，撤销 always-own 读取补丁。仅引擎，用户面（move 语法/lv2/fmt/pub）留 B-068 deferred | branch-balancing 给未消费分支强插 drop → 单值多次 free；三套循环机制不覆盖此缝；逐点 always-own sweep 是站点未知的 whack-a-mole + 每个 move 需深层 Perceus 手术。borrow 不要求每路径消费 → 整类崩溃从根消除 |
 | Perceus L0 对象头 | 每堆对象 offset 0 `{rc:u32, typeid:u32}`；per-type drop 函数 + typeid 派发表 | dup/drop 类型无关；用户类型 drop 由 codegen 生成（Koka 风格 per-type drop/scan）|
 | Perceus L0 范围 | 不处理 abort 路径 drop（留 L2 drop-aware unwind）/ 循环引用（留 L2 Weak） | longjmp 跳过 drop = 泄漏非 UAF（安全）；自举走成功路径 + 树形数据无环；先解内存墙 |
