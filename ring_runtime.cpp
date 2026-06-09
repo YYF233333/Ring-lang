@@ -111,8 +111,13 @@ static void ring_drop_by_typeid(uint32_t tid, void* data);
 #ifndef RING_BOX_PROFILE_SAMPLE
 #define RING_BOX_PROFILE_SAMPLE 64   // must be a power of two
 #endif
-static std::unordered_map<void*, void*>*    g_box_live = nullptr; // live INT ptr -> RA
-static std::unordered_map<void*, uint64_t>* g_box_born = nullptr; // RA -> cumulative sampled births
+// B-109: extended to per-typeid attribution.  INT recorded at ring_box_int (RA = IR
+// site), OPTION at ring_enum_some (RA = IR site), STR at ring_alloc (RA = the runtime
+// string helper that allocated it — concat / interp / int_to_str / literal, a
+// coarser but still useful "which string op leaks" signal).  Report splits by typeid.
+struct RingBoxRec { void* ra; uint32_t tid; };
+static std::unordered_map<void*, RingBoxRec>* g_box_live = nullptr; // live ptr -> (RA, typeid)
+static std::unordered_map<void*, uint64_t>*   g_box_born = nullptr; // RA -> cumulative sampled births
 static uint64_t g_box_seq = 0;
 static uintptr_t ring_image_base() {
 #ifdef _WIN32
@@ -122,13 +127,20 @@ static uintptr_t ring_image_base() {
     return 0;
 #endif
 }
-static void ring_box_profile_record(void* ptr, void* ra) {
+static const char* ring_tid_name(uint32_t tid) {
+    switch (tid) {
+        case 0:  return "INT";    case 2:  return "BOOL";   case 3:  return "STR";
+        case 7:  return "CLOSURE"; case 8: return "OPTION"; case 10: return "TUPLE";
+        default: return "?";
+    }
+}
+static void ring_box_profile_record(void* ptr, void* ra, uint32_t tid) {
     if (!g_box_live) {
-        g_box_live = new std::unordered_map<void*, void*>();
+        g_box_live = new std::unordered_map<void*, RingBoxRec>();
         g_box_born = new std::unordered_map<void*, uint64_t>();
     }
     if ((g_box_seq++ & (RING_BOX_PROFILE_SAMPLE - 1)) != 0) return; // sample 1/N
-    (*g_box_live)[ptr] = ra;
+    (*g_box_live)[ptr] = RingBoxRec{ ra, tid };
     (*g_box_born)[ra]++;
 }
 static void ring_box_profile_erase(void* ptr) {
@@ -136,23 +148,27 @@ static void ring_box_profile_erase(void* ptr) {
 }
 static void ring_box_profile_report() {
     if (!g_box_live) return;
-    std::unordered_map<void*, uint64_t> live; // RA -> live sample count
-    for (auto& kv : *g_box_live) live[kv.second]++;
-    std::vector<std::pair<void*, uint64_t>> v(live.begin(), live.end());
-    std::sort(v.begin(), v.end(),
-        [](const std::pair<void*,uint64_t>& a, const std::pair<void*,uint64_t>& b){ return a.second > b.second; });
     uintptr_t base = ring_image_base();
-    uint64_t total_live = 0; for (auto& kv : v) total_live += kv.second;
-    fprintf(stderr, "[box-profile] live INT sites: %zu distinct, %llu live samples (x%d = ~%llu boxes), top:\n",
-            v.size(), (unsigned long long)total_live, RING_BOX_PROFILE_SAMPLE,
-            (unsigned long long)total_live * RING_BOX_PROFILE_SAMPLE);
-    int n = (int)v.size(); if (n > 16) n = 16;
-    for (int i = 0; i < n; i++) {
-        void* ra = v[i].first;
-        uint64_t born = (*g_box_born)[ra];
-        fprintf(stderr, "  rva=0x%llx live=%llu born=%llu (RA=%p)\n",
-                (unsigned long long)((uintptr_t)ra - base),
-                (unsigned long long)v[i].second, (unsigned long long)born, ra);
+    // aggregate live samples by (typeid, RA)
+    std::unordered_map<uint32_t, std::unordered_map<void*, uint64_t>> per; // tid -> ra -> live
+    std::unordered_map<uint32_t, uint64_t> tid_total;
+    for (auto& kv : *g_box_live) { per[kv.second.tid][kv.second.ra]++; tid_total[kv.second.tid]++; }
+    for (auto& tp : per) {
+        uint32_t tid = tp.first;
+        std::vector<std::pair<void*, uint64_t>> v(tp.second.begin(), tp.second.end());
+        std::sort(v.begin(), v.end(),
+            [](const std::pair<void*,uint64_t>& a, const std::pair<void*,uint64_t>& b){ return a.second > b.second; });
+        fprintf(stderr, "[box-profile] %s live sites: %zu distinct, %llu samples (x%d = ~%llu boxes), top:\n",
+                ring_tid_name(tid), v.size(), (unsigned long long)tid_total[tid], RING_BOX_PROFILE_SAMPLE,
+                (unsigned long long)tid_total[tid] * RING_BOX_PROFILE_SAMPLE);
+        int n = (int)v.size(); if (n > 12) n = 12;
+        for (int i = 0; i < n; i++) {
+            void* ra = v[i].first;
+            uint64_t born = (*g_box_born)[ra];
+            fprintf(stderr, "  [%s] rva=0x%llx live=%llu born=%llu (RA=%p)\n",
+                    ring_tid_name(tid), (unsigned long long)((uintptr_t)ra - base),
+                    (unsigned long long)v[i].second, (unsigned long long)born, ra);
+        }
     }
     fflush(stderr);
 }
@@ -218,6 +234,12 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
     if (typeid_val >= 0 && typeid_val < 4096) g_live_tid[typeid_val]++;
     if (g_allocs >= g_next_report) { ring_alloc_stats_report(); g_next_report += (1ULL << 25); }
 #endif
+#ifdef RING_BOX_PROFILE
+    // STR is allocated inside many runtime string helpers (concat / interp / int_to_str
+    // / literal), not directly from IR — record here so RA attributes the leak to the
+    // string op.  INT/OPTION are recorded at their own constructors (IR-site RA).
+    if (typeid_val == RING_TYPEID_STR) ring_box_profile_record(raw + 8, _ReturnAddress(), RING_TYPEID_STR);
+#endif
     return raw + 8;                               // return data pointer
 }
 
@@ -247,7 +269,7 @@ extern "C" void ring_drop(void* ptr) {
     if (*rc <= 1) {
         ring_drop_by_typeid(tid, ptr);
 #ifdef RING_BOX_PROFILE
-        if (tid == RING_TYPEID_INT) ring_box_profile_erase(ptr);
+        if (tid == RING_TYPEID_INT || tid == RING_TYPEID_STR || tid == RING_TYPEID_OPTION) ring_box_profile_erase(ptr);
 #endif
         free((char*)ptr - 8);
 #ifdef RING_ALLOC_STATS
@@ -387,7 +409,7 @@ extern "C" void* ring_box_int(int64_t val) {
     void* data = ring_alloc(sizeof(int64_t), RING_TYPEID_INT);
     *(int64_t*)data = val;
 #ifdef RING_BOX_PROFILE
-    ring_box_profile_record(data, _ReturnAddress());
+    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_INT);
 #endif
     return data;
 }
@@ -785,6 +807,9 @@ static void* ring_enum_some(void* val) {
     void* data = ring_alloc(sizeof(int64_t) + sizeof(void*), RING_TYPEID_OPTION);
     ((int64_t*)data)[0] = 0;
     *((void**)((int64_t*)data + 1)) = val;
+#ifdef RING_BOX_PROFILE
+    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_OPTION);
+#endif
     return data;
 }
 
@@ -792,6 +817,9 @@ static void* ring_enum_none() {
     void* data = ring_alloc(sizeof(int64_t) * 2, RING_TYPEID_OPTION);
     ((int64_t*)data)[0] = 1;
     ((int64_t*)data)[1] = 0;
+#ifdef RING_BOX_PROFILE
+    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_OPTION);
+#endif
     return data;
 }
 
