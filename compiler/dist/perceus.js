@@ -1627,8 +1627,14 @@ function rc_stmt(stmt, owned, boxed, externs, gensym, loop_base) {
     if (__ring_m34._tag === "Assign") {
       const target = __ring_m34.target; const value = __ring_m34.value; const span = __ring_m34.span;
       const new_value = rc_escape(value, owned, boxed, externs, gensym, loop_base);
+      const w4_target = (function() {
+  const __ring_m = scalar_reassign_drop_name(target, boxed);
+  if (__ring_m._tag === "some") { const dn = __ring_m._0; return (List_contains(owned, dn, __Str_Eq) ? Option_some(dn) : Option_none); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
       __ring_match35: {
-        const __ring_m35 = scalar_reassign_drop_name(target, boxed);
+        const __ring_m35 = w4_target;
         if (__ring_m35._tag === "some") {
           const dname = __ring_m35._0;
           const tmp = fresh_scope_tmp(gensym);

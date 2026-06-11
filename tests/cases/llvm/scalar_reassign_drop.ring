@@ -44,10 +44,25 @@ fn snapshot_sum(n: Int) -> Int {
     total
 }
 
+// B-104 D2 (verifier-found latent UAF): a scalar binding whose init is `&&`/`||`
+// holds the RHS box VERBATIM (phi, un-Cloned — the struct still owns it).  The
+// W4 reassign-drop must NOT fire for it (binding not in the visible owned set):
+// dropping would free obj's field box.  obj.flag must survive the reassign.
+struct Gate { flag: Bool }
+
+fn andor_init_reassign() -> Str {
+    let g = Gate { flag: true }
+    let cond = true
+    let mut ok = cond && g.flag    // non-droppable init: holds g.flag's box verbatim
+    ok = false                     // must NOT drop the old (borrowed) box
+    "ok=${ok} flag=${g.flag}"
+}
+
 fn main() {
     print("sum=${sum_to(100)}")                   // sum=4950
     print("shared=${shared_then_reassign()}")     // shared=226
     print("snap=${snapshot_sum(10)}")             // snap=45
+    print(andor_init_reassign())                  // ok=false flag=true
 
     // Bool + Float reassignment (scalar typeids 2 / for float, drop is a no-op free).
     let mut b = true

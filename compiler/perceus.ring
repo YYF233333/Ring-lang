@@ -1944,7 +1944,21 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, mu
             // value, THEN store the temp.  Dropping first would UAF the RHS read.
             // Non-scalar / auto-boxed targets keep the leak-on-overwrite behaviour
             // (see scalar_reassign_drop_name for the soundness argument).
-            match scalar_reassign_drop_name(target, boxed) {
+            //
+            // B-104 D2 (verifier-found latent UAF, zero compiler instances): the
+            // drop additionally requires the binding to be in the VISIBLE OWNED
+            // set — i.e. its init was droppable.  W4's soundness argument ("every
+            // cross-statement holder dup'd the box") fails exactly for the
+            // non-droppable inits the rest of the pass already excludes: a
+            // `let mut ok = a && obj.flag` binding holds the RHS box VERBATIM
+            // (And/Or phi, un-Cloned — obj still owns it), so the W4 drop on
+            // `ok = false` would free obj's box → UAF.  Not in `owned` → no
+            // drop → the documented leak-on-overwrite posture instead.
+            let w4_target = match scalar_reassign_drop_name(target, boxed) {
+                some(dn) => if owned.contains(dn) { some(dn) } else { none },
+                none => none,
+            }
+            match w4_target {
                 some(dname) => {
                     let tmp = fresh_scope_tmp(gensym)
                     let vt = hexpr_type(value)
