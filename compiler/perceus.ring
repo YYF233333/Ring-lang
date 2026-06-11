@@ -213,6 +213,22 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     if type_contains_extern_handle(ty, externs) {
         return false
     }
+    // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #148): an expression
+    // whose HIR type is an unresolved TypeVar must never be materialised.  The
+    // type-level Unit exclusion (rule ②) cannot see through it: an UNANNOTATED
+    // Ring fn's return type is over-generalised to a free var (checker hole,
+    // audit #148 — `let x: Str = tp([1])` type-checks), so a call like `tp(a)`
+    // whose body tail is a receiver-returning Unit builtin (`xs.push(v)` —
+    // moved verbatim, un-dup'd, because Unit is rc-excluded) hands back the
+    // LIVE RECEIVER pointer typed as a TypeVar.  Materialise + scope-end-drop
+    // would double-free the caller's container (ASan-proven: `let r = tp(a)`
+    // UAF on the pre-guard compiler).  Ownership of a TypeVar-typed value is
+    // unknowable here → leak-direction: not materialised, not droppable (see
+    // the same guard in is_droppable_init).  Clone-on-escape stays allowed
+    // (an extra dup on a live pointer only pins — crash-free).
+    if is_unresolved_var_type(ty) {
+        return false
+    }
     match expr {
         // Arithmetic / comparison BinOps box a FRESH result (gen_int_binop /
         // gen_*_binop → box_int/box_bool/box_float).  But `&&` / `||` (BinOp::And /
@@ -286,6 +302,22 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
 fn is_str_index(receiver: HExpr) -> Bool {
     match hexpr_type(receiver) {
         Type::StrType => true,
+        _ => false,
+    }
+}
+
+// B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP type (audit #148): an unresolved TypeVar
+// (or an ErrorType from checker recovery) gives no ownership information — the
+// value could be the Unit ABI accident (a live receiver pointer moved verbatim
+// because Unit is rc-excluded), which a drop would double-free.  Such values are
+// excluded from materialisation and droppability (leak direction); Clone on
+// escape stays allowed (a dup only pins).  Monomorphic call sites are zonked to
+// concrete types and unaffected; the leak cost is confined to generic-context
+// temporaries and the #148 over-generalised unannotated-fn calls.
+fn is_unresolved_var_type(ty: Type) -> Bool {
+    match ty {
+        Type::TypeVar { .. } => true,
+        Type::ErrorType => true,
         _ => false,
     }
 }
@@ -437,10 +469,19 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
         },
         HStmt::ExprStmt { expr, span } => {
             let mut hoists: List<HStmt> = []
-            // Statement position: the value is discarded.  Normalise nested
-            // subexprs (their temps hoist + scope-drop); the top expr itself is in
-            // value (non-escaping) position — recurse, do not materialise the whole.
-            let new_expr = anf_expr(expr, hoists, externs, counter)
+            // Statement position: the value is DISCARDED — the textbook "parent
+            // drops it" fresh-owned temporary (B-104 D1 Stage 2).  A non-Unit
+            // fresh result (`xs.pop()`, `compute()` for side effects) previously
+            // had no owner and leaked.  Materialise the top expression
+            // (anf_operand): `let __anf = xs.pop()` → scope-end drop reclaims it.
+            // Zero churn for the common cases: Unit-typed calls (print / push /
+            // insert — rule ②) and borrow-returning calls fail
+            // anf_should_materialize and stay plain statements; control-flow
+            // statements (if/match/block) are normalised structurally as before
+            // (their discarded branch values stay borrows — residual).  A
+            // NeverType call (panic/exit) materialises harmlessly (the drop is
+            // unreachable).
+            let new_expr = anf_operand(expr, hoists, externs, counter)
             hoists.push(HStmt::ExprStmt { expr: new_expr, span: span })
             hoists
         },
@@ -1587,6 +1628,17 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         return false
     }
     if type_contains_extern_handle(ty, externs) {
+        return false
+    }
+    // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #148, mirrors
+    // anf_should_materialize): a binding whose type is an unresolved TypeVar is
+    // never scope-end-dropped.  The #148 checker hole over-generalises an
+    // unannotated fn's return to a free var, so `let r = tp(a)` (where tp's
+    // body tail is a receiver-returning Unit builtin, moved verbatim un-dup'd)
+    // binds the LIVE container typed as a TypeVar — dropping r double-frees it
+    // (ASan-proven on the pre-guard compiler).  Leak direction; concrete
+    // (zonked) types are unaffected.
+    if is_unresolved_var_type(ty) {
         return false
     }
     match init {
