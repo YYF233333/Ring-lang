@@ -11,56 +11,33 @@
 
 **目标**：基础设施特性 + 中等特性全部完成，为层 3 重型特性铺路。
 
-**层 1（基础设施，优先）**：
-- ~~B-034 Effect Aliases [S]~~ ✅ 已完成（2026-05-23）
-- ~~B-005 Supertrait 继承 [M]~~ ✅ 已完成（2026-05-23）
-- ~~B-037 `mut<T>` Marker Effect [M]~~ ✅ 已完成（2026-05-23）
-- ~~B-008 Default Effect Handler [M]~~ ✅ 已完成（2026-05-23）
+**已完成（2026-05-23→06-05，明细见 git）**：层 1（B-034/B-005/B-037/B-008）+ 层 2（B-004/B-036/B-010）+ 设计验证（B-043/B-044；B-042 吸收——设计在 design.md §7.9 定案 `Weak<T>`，实现归 B-002 L2）+ 关键路径 B-011 LLVM → B-012 RC L0 → B-082 RC 诊断 → B-081 dup 架构迁移 全部落地。
 
-**层 2（核心特性）**：
-- ~~B-004 关联类型 [L]~~ ✅ 已完成（2026-05-24）
-- ~~B-036 Iterator Trait [M]~~ ✅ 已完成（2026-05-24）
-- ~~B-010 `delegate` 关键字 [M]~~ ✅ 已完成（2026-05-23）
-
-**设计验证（Stabilize 前置，阻塞层 3）**：
-- ~~B-042 Perceus 循环引用策略 [M]~~ ✅ 吸收（2026-06-04）：设计已在 design.md §7.9 定案（`Weak<T>`），实现归 B-002 (L2)；B-012 已完成，无独立 item 必要
-- B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（native-working 关键路径，2026-06-04）**；B-068 缩减为用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则），仍 deferred、不阻塞 native
-- ~~B-043 Refinement × Linear × Effects 交互矩阵 [M]~~ ✅ 已完成（2026-05-24）
-- ~~B-044 Ring 语义规范 [M]~~ ✅ 已完成（2026-05-24）
-
-**关键路径（2026-06-03 更新）**：
-- ~~B-004~~ → ~~B-036~~ → ~~B-011 LLVM~~ ✅ → ~~B-012 Perceus RC L0 基础设施~~ ✅ → ~~B-082 RC 诊断~~ ✅ → ~~B-081 dup 架构迁移~~ ✅
-- **当前目标：native 自举 + E2E + 双后端行为对比全过**（2026-06-03 规划，见下「Native 自举路线图」）
-- **订正（2026-06-04，#134 证伪）**：「L0 owned-everywhere 即可自举」的原假设错误——L0 对「循环内条件 move」是 double-free（崩溃，非泄漏），不能干净自举。借用推断引擎（B-098，原 B-068 引擎部分）被提前到 native-working **之前**，是 native 自举关键路径。B-068 用户面仍不阻塞 native（B-042 已吸收入 B-002 L2）
+**现状 / 未完成项**：
+- **当前目标：native 自举 + E2E + 双后端行为对比全过**（见下「Native 自举路线图」与「⭐ native on-par 统一规划」）
+- B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（✅）**；B-068 缩减为用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则），仍 deferred、不阻塞 native
+- **订正（2026-06-04，#134 证伪）**：「L0 owned-everywhere 即可自举」的原假设错误——L0 对「循环内条件 move」是 double-free（崩溃，非泄漏）。借用推断引擎（B-098）被提前到 native-working 之前并已落地
 - B-033 GADTs 推迟至 native 自举之后（无下游依赖）
 - 层 3 在 native 自举 + 归档后启动。**排序（2026-06-05 Discussion 定）**：B-002 Drop/RAII(L2) → **async(B-007) 先**（设计已锁、自包含、风险低、宣发价值大）→ Refinement(B-001) 随后（需 Z3 + 先做 B-070 const generics）；M 项（B-072 Union / B-069 默认参数 / B-070 固定数组）当 XL 间换气穿插；P3 研究（GADTs/dyn/GATs）最后。B-002 的 abort-unwind 子集可能因 G-a 内存提前（待 B-102 内存实测定）
 - **LLVM 落地后 JS 后端归档**（策略见 B-100，非简单废弃——先证 parity + golden 快照）
 
 ### Native 自举路线图（2026-06-03 规划）
 
-> 来源：本次 Discussion 4 路只读调研（codegen gap / 差分覆盖 / RC gap / runtime 完整性）+ 亲自贴码核查 load-bearing 断言。子 agent 报告按核过的可信度分档落项；hedged 断言走差分验证（B-088）再修。
-
 三个验收门：
-- **G-a 内存**：带 RC pass 自编译，内存峰值从 no-GC 的 25.9GB 降至本机可运行。**本机可验，待实跑确认**（JS 编译器 compile-time 已观测几百 M；native runtime 峰值待 #133 修复后本机实跑确认——RC 已编入 .o，runtime 大概率同步回落）
+- **G-a 内存**：带 RC pass 自编译，内存峰值从 no-GC 的 25.9GB 降至本机可运行
 - **G-b 双 bootstrap 一致**：native 二进制重编译编译器，字节级一致
 - **G-c 双后端 parity**：native E2E + llvm_diff 全过，行为与 JS oracle 一致
 
+铺垫已全部完成（B-083 match guard / B-088 差分覆盖 / B-084 闭包 owned-capture drop / B-085 发射 determinism / B-086 缺失方法 / B-087 双后端 parity / B-098 clone-all-escape / B-101 ctor-sink，明细见 git）。余项：
+
 | Item | 内容 | 门 | 优先级 |
 |------|------|-----|--------|
-| ~~B-083~~ ✅ | LLVM match guard 完整实现（codegen + perceus RC + diff）| G-c + G-a/b(RC) | P1 |
-| ~~B-088~~ ✅ | 双后端差分覆盖扩展 — 锁 6 parity 用例 + 发现 6 处 LLVM 发散喂 B-087 | G-c | P1 |
-| ~~B-084~~ ✅ | #130 闭包 owned-capture drop（typeid 15 CLOSURE_ENV + count-prefixed env + 通用 drop_closure_env；catch/handle + guard-false → B-096）| G-a/b | P2 |
-| ~~B-085~~ ✅ | Perceus 发射 determinism（sort Set names before emit）| G-b | P2 |
-| ~~B-086~~ ✅ | LLVM 缺失方法/runtime/dict（flat_map/find_index/fold/Ord dict/Option.to_fail）| G-c | P2 |
-| ~~B-087~~ ✅ | LLVM codegen 双后端 parity — 6 确认 gap + tuple-literal pattern 全修（dict_closure_dicts / Wrapped dict / 闭包捕获 dict / range var for-in / #103 mut writeback / #132 print Int）；llvm_diff 39→46 | G-c | P2 |
 | B-002 | abort-unwind drop（#2 TryCatch + handler abort）并入 Drop/RAII | G-a/c | P2 |
 | B-096 | Perceus 闭包 RC 完整收口 A 波（borrowed建模+ring_try drop+#4 guard-false+Range/dict drop_T）| G-a | P3（本机可做）|
-| ~~B-098~~ ✅ | 借用推断引擎 clone-all-escape（§7.11）— #134 系统性 double-free 崩溃类消除（a_empty.ring native EXIT 0 + 731/49×3 + double-bootstrap 一致）| G-a/b/c | ✅ 2026-06-04 |
-| ~~B-101~~ ✅ | Type-DAG 所有权 = intern + 永不 drop — A1（never-drop）杀结构性 Type-DAG UAF + enum 构造器 call-arg sink（解锁空 prelude 真根因）落地；native E2E×3 已建 | G-a/c | ✅ 2026-06-05（A1+ctor-sink；A2/链→B-102）|
-| **B-102** | **native over-free 链终结（ASan 驱动）+ A2 hash-cons — native 自举真 blocker：链≥3 层 pre-existing UAF（A1 修 2 层，剩 `TypeExpr` 等）用 ASan 收敛猎杀 + A2 intern 去重达 G-a（承 B-101 方案 A 另一半）** | **G-a/c** | **P1（native-working 硬前置，2026-06-05 立项）** |
-| B-089 | Native 终验 capstone（G-a/b/c + 内存实测 + B-099）| 全部 | P1（依赖 B-102，B-102 后启动）|
+| B-102 | native Type-DAG RC 正确性（R-clean）——over-free 链已终结、本质 done，终验待 B-104（见条目）| G-a/c | P1 |
+| B-089 | Native 终验 capstone（G-a/b/c + 内存实测 + B-099）| 全部 | P1（依赖 B-104，其后启动）|
 
-依赖：B-089 依赖前述全部；B-088 是 G-c 的发现+锁定引擎（失败的 diff 用例喂给 B-083/B-087，通过的锁定 parity）。**关键认识**：编译器自身重度用 trait/泛型/dict 且 LLVM 自编译字节级一致——故 B-087 那些 dict/多态发散**不阻塞自举**（编译器不触发），只阻塞 G-c E2E parity（特定模式触发）。
+**关键认识**：编译器自身重度用 trait/泛型/dict 且 LLVM 自编译字节级一致——故 B-087 那些 dict/多态发散**不阻塞自举**（编译器不触发），只阻塞 G-c E2E parity（特定模式触发）。
 
 ---
 
@@ -405,18 +382,6 @@ fn test_fetch() {
 > 前置依赖链：LLVM backend → Perceus RC → 各项优化 pass → JIT（远期）。
 
 > **B-011 LLVM Native Backend 已完成（2026-06-01）** — 前端自举打通：ring.exe 单文件产出与参考编译器字节级一致，多模块端到端跑通，所有 codegen bug + fail/catch 已修（见 `tests/cases/llvm/` 回归套件）。**完整 native 自举的剩余两条验收（二次自举一致性 + native E2E 全过）受内存墙（25.9GB，no-GC）阻塞，已并入 B-012——Perceus RC 是解锁它们的唯一路径。**
-
-### ~~B-012 Perceus RC 核心 (L0)~~ ✅ 已完成（2026-06-01）
-
-基础设施全部落地：runtime RC（ring_alloc/dup/drop + typeid dispatch + builtin drops）、HIR Drop/Dup 节点、Perceus pass（backward liveness + branch-balancing）、LLVM codegen 集成。不带 RC pass 可自举且功能正常。728 E2E + 11 LLVM diff 全过。
-
-**Perceus 分层**：L0 ✅ → **L1 借用推断引擎（B-098，native-working 关键路径）** → L1 用户面（B-068，deferred）→ L2 Drop/RAII（B-002）→ L3 reuse/FBIP（B-079）→ L4 标量 unboxing（B-080）。注：原「L0 单独解锁全自举」被 #134 证伪，L1 引擎提前。
-
-**L0 剩余收尾**（从 B-012 拆出为独立 item）：
-- B-082：RC 诊断基础设施（runtime 断言 + codegen 警告）
-- B-081：dup 从表达式层 Block 包装迁移到语句层 emit
-- B-083：RC pass 正确性修复（闭包捕获 / try-catch / 循环+闭包 / match guard）
-- 全部完成后：带 RC pass 编译编译器自身，验证内存下降 + 二次自举一致性
 
 ### B-079 Perceus Reuse Analysis / FBIP (L3) [feature] [P3] [XL] [judgment] [queued]
 就地复用分析（functional but in-place）：`rc == 1` 时 match 解构 + 同尺寸重构 → 就地改写，drop-reuse 配对消除分配。Perceus 的性能核爆点（函数式写法零拷贝：list map、tree rebalance/insert）。含 reuse specialization（为有/无 reuse token 特化函数）+ COW（`rc > 1` 时 clone-on-write，内部优化非用户可见语义）。
@@ -839,10 +804,6 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 **前置依赖**：无
 **复杂度**：M（Parser + Checker const generic + Codegen）
-
-## 关联类型修复依赖序（audit 建议）
-
-~~B-062（#124 约束验证）~~ ✅ → ~~B-063（#125/#128 delegate 转发）~~ ✅ → ~~B-064（#129 scope 区分）~~ ✅ → ~~B-058（#115 bound 验证）~~ ✅ → ~~B-065（#121 显示改善）~~ ✅
 
 ## LLVM 后端质量
 
