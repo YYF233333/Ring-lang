@@ -184,9 +184,9 @@ fn main() {
 
 ## 接下来
 
-正在做 LLVM native backend——前置的类型系统特性已经全部就绪。
+正在做 LLVM native backend——编译器已能编译为 native 二进制，ownership + Perceus RC（内存管理）正在收口。
 
-再往后：ownership + Perceus RC、async effect + 结构化并发、refinement types（实验性）、LSP。
+再往后：async effect + 结构化并发、refinement types（实验性）、LSP。
 
 ## 项目结构
 

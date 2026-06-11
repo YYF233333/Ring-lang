@@ -1,6 +1,6 @@
 # Ring-lang 设计哲学
 
-面向大型多端应用的编程语言。转译到 JavaScript/V8 运行。
+面向大型多端应用的编程语言。当前编译到 JS/V8（bootstrap 后端），目标后端 LLVM native。
 
 核心赌注：LLM 在零训练数据的情况下 vibe coding 大规模代码库的表现能干掉 JS/TS。
 
@@ -154,6 +154,6 @@ TS 要读完实现才知道函数会抛什么异常。Ring 的模块签名包含
 | 命名 | snake_case，ALL_CAPS 常量 |
 | 不可变 | 默认不可变，`var` 显式声明可变 |
 | 数据结构 | struct + enum + trait，不造 class 层级 |
-| 内存 | GC（V8），开发者零心智负担 |
+| 内存 | Perceus RC + ownership 推断（无 borrow checker），零标注负担；bootstrap JS 后端暂用 V8 GC |
 | 注释 | `//` 单行（无块注释），默认不写注释 |
-| 编译目标 | JavaScript（V8），未来扩展 WASM/LLVM |
+| 编译目标 | LLVM native（推进中）；JS/V8 为 bootstrap 后端，LLVM 落地后归档 |
