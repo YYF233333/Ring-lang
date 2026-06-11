@@ -28,7 +28,7 @@ Ring-lang/
 ├── tests/             E2E 测试用例 + 测试运行器
 ├── examples/          示例程序
 ├── editor/vscode/     VSCode 插件（语法高亮，LSP 暂不可用）
-└── docs/              设计文档、技术债清单、竞品分析
+└── docs/              设计文档、技术债清单、竞品分析（含 lang-design.md：语言面长期决策——数值类型/@repr/TCO/comptime/包管理等）
 ```
 
 ## 编译器管线

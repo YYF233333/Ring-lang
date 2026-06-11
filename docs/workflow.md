@@ -7,7 +7,7 @@
 ### Discussion Agent（前台，用户交互）
 
 - **触发**：用户发起对话
-- **写入范围**：`docs/`（design.md, backlog.md, competitive-analysis.md, workflow.md）
+- **写入范围**：`docs/`（design.md, lang-design.md, backlog.md, competitive-analysis.md, workflow.md）
 - **不触碰**：`compiler/`, `std/`, `tests/`, `CLAUDE.md`
 - **工作流**：和用户讨论设计 → 用户拍板 → 更新 design.md → 写入 backlog 条目（queued）→ commit
 - **规则**：
