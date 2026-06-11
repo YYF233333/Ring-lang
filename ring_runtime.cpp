@@ -718,6 +718,12 @@ extern "C" void* ring_list_concat(void* a, void* b) {
     void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
     auto* result = new (data) std::vector<void*>(*va);
     result->insert(result->end(), vb->begin(), vb->end());
+    // B-103: the fresh list co-owns elements still owned by `a` and `b` — dup each
+    // (owned-container-constructor rule, design §7.11; same class as ring_list_clone).
+    // Without this, dropping both the concat result and a source deep-drops the
+    // same elements → double-free (latent while the leak régime never dropped the
+    // sources; detonates under is_droppable_init(Call)=true / the D1 total pass).
+    for (void* el : *result) ring_dup(el);
     return data;
 }
 
@@ -732,7 +738,10 @@ extern "C" void* ring_list_slice(void* list, int64_t start, int64_t end) {
         return data;
     }
     void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    new (data) std::vector<void*>(vec->begin() + start, vec->begin() + end);
+    auto* result = new (data) std::vector<void*>(vec->begin() + start, vec->begin() + end);
+    // B-103: dup the copied range — the fresh slice co-owns elements still owned
+    // by the source list (owned-container-constructor rule; see ring_list_concat).
+    for (void* el : *result) ring_dup(el);
     return data;
 }
 
@@ -786,7 +795,10 @@ extern "C" void* ring_list_get_opt(void* list, int64_t idx) {
 extern "C" void* ring_list_reverse(void* list) {
     auto* vec = (std::vector<void*>*)list;
     void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    new (data) std::vector<void*>(vec->rbegin(), vec->rend());
+    auto* result = new (data) std::vector<void*>(vec->rbegin(), vec->rend());
+    // B-103: dup — the fresh reversed list co-owns the source's elements
+    // (owned-container-constructor rule; see ring_list_concat).
+    for (void* el : *result) ring_dup(el);
     return data;
 }
 
@@ -794,6 +806,9 @@ extern "C" void* ring_list_sort(void* list, void* closure) {
     auto* vec = (std::vector<void*>*)list;
     void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
     auto* result = new (data) std::vector<void*>(*vec);
+    // B-103: dup — the fresh sorted list co-owns the source's elements
+    // (owned-container-constructor rule; see ring_list_concat).
+    for (void* el : *result) ring_dup(el);
     RingClosure* cmp = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cmp->fn_ptr);
     std::sort(result->begin(), result->end(), [fn, cmp](void* a, void* b) -> bool {
@@ -887,6 +902,9 @@ extern "C" void* ring_list_sort_default(void* list) {
     auto* vec = (std::vector<void*>*)list;
     void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
     auto* result = new (data) std::vector<void*>(*vec);
+    // B-103: dup — the fresh sorted list co-owns the source's elements
+    // (owned-container-constructor rule; see ring_list_concat).
+    for (void* el : *result) ring_dup(el);
     std::sort(result->begin(), result->end(), [](void* a, void* b) -> bool {
         return ring_unbox_int(a) < ring_unbox_int(b);
     });
@@ -995,6 +1013,9 @@ extern "C" void* ring_list_filter(void* list, void* closure) {
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
         if (ring_unbox_int(r) != 0) {
+            // B-103: dup — the fresh filtered list co-owns the source's element
+            // (owned-container-constructor rule; see ring_list_concat).
+            ring_dup((*vec)[i]);
             result->push_back((*vec)[i]);
         }
     }
@@ -1058,7 +1079,20 @@ extern "C" void* ring_list_flat_map(void* list, void* closure) {
         void* sub = fn(cls->env_ptr, (*vec)[i]);
         if (sub) {
             auto* svec = (std::vector<void*>*)sub;
-            result->insert(result->end(), svec->begin(), svec->end());
+            // B-103: dup each copied element, then drop the sub-list (the
+            // closure's result, owned by Ring-fn convention).  Before this, the
+            // result STOLE the sub-list's element ownership (no dup) and leaked
+            // the sub-list header — and when the closure returned a Clone of an
+            // EXISTING list (`.flat_map(fn(l) { l })` — tail escape Clones the
+            // borrowed param), the result's deep-drop freed elements still owned
+            // by the original → UAF.  dup + drop is balanced for both cases:
+            // fresh sub (rc1: dup→2, deep-drop→1, owned by result; header freed)
+            // and shared sub (rc≥2: dup, shallow drop; both owners intact).
+            for (void* el : *svec) {
+                ring_dup(el);
+                result->push_back(el);
+            }
+            ring_drop(sub);
         }
     }
     return data;
@@ -1305,7 +1339,10 @@ extern "C" void* ring_map_int_from(void* entries) {
         auto* pair = (std::vector<void*>*)((*vec)[i]);
         if (pair->size() >= 2) {
             int64_t key = *(int64_t*)((*pair)[0]);
-            (*result)[key] = (*pair)[1];
+            void* val = (*pair)[1];
+            // B-103: dup — fresh map co-owns the value (see ring_map_from).
+            ring_dup(val);
+            (*result)[key] = val;
         }
     }
     return data;
@@ -1869,7 +1906,14 @@ extern "C" void* ring_map_from(void* entries) {
         auto* pair = (std::vector<void*>*)((*vec)[i]);
         if (pair->size() >= 2) {
             std::string* key = (std::string*)((*pair)[0]);
-            (*result)[*key] = (*pair)[1];
+            void* val = (*pair)[1];
+            // B-103: dup — the fresh map co-owns the value still owned by the
+            // entries pair-list (owned-container-constructor rule; see
+            // ring_list_concat).  Repeated keys: the overwritten previous value
+            // keeps the entries list's own reference, so no drop here (the
+            // overwrite-leak class is D1's, see worker_feedback [观察]).
+            ring_dup(val);
+            (*result)[*key] = val;
         }
     }
     return data;

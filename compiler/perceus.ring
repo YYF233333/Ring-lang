@@ -909,18 +909,132 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // A method call whose result is a BORROW of (an inner reference of) its receiver
 // or an argument, returned WITHOUT a dup by the runtime — so escaping it needs a
 // Clone, AND scope-end-dropping its binding would free a reference owned elsewhere.
-// These are the extern Option projection accessors (the LLVM backend shortcuts
-// them straight to ring_Option_* runtime fns, so their borrow-ness does NOT
-// propagate through any Ring body — they MUST be listed here):
-//   .unwrap          (ring_Option_unwrap)         → returns the Some payload (a
-//                                                    borrow of the Option's slot).
-//   .unwrap_or       (ring_Option_unwrap_or)      → Some → payload borrow; None →
-//                                                    the `default` ARGUMENT verbatim
-//                                                    (a borrow of the caller's value).
-//   .unwrap_or_else  (ring_Option_unwrap_or_else) → Some → payload borrow; None →
-//                                                    the closure's result (forwarded).
-//   .to_fail         (ring_Option_to_fail)        → Some → payload borrow (None
-//                                                    raises, never returns a value).
+//
+// ═════════════════════════════════════════════════════════════════════════════
+// B-103 COMPLETE ring_runtime.cpp RETURN-MODE CLASSIFICATION (2026-06-11)
+// ═════════════════════════════════════════════════════════════════════════════
+// Total enumeration of every extern "C" function in ring_runtime.cpp by return
+// mode, with the source evidence (does the body alloc/dup before returning?).
+// This table is THE drop-decision foundation for the B-104 D1 total drop pass:
+// a temporary is droppable iff its producer is FRESH; a BORROW producer's result
+// must never be dropped un-Cloned.  Four modes:
+//   FRESH    — returns a pointer freshly ring_alloc'd (or with element/payload
+//              ownership transferred/dup'd in).  Caller solely owns it.
+//   BORROW   — returns a pointer INTO an argument/receiver (or the arg itself)
+//              without a dup.  Caller owns nothing.
+//   SCALAR   — returns i64/double/void: no RC meaning.
+//   NULL/NEVER — returns nullptr (ring_drop(null) is a no-op → RC-inert) or
+//              never returns (exit/panic/longjmp).
+//
+// ── BORROW returners (every one MUST be reachable from this predicate or from
+//    is_owner_bearing's Ident/FieldAccess/IndexExpr arms) ──────────────────────
+//   ring_Option_unwrap        .unwrap          → Some payload slot (no dup).
+//   ring_Option_unwrap_or     .unwrap_or       → payload slot, or the `default`
+//                                                ARGUMENT verbatim on None.
+//   ring_Option_unwrap_or_else .unwrap_or_else → payload slot, or the closure's
+//                                                result forwarded.
+//   ring_Option_to_fail       .to_fail         → payload slot (None raises).
+//   ring_list_get             list[i] / tuple .0 / for-in   → element ptr, no dup
+//                             (HIR: IndexExpr / tuple FieldAccess — covered by
+//                              is_owner_bearing's IndexExpr/FieldAccess arms, NOT
+//                              by a field name here).
+//   ring_map_get / ring_map_int_get   m[k]     → value ptr, no dup (HIR: IndexExpr).
+//   RECEIVER-RETURNING MUTATORS (B-103 Wave A): each returns its RECEIVER (arg 0)
+//   verbatim — `return list;` / `return map;` / `return set;` / `return sb;` —
+//   no dup.  Ring-level type is Unit, but at the LLVM ABI the result IS the live
+//   container, so a `let x = xs.push(v)` binding (droppable since
+//   is_droppable_init(Call)=true) would scope-end-drop the caller's container →
+//   UAF.  Listing them here Clone-wraps the bound result (dup balances the drop).
+//   D1 likewise must not drop their statement-position results.
+//     .push    ring_list_push                  → `return list;`
+//     .set     ring_list_set                   → `return list;`
+//     .insert  ring_map_set / ring_map_int_set → `return map;`
+//              (Set.insert → ring_set_add / ring_set_int_add → `return set;`)
+//     .remove  ring_map_delete / ring_map_int_delete / ring_set_delete /
+//              ring_set_int_delete             → `return map/set;`
+//     .add     ring_set_add / ring_set_int_add / ring_sb_add → `return set/sb;`
+//     .clear   ring_list_clear / ring_map_clear / ring_map_int_clear /
+//              ring_set_clear / ring_set_int_clear → `return receiver;`
+//     .extend  ring_list_extend                → `return list;` (the OTHER list's
+//              elements are dup'd inside the runtime — B-102 layer 5)
+//     .line / .add_int  ring_sb_line / ring_sb_add_int → `return sb;`
+//              (currently unmapped in method_to_runtime — native panic-stub, see
+//              audit-report — but std/str.ring declares them; classified now so
+//              the mapping fix cannot reopen a UAF.)
+//   ring_catch_get_error — returns the raised error ptr held by the frame
+//              (codegen-internal: catch lowering only; never an HIR call).
+//
+// ── FRESH returners (safe to drop; is_droppable_init(Call)=true reclaims) ─────
+//   Str ops (alloc a new std::string block): ring_str_new / from_cstr / concat /
+//     slice / split (fresh list of fresh strs) / join / replace / trim /
+//     trim_start / trim_end / to_upper / to_lower / pad_start / pad_end / repeat
+//     / ring_int_to_str / float_to_str / bool_to_str / ring_str_get (str[i]
+//     allocs a NEW 1-char string — fresh, despite being routed through the
+//     IndexExpr borrow arm; see [观察] in worker_feedback) / ring_list_join /
+//     ring_json_stringify / ring_cwd / ring_read_file / ring_path_join / resolve
+//     / dirname / basename / extname.
+//   Option builders (fresh 2-slot block; payload dup'd or ownership-transferred):
+//     ring_list_get_opt / ring_map_get_opt / ring_map_int_get_opt (dup payload),
+//     ring_list_first / last / find (dup payload — B-103), ring_list_find_index /
+//     ring_str_char_at / char_code_at / index_of / last_index_of / ring_parse_int
+//     / parse_float (fresh boxed payload), ring_list_pop / shift (payload
+//     OWNERSHIP TRANSFERRED out of the vector — vec erases its ref, no dup
+//     needed), ring_Option_map (wraps the closure's owned result).
+//   Container builders: ring_list_new / map_new / map_int_new / set_new /
+//     set_int_new / sb_new / ring_args / ring_map_keys (fresh strs) /
+//     map_int_keys (fresh boxes) / ring_map_values / entries / map_int_values /
+//     entries (dup values — B-098/B-103) / ring_set_to_list / set_int_to_list
+//     (fresh strs/boxes) / ring_set_from_list / set_int_from_list (inline-value
+//     copies) / ring_set_union / intersect / difference (+ _int variants; inline
+//     values, no RC sharing) / ring_set_clone / set_int_clone (inline values) /
+//     ring_list_clone / map_clone / map_int_clone (dup elements/values — B-103 /
+//     #135) / ring_list_map (owns closure results) / ring_list_filter / concat /
+//     slice / reverse / sort / sort_default / flat_map / ring_map_from /
+//     map_int_from (dup shared elements/values — B-103 Wave A: these copied
+//     source-owned pointers into the fresh container WITHOUT a dup, so dropping
+//     both source and result deep-dropped the same elements → latent double-free,
+//     masked only while the leak régime never dropped the source) / ring_sb_to_str.
+//   Boxers (codegen-internal): ring_box_int / box_float / box_bool, the Eq/Ord
+//     dict closure shims ring_cl_eq_* / cl_ne_* / cl_cmp_* (fresh boxed results),
+//     ring_get_builtin_dict (fresh TUPLE dict of fresh closures), ring_file_exists
+//     (fresh bool box), ring_alloc itself, ring_catch_push (codegen-internal).
+//   ring_try — returns the body/catch closure's result (owned by Ring-fn
+//     convention).  HIR surface = TryCatch, conservatively excluded from
+//     is_droppable_init (abort-path aliasing, B-002).
+//
+// ── SCALAR returners (i64/double — no RC meaning) ─────────────────────────────
+//   ring_unbox_int / unbox_float / unbox_bool (codegen-internal; HIR never sees
+//   an "unbox call" — unboxing is emitted inside arith/compare/cond lowering),
+//   ring_str_len / eq / lt / contains / starts_with / ends_with / is_empty,
+//   ring_list_len / contains / index_of / is_empty / any / all,
+//   ring_map_has / len, ring_map_int_has / len, ring_set_has / len,
+//   ring_set_int_has / len, ring_sb_len, ring_Option_is_some / is_none,
+//   ring_catch_setjmp (codegen-internal).
+//
+// ── NULL / NEVER returners (RC-inert: ring_drop(null) is a no-op) ─────────────
+//   null:  ring_print / eprintln / write_file / delete_file / assert /
+//          ring_list_for_each / map_for_each / map_int_for_each / set_for_each /
+//          set_int_for_each.
+//   never: ring_panic / exit / match_fail / ring_raise / __ring_raise_fail
+//          (longjmp/exit).
+//   void:  ring_dup / drop / register_drop / register_never_drop / runtime_init /
+//          ring_catch_pop (codegen-internal plumbing).
+//
+// ── Static (not extern, runtime-internal only) ────────────────────────────────
+//   ring_enum_some / enum_none (FRESH; HIR surface = variant-ctor call, whose
+//   args are sink positions — is_variant_constructor_call), ring_make_closure /
+//   make_eq_dict / make_ord_dict (FRESH, dict plumbing), drop_* destructors.
+//
+// ── Out-of-table: non-RC extern pointers (llvm_ffi.ring) ──────────────────────
+//   The 59 LLVM-C API externs return OPAQUE FOREIGN handles that are NOT
+//   ring_alloc'd — neither FRESH nor BORROW: ring_dup/ring_drop on them reads a
+//   garbage header → corruption.  They need full RC EXCLUSION (never Clone,
+//   never drop), which is a TYPE-level property (ExternType), not a name-list
+//   entry here.  Dormant today (codegen_llvm only executes when the native
+//   compiler itself runs --target=llvm — B-099 scope); flagged as a hard D1
+//   prerequisite in worker_feedback + audit-report.
+// ═════════════════════════════════════════════════════════════════════════════
+//
 // NOTE: `.get()` is NOT here — list.get / map.get build a FRESH owned Option
 // (ring_*_get_opt, which ring_dup's the element into the Option), so their result
 // is a fresh owned temporary, not a borrow.  `.first` / `.last` (B-103: now
@@ -930,11 +1044,24 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // Safety asymmetry: mis-listing a fresh-temp call here only LEAKS (an extra dup
 // whose source leaks); OMITTING a genuine borrow-returner CRASHES (UAF when the
 // escaped borrow is scope-end-dropped).  So this list errs toward inclusion.
+// Known leak-side cost of the name-grain match: a USER method that happens to
+// share a listed name (`.push` / `.add` / `.set` / …) and returns a real fresh
+// value gets Clone-wrapped on escape → its result leaks one refcount (crash-free;
+// same cost class as a user method named `unwrap`).  A Unit-typed mutator call in
+// a fn-tail/return position now also gets Clone-wrapped (+1 on the receiver →
+// pins it; bounded, crash-free) — the principled refinement (skip Clone/Drop for
+// Unit-typed values, a TYPE-level rule) is proposed for D1 in worker_feedback.
 fn is_borrow_returning_call(callee: HExpr) -> Bool {
     match callee {
         HExpr::FieldAccess { field, .. } =>
             field == "unwrap" || field == "to_fail"
-            || field == "unwrap_or" || field == "unwrap_or_else",
+            || field == "unwrap_or" || field == "unwrap_or_else"
+            // B-103 Wave A — receiver-returning mutators: the runtime returns the
+            // receiver (arg 0) verbatim, no dup (see the classification table
+            // above for the per-function `return list/map/set/sb;` evidence).
+            || field == "push" || field == "set" || field == "insert"
+            || field == "remove" || field == "add" || field == "clear"
+            || field == "extend" || field == "line" || field == "add_int",
         _ => false,
     }
 }
@@ -964,6 +1091,21 @@ fn is_borrow_returning_call(callee: HExpr) -> Bool {
 // Mis-INCLUDING a callee → its args stay borrows → LEAK (crash-free).  So this list
 // errs toward INCLUSION.  ASan (real_program ×3 + self-compile) is the completeness
 // net: a double-free pinpoints a missed callee, which is then added here.
+//
+// B-103 COMPLETENESS AUDIT (2026-06-11, full ring_runtime.cpp enumeration — see
+// the classification table above is_borrow_returning_call): `fold` remains the
+// SOLE member.  Every other runtime function that returns an argument verbatim
+// falls in one of two exempt classes:
+//   1. Option projections (`unwrap_or` returns `default`; `unwrap_or_else`
+//      forwards the closure result) — ∈ is_borrow_returning_call, so the result
+//      is Clone-wrapped on escape; that dup balances a materialised arg's drop.
+//   2. Receiver-returning mutators (push/set/insert/remove/add/clear/extend/
+//      line/add_int return ARG 0) — now ∈ is_borrow_returning_call (B-103
+//      Wave A), same Clone-wrap exemption; additionally the receiver is part of
+//      the FieldAccess callee, not of `args`, so anf never materialises it.
+// Ring-level functions can never join this list: clone-all-escape Clone-wraps a
+// returned borrowed param at the return/tail escape position, so every Ring fn
+// returns OWNED (the B-103 "no fixpoint needed" theorem, backlog B-103).
 fn is_arg_returning_call(callee: HExpr) -> Bool {
     match callee {
         HExpr::FieldAccess { field, .. } => field == "fold",

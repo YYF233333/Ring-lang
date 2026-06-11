@@ -1068,7 +1068,7 @@ function is_borrow_returning_call(callee) {
     const __ring_m18 = callee;
     if (__ring_m18._tag === "FieldAccess") {
       const field = __ring_m18.field;
-      return ((((field === "unwrap") || (field === "to_fail")) || (field === "unwrap_or")) || (field === "unwrap_or_else"));
+      return (((((((((((((field === "unwrap") || (field === "to_fail")) || (field === "unwrap_or")) || (field === "unwrap_or_else")) || (field === "push")) || (field === "set")) || (field === "insert")) || (field === "remove")) || (field === "add")) || (field === "clear")) || (field === "extend")) || (field === "line")) || (field === "add_int"));
       break __ring_match18;
     }
     return false;

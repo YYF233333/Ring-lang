@@ -338,6 +338,7 @@ const cases: TestCase[] = [
   { file: "var_self_test.ring", expected: "all var_self tests passed\n" },
   { file: "enum_qualified.ring", expected: "red\nenum_qualified: all tests passed\n" },
   { file: "api_clone.ring", expected: "api_clone: all tests passed\n" },
+  { file: "rc_mutator_share_ops.ring", expected: "rc_mutator_share_ops: all tests passed\n" },
   { file: "list_pop.ring", expected: "list_pop: all tests passed\n" },
   { file: "str_pad_end.ring", expected: "str_pad_end: all tests passed\n" },
   { file: "collection_clear.ring", expected: "collection_clear: all tests passed\n" },
