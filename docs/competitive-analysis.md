@@ -1,6 +1,28 @@
 # Ring-lang 竞品与行业定位
 
-> 最后更新：2026-05-22。数据来源：官方 GitHub、官网、科技媒体报道。
+> 最后更新：2026-06-11（增量节，深度研究三票对抗验证）；全景基线 2026-05-22。数据来源：官方 GitHub、官网、科技媒体报道。
+
+## 2026-06-11 增量：窗口期评估（深度研究，21 源 / 25 主张三票验证 / 4 否决）
+
+**窗口期分层判断**：
+- **机制窗口（核心组合）≥ 2-3 个季度**：「全推断代数效果（io/fail/mut/async）+ HM 零标注 + Perceus RC native + 自举」截至 2026-06-11 无人在做或宣布。三个最近邻方向各异且均非此路：MoonBit 向**显式标注**移动（反向）、Zero 押**显式 capability + graph-native**（反面）、Mojo 只打类型安全牌（无 effect）。
+- **叙事窗口以月计**：Mojo 26.2（2026-03-19）已官方采用「编译期报错 = 省 LLM token」话术；Zero 被二级报道贴「explicit effects」标签。「签名即 LLM 行为契约」的话语权正被相邻叙事侵占——先发证据（可运行 native + 量化 benchmark）比机制本身更紧迫。
+- **native 已从差异化变入场券**：同一周（2026-06-08）Zero v0.3.0 加实验性 LLVM 后端、MoonBit v0.10.0 加 native 后端。
+
+**逐对象事实更新（全部已验证，区分发货/宣称）**：
+
+| 对象 | 增量事实 | 对 Ring 威胁 |
+|------|----------|--------------|
+| **MoonBit** | 1.0 **滑期 Q3 2026**（官方 v0.10.0 notes 改口，原 H1）；v0.8.0 **弃用局部 fn effect 推断、改显式标注**（与 Ring 全推断**反向**）；1.0 路线图选 Kotlin 式协程而非代数效果；fd-leak 检查是运行时开关非类型级；Pilot 仍是工具链牌（零类型系统牌） | 机制威胁**下调**（effect 维度反向移动）；工程成熟度威胁维持中 |
+| **Zero** | 动量强劲：25 天 10 版本、4,972 stars、1,057 commits（GitHub API 实测非自报）；v0.3.0 起 **graph-native**（`zero.graph` 语义图是编译器输入，.0 文件仅人类投影，agent 经 `zero query/patch` 对图做 checked edits）+ **实验性 LLVM 后端**；World capability 维持显式传递，无任何 effect 推断演进迹象 | **高**（叙事+动量+Vercel 品牌）；机制是不同的 LLM-first 赌注：「agent 直接操作语义图」vs Ring「签名携带语义」 |
+| **Mojo/Modular** | 26.2（03-19）官方 token-economy 叙事 + agent skills（可装 Claude/Cursor/Codex）+ 750K 行开源 kernel；26.3（05-07）Mojo 1.0 Beta 1；Phase 1 仍明确限 GPU/CPU kernel | 叙事最近邻 + 大厂资源（**中**）；定位不重叠（**低**） |
+| **TypeScript 7** | Beta 2026-04-21（tsgo），官方计划「两个月内」stable（即 ~6 月，RC 先行数周）；截至 06-11 **RC 未发**，可能小幅滑出 6 月；VS 2026 18.6 Insiders 已默认启用 Beta | 「够用就行」主向量，**极高**（不变） |
+| **OpenAI×Astral** | 2026-03-19 收购协议（并入 Codex 团队），**未交割**（待监管）；自述方向 = 开源工具与 Codex 深度整合 | Python「够用就行」最强确认，**高** |
+| **学术** | arXiv 2507.22048：effect handler 用于 LLM 脚本**编排**（OCaml，LLM 调用/IO/并发作为效果）——方向是编排非语言设计；「effect 签名帮 LLM 写代码」**未被学术抢注** | 低；交叉研究已开始出现 |
+
+**覆盖缺口（验证管线空集 ≠ 确认无动态）**：Koka/Effekt/Flix/Unison/Scala caprese/OCaml effects 的 Q2 动态、4-6 月其他大厂/初创新语言、LLM×强类型语言新 benchmark——下轮定向补查。**报告保鲜期 ~4-6 周，2026 年 7 月中复查**（TS7 stable 随时落地、MoonBit 1.0 定 Q3、Zero 周更 2-3 版）。
+
+**行动衔接（2026-06-11 Discussion 已立项）**：B-111 eval harness = 叙事武器（Mojo 的 token 话术只有定性说法，Ring 实测「effect 签名省 X% token/轮数」可越级）；B-104/B-089 native 收口 = 入场券；公开发布时机 = native + benchmark 两证据齐后（Zero 案例证明窗口内发布有 25 天 5k stars 级红利）。
 
 ## 竞品全景（2026-05-22）
 
