@@ -1346,6 +1346,38 @@ function is_fresh_owned_bool_value(expr) {
       }
       break __ring_match16;
     }
+    if (__ring_m16._tag === "IfExpr") {
+      const then_branch = __ring_m16.then_branch; const else_branch = __ring_m16.else_branch;
+      __ring_match21: {
+        const __ring_m21 = else_branch;
+        if (__ring_m21._tag === "none") {
+          return false;
+          break __ring_match21;
+        }
+        if (__ring_m21._tag === "some") {
+          const eb = __ring_m21._0;
+          return (is_fresh_owned_bool_value(then_branch) && is_fresh_owned_bool_value(eb));
+          break __ring_match21;
+        }
+        __match_fail(__ring_m21);
+      }
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "MatchExpr") {
+      const arms = __ring_m16.arms;
+      let all = (List_len(arms) > 0);
+      const __ring_iter_12 = __List_Iterable.iter(arms);
+      while (true) {
+        const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+        if (__ring_next_12._tag === "none") break;
+        const arm = __ring_next_12._0;
+        if ((is_fresh_owned_bool_value(arm.body) === false)) {
+          all = false;
+        }
+      }
+      return all;
+      break __ring_match16;
+    }
     return false;
     break __ring_match16;
   }
@@ -1353,28 +1385,28 @@ function is_fresh_owned_bool_value(expr) {
 
 function block_local_init(stmts, name) {
   let found = Option_none;
-  const __ring_iter_12 = __List_Iterable.iter(stmts);
+  const __ring_iter_13 = __List_Iterable.iter(stmts);
   while (true) {
-    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-    if (__ring_next_12._tag === "none") break;
-    const s = __ring_next_12._0;
-    __ring_match21: {
-      const __ring_m21 = s;
-      if (__ring_m21._tag === "Let") {
-        const n = __ring_m21.name; const init = __ring_m21.init;
+    const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+    if (__ring_next_13._tag === "none") break;
+    const s = __ring_next_13._0;
+    __ring_match22: {
+      const __ring_m22 = s;
+      if (__ring_m22._tag === "Let") {
+        const n = __ring_m22.name; const init = __ring_m22.init;
         if ((n === name)) {
           found = Option_some(init);
         }
-        break __ring_match21;
+        break __ring_match22;
       }
-      if (__ring_m21._tag === "Var") {
-        const n = __ring_m21.name; const init = __ring_m21.init;
+      if (__ring_m22._tag === "Var") {
+        const n = __ring_m22.name; const init = __ring_m22.init;
         if ((n === name)) {
           found = Option_some(init);
         }
-        break __ring_match21;
+        break __ring_match22;
       }
-      break __ring_match21;
+      break __ring_match22;
     }
   }
   return found;

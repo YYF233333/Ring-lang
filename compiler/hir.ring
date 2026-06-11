@@ -594,8 +594,19 @@ pub fn is_arg_returning_call(callee: HExpr) -> Bool {
 //   * Clone → an owned dup by construction (a dropping cond-block's
 //     Clone-wrapped tail — rc_block_inner's tail-escape invariant).
 //   * Block → its value is its tail's value → recurse.
-// Everything else (Ident / FieldAccess / IndexExpr reads, If/Match phis,
-// EffectOp, …) → false: borrow or unknown ownership — leak-direction.  The
+//   * If/Match (B-104 D2) → TRUE iff EVERY branch tail is itself
+//     is_fresh_owned_bool_value (the W3a branch-value recursion, bottoming
+//     out on the same leaf classification).  Covers the match-valued
+//     while-cond (`while match make(i) { some(p) => p.flag, none => false }`):
+//     in a DROPPING cond-block the tail-escape invariant Clone-wraps every
+//     owner-bearing arm tail, so the phi box is always a fresh dup/box that
+//     leaked once per ITERATION pre-D2 (verifier finding on
+//     receiver_temp_drop.ring).  A bare borrow arm tail (`m => obj.flag`,
+//     un-Cloned in a no-drop cond) classifies false → whole phi false →
+//     conservative no-drop, exactly as before.  A DIVERGING arm (Block ending
+//     in return — no tail) classifies false → conservative leak-direction.
+// Everything else (Ident / FieldAccess / IndexExpr reads, EffectOp, …) →
+// false: borrow or unknown ownership — leak-direction.  The
 // BoolType requirement is a belt against audit #149 TypeVar-typed conditions
 // (an unannotated fn's over-generalised return — unknown ownership, possibly
 // the Unit ABI receiver-return accident).
@@ -642,6 +653,17 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
                 _ => is_fresh_owned_bool_value(t),
             },
             none => false,
+        },
+        HExpr::IfExpr { then_branch, else_branch, .. } => match else_branch {
+            none => false,
+            some(eb) => is_fresh_owned_bool_value(then_branch) && is_fresh_owned_bool_value(eb),
+        },
+        HExpr::MatchExpr { arms, .. } => {
+            let mut all = arms.len() > 0
+            for arm in arms {
+                if is_fresh_owned_bool_value(arm.body) == false { all = false }
+            }
+            all
         },
         _ => false,
     }
