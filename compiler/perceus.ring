@@ -498,8 +498,18 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
             hoists
         },
         HStmt::LetDestructure { pattern, bindings, init, span } => {
+            // B-104 D1 Stage 2 — DESTRUCTURE INIT position: `let (a, b) = f()` /
+            // `let (a, b) = (x, y)`.  The destructure only PROJECTS borrows out
+            // of the init value (codegen emit_let_destructure: ring_list_get
+            // loads, no dup; bindings are excluded from the owned set), so a
+            // fresh init had NO owner and leaked (the TUPLE-typeid residual).
+            // Materialise it: `let __anf = f(); let (a, b) = __anf` — the
+            // bindings borrow __anf's slots, escapes of them Clone-wrap, and
+            // __anf is scope-end-dropped.  Paired with the rc_stmt change that
+            // processes the init as a BORROW (rc_expr) instead of rc_escape —
+            // see rc_stmt's LetDestructure arm.
             let mut hoists: List<HStmt> = []
-            let new_init = anf_tail_value(init, hoists, externs, counter)
+            let new_init = anf_operand(init, hoists, externs, counter)
             hoists.push(HStmt::LetDestructure { pattern: pattern, bindings: bindings, init: new_init, span: span })
             hoists
         },
@@ -1890,8 +1900,19 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, mu
         HStmt::Break { span } => [HStmt::Break { span: span }],
         HStmt::Continue { span } => [HStmt::Continue { span: span }],
         HStmt::LetDestructure { pattern, bindings, init, span } => {
-            // The destructure binds owned slots from the initialiser → escape.
-            let new_init = rc_escape(init, owned, boxed, externs, gensym)
+            // B-104 D1 Stage 2: the destructure does NOT take ownership of the
+            // init — codegen (emit_let_destructure) PROJECTS each element via
+            // ring_list_get (a borrow load, no dup) into the binding allocas,
+            // and the bindings are excluded from the owned set (never dropped).
+            // So the init is a BORROW read, not an escape.  The previous
+            // rc_escape here Clone-wrapped an owner-bearing init (`let (a, b) =
+            // pair`), producing an anonymous dup nobody dropped — a refcount
+            // pin that leaked the tuple on every destructure of a named value.
+            // Fresh inits are materialised by the ANF pass (`let __anf = f();
+            // let (a, b) = __anf`) so the borrow source is an owned, scope-end-
+            // dropped binding; binding escapes are Clone-wrapped as usual
+            // (dup-before-drop balance, same as the W2 scrutinee).
+            let new_init = rc_expr(init, false, owned, boxed, externs, gensym)
             [HStmt::LetDestructure { pattern: pattern, bindings: bindings, init: new_init, span: span }]
         },
         HStmt::IfLet { pattern, expr, then_block, else_block, span } => {

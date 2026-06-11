@@ -631,7 +631,7 @@ function anf_stmt(stmt, externs, counter) {
     if (__ring_m11._tag === "LetDestructure") {
       const pattern = __ring_m11.pattern; const bindings = __ring_m11.bindings; const init = __ring_m11.init; const span = __ring_m11.span;
       let hoists = [];
-      const new_init = anf_tail_value(init, hoists, externs, counter);
+      const new_init = anf_operand(init, hoists, externs, counter);
       List_push(hoists, hir$HStmt_LetDestructure(pattern, bindings, new_init, span));
       return hoists;
       break __ring_match11;
@@ -1668,7 +1668,7 @@ function rc_stmt(stmt, owned, boxed, externs, gensym) {
     }
     if (__ring_m33._tag === "LetDestructure") {
       const pattern = __ring_m33.pattern; const bindings = __ring_m33.bindings; const init = __ring_m33.init; const span = __ring_m33.span;
-      const new_init = rc_escape(init, owned, boxed, externs, gensym);
+      const new_init = rc_expr(init, false, owned, boxed, externs, gensym);
       return [hir$HStmt_LetDestructure(pattern, bindings, new_init, span)];
       break __ring_match33;
     }
