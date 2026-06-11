@@ -1,6 +1,7 @@
 use types::{Type, BUILTIN_RANGE}
 use ast::{Pattern, LiteralValue}
-use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type}
+use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type,
+    is_fresh_owned_bool_value}
 use codegen_llvm_ctx::{LlvmCtx, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca}
 
 // Re-declare LLVM types and functions to avoid ESM import issues
@@ -226,6 +227,20 @@ fn emit_while(mut ctx: LlvmCtx, condition: HExpr, body: HExpr) {
     LLVMPositionBuilderAtEnd(ctx.builder, cond_bb)
     let cond_val = gen_llvm_expr(ctx, condition)
     let cond_i1 = unbox_to_i1(ctx, cond_val)
+    // B-104 D1 Stage 2 — while-condition box drop: the condition is
+    // re-evaluated EVERY iteration, and a fresh-owned Bool box (`i < n` →
+    // box_bool; a Ring-fn call result; a dropping cond-block's Clone-wrapped
+    // tail) has no other consumer than the unbox above — without this drop
+    // every iteration leaks one box (the W4-observed tid=2 BOOL climb; the
+    // lexer/parser `while self.pos < len` hot loops).  HIR cannot sequence
+    // "unbox, then release", so the drop is emitted here, post-unbox,
+    // per-iteration — the same codegen-level pattern as the B-104b range
+    // bound/counter drops.  is_fresh_owned_bool_value (hir.ring, shared with
+    // perceus) answers ownership: borrows (`while flag`, unwrap-family calls,
+    // And/Or phis that may yield an operand box verbatim) are never dropped.
+    if is_fresh_owned_bool_value(condition) {
+        emit_drop_value(ctx, cond_val)
+    }
     discard(LLVMBuildCondBr(ctx.builder, cond_i1, body_bb, merge_bb))
 
     // Save and set loop context for break/continue

@@ -534,3 +534,133 @@ fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) 
         _ => false,
     }
 }
+
+// ============================================================
+// B-104 return-mode predicates (shared perceus ↔ LLVM codegen)
+// ============================================================
+//
+// These were perceus-internal until D1 Stage 2; the codegen-level condition-box
+// drops (emit_while / match-guard post-unbox — see is_fresh_owned_bool_value)
+// need the same classification, and cross-stage contracts live in hir.ring.
+// THE EVIDENCE RECORD (the complete B-103 ring_runtime.cpp return-mode
+// classification table, function by function) remains in perceus.ring directly
+// above its former location — read it before touching membership here.
+
+// A method call whose result is a BORROW of (an inner reference of) its
+// receiver or an argument, returned WITHOUT a dup by the runtime — escaping it
+// needs a Clone, and scope-end-dropping its binding would free a reference
+// owned elsewhere.  Membership = the 4 Option projections (B-104 D1 rule ②
+// retired the 9 receiver-returning mutator names — their protection is the
+// type-level Unit exclusion).  Safety asymmetry: omitting a genuine borrow
+// returner CRASHES (UAF); mis-listing a fresh returner only leaks.
+pub fn is_borrow_returning_call(callee: HExpr) -> Bool {
+    match callee {
+        HExpr::FieldAccess { field, .. } =>
+            field == "unwrap" || field == "to_fail"
+            || field == "unwrap_or" || field == "unwrap_or_else",
+        _ => false,
+    }
+}
+
+// A call whose result may be ONE OF ITS ARGUMENTS returned VERBATIM (no dup)
+// with a MOVED (not Clone-wrapped) result — `fold` returns `init` unchanged on
+// an empty receiver.  Materialising/dropping such a result (or its args) can
+// double-free; both perceus (anf_arg) and the codegen condition drop must
+// treat these as non-fresh.  Sole member per the B-103 completeness audit
+// (table in perceus.ring); principled exit = runtime dup-on-empty (audit #149).
+pub fn is_arg_returning_call(callee: HExpr) -> Bool {
+    match callee {
+        HExpr::FieldAccess { field, .. } => field == "fold",
+        _ => false,
+    }
+}
+
+// B-104 D1 Stage 2 — fresh-owned Bool CONDITION value (the while-cond /
+// match-guard box).  HIR cannot express "unbox the condition, THEN release the
+// box" — the unbox is emitted inside codegen's condition lowering, so the drop
+// must be emitted there too (same pattern as the B-104b range-loop drops in
+// emit_for_in_range_direct).  This predicate is the perceus-blessed ownership
+// answer: TRUE iff the expression's value is a freshly-allocated Bool box whose
+// FINAL consumer is that unbox, so a post-unbox ring_drop is balanced:
+//   * BinOp non-And/Or → comparison/eq lowers to box_bool (fresh).  And/Or are
+//     phis that may yield the RHS operand box VERBATIM (possibly a borrow,
+//     e.g. `a && obj.flag`) → false.
+//   * UnaryOp → `!x` boxes a fresh result.
+//   * Call, unless borrow-returning (unwrap family → borrow of the receiver's
+//     payload) or arg-returning (fold → may alias a caller-owned arg): a Ring
+//     fn returns OWNED (clone-all-escape Clone-wraps tail borrows) and scalar
+//     builtins are boxed fresh at the call site.
+//   * BoolLit → a fresh box per evaluation (`while true`).
+//   * Clone → an owned dup by construction (a dropping cond-block's
+//     Clone-wrapped tail — rc_block_inner's tail-escape invariant).
+//   * Block → its value is its tail's value → recurse.
+// Everything else (Ident / FieldAccess / IndexExpr reads, If/Match phis,
+// EffectOp, …) → false: borrow or unknown ownership — leak-direction.  The
+// BoolType requirement is a belt against audit #148 TypeVar-typed conditions
+// (an unannotated fn's over-generalised return — unknown ownership, possibly
+// the Unit ABI receiver-return accident).
+pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
+    let is_bool = match hexpr_type(expr) {
+        Type::BoolType => true,
+        _ => false,
+    }
+    if is_bool == false {
+        return false
+    }
+    match expr {
+        HExpr::BinOp { op, .. } => match op {
+            BinOp::And => false,
+            BinOp::Or => false,
+            _ => true,
+        },
+        HExpr::UnaryOp { .. } => true,
+        HExpr::Call { callee, .. } =>
+            is_borrow_returning_call(callee) == false
+            && is_arg_returning_call(callee) == false,
+        HExpr::BoolLit { .. } => true,
+        HExpr::Clone { .. } => true,
+        // A Block's value is its tail's value.  POST-RC SHAPE: a block that
+        // emits scope-end drops has its tail HOISTED by rc_block_inner into a
+        // fresh `let __rc_scope_N = <escape-processed tail>` (so the drops run
+        // after the tail is computed) and the syntactic tail becomes an Ident
+        // referencing it.  That binding's value is OWNED by construction (the
+        // tail-escape invariant moves a fresh tail / Clone-wraps an
+        // owner-bearing one) and is never in the block's own drop set (it is
+        // created after block_locals).  So: a non-Ident tail classifies
+        // directly; an Ident tail classifies via the init of the LAST Let/Var
+        // of that name among this block's direct statements (the hoist, or a
+        // user binding — which, in a NON-dropping block, was necessarily
+        // non-droppable, so its init classifies false: borrows/And-Or stay
+        // un-dropped).  An Ident with no binding in this block is an outer
+        // borrow → false.
+        HExpr::Block { stmts, tail, .. } => match tail {
+            some(t) => match t {
+                HExpr::Ident { name, .. } => match block_local_init(stmts, name) {
+                    some(init) => is_fresh_owned_bool_value(init),
+                    none => false,
+                },
+                _ => is_fresh_owned_bool_value(t),
+            },
+            none => false,
+        },
+        _ => false,
+    }
+}
+
+// The initialiser of the LAST direct `let`/`var` statement binding `name` in a
+// statement list (helper for is_fresh_owned_bool_value's post-RC Block arm).
+fn block_local_init(stmts: List<HStmt>, name: Str) -> HExpr? {
+    let mut found: HExpr? = none
+    for s in stmts {
+        match s {
+            HStmt::Let { name: n, init, .. } => {
+                if n == name { found = some(init) }
+            },
+            HStmt::Var { name: n, init, .. } => {
+                if n == name { found = some(init) }
+            },
+            _ => {},
+        }
+    }
+    found
+}

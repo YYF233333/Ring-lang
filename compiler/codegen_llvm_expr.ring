@@ -7,7 +7,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     BUILTIN_RANGE,
     effect_op_slot,
-    hexpr_type, hexpr_effects}
+    hexpr_type, hexpr_effects, is_fresh_owned_bool_value}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
@@ -2704,6 +2704,20 @@ fn emit_match_arm_body(mut ctx: LlvmCtx, arm: HMatchArm, merge_bb: LLVMBasicBloc
             let body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.body")
             let guard_val = gen_llvm_expr(ctx, g)
             let guard_i1 = unbox_to_i1(ctx, guard_val)
+            // B-104 D1 Stage 2 — guard box drop (same as emit_while's
+            // condition drop): a fresh-owned Bool guard box (`v > 0` →
+            // box_bool; a dropping guard-block's Clone-wrapped tail) is fully
+            // consumed by the unbox above and would otherwise leak per guard
+            // evaluation.  Emitted post-unbox, pre-branch, so BOTH edges
+            // (taken body / fall-through to the next arm test) see the box
+            // released exactly once.  is_fresh_owned_bool_value (hir.ring)
+            // keeps borrows (Ident guards, unwrap-family calls, And/Or phis)
+            // un-dropped.
+            if is_fresh_owned_bool_value(g) {
+                let gdrop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+                let gdrop_ty = get_rt_fn_type(ctx, "ring_drop")
+                discard(LLVMBuildCall2(ctx.builder, gdrop_ty, gdrop_fn, [guard_val], ""))
+            }
             discard(LLVMBuildCondBr(ctx.builder, guard_i1, body_bb, next_bb))
             LLVMPositionBuilderAtEnd(ctx.builder, body_bb)
         },

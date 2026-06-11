@@ -1237,6 +1237,149 @@ function type_contains_extern_rec(ty, externs, visited) {
   }
 }
 
+function is_borrow_returning_call(callee) {
+  __ring_match14: {
+    const __ring_m14 = callee;
+    if (__ring_m14._tag === "FieldAccess") {
+      const field = __ring_m14.field;
+      return ((((field === "unwrap") || (field === "to_fail")) || (field === "unwrap_or")) || (field === "unwrap_or_else"));
+      break __ring_match14;
+    }
+    return false;
+    break __ring_match14;
+  }
+}
+
+function is_arg_returning_call(callee) {
+  __ring_match15: {
+    const __ring_m15 = callee;
+    if (__ring_m15._tag === "FieldAccess") {
+      const field = __ring_m15.field;
+      return (field === "fold");
+      break __ring_match15;
+    }
+    return false;
+    break __ring_match15;
+  }
+}
+
+function is_fresh_owned_bool_value(expr) {
+  const is_bool = (function() {
+  const __ring_m = hexpr_type(expr);
+  if (__ring_m._tag === "BoolType") { return true; }
+  return false;
+})();
+  if ((is_bool === false)) {
+    return false;
+  }
+  __ring_match16: {
+    const __ring_m16 = expr;
+    if (__ring_m16._tag === "BinOp") {
+      const op = __ring_m16.op;
+      __ring_match17: {
+        const __ring_m17 = op;
+        if (__ring_m17._tag === "And") {
+          return false;
+          break __ring_match17;
+        }
+        if (__ring_m17._tag === "Or") {
+          return false;
+          break __ring_match17;
+        }
+        return true;
+        break __ring_match17;
+      }
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "UnaryOp") {
+      return true;
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "Call") {
+      const callee = __ring_m16.callee;
+      return ((is_borrow_returning_call(callee) === false) && (is_arg_returning_call(callee) === false));
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "BoolLit") {
+      return true;
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "Clone") {
+      return true;
+      break __ring_match16;
+    }
+    if (__ring_m16._tag === "Block") {
+      const stmts = __ring_m16.stmts; const tail = __ring_m16.tail;
+      __ring_match18: {
+        const __ring_m18 = tail;
+        if (__ring_m18._tag === "some") {
+          const t = __ring_m18._0;
+          __ring_match19: {
+            const __ring_m19 = t;
+            if (__ring_m19._tag === "Ident") {
+              const name = __ring_m19.name;
+              __ring_match20: {
+                const __ring_m20 = block_local_init(stmts, name);
+                if (__ring_m20._tag === "some") {
+                  const init = __ring_m20._0;
+                  return is_fresh_owned_bool_value(init);
+                  break __ring_match20;
+                }
+                if (__ring_m20._tag === "none") {
+                  return false;
+                  break __ring_match20;
+                }
+                __match_fail(__ring_m20);
+              }
+              break __ring_match19;
+            }
+            return is_fresh_owned_bool_value(t);
+            break __ring_match19;
+          }
+          break __ring_match18;
+        }
+        if (__ring_m18._tag === "none") {
+          return false;
+          break __ring_match18;
+        }
+        __match_fail(__ring_m18);
+      }
+      break __ring_match16;
+    }
+    return false;
+    break __ring_match16;
+  }
+}
+
+function block_local_init(stmts, name) {
+  let found = Option_none;
+  const __ring_iter_12 = __List_Iterable.iter(stmts);
+  while (true) {
+    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+    if (__ring_next_12._tag === "none") break;
+    const s = __ring_next_12._0;
+    __ring_match21: {
+      const __ring_m21 = s;
+      if (__ring_m21._tag === "Let") {
+        const n = __ring_m21.name; const init = __ring_m21.init;
+        if ((n === name)) {
+          found = Option_some(init);
+        }
+        break __ring_match21;
+      }
+      if (__ring_m21._tag === "Var") {
+        const n = __ring_m21.name; const init = __ring_m21.init;
+        if ((n === name)) {
+          found = Option_some(init);
+        }
+        break __ring_match21;
+      }
+      break __ring_match21;
+    }
+  }
+  return found;
+}
+
 function __DictDispatchInfo_Eq_eq(self, other) {
   return (self.dict_param === other.dict_param) && (self.method === other.method);
 }
@@ -1483,4 +1626,4 @@ function __DerivedImpl_Debug_debug(self) {
 const __DerivedImpl_Debug = { debug: __DerivedImpl_Debug_debug };
 
 
-export { HParam, DictRef_Simple, DictRef_Wrapped, TraitDispatch_Builtin, TraitDispatch_Direct, TraitDispatch_Dict, DictDispatchInfo, HStructFieldInit, HMatchArm, HEffectHandler, HStringInterpPart_Literal, HStringInterpPart_Expression, HExpr_IntLit, HExpr_FloatLit, HExpr_StrLit, HExpr_BoolLit, HExpr_Ident, HExpr_BinOp, HExpr_UnaryOp, HExpr_Call, HExpr_FieldAccess, HExpr_StructLit, HExpr_NamedVariantConstruct, HExpr_MatchExpr, HExpr_Block, HExpr_IfExpr, HExpr_StringInterp, HExpr_TryCatch, HExpr_HandleExpr, HExpr_Lambda, HExpr_EffectOp, HExpr_RangeExpr, HExpr_ListLit, HExpr_TupleLit, HExpr_IndexExpr, HExpr_Clone, HForInDestructure, HLetDestructureBinding, HStmt_Let, HStmt_Var, HStmt_Assign, HStmt_ExprStmt, HStmt_Return, HStmt_While, HStmt_ForIn, HStmt_Break, HStmt_Continue, HStmt_LetDestructure, HStmt_IfLet, HStmt_Drop, HStmt_Dup, HStructField, HEnumVariant, HEffectOp, HTraitMethod, TraitBound, HAssocType, HSigMember, HDecl_Fn, HDecl_Struct, HDecl_Enum, HDecl_Impl, HDecl_Effect, HDecl_Test, HDecl_Trait, HDecl_ExternFn, HDecl_ExternType, HDecl_TypeAlias, HDecl_Const, HDecl_ModBlock, HDecl_Sig, FieldAction_Identity, FieldAction_Call, FieldAction_Tuple, FieldAction_FnLiteral, DerivedField, DerivedVariant, TypeKind_StructKind, TypeKind_EnumKind, DerivedImpl, HProgram, variant_js_name, trait_dict_name, evidence_param_name, default_evidence_name, effect_op_slot, trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL, hexpr_type, hexpr_effects, hexpr_span, collect_extern_type_names, is_extern_handle_type, is_rc_excluded_type, type_contains_extern_handle, __DictDispatchInfo_Eq, __HForInDestructure_Eq, __TraitBound_Eq, __TypeKind_Eq, __DictDispatchInfo_Clone, __HForInDestructure_Clone, __TraitBound_Clone, __DictRef_Clone, __TraitDispatch_Clone, __FieldAction_Clone, __TypeKind_Clone, __DerivedField_Clone, __DerivedVariant_Clone, __DerivedImpl_Clone, __DictDispatchInfo_Ord, __TraitBound_Ord, __TypeKind_Ord, __DictDispatchInfo_Debug, __HForInDestructure_Debug, __TraitBound_Debug, __DictRef_Debug, __TraitDispatch_Debug, __FieldAction_Debug, __TypeKind_Debug, __DerivedField_Debug, __DerivedVariant_Debug, __DerivedImpl_Debug, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS, MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS, OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS, STRINGBUILDER_METHODS };
+export { HParam, DictRef_Simple, DictRef_Wrapped, TraitDispatch_Builtin, TraitDispatch_Direct, TraitDispatch_Dict, DictDispatchInfo, HStructFieldInit, HMatchArm, HEffectHandler, HStringInterpPart_Literal, HStringInterpPart_Expression, HExpr_IntLit, HExpr_FloatLit, HExpr_StrLit, HExpr_BoolLit, HExpr_Ident, HExpr_BinOp, HExpr_UnaryOp, HExpr_Call, HExpr_FieldAccess, HExpr_StructLit, HExpr_NamedVariantConstruct, HExpr_MatchExpr, HExpr_Block, HExpr_IfExpr, HExpr_StringInterp, HExpr_TryCatch, HExpr_HandleExpr, HExpr_Lambda, HExpr_EffectOp, HExpr_RangeExpr, HExpr_ListLit, HExpr_TupleLit, HExpr_IndexExpr, HExpr_Clone, HForInDestructure, HLetDestructureBinding, HStmt_Let, HStmt_Var, HStmt_Assign, HStmt_ExprStmt, HStmt_Return, HStmt_While, HStmt_ForIn, HStmt_Break, HStmt_Continue, HStmt_LetDestructure, HStmt_IfLet, HStmt_Drop, HStmt_Dup, HStructField, HEnumVariant, HEffectOp, HTraitMethod, TraitBound, HAssocType, HSigMember, HDecl_Fn, HDecl_Struct, HDecl_Enum, HDecl_Impl, HDecl_Effect, HDecl_Test, HDecl_Trait, HDecl_ExternFn, HDecl_ExternType, HDecl_TypeAlias, HDecl_Const, HDecl_ModBlock, HDecl_Sig, FieldAction_Identity, FieldAction_Call, FieldAction_Tuple, FieldAction_FnLiteral, DerivedField, DerivedVariant, TypeKind_StructKind, TypeKind_EnumKind, DerivedImpl, HProgram, variant_js_name, trait_dict_name, evidence_param_name, default_evidence_name, effect_op_slot, trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL, hexpr_type, hexpr_effects, hexpr_span, collect_extern_type_names, is_extern_handle_type, is_rc_excluded_type, type_contains_extern_handle, is_borrow_returning_call, is_arg_returning_call, is_fresh_owned_bool_value, __DictDispatchInfo_Eq, __HForInDestructure_Eq, __TraitBound_Eq, __TypeKind_Eq, __DictDispatchInfo_Clone, __HForInDestructure_Clone, __TraitBound_Clone, __DictRef_Clone, __TraitDispatch_Clone, __FieldAction_Clone, __TypeKind_Clone, __DerivedField_Clone, __DerivedVariant_Clone, __DerivedImpl_Clone, __DictDispatchInfo_Ord, __TraitBound_Ord, __TypeKind_Ord, __DictDispatchInfo_Debug, __HForInDestructure_Debug, __TraitBound_Debug, __DictRef_Debug, __TraitDispatch_Debug, __FieldAction_Debug, __TypeKind_Debug, __DerivedField_Debug, __DerivedVariant_Debug, __DerivedImpl_Debug, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS, MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS, OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS, STRINGBUILDER_METHODS };

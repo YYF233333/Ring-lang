@@ -15,7 +15,8 @@ use ast::{Span, Position, Pattern, BinOp}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler,
     hexpr_type, hexpr_span, hexpr_effects,
-    collect_extern_type_names, is_rc_excluded_type, type_contains_extern_handle}
+    collect_extern_type_names, is_rc_excluded_type, type_contains_extern_handle,
+    is_borrow_returning_call, is_arg_returning_call}
 use types::{Type}
 
 // ============================================================
@@ -1255,14 +1256,13 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // mutator names from this list (push/set/insert/remove/add/clear/extend/line/
 // add_int — their UAF protection is now the TYPE-level Unit exclusion, see the
 // classification table above), shrinking that cost to the 4 Option projections.
-fn is_borrow_returning_call(callee: HExpr) -> Bool {
-    match callee {
-        HExpr::FieldAccess { field, .. } =>
-            field == "unwrap" || field == "to_fail"
-            || field == "unwrap_or" || field == "unwrap_or_else",
-        _ => false,
-    }
-}
+//
+// ⚠️ THE PREDICATE ITSELF NOW LIVES IN hir.ring (B-104 D1 Stage 2): the LLVM
+// codegen's condition-box drops (emit_while / match-guard post-unbox,
+// is_fresh_owned_bool_value) need the same classification, and cross-stage
+// contracts belong in hir.ring.  THIS TABLE REMAINS THE EVIDENCE RECORD —
+// update it together with any membership change in hir.ring's
+// is_borrow_returning_call / is_arg_returning_call.
 
 // B-104 W1 (arg materialise): a call whose result may be ONE OF ITS ARGUMENTS
 // returned VERBATIM (no dup) AND whose result is NOT Clone-wrapped on escape
@@ -1309,12 +1309,9 @@ fn is_borrow_returning_call(callee: HExpr) -> Bool {
 // Ring-level functions can never join this list: clone-all-escape Clone-wraps a
 // returned borrowed param at the return/tail escape position, so every Ring fn
 // returns OWNED (the B-103 "no fixpoint needed" theorem, backlog B-103).
-fn is_arg_returning_call(callee: HExpr) -> Bool {
-    match callee {
-        HExpr::FieldAccess { field, .. } => field == "fold",
-        _ => false,
-    }
-}
+//
+// ⚠️ Predicate relocated to hir.ring alongside is_borrow_returning_call (shared
+// with the codegen condition-box drops); this comment block is its evidence.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // B-101 DEAD ROAD (Wave A,证伪 2026-06-05) — DO NOT re-introduce a function-level
