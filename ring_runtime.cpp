@@ -1174,7 +1174,17 @@ extern "C" int64_t ring_map_has(void* map, void* key) {
 
 extern "C" void* ring_map_delete(void* map, void* key) {
     RingMap* m = (RingMap*)map;
-    m->erase(*(std::string*)key);
+    // B-104 D1 rule ④ — removal must DROP the value the map owned (+1 from the
+    // ".insert" sink dup / map_from's dup; the account drop_map settles at
+    // end-of-life).  The key owes nothing: the node's std::string is value-
+    // inlined and destroyed by erase itself; the caller's key box is a borrow.
+    // rc>1 sharers of the value only get decremented.
+    auto it = m->find(*(std::string*)key);
+    if (it != m->end()) {
+        void* old = it->second;
+        m->erase(it);
+        ring_drop(old);
+    }
     return map;
 }
 
@@ -1300,7 +1310,14 @@ extern "C" int64_t ring_map_int_has(void* map, void* key) {
 extern "C" void* ring_map_int_delete(void* map, void* key) {
     RingMapInt* m = (RingMapInt*)map;
     int64_t k = *(int64_t*)key;
-    m->erase(k);
+    // B-104 D1 rule ④ — removal must DROP the owned value (see ring_map_delete);
+    // the int64 key is value-inlined, no RC account.
+    auto it = m->find(k);
+    if (it != m->end()) {
+        void* old = it->second;
+        m->erase(it);
+        ring_drop(old);
+    }
     return map;
 }
 
@@ -1389,7 +1406,11 @@ extern "C" void* ring_map_int_from(void* entries) {
 }
 
 extern "C" void* ring_map_int_clear(void* map) {
-    ((RingMapInt*)map)->clear();
+    RingMapInt* m = (RingMapInt*)map;
+    // B-104 D1 rule ④ — drop every owned value (see ring_map_clear); int64 keys
+    // are value-inlined, no RC account.
+    for (auto& kv : *m) ring_drop(kv.second);
+    m->clear();
     return map;
 }
 
@@ -1567,6 +1588,8 @@ extern "C" void* ring_set_int_difference(void* a, void* b) {
 }
 
 extern "C" void* ring_set_int_clear(void* set) {
+    // B-104 D1 rule ④ audit — nothing to drop: Set<Int> elements are value-
+    // inlined int64 (see ring_set_clear), no RC account.
     ((RingSetInt*)set)->clear();
     return set;
 }
@@ -2209,7 +2232,13 @@ extern "C" void* ring_list_shift(void* list) {
 }
 
 extern "C" void* ring_list_clear(void* list) {
-    ((std::vector<void*>*)list)->clear();
+    auto* vec = (std::vector<void*>*)list;
+    // B-104 D1 rule ④ — clear is early end-of-life for the CONTENTS: drop every
+    // element the list owned (+1 per slot from the push/set sink dups — the same
+    // account drop_list settles when the list itself dies).  rc>1 sharers are
+    // only decremented; the list stays alive and reusable.
+    for (void* elem : *vec) ring_drop(elem);
+    vec->clear();
     return list;
 }
 
@@ -2235,7 +2264,11 @@ extern "C" void* ring_list_extend(void* list, void* other) {
 // ============================================================================
 
 extern "C" void* ring_map_clear(void* map) {
-    ((RingMap*)map)->clear();
+    RingMap* m = (RingMap*)map;
+    // B-104 D1 rule ④ — drop every owned value (see ring_list_clear); keys are
+    // value-inlined std::string, destroyed by clear() itself, no RC account.
+    for (auto& kv : *m) ring_drop(kv.second);
+    m->clear();
     return map;
 }
 
@@ -2244,6 +2277,10 @@ extern "C" void* ring_map_clear(void* map) {
 // ============================================================================
 
 extern "C" void* ring_set_clear(void* set) {
+    // B-104 D1 rule ④ audit — nothing to drop: Set<Str> elements are VALUE-
+    // INLINED std::string copies (ring_set_add copies the CONTENT; no RC pointer
+    // is ever stored — same conclusion as ring_set_clone, #135), so clear() owes
+    // no RC account; ~unordered_set semantics handle the inline strings.
     ((RingSet*)set)->clear();
     return set;
 }
