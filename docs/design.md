@@ -146,6 +146,8 @@ fn load_config(path: Str) -> Config with {fail<IoError | ParseError>} {
 
 ### 1.2 Refinement Types
 
+> **实现现状（2026-06-11 实测核定）**：`where` 全链路未强制（编译时 W0002 提示）。struct-field 位可解析（tokens 丢弃）；**参数位（`fn f(x: Int where ...)`）连解析都未实现——硬 parse error E0103**。参数位 parser 支持与验证一并归 B-001，不单独先行（避免再造「写了不生效」的静默面）。
+
 类型附带谓词，编译器尽力静态检查，无法证明时插入运行时检查：
 
 ```
