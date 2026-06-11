@@ -108,9 +108,9 @@ Ring-lang/
 
 **当前**：**B-104 完整 Perceus RC（里程碑，专门 session）= G-a 内存墙真解**。
 
-- **已落地地基**：L0 RC 基础设施（B-012）→ L1 借用引擎 clone-all-escape（B-098，从根消除 #134 move-analysis double-free 崩溃类）→ over-free/UAF 链终结（B-101→B-102→B-103，细节见 git）→ **B-103 return-mode 分类 ✅（2026-06-11）**：ring_runtime.cpp ~170 函数全量分类表（FRESH/BORROW/SCALAR/NULL-NEVER，逐函数证据）落 `perceus.ring`、`is_borrow_returning_call` 含 9 个 receiver-returning mutator 字段名、runtime dup-on-share 补全 ×9。
+- **已落地地基**：L0 RC 基础设施（B-012）→ L1 借用引擎 clone-all-escape（B-098，从根消除 #134 move-analysis double-free 崩溃类）→ over-free/UAF 链终结（B-101→B-102→B-103，细节见 git）→ **B-103 return-mode 分类 ✅（2026-06-11）**：ring_runtime.cpp ~170 函数全量分类表（FRESH/BORROW/SCALAR/NULL-NEVER，逐函数证据）落 `perceus.ring`、`is_borrow_returning_call` 曾含 9 个 receiver-returning mutator 字段名（D1 规则②落地后退役，Unit 类型级规则接管）、runtime dup-on-share 补全 ×9。
 - **结论（2026-06-09 拍板，数据驱动）**：G-a 主因 = incomplete RC——clone-all-escape 只 drop named 绑定 + 逃逸，**不 drop 中间临时**；墙主体 74.5% 是非标量临时（STR/OPTION/CLOSURE/TUPLE）。标记指针只消 ~21%（BOOL+INT）→ **B-080 降级为后续 peak/perf，B-109 折入 B-104**。停 wave 式「哪里漏堵哪里」打地鼠，做完整 Perceus（garbage-free by construction，Koka POPL'21 定理）。
-- **执行序**：**D1** total return-mode drop pass（推进中；内置规则①extern-handle 类型级 RC 排除（#139 硬前置）②Unit 类型级不 Clone/Drop ③IndexExpr 按 receiver 精化 ④runtime overwrite/remove drop，spec 见 backlog B-104）→ **D2** 静态 leak verifier（post-RC HIR 线性检查，编译期证明 0 泄露/0 UAF，挂 `npm test`）→ **D3** 0 泄露 = 无环 by-construction + 环用 `Weak<T>`（§7.9）→ native re-measure。实现模型见 design.md §7.11。
+- **执行序**：**D1** total return-mode drop pass（推进中：**内置规则①② ✅ 2026-06-11 Stage 1**——#139 extern-handle 类型级 RC 排除 + Unit 类型级不 Clone/Drop + 9 mutator 名退役，git `bfd4fe6`..`b62423b`；剩 total pass 收编 + 规则③IndexExpr 按 receiver 精化 ④runtime overwrite/remove drop，spec 见 backlog B-104）→ **D2** 静态 leak verifier（post-RC HIR 线性检查，编译期证明 0 泄露/0 UAF，挂 `npm test`）→ **D3** 0 泄露 = 无环 by-construction + 环用 `Weak<T>`（§7.9）→ native re-measure。实现模型见 design.md §7.11。
 **后续**：B-089 native 自举终验（G-a/b/c）→ B-099 native LLVM-C 链接（Node 消除）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
 **遗留**：impl effect 传播修复、LSP 移植、技术债清理（见 `docs/audit-report.md`）
@@ -120,8 +120,8 @@ Ring-lang/
 ## 常用命令
 
 ```bash
-# 运行
-node compiler/dist/main.js run examples/hello.ring
+# 运行单文件（run 子命令对单文件是未实现 stub——audit #144；先 build 再 node）
+node compiler/dist/main.js build examples/hello.ring && node examples/hello.js
 
 # 编译为 JS
 node compiler/dist/main.js build examples/hello.ring
@@ -141,8 +141,8 @@ cd compiler && npm run test:llvm
 # 重新编译编译器自身
 node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
 
-# 调试模式
-node compiler/dist/main.js run --debug examples/hello.ring
+# 调试模式（多文件入口；单文件同受 #144 限制）
+node compiler/dist/main.js run --debug <project-entry>.ring
 
 # LLVM 后端：编译为 native .o
 node compiler/dist/main.js build examples/hello.ring --target=llvm
