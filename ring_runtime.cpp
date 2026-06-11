@@ -1399,7 +1399,16 @@ extern "C" void* ring_map_int_from(void* entries) {
             void* val = (*pair)[1];
             // B-103: dup — fresh map co-owns the value (see ring_map_from).
             ring_dup(val);
-            (*result)[key] = val;
+            // B-104 D1 rule ④ — repeated key: later entry wins; drop the
+            // previously stored dup (this map's own +1; see ring_map_from).
+            auto it = result->find(key);
+            if (it == result->end()) {
+                result->emplace(key, val);
+            } else {
+                void* old = it->second;
+                it->second = val;
+                ring_drop(old);
+            }
         }
     }
     return data;
@@ -1972,11 +1981,22 @@ extern "C" void* ring_map_from(void* entries) {
             void* val = (*pair)[1];
             // B-103: dup — the fresh map co-owns the value still owned by the
             // entries pair-list (owned-container-constructor rule; see
-            // ring_list_concat).  Repeated keys: the overwritten previous value
-            // keeps the entries list's own reference, so no drop here (the
-            // overwrite-leak class is D1's, see worker_feedback [观察]).
+            // ring_list_concat).
             ring_dup(val);
-            (*result)[*key] = val;
+            // B-104 D1 rule ④ — repeated key: the later entry wins (JS
+            // `new Map(entries)` oracle), and the previously stored dup is THIS
+            // map's own +1 — release it, else it leaks.  The entries list's own
+            // reference is untouched either way (rc only steps back to the
+            // pre-dup count, never below — the overwritten value stays alive
+            // for the entries list).
+            auto it = result->find(*key);
+            if (it == result->end()) {
+                result->emplace(*key, val);
+            } else {
+                void* old = it->second;
+                it->second = val;
+                ring_drop(old);
+            }
         }
     }
     return data;
