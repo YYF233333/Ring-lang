@@ -460,96 +460,51 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                         }
                         if method == "fold" {
                             let r = gen_expr(ctx, receiver)
-                            let init = match args.get(0) { some(a) => gen_expr(ctx, a), none => "undefined" }
+                            let init = gen_first_arg_or_undefined(ctx, args)
                             let cb = gen_lambda_capture_evidence(ctx, args, 1)
                             return "${r}.reduce(${cb}, ${init})"
                         }
-                        if method == "find" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return gen_find_expr(r, cb)
-                        }
-                        if method == "find_index" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return gen_find_index_expr(r, cb)
-                        }
+                        if method == "find" { return gen_list_find_expr(ctx, receiver, args, "__a[__i]") }
+                        if method == "find_index" { return gen_list_find_expr(ctx, receiver, args, "__i") }
                         if method == "sort_by" {
                             let r = gen_expr(ctx, receiver)
                             let cb = gen_lambda_capture_evidence(ctx, args, 0)
                             return "${r}.sort(${cb})"
                         }
                     }
+                    // Map/Set inline HOFs share the iteration-pattern helpers below;
+                    // each container lists only the methods it actually inlines.
                     if (name == BUILTIN_MAP) {
                         if method == "map_values" {
                             let r = gen_expr(ctx, receiver)
                             let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return "((__m, __f) => { const __r = new Map(); for (const [__k, __v] of __m) __r.set(__k, __f(__v)); return __r; })(${r}, ${cb})"
+                            return gen_hof_collect_expr(map_hof_shape(), "__r.set(__k, __f(__v))", r, cb)
                         }
-                        if method == "filter" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return "((__m, __f) => { const __r = new Map(); for (const [__k, __v] of __m) if (__f(__k, __v)) __r.set(__k, __v); return __r; })(${r}, ${cb})"
-                        }
-                        if method == "fold" {
-                            let r = gen_expr(ctx, receiver)
-                            let init = match args.get(0) { some(a) => gen_expr(ctx, a), none => "undefined" }
-                            let cb = gen_lambda_capture_evidence(ctx, args, 1)
-                            return "((__m, __a, __f) => { for (const [__k, __v] of __m) __a = __f(__a, __k, __v); return __a; })(${r}, ${init}, ${cb})"
-                        }
-                        if method == "any" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return "((__m, __f) => { for (const [__k, __v] of __m) if (__f(__k, __v)) return true; return false; })(${r}, ${cb})"
-                        }
+                        if method == "filter" { return gen_hof_filter(ctx, map_hof_shape(), receiver, args) }
+                        if method == "fold" { return gen_hof_fold(ctx, map_hof_shape(), receiver, args) }
+                        if method == "any" { return gen_hof_any(ctx, map_hof_shape(), receiver, args) }
                     }
                     if (name == BUILTIN_SET) {
-                        if method == "filter" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return "((__s, __f) => { const __r = new Set(); for (const __x of __s) if (__f(__x)) __r.add(__x); return __r; })(${r}, ${cb})"
-                        }
-                        if method == "fold" {
-                            let r = gen_expr(ctx, receiver)
-                            let init = match args.get(0) { some(a) => gen_expr(ctx, a), none => "undefined" }
-                            let cb = gen_lambda_capture_evidence(ctx, args, 1)
-                            return "((__s, __a, __f) => { for (const __x of __s) __a = __f(__a, __x); return __a; })(${r}, ${init}, ${cb})"
-                        }
-                        if method == "any" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return "((__s, __f) => { for (const __x of __s) if (__f(__x)) return true; return false; })(${r}, ${cb})"
-                        }
-                        if method == "all" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return "((__s, __f) => { for (const __x of __s) if (!__f(__x)) return false; return true; })(${r}, ${cb})"
-                        }
+                        if method == "filter" { return gen_hof_filter(ctx, set_hof_shape(), receiver, args) }
+                        if method == "fold" { return gen_hof_fold(ctx, set_hof_shape(), receiver, args) }
+                        if method == "any" { return gen_hof_any(ctx, set_hof_shape(), receiver, args) }
+                        if method == "all" { return gen_hof_all(ctx, set_hof_shape(), receiver, args) }
                     }
                 },
                 Type::EnumType { name, .. } => {
                     if (name == BUILTIN_OPTION) {
                         if method == "map" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return gen_option_map_expr(r, cb)
+                            return gen_option_hof(ctx, receiver, args, "{ _tag: \"some\", _0: __f(__o._0) }", "__o")
                         }
                         if method == "and_then" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return gen_option_and_then_expr(r, cb)
+                            return gen_option_hof(ctx, receiver, args, "__f(__o._0)", "__o")
                         }
                         if method == "unwrap_or_else" {
-                            let r = gen_expr(ctx, receiver)
-                            let cb = gen_lambda_capture_evidence(ctx, args, 0)
-                            return gen_option_unwrap_or_else_expr(r, cb)
+                            return gen_option_hof(ctx, receiver, args, "__o._0", "__f()")
                         }
                         if method == "to_fail" {
                             let r = gen_expr(ctx, receiver)
-                            let err_arg = match args.get(0) {
-                                some(a) => gen_expr(ctx, a),
-                                none => "undefined"
-                            }
+                            let err_arg = gen_first_arg_or_undefined(ctx, args)
                             let ev = evidence_param_name("fail")
                             let tag_f = ENUM_TAG_FIELD
                             let some_t = OPTION_SOME_TAG
@@ -659,59 +614,101 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
     "${callee_str}(${all_str})"
 }
 
-// Helper: generate find expression with option wrapping
-fn gen_find_expr(receiver: Str, cb: Str) -> Str {
-    let mut p: List<Str> = []
-    p.push("((__a) => { const __i = __a.findIndex(")
-    p.push(cb)
-    p.push("); return __i >= 0 ? { _tag: \"some\", _0: __a[__i] } : { _tag: \"none\" }; })(")
-    p.push(receiver)
-    p.push(")")
-    p.join("")
+// ============================================================
+// Inline HOF helpers — shared iteration patterns (#28)
+// ============================================================
+
+// How to iterate a JS container inside an inline-HOF IIFE: the loop
+// binding, how element values reach the user callback, and how matching
+// elements are collected into a fresh result container (`__r`).
+struct HofIterShape {
+    container_var: Str, // IIFE parameter holding the container
+    binding: Str,       // per-element for-of binding
+    cb_args: Str,       // arguments forwarded to the user callback
+    result_ctor: Str,   // empty result-container constructor
+    result_add: Str,    // statement inserting the current element into __r
 }
 
-// Helper: generate find_index expression with option wrapping
-fn gen_find_index_expr(receiver: Str, cb: Str) -> Str {
-    let mut p: List<Str> = []
-    p.push("((__a) => { const __i = __a.findIndex(")
-    p.push(cb)
-    p.push("); return __i >= 0 ? { _tag: \"some\", _0: __i } : { _tag: \"none\" }; })(")
-    p.push(receiver)
-    p.push(")")
-    p.join("")
+fn map_hof_shape() -> HofIterShape {
+    HofIterShape {
+        container_var: "__m",
+        binding: "[__k, __v]",
+        cb_args: "__k, __v",
+        result_ctor: "new Map()",
+        result_add: "__r.set(__k, __v)",
+    }
 }
 
-// Helper: Option.map codegen
-fn gen_option_map_expr(receiver: Str, cb: Str) -> Str {
-    let mut p: List<Str> = []
-    p.push("((__o, __f) => __o._tag === \"some\" ? { _tag: \"some\", _0: __f(__o._0) } : __o)(")
-    p.push(receiver)
-    p.push(", ")
-    p.push(cb)
-    p.push(")")
-    p.join("")
+fn set_hof_shape() -> HofIterShape {
+    HofIterShape {
+        container_var: "__s",
+        binding: "__x",
+        cb_args: "__x",
+        result_ctor: "new Set()",
+        result_add: "__r.add(__x)",
+    }
 }
 
-// Helper: Option.and_then codegen
-fn gen_option_and_then_expr(receiver: Str, cb: Str) -> Str {
-    let mut p: List<Str> = []
-    p.push("((__o, __f) => __o._tag === \"some\" ? __f(__o._0) : __o)(")
-    p.push(receiver)
-    p.push(", ")
-    p.push(cb)
-    p.push(")")
-    p.join("")
+// First call argument, or "undefined" when absent (fold init, to_fail payload)
+fn gen_first_arg_or_undefined(mut ctx: CodegenCtx, args: List<HExpr>) -> Str {
+    match args.get(0) {
+        some(a) => gen_expr(ctx, a),
+        none => "undefined",
+    }
 }
 
-// Helper: Option.unwrap_or_else codegen
-fn gen_option_unwrap_or_else_expr(receiver: Str, cb: Str) -> Str {
-    let mut p: List<Str> = []
-    p.push("((__o, __f) => __o._tag === \"some\" ? __o._0 : __f())(")
-    p.push(receiver)
-    p.push(", ")
-    p.push(cb)
-    p.push(")")
-    p.join("")
+// Collect loop: build a fresh container, run `element_stmt` per element
+fn gen_hof_collect_expr(sh: HofIterShape, element_stmt: Str, receiver: Str, cb: Str) -> Str {
+    let cv = sh.container_var
+    "((${cv}, __f) => { const __r = ${sh.result_ctor}; for (const ${sh.binding} of ${cv}) ${element_stmt}; return __r; })(${receiver}, ${cb})"
+}
+
+// filter: collect the elements the callback accepts
+fn gen_hof_filter(mut ctx: CodegenCtx, sh: HofIterShape, receiver: HExpr, args: List<HExpr>) -> Str {
+    let r = gen_expr(ctx, receiver)
+    let cb = gen_lambda_capture_evidence(ctx, args, 0)
+    gen_hof_collect_expr(sh, "if (__f(${sh.cb_args})) ${sh.result_add}", r, cb)
+}
+
+// fold: args[0] is the initial accumulator, args[1] the combine callback
+fn gen_hof_fold(mut ctx: CodegenCtx, sh: HofIterShape, receiver: HExpr, args: List<HExpr>) -> Str {
+    let r = gen_expr(ctx, receiver)
+    let init = gen_first_arg_or_undefined(ctx, args)
+    let cb = gen_lambda_capture_evidence(ctx, args, 1)
+    let cv = sh.container_var
+    "((${cv}, __a, __f) => { for (const ${sh.binding} of ${cv}) __a = __f(__a, ${sh.cb_args}); return __a; })(${r}, ${init}, ${cb})"
+}
+
+// any: early-exit true on the first element the callback accepts
+fn gen_hof_any(mut ctx: CodegenCtx, sh: HofIterShape, receiver: HExpr, args: List<HExpr>) -> Str {
+    let r = gen_expr(ctx, receiver)
+    let cb = gen_lambda_capture_evidence(ctx, args, 0)
+    let cv = sh.container_var
+    "((${cv}, __f) => { for (const ${sh.binding} of ${cv}) if (__f(${sh.cb_args})) return true; return false; })(${r}, ${cb})"
+}
+
+// all: early-exit false on the first element the callback rejects
+fn gen_hof_all(mut ctx: CodegenCtx, sh: HofIterShape, receiver: HExpr, args: List<HExpr>) -> Str {
+    let r = gen_expr(ctx, receiver)
+    let cb = gen_lambda_capture_evidence(ctx, args, 0)
+    let cv = sh.container_var
+    "((${cv}, __f) => { for (const ${sh.binding} of ${cv}) if (!__f(${sh.cb_args})) return false; return true; })(${r}, ${cb})"
+}
+
+// List find/find_index: findIndex + option-wrap; `found` is the some-payload
+// and may reference __a (the array) and __i (the found index)
+fn gen_list_find_expr(mut ctx: CodegenCtx, receiver: HExpr, args: List<HExpr>, found: Str) -> Str {
+    let r = gen_expr(ctx, receiver)
+    let cb = gen_lambda_capture_evidence(ctx, args, 0)
+    "((__a) => { const __i = __a.findIndex(${cb}); return __i >= 0 ? { _tag: \"some\", _0: ${found} } : { _tag: \"none\" }; })(${r})"
+}
+
+// Option map/and_then/unwrap_or_else share one shape: test the tag, then
+// pick a some-branch / none-branch expression over __o (option) and __f (callback)
+fn gen_option_hof(mut ctx: CodegenCtx, receiver: HExpr, args: List<HExpr>, on_some: Str, on_none: Str) -> Str {
+    let r = gen_expr(ctx, receiver)
+    let cb = gen_lambda_capture_evidence(ctx, args, 0)
+    "((__o, __f) => __o._tag === \"some\" ? ${on_some} : ${on_none})(${r}, ${cb})"
 }
 
 // ============================================================
