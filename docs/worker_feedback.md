@@ -41,6 +41,6 @@ ring_str_get 对 `s[i]` **新 alloc 1 字符串**（fresh），但 is_owner_bear
 
 fresh bootstrap 产出 40 个 .js 与 dist 全字节一致。但 git 里的 `compiler/dist/llvm_ffi.js` 是 `7fee652`（Wave 2a）时代遗留——extern-only 模块现今构建**不再产出** JS 文件，该文件从未被后续 build 覆盖（内容是古老运行时 shim）。属 dead weight，建议删除（未动：零无关重构纪律）。
 
-### [通知] 验证汇总
+### [通知] 验证汇总（ASan 自编译按用户指示中止）
 
-JS e2e 735/735（新增 rc_mutator_share_ops）；llvm_diff 55×3 全绿（新增 mutator_result_binding + list_share_ops_rc，前者有 pre-fix 失败实证）；double-bootstrap 字节一致（40 产出文件）；ASan real_program ×3 build EXIT 0 + 输出逐字节对 + 0 ASan 报错；native harness（test:native）3/3；ASan 自编译结果见 commit message / 末次汇报。
+JS e2e 735/735（新增 rc_mutator_share_ops）；llvm_diff 55×3 全绿（新增 mutator_result_binding + list_share_ops_rc，前者有 pre-fix 失败实证）；double-bootstrap 字节一致（40 产出文件）；ASan real_program ×3 build EXIT 0 + 输出逐字节对 + 0 ASan 报错；native harness（test:native）3/3。**ASan 自编译（步骤 6）**：跑了 ~40 分钟（RSS 缓慢爬至 ~8.6GB，远慢于历史非 ASan 速率），**全程 stderr 零 ASan 报告**（ASan 检出即流式输出，空 log = 观察窗口内零 over-free/UAF），未跑完即按用户指示（「自编译太慢了，跳过」）中止、未达 15GB kill 线。完整门留给 B-104 D1 的 native re-measure（彼时无 ASan 的 alloc-stats 自编译本来就是必跑项）。
