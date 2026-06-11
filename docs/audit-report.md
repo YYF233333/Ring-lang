@@ -40,10 +40,6 @@
 
 ## Codegen
 
-### #28 HOF inline 代码在 List/Map/Set/Option 间重复 [low] [mechanical] [doing]
-
-~100 行重复。应抽象迭代模式。
-
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
 可移植性问题。
