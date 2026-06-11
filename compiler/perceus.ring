@@ -34,7 +34,9 @@ fn synthetic_span() -> Span {
 // `_` also has no observable binding to release — it is a discard, the value
 // flows through the enclosing scrutinee's own RC. Centralise the skip so every
 // drop/dup emission site is consistent.
-fn rc_name_skippable(name: Str) -> Bool {
+// (pub: shared with verify_rc.ring — the B-104 D2 static verifier mirrors the
+// same skip so `_` never enters its binding account.)
+pub fn rc_name_skippable(name: Str) -> Bool {
     name == "_"
 }
 
@@ -43,6 +45,23 @@ fn rc_name_skippable(name: Str) -> Bool {
 // ============================================================
 
 pub fn perceus_transform(program: HProgram) -> HProgram {
+    perceus_transform_mutated(program, "")
+}
+
+// B-104 D2 TEST-ONLY entry: the static leak verifier's negative tests need a
+// deliberately-degraded RC pipeline to prove the verifier catches regressions
+// (a correct pass produces verifiable output, so leak/UAF inputs cannot be
+// constructed from source alone).  `mutate` selects a degradation:
+//   ""            — no mutation (the normal pipeline; perceus_transform).
+//   "skip-anf"    — skip the ANF/materialize pre-pass: fresh-owned operand/arg/
+//                   scrutinee temporaries stay unbound → the verifier must
+//                   report leak-temp (the B-109 ② call-result temp class).
+//   "drop-params" — append a Drop for every function parameter to the function
+//                   body: params are BORROWS (L1 point 4) → the verifier must
+//                   report uaf-drop-borrow.
+// Reached only via the `--rc-mutate=` CLI flag (verify path); the build/run
+// pipelines call perceus_transform and cannot be mutated.
+pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
     // B-104: ANF/materialize pre-pass — hoist every FRESH-OWNED intermediate
     // temporary (call args / operands / conditions / subexprs that are not bound
     // by a `let`) into a `let __anf_N = <expr>` statement so the clone-all-escape
@@ -61,16 +80,52 @@ pub fn perceus_transform(program: HProgram) -> HProgram {
     // Drop/materialise (its deep drop would reach the foreign pointer).  See
     // hir.ring's collect_extern_type_names / type_contains_extern_handle.
     let externs = collect_extern_type_names(program.decls)
-    let anf_program = anf_normalize(program, externs)
+    let anf_program = if mutate == "skip-anf" { program } else { anf_normalize(program, externs) }
     // B-091: `boxed_vars` (def_ids of `let mut` vars auto-boxed for write-through
     // closure capture) is threaded through the RC pass so the Assign old-value
     // Drop is suppressed for them — a boxed write mutates `cell.value`, it does
     // NOT consume/free the shared cell pointer.
     let new_decls = transform_decls(anf_program.decls, anf_program.boxed_vars, externs)
+    let mutated_decls = if mutate == "drop-params" { mutate_drop_params(new_decls) } else { new_decls }
     HProgram {
-        decls: new_decls,
+        decls: mutated_decls,
         derived_impls: anf_program.derived_impls,
         boxed_vars: anf_program.boxed_vars
+    }
+}
+
+// B-104 D2 TEST-ONLY (see perceus_transform_mutated): append a Drop of every
+// parameter to each function body — a deliberate violation of "all parameters
+// borrow" (the callee never drops a parameter) for the verifier's
+// uaf-drop-borrow negative test.
+fn mutate_drop_params(decls: List<HDecl>) -> List<HDecl> {
+    let mut out: List<HDecl> = []
+    for d in decls {
+        match d {
+            HDecl::Fn { name, def_id, type_params, params, return_type, effects, body, is_pub, trait_bounds, span } => {
+                out.push(HDecl::Fn {
+                    name: name, def_id: def_id, type_params: type_params,
+                    params: params, return_type: return_type, effects: effects,
+                    body: mutate_append_param_drops(body, params),
+                    is_pub: is_pub, trait_bounds: trait_bounds, span: span
+                })
+            },
+            _ => out.push(d),
+        }
+    }
+    out
+}
+
+fn mutate_append_param_drops(body: HExpr, params: List<HParam>) -> HExpr {
+    match body {
+        HExpr::Block { stmts, tail, ty, effects, span } => {
+            let mut new_stmts = stmts.concat([])
+            for p in params {
+                new_stmts.push(HStmt::Drop { name: p.name, ty: Type::UnitType, span: synthetic_span() })
+            }
+            HExpr::Block { stmts: new_stmts, tail: tail, ty: ty, effects: effects, span: span }
+        },
+        _ => body,
     }
 }
 
@@ -300,7 +355,8 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
 // index read a FRESH single-char string (ring_str_get allocates) rather than a
 // borrowed element pointer.  Conservative on anything but a literal StrType
 // (TypeVar / generic receivers stay classified as borrows — crash-free leak).
-fn is_str_index(receiver: HExpr) -> Bool {
+// (pub: shared with verify_rc.ring's value classification.)
+pub fn is_str_index(receiver: HExpr) -> Bool {
     match hexpr_type(receiver) {
         Type::StrType => true,
         _ => false,
@@ -315,7 +371,8 @@ fn is_str_index(receiver: HExpr) -> Bool {
 // escape stays allowed (a dup only pins).  Monomorphic call sites are zonked to
 // concrete types and unaffected; the leak cost is confined to generic-context
 // temporaries and the #149 over-generalised unannotated-fn calls.
-fn is_unresolved_var_type(ty: Type) -> Bool {
+// (pub: shared with verify_rc.ring's unknown-ownership guard.)
+pub fn is_unresolved_var_type(ty: Type) -> Bool {
     match ty {
         Type::TypeVar { .. } => true,
         Type::ErrorType => true,
@@ -1838,7 +1895,8 @@ fn scalar_reassign_drop_name(target: HExpr, boxed: Set<Int>) -> Str? {
     }
 }
 
-fn is_scalar_type(ty: Type) -> Bool {
+// (pub: shared with verify_rc.ring's overwrite accounting.)
+pub fn is_scalar_type(ty: Type) -> Bool {
     match ty {
         Type::IntType => true,
         Type::FloatType => true,
@@ -2258,7 +2316,9 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
 // .insert / set.add / .insert, string-builder .append etc.  Returns the arg
 // indices (0-based, receiver excluded — args here are the non-self arguments)
 // that are sink (owned) positions.  Anything not listed is a borrow.
-fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
+// (pub: shared with verify_rc.ring — the verifier must agree on which call args
+// are ownership sinks, or it would mis-report escapes/leaks.)
+pub fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
     match callee {
         HExpr::FieldAccess { field, .. } => {
             if field == "push" || field == "add" || field == "append" || field == "push_back" {
@@ -2298,7 +2358,9 @@ fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
 // extra Clone on an already-owned arg → a leak (crash-free); a false NEGATIVE
 // (missing a real constructor) leaves the arg un-cloned → UAF.  The predicate
 // therefore errs toward inclusion for enum-returning bare-Ident calls.
-fn is_variant_constructor_call(callee: HExpr, result_ty: Type) -> Bool {
+// (pub: shared with verify_rc.ring — same sink-agreement requirement as
+// sink_arg_indices.)
+pub fn is_variant_constructor_call(callee: HExpr, result_ty: Type) -> Bool {
     match callee {
         HExpr::Ident { resolved_name, .. } => match resolved_name {
             some(rn) => match result_ty {
@@ -2325,7 +2387,8 @@ fn list_contains_int(xs: List<Int>, x: Int) -> Bool {
 // the return path would double-free what the return already released).
 // ============================================================
 
-fn stmt_diverges(stmt: HStmt) -> Bool {
+// (pub: shared with verify_rc.ring's path accounting.)
+pub fn stmt_diverges(stmt: HStmt) -> Bool {
     match stmt {
         HStmt::Return { .. } => true,
         HStmt::Break { .. } => true,
@@ -2335,7 +2398,8 @@ fn stmt_diverges(stmt: HStmt) -> Bool {
     }
 }
 
-fn expr_diverges(expr: HExpr) -> Bool {
+// (pub: shared with verify_rc.ring's path accounting.)
+pub fn expr_diverges(expr: HExpr) -> Bool {
     match expr {
         HExpr::Block { stmts, tail, .. } => {
             // Diverges if any top-level statement diverges (statements after it

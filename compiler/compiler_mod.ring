@@ -13,7 +13,8 @@ use runtime::{RUNTIME_CODE, RUNTIME_EXPORT_NAMES, runtime_esm_code}
 use resolver::{ModuleGraph, ModuleId, module_key, module_prefix,
     build_module_graph}
 use exports::{ModuleExports, TypeDef, extract_exports}
-use perceus::{perceus_transform}
+use perceus::{perceus_transform, perceus_transform_mutated}
+use verify_rc::{RcFinding, verify_rc_program, rc_fatal_count, format_rc_findings}
 
 pub struct CompileProjectResult {
     pub js: Str,
@@ -192,6 +193,44 @@ pub fn compile_project_llvm(entry_file: Str, output_path: Str) -> LlvmCompileRes
 
             generate_llvm_project(modules, entry_prefix, output_path)
             LlvmCompileResult { success: true }
+        },
+    }
+}
+
+// ============================================================
+// B-104 D2: multi-file static RC verification
+// Runs the same per-module perceus_transform as compile_project_llvm, then
+// the verify_rc linear check on each module's post-RC HIR.
+// ============================================================
+
+pub struct RcProjectVerifyResult {
+    pub success: Bool,
+    pub fatal: Int,
+    pub exempt: Int,
+    pub report: Str
+}
+
+pub fn verify_project_rc(entry_file: Str, mutate: Str, strict: Bool) -> RcProjectVerifyResult {
+    match compile_phases(entry_file) {
+        none => RcProjectVerifyResult { success: false, fatal: 0, exempt: 0, report: "" },
+        some(phases) => {
+            let mut all: List<RcFinding> = []
+            for key in phases.graph.topo_order {
+                match phases.module_hirs.get(key) {
+                    some(hir) => {
+                        let rc_hir = perceus_transform_mutated(hir, mutate)
+                        for f in verify_rc_program(rc_hir) { all.push(f) }
+                    },
+                    none => {},
+                }
+            }
+            let fatal = rc_fatal_count(all)
+            RcProjectVerifyResult {
+                success: true,
+                fatal: fatal,
+                exempt: all.len() - fatal,
+                report: format_rc_findings(all, strict)
+            }
         },
     }
 }

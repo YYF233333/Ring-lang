@@ -5,9 +5,10 @@ use formatter::{format_human, format_llm}
 use checker::{CheckResult, check as check_single}
 use codegen::{generate}
 use codegen_llvm::{generate_llvm}
-use compiler_mod::{compile_project, compile_project_esm, compile_project_llvm}
+use compiler_mod::{compile_project, compile_project_esm, compile_project_llvm, verify_project_rc}
 use parser::{parse}
-use perceus::{perceus_transform}
+use perceus::{perceus_transform, perceus_transform_mutated}
+use verify_rc::{verify_rc_program, rc_fatal_count, format_rc_findings}
 
 pub fn cli_main() {
     let args = argv()
@@ -55,6 +56,24 @@ pub fn cli_main() {
 
     // Multi-file mode
     if ast.uses.len() > 0 {
+        // B-104 D2: static RC leak/UAF verification (post-perceus HIR linear
+        // check; --verify-rc on the `check` command).  Runs the same per-module
+        // perceus_transform as the LLVM pipeline, then verify_rc_program.
+        if parsed.command == "check" && (parsed.verify_rc || parsed.verify_strict) {
+            let res = verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict)
+            if res.success == false {
+                eprintln("Compilation failed")
+                exit_process(1)
+                return
+            }
+            print(res.report)
+            if res.fatal > 0 || (parsed.verify_strict && res.exempt > 0) {
+                exit_process(1)
+            } else {
+                print("OK")
+            }
+            return
+        }
         if parsed.target == "llvm" {
             // LLVM multi-file mode: all modules → single .o
             if parsed.command == "check" {
@@ -154,6 +173,21 @@ pub fn cli_main() {
         }
     }
 
+    // B-104 D2: single-file --verify-rc (see the multi-file branch above).
+    if parsed.command == "check" && (parsed.verify_rc || parsed.verify_strict) {
+        let rc_program = perceus_transform_mutated(check_result.program, parsed.rc_mutate)
+        let findings = verify_rc_program(rc_program)
+        let fatal = rc_fatal_count(findings)
+        let exempt = findings.len() - fatal
+        print(format_rc_findings(findings, parsed.verify_strict))
+        if fatal > 0 || (parsed.verify_strict && exempt > 0) {
+            exit_process(1)
+        } else {
+            print("OK")
+        }
+        return
+    }
+
     if parsed.target == "llvm" {
         if parsed.command == "check" {
             print("OK")
@@ -204,7 +238,10 @@ struct CliArgs {
     debug: Bool,
     error_format: Str,
     out_dir: Str,
-    target: Str
+    target: Str,
+    verify_rc: Bool,
+    verify_strict: Bool,
+    rc_mutate: Str
 }
 
 fn parse_cli_args(args: List<Str>) -> CliArgs {
@@ -212,22 +249,39 @@ fn parse_cli_args(args: List<Str>) -> CliArgs {
     let mut error_format = "human"
     let mut out_dir = "dist"
     let mut target = "js"
+    let mut verify_rc = false
+    let mut verify_strict = false
+    let mut rc_mutate = ""
     let mut positional: List<Str> = []
 
     for arg in args {
         if arg == "--debug" {
             debug = true
         } else {
-            if arg.starts_with("--error-format=") {
-                error_format = arg.slice(15, arg.len())
+            if arg == "--verify-rc" {
+                verify_rc = true
             } else {
-                if arg.starts_with("--out-dir=") {
-                    out_dir = arg.slice(10, arg.len())
+                if arg == "--verify-rc-strict" {
+                    verify_strict = true
                 } else {
-                    if arg.starts_with("--target=") {
-                        target = arg.slice(9, arg.len())
+                    if arg.starts_with("--rc-mutate=") {
+                        // TEST-ONLY (B-104 D2 negative tests): degrade the RC
+                        // pipeline so the verifier's detection can be asserted.
+                        rc_mutate = arg.slice(12, arg.len())
                     } else {
-                        positional.push(arg)
+                        if arg.starts_with("--error-format=") {
+                            error_format = arg.slice(15, arg.len())
+                        } else {
+                            if arg.starts_with("--out-dir=") {
+                                out_dir = arg.slice(10, arg.len())
+                            } else {
+                                if arg.starts_with("--target=") {
+                                    target = arg.slice(9, arg.len())
+                                } else {
+                                    positional.push(arg)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -243,7 +297,10 @@ fn parse_cli_args(args: List<Str>) -> CliArgs {
         debug: debug,
         error_format: error_format,
         out_dir: out_dir,
-        target: target
+        target: target,
+        verify_rc: verify_rc,
+        verify_strict: verify_strict,
+        rc_mutate: rc_mutate
     }
 }
 
@@ -261,4 +318,6 @@ fn usage() {
     print("  --error-format=human|llm  Error output format (default: human)")
     print("  --out-dir=<path>          Output directory (default: dist)")
     print("  --target=js|llvm          Code generation target (default: js)")
+    print("  --verify-rc               (check) static RC leak/UAF verification of the post-RC HIR")
+    print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail")
 }

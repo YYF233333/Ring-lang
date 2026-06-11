@@ -6,9 +6,10 @@ import { format_human as formatter$format_human, format_llm as formatter$format_
 import { check as checker$check, check_module as checker$check_module, CheckResult as checker$CheckResult } from "./checker.js";
 import { generate as codegen$generate } from "./codegen.js";
 import { generate_llvm as codegen_llvm$generate_llvm, generate_llvm_project as codegen_llvm$generate_llvm_project } from "./codegen_llvm.js";
-import { compile_project as compiler_mod$compile_project, compile_project_llvm as compiler_mod$compile_project_llvm, compile_project_esm as compiler_mod$compile_project_esm, CompileProjectResult as compiler_mod$CompileProjectResult, EsmCompileResult as compiler_mod$EsmCompileResult, LlvmCompileResult as compiler_mod$LlvmCompileResult, __CompileProjectResult_Eq as compiler_mod$__CompileProjectResult_Eq, __CompileProjectResult_Clone as compiler_mod$__CompileProjectResult_Clone, __CompileProjectResult_Ord as compiler_mod$__CompileProjectResult_Ord, __CompileProjectResult_Debug as compiler_mod$__CompileProjectResult_Debug, __EsmCompileResult_Eq as compiler_mod$__EsmCompileResult_Eq, __EsmCompileResult_Clone as compiler_mod$__EsmCompileResult_Clone, __EsmCompileResult_Ord as compiler_mod$__EsmCompileResult_Ord, __EsmCompileResult_Debug as compiler_mod$__EsmCompileResult_Debug, __LlvmCompileResult_Eq as compiler_mod$__LlvmCompileResult_Eq, __LlvmCompileResult_Clone as compiler_mod$__LlvmCompileResult_Clone, __LlvmCompileResult_Ord as compiler_mod$__LlvmCompileResult_Ord, __LlvmCompileResult_Debug as compiler_mod$__LlvmCompileResult_Debug } from "./compiler_mod.js";
+import { compile_project as compiler_mod$compile_project, compile_project_llvm as compiler_mod$compile_project_llvm, verify_project_rc as compiler_mod$verify_project_rc, compile_project_esm as compiler_mod$compile_project_esm, CompileProjectResult as compiler_mod$CompileProjectResult, EsmCompileResult as compiler_mod$EsmCompileResult, LlvmCompileResult as compiler_mod$LlvmCompileResult, RcProjectVerifyResult as compiler_mod$RcProjectVerifyResult, __CompileProjectResult_Eq as compiler_mod$__CompileProjectResult_Eq, __CompileProjectResult_Clone as compiler_mod$__CompileProjectResult_Clone, __CompileProjectResult_Ord as compiler_mod$__CompileProjectResult_Ord, __CompileProjectResult_Debug as compiler_mod$__CompileProjectResult_Debug, __EsmCompileResult_Eq as compiler_mod$__EsmCompileResult_Eq, __EsmCompileResult_Clone as compiler_mod$__EsmCompileResult_Clone, __EsmCompileResult_Ord as compiler_mod$__EsmCompileResult_Ord, __EsmCompileResult_Debug as compiler_mod$__EsmCompileResult_Debug, __LlvmCompileResult_Eq as compiler_mod$__LlvmCompileResult_Eq, __LlvmCompileResult_Clone as compiler_mod$__LlvmCompileResult_Clone, __LlvmCompileResult_Ord as compiler_mod$__LlvmCompileResult_Ord, __LlvmCompileResult_Debug as compiler_mod$__LlvmCompileResult_Debug, __RcProjectVerifyResult_Eq as compiler_mod$__RcProjectVerifyResult_Eq, __RcProjectVerifyResult_Clone as compiler_mod$__RcProjectVerifyResult_Clone, __RcProjectVerifyResult_Ord as compiler_mod$__RcProjectVerifyResult_Ord, __RcProjectVerifyResult_Debug as compiler_mod$__RcProjectVerifyResult_Debug } from "./compiler_mod.js";
 import { PREC_NONE as parser$PREC_NONE, PREC_CATCH as parser$PREC_CATCH, PREC_LOGIC_OR as parser$PREC_LOGIC_OR, PREC_LOGIC_AND as parser$PREC_LOGIC_AND, PREC_EQUALITY as parser$PREC_EQUALITY, PREC_COMPARE as parser$PREC_COMPARE, PREC_RANGE as parser$PREC_RANGE, PREC_ADD_SUB as parser$PREC_ADD_SUB, PREC_MUL_DIV as parser$PREC_MUL_DIV, PREC_UNARY as parser$PREC_UNARY, PREC_POSTFIX as parser$PREC_POSTFIX, infix_precedence as parser$infix_precedence, type_expr_span as parser$type_expr_span, expr_span as parser$expr_span, pattern_span as parser$pattern_span, new_parser as parser$new_parser, parse as parser$parse, Parser as parser$Parser, __Parser_Clone as parser$__Parser_Clone, __Parser_Debug as parser$__Parser_Debug, Parser_peek as parser$Parser_peek, Parser_peek_at as parser$Parser_peek_at, Parser_advance as parser$Parser_advance, Parser_check as parser$Parser_check, Parser_try_consume as parser$Parser_try_consume, Parser_expect as parser$Parser_expect, Parser_at_end as parser$Parser_at_end, Parser_current_span_start as parser$Parser_current_span_start, Parser_make_span as parser$Parser_make_span, Parser_report_error as parser$Parser_report_error, Parser_error as parser$Parser_error, Parser_parse_program as parser$Parser_parse_program, Parser_parse_stmt as parser$Parser_parse_stmt, Parser_parse_while_stmt as parser$Parser_parse_while_stmt, Parser_parse_loop_stmt as parser$Parser_parse_loop_stmt, Parser_parse_for_in_stmt as parser$Parser_parse_for_in_stmt, Parser_parse_break_stmt as parser$Parser_parse_break_stmt, Parser_parse_continue_stmt as parser$Parser_parse_continue_stmt, Parser_parse_if_let_stmt as parser$Parser_parse_if_let_stmt, Parser_parse_binding_stmt as parser$Parser_parse_binding_stmt, Parser_parse_binding_body as parser$Parser_parse_binding_body, Parser_parse_return_stmt as parser$Parser_parse_return_stmt, Parser_parse_block_expr as parser$Parser_parse_block_expr, Parser_parse_use_decl as parser$Parser_parse_use_decl, Parser_parse_mod_block as parser$Parser_parse_mod_block, Parser_parse_decl as parser$Parser_parse_decl, Parser_parse_effect_list as parser$Parser_parse_effect_list, Parser_parse_effect_annotation as parser$Parser_parse_effect_annotation, Parser_parse_fn_decl as parser$Parser_parse_fn_decl, Parser_parse_const_decl as parser$Parser_parse_const_decl, Parser_parse_sig_block as parser$Parser_parse_sig_block, Parser_parse_extern_decl as parser$Parser_parse_extern_decl, Parser_parse_extern_fn_decl_body as parser$Parser_parse_extern_fn_decl_body, Parser_parse_extern_type_decl_body as parser$Parser_parse_extern_type_decl_body, Parser_parse_type_alias_decl as parser$Parser_parse_type_alias_decl, Parser_parse_struct_decl as parser$Parser_parse_struct_decl, Parser_parse_enum_decl as parser$Parser_parse_enum_decl, Parser_parse_impl_decl as parser$Parser_parse_impl_decl, Parser_parse_effect_alias_decl as parser$Parser_parse_effect_alias_decl, Parser_parse_effect_decl as parser$Parser_parse_effect_decl, Parser_parse_test_decl as parser$Parser_parse_test_decl, Parser_parse_assoc_type_decl as parser$Parser_parse_assoc_type_decl, Parser_parse_trait_decl as parser$Parser_parse_trait_decl, Parser_parse_expr as parser$Parser_parse_expr, Parser_parse_expr_no_struct as parser$Parser_parse_expr_no_struct, Parser_parse_expr_bp as parser$Parser_parse_expr_bp, Parser_parse_prefix as parser$Parser_parse_prefix, Parser_parse_dot_expr as parser$Parser_parse_dot_expr, Parser_parse_index_expr as parser$Parser_parse_index_expr, Parser_parse_call_expr as parser$Parser_parse_call_expr, Parser_parse_arg_list as parser$Parser_parse_arg_list, Parser_parse_catch_expr as parser$Parser_parse_catch_expr, Parser_parse_string_interp as parser$Parser_parse_string_interp, Parser_parse_if_expr as parser$Parser_parse_if_expr, Parser_parse_match_expr as parser$Parser_parse_match_expr, Parser_parse_match_arm as parser$Parser_parse_match_arm, Parser_parse_pattern as parser$Parser_parse_pattern, Parser_parse_handle_expr as parser$Parser_parse_handle_expr, Parser_parse_effect_handler as parser$Parser_parse_effect_handler, Parser_parse_lambda_expr as parser$Parser_parse_lambda_expr, Parser_parse_struct_literal as parser$Parser_parse_struct_literal, Parser_try_parse_type_args as parser$Parser_try_parse_type_args, Parser_parse_type_expr as parser$Parser_parse_type_expr, Parser_parse_record_type_expr as parser$Parser_parse_record_type_expr, Parser_parse_qualified_ident as parser$Parser_parse_qualified_ident, Parser_validate_target_type_args as parser$Parser_validate_target_type_args, Parser_parse_type_params as parser$Parser_parse_type_params, Parser_parse_type_bound as parser$Parser_parse_type_bound, Parser_parse_params as parser$Parser_parse_params, Parser_parse_param as parser$Parser_parse_param } from "./parser.js";
-import { perceus_transform as perceus$perceus_transform } from "./perceus.js";
+import { rc_name_skippable as perceus$rc_name_skippable, perceus_transform as perceus$perceus_transform, perceus_transform_mutated as perceus$perceus_transform_mutated, is_str_index as perceus$is_str_index, is_unresolved_var_type as perceus$is_unresolved_var_type, is_scalar_type as perceus$is_scalar_type, sink_arg_indices as perceus$sink_arg_indices, is_variant_constructor_call as perceus$is_variant_constructor_call, stmt_diverges as perceus$stmt_diverges, expr_diverges as perceus$expr_diverges } from "./perceus.js";
+import { verify_rc_program as verify_rc$verify_rc_program, rc_fatal_count as verify_rc$rc_fatal_count, rc_verify_boundary_note as verify_rc$rc_verify_boundary_note, format_rc_findings as verify_rc$format_rc_findings, RcFinding as verify_rc$RcFinding, __RcFinding_Eq as verify_rc$__RcFinding_Eq, __RcFinding_Clone as verify_rc$__RcFinding_Clone, __RcFinding_Ord as verify_rc$__RcFinding_Ord, __RcFinding_Debug as verify_rc$__RcFinding_Debug } from "./verify_rc.js";
 
 
 
@@ -280,6 +281,21 @@ function cli_main(__ring_ev_io) {
     return;
   }
   if ((List_len(ast.uses) > 0)) {
+    if (((parsed.command === "check") && (parsed.verify_rc || parsed.verify_strict))) {
+      const res = compiler_mod$verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict);
+      if ((res.success === false)) {
+        eprintln("Compilation failed");
+        exit_process(1);
+        return;
+      }
+      print(res.report, __ring_ev_io);
+      if (((res.fatal > 0) || (parsed.verify_strict && (res.exempt > 0)))) {
+        exit_process(1);
+      } else {
+        print("OK", __ring_ev_io);
+      }
+      return;
+    }
     if ((parsed.target === "llvm")) {
       if ((parsed.command === "check")) {
         const result = compiler_mod$compile_project(file_path);
@@ -377,6 +393,19 @@ function cli_main(__ring_ev_io) {
       eprintln(formatter$format_human(warning_diags, source));
     }
   }
+  if (((parsed.command === "check") && (parsed.verify_rc || parsed.verify_strict))) {
+    const rc_program = perceus$perceus_transform_mutated(check_result.program, parsed.rc_mutate);
+    const findings = verify_rc$verify_rc_program(rc_program);
+    const fatal = verify_rc$rc_fatal_count(findings);
+    const exempt = (List_len(findings) - fatal);
+    print(verify_rc$format_rc_findings(findings, parsed.verify_strict), __ring_ev_io);
+    if (((fatal > 0) || (parsed.verify_strict && (exempt > 0)))) {
+      exit_process(1);
+    } else {
+      print("OK", __ring_ev_io);
+    }
+    return;
+  }
   if ((parsed.target === "llvm")) {
     if ((parsed.command === "check")) {
       print("OK", __ring_ev_io);
@@ -415,13 +444,16 @@ function cli_main(__ring_ev_io) {
 }
 
 class CliArgs {
-  constructor(command, file, debug, error_format, out_dir, target) {
+  constructor(command, file, debug, error_format, out_dir, target, verify_rc, verify_strict, rc_mutate) {
     this.command = command;
     this.file = file;
     this.debug = debug;
     this.error_format = error_format;
     this.out_dir = out_dir;
     this.target = target;
+    this.verify_rc = verify_rc;
+    this.verify_strict = verify_strict;
+    this.rc_mutate = rc_mutate;
   }
 }
 
@@ -430,6 +462,9 @@ function parse_cli_args(args) {
   let error_format = "human";
   let out_dir = "dist";
   let target = "js";
+  let verify_rc = false;
+  let verify_strict = false;
+  let rc_mutate = "";
   let positional = [];
   const __ring_iter_4 = __List_Iterable.iter(args);
   while (true) {
@@ -439,16 +474,28 @@ function parse_cli_args(args) {
     if ((arg === "--debug")) {
       debug = true;
     } else {
-      if (Str_starts_with(arg, "--error-format=")) {
-        error_format = Str_slice(arg, 15, Str_len(arg));
+      if ((arg === "--verify-rc")) {
+        verify_rc = true;
       } else {
-        if (Str_starts_with(arg, "--out-dir=")) {
-          out_dir = Str_slice(arg, 10, Str_len(arg));
+        if ((arg === "--verify-rc-strict")) {
+          verify_strict = true;
         } else {
-          if (Str_starts_with(arg, "--target=")) {
-            target = Str_slice(arg, 9, Str_len(arg));
+          if (Str_starts_with(arg, "--rc-mutate=")) {
+            rc_mutate = Str_slice(arg, 12, Str_len(arg));
           } else {
-            List_push(positional, arg);
+            if (Str_starts_with(arg, "--error-format=")) {
+              error_format = Str_slice(arg, 15, Str_len(arg));
+            } else {
+              if (Str_starts_with(arg, "--out-dir=")) {
+                out_dir = Str_slice(arg, 10, Str_len(arg));
+              } else {
+                if (Str_starts_with(arg, "--target=")) {
+                  target = Str_slice(arg, 9, Str_len(arg));
+                } else {
+                  List_push(positional, arg);
+                }
+              }
+            }
           }
         }
       }
@@ -466,7 +513,7 @@ function parse_cli_args(args) {
   if (__ring_m._tag === "none") { return ""; }
   __match_fail(__ring_m);
 })();
-  return new CliArgs(command, file, debug, error_format, out_dir, target);
+  return new CliArgs(command, file, debug, error_format, out_dir, target, verify_rc, verify_strict, rc_mutate);
 }
 
 function usage(__ring_ev_io) {
@@ -482,11 +529,13 @@ function usage(__ring_ev_io) {
   print("  --debug                   Print intermediate info", __ring_ev_io);
   print("  --error-format=human|llm  Error output format (default: human)", __ring_ev_io);
   print("  --out-dir=<path>          Output directory (default: dist)", __ring_ev_io);
-  return print("  --target=js|llvm          Code generation target (default: js)", __ring_ev_io);
+  print("  --target=js|llvm          Code generation target (default: js)", __ring_ev_io);
+  print("  --verify-rc               (check) static RC leak/UAF verification of the post-RC HIR", __ring_ev_io);
+  return print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail", __ring_ev_io);
 }
 
 function __CliArgs_Eq_eq(self, other) {
-  return (self.command === other.command) && (self.file === other.file) && (self.debug === other.debug) && (self.error_format === other.error_format) && (self.out_dir === other.out_dir) && (self.target === other.target);
+  return (self.command === other.command) && (self.file === other.file) && (self.debug === other.debug) && (self.error_format === other.error_format) && (self.out_dir === other.out_dir) && (self.target === other.target) && (self.verify_rc === other.verify_rc) && (self.verify_strict === other.verify_strict) && (self.rc_mutate === other.rc_mutate);
 }
 const __CliArgs_Eq = { eq: __CliArgs_Eq_eq, ne: function(self, other) { return !__CliArgs_Eq_eq(self, other); } };
 
@@ -511,7 +560,7 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __CliArgs_Clone_clone(self) {
-  return new CliArgs(self.command, self.file, self.debug, self.error_format, self.out_dir, self.target);
+  return new CliArgs(self.command, self.file, self.debug, self.error_format, self.out_dir, self.target, self.verify_rc, self.verify_strict, self.rc_mutate);
 }
 const __CliArgs_Clone = { clone: __CliArgs_Clone_clone };
 
@@ -536,7 +585,13 @@ function __CliArgs_Ord_cmp(self, other) {
   if (c !== 0) return c;
   c = (self.out_dir < other.out_dir ? -1 : self.out_dir > other.out_dir ? 1 : 0);
   if (c !== 0) return c;
-  return (self.target < other.target ? -1 : self.target > other.target ? 1 : 0);
+  c = (self.target < other.target ? -1 : self.target > other.target ? 1 : 0);
+  if (c !== 0) return c;
+  c = (self.verify_rc < other.verify_rc ? -1 : self.verify_rc > other.verify_rc ? 1 : 0);
+  if (c !== 0) return c;
+  c = (self.verify_strict < other.verify_strict ? -1 : self.verify_strict > other.verify_strict ? 1 : 0);
+  if (c !== 0) return c;
+  return (self.rc_mutate < other.rc_mutate ? -1 : self.rc_mutate > other.rc_mutate ? 1 : 0);
 }
 const __CliArgs_Ord = { cmp: __CliArgs_Ord_cmp };
 
@@ -564,7 +619,7 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __CliArgs_Debug_debug(self) {
-  return "CliArgs { " + "command: " + String(self.command) + ", " + "file: " + String(self.file) + ", " + "debug: " + String(self.debug) + ", " + "error_format: " + String(self.error_format) + ", " + "out_dir: " + String(self.out_dir) + ", " + "target: " + String(self.target) + " }";
+  return "CliArgs { " + "command: " + String(self.command) + ", " + "file: " + String(self.file) + ", " + "debug: " + String(self.debug) + ", " + "error_format: " + String(self.error_format) + ", " + "out_dir: " + String(self.out_dir) + ", " + "target: " + String(self.target) + ", " + "verify_rc: " + String(self.verify_rc) + ", " + "verify_strict: " + String(self.verify_strict) + ", " + "rc_mutate: " + String(self.rc_mutate) + " }";
 }
 const __CliArgs_Debug = { debug: __CliArgs_Debug_debug };
 
