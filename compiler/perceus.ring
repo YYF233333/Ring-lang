@@ -468,8 +468,27 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
         HStmt::ForIn { binding, binding_span, def_id, destructure, iterable, body, iterable_type_name, iter_type_name, span } => {
             // The iterable is evaluated ONCE before the loop → its temps may hoist
             // before the ForIn statement.  The body is its own per-iteration scope.
+            //
+            // B-104 D1 Stage 2 — ITERABLE position: a fresh-owned iterable
+            // (`for e in m.entries()`, `for x in xs.filter(p)`, `for v in
+            // make_list()`) was read by the loop and never dropped.  Materialise
+            // it: `let __anf = m.entries(); for e in __anf` — the loop binding
+            // borrows __anf's elements (B-098 read-borrow), element escapes are
+            // Clone-wrapped, and __anf is scope-end-dropped AFTER the loop (a
+            // `return` inside the body drops the full owned set incl. __anf).
+            // Same Clone-wrap balance as the W2 scrutinee.
+            //
+            // EXCEPTION — a literal RangeExpr iterable stays INLINE: emit_for_in
+            // pattern-matches the RangeExpr form structurally to lower a direct
+            // counting loop (no range struct) with its own per-iteration counter
+            // + bound drops (B-104b).  Materialising it would reroute through
+            // the heavier range-var path for zero RC gain (the direct lowering
+            // already drops the bound boxes).
             let mut hoists: List<HStmt> = []
-            let new_iter = anf_expr(iterable, hoists, externs, counter)
+            let new_iter = match iterable {
+                HExpr::RangeExpr { .. } => anf_expr(iterable, hoists, externs, counter),
+                _ => anf_operand(iterable, hoists, externs, counter),
+            }
             let new_body = anf_block_expr(body, externs, counter)
             hoists.push(HStmt::ForIn {
                 binding: binding, binding_span: binding_span, def_id: def_id,
@@ -487,8 +506,18 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
         HStmt::IfLet { pattern, expr, then_block, else_block, span } => {
             // Scrutinee evaluated once → hoist before the IfLet.  Branch blocks are
             // their own scopes (R2).
+            //
+            // B-104 D1 Stage 2 — IF-LET SCRUTINEE position (W2 extension): a
+            // fresh-owned scrutinee (`if let some(v) = m.get(k)`) was read by the
+            // pattern test and never dropped.  Materialise it (anf_operand) —
+            // identical reasoning to the W2 MatchExpr scrutinee: pattern bindings
+            // PROJECT borrows of __anf (excluded from owned, never dropped), any
+            // escape of a binding/projection is Clone-wrapped, and __anf's
+            // scope-end Drop (after both branches) releases the original —
+            // dup-before-drop balanced.  Borrow scrutinees (Ident/field/index)
+            // fail anf_should_materialize and stay inline.
             let mut hoists: List<HStmt> = []
-            let new_expr = anf_expr(expr, hoists, externs, counter)
+            let new_expr = anf_operand(expr, hoists, externs, counter)
             let new_then = anf_block_expr(then_block, externs, counter)
             let new_else = match else_block {
                 some(eb) => some(anf_block_expr(eb, externs, counter)),

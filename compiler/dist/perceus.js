@@ -618,7 +618,11 @@ function anf_stmt(stmt, externs, counter) {
     if (__ring_m11._tag === "ForIn") {
       const binding = __ring_m11.binding; const binding_span = __ring_m11.binding_span; const def_id = __ring_m11.def_id; const destructure = __ring_m11.destructure; const iterable = __ring_m11.iterable; const body = __ring_m11.body; const iterable_type_name = __ring_m11.iterable_type_name; const iter_type_name = __ring_m11.iter_type_name; const span = __ring_m11.span;
       let hoists = [];
-      const new_iter = anf_expr(iterable, hoists, externs, counter);
+      const new_iter = (function() {
+  const __ring_m = iterable;
+  if (__ring_m._tag === "RangeExpr") { return anf_expr(iterable, hoists, externs, counter); }
+  return anf_operand(iterable, hoists, externs, counter);
+})();
       const new_body = anf_block_expr(body, externs, counter);
       List_push(hoists, hir$HStmt_ForIn(binding, binding_span, def_id, destructure, new_iter, new_body, iterable_type_name, iter_type_name, span));
       return hoists;
@@ -635,7 +639,7 @@ function anf_stmt(stmt, externs, counter) {
     if (__ring_m11._tag === "IfLet") {
       const pattern = __ring_m11.pattern; const expr = __ring_m11.expr; const then_block = __ring_m11.then_block; const else_block = __ring_m11.else_block; const span = __ring_m11.span;
       let hoists = [];
-      const new_expr = anf_expr(expr, hoists, externs, counter);
+      const new_expr = anf_operand(expr, hoists, externs, counter);
       const new_then = anf_block_expr(then_block, externs, counter);
       const new_else = (function() {
   const __ring_m = else_block;
