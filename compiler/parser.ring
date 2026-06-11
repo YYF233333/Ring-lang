@@ -11,7 +11,7 @@ use ast::{
 }
 use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
 use diagnostics::{CollectingSink, Severity, DiagnosticContext, new_collecting_sink, make_diag, make_diagnostic}
-use codes::{E0101, E0103, E0104, E0706, W0001}
+use codes::{E0101, E0103, E0104, E0706, W0002}
 
 extern fn __ring_raise_fail(msg: Str) -> Never
 
@@ -995,8 +995,8 @@ impl Parser {
             let type_annotation = self.parse_type_expr()
             if self.check(TokenKind::TkWhere) {
                 let where_span = self.peek().span
-                self.sink.report(make_diag(W0001, Severity::SevWarning,
-                    "Refinement types are not yet implemented; 'where' clause is ignored",
+                self.sink.report(make_diag(W0002, Severity::SevWarning,
+                    "refinement 'where' clause is parsed but not enforced; it is a documentation-only annotation until refinement types are implemented",
                     where_span,
                     DiagnosticContext::OtherContext { detail: some("where clause parsed but not enforced") }))
                 self.advance()

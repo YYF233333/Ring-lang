@@ -355,8 +355,27 @@ function cli_main(__ring_ev_io) {
     exit_process(1);
     return;
   }
-  if ((List_len(sink.items) > 0)) {
-    eprintln(formatter$format_human(sink.items, source));
+  let warning_diags = [];
+  const __ring_iter_2 = __List_Iterable.iter(parse_sink.items);
+  while (true) {
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const d = __ring_next_2._0;
+    List_push(warning_diags, d);
+  }
+  const __ring_iter_3 = __List_Iterable.iter(sink.items);
+  while (true) {
+    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+    if (__ring_next_3._tag === "none") break;
+    const d = __ring_next_3._0;
+    List_push(warning_diags, d);
+  }
+  if ((List_len(warning_diags) > 0)) {
+    if ((parsed.error_format === "llm")) {
+      eprintln(formatter$format_llm(warning_diags, file_path));
+    } else {
+      eprintln(formatter$format_human(warning_diags, source));
+    }
   }
   if ((parsed.target === "llvm")) {
     if ((parsed.command === "check")) {
@@ -412,11 +431,11 @@ function parse_cli_args(args) {
   let out_dir = "dist";
   let target = "js";
   let positional = [];
-  const __ring_iter_2 = __List_Iterable.iter(args);
+  const __ring_iter_4 = __List_Iterable.iter(args);
   while (true) {
-    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
-    if (__ring_next_2._tag === "none") break;
-    const arg = __ring_next_2._0;
+    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+    if (__ring_next_4._tag === "none") break;
+    const arg = __ring_next_4._0;
     if ((arg === "--debug")) {
       debug = true;
     } else {

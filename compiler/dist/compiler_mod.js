@@ -349,6 +349,15 @@ function compile_phases(entry_file) {
                 eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(sink), src));
                 check_ok = false;
               } else {
+                if ((List_len(sink.items) > 0)) {
+                  const src = read_file((function() {
+  const __ring_m = _Map_get(graph.modules, key);
+  if (__ring_m._tag === "some") { const m = __ring_m._0; return m.file_path; }
+  if (__ring_m._tag === "none") { return ""; }
+  __match_fail(__ring_m);
+})());
+                  eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(sink), src));
+                }
                 _Map_insert(module_hirs, key, result.program);
                 __ring_match10: {
                   const __ring_m10 = _Map_get(graph.modules, key);

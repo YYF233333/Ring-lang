@@ -139,9 +139,19 @@ pub fn cli_main() {
         return
     }
 
-    // Print warnings (non-error diagnostics) even on success
-    if sink.items.len() > 0 {
-        eprintln(format_human(sink.items, source))
+    // Surface warnings (non-error diagnostics) even on success — to stderr,
+    // so stdout keeps its success contract ("OK" / "Compiled: ...") and the
+    // exit code is unchanged. Includes parser warnings (e.g. W0002 refinement
+    // 'where' clause) and checker warnings (e.g. W0001 catch on pure expr).
+    let mut warning_diags: List<Diagnostic> = []
+    for d in parse_sink.items { warning_diags.push(d) }
+    for d in sink.items { warning_diags.push(d) }
+    if warning_diags.len() > 0 {
+        if parsed.error_format == "llm" {
+            eprintln(format_llm(warning_diags, file_path))
+        } else {
+            eprintln(format_human(warning_diags, source))
+        }
     }
 
     if parsed.target == "llvm" {
