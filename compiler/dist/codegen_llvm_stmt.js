@@ -694,6 +694,7 @@ function emit_for_in_list(ctx, binding, destructure, iterable, body) {
   __match_fail(__ring_m);
 })();
   const list_val_raw = codegen_llvm_expr$gen_llvm_expr(ctx, iterable);
+  let set_converted = false;
   const list_val = (function() {
   const __ring_m = hir$hexpr_type(iterable);
   if (__ring_m._tag === "StructType") { const name = __ring_m.name; const type_params = __ring_m.type_params; return ((name === "Set") ? (function() {
@@ -705,6 +706,7 @@ function emit_for_in_list(ctx, binding, destructure, iterable, body) {
   const conv_name = (is_int_elem ? "ring_set_int_to_list" : "ring_set_to_list");
   const conv_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type);
   const conv_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, conv_name);
+  set_converted = true;
   return LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], codegen_llvm_ctx$fresh_name(ctx, "s2l"));
 })() : list_val_raw); }
   return list_val_raw;
@@ -781,7 +783,10 @@ function emit_for_in_list(ctx, binding, destructure, iterable, body) {
   discard(LLVMBuildBr(ctx.builder, cond_bb));
   ctx.loop_break_bb = saved_break;
   ctx.loop_continue_bb = saved_continue;
-  return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
+  LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
+  if (set_converted) {
+    return emit_drop_value(ctx, list_val);
+  }
 }
 
 function emit_break(ctx) {

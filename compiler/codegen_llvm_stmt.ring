@@ -487,6 +487,17 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
 
     // A Set is backed by a hash table, not a vector — convert it to a List before
     // index-based iteration. List iterables pass through unchanged.
+    //
+    // B-104 D1 Stage 2: the conversion list is a codegen-SYNTHESIZED fresh
+    // temporary (ring_set_to_list allocs the list AND fresh element strs/boxes)
+    // that perceus never sees — it leaked on every set iteration.  Drop it at
+    // loop exit (merge_bb below), the same codegen-level pattern as the B-104b
+    // range bound/counter drops.  Sound: loop-body borrows of its elements end
+    // by merge (element escapes were Clone-wrapped by perceus); `break` routes
+    // through merge_bb (loop_break_bb).  Residual: a `return` mid-loop bypasses
+    // merge and leaks one conversion list — bounded O(loop-entries), the same
+    // accepted residual as the B-104b range drops.
+    let mut set_converted = false
     let list_val = match hexpr_type(iterable) {
         Type::StructType { name, type_params, .. } => {
             if name == "Set" {
@@ -499,6 +510,7 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
                 let conv_name = if is_int_elem { "ring_set_int_to_list" } else { "ring_set_to_list" }
                 let conv_fn = get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type)
                 let conv_ty = get_rt_fn_type(ctx, conv_name)
+                set_converted = true
                 LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "s2l"))
             } else {
                 list_val_raw
@@ -588,6 +600,12 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
     ctx.loop_continue_bb = saved_continue
 
     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+    // B-104 D1 Stage 2: release the set→list conversion temporary (see the
+    // conversion comment above).  Deep drop frees the list + its fresh
+    // element copies; sharers hold Clone-wrapped dups.
+    if set_converted {
+        emit_drop_value(ctx, list_val)
+    }
 }
 
 // ============================================================
