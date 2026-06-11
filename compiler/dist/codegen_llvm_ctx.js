@@ -253,17 +253,19 @@ function to_result(f) {
 
 
 class StructFieldInfo {
-  constructor(field_names, llvm_type) {
+  constructor(field_names, field_rc_skip, llvm_type) {
     this.field_names = field_names;
+    this.field_rc_skip = field_rc_skip;
     this.llvm_type = llvm_type;
   }
 }
 
 class EnumVariantInfo {
-  constructor(tag, field_count, field_names) {
+  constructor(tag, field_count, field_names, field_rc_skip) {
     this.tag = tag;
     this.field_count = field_count;
     this.field_names = field_names;
+    this.field_rc_skip = field_rc_skip;
   }
 }
 
@@ -276,7 +278,7 @@ class EnumTypeInfo {
 }
 
 class LlvmCtx {
-  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params, effect_ops) {
+  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params, effect_ops, extern_types) {
     this.context = context;
     this.module = module;
     this.builder = builder;
@@ -314,6 +316,7 @@ class LlvmCtx {
     this.boxed_vars = boxed_vars;
     this.fn_mut_params = fn_mut_params;
     this.effect_ops = effect_ops;
+    this.extern_types = extern_types;
   }
 }
 
@@ -532,7 +535,7 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __EnumVariantInfo_Clone_clone(self) {
-  return new EnumVariantInfo(self.tag, self.field_count, __List_Clone.clone(self.field_names, __Str_Clone));
+  return new EnumVariantInfo(self.tag, self.field_count, __List_Clone.clone(self.field_names, __Str_Clone), __List_Clone.clone(self.field_rc_skip, __Bool_Clone));
 }
 const __EnumVariantInfo_Clone = { clone: __EnumVariantInfo_Clone_clone };
 
@@ -569,7 +572,7 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __EnumVariantInfo_Debug_debug(self) {
-  return "EnumVariantInfo { " + "tag: " + String(self.tag) + ", " + "field_count: " + String(self.field_count) + ", " + "field_names: " + __List_Debug.debug(self.field_names, __Str_Debug) + " }";
+  return "EnumVariantInfo { " + "tag: " + String(self.tag) + ", " + "field_count: " + String(self.field_count) + ", " + "field_names: " + __List_Debug.debug(self.field_names, __Str_Debug) + ", " + "field_rc_skip: " + __List_Debug.debug(self.field_rc_skip, __Bool_Debug) + " }";
 }
 const __EnumVariantInfo_Debug = { debug: __EnumVariantInfo_Debug_debug };
 

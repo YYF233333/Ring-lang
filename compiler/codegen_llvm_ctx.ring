@@ -29,13 +29,23 @@ extern fn LLVMIsNullPtr(val: LLVMValueRef) -> Int
 
 pub struct StructFieldInfo {
     pub field_names: List<Str>,
+    // B-104 D1 rule ① (audit #139): per-field "skip in drop_T" flags.  True when
+    // the field's Ring type IS an extern handle or transitively CONTAINS one
+    // (LlvmCtx.builder : LLVMBuilderRef, .named_values : Map<Str, LLVMValueRef>,
+    // .current_fn : LLVMValueRef?, .struct_types : Map<Str, StructFieldInfo>) —
+    // ring_drop on such a field would reach a raw foreign pointer (garbage RC
+    // header / foreign free).  emit_drop_functions skips these fields (leak,
+    // crash-free; foreign handles are owned by the foreign API).
+    pub field_rc_skip: List<Bool>,
     pub llvm_type: LLVMTypeRef
 }
 
 pub struct EnumVariantInfo {
     pub tag: Int,
     pub field_count: Int,
-    pub field_names: List<Str>
+    pub field_names: List<Str>,
+    // B-104 D1 rule ①: same per-payload-field skip flags as StructFieldInfo.
+    pub field_rc_skip: List<Bool>
 }
 
 pub struct EnumTypeInfo {
@@ -124,7 +134,14 @@ pub struct LlvmCtx {
     // declaration order. gen_handle_expr lays the evidence struct out in this
     // order; gen_effect_op dispatches via effect_op_slot (hir.ring) using the
     // same registry. Mirrors the JS backend's CodegenCtx.effect_ops.
-    pub effect_ops: Map<Str, List<HEffectOp>>
+    pub effect_ops: Map<Str, List<HEffectOp>>,
+
+    // B-104 D1 rule ① (audit #139): extern type names declared by the program
+    // (union over all modules in project mode — names are consistent across the
+    // codegen_llvm_* local re-declarations).  register_struct_info /
+    // register_enum_info consult it (via hir::type_contains_extern_handle) to
+    // mark fields whose drop_T emission must be skipped.
+    pub extern_types: Set<Str>
 }
 
 // B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).

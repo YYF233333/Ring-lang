@@ -3,7 +3,7 @@ use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
-    hexpr_type, hexpr_effects}
+    hexpr_type, hexpr_effects, collect_extern_type_names}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
@@ -445,8 +445,8 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     // Option<T>: { some(T), none } → { i64 tag, ptr payload }
     let option_ty = LLVMStructTypeInContext(ctx.context, [i64, ptr], 0)
     let mut option_variants: Map<Str, EnumVariantInfo> = map_new()
-    option_variants.insert("some", EnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"] })
-    option_variants.insert("none", EnumVariantInfo { tag: 1, field_count: 0, field_names: [] })
+    option_variants.insert("some", EnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"], field_rc_skip: [false] })
+    option_variants.insert("none", EnumVariantInfo { tag: 1, field_count: 0, field_names: [], field_rc_skip: [] })
     ctx.enum_types.insert("Option", EnumTypeInfo {
         variants: option_variants, max_fields: 1, llvm_type: option_ty
     })
@@ -489,8 +489,8 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     // Result<T, E>: { Ok(T), Err(E) } → { i64 tag, ptr payload }
     let result_ty = LLVMStructTypeInContext(ctx.context, [i64, ptr], 0)
     let mut result_variants: Map<Str, EnumVariantInfo> = map_new()
-    result_variants.insert("Ok", EnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"] })
-    result_variants.insert("Err", EnumVariantInfo { tag: 1, field_count: 1, field_names: ["value"] })
+    result_variants.insert("Ok", EnumVariantInfo { tag: 0, field_count: 1, field_names: ["value"], field_rc_skip: [false] })
+    result_variants.insert("Err", EnumVariantInfo { tag: 1, field_count: 1, field_names: ["value"], field_rc_skip: [false] })
     ctx.enum_types.insert("Result", EnumTypeInfo {
         variants: result_variants, max_fields: 1, llvm_type: result_ty
     })
@@ -701,11 +701,20 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
 
                 let data_ptr = LLVMGetParam(fn_val, 0)
 
-                // For each field, GEP + load + ring_drop
+                // For each field, GEP + load + ring_drop.
+                // B-104 D1 rule ① (audit #139): skip fields whose Ring type is
+                // (or transitively contains) an extern handle — ring_drop on a
+                // raw foreign pointer reads a garbage header / frees foreign
+                // memory (LlvmCtx.builder, .named_values : Map<Str, LLVMValueRef>,
+                // .current_fn : LLVMValueRef?, …).  Leak instead (crash-free;
+                // foreign handles are owned by the foreign API).
                 for i in 0..info.field_names.len() {
-                    let field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, data_ptr, i, fresh_name(ctx, "fp"))
-                    let field_val = LLVMBuildLoad2(ctx.builder, ptr, field_ptr, fresh_name(ctx, "fv"))
-                    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [field_val], ""))
+                    let skip = match info.field_rc_skip.get(i) { some(s) => s, none => false }
+                    if skip == false {
+                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, data_ptr, i, fresh_name(ctx, "fp"))
+                        let field_val = LLVMBuildLoad2(ctx.builder, ptr, field_ptr, fresh_name(ctx, "fv"))
+                        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [field_val], ""))
+                    }
                 }
 
                 discard(LLVMBuildRetVoid(ctx.builder))
@@ -767,11 +776,16 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
                                 LLVMAddCase(switch_val, LLVMConstInt(i64, vi.tag, 0), variant_bb)
 
                                 LLVMPositionBuilderAtEnd(ctx.builder, variant_bb)
-                                // Drop each field (fields start at index 1 in the enum struct)
+                                // Drop each field (fields start at index 1 in the enum struct).
+                                // B-104 D1 rule ①: skip extern-containing payload
+                                // fields (same rationale as the struct loop above).
                                 for fi in 0..vi.field_count {
-                                    let fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, data_ptr, fi + 1, fresh_name(ctx, "efp"))
-                                    let fv = LLVMBuildLoad2(ctx.builder, ptr, fp, fresh_name(ctx, "efv"))
-                                    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [fv], ""))
+                                    let skip = match vi.field_rc_skip.get(fi) { some(s) => s, none => false }
+                                    if skip == false {
+                                        let fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, data_ptr, fi + 1, fresh_name(ctx, "efp"))
+                                        let fv = LLVMBuildLoad2(ctx.builder, ptr, fp, fresh_name(ctx, "efv"))
+                                        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [fv], ""))
+                                    }
                                 }
                                 discard(LLVMBuildBr(ctx.builder, done_bb))
                             },
@@ -983,12 +997,17 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         type_to_typeid: map_new(),
         boxed_vars: set_new(),
         fn_mut_params: map_new(),
-        effect_ops: map_new()
+        effect_ops: map_new(),
+        extern_types: set_new()
     }
 
     // B-091: thread the auto-boxed mut-cell def_ids through so Var/read/write
     // codegen routes them through a shared heap cell (write-through capture).
     for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
+
+    // B-104 D1 rule ① (audit #139): extern type names, consulted by
+    // register_struct_info / register_enum_info for drop_T field skipping.
+    for en in collect_extern_type_names(program.decls) { ctx.extern_types.insert(en) }
 
     // 6. Register built-in types (Option, Result — not in HDecl, handled by runtime)
     register_builtin_enums(ctx)
@@ -1113,7 +1132,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         type_to_typeid: map_new(),
         boxed_vars: set_new(),
         fn_mut_params: map_new(),
-        effect_ops: map_new()
+        effect_ops: map_new(),
+        extern_types: set_new()
     }
 
     // 6. Register built-in types
@@ -1127,6 +1147,11 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
         // B-090: register effect-op declaration order (shared by all modules).
         register_effect_ops_llvm(program.decls, ctx.effect_ops)
+        // B-104 D1 rule ① (audit #139): union of all modules' extern type names
+        // (the codegen_llvm_* modules re-declare the same bare names, so the
+        // union is consistent); used for drop_T field skipping in the
+        // forward-declare pass below.
+        for en in collect_extern_type_names(program.decls) { ctx.extern_types.insert(en) }
         // #134: do NOT union boxed_vars across modules here.  def_ids are minted
         // per-module (each module is checked with a fresh InferCtx whose
         // next_def_id restarts at 0 — see checker.ring::new_infer_ctx), so a

@@ -646,8 +646,8 @@ function register_builtin_enums(ctx) {
   const i64 = ctx.i64_type;
   const option_ty = LLVMStructTypeInContext(ctx.context, [i64, ptr], 0);
   let option_variants = map_new();
-  _Map_insert(option_variants, "some", new codegen_llvm_ctx$EnumVariantInfo(0, 1, ["value"]));
-  _Map_insert(option_variants, "none", new codegen_llvm_ctx$EnumVariantInfo(1, 0, []));
+  _Map_insert(option_variants, "some", new codegen_llvm_ctx$EnumVariantInfo(0, 1, ["value"], [false]));
+  _Map_insert(option_variants, "none", new codegen_llvm_ctx$EnumVariantInfo(1, 0, [], []));
   _Map_insert(ctx.enum_types, "Option", new codegen_llvm_ctx$EnumTypeInfo(option_variants, 1, option_ty));
   const some_fn_ty = LLVMFunctionType(ptr, [ptr], 0);
   const some_fn = LLVMAddFunction(ctx.module, "ring_Option_some", some_fn_ty);
@@ -678,8 +678,8 @@ function register_builtin_enums(ctx) {
   discard(LLVMBuildRet(ctx.builder, none_ptr));
   const result_ty = LLVMStructTypeInContext(ctx.context, [i64, ptr], 0);
   let result_variants = map_new();
-  _Map_insert(result_variants, "Ok", new codegen_llvm_ctx$EnumVariantInfo(0, 1, ["value"]));
-  _Map_insert(result_variants, "Err", new codegen_llvm_ctx$EnumVariantInfo(1, 1, ["value"]));
+  _Map_insert(result_variants, "Ok", new codegen_llvm_ctx$EnumVariantInfo(0, 1, ["value"], [false]));
+  _Map_insert(result_variants, "Err", new codegen_llvm_ctx$EnumVariantInfo(1, 1, ["value"], [false]));
   _Map_insert(ctx.enum_types, "Result", new codegen_llvm_ctx$EnumTypeInfo(result_variants, 1, result_ty));
   const result_tid = codegen_llvm_ctx$get_or_assign_typeid(ctx, "Result");
   const result_typeid = LLVMConstInt(i64, result_tid, 0);
@@ -932,9 +932,17 @@ function emit_drop_functions(ctx) {
         const data_ptr = LLVMGetParam(fn_val, 0);
         const __ring_end19 = List_len(info.field_names);
         for (let i = 0; i < __ring_end19; i++) {
-          const field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, data_ptr, i, codegen_llvm_ctx$fresh_name(ctx, "fp"));
-          const field_val = LLVMBuildLoad2(ctx.builder, ptr, field_ptr, codegen_llvm_ctx$fresh_name(ctx, "fv"));
-          discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [field_val], ""));
+          const skip = (function() {
+  const __ring_m = List_get(info.field_rc_skip, i);
+  if (__ring_m._tag === "some") { const s = __ring_m._0; return s; }
+  if (__ring_m._tag === "none") { return false; }
+  __match_fail(__ring_m);
+})();
+          if ((skip === false)) {
+            const field_ptr = LLVMBuildStructGEP2(ctx.builder, info.llvm_type, data_ptr, i, codegen_llvm_ctx$fresh_name(ctx, "fp"));
+            const field_val = LLVMBuildLoad2(ctx.builder, ptr, field_ptr, codegen_llvm_ctx$fresh_name(ctx, "fv"));
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [field_val], ""));
+          }
         }
         discard(LLVMBuildRetVoid(ctx.builder));
         ctx.current_fn = saved_fn;
@@ -997,9 +1005,17 @@ function emit_drop_functions(ctx) {
                 LLVMPositionBuilderAtEnd(ctx.builder, variant_bb);
                 const __ring_end22 = vi.field_count;
                 for (let fi = 0; fi < __ring_end22; fi++) {
-                  const fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, data_ptr, (fi + 1), codegen_llvm_ctx$fresh_name(ctx, "efp"));
-                  const fv = LLVMBuildLoad2(ctx.builder, ptr, fp, codegen_llvm_ctx$fresh_name(ctx, "efv"));
-                  discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [fv], ""));
+                  const skip = (function() {
+  const __ring_m = List_get(vi.field_rc_skip, fi);
+  if (__ring_m._tag === "some") { const s = __ring_m._0; return s; }
+  if (__ring_m._tag === "none") { return false; }
+  __match_fail(__ring_m);
+})();
+                  if ((skip === false)) {
+                    const fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, data_ptr, (fi + 1), codegen_llvm_ctx$fresh_name(ctx, "efp"));
+                    const fv = LLVMBuildLoad2(ctx.builder, ptr, fp, codegen_llvm_ctx$fresh_name(ctx, "efv"));
+                    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [fv], ""));
+                  }
                 }
                 discard(LLVMBuildBr(ctx.builder, done_bb));
                 break __ring_match17;
@@ -1183,13 +1199,20 @@ function generate_llvm(program, output_path, __ring_ev_io) {
   const i1_type = LLVMInt1TypeInContext(context);
   const void_type = LLVMVoidTypeInContext(context);
   const double_type = LLVMDoubleTypeInContext(context);
-  let ctx = new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), Option_none, map_new(), set_new(), 0, 0, 0, Option_none, "", Option_none, Option_none, 64, map_new(), set_new(), map_new(), map_new());
+  let ctx = new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), Option_none, map_new(), set_new(), 0, 0, 0, Option_none, "", Option_none, Option_none, 64, map_new(), set_new(), map_new(), map_new(), set_new());
   const __ring_iter_26 = ___Set_Iterable.iter(program.boxed_vars);
   while (true) {
     const __ring_next_26 = __SetIterator_Iterator.next(__ring_iter_26);
     if (__ring_next_26._tag === "none") break;
     const did = __ring_next_26._0;
     _Set_insert(ctx.boxed_vars, did);
+  }
+  const __ring_iter_27 = ___Set_Iterable.iter(hir$collect_extern_type_names(program.decls));
+  while (true) {
+    const __ring_next_27 = __SetIterator_Iterator.next(__ring_iter_27);
+    if (__ring_next_27._tag === "none") break;
+    const en = __ring_next_27._0;
+    _Set_insert(ctx.extern_types, en);
   }
   register_builtin_enums(ctx);
   scan_fn_effects(program.decls, ctx.local_fn_effects);
@@ -1198,11 +1221,11 @@ function generate_llvm(program, output_path, __ring_ev_io) {
   register_effect_ops_llvm(program.decls, ctx.effect_ops);
   declare_runtime_fns(ctx);
   forward_declare_functions(ctx, program.decls);
-  const __ring_iter_27 = __List_Iterable.iter(program.decls);
+  const __ring_iter_28 = __List_Iterable.iter(program.decls);
   while (true) {
-    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
-    if (__ring_next_27._tag === "none") break;
-    const decl = __ring_next_27._0;
+    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+    if (__ring_next_28._tag === "none") break;
+    const decl = __ring_next_28._0;
     codegen_llvm_decl$emit_llvm_decl(ctx, decl);
   }
   emit_drop_functions(ctx);
@@ -1240,13 +1263,13 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
   const i1_type = LLVMInt1TypeInContext(context);
   const void_type = LLVMVoidTypeInContext(context);
   const double_type = LLVMDoubleTypeInContext(context);
-  let ctx = new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), Option_none, map_new(), set_new(), 0, 0, 0, Option_none, "", Option_none, Option_none, 64, map_new(), set_new(), map_new(), map_new());
+  let ctx = new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), Option_none, map_new(), set_new(), 0, 0, 0, Option_none, "", Option_none, Option_none, 64, map_new(), set_new(), map_new(), map_new(), set_new());
   register_builtin_enums(ctx);
-  const __ring_iter_28 = __List_Iterable.iter(modules);
+  const __ring_iter_29 = __List_Iterable.iter(modules);
   while (true) {
-    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
-    if (__ring_next_28._tag === "none") break;
-    const m = __ring_next_28._0;
+    const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+    if (__ring_next_29._tag === "none") break;
+    const m = __ring_next_29._0;
     const __ring_dt0 = m;
     const prefix = __ring_dt0[0];
     const program = __ring_dt0[1];
@@ -1255,24 +1278,31 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
     scan_trait_decls(program.decls, ctx.trait_method_order);
     scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params);
     register_effect_ops_llvm(program.decls, ctx.effect_ops);
+    const __ring_iter_30 = ___Set_Iterable.iter(hir$collect_extern_type_names(program.decls));
+    while (true) {
+      const __ring_next_30 = __SetIterator_Iterator.next(__ring_iter_30);
+      if (__ring_next_30._tag === "none") break;
+      const en = __ring_next_30._0;
+      _Set_insert(ctx.extern_types, en);
+    }
   }
   declare_runtime_fns(ctx);
-  const __ring_iter_29 = __List_Iterable.iter(modules);
+  const __ring_iter_31 = __List_Iterable.iter(modules);
   while (true) {
-    const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
-    if (__ring_next_29._tag === "none") break;
-    const m = __ring_next_29._0;
+    const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+    if (__ring_next_31._tag === "none") break;
+    const m = __ring_next_31._0;
     const __ring_dt1 = m;
     const prefix = __ring_dt1[0];
     const program = __ring_dt1[1];
     const _uses = __ring_dt1[2];
     forward_declare_functions_with_prefix(ctx, program.decls, Option_some(prefix));
   }
-  const __ring_iter_30 = __List_Iterable.iter(modules);
+  const __ring_iter_32 = __List_Iterable.iter(modules);
   while (true) {
-    const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
-    if (__ring_next_30._tag === "none") break;
-    const m = __ring_next_30._0;
+    const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+    if (__ring_next_32._tag === "none") break;
+    const m = __ring_next_32._0;
     const __ring_dt2 = m;
     const prefix = __ring_dt2[0];
     const program = __ring_dt2[1];
@@ -1281,11 +1311,11 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
     ctx.boxed_vars = program.boxed_vars;
     ctx.local_names = collect_local_names(program.decls);
     ctx.imports_map = build_imports_map(uses);
-    const __ring_iter_31 = __List_Iterable.iter(program.decls);
+    const __ring_iter_33 = __List_Iterable.iter(program.decls);
     while (true) {
-      const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
-      if (__ring_next_31._tag === "none") break;
-      const decl = __ring_next_31._0;
+      const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+      if (__ring_next_33._tag === "none") break;
+      const decl = __ring_next_33._0;
       codegen_llvm_decl$emit_llvm_decl(ctx, decl);
     }
   }
@@ -1336,11 +1366,11 @@ function emit_c_main_project(ctx, entry_prefix) {
         const __ring_m24 = _Map_get(ctx.fn_evidence_params, ring_main_name);
         if (__ring_m24._tag === "some") {
           const ev_params = __ring_m24._0;
-          const __ring_iter_32 = __List_Iterable.iter(ev_params);
+          const __ring_iter_34 = __List_Iterable.iter(ev_params);
           while (true) {
-            const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
-            if (__ring_next_32._tag === "none") break;
-            const ep = __ring_next_32._0;
+            const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+            if (__ring_next_34._tag === "none") break;
+            const ep = __ring_next_34._0;
             List_push(call_args, LLVMConstPointerNull(ptr));
           }
           break __ring_match24;
@@ -1371,21 +1401,21 @@ function emit_c_main_project(ctx, entry_prefix) {
 
 function build_imports_map(uses) {
   let imap = map_new();
-  const __ring_iter_33 = __List_Iterable.iter(uses);
+  const __ring_iter_35 = __List_Iterable.iter(uses);
   while (true) {
-    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
-    if (__ring_next_33._tag === "none") break;
-    const u = __ring_next_33._0;
+    const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+    if (__ring_next_35._tag === "none") break;
+    const u = __ring_next_35._0;
     const module_name = List_join(u.path.segments, "_");
     __ring_match25: {
       const __ring_m25 = u.imports;
       if (__ring_m25._tag === "NamedItems") {
         const names = __ring_m25.names;
-        const __ring_iter_34 = __List_Iterable.iter(names);
+        const __ring_iter_36 = __List_Iterable.iter(names);
         while (true) {
-          const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
-          if (__ring_next_34._tag === "none") break;
-          const ni = __ring_next_34._0;
+          const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+          if (__ring_next_36._tag === "none") break;
+          const ni = __ring_next_36._0;
           const local_name = (function() {
   const __ring_m = ni.alias;
   if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
@@ -1413,11 +1443,11 @@ function collect_local_names(decls) {
 }
 
 function collect_local_names_rec(decls, names) {
-  const __ring_iter_35 = __List_Iterable.iter(decls);
+  const __ring_iter_37 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
-    if (__ring_next_35._tag === "none") break;
-    const decl = __ring_next_35._0;
+    const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+    if (__ring_next_37._tag === "none") break;
+    const decl = __ring_next_37._0;
     __ring_match26: {
       const __ring_m26 = decl;
       if (__ring_m26._tag === "Fn") {

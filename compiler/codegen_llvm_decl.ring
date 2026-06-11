@@ -3,7 +3,7 @@ use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
-    hexpr_type, hexpr_effects}
+    hexpr_type, hexpr_effects, type_contains_extern_handle}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
@@ -219,13 +219,19 @@ fn emit_const_body(mut ctx: LlvmCtx, name: Str, init: HExpr) {
 pub fn register_struct_info(mut ctx: LlvmCtx, name: Str, fields: List<HStructField>) {
     let mut field_names: List<Str> = []
     let mut field_types: List<LLVMTypeRef> = []
+    // B-104 D1 rule ① (audit #139): mark fields whose Ring type is (or
+    // transitively contains) an extern handle — emit_drop_functions must not
+    // ring_drop them (raw foreign pointers / containers thereof).
+    let mut field_rc_skip: List<Bool> = []
     for f in fields {
         field_names.push(f.name)
         field_types.push(ctx.ptr_type)
+        field_rc_skip.push(type_contains_extern_handle(f.ty, ctx.extern_types))
     }
     let struct_ty = LLVMStructTypeInContext(ctx.context, field_types, 0)
     ctx.struct_types.insert(name, StructFieldInfo {
         field_names: field_names,
+        field_rc_skip: field_rc_skip,
         llvm_type: struct_ty
     })
 }
@@ -303,7 +309,13 @@ pub fn register_enum_info(mut ctx: LlvmCtx, name: Str, variants: List<HEnumVaria
                 ns
             },
         }
-        variant_map.insert(v.name, EnumVariantInfo { tag: tag, field_count: fc, field_names: fnames })
+        // B-104 D1 rule ① (audit #139): same extern-containment skip flags as
+        // register_struct_info, per payload field.
+        let mut frs: List<Bool> = []
+        for ft in v.fields {
+            frs.push(type_contains_extern_handle(ft, ctx.extern_types))
+        }
+        variant_map.insert(v.name, EnumVariantInfo { tag: tag, field_count: fc, field_names: fnames, field_rc_skip: frs })
         tag = tag + 1
     }
 
