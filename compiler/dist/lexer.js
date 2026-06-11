@@ -837,15 +837,22 @@ function is_ident_continue(ch) {
   }
 }
 
+class InterpFrame {
+  constructor(depth, start_span) {
+    this.depth = depth;
+    this.start_span = start_span;
+  }
+}
+
 class Lexer {
-  constructor(source, file, pos, line, column, sink, interp_brace_depth) {
+  constructor(source, file, pos, line, column, sink, interp_frames) {
     this.source = source;
     this.file = file;
     this.pos = pos;
     this.line = line;
     this.column = column;
     this.sink = sink;
-    this.interp_brace_depth = interp_brace_depth;
+    this.interp_frames = interp_frames;
   }
 }
 
@@ -872,11 +879,17 @@ function Lexer_tokenize(self) {
 function Lexer_next_token(self) {
   Lexer_skip_whitespace_and_comments(self);
   if ((self.pos >= Str_len(self.source))) {
+    if ((List_len(self.interp_frames) > 0)) {
+      const interp_span = Lexer_last_frame_span(self);
+      diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated string interpolation: missing '}' to close '${'", interp_span, diagnostics$DiagnosticContext_ParseError("${", Option_none)));
+      while ((List_len(self.interp_frames) > 0)) {
+        List_pop(self.interp_frames);
+      }
+    }
     return Lexer_make_token(self, TokenKind_TkEof, "", Lexer_current_position(self), Lexer_current_position(self));
   }
-  if ((List_len(self.interp_brace_depth) > 0)) {
-    const top = Option_unwrap_or(List_last(self.interp_brace_depth), 0);
-    if (((top === 0) && (Lexer_peek(self) === "}"))) {
+  if ((List_len(self.interp_frames) > 0)) {
+    if (((Lexer_last_frame_depth(self) === 0) && (Lexer_peek(self) === "}"))) {
       Lexer_advance(self);
       return Lexer_lex_string_continuation(self);
     }
@@ -918,19 +931,21 @@ function Lexer_lex_string_body(self, start, is_new) {
       if (is_new) {
         return Lexer_make_token(self, TokenKind_TkStringLit, value, start, end);
       } else {
-        List_pop(self.interp_brace_depth);
+        List_pop(self.interp_frames);
         return Lexer_make_token(self, TokenKind_TkStringInterpEnd, value, start, end);
       }
     }
     if ((((ch === "$") && ((self.pos + 1) < Str_len(self.source))) && (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "{"))) {
+      const interp_start = Lexer_current_position(self);
       Lexer_advance(self);
       Lexer_advance(self);
       const end = Lexer_current_position(self);
+      const interp_span = new ast$Span(self.file, interp_start, end);
       if (is_new) {
-        List_push(self.interp_brace_depth, 0);
+        List_push(self.interp_frames, new InterpFrame(0, interp_span));
         return Lexer_make_token(self, TokenKind_TkStringInterpStart, value, start, end);
       } else {
-        Lexer_reset_last_depth(self);
+        Lexer_reset_last_frame(self, interp_span);
         return Lexer_make_token(self, TokenKind_TkStringInterpMiddle, value, start, end);
       }
     }
@@ -974,6 +989,9 @@ function Lexer_lex_string_body(self, start, is_new) {
       }
       Lexer_advance(self);
     }
+  }
+  if ((is_new === false)) {
+    List_pop(self.interp_frames);
   }
   const end = Lexer_current_position(self);
   const span = new ast$Span(self.file, start, end);
@@ -1080,13 +1098,13 @@ function Lexer_lex_punctuation(self, start) {
     return Lexer_make_token(self, TokenKind_TkRParen, ")", start, Lexer_current_position(self));
   }
   if ((ch === "{")) {
-    if ((List_len(self.interp_brace_depth) > 0)) {
+    if ((List_len(self.interp_frames) > 0)) {
       Lexer_inc_last_depth(self);
     }
     return Lexer_make_token(self, TokenKind_TkLBrace, "{", start, Lexer_current_position(self));
   }
   if ((ch === "}")) {
-    if ((List_len(self.interp_brace_depth) > 0)) {
+    if ((List_len(self.interp_frames) > 0)) {
       Lexer_dec_last_depth(self);
     }
     return Lexer_make_token(self, TokenKind_TkRBrace, "}", start, Lexer_current_position(self));
@@ -1243,18 +1261,73 @@ function Lexer_current_position(self) {
 function Lexer_make_token(self, kind, value, start, end) {
   return new Token(kind, value, new ast$Span(self.file, start, end));
 }
+function Lexer_last_frame_depth(self) {
+  __ring_match8: {
+    const __ring_m8 = List_last(self.interp_frames);
+    if (__ring_m8._tag === "some") {
+      const f = __ring_m8._0;
+      return f.depth;
+      break __ring_match8;
+    }
+    if (__ring_m8._tag === "none") {
+      return 0;
+      break __ring_match8;
+    }
+    __match_fail(__ring_m8);
+  }
+}
+function Lexer_last_frame_span(self) {
+  __ring_match9: {
+    const __ring_m9 = List_last(self.interp_frames);
+    if (__ring_m9._tag === "some") {
+      const f = __ring_m9._0;
+      return f.start_span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "none") {
+      return new ast$Span(self.file, Lexer_current_position(self), Lexer_current_position(self));
+      break __ring_match9;
+    }
+    __match_fail(__ring_m9);
+  }
+}
 function Lexer_inc_last_depth(self) {
-  const val = Option_unwrap_or(List_pop(self.interp_brace_depth), 0);
-  return List_push(self.interp_brace_depth, (val + 1));
+  __ring_match10: {
+    const __ring_m10 = List_pop(self.interp_frames);
+    if (__ring_m10._tag === "some") {
+      const f = __ring_m10._0;
+      return List_push(self.interp_frames, new InterpFrame((f.depth + 1), f.start_span));
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "none") {
+      break __ring_match10;
+    }
+    __match_fail(__ring_m10);
+  }
 }
 function Lexer_dec_last_depth(self) {
-  const val = Option_unwrap_or(List_pop(self.interp_brace_depth), 0);
-  return List_push(self.interp_brace_depth, (val - 1));
+  __ring_match11: {
+    const __ring_m11 = List_pop(self.interp_frames);
+    if (__ring_m11._tag === "some") {
+      const f = __ring_m11._0;
+      return List_push(self.interp_frames, new InterpFrame((f.depth - 1), f.start_span));
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "none") {
+      break __ring_match11;
+    }
+    __match_fail(__ring_m11);
+  }
 }
-function Lexer_reset_last_depth(self) {
-  List_pop(self.interp_brace_depth);
-  return List_push(self.interp_brace_depth, 0);
+function Lexer_reset_last_frame(self, span) {
+  List_pop(self.interp_frames);
+  return List_push(self.interp_frames, new InterpFrame(0, span));
 }
+
+function __InterpFrame_Eq_eq(self, other) {
+  return (self.depth === other.depth) && __Span_Eq.eq(self.start_span, other.start_span);
+}
+const __InterpFrame_Eq = { eq: __InterpFrame_Eq_eq, ne: function(self, other) { return !__InterpFrame_Eq_eq(self, other); } };
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
@@ -1287,8 +1360,13 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
+function __InterpFrame_Clone_clone(self) {
+  return new InterpFrame(self.depth, __Span_Clone.clone(self.start_span));
+}
+const __InterpFrame_Clone = { clone: __InterpFrame_Clone_clone };
+
 function __Lexer_Clone_clone(self) {
-  return new Lexer(self.source, self.file, self.pos, self.line, self.column, __CollectingSink_Clone.clone(self.sink), __List_Clone.clone(self.interp_brace_depth, __Int_Clone));
+  return new Lexer(self.source, self.file, self.pos, self.line, self.column, __CollectingSink_Clone.clone(self.sink), __List_Clone.clone(self.interp_frames, __InterpFrame_Clone));
 }
 const __Lexer_Clone = { clone: __Lexer_Clone_clone };
 
@@ -1393,6 +1471,14 @@ function __Token_Clone_clone(self) {
 }
 const __Token_Clone = { clone: __Token_Clone_clone };
 
+function __InterpFrame_Ord_cmp(self, other) {
+  var c;
+  c = (self.depth < other.depth ? -1 : self.depth > other.depth ? 1 : 0);
+  if (c !== 0) return c;
+  return __Span_Ord.cmp(self.start_span, other.start_span);
+}
+const __InterpFrame_Ord = { cmp: __InterpFrame_Ord_cmp };
+
 const __Result_tag_order = { "Ok": 0, "Err": 1 };
 function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
   var t1 = __Result_tag_order[self._tag];
@@ -1435,8 +1521,13 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
+function __InterpFrame_Debug_debug(self) {
+  return "InterpFrame { " + "depth: " + String(self.depth) + ", " + "start_span: " + __Span_Debug.debug(self.start_span) + " }";
+}
+const __InterpFrame_Debug = { debug: __InterpFrame_Debug_debug };
+
 function __Lexer_Debug_debug(self) {
-  return "Lexer { " + "source: " + String(self.source) + ", " + "file: " + String(self.file) + ", " + "pos: " + String(self.pos) + ", " + "line: " + String(self.line) + ", " + "column: " + String(self.column) + ", " + "sink: " + __CollectingSink_Debug.debug(self.sink) + ", " + "interp_brace_depth: " + __List_Debug.debug(self.interp_brace_depth, __Int_Debug) + " }";
+  return "Lexer { " + "source: " + String(self.source) + ", " + "file: " + String(self.file) + ", " + "pos: " + String(self.pos) + ", " + "line: " + String(self.line) + ", " + "column: " + String(self.column) + ", " + "sink: " + __CollectingSink_Debug.debug(self.sink) + ", " + "interp_frames: " + __List_Debug.debug(self.interp_frames, __InterpFrame_Debug) + " }";
 }
 const __Lexer_Debug = { debug: __Lexer_Debug_debug };
 
@@ -1542,4 +1633,4 @@ function __Token_Debug_debug(self) {
 const __Token_Debug = { debug: __Token_Debug_debug };
 
 
-export { TokenKind_TkFn, TokenKind_TkLet, TokenKind_TkVar, TokenKind_TkMut, TokenKind_TkConst, TokenKind_TkStruct, TokenKind_TkEnum, TokenKind_TkMatch, TokenKind_TkImpl, TokenKind_TkEffect, TokenKind_TkHandle, TokenKind_TkWith, TokenKind_TkIf, TokenKind_TkElse, TokenKind_TkCatch, TokenKind_TkTest, TokenKind_TkReturn, TokenKind_TkFor, TokenKind_TkIn, TokenKind_TkPub, TokenKind_TkWhere, TokenKind_TkTrue, TokenKind_TkFalse, TokenKind_TkTrait, TokenKind_TkTry, TokenKind_TkWhile, TokenKind_TkBreak, TokenKind_TkContinue, TokenKind_TkLoop, TokenKind_TkUse, TokenKind_TkAs, TokenKind_TkExtern, TokenKind_TkMod, TokenKind_TkSuper, TokenKind_TkSig, TokenKind_TkRequires, TokenKind_TkIntLit, TokenKind_TkFloatLit, TokenKind_TkStringLit, TokenKind_TkStringInterpStart, TokenKind_TkStringInterpMiddle, TokenKind_TkStringInterpEnd, TokenKind_TkRawStringLit, TokenKind_TkIdent, TokenKind_TkPlus, TokenKind_TkMinus, TokenKind_TkStar, TokenKind_TkSlash, TokenKind_TkPercent, TokenKind_TkEqEq, TokenKind_TkBangEq, TokenKind_TkLt, TokenKind_TkGt, TokenKind_TkLtEq, TokenKind_TkGtEq, TokenKind_TkAmpAmp, TokenKind_TkPipePipe, TokenKind_TkPipe, TokenKind_TkBang, TokenKind_TkEq, TokenKind_TkPlusEq, TokenKind_TkMinusEq, TokenKind_TkLParen, TokenKind_TkRParen, TokenKind_TkLBrace, TokenKind_TkRBrace, TokenKind_TkLBracket, TokenKind_TkRBracket, TokenKind_TkComma, TokenKind_TkColon, TokenKind_TkColonColon, TokenKind_TkDot, TokenKind_TkDotDot, TokenKind_TkDotDotEq, TokenKind_TkFatArrow, TokenKind_TkArrow, TokenKind_TkQuestion, TokenKind_TkSemi, TokenKind_TkEof, TokenKind_TkError, token_kind_value, Token, Lexer, new_lexer, Lexer_tokenize, Lexer_next_token, Lexer_lex_string, Lexer_lex_string_continuation, Lexer_lex_string_body, Lexer_lex_raw_string, Lexer_lex_number, Lexer_lex_ident, Lexer_lex_punctuation, Lexer_skip_whitespace_and_comments, Lexer_peek, Lexer_advance, Lexer_current_position, Lexer_make_token, Lexer_inc_last_depth, Lexer_dec_last_depth, Lexer_reset_last_depth, __TokenKind_Eq, __Token_Eq, __Lexer_Clone, __TokenKind_Clone, __Token_Clone, __TokenKind_Ord, __Token_Ord, __Lexer_Debug, __TokenKind_Debug, __Token_Debug };
+export { TokenKind_TkFn, TokenKind_TkLet, TokenKind_TkVar, TokenKind_TkMut, TokenKind_TkConst, TokenKind_TkStruct, TokenKind_TkEnum, TokenKind_TkMatch, TokenKind_TkImpl, TokenKind_TkEffect, TokenKind_TkHandle, TokenKind_TkWith, TokenKind_TkIf, TokenKind_TkElse, TokenKind_TkCatch, TokenKind_TkTest, TokenKind_TkReturn, TokenKind_TkFor, TokenKind_TkIn, TokenKind_TkPub, TokenKind_TkWhere, TokenKind_TkTrue, TokenKind_TkFalse, TokenKind_TkTrait, TokenKind_TkTry, TokenKind_TkWhile, TokenKind_TkBreak, TokenKind_TkContinue, TokenKind_TkLoop, TokenKind_TkUse, TokenKind_TkAs, TokenKind_TkExtern, TokenKind_TkMod, TokenKind_TkSuper, TokenKind_TkSig, TokenKind_TkRequires, TokenKind_TkIntLit, TokenKind_TkFloatLit, TokenKind_TkStringLit, TokenKind_TkStringInterpStart, TokenKind_TkStringInterpMiddle, TokenKind_TkStringInterpEnd, TokenKind_TkRawStringLit, TokenKind_TkIdent, TokenKind_TkPlus, TokenKind_TkMinus, TokenKind_TkStar, TokenKind_TkSlash, TokenKind_TkPercent, TokenKind_TkEqEq, TokenKind_TkBangEq, TokenKind_TkLt, TokenKind_TkGt, TokenKind_TkLtEq, TokenKind_TkGtEq, TokenKind_TkAmpAmp, TokenKind_TkPipePipe, TokenKind_TkPipe, TokenKind_TkBang, TokenKind_TkEq, TokenKind_TkPlusEq, TokenKind_TkMinusEq, TokenKind_TkLParen, TokenKind_TkRParen, TokenKind_TkLBrace, TokenKind_TkRBrace, TokenKind_TkLBracket, TokenKind_TkRBracket, TokenKind_TkComma, TokenKind_TkColon, TokenKind_TkColonColon, TokenKind_TkDot, TokenKind_TkDotDot, TokenKind_TkDotDotEq, TokenKind_TkFatArrow, TokenKind_TkArrow, TokenKind_TkQuestion, TokenKind_TkSemi, TokenKind_TkEof, TokenKind_TkError, token_kind_value, Token, Lexer, new_lexer, Lexer_tokenize, Lexer_next_token, Lexer_lex_string, Lexer_lex_string_continuation, Lexer_lex_string_body, Lexer_lex_raw_string, Lexer_lex_number, Lexer_lex_ident, Lexer_lex_punctuation, Lexer_skip_whitespace_and_comments, Lexer_peek, Lexer_advance, Lexer_current_position, Lexer_make_token, Lexer_last_frame_depth, Lexer_last_frame_span, Lexer_inc_last_depth, Lexer_dec_last_depth, Lexer_reset_last_frame, __TokenKind_Eq, __Token_Eq, __Lexer_Clone, __TokenKind_Clone, __Token_Clone, __TokenKind_Ord, __Token_Ord, __Lexer_Debug, __TokenKind_Debug, __Token_Debug };

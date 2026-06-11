@@ -154,6 +154,14 @@ fn is_ident_continue(ch: Str) -> Bool {
 // Lexer
 // ============================================================
 
+// One stack frame per open `${` interpolation: brace nesting depth inside the
+// expression (`}` only resumes the string at depth 0) plus the span of the
+// opening `${` for unterminated-interpolation diagnostics.
+struct InterpFrame {
+    depth: Int,
+    start_span: Span
+}
+
 pub struct Lexer {
     pub source: Str,
     pub file: Str,
@@ -161,7 +169,7 @@ pub struct Lexer {
     line: Int,
     column: Int,
     pub sink: CollectingSink,
-    interp_brace_depth: List<Int>
+    interp_frames: List<InterpFrame>
 }
 
 pub fn new_lexer(source: Str, file: Str, sink: CollectingSink) -> Lexer {
@@ -172,7 +180,7 @@ pub fn new_lexer(source: Str, file: Str, sink: CollectingSink) -> Lexer {
         line: 1,
         column: 0,
         sink: sink,
-        interp_brace_depth: []
+        interp_frames: []
     }
 }
 
@@ -192,12 +200,18 @@ impl Lexer {
         self.skip_whitespace_and_comments()
 
         if self.pos >= self.source.len() {
+            if self.interp_frames.len() > 0 {
+                let interp_span = self.last_frame_span()
+                self.sink.report(make_diag(E0102, Severity::SevError, "Unterminated string interpolation: missing '}' to close '\${'", interp_span, DiagnosticContext::ParseError { token: "\${", expected: none }))
+                while self.interp_frames.len() > 0 {
+                    self.interp_frames.pop()
+                }
+            }
             return self.make_token(TokenKind::TkEof, "", self.current_position(), self.current_position())
         }
 
-        if self.interp_brace_depth.len() > 0 {
-            let top = self.interp_brace_depth.last().unwrap_or(0)
-            if top == 0 && self.peek() == "}" {
+        if self.interp_frames.len() > 0 {
+            if self.last_frame_depth() == 0 && self.peek() == "}" {
                 self.advance()
                 return self.lex_string_continuation()
             }
@@ -252,19 +266,21 @@ impl Lexer {
                 if is_new {
                     return self.make_token(TokenKind::TkStringLit, value, start, end)
                 } else {
-                    self.interp_brace_depth.pop()
+                    self.interp_frames.pop()
                     return self.make_token(TokenKind::TkStringInterpEnd, value, start, end)
                 }
             }
             if ch == "$" && self.pos + 1 < self.source.len() && self.source.char_at(self.pos + 1).unwrap_or("") == "{" {
+                let interp_start = self.current_position()
                 self.advance()
                 self.advance()
                 let end = self.current_position()
+                let interp_span = Span { file: self.file, start: interp_start, end: end }
                 if is_new {
-                    self.interp_brace_depth.push(0)
+                    self.interp_frames.push(InterpFrame { depth: 0, start_span: interp_span })
                     return self.make_token(TokenKind::TkStringInterpStart, value, start, end)
                 } else {
-                    self.reset_last_depth()
+                    self.reset_last_frame(interp_span)
                     return self.make_token(TokenKind::TkStringInterpMiddle, value, start, end)
                 }
             }
@@ -289,6 +305,12 @@ impl Lexer {
                 }
                 self.advance()
             }
+        }
+        // Unterminated string at EOF. In continuation mode the `${...}` was
+        // already closed by `}`, so pop this string's frame — only the plain
+        // unterminated-string diagnostic applies, not unterminated-interpolation.
+        if is_new == false {
+            self.interp_frames.pop()
         }
         let end = self.current_position()
         let span = Span { file: self.file, start: start, end: end }
@@ -413,13 +435,13 @@ impl Lexer {
         if ch == "(" { return self.make_token(TokenKind::TkLParen, "(", start, self.current_position()) }
         if ch == ")" { return self.make_token(TokenKind::TkRParen, ")", start, self.current_position()) }
         if ch == "{" {
-            if self.interp_brace_depth.len() > 0 {
+            if self.interp_frames.len() > 0 {
                 self.inc_last_depth()
             }
             return self.make_token(TokenKind::TkLBrace, "{", start, self.current_position())
         }
         if ch == "}" {
-            if self.interp_brace_depth.len() > 0 {
+            if self.interp_frames.len() > 0 {
                 self.dec_last_depth()
             }
             return self.make_token(TokenKind::TkRBrace, "}", start, self.current_position())
@@ -535,18 +557,39 @@ impl Lexer {
         }
     }
 
+    fn last_frame_depth(self) -> Int {
+        match self.interp_frames.last() {
+            some(f) => f.depth,
+            none => 0
+        }
+    }
+
+    fn last_frame_span(self) -> Span {
+        match self.interp_frames.last() {
+            some(f) => f.start_span,
+            none => Span { file: self.file, start: self.current_position(), end: self.current_position() }
+        }
+    }
+
     fn inc_last_depth(mut self) {
-        let val = self.interp_brace_depth.pop().unwrap_or(0)
-        self.interp_brace_depth.push(val + 1)
+        match self.interp_frames.pop() {
+            some(f) => self.interp_frames.push(InterpFrame { depth: f.depth + 1, start_span: f.start_span }),
+            none => {}
+        }
     }
 
     fn dec_last_depth(mut self) {
-        let val = self.interp_brace_depth.pop().unwrap_or(0)
-        self.interp_brace_depth.push(val - 1)
+        match self.interp_frames.pop() {
+            some(f) => self.interp_frames.push(InterpFrame { depth: f.depth - 1, start_span: f.start_span }),
+            none => {}
+        }
     }
 
-    fn reset_last_depth(mut self) {
-        self.interp_brace_depth.pop()
-        self.interp_brace_depth.push(0)
+    // On `}...${` (TkStringInterpMiddle) the previous interpolation in this
+    // string closed and a new one opened: reuse the frame, reset its depth and
+    // point it at the new `${`.
+    fn reset_last_frame(mut self, span: Span) {
+        self.interp_frames.pop()
+        self.interp_frames.push(InterpFrame { depth: 0, start_span: span })
     }
 }
