@@ -147,3 +147,12 @@ node compiler/dist/main.js build examples/hello.ring --target=llvm
 # LLVM 后端：编译编译器自身（多文件）
 node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
 ```
+
+## ASan 跑法（两档，2026-06-11 定）
+
+ASan 对自编译（2.5 亿次分配）默认参数会放大 ~100x（每次 malloc/free 抓 30 帧栈 + redzone + quarantine），半小时起步。分两档：
+
+- **gating（内循环 / ×3 例行 / llvm_diff + real_program）**：`ASAN_OPTIONS=malloc_context_size=0:quarantine_size_mb=16:max_redzone=32:detect_leaks=0`（**已设为 User 级默认 env，新 shell 自动继承**；已在跑的旧 session 需内联设置）。检测面不变（立即 UAF/over-free 照抓），代价 = 报告无 alloc/free 栈 + 延迟 UAF 覆盖缩小。**ASan self-compile 不进内循环**——内循环 self-compile 用非 ASan + alloc/free 计数器 + 退出码（20s/轮）。
+- **capstone 终验（self-compile 全量 ASan，每个 milestone 一次，可过夜）**：必须显式覆盖回全强度 `$env:ASAN_OPTIONS='quarantine_size_mb=256:malloc_context_size=12'`。gating 抓到 bug 后对单用例用此档重跑拿完整 alloc/free 栈。
+- ring_asan 构建建议 `-fsanitize=address -O1 -fno-omit-frame-pointer`（-O0 下减速翻数倍）。
+- thrash 预警：31GB 物理内存，ASan self-compile 后段可能换页——CPU 掉零 + 磁盘狂转即杀，别等。
