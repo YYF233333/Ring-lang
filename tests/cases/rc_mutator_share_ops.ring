@@ -6,12 +6,12 @@
 // the native RC behaviour); this one locks the language-level semantics on the
 // JS backend.
 
-fn bind_push(xs: List<Str>) -> Int {
+fn bind_push(mut xs: List<Str>) -> Int {
     let r = xs.push("d")
     xs.len()
 }
 
-fn bind_map_insert(m: Map<Str, Str>) -> Int {
+fn bind_map_insert(mut m: Map<Str, Str>) -> Int {
     let r = m.insert("b", "two")
     m.len()
 }
@@ -42,12 +42,12 @@ fn drop_map_from() -> Str {
 }
 
 fn main() {
-    let xs = ["a", "b", "c"]
+    let mut xs = ["a", "b", "c"]
     assert(bind_push(xs) == 4, "push inside helper appends")
     assert(xs.len() == 4, "source list alive after mutator-result binding dropped")
     assert(xs[3] == "d", "appended element visible in caller")
 
-    let m = map_new()
+    let mut m = map_new()
     let r0 = m.insert("a", "one")
     assert(bind_map_insert(m) == 2, "insert inside helper lands")
     assert(m["a"] == "one", "existing entry alive after binding dropped")

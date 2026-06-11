@@ -52,6 +52,22 @@
 
 > #135（`ring_map_clone` / `ring_map_int_clone` 浅拷不 dup value，同 `ring_list_clone` 类）已于 2026-06-07 在 B-104 工作树修复（深拷 + 逐 value `ring_dup`）；`ring_set_clone`/`ring_set_int_clone` 核为非 bug（值内联）。
 
+### #136 LLVM 后端 5 个 mapped-but-missing runtime 符号 [low] [judgment] [open]
+
+B-103 全量枚举 ring_runtime.cpp 时发现：`method_to_runtime`（codegen_llvm_expr.ring）映射了 5 个 **ring_runtime.cpp 中不存在**的符号——`ring_str_to_int`（Str.to_int）、`ring_str_to_float`（Str.to_float）、`ring_list_enumerate`（List.enumerate，且在 codegen_llvm.ring:174 被无条件 declare）、`ring_map_is_empty`（Map.is_empty）、`ring_set_is_empty`（Set.is_empty）。任何程序在 `--target=llvm` 下调用这些方法 → 链接失败（undefined symbol）。当前编译器/测试零使用（`.enumerate` 仅注释提及）→ latent。修复方向：补 runtime 实现或删映射改走 Ring impl。发现者：B-103 Wave A。
+
+### #137 List.reverse / List.sort 后端语义分歧（JS 原地 vs LLVM fresh 丢弃）[medium] [judgment] [open]
+
+std/list.ring 声明 `reverse`/`sort` 返回 Unit（原地变异语义）；JS 后端确实原地（runtime.ring:87 `self.reverse()`，sort 同）。但 LLVM runtime `ring_list_reverse`/`ring_list_sort_default` **构造 fresh 副本返回、不动接收者**——语句位调用在 native 等于 no-op。编译器自身有 8 处 `.sort(`（穷尽性/codegen 排序等），native 自编译产出的 JS 与 node 版可能**顺序不一致 → G-b（double-bootstrap 字节一致门）地雷**。B-103 已为两个 runtime fn 补元素 dup（RC 健全），但语义分歧未动（修复方向需拍板：LLVM runtime 改原地、或 codegen 把结果写回 receiver alloca）。`tests/cases/llvm/list_share_ops_rc.ring` 的 reverse 用例刻意只断言 len 不断言顺序。发现者：B-103 Wave A。
+
+### #138 std 已声明但 method_to_runtime 未映射的方法在 native 落 panic-stub [low] [judgment] [open]
+
+`StringBuilder.line` / `StringBuilder.add_int`、`Set<Str>.clear`、`Set.union` / `intersect` / `difference`（runtime 符号 `ring_sb_line`/`ring_sb_add_int`/`ring_set_clear`/`ring_set_union`/... **存在**但 method 派发不可达），以及 str-keyed `Map.clone()` / `List.clone()` / `Set<Str>.clone()` 方法语法（int-keyed 分支有映射、str-keyed 落空；直呼 `map_clone(m)`/`list_clone(l)` 经 gen_direct_call 的 `ring_` fallback 正常）。这些方法调用在 native 生成 "unknown method" panic-stub，运行即 panic。当前编译器自身零使用（`.line(`/`.union(` 等 grep 为 0）→ latent。发现者：B-103 Wave A。
+
+### #139 llvm_ffi extern handle（非 RC 外来指针）游离于 RC 分类之外 [high] [judgment] [open] [deferred: B-104 D1 硬前置]
+
+`llvm_ffi.ring` 的 59 个 extern fn 返回 LLVM-C API 的**裸外来指针**（非 ring_alloc，ptr-8 处无 RC header）。它们既非 fresh 也非 borrow——必须**完全排除**在 dup/drop/Clone 之外，但 perceus 目前按普通 Call/Ident 处理：① `is_droppable_init(Call)=true` → `let x = LLVMCreateBuilder(...)` 被 scope-end `ring_drop`（读垃圾 header → free 外来内部指针）；② 逃逸位（如 `LlvmCtx { builder: builder }` 字段存储）对 Ident 发 Clone → `ring_dup` 直接**写**坏 LLVM 堆（rc+1 落在外来内存上）。当前 dormant：这些代码路径只在 native 编译器自身执行 `--target=llvm` 时运行（B-099 范围，Level 1 显式 out-of-scope），js-target 自编译不触发。但它是 **B-104 D1 total drop pass 的硬前置**——D1 会把所有「fresh-owned 临时」在 arg/subexpr 位 drop，extern-handle call 结果会被系统性误 drop。正确修法是**类型级 RC 排除**（HIR type = ExternType → 不 Clone/不 Drop/不计 owned），非名字白名单（59 个名字会随 FFI 增长漂移）。机制归属（D1 内做 vs 单列 item）见 worker_feedback [决策]。发现者：B-103 Wave A。
+
 
 
 
