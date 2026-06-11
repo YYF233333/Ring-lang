@@ -214,11 +214,11 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     if type_contains_extern_handle(ty, externs) {
         return false
     }
-    // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #148): an expression
+    // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #149): an expression
     // whose HIR type is an unresolved TypeVar must never be materialised.  The
     // type-level Unit exclusion (rule ②) cannot see through it: an UNANNOTATED
     // Ring fn's return type is over-generalised to a free var (checker hole,
-    // audit #148 — `let x: Str = tp([1])` type-checks), so a call like `tp(a)`
+    // audit #149 — `let x: Str = tp([1])` type-checks), so a call like `tp(a)`
     // whose body tail is a receiver-returning Unit builtin (`xs.push(v)` —
     // moved verbatim, un-dup'd, because Unit is rc-excluded) hands back the
     // LIVE RECEIVER pointer typed as a TypeVar.  Materialise + scope-end-drop
@@ -307,14 +307,14 @@ fn is_str_index(receiver: HExpr) -> Bool {
     }
 }
 
-// B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP type (audit #148): an unresolved TypeVar
+// B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP type (audit #149): an unresolved TypeVar
 // (or an ErrorType from checker recovery) gives no ownership information — the
 // value could be the Unit ABI accident (a live receiver pointer moved verbatim
 // because Unit is rc-excluded), which a drop would double-free.  Such values are
 // excluded from materialisation and droppability (leak direction); Clone on
 // escape stays allowed (a dup only pins).  Monomorphic call sites are zonked to
 // concrete types and unaffected; the leak cost is confined to generic-context
-// temporaries and the #148 over-generalised unannotated-fn calls.
+// temporaries and the #149 over-generalised unannotated-fn calls.
 fn is_unresolved_var_type(ty: Type) -> Bool {
     match ty {
         Type::TypeVar { .. } => true,
@@ -369,7 +369,7 @@ fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut coun
 //     a moved result (is_arg_returning_call; list_fold.ring heap-corruption
 //     regression).  Materialising + scope-dropping it would double-free the box
 //     the result binding also moves.  Residual crash-free leak; the principled
-//     exit is a runtime dup-on-empty-return (see audit #149).
+//     exit is a runtime dup-on-empty-return (see audit #150).
 fn anf_arg(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
     anf_expr(expr, hoists, externs, counter)
 }
@@ -1637,9 +1637,9 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
     if type_contains_extern_handle(ty, externs) {
         return false
     }
-    // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #148, mirrors
+    // B-104 D1 Stage 2 — UNKNOWN-OWNERSHIP guard (audit #149, mirrors
     // anf_should_materialize): a binding whose type is an unresolved TypeVar is
-    // never scope-end-dropped.  The #148 checker hole over-generalises an
+    // never scope-end-dropped.  The #149 checker hole over-generalises an
     // unannotated fn's return to a free var, so `let r = tp(a)` (where tp's
     // body tail is a receiver-returning Unit builtin, moved verbatim un-dup'd)
     // binds the LIVE container typed as a TypeVar — dropping r double-frees it

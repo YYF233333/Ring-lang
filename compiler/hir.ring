@@ -567,7 +567,7 @@ pub fn is_borrow_returning_call(callee: HExpr) -> Bool {
 // an empty receiver.  Materialising/dropping such a result (or its args) can
 // double-free; both perceus (anf_arg) and the codegen condition drop must
 // treat these as non-fresh.  Sole member per the B-103 completeness audit
-// (table in perceus.ring); principled exit = runtime dup-on-empty (audit #149).
+// (table in perceus.ring); principled exit = runtime dup-on-empty (audit #150).
 pub fn is_arg_returning_call(callee: HExpr) -> Bool {
     match callee {
         HExpr::FieldAccess { field, .. } => field == "fold",
@@ -596,7 +596,7 @@ pub fn is_arg_returning_call(callee: HExpr) -> Bool {
 //   * Block → its value is its tail's value → recurse.
 // Everything else (Ident / FieldAccess / IndexExpr reads, If/Match phis,
 // EffectOp, …) → false: borrow or unknown ownership — leak-direction.  The
-// BoolType requirement is a belt against audit #148 TypeVar-typed conditions
+// BoolType requirement is a belt against audit #149 TypeVar-typed conditions
 // (an unannotated fn's over-generalised return — unknown ownership, possibly
 // the Unit ABI receiver-return accident).
 pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {

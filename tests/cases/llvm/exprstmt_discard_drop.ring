@@ -19,7 +19,7 @@ fn make_box(v: Int) -> Box {
     Box { v: v }
 }
 
-// audit #148 guard shape: an UNANNOTATED fn's return type is over-generalised
+// audit #149 guard shape: an UNANNOTATED fn's return type is over-generalised
 // to a free TypeVar (checker hole), and its body tail is a receiver-returning
 // Unit builtin — at the LLVM ABI the call hands back the LIVE receiver,
 // un-dup'd.  The unknown-ownership (TypeVar) guard must keep such results
@@ -61,7 +61,7 @@ fn main() {
         i = i + 1
     }
 
-    // audit #148 guard: unannotated-fn (TypeVar-typed) results must not be
+    // audit #149 guard: unannotated-fn (TypeVar-typed) results must not be
     // dropped — statement position AND let-binding position; the receiver
     // must stay alive and mutated afterwards.
     let mut ys = [1]

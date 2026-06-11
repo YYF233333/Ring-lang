@@ -31,7 +31,7 @@ fn main() {
     print("${keys}:${sum}")
 
     // ForIn over a fresh HOF-chain iterable; element escapes into outer list.
-    // (join is List<Str>-only on native — List<Int>.join is audit #147.)
+    // (join is List<Str>-only on native — List<Int>.join is audit #148.)
     let mut kept: List<Str> = []
     for x in make_list().filter(fn(v) { v > 1 }) {
         kept.push("${x}")
