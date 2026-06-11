@@ -361,19 +361,14 @@ fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut coun
 
 // Normalise a sub-expression in a CONSERVATIVE arg-aliasing position: recurse into
 // its own nested CONSUMING operands (which still hoist + materialise normally), but
-// NEVER materialise the top-level expression itself.  Used where the value may be
-// aliased verbatim into the enclosing expression's result with a MOVED (not Clone-
-// wrapped) binding, so materialising + scope-dropping it would double-free:
-//   * a MATCH SCRUTINEE — a `match scrut { … => scrut }` arm returns the scrutinee
-//     verbatim (W2: needs arm return-value analysis);
-//   * an EFFECTOP arg — a handler may resume with / return an arg verbatim (W3);
+// NEVER materialise the top-level expression itself.  The SOLE remaining user
+// (B-104 D1 Stage 2 — W2 reclaimed the match scrutinee, Stage 2 reclaimed
+// EffectOp args via the handler-tail Clone-wrap balance) is:
 //   * a `fold`-family CALL arg — fold returns `init` verbatim on an empty list with
 //     a moved result (is_arg_returning_call; list_fold.ring heap-corruption
-//     regression).
-// (B-104 W1 reclaimed the general Call-arg position — see the Call arm + anf_operand
-// — leaving only these aliasing-hazard positions on the conservative path.  Their
-// residual leak needs callee/arm return-mode analysis to reclaim safely; crash-free
-// leak > unsound drop.)
+//     regression).  Materialising + scope-dropping it would double-free the box
+//     the result binding also moves.  Residual crash-free leak; the principled
+//     exit is a runtime dup-on-empty-return (see audit #149).
 fn anf_arg(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
     anf_expr(expr, hoists, externs, counter)
 }
@@ -902,12 +897,27 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
         },
 
         HExpr::EffectOp { effect_name, op_name, args, ty, effects, span } => {
-            // Effect-op args behave like call args: BORROW-passed, and a handler may
-            // resume with / return an arg verbatim → same arg-aliasing hazard as
-            // anf_arg.  Recurse into nested operands but do NOT materialise the
-            // top-level arg.  (Residual leak; needs return-mode analysis.)
+            // B-104 D1 Stage 2 — EFFECT-OP ARG position (closes the W1-era
+            // conservative hold-out).  Args are BORROW-passed to the handler
+            // closure (gen_effect_op → gen_closure_call; closure params are
+            // never dropped by the callee), so a fresh-owned arg had no owner
+            // and leaked.  Materialise + scope-end-drop is SOUND here, unlike
+            // the old fear of "handler returns an arg verbatim":
+            //   * a TAIL-RESUMPTIVE handler arm is transformed with
+            //     rc_block_root(escape=true) — an arm returning its parameter
+            //     (`Echo.echo(s) => s`) has the tail Clone-wrapped at the
+            //     escape, so the op's result is an independent dup, balancing
+            //     the materialised arg's scope-end drop (the same Clone-wrap
+            //     balance as W1's unwrap_or and the W2 scrutinee).  A handler
+            //     STORING an arg likewise Clones at the escape.
+            //   * an ABORT op (fail.raise → ring_raise, longjmp) never returns:
+            //     the materialised __anf's scope-end drop is skipped by the
+            //     longjmp → leak, not UAF — identical to the pre-existing
+            //     abort-path posture (B-002); the catch arm's projections of
+            //     the raised value stay valid (the owner binding is simply
+            //     never released).
             let mut new_args: List<HExpr> = []
-            for a in args { new_args.push(anf_arg(a, hoists, externs, counter)) }
+            for a in args { new_args.push(anf_operand(a, hoists, externs, counter)) }
             HExpr::EffectOp { effect_name: effect_name, op_name: op_name, args: new_args,
                 ty: ty, effects: effects, span: span }
         },

@@ -977,7 +977,7 @@ function anf_expr(expr, hoists, externs, counter) {
         const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
         if (__ring_next_17._tag === "none") break;
         const a = __ring_next_17._0;
-        List_push(new_args, anf_arg(a, hoists, externs, counter));
+        List_push(new_args, anf_operand(a, hoists, externs, counter));
       }
       return hir$HExpr_EffectOp(effect_name, op_name, new_args, ty, effects, span);
       break __ring_match15;
