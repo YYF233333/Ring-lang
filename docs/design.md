@@ -1412,6 +1412,11 @@ B-104 四波（W1/W2/W3a/W4）+ 两个 range-loop 修复（counter `15b5318` / b
 
 3. **"0 泄露"的精确范围（D3）= 无环 0 泄露 + 环用 `Weak<T>`（承 §7.9）**：RC 物理收不了环 → Ring 答案是 `Weak<T>`（§7.9 已定案，不引入 cycle collector）。"0 泄露" = 无环数据**字面 0** + 环由程序员用 `Weak<T>` 打破（Swift / Rust `Rc` / Koka 同级标准保证）。自举工作负载（HIR 树/DAG，无环，§7.10 已确认）→ **字面意义的 0 泄露**。
 
+**D1 实现不变量（Stage 2 落地，2026-06-11——扩展 rc_block_inner / total pass 时必须保持）**：
+
+- **dropping-block tail-escape 不变量**（`rc_block_inner`）：凡发出 scope-end drops 的 block，其 tail 一律按 escape 处理——RC 把 tail 重写为 `let __rc_scope_N = <owned tail>` + Ident，hoist 的 tail 值存活到 drops **之后**才被父节点消费，故 borrow tail（直接借用，或经控制流 arm tail 借用本 block 将 drop 的 local）必然悬垂。任何「tail 借用本 block 将 drop 的 local」形态都是 UAF 类。该不变量修复了 W2 起即存在的 ASan 实证 UAF（cond-block 内材料化 scrutinee 在 block 末 drop，match arm 刚返回其 solely-owned payload 投影 → unbox 读 freed）。代价 = borrow 位 dropping-block 的 owner-bearing tail 多一个 dup（有界、crash-free 方向）。
+- **unknown-ownership 守卫**：静态类型为 TypeVar / ErrorType 的值**不材料化、不 drop**（ownership 未知，drop 是赌博）——audit #149（未标注 fn 返回过度泛化 → TypeVar）洞的 RC 侧防线，ASan 双向实证（pre-guard UAF / post-guard EXIT 0）。checker 根修归 #149，守卫在根修后仍保留（防御纵深）。
+
 **标记指针（B-080）降级**：从「G-a 真解」降为后续 **peak/perf 优化**（消 ~21% BOOL+INT 装箱 churn + 标量分配，**非泄漏驱动**）；condition-result Bool box 由 total pass drop（precise RC），BOOL 装箱本身的 churn 留 B-080。**G-a 经 B-104 完整 RC 达成，不依赖 B-080。**
 
 ---
@@ -2141,6 +2146,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | 标量表示 = 标记指针（2026-06-08，B-080 重定义）| Int/Bool 低位 tag，所有位置不进堆；取代 box-at-boundary/inline-A1。Float 暂留 box | box-at-boundary 工作树实测证伪：inline 标量字段后 `a1d @402M` INT=63.3M≈W4 基线，字段 box 拆了 INT 没降→残留 INT 在多态边界（List<Int>/Option<Int>/泛型/dict 槽），uniform void* 必须 box，RC 波/inline 都消不掉；精确-RC 四波回收非标量临时后 INT 纹丝不动。标记指针让标量哪都不进堆 = 唯一结构性解，patch treadmill 终结 |
 | Mutable aliasing 语义 = move 补完（2026-06-11，B-110）| 复合赋值/存字段/返回 = move（use-after-move 编译错误）；句法禁 `f(xs, mut xs)` 同 lvalue 借用/mut 重叠（无 borrow checker 唯一的洞）；`.clone()` = 独立副本，Perceus 以 dup+COW 实现（move 杜绝别名后不可观测） | 三真值源分裂（实现=引用语义、设计=move、Koka 血统=值语义+COW），且无任何测试锁定。B 胜出：迁移「响」（自举编译器依赖共享的站点变编译错误 = 迁移清单；值语义方案是静默行为变化）；不可变共享 clone = 免费 dup，编译器 HIR/Type 共享图无伤；公理 1（Rust 语法 Rust 行为）+ LLM 对 use-after-move 自修复能力最强；JS oracle 无 RC 表达不了 COW。否决引用语义追认（mut\<T\> 系统性失真、aliasing bug 类对无人回路永久开放）|
 | 定位语修订（2026-06-11，设计方向复盘）| 定位改「LLM-first native 语言」，主战场 CLI/服务端/系统编程；「面向大型多端应用 / 干掉 JS/TS」开篇退役（philosophy.md 已改写）；演进判据成文 = 把人类判断逐项移交编译期判定 | 实际演进与开工定位脱节：JS 后端定归档、WasmGC 已排除、系统域决策批（16 数值类型/@repr/[T;N]/Arc）+ Perceus/move 走向使真实对标从 TS 变为 MoonBit/Zero/Mojo；leak verifier（D2）是该判据被工程自发验证的实例 |
+| fold 空表 verbatim-init 修复方向（2026-06-11，audit #150）| runtime `ring_list_fold` 空表路径 `ring_dup(init)`（dup-on-share，B-103 ×9 同模式）+ `fold` 退役出 `is_arg_returning_call`（清空后 anf_arg 保守机制整个删除）| 空表 `return init;` 无 dup + caller scope-end drop = double-free（latent，全仓 19 处 fold init 全字面量零实存）；C ABI callee 借用实参约定下唯一不平衡点就是 verbatim 返回，runtime dup 一处即闭环；退役后 W1 实参材料化全覆盖、消掉最后一个分类特例 = 净简化非补丁。否决只补 dup 留分类（留死机制+保守泄漏面）与维持 latent（违背禁 temp fix 基线，D2 verifier 上线必报）|
 | COW 不可观测原则（2026-06-11，所有权讨论）| COW 仅为 Perceus 引擎内部优化（`.clone()` = O(1) dup + 写时拷），**语义层绝不暴露**：任何用户可观测的 COW 分叉（写副本却以为写原件）= 设计错误，必须以编译错误或官方原地写法承接。投影绑定写入（`let item = xs[i]; item.f = v` 类）判定为 B-110 必须堵的洞（堵法见 B-110 spec 增补，机制实现前核定）| 内置且语义可见的 COW 在主流语言罕见（多为应用级特性）；静默分叉是行为级 heisenbug，对无人回路致命（agent 从局部代码看不出写丢了）；与 B-110「迁移必须响」同一原则 |
 
 ### 幽灵功能（已解析但无语义效果）
