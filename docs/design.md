@@ -1419,6 +1419,31 @@ B-104 四波（W1/W2/W3a/W4）+ 两个 range-loop 修复（counter `15b5318` / b
 
 **标记指针（B-080）降级**：从「G-a 真解」降为后续 **peak/perf 优化**（消 ~21% BOOL+INT 装箱 churn + 标量分配，**非泄漏驱动**）；condition-result Bool box 由 total pass drop（precise RC），BOOL 装箱本身的 churn 留 B-080。**G-a 经 B-104 完整 RC 达成，不依赖 B-080。**
 
+### 7.12 unsafe 区域图景（2026-06-11 确定，细化归 B-106）
+
+**定位：unsafe 区是所有权模型全部张力的最终出处——它定义「语言不在安全区处理什么」。** 三栏总账，每个表达力缺口必居其一、不允许悬空：
+
+| 栏 | 内容 |
+|---|---|
+| **A 安全区**（目标 ≥99% 用户代码）| 共享→Rc/Arc，环→Weak（§7.9），视图→Span/(offset,len)/arena+index，深层可变→mut 参数线程化 + 嵌套 lvalue path（B-110 #5），性能→引擎优化（COW/reuse/unboxing，不可观测原则见决策表）|
+| **B unsafe 区**（库作者，少数）| 零拷贝视图（指进 buffer 的 slice）、自引用/侵入式结构、RIIR 容器底层（malloc/指针算术/未初始化内存）、FFI 裸指针 |
+| **C 明确不做** | first-class 借用 / lifetime 标注 / borrow checker；安全区的跨函数零拷贝视图；cycle collector |
+
+栏 C 的可信度由栏 B 背书：「X 不在安全区」的回答是「去 unsafe 区」，与 Rust 同构——撤销旧「Ring 用类型系统消除 unsafe 的需求」立场（原 backlog「不做的控制力」表）。
+
+**形态 = `unsafe` effect**（承 §6.3「用户责任，系统不保证」）：unsafe 原语操作产生 `unsafe` effect，签名可见、自动冒泡。不可被普通 handler 处理——唯一消除方式是 discharge。
+
+**Discharge 模型 = 两级，关键字与 Rust 一致（2026-06-11 用户拍板）**：
+- **模块级 = 许可**：`mod name requires {unsafe}`（复用 mod capability 语法）——未声明的模块内不可使用 unsafe 原语；
+- **块级 = 责任**：`unsafe { ... }` 吸收块内 unsafe effect，块 = 作者签字「此处不变量已人工验证」，等价 Rust unsafe block。安全封装因此成立：std 容器内部 unsafe、pub 签名纯净；
+- 配套 `ring audit unsafe`：列出全代码库 discharge 点。
+
+**与无人回路公理的接法**：discharge 点清单 = 整个代码库需要人类审查的全部位置——有限、可枚举、签名可定位。agent 在安全区自由工作；lint 可配「agent 不得新增 unsafe 块」，使人类审查面的增长本身受控。Rust 只有隔离（靠人 grep），effect 系统补上类型层自动追踪。
+
+**与 RC 的交互（雏形已验证）**：unsafe 区裸指针不参与 RC——extern type 类型级 RC 排除（B-104 D1 规则①：不 Clone/不 Drop/不入 owned）即此规则的现实先例，`Ptr<T>`（名称待定）为其推广。跨界点 = 所有权显式移交。
+
+**待定（B-106 design-probe 正文）**：区内原语集清单（alloc/dealloc、read/write/offset、受控 transmute）、跨界移交 API、unsafe 封装库的验收工具（ASan 档位、miri 类）、RIIR 边界。
+
 ---
 
 ## 8. 并发模型 ⚠️ 设计愿景，尚未实现
@@ -2148,6 +2173,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | 定位语修订（2026-06-11，设计方向复盘）| 定位改「LLM-first native 语言」，主战场 CLI/服务端/系统编程；「面向大型多端应用 / 干掉 JS/TS」开篇退役（philosophy.md 已改写）；演进判据成文 = 把人类判断逐项移交编译期判定 | 实际演进与开工定位脱节：JS 后端定归档、WasmGC 已排除、系统域决策批（16 数值类型/@repr/[T;N]/Arc）+ Perceus/move 走向使真实对标从 TS 变为 MoonBit/Zero/Mojo；leak verifier（D2）是该判据被工程自发验证的实例 |
 | fold 空表 verbatim-init 修复方向（2026-06-11，audit #150）| runtime `ring_list_fold` 空表路径 `ring_dup(init)`（dup-on-share，B-103 ×9 同模式）+ `fold` 退役出 `is_arg_returning_call`（清空后 anf_arg 保守机制整个删除）| 空表 `return init;` 无 dup + caller scope-end drop = double-free（latent，全仓 19 处 fold init 全字面量零实存）；C ABI callee 借用实参约定下唯一不平衡点就是 verbatim 返回，runtime dup 一处即闭环；退役后 W1 实参材料化全覆盖、消掉最后一个分类特例 = 净简化非补丁。否决只补 dup 留分类（留死机制+保守泄漏面）与维持 latent（违背禁 temp fix 基线，D2 verifier 上线必报）|
 | COW 不可观测原则（2026-06-11，所有权讨论）| COW 仅为 Perceus 引擎内部优化（`.clone()` = O(1) dup + 写时拷），**语义层绝不暴露**：任何用户可观测的 COW 分叉（写副本却以为写原件）= 设计错误，必须以编译错误或官方原地写法承接。投影绑定写入（`let item = xs[i]; item.f = v` 类）判定为 B-110 必须堵的洞（堵法见 B-110 spec 增补，机制实现前核定）| 内置且语义可见的 COW 在主流语言罕见（多为应用级特性）；静默分叉是行为级 heisenbug，对无人回路致命（agent 从局部代码看不出写丢了）；与 B-110「迁移必须响」同一原则 |
+| unsafe 区域图景（2026-06-11，所有权讨论）| 三栏总账（安全区 / unsafe 区 / 明确不做）+ `unsafe` effect 形态 + 两级 discharge（`mod requires {unsafe}` 许可 + `unsafe {}` 块吸收，关键字与 Rust 一致）+ `ring audit unsafe` 审计面；裸指针不参与 RC（extern type 排除规则推广）；撤销旧「不做 unsafe 块 / 裸指针」立场。详见 §7.12，原语集细化归 B-106 | unsafe 是所有权张力的最终出处——栏 C「明确不做」的可信度由栏 B 兜底背书；effect 形态 = 签名可见自动追踪（Rust 隔离 + effect 追踪复合，竞品无）；discharge 点清单 = 全代码库人类审查面，接无人回路公理 |
 
 ### 幽灵功能（已解析但无语义效果）
 

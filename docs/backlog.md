@@ -535,13 +535,13 @@ handle {
 | `@vectorize` | 结合 effect purity 安全自动向量化 |
 | `@inline` / `@noinline` | 内联控制 |
 
-**不做的控制力**
+**不做的控制力**（2026-06-11 订正：unsafe 两行旧立场撤销，见 design.md §7.12 unsafe 区域图景）
 
-| 机制 | 不做的原因 |
+| 机制 | 状态/原因 |
 |------|-----------|
-| 原始指针 / 手动 malloc | 破坏 RC/linear 保证 |
+| 原始指针 / 手动 malloc | **安全区不做；unsafe 区提供**（§7.12 三栏总账，原语集归 B-106）|
+| `unsafe` 块 | **改做**——`unsafe` effect + 两级 discharge（`mod requires {unsafe}` + `unsafe {}`，关键字与 Rust 一致），§7.12 |
 | 手动 SIMD intrinsics | 不可移植，由编译器 + hint 处理 |
-| `unsafe` 块（Rust 风格） | Ring 用类型系统消除 unsafe 的需求 |
 | 无 RC 模式 | 和 Perceus 架构冲突 |
 
 ## 工具链
@@ -609,10 +609,11 @@ source-map 支持 + 断点调试。
 
 > **scope 扩展（2026-06-11 所有权讨论，用户指示）**：从「RIIR 前置」扩为**「没有一等引用/指针，语言怎么弥补」的系统性图景**。安全区答案已成形（Rc/Weak、arena+index、Span/(offset,len)、mut 参数线程化），残余无解场景 = 零拷贝视图（slice/serde-borrow）、深层可变访问的跨语句持有、自引用结构、RIIR 裸内存——这些是 unsafe 区域要兜的底。产出补充：**unsafe 区域图景**——unsafe 以 effect 形态出现（design.md 6.3 已锚定「unsafe effect = 用户责任」，签名可见 = LLM/审查可定位）、区内提供哪些原语（裸指针/指针算术/region/受控 transmute 候选集）、区边界如何审计、与 Perceus RC 的交互（unsafe 区内对象的 RC 责任归属）。**作为后续目标**，优先级维持 P3。
 
-**要回答的设计问题**：
-1. Ring 是否、以何种形式提供低层内存原语？候选：value types（unboxed 内联）/ region effect（受控分配）/ 类型系统约束的「受控 unsafe」/ 维持 C FFI 为永久退缩前线（核心容器底层永远是 C，不 RIIR）。
-2. 若提供：如何与 Perceus RC / linear types / 「无 unsafe」哲学共存？
+**要回答的设计问题**（2026-06-11 形态已拍——`unsafe` effect + 两级 discharge + 三栏总账，design.md §7.12 为真值；剩余）：
+1. 区内原语集清单：`Ptr<T>`（名称待定）/ alloc/dealloc / read/write/offset / 受控 transmute——由 §7.12 栏 B 四场景（零拷贝视图/自引用/RIIR/FFI）倒推；value types / region effect 候选与之的关系（region 能否作为安全区替代收窄 unsafe 面）。
+2. 跨界所有权移交 API（unsafe 指针 ↔ 安全值）+ RC 交互细则（extern type 类型级排除规则的推广）。
 3. RIIR 边界划在哪：容器底层 RIIR 收益（自包含 + 对容器内部跑 Perceus reuse）vs 成本（libstdc++ 本就零依赖随 clang 自带、STL 久经考验）是否成立？
+4. unsafe 封装库的验收工具：ASan 档位接入、miri 类解释器（远期）。
 
 **产出**：design.md 章节——低层内存原语取舍决策 + RIIR 边界定义。决策后再评估是否立 RIIR 实现项。
 
