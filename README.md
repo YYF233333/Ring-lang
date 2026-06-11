@@ -6,6 +6,8 @@ Ring 把代数 effect system、HM 类型推断和 trait-based 多态塞进一门
 
 编译器自举完成，用 Ring 自己写的。当前先编译到 JS 跑着，正在做 LLVM native backend。
 
+设计的根依据是六条公理（类型即模型 / 效果即可见性 / 推断为王 / 无人回路 / 编译器必须终止 / 确定性资源语义），全文见 [docs/philosophy.md](docs/philosophy.md)。
+
 ## Quick Start
 
 ```bash

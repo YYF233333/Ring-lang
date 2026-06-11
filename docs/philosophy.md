@@ -6,7 +6,9 @@ LLM-first 的 native 编程语言：写起来像 Python（lv0 零标注），编
 
 ---
 
-## 四条公理
+## 六条公理
+
+> 唯一真值源（2026-06-12 由四条扩为六条：可判定性与资源语义两条隐性地基成文）。design.md/CLAUDE.md/README 只放指针或速查，不重复全文。设计决策与公理冲突时公理优先；公理间冲突的仲裁记录入 design.md 决策表。
 
 ### 1. 类型即模型，不是谜题
 
@@ -20,11 +22,29 @@ LLM-first 的 native 编程语言：写起来像 Python（lv0 零标注），编
 
 Bidirectional + constraint solving + effect inference。写代码的体验接近 Python，编译器内部看到完整类型+效果信息。标注由 formatter 按配置等级自动生成维护，人只控制详细度。
 
+推论：**标注是文档，不是语义**（Gradual Guarantee 编译期变体——加标注不改变编译行为，标注过时只产生 warning，编译器永远从代码推断真值。见 lang-design.md §2.4）。
+
 ### 4. 无人回路
 
 终极约束：让 LLM agent 能在无人审查的情况下自主编写正确代码。每个语言特性的评估标准之一是"它能替代人类在开发回路中的哪个角色"。编译器不只是检查工具，而是自主开发闭环中替代人类的控制器。
 
 演进主线即此公理的逐项兑现：effect 推断（"有副作用吗"）→ 穷尽匹配（"case 全了吗"）→ 静态 leak verifier（"泄露了吗"，B-104 D2）→ refinement（"参数合法吗"，B-001）。新特性的取舍判据 = 能否把又一个人类判断移交编译期判定。
+
+推论：**失真必须响**（静默行为差异对 agent 不可见，必须以编译错误浮现——B-110）；**优化不可观测**（引擎优化绝不改变可观测语义——COW 原则）；**人类审查面可枚举**（审查没有被消灭的地方压缩为可枚举集合 = unsafe discharge 点清单，`ring audit unsafe`，design.md §7.12）。
+
+### 5. 编译器必须终止
+
+类型检查与推断必须可判定——每个高级特性限制在可判定片段内，超出片段 = 编译错误（要求标注或 runtime check 兜底），不允许编译器不终止或耗时不可预期。为此放弃的特性及替代方案见 lang-design.md §11.7（函数重载/真 union 子类型/rank-2+/specialization 等八项）。这是无人回路的前置条件：编译器卡死 = agent 闭环断裂。对比：Rust trait solver 图灵完备（可能不终止），Ring 当前系统全部可判定。
+
+### 6. 确定性资源语义
+
+资源的释放时机是语言语义（确定、可从代码推导），不是运行时策略：`Drop` 在 scope 退出/最后使用处触发（编译器插入、后端无关），内存在不可达瞬间精确回收（native = Perceus RC，garbage-free 定理），环 = 泄漏、由 `Weak<T>` 显式打破；无 GC 停顿、无 finalizer、无隐藏 runtime。这是 move 语义、`.clone()`、`Weak`、unsafe 区（design.md §7.12）的公理地基。
+
+**GC 取舍记录（2026-06-12 分析定案——放弃 GC 的真实理由，旧理由"GC 停顿"不成立）**：
+- **语义层费用 GC 省不掉**：公理 2/4 独立强迫 move 语义——引用语义使 `mut<S>` 系统性失真、aliasing bug 类对无人回路永久开放（B-110 否决理由与引擎无关）；Drop/RAII 强迫 move-only 类型存在。即便换 GC 引擎，所有权的用户面（5 个浮现点）几乎原样保留，省下的只有引擎层。
+- **引擎层四收益**：① 无 runtime——C ABI FFI 零摩擦、二进制小、WASM/嵌入式/GPU（design.md §9 远期）路径不堵死；② 内存占用 = live set（GC 需 2-3× heap headroom，agent 并行 ×N 进程放大）；③ Perceus 特有——FBIP 原地复用、garbage-free 定理、D2 静态 verifier（"编译期证明 0 泄露"GC 给不了）；④ 竞争位——AI-native 同辈（Mojo/MoonBit/Zero）全选 ownership/no-GC；GC 化 = 进 Go/TS"够用就行"修罗场（效果推断差异化最弱处），no-GC 打的是"Rust 人体工学"这个公认无解痛点。
+- **不可逆性不对称（最硬一条）**：GC→确定性 retrofit 史上无成功案例（D 的 @nogc 残废、finalizer ≠ destructor）；RC→GC 级人体工学 = 当前设计纲领且已基本兑现（所有权仅 5 浮现点、全部 fail-safe）。要错就错在 no-GC 这边。
+- **可证伪锚点**：B-089 re-measure = Ring 首个 RC vs GC footprint 实测（native RC plateau vs V8 自编译基线）；若完整 RC 不优于 V8，此账重算。
 
 ---
 
