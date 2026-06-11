@@ -331,6 +331,8 @@ const E0706 = "E0706";
 
 const W0001 = "W0001";
 
+const W0002 = "W0002";
+
 function error_description(code) {
   if ((code === "E0101")) {
     return "Unexpected token";
@@ -479,6 +481,9 @@ function error_description(code) {
   if ((code === "W0001")) {
     return "Catch on expression with no fail effect";
   }
+  if ((code === "W0002")) {
+    return "Refinement where clause not enforced";
+  }
   return "Unknown error";
 }
 
@@ -572,4 +577,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0208, E0301, E0302, E0303, E0304, E0305, E0306, E0307, E0308, E0402, E0403, E0404, E0501, E0502, E0503, E0405, E0406, E0407, E0408, E0504, E0505, E0506, E0507, E0508, E0409, E0410, E0509, E0510, E0511, E0512, E0513, E0514, E0601, E0702, E0703, E0704, E0705, E0706, W0001, error_description, error_category };
+export { E0101, E0102, E0103, E0104, E0201, E0203, E0204, E0205, E0206, E0207, E0208, E0301, E0302, E0303, E0304, E0305, E0306, E0307, E0308, E0402, E0403, E0404, E0501, E0502, E0503, E0405, E0406, E0407, E0408, E0504, E0505, E0506, E0507, E0508, E0409, E0410, E0509, E0510, E0511, E0512, E0513, E0514, E0601, E0702, E0703, E0704, E0705, E0706, W0001, W0002, error_description, error_category };

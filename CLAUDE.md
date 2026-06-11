@@ -82,7 +82,7 @@ Ring-lang/
 ### 类型系统
 
 - Record row types 仅在参数位置使用（无匿名 record 字面量）
-- Refinement `where` 子句只解析不验证（tokens 消费后丢弃）
+- Refinement `where` 子句只解析不验证（编译时发 W0002 warning 提示未强制；B-001 落地后移除）
 - 不支持 `dyn Trait` 动态分发、GATs
 - `pub` 可见性在单文件模式不强制（向后兼容）
 - 穷尽性检查：嵌套模式递归检查正常，多字段交叉组合不验证

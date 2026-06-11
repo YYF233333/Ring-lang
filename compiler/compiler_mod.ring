@@ -76,6 +76,11 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
                                 eprintln(format_human(sink.diagnostics(), src))
                                 check_ok = false
                             } else {
+                                // Surface check warnings (non-error diagnostics) without failing the build
+                                if sink.items.len() > 0 {
+                                    let src = read_file(match graph.modules.get(key) { some(m) => m.file_path, none => "" })
+                                    eprintln(format_human(sink.diagnostics(), src))
+                                }
                                 module_hirs.insert(key, result.program)
                                 match graph.modules.get(key) {
                                     some(mod_) => {

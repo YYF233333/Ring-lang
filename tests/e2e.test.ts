@@ -6,7 +6,7 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vm from "node:vm";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { parse } from "../compiler/dist/parser.js";
@@ -513,6 +513,7 @@ const cases: TestCase[] = [
   { file: "assoc_type_self_item.ring", expected: "assoc_type_self_item: ok\n" },
   { file: "or_pattern.ring", expected: "or pattern: ok\n" },
   { file: "exhaustive_generic_payload.ring", expected: "exhaustive_generic_payload: all tests passed\n" },
+  { file: "where_clause_warning.ring", expected: "5\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -632,6 +633,42 @@ describe("e2e: warnings (should pass check but emit warning)", { concurrency: tr
     const warnings = sink.items.filter((d: any) => d.severity._tag === "SevWarning");
     assert.ok(warnings.length > 0, "Expected at least one warning");
     assert.ok(warnings.some((w: any) => w.code === "W0001"), "Expected W0001 warning code");
+  });
+
+  // B-112: refinement 'where' clauses parse but are not enforced; W0002 makes
+  // that visible. Remove these three tests together with the warning when
+  // refinement types (B-001) land.
+  test("refinement where clause emits W0002 warning but succeeds", () => {
+    const filePath = path.join(CASES_DIR, "where_clause_warning.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    parse(source, filePath, sink);
+    assert.ok(!has_errors(sink), "Expected no errors");
+    const warnings = sink.items.filter((d: any) => d.severity._tag === "SevWarning");
+    assert.ok(warnings.some((w: any) => w.code === "W0002"), "Expected W0002 warning code");
+    const w = warnings.find((w: any) => w.code === "W0002") as any;
+    // Span must point at the 'where' token (line 11 of the test case)
+    assert.equal(w.span.start.line, 11, "Expected W0002 span on the where clause line");
+  });
+
+  test("CLI check surfaces W0002 on stderr (human format), exit 0", () => {
+    const filePath = path.join(CASES_DIR, "where_clause_warning.ring");
+    const r = spawnSync("node", [RING, "check", filePath], { encoding: "utf-8", timeout: 15000 });
+    assert.equal(r.status, 0, `Expected exit 0, got ${r.status}; stderr: ${(r.stderr || "").slice(0, 200)}`);
+    assert.ok(r.stdout.includes("OK"), `Expected 'OK' on stdout, got: ${r.stdout.slice(0, 200)}`);
+    assert.ok(r.stderr.includes("warning[W0002]"), `Expected 'warning[W0002]' on stderr, got: ${r.stderr.slice(0, 300)}`);
+  });
+
+  test("CLI check --error-format=llm surfaces W0002 as JSON on stderr, exit 0", () => {
+    const filePath = path.join(CASES_DIR, "where_clause_warning.ring");
+    const r = spawnSync("node", [RING, "check", filePath, "--error-format=llm"], { encoding: "utf-8", timeout: 15000 });
+    assert.equal(r.status, 0, `Expected exit 0, got ${r.status}; stderr: ${(r.stderr || "").slice(0, 200)}`);
+    assert.ok(r.stdout.includes("OK"), `Expected 'OK' on stdout, got: ${r.stdout.slice(0, 200)}`);
+    const parsed = JSON.parse(r.stderr);
+    assert.ok(
+      parsed.diagnostics.some((d: any) => d.code === "W0002" && d.severity === "warning"),
+      `Expected W0002 warning in LLM JSON, got: ${r.stderr.slice(0, 300)}`
+    );
   });
 });
 

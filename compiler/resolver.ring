@@ -92,6 +92,10 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                             eprintln(format_human(resolve_sink.diagnostics(), source))
                             return none
                         }
+                        // Surface parse warnings (non-error diagnostics) without failing the build
+                        if resolve_sink.items.len() > 0 {
+                            eprintln(format_human(resolve_sink.diagnostics(), source))
+                        }
                         asts_map.insert(current_key, ast)
 
                         let mut deps: List<Str> = []

@@ -62,6 +62,7 @@ pub const E0705: Str = "E0705"
 pub const E0706: Str = "E0706"
 
 pub const W0001: Str = "W0001"
+pub const W0002: Str = "W0002"
 
 pub fn error_description(code: Str) -> Str {
     if code == "E0101" { return "Unexpected token" }
@@ -114,6 +115,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0705" { return "Relative path out of scope" }
     if code == "E0706" { return "Use declaration must appear before other declarations" }
     if code == "W0001" { return "Catch on expression with no fail effect" }
+    if code == "W0002" { return "Refinement where clause not enforced" }
     "Unknown error"
 }
 

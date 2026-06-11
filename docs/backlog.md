@@ -680,18 +680,6 @@ connect("localhost", 3000)     // timeout=30
 **复杂度**：M（Parser 扩展 + Checker 参数匹配 + Codegen 展开）
 
 
-### B-112 `where` refinement 子句未强制 warning [feature] [P2] [S] [mechanical] [doing]
-
-> 2026-06-11 立项（Discussion）。`where` 子句当前解析后丢 token 且零警告——写 `fn f(x: Int where x > 0)` 得到「看似强制实为 no-op」的安全约束，对无人回路是最坏失败模式（LLM 写了就信）。
-
-**涉及修改**：
-1. parser/checker 消费 where 子句处发 warning（含 span）：「refinement 子句已解析但尚未强制（B-001 落地前为文档性标注）」。
-2. `--error-format=llm` 同步输出。
-
-**验收标准**：
-- 含 where 的程序编译输出 warning（human + llm 格式），编译行为不变
-- e2e 一例；B-001 落地时该 warning 与测试随之移除（spec 注明）
-
 ### B-113 `return` 在 match arm 表达式位置 [feature] [P2] [M] [judgment] [queued]
 
 > 2026-06-11 立项（Discussion，公理 1 违例簇）。Rust 允许 match arm 内 return，LLM 高频本能写法；Ring 当前拒绝。语义无歧义：含 return 的 arm 类型为 `Never`，与其他 arm 自然 unify（`fail.raise` 已走此路，机制存在）。
