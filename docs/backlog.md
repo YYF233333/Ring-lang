@@ -683,7 +683,7 @@ connect("localhost", 3000)     // timeout=30
 **复杂度**：M（Parser 扩展 + Checker 参数匹配 + Codegen 展开）
 
 
-### B-112 `where` refinement 子句未强制 warning [feature] [P2] [S] [mechanical] [queued]
+### B-112 `where` refinement 子句未强制 warning [feature] [P2] [S] [mechanical] [doing]
 
 > 2026-06-11 立项（Discussion）。`where` 子句当前解析后丢 token 且零警告——写 `fn f(x: Int where x > 0)` 得到「看似强制实为 no-op」的安全约束，对无人回路是最坏失败模式（LLM 写了就信）。
 
@@ -708,7 +708,7 @@ connect("localhost", 3000)     // timeout=30
 **验收标准**：
 - design.md/CLAUDE.md「已知限制」删除该条；双后端 e2e 通过；穷尽性检查与 Never arm 共存正确
 
-### B-115 字符串插值嵌套引号 [feature] [P2] [M] [judgment] [queued]
+### B-115 字符串插值嵌套引号 [feature] [P2] [M] [judgment] [doing]
 
 > 2026-06-11 立项（Discussion，公理 1 违例簇）。`"${fn("arg")}"` 解析失败——内层 `"` 被当外层终止。自举备忘实测：codegen 模块因此膨胀 ~15%（「无 `+` 拼接」的真实痛点在此，修掉后该原则零代价）。JS/Kotlin/Swift 插值均允许嵌套引号。
 
