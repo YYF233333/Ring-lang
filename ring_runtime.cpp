@@ -702,7 +702,18 @@ extern "C" void* ring_list_set(void* list, int64_t idx, void* val) {
                 (long long)idx, (long long)vec->size());
         exit(1);
     }
+    // B-104 D1 rule ④ — overwrite must DROP the old element.  Insert side: the
+    // value arg is a sink position (perceus sink_arg_indices ".set" → borrows are
+    // escape-Cloned, fresh temps transfer ownership), so the list owns +1 per slot
+    // — exactly the account drop_list settles at end-of-life.  Overwriting without
+    // a drop leaked that +1 (unbounded for hot slots).  Store first, THEN drop:
+    // a self-assign `xs.set(i, xs[i])` arrives with its own call-site dup (rc ≥ 2)
+    // and external sharers (`let saved = xs[i]` escape-Clone) hold their own +1,
+    // so the drop only decrements for them; an unshared old value (rc=1) is freed
+    // — the reclaimed leak.
+    void* old = (*vec)[(size_t)idx];
     (*vec)[(size_t)idx] = val;
+    ring_drop(old);
     return list;
 }
 
@@ -1134,7 +1145,25 @@ extern "C" void* ring_map_get_opt(void* map, void* key) {
 extern "C" void* ring_map_set(void* map, void* key, void* val) {
     CHK("map_set");
     RingMap* m = (RingMap*)map;
-    (*m)[*(std::string*)key] = val;
+    const std::string& k = *(std::string*)key;
+    // B-104 D1 rule ④ — duplicate-key insert must DROP the old value.  Insert
+    // side: the value arg is a sink position (perceus sink_arg_indices ".insert"),
+    // so the map owns +1 per value — the account drop_map settles at end-of-life.
+    // The KEY is value-inlined: the node copies the std::string CONTENT (no RC
+    // pointer is stored; the caller's key box stays a pure borrow), so there is
+    // no key account to settle on hit (the existing node key is reused, no new
+    // copy) or on miss (a fresh content copy owned by the node) — symmetric with
+    // the insert side never dup'ing the key.  Store the new value first, THEN
+    // drop the old: rc>1 sharers (`let saved = m[k]` escape-Clone / a get()
+    // Option's dup) only get decremented; an unshared old value is freed.
+    auto it = m->find(k);
+    if (it == m->end()) {
+        m->emplace(k, val);
+    } else {
+        void* old = it->second;
+        it->second = val;
+        ring_drop(old);
+    }
     return map;
 }
 
@@ -1247,7 +1276,18 @@ extern "C" void* ring_map_int_set(void* map, void* key, void* val) {
     CHK("map_int_set");
     RingMapInt* m = (RingMapInt*)map;
     int64_t k = *(int64_t*)key;
-    (*m)[k] = val;
+    // B-104 D1 rule ④ — duplicate-key insert must DROP the old value (the map
+    // owns +1 per value via the ".insert" sink dup; see ring_map_set).  The key
+    // is an unboxed int64 read out of the caller's box — value-inlined, no RC
+    // account on either insert or overwrite.
+    auto it = m->find(k);
+    if (it == m->end()) {
+        m->emplace(k, val);
+    } else {
+        void* old = it->second;
+        it->second = val;
+        ring_drop(old);
+    }
     return map;
 }
 
