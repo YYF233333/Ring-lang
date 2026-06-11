@@ -1,8 +1,8 @@
 # Ring-lang 设计哲学
 
-面向大型多端应用的编程语言。当前编译到 JS/V8（bootstrap 后端），目标后端 LLVM native。
+LLM-first 的 native 编程语言：写起来像 Python（lv0 零标注），编译器看到 Rust 级别的类型与副作用信息。语义内核 = Rust − borrow checker − 标注负担 + 代数效果 + 可判定推断。主战场：CLI / 服务端 / 系统编程——编译器自身（自举，35k 行级）是第一个生产负载。编译到 LLVM native；JS/V8 为 bootstrap 后端，native 落地后归档。
 
-核心赌注：LLM 在零训练数据的情况下 vibe coding 大规模代码库的表现能干掉 JS/TS。
+核心赌注：LLM 在零训练数据的情况下 vibe coding 大规模代码库，运行时错误率与总迭代轮数干掉主流语言——首先是「够用就行」的 JS/TS/Python。
 
 ---
 
@@ -23,6 +23,8 @@ Bidirectional + constraint solving + effect inference。写代码的体验接近
 ### 4. 无人回路
 
 终极约束：让 LLM agent 能在无人审查的情况下自主编写正确代码。每个语言特性的评估标准之一是"它能替代人类在开发回路中的哪个角色"。编译器不只是检查工具，而是自主开发闭环中替代人类的控制器。
+
+演进主线即此公理的逐项兑现：effect 推断（"有副作用吗"）→ 穷尽匹配（"case 全了吗"）→ 静态 leak verifier（"泄露了吗"，B-104 D2）→ refinement（"参数合法吗"，B-001）。新特性的取舍判据 = 能否把又一个人类判断移交编译期判定。
 
 ---
 
