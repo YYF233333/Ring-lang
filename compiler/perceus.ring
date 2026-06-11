@@ -260,9 +260,32 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
         HExpr::FloatLit { .. } => true,
         HExpr::StrLit { .. } => true,
         HExpr::BoolLit { .. } => true,
-        // NEVER materialise: Ident / FieldAccess / IndexExpr (borrows), control-flow
-        // (Block/If/Match — handled structurally), EffectOp / HandleExpr / TryCatch /
-        // Clone.
+        // B-104 D1 rule ③: IndexExpr refined by RECEIVER type.  `s[i]` on a Str
+        // lowers to ring_str_get, which allocates a NEW 1-char string
+        // (ring_runtime.cpp: ring_alloc + placement-new — verified) — a FRESH
+        // owned value, NOT a borrow into the receiver.  Before this rule it rode
+        // the blanket IndexExpr borrow classification: never materialised (leak
+        // in every operand position — the lexer's per-char `src[i]` flood, a
+        // dominant tid=3 STR share) and Clone-wrapped on escape (the dup
+        // escaped, the original 1-char string leaked).  List/Map indexing
+        // (ring_list_get / ring_map_get / ring_map_int_get) returns the element
+        // pointer WITHOUT a dup — a true borrow — and keeps the conservative
+        // path (generic/TypeVar receivers too).
+        HExpr::IndexExpr { receiver, .. } => is_str_index(receiver),
+        // NEVER materialise: Ident / FieldAccess / non-Str IndexExpr (borrows),
+        // control-flow (Block/If/Match — handled structurally), EffectOp /
+        // HandleExpr / TryCatch / Clone.
+        _ => false,
+    }
+}
+
+// B-104 D1 rule ③ helper: whether an IndexExpr's receiver is a Str, making the
+// index read a FRESH single-char string (ring_str_get allocates) rather than a
+// borrowed element pointer.  Conservative on anything but a literal StrType
+// (TypeVar / generic receivers stay classified as borrows — crash-free leak).
+fn is_str_index(receiver: HExpr) -> Bool {
+    match hexpr_type(receiver) {
+        Type::StrType => true,
         _ => false,
     }
 }
@@ -932,7 +955,13 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
     match expr {
         HExpr::Ident { .. } => true,
         HExpr::FieldAccess { .. } => true,
-        HExpr::IndexExpr { .. } => true,
+        // B-104 D1 rule ③: `s[i]` on a Str is NOT owner-bearing — ring_str_get
+        // returns a FRESH 1-char string (new ring_alloc, verified), so an escape
+        // MOVES it (the sink becomes sole owner; Clone-wrapping would dup the
+        // fresh string and leak the original, the pre-rule behaviour).  List/Map
+        // indexing returns a borrowed element pointer → owner-bearing (escape
+        // Clones) as before.
+        HExpr::IndexExpr { receiver, .. } => is_str_index(receiver) == false,
         HExpr::Call { callee, .. } => is_borrow_returning_call(callee),
         _ => false,
     }
@@ -1021,8 +1050,9 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //     slice / split (fresh list of fresh strs) / join / replace / trim /
 //     trim_start / trim_end / to_upper / to_lower / pad_start / pad_end / repeat
 //     / ring_int_to_str / float_to_str / bool_to_str / ring_str_get (str[i]
-//     allocs a NEW 1-char string — fresh, despite being routed through the
-//     IndexExpr borrow arm; see [观察] in worker_feedback) / ring_list_join /
+//     allocs a NEW 1-char string — FRESH; classified per-receiver by D1 rule ③:
+//     is_owner_bearing / anf_should_materialize special-case Str-receiver
+//     IndexExpr as fresh, see is_str_index) / ring_list_join /
 //     ring_json_stringify / ring_cwd / ring_read_file / ring_path_join / resolve
 //     / dirname / basename / extname.
 //   Option builders (fresh 2-slot block; payload dup'd or ownership-transferred):
@@ -1480,6 +1510,12 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         // later element drop) is untouched.  Balanced — NO UAF, NO leak.  (This is
         // why is_droppable_init and is_owner_bearing agree on these arms: every
         // droppable-as-owner-bearing init is Clone-wrapped before it is dropped.)
+        //
+        // B-104 D1 rule ③: a Str-receiver IndexExpr (`let c = s[i]`) is droppable
+        // on the OTHER ground — it is a FRESH 1-char string (ring_str_get
+        // allocates; not owner-bearing, so rc_escape MOVES it into the binding),
+        // released by the same scope-end Drop.  Both IndexExpr cases are
+        // droppable; they differ only in whether the init was Clone-wrapped.
         HExpr::Ident { .. } => true,
         HExpr::FieldAccess { .. } => true,
         HExpr::IndexExpr { .. } => true,
