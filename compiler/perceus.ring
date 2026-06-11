@@ -626,17 +626,43 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
         },
 
         HExpr::FieldAccess { receiver, field, ty, effects, span } => {
-            // A read projection: receiver is a borrow.  Normalise its subexprs but
-            // do NOT materialise the receiver (materialising a borrow source would
-            // bind + later drop a value that aliases live state — and the projection
-            // itself is a borrow, never materialised by callers via R1).
-            HExpr::FieldAccess { receiver: anf_borrow(receiver, hoists, externs, counter),
+            // B-104 D1 Stage 2 — RECEIVER position: a FRESH-OWNED receiver
+            // (`f(x).method()`, `make().field`, `s.char_at(i).unwrap_or("")`'s
+            // char_at Option — the lexer per-char leak) was read in place and
+            // never dropped.  Materialise it (anf_operand): `let __anf = f(x);
+            // __anf.method()` — scope-end-dropped like any owned binding.
+            //
+            // SOUNDNESS (why a projection/method result never dangles):
+            //   * The projection (FieldAccess/IndexExpr) and every borrow-
+            //     returning method result (is_borrow_returning_call) are OWNER-
+            //     BEARING — any escape of them is Clone-wrapped by rc_escape, so
+            //     a binding/sink owns an independent dup before __anf's scope-end
+            //     drop runs.  Non-escaping uses are transient borrows consumed
+            //     within the statement, strictly before the scope-end drop.
+            //   * A borrow tail of a DROPPING block (cond wrappers: while-cond /
+            //     guards / &&-RHS) is Clone-wrapped by the rc_block_inner
+            //     tail-escape invariant — the one position where a borrow of the
+            //     materialised receiver outlives the block's own drops.
+            //   * Fresh receivers of Unit-typed mutators (`f(x).push(v)`) are
+            //     reclaimed (the receiver-returning ABI result is excluded by
+            //     rule ② everywhere).  `fold` returns an ARG, never the receiver,
+            //     so receiver materialisation is independent of
+            //     is_arg_returning_call.
+            //   * Borrow receivers (Ident / FieldAccess chains / non-Str index /
+            //     borrow-returning calls) fail anf_should_materialize and stay
+            //     in-place reads — unchanged.
+            // Evaluation order preserved: the receiver's hoist precedes the
+            // args' hoists (anf_callee runs before the args loop in the Call arm).
+            HExpr::FieldAccess { receiver: anf_operand(receiver, hoists, externs, counter),
                 field: field, ty: ty, effects: effects, span: span }
         },
 
         HExpr::IndexExpr { receiver, index, ty, effects, span } => {
-            // Read: receiver is a borrow source; index is a read operand.
-            HExpr::IndexExpr { receiver: anf_borrow(receiver, hoists, externs, counter),
+            // Read: receiver follows the same Stage 2 receiver-position rule as
+            // FieldAccess above (`f(x)[0]` materialises f(x); the element read
+            // borrows __anf, Clone-wrapped on escape, dropped at scope end);
+            // index is a read operand.
+            HExpr::IndexExpr { receiver: anf_operand(receiver, hoists, externs, counter),
                 index: anf_operand(index, hoists, externs, counter),
                 ty: ty, effects: effects, span: span }
         },
@@ -818,12 +844,18 @@ fn anf_callee(callee: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut cou
     anf_borrow(callee, hoists, externs, counter)
 }
 
-// Normalise an expression that is a BORROW SOURCE (a FieldAccess/Call receiver, a
-// callee, a spread source): recurse into its subexprs (which still hoist their own
-// fresh operands), but NEVER materialise the top expression — it is read in place
-// and the projection above it is itself a borrow.  Materialising a borrow source
-// would bind a fresh `let` that the RC pass might clone/drop, perturbing the
-// borrow chain; keeping it a plain in-place read preserves the existing semantics.
+// Normalise an expression on the residual NO-MATERIALISE path: recurse into its
+// subexprs (which still hoist their own fresh operands), but NEVER materialise
+// the top expression.  Since B-104 D1 Stage 2 (receiver positions now go through
+// anf_operand — see the FieldAccess/IndexExpr arms) only two positions remain:
+//   * the CALLEE expression itself (an Ident or the method FieldAccess — never a
+//     materialisable form; a hypothetical Call-callee `get_fn()(x)` would be a
+//     residual leak, kept conservative);
+//   * a STRUCT/VARIANT SPREAD source: codegen copies the source's field pointers
+//     RAW (no dup) into the new struct — materialising a fresh spread source
+//     would scope-end-drop it, deep-freeing the fields the new struct now holds
+//     → UAF.  Spread sources must stay un-owned reads (leak-on-spread, the
+//     documented L1 posture).
 fn anf_borrow(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
     anf_expr(expr, hoists, externs, counter)
 }
@@ -1343,19 +1375,41 @@ fn rc_block_inner(stmts: List<HStmt>, tail: HExpr?, escape: Bool, owned: List<St
         }
     }
 
-    // The tail sees every block-local (all `let`s precede the tail).
-    let new_tail = match tail {
-        some(t) => some(rc_escape_or_value(t, escape, visible_owned, boxed, externs, gensym)),
-        none => none,
-    }
-
-    // Scope-end drops for this block's OWN fresh bindings, on the fall-through path.
+    // This block's OWN fresh bindings (dropped at block end, fall-through path).
     // A block-local that shadows an enclosing owned name (same flat alloca) is NOT
     // re-dropped here — the enclosing scope owns that drop; re-dropping would free
-    // the one shared alloca twice (B-102 layer-3 over-free).
+    // the one shared alloca twice (B-102 layer-3 over-free).  Computed BEFORE the
+    // tail so the tail's escape mode can depend on it (below).
     let mut own_block_locals: List<Str> = []
     for n in block_locals {
         if owned.contains(n) == false { own_block_locals.push(n) }
+    }
+
+    // B-104 D1 (Stage 2) — DROPPING-BLOCK TAIL-ESCAPE INVARIANT: a block that
+    // emits scope-end drops must hand its parent an OWNED tail value, even in a
+    // borrow (escape=false) position.  The block-end machinery evaluates the tail
+    // FIRST (hoisted into __rc_scope_N), then runs the local drops, then yields
+    // the hoisted value — so a tail that is (or, through control-flow arms,
+    // yields) a BORROW of one of the dropped locals would dangle the moment the
+    // drops run, and the parent (e.g. a while-condition's ring_unbox_bool) reads
+    // freed memory.  Processing the tail in ESCAPE position Clone-wraps every
+    // owner-bearing tail (rc_escape; control-flow tails inherit escape down to
+    // their arm tails), so the hoisted value owns an independent reference that
+    // survives the local drops.  ASan-proven hole this closes (pre-existing since
+    // W2): `while match make(i) { some(p) => p.flag, none => false }` — the
+    // materialised scrutinee `__anf = make(i)` is dropped at the cond-block end,
+    // freeing the solely-owned payload whose `.flag` box the taken arm just
+    // returned → heap-use-after-free in ring_unbox_bool.  Cost: in a true borrow
+    // position the Clone'd tail dup has no consumer and leaks (bounded, one per
+    // block evaluation, only when the block has droppable locals AND the tail is
+    // owner-bearing) — crash-free direction, mirroring clone-all-escape's bias.
+    // A no-drop block keeps borrow tails verbatim (zero churn, nothing freed).
+    let tail_escape = if own_block_locals.len() > 0 { true } else { escape }
+
+    // The tail sees every block-local (all `let`s precede the tail).
+    let new_tail = match tail {
+        some(t) => some(rc_escape_or_value(t, tail_escape, visible_owned, boxed, externs, gensym)),
+        none => none,
     }
     if own_block_locals.len() == 0 {
         ((new_stmts, new_tail))

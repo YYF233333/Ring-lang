@@ -769,12 +769,12 @@ function anf_expr(expr, hoists, externs, counter) {
     }
     if (__ring_m14._tag === "FieldAccess") {
       const receiver = __ring_m14.receiver; const field = __ring_m14.field; const ty = __ring_m14.ty; const effects = __ring_m14.effects; const span = __ring_m14.span;
-      return hir$HExpr_FieldAccess(anf_borrow(receiver, hoists, externs, counter), field, ty, effects, span);
+      return hir$HExpr_FieldAccess(anf_operand(receiver, hoists, externs, counter), field, ty, effects, span);
       break __ring_match14;
     }
     if (__ring_m14._tag === "IndexExpr") {
       const receiver = __ring_m14.receiver; const index = __ring_m14.index; const ty = __ring_m14.ty; const effects = __ring_m14.effects; const span = __ring_m14.span;
-      return hir$HExpr_IndexExpr(anf_borrow(receiver, hoists, externs, counter), anf_operand(index, hoists, externs, counter), ty, effects, span);
+      return hir$HExpr_IndexExpr(anf_operand(receiver, hoists, externs, counter), anf_operand(index, hoists, externs, counter), ty, effects, span);
       break __ring_match14;
     }
     if (__ring_m14._tag === "StructLit") {
@@ -1164,12 +1164,6 @@ function rc_block_inner(stmts, tail, escape, owned, boxed, externs, gensym) {
       }
     }
   }
-  const new_tail = (function() {
-  const __ring_m = tail;
-  if (__ring_m._tag === "some") { const t = __ring_m._0; return Option_some(rc_escape_or_value(t, escape, visible_owned, boxed, externs, gensym)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
   let own_block_locals = [];
   const __ring_iter_22 = __List_Iterable.iter(block_locals);
   while (true) {
@@ -1180,6 +1174,13 @@ function rc_block_inner(stmts, tail, escape, owned, boxed, externs, gensym) {
       List_push(own_block_locals, n);
     }
   }
+  const tail_escape = ((List_len(own_block_locals) > 0) ? true : escape);
+  const new_tail = (function() {
+  const __ring_m = tail;
+  if (__ring_m._tag === "some") { const t = __ring_m._0; return Option_some(rc_escape_or_value(t, tail_escape, visible_owned, boxed, externs, gensym)); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
   if ((List_len(own_block_locals) === 0)) {
     return [new_stmts, new_tail];
   } else {
