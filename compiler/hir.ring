@@ -1,5 +1,5 @@
 use ast::{Span, Pattern, BinOp, UnaryOp, TypeParam}
-use types::{Type, EffectRow}
+use types::{Type, EffectRow, StructField, EnumVariant, RecordField}
 
 pub use types::{BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET,
@@ -372,5 +372,165 @@ pub fn hexpr_span(e: HExpr) -> Span {
         HExpr::TupleLit { span, .. } => span,
         HExpr::IndexExpr { span, .. } => span,
         HExpr::Clone { span, .. } => span
+    }
+}
+
+// ============================================================
+// B-104 D1 built-in rule ① — extern-handle type-level RC exclusion (audit #139)
+// ============================================================
+//
+// `extern type` declarations (llvm_ffi.ring / the codegen_llvm_* re-declarations)
+// describe OPAQUE FOREIGN handles: their values are raw pointers produced by a
+// non-Ring allocator (LLVM-C API), with NO ring_alloc RC header at ptr-8.
+// ring_dup on one WRITES a refcount into foreign memory; ring_drop READS a
+// garbage header and may free a foreign interior pointer — both corrupt the
+// foreign heap.  Such values are therefore EXCLUDED from RC entirely, decided at
+// the TYPE level (not a name-list of the 59 LLVM-C externs, which would drift as
+// the FFI grows — 2026-06-11 user decision, backlog B-104 D1 rule ①):
+//   * never Clone   (rc_escape: escape = MOVE, no ring_dup)
+//   * never Drop    (is_droppable_init: false → never enters the owned set)
+//   * never materialise (anf_should_materialize: false → no __anf binding)
+//
+// The registry side: checker registers `extern type X` as
+// `StructDef { fields: [], is_extern: true }` (infer_register.ring), and every
+// use site resolves to `Type::StructType { name: X, .. }` carrying the SAME name
+// as the `HDecl::ExternType` decl (bare for file-level decls; `${mod}::${name}`
+// for inline-mod decls — check_mod_decl prefixes the decl BEFORE check_decl, so
+// HIR decl name and StructType name agree in both forms).  Perceus runs PER
+// MODULE (compiler_mod.ring), and every module that handles LLVM values
+// re-declares the extern types locally (codegen_llvm_* convention), so
+// collecting this module's HDecl::ExternType names covers all its use sites.
+// KNOWN LIMIT (crash direction, documented in worker_feedback): a module that
+// imports an extern type via `use` WITHOUT a local re-declaration would not be
+// covered — no such module exists today, and the codegen_llvm convention is to
+// re-declare.
+
+// Collect the extern type names declared by this module's HIR (recursing into
+// inline mod blocks, whose decl names are already module-prefixed).
+pub fn collect_extern_type_names(decls: List<HDecl>) -> Set<Str> {
+    let mut out: Set<Str> = set_new()
+    collect_extern_type_names_rec(decls, out)
+    out
+}
+
+fn collect_extern_type_names_rec(decls: List<HDecl>, mut out: Set<Str>) {
+    for d in decls {
+        match d {
+            HDecl::ExternType { name, .. } => { out.insert(name) },
+            HDecl::ModBlock { decls: md, .. } => { collect_extern_type_names_rec(md, out) },
+            _ => {},
+        }
+    }
+}
+
+// A type whose values ARE foreign handles (direct extern type).  ring_dup /
+// ring_drop on such a value corrupts foreign memory — full RC exclusion.
+pub fn is_extern_handle_type(ty: Type, externs: Set<Str>) -> Bool {
+    if externs.len() == 0 {
+        false
+    } else {
+        match ty {
+            Type::StructType { name, .. } => externs.contains(name),
+            _ => false,
+        }
+    }
+}
+
+// B-104 D1 rule ② (Unit) + rule ① (direct extern): a value of this type must
+// never be Clone'd, never be Drop'ed, never enter the owned set, and never be
+// materialised.  UnitType: the checker guarantees Unit has no value semantics
+// (JS backend yields undefined); at the LLVM ABI a Unit-typed call may
+// accidentally return a live pointer (the receiver-returning mutators —
+// `return list;` etc., see perceus.ring's B-103 classification table), so
+// dup/drop bookkeeping on it is at best a pin-leak and at worst a UAF.
+pub fn is_rc_excluded_type(ty: Type, externs: Set<Str>) -> Bool {
+    match ty {
+        Type::UnitType => true,
+        _ => is_extern_handle_type(ty, externs),
+    }
+}
+
+// A type whose values, when DEEP-DROPPED, would reach a foreign handle: the
+// extern type itself, or a container / Option / tuple / struct / enum that
+// transitively holds one (e.g. `List<LLVMTypeRef>` — drop_list ring_drops each
+// element; `LLVMValueRef?` — drop_option drops the payload; `LlvmCtx` — its
+// drop_T would drop extern fields and `Map<Str, LLVMValueRef>` fields whose
+// runtime drop_map drops the foreign values).  Such values must never be
+// scope-end-dropped or materialised (leak instead — crash-free direction).
+// A SHALLOW ring_dup on a non-extern container of extern handles is safe (the
+// container itself has a real RC header), so Clone-on-escape stays allowed for
+// these (only the DIRECT extern type suppresses Clone — is_extern_handle_type).
+//
+// FnType is NOT recursed: a closure's captures are not described by its
+// signature, and drop_closure_env releases captures, not param/return values.
+// Recursive types terminate via an on-stack visited set (struct/enum names);
+// monotone OR + one full exploration per name keeps reachability exact.
+pub fn type_contains_extern_handle(ty: Type, externs: Set<Str>) -> Bool {
+    if externs.len() == 0 {
+        false
+    } else {
+        let mut visited: Set<Str> = set_new()
+        type_contains_extern_rec(ty, externs, visited)
+    }
+}
+
+fn type_contains_extern_rec(ty: Type, externs: Set<Str>, mut visited: Set<Str>) -> Bool {
+    match ty {
+        Type::StructType { name, type_params, fields } => {
+            if externs.contains(name) {
+                true
+            } else if visited.contains("S:${name}") {
+                false
+            } else {
+                visited.insert("S:${name}")
+                let mut found = false
+                for tp in type_params {
+                    if type_contains_extern_rec(tp, externs, visited) { found = true }
+                }
+                for f in fields {
+                    if type_contains_extern_rec(f.ty, externs, visited) { found = true }
+                }
+                found
+            }
+        },
+        Type::EnumType { name, type_params, variants } => {
+            if visited.contains("E:${name}") {
+                false
+            } else {
+                visited.insert("E:${name}")
+                let mut found = false
+                for tp in type_params {
+                    if type_contains_extern_rec(tp, externs, visited) { found = true }
+                }
+                for v in variants {
+                    for ft in v.fields {
+                        if type_contains_extern_rec(ft, externs, visited) { found = true }
+                    }
+                }
+                found
+            }
+        },
+        Type::TupleType { elements } => {
+            let mut found = false
+            for e in elements {
+                if type_contains_extern_rec(e, externs, visited) { found = true }
+            }
+            found
+        },
+        Type::GenericType { base, args } => {
+            let mut found = type_contains_extern_rec(base, externs, visited)
+            for a in args {
+                if type_contains_extern_rec(a, externs, visited) { found = true }
+            }
+            found
+        },
+        Type::RecordType { fields, .. } => {
+            let mut found = false
+            for f in fields {
+                if type_contains_extern_rec(f.ty, externs, visited) { found = true }
+            }
+            found
+        },
+        _ => false,
     }
 }

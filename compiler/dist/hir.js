@@ -1049,6 +1049,194 @@ function hexpr_span(e) {
   }
 }
 
+function collect_extern_type_names(decls) {
+  let out = set_new();
+  collect_extern_type_names_rec(decls, out);
+  return out;
+}
+
+function collect_extern_type_names_rec(decls, out) {
+  const __ring_iter_3 = __List_Iterable.iter(decls);
+  while (true) {
+    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+    if (__ring_next_3._tag === "none") break;
+    const d = __ring_next_3._0;
+    __ring_match10: {
+      const __ring_m10 = d;
+      if (__ring_m10._tag === "ExternType") {
+        const name = __ring_m10.name;
+        _Set_insert(out, name);
+        break __ring_match10;
+      }
+      if (__ring_m10._tag === "ModBlock") {
+        const md = __ring_m10.decls;
+        collect_extern_type_names_rec(md, out);
+        break __ring_match10;
+      }
+      break __ring_match10;
+    }
+  }
+}
+
+function is_extern_handle_type(ty, externs) {
+  if ((_Set_len(externs) === 0)) {
+    return false;
+  } else {
+    __ring_match11: {
+      const __ring_m11 = ty;
+      if (__ring_m11._tag === "StructType") {
+        const name = __ring_m11.name;
+        return _Set_contains(externs, name, __Str_Eq);
+        break __ring_match11;
+      }
+      return false;
+      break __ring_match11;
+    }
+  }
+}
+
+function is_rc_excluded_type(ty, externs) {
+  __ring_match12: {
+    const __ring_m12 = ty;
+    if (__ring_m12._tag === "UnitType") {
+      return true;
+      break __ring_match12;
+    }
+    return is_extern_handle_type(ty, externs);
+    break __ring_match12;
+  }
+}
+
+function type_contains_extern_handle(ty, externs) {
+  if ((_Set_len(externs) === 0)) {
+    return false;
+  } else {
+    let visited = set_new();
+    return type_contains_extern_rec(ty, externs, visited);
+  }
+}
+
+function type_contains_extern_rec(ty, externs, visited) {
+  __ring_match13: {
+    const __ring_m13 = ty;
+    if (__ring_m13._tag === "StructType") {
+      const name = __ring_m13.name; const type_params = __ring_m13.type_params; const fields = __ring_m13.fields;
+      if (_Set_contains(externs, name, __Str_Eq)) {
+        return true;
+      } else {
+        if (_Set_contains(visited, `S:${name}`, __Str_Eq)) {
+          return false;
+        } else {
+          _Set_insert(visited, `S:${name}`);
+          let found = false;
+          const __ring_iter_4 = __List_Iterable.iter(type_params);
+          while (true) {
+            const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+            if (__ring_next_4._tag === "none") break;
+            const tp = __ring_next_4._0;
+            if (type_contains_extern_rec(tp, externs, visited)) {
+              found = true;
+            }
+          }
+          const __ring_iter_5 = __List_Iterable.iter(fields);
+          while (true) {
+            const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+            if (__ring_next_5._tag === "none") break;
+            const f = __ring_next_5._0;
+            if (type_contains_extern_rec(f.ty, externs, visited)) {
+              found = true;
+            }
+          }
+          return found;
+        }
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "EnumType") {
+      const name = __ring_m13.name; const type_params = __ring_m13.type_params; const variants = __ring_m13.variants;
+      if (_Set_contains(visited, `E:${name}`, __Str_Eq)) {
+        return false;
+      } else {
+        _Set_insert(visited, `E:${name}`);
+        let found = false;
+        const __ring_iter_6 = __List_Iterable.iter(type_params);
+        while (true) {
+          const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+          if (__ring_next_6._tag === "none") break;
+          const tp = __ring_next_6._0;
+          if (type_contains_extern_rec(tp, externs, visited)) {
+            found = true;
+          }
+        }
+        const __ring_iter_7 = __List_Iterable.iter(variants);
+        while (true) {
+          const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+          if (__ring_next_7._tag === "none") break;
+          const v = __ring_next_7._0;
+          const __ring_iter_8 = __List_Iterable.iter(v.fields);
+          while (true) {
+            const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+            if (__ring_next_8._tag === "none") break;
+            const ft = __ring_next_8._0;
+            if (type_contains_extern_rec(ft, externs, visited)) {
+              found = true;
+            }
+          }
+        }
+        return found;
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "TupleType") {
+      const elements = __ring_m13.elements;
+      let found = false;
+      const __ring_iter_9 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+        if (__ring_next_9._tag === "none") break;
+        const e = __ring_next_9._0;
+        if (type_contains_extern_rec(e, externs, visited)) {
+          found = true;
+        }
+      }
+      return found;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "GenericType") {
+      const base = __ring_m13.base; const args = __ring_m13.args;
+      let found = type_contains_extern_rec(base, externs, visited);
+      const __ring_iter_10 = __List_Iterable.iter(args);
+      while (true) {
+        const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+        if (__ring_next_10._tag === "none") break;
+        const a = __ring_next_10._0;
+        if (type_contains_extern_rec(a, externs, visited)) {
+          found = true;
+        }
+      }
+      return found;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "RecordType") {
+      const fields = __ring_m13.fields;
+      let found = false;
+      const __ring_iter_11 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+        if (__ring_next_11._tag === "none") break;
+        const f = __ring_next_11._0;
+        if (type_contains_extern_rec(f.ty, externs, visited)) {
+          found = true;
+        }
+      }
+      return found;
+      break __ring_match13;
+    }
+    return false;
+    break __ring_match13;
+  }
+}
+
 function __DictDispatchInfo_Eq_eq(self, other) {
   return (self.dict_param === other.dict_param) && (self.method === other.method);
 }
@@ -1295,4 +1483,4 @@ function __DerivedImpl_Debug_debug(self) {
 const __DerivedImpl_Debug = { debug: __DerivedImpl_Debug_debug };
 
 
-export { HParam, DictRef_Simple, DictRef_Wrapped, TraitDispatch_Builtin, TraitDispatch_Direct, TraitDispatch_Dict, DictDispatchInfo, HStructFieldInit, HMatchArm, HEffectHandler, HStringInterpPart_Literal, HStringInterpPart_Expression, HExpr_IntLit, HExpr_FloatLit, HExpr_StrLit, HExpr_BoolLit, HExpr_Ident, HExpr_BinOp, HExpr_UnaryOp, HExpr_Call, HExpr_FieldAccess, HExpr_StructLit, HExpr_NamedVariantConstruct, HExpr_MatchExpr, HExpr_Block, HExpr_IfExpr, HExpr_StringInterp, HExpr_TryCatch, HExpr_HandleExpr, HExpr_Lambda, HExpr_EffectOp, HExpr_RangeExpr, HExpr_ListLit, HExpr_TupleLit, HExpr_IndexExpr, HExpr_Clone, HForInDestructure, HLetDestructureBinding, HStmt_Let, HStmt_Var, HStmt_Assign, HStmt_ExprStmt, HStmt_Return, HStmt_While, HStmt_ForIn, HStmt_Break, HStmt_Continue, HStmt_LetDestructure, HStmt_IfLet, HStmt_Drop, HStmt_Dup, HStructField, HEnumVariant, HEffectOp, HTraitMethod, TraitBound, HAssocType, HSigMember, HDecl_Fn, HDecl_Struct, HDecl_Enum, HDecl_Impl, HDecl_Effect, HDecl_Test, HDecl_Trait, HDecl_ExternFn, HDecl_ExternType, HDecl_TypeAlias, HDecl_Const, HDecl_ModBlock, HDecl_Sig, FieldAction_Identity, FieldAction_Call, FieldAction_Tuple, FieldAction_FnLiteral, DerivedField, DerivedVariant, TypeKind_StructKind, TypeKind_EnumKind, DerivedImpl, HProgram, variant_js_name, trait_dict_name, evidence_param_name, default_evidence_name, effect_op_slot, trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL, hexpr_type, hexpr_effects, hexpr_span, __DictDispatchInfo_Eq, __HForInDestructure_Eq, __TraitBound_Eq, __TypeKind_Eq, __DictDispatchInfo_Clone, __HForInDestructure_Clone, __TraitBound_Clone, __DictRef_Clone, __TraitDispatch_Clone, __FieldAction_Clone, __TypeKind_Clone, __DerivedField_Clone, __DerivedVariant_Clone, __DerivedImpl_Clone, __DictDispatchInfo_Ord, __TraitBound_Ord, __TypeKind_Ord, __DictDispatchInfo_Debug, __HForInDestructure_Debug, __TraitBound_Debug, __DictRef_Debug, __TraitDispatch_Debug, __FieldAction_Debug, __TypeKind_Debug, __DerivedField_Debug, __DerivedVariant_Debug, __DerivedImpl_Debug, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS, MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS, OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS, STRINGBUILDER_METHODS };
+export { HParam, DictRef_Simple, DictRef_Wrapped, TraitDispatch_Builtin, TraitDispatch_Direct, TraitDispatch_Dict, DictDispatchInfo, HStructFieldInit, HMatchArm, HEffectHandler, HStringInterpPart_Literal, HStringInterpPart_Expression, HExpr_IntLit, HExpr_FloatLit, HExpr_StrLit, HExpr_BoolLit, HExpr_Ident, HExpr_BinOp, HExpr_UnaryOp, HExpr_Call, HExpr_FieldAccess, HExpr_StructLit, HExpr_NamedVariantConstruct, HExpr_MatchExpr, HExpr_Block, HExpr_IfExpr, HExpr_StringInterp, HExpr_TryCatch, HExpr_HandleExpr, HExpr_Lambda, HExpr_EffectOp, HExpr_RangeExpr, HExpr_ListLit, HExpr_TupleLit, HExpr_IndexExpr, HExpr_Clone, HForInDestructure, HLetDestructureBinding, HStmt_Let, HStmt_Var, HStmt_Assign, HStmt_ExprStmt, HStmt_Return, HStmt_While, HStmt_ForIn, HStmt_Break, HStmt_Continue, HStmt_LetDestructure, HStmt_IfLet, HStmt_Drop, HStmt_Dup, HStructField, HEnumVariant, HEffectOp, HTraitMethod, TraitBound, HAssocType, HSigMember, HDecl_Fn, HDecl_Struct, HDecl_Enum, HDecl_Impl, HDecl_Effect, HDecl_Test, HDecl_Trait, HDecl_ExternFn, HDecl_ExternType, HDecl_TypeAlias, HDecl_Const, HDecl_ModBlock, HDecl_Sig, FieldAction_Identity, FieldAction_Call, FieldAction_Tuple, FieldAction_FnLiteral, DerivedField, DerivedVariant, TypeKind_StructKind, TypeKind_EnumKind, DerivedImpl, HProgram, variant_js_name, trait_dict_name, evidence_param_name, default_evidence_name, effect_op_slot, trait_bound_param_name, default_method_self_name, ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL, hexpr_type, hexpr_effects, hexpr_span, collect_extern_type_names, is_extern_handle_type, is_rc_excluded_type, type_contains_extern_handle, __DictDispatchInfo_Eq, __HForInDestructure_Eq, __TraitBound_Eq, __TypeKind_Eq, __DictDispatchInfo_Clone, __HForInDestructure_Clone, __TraitBound_Clone, __DictRef_Clone, __TraitDispatch_Clone, __FieldAction_Clone, __TypeKind_Clone, __DerivedField_Clone, __DerivedVariant_Clone, __DerivedImpl_Clone, __DictDispatchInfo_Ord, __TraitBound_Ord, __TypeKind_Ord, __DictDispatchInfo_Debug, __HForInDestructure_Debug, __TraitBound_Debug, __DictRef_Debug, __TraitDispatch_Debug, __FieldAction_Debug, __TypeKind_Debug, __DerivedField_Debug, __DerivedVariant_Debug, __DerivedImpl_Debug, BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_RANGE, BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION, BUILTIN_CELL, BUILTIN_STRING_BUILDER, CELL_METHODS, STR_METHODS, INT_METHODS, FLOAT_METHODS, LIST_NON_HOF_METHODS, LIST_HOF_METHODS, MAP_NON_HOF_METHODS, MAP_HOF_METHODS, SET_NON_HOF_METHODS, SET_HOF_METHODS, OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS, STRINGBUILDER_METHODS };
