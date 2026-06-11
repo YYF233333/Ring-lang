@@ -10,7 +10,7 @@
 
 ## 🔴 Critical（阻塞 native 自举）
 
-（无 open 项。#134「native 运行时系统性 L0 RC 损坏」的确定性崩溃类 2026-06-04 由 **B-098 借用推断引擎（clone-all-escape）** 从根消除并独立验证：native ring.exe 编 `a_empty.ring` EXIT 0（register_impl_method double-free 崩点消除）、JS 731×3 + llvm_diff 49×3 全绿、dist double-bootstrap 字节一致。native 自举剩余项——native `print` builtin bug（可能残留 RC over-free 了 builtins 环境，根因待 native 调试定位）/ 内存峰值实测 / B-099 LLVM-C 链接——归 backlog **B-089** 跟踪。详见 git `c54e7c6`/`e0d1cf4` + `docs/worker_feedback.md`。）
+（无 open 项。#134 已由 B-098 clone-all-escape 从根消除（2026-06-04，git `c54e7c6`）；native 自举余项归 B-089。）
 
 ## Checker
 
@@ -21,16 +21,6 @@
 设计约束：fields 是模板字段（含递归引用），递归替换会导致 `Node<T>` 等递归类型栈溢出。当前 `infer_field_access` 的 inst_map 兜底是正确设计。如需修复需改为 nominal 表示（关联 #16）。
 
 **决策（2026-05-23）**：长期容忍。当前方案正确且无性能问题，改动大（L-XL）收益主要在未来后端。等 LLVM 后端需要时与 #16 一并重构。
-
-### #108 Occurs check 对 StructType/EnumType 仅检查 type_params [low] [judgment] [wontfix]
-
-`occurs_in`（`unify.ring:55-58`）只递归 `type_params`，不查 `fields`/`variants`——经 2026-06-03 Discussion 贴码核查，确认这是**正确的 nominal 语义，非 bug**。
-
-`StructType.fields`/`EnumType.variants` 自始至终是**声明模板**：`apply_subst` 原样保留 fields（`env.ring:525-536`），字段类型实例化走**局部 `inst_map`** 在读字段时进行、不写回（`infer_ctx.ring:1206/1319/1343`、`infer.ring:2166`）；类型相等也只比 `name + type_params`（`types.ring:319-325`，identity 已是 nominal）。因此无限类型的环只能经 `type_params` 形成（实例化传入的实际类型），occurs check **已覆盖**；fields 里是声明模板 var（与查询 var 不同 id），递归查反而误判。
-
-原 B-057「同时补 occurs_in + apply_subst 的 fields 遍历」基于误解已撤销：补 `apply_subst` → 递归类型栈溢出（见 #45）；补 `occurs_in` → 误判模板 var。真正的表示统一是 **#16 nominal 重构**（已 deferred），届时此条自然消解。
-
-发现者：Opus
 
 
 
@@ -116,7 +106,7 @@ cli.ring:177 "Single-file run not yet implemented"（EXIT 1），且在源文件
 
 类型表示不一致。应改为 nominal 表示。
 
-**决策（2026-05-23）**：长期容忍，与 #45 一并推迟到 LLVM 后端阶段。改 nominal 表示（只存 `name + type_args`，fields 走 registry 查）后，#45（apply_subst 不递归 fields）/ #108（occurs check 不查 fields）随之一并消解——它们都是当前 fields-as-template 表示的衍生现象。
+**决策（2026-05-23）**：长期容忍，与 #45 一并推迟到 LLVM 后端阶段。改 nominal 表示（只存 `name + type_args`，fields 走 registry 查）后，#45（apply_subst 不递归 fields）/ 原 #108（occurs check 不查 fields——2026-06-03 贴码核为正确 nominal 语义非 bug 已 wontfix 删除：fields/variants 是声明模板，环只能经 type_params 形成、occurs check 已覆盖，递归查模板 var 反而误判）随之一并消解——它们都是当前 fields-as-template 表示的衍生现象。
 
 ### #19 Ring 编译器缺少 `assertNever` 等效编译期保护 [low] [mechanical] [open]
 
