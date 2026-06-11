@@ -1374,6 +1374,8 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 
 6. **无 last-use→move 优化**（留 L3 reuse）：连 last-use 的 Ident 逃逸也 clone（再 scope-end drop）。代价是 churn，但**比 always-own 少 dup**（读取 ≫ 逃逸）、**无泄漏**。
 
+**Drop 时机语义（2026-06-12 D-1 拍板，公理⑥消歧）**：上表 4 的 scope-end **即语义本身，不是临时实现**。last-use drop / FBIP 重用（L3，B-079）的合法性来自 **as-if 条款**——仅当该类型**无用户 Drop impl 且不被任何 `Weak<T>` 指向**（类型级可判定）时，引擎可提前 drop；否则钉死 scope-end。约束来源：`Weak.upgrade()` 使 drop 时机可观测（提前 drop 会把 `some` 变 `none`），用户 Drop impl 的副作用时机同理。**B-104 D3 的 `Weak<T>` 按 scope-end 语义落地**。仲裁记录见附录「公理仲裁决策表」。
+
 **为何从根消除 #134**：逃逸 **clone 而非 consume** → 绑定/参数**永不被按路径消费** → 不存在每路径消费不平衡 → branch-balancing 整个不需要 → 未消费分支不再插 spurious drop → 循环内条件逃逸不再 double-free。`self_type` 验证：`resolve_impl_self_type` 创建 rc=1 → self 迭代 push 处 `Clone`（rc 1→2，list 存入）→ 非 self 迭代不碰（else 无 spurious drop）→ 循环末 scope drop 一次（rc 2→1，list 留 1）。无 double-free 无泄漏，不依赖循环/分支嵌套层数。
 
 **闭包捕获边界（B-098 vs B-096）**：B-098 把**所有闭包捕获保守当 owned**——捕获处 clone，env 死时 drop（复用 B-084 已落地的独立 typeid + per-env `drop_env_T`）。leak-free + crash-free（绑定 rc=1 → 捕获 clone → rc=2 → env drop → rc=1 → 绑定 scope-end drop → 0，配平）。B-098 **不碰** catch/handle 闭包、`ring_try` drop、borrowed-capture 优化——这些归 **B-096**（在 B-098 之上做 sync-闭包 borrowed-capture 优化 + `ring_try` 后 drop body/catch 闭包 + guard-false 边 + Range/dict `drop_T` + evidence struct）。
@@ -2108,6 +2110,22 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | Const generics + refinement 组合 | 约束求解可能不可判定，需要保守边界 |
 | LLM 友好的严格编译器 | 首次编译通过率可能低于 TS |
 | 一种事一种写法 | 老手可能觉得缺乏灵活性 |
+
+## 附录：公理仲裁决策表
+
+> philosophy.md「层级与仲裁」规则 2/3 的记录处。公理间冲突、修宪程序、体系级元决策均落此表；per-topic 设计决策仍散于各节，仅涉公理仲裁者入表。2026-06-12 建表。
+
+| 日期 | 议题 | 裁决 | 适用规则 | 可证伪锚点 |
+|------|------|------|---------|-----------|
+| 2026-06-12 | 体系结构：平铺六条无优先序 → 冲突无法仲裁（D-2） | 三层结构（0 目标 / 1 约束 / 2 策略）+ 四条仲裁规则 + 修宪程序；④ 改写为「无人回路 × 全场景」（全场景 = 量词非第二目标）；⑦「场景不可堵死」自 ⑥ GC 记录升格成文；编号永不重排 | 元决策 | B-111（层 0 判据的测量仪） |
+| 2026-06-12 | GC vs ⑥：no-GC 是否站得住（所有权讨论引发重审） | 维持 ⑥：语义层费用引擎无关（②④ 独立强迫 move 语义）+ 不可逆性不对称 + ⑦ 场景路径；性能（GC 停顿）明确不是理由。全文 dossier 见 philosophy.md ⑥ | 规则 3（修宪程序，首例） | B-089 re-measure：native RC plateau vs V8 自编译基线 |
+| 2026-06-12 | 优化可观测性：引擎优化（COW/reuse/unboxing）vs 用户可见语义 | 优化不可观测原则（④ 推论，philosophy.md 成文）：引擎优化绝不改变可观测语义；§7.12 安全区表「见决策表」指此条 | ④ 推论成文 | — |
+| 2026-06-12 | Drop 时机（D-1）：⑥ 原文「scope 退出/最后使用处」二点歧义违反 ⑥ 自身；`Weak.upgrade()` 使时机可观测 → 与「优化不可观测」（④ 推论）+ L3/FBIP（B-079）预定相撞，gates B-104 D3 | 语义 = scope-end + as-if 条款：引擎仅对「无用户 Drop impl 且非 Weak 目标」类型（类型级可判定）允许提前 drop；B-104 D3 Weak 按 scope-end 落地；⑥「无 GC 停顿」改「无不可预期停顿」（级联 drop 诚实记账）。细则 §7.11 | ⑥ 自身消歧（约束内修正，非修宪） | llvm_diff：Weak/Drop 用例在 L3 reuse 启用前后输出一致 |
+| 2026-06-12 | ③ 推论「标注非语义」vs ④「失真必须响」（D-3）：过时标注 = 意图与真值的失真，却只 warning | agent profile 下 warnings 即 errors（CI gate 升级 W 类为 must-fix）；人类场景保留 warning，gradual guarantee 不破；标注语义化否决（毁 formatter 自动维护） | 规则 2（策略间，层 0 判据） | B-111 可测：标注漂移引发的 agent 迭代轮数差 |
+| 2026-06-12 | ① 无判定程序、无否决记录，与 GADT/refinement 路线图潜在互蹭（D-4） | 重写为可判定标准：lv0 常见用例零标注可用 + 推断失败错误可被 LLM 单轮修复；B-033/B-001 评审以此投票 | 元决策 | B-033/B-001 评审实际使用该标准 |
+| 2026-06-12 | ⑤ 做实（D-5）：HM 最坏指数与「耗时可预期」字面冲突；B-001 SMT 半可判定预定碰撞；trait instance 终止性未证 | 推断 fuel/深度上限、超限=编译错误（B-119）；B-001 spec 补具名可判定片段条款（QF_LIA 类，超出=要求 runtime check）；trait 终止性审计（B-119） | ⑤ 自身做实（约束内修正） | B-119 验收 |
+| 2026-06-12 | 公理名单与实战否决记录错位 + 性能地位空白（D-6） | ⑧「一种事一种写法」⑨「语法借用」自「语法原则」升格为层 2 公理；性能成文为非公理工程目标（让位全部公理，受 ⑥⑦ 间接保护，优先级锚点=层 0 判据） | 元决策 | — |
+| 2026-06-12 | ② 可见性载体失真（D-8）：「IDE 幽灵标注」对主受众 LLM 无效（agent 读源码文本/编译器输出，LSP 亦不存在） | 主载体改写 = formatter 物化标注 + 模块签名 + `--error-format=llm`；IDE 为人类适配层（B-016）；formatter 等级系统待优先级专题讨论；io 效果粒度记 lang-design §10 待议 | 规则 2 | — |
 
 ## 附录：实现状态（2026-05-24 更新）
 
