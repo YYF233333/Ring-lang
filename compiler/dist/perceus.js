@@ -361,7 +361,11 @@ function anf_fn_body(body, externs, counter) {
 }
 
 function anf_should_materialize(expr, externs) {
-  if (hir$type_contains_extern_handle(hir$hexpr_type(expr), externs)) {
+  const ty = hir$hexpr_type(expr);
+  if (hir$is_rc_excluded_type(ty, externs)) {
+    return false;
+  }
+  if (hir$type_contains_extern_handle(ty, externs)) {
     return false;
   }
   __ring_match7: {
@@ -1072,7 +1076,7 @@ function is_borrow_returning_call(callee) {
     const __ring_m18 = callee;
     if (__ring_m18._tag === "FieldAccess") {
       const field = __ring_m18.field;
-      return (((((((((((((field === "unwrap") || (field === "to_fail")) || (field === "unwrap_or")) || (field === "unwrap_or_else")) || (field === "push")) || (field === "set")) || (field === "insert")) || (field === "remove")) || (field === "add")) || (field === "clear")) || (field === "extend")) || (field === "line")) || (field === "add_int"));
+      return ((((field === "unwrap") || (field === "to_fail")) || (field === "unwrap_or")) || (field === "unwrap_or_else"));
       break __ring_match18;
     }
     return false;
@@ -1094,7 +1098,7 @@ function is_arg_returning_call(callee) {
 }
 
 function rc_escape(expr, owned, boxed, externs, gensym) {
-  if ((is_owner_bearing(expr) && (hir$is_extern_handle_type(hir$hexpr_type(expr), externs) === false))) {
+  if ((is_owner_bearing(expr) && (hir$is_rc_excluded_type(hir$hexpr_type(expr), externs) === false))) {
     const inner = rc_expr(expr, false, owned, boxed, externs, gensym);
     return hir$HExpr_Clone(inner, hir$hexpr_type(expr), hir$hexpr_effects(expr), hir$hexpr_span(expr));
   } else {
@@ -1268,7 +1272,11 @@ function stmt_droppable_locals(s, externs) {
 }
 
 function is_droppable_init(init, externs) {
-  if (hir$type_contains_extern_handle(hir$hexpr_type(init), externs)) {
+  const ty = hir$hexpr_type(init);
+  if (hir$is_rc_excluded_type(ty, externs)) {
+    return false;
+  }
+  if (hir$type_contains_extern_handle(ty, externs)) {
     return false;
   }
   __ring_match23: {

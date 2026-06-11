@@ -15,7 +15,7 @@ use ast::{Span, Position, Pattern, BinOp}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler,
     hexpr_type, hexpr_span, hexpr_effects,
-    collect_extern_type_names, is_extern_handle_type, type_contains_extern_handle}
+    collect_extern_type_names, is_rc_excluded_type, type_contains_extern_handle}
 use types::{Type}
 
 // ============================================================
@@ -192,13 +192,25 @@ fn anf_fn_body(body: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr 
 // it sits in a hoistable (non-binding) position (R1).  A borrow-returning Call is
 // excluded — its result aliases a live reference, so binding+dropping it would UAF.
 fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
-    // B-104 D1 rule ① (audit #139): a value whose type IS an extern handle, or
-    // transitively CONTAINS one (List<LLVMTypeRef>, LLVMValueRef?, …), must never
-    // be materialised — the materialised `let __anf` would be scope-end-dropped,
-    // and dropping it ring_drops a raw foreign pointer (garbage header read /
-    // foreign free → heap corruption).  Leave it inline: borrowed by the consumer,
-    // never dropped (the pre-D1 status quo for these values — crash-free).
-    if type_contains_extern_handle(hexpr_type(expr), externs) {
+    // B-104 D1 rule ② (Unit) + rule ① (extern, audit #139), both TYPE-level:
+    //   ② a Unit-typed expression has no value semantics (checker-guaranteed; JS
+    //     backend yields undefined).  At the LLVM ABI a Unit-typed builtin call
+    //     may accidentally return a live pointer (the receiver-returning
+    //     mutators — `return list;` etc., classification table below), so
+    //     binding + scope-end-dropping it would free the caller's container.
+    //     Never materialise Unit.
+    //   ① a value whose type IS an extern handle, or transitively CONTAINS one
+    //     (List<LLVMTypeRef>, LLVMValueRef?, …), must never be materialised —
+    //     the materialised `let __anf` would be scope-end-dropped, and dropping
+    //     it ring_drops a raw foreign pointer (garbage header read / foreign
+    //     free → heap corruption).
+    // Leave both inline: borrowed by the consumer, never dropped (the pre-D1
+    // status quo for these values — crash-free).
+    let ty = hexpr_type(expr)
+    if is_rc_excluded_type(ty, externs) {
+        return false
+    }
+    if type_contains_extern_handle(ty, externs) {
         return false
     }
     match expr {
@@ -946,8 +958,10 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   NULL/NEVER — returns nullptr (ring_drop(null) is a no-op → RC-inert) or
 //              never returns (exit/panic/longjmp).
 //
-// ── BORROW returners (every one MUST be reachable from this predicate or from
-//    is_owner_bearing's Ident/FieldAccess/IndexExpr arms) ──────────────────────
+// ── BORROW returners (every one MUST be covered by this predicate, by
+//    is_owner_bearing's Ident/FieldAccess/IndexExpr arms, or — for the
+//    Unit-typed receiver-returning mutators — by the D1 rule ② type-level
+//    Unit exclusion) ─────────────────────────────────────────────────────────
 //   ring_Option_unwrap        .unwrap          → Some payload slot (no dup).
 //   ring_Option_unwrap_or     .unwrap_or       → payload slot, or the `default`
 //                                                ARGUMENT verbatim on None.
@@ -959,13 +973,31 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //                              is_owner_bearing's IndexExpr/FieldAccess arms, NOT
 //                              by a field name here).
 //   ring_map_get / ring_map_int_get   m[k]     → value ptr, no dup (HIR: IndexExpr).
-//   RECEIVER-RETURNING MUTATORS (B-103 Wave A): each returns its RECEIVER (arg 0)
-//   verbatim — `return list;` / `return map;` / `return set;` / `return sb;` —
-//   no dup.  Ring-level type is Unit, but at the LLVM ABI the result IS the live
-//   container, so a `let x = xs.push(v)` binding (droppable since
-//   is_droppable_init(Call)=true) would scope-end-drop the caller's container →
-//   UAF.  Listing them here Clone-wraps the bound result (dup balances the drop).
-//   D1 likewise must not drop their statement-position results.
+//   RECEIVER-RETURNING MUTATORS (B-103 Wave A → B-104 D1 rule ② re-mechanised):
+//   each returns its RECEIVER (arg 0) verbatim — `return list;` / `return map;`
+//   / `return set;` / `return sb;` — no dup.  Ring-level type is Unit, but at
+//   the LLVM ABI the result IS the live container, so a `let x = xs.push(v)`
+//   binding scope-end-dropped would free the caller's container → UAF.
+//   B-103 guarded this by LISTING the 9 field names below in this predicate
+//   (Clone-wrap balanced the drop) — at a leak-side cost: a USER method sharing
+//   a listed name but returning a real fresh value got Clone-wrapped (leak),
+//   and a fn-tail mutator result's Clone dup-pinned the receiver.  D1 rule ②
+//   (2026-06-11 user decision) replaces the name grain with the TYPE-level
+//   Unit rule: every one of these calls is Unit-typed (all 13 std declarations
+//   verified `-> Unit`: List.push/extend/clear/set, Map.insert/remove/clear,
+//   Set.insert/remove/clear, SB.add/line/add_int), and Unit-typed values are
+//   excluded from Clone (rc_escape), Drop/owned (is_droppable_init) and
+//   materialisation (anf_should_materialize) — so the binding holds the raw
+//   receiver pointer and never drops it: same UAF protection, zero churn, and
+//   user methods with these names are no longer misclassified.  The names are
+//   therefore REMOVED from the predicate; the ABI evidence stays recorded here
+//   (D1's total pass must keep treating their results as non-droppable, which
+//   the Unit type rule does for every position).
+//   Residual (accepted, see worker_feedback): a Unit value flowing into an RC
+//   SINK (`[xs.push(v)]` — a List<Unit>) would store the receiver un-dup'd and
+//   the sink's drop would free it; pathological, not expressible in real code
+//   paths today.  The principled long-term fix is codegen emitting null for
+//   Unit-typed values instead of the receiver-return ABI accident.
 //     .push    ring_list_push                  → `return list;`
 //     .set     ring_list_set                   → `return list;`
 //     .insert  ring_map_set / ring_map_int_set → `return map;`
@@ -1065,23 +1097,17 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // whose source leaks); OMITTING a genuine borrow-returner CRASHES (UAF when the
 // escaped borrow is scope-end-dropped).  So this list errs toward inclusion.
 // Known leak-side cost of the name-grain match: a USER method that happens to
-// share a listed name (`.push` / `.add` / `.set` / …) and returns a real fresh
-// value gets Clone-wrapped on escape → its result leaks one refcount (crash-free;
-// same cost class as a user method named `unwrap`).  A Unit-typed mutator call in
-// a fn-tail/return position now also gets Clone-wrapped (+1 on the receiver →
-// pins it; bounded, crash-free) — the principled refinement (skip Clone/Drop for
-// Unit-typed values, a TYPE-level rule) is proposed for D1 in worker_feedback.
+// share a listed name and returns a real fresh value gets Clone-wrapped on
+// escape → its result leaks one refcount (crash-free; the cost class of a user
+// method named `unwrap`).  B-104 D1 rule ② removed the 9 receiver-returning
+// mutator names from this list (push/set/insert/remove/add/clear/extend/line/
+// add_int — their UAF protection is now the TYPE-level Unit exclusion, see the
+// classification table above), shrinking that cost to the 4 Option projections.
 fn is_borrow_returning_call(callee: HExpr) -> Bool {
     match callee {
         HExpr::FieldAccess { field, .. } =>
             field == "unwrap" || field == "to_fail"
-            || field == "unwrap_or" || field == "unwrap_or_else"
-            // B-103 Wave A — receiver-returning mutators: the runtime returns the
-            // receiver (arg 0) verbatim, no dup (see the classification table
-            // above for the per-function `return list/map/set/sb;` evidence).
-            || field == "push" || field == "set" || field == "insert"
-            || field == "remove" || field == "add" || field == "clear"
-            || field == "extend" || field == "line" || field == "add_int",
+            || field == "unwrap_or" || field == "unwrap_or_else",
         _ => false,
     }
 }
@@ -1120,9 +1146,14 @@ fn is_borrow_returning_call(callee: HExpr) -> Bool {
 //      forwards the closure result) — ∈ is_borrow_returning_call, so the result
 //      is Clone-wrapped on escape; that dup balances a materialised arg's drop.
 //   2. Receiver-returning mutators (push/set/insert/remove/add/clear/extend/
-//      line/add_int return ARG 0) — now ∈ is_borrow_returning_call (B-103
-//      Wave A), same Clone-wrap exemption; additionally the receiver is part of
-//      the FieldAccess callee, not of `args`, so anf never materialises it.
+//      line/add_int return ARG 0) — exempt on TWO grounds: the returned
+//      "argument" is the RECEIVER, which is part of the FieldAccess callee,
+//      not of `args`, so anf never materialises it; and their results are
+//      Unit-typed, so D1 rule ② excludes them from Clone/Drop/owned/materialise
+//      at every position (B-104; previously the B-103 name listing in
+//      is_borrow_returning_call provided the equivalent Clone-wrap balance).
+//      Their VALUE args are sink positions (sink_arg_indices → rc_escape
+//      Clone), which independently balances a materialised arg's drop.
 // Ring-level functions can never join this list: clone-all-escape Clone-wraps a
 // returned borrowed param at the return/tail escape position, so every Ring fn
 // returns OWNED (the B-103 "no fixpoint needed" theorem, backlog B-103).
@@ -1185,15 +1216,22 @@ fn rc_escape(expr: HExpr, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, 
     // parent Type owns its own (shallow) reference, symmetric with the recursive
     // drop_T that releases it.  (A1's never-drop special case is removed.)
     //
-    // B-104 D1 rule ① (audit #139): a DIRECT extern-handle value never Clones —
-    // ring_dup would WRITE a refcount into foreign (non-ring_alloc) memory.  It
-    // escapes as a MOVE (the sink stores the raw handle; no holder ever drops it
-    // — extern-typed/extern-containing bindings are excluded from the owned set
-    // and drop_T skips extern-typed fields).  Note this is the DIRECT-type test
-    // only: a CONTAINER of extern handles (List<LLVMTypeRef>, LLVMValueRef?) has
-    // a real RC header, so its shallow Clone stays allowed/safe — only its DROP
-    // is excluded (type_contains_extern_handle in is_droppable_init).
-    if is_owner_bearing(expr) && is_extern_handle_type(hexpr_type(expr), externs) == false {
+    // B-104 D1 rule ① (audit #139) + rule ② (Unit), both TYPE-level:
+    //   ① a DIRECT extern-handle value never Clones — ring_dup would WRITE a
+    //     refcount into foreign (non-ring_alloc) memory.  It escapes as a MOVE
+    //     (the sink stores the raw handle; no holder ever drops it —
+    //     extern-typed/extern-containing bindings are excluded from the owned
+    //     set and drop_T skips extern-typed fields).  DIRECT-type test only: a
+    //     CONTAINER of extern handles (List<LLVMTypeRef>, LLVMValueRef?) has a
+    //     real RC header, so its shallow Clone stays allowed/safe — only its
+    //     DROP is excluded (type_contains_extern_handle in is_droppable_init).
+    //   ② a Unit-typed value never Clones — Unit has no value semantics, and at
+    //     the LLVM ABI a Unit-typed mutator call result IS the receiver
+    //     (`return list;`), so Cloning it ring_dup-pins the caller's container
+    //     (the B-103 leak-side cost this rule eliminates).  MOVE instead; the
+    //     binding/sink is RC-inert because Unit is excluded from droppability
+    //     and materialisation everywhere (is_rc_excluded_type).
+    if is_owner_bearing(expr) && is_rc_excluded_type(hexpr_type(expr), externs) == false {
         let inner = rc_expr(expr, false, owned, boxed, externs, gensym)
         HExpr::Clone {
             inner: inner,
@@ -1398,17 +1436,34 @@ fn stmt_droppable_locals(s: HStmt, externs: Set<Str>) -> List<Str> {
 // Block/If/Match are conservatively NOT droppable (their value may be a Call
 // result on some path).
 fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
-    // B-104 D1 rule ① (audit #139): a binding whose type IS an extern handle
-    // (`let b = LLVMCreateBuilder(...)`) must never be scope-end-dropped —
-    // ring_drop on a raw foreign pointer reads a garbage header / frees foreign
-    // memory.  A binding whose type transitively CONTAINS an extern handle
-    // (`let saved = ctx.current_fn` : LLVMValueRef?, `let pts: List<LLVMTypeRef>
-    // = []`, a struct with handle fields) must not be dropped either: its DEEP
-    // drop (drop_option / drop_list / drop_T field recursion at the runtime
-    // level) would reach the foreign pointer.  Both leak instead — crash-free
-    // direction; foreign handles are owned by the foreign API (LLVMContextDispose
-    // et al.), not by Ring RC.
-    if type_contains_extern_handle(hexpr_type(init), externs) {
+    // B-104 D1 rule ② (Unit) + rule ① (extern, audit #139), both TYPE-level:
+    //   ② a Unit-typed binding is never dropped: Unit has no value semantics
+    //     (checker-guaranteed), and at the LLVM ABI a Unit-typed builtin call
+    //     may accidentally return a live pointer — the receiver-returning
+    //     mutators (`let x = xs.push(v)` → result IS the caller's container,
+    //     `return list;`), so dropping it would free a live container → UAF.
+    //     This TYPE-level rule replaces the B-103 name-grain listing of the 9
+    //     mutator field names in is_borrow_returning_call (push/set/insert/
+    //     remove/add/clear/extend/line/add_int — all declared `-> Unit` in std,
+    //     verified per declaration), eliminating its leak-side cost: a USER
+    //     method that shares a listed name but returns a real value is no
+    //     longer Clone-wrapped (its result now moves + drops normally), and a
+    //     fn-tail mutator result no longer dup-pins the receiver.
+    //   ① a binding whose type IS an extern handle (`let b =
+    //     LLVMCreateBuilder(...)`) must never be scope-end-dropped — ring_drop
+    //     on a raw foreign pointer reads a garbage header / frees foreign
+    //     memory.  A binding whose type transitively CONTAINS an extern handle
+    //     (`let saved = ctx.current_fn` : LLVMValueRef?, `let pts:
+    //     List<LLVMTypeRef> = []`, a struct with handle fields) must not be
+    //     dropped either: its DEEP drop (drop_option / drop_list / drop_T field
+    //     recursion at the runtime level) would reach the foreign pointer.
+    //     Both leak instead — crash-free direction; foreign handles are owned
+    //     by the foreign API (LLVMContextDispose et al.), not by Ring RC.
+    let ty = hexpr_type(init)
+    if is_rc_excluded_type(ty, externs) {
+        return false
+    }
+    if type_contains_extern_handle(ty, externs) {
         return false
     }
     match init {
