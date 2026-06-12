@@ -18,10 +18,11 @@
 
 ### Audit Agent（按需，用户手动触发）
 
-- **触发**：用户执行 `/full-audit`
+- **触发**：用户执行 `/full-audit`（标准档）/ "彻底审查"（thorough 档，loop-until-dry）/ "审豁免"（豁免清单对抗抽审专项）
 - **写入范围**：`docs/audit-report.md`
 - **不触碰**：其他任何文件
-- **工作流**：读全部代码 → 多维度审查 → 新发现追加到 audit-report（open）→ 已修复标记 fixed 并删除 → commit
+- **工作流（2026-06-12 升级为 Workflow 对抗审计编排，细则见 skill 文档）**：多 lens finder fan-out（六维基准：rc-memory / type-soundness / backend-parity / runtime-abi / design-drift / oracle-blind，按近期改动面增删）→ 每个 finding 三视角 skeptic 对抗验证（refute-correctness / reproduce / already-tracked，≥2 票存活）→ thorough 档 loop-until-dry → orchestrator 终审（critical 亲自读码 + dispatch 标注）→ 写 audit-report → commit。被杀 findings 进 Summary 统计（不静默丢弃）。DS 独立路在 DS 可用机器上仍必须并行派发，findings 注入 verify 阶段
+- **豁免抽审专项**：对 verify_rc.ring 豁免清单逐类派 skeptic（构造反例 / 挑论证的洞），发现进 audit-report，缺回归锚点进 worker_feedback `[观察]`
 - **Race condition 处理**：
   - 仓库中可能有 Worker 的 worktree 在并行工作
   - 发现问题如果在 backlog 的 `planning`/`doing` 条目范围内，标注"可能正在修复中"
