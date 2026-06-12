@@ -1434,7 +1434,7 @@ function infer_ident(ctx, name, span, subst, qualifier) {
     const __ring_m63 = qualifier;
     if (__ring_m63._tag === "some") {
       const q = __ring_m63._0;
-      if (((q === "self") || Str_starts_with(q, "super"))) {
+      if (((q === "self") ? true : Str_starts_with(q, "super"))) {
         __ring_match64: {
           const __ring_m64 = infer_ctx$resolve_relative_qualifier(q, ctx.mod_path_stack);
           if (__ring_m64._tag === "some") {
@@ -1650,7 +1650,7 @@ function infer_bin_op(ctx, op, left, right, span, subst, __ring_ev_fail) {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
       result_type = types$BOOL;
       const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
-      const is_builtin = (is_primitive_eq(resolved) || is_tuple_type(resolved));
+      const is_builtin = (is_primitive_eq(resolved) ? true : is_tuple_type(resolved));
       const op_sym = (function() {
   const __ring_m = op;
   if (__ring_m._tag === "Eq") { return "=="; }
@@ -1953,7 +1953,7 @@ function resolve_type_to_dict_ref(ctx, t, subst, trait_name) {
     const __ring_m88 = t;
     if (__ring_m88._tag === "TypeVar") {
       const id = __ring_m88.id;
-      const bound = ((__a) => { const __i = __a.findIndex((function(fb) { return ((fb.type_param_var_id === id) && (fb.trait_name === trait_name)); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(ctx.current_fn_bounds);
+      const bound = ((__a) => { const __i = __a.findIndex((function(fb) { return ((fb.type_param_var_id === id) ? (fb.trait_name === trait_name) : false); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(ctx.current_fn_bounds);
       __ring_match89: {
         const __ring_m89 = bound;
         if (__ring_m89._tag === "some") {
@@ -2177,7 +2177,7 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
         if (__ring_m99._tag === "some") {
           const mut_flags = __ring_m99._0;
           let mi = 0;
-          while (((mi < List_len(mut_flags)) && (mi < List_len(args)))) {
+          while (((mi < List_len(mut_flags)) ? (mi < List_len(args)) : false)) {
             __ring_match100: {
               const __ring_m100 = [List_get(mut_flags, mi), List_get(hargs, mi)];
               if (Array.isArray(__ring_m100) && __ring_m100.length === 2 && __ring_m100[0]._tag === "some" && __ring_m100[1]._tag === "some") {
@@ -2318,7 +2318,7 @@ function resolve_arg_bound_dict(ctx, concrete, trait_name, dicts) {
     }
     if (__ring_m107._tag === "TypeVar") {
       const id = __ring_m107.id;
-      const matching = ((__a) => { const __i = __a.findIndex((function(fb) { return ((fb.type_param_var_id === id) && (fb.trait_name === trait_name)); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(ctx.current_fn_bounds);
+      const matching = ((__a) => { const __i = __a.findIndex((function(fb) { return ((fb.type_param_var_id === id) ? (fb.trait_name === trait_name) : false); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(ctx.current_fn_bounds);
       __ring_match108: {
         const __ring_m108 = matching;
         if (__ring_m108._tag === "some") {
@@ -3100,7 +3100,7 @@ function infer_field_access(ctx, receiver, field, span, subst, __ring_ev_fail) {
               const found_field = __ring_m156._0;
               let inst_map = map_new();
               let fi = 0;
-              while (((fi < List_len(struct_def.type_param_vars)) && (fi < List_len(type_params)))) {
+              while (((fi < List_len(struct_def.type_param_vars)) ? (fi < List_len(type_params)) : false)) {
                 __ring_match157: {
                   const __ring_m157 = [List_get(struct_def.type_param_vars, fi), List_get(type_params, fi)];
                   if (Array.isArray(__ring_m157) && __ring_m157.length === 2 && __ring_m157[0]._tag === "some" && __ring_m157[1]._tag === "some") {
@@ -3169,7 +3169,7 @@ function infer_field_access(ctx, receiver, field, span, subst, __ring_ev_fail) {
         }
         if (__ring_m160._tag === "some") {
           const i = __ring_m160._0;
-          if (((i < 0) || (i >= List_len(elements)))) {
+          if (((i < 0) ? true : (i >= List_len(elements)))) {
             const _ = infer_ctx$type_error(ctx.sink, codes$E0304, `Tuple index ${field} out of bounds; tuple has ${Int_to_str(List_len(elements))} elements`, span, diagnostics$DiagnosticContext_MissingField(field, "tuple", Option_none));
           }
           __ring_match161: {
@@ -3206,7 +3206,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
     const __ring_m162 = qualifier;
     if (__ring_m162._tag === "some") {
       const q = __ring_m162._0;
-      if (((q === "self") || Str_starts_with(q, "super"))) {
+      if (((q === "self") ? true : Str_starts_with(q, "super"))) {
         __ring_match163: {
           const __ring_m163 = infer_ctx$resolve_relative_qualifier(q, ctx.mod_path_stack);
           if (__ring_m163._tag === "some") {
@@ -3318,7 +3318,7 @@ function infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __r
     }
     __match_fail(__ring_m167);
   }
-  if ((Option_is_none(variant_enum) && Option_is_some(resolved_qualifier))) {
+  if ((Option_is_none(variant_enum) ? Option_is_some(resolved_qualifier) : false)) {
     __ring_match170: {
       const __ring_m170 = resolved_qualifier;
       if (__ring_m170._tag === "some") {
@@ -3907,7 +3907,7 @@ function infer_catch(ctx, expr, arms, span, subst, __ring_ev_fail) {
   if (__ring_m._tag === "none") { return false; }
   __match_fail(__ring_m);
 })();
-  if (((found_fail === false) && (has_open_tail === false))) {
+  if (((found_fail === false) ? (has_open_tail === false) : false)) {
     const warn = diagnostics$make_diag(codes$W0001, diagnostics$Severity_SevWarning, "catch on expression with no fail effect; handler will never execute", span, diagnostics$DiagnosticContext_OtherContext(Option_some("body has no fail effect")));
     diagnostics$CollectingSink_report(ctx.sink, warn);
   }

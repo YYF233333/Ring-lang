@@ -7,6 +7,7 @@ import { lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as
 import { get_or_create_methods as builtins$get_or_create_methods, register_builtins as builtins$register_builtins, register_hof_intrinsics as builtins$register_hof_intrinsics } from "./builtins.js";
 import { check as infer_decl$check, resolve_type_expr_public as infer_decl$resolve_type_expr_public, check_prelude_decl as infer_decl$check_prelude_decl } from "./infer_decl.js";
 import { lower_dicts as dict_lower$lower_dicts } from "./dict_lower.js";
+import { lower_andor as andor_lower$lower_andor } from "./andor_lower.js";
 import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_error, type_error_with_notes as infer_ctx$type_error_with_notes, merge_effects as infer_ctx$merge_effects, unify_at as infer_ctx$unify_at, unify_at_noted as infer_ctx$unify_at_noted, free_type_vars as infer_ctx$free_type_vars, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, update_fn_effects as infer_ctx$update_fn_effects, build_scheme_var_map as infer_ctx$build_scheme_var_map, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_type_expr as infer_ctx$resolve_type_expr, resolve_self_type as infer_ctx$resolve_self_type, resolve_named_type as infer_ctx$resolve_named_type, bind_pattern as infer_ctx$bind_pattern, remove_fail_effect as infer_ctx$remove_fail_effect, resolve_relative_qualifier as infer_ctx$resolve_relative_qualifier, InferResult as infer_ctx$InferResult, FnBoundsEntry as infer_ctx$FnBoundsEntry, CompileError as infer_ctx$CompileError, InferCtx as infer_ctx$InferCtx, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug, __CompileError_Eq as infer_ctx$__CompileError_Eq, __CompileError_Clone as infer_ctx$__CompileError_Clone, __CompileError_Ord as infer_ctx$__CompileError_Ord, __CompileError_Debug as infer_ctx$__CompileError_Debug } from "./infer_ctx.js";
 import { register_decl_public as infer_register$register_decl_public, insert_mod_aliases as infer_register$insert_mod_aliases, prefix_decl_name as infer_register$prefix_decl_name, register_decls_two_phase as infer_register$register_decls_two_phase, collect_all_supertraits as infer_register$collect_all_supertraits, resolve_effect_expr as infer_register$resolve_effect_expr, resolve_declared_effects as infer_register$resolve_declared_effects, inject_assoc_types_from_bounds as infer_register$inject_assoc_types_from_bounds } from "./infer_register.js";
 import { extract_exports as exports$extract_exports, ModuleExports as exports$ModuleExports, TypeDef_StructDef_ as exports$TypeDef_StructDef_, TypeDef_EnumDef_ as exports$TypeDef_EnumDef_ } from "./exports.js";
@@ -438,7 +439,7 @@ function check(program, sink) {
     List_push(all_decls, d);
   }
   const assembled = new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars, []);
-  return new CheckResult(dict_lower$lower_dicts(assembled), ctx.env, ctx.fn_mut_params);
+  return new CheckResult(dict_lower$lower_dicts(andor_lower$lower_andor(assembled)), ctx.env, ctx.fn_mut_params);
 }
 
 function check_module(program, module_exports, sink) {
@@ -456,7 +457,7 @@ function check_module(program, module_exports, sink) {
     List_push(all_decls, d);
   }
   const assembled = new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars, []);
-  return new CheckResult(dict_lower$lower_dicts(assembled), ctx.env, ctx.fn_mut_params);
+  return new CheckResult(dict_lower$lower_dicts(andor_lower$lower_andor(assembled)), ctx.env, ctx.fn_mut_params);
 }
 
 function inject_module_exports(ctx, exports) {
@@ -627,7 +628,7 @@ function resolve_uses(ctx, uses, available_modules) {
     if (__ring_next_23._tag === "none") break;
     const use_decl = __ring_next_23._0;
     const first_seg = Option_unwrap_or(List_get(use_decl.path.segments, 0), "");
-    if (((first_seg === "self") || (first_seg === "super"))) {
+    if (((first_seg === "self") ? true : (first_seg === "super"))) {
       const d = diagnostics$make_diag(codes$E0705, diagnostics$Severity_SevError, `Cannot use '${first_seg}::' at file level — relative paths are only supported inside mod blocks`, use_decl.path.span, diagnostics$DiagnosticContext_OtherContext(Option_some("relative path out of scope")));
       diagnostics$CollectingSink_report(ctx.sink, d);
       continue;

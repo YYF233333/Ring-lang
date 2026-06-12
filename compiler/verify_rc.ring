@@ -32,9 +32,10 @@
 // ── Exemption classes (leak-direction, documented; non-fatal) ─────────────
 //   (x-fold-arg retired 2026-06-12 — #150 closed by the ring_list_fold
 //    empty-path dup; fold args materialise like any call args now.)
-//   x-andor             `&&`/`||` yield the RHS box verbatim (phi); an owned
-//                       RHS / And-Or result has no consumer (is_droppable_init
-//                       And/Or exclusion; D1 保守保留).
+//   (x-andor retired 2026-06-13 — B-104 D7: andor_lower rewrites `&&`/`||`
+//    to IfExpr at checker end; the phi either materialises + scope-end-drops
+//    (all-fresh arms) or falls under the existing x-cf-value posture (mixed
+//    arms).  No And/Or BinOp reaches post-RC HIR.)
 //   x-cf-value          a control-flow value (if/match/block tail) that is an
 //                       owned temporary in a non-consuming position (discarded
 //                       statement value / borrow position / mixed-ownership
@@ -95,7 +96,7 @@
 // (Block tails may have been hoisted into `let __rc_scope_N` + Ident tail) —
 // keep the two in sync; a drift shows up immediately as self-verify findings.
 
-use ast::{Span, Position, Pattern, BinOp}
+use ast::{Span, Position, Pattern}
 use types::{Type}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, hexpr_type, hexpr_span,
@@ -109,8 +110,8 @@ use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
 const CLS_OWNED: Int = 0     // fresh / dup'd — somebody must consume it exactly once
 const CLS_BORROW: Int = 1    // aliases a reference owned elsewhere
 const CLS_EXCLUDED: Int = 2  // outside the RC account (Unit / extern / TypeVar / Never)
-const CLS_OPAQUE: Int = 3    // ownership not statically determined (And/Or phi,
-                             // effect values, mixed control flow) — leak-direction
+const CLS_OPAQUE: Int = 3    // ownership not statically determined (effect
+                             // values, mixed control flow) — leak-direction
 
 // Consumption modes (what the PARENT position does with the value)
 const M_CONSUMED: Int = 0    // parent takes ownership (escape/sink/slot)
@@ -440,7 +441,9 @@ fn v_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         // perceus.is_droppable_init) — the dict_lower binding is dropped at
         // scope end (runtime drop_dict).
         HExpr::DictConstruct { .. } => true,
-        HExpr::BinOp { op, .. } => match op { BinOp::And => false, BinOp::Or => false, _ => true },
+        // B-104 D7: `&&`/`||` are lowered to IfExpr before RC — every BinOp
+        // here is eager arith/compare with a fresh boxed result.
+        HExpr::BinOp { .. } => true,
         HExpr::UnaryOp { .. } => true,
         HExpr::IfExpr { then_branch, else_branch, .. } => {
             match else_branch {
@@ -558,18 +561,15 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
 
         HExpr::Ident { name, ty, span, .. } => v_ident(name, ty, span, mode, ctx),
 
-        HExpr::BinOp { op, left, right, ty, span, .. } => {
-            match op {
-                BinOp::And => v_andor(left, right, ty, span, ctx),
-                BinOp::Or => v_andor(left, right, ty, span, ctx),
-                _ => {
-                    // Eager arith/compare: operands are consuming-borrows (the op
-                    // unboxes them; post-ANF they are materialised Idents/borrows).
-                    v_borrow(left, "", ctx)
-                    v_borrow(right, "", ctx)
-                    v_cls_of_fresh(ty, ctx.externs)
-                },
-            }
+        HExpr::BinOp { left, right, ty, .. } => {
+            // Eager arith/compare: operands are consuming-borrows (the op
+            // unboxes them; post-ANF they are materialised Idents/borrows).
+            // `&&`/`||` never reach post-RC HIR (B-104 D7: andor_lower rewrites
+            // them to IfExpr at checker end) — an unexpected one would surface
+            // here as a leak-temp finding on its owned RHS.
+            v_borrow(left, "", ctx)
+            v_borrow(right, "", ctx)
+            v_cls_of_fresh(ty, ctx.externs)
         },
 
         HExpr::UnaryOp { operand, ty, .. } => {
@@ -797,20 +797,9 @@ fn v_cls_of_fresh(ty: Type, externs: Set<Str>) -> Int {
     }
 }
 
-// `&&` / `||`: gen_and/gen_or emit a phi yielding the RHS box VERBATIM on the
-// taken edge — the result is possibly a borrow (CLS_OPAQUE) and nobody ever
-// drops it (is_droppable_init excludes And/Or).  An owned RHS value therefore
-// leaks (documented x-andor).  The LHS is an always-evaluated operand
-// (materialised by ANF when fresh).
-fn v_andor(left: HExpr, right: HExpr, ty: Type, span: Span, mut ctx: VCtx) -> Int {
-    v_borrow(left, "", ctx)
-    let rcls = v_expr(right, M_BORROWED, ctx)
-    if rcls == CLS_OWNED {
-        v_report(ctx, "x-andor", false,
-            "owned RHS of &&/|| becomes the phi result verbatim and is never dropped (documented leak)", hexpr_span(right))
-    }
-    if v_type_excluded(ty, ctx.externs) { CLS_EXCLUDED } else { CLS_OPAQUE }
-}
+// (v_andor retired 2026-06-13 — B-104 D7: `&&`/`||` are lowered to IfExpr by
+//  andor_lower at checker end and never reach post-RC HIR; the x-andor
+//  exemption class retired with it.)
 
 // Identifier read/move.
 fn v_ident(name: Str, ty: Type, span: Span, mode: Int, mut ctx: VCtx) -> Int {
@@ -1184,7 +1173,8 @@ fn v_let_like(name: Str, init: HExpr, span: Span, mut ctx: VCtx) {
 
 fn v_opaque_exempt_class(init: HExpr) -> Str {
     match init {
-        HExpr::BinOp { .. } => "x-andor",
+        // (BinOp is never OPAQUE post-D7 — `&&`/`||` were the only opaque
+        //  BinOps and andor_lower retired them; falls to the catch-all.)
         HExpr::EffectOp { .. } => "x-effect-value",
         HExpr::TryCatch { .. } => "x-effect-value",
         HExpr::HandleExpr { .. } => "x-effect-value",

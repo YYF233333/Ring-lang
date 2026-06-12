@@ -805,7 +805,7 @@ class Token {
 }
 
 function code_in_range(c, low, high) {
-  if (((c >= low) && (c <= high))) {
+  if (((c >= low) ? (c <= high) : false)) {
     return true;
   } else {
     return false;
@@ -889,16 +889,16 @@ function Lexer_next_token(self) {
     return Lexer_make_token(self, TokenKind_TkEof, "", Lexer_current_position(self), Lexer_current_position(self));
   }
   if ((List_len(self.interp_frames) > 0)) {
-    if (((Lexer_last_frame_depth(self) === 0) && (Lexer_peek(self) === "}"))) {
+    if (((Lexer_last_frame_depth(self) === 0) ? (Lexer_peek(self) === "}") : false)) {
       Lexer_advance(self);
       return Lexer_lex_string_continuation(self);
     }
   }
   const start = Lexer_current_position(self);
   const ch = Lexer_peek(self);
-  if (((ch === "r") && ((self.pos + 1) < Str_len(self.source)))) {
+  if (((ch === "r") ? ((self.pos + 1) < Str_len(self.source)) : false)) {
     const next_ch = Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "");
-    if (((next_ch === "#") || (next_ch === "\""))) {
+    if (((next_ch === "#") ? true : (next_ch === "\""))) {
       return Lexer_lex_raw_string(self, start);
     }
   }
@@ -935,7 +935,7 @@ function Lexer_lex_string_body(self, start, is_new) {
         return Lexer_make_token(self, TokenKind_TkStringInterpEnd, value, start, end);
       }
     }
-    if ((((ch === "$") && ((self.pos + 1) < Str_len(self.source))) && (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "{"))) {
+    if ((((ch === "$") ? ((self.pos + 1) < Str_len(self.source)) : false) ? (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "{") : false)) {
       const interp_start = Lexer_current_position(self);
       Lexer_advance(self);
       Lexer_advance(self);
@@ -1015,7 +1015,7 @@ function Lexer_lex_raw_string(self, start) {
     let value = "";
     while ((self.pos < Str_len(self.source))) {
       const ch = Lexer_peek(self);
-      if ((((ch === "\"") && ((self.pos + 1) < Str_len(self.source))) && (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "#"))) {
+      if ((((ch === "\"") ? ((self.pos + 1) < Str_len(self.source)) : false) ? (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "#") : false)) {
         Lexer_advance(self);
         Lexer_advance(self);
         const end = Lexer_current_position(self);
@@ -1058,15 +1058,15 @@ function Lexer_lex_raw_string(self, start) {
 function Lexer_lex_number(self, start) {
   let value = "";
   let is_float = false;
-  while (((self.pos < Str_len(self.source)) && is_digit(Lexer_peek(self)))) {
+  while (((self.pos < Str_len(self.source)) ? is_digit(Lexer_peek(self)) : false)) {
     value = `${value}${Lexer_peek(self)}`;
     Lexer_advance(self);
   }
-  if (((((self.pos < Str_len(self.source)) && (Lexer_peek(self) === ".")) && ((self.pos + 1) < Str_len(self.source))) && is_digit(Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "")))) {
+  if (((((self.pos < Str_len(self.source)) ? (Lexer_peek(self) === ".") : false) ? ((self.pos + 1) < Str_len(self.source)) : false) ? is_digit(Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "")) : false)) {
     is_float = true;
     value = `${value}.`;
     Lexer_advance(self);
-    while (((self.pos < Str_len(self.source)) && is_digit(Lexer_peek(self)))) {
+    while (((self.pos < Str_len(self.source)) ? is_digit(Lexer_peek(self)) : false)) {
       value = `${value}${Lexer_peek(self)}`;
       Lexer_advance(self);
     }
@@ -1080,7 +1080,7 @@ function Lexer_lex_number(self, start) {
 }
 function Lexer_lex_ident(self, start) {
   let value = "";
-  while (((self.pos < Str_len(self.source)) && is_ident_continue(Lexer_peek(self)))) {
+  while (((self.pos < Str_len(self.source)) ? is_ident_continue(Lexer_peek(self)) : false)) {
     value = `${value}${Lexer_peek(self)}`;
     Lexer_advance(self);
   }
@@ -1224,14 +1224,14 @@ function Lexer_lex_punctuation(self, start) {
 function Lexer_skip_whitespace_and_comments(self) {
   while ((self.pos < Str_len(self.source))) {
     const ch = Lexer_peek(self);
-    if ((((ch === " ") || (ch === "\t")) || (ch === "\r"))) {
+    if ((((ch === " ") ? true : (ch === "\t")) ? true : (ch === "\r"))) {
       Lexer_advance(self);
     } else {
       if ((ch === "\n")) {
         Lexer_advance(self);
       } else {
-        if ((((ch === "/") && ((self.pos + 1) < Str_len(self.source))) && (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "/"))) {
-          while (((self.pos < Str_len(self.source)) && (Lexer_peek(self) !== "\n"))) {
+        if ((((ch === "/") ? ((self.pos + 1) < Str_len(self.source)) : false) ? (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "/") : false)) {
+          while (((self.pos < Str_len(self.source)) ? (Lexer_peek(self) !== "\n") : false)) {
             Lexer_advance(self);
           }
         } else {

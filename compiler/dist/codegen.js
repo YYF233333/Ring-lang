@@ -693,7 +693,7 @@ function register_decl_info(decls, ctx) {
                   const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
                   if (__ring_next_26._tag === "none") break;
                   const tm = __ring_next_26._0;
-                  if ((tm.has_default && (!_Set_contains(explicit_methods, tm.name, __Str_Eq)))) {
+                  if ((tm.has_default ? (!_Set_contains(explicit_methods, tm.name, __Str_Eq)) : false)) {
                     const key = `${codegen_ctx$qualify(ctx, target_type)}.${tm.name}`;
                     __ring_match22: {
                       const __ring_m22 = _Map_get(ctx.impl_methods, key);
@@ -1106,7 +1106,7 @@ function scan_fn_mut_params(decls, ctx) {
           const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
           if (__ring_next_41._tag === "none") break;
           const p = __ring_next_41._0;
-          if (((p.name === "self") || (!p.is_mutable))) {
+          if (((p.name === "self") ? true : (!p.is_mutable))) {
             List_push(flags, false);
           } else {
             List_push(flags, is_codegen_value_type(p.ty));
@@ -1136,7 +1136,7 @@ function scan_fn_mut_params(decls, ctx) {
                 const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
                 if (__ring_next_43._tag === "none") break;
                 const p = __ring_next_43._0;
-                if (((p.name === "self") || (!p.is_mutable))) {
+                if (((p.name === "self") ? true : (!p.is_mutable))) {
                   List_push(flags, false);
                 } else {
                   List_push(flags, is_codegen_value_type(p.ty));

@@ -655,7 +655,7 @@ function effect_op_slot(effect_ops, effect_name, op_name) {
         const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
         if (__ring_next_2._tag === "none") break;
         const o = __ring_next_2._0;
-        if (((o.name === op_name) && (found === (-1)))) {
+        if (((o.name === op_name) ? (found === (-1)) : false)) {
           found = idx;
         }
         idx = (idx + 1);
@@ -1281,7 +1281,11 @@ function is_borrow_returning_call(callee) {
     const __ring_m14 = callee;
     if (__ring_m14._tag === "FieldAccess") {
       const field = __ring_m14.field;
-      return ((((field === "unwrap") || (field === "to_fail")) || (field === "unwrap_or")) || (field === "unwrap_or_else"));
+      if ((((field === "unwrap") ? true : (field === "to_fail")) ? true : (field === "unwrap_or"))) {
+        return true;
+      } else {
+        return (field === "unwrap_or_else");
+      }
       break __ring_match14;
     }
     return false;
@@ -1301,20 +1305,7 @@ function is_fresh_owned_bool_value(expr) {
   __ring_match15: {
     const __ring_m15 = expr;
     if (__ring_m15._tag === "BinOp") {
-      const op = __ring_m15.op;
-      __ring_match16: {
-        const __ring_m16 = op;
-        if (__ring_m16._tag === "And") {
-          return false;
-          break __ring_match16;
-        }
-        if (__ring_m16._tag === "Or") {
-          return false;
-          break __ring_match16;
-        }
-        return true;
-        break __ring_match16;
-      }
+      return true;
       break __ring_match15;
     }
     if (__ring_m15._tag === "UnaryOp") {
@@ -1336,56 +1327,60 @@ function is_fresh_owned_bool_value(expr) {
     }
     if (__ring_m15._tag === "Block") {
       const stmts = __ring_m15.stmts; const tail = __ring_m15.tail;
-      __ring_match17: {
-        const __ring_m17 = tail;
-        if (__ring_m17._tag === "some") {
-          const t = __ring_m17._0;
-          __ring_match18: {
-            const __ring_m18 = t;
-            if (__ring_m18._tag === "Ident") {
-              const name = __ring_m18.name;
-              __ring_match19: {
-                const __ring_m19 = block_local_init(stmts, name);
-                if (__ring_m19._tag === "some") {
-                  const init = __ring_m19._0;
+      __ring_match16: {
+        const __ring_m16 = tail;
+        if (__ring_m16._tag === "some") {
+          const t = __ring_m16._0;
+          __ring_match17: {
+            const __ring_m17 = t;
+            if (__ring_m17._tag === "Ident") {
+              const name = __ring_m17.name;
+              __ring_match18: {
+                const __ring_m18 = block_local_init(stmts, name);
+                if (__ring_m18._tag === "some") {
+                  const init = __ring_m18._0;
                   return is_fresh_owned_bool_value(init);
-                  break __ring_match19;
+                  break __ring_match18;
                 }
-                if (__ring_m19._tag === "none") {
+                if (__ring_m18._tag === "none") {
                   return false;
-                  break __ring_match19;
+                  break __ring_match18;
                 }
-                __match_fail(__ring_m19);
+                __match_fail(__ring_m18);
               }
-              break __ring_match18;
+              break __ring_match17;
             }
             return is_fresh_owned_bool_value(t);
-            break __ring_match18;
+            break __ring_match17;
           }
-          break __ring_match17;
+          break __ring_match16;
         }
-        if (__ring_m17._tag === "none") {
+        if (__ring_m16._tag === "none") {
           return false;
-          break __ring_match17;
+          break __ring_match16;
         }
-        __match_fail(__ring_m17);
+        __match_fail(__ring_m16);
       }
       break __ring_match15;
     }
     if (__ring_m15._tag === "IfExpr") {
       const then_branch = __ring_m15.then_branch; const else_branch = __ring_m15.else_branch;
-      __ring_match20: {
-        const __ring_m20 = else_branch;
-        if (__ring_m20._tag === "none") {
+      __ring_match19: {
+        const __ring_m19 = else_branch;
+        if (__ring_m19._tag === "none") {
           return false;
-          break __ring_match20;
+          break __ring_match19;
         }
-        if (__ring_m20._tag === "some") {
-          const eb = __ring_m20._0;
-          return (is_fresh_owned_bool_value(then_branch) && is_fresh_owned_bool_value(eb));
-          break __ring_match20;
+        if (__ring_m19._tag === "some") {
+          const eb = __ring_m19._0;
+          if (is_fresh_owned_bool_value(then_branch)) {
+            return is_fresh_owned_bool_value(eb);
+          } else {
+            return false;
+          }
+          break __ring_match19;
         }
-        __match_fail(__ring_m20);
+        __match_fail(__ring_m19);
       }
       break __ring_match15;
     }
@@ -1416,23 +1411,23 @@ function block_local_init(stmts, name) {
     const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
     if (__ring_next_13._tag === "none") break;
     const s = __ring_next_13._0;
-    __ring_match21: {
-      const __ring_m21 = s;
-      if (__ring_m21._tag === "Let") {
-        const n = __ring_m21.name; const init = __ring_m21.init;
+    __ring_match20: {
+      const __ring_m20 = s;
+      if (__ring_m20._tag === "Let") {
+        const n = __ring_m20.name; const init = __ring_m20.init;
         if ((n === name)) {
           found = Option_some(init);
         }
-        break __ring_match21;
+        break __ring_match20;
       }
-      if (__ring_m21._tag === "Var") {
-        const n = __ring_m21.name; const init = __ring_m21.init;
+      if (__ring_m20._tag === "Var") {
+        const n = __ring_m20.name; const init = __ring_m20.init;
         if ((n === name)) {
           found = Option_some(init);
         }
-        break __ring_match21;
+        break __ring_match20;
       }
-      break __ring_match21;
+      break __ring_match20;
     }
   }
   return found;

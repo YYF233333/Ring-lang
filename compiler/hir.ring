@@ -641,9 +641,9 @@ pub fn is_borrow_returning_call(callee: HExpr) -> Bool {
 // emit_for_in_range_direct).  This predicate is the perceus-blessed ownership
 // answer: TRUE iff the expression's value is a freshly-allocated Bool box whose
 // FINAL consumer is that unbox, so a post-unbox ring_drop is balanced:
-//   * BinOp non-And/Or → comparison/eq lowers to box_bool (fresh).  And/Or are
-//     phis that may yield the RHS operand box VERBATIM (possibly a borrow,
-//     e.g. `a && obj.flag`) → false.
+//   * BinOp → comparison/eq lowers to box_bool (fresh).  (`&&`/`||` never
+//     appear here — B-104 D7: andor_lower rewrites them to IfExpr at checker
+//     end; their phi classifies via the If/Match recursion below.)
 //   * UnaryOp → `!x` boxes a fresh result.
 //   * Call, unless borrow-returning (unwrap family → borrow of the receiver's
 //     payload): a Ring fn returns OWNED (clone-all-escape Clone-wraps tail
@@ -678,11 +678,7 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
         return false
     }
     match expr {
-        HExpr::BinOp { op, .. } => match op {
-            BinOp::And => false,
-            BinOp::Or => false,
-            _ => true,
-        },
+        HExpr::BinOp { .. } => true,
         HExpr::UnaryOp { .. } => true,
         HExpr::Call { callee, .. } =>
             is_borrow_returning_call(callee) == false,
@@ -699,7 +695,7 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
         // directly; an Ident tail classifies via the init of the LAST Let/Var
         // of that name among this block's direct statements (the hoist, or a
         // user binding — which, in a NON-dropping block, was necessarily
-        // non-droppable, so its init classifies false: borrows/And-Or stay
+        // non-droppable, so its init classifies false: borrows stay
         // un-dropped).  An Ident with no binding in this block is an outer
         // borrow → false.
         HExpr::Block { stmts, tail, .. } => match tail {

@@ -463,7 +463,11 @@ function is_decl_start(k) {
 
 function is_uppercase(ch) {
   const c = Option_unwrap_or(Str_char_code_at(ch, 0), 0);
-  return ((c >= 65) && (c <= 90));
+  if ((c >= 65)) {
+    return (c <= 90);
+  } else {
+    return false;
+  }
 }
 
 function type_expr_span(te) {
@@ -888,7 +892,7 @@ function Parser_parse_stmt(self) {
     if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
       Parser_advance(self);
       let depth = 1;
-      while (((depth > 0) && (self.pos < (List_len(self.tokens) - 1)))) {
+      while (((depth > 0) ? (self.pos < (List_len(self.tokens) - 1)) : false)) {
         if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
           depth = (depth + 1);
         } else {
@@ -903,7 +907,7 @@ function Parser_parse_stmt(self) {
     return ast$Stmt_ExprStmt(ast$Expr_IntLit(0, Parser_make_span(self, start, end)), false, Parser_make_span(self, start, end));
   }
   const expr = Parser_parse_expr(self);
-  if (((Parser_check(self, lexer$TokenKind_TkEq) || Parser_check(self, lexer$TokenKind_TkPlusEq)) || Parser_check(self, lexer$TokenKind_TkMinusEq))) {
+  if (((Parser_check(self, lexer$TokenKind_TkEq) ? true : Parser_check(self, lexer$TokenKind_TkPlusEq)) ? true : Parser_check(self, lexer$TokenKind_TkMinusEq))) {
     const op_tok = Parser_advance(self);
     const value_expr = Parser_parse_expr(self);
     Parser_try_consume(self, lexer$TokenKind_TkSemi);
@@ -1037,7 +1041,7 @@ function Parser_parse_return_stmt(self) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkReturn);
   let value = Option_none;
-  if ((((!Parser_check(self, lexer$TokenKind_TkSemi)) && (!Parser_check(self, lexer$TokenKind_TkRBrace))) && (!Parser_at_end(self)))) {
+  if ((((!Parser_check(self, lexer$TokenKind_TkSemi)) ? (!Parser_check(self, lexer$TokenKind_TkRBrace)) : false) ? (!Parser_at_end(self)) : false)) {
     value = Option_some(Parser_parse_expr(self));
   }
   Parser_try_consume(self, lexer$TokenKind_TkSemi);
@@ -1049,7 +1053,7 @@ function Parser_parse_block_expr(self) {
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let stmts = [];
   let tail = Option_none;
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const stmt = Parser_parse_stmt(self);
     if (Parser_check(self, lexer$TokenKind_TkRBrace)) {
       __ring_match14: {
@@ -1082,7 +1086,7 @@ function Parser_parse_use_decl(self, is_pub) {
     List_push(segments, "super");
     const _ = Parser_advance(self);
   } else {
-    if (((Parser_check(self, lexer$TokenKind_TkIdent) && (Parser_peek(self).value === "self")) && lexer$__TokenKind_Eq.eq(Parser_peek_at(self, 1).kind, lexer$TokenKind_TkColonColon))) {
+    if (((Parser_check(self, lexer$TokenKind_TkIdent) ? (Parser_peek(self).value === "self") : false) ? lexer$__TokenKind_Eq.eq(Parser_peek_at(self, 1).kind, lexer$TokenKind_TkColonColon) : false)) {
       List_push(segments, "self");
       const _ = Parser_advance(self);
     } else {
@@ -1108,7 +1112,7 @@ function Parser_parse_use_decl(self, is_pub) {
   if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
     Parser_advance(self);
     let names = [];
-    while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+    while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
       const name_start = Parser_current_span_start(self);
       const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
       let name_alias = Option_none;
@@ -1152,7 +1156,7 @@ function Parser_parse_mod_block(self, is_pub) {
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let uses = [];
   let decls = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     if (Parser_check(self, lexer$TokenKind_TkUse)) {
       const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
       __ring_match15: {
@@ -1164,7 +1168,7 @@ function Parser_parse_mod_block(self, is_pub) {
         }
         if (__ring_m15._tag === "none") {
           while ((!Parser_at_end(self))) {
-            if (((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkUse)) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
+            if (((is_decl_start(Parser_peek(self).kind) ? true : Parser_check(self, lexer$TokenKind_TkUse)) ? true : Parser_check(self, lexer$TokenKind_TkRBrace))) {
               break;
             }
             Parser_advance(self);
@@ -1185,7 +1189,7 @@ function Parser_parse_mod_block(self, is_pub) {
       }
       if (__ring_m16._tag === "none") {
         while ((!Parser_at_end(self))) {
-          if ((is_decl_start(Parser_peek(self).kind) || Parser_check(self, lexer$TokenKind_TkRBrace))) {
+          if ((is_decl_start(Parser_peek(self).kind) ? true : Parser_check(self, lexer$TokenKind_TkRBrace))) {
             break;
           }
           Parser_advance(self);
@@ -1263,7 +1267,7 @@ function Parser_parse_decl(self) {
 function Parser_parse_effect_list(self) {
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let effects = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const estart = Parser_current_span_start(self);
     let ename = "";
     if (Parser_check(self, lexer$TokenKind_TkMut)) {
@@ -1279,7 +1283,7 @@ function Parser_parse_effect_list(self) {
     let type_args = [];
     if (Parser_check(self, lexer$TokenKind_TkLt)) {
       Parser_advance(self);
-      while (((!Parser_check(self, lexer$TokenKind_TkGt)) && (!Parser_at_end(self)))) {
+      while (((!Parser_check(self, lexer$TokenKind_TkGt)) ? (!Parser_at_end(self)) : false)) {
         List_push(type_args, Parser_parse_type_expr(self));
         if ((!Parser_check(self, lexer$TokenKind_TkGt))) {
           Parser_expect(self, lexer$TokenKind_TkComma);
@@ -1318,7 +1322,7 @@ function Parser_parse_fn_decl(self, is_pub, body_optional) {
   }
   let body = ast$Expr_Block([], Option_none, ast$span_zero());
   let is_abstract_val = false;
-  if ((body_optional && (!Parser_check(self, lexer$TokenKind_TkLBrace)))) {
+  if ((body_optional ? (!Parser_check(self, lexer$TokenKind_TkLBrace)) : false)) {
     const pos = Parser_current_span_start(self);
     body = ast$Expr_Block([], Option_none, Parser_make_span(self, pos, pos));
     is_abstract_val = true;
@@ -1345,7 +1349,7 @@ function Parser_parse_sig_block(self, is_pub) {
   const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let members = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const mstart = Parser_current_span_start(self);
     Parser_expect(self, lexer$TokenKind_TkFn);
     const mname = Parser_expect(self, lexer$TokenKind_TkIdent).value;
@@ -1360,7 +1364,7 @@ function Parser_parse_sig_block(self, is_pub) {
     let meffects = [];
     if (Parser_try_consume(self, lexer$TokenKind_TkWith)) {
       Parser_expect(self, lexer$TokenKind_TkLBrace);
-      while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+      while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
         const eff = Parser_parse_type_expr(self);
         List_push(meffects, eff);
         Parser_try_consume(self, lexer$TokenKind_TkComma);
@@ -1376,7 +1380,7 @@ function Parser_parse_sig_block(self, is_pub) {
 function Parser_parse_extern_decl(self, is_pub) {
   const start = Parser_current_span_start(self);
   Parser_expect(self, lexer$TokenKind_TkExtern);
-  if ((Parser_check(self, lexer$TokenKind_TkIdent) && (Parser_peek(self).value === "type"))) {
+  if ((Parser_check(self, lexer$TokenKind_TkIdent) ? (Parser_peek(self).value === "type") : false)) {
     return Parser_parse_extern_type_decl_body(self, is_pub, start);
   }
   return Parser_parse_extern_fn_decl_body(self, is_pub, start);
@@ -1426,7 +1430,7 @@ function Parser_parse_struct_decl(self, is_pub) {
   const type_params = Parser_parse_type_params(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let fields = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const field_start = Parser_current_span_start(self);
     const field_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
     const field_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
@@ -1438,13 +1442,13 @@ function Parser_parse_struct_decl(self, is_pub) {
       Parser_advance(self);
       let depth = 0;
       while ((!Parser_at_end(self))) {
-        if (((depth === 0) && (Parser_check(self, lexer$TokenKind_TkComma) || Parser_check(self, lexer$TokenKind_TkRBrace)))) {
+        if (((depth === 0) ? (Parser_check(self, lexer$TokenKind_TkComma) ? true : Parser_check(self, lexer$TokenKind_TkRBrace)) : false)) {
           break;
         }
-        if (((Parser_check(self, lexer$TokenKind_TkLParen) || Parser_check(self, lexer$TokenKind_TkLBrace)) || Parser_check(self, lexer$TokenKind_TkLBracket))) {
+        if (((Parser_check(self, lexer$TokenKind_TkLParen) ? true : Parser_check(self, lexer$TokenKind_TkLBrace)) ? true : Parser_check(self, lexer$TokenKind_TkLBracket))) {
           depth = (depth + 1);
         }
-        if (((Parser_check(self, lexer$TokenKind_TkRParen) || Parser_check(self, lexer$TokenKind_TkRBrace)) || Parser_check(self, lexer$TokenKind_TkRBracket))) {
+        if (((Parser_check(self, lexer$TokenKind_TkRParen) ? true : Parser_check(self, lexer$TokenKind_TkRBrace)) ? true : Parser_check(self, lexer$TokenKind_TkRBracket))) {
           depth = (depth - 1);
         }
         if ((depth < 0)) {
@@ -1467,7 +1471,7 @@ function Parser_parse_enum_decl(self, is_pub) {
   const type_params = Parser_parse_type_params(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let variants = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const v_start = Parser_current_span_start(self);
     const v_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
     let v_fields = [];
@@ -1491,7 +1495,7 @@ function Parser_parse_enum_decl(self, is_pub) {
       if (Parser_check(self, lexer$TokenKind_TkLBrace)) {
         Parser_advance(self);
         let nf = [];
-        while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+        while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
           const f_start = Parser_current_span_start(self);
           const f_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
           Parser_expect(self, lexer$TokenKind_TkColon);
@@ -1526,8 +1530,8 @@ function Parser_parse_impl_decl(self) {
   }
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let methods = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
-    if ((Parser_check(self, lexer$TokenKind_TkIdent) && (Parser_peek(self).value === "delegate"))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
+    if ((Parser_check(self, lexer$TokenKind_TkIdent) ? (Parser_peek(self).value === "delegate") : false)) {
       const d_start = Parser_current_span_start(self);
       Parser_advance(self);
       const d_field = Parser_expect(self, lexer$TokenKind_TkIdent).value;
@@ -1542,7 +1546,7 @@ function Parser_parse_impl_decl(self) {
       continue;
     }
     const m_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
-    if ((Parser_check(self, lexer$TokenKind_TkIdent) && (Parser_peek(self).value === "type"))) {
+    if ((Parser_check(self, lexer$TokenKind_TkIdent) ? (Parser_peek(self).value === "type") : false)) {
       List_push(methods, Parser_parse_assoc_type_decl(self, m_pub));
     } else {
       if (Parser_check(self, lexer$TokenKind_TkExtern)) {
@@ -1575,7 +1579,7 @@ function Parser_parse_effect_decl(self, is_pub) {
   const type_params = Parser_parse_type_params(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let ops = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const op_start = Parser_current_span_start(self);
     Parser_expect(self, lexer$TokenKind_TkFn);
     const op_name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
@@ -1637,9 +1641,9 @@ function Parser_parse_trait_decl(self, is_pub) {
   }
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let methods = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const m_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
-    if ((Parser_check(self, lexer$TokenKind_TkIdent) && (Parser_peek(self).value === "type"))) {
+    if ((Parser_check(self, lexer$TokenKind_TkIdent) ? (Parser_peek(self).value === "type") : false)) {
       List_push(methods, Parser_parse_assoc_type_decl(self, m_pub));
     } else {
       List_push(methods, Parser_parse_fn_decl(self, m_pub, true));
@@ -1685,7 +1689,7 @@ function Parser_parse_expr_bp(self, min_prec, allow_struct_lit) {
             left = Parser_parse_index_expr(self, left);
             last_was_comparison = false;
           } else {
-            if ((Parser_check(self, lexer$TokenKind_TkDotDot) || Parser_check(self, lexer$TokenKind_TkDotDotEq))) {
+            if ((Parser_check(self, lexer$TokenKind_TkDotDot) ? true : Parser_check(self, lexer$TokenKind_TkDotDotEq))) {
               const inclusive = Parser_check(self, lexer$TokenKind_TkDotDotEq);
               Parser_advance(self);
               const right = Parser_parse_expr_bp(self, prec, allow_struct_lit);
@@ -1693,8 +1697,8 @@ function Parser_parse_expr_bp(self, min_prec, allow_struct_lit) {
               left = ast$Expr_Range(left, right, inclusive, span);
               last_was_comparison = false;
             } else {
-              const is_comparison = ((prec === PREC_EQUALITY) || (prec === PREC_COMPARE));
-              if ((is_comparison && last_was_comparison)) {
+              const is_comparison = ((prec === PREC_EQUALITY) ? true : (prec === PREC_COMPARE));
+              if ((is_comparison ? last_was_comparison : false)) {
                 Parser_error(self, `Comparison operators are non-associative: cannot chain '${tok.value}' after another comparison`);
               }
               Parser_advance(self);
@@ -1713,7 +1717,7 @@ function Parser_parse_expr_bp(self, min_prec, allow_struct_lit) {
 function Parser_parse_prefix(self, allow_struct_lit) {
   const tok = Parser_peek(self);
   const start = Parser_current_span_start(self);
-  if ((Parser_check(self, lexer$TokenKind_TkMinus) || Parser_check(self, lexer$TokenKind_TkBang))) {
+  if ((Parser_check(self, lexer$TokenKind_TkMinus) ? true : Parser_check(self, lexer$TokenKind_TkBang))) {
     Parser_advance(self);
     const operand = Parser_parse_expr_bp(self, PREC_UNARY, allow_struct_lit);
     return ast$Expr_UnaryOp(str_to_unaryop(tok.value), operand, Parser_make_span(self, start, expr_span(operand).end));
@@ -1810,7 +1814,7 @@ function Parser_parse_prefix(self, allow_struct_lit) {
     const member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
     const member_name = member_tok.value;
     const qualifier_str = List_join(qualifier_parts, "::");
-    if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
+    if (((allow_struct_lit ? is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), "")) : false) ? Parser_check(self, lexer$TokenKind_TkLBrace) : false)) {
       return Parser_parse_struct_literal(self, member_name, start, Option_some(qualifier_str));
     }
     return ast$Expr_Ident(member_name, Option_some(qualifier_str), Parser_make_span(self, start, member_tok.span.end));
@@ -1818,16 +1822,16 @@ function Parser_parse_prefix(self, allow_struct_lit) {
   if (Parser_check(self, lexer$TokenKind_TkIdent)) {
     Parser_advance(self);
     const name = tok.value;
-    if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+    if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
       Parser_advance(self);
       const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
       const variant_name = variant_tok.value;
-      if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(variant_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
+      if (((allow_struct_lit ? is_uppercase(Option_unwrap_or(Str_char_at(variant_name, 0), "")) : false) ? Parser_check(self, lexer$TokenKind_TkLBrace) : false)) {
         return Parser_parse_struct_literal(self, variant_name, start, Option_some(name));
       }
       return ast$Expr_Ident(variant_name, Option_some(name), Parser_make_span(self, start, variant_tok.span.end));
     }
-    if (((!is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+    if (((!is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
       let qualifier_parts = [name];
       let member_tok = tok;
       let member_name = name;
@@ -1835,29 +1839,29 @@ function Parser_parse_prefix(self, allow_struct_lit) {
         Parser_advance(self);
         member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
         member_name = member_tok.value;
-        if (((!is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+        if (((!is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
           List_push(qualifier_parts, member_name);
         } else {
           break;
         }
       }
       const qualifier_str = List_join(qualifier_parts, "::");
-      if ((is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+      if ((is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), "")) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
         Parser_advance(self);
         const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
         const variant_name = variant_tok.value;
         const full_qualifier = `${qualifier_str}::${member_name}`;
-        if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(variant_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
+        if (((allow_struct_lit ? is_uppercase(Option_unwrap_or(Str_char_at(variant_name, 0), "")) : false) ? Parser_check(self, lexer$TokenKind_TkLBrace) : false)) {
           return Parser_parse_struct_literal(self, variant_name, start, Option_some(full_qualifier));
         }
         return ast$Expr_Ident(variant_name, Option_some(full_qualifier), Parser_make_span(self, start, variant_tok.span.end));
       }
-      if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
+      if (((allow_struct_lit ? is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), "")) : false) ? Parser_check(self, lexer$TokenKind_TkLBrace) : false)) {
         return Parser_parse_struct_literal(self, member_name, start, Option_some(qualifier_str));
       }
       return ast$Expr_Ident(member_name, Option_some(qualifier_str), Parser_make_span(self, start, member_tok.span.end));
     }
-    if (((allow_struct_lit && is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkLBrace))) {
+    if (((allow_struct_lit ? is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) : false) ? Parser_check(self, lexer$TokenKind_TkLBrace) : false)) {
       return Parser_parse_struct_literal(self, name, start, Option_none);
     }
     return ast$Expr_Ident(name, Option_none, tok.span);
@@ -1929,7 +1933,7 @@ function Parser_parse_catch_expr(self, left) {
   Parser_advance(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let arms = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     List_push(arms, Parser_parse_match_arm(self));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
@@ -1996,7 +2000,7 @@ function Parser_parse_match_expr(self) {
   const scrutinee = Parser_parse_expr_no_struct(self);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let arms = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     List_push(arms, Parser_parse_match_arm(self));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
@@ -2026,7 +2030,7 @@ function Parser_parse_match_arm(self) {
 function Parser_parse_pattern(self) {
   const tok = Parser_peek(self);
   const start = Parser_current_span_start(self);
-  if ((Parser_check(self, lexer$TokenKind_TkIdent) && (tok.value === "_"))) {
+  if ((Parser_check(self, lexer$TokenKind_TkIdent) ? (tok.value === "_") : false)) {
     Parser_advance(self);
     return ast$Pattern_Wildcard(tok.span);
   }
@@ -2054,21 +2058,21 @@ function Parser_parse_pattern(self) {
     Parser_advance(self);
     let name = tok.value;
     let qualifier = Option_none;
-    if (((!is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+    if (((!is_uppercase(Option_unwrap_or(Str_char_at(name, 0), ""))) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
       let qual_parts = [name];
       let next_name = name;
       while (Parser_check(self, lexer$TokenKind_TkColonColon)) {
         Parser_advance(self);
         const next_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
         next_name = next_tok.value;
-        if (((!is_uppercase(Option_unwrap_or(Str_char_at(next_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+        if (((!is_uppercase(Option_unwrap_or(Str_char_at(next_name, 0), ""))) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
           List_push(qual_parts, next_name);
         } else {
           break;
         }
       }
       const qual_str = List_join(qual_parts, "::");
-      if ((is_uppercase(Option_unwrap_or(Str_char_at(next_name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+      if ((is_uppercase(Option_unwrap_or(Str_char_at(next_name, 0), "")) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
         Parser_advance(self);
         const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
         qualifier = Option_some(`${qual_str}::${next_name}`);
@@ -2078,7 +2082,7 @@ function Parser_parse_pattern(self) {
         name = next_name;
       }
     }
-    if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+    if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
       Parser_advance(self);
       const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
       qualifier = Option_some((function() {
@@ -2104,11 +2108,11 @@ function Parser_parse_pattern(self) {
       const rparen = Parser_expect(self, lexer$TokenKind_TkRParen);
       return ast$Pattern_Constructor(name, qualifier, fields, Parser_make_span(self, start, rparen.span.end));
     }
-    if ((Parser_check(self, lexer$TokenKind_TkLBrace) && is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")))) {
+    if ((Parser_check(self, lexer$TokenKind_TkLBrace) ? is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) : false)) {
       Parser_advance(self);
       let named_fields = [];
       let rest = false;
-      while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+      while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
         if (Parser_check(self, lexer$TokenKind_TkDotDot)) {
           Parser_advance(self);
           rest = true;
@@ -2163,7 +2167,7 @@ function Parser_parse_handle_expr(self) {
   Parser_expect(self, lexer$TokenKind_TkWith);
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let handlers = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     List_push(handlers, Parser_parse_effect_handler(self));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
@@ -2209,7 +2213,7 @@ function Parser_parse_struct_literal(self, name, start, qualifier) {
     spread = Option_some(Parser_parse_expr(self));
     Parser_try_consume(self, lexer$TokenKind_TkComma);
   }
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const f_start = Parser_current_span_start(self);
     const f_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
     const f_name = f_tok.value;
@@ -2330,7 +2334,7 @@ function Parser_parse_type_expr(self) {
       Parser_advance(self);
       const member_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
       const member_name = member_tok.value;
-      if (((!is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) && Parser_check(self, lexer$TokenKind_TkColonColon))) {
+      if (((!is_uppercase(Option_unwrap_or(Str_char_at(member_name, 0), ""))) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
         List_push(qual_parts, member_name);
       } else {
         actual_name = member_name;
@@ -2353,7 +2357,7 @@ function Parser_parse_record_type_expr(self) {
   Parser_expect(self, lexer$TokenKind_TkLBrace);
   let fields = [];
   let rest = Option_none;
-  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     if (Parser_check(self, lexer$TokenKind_TkDotDot)) {
       Parser_advance(self);
       rest = Option_some(Parser_expect(self, lexer$TokenKind_TkIdent).value);
@@ -2394,7 +2398,7 @@ function Parser_validate_target_type_args(self, type_params) {
     return;
   }
   Parser_advance(self);
-  while (((!Parser_check(self, lexer$TokenKind_TkGt)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkGt)) ? (!Parser_at_end(self)) : false)) {
     const arg_tok = Parser_peek(self);
     if (lexer$__TokenKind_Eq.eq(arg_tok.kind, lexer$TokenKind_TkIdent)) {
       const arg_name = arg_tok.value;
@@ -2428,7 +2432,7 @@ function Parser_parse_type_params(self) {
   }
   Parser_advance(self);
   let params = [];
-  while (((!Parser_check(self, lexer$TokenKind_TkGt)) && (!Parser_at_end(self)))) {
+  while (((!Parser_check(self, lexer$TokenKind_TkGt)) ? (!Parser_at_end(self)) : false)) {
     const tp_start = Parser_current_span_start(self);
     const name = Parser_expect(self, lexer$TokenKind_TkIdent).value;
     let bounds = [];
@@ -2456,8 +2460,8 @@ function Parser_parse_type_bound(self) {
     const save_errors = self.error_count;
     const sink_checkpoint = diagnostics$CollectingSink_save(self.sink);
     Parser_advance(self);
-    while (((!Parser_check(self, lexer$TokenKind_TkGt)) && (!Parser_at_end(self)))) {
-      if ((Parser_check(self, lexer$TokenKind_TkIdent) && lexer$__TokenKind_Eq.eq(Parser_peek_at(self, 1).kind, lexer$TokenKind_TkEq))) {
+    while (((!Parser_check(self, lexer$TokenKind_TkGt)) ? (!Parser_at_end(self)) : false)) {
+      if ((Parser_check(self, lexer$TokenKind_TkIdent) ? lexer$__TokenKind_Eq.eq(Parser_peek_at(self, 1).kind, lexer$TokenKind_TkEq) : false)) {
         const ac_start = Parser_current_span_start(self);
         const ac_name = Parser_advance(self).value;
         Parser_advance(self);

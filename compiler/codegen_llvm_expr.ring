@@ -519,10 +519,11 @@ fn operand_type_from_binop(left: HExpr) -> Type {
 fn gen_binop(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch: TraitDispatch?, ord_dispatch: TraitDispatch?, result_ty: Type) -> LLVMValueRef {
     let op_type = operand_type_from_binop(left)
 
-    // Short-circuit And/Or
+    // B-104 D7: `&&`/`||` are rewritten to IfExpr by andor_lower (checker end)
+    // and never reach codegen as BinOps.
     match op {
-        BinOp::And => { return gen_and(ctx, left, right) },
-        BinOp::Or => { return gen_or(ctx, left, right) },
+        BinOp::And => panic("LLVM codegen: BinOp::And must be lowered by andor_lower"),
+        BinOp::Or => panic("LLVM codegen: BinOp::Or must be lowered by andor_lower"),
         _ => {},
     }
 
@@ -716,8 +717,8 @@ fn gen_int_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueR
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
-        BinOp::And => panic("LLVM codegen: And should be handled by short-circuit"),
-        BinOp::Or => panic("LLVM codegen: Or should be handled by short-circuit"),
+        BinOp::And => panic("LLVM codegen: BinOp::And lowered by andor_lower — unreachable"),
+        BinOp::Or => panic("LLVM codegen: BinOp::Or lowered by andor_lower — unreachable"),
     }
 }
 
@@ -827,67 +828,10 @@ fn gen_bool_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValue
     }
 }
 
-// ============================================================
-// Short-circuit And / Or
-// ============================================================
-
-fn gen_and(mut ctx: LlvmCtx, left: HExpr, right: HExpr) -> LLVMValueRef {
-    let current_fn = match ctx.current_fn {
-        some(f) => f,
-        none => panic("LLVM codegen: gen_and outside function"),
-    }
-
-    let lhs = gen_llvm_expr(ctx, left)
-    let lhs_bool = unbox_to_i1(ctx, lhs)
-
-    // Generate false_val in the current block (before branching)
-    let false_val = gen_bool_lit(ctx, false)
-
-    let rhs_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "and.rhs")
-    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "and.merge")
-    let lhs_end_bb = LLVMGetInsertBlock(ctx.builder)
-
-    LLVMBuildCondBr(ctx.builder, lhs_bool, rhs_bb, merge_bb)
-
-    LLVMPositionBuilderAtEnd(ctx.builder, rhs_bb)
-    let rhs = gen_llvm_expr(ctx, right)
-    let rhs_end_bb = LLVMGetInsertBlock(ctx.builder)
-    LLVMBuildBr(ctx.builder, merge_bb)
-
-    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "and"))
-    LLVMAddIncoming(phi, [false_val, rhs], [lhs_end_bb, rhs_end_bb])
-    phi
-}
-
-fn gen_or(mut ctx: LlvmCtx, left: HExpr, right: HExpr) -> LLVMValueRef {
-    let current_fn = match ctx.current_fn {
-        some(f) => f,
-        none => panic("LLVM codegen: gen_or outside function"),
-    }
-
-    let lhs = gen_llvm_expr(ctx, left)
-    let lhs_bool = unbox_to_i1(ctx, lhs)
-
-    // Generate true_val in the current block (before branching)
-    let true_val = gen_bool_lit(ctx, true)
-
-    let rhs_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "or.rhs")
-    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "or.merge")
-    let lhs_end_bb = LLVMGetInsertBlock(ctx.builder)
-
-    LLVMBuildCondBr(ctx.builder, lhs_bool, merge_bb, rhs_bb)
-
-    LLVMPositionBuilderAtEnd(ctx.builder, rhs_bb)
-    let rhs = gen_llvm_expr(ctx, right)
-    let rhs_end_bb = LLVMGetInsertBlock(ctx.builder)
-    LLVMBuildBr(ctx.builder, merge_bb)
-
-    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "or"))
-    LLVMAddIncoming(phi, [true_val, rhs], [lhs_end_bb, rhs_end_bb])
-    phi
-}
+// (gen_and / gen_or retired 2026-06-13 — B-104 D7: andor_lower rewrites
+//  `&&`/`||` to IfExpr at checker end; gen_if_expr is the single phi path.
+//  The old phi yielded the RHS operand box VERBATIM on the taken edge —
+//  undroppable, the x-andor leak class.)
 
 // ============================================================
 // Unary operations

@@ -845,7 +845,7 @@ function mut_param_flags(params) {
     const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
     if (__ring_next_15._tag === "none") break;
     const p = __ring_next_15._0;
-    if (((p.name === "self") || (!p.is_mutable))) {
+    if (((p.name === "self") ? true : (!p.is_mutable))) {
       List_push(flags, false);
     } else {
       List_push(flags, llvm_is_value_type(p.ty));

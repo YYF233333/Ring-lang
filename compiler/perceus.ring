@@ -289,15 +289,13 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
     }
     match expr {
         // Arithmetic / comparison BinOps box a FRESH result (gen_int_binop /
-        // gen_*_binop → box_int/box_bool/box_float).  But `&&` / `||` (BinOp::And /
-        // Or) DO NOT: gen_and/gen_or emit a phi that yields the RHS operand VERBATIM
-        // on the short-circuit-taken path (`a && b` returns b's own box when a is
-        // true).  That box may be a BORROW (e.g. `obj.is_mutable`), so materialising
-        // the `&&`/`||` and scope-dropping it would free a value owned elsewhere →
-        // UAF (ASan: register_impl_method freeing parse_param's is_mutable Bool).
-        // Therefore NEVER materialise And/Or — only the arithmetic/comparison
-        // BinOps, whose result is genuinely fresh.
-        HExpr::BinOp { op, .. } => match op { BinOp::And => false, BinOp::Or => false, _ => true },
+        // gen_*_binop → box_int/box_bool/box_float) — materialise.  `&&`/`||`
+        // never reach this pass (B-104 D7: andor_lower rewrites them to IfExpr
+        // at checker end), retiring the And/Or phi-verbatim borrow hazard this
+        // arm used to guard against (the old gen_and/gen_or yielded the RHS
+        // operand box VERBATIM on the taken edge — possibly a borrow, the
+        // register_impl_method/is_mutable ASan UAF).
+        HExpr::BinOp { .. } => true,
         HExpr::UnaryOp { .. } => true,
         HExpr::Call { callee, .. } => is_borrow_returning_call(callee) == false,
         HExpr::StructLit { .. } => true,
@@ -314,22 +312,18 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
         // piece) is borrowed by the consumer and never dropped → leak (the residual
         // tid=0 INT / tid=3 STR / tid=2 BOOL bulk).  Materialise + scope-end-drop them.
         //
-        // ⚠️ &&-RHS PHI-ALIAS SAFETY (same trap as And/Or, parse_param is_mutable UAF):
-        // gen_and/gen_or yield the RHS operand box VERBATIM on the short-circuit-taken
-        // edge.  If a materialised literal box became that phi result, scope-dropping
-        // the __anf binding AND the && result would double-free.  This is STRUCTURALLY
-        // prevented WITHOUT a special case here: a literal only reaches
-        // anf_should_materialize via anf_operand, but the &&/|| RHS TOP expression is
-        // normalised by anf_cond_in_own_scope → anf_expr (NOT anf_operand), and a bare
-        // literal passes through anf_expr unchanged with zero hoists → it stays INLINE,
-        // never materialised (`a && true` remains `a && true`).  Likewise if/match/block
-        // branch TAILS go through anf_tail_value → anf_expr (no top-level materialise),
-        // so a literal that becomes a branch phi result is never bound either.  The only
-        // materialisation site is a genuine eager operand (call arg / arith operand /
-        // condition / interp piece), whose box is consumed by the operation, not aliased
-        // back out as the enclosing expression's value.  R5 escape (a materialised
-        // literal that later escapes, e.g. `let x = f(5)` where 5 is the only arg path)
-        // is handled by clone-all-escape exactly as for any other fresh-owned binding.
+        // PHI-ALIAS note (B-104 D7 update): branch TAILS (if/match/block, incl.
+        // the arms andor_lower produces from `&&`/`||`) go through
+        // anf_tail_value → anf_expr (no top-level materialise), so a literal
+        // that becomes a branch phi value is never separately bound — the phi
+        // consumer (binding drop / codegen post-unbox drop / IfExpr value
+        // materialisation below) releases it exactly once.  The only
+        // materialisation site is a genuine eager operand (call arg / arith
+        // operand / condition / interp piece), whose box is consumed by the
+        // operation, not aliased back out as the enclosing expression's value.
+        // R5 escape (a materialised literal that later escapes, e.g.
+        // `let x = f(5)` where 5 is the only arg path) is handled by
+        // clone-all-escape exactly as for any other fresh-owned binding.
         HExpr::IntLit { .. } => true,
         HExpr::FloatLit { .. } => true,
         HExpr::StrLit { .. } => true,
@@ -346,10 +340,52 @@ fn anf_should_materialize(expr: HExpr, externs: Set<Str>) -> Bool {
         // pointer WITHOUT a dup — a true borrow — and keeps the conservative
         // path (generic/TypeVar receivers too).
         HExpr::IndexExpr { receiver, .. } => is_str_index(receiver),
+        // B-104 D7: a value-position IfExpr whose EVERY non-diverging branch
+        // tail is itself materialisable (fresh-owned) — materialise the whole
+        // phi so the branch box is reclaimed by the scope-end drop.  This is
+        // what closes the lowered `a && b` in ONE-SHOT condition / operand
+        // positions (`if a && b {…}`, `f(a && b)`, `!(a && b)`): post-lower
+        // the phi is an IfExpr with fresh arms (comparison / call / BoolLit),
+        // hoisted to `let __anf_N = if a { b } else { false }` and scope-end-
+        // dropped (the types.ring:386 if-cond class, ≈23.3M @2.382B).  A
+        // borrow arm (Ident / FieldAccess tail) vetoes — the phi may alias
+        // state owned elsewhere; it stays inline under the conservative
+        // x-cf-value posture, exactly the old And/Or conservatism.  While-cond
+        // / match-guard positions never reach here (anf_cond_in_own_scope
+        // normalises the cond top-level via anf_expr, not anf_operand); their
+        // phi box is dropped by the codegen post-unbox drop gated on
+        // is_fresh_owned_bool_value.  MatchExpr values deliberately keep the
+        // no-materialise posture (pre-existing conservatism, not D7 scope).
+        HExpr::IfExpr { then_branch, else_branch, .. } => {
+            match else_branch {
+                none => false,
+                some(eb) => anf_branch_materializable(then_branch, externs)
+                    && anf_branch_materializable(eb, externs),
+            }
+        },
         // NEVER materialise: Ident / FieldAccess / non-Str IndexExpr (borrows),
-        // control-flow (Block/If/Match — handled structurally), EffectOp /
+        // Match/Block control-flow (handled structurally), EffectOp /
         // HandleExpr / TryCatch / Clone.
         _ => false,
+    }
+}
+
+// B-104 D7: whether a branch body yields a value that is itself materialisable
+// — the all-fresh branch recursion for value-position IfExpr materialisation.
+// Mirrors is_droppable_branch_value's divergence handling (a diverging branch
+// yields no value, so it never vetoes) and bottoms out on the same
+// anf_should_materialize leaf classification.
+fn anf_branch_materializable(body: HExpr, externs: Set<Str>) -> Bool {
+    if expr_diverges(body) {
+        true
+    } else {
+        match body {
+            HExpr::Block { tail, .. } => match tail {
+                some(t) => anf_should_materialize(t, externs),
+                none => false,
+            },
+            _ => anf_should_materialize(body, externs),
+        }
     }
 }
 
@@ -628,10 +664,11 @@ fn anf_stmt(stmt: HStmt, externs: Set<Str>, mut counter: List<Int>) -> List<HStm
     }
 }
 
-// A while/if/match condition that is evaluated potentially repeatedly (loop cond)
-// or in a position where its temps must be self-contained: normalise it, and if
-// any temps are produced, wrap them in a Block whose tail is the condition value
-// so they are scope-end-dropped at each evaluation (R3).
+// A while-cond / match-guard that is evaluated potentially repeatedly (loop
+// cond) or in a position where its temps must be self-contained: normalise it,
+// and if any temps are produced, wrap them in a Block whose tail is the
+// condition value so they are scope-end-dropped at each evaluation (R3).
+// (If-conds are one-shot eager operands — they go through anf_operand instead.)
 fn anf_cond_in_own_scope(cond: HExpr, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
     let mut hoists: List<HStmt> = []
     let nc = anf_expr(cond, hoists, externs, counter)
@@ -682,35 +719,22 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
         HExpr::DictConstruct { .. } => expr,
 
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
+            // B-104 D7: `&&`/`||` never reach this pass — andor_lower (checker
+            // end) rewrites them to IfExpr, whose branch blocks are their own
+            // materialisation scopes (the R2 lazy boundary that
+            // anf_cond_in_own_scope used to provide for the RHS here).
             match op {
-                // R2: `&&` / `||` short-circuit.  The LEFT operand is always
-                // evaluated → its temps hoist normally.  The RIGHT operand is
-                // evaluated conditionally → its temps must NOT hoist past the
-                // boundary; they wrap into a self-contained Block (lazy + scoped).
-                BinOp::And => {
-                    let new_left = anf_operand(left, hoists, externs, counter)
-                    let new_right = anf_cond_in_own_scope(right, externs, counter)
-                    HExpr::BinOp { op: op, left: new_left, right: new_right,
-                        eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
-                        ty: ty, effects: effects, span: span }
-                },
-                BinOp::Or => {
-                    let new_left = anf_operand(left, hoists, externs, counter)
-                    let new_right = anf_cond_in_own_scope(right, externs, counter)
-                    HExpr::BinOp { op: op, left: new_left, right: new_right,
-                        eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
-                        ty: ty, effects: effects, span: span }
-                },
-                // Eager arithmetic/comparison: both operands always evaluated
-                // left→right → materialise fresh-owned operands (R4).
-                _ => {
-                    let new_left = anf_operand(left, hoists, externs, counter)
-                    let new_right = anf_operand(right, hoists, externs, counter)
-                    HExpr::BinOp { op: op, left: new_left, right: new_right,
-                        eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
-                        ty: ty, effects: effects, span: span }
-                },
+                BinOp::And => panic("perceus: BinOp::And must be lowered by andor_lower"),
+                BinOp::Or => panic("perceus: BinOp::Or must be lowered by andor_lower"),
+                _ => {},
             }
+            // Eager arithmetic/comparison: both operands always evaluated
+            // left→right → materialise fresh-owned operands (R4).
+            let new_left = anf_operand(left, hoists, externs, counter)
+            let new_right = anf_operand(right, hoists, externs, counter)
+            HExpr::BinOp { op: op, left: new_left, right: new_right,
+                eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch,
+                ty: ty, effects: effects, span: span }
         },
 
         HExpr::UnaryOp { op, operand, ty, effects, span } => {
@@ -1720,14 +1744,13 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         // borrow, so safe to scope-end-drop.  Reclaims the boxed Int/Bool arithmetic
         // flood (diag: tid=0 INT 86M + tid=2 BOOL 43M live).
         //
-        // EXCEPTION — `&&` / `||` (BinOp::And / Or) are NOT fresh: gen_and/gen_or
-        // emit a phi whose short-circuit-taken edge is the RHS operand VERBATIM
-        // (`a && b` yields b's own box when a is true).  That box may be a BORROW
-        // (e.g. a `let x = a && obj.is_mutable` binding aliases obj.is_mutable on the
-        // taken path), so scope-end-dropping such a binding would over-free a value
-        // owned elsewhere → UAF.  Conservatively NOT droppable (leak, crash-free) —
-        // mirrors anf_should_materialize's And/Or exclusion.
-        HExpr::BinOp { op, .. } => match op { BinOp::And => false, BinOp::Or => false, _ => true },
+        // (The old `&&`/`||` exception is RETIRED — B-104 D7: andor_lower
+        // rewrites them to IfExpr at checker end, so the phi-verbatim borrow
+        // hazard (`let x = a && obj.is_mutable` aliasing obj's box) is
+        // structurally gone: an IfExpr init classifies via the branch-value
+        // recursion below, and its borrow arm tails are Clone-wrapped by
+        // rc_escape — the binding always owns its value.)
+        HExpr::BinOp { .. } => true,
         HExpr::UnaryOp { .. } => true,
         // B-104 W3a: control-flow value (If / Match / Block) is droppable IFF every
         // value-producing branch yields a droppable owned value.  Each branch / arm /
@@ -1738,17 +1761,18 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         // balanced by the scope-end Drop — same reasoning as the Call arm (B-103),
         // reclaiming the `let x = if c {…} else {…}` / `let x = match …` residual.
         //
-        // ⚠️ BUT NOT a blanket true — branch values are MIXED-ownership.  A branch
-        // whose tail is `&&` / `||` (BinOp And/Or) yields the RHS box VERBATIM, which
-        // may be a BORROW (`if c { a && obj.field } else { d }` → obj.field on the
-        // taken edge); rc_escape MOVES it (And/Or ∉ is_owner_bearing) rather than
-        // Cloning, so scope-end-dropping x would over-free obj.field → UAF.  Likewise
-        // an EffectOp / TryCatch / HandleExpr tail can alias.  So we RECURSE: the
-        // control-flow value is droppable only if each non-diverging branch tail is
-        // itself is_droppable_init (And/Or tail → false → whole node not dropped).  A
-        // DIVERGING branch (return/break/continue) yields no value to the binding, so
-        // it never constrains droppability.  (This IS the "branch-value analysis"; it
-        // bottoms out on the same per-expr classification, recursively.)
+        // ⚠️ BUT NOT a blanket true — branch values are MIXED-ownership: an
+        // EffectOp / TryCatch / HandleExpr tail can alias resumed/handler state
+        // or sit on an abort path (B-002).  So we RECURSE: the control-flow
+        // value is droppable only if each non-diverging branch tail is itself
+        // is_droppable_init (an effect-value tail → false → whole node not
+        // dropped).  A DIVERGING branch (return/break/continue) yields no value
+        // to the binding, so it never constrains droppability.  (This IS the
+        // W3a "branch-value analysis", bottoming out on the same per-expr
+        // classification recursively.  Its original motivation — `&&`/`||`
+        // branch tails whose phi yielded a borrow VERBATIM — was retired by
+        // B-104 D7's andor_lower: And/Or no longer exist at this stage, and
+        // the recursion remains solely for the effect-value tails.)
         HExpr::IfExpr { then_branch, else_branch, .. } => {
             match else_branch {
                 // No else → the if is statement-typed (Unit value), not a fresh owned
@@ -1783,7 +1807,7 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
 // DROPPABLE owned value.  A diverging branch (return/break/continue) yields no
 // value to the enclosing binding, so it never vetoes droppability.  Otherwise the
 // branch value is its tail expression, classified by is_droppable_init (recursing
-// through nested control flow; an And/Or or EffectOp tail → not droppable).
+// through nested control flow; an EffectOp-family tail → not droppable).
 fn is_droppable_branch_value(body: HExpr, externs: Set<Str>) -> Bool {
     if expr_diverges(body) {
         true
@@ -1909,11 +1933,14 @@ fn rc_stmt(stmt: HStmt, owned: List<Str>, boxed: Set<Int>, externs: Set<Str>, mu
             // drop additionally requires the binding to be in the VISIBLE OWNED
             // set — i.e. its init was droppable.  W4's soundness argument ("every
             // cross-statement holder dup'd the box") fails exactly for the
-            // non-droppable inits the rest of the pass already excludes: a
-            // `let mut ok = a && obj.flag` binding holds the RHS box VERBATIM
-            // (And/Or phi, un-Cloned — obj still owns it), so the W4 drop on
-            // `ok = false` would free obj's box → UAF.  Not in `owned` → no
-            // drop → the documented leak-on-overwrite posture instead.
+            // non-droppable inits the rest of the pass already excludes — e.g.
+            // an EffectOp-valued init holding a possibly-aliased box un-Cloned.
+            // Not in `owned` → no drop → the documented leak-on-overwrite
+            // posture instead.  (The D2-#3 instance that found this gate —
+            // `let mut ok = a && obj.flag` holding the And/Or phi's RHS box
+            // VERBATIM — was retired by B-104 D7's andor_lower: the lowered
+            // IfExpr init Clone-wraps borrow arm tails, so such a binding now
+            // OWNS its value and the reassign drop is balanced.)
             let w4_target = match scalar_reassign_drop_name(target, boxed) {
                 some(dn) => if owned.contains(dn) { some(dn) } else { none },
                 none => none,

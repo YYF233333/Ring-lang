@@ -747,7 +747,7 @@ function emit_effect_decl(ctx, name, ops) {
           const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
           if (__ring_next_23._tag === "none") break;
           const en = __ring_next_23._0;
-          if ((((en !== "io") && (en !== name)) && (!_Set_contains(body_effect_set, en, __Str_Eq)))) {
+          if ((((en !== "io") ? (en !== name) : false) ? (!_Set_contains(body_effect_set, en, __Str_Eq)) : false)) {
             _Set_insert(body_effect_set, en);
             List_push(body_effect_names, en);
           }

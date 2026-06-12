@@ -290,7 +290,7 @@ function gen_expr(ctx, expr) {
       const is_imported = codegen_ctx$is_imported_name(ctx, name);
       const boxed_qname = (function() {
   const __ring_m = def_id;
-  if (__ring_m._tag === "some") { const did = __ring_m._0; return (((!is_imported) && _Set_contains(ctx.boxed_vars, did, __Int_Eq)) ? `${qname}.value` : qname); }
+  if (__ring_m._tag === "some") { const did = __ring_m._0; return (((!is_imported) ? _Set_contains(ctx.boxed_vars, did, __Int_Eq) : false) ? `${qname}.value` : qname); }
   if (__ring_m._tag === "none") { return qname; }
   __match_fail(__ring_m);
 })();
@@ -509,7 +509,7 @@ function gen_mut_arg(ctx, arg) {
         const __ring_m11 = def_id;
         if (__ring_m11._tag === "some") {
           const did = __ring_m11._0;
-          if (((!is_imported) && _Set_contains(ctx.boxed_vars, did, __Int_Eq))) {
+          if (((!is_imported) ? _Set_contains(ctx.boxed_vars, did, __Int_Eq) : false)) {
             __ring_match12: {
               const __ring_m12 = resolved_name;
               if (__ring_m12._tag === "some") {
@@ -595,7 +595,7 @@ function try_eq_dispatch(ctx, op, left, right, eq_dispatch) {
     const __ring_m16 = eq_dispatch;
     if (__ring_m16._tag === "some") {
       const dispatch = __ring_m16._0;
-      const is_eq_op = (ast$__BinOp_Eq.eq(op, ast$BinOp_Eq) || ast$__BinOp_Eq.eq(op, ast$BinOp_Neq));
+      const is_eq_op = (ast$__BinOp_Eq.eq(op, ast$BinOp_Eq) ? true : ast$__BinOp_Eq.eq(op, ast$BinOp_Neq));
       if (is_eq_op) {
         return Option_some(gen_eq_dispatch(ctx, op, left, right, dispatch));
       }
@@ -614,7 +614,7 @@ function try_ord_dispatch(ctx, op, left, right, ord_dispatch) {
     const __ring_m17 = ord_dispatch;
     if (__ring_m17._tag === "some") {
       const dispatch = __ring_m17._0;
-      const is_ord_op = (((ast$__BinOp_Eq.eq(op, ast$BinOp_Lt) || ast$__BinOp_Eq.eq(op, ast$BinOp_Gt)) || ast$__BinOp_Eq.eq(op, ast$BinOp_Lte)) || ast$__BinOp_Eq.eq(op, ast$BinOp_Gte));
+      const is_ord_op = (((ast$__BinOp_Eq.eq(op, ast$BinOp_Lt) ? true : ast$__BinOp_Eq.eq(op, ast$BinOp_Gt)) ? true : ast$__BinOp_Eq.eq(op, ast$BinOp_Lte)) ? true : ast$__BinOp_Eq.eq(op, ast$BinOp_Gte));
       if (is_ord_op) {
         return Option_some(gen_ord_dispatch(ctx, op, left, right, dispatch));
       }
@@ -676,11 +676,11 @@ function binop_str(op) {
       break __ring_match18;
     }
     if (__ring_m18._tag === "And") {
-      return "&&";
+      return panic("JS codegen: BinOp::And must be lowered by andor_lower");
       break __ring_match18;
     }
     if (__ring_m18._tag === "Or") {
-      return "||";
+      return panic("JS codegen: BinOp::Or must be lowered by andor_lower");
       break __ring_match18;
     }
     __match_fail(__ring_m18);
@@ -1000,7 +1000,7 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
         const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
         if (__ring_next_11._tag === "none") break;
         const a = __ring_next_11._0;
-        if ((skip_first_arg && (arg_idx === 0))) {
+        if ((skip_first_arg ? (arg_idx === 0) : false)) {
           arg_idx = (arg_idx + 1);
         } else {
           List_push(other_args, gen_expr(ctx, a));
@@ -2352,7 +2352,7 @@ function gen_handle(ctx, body, handlers) {
       }
       const params_str = List_join(params, ", ");
       const b = gen_expr(ctx, h.body);
-      const is_abort = ((effect_name === "fail") && (h.op_name === "raise"));
+      const is_abort = ((effect_name === "fail") ? (h.op_name === "raise") : false);
       if (is_abort) {
         has_abort = true;
         List_push(abort_effect_names, effect_name);
@@ -2371,7 +2371,7 @@ function gen_handle(ctx, body, handlers) {
           const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
           if (__ring_next_43._tag === "none") break;
           const op = __ring_next_43._0;
-          if ((op.has_default && (!_Set_contains(handled_op_names, op.name, __Str_Eq)))) {
+          if ((op.has_default ? (!_Set_contains(handled_op_names, op.name, __Str_Eq)) : false)) {
             __ring_match75: {
               const __ring_m75 = op.default_body;
               if (__ring_m75._tag === "some") {

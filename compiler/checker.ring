@@ -6,6 +6,7 @@ use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntr
 use builtins::{register_builtins, register_hof_intrinsics}
 use infer_decl::{check as infer_check, check_prelude_decl}
 use dict_lower::{lower_dicts}
+use andor_lower::{lower_andor}
 use infer_ctx::{InferCtx}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
@@ -147,11 +148,12 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
-    // B-104 D4: first-class the dict evidence (static singleton set +
-    // local constructions for dynamic wrapped dicts) before perceus/codegen.
+    // B-104 D7: lower `&&`/`||` to if-else (andor_lower), then B-104 D4:
+    // first-class the dict evidence (static singleton set + local
+    // constructions for dynamic wrapped dicts) — both before perceus/codegen.
     let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [] }
     CheckResult {
-        program: lower_dicts(assembled),
+        program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params
     }
@@ -166,10 +168,10 @@ pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink:
     // Prepend prelude hdecls to the program's decls
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
-    // B-104 D4: see check() above.
+    // B-104 D7 + D4: see check() above.
     let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [] }
     CheckResult {
-        program: lower_dicts(assembled),
+        program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
         fn_mut_params: ctx.fn_mut_params
     }

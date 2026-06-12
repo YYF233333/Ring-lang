@@ -254,7 +254,7 @@ function insert_mod_aliases(ctx, mod_name, decls, guard) {
       if (__ring_m6._tag === "Struct") {
         const name = __ring_m6.name;
         const qualified = `${mod_name}::${name}`;
-        if (((!guard) || (!_Map_contains_key(ctx.env.types.structs, name)))) {
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.structs, name)))) {
           __ring_match7: {
             const __ring_m7 = _Map_get(ctx.env.types.structs, qualified);
             if (__ring_m7._tag === "some") {
@@ -273,7 +273,7 @@ function insert_mod_aliases(ctx, mod_name, decls, guard) {
       if (__ring_m6._tag === "Enum") {
         const name = __ring_m6.name;
         const qualified = `${mod_name}::${name}`;
-        if (((!guard) || (!_Map_contains_key(ctx.env.types.enums, name)))) {
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.enums, name)))) {
           __ring_match8: {
             const __ring_m8 = _Map_get(ctx.env.types.enums, qualified);
             if (__ring_m8._tag === "some") {
@@ -292,7 +292,7 @@ function insert_mod_aliases(ctx, mod_name, decls, guard) {
       if (__ring_m6._tag === "Trait") {
         const name = __ring_m6.name;
         const qualified = `${mod_name}::${name}`;
-        if (((!guard) || (!_Map_contains_key(ctx.env.trait_reg.traits, name)))) {
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.trait_reg.traits, name)))) {
           __ring_match9: {
             const __ring_m9 = _Map_get(ctx.env.trait_reg.traits, qualified);
             if (__ring_m9._tag === "some") {
@@ -311,7 +311,7 @@ function insert_mod_aliases(ctx, mod_name, decls, guard) {
       if (__ring_m6._tag === "Effect") {
         const name = __ring_m6.name;
         const qualified = `${mod_name}::${name}`;
-        if (((!guard) || (!_Map_contains_key(ctx.env.types.effects, name)))) {
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.effects, name)))) {
           __ring_match10: {
             const __ring_m10 = _Map_get(ctx.env.types.effects, qualified);
             if (__ring_m10._tag === "some") {
@@ -330,7 +330,7 @@ function insert_mod_aliases(ctx, mod_name, decls, guard) {
       if (__ring_m6._tag === "EffectAlias") {
         const name = __ring_m6.name;
         const qualified = `${mod_name}::${name}`;
-        if (((!guard) || (!_Map_contains_key(ctx.env.types.effect_aliases, name)))) {
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.effect_aliases, name)))) {
           __ring_match11: {
             const __ring_m11 = _Map_get(ctx.env.types.effect_aliases, qualified);
             if (__ring_m11._tag === "some") {
@@ -1430,7 +1430,7 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span)
             const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
             if (__ring_next_51._tag === "none") break;
             const tm = __ring_next_51._0;
-            if (((!tm.has_default) && (!_Set_contains(impl_method_names, tm.name, __Str_Eq)))) {
+            if (((!tm.has_default) ? (!_Set_contains(impl_method_names, tm.name, __Str_Eq)) : false)) {
               const _ = infer_ctx$type_error(ctx.sink, codes$E0502, `Missing method '${tm.name}' in impl ${tname} for ${target_type}`, span, diagnostics$DiagnosticContext_TraitError(`missing method '${tm.name}'`));
             }
           }
@@ -1714,7 +1714,7 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
       const __ring_dt4 = entry;
       const tpname = __ring_dt4[0];
       const tv = __ring_dt4[1];
-      if (((!_Map_contains_key(outer_saved, tpname)) && (!_Set_contains(declared_names, tpname, __Str_Eq)))) {
+      if (((!_Map_contains_key(outer_saved, tpname)) ? (!_Set_contains(declared_names, tpname, __Str_Eq)) : false)) {
         __ring_match59: {
           const __ring_m59 = tv;
           if (__ring_m59._tag === "TypeVar") {
@@ -1742,7 +1742,7 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
       const __ring_m60 = List_first(params);
       if (__ring_m60._tag === "some") {
         const first_p = __ring_m60._0;
-        if (((first_p.name === "self") && first_p.is_mutable)) {
+        if (((first_p.name === "self") ? first_p.is_mutable : false)) {
           let mut_set = (function() {
   const __ring_m = _Map_get(ctx.env.trait_reg.mut_methods, target_type);
   if (__ring_m._tag === "some") { const s = __ring_m._0; return s; }
@@ -2082,7 +2082,7 @@ function expand_effect_exprs(ctx, decl_effects, expanding) {
           }
           let subst_map = map_new();
           let si = 0;
-          while (((si < List_len(alias_def.type_param_vars)) && (si < List_len(eff.type_args)))) {
+          while (((si < List_len(alias_def.type_param_vars)) ? (si < List_len(eff.type_args)) : false)) {
             __ring_match72: {
               const __ring_m72 = [List_get(alias_def.type_param_vars, si), List_get(eff.type_args, si)];
               if (Array.isArray(__ring_m72) && __ring_m72.length === 2 && __ring_m72[0]._tag === "some" && __ring_m72[1]._tag === "some") {
@@ -2283,7 +2283,7 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
   __match_fail(__ring_m);
 })();
       List_push(param_types, pt);
-      if (((p.name === "self") || (!p.is_mutable))) {
+      if (((p.name === "self") ? true : (!p.is_mutable))) {
         List_push(mut_flags, false);
       } else {
         List_push(mut_flags, is_register_value_type(pt));
@@ -2333,7 +2333,7 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
     const __ring_dt5 = entry;
     const tpname = __ring_dt5[0];
     const tv = __ring_dt5[1];
-    if (((!_Map_contains_key(saved, tpname)) && (!_Set_contains(declared_names, tpname, __Str_Eq)))) {
+    if (((!_Map_contains_key(saved, tpname)) ? (!_Set_contains(declared_names, tpname, __Str_Eq)) : false)) {
       __ring_match80: {
         const __ring_m80 = tv;
         if (__ring_m80._tag === "TypeVar") {
@@ -2432,7 +2432,7 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
       }
     }
   }
-  if ((track_fn_bounds && (List_len(fn_bounds_list) > 0))) {
+  if ((track_fn_bounds ? (List_len(fn_bounds_list) > 0) : false)) {
     _Map_insert(ctx.env.scope.fn_bounds, name, fn_bounds_list);
   }
   ctx.type_param_scope = saved;

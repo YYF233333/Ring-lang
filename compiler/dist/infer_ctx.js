@@ -290,16 +290,16 @@ function new_infer_ctx(sink) {
 function infer_suggestion(code, message, context) {
   let suggestions = [];
   if ((code === "E0301")) {
-    if ((Str_contains(message, "Str") && Str_contains(message, "Int"))) {
+    if ((Str_contains(message, "Str") ? Str_contains(message, "Int") : false)) {
       List_push(suggestions, new diagnostics$Suggestion("Use parse_int() to convert Str to Int, or .to_str() for Int to Str", Option_none, Option_none));
     }
-    if ((Str_contains(message, "Str") && Str_contains(message, "Float"))) {
+    if ((Str_contains(message, "Str") ? Str_contains(message, "Float") : false)) {
       List_push(suggestions, new diagnostics$Suggestion("Use parse_float() to convert Str to Float, or .to_str() for Float to Str", Option_none, Option_none));
     }
     if (Str_contains(message, "Option")) {
       List_push(suggestions, new diagnostics$Suggestion("Use match, .unwrap_or(), or .unwrap_or_else() to handle Option values", Option_none, Option_none));
     }
-    if ((Str_contains(message, "Bool") && (Str_contains(message, "Int") || Str_contains(message, "Str")))) {
+    if ((Str_contains(message, "Bool") ? (Str_contains(message, "Int") ? true : Str_contains(message, "Str")) : false)) {
       List_push(suggestions, new diagnostics$Suggestion("Bool cannot be implicitly converted; use an if expression instead", Option_none, Option_none));
     }
   }
@@ -397,10 +397,10 @@ function find_similar_name(target, candidates) {
     if (__ring_next_2._tag === "none") break;
     const candidate = __ring_next_2._0;
     let score = 0;
-    if ((Str_starts_with(candidate, target) || Str_starts_with(target, candidate))) {
+    if ((Str_starts_with(candidate, target) ? true : Str_starts_with(target, candidate))) {
       score = 3;
     }
-    if (((Str_len(target) >= 2) && (Str_len(candidate) >= 2))) {
+    if (((Str_len(target) >= 2) ? (Str_len(candidate) >= 2) : false)) {
       if ((Str_slice(target, 0, 2) === Str_slice(candidate, 0, 2))) {
         const len_diff = ((Str_len(target) > Str_len(candidate)) ? (Str_len(target) - Str_len(candidate)) : (Str_len(candidate) - Str_len(target)));
         if ((len_diff <= 2)) {
@@ -408,7 +408,7 @@ function find_similar_name(target, candidates) {
         }
       }
     }
-    if (((Str_len(target) === Str_len(candidate)) && (Str_len(target) >= 1))) {
+    if (((Str_len(target) === Str_len(candidate)) ? (Str_len(target) >= 1) : false)) {
       if ((Str_slice(target, 0, 1) === Str_slice(candidate, 0, 1))) {
         score = 1;
       }
@@ -1058,7 +1058,11 @@ function resolve_dicts_from_scheme(sink, env, current_fn_bounds, scheme, callee_
   if (__ring_m._tag === "TypeVar") { const rid = __ring_m.id; return (rid === id); }
   return false;
 })();
-  return ((((fb.type_param_var_id === id) || (union_find$uf_find(s, fb.type_param_var_id) === id)) || resolved_match) && (fb.trait_name === bound.trait_name));
+  if ((((fb.type_param_var_id === id) ? true : (union_find$uf_find(s, fb.type_param_var_id) === id)) ? true : resolved_match)) {
+    return (fb.trait_name === bound.trait_name);
+  } else {
+    return false;
+  }
 })(); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(current_fn_bounds);
             __ring_match38: {
               const __ring_m38 = matching;
@@ -1189,7 +1193,7 @@ function resolve_concrete_type_to_dict_ref(env, current_fn_bounds, t, s, trait_n
     const __ring_m44 = t;
     if (__ring_m44._tag === "TypeVar") {
       const id = __ring_m44.id;
-      const bound = ((__a) => { const __i = __a.findIndex((function(fb) { return ((fb.type_param_var_id === id) && (fb.trait_name === trait_name)); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(current_fn_bounds);
+      const bound = ((__a) => { const __i = __a.findIndex((function(fb) { return ((fb.type_param_var_id === id) ? (fb.trait_name === trait_name) : false); })); return __i >= 0 ? { _tag: "some", _0: __a[__i] } : { _tag: "none" }; })(current_fn_bounds);
       __ring_match45: {
         const __ring_m45 = bound;
         if (__ring_m45._tag === "some") {
@@ -1256,7 +1260,7 @@ function resolve_type_expr(ctx, texpr) {
             }
             if (__ring_m48._tag === "none") {
               let resolved_q = q;
-              if (((q === "self") || Str_starts_with(q, "super"))) {
+              if (((q === "self") ? true : Str_starts_with(q, "super"))) {
                 __ring_match49: {
                   const __ring_m49 = resolve_relative_qualifier(q, ctx.mod_path_stack);
                   if (__ring_m49._tag === "some") {
@@ -1275,13 +1279,13 @@ function resolve_type_expr(ctx, texpr) {
                 return resolve_named_type(ctx, name, type_args, span);
               } else {
                 const qualified_type_name = `${resolved_q}::${name}`;
-                if (((_Map_contains_key(ctx.env.types.structs, qualified_type_name) || _Map_contains_key(ctx.env.types.enums, qualified_type_name)) || _Map_contains_key(ctx.env.types.type_aliases, qualified_type_name))) {
+                if (((_Map_contains_key(ctx.env.types.structs, qualified_type_name) ? true : _Map_contains_key(ctx.env.types.enums, qualified_type_name)) ? true : _Map_contains_key(ctx.env.types.type_aliases, qualified_type_name))) {
                   return resolve_named_type(ctx, qualified_type_name, type_args, span);
                 } else {
                   if ((List_len(ctx.mod_path_stack) > 0)) {
                     const mod_prefix = List_join(ctx.mod_path_stack, "::");
                     const full_type_name = `${mod_prefix}::${qualified_type_name}`;
-                    if (((_Map_contains_key(ctx.env.types.structs, full_type_name) || _Map_contains_key(ctx.env.types.enums, full_type_name)) || _Map_contains_key(ctx.env.types.type_aliases, full_type_name))) {
+                    if (((_Map_contains_key(ctx.env.types.structs, full_type_name) ? true : _Map_contains_key(ctx.env.types.enums, full_type_name)) ? true : _Map_contains_key(ctx.env.types.type_aliases, full_type_name))) {
                       return resolve_named_type(ctx, full_type_name, type_args, span);
                     } else {
                       return resolve_named_type(ctx, qualified_type_name, type_args, span);
@@ -1590,7 +1594,7 @@ function resolve_named_type(ctx, name, type_args, span) {
     }
     __match_fail(__ring_m59);
   }
-  if (((name === hir$BUILTIN_OPTION) && (List_len(type_args) === 1))) {
+  if (((name === hir$BUILTIN_OPTION) ? (List_len(type_args) === 1) : false)) {
     __ring_match60: {
       const __ring_m60 = List_get(type_args, 0);
       if (__ring_m60._tag === "some") {
@@ -1609,7 +1613,7 @@ function resolve_named_type(ctx, name, type_args, span) {
       const __ring_m61 = _Map_get(ctx.env.types.structs, name);
       if (__ring_m61._tag === "some") {
         const def = __ring_m61._0;
-        if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(def.type_params)))) {
+        if (((List_len(type_args) > 0) ? (List_len(type_args) !== List_len(def.type_params)) : false)) {
           const _ = type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(def.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(def.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none));
         }
         let resolved_params = [];
@@ -1644,7 +1648,7 @@ function resolve_named_type(ctx, name, type_args, span) {
       const __ring_m62 = _Map_get(ctx.env.types.enums, name);
       if (__ring_m62._tag === "some") {
         const def = __ring_m62._0;
-        if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(def.type_params)))) {
+        if (((List_len(type_args) > 0) ? (List_len(type_args) !== List_len(def.type_params)) : false)) {
           const _ = type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(def.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(def.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none));
         }
         let resolved_params = [];
@@ -1678,7 +1682,7 @@ function resolve_named_type(ctx, name, type_args, span) {
     const __ring_m63 = _Map_get(ctx.env.types.type_aliases, name);
     if (__ring_m63._tag === "some") {
       const alias = __ring_m63._0;
-      if (((List_len(type_args) > 0) && (List_len(type_args) !== List_len(alias.type_params)))) {
+      if (((List_len(type_args) > 0) ? (List_len(type_args) !== List_len(alias.type_params)) : false)) {
         const _ = type_error(ctx.sink, codes$E0301, `Type '${name}' expects ${Int_to_str(List_len(alias.type_params))} type argument(s), got ${Int_to_str(List_len(type_args))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(List_len(alias.type_params))} type args`, `${Int_to_str(List_len(type_args))} type args`, Option_none));
       }
       if ((List_len(alias.type_param_vars) === 0)) {
@@ -1846,7 +1850,7 @@ function bind_constructor_pattern(ctx, name, qualifier, fields, expected_type, s
                 const _ = type_error(ctx.sink, codes$E0301, `constructor '${name}' has ${Int_to_str(List_len(v.fields))} field(s) but pattern has ${Int_to_str(List_len(fields))}`, span, diagnostics$DiagnosticContext_OtherContext(Option_some("constructor arity mismatch")));
               }
               let i = 0;
-              while (((i < List_len(fields)) && (i < List_len(v.fields)))) {
+              while (((i < List_len(fields)) ? (i < List_len(v.fields)) : false)) {
                 __ring_match74: {
                   const __ring_m74 = [List_get(fields, i), List_get(v.fields, i)];
                   if (Array.isArray(__ring_m74) && __ring_m74.length === 2 && __ring_m74[0]._tag === "some" && __ring_m74[1]._tag === "some") {
@@ -1888,7 +1892,7 @@ function bind_named_constructor_pattern(ctx, name, qualifier, fields, expected_t
     const __ring_m75 = qualifier;
     if (__ring_m75._tag === "some") {
       const q = __ring_m75._0;
-      if (((q === "self") || Str_starts_with(q, "super"))) {
+      if (((q === "self") ? true : Str_starts_with(q, "super"))) {
         __ring_match76: {
           const __ring_m76 = resolve_relative_qualifier(q, ctx.mod_path_stack);
           if (__ring_m76._tag === "some") {
@@ -2200,7 +2204,7 @@ function build_instantiation_map(type_param_vars, resolved_expected) {
     if (__ring_m94._tag === "EnumType") {
       const type_params = __ring_m94.type_params;
       let i = 0;
-      while (((i < List_len(type_param_vars)) && (i < List_len(type_params)))) {
+      while (((i < List_len(type_param_vars)) ? (i < List_len(type_params)) : false)) {
         __ring_match95: {
           const __ring_m95 = [List_get(type_param_vars, i), List_get(type_params, i)];
           if (Array.isArray(__ring_m95) && __ring_m95.length === 2 && __ring_m95[0]._tag === "some" && __ring_m95[1]._tag === "some") {
@@ -2217,7 +2221,7 @@ function build_instantiation_map(type_param_vars, resolved_expected) {
     if (__ring_m94._tag === "StructType") {
       const type_params = __ring_m94.type_params;
       let i = 0;
-      while (((i < List_len(type_param_vars)) && (i < List_len(type_params)))) {
+      while (((i < List_len(type_param_vars)) ? (i < List_len(type_params)) : false)) {
         __ring_match96: {
           const __ring_m96 = [List_get(type_param_vars, i), List_get(type_params, i)];
           if (Array.isArray(__ring_m96) && __ring_m96.length === 2 && __ring_m96[0]._tag === "some" && __ring_m96[1]._tag === "some") {

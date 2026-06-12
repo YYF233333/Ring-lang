@@ -496,14 +496,14 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                 const __ring_m20 = d;
                 if (__ring_m20._tag === "Struct") {
                   const name = __ring_m20.name; const is_pub = __ring_m20.is_pub;
-                  if (((name === target_type) && is_pub)) {
+                  if (((name === target_type) ? is_pub : false)) {
                     is_pub_type = true;
                   }
                   break __ring_match20;
                 }
                 if (__ring_m20._tag === "Enum") {
                   const name = __ring_m20.name; const is_pub = __ring_m20.is_pub;
-                  if (((name === target_type) && is_pub)) {
+                  if (((name === target_type) ? is_pub : false)) {
                     is_pub_type = true;
                   }
                   break __ring_match20;
@@ -1096,7 +1096,7 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
       const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
       if (__ring_next_17._tag === "none") break;
       const impl_ = __ring_next_17._0;
-      if ((_Map_contains_key(types, impl_.target_type_name) || _Map_contains_key(traits, impl_.trait_name))) {
+      if ((_Map_contains_key(types, impl_.target_type_name) ? true : _Map_contains_key(traits, impl_.trait_name))) {
         List_push(trait_impls, impl_);
       }
     }

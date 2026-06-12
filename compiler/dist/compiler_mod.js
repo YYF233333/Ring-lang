@@ -674,7 +674,7 @@ function build_dep_import_pairs(dep_exports, dep_prefix) {
     const ventry = __ring_next_14._0;
     const __ring_dt1 = ventry;
     const name = __ring_dt1[0];
-    if (((!_Set_contains(dep_exports.extern_values, name, __Str_Eq)) && (!_Set_contains(bare_variants, name, __Str_Eq)))) {
+    if (((!_Set_contains(dep_exports.extern_values, name, __Str_Eq)) ? (!_Set_contains(bare_variants, name, __Str_Eq)) : false)) {
       const si = codegen_ctx$safe_ident(name);
       const alias = `${dep_prefix}$${si}`;
       List_push(import_pairs, `${si} as ${alias}`);
@@ -806,7 +806,7 @@ function resolve_extern_fn_imports(ast, key, graph, exports_map, imports_map, im
             const __ring_dt4 = eentry;
             const other_key = __ring_dt4[0];
             const other_exports = __ring_dt4[1];
-            if ((((other_key !== key) && _Map_contains_key(other_exports.values, name)) && (!_Set_contains(other_exports.extern_values, name, __Str_Eq)))) {
+            if ((((other_key !== key) ? _Map_contains_key(other_exports.values, name) : false) ? (!_Set_contains(other_exports.extern_values, name, __Str_Eq)) : false)) {
               __ring_match26: {
                 const __ring_m26 = _Map_get(graph.modules, other_key);
                 if (__ring_m26._tag === "some") {
@@ -873,14 +873,14 @@ function is_pub_type_in_decls(type_name, decls) {
       const __ring_m27 = d;
       if (__ring_m27._tag === "Struct") {
         const dn = __ring_m27.name; const dp = __ring_m27.is_pub;
-        if (((dn === type_name) && dp)) {
+        if (((dn === type_name) ? dp : false)) {
           result = true;
         }
         break __ring_match27;
       }
       if (__ring_m27._tag === "Enum") {
         const dn = __ring_m27.name; const dp = __ring_m27.is_pub;
-        if (((dn === type_name) && dp)) {
+        if (((dn === type_name) ? dp : false)) {
           result = true;
         }
         break __ring_match27;
@@ -898,14 +898,14 @@ function is_pub_type_in_decls(type_name, decls) {
               const __ring_m28 = prefixed;
               if (__ring_m28._tag === "Struct") {
                 const sn = __ring_m28.name; const sp = __ring_m28.is_pub;
-                if (((sn === type_name) && sp)) {
+                if (((sn === type_name) ? sp : false)) {
                   result = true;
                 }
                 break __ring_match28;
               }
               if (__ring_m28._tag === "Enum") {
                 const en = __ring_m28.name; const ep = __ring_m28.is_pub;
-                if (((en === type_name) && ep)) {
+                if (((en === type_name) ? ep : false)) {
                   result = true;
                 }
                 break __ring_match28;

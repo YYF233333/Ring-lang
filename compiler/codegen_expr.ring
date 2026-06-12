@@ -257,7 +257,10 @@ fn binop_str(op: BinOp) -> Str {
         BinOp::Add => "+", BinOp::Sub => "-", BinOp::Mul => "*", BinOp::Div => "/", BinOp::Mod => "%",
         BinOp::Eq => "===", BinOp::Neq => "!==",
         BinOp::Lt => "<", BinOp::Lte => "<=", BinOp::Gt => ">", BinOp::Gte => ">=",
-        BinOp::And => "&&", BinOp::Or => "||",
+        // B-104 D7: `&&`/`||` are rewritten to IfExpr by andor_lower (checker
+        // end) — gen_if's ternary/statement-if is the single lowering path.
+        BinOp::And => panic("JS codegen: BinOp::And must be lowered by andor_lower"),
+        BinOp::Or => panic("JS codegen: BinOp::Or must be lowered by andor_lower"),
     }
 }
 

@@ -251,7 +251,7 @@ class Ctor {
 function build_inst_map(type_param_vars, type_params) {
   let inst_map = map_new();
   let i = 0;
-  while (((i < List_len(type_param_vars)) && (i < List_len(type_params)))) {
+  while (((i < List_len(type_param_vars)) ? (i < List_len(type_params)) : false)) {
     __ring_match6: {
       const __ring_m6 = [List_get(type_param_vars, i), List_get(type_params, i)];
       if (Array.isArray(__ring_m6) && __ring_m6.length === 2 && __ring_m6[0]._tag === "some" && __ring_m6[1]._tag === "some") {

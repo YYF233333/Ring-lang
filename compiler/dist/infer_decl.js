@@ -538,7 +538,7 @@ function resolve_mod_uses(ctx, uses) {
       continue;
     }
     const first = Option_unwrap_or(List_get(segments, 0), "");
-    if (((first !== "self") && (first !== "super"))) {
+    if (((first !== "self") ? (first !== "super") : false)) {
       continue;
     }
     let qualifier = first;
@@ -809,7 +809,7 @@ function check_effect_decl(ctx, name, type_params, ast_ops, is_pub, span, __ring
       all_defaults = false;
     }
   }
-  if ((all_defaults && (List_len(def.ops) > 0))) {
+  if ((all_defaults ? (List_len(def.ops) > 0) : false)) {
     let deps = [];
     let dep_set = set_new();
     const __ring_iter_16 = __List_Iterable.iter(hops);
@@ -828,7 +828,7 @@ function check_effect_decl(ctx, name, type_params, ast_ops, is_pub, span, __ring
             if (__ring_next_17._tag === "none") break;
             const eff = __ring_next_17._0;
             const eff_name = types$effect_kind_name(eff);
-            if (((((eff_name === "io") || (eff_name === "fail")) || (eff_name === "mut")) || (eff_name === name))) {
+            if (((((eff_name === "io") ? true : (eff_name === "fail")) ? true : (eff_name === "mut")) ? true : (eff_name === name))) {
               continue;
             }
             __ring_match27: {
@@ -1540,7 +1540,7 @@ function check_trait_decl(ctx, name, type_params, ast_methods, is_pub, span, __r
               const abody = __ring_m55.body;
               const has_body = (function() {
   const __ring_m = abody;
-  if (__ring_m._tag === "Block") { const stmts = __ring_m.stmts; const tail = __ring_m.tail; return ((List_len(stmts) > 0) || Option_is_some(tail)); }
+  if (__ring_m._tag === "Block") { const stmts = __ring_m.stmts; const tail = __ring_m.tail; return ((List_len(stmts) > 0) ? true : Option_is_some(tail)); }
   return true;
 })();
               if (has_body) {
@@ -1804,7 +1804,7 @@ function check_fn_body(ctx, type_params, hparams, expected_ret, body, saved_tp_s
     const __ring_dt1 = entry;
     const tpname = __ring_dt1[0];
     const tv = __ring_dt1[1];
-    if (((!_Map_contains_key(saved_tp_scope, tpname)) && (!_Set_contains(declared_names, tpname, __Str_Eq)))) {
+    if (((!_Map_contains_key(saved_tp_scope, tpname)) ? (!_Set_contains(declared_names, tpname, __Str_Eq)) : false)) {
       __ring_match64: {
         const __ring_m64 = tv;
         if (__ring_m64._tag === "TypeVar") {
@@ -2090,7 +2090,7 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
           if (Array.isArray(__ring_m73) && __ring_m73.length === 2 && __ring_m73[0]._tag === "CustomEffect" && __ring_m73[1]._tag === "CustomEffect") {
             const ia = __ring_m73[0].type_args; const da = __ring_m73[1].type_args;
             let i = 0;
-            while (((i < List_len(ia)) && (i < List_len(da)))) {
+            while (((i < List_len(ia)) ? (i < List_len(da)) : false)) {
               ctx.subst = infer_ctx$unify_at(ctx.sink, ctx.env, Option_unwrap_or(List_get(ia, i), types$UNIT), Option_unwrap_or(List_get(da, i), types$UNIT), ctx.subst, span);
               i = (i + 1);
             }
@@ -2177,7 +2177,7 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
     const __ring_next_56 = __ListIterator_Iterator.next(__ring_iter_56);
     if (__ring_next_56._tag === "none") break;
     const p = __ring_next_56._0;
-    if (((p.name === "self") || (!p.is_mutable))) {
+    if (((p.name === "self") ? true : (!p.is_mutable))) {
       List_push(mut_flags, false);
     } else {
       __ring_match77: {

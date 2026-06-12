@@ -310,7 +310,11 @@ function occurs_in(var_id, t, subst) {
     }
     if (__ring_m6._tag === "FnType") {
       const params = __ring_m6.params; const return_type = __ring_m6.return_type; const effects = __ring_m6.effects;
-      return ((params.some((function(p) { return occurs_in(var_id, p, subst); })) || occurs_in(var_id, return_type, subst)) || occurs_in_row(var_id, effects, subst));
+      if ((params.some((function(p) { return occurs_in(var_id, p, subst); })) ? true : occurs_in(var_id, return_type, subst))) {
+        return true;
+      } else {
+        return occurs_in_row(var_id, effects, subst);
+      }
       break __ring_match6;
     }
     if (__ring_m6._tag === "StructType") {
@@ -325,7 +329,11 @@ function occurs_in(var_id, t, subst) {
     }
     if (__ring_m6._tag === "GenericType") {
       const base = __ring_m6.base; const args = __ring_m6.args;
-      return (occurs_in(var_id, base, subst) || args.some((function(a) { return occurs_in(var_id, a, subst); })));
+      if (occurs_in(var_id, base, subst)) {
+        return true;
+      } else {
+        return args.some((function(a) { return occurs_in(var_id, a, subst); }));
+      }
       break __ring_match6;
     }
     if (__ring_m6._tag === "RecordType") {
@@ -336,7 +344,11 @@ function occurs_in(var_id, t, subst) {
   if (__ring_m._tag === "none") { return false; }
   __match_fail(__ring_m);
 })();
-      return (in_tail || fields.some((function(f) { return occurs_in(var_id, f.ty, subst); })));
+      if (in_tail) {
+        return true;
+      } else {
+        return fields.some((function(f) { return occurs_in(var_id, f.ty, subst); }));
+      }
       break __ring_match6;
     }
     if (__ring_m6._tag === "EffectRowType") {
@@ -360,7 +372,11 @@ function occurs_in_row(var_id, row, subst) {
   if (__ring_m._tag === "none") { return false; }
   __match_fail(__ring_m);
 })();
-  return (in_tail || row.effects.some((function(e) { return occurs_in_effect(var_id, e, subst); })));
+  if (in_tail) {
+    return true;
+  } else {
+    return row.effects.some((function(e) { return occurs_in_effect(var_id, e, subst); }));
+  }
 }
 
 function occurs_in_effect(var_id, e, subst) {
@@ -466,11 +482,11 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
   }
   const a_unmatched = filter_by_index_not_in(ra.effects, a_matched);
   const b_unmatched = filter_by_index_not_in(rb.effects, b_matched);
-  if (((List_len(a_unmatched) > 0) && Option_is_none(rb.tail))) {
+  if (((List_len(a_unmatched) > 0) ? Option_is_none(rb.tail) : false)) {
     const names = List_join(a_unmatched.map((function(e) { return types$effect_kind_name(e); })), ", ");
     unify_error_msg(`effect mismatch: effects [${names}] not allowed in pure context`, __ring_ev_fail);
   }
-  if (((List_len(b_unmatched) > 0) && Option_is_none(ra.tail))) {
+  if (((List_len(b_unmatched) > 0) ? Option_is_none(ra.tail) : false)) {
     const names = List_join(b_unmatched.map((function(e) { return types$effect_kind_name(e); })), ", ");
     unify_error_msg(`effect mismatch: effects [${names}] not allowed in pure context`, __ring_ev_fail);
   }
@@ -479,7 +495,7 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
     if (Array.isArray(__ring_m10) && __ring_m10.length === 2 && __ring_m10[0]._tag === "some" && __ring_m10[1]._tag === "some") {
       const ta = __ring_m10[0]._0; const tb = __ring_m10[1]._0;
       if ((ta === tb)) {
-        if (((List_len(a_unmatched) > 0) || (List_len(b_unmatched) > 0))) {
+        if (((List_len(a_unmatched) > 0) ? true : (List_len(b_unmatched) > 0))) {
           const fresh = env$TypeEnv_fresh_var_id(env);
           let all_unmatched = [];
           const __ring_iter_3 = __List_Iterable.iter(a_unmatched);
@@ -503,7 +519,7 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
           union_find$uf_insert(s, ta, extended_row);
         }
       } else {
-        if (((List_len(a_unmatched) === 0) && (List_len(b_unmatched) === 0))) {
+        if (((List_len(a_unmatched) === 0) ? (List_len(b_unmatched) === 0) : false)) {
           s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(tb, Option_none), s, env, __ring_ev_fail);
         } else {
           const fresh = env$TypeEnv_fresh_var_id(env);
@@ -602,15 +618,15 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
       }
       const a_only = a_fields.filter((function(f) { return (!_Set_contains(b_name_set.value, f.name, __Str_Eq)); }));
       const b_only = b_fields.filter((function(f) { return (!_Set_contains(a_name_set.value, f.name, __Str_Eq)); }));
-      if (((List_len(a_only) > 0) && Option_is_none(b_tail))) {
+      if (((List_len(a_only) > 0) ? Option_is_none(b_tail) : false)) {
         const missing = List_join(a_only.map((function(f) { return f.name; })), ", ");
         unify_error(ra, rb, Option_some(`record missing fields: ${missing}`), __ring_ev_fail);
       }
-      if (((List_len(b_only) > 0) && Option_is_none(a_tail))) {
+      if (((List_len(b_only) > 0) ? Option_is_none(a_tail) : false)) {
         const missing = List_join(b_only.map((function(f) { return f.name; })), ", ");
         unify_error(ra, rb, Option_some(`record missing fields: ${missing}`), __ring_ev_fail);
       }
-      if (((((List_len(a_only) > 0) && (List_len(b_only) > 0)) && Option_is_some(a_tail)) && Option_is_some(b_tail))) {
+      if (((((List_len(a_only) > 0) ? (List_len(b_only) > 0) : false) ? Option_is_some(a_tail) : false) ? Option_is_some(b_tail) : false)) {
         __ring_match13: {
           const __ring_m13 = [a_tail, b_tail];
           if (Array.isArray(__ring_m13) && __ring_m13.length === 2 && __ring_m13[0]._tag === "some" && __ring_m13[1]._tag === "some") {
@@ -671,7 +687,7 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
           const __ring_m16 = [a_tail, b_tail];
           if (Array.isArray(__ring_m16) && __ring_m16.length === 2 && __ring_m16[0]._tag === "some" && __ring_m16[1]._tag === "some") {
             const ta = __ring_m16[0]._0; const tb = __ring_m16[1]._0;
-            if ((((List_len(a_only) === 0) && (List_len(b_only) === 0)) && (ta !== tb))) {
+            if ((((List_len(a_only) === 0) ? (List_len(b_only) === 0) : false) ? (ta !== tb) : false)) {
               s = unify(types$Type_TypeVar(ta, Option_none), types$Type_TypeVar(tb, Option_none), s, env, __ring_ev_fail);
             }
             break __ring_match16;
@@ -804,7 +820,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
     }
     break __ring_match24;
   }
-  if ((is_any(a) || is_any(b))) {
+  if ((is_any(a) ? true : is_any(b))) {
     return subst;
   }
   const va = var_id(a);
@@ -844,7 +860,7 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
     }
     __match_fail(__ring_m27);
   }
-  if ((is_never(a) || is_never(b))) {
+  if ((is_never(a) ? true : is_never(b))) {
     return subst;
   }
   __ring_match28: {

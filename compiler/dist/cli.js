@@ -247,7 +247,7 @@ function to_result(f) {
 function cli_main(__ring_ev_io) {
   const args = argv();
   const parsed = parse_cli_args(args);
-  if (((parsed.command === "help") || (parsed.command === ""))) {
+  if (((parsed.command === "help") ? true : (parsed.command === ""))) {
     usage(__ring_ev_io);
     return;
   }
@@ -281,7 +281,7 @@ function cli_main(__ring_ev_io) {
     return;
   }
   if ((List_len(ast.uses) > 0)) {
-    if (((parsed.command === "check") && (parsed.verify_rc || parsed.verify_strict))) {
+    if (((parsed.command === "check") ? (parsed.verify_rc ? true : parsed.verify_strict) : false)) {
       const res = compiler_mod$verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict);
       if ((res.success === false)) {
         eprintln("Compilation failed");
@@ -289,7 +289,7 @@ function cli_main(__ring_ev_io) {
         return;
       }
       print(res.report, __ring_ev_io);
-      if (((res.fatal > 0) || (parsed.verify_strict && (res.exempt > 0)))) {
+      if (((res.fatal > 0) ? true : (parsed.verify_strict ? (res.exempt > 0) : false))) {
         exit_process(1);
       } else {
         print("OK", __ring_ev_io);
@@ -393,13 +393,13 @@ function cli_main(__ring_ev_io) {
       eprintln(formatter$format_human(warning_diags, source));
     }
   }
-  if (((parsed.command === "check") && (parsed.verify_rc || parsed.verify_strict))) {
+  if (((parsed.command === "check") ? (parsed.verify_rc ? true : parsed.verify_strict) : false)) {
     const rc_program = perceus$perceus_transform_mutated(check_result.program, parsed.rc_mutate);
     const findings = verify_rc$verify_rc_program(rc_program);
     const fatal = verify_rc$rc_fatal_count(findings);
     const exempt = (List_len(findings) - fatal);
     print(verify_rc$format_rc_findings(findings, parsed.verify_strict), __ring_ev_io);
-    if (((fatal > 0) || (parsed.verify_strict && (exempt > 0)))) {
+    if (((fatal > 0) ? true : (parsed.verify_strict ? (exempt > 0) : false))) {
       exit_process(1);
     } else {
       print("OK", __ring_ev_io);
