@@ -40,7 +40,7 @@
 - **不触碰**：`design.md`
 - **工作流**：
   1. 扫描两个表，收集 `queued` / `open` items
-  2. 按优先级排序：P0 > Critical open > P1 > Important open > P2 > Minor open > P3
+  2. 按优先级排序：P0 > critical open > P1 > medium open > P2 > low open > P3
   3. 分析依赖，组成 wave（独立 items 并行，有依赖串行）
   4. 每个 wave：
      a. 将 items 标为 `planning`
@@ -65,7 +65,7 @@
 **条目格式：**
 
 ```markdown
-### B-xxx <标题> [类型] [优先级] [复杂度] [状态]
+### B-xxx <标题> [类型] [优先级] [复杂度] [dispatch] [状态]
 
 <spec 正文：设计决策、涉及修改、验收标准>
 ```
@@ -75,26 +75,28 @@
 - **类型**：`feature` / `design-align` / `refactor` / `bugfix`
 - **优先级**：`P0`（下个 wave 必须）/ `P1`（近期）/ `P2`（排队）/ `P3`（低优先）
 - **复杂度**：`S`（< 1h）/ `M`（半天）/ `L`（1-2 天）/ `XL`（多天）
+- **dispatch**：`mechanical` / `judgment`（Worker 据此决定执行者）
 - **状态**：`queued` → `planning` → `doing` → 删除
 
 ### Audit Report（`docs/audit-report.md`）
 
 **活的 bug 看板。** 修复后从表中删除。
 
-**条目格式：**
+**条目格式（与 full-audit SKILL.md Phase 3 一致；Worker 依赖 `grep "\[open\]"` 扫描）：**
 
 ```markdown
-### #xxx <标题> [严重度] [状态]
+### #xxx <标题> [严重度] [dispatch] [open]
 
-**文件**：涉及的文件路径
-**描述**：问题描述
-**建议修复**：修复方向
+<问题描述，含文件路径、行号、影响、建议修复方向>
+
+发现者：<agent 名>
 ```
 
 字段说明：
 - **ID**：`#` + 数字，递增分配
-- **严重度**：`Critical` / `Important` / `Minor` / `Style`
-- **状态**：`open` → `doing` → 删除
+- **严重度**：`critical` / `medium` / `low`（小写三级，不使用其他词汇）
+- **dispatch**：`mechanical` / `judgment`
+- **状态**：`open` → `doing` → 删除；`[open]` 标记不可省略（Worker 扫描依赖）
 
 ### 列表维护规则
 
@@ -112,10 +114,10 @@
 | Agent | 写入范围 | 不触碰 |
 |-------|---------|--------|
 | Discussion | `docs/` | `compiler/`, `std/`, `tests/`, `CLAUDE.md` |
-| Audit | `docs/audit-report.md` | 其他所有文件 |
-| Worker | `compiler/`, `std/`, `tests/`, `CLAUDE.md`, 两个表的状态字段 | `design.md` |
+| Audit | `docs/audit-report.md` + `docs/worker_feedback.md`（[观察] 条目） | 其他所有文件 |
+| Worker | `compiler/`, `std/`, `tests/`, `CLAUDE.md`, 两个表的状态字段, `docs/worker_feedback.md`（追加） | `design.md` |
 
-唯一的写入交叉点：**两个表的状态字段**。Discussion 写新条目，Worker 改状态/删除。由于是不同行的修改，git merge 不会冲突。
+两个写入交叉点：**两个表的状态字段**（Discussion 写新条目，Worker 改状态/删除——不同行修改，git merge 不冲突）+ **`worker_feedback.md`**（Worker/Audit 追加写入，Discussion 呈现用户后删除——追加式同样天然免冲突）。
 
 Worker 在 worktree 中工作，每个 wave 开始前 rebase 到最新 main（拿到最新的 backlog/audit 状态）。
 

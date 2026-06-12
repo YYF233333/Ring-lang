@@ -38,13 +38,11 @@
 
 可移植性问题。
 
-> #130（闭包 env 捕获泄漏）/ #131（perceus drop 落不了地，96 rc-warn）已于 2026-06-03 并入 backlog **B-084**（Perceus drop 精度 + drop_T 完整性），详见 backlog。
-
-> #135（`ring_map_clone` / `ring_map_int_clone` 浅拷不 dup value，同 `ring_list_clone` 类）已于 2026-06-07 在 B-104 工作树修复（深拷 + 逐 value `ring_dup`）；`ring_set_clone`/`ring_set_int_clone` 核为非 bug（值内联）。
+> #130（闭包 env 捕获泄漏）/ #131（perceus drop 落不了地，96 rc-warn）已于 2026-06-03 并入 B-084（✅ 已落地删除，见 git）；剩余闭包 RC 收口归 **B-096**。
 
 ### #136 LLVM 后端 5 个 mapped-but-missing runtime 符号 [low] [judgment] [open]
 
-B-103 全量枚举 ring_runtime.cpp 时发现：`method_to_runtime`（codegen_llvm_expr.ring）映射了 5 个 **ring_runtime.cpp 中不存在**的符号——`ring_str_to_int`（Str.to_int）、`ring_str_to_float`（Str.to_float）、`ring_list_enumerate`（List.enumerate，且在 codegen_llvm.ring:174 被无条件 declare）、`ring_map_is_empty`（Map.is_empty）、`ring_set_is_empty`（Set.is_empty）。任何程序在 `--target=llvm` 下调用这些方法 → 链接失败（undefined symbol）。当前编译器/测试零使用（`.enumerate` 仅注释提及）→ latent。修复方向：补 runtime 实现或删映射改走 Ring impl。发现者：B-103 Wave A。
+B-103 全量枚举 ring_runtime.cpp 时发现：`method_to_runtime`（codegen_llvm_expr.ring）映射了 5 个 **ring_runtime.cpp 中不存在**的符号——`ring_str_to_int`（Str.to_int）、`ring_str_to_float`（Str.to_float）、`ring_list_enumerate`（List.enumerate，且在 codegen_llvm.ring:174 被无条件 declare）、`ring_map_is_empty`（Map.is_empty）、`ring_set_is_empty`（Set.is_empty）。任何程序在 `--target=llvm` 下调用这些方法 → 链接失败（undefined symbol）。当前编译器/测试零使用（`.enumerate` 仅注释提及）→ latent。修复方向：补 runtime 实现或删映射改走 Ring impl；**注意其中 to_int/to_float/enumerate 三个已由 B-094 拍板「确定不加、清死映射」（2026-06-03，enumerate 真做时归 B-095）——本条净增量 = `ring_map_is_empty`/`ring_set_is_empty` 两个，修复时勿与 B-094 决策冲突**。发现者：B-103 Wave A。
 
 ### #137 List.reverse / List.sort 后端语义分歧（JS 原地 vs LLVM fresh 丢弃）[medium] [judgment] [open]
 
@@ -84,7 +82,7 @@ ring_runtime.cpp 的 HOF 家族在循环内持有闭包结果/合成临时但从
 
 ### #151 codegen 合成的 builtin Eq/Ord dict + 闭包 per-call-site 构造后不 drop（CLOSURE/TUPLE 残余泄漏主体嫌疑）[medium] [judgment] [open]
 
-泛型 Eq/Ord dict 派发在调用点合成 fresh dict（`ring_get_builtin_dict` → fresh TUPLE of fresh closures，分类表已标 FRESH）——这些是 **codegen 合成临时、HIR 不可见**，ANF/材料化永远盖不到，构造后无人 drop。Stage 2 收口全部 ANF 可达位置后，自编译残余 live 主体 = STR 86.5M / BOOL 67.8M / **CLOSURE 63.8M / TUPLE 31.9M**（@2.382B）——CLOSURE+TUPLE 高度疑似本项（编译器自身闭包多为 HOF 实参、已被 W1 回收）。修复方向：dict 构造结果在消费后 drop（codegen 级，参照 B-104b/Stage 2 cond-drop 模式），或 dict 缓存为模块级 global（`dict_globals` 机制已存在，复用一次构造）。量化验证：修后跑 `-DRING_ALLOC_STATS` 看 tid7/tid10。发现者：B-104 D1 Stage 2（残余归因）。
+泛型 Eq/Ord dict 派发在调用点合成 fresh dict（`ring_get_builtin_dict` → fresh TUPLE of fresh closures，分类表已标 FRESH）——这些是 **codegen 合成临时、HIR 不可见**，ANF/材料化永远盖不到，构造后无人 drop。Stage 2 收口全部 ANF 可达位置后，自编译残余 live 主体 = STR 86.5M / BOOL 67.8M / **CLOSURE 63.8M / TUPLE 31.9M**（@2.382B）——CLOSURE+TUPLE 高度疑似本项（编译器自身闭包多为 HOF 实参、已被 W1 回收）。发现者：B-104 D1 Stage 2（残余归因）。（首报时列的两个修复方向即后来三案中的 (a)/(b)，已被下方拍板取代。）
 
 **诊断坐实（2026-06-12，probe 实证 + 站点清单）**：5 probe × 100K 热循环逐 box 计数——泛型 Eq 派发恰泄 **1 TUPLE + 2 CLOSURE + 1 STR/次**（STR = dict 名字串，resolve 站点 gen_str_lit 每次 fresh，**本项第三个成员**）；用户 `ring_dict_init` 路径 1 TUPLE + 1 CLOSURE/次；**单态 `xs.contains()` 同样 4 box/次**（影响面不限泛型代码）；对照组 0 泄漏。泛型 Ord 另泄 cmp 结果 INT box/次（`gen_ord_dispatch_llvm` unbox 后不 drop，同 while-cond box 家族，收口时一并补）。合成站点 4 路（resolve_dict_ref 三子路径 / TraitDispatch::Direct / gen_dict_closure_wrapper / build_wrapped_dict）全部 per-call-site-execution fresh、dict 数据零复用；**JS 后端同名 dict = 模块级单例 const → fresh-per-execution 是 LLVM 后端独有偏离**。自编译 @2.382B TUPLE:CLOSURE = 31.7M:63.4M 恰 1:2（Eq-dict 指纹）→ 本项 ≈ residual live 的 **28%~38%，当前最大单一泄漏类**。
 
@@ -145,6 +143,8 @@ cli.ring:177 "Single-file run not yet implemented"（EXIT 1），且在源文件
 ### #20 HExpr/HStmt match 在 5+ pass 中重复 [low] [judgment] [open]
 
 维护负担。应扩展 hir-visitor。
+
+**D2 重估结论（2026-06-12，git `efe6054` 归档）**：verifier（第 6 个全量 match）**不建**通用 visitor——位置敏感所有权记账（同一表达式在 consume/borrow/cond 位行为不同 + 路径快照/恢复/分支合并）无法折进 fold visitor；叶子分类经 pub 谓词共享（无重复代码）。「扩展 hir-visitor」方向对 RC/verifier 类 pass 已证不适用，#20 维持不立项；如未来出现纯结构遍历的新 pass 再重估。
 
 ## Delegate 完整性（2026-05-23 审计发现）
 

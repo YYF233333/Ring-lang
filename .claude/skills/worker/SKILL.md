@@ -37,7 +37,7 @@ grep -n "\[open\]" docs/audit-report.md
 
 ### Step 2: 排序、分组与 Dispatch 核查
 
-**优先级排序**：P0 > Critical open > P1 > Important open > P2 > Minor open > P3 > Style open
+**优先级排序**：P0 > critical open > P1 > medium open > P2 > low open > P3
 
 **Dispatch 核查**：对每个 item 检查 `dispatch` 标记（`mechanical` / `judgment`）：
 - `mechanical`：使用 `deepseek-dispatch` skill 派发给 DS 执行（成本低，适合解法唯一确定的任务）

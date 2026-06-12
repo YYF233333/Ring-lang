@@ -117,11 +117,11 @@ pub fn/trait/type 必须有完整标注（`ring check` 缺失报 warning）：
 > **标注是文档，不是语义。编译器永远从函数体推断 convention，标注不改变编译行为。**
 
 - 标注一致 = 无事
-- 标注缺失/不一致 = warning（从不 error）
+- 标注缺失/不一致 = warning（人类场景从不 error；**agent profile 下经 CI gate 升级为 must-fix**——D-3 仲裁，philosophy.md ③）
 - lv0 能编译的代码加上任何标注后仍能编译
 - 编译错误只来自逻辑问题（use-after-move, 类型不匹配等）
 
-理论联系：此模型满足 Gradual Guarantee（Siek et al. 2015）的编译期变体——添加标注不改变编译行为，移除标注不引入编译错误，不一致标注仅产生 warning。这也意味着 Bidirectional Type Checking 不适用于 Ring——bidi check 依赖信任标注向下传播类型信息，但 Ring 的标注可能过时，编译器始终从函数体推断 truth。
+理论联系：此模型满足 Gradual Guarantee（Siek et al. 2015）的编译期变体——添加标注不改变编译行为，移除标注不引入编译错误，不一致标注仅产生 warning。这也意味着「信任标注向下传播」式的 bidi check 不适用于 Ring——标注可能过时，编译器始终从函数体推断 truth；来自调用上下文的双向传播（lambda 参数类型、expected type）仍正常使用（philosophy.md §3「Bidirectional + constraint solving」、design.md「Lambda 双向类型传播」决策行）。
 
 ### 2.5 Formatter 对 pub fn 的处理
 
@@ -276,17 +276,17 @@ x.push(42)         // α = Int（从 usage 消歧）
 | HM 推断 | ✅ 保证终止 | Damas-Milner 1982 |
 | Effect row inference | ✅ 多项式时间 | Leijen (Koka) 2017 |
 | Row polymorphism | ✅ HM 扩展 | Rémy 1989 |
-| Trait (无 overlap) | ✅ 简单查表 | — |
+| Trait (无 overlap) | ⚠️ blanket impl 终止性待审计（B-119，D-5 条款③） | — |
 | Associated types | ✅ 有限展开 | — |
 | 约束推断（方法→trait） | ✅ 有限遍历 | — |
 
-**Ring 当前系统完全可判定——类型检查保证终止。**
+**Ring 当前系统可判定（modulo D-5 待办：HM fuel 上限 + trait instance 终止性审计 = B-119）——类型检查以保证终止为硬约束（公理⑤）。**
 
 ### 6.2 未来特性的判定性风险
 
 | 特性 | Phase | 风险 | 缓解策略 |
 |------|-------|:---:|---------|
-| Refinement Types | C/D | 高（SMT 不可判定） | Z3 timeout → fallback runtime check |
+| Refinement Types | C/D | 高（SMT 不可判定） | 具名可判定片段（QF_LIA 类）；超出片段 = 编译错误要求显式 runtime check；**禁止 timeout 语义**（D-5，B-001 spec） |
 | GADTs | D | 中（推断不可判定） | GADT match scrutinee 需要已知类型 |
 | HKT | D | 中（高阶 unification） | 限制为 first-order（`* -> *`） |
 | Const Generics + Refinement | D | 高（定理证明） | 限制为 Presburger arithmetic（可判定片段） |
@@ -306,7 +306,7 @@ x.push(42)         // α = Int（从 usage 消歧）
 | Effect 子类型（impl ⊆ trait） | 编译器推断 truth，标注是文档 | ✅ 安全 |
 | mut 闭包共享 box | 单线程顺序安全；spawn 需要 move（阻止跨线程共享） | ✅ 安全（需证明） |
 | 逃逸检查完备性（B-068） | 直接逃逸 OK；闭包间接逃逸 + 泛型间接逃逸需要递归追踪 | ⚠️ 需要形式化 |
-| Perceus RC 循环引用 | 内存泄漏（非 UB）；Drop 副作用可能延迟/丢失 | ⚠️ B-042 待设计 |
+| Perceus RC 循环引用 | 内存泄漏（非 UB）；Drop 副作用可能延迟/丢失 | ✅ 已决策（`Weak<T>`，§9.5 / design.md §7.9；落地 = B-104 D3 + B-002） |
 | unsafe effect | 用户责任，系统不保证 | 设计如此 |
 
 ### 6.4 与 Rust 的对比
@@ -464,7 +464,7 @@ comptime 代码运行在编译期，必须终止：
 
 #### 数值类型
 
-16 个固定宽度类型，无 `Int`/`Float` 别名：
+14 个固定宽度类型，无 `Int`/`Float` 别名：
 
 ```
 I8, I16, I32, I64, I128
@@ -528,7 +528,7 @@ struct CacheLine { data: List<U8> }         // 显式对齐（cache line）
 **索引**：`Index`（`[]`）、`IndexMut`（`[]=`）
 
 - 不支持跨类型运算（`I32 + I64` 编译错误，需显式 `.to_i64()` 转换）
-- 16 个数值类型各自 impl 全套 trait（编译器内置）
+- 14 个数值类型各自 impl 全套 trait（编译器内置）
 
 #### 数值转换（2026-05-25 更新：零隐式转换）
 

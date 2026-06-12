@@ -54,7 +54,7 @@ Bidirectional + constraint solving + effect inference。写代码的体验接近
 
 ### 4. 无人回路 × 全场景（层 0 · 目标）
 
-终极目标：让 LLM agent 能在无人审查的情况下，自主编写**任意场景**的正确软件。全场景是无人回路的量词，不是第二个目标——全场景而无安全网的语言已经存在（C）；无人回路只覆盖窄域，则安全网恰好在 agent 最需要的地方（系统层）缺席。场景集具名（扩列 = 修宪）：**主战场 CLI / 服务端 / 系统编程；远期 WASM / 嵌入式 / GPU**（design.md §9）。全场景对设计的日常约束力由 ⑦ 承接。
+终极目标：让 LLM agent 能在无人审查的情况下，自主编写**任意场景**的正确软件。全场景是无人回路的量词，不是第二个目标——全场景而无安全网的语言已经存在（C）；无人回路只覆盖窄域，则安全网恰好在 agent 最需要的地方（系统层）缺席。场景集具名（扩列 = 修宪）：**主战场 CLI / 服务端 / 系统编程；远期 WASM / 嵌入式 / GPU**（本条即场景集正典清单；GPU 愿景另见 design.md §9）。全场景对设计的日常约束力由 ⑦ 承接。
 
 这是渐近北极星——近期现实形态 = 受监督的 agent 回路，各推论在两种回路下同等生效。每个语言特性的评估标准之一是"它能替代人类在开发回路中的哪个角色"。编译器不只是检查工具，而是自主开发闭环中替代人类的控制器。
 
@@ -76,7 +76,7 @@ Bidirectional + constraint solving + effect inference。写代码的体验接近
 
 **GC 取舍记录（2026-06-12 分析定案——放弃 GC 的真实理由，旧理由"GC 停顿"不成立）**：
 - **语义层费用 GC 省不掉**：公理 2/4 独立强迫 move 语义——引用语义使 `mut<S>` 系统性失真、aliasing bug 类对无人回路永久开放（B-110 否决理由与引擎无关）；Drop/RAII 强迫 move-only 类型存在。即便换 GC 引擎，所有权的用户面（5 个浮现点）几乎原样保留，省下的只有引擎层。
-- **引擎层四收益**：① 无 runtime——C ABI FFI 零摩擦、二进制小、WASM/嵌入式/GPU（design.md §9 远期）路径不堵死（2026-06-12 升格为公理⑦）；② 内存占用 = live set（GC 需 2-3× heap headroom，agent 并行 ×N 进程放大）；③ Perceus 特有——FBIP 原地复用、garbage-free 定理、D2 静态 verifier（"编译期证明 0 泄露"GC 给不了）；④ 竞争位——AI-native 同辈（Mojo/MoonBit/Zero）全选 ownership/no-GC；GC 化 = 进 Go/TS"够用就行"修罗场（效果推断差异化最弱处），no-GC 打的是"Rust 人体工学"这个公认无解痛点。
+- **引擎层四收益**：① 无 runtime——C ABI FFI 零摩擦、二进制小、WASM/嵌入式/GPU（远期场景，正典清单见上 ④）路径不堵死（2026-06-12 升格为公理⑦）；② 内存占用 = live set（GC 需 2-3× heap headroom，agent 并行 ×N 进程放大）；③ Perceus 特有——FBIP 原地复用、garbage-free 定理、D2 静态 verifier（"编译期证明 0 泄露"GC 给不了）；④ 竞争位——AI-native 同辈（Mojo/MoonBit/Zero）全选 ownership/no-GC；GC 化 = 进 Go/TS"够用就行"修罗场（效果推断差异化最弱处），no-GC 打的是"Rust 人体工学"这个公认无解痛点。
 - **不可逆性不对称（最硬一条）**：GC→确定性 retrofit 史上无成功案例（D 的 @nogc 残废、finalizer ≠ destructor）；RC→GC 级人体工学 = 当前设计纲领且已基本兑现（所有权仅 5 浮现点、全部 fail-safe）。要错就错在 no-GC 这边。
 - **可证伪锚点**：B-089 re-measure = Ring 首个 RC vs GC footprint 实测（native RC plateau vs V8 自编译基线）；若完整 RC 不优于 V8，此账重算。
 
@@ -191,7 +191,7 @@ Option 世界（数据类型）          Fail 世界（effect）
 - 函数参数和返回类型可以不写——HM 推断 + 双向推断
 - Lambda 参数类型在 HOF 上下文中自动推断：`xs.map(fn(x) { x * 2 })`
 - Effect 完全推断——函数签名中的 `with { io, fail<E> }` 由编译器自动计算
-- Formatter 按等级（0-4）自动补全标注，开发者控制详细度
+- Formatter 按等级预设自动补全标注（lv0/lv2 存储 + none…full 查看预设，design.md §3.2；等级系统细化待 D-8 专题），开发者控制详细度
 
 ### Trait = 行为，不是身份
 
@@ -228,7 +228,7 @@ TS 要读完实现才知道函数会抛什么异常。Ring 的模块签名包含
 |------|------|
 | 范式 | 过程式 + 函数式，零 OOP 语义 |
 | 命名 | snake_case，ALL_CAPS 常量 |
-| 不可变 | 默认不可变，`var` 显式声明可变 |
+| 不可变 | 默认不可变，`let mut` 显式声明可变 |
 | 数据结构 | struct + enum + trait，不造 class 层级 |
 | 内存 | Perceus RC + ownership 推断（无 borrow checker），零标注负担；bootstrap JS 后端暂用 V8 GC |
 | 注释 | `//` 单行（无块注释），默认不写注释 |
