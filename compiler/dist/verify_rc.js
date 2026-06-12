@@ -308,7 +308,7 @@ function rc_fatal_count(findings) {
 }
 
 function rc_verify_boundary_note() {
-  return "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), Eq/Ord dict synthesis (#151 known leak), handler evidence/catch closures (B-096), abort paths (longjmp skips scope drops — B-002).";
+  return "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), handler evidence/catch closures (B-096), abort paths (longjmp skips scope drops — B-002).";
 }
 
 function format_rc_findings(findings, strict) {
@@ -643,6 +643,10 @@ function v_droppable_init(init, externs) {
       break __ring_match9;
     }
     if (__ring_m9._tag === "Call") {
+      return true;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "DictConstruct") {
       return true;
       break __ring_match9;
     }

@@ -70,8 +70,11 @@
 //     temporary list; dropped by codegen — Stage 2 F round).
 //   * range-loop counter/bound boxes (emit_for_in_range_direct drops them —
 //     B-104b); a literal RangeExpr iterable is therefore accepted inline.
-//   * codegen-synthesised generic Eq/Ord dicts (#151 — KNOWN leak, pending
-//     independent close-out; CLOSURE/TUPLE residual).
+//   (the former "#151 codegen-synthesised Eq/Ord dicts" entry is RETIRED —
+//    B-104 D4 made dict evidence first-class: static dicts are never-drop
+//    module singletons (borrows, outside the account by construction) and
+//    dynamic wrapped dicts are HIR-visible DictConstruct locals in the normal
+//    LEAK/UAF/BALANCE account above.  No exemption class replaces it.)
 //   * handler evidence structs / catch closures (intentionally leaked at
 //     L0/L1 — B-096 scope) and closure env capture dups (balanced by
 //     drop_closure_env).
@@ -162,7 +165,7 @@ pub fn rc_fatal_count(findings: List<RcFinding>) -> Int {
 }
 
 pub fn rc_verify_boundary_note() -> Str {
-    "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), Eq/Ord dict synthesis (#151 known leak), handler evidence/catch closures (B-096), abort paths (longjmp skips scope drops — B-002)."
+    "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), handler evidence/catch closures (B-096), abort paths (longjmp skips scope drops — B-002)."
 }
 
 // Format findings: fatal lines always one-per-finding; exempt (documented)
@@ -433,6 +436,10 @@ fn v_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         HExpr::BoolLit { .. } => true,
         HExpr::Clone { .. } => true,
         HExpr::Call { .. } => true,
+        // B-104 D4: a dict construction is fresh-owned (mirrors
+        // perceus.is_droppable_init) — the dict_lower binding is dropped at
+        // scope end (runtime drop_dict).
+        HExpr::DictConstruct { .. } => true,
         HExpr::BinOp { op, .. } => match op { BinOp::And => false, BinOp::Or => false, _ => true },
         HExpr::UnaryOp { .. } => true,
         HExpr::IfExpr { then_branch, else_branch, .. } => {
