@@ -1347,6 +1347,12 @@ Ring 语义层模仿 Rust（move/borrow/Drop/RAII），底层用 RC 而非静态
 
 **COW 的角色澄清（同日）**：COW 不是独立优化，是「`.clone()` = O(1) dup」的**语义修复机制**——dup 省拷贝、COW 保语义（写入点 rc>1 先分叉再写；rc=1 原地写 = FBIP/reuse 入口）。真拷贝成本只在「clone 后双方存活且发生写入」时支付——恰是语义上必须拷贝的时刻。该能力为 RC 模型独有：运行时计数使「唯一持有？」成为 O(1) 可答问题——Rust 静态系统与 GC 均不可答（Rust clone 永远实拷）。B-110 move 杜绝可变别名 → COW 分叉永不可观测 → COW 从应用级特性降为纯引擎优化（即决策表「COW 不可观测原则」）。现状：dup 侧已落地（L1 `HExpr::Clone` = ring_dup）；写时分叉检查随 B-110 强制落地（过渡期两后端同为引用语义，差分不炸）。
 
+**COW 性能可预测性 = 三支柱（2026-06-13 拍定）**：COW 把拷贝成本从 clone 点搬到首个写入点且依赖运行时 rc 状态——归因漂移/非局部性/路径依赖是其经典软肋（Swift「意外 CoW 拷贝」前车之鉴）；且 Swift 的官方解药 `isKnownUniquelyReferenced` 被四通道之②封死（运行时唯一性查询 = identity 观测 API）。Ring 的自有答案：
+
+1. **成本上界定理（预算面）**：`.clone()` 语义成本 = 深拷贝，COW 是惰性兑现——**任何程序 COW 实际成本 ≤ eager 深拷贝成本**。按语义成本做预算，优化只省不加；不存在凭空悬崖，只存在「优化未省成、回落语义基线」（「优化不可观测」在性能面的投影：优化失效下界 = 语义成本）。分叉点对给定输入完全确定可复现（优于 GC 非确定停顿一档）。
+2. **move 锚点（归因面）**：Swift 病根 = 隐式共享（赋值即共享，rc 不可见乱涨），Ring B-110 后结构性不存在——「rc>1 且后续被写」仅源于显式 `.clone()`/`Rc<T>`（词法可见）；引擎隐式 dup 只在只读路径（永不分叉）。推论：**每次 COW 分叉的数据流上游必有用户亲手写的 clone/Rc 词法锚点**——归因从全程序大海捞针收窄为沿 lvalue 数据流回溯，有限可追、可教给 agent。
+3. **工具层（精调面，待 B-110 写时分叉落地后 Discussion 立项）**：① `ring audit cow`——静态枚举「上游有 clone/Rc 的写入点」= 潜在分叉面，与 `ring audit unsafe` 同手法（可枚举审查面）；② debug profile 分叉归因——按站点计数 + 报共享来源（复用 B-104 `RING_BOX_PROFILE` 侧表基建，release 零开销）；③ fbip 式零分叉断言——热路径函数声明不期望分叉，静态证明或 debug 检查（Koka `fbip` 血统，支柱 3 语义驱动性能的一块砖）。
+
 ### 7.10 Perceus 分层实现路线（2026-06-01 确定）
 
 Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 core dup/drop，再 borrowing，再 reuse）。Ring 切成可独立测试、独立 merge 的序列：
@@ -2266,6 +2272,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | unsafe 原语集 + `Ptr<T>` 拍定（2026-06-13，B-106 正文）| typed 单一 `Ptr<T>`（不分 const/mut）普通值、操作才 unsafe；原语 v1 = alloc/dealloc/read/write/offset(inbounds)/cast/copy/addr 互转（互转 safe）；read/write = 按位 move 不动 RC（Perceus 零特殊化，落 B-103 既有分类）；extern fn 声明处签字（调用点 safe，extern type 句柄层与 Ptr 并存）；跨界 per-type 三件套、不做泛型 addr_of；不做 MaybeUninit / 泛型 transmute / v1 volatile-atomic。详见 §7.12，实现 = B-125；RIIR 边界挂 B-104 后数据留 B-106 | 操作锚点使安全封装成立（持有即感染则容器 struct 定义本身被感染）；泛型 addr_of 把引擎私有值表示变可观测 API、堵死「优化不可观测」；inbounds 换别名分析/向量化（容器热路径）；声明处签字 = 信任点真实位置（签名忠实性在声明不在调用）+ 与现状 std 兼容、Rust 2024 同方向 |
 | RC 性能立场 = 渐近零开销（2026-06-13）| RC 计数当前有代价 = 优化器成熟度问题非模型税：树状所有权（静态可证唯一）处计数全部可优化消除（borrow 推断/move/reuse/单例化/标记指针/drop specialization），计数只保留在真共享处——该场景 Rust 同付 Rc/Arc。结论 = 相对 Rust 渐近无性能损失，差距可测量（B-104 re-measure 即实践）。详见 §7.9 | Rust 零开销只覆盖树状（borrow checker 静态证唯一 → 无条件 drop）；Perceus 框架下 Rust 模式 = 计数恒为 1 的退化情形，Ring 在可证唯一处向其收敛；真共享处两语言成本同构，Ring 把 Rust 手写 Rc 的标注负担变默认自动（lv0 零标注交换）|
 | RC 语义立场 = 与 Rust 四通道可观测等价（2026-06-13）| 语义模仿 Rust + RC 实现的全部可观测分叉收敛四通道：① Drop 副作用——「Drop 禁 Clone」+ B-110 move 使 Drop 类型恒计数 1、与 Rust 逐点一致（该规则实为 COW 不可观测承重墙，非仅「资源不可复制」）② identity——永不提供 ptr_eq/is 类算子（负面承诺，主动与 Rust `Rc::ptr_eq` 分叉）；现行债升格 = audit #156 ③ 析构顺序——唯一悬空，归 B-002 必答（默认对齐 Rust）④ drop 时机——D-1 as-if 已封。COW 定性 = 「clone = dup」的语义修复机制而非独立优化（rc=1 原地写 = FBIP 入口，RC 独有能力）。详见 §7.9 | 纯内存值无「何时 free」观测窗口 → RC vs 静态 drop 的分叉只能经 Drop 副作用/identity/顺序/时机四通道传播；逐通道封堵即「与 Rust 行为等价」的可枚举证明，与 unsafe discharge 清单同手法（暴露面有界可审计）|
+| COW 性能可预测性 = 三支柱（2026-06-13）| ① 成本上界定理：COW ≤ eager 深拷贝，预算按语义成本、优化只省不加、无凭空悬崖且确定可复现 ② move 锚点：B-110 后「rc>1 且被写」仅源于显式 clone/Rc——每次分叉数据流上游必有词法锚点，Swift 隐式共享病根结构性不存在 ③ 工具层（待 B-110 写时分叉落地后立项）：`ring audit cow` 静态分叉面枚举 + debug 分叉归因 profiler（复用 RING_BOX_PROFILE 基建）+ fbip 式零分叉断言（Koka 血统）。详见 §7.9 | COW 经典软肋 = 归因漂移/非局部性/路径依赖（Swift 前车之鉴）；Swift 解药 isKnownUniquelyReferenced = 运行时唯一性查询 = identity 观测 API，被四通道之②封死——Ring 必须以「预算上界 + 结构锚点 + 可枚举工具」替代，与 unsafe/audit 同手法 |
 | 公理体系 4→6 条 + GC 取舍成文（2026-06-12）| 新增公理 5「编译器必须终止」（可判定性成文，lang-design §11.7 放弃清单挂其下）+ 公理 6「确定性资源语义」（RC/move/Weak/unsafe 区的公理地基补全）；会话原则归推论（标注是文档→3；失真必须响/优化不可观测/审查面可枚举→4）；philosophy.md 为唯一真值源，本文件公理节改速记，CLAUDE.md/README 加速查指针；GC 取舍理由成文于公理 6（语义层费用 GC 省不掉 + 引擎层四收益 + 不可逆性不对称；「GC 停顿」不是理由；B-089 re-measure 为可证伪锚点）| 推导审计发现资源管理体系站在未成文承诺上——四公理字面下 GC 严格更优、推导不闭合；philosophy/design 公理全文双真值源已现漂移隐患 |
 
 ### 幽灵功能（已解析但无语义效果）
