@@ -1325,6 +1325,15 @@ match child.parent.upgrade() {
 - 类型系统禁止循环：限制过强
 - 混合方案（Perceus + cycle collector fallback）：两套机制，复杂度高
 
+**RC 性能立场：渐近零开销（2026-06-13 拍定）**
+
+RC 计数操作（dup/drop）**当前有运行时代价**——这被承认为优化器成熟度问题，**不是模型税**。立场：
+
+- **树状所有权（静态可证唯一）处的计数操作全部可被优化消除**，手段已在路线上：borrow 推断（L1，实参不逃逸不动计数）、move 语义（B-110，转移不计数）、Perceus reuse/FBIP（drop 原地复用）、单例化（B-104 D4 dict / D6 none+const，整类退出记账）、标记指针（B-080，标量不进堆）、后续 drop specialization。
+- **计数只保留在「真共享」（图状、静态不可证唯一）处**——而该场景 Rust 同样付 `Rc`/`Arc` 的钱：borrow checker 的零开销只覆盖树状所有权，真共享处两个语言成本同构。
+- **结论：相对 Rust 渐近无性能损失**。逐场景对照：树状——Rust 无条件 drop / Ring 计数消除后同样零计数；真共享——双方同付 RC；差距 = 优化器完成度，**可测量**（B-104 系列 re-measure 即此判据的实践），随支柱 3（语义驱动性能）持续收敛。
+- 在 Perceus 框架下 Rust 模式 = 「计数恒为 1 的退化情形」：Ring 在所有能静态证明唯一的地方向该退化情形收敛，换取的是 lv0 零标注 + 无 borrow checker（栏 C）——Rust 把真共享的标注负担交给程序员手写 `Rc`，Ring 把它变成默认且自动。
+
 ### 7.10 Perceus 分层实现路线（2026-06-01 确定）
 
 Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 core dup/drop，再 borrowing，再 reuse）。Ring 切成可独立测试、独立 merge 的序列：
@@ -2242,6 +2251,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | COW 不可观测原则（2026-06-11，所有权讨论）| COW 仅为 Perceus 引擎内部优化（`.clone()` = O(1) dup + 写时拷），**语义层绝不暴露**：任何用户可观测的 COW 分叉（写副本却以为写原件）= 设计错误，必须以编译错误或官方原地写法承接。投影绑定写入（`let item = xs[i]; item.f = v` 类）判定为 B-110 必须堵的洞（堵法见 B-110 spec 增补，机制实现前核定）| 内置且语义可见的 COW 在主流语言罕见（多为应用级特性）；静默分叉是行为级 heisenbug，对无人回路致命（agent 从局部代码看不出写丢了）；与 B-110「迁移必须响」同一原则 |
 | unsafe 区域图景（2026-06-11，所有权讨论）| 三栏总账（安全区 / unsafe 区 / 明确不做）+ `unsafe` effect 形态 + 两级 discharge（`mod requires {unsafe}` 许可 + `unsafe {}` 块吸收，关键字与 Rust 一致）+ `ring audit unsafe` 审计面；裸指针不参与 RC（extern type 排除规则推广）；撤销旧「不做 unsafe 块 / 裸指针」立场。详见 §7.12，原语集细化归 B-106 | unsafe 是所有权张力的最终出处——栏 C「明确不做」的可信度由栏 B 兜底背书；effect 形态 = 签名可见自动追踪（Rust 隔离 + effect 追踪复合，竞品无）；discharge 点清单 = 全代码库人类审查面，接无人回路公理 |
 | unsafe 原语集 + `Ptr<T>` 拍定（2026-06-13，B-106 正文）| typed 单一 `Ptr<T>`（不分 const/mut）普通值、操作才 unsafe；原语 v1 = alloc/dealloc/read/write/offset(inbounds)/cast/copy/addr 互转（互转 safe）；read/write = 按位 move 不动 RC（Perceus 零特殊化，落 B-103 既有分类）；extern fn 声明处签字（调用点 safe，extern type 句柄层与 Ptr 并存）；跨界 per-type 三件套、不做泛型 addr_of；不做 MaybeUninit / 泛型 transmute / v1 volatile-atomic。详见 §7.12，实现 = B-125；RIIR 边界挂 B-104 后数据留 B-106 | 操作锚点使安全封装成立（持有即感染则容器 struct 定义本身被感染）；泛型 addr_of 把引擎私有值表示变可观测 API、堵死「优化不可观测」；inbounds 换别名分析/向量化（容器热路径）；声明处签字 = 信任点真实位置（签名忠实性在声明不在调用）+ 与现状 std 兼容、Rust 2024 同方向 |
+| RC 性能立场 = 渐近零开销（2026-06-13）| RC 计数当前有代价 = 优化器成熟度问题非模型税：树状所有权（静态可证唯一）处计数全部可优化消除（borrow 推断/move/reuse/单例化/标记指针/drop specialization），计数只保留在真共享处——该场景 Rust 同付 Rc/Arc。结论 = 相对 Rust 渐近无性能损失，差距可测量（B-104 re-measure 即实践）。详见 §7.9 | Rust 零开销只覆盖树状（borrow checker 静态证唯一 → 无条件 drop）；Perceus 框架下 Rust 模式 = 计数恒为 1 的退化情形，Ring 在可证唯一处向其收敛；真共享处两语言成本同构，Ring 把 Rust 手写 Rc 的标注负担变默认自动（lv0 零标注交换）|
 | 公理体系 4→6 条 + GC 取舍成文（2026-06-12）| 新增公理 5「编译器必须终止」（可判定性成文，lang-design §11.7 放弃清单挂其下）+ 公理 6「确定性资源语义」（RC/move/Weak/unsafe 区的公理地基补全）；会话原则归推论（标注是文档→3；失真必须响/优化不可观测/审查面可枚举→4）；philosophy.md 为唯一真值源，本文件公理节改速记，CLAUDE.md/README 加速查指针；GC 取舍理由成文于公理 6（语义层费用 GC 省不掉 + 引擎层四收益 + 不可逆性不对称；「GC 停顿」不是理由；B-089 re-measure 为可证伪锚点）| 推导审计发现资源管理体系站在未成文承诺上——四公理字面下 GC 严格更优、推导不闭合；philosophy/design 公理全文双真值源已现漂移隐患 |
 
 ### 幽灵功能（已解析但无语义效果）
