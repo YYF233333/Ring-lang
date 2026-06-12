@@ -22,7 +22,7 @@
 
 **决策（2026-05-23）**：长期容忍。当前方案正确且无性能问题，改动大（L-XL）收益主要在未来后端。等 LLVM 后端需要时与 #16 一并重构。
 
-### #149 未标注 fn 的返回类型被过度泛化为自由 TypeVar（健全性洞）[high] [judgment] [open]
+### #149 未标注 fn 的返回类型被过度泛化为自由 TypeVar（健全性洞）[critical] [judgment] [open]
 
 `fn tp(mut xs: List<Int>) { xs.push(1) }`（无 `-> T` 标注）的返回类型在 generalization 后是**自由类型变量**——`let x: Str = tp([1])` **通过类型检查**（实测 `check` OK）。JS 后端 x = undefined 静默流动；native 后端是**致命组合**：tp 的 body tail 是 receiver-returning Unit builtin（`xs.push` 结果 Unit-typed 被 rc 排除 → move verbatim 不 dup）→ ABI 返回**活 receiver 指针**、call-site 类型却是 TypeVar → 规则②（Unit 类型级排除）拦不住 → 任何 droppable 位置（`let r = tp(a)` 自 B-103 起；arg/receiver/statement 位随 Stage 2 各轮）把它 scope-end-drop → **与 caller 容器 double-free**（ASan 双向实证：c470d13 上 `let r = tp(a)` UAF；守卫后 EXIT 0）。**Perceus 侧已加 unknown-ownership 守卫**（`is_unresolved_var_type`：TypeVar/ErrorType 不材料化、不 droppable，Clone 保留；git 89d2eb7，泄漏方向，单态 call-site zonk 后不受影响）。**本条是 checker 根修**：未标注 fn 的 expected_ret fresh var 应与 body 类型 unify 后不被 generalize（infer_decl.ring:1304-1311 路径），修复方向需拍板（涉及推断语义）。回归：`tests/cases/llvm/exprstmt_discard_drop.ring` #149 段锁守卫；checker 修复后应加负面测试断言 `let x: Str = tp([1])` 报错。Stage 2 commit message 中曾以 #148 引用。发现者：B-104 D1 Stage 2（Round C3，llvm_diff `mutator_result_binding.ring` ×3 确定性触发后追根）。
 
