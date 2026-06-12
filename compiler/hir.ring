@@ -562,18 +562,10 @@ pub fn is_borrow_returning_call(callee: HExpr) -> Bool {
     }
 }
 
-// A call whose result may be ONE OF ITS ARGUMENTS returned VERBATIM (no dup)
-// with a MOVED (not Clone-wrapped) result — `fold` returns `init` unchanged on
-// an empty receiver.  Materialising/dropping such a result (or its args) can
-// double-free; both perceus (anf_arg) and the codegen condition drop must
-// treat these as non-fresh.  Sole member per the B-103 completeness audit
-// (table in perceus.ring); principled exit = runtime dup-on-empty (audit #150).
-pub fn is_arg_returning_call(callee: HExpr) -> Bool {
-    match callee {
-        HExpr::FieldAccess { field, .. } => field == "fold",
-        _ => false,
-    }
-}
+// is_arg_returning_call (sole member `fold`) was RETIRED here on 2026-06-12
+// (B-104 D1 Stage 3, audit #150): ring_list_fold now dups `init` on the
+// empty-receiver path, so no runtime callee returns an argument verbatim with
+// a moved result — every call result is OWNED on every path.
 
 // B-104 D1 Stage 2 — fresh-owned Bool CONDITION value (the while-cond /
 // match-guard box).  HIR cannot express "unbox the condition, THEN release the
@@ -587,9 +579,9 @@ pub fn is_arg_returning_call(callee: HExpr) -> Bool {
 //     e.g. `a && obj.flag`) → false.
 //   * UnaryOp → `!x` boxes a fresh result.
 //   * Call, unless borrow-returning (unwrap family → borrow of the receiver's
-//     payload) or arg-returning (fold → may alias a caller-owned arg): a Ring
-//     fn returns OWNED (clone-all-escape Clone-wraps tail borrows) and scalar
-//     builtins are boxed fresh at the call site.
+//     payload): a Ring fn returns OWNED (clone-all-escape Clone-wraps tail
+//     borrows) and scalar builtins are boxed fresh at the call site (`fold`
+//     included since the #150 empty-path dup — owned on every path).
 //   * BoolLit → a fresh box per evaluation (`while true`).
 //   * Clone → an owned dup by construction (a dropping cond-block's
 //     Clone-wrapped tail — rc_block_inner's tail-escape invariant).
@@ -626,8 +618,7 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
         },
         HExpr::UnaryOp { .. } => true,
         HExpr::Call { callee, .. } =>
-            is_borrow_returning_call(callee) == false
-            && is_arg_returning_call(callee) == false,
+            is_borrow_returning_call(callee) == false,
         HExpr::BoolLit { .. } => true,
         HExpr::Clone { .. } => true,
         // A Block's value is its tail's value.  POST-RC SHAPE: a block that

@@ -16,7 +16,7 @@ use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler,
     hexpr_type, hexpr_span, hexpr_effects,
     collect_extern_type_names, is_rc_excluded_type, type_contains_extern_handle,
-    is_borrow_returning_call, is_arg_returning_call}
+    is_borrow_returning_call}
 use types::{Type}
 
 // ============================================================
@@ -403,11 +403,12 @@ fn anf_materialize(expr: HExpr, mut hoists: List<HStmt>, mut counter: List<Int>)
 // caller's scope-end Drop is balanced.  Recurse, then materialise if fresh-owned
 // (R1/R4).
 //
-// ⚠️ NOT for CALL / EFFECTOP arguments or a MATCH SCRUTINEE — see anf_arg.  Those
-// positions can ALIAS the operand into the result (a callee that returns an arg
-// verbatim, e.g. `list.fold(init, …)` returns `init` unchanged on an empty list →
-// the result box IS the arg box; a match arm that returns the scrutinee), so
-// materialising+dropping the arg double-frees the box the result binding also owns.
+// This now covers EVERY operand position, including CALL / EFFECTOP arguments
+// and the MATCH scrutinee.  The historical alias hazards are all closed: a match
+// arm that returns the scrutinee is Clone-wrapped by rc_escape (W2), and the last
+// verbatim-arg-returning callee (`fold` on an empty list) was closed at the
+// runtime by the #150 dup-on-empty (B-104 D1 Stage 3) — no callee hands back an
+// un-dup'd argument any more, so materialise+scope-drop is sound everywhere.
 fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
     let normalized = anf_expr(expr, hoists, externs, counter)
     if anf_should_materialize(normalized, externs) {
@@ -415,20 +416,6 @@ fn anf_operand(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut coun
     } else {
         normalized
     }
-}
-
-// Normalise a sub-expression in a CONSERVATIVE arg-aliasing position: recurse into
-// its own nested CONSUMING operands (which still hoist + materialise normally), but
-// NEVER materialise the top-level expression itself.  The SOLE remaining user
-// (B-104 D1 Stage 2 — W2 reclaimed the match scrutinee, Stage 2 reclaimed
-// EffectOp args via the handler-tail Clone-wrap balance) is:
-//   * a `fold`-family CALL arg — fold returns `init` verbatim on an empty list with
-//     a moved result (is_arg_returning_call; list_fold.ring heap-corruption
-//     regression).  Materialising + scope-dropping it would double-free the box
-//     the result binding also moves.  Residual crash-free leak; the principled
-//     exit is a runtime dup-on-empty-return (see audit #150).
-fn anf_arg(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
-    anf_expr(expr, hoists, externs, counter)
 }
 
 // A Block (or non-block single expr) used as a function/branch/loop body or value.
@@ -737,21 +724,14 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             // function return-clones its tail (clone-all-escape) so it never hands
             // back an un-dup'd arg, and owned/borrow builtins are likewise safe (a
             // borrow-returning result is Clone-wrapped at the binding, balancing the
-            // materialised arg's drop — see is_arg_returning_call).
-            //
-            // EXCEPTION — a callee that returns an arg VERBATIM with a MOVED result
-            // (`fold`, per is_arg_returning_call): materialising its args would
-            // double-free the arg box the result binding also moves.  Keep those args
-            // UN-materialised borrows (anf_arg, recurse-only) — residual crash-free
-            // leak, the cost of no full return-mode analysis.
-            let arg_returning = is_arg_returning_call(new_callee)
+            // materialised arg's drop — see is_borrow_returning_call).  The last
+            // verbatim-arg-returning callee (`fold` on an empty list, a MOVED
+            // result) was closed at the runtime by the #150 dup-on-empty (B-104 D1
+            // Stage 3) — every callee now returns OWNED on every path, so EVERY
+            // arg materialises (the anf_arg conservative mechanism is retired).
             let mut new_args: List<HExpr> = []
             for a in args {
-                if arg_returning {
-                    new_args.push(anf_arg(a, hoists, externs, counter))
-                } else {
-                    new_args.push(anf_operand(a, hoists, externs, counter))
-                }
+                new_args.push(anf_operand(a, hoists, externs, counter))
             }
             HExpr::Call { callee: new_callee, args: new_args, type_args: type_args,
                 resolved_dicts: resolved_dicts, dict_dispatch: dict_dispatch,
@@ -778,9 +758,7 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             //     materialised receiver outlives the block's own drops.
             //   * Fresh receivers of Unit-typed mutators (`f(x).push(v)`) are
             //     reclaimed (the receiver-returning ABI result is excluded by
-            //     rule ② everywhere).  `fold` returns an ARG, never the receiver,
-            //     so receiver materialisation is independent of
-            //     is_arg_returning_call.
+            //     rule ② everywhere).
             //   * Borrow receivers (Ident / FieldAccess chains / non-Str index /
             //     borrow-returning calls) fail anf_should_materialize and stay
             //     in-place reads — unchanged.
@@ -903,9 +881,9 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
             // the match is NOT in escape position (statement / borrow arg), arm tails
             // are borrows and nothing else takes ownership, so the scrutinee's single
             // scope-end Drop is still balanced.  Same Clone-wrap balance that makes
-            // W1's unwrap_or arg safe.  Unlike `fold` (W1 is_arg_returning_call), a
-            // match never MOVES the scrutinee out un-dup'd — arm tails always route
-            // through rc_escape, which Clones owner-bearing returns.  ASan-verified
+            // W1's unwrap_or arg safe.  A match never MOVES the scrutinee out
+            // un-dup'd — arm tails always route through rc_escape, which Clones
+            // owner-bearing returns.  ASan-verified
             // (real_program matches + self-compile).
             // Arm bodies + guards are their own scopes (R2).
             let new_scrutinee = anf_operand(scrutinee, hoists, externs, counter)
@@ -1320,56 +1298,20 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 // is_fresh_owned_bool_value) need the same classification, and cross-stage
 // contracts belong in hir.ring.  THIS TABLE REMAINS THE EVIDENCE RECORD —
 // update it together with any membership change in hir.ring's
-// is_borrow_returning_call / is_arg_returning_call.
+// is_borrow_returning_call.
 
-// B-104 W1 (arg materialise): a call whose result may be ONE OF ITS ARGUMENTS
-// returned VERBATIM (no dup) AND whose result is NOT Clone-wrapped on escape
-// (callee ∉ is_borrow_returning_call → is_owner_bearing(Call) is false → the
-// binding MOVES the result).  For such a callee, MATERIALISING an argument into a
-// `let __anf` and scope-end-dropping it would double-free: on the arg-returning
-// path the result IS the arg box, the result binding also owns it (move), so both
-// drop the same allocation (list_fold.ring empty-list heap corruption).  Args to
-// these callees must therefore stay UN-materialised borrows (anf_arg, recurse-only)
-// — a residual crash-free leak, the cost of not having full callee return-mode
-// analysis.
-//
-// Membership is NARROW by design.  An arg-returning callee that IS borrow-returning
-// (e.g. `Option.unwrap_or` returns the `default` ARGUMENT on None) does NOT belong
-// here: its result is Clone-wrapped on escape (is_owner_bearing(Call)=true via
-// is_borrow_returning_call), and that dup exactly balances the materialised arg's
-// scope-end drop — so materialising unwrap_or's arg is SOUND, no double-free.  Only
-// `fold` qualifies: it returns `init` verbatim on an empty list AND its result is
-// MOVED (it cannot join is_borrow_returning_call — on the common non-empty path it
-// returns the closure's FRESH owned accumulator, which Clone-wrapping would leak).
-//
-// Safety asymmetry (mirrors is_borrow_returning_call, opposite direction): OMITTING
-// a genuine return-arg-and-move callee → a materialised arg double-frees → CRASH.
-// Mis-INCLUDING a callee → its args stay borrows → LEAK (crash-free).  So this list
-// errs toward INCLUSION.  ASan (real_program ×3 + self-compile) is the completeness
-// net: a double-free pinpoints a missed callee, which is then added here.
-//
-// B-103 COMPLETENESS AUDIT (2026-06-11, full ring_runtime.cpp enumeration — see
-// the classification table above is_borrow_returning_call): `fold` remains the
-// SOLE member.  Every other runtime function that returns an argument verbatim
-// falls in one of two exempt classes:
-//   1. Option projections (`unwrap_or` returns `default`; `unwrap_or_else`
-//      forwards the closure result) — ∈ is_borrow_returning_call, so the result
-//      is Clone-wrapped on escape; that dup balances a materialised arg's drop.
-//   2. Receiver-returning mutators (push/set/insert/remove/add/clear/extend/
-//      line/add_int return ARG 0) — exempt on TWO grounds: the returned
-//      "argument" is the RECEIVER, which is part of the FieldAccess callee,
-//      not of `args`, so anf never materialises it; and their results are
-//      Unit-typed, so D1 rule ② excludes them from Clone/Drop/owned/materialise
-//      at every position (B-104; previously the B-103 name listing in
-//      is_borrow_returning_call provided the equivalent Clone-wrap balance).
-//      Their VALUE args are sink positions (sink_arg_indices → rc_escape
-//      Clone), which independently balances a materialised arg's drop.
-// Ring-level functions can never join this list: clone-all-escape Clone-wraps a
-// returned borrowed param at the return/tail escape position, so every Ring fn
-// returns OWNED (the B-103 "no fixpoint needed" theorem, backlog B-103).
-//
-// ⚠️ Predicate relocated to hir.ring alongside is_borrow_returning_call (shared
-// with the codegen condition-box drops); this comment block is its evidence.
+// B-104 W1 arg-returning classification (is_arg_returning_call, sole member
+// `fold`) — RETIRED 2026-06-12 (B-104 D1 Stage 3, audit #150).  ring_list_fold
+// now dups `init` on the empty-list path, so no runtime callee returns an
+// argument verbatim with a MOVED result any more: every call result is OWNED
+// on every path, all call args materialise (anf_operand), and the anf_arg
+// conservative mechanism is deleted.  The B-103 completeness audit's two exempt
+// classes stand unchanged (Option projections balance via is_borrow_returning_
+// call's escape Clone; receiver-returning mutators are excluded type-level by
+// D1 rule ②), and Ring-level functions still always return OWNED
+// (clone-all-escape, the B-103 "no fixpoint needed" theorem).  Decision record:
+// design.md appendix decision table「fold 空表 verbatim-init 修复方向」; full
+// pre-retirement evidence text: git history (this block, pre-2026-06-12).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // B-101 DEAD ROAD (Wave A,证伪 2026-06-05) — DO NOT re-introduce a function-level

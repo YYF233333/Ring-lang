@@ -30,8 +30,8 @@
 // code and are invisible in HIR (see rc_verify_boundary_note).
 //
 // ── Exemption classes (leak-direction, documented; non-fatal) ─────────────
-//   x-fold-arg          fold call args stay un-materialised borrows; a fresh-
-//                       owned arg leaks (perceus anf_arg; audit #150 pending).
+//   (x-fold-arg retired 2026-06-12 — #150 closed by the ring_list_fold
+//    empty-path dup; fold args materialise like any call args now.)
 //   x-andor             `&&`/`||` yield the RHS box verbatim (phi); an owned
 //                       RHS / And-Or result has no consumer (is_droppable_init
 //                       And/Or exclusion; D1 保守保留).
@@ -83,8 +83,8 @@
 //   The per-function return-mode classification of ring_runtime.cpp builtins
 //   (FRESH/BORROW/SCALAR/NULL-NEVER) is the shared ground truth established
 //   by B-103 (evidence table in perceus.ring, predicates in hir.ring).  The
-//   verifier consumes it via is_borrow_returning_call / is_arg_returning_call
-//   / is_str_index — its independent value is the structural ACCOUNTING
+//   verifier consumes it via is_borrow_returning_call / is_str_index — its
+//   independent value is the structural ACCOUNTING
 //   (exactly-once over every position and path), not the leaf table, whose
 //   completeness is validated by ASan (the B-103 safety net).
 //
@@ -97,7 +97,7 @@ use types::{Type}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, hexpr_type, hexpr_span,
     collect_extern_type_names, is_rc_excluded_type, type_contains_extern_handle,
-    is_borrow_returning_call, is_arg_returning_call, is_fresh_owned_bool_value}
+    is_borrow_returning_call, is_fresh_owned_bool_value}
 use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
     sink_arg_indices, is_variant_constructor_call, expr_diverges, stmt_diverges,
     is_scalar_type}
@@ -580,18 +580,13 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                 _ => { v_borrow(callee, "", ctx) },
             }
             let ctor = is_variant_constructor_call(callee, ty)
-            let folds = is_arg_returning_call(callee)
             let sinks = sink_arg_indices(callee, args.len())
             let mut i = 0
             for a in args {
                 if ctor || v_list_has_int(sinks, i) {
                     v_consume(a, ctx)
                 } else {
-                    if folds {
-                        v_borrow(a, "x-fold-arg", ctx)
-                    } else {
-                        v_borrow(a, "", ctx)
-                    }
+                    v_borrow(a, "", ctx)
                 }
                 i = i + 1
             }
