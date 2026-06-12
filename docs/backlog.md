@@ -102,6 +102,7 @@ Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪
 - 共享访问 → `Rc<T>`（Ring 等价物），Rc 可 Clone，内部资源 Drop 在 Rc 归零时触发
 - 无 `linear` 关键字——`impl Drop` 是唯一的 ownership 入口
 - 容器持有 Drop 类型值 → 容器 Drop 自动 drop 所有元素，容器自身不因此获得 Drop 约束
+- **析构顺序必答（2026-06-13 增补，design.md §7.9 四通道之③——四通道唯一悬空项）**：实现时必须成文 drop 顺序承诺（同 scope 逆序 / struct 字段声明序 / 容器元素序，**默认对齐 Rust**），两后端一致并入差分回归；成文前顺序属实现产物、用户代码不得依赖
 
 **LLM 友好性**：本质是 Rust move/drop/RAII 语义，LLM 从 Rust 训练数据天然理解。自动浮现路径：LLM 正常写代码 → move 后使用原变量 → 编译器报 "value moved" → LLM 修。无新概念。
 

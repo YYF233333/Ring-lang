@@ -36,6 +36,12 @@
 
 ## Codegen
 
+### #156 Eq 语义残留 identity 比较：native contains/index_of 裸指针 + JS find/Map key `===`（COW 可观测性洞）[medium] [judgment] [open]
+
+- `ring_runtime.cpp:895/903`（`ring_list_contains` / `ring_list_index_of`）为裸指针比较（注释自认 "pointer comparison (bootstrap)"）；JS 后端 contains 已走 Eq trait → **两后端现行发散**。JS 侧残留 = `List.find` / Map key `===`（CLAUDE.md 已知限制在案）。
+- **升格定性（2026-06-13 Discussion）**：不止正确性债——identity 比较是 RC 实现泄进语义的**现行窗口**（dup 副本同地址 → contains 判 true，深拷贝异地址 → 按值判定；COW/dup 因此可观测，design.md §7.9 四通道之②）。配套语言层负面承诺：**永不提供 ptr_eq/is 类算子**（含 `Rc<T>` 上）。
+- 修复方向：Eq trait 派发统一（native contains/index_of 接 Eq dict 路径）；Map key 归 B-107（泛型 key + Hash trait）。
+
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
 可移植性问题。
