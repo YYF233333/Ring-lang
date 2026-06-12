@@ -8,7 +8,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     get_or_assign_typeid, RING_TYPEID_DICT_STATIC}
-use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter}
+use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter, emit_memoised_const_body}
 use codegen_ctx::{extract_effect_names}
 
 // Re-declare LLVM types and functions to avoid ESM cross-module import issues
@@ -191,20 +191,36 @@ fn emit_const_body(mut ctx: LlvmCtx, name: Str, init: HExpr) {
 
     match ctx.functions.get(const_fn_name) {
         some(fn_val) => {
-            let saved_fn = ctx.current_fn
-            ctx.current_fn = some(fn_val)
+            // B-104 D6 (#154): a Str const's getter is a lazy memoised
+            // SINGLETON (never-drop typeid via ring_const_intern) — the LLVM
+            // mirror of the JS backend's module-level `const`.  Use sites
+            // already borrow (perceus treats const Idents as owner-bearing
+            // borrows; pre-D6 the per-access fresh re-evaluation is what
+            // leaked).  Non-Str consts keep the per-access form: scalar boxes
+            // are FRESH-owned and correctly dropped at use sites today — not a
+            // leak class, and not worth the singleton-aliasing surface.
+            let is_str_const = match hexpr_type(init) {
+                Type::StrType => true,
+                _ => false,
+            }
+            if is_str_const {
+                emit_memoised_const_body(ctx, fn_val, const_fn_name, init)
+            } else {
+                let saved_fn = ctx.current_fn
+                ctx.current_fn = some(fn_val)
 
-            let saved_named = ctx.named_values
-            ctx.named_values = map_new()
+                let saved_named = ctx.named_values
+                ctx.named_values = map_new()
 
-            let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
-            LLVMPositionBuilderAtEnd(ctx.builder, entry)
+                let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+                LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
-            let val = gen_llvm_expr(ctx, init)
-            LLVMBuildRet(ctx.builder, val)
+                let val = gen_llvm_expr(ctx, init)
+                LLVMBuildRet(ctx.builder, val)
 
-            ctx.named_values = saved_named
-            ctx.current_fn = saved_fn
+                ctx.named_values = saved_named
+                ctx.current_fn = saved_fn
+            }
         },
         none => {
             // Not forward-declared, skip

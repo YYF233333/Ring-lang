@@ -80,6 +80,22 @@
 //                 owning binding is scope-end-dropped.
 #define RING_TYPEID_DICT_STATIC 16
 #define RING_TYPEID_DICT_DYN    17
+// B-104 D6 (#153/#154): module-level immutable singletons, mirroring the JS
+// backend's frozen `Option_none` / module-level consts.  Both NEVER-DROP
+// (registered in ring_runtime_init) — stray dup/drop are no-ops, same
+// defense-in-depth leg as DICT_STATIC.
+//   OPTION_NONE  — THE process-wide `none` value (layout identical to a
+//                  tag==1 OPTION; pattern matches read the tag and never the
+//                  typeid).  Built lazily by ring_enum_none; every producer
+//                  (codegen's ring_Option_none + all runtime helpers) returns
+//                  this one pointer, so none==none pointer identity matches
+//                  the JS oracle's `Option_none === Option_none`.
+//   CONST_STATIC — a `const` declaration's initialiser value, built once
+//                  inside the codegen-emitted memoised getter and retagged
+//                  via ring_const_intern (data layout unchanged — a retagged
+//                  Str is still read as std::string* by every str op).
+#define RING_TYPEID_OPTION_NONE 18
+#define RING_TYPEID_CONST_STATIC 19
 #define RING_TYPEID_USER_BASE 64  // user-defined types start here
 
 // ============================================================================
@@ -209,7 +225,8 @@ static bool g_box_atexit = (atexit(ring_box_profile_report), true);
 // program has live ≈ allocs (1:1, never plateaus), a reclaiming one has live
 // plateau (frees keep pace).  Periodic stderr reports (every ~32M allocs) + atexit
 // give a leak% trajectory even when a self-compile is memory-capped before exit.
-// typeid quick-ref: 0=INT 2=BOOL 3=STR 4=LIST 7=CLOSURE 8=OPTION 10=TUPLE 64+=user.
+// typeid quick-ref: 0=INT 2=BOOL 3=STR 4=LIST 7=CLOSURE 8=OPTION 10=TUPLE
+// 16/17=DICT(static/dyn) 18=NONE-SINGLETON 19=CONST-STATIC 64+=user.
 // Used to attribute the G-a memory wall (B-104): the precise-Perceus waves drive
 // the leak% down by dropping owned temporaries that clone-all-escape leaves alive.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,6 +377,31 @@ extern "C" void ring_register_never_drop(int64_t typeid_val) {
     }
 }
 
+// B-104 D6 (#154): retag a freshly built `const` initialiser as an immortal
+// module-level singleton.  Called exactly once per const, from the build leg of
+// the codegen-emitted memoised getter (emit_const_body's lazy path).  Only the
+// header typeid changes — the data layout is untouched, so e.g. a retagged Str
+// is still read as std::string* by every str op (nothing in the runtime
+// dispatches on the STR typeid except dup/drop + diagnostics).  After the
+// retag, stray dup/drop on the singleton are no-ops (never-drop table).
+extern "C" void* ring_const_intern(void* p) {
+    if (!p) return p;
+    uint32_t* tid_p = (uint32_t*)((char*)p - 4);
+#ifdef RING_ALLOC_STATS
+    // Move the live-count to the CONST_STATIC class so the original class
+    // (e.g. STR) is not polluted by one immortal entry per const decl.
+    if (*tid_p < 4096) g_live_tid[*tid_p]--;
+    g_live_tid[RING_TYPEID_CONST_STATIC]++;
+#endif
+#ifdef RING_BOX_PROFILE
+    // Drop the box-profile sample recorded at allocation (immortal by design;
+    // keeping it would show one permanent fake "leak" per const decl).
+    ring_box_profile_erase(p);
+#endif
+    *tid_p = RING_TYPEID_CONST_STATIC;
+    return p;
+}
+
 static void ring_drop_by_typeid(uint32_t tid, void* data) {
     if (tid < 4096 && drop_table[tid]) {
         drop_table[tid](data);
@@ -467,6 +509,10 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
     // (immortal, bounded); dynamic wrapped dicts release their method closures.
     never_drop_table[RING_TYPEID_DICT_STATIC] = true;
     drop_table[RING_TYPEID_DICT_DYN] = drop_dict;
+    // B-104 D6 (#153/#154): the none singleton + const-initialiser singletons
+    // are immortal module-level values (bounded: 1 none + one per const decl).
+    never_drop_table[RING_TYPEID_OPTION_NONE] = true;
+    never_drop_table[RING_TYPEID_CONST_STATIC] = true;
 }
 
 // ============================================================================
@@ -836,10 +882,7 @@ extern "C" void* ring_list_slice(void* list, int64_t start, int64_t end) {
 extern "C" void* ring_list_pop(void* list) {
     auto* vec = (std::vector<void*>*)list;
     if (vec->empty()) {
-        void* data = ring_alloc(sizeof(int64_t) * 2, RING_TYPEID_OPTION);
-        ((int64_t*)data)[0] = 1; // None tag
-        ((int64_t*)data)[1] = 0;
-        return data;
+        return ring_enum_none(); // B-104 D6: the none singleton (was an inline fresh tag-1 OPTION)
     }
     void* val = vec->back();
     vec->pop_back();
@@ -915,11 +958,33 @@ static void* ring_enum_some(void* val) {
     return data;
 }
 
+// B-104 D6 (#153): `none` is a lazy memoised PROCESS SINGLETON — the runtime
+// mirror of the JS backend's frozen module-level `Option_none` (runtime.ring:208).
+// Allocated once with the never-drop OPTION_NONE typeid (stray dup/drop are
+// no-ops; OPTION alloc-stats/box-profile classes stay some-only).  Every none
+// producer returns this pointer: the codegen-called ring_Option_none (defined
+// below — the generated module only DECLARES it since D6) and all runtime
+// helpers (find/get_opt/pop/try...).  Kills the per-eval fresh none (D5: 64.2M
+// live=born=100% @2.382B self-compile) — nobody ever dropped a none because
+// HIR/perceus correctly treat `none` as a borrow of a module singleton; the
+// fresh-per-eval lowering was the LLVM-backend deviation.
+static void* g_ring_none_singleton = nullptr;
 static void* ring_enum_none() {
-    void* data = ring_alloc(sizeof(int64_t) * 2, RING_TYPEID_OPTION);
-    ((int64_t*)data)[0] = 1;
-    ((int64_t*)data)[1] = 0;
-    return data;
+    if (!g_ring_none_singleton) {
+        void* data = ring_alloc(sizeof(int64_t) * 2, RING_TYPEID_OPTION_NONE);
+        ((int64_t*)data)[0] = 1;
+        ((int64_t*)data)[1] = 0;
+        g_ring_none_singleton = data;
+    }
+    return g_ring_none_singleton;
+}
+
+// The symbol every codegen use-site of `none` calls (gen_ident →
+// call_zero_arg_or_return).  Pre-D6 this was a codegen-EMITTED function body
+// that ring_alloc'd a fresh tag-1 OPTION per call; now codegen only forward-
+// declares it and the runtime provides the singleton.
+extern "C" void* ring_Option_none() {
+    return ring_enum_none();
 }
 
 // ============================================================================

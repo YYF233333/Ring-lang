@@ -174,6 +174,15 @@ pub const RING_TYPEID_CLOSURE_ENV: Int = 15
 pub const RING_TYPEID_DICT_STATIC: Int = 16
 pub const RING_TYPEID_DICT_DYN: Int = 17
 
+// B-104 D6 (#153/#154): runtime-side never-drop singleton typeids — documented
+// here for the typeid map only, codegen never allocates with them directly:
+//   18 OPTION_NONE  — the process-wide `none` singleton (ring_enum_none /
+//                     ring_Option_none, both defined in ring_runtime.cpp; the
+//                     generated module only DECLARES ring_Option_none).
+//   19 CONST_STATIC — `const` initialiser values, retagged once inside the
+//                     memoised const getter via ring_const_intern
+//                     (emit_memoised_const_body).
+
 // ============================================================
 // LLVM name mangling
 // ============================================================

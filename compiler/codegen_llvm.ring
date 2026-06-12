@@ -458,6 +458,13 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     ctx.fn_types.insert("ring_Option_some", some_fn_ty)
 
     // Option_none: () -> ptr
+    // B-104 D6 (#153): DECLARATION ONLY — the body lives in ring_runtime.cpp,
+    // which returns the lazy memoised none SINGLETON (never-drop typeid
+    // OPTION_NONE), mirroring the JS backend's frozen module-level Option_none.
+    // Pre-D6 a body was emitted here that ring_alloc'd a fresh tag-1 OPTION per
+    // call — D5 measured it at 64.2M live=born=100% @2.382B self-compile
+    // (nothing ever drops a none: HIR/perceus treat `none` as a borrow of a
+    // module singleton, which is now what every call site actually gets).
     let none_fn_ty = LLVMFunctionType(ptr, [], 0)
     let none_fn = LLVMAddFunction(ctx.module, "ring_Option_none", none_fn_ty)
     ctx.functions.insert("ring_Option_none", none_fn)
@@ -477,14 +484,7 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
     discard(LLVMBuildStore(ctx.builder, LLVMGetParam(some_fn, 0), some_val_ptr))
     discard(LLVMBuildRet(ctx.builder, some_ptr))
 
-    // Generate Option_none body
-    let none_entry = LLVMAppendBasicBlockInContext(ctx.context, none_fn, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, none_entry)
-    let none_size = LLVMSizeOf(option_ty)
-    let none_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [none_size, option_typeid], "opt")
-    let none_tag_ptr = LLVMBuildStructGEP2(ctx.builder, option_ty, none_ptr, 0, "tag")
-    discard(LLVMBuildStore(ctx.builder, LLVMConstInt(i64, 1, 0), none_tag_ptr))
-    discard(LLVMBuildRet(ctx.builder, none_ptr))
+    // (no Option_none body — see the D6 declaration note above)
 
     // Result<T, E>: { Ok(T), Err(E) } → { i64 tag, ptr payload }
     let result_ty = LLVMStructTypeInContext(ctx.context, [i64, ptr], 0)

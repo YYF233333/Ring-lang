@@ -1248,6 +1248,54 @@ pub fn emit_memoised_dict_getter(mut ctx: LlvmCtx, name: Str, build_fn: LLVMValu
     fn_val
 }
 
+// B-104 D6 (#154): emit a Str const's getter body as a lazy memoised SINGLETON
+// (D4 dict-getter shape).  Pre-D6 the zero-arg const fn re-evaluated its
+// initialiser on EVERY access (ring_str_from_cstr fresh alloc; D5 measured the
+// BUILTIN_* getters at ≈29.6M live @2.382B self-compile — call sites correctly
+// treat a const access as a borrow of a module-level value, mirroring the JS
+// backend's module-level `const`, so nobody ever dropped the fresh copies).
+// Getter shape:
+//   entry: %c = load @__ring_constg_<fn> ; br (%c == null), build, done
+//   build: %v = ring_const_intern(<init expr>) ; store %v, @g ; br done
+//   done:  ret load @g
+// ring_const_intern retags the once-built value with the never-drop
+// CONST_STATIC typeid (defense in depth: stray dup/drop on the singleton are
+// no-ops; data layout untouched).
+pub fn emit_memoised_const_body(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled: Str, init: HExpr) {
+    let g = LLVMAddGlobal(ctx.module, ctx.ptr_type, "__ring_constg_${mangled}")
+    LLVMSetInitializer(g, LLVMConstPointerNull(ctx.ptr_type))
+
+    let saved_fn = ctx.current_fn
+    let saved_named = ctx.named_values
+    ctx.current_fn = some(fn_val)
+    ctx.named_values = map_new()
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    let build_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "build")
+    let done_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "done")
+
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+    let cached = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "cc"))
+    // 32 = LLVMIntEQ
+    let isnull = LLVMBuildICmp(ctx.builder, 32, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "cn"))
+    discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
+    let built = gen_llvm_expr(ctx, init)
+    let intern_fn = get_or_declare_runtime_fn(ctx, "ring_const_intern", [ctx.ptr_type], ctx.ptr_type)
+    let intern_ty = get_rt_fn_type(ctx, "ring_const_intern")
+    let interned = LLVMBuildCall2(ctx.builder, intern_ty, intern_fn, [built], fresh_name(ctx, "ci"))
+    discard(LLVMBuildStore(ctx.builder, interned, g))
+    discard(LLVMBuildBr(ctx.builder, done_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, done_bb)
+    let result = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "cv"))
+    discard(LLVMBuildRet(ctx.builder, result))
+
+    ctx.named_values = saved_named
+    ctx.current_fn = saved_fn
+}
+
 // B-104 D4: synthesise (once) the memoised getter `ring_dict_init_<name>` for a
 // static dict with no impl-generated init function:
 //   * a dict_lower wrapped INSTANCE (static_dict_defs entry with inner != []):

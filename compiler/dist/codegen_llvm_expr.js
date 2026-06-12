@@ -1701,6 +1701,34 @@ function emit_memoised_dict_getter(ctx, name, build_fn, build_fn_ty) {
   return fn_val;
 }
 
+function emit_memoised_const_body(ctx, fn_val, mangled, init) {
+  const g = LLVMAddGlobal(ctx.module, ctx.ptr_type, `__ring_constg_${mangled}`);
+  LLVMSetInitializer(g, LLVMConstPointerNull(ctx.ptr_type));
+  const saved_fn = ctx.current_fn;
+  const saved_named = ctx.named_values;
+  ctx.current_fn = Option_some(fn_val);
+  ctx.named_values = map_new();
+  const entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry");
+  const build_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "build");
+  const done_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "done");
+  LLVMPositionBuilderAtEnd(ctx.builder, entry);
+  const cached = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, codegen_llvm_ctx$fresh_name(ctx, "cc"));
+  const isnull = LLVMBuildICmp(ctx.builder, 32, cached, LLVMConstPointerNull(ctx.ptr_type), codegen_llvm_ctx$fresh_name(ctx, "cn"));
+  discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, build_bb);
+  const built = gen_llvm_expr(ctx, init);
+  const intern_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_const_intern", [ctx.ptr_type], ctx.ptr_type);
+  const intern_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_const_intern");
+  const interned = LLVMBuildCall2(ctx.builder, intern_ty, intern_fn, [built], codegen_llvm_ctx$fresh_name(ctx, "ci"));
+  discard(LLVMBuildStore(ctx.builder, interned, g));
+  discard(LLVMBuildBr(ctx.builder, done_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, done_bb);
+  const result = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, codegen_llvm_ctx$fresh_name(ctx, "cv"));
+  discard(LLVMBuildRet(ctx.builder, result));
+  ctx.named_values = saved_named;
+  ctx.current_fn = saved_fn;
+}
+
 function get_or_create_static_dict_getter(ctx, name) {
   const fname = `ring_dict_init_${name}`;
   __ring_match54: {
@@ -5794,4 +5822,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { gen_llvm_expr, is_boxed_def, build_cell_alloc, build_cell_store, get_or_create_dict_global, emit_memoised_dict_getter, box_int, box_float, box_bool, unbox_to_i1 };
+export { gen_llvm_expr, is_boxed_def, build_cell_alloc, build_cell_store, get_or_create_dict_global, emit_memoised_dict_getter, emit_memoised_const_body, box_int, box_float, box_bool, unbox_to_i1 };
