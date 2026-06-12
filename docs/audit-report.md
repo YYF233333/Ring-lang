@@ -124,10 +124,6 @@ parser.ring:2143/2147 以字符串字面量 `"E0105"` 报错，codes.ring 无 co
 
 cli.ring:177 "Single-file run not yet implemented"（EXIT 1），且在源文件目录残留 `.ring_tmp_run.js`（orchestrator 实测复现）。CLAUDE.md 常用命令已改为 build + node 流。修复方向：实现单文件 run（编译 + 执行 + 清理临时产物），或删 stub 改提示 build 流；`--debug` 同路径一并处理。发现者：B-115。
 
-### #155 llvm_diff harness：case 名含 "update" 等 UAC 关键词时 exe 启动失败（ERROR_ELEVATION_REQUIRED），假阴/挂死 [medium] [judgment] [doing]
-
-`tests/llvm_diff.test.mjs` 把 exe 链接成 `<case 名>.exe`——Windows UAC installer-detection 启发式对名含 update/setup/install/patch 的无 manifest exe 要求提权 → `struct_update_enum.exe` 自 2026-06-12 起在本机 100% 启动失败（昨日 D4 ×3 还全绿 = 机器策略状态变化，非代码回归；同字节改名 `sue_plain.exe` 即正常，HEAD/d1f10ff 两 runtime A/A 同失败）。**失败形态多变且极易误判为堆损坏**：经 cmd.exe/execSync 时或为空 stdout + exit 0（assert 实际输出为空）、或 consent 路径卡死 60s ETIMEDOUT。当前影响：`npm run test:llvm` 恒 71/72，×3 纪律判读须排除该例。修复方向曾列三案：① harness 链接到中性临时名（如 `case_N.exe`）② 链接时嵌 asInvoker manifest ③ 改 case 文件名避开关键词。**已拍板（2026-06-12 Discussion）= ②：harness 链接步骤统一嵌 asInvoker manifest**（根治整类——任何 exe 名对安装检测启发式免疫，且顺手把文档/脚本中 ring.exe 的链接配方一并补 manifest）；若 clang/lld 嵌入路径受阻（工具链问题）→ 回 feedback 报告，不自行切①。**执行时序：先行或随 B-104 D6 首棒，解锁 llvm_diff 72/72 的 ×3 判读基线**。发现者：B-104 D5（测量并行验证时撞出）。
-
 ## 代码质量 / 可维护性
 
 ### #6 `runtime.ring` 用数百个 `.push()` 拼接 JS 运行时代码 [low] [mechanical] [open]

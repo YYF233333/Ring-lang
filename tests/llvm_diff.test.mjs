@@ -59,7 +59,12 @@ function runLlvm(ringFile) {
   try {
     sh(`node "${RING}" build "${ringFile}" --target=llvm`);
     // Big stack: a few cases recurse; LLVM native default stack is 1MB.
-    sh(`clang "${oFile}" "${RUNTIME_O}" -o "${exeFile}" -lmsvcrt -Wl,/STACK:536870912`);
+    // Embedded asInvoker manifest (audit #155): without a manifest, Windows
+    // installer-detection heuristics demand elevation for exe names containing
+    // update/setup/install/patch (e.g. struct_update_enum.exe) -> launch fails
+    // with ERROR_ELEVATION_REQUIRED or hangs on the consent path. The manifest
+    // makes any case name immune.
+    sh(`clang "${oFile}" "${RUNTIME_O}" -o "${exeFile}" -lmsvcrt -Wl,/STACK:536870912 -Wl,/MANIFEST:EMBED -Wl,/MANIFESTUAC:level='asInvoker'`);
     return sh(`"${exeFile}"`);
   } finally {
     fs.rmSync(oFile, { force: true });
