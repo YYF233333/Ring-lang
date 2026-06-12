@@ -80,13 +80,7 @@ ring_runtime.cpp 的 HOF 家族在循环内持有闭包结果/合成临时但从
 
 > （#150 fold 空表 verbatim 返回 init 的 double-free 洞已于 2026-06-12 修复删除：`ring_list_fold` 空表路径 dup-on-share + fold 退役出 `is_arg_returning_call` + anf_arg 机制删除，git `0f80b42`/`735a669`，回归 `tests/cases/llvm/fold_empty_owner_init.ring`。原文「map/set fold 同形」经核实**不成立**——`ring_map_fold`/`ring_set_fold` 符号不存在，见 #138 精化。）
 
-### #151 codegen 合成的 builtin Eq/Ord dict + 闭包 per-call-site 构造后不 drop（CLOSURE/TUPLE 残余泄漏主体嫌疑）[medium] [judgment] [open]
-
-泛型 Eq/Ord dict 派发在调用点合成 fresh dict（`ring_get_builtin_dict` → fresh TUPLE of fresh closures，分类表已标 FRESH）——这些是 **codegen 合成临时、HIR 不可见**，ANF/材料化永远盖不到，构造后无人 drop。Stage 2 收口全部 ANF 可达位置后，自编译残余 live 主体 = STR 86.5M / BOOL 67.8M / **CLOSURE 63.8M / TUPLE 31.9M**（@2.382B）——CLOSURE+TUPLE 高度疑似本项（编译器自身闭包多为 HOF 实参、已被 W1 回收）。发现者：B-104 D1 Stage 2（残余归因）。（首报时列的两个修复方向即后来三案中的 (a)/(b)，已被下方拍板取代。）
-
-**诊断坐实（2026-06-12，probe 实证 + 站点清单）**：5 probe × 100K 热循环逐 box 计数——泛型 Eq 派发恰泄 **1 TUPLE + 2 CLOSURE + 1 STR/次**（STR = dict 名字串，resolve 站点 gen_str_lit 每次 fresh，**本项第三个成员**）；用户 `ring_dict_init` 路径 1 TUPLE + 1 CLOSURE/次；**单态 `xs.contains()` 同样 4 box/次**（影响面不限泛型代码）；对照组 0 泄漏。泛型 Ord 另泄 cmp 结果 INT box/次（`gen_ord_dispatch_llvm` unbox 后不 drop，同 while-cond box 家族，收口时一并补）。合成站点 4 路（resolve_dict_ref 三子路径 / TraitDispatch::Direct / gen_dict_closure_wrapper / build_wrapped_dict）全部 per-call-site-execution fresh、dict 数据零复用；**JS 后端同名 dict = 模块级单例 const → fresh-per-execution 是 LLVM 后端独有偏离**。自编译 @2.382B TUPLE:CLOSURE = 31.7M:63.4M 恰 1:2（Eq-dict 指纹）→ 本项 ≈ residual live 的 **28%~38%，当前最大单一泄漏类**。
-
-**修复方向已拍板（2026-06-12 Discussion）= (c) dict evidence HIR 一等化 + 吸收 (b) 单例语义（静态单例 + 动态局部）**：静态 dict = HIR 模块级单例实体（使用点 borrow 引用，两后端同源 lower），动态 wrapped = HIR 局部 evidence 构造值（owned，D1/D2 正常覆盖，verifier 豁免类删除）；Ord-result-box 一并补。否决 (a) per-use drop / 纯 (b) codegen 级缓存。spec = backlog **B-104 D4**；设计真值 = design.md §7.11「dict evidence HIR 一等化」+ 决策表。修后量化验证（tid7/tid10/tid3 + churn）归 D4 验收。
+> （#151 dict evidence 泄漏已于 2026-06-12 修复删除：B-104 D4 dict evidence HIR 一等化落地（静态单例 + 动态局部），git `0411b4c`..`f8d8891` + 验收 `663827a`/`2635bcc`；re-measure @2.382B leak 14.0%→9.2%（−34.1%，预测 28~38% 实测 34% 正中）、CLOSURE/TUPLE 退出 top-6、5-probe 固化 `tests/cases/llvm/dict_singleton_hotloop.ring`。归因/三案对比存档 = design.md §7.11 + git history。）
 
 
 

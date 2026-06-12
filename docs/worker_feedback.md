@@ -35,3 +35,19 @@
   - tid16(DICT_STATIC)/tid17(DICT_DYN) 全程未进自编译 top-6（计数器仅报 top-6，自编译精确值不可见；probe 侧实证 tid16=3 / tid17=0，单例常量量级符合预期）。INT 3.90M / tid169 4.13M plateau 维持（精确-RC 标量修复在新规模继续成立）。
 - [通知] **G-a 三门逐门判定**：① live plateau——**未达**（线性爬升仍在，累计 leak 斜率 14.0%→9.2%）；② peak << 25.9GB——**未达**（15GB 护机 kill，自然 peak 未见）；③ 自编译跑完——**未达**（kill 点比基线多走 28%~53%，终点未到）。#151 修复规模如预测兑现但非最后一堵墙：残余 ~9% 仍随 allocs 线性爬升，**下一个最大类 = BOOL 71.4M@2.38B**（#152 runtime HOF 谓词 box——filter/any/all/find 每元素泄 1 BOOL，编译器重度使用——+ And/Or phi 保守保留类双嫌疑），其后 OPTION 64.2M（待归因）/ STR 残余 57.5M（#152 for_each 合成 key 嫌疑 + 待归因）/ SB 11.9M（前棒 [观察] 维持）/ tid103 用户结构 5.4M（新进 top-6 可见类）。
 - [通知] **capstone 待安排**：全强度 ASan 自编译（`quarantine_size_mb=256:malloc_context_size=12`）本棒未跑——用户不在场，thrash 风险需人盯（CLAUDE.md：CPU 掉零 + 磁盘狂转即杀）。D4 milestone capstone 待用户回来安排。
+
+## B-104 D4 后下一杠杆（2026-06-12 orchestrator 汇总）
+
+### 1. G-a 未达，下一杠杆选择 [决策]
+
+**现状**：D4 兑现（residual −34.1%，#151 收口正中预测 28~38%），但 G-a 三门全未达（详见上「验收棒」组逐门判定）。残留 live 新排序 @2.382B：**BOOL 71.4M > OPTION 64.2M > STR 57.5M > SB 11.9M > tid103 5.4M（新可见）**；INT 3.90M plateau（合法存活）。
+**原因**：BOOL 有双嫌（#152 HOF 谓词 box / And/Or phi 保守保留类）但无定量切分；OPTION/tid103 完全未归因——直接动手有打地鼠回潮风险（2026-06-09 已拍板反对）。
+**待决策**（可组合）：
+- (A) **#152 runtime HOF 内部临时 drop**（已立案 medium：filter/any/all/find 谓词 Bool box、fold 中间 acc、for_each 合成 STR key；runtime 改动逐函数核对面大，#152 原文建议独立 wave + ×3 全套）
+- (B) **And/Or phi 保守保留类收口**（BOOL 另一嫌；D1 保守清单项，需 phi 所有权分析，工程难度高于 A）
+- (C) **先归因测量再动手**（box-profile/计数器对 BOOL 来源定量切分 #152-谓词 vs And/Or-phi；OPTION 64.2M 与 tid103 一并归因；工具现成）——**orchestrator 推荐先 C**，用数据定 A/B 顺序与是否值得
+- (D) **capstone 全强度 ASan 自编译终验**（D4 是 milestone，按 ASan 跑法纪律该跑一次；可过夜，需你在场盯 thrash；与 A-C 不冲突）
+
+### 2. exempt 账面核正 [通知]
+
+backlog #150 行曾记「1292→1289 exempt」；orchestrator 在 HEAD `2635bcc` 实测 self-verify = **1292 exempt 持平**（x-fold-arg −3 与 anf_arg 删除后统一材料化的新增命中相抵）。backlog/CLAUDE.md 已核正，WB1 的核账请求闭环。
