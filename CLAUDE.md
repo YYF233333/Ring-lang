@@ -47,7 +47,7 @@ Ring-lang/
 - **HIR**：独立数据结构，每个表达式带推断的 Type + EffectRow，语法糖已展开
 - **DiagnosticSink**：Lexer/Parser/Checker 错误统一收集，支持多错误报告
 - HIR 独立于 AST，后续优化 pass 在 HIR → Codegen 之间插入
-- **Perceus RC pass**（`perceus.ring`，仅 `--target=llvm`）：HIR → [escape-clone/drop 插入] → RC 标注 HIR → Codegen LLVM。**L1 借用引擎 clone-all-escape**（读取 borrow、逃逸点 `HExpr::Clone`、scope-end-drop-once，已撤 branch-balancing），翻译 Koka POPL'21 borrowing 扩展。实现模型见 design.md §7.11
+- **Perceus RC pass**（`perceus.ring`，仅 `--target=llvm`）：HIR → [escape-clone/drop 插入] → RC 标注 HIR → Codegen LLVM。**L1 借用引擎 clone-all-escape**（读取 borrow、逃逸点 `HExpr::Clone`、scope-end-drop-once，已撤 branch-balancing），翻译 Koka POPL'21 borrowing 扩展。post-RC HIR 经 `verify_rc.ring` 静态 LEAK/UAF/BALANCE 检查（`--verify-rc`，随 npm test 强制）。实现模型见 design.md §7.11
 - **双后端**：`--target=js`（默认，bootstrap）和 `--target=llvm`（native，开发中）共享同一 HIR
 
 ## 开发约定
@@ -55,6 +55,7 @@ Ring-lang/
 - 编译器源码是 Ring（`compiler/*.ring`），snake_case 命名
 - 编译器各阶段共享约定放 `hir.ring`（如 `variant_js_name`），不允许跨阶段硬编码字符串契约
 - **修改编译器后必须重新编译 dist/**：`node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist`，并提交更新后的 dist/ 文件。**Worktree merge 后的 rebuild 必须 amend 进 merge commit**——不允许 broken intermediate state（dist/ 失配）作为独立 commit 存在。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist 编译新源码的产出可能有引用错误，需先用 worktree 的 dist 做中间 bootstrap 再 double bootstrap。
+- **dist-llvm/ rebuild 纪律与 dist/ 同级**：动编译器（含 lexer/parser 等任何前端阶段）或 RC/LLVM 后端后同步重编 `node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm` 并提交；worktree merge 后的重建一并 amend 进 merge commit（背景：维护 wave `b19c85b` 改 lexer 后未重建 dist-llvm）。
 - 注释语法 `//`，无 pipe 运算符，UFCS `.method()` 是唯一链式调用方式
 - 生成的 JS 代码应可读——方便调试
 - 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源
@@ -74,6 +75,7 @@ Ring-lang/
 - **回归测试写 E2E 层**：不写 "第 X 行生成的 JS 应该是 Y"——codegen 实现可变
 - **度量语义覆盖**，不度量代码行覆盖
 - **LLVM 差分回归测试**（`tests/cases/llvm/*.ring` + `tests/llvm_diff.test.mjs`，`npm run test:llvm`）：每个用例用 JS 和 LLVM 两个后端编译运行，断言输出一致（JS 后端是 oracle）。锁定历次 LLVM codegen/RC/effect-handler 修复——用例即规约，修复明细在 git history。需本地 clang，无则自动 skip。**动 RC 的改动必须 ×3 跑全套**（间歇性堆损坏单跑约 1/3 命中，单跑假绿）。
+- **RC 静态 verifier 套件**（`tests/verify_rc.test.mjs`，随 `npm test`）：post-RC HIR 线性检查（LEAK/UAF/BALANCE 三判据）——self-verify 门（编译器自身 0 errors）+ llvm 用例 in-process sweep + 负面套件。见 design.md §7.11 D2
 
 ## 已知限制
 
@@ -114,7 +116,7 @@ Ring-lang/
 
 - **已落地地基**：L0 RC 基础设施（B-012）→ L1 借用引擎 clone-all-escape（B-098，从根消除 #134 move-analysis double-free 崩溃类）→ over-free/UAF 链终结（B-101→B-102→B-103，细节见 git）→ **B-103 return-mode 分类 ✅（2026-06-11）**：ring_runtime.cpp ~170 函数全量分类表（FRESH/BORROW/SCALAR/NULL-NEVER，逐函数证据）落 `perceus.ring`、`is_borrow_returning_call` 曾含 9 个 receiver-returning mutator 字段名（D1 规则②落地后退役，Unit 类型级规则接管）、runtime dup-on-share 补全 ×9。
 - **结论（2026-06-09 拍板，数据驱动）**：G-a 主因 = incomplete RC——clone-all-escape 只 drop named 绑定 + 逃逸，**不 drop 中间临时**；墙主体 74.5% 是非标量临时（STR/OPTION/CLOSURE/TUPLE）。标记指针只消 ~21%（BOOL+INT）→ **B-080 降级为后续 peak/perf，B-109 折入 B-104**。停 wave 式「哪里漏堵哪里」打地鼠，做完整 Perceus（garbage-free by construction，Koka POPL'21 定理）。
-- **执行序**：**D1 total return-mode drop pass ✅（2026-06-11/12 全落地，Stage 1-3，git `bfd4fe6`..`26aadf1`）**——规则①②③④（extern/Unit 类型级排除、Str-IndexExpr=FRESH、runtime overwrite/remove drop）+ ANF 可达位置全收口 + 2 个新不变量（dropping-block tail-escape / unknown-ownership 守卫）；llvm_diff 57→68 例、自编译 leak 15.3%→14.1%@2.382B（残余主体 STR/BOOL/CLOSURE/TUPLE，头号嫌疑 audit #151 codegen 合成 dict——HIR 不可见，D1 范围外待独立收口）→ **D2 静态 leak verifier ✅（2026-06-12，git `6d7cfc0`..`efe6054`）**——`verify_rc.ring` + `--verify-rc`，挂 `npm test`（817 = 743 e2e + 74 verify）；编译器自身 **0 errors + 1292 文档化豁免**（12 个 leak 向豁免类 + codegen 级边界 + abort/B-002，清单见 verify_rc.ring 头注）；上线即抓出 RC pass **3 个真实潜伏漏洞**并 fix-forward（break/continue 边泄漏循环 owned 集 ×264 处 / cond-phi box 漏 drop / W4 误 drop And-Or borrow box 潜伏 UAF）→ **D3** 0 泄露 = 无环 by-construction + 环用 `Weak<T>`（§7.9）→ **native re-measure ✅ 读数（2026-06-12，git `b2782a6`）：leak 14.0%@2.382B（D2 修复规模兑现≈无感）、live 无 plateau、peak 15GB kill@2.617B 自编译未跑完——G-a 未达**；最大单一残留类 = **audit #151 codegen 合成 dict（~28-38% residual，TUPLE:CLOSURE=1:2 指纹坐实 + dict 名 STR + Ord 结果 INT box；单态 contains 同样命中）**，修复方向推荐 codegen 级全局缓存单例（JS 后端本就是模块级单例，LLVM fresh-per-execution 是偏离）**[决策] 待拍板**；次一个可见类 = SB 11M [观察]。实现模型见 design.md §7.11。
+- **执行序**：**D1 total return-mode drop pass ✅（2026-06-11/12 全落地，Stage 1-3，git `bfd4fe6`..`26aadf1`）**——规则①②③④（extern/Unit 类型级排除、Str-IndexExpr=FRESH、runtime overwrite/remove drop）+ ANF 可达位置全收口 + 2 个新不变量（dropping-block tail-escape / unknown-ownership 守卫）+ Stage 3 收尾 #150 ✅（2026-06-12，git `0f80b42`/`735a669`：fold 空表 dup-on-share + `is_arg_returning_call`/`anf_arg` 退役——实参材料化全覆盖零特例；顺带新发现 runtime HOF 内部泄漏类 → audit #152）；llvm_diff 57→70 例、自编译 leak 15.3%→14.1%@2.382B（残余主体 STR/BOOL/CLOSURE/TUPLE，头号嫌疑 audit #151 codegen 合成 dict——HIR 不可见，D1 范围外待独立收口）→ **D2 静态 leak verifier ✅（2026-06-12，git `6d7cfc0`..`efe6054`）**——`verify_rc.ring` + `--verify-rc`，挂 `npm test`（818 = 744 e2e + 74 verify）；编译器自身 **0 errors + 1289 文档化豁免**（11 个 leak 向豁免类 + codegen 级边界 + abort/B-002，清单见 verify_rc.ring 头注）；上线即抓出 RC pass **3 个真实潜伏漏洞**并 fix-forward（break/continue 边泄漏循环 owned 集 ×264 处 / cond-phi box 漏 drop / W4 误 drop And-Or borrow box 潜伏 UAF）→ **native re-measure ✅ 读数（2026-06-12，git `b2782a6`）：leak 14.0%@2.382B（D2 修复规模兑现≈无感）、live 无 plateau、peak 15GB kill@2.617B 自编译未跑完——G-a 未达**；最大单一残留类 = **audit #151 codegen 合成 dict（~28-38% residual，TUPLE:CLOSURE=1:2 指纹坐实 + dict 名 STR + Ord 结果 INT box；单态 contains 同样命中）**，修复 = **D4 dict evidence HIR 一等化（当前步，2026-06-12 拍板 = 三案 (c) + 吸收 (b) 单例语义：静态 dict = HIR 模块级单例、动态 wrapped = 局部 evidence 值；spec 见 backlog B-104 D4）** → 再 re-measure → SB（tid13 ≈12M）归因。**D3（0 泄露范围）**= 无环 by-construction + 环用 `Weak<T>`（§7.9）。实现模型见 design.md §7.11。
 **后续**：B-089 native 自举终验（G-a/b/c）→ B-099 native LLVM-C 链接（Node 消除）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
 **遗留**：impl effect 传播修复、LSP 移植、技术债清理（见 `docs/audit-report.md`）
@@ -157,7 +159,7 @@ node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=comp
 
 ## ASan 跑法（两档，2026-06-11 定）
 
-ASan 对自编译（2.5 亿次分配）默认参数会放大 ~100x（每次 malloc/free 抓 30 帧栈 + redzone + quarantine），半小时起步。分两档：
+ASan 对自编译（数十亿次分配，@2026-06-12 ~26 亿）默认参数会放大 ~100x（每次 malloc/free 抓 30 帧栈 + redzone + quarantine），半小时起步。分两档：
 
 - **gating（内循环 / ×3 例行 / llvm_diff + real_program）**：`ASAN_OPTIONS=malloc_context_size=0:quarantine_size_mb=16:max_redzone=32:detect_leaks=0`（**已设为 User 级默认 env，新 shell 自动继承**；已在跑的旧 session 需内联设置）。检测面不变（立即 UAF/over-free 照抓），代价 = 报告无 alloc/free 栈 + 延迟 UAF 覆盖缩小。**ASan self-compile 不进内循环**——内循环 self-compile 用非 ASan + alloc/free 计数器 + 退出码（20s/轮）。
 - **capstone 终验（self-compile 全量 ASan，每个 milestone 一次，可过夜）**：必须显式覆盖回全强度 `$env:ASAN_OPTIONS='quarantine_size_mb=256:malloc_context_size=12'`。gating 抓到 bug 后对单用例用此档重跑拿完整 alloc/free 栈。
