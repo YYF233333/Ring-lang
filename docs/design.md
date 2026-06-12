@@ -1418,6 +1418,17 @@ B-104 四波（W1/W2/W3a/W4）+ 两个 range-loop 修复（counter `15b5318` / b
 
 **标记指针（B-080）降级**：从「G-a 真解」降为后续 **peak/perf 优化**（消 ~21% BOOL+INT 装箱 churn + 标量分配，**非泄漏驱动**）；condition-result Bool box 由 total pass drop（precise RC），BOOL 装箱本身的 churn 留 B-080。**G-a 经 B-104 完整 RC 达成，不依赖 B-080。**
 
+**dict evidence HIR 一等化（#151 根治，2026-06-12 拍板，实现 = B-104 D4）**：
+
+D1/D2 收口后 re-measure（2026-06-12）显示 G-a 后两门未达，最大单一泄漏类（residual 28%~38%）= **audit #151：LLVM 后端在调用点执行时 fresh 合成 trait dict**——泛型 Eq 派发恰泄 1 TUPLE + 2 CLOSURE + 1 dict 名 STR/次（5-probe 实证），单态 `xs.contains()` 同中。结构性原因：**dispatch 决策（`DictRef`/`TraitDispatch`，hir.ring:22-31）早已 HIR 可见，但 dict 值的构造与生命周期在 codegen 层合成**——HIR/ANF/D1/D2 永远盖不到，只能当 verifier 豁免类。JS 后端同名 dict = 模块级单例 const → per-execution fresh 是 LLVM 后端独有偏离。
+
+**拍板 = 三案中 (c) HIR 一等 evidence，吸收 (b) 单例语义（静态单例 + 动态局部混合形态）**，否决 (a) per-use drop（codegen 内手工配对面大 + churn 不消，自编译 ~1.27 亿对 malloc/free 留热路径）与纯 (b) codegen 级缓存（解决泄漏与 churn 但 dict 仍 HIR 不可见，豁免类永存）：
+
+- **静态 dict（Simple + inner 全静态的 Wrapped）= HIR 模块级单例实体**：使用点 = borrow 引用（不 Clone / 不 Drop / 不入 owned），两后端从同一 HIR 实体 lower——JS emit 模块级 const（现状不变，结构对齐），LLVM emit module 级 global + 使用点单 load。churn 与 TUPLE/CLOSURE/STR 三类泄漏一次全消。
+- **动态 dict（inner 含动态 dict 参数的 Wrapped）= HIR 局部 evidence 构造表达式**：owned，D1 普通规则 drop、D2 verifier 正常记账——(b) 覆盖不了的残留在 (c) 下也被正确收口，verifier 的 #151 豁免类整类消失。
+- **有界性论证（与 R-clean 否 Type intern 不冲突）**：Type 随推断步无界新生，故 intern/never-drop 是死路；dict 集 = 程序文本的静态属性（#impl × #trait + builtin 组合，小常数）→ 单例真等价于安全 intern。单例建议 dedicated never-drop typeid 作纵深（stray drop 变 no-op）。
+- **范围边界**：只一等化 dict 的构造与生命周期；**不重构 evidence 参数传递机制**（`TraitDispatch::Dict{param}` / dict 实参线程化已工作，不动）。Ord cmp 结果 INT box（`gen_ord_dispatch_llvm` unbox 后不 drop，while-cond box 同家族）是独立 codegen 缺口，随 D4 一并补。
+
 ### 7.12 unsafe 区域图景（2026-06-11 确定，细化归 B-106）
 
 **定位：unsafe 区是所有权模型全部张力的最终出处——它定义「语言不在安全区处理什么」。** 三栏总账，每个表达力缺口必居其一、不允许悬空：
@@ -2181,6 +2192,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | A2 Type hash-cons 边界（2026-06-07，B-102 Phase 2）| 只在 `apply_subst` **5 个**复合 arm intern（Fn/Generic/Record/EffectRow/Tuple，**排除 Struct/Enum**），表塞 `UnionFind`（零线程化）；**含未解析 TypeVar 不入表**（`type_intern_key -> Str?`，订正旧述「输出已 resolve」）；key 逐字对齐 `types_equal`（Record/EffectRow 无序排序、**FnType effects 有序**、不复用有损 `type_to_string`）；O(1) 相等彩蛋解耦另立项 | apply_subst 每次重建 spine = 2.51亿洪流；intern 去重达 G-a（A1 never-drop 不去重仍 ~25.9GB）。**Struct/Enum 排除**：nominal-shallow key 不健全——apply_subst 不代换 variants/fields、exhaustive.ring 却结构化读，intern 任选缓存致 stale payload（回归 tuple_option_sugar）；否决代换 variants（爆栈，见 occurs_in/apply_subst 忽略 fields 一条）/deep key（违反 key==types_equal） |
 | 泛型 Map key（2026-06-07，B-107，P2）| 加 `Hash` trait + derive，runtime Map key 改 void* 经 Eq/Hash dict 派发（复用 `ring_get_builtin_dict`）| 类型层 `Map<K,V>` 全泛型但 runtime 只兑现 Str key（两后端，LLVM 具体化）= 类型系统说谎；bootstrap 编译器全 `Map<Str,..>` 故未暴露。镜像 Eq/Ord/Clone derive 机制；与 B-080 unboxing 协同 |
 | LLVM 增量编译 deferred（2026-06-07，B-105）| 维持单 Module/单 .o；增量（每 .ring→.o）deferred 至 native 成主工具链（B-099 后）+ 编译时间成实测痛点 | 当初为省跨模块符号解析；不阻塞 B-089/099/100。真难点 = 跨模块单态化（泛型实例 emit 何处，Rust/C++ 模板问题），非 link，具体方案真做时再 Discussion |
+| dict evidence HIR 一等化（2026-06-12，#151 根治，B-104 D4）| 三案取 (c) HIR 一等 evidence + 吸收 (b) 单例语义：静态 dict = HIR 模块级单例实体（使用点 borrow 引用，两后端同源 lower）、动态 wrapped = HIR 局部 evidence 构造值（owned，D1/D2 正常覆盖）；不动 evidence 参数传递机制 | dispatch 决策已 HIR 可见、唯 dict 构造在 codegen 合成（LLVM per-execution fresh = 对 JS 单例模型的偏离，residual 28~38% 最大泄漏类 + ~1.27 亿对 churn）；否决 (a) per-use drop（churn 不消 + codegen 内配对面大）与纯 (b) codegen 缓存（豁免类永存）；dict 集 = 程序文本静态属性有界小常数，与 R-clean 否 Type intern 不冲突（Type 无界新生）。详见 §7.11 |
 | 低层内存原语 = design-probe 前置（2026-06-07，B-106）| RIIR（runtime C++ STL→纯 Ring）立 design-probe 而非实现项：先决「Ring 是否/以何形式提供低层内存原语」| 纯 Ring 重写 vector/map/string 需裸内存操作，与哲学「不做裸指针/manual malloc」冲突；张力不解 RIIR 无从落地。候选：value types / region effect / 受控 unsafe / 维持 C FFI 永久退缩前线 |
 | native on-par 统一规划 = Level 1（2026-06-08）| 终点 = native 前端+JS 后端与 node 版对等（三门走 js 路径），**B-099（自产 .o / Node 消除 / JS 归档）= Level 2，本轮 out-of-scope**。剩余工作收编为 P0 诊断 → P1 标记指针（B-080）→ P2 三门（B-089），绕掉 B-104 后续碎波 + B-080 box-at-boundary 拆分 | 用户拍板「绕中间 milestone 直达 on-par」；碎波可绕但依赖序+验证关卡（每改一类位置 llvm_diff+ASan）不可绕，否则大改裸奔全崩无从二分 |
 | 标量表示 = 标记指针（2026-06-08，B-080 重定义）| Int/Bool 低位 tag，所有位置不进堆；取代 box-at-boundary/inline-A1。Float 暂留 box | box-at-boundary 工作树实测证伪：inline 标量字段后 `a1d @402M` INT=63.3M≈W4 基线，字段 box 拆了 INT 没降→残留 INT 在多态边界（List<Int>/Option<Int>/泛型/dict 槽），uniform void* 必须 box，RC 波/inline 都消不掉；精确-RC 四波回收非标量临时后 INT 纹丝不动。标记指针让标量哪都不进堆 = 唯一结构性解，patch treadmill 终结 |
