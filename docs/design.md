@@ -1458,9 +1458,38 @@ D4 后 residual 220.1M@2.382B 经 D5 全量定量归因（box-profile 校准 99.
 
 **与无人回路公理的接法**：discharge 点清单 = 整个代码库需要人类审查的全部位置——有限、可枚举、签名可定位。agent 在安全区自由工作；lint 可配「agent 不得新增 unsafe 块」，使人类审查面的增长本身受控。Rust 只有隔离（靠人 grep），effect 系统补上类型层自动追踪。
 
-**与 RC 的交互（雏形已验证）**：unsafe 区裸指针不参与 RC——extern type 类型级 RC 排除（B-104 D1 规则①：不 Clone/不 Drop/不入 owned）即此规则的现实先例，`Ptr<T>`（名称待定）为其推广。跨界点 = 所有权显式移交。
+**与 RC 的交互（雏形已验证）**：unsafe 区裸指针不参与 RC——extern type 类型级 RC 排除（B-104 D1 规则①：不 Clone/不 Drop/不入 owned）即此规则的现实先例，`Ptr<T>`（2026-06-13 定名）为其推广。跨界点 = 所有权显式移交（per-type 三件套，见下）。
 
-**待定（B-106 design-probe 正文）**：区内原语集清单（alloc/dealloc、read/write/offset、受控 transmute）、跨界移交 API、unsafe 封装库的验收工具（ASan 档位、miri 类）、RIIR 边界。
+**B-106 正文拍定（2026-06-13 Discussion，下列即真值）**：
+
+**`Ptr<T>` 形态**：typed（offset 按 `size_of<T>` 步进，reinterpret 走显式 `cast`）；**单一类型不分 const/mut**（Rust `*const`/`*mut` 三作用中 variance 与借用来源追踪对 Ring 不存在，仅剩文档价值——公理⑧不分，const 意图归注释与封装 API 命名）；`Ptr<T>` 是**普通值**——copy 语义、不参与 RC、存字段/传参/比较皆 safe，**操作才产生 unsafe effect**（effect 挂操作不挂类型，与 fail 同构；安全封装因此成立——RIIR 容器 struct `{data: Ptr<T>, len, cap}` 定义本身不被感染）。
+
+**原语集 v1**（由栏 B 四场景倒推）：
+
+| 原语 | 签名（示意） | effect | 备注 |
+|---|---|---|---|
+| alloc | `alloc<T>(count: Int) -> Ptr<T>` | unsafe | 返回**未初始化**内存 |
+| dealloc | `dealloc<T>(p: Ptr<T>, count: Int)` | unsafe | 带 count：对齐正确性 + sized-dealloc 留门 |
+| read | `p.read() -> T` | unsafe | 按位 move out，**不动 RC**，返回 fresh owned |
+| write | `p.write(v: T)` | unsafe | 按位 move in，**不动 RC**，不 drop 旧值 |
+| offset | `p.offset(i: Int) -> Ptr<T>` | unsafe | **inbounds 语义**（同 allocation 作者承诺 → `getelementptr inbounds`，换别名分析/向量化） |
+| cast | `p.cast<U>() -> Ptr<U>` | safe | 造值不炸，deref 才炸 |
+| copy | `copy(src: Ptr<T>, dst: Ptr<T>, count: Int)` | unsafe | memmove 语义；nonoverlapping 变体按实测需求后加 |
+| addr / from_addr | `p.addr() -> Int` / `Ptr::from_addr<T>(a: Int)` | safe | 对齐计算/tagged pointer；危险链条被 deref（unsafe）卡死 |
+
+**read/write 所有权语义 = Perceus 接口承重墙**：read 产 fresh owned、write 耗 owned，RC pass 视作普通「产 owned / 吃 owned」函数——落进 B-103 return-mode 既有分类，**零特殊化**。buffer 内的值 = RC 世界之外、所有权由封装作者人工记账（RIIR vector：push = `data.offset(len).write(v)` 移入，pop = `data.offset(len-1).read()` 移回；重复 read 同位 = double-free，签字内容，等价 Rust `ptr::read` 契约）。
+
+**相对 Rust 的三处简化（明确不做）**：① 无 `MaybeUninit`——Rust 需要它是因为 safe 区要能持有未初始化值，Ring 的未初始化内存只活在 Ptr 后面、永不以值形态进安全区，「read 前已 init」即签字内容；② 无泛型 `transmute`——99% 用例 = 指针 reinterpret（走 cast）+ 标量 bits 互转（具体 intrinsic 按需提供），最危险的门开最窄；③ v1 无 volatile/atomic——§8 并发定型后随 B-007 系再议。
+
+**extern fn 边界 = 声明处签字**：extern fn 声明要求所在模块 `requires {unsafe}`，声明 = 签字「签名忠实于 C 实现」，调用点 safe（与现状 std 全部 extern 调用兼容；Rust 2024 `unsafe extern` 同方向）。**`extern type` 与 `Ptr<T>` 并存两层**：extern type = 不透明句柄（不可 deref/offset，持有传递天然 safe——LLVM FFI 91 fn 即此层）；`Ptr<T>` = 可算术可解引用的真指针。大量 FFI 永远停留在句柄层，分层本身是缩小 unsafe 面的杠杆。
+
+**跨界移交 = per-type 三件套，不做泛型 `addr_of`**：泛型「对任意安全值取指针」把引擎私有的值表示（box 布局/unboxing/单例化——B-104 D4 dict、D6 none/const 均在动）变成可观测 API，「优化不可观测」被堵死。跨界走容器显式 API：`List<T>::from_raw_parts(p, len, cap)`（移交进 RC 世界）/ `list.into_raw_parts()`（移交出，consume）/ `list.as_ptr()`（borrow 性质，指针有效期 ≤ 宿主存活 = 签字内容）；Str 同构。FFI 调用保活无需新机制（实参 borrow 语义已覆盖）。
+
+**`@repr(C)` 的精确角色**：read/write 按位搬 **T 的值表示**（box 指针或 unboxed 标量），任意 T 永远合法（容器场景无需布局承诺）；需要 `@repr(C)` 门票的是**字段级解释**（把 C 填的内存按字段读、字段指针投影）——默认布局编译器自由重排。投影形态（`offset_of` intrinsic vs 投影语法）归实现项 B-125。
+
+**验收工具 v1** = ASan 两档纪律 + `ring audit unsafe`；miri 类解释器远期挂账不立项。
+
+**剩余待定**：RIIR 边界（容器底层 RIIR vs libstdc++ 永久前线）挂 B-104 后实测数据再拍（关键变量 = Perceus reuse 对容器内部实际收益），留 B-106；实现 = B-125（P3，XL）。
 
 ---
 
@@ -2212,6 +2241,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | fold 空表 verbatim-init 修复方向（2026-06-11，audit #150）| runtime `ring_list_fold` 空表路径 `ring_dup(init)`（dup-on-share，B-103 ×9 同模式）+ `fold` 退役出 `is_arg_returning_call`（清空后 anf_arg 保守机制整个删除）| 空表 `return init;` 无 dup + caller scope-end drop = double-free（latent，全仓 19 处 fold init 全字面量零实存）；C ABI callee 借用实参约定下唯一不平衡点就是 verbatim 返回，runtime dup 一处即闭环；退役后 W1 实参材料化全覆盖、消掉最后一个分类特例 = 净简化非补丁。否决只补 dup 留分类（留死机制+保守泄漏面）与维持 latent（违背禁 temp fix 基线，D2 verifier 上线必报）|
 | COW 不可观测原则（2026-06-11，所有权讨论）| COW 仅为 Perceus 引擎内部优化（`.clone()` = O(1) dup + 写时拷），**语义层绝不暴露**：任何用户可观测的 COW 分叉（写副本却以为写原件）= 设计错误，必须以编译错误或官方原地写法承接。投影绑定写入（`let item = xs[i]; item.f = v` 类）判定为 B-110 必须堵的洞（堵法见 B-110 spec 增补，机制实现前核定）| 内置且语义可见的 COW 在主流语言罕见（多为应用级特性）；静默分叉是行为级 heisenbug，对无人回路致命（agent 从局部代码看不出写丢了）；与 B-110「迁移必须响」同一原则 |
 | unsafe 区域图景（2026-06-11，所有权讨论）| 三栏总账（安全区 / unsafe 区 / 明确不做）+ `unsafe` effect 形态 + 两级 discharge（`mod requires {unsafe}` 许可 + `unsafe {}` 块吸收，关键字与 Rust 一致）+ `ring audit unsafe` 审计面；裸指针不参与 RC（extern type 排除规则推广）；撤销旧「不做 unsafe 块 / 裸指针」立场。详见 §7.12，原语集细化归 B-106 | unsafe 是所有权张力的最终出处——栏 C「明确不做」的可信度由栏 B 兜底背书；effect 形态 = 签名可见自动追踪（Rust 隔离 + effect 追踪复合，竞品无）；discharge 点清单 = 全代码库人类审查面，接无人回路公理 |
+| unsafe 原语集 + `Ptr<T>` 拍定（2026-06-13，B-106 正文）| typed 单一 `Ptr<T>`（不分 const/mut）普通值、操作才 unsafe；原语 v1 = alloc/dealloc/read/write/offset(inbounds)/cast/copy/addr 互转（互转 safe）；read/write = 按位 move 不动 RC（Perceus 零特殊化，落 B-103 既有分类）；extern fn 声明处签字（调用点 safe，extern type 句柄层与 Ptr 并存）；跨界 per-type 三件套、不做泛型 addr_of；不做 MaybeUninit / 泛型 transmute / v1 volatile-atomic。详见 §7.12，实现 = B-125；RIIR 边界挂 B-104 后数据留 B-106 | 操作锚点使安全封装成立（持有即感染则容器 struct 定义本身被感染）；泛型 addr_of 把引擎私有值表示变可观测 API、堵死「优化不可观测」；inbounds 换别名分析/向量化（容器热路径）；声明处签字 = 信任点真实位置（签名忠实性在声明不在调用）+ 与现状 std 兼容、Rust 2024 同方向 |
 | 公理体系 4→6 条 + GC 取舍成文（2026-06-12）| 新增公理 5「编译器必须终止」（可判定性成文，lang-design §11.7 放弃清单挂其下）+ 公理 6「确定性资源语义」（RC/move/Weak/unsafe 区的公理地基补全）；会话原则归推论（标注是文档→3；失真必须响/优化不可观测/审查面可枚举→4）；philosophy.md 为唯一真值源，本文件公理节改速记，CLAUDE.md/README 加速查指针；GC 取舍理由成文于公理 6（语义层费用 GC 省不掉 + 引擎层四收益 + 不可逆性不对称；「GC 停顿」不是理由；B-089 re-measure 为可证伪锚点）| 推导审计发现资源管理体系站在未成文承诺上——四公理字面下 GC 严格更优、推导不闭合；philosophy/design 公理全文双真值源已现漂移隐患 |
 
 ### 幽灵功能（已解析但无语义效果）

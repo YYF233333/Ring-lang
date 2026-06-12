@@ -340,6 +340,27 @@ fn test_fetch() {
 **优先级**：层 3（Phase C 层 1+2 完成后启动）
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲
 
+### B-125 unsafe effect + `Ptr<T>` 原语全链路 [feature] [P3] [XL] [judgment] [queued]
+
+> 2026-06-13 立项（Discussion，B-106 design-probe 正文拍定后的实现项，用户拍板 P3）。**设计真值 = design.md §7.12**（三栏总账 + unsafe effect 两级 discharge + `Ptr<T>` 形态 + 原语集 v1 + extern fn 声明处签字 + 跨界三件套）。**时序：B-104 落地后**（动 checker/effect/双后端 codegen，避免与 milestone 并发；同 B-117/B-118/B-121 约定）。
+
+**涉及修改**：
+1. Lexer/Parser：`unsafe { ... }` 块、`mod name requires {unsafe}`（复用 mod capability 语法）。
+2. Checker/effect：内建 `unsafe` effect——原语操作产生、自动冒泡、不可被普通 handler 处理；块级 discharge（吸收块内 unsafe）+ 模块级许可检查（未声明模块内使用原语 = 编译错误）。
+3. 内建类型 `Ptr<T>`：普通值语义（copy、不参与 RC——extern type 类型级排除规则推广：不 Clone/不 Drop/不入 owned）。
+4. 原语集 v1（§7.12 表）：alloc/dealloc/read/write/offset(inbounds)/cast/copy/addr/from_addr。LLVM 后端为主战场；**JS 后端口径实现时定**（ArrayBuffer 模拟 vs llvm-only + 差分跳过），差分测试需明确口径。
+5. extern fn 声明处签字：声明所在模块 `requires {unsafe}` 检查（现状 std extern 声明模块需批量迁移加声明——机械）。
+6. `ring audit unsafe` 子命令：列全代码库 discharge 点（unsafe 块 + 模块许可 + extern 声明）。
+7. Perceus/verify_rc：read 产 fresh owned / write 耗 owned 落 B-103 既有分类——预期零特殊化，验证之；verifier 对 unsafe 块内指针操作的豁免口径。
+8. 字段投影（`@repr(C)` 门票，`offset_of` intrinsic vs 投影语法）：实现时定形态，可后置子项。
+
+**验收标准**：
+- 未 discharge 使用原语 = 编译错误（负面测试两类：无 unsafe 块 / 模块未 requires）
+- 安全封装成立：Ptr buffer + len/cap 容器 demo 内部 unsafe、pub 签名纯净，E2E 行为正确
+- read/write 所有权语义过 verify_rc 三判据；llvm_diff 全量 ×3（动 RC 纪律）+ ASan-clean
+- `ring audit unsafe` 输出全部 discharge 点
+- per-type 三件套（List/Str 的 as_ptr/from_raw_parts/into_raw_parts）可用且 E2E 覆盖
+
 ## 迭代与集合
 
 ### B-095 List.enumerate 方法 [feature] [P3] [M] [judgment] [queued]
@@ -627,7 +648,7 @@ handle {
 
 | 机制 | 状态/原因 |
 |------|-----------|
-| 原始指针 / 手动 malloc | **安全区不做；unsafe 区提供**（§7.12 三栏总账，原语集归 B-106）|
+| 原始指针 / 手动 malloc | **安全区不做；unsafe 区提供**（§7.12 三栏总账；原语集已拍定 §7.12「B-106 正文拍定」，实现 = B-125）|
 | `unsafe` 块 | **改做**——`unsafe` effect + 两级 discharge（`mod requires {unsafe}` + `unsafe {}`，关键字与 Rust 一致），§7.12 |
 | 手动 SIMD intrinsics | 不可移植，由编译器 + hint 处理 |
 | 无 RC 模式 | 和 Perceus 架构冲突 |
@@ -692,24 +713,18 @@ source-map 支持 + 断点调试。
 
 > 非实现任务，而是设计探针。在对应 XL 特性实现前完成，防止特性交互导致事后 breaking change。
 
-### B-106 低层内存原语 + unsafe 区域图景（design-probe）[design-align] [P3] [M] [judgment] [queued]
+### B-106 低层内存原语 + unsafe 区域图景（design-probe）[design-align] [P3] [S] [judgment] [queued]
 
 > 2026-06-07 立项（Discussion）。**design-probe，非实现项**——产出设计决策文档，不写代码。RIIR（runtime C++ STL → 纯 Ring 重写，见「生态策略：RIIR」）的硬前置：用纯 Ring 重写 `std::vector`/`unordered_map`/`std::string` 需要 Ring 能表达裸内存操作（malloc / 指针算术），而设计哲学当前**明确排除裸指针**（「不做的控制力」表：raw pointer / manual malloc 不做）。此张力不解，RIIR 无从落地。
 
 > **scope 扩展（2026-06-11 所有权讨论，用户指示）**：从「RIIR 前置」扩为**「没有一等引用/指针，语言怎么弥补」的系统性图景**。安全区答案已成形（Rc/Weak、arena+index、Span/(offset,len)、mut 参数线程化），残余无解场景 = 零拷贝视图（slice/serde-borrow）、深层可变访问的跨语句持有、自引用结构、RIIR 裸内存——这些是 unsafe 区域要兜的底。产出补充：**unsafe 区域图景**——unsafe 以 effect 形态出现（design.md 6.3 已锚定「unsafe effect = 用户责任」，签名可见 = LLM/审查可定位）、区内提供哪些原语（裸指针/指针算术/region/受控 transmute 候选集）、区边界如何审计、与 Perceus RC 的交互（unsafe 区内对象的 RC 责任归属）。**作为后续目标**，优先级维持 P3。
 
-**要回答的设计问题**（2026-06-11 形态已拍——`unsafe` effect + 两级 discharge + 三栏总账，design.md §7.12 为真值；剩余）：
-1. 区内原语集清单：`Ptr<T>`（名称待定）/ alloc/dealloc / read/write/offset / 受控 transmute——由 §7.12 栏 B 四场景（零拷贝视图/自引用/RIIR/FFI）倒推；value types / region effect 候选与之的关系（region 能否作为安全区替代收窄 unsafe 面）。
-2. 跨界所有权移交 API（unsafe 指针 ↔ 安全值）+ RC 交互细则（extern type 类型级排除规则的推广）。
-3. RIIR 边界划在哪：容器底层 RIIR 收益（自包含 + 对容器内部跑 Perceus reuse）vs 成本（libstdc++ 本就零依赖随 clang 自带、STL 久经考验）是否成立？
-4. unsafe 封装库的验收工具：ASan 档位接入、miri 类解释器（远期）。
+**已拍（2026-06-13 Discussion，真值 = design.md §7.12「B-106 正文拍定」节）**：原问题 1/2/4 全部落定——typed 单一 `Ptr<T>` 普通值 + 操作才 unsafe；原语集 v1 表（alloc/dealloc/read/write/offset-inbounds/cast/copy/addr 互转 safe）；read/write = 按位 move 不动 RC（Perceus 零特殊化，落 B-103 既有分类）；extern fn 声明处签字；跨界 per-type 三件套（不做泛型 addr_of）；不做 MaybeUninit/泛型 transmute/v1 volatile-atomic；验收工具 v1 = ASan 两档 + `ring audit unsafe`。实现项 = B-125。
 
-**产出**：design.md 章节——低层内存原语取舍决策 + RIIR 边界定义。决策后再评估是否立 RIIR 实现项。
+**剩余（本条唯一遗留）= 原问题 3 RIIR 边界**：容器底层 RIIR 收益（自包含 + 容器内部跑 Perceus reuse）vs 成本（libstdc++ 零依赖随 clang 自带、STL 久经考验）。**挂 B-104 落地后实测数据再拍**（关键变量 = Perceus reuse 对容器内部的实际收益，现在拍是纸面比较——2026-06-13 用户拍板）。
 
 **验收标准**：
-- design.md 记录低层内存原语决策（提供/不提供 + 形式）
-- RIIR 边界明确（哪层 RIIR、哪层永久 C FFI）
-- 与 Perceus / linear / 哲学的一致性论证
+- RIIR 边界明确（哪层 RIIR、哪层永久 C FFI），以 B-104 后实测数据支撑
 
 ### B-116 async native 实现模型（B-007 前置 design-probe）[design-align] [P3] [M] [judgment] [queued]
 
