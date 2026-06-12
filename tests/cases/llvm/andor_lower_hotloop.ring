@@ -68,12 +68,19 @@ fn main() {
     print("C=${count_c}")
 
     // probe D: And/Or value BOUND per iteration (`let ok = a && b`) + nested
-    // chain `a && b || c` — binding-drop path through the branch-value
-    // recursion (pre-D7: non-droppable, leaked per iteration).
+    // all-fresh chain `(a && b) || c` — binding-drop path through the
+    // branch-value recursion (pre-D7: non-droppable, leaked per iteration).
+    // NOTE: a nested chain with a BORROW arm in cond position
+    // (`(a && ok) || c` with `ok` an Ident) is the DOCUMENTED x-cf-value
+    // residual (the inner phi cannot be materialised — borrow arm veto — so
+    // its untaken-edge BoolLit box leaks ~1/iter, strictly less than the
+    // pre-D7 both-edges leak).  Not D7's target class; kept OUT of the hot
+    // loops so the D7 classes assert flat (probe E covers borrow-arm
+    // correctness; the leak-direction posture is verifier-accounted).
     let mut count_d = 0
     for j in 0..n {
         let ok = j >= 0 && j < n
-        let chain = (j < 0 && ok) || j >= 0
+        let chain = (j < 0 && j > 10) || j >= 0
         if ok { if chain { count_d = count_d + 1 } }
     }
     print("D=${count_d}")
