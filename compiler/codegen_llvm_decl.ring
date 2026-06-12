@@ -7,8 +7,8 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
-    get_or_assign_typeid}
-use codegen_llvm_expr::{gen_llvm_expr}
+    get_or_assign_typeid, RING_TYPEID_DICT_STATIC}
+use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter}
 use codegen_ctx::{extract_effect_names}
 
 // Re-declare LLVM types and functions to avoid ESM cross-module import issues
@@ -408,32 +408,40 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     let method_count = method_order.len()
     if method_count == 0 { return }
 
-    // Generate a dict init function: ring_dict_init_<dictname>() -> ptr
-    // This function allocates a dict struct and fills it with closure pointers
-    let init_fn_name = "ring_dict_init_${dict_name}"
-    let init_fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
-    let init_fn = LLVMAddFunction(ctx.module, init_fn_name, init_fn_ty)
-    ctx.functions.insert(init_fn_name, init_fn)
-    ctx.fn_types.insert(init_fn_name, init_fn_ty)
+    // B-104 D4: the RAW build function ring_dict_build_<dictname>() -> ptr —
+    // allocates the dict struct and fills the method closure slots.  It is
+    // wrapped below in the memoised singleton getter ring_dict_init_<dictname>
+    // (one construction per process; use sites borrow the singleton).
+    let build_fn_name = "ring_dict_build_${dict_name}"
+    let build_fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+    let build_fn = LLVMAddFunction(ctx.module, build_fn_name, build_fn_ty)
+    ctx.functions.insert(build_fn_name, build_fn)
+    ctx.fn_types.insert(build_fn_name, build_fn_ty)
 
     let saved_fn = ctx.current_fn
-    ctx.current_fn = some(init_fn)
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, init_fn, "entry")
+    ctx.current_fn = some(build_fn)
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, build_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
-    // Dict struct type: one ptr per method (each is a RingClosure)
-    let mut dict_elem_types: List<LLVMTypeRef> = []
+    // Dict struct type (B-104 D4 layout): { i64 method_count, ptr m0, ... }
+    // — method slot i at struct index i+1, matching load_dict_method /
+    // gen_dict_dispatch_call / build_wrapped_dict / the runtime dict makers.
+    let mut dict_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
     for i in 0..method_count {
         dict_elem_types.push(ctx.ptr_type)
     }
     let dict_struct_ty = LLVMStructTypeInContext(ctx.context, dict_elem_types, 0)
 
-    // Allocate dict via ring_alloc (use TUPLE typeid for trait dicts)
+    // Allocate via ring_alloc with the DICT_STATIC typeid: impl dicts are
+    // module singletons — the runtime registers the typeid never-drop, so any
+    // stray dup/drop on one is a no-op (defense in depth).
     let dict_size = LLVMSizeOf(dict_struct_ty)
     let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
     let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
-    let dict_typeid = LLVMConstInt(ctx.i64_type, 10, 0)  // RING_TYPEID_TUPLE
+    let dict_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_DICT_STATIC, 0)
     let dict_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [dict_size, dict_typeid], "dict")
+    let count_slot = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, 0, "dcnt")
+    LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, method_count, 0), count_slot)
 
     // Closure struct type: { fn_ptr, env_ptr }
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
@@ -452,8 +460,11 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     LLVMBuildRet(ctx.builder, dict_ptr)
     ctx.current_fn = saved_fn
 
-    // Register the dict init function so it can be found by resolve_dict_ref
-    ctx.dict_globals.insert(dict_name, init_fn)
+    // B-104 D4: wrap the build fn in the memoised getter (registered as
+    // ring_dict_init_<dictname>) and expose it via dict_globals so
+    // resolve_static_dict_by_name finds the SINGLETON, not a fresh build.
+    let getter = emit_memoised_dict_getter(ctx, dict_name, build_fn, build_fn_ty)
+    ctx.dict_globals.insert(dict_name, getter)
 }
 
 fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, dict_struct_ty: LLVMTypeRef, dict_ptr: LLVMValueRef, closure_ty: LLVMTypeRef, closure_size: LLVMValueRef, alloc_fn: LLVMValueRef, alloc_ty: LLVMTypeRef, slot_idx: Int) {
@@ -478,13 +489,13 @@ fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, d
             let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "eps"))
             LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), env_slot)
 
-            // Store closure in dict slot
-            let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx, fresh_name(ctx, "ds"))
+            // Store closure in dict slot (B-104 D4 layout: slot i at index i+1).
+            let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx + 1, fresh_name(ctx, "ds"))
             LLVMBuildStore(ctx.builder, closure_ptr, slot_ptr)
         },
         none => {
             // Method not found — store null closure
-            let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx, fresh_name(ctx, "ds"))
+            let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx + 1, fresh_name(ctx, "ds"))
             LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot_ptr)
         },
     }

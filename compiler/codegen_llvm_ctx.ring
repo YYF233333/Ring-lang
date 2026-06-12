@@ -92,6 +92,10 @@ pub struct LlvmCtx {
     // resolve_static_dict_by_name from base_dict + inner singleton names.
     pub static_dict_defs: Map<Str, HDictDef>,
 
+    // B-104 D4: per-singleton module-level global ptr variables
+    // (@__ring_dictg_<name>, init null) backing the memoised dict getters.
+    pub dict_singletons: Map<Str, LLVMValueRef>,
+
     // Trait method order: maps trait_name → [method_name, ...]
     pub trait_method_order: Map<Str, List<Str>>,
 
@@ -158,6 +162,17 @@ pub const RING_TYPEID_CELL: Int = 14
 // Distinct from RING_TYPEID_CLOSURE (7, the {fn,env} pair) so drop_closure's
 // ring_drop(env_ptr) dispatches to drop_closure_env, not back to drop_closure.
 pub const RING_TYPEID_CLOSURE_ENV: Int = 15
+
+// B-104 D4 (#151): first-class trait dict typeids (must match ring_runtime.cpp).
+// Layout for both: { i64 method_count, ptr method_closure0, ... } — dispatch
+// GEPs slot i at struct index i+1.
+//   DICT_STATIC — module-level singletons (impl dicts / builtin primitive
+//                 dicts / fully-static wrapped instances); runtime registers
+//                 the typeid NEVER-DROP, so stray dup/drop are no-ops.
+//   DICT_DYN    — dict_lower's local DictConstruct values; runtime drop_dict
+//                 releases the method closures (envs hold dup'd inner refs).
+pub const RING_TYPEID_DICT_STATIC: Int = 16
+pub const RING_TYPEID_DICT_DYN: Int = 17
 
 // ============================================================
 // LLVM name mangling

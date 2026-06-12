@@ -12,7 +12,8 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     llvm_resolve_fn, build_entry_alloca,
-    get_or_assign_typeid, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV}
+    get_or_assign_typeid, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV,
+    RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN}
 use codegen_llvm_stmt::{emit_llvm_stmt}
 use codegen_ctx::{extract_effect_names}
 
@@ -28,6 +29,9 @@ extern fn LLVMConstInt(ty: LLVMTypeRef, val: Int, sign_extend: Int) -> LLVMValue
 extern fn LLVMConstReal(ty: LLVMTypeRef, val: Float) -> LLVMValueRef
 extern fn LLVMConstNull(ty: LLVMTypeRef) -> LLVMValueRef
 extern fn LLVMConstPointerNull(ty: LLVMTypeRef) -> LLVMValueRef
+// B-104 D4: module-level globals for the static dict singleton memo cells.
+extern fn LLVMAddGlobal(m: LLVMModuleRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
+extern fn LLVMSetInitializer(global: LLVMValueRef, val: LLVMValueRef) -> Unit
 extern fn LLVMGetParam(fn_val: LLVMValueRef, index: Int) -> LLVMValueRef
 extern fn LLVMCountParams(fn_val: LLVMValueRef) -> Int
 extern fn LLVMAppendBasicBlockInContext(ctx: LLVMContextRef, fn_val: LLVMValueRef, name: Str) -> LLVMBasicBlockRef
@@ -355,10 +359,12 @@ fn call_zero_arg_or_return(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled: Str)
 //   ring_<fn>__dictwrap(env, p0..pN) -> ptr
 // that loads the captured dicts/evidence from env and forwards
 //   real_fn(p0..pN, dict0..dictM, ev0..evK)
-// then return a {fn_ptr=thunk, env_ptr} closure pair (typeid 7). The env stores the
-// resolved dicts (and evidence) with leading count=0 so drop_closure_env never tries
-// to RC-drop them (they are shared/builtin dicts, not owned captures). Mirrors the JS
-// backend's `(p0..) => fn(p0.., dict.., ev..)` wrapper (codegen_expr.ring:38-62).
+// then return a {fn_ptr=thunk, env_ptr} closure pair (typeid 7). B-104 D4: the env
+// stores the resolved dicts as OWNED counted slots (ring_dup'd; static singletons
+// are never-drop no-ops, a dynamic dict-param-backed dict gets a real reference
+// released by drop_closure_env) followed by UNcounted evidence slots (handler-
+// scoped lifetime, B-096). Mirrors the JS backend's
+// `(p0..) => fn(p0.., dict.., ev..)` wrapper (codegen_expr.ring:38-62).
 fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_names: List<Str>, ty: Type) -> LLVMValueRef {
     // Resolve the real function.
     let mangled = llvm_resolve_fn(ctx, lookup_name)
@@ -396,7 +402,13 @@ fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_
 
     let captured_count = dict_vals.len() + ev_vals.len()
 
-    // Env layout: { i64 count(=0), ptr slot0, ... }. count=0 so drop_closure_env skips.
+    // Env layout: { i64 count, dict0..dictD-1, ev0..evK-1 }.
+    // B-104 D4 RC honesty: count = dict_count — the dict slots are OWNED
+    // (ring_dup'd at store below; static singletons no-op, a dict-param-backed
+    // dynamic dict gets a real reference), released by drop_closure_env when
+    // the wrapper closure dies.  Evidence slots stay OUTSIDE the counted
+    // window (stored after the dicts, never dropped) — evidence lifetime is
+    // handler-scoped, not closure-owned (B-096 posture).
     let mut env_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
     for i in 0..captured_count { env_elem_types.push(ctx.ptr_type) }
     let env_ty = LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
@@ -441,9 +453,11 @@ fn gen_dict_closure_wrapper(mut ctx: LlvmCtx, lookup_name: Str, name: Str, dict_
     let env_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE_ENV, 0)
     let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [env_size, env_typeid], fresh_name(ctx, "wenv"))
     let count_slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, 0, fresh_name(ctx, "wcnt"))
-    discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, 0, 0), count_slot))
+    discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, dict_vals.len(), 0), count_slot))
     let mut slot_idx = 0
     for dv in dict_vals {
+        // Own the dict reference (no-op for static singletons).
+        discard(gen_dup_value(ctx, dv))
         let slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, slot_idx + 1, fresh_name(ctx, "wstore"))
         discard(LLVMBuildStore(ctx.builder, dv, slot))
         slot_idx = slot_idx + 1
@@ -577,10 +591,13 @@ fn resolve_dispatch_dict(mut ctx: LlvmCtx, dispatch: TraitDispatch) -> LLVMValue
     }
 }
 
-// Load a method closure from a dict struct slot (dict is a struct of ptr closures).
+// Load a method closure from a dict struct slot.  B-104 D4 dict layout is
+// count-prefixed: { i64 method_count, ptr m0, ptr m1, ... } — method slot i
+// lives at struct index i+1 (must match emit_trait_dict / build_wrapped_dict /
+// ring_make_eq_dict / ring_make_ord_dict).
 fn load_dict_method(mut ctx: LlvmCtx, dict_ptr: LLVMValueRef, slot: Int) -> LLVMValueRef {
-    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
-    let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot, fresh_name(ctx, "ms"))
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+    let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot + 1, fresh_name(ctx, "ms"))
     LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "mc"))
 }
 
@@ -596,6 +613,13 @@ fn gen_eq_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, 
             let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
             let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
             let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [result], fresh_name(ctx, "ub"))
+            // B-104 D4: the eq closure's Bool box is INTERNAL on the Neq path —
+            // unboxed then replaced by a fresh negated box.  Drop it (the shim /
+            // Ring impl returns an OWNED fresh box; same family as the
+            // while-cond post-unbox drop).
+            let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+            let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [result], ""))
             let one = LLVMConstInt(ctx.i64_type, 1, 0)
             let neg = LLVMBuildSub(ctx.builder, one, raw, fresh_name(ctx, "neg"))
             box_bool(ctx, neg)
@@ -614,6 +638,13 @@ fn gen_ord_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr,
     let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
     let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
     let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [cmp_result], fresh_name(ctx, "uc"))
+    // B-104 D4 (#151 probe D): the cmp INT box is INTERNAL — unboxed here and
+    // replaced by a fresh Bool box below; it leaked once per Ord dispatch.
+    // The shim / Ring impl returns an OWNED fresh box — drop it post-unbox
+    // (same family as the while-cond box drop).
+    let cmp_drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let cmp_drop_ty = get_rt_fn_type(ctx, "ring_drop")
+    discard(LLVMBuildCall2(ctx.builder, cmp_drop_ty, cmp_drop_fn, [cmp_result], ""))
     let zero = LLVMConstInt(ctx.i64_type, 0, 0)
     let pred = match op {
         BinOp::Lt => 40,
@@ -1121,11 +1152,14 @@ fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
     }
 }
 
-// Resolve a STATIC dict by name: impl-generated init function (ring_dict_init_*),
-// a dict_globals registration, a dict_lower wrapped-instance definition, or the
-// runtime builtin synthesis for primitive dicts.
+// Resolve a STATIC dict by name — B-104 D4: every path returns the MEMOISED
+// MODULE SINGLETON (one construction per dict per process):
+//   * impl dicts: ring_dict_init_<name> (emit_trait_dict — memoised internally
+//     via the @__ring_dictg_<name> global);
+//   * wrapped instances / builtin primitive dicts: a synthesised memoised
+//     getter of the same name (get_or_create_static_dict_getter).
+// This kills the per-call-site fresh TUPLE+closures+name-STR synthesis (#151).
 fn resolve_static_dict_by_name(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
-    // Try as a dict init function (generated from impl Trait for Type)
     let init_fn_name = "ring_dict_init_${name}"
     match ctx.functions.get(init_fn_name) {
         some(init_fn) => {
@@ -1147,35 +1181,146 @@ fn resolve_static_dict_by_name(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
                     LLVMBuildCall2(ctx.builder, ft, init_fn, [], fresh_name(ctx, "dict"))
                 },
                 none => {
-                    // B-104 D4: a dict_lower static wrapped INSTANCE (inner != [])
-                    // — build it from its HDictDef (base dict + inner singletons).
-                    // PLAIN entries (inner == []) are footprint records only and
-                    // MUST fall through to the builtin synthesis (a plain entry
-                    // routed into build_wrapped_dict would yield a 0-slot dict —
-                    // dispatch crash).
-                    let inst_def = match ctx.static_dict_defs.get(name) {
-                        some(def) => if def.inner.len() > 0 { some(def) } else { none },
-                        none => none,
-                    }
-                    match inst_def {
-                        some(def) => {
-                            let mut inner_refs: List<DictRef> = []
-                            for inn in def.inner { inner_refs.push(DictRef::Static(inn)) }
-                            build_wrapped_dict(ctx, def.base_dict, def.trait_name, inner_refs)
-                        },
-                        none => {
-                            // Builtin primitive trait dicts (Eq for Str/Int/Float/Bool)
-                            // are not emitted as Ring impls; construct them via the runtime.
-                            let name_str = gen_str_lit(ctx, name)
-                            let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
-                            let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
-                            LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
-                        },
-                    }
+                    let getter = get_or_create_static_dict_getter(ctx, name)
+                    let ft = LLVMFunctionType(ctx.ptr_type, [], 0)
+                    LLVMBuildCall2(ctx.builder, ft, getter, [], fresh_name(ctx, "dict"))
                 },
             }
         },
     }
+}
+
+// B-104 D4: the module-level global ptr (@__ring_dictg_<name>, init null)
+// backing a static dict singleton's memoised getter.
+pub fn get_or_create_dict_global(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
+    match ctx.dict_singletons.get(name) {
+        some(g) => g,
+        none => {
+            let g = LLVMAddGlobal(ctx.module, ctx.ptr_type, "__ring_dictg_${name}")
+            LLVMSetInitializer(g, LLVMConstPointerNull(ctx.ptr_type))
+            ctx.dict_singletons.insert(name, g)
+            g
+        },
+    }
+}
+
+// B-104 D4: wrap a raw dict BUILD function (ring_dict_build_<name>, emitted by
+// emit_trait_dict for impl dicts) in the memoised singleton getter
+// `ring_dict_init_<name>`: { if @g == null { @g = build() }; return @g }.
+// Registered under the init name so resolve_static_dict_by_name finds it.
+pub fn emit_memoised_dict_getter(mut ctx: LlvmCtx, name: Str, build_fn: LLVMValueRef, build_fn_ty: LLVMTypeRef) -> LLVMValueRef {
+    let fname = "ring_dict_init_${name}"
+    match ctx.functions.get(fname) {
+        some(existing) => { return existing },
+        none => {},
+    }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+    let fn_val = LLVMAddFunction(ctx.module, fname, fn_ty)
+    ctx.functions.insert(fname, fn_val)
+    ctx.fn_types.insert(fname, fn_ty)
+    let g = get_or_create_dict_global(ctx, name)
+
+    let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(fn_val)
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    let build_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "build")
+    let done_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "done")
+
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+    let cached = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "dc"))
+    // 32 = LLVMIntEQ
+    let isnull = LLVMBuildICmp(ctx.builder, 32, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "dn"))
+    discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
+    let built = LLVMBuildCall2(ctx.builder, build_fn_ty, build_fn, [], fresh_name(ctx, "db"))
+    discard(LLVMBuildStore(ctx.builder, built, g))
+    discard(LLVMBuildBr(ctx.builder, done_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, done_bb)
+    let result = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "dv"))
+    discard(LLVMBuildRet(ctx.builder, result))
+
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    fn_val
+}
+
+// B-104 D4: synthesise (once) the memoised getter `ring_dict_init_<name>` for a
+// static dict with no impl-generated init function:
+//   * a dict_lower wrapped INSTANCE (static_dict_defs entry with inner != []):
+//     built via build_wrapped_dict with the DICT_STATIC typeid;
+//   * a builtin primitive dict (__Int_Eq / __Str_Ord / enum tag-Eq fallback):
+//     built via the runtime's ring_get_builtin_dict (its name STR is now
+//     allocated ONCE, inside the getter — the per-use fresh STR is gone).
+// Getter shape (lazy first-use; no init-order concerns, inners resolve
+// recursively through their own getters):
+//   entry: %c = load @g ; br (%c == null), build, done
+//   build: %v = <construct> ; store %v, @g ; br done
+//   done:  ret load @g
+// PLAIN footprint entries (inner == []) deliberately fall to the builtin path —
+// routing one into build_wrapped_dict would yield a 0-slot dict (dispatch crash).
+fn get_or_create_static_dict_getter(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
+    let fname = "ring_dict_init_${name}"
+    match ctx.functions.get(fname) {
+        some(existing) => { return existing },
+        none => {},
+    }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+    let fn_val = LLVMAddFunction(ctx.module, fname, fn_ty)
+    ctx.functions.insert(fname, fn_val)
+    ctx.fn_types.insert(fname, fn_ty)
+    let g = get_or_create_dict_global(ctx, name)
+
+    // Emit the getter body (save/restore the surrounding emission state — the
+    // getter is created on demand from inside another function's body).
+    let saved_fn = ctx.current_fn
+    let saved_named = ctx.named_values
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(fn_val)
+    ctx.named_values = map_new()
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    let build_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "build")
+    let done_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "done")
+
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+    let cached = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "dc"))
+    // 32 = LLVMIntEQ
+    let isnull = LLVMBuildICmp(ctx.builder, 32, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "dn"))
+    discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
+    let inst_def = match ctx.static_dict_defs.get(name) {
+        some(def) => if def.inner.len() > 0 { some(def) } else { none },
+        none => none,
+    }
+    let value = match inst_def {
+        some(def) => {
+            let mut inner_refs: List<DictRef> = []
+            for inn in def.inner { inner_refs.push(DictRef::Static(inn)) }
+            build_wrapped_dict_typed(ctx, def.base_dict, def.trait_name, inner_refs, RING_TYPEID_DICT_STATIC)
+        },
+        none => {
+            let name_str = gen_str_lit(ctx, name)
+            let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
+            let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
+            LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
+        },
+    }
+    discard(LLVMBuildStore(ctx.builder, value, g))
+    discard(LLVMBuildBr(ctx.builder, done_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, done_bb)
+    let result = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "dv"))
+    discard(LLVMBuildRet(ctx.builder, result))
+
+    ctx.named_values = saved_named
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    fn_val
 }
 
 // #B-087 gap 2: construct a wrapper trait dict for a parameterized type (e.g.
@@ -1186,9 +1331,23 @@ fn resolve_static_dict_by_name(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
 //   ring_<Type>_<m>__wrapthunk(env, a0..aK) -> ptr
 // that loads the inner dicts captured in env and calls the real method
 //   ring_<Type>_<m>(a0..aK, inner0..innerM).
-// The wrapper dict has the same { ptr-per-method } layout as a normal dict, with each
-// slot a { thunk, env } closure. Mirrors codegen_expr.ring's dict_ref_to_js wrapper.
+// The wrapper dict has the count-prefixed dict layout { i64 count, ptr-per-method },
+// each method slot a { thunk, env } closure. Mirrors codegen_expr.ring's
+// dict_ref_to_js wrapper.
+//
+// B-104 D4 RC honesty: the per-method thunk envs hold the inner dicts with
+// count=inner_count and a ring_dup per slot — so a DYNAMIC wrapped dict
+// (typeid DICT_DYN, dict_lower's DictConstruct) is FULLY reclaimed by its
+// scope-end drop (drop_dict → drop_closure → drop_closure_env → releases the
+// dup'd inner refs), and a dict-param-backed inner stays alive as long as any
+// wrapped dict referencing it does.  For STATIC instances (typeid DICT_STATIC,
+// built once inside a memoised getter) the dup/drop legs are no-ops
+// (never-drop typeid) — same construction code, zero cost.
 fn build_wrapped_dict(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>) -> LLVMValueRef {
+    build_wrapped_dict_typed(ctx, dict_name, trait_name, inner_dicts, RING_TYPEID_DICT_DYN)
+}
+
+fn build_wrapped_dict_typed(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_dicts: List<DictRef>, dict_tid: Int) -> LLVMValueRef {
     // Resolve the inner dicts at this site.
     let mut inner_vals: List<LLVMValueRef> = []
     for d in inner_dicts {
@@ -1205,16 +1364,18 @@ fn build_wrapped_dict(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_d
     }
     let method_count = method_order.len()
 
-    // Dict struct: one ptr (RingClosure) per method.
-    let mut dict_elem_types: List<LLVMTypeRef> = []
+    // Dict struct: { i64 method_count, one ptr (RingClosure) per method }.
+    let mut dict_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
     for i in 0..method_count { dict_elem_types.push(ctx.ptr_type) }
     let dict_struct_ty = LLVMStructTypeInContext(ctx.context, dict_elem_types, 0)
 
     let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
     let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
     let dict_size = LLVMSizeOf(dict_struct_ty)
-    let dict_typeid = LLVMConstInt(ctx.i64_type, 10, 0)  // RING_TYPEID_TUPLE
+    let dict_typeid = LLVMConstInt(ctx.i64_type, dict_tid, 0)
     let dict_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [dict_size, dict_typeid], fresh_name(ctx, "wdict"))
+    let dict_cnt_slot = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, 0, fresh_name(ctx, "wdc"))
+    discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, method_count, 0), dict_cnt_slot))
 
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let closure_size = LLVMSizeOf(closure_ty)
@@ -1234,7 +1395,11 @@ fn build_wrapped_dict(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_d
                         let dispatch_arity = base_arity - inner_count
                         let thunk_fn = emit_wrapped_method_thunk(ctx, mangled, method_fn, method_name, dispatch_arity, inner_count)
 
-                        // env: { i64 count(=0), inner0, inner1, ... }.
+                        // env: { i64 count(=inner_count), inner0, inner1, ... }.
+                        // B-104 D4 RC honesty: count covers the inner-dict slots
+                        // and each stored inner is ring_dup'd — drop_closure_env
+                        // releases them when the (dynamic) dict dies.  Static
+                        // singleton inners: dup/drop are never-drop no-ops.
                         let mut env_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
                         for j in 0..inner_count { env_elem_types.push(ctx.ptr_type) }
                         let env_ty = LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
@@ -1242,9 +1407,10 @@ fn build_wrapped_dict(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_d
                         let env_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE_ENV, 0)
                         let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [env_size, env_typeid], fresh_name(ctx, "wmenv"))
                         let cnt_slot = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, 0, fresh_name(ctx, "wmc"))
-                        discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, 0, 0), cnt_slot))
+                        discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, inner_count, 0), cnt_slot))
                         let mut sj = 0
                         for iv in inner_vals {
+                            discard(gen_dup_value(ctx, iv))
                             let s = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, sj + 1, fresh_name(ctx, "wmi"))
                             discard(LLVMBuildStore(ctx.builder, iv, s))
                             sj = sj + 1
@@ -1257,11 +1423,11 @@ fn build_wrapped_dict(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, inner_d
                         let ep = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "wmep"))
                         discard(LLVMBuildStore(ctx.builder, env_alloc, ep))
 
-                        let slot = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, i, fresh_name(ctx, "wmds"))
+                        let slot = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, i + 1, fresh_name(ctx, "wmds"))
                         discard(LLVMBuildStore(ctx.builder, closure_ptr, slot))
                     },
                     none => {
-                        let slot = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, i, fresh_name(ctx, "wmds"))
+                        let slot = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, i + 1, fresh_name(ctx, "wmds"))
                         discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot))
                     },
                 }
@@ -1398,13 +1564,14 @@ fn gen_dict_dispatch_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, dd
             //   Debug: { debug } → 0
             let method_idx = get_trait_method_index(ctx, dd.dict_param, dd.method)
 
-            // Build dict struct type (all ptr fields)
-            // We don't know the exact field count, but we can use a conservative GEP
-            // with enough fields. For simplicity, use a 4-field dict type (covers Eq with eq+ne+...)
-            let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+            // Build dict struct type (B-104 D4 count-prefixed layout: { i64
+            // method_count, ptr m0, ... }).  We don't know the exact slot count,
+            // but a conservative 4-slot type suffices for the GEP — method slot
+            // i lives at struct index i+1.
+            let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
 
             // GEP to the method slot
-            let method_slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, method_idx, fresh_name(ctx, "ms"))
+            let method_slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, method_idx + 1, fresh_name(ctx, "ms"))
             let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, method_slot_ptr, fresh_name(ctx, "cp"))
 
             // Call through closure (same as gen_closure_call)

@@ -1243,8 +1243,14 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //     masked only while the leak régime never dropped the source) / ring_sb_to_str.
 //   Boxers (codegen-internal): ring_box_int / box_float / box_bool, the Eq/Ord
 //     dict closure shims ring_cl_eq_* / cl_ne_* / cl_cmp_* (fresh boxed results),
-//     ring_get_builtin_dict (fresh TUPLE dict of fresh closures), ring_file_exists
-//     (fresh bool box), ring_alloc itself, ring_catch_push (codegen-internal).
+//     ring_file_exists (fresh bool box), ring_alloc itself, ring_catch_push
+//     (codegen-internal).
+//   ring_get_builtin_dict — B-104 D4 re-annotation (was: "fresh TUPLE dict of
+//     fresh closures", the #151 per-call-site leak class): now allocates a
+//     never-drop DICT_STATIC singleton and is reachable ONLY from the
+//     codegen's memoised getters (ring_dict_init_<name>) — at most one
+//     execution per dict name per process.  Never an HIR-visible call; no
+//     perceus classification applies.
 //   ring_try — returns the body/catch closure's result (owned by Ring-fn
 //     convention).  HIR surface = TryCatch, conservatively excluded from
 //     is_droppable_init (abort-path aliasing, B-002).

@@ -66,6 +66,20 @@
 #define RING_TYPEID_SB       13   // StringBuilder (same underlying type as Str)
 #define RING_TYPEID_CELL     14   // boxed mut-cell: { void* value } — write-through closure capture (B-091)
 #define RING_TYPEID_CLOSURE_ENV 15 // closure env struct: { int64 count, void* cap0, ... } — owned-capture drop (B-084)
+// B-104 D4 (#151): trait dicts are first-class.  Layout for BOTH dict typeids:
+//   { int64 method_count, void* method_closure0, ... }  (count-prefixed, like
+//   CLOSURE_ENV) — dispatch GEPs slot i at offset 8 + i*8.
+//   DICT_STATIC — module-level singletons (impl dicts / builtin primitive dicts
+//                 / fully-static wrapped instances).  Registered NEVER-DROP:
+//                 they live for the program lifetime, so a stray ring_dup/
+//                 ring_drop (e.g. a closure env capturing one) is a no-op —
+//                 defense in depth for the singleton model.
+//   DICT_DYN    — locally constructed dynamic wrapped dicts (HExpr::
+//                 DictConstruct).  drop_dict releases the method closures
+//                 (whose envs hold dup'd inner-dict references) when the
+//                 owning binding is scope-end-dropped.
+#define RING_TYPEID_DICT_STATIC 16
+#define RING_TYPEID_DICT_DYN    17
 #define RING_TYPEID_USER_BASE 64  // user-defined types start here
 
 // ============================================================================
@@ -76,16 +90,16 @@ typedef void (*ring_drop_fn)(void* data);
 static ring_drop_fn drop_table[4096];
 static int drop_table_size = RING_TYPEID_USER_BASE;
 
-// B-101 never-drop (interned / arena) typeids — RETIRED by B-102 R-clean
-// (2026-06-07).  The compiler's `Type` DAG now participates in ordinary Perceus
-// RC: the codegen no longer registers any typeid as never-drop, so this table
-// stays all-false and the dup/drop guards below are inert.  The mechanism
-// (ring_register_never_drop + this table + the two guard checks) is kept as a
-// cheap, currently-unused hook should an arena/interned value class be wanted
-// later; with no registrations it has zero effect.  The original A1 over-free
-// (shallow ring_dup vs deep recursive drop_Type on aliased substructure) is now
-// fixed at the source: perceus Clone-wraps every escaping shared Type
-// substructure, balancing the recursive drop (design §7.11 "pure Perceus RC").
+// B-101 never-drop (interned / arena) typeids — RETIRED for the compiler's
+// `Type` DAG by B-102 R-clean (2026-06-07; Type participates in ordinary
+// Perceus RC, see design §7.11 "pure Perceus RC").  RE-ACTIVATED by B-104 D4
+// (#151) for exactly ONE typeid: RING_TYPEID_DICT_STATIC — trait-dict
+// singletons are immortal module-level values (bounded: one per dict instance
+// per program), so dup/drop on them are no-ops.  This makes every stray RC op
+// on a singleton (closure-env capture dup, env-drop release, scope-end drop of
+// a binding that aliased one) safe by construction — the defense-in-depth leg
+// of the D4 singleton model.  ring_runtime_init registers it; no codegen-side
+// registration exists.
 static bool never_drop_table[4096];
 
 // Forward declarations for RC infrastructure
@@ -342,6 +356,7 @@ static void drop_closure_env(void* data);
 static void drop_option(void* data);
 static void drop_tuple(void* data);
 static void drop_sb(void* data);
+static void drop_dict(void* data);
 
 // ============================================================================
 // RingClosure — closure representation for higher-order functions
@@ -398,6 +413,10 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
     drop_table[RING_TYPEID_SB]      = drop_sb;
     drop_table[RING_TYPEID_CELL]    = drop_cell;
     drop_table[RING_TYPEID_CLOSURE_ENV] = drop_closure_env;
+    // B-104 D4 (#151): first-class trait dicts.  Static singletons never drop
+    // (immortal, bounded); dynamic wrapped dicts release their method closures.
+    never_drop_table[RING_TYPEID_DICT_STATIC] = true;
+    drop_table[RING_TYPEID_DICT_DYN] = drop_dict;
 }
 
 // ============================================================================
@@ -2423,20 +2442,23 @@ static void* ring_make_closure(void* fn) {
     return data;
 }
 static void* ring_make_eq_dict(void* eqfn, void* nefn) {
-    // Dict struct is 4 void* slots: [eq_closure, ne_closure, null, null]
-    // Treated as TUPLE for RC purposes (fields are ring_alloc'd closures).
-    void* data = ring_alloc(4 * sizeof(void*), RING_TYPEID_TUPLE);
-    void** d = (void**)data;
+    // B-104 D4 dict layout: { int64 count, eq_closure, ne_closure, null, null }.
+    // DICT_STATIC: builtin dicts are only synthesised from the codegen's
+    // memoised singleton getters — one per dict name per program, never dropped.
+    void* data = ring_alloc(sizeof(int64_t) + 4 * sizeof(void*), RING_TYPEID_DICT_STATIC);
+    *(int64_t*)data = 4;
+    void** d = (void**)((char*)data + 8);
     d[0] = ring_make_closure(eqfn);
     d[1] = ring_make_closure(nefn);
     d[2] = nullptr; d[3] = nullptr;
     return data;
 }
 static void* ring_make_ord_dict(void* cmpfn) {
-    // Ord dict: 4 void* slots with the single `cmp` closure at slot 0 (matching
-    // the trait's method order). Same TUPLE layout/RC handling as the Eq dict.
-    void* data = ring_alloc(4 * sizeof(void*), RING_TYPEID_TUPLE);
-    void** d = (void**)data;
+    // Ord dict: single `cmp` closure at slot 0 (matching the trait's method
+    // order).  Same count-prefixed DICT_STATIC layout as the Eq dict.
+    void* data = ring_alloc(sizeof(int64_t) + 4 * sizeof(void*), RING_TYPEID_DICT_STATIC);
+    *(int64_t*)data = 4;
+    void** d = (void**)((char*)data + 8);
     d[0] = ring_make_closure(cmpfn);
     d[1] = nullptr; d[2] = nullptr; d[3] = nullptr;
     return data;
@@ -2532,6 +2554,20 @@ static void drop_tuple(void* data) {
 static void drop_sb(void* data) {
     // StringBuilder is just a std::string underneath.
     ((std::string*)data)->~basic_string();
+}
+
+static void drop_dict(void* data) {
+    // B-104 D4: dynamic wrapped dict { int64 count, void* method_closure0, ... }.
+    // Each non-null slot is a RingClosure whose env (CLOSURE_ENV, count =
+    // inner_count) holds dup'd inner-dict references — dropping the closure
+    // drops the env, which releases the inners (no-op for DICT_STATIC inners,
+    // real release for dict-param-backed dynamic inners).  Same walk as
+    // drop_closure_env.
+    int64_t count = *(int64_t*)data;
+    void** slots = (void**)((char*)data + 8);
+    for (int64_t i = 0; i < count; i++) {
+        if (slots[i]) ring_drop(slots[i]);
+    }
 }
 
 extern "C" void* ring_get_builtin_dict(void* name_ptr) {
