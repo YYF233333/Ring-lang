@@ -126,9 +126,16 @@ static void ring_drop_by_typeid(uint32_t tid, void* data);
 #define RING_BOX_PROFILE_SAMPLE 64   // must be a power of two
 #endif
 // B-109: extended to per-typeid attribution.  INT recorded at ring_box_int (RA = IR
-// site), OPTION at ring_enum_some (RA = IR site), STR at ring_alloc (RA = the runtime
-// string helper that allocated it — concat / interp / int_to_str / literal, a
-// coarser but still useful "which string op leaks" signal).  Report splits by typeid.
+// site).  Report splits by typeid.
+// B-104 D5 run-2 refinement: OPTION moved from ring_enum_some/none to ring_alloc —
+// run 1 showed ZERO live OPTION samples because IR-level Option constructors call
+// ring_alloc(typeid=8) directly and bypass the (runtime-internal, static) enum
+// helpers entirely; recording in ring_alloc covers both paths (RA = IR ctor site,
+// or the runtime helper that enum_some inlined into).  STR moved from ring_alloc
+// to ring_str_from_cstr + ring_sb_to_str (RA = IR site instead of one collapsed
+// runtime-helper bucket) — run 1 measured those two helpers at 99.9% of live STR
+// (88.2% / 11.7%); the remaining helpers (map_entries / join / int_to_str …) were
+// < 0.01% live and are deliberately not recorded.
 // B-104 D5: BOOL recorded at ring_box_bool (RA = IR site — note that predicate
 // closures called by runtime HOFs box their result inside the closure body, so
 // HOF-discarded BOOLs attribute to lambda IR functions; the exact HOF share comes
@@ -276,10 +283,12 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
     if (g_allocs >= g_next_report) { ring_alloc_stats_report(); g_next_report += (1ULL << 25); }
 #endif
 #ifdef RING_BOX_PROFILE
-    // STR is allocated inside many runtime string helpers (concat / interp / int_to_str
-    // / literal), not directly from IR — record here so RA attributes the leak to the
-    // string op.  INT/OPTION are recorded at their own constructors (IR-site RA).
-    if (typeid_val == RING_TYPEID_STR) ring_box_profile_record(raw + 8, _ReturnAddress(), RING_TYPEID_STR);
+    // OPTION is allocated both by IR-level Option constructors (direct ring_alloc
+    // calls, the dominant leak path per D5 run 1) and by runtime helpers (via the
+    // static, inlined ring_enum_some/none) — record here so both attribute.
+    // INT is recorded at ring_box_int, STR at ring_str_from_cstr / ring_sb_to_str
+    // (IR-site RA; see the box-profile header note).
+    if (typeid_val == RING_TYPEID_OPTION) ring_box_profile_record(raw + 8, _ReturnAddress(), RING_TYPEID_OPTION);
 #endif
     return raw + 8;                               // return data pointer
 }
@@ -520,6 +529,11 @@ extern "C" void* ring_str_from_cstr(const char* cstr) {
     CHK("str_from_cstr");
     void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
     new (data) std::string(cstr);
+#ifdef RING_BOX_PROFILE
+    // B-104 D5: string-literal materialization — RA = the IR site evaluating the
+    // literal (D5 run 1: 88.2% of live STR was this one class).
+    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_STR);
+#endif
     return data;
 }
 
@@ -893,12 +907,11 @@ extern "C" void* ring_list_sort(void* list, void* closure) {
 }
 
 static void* ring_enum_some(void* val) {
+    // (box-profile: OPTION is recorded inside ring_alloc — see the header note;
+    // a second record here would double-sample helper-built Options.)
     void* data = ring_alloc(sizeof(int64_t) + sizeof(void*), RING_TYPEID_OPTION);
     ((int64_t*)data)[0] = 0;
     *((void**)((int64_t*)data + 1)) = val;
-#ifdef RING_BOX_PROFILE
-    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_OPTION);
-#endif
     return data;
 }
 
@@ -906,9 +919,6 @@ static void* ring_enum_none() {
     void* data = ring_alloc(sizeof(int64_t) * 2, RING_TYPEID_OPTION);
     ((int64_t*)data)[0] = 1;
     ((int64_t*)data)[1] = 0;
-#ifdef RING_BOX_PROFILE
-    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_OPTION);
-#endif
     return data;
 }
 
@@ -1816,6 +1826,11 @@ extern "C" void* ring_sb_add(void* sb, void* s) {
 extern "C" void* ring_sb_to_str(void* sb) {
     void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
     new (data) std::string(*(std::string*)sb);
+#ifdef RING_BOX_PROFILE
+    // B-104 D5: StringBuilder.to_str results — RA = the IR call site (D5 run 1:
+    // 11.7% of live STR).
+    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_STR);
+#endif
     return data;
 }
 
