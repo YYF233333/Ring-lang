@@ -129,6 +129,11 @@ static void ring_drop_by_typeid(uint32_t tid, void* data);
 // site), OPTION at ring_enum_some (RA = IR site), STR at ring_alloc (RA = the runtime
 // string helper that allocated it — concat / interp / int_to_str / literal, a
 // coarser but still useful "which string op leaks" signal).  Report splits by typeid.
+// B-104 D5: BOOL recorded at ring_box_bool (RA = IR site — note that predicate
+// closures called by runtime HOFs box their result inside the closure body, so
+// HOF-discarded BOOLs attribute to lambda IR functions; the exact HOF share comes
+// from the direct [hof-stats] counters below, the profile cross-validates and
+// attributes the non-HOF remainder, e.g. And/Or phi sites).
 struct RingBoxRec { void* ra; uint32_t tid; };
 static std::unordered_map<void*, RingBoxRec>* g_box_live = nullptr; // live ptr -> (RA, typeid)
 static std::unordered_map<void*, uint64_t>*   g_box_born = nullptr; // RA -> cumulative sampled births
@@ -206,6 +211,22 @@ static uint64_t g_allocs = 0;
 static uint64_t g_frees  = 0;
 static int64_t  g_live_tid[4096] = {0};
 static uint64_t g_next_report = (1ULL << 25); // first report at 32M allocs
+// ─────────────────────────────────────────────────────────────────────────────
+// B-104 D5 — direct attribution counters for runtime-internal discarded
+// temporaries (audit #152).  Each increment = one allocation created by / handed
+// to a runtime HOF loop that nobody drops, so the counter value IS the exact
+// cumulative count for that site class (no sampling).  Splits the BOOL residual
+// (HOF predicate share vs And/Or-phi-and-other remainder, read against
+// g_live_tid[2]) and the STR residual (for_each synthesized keys vs other string
+// ops).  Caveat: counts boxes DISCARDED by the HOF; if a predicate returned a
+// dup'd shared box rather than a fresh one, the discard leaks a reference, not
+// an allocation — cross-check against [box-profile] BOOL totals.
+// ─────────────────────────────────────────────────────────────────────────────
+static uint64_t g_hof_pred_bool   = 0; // filter/any/all/find/find_index predicate result Bool box
+static uint64_t g_hof_fold_acc    = 0; // fold intermediate accumulator overwritten (i >= 1)
+static uint64_t g_foreach_key_str = 0; // map/set for_each synthesized STR key/elem
+static uint64_t g_foreach_key_int = 0; // map_int/set_int for_each synthesized INT key box
+#define RING_D5_COUNT(counter) ((counter)++)
 static void ring_alloc_stats_report() {
     uint64_t live = g_allocs - g_frees;
     double pct = g_allocs ? (100.0 * (double)live / (double)g_allocs) : 0.0;
@@ -226,12 +247,18 @@ static void ring_alloc_stats_report() {
     for (int s = 0; s < 6; s++) {
         if (top[s] >= 0) fprintf(stderr, " tid%d=%lld", top[s], (long long)g_live_tid[top[s]]);
     }
-    fprintf(stderr, "\n"); fflush(stderr);
+    fprintf(stderr, "\n");
+    fprintf(stderr, "[hof-stats] pred_bool=%llu fold_acc=%llu foreach_key_str=%llu foreach_key_int=%llu\n",
+            (unsigned long long)g_hof_pred_bool, (unsigned long long)g_hof_fold_acc,
+            (unsigned long long)g_foreach_key_str, (unsigned long long)g_foreach_key_int);
+    fflush(stderr);
 #ifdef RING_BOX_PROFILE
     ring_box_profile_report();
 #endif
 }
 static bool g_stats_atexit = (atexit(ring_alloc_stats_report), true);
+#else
+#define RING_D5_COUNT(counter) ((void)0)
 #endif
 
 extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
@@ -283,7 +310,7 @@ extern "C" void ring_drop(void* ptr) {
     if (*rc <= 1) {
         ring_drop_by_typeid(tid, ptr);
 #ifdef RING_BOX_PROFILE
-        if (tid == RING_TYPEID_INT || tid == RING_TYPEID_STR || tid == RING_TYPEID_OPTION) ring_box_profile_erase(ptr);
+        if (tid == RING_TYPEID_INT || tid == RING_TYPEID_BOOL || tid == RING_TYPEID_STR || tid == RING_TYPEID_OPTION) ring_box_profile_erase(ptr);
 #endif
         free((char*)ptr - 8);
 #ifdef RING_ALLOC_STATS
@@ -296,6 +323,20 @@ extern "C" void ring_drop(void* ptr) {
 }
 
 extern "C" void ring_register_drop(int64_t typeid_val, void* drop_fn_ptr) {
+#ifdef RING_ALLOC_STATS
+    // B-104 D5: typeid → type-name attribution.  User typeids (64+) are assigned
+    // in deterministic codegen order but the mapping lives only in the compiler
+    // (get_or_assign_typeid); print each registration's drop-fn RVA so the linker
+    // map resolves it to `ring_drop_<TypeName>` — identifies e.g. tid103.
+    {
+        uintptr_t base = 0;
+#ifdef _WIN32
+        base = (uintptr_t)GetModuleHandleW(NULL);
+#endif
+        fprintf(stderr, "[drop-reg] tid=%lld drop_rva=0x%llx\n", (long long)typeid_val,
+                (unsigned long long)((uintptr_t)drop_fn_ptr - base));
+    }
+#endif
     if (typeid_val >= 0 && typeid_val < 4096) {
         drop_table[(int)typeid_val] = (ring_drop_fn)drop_fn_ptr;
     }
@@ -453,6 +494,9 @@ extern "C" void* ring_box_bool(int64_t val) {
     CHK("box_bool");
     void* data = ring_alloc(sizeof(int64_t), RING_TYPEID_BOOL);
     *(int64_t*)data = (val != 0) ? 1 : 0;
+#ifdef RING_BOX_PROFILE
+    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_BOOL); // B-104 D5
+#endif
     return data;
 }
 
@@ -947,6 +991,7 @@ extern "C" int64_t ring_list_any(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
+        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
         if (ring_unbox_int(r) != 0) return 1;
     }
     return 0;
@@ -958,6 +1003,7 @@ extern "C" int64_t ring_list_all(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
+        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
         if (ring_unbox_int(r) == 0) return 0;
     }
     return 1;
@@ -969,6 +1015,7 @@ extern "C" void* ring_list_find(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
+        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
         if (ring_unbox_int(r) != 0) {
             // B-103: .find builds a FRESH owned Option that co-owns the matched
             // element (same owned-container-constructor rule as ring_list_get_opt /
@@ -995,6 +1042,7 @@ extern "C" void* ring_list_find_index(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
+        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
         if (ring_unbox_int(r) != 0) {
             return ring_enum_some(ring_box_int((int64_t)i));
         }
@@ -1022,6 +1070,8 @@ extern "C" void* ring_list_fold(void* list, void* init, void* closure) {
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     void* acc = init;
     for (size_t i = 0; i < vec->size(); i++) {
+        if (i > 0) RING_D5_COUNT(g_hof_fold_acc); // audit #152 ②: the i>=1 overwrite
+                                                  // discards the previous owned acc
         acc = fn(cls->env_ptr, acc, (*vec)[i]);
     }
     return acc;
@@ -1053,6 +1103,7 @@ extern "C" void* ring_list_filter(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
+        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
         if (ring_unbox_int(r) != 0) {
             // B-103: dup — the fresh filtered list co-owns the source's element
             // (owned-container-constructor rule; see ring_list_concat).
@@ -1277,6 +1328,7 @@ extern "C" void* ring_map_for_each(void* map, void* closure) {
     for (auto& kv : *m) {
         void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
         new (sd) std::string(kv.first);
+        RING_D5_COUNT(g_foreach_key_str); // audit #152 ③: synthesized key never freed
         fn(cls->env_ptr, sd, kv.second);
     }
     return nullptr;
@@ -1403,6 +1455,7 @@ extern "C" void* ring_map_int_for_each(void* map, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     for (auto& kv : *m) {
+        RING_D5_COUNT(g_foreach_key_int); // audit #152 ③ int-keyed variant: synthesized box never freed
         fn(cls->env_ptr, ring_box_int(kv.first), kv.second);
     }
     return nullptr;
@@ -1514,6 +1567,7 @@ extern "C" void* ring_set_for_each(void* set, void* closure) {
     for (auto& elem : *s) {
         void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
         new (sd) std::string(elem);
+        RING_D5_COUNT(g_foreach_key_str); // audit #152 ③: synthesized elem never freed
         fn(cls->env_ptr, sd);
     }
     return nullptr;
@@ -1577,6 +1631,7 @@ extern "C" void* ring_set_int_for_each(void* set, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (auto& elem : *s) {
+        RING_D5_COUNT(g_foreach_key_int); // audit #152 ③ int-keyed variant: synthesized box never freed
         fn(cls->env_ptr, ring_box_int(elem));
     }
     return nullptr;
