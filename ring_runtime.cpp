@@ -988,6 +988,17 @@ extern "C" void* ring_list_find_index(void* list, void* closure) {
 // `list.reduce(cb, init)` lowering (acc is the first closure argument).
 extern "C" void* ring_list_fold(void* list, void* init, void* closure) {
     auto* vec = (std::vector<void*>*)list;
+    // B-104 D1 Stage 3 (audit #150): on the EMPTY path the result is `init`.
+    // Returning it VERBATIM while the caller's result binding MOVES it would
+    // make the binding co-own one box with init's owner — double-free at scope
+    // end.  Dup so the fold result is owned on EVERY path (the non-empty path
+    // returns the closure's owned result; B-103 dup-on-share pattern, see
+    // ring_list_filter / ring_list_concat).  This dup is what retired `fold`
+    // from is_arg_returning_call and the perceus anf_arg mechanism.
+    if (vec->empty()) {
+        ring_dup(init);
+        return init;
+    }
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     void* acc = init;
