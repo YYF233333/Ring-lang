@@ -602,6 +602,14 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             if v_type_excluded(ty, ctx.externs) { CLS_EXCLUDED } else { CLS_BORROW }
         },
 
+        // B-104 D4: a dict construction is a FRESH owned TUPLE-of-closures.  It
+        // is a leaf — its inner DictRefs are borrows of dict params / locals /
+        // module singletons (no sub-expressions to account).  It enters the
+        // normal LEAK/UAF/BALANCE account: dict_lower binds it via `let
+        // __ring_dictlocal_N`, perceus scope-end-drops the binding (exactly-once
+        // consumption); an unconsumed construct is reported like any owned temp.
+        HExpr::DictConstruct { ty, .. } => v_cls_of_fresh(ty, ctx.externs),
+
         HExpr::IndexExpr { receiver, index, ty, .. } => {
             v_borrow(receiver, "", ctx)
             v_borrow(index, "", ctx)

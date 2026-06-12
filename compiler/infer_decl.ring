@@ -1604,7 +1604,8 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     // Check for cyclic dependencies in default effect handlers
     check_default_effect_cycles(ctx, program.decls)
 
-    HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars }
+    // static_dicts is populated by dict_lower (checker pipeline) — empty here.
+    HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars, static_dicts: [] }
 }
 
 pub fn resolve_type_expr_public(mut ctx: InferCtx, texpr: TypeExpr) -> Type {

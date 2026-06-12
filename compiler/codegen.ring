@@ -14,7 +14,7 @@ use codegen_ctx::{CodegenCtx, HTraitDeclInfo, new_codegen_ctx,
     emit, emit_raw, push_indent, pop_indent, qualify, safe_ident,
     get_evidence_params}
 use codegen_decl::{emit_decl, emit_toplevel_evidence}
-use codegen_expr::{gen_expr}
+use codegen_expr::{gen_expr, wrapped_dict_js}
 use codegen_derive::{emit_derived_impl, get_derived_method_names}
 
 // ============================================================
@@ -88,6 +88,16 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
 
     // Collect local names, fn effects, struct field orders, trait decls, impl methods
     register_decl_info(program.decls, ctx)
+
+    // B-104 D4: static wrapped dict instances are module-level consts of THIS
+    // module (each referencing module defines its own copy — instances are
+    // module-private, never exported).  Register their names so qualify()
+    // module-prefixes them in concatenated multi-file mode (collision-free).
+    for sd in program.static_dicts {
+        if sd.inner.len() > 0 {
+            ctx.local_names.insert(sd.name)
+        }
+    }
 
     // Compute transitive effect closure
     if ctx.local_fn_effects.len() > 0 {
@@ -179,6 +189,24 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
         emit_derived_impl(ctx, impl_)
         emit_raw(ctx, "")
     }
+
+    // B-104 D4: module-level static wrapped dict instance singletons (use
+    // sites reference them via DictRef::Static).  Emitted after impl/derived
+    // dicts; the inner references sit inside arrow closures, so definition
+    // order is not evaluation order — only the const itself must precede the
+    // main() call below.  Plain entries (inner == []) already have defs
+    // (impl consts / runtime preamble).
+    let mut emitted_instance = false
+    for sd in program.static_dicts {
+        if sd.inner.len() > 0 {
+            let d = qualify(ctx, sd.base_dict)
+            let mut inner_strs: List<Str> = []
+            for inn in sd.inner { inner_strs.push(qualify(ctx, inn)) }
+            emit(ctx, "const ${qualify(ctx, sd.name)} = ${wrapped_dict_js(d, sd.trait_name, inner_strs)};")
+            emitted_instance = true
+        }
+    }
+    if emitted_instance { emit_raw(ctx, "") }
 
     // Auto-call main() if present
     if ctx.skip_main_call == false {

@@ -1,5 +1,5 @@
 use types::{Type, Effect, EffectRow, effect_kind_name}
-use hir::{HEffectOp}
+use hir::{HEffectOp, HDictDef}
 
 // Re-declare LLVM opaque types to avoid cross-module ESM import issues.
 // These match the declarations in llvm_ffi.ring and unify to the same types.
@@ -86,6 +86,11 @@ pub struct LlvmCtx {
 
     // Trait dict globals: maps dict name → LLVMValueRef (global ptr)
     pub dict_globals: Map<Str, LLVMValueRef>,
+
+    // B-104 D4: static dict singleton definitions (HProgram.static_dicts, unioned
+    // across modules in project mode) — wrapped INSTANCE entries are built by
+    // resolve_static_dict_by_name from base_dict + inner singleton names.
+    pub static_dict_defs: Map<Str, HDictDef>,
 
     // Trait method order: maps trait_name → [method_name, ...]
     pub trait_method_order: Map<Str, List<Str>>,

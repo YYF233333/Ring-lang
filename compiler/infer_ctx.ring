@@ -609,7 +609,7 @@ pub fn resolve_dicts_from_scheme(
                                     inner_dicts: inner
                                 })
                             } else {
-                                resolved_dicts.push(DictRef::Simple(trait_dict_name(name, bound.trait_name)))
+                                resolved_dicts.push(DictRef::Static(trait_dict_name(name, bound.trait_name)))
                             }
                             found = true
                             // Validate associated type constraints
@@ -626,7 +626,7 @@ pub fn resolve_dicts_from_scheme(
                                     inner_dicts: inner
                                 })
                             } else {
-                                resolved_dicts.push(DictRef::Simple(trait_dict_name(name, bound.trait_name)))
+                                resolved_dicts.push(DictRef::Static(trait_dict_name(name, bound.trait_name)))
                             }
                             found = true
                             // Validate associated type constraints
@@ -653,7 +653,7 @@ pub fn resolve_dicts_from_scheme(
                     match type_to_builtin_name(concrete) {
                         some(prim_name) => {
                             if has_impl(env.trait_reg, prim_name, bound.trait_name) {
-                                resolved_dicts.push(DictRef::Simple(trait_dict_name(prim_name, bound.trait_name)))
+                                resolved_dicts.push(DictRef::Static(trait_dict_name(prim_name, bound.trait_name)))
                                 found = true
                                 // Validate associated type constraints
                                 check_assoc_constraints(sink, env, bound, prim_name, s, span)
@@ -730,7 +730,7 @@ fn resolve_concrete_type_to_dict_ref(
         some(builtin_name) => match t {
             Type::StructType { .. } => {},
             Type::EnumType { .. } => {},
-            _ => { return DictRef::Simple(trait_dict_name(builtin_name, trait_name)) }
+            _ => { return DictRef::Static(trait_dict_name(builtin_name, trait_name)) }
         },
         none => {}
     }
@@ -741,7 +741,7 @@ fn resolve_concrete_type_to_dict_ref(
             })
             match bound {
                 some(b) => DictRef::Simple(trait_bound_param_name(b.type_param_name, trait_name)),
-                none => DictRef::Simple(trait_dict_name("__unknown", trait_name))
+                none => DictRef::Static(trait_dict_name("__unknown", trait_name))
             }
         },
         Type::StructType { name, type_params, .. } => {
@@ -754,10 +754,10 @@ fn resolve_concrete_type_to_dict_ref(
                         inner_dicts: inner
                     }
                 } else {
-                    DictRef::Simple(trait_dict_name(name, trait_name))
+                    DictRef::Static(trait_dict_name(name, trait_name))
                 }
             } else {
-                DictRef::Simple(trait_dict_name(name, trait_name))
+                DictRef::Static(trait_dict_name(name, trait_name))
             }
         },
         Type::EnumType { name, type_params, .. } => {
@@ -770,13 +770,13 @@ fn resolve_concrete_type_to_dict_ref(
                         inner_dicts: inner
                     }
                 } else {
-                    DictRef::Simple(trait_dict_name(name, trait_name))
+                    DictRef::Static(trait_dict_name(name, trait_name))
                 }
             } else {
-                DictRef::Simple(trait_dict_name(name, trait_name))
+                DictRef::Static(trait_dict_name(name, trait_name))
             }
         },
-        _ => DictRef::Simple(trait_dict_name("__unknown", trait_name))
+        _ => DictRef::Static(trait_dict_name("__unknown", trait_name))
     }
 }
 

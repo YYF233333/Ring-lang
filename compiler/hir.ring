@@ -19,9 +19,59 @@ pub struct HParam {
     pub is_mutable: Bool
 }
 
+// B-104 D4 (#151): dict evidence is FIRST-CLASS in HIR.  Three reference forms:
+//   Simple(name)  — a SCOPE reference: a dict PARAM (`__ring_T_Eq`, from
+//                   trait_bound_param_name) or a dict LOCAL synthesised by the
+//                   dict-lowering pass (`__ring_dictlocal_N`).  Borrow — the
+//                   referenced binding owns the dict.
+//   Static(name)  — a MODULE-LEVEL STATIC dict singleton reference (borrow):
+//                   either a plain dict (`__Type_Trait` impl dict / builtin
+//                   primitive dict) or a fully-static wrapped INSTANCE
+//                   (dict_instance_name).  Singletons live for the program
+//                   lifetime — never Clone'd, never Drop'ed, never owned.
+//                   Produced by infer (plain) / dict_lower (instances).
+//   Wrapped{..}   — the infer-side RESOLUTION form for a parameterized type's
+//                   dict (base dict + inner dicts).  dict_lower rewrites every
+//                   use site: all-static → Static(instance); any dynamic inner
+//                   → a local `let __ring_dictlocal_N = HExpr::DictConstruct`
+//                   + Simple(local).  After dict_lower, Wrapped survives ONLY
+//                   in BinOp eq/ord_dispatch extra_dicts (JS-only consumption;
+//                   the LLVM backend ignores extra_dicts — pre-existing gap).
 pub enum DictRef {
     Simple(Str),
-    Wrapped { dict: Str, trait_name: Str, inner_dicts: List<DictRef> }
+    Wrapped { dict: Str, trait_name: Str, inner_dicts: List<DictRef> },
+    Static(Str)
+}
+
+// B-104 D4: a module-level static dict singleton definition (HProgram.static_dicts).
+//   inner == []  — a PLAIN static dict (impl dict or builtin primitive dict).
+//                  Its definition already exists (JS: impl const / runtime
+//                  preamble; LLVM: ring_dict_init_* / runtime builtin synthesis);
+//                  the entry records the module's static-dict footprint and the
+//                  LLVM backend memoises the named singleton on first use.
+//                  trait_name may be "" (not recoverable from the name alone —
+//                  backends do not need it for plain dicts).
+//   inner != [] — a fully-static WRAPPED INSTANCE: base_dict's trait methods
+//                  partially applied with the inner singletons.  Both backends
+//                  emit ONE module-level definition (JS: const; LLVM: lazy
+//                  memoised getter) and use sites borrow it via DictRef::Static.
+pub struct HDictDef {
+    pub name: Str,
+    pub base_dict: Str,
+    pub trait_name: Str,
+    pub inner: List<Str>
+}
+
+// Naming convention for a fully-static wrapped dict instance (cross-stage
+// contract: dict_lower mints it, both backends define/reference it).  `$` is
+// legal in JS identifiers and LLVM symbols, and cannot appear in user type
+// names, so the encoding is collision-free and deterministic.
+pub fn dict_instance_name(base_dict: Str, inner: List<Str>) -> Str {
+    if inner.len() == 0 {
+        base_dict
+    } else {
+        "${base_dict}$${inner.join("$")}"
+    }
 }
 
 pub enum TraitDispatch {
@@ -84,6 +134,16 @@ pub enum HExpr {
     ListLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
     TupleLit { elements: List<HExpr>, ty: Type, effects: EffectRow, span: Span },
     IndexExpr { receiver: HExpr, index: HExpr, ty: Type, effects: EffectRow, span: Span },
+    // B-104 D4 (#151): LOCAL construction of a DYNAMIC wrapped dict (at least
+    // one inner is a dict param / dict local — unknowable at module scope).
+    // Synthesised by dict_lower as the init of a `let __ring_dictlocal_N = …`
+    // immediately above the consuming call; the binding is FRESH-OWNED and is
+    // reclaimed by the ordinary Perceus scope-end drop (D1/D2 coverage).
+    // `inner` entries are Simple (param/local borrow) or Static (singleton
+    // borrow) — never Wrapped (dict_lower flattens nested dynamics into their
+    // own locals first).  ty is TupleType{[]} (a dict IS a tuple of method
+    // closures); effects are pure.
+    DictConstruct { base_dict: Str, trait_name: Str, inner: List<DictRef>, ty: Type, effects: EffectRow, span: Span },
     // B-098: value-level clone inserted by the Perceus L1 borrow-inference pass
     // (clone-all-escape) for --target=llvm only.  Wraps an escaping value that
     // already has an independent owner (Ident binding / FieldAccess / IndexExpr /
@@ -217,7 +277,11 @@ pub struct DerivedImpl {
 pub struct HProgram {
     pub decls: List<HDecl>,
     pub derived_impls: List<DerivedImpl>,
-    pub boxed_vars: Set<Int>
+    pub boxed_vars: Set<Int>,
+    // B-104 D4: the module's static dict singleton set (see HDictDef), collected
+    // by dict_lower (checker pipeline) in registration order (inners before the
+    // wrapped instances that reference them).
+    pub static_dicts: List<HDictDef>
 }
 
 // B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case
@@ -313,6 +377,7 @@ pub fn hexpr_type(e: HExpr) -> Type {
         HExpr::ListLit { ty, .. } => ty,
         HExpr::TupleLit { ty, .. } => ty,
         HExpr::IndexExpr { ty, .. } => ty,
+        HExpr::DictConstruct { ty, .. } => ty,
         HExpr::Clone { ty, .. } => ty
     }
 }
@@ -342,6 +407,7 @@ pub fn hexpr_effects(e: HExpr) -> EffectRow {
         HExpr::ListLit { effects, .. } => effects,
         HExpr::TupleLit { effects, .. } => effects,
         HExpr::IndexExpr { effects, .. } => effects,
+        HExpr::DictConstruct { effects, .. } => effects,
         HExpr::Clone { effects, .. } => effects
     }
 }
@@ -371,6 +437,7 @@ pub fn hexpr_span(e: HExpr) -> Span {
         HExpr::ListLit { span, .. } => span,
         HExpr::TupleLit { span, .. } => span,
         HExpr::IndexExpr { span, .. } => span,
+        HExpr::DictConstruct { span, .. } => span,
         HExpr::Clone { span, .. } => span
     }
 }

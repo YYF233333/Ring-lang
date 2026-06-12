@@ -110,6 +110,11 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
         HExpr::UnaryOp { op, operand, ty, .. } => gen_unaryop(ctx, op, operand, ty),
         HExpr::Call { callee, args, resolved_dicts, dict_dispatch, ty, effects, .. } =>
             gen_call(ctx, callee, args, resolved_dicts, dict_dispatch, ty, effects),
+        // B-104 D4: local construction of a DYNAMIC wrapped dict (dict_lower's
+        // `let __ring_dictlocal_N = …` init) — a fresh owned value, reclaimed
+        // by the binding's Perceus scope-end drop.
+        HExpr::DictConstruct { base_dict, trait_name, inner, .. } =>
+            build_wrapped_dict(ctx, base_dict, trait_name, inner),
         HExpr::FieldAccess { receiver, field, ty, .. } =>
             gen_field_access(ctx, receiver, field, ty),
         HExpr::StructLit { name, fields, spread, .. } =>
@@ -1094,50 +1099,81 @@ fn resolve_dict_refs(mut ctx: LlvmCtx, dicts: List<DictRef>) -> List<LLVMValueRe
 fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
     match dr {
         DictRef::Simple(name) => {
-            // First check if it's a dict parameter in the current scope (e.g. __ring_T_Eq)
+            // A scope reference: dict parameter (__ring_T_Eq) or dict_lower's
+            // local dict binding (__ring_dictlocal_N).  Name-based legacy
+            // callers (dict_closure_dicts / derive extra_dicts strings) also
+            // funnel here, so unknown names fall through to the static chain.
             match ctx.named_values.get(name) {
                 some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "dict")),
-                none => {
-                    // Try as a dict init function (generated from impl Trait for Type)
-                    let init_fn_name = "ring_dict_init_${name}"
-                    match ctx.functions.get(init_fn_name) {
-                        some(init_fn) => {
-                            let init_fn_ty = match ctx.fn_types.get(init_fn_name) {
-                                some(t) => t,
-                                none => {
-                                    // Fallback: create a () -> ptr type
-                                    LLVMFunctionType(ctx.ptr_type, [], 0)
-                                },
-                            }
-                            // Call the init function to get the dict
-                            LLVMBuildCall2(ctx.builder, init_fn_ty, init_fn, [], fresh_name(ctx, "dict"))
-                        },
-                        none => {
-                            // Check dict_globals
-                            match ctx.dict_globals.get(name) {
-                                some(init_fn) => {
-                                    let ft = LLVMFunctionType(ctx.ptr_type, [], 0)
-                                    LLVMBuildCall2(ctx.builder, ft, init_fn, [], fresh_name(ctx, "dict"))
-                                },
-                                none => {
-                                    // Builtin primitive trait dicts (Eq for Str/Int/Float/Bool)
-                                    // are not emitted as Ring impls; construct them via the runtime.
-                                    let name_str = gen_str_lit(ctx, name)
-                                    let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
-                                    let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
-                                    LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
-                                },
-                            }
-                        },
-                    }
-                },
+                none => resolve_static_dict_by_name(ctx, name),
             }
         },
+        // B-104 D4: module-level static dict singleton reference (borrow).
+        DictRef::Static(name) => resolve_static_dict_by_name(ctx, name),
         DictRef::Wrapped { dict, trait_name, inner_dicts } => {
             // #B-087 gap 2: a wrapped dict for a parameterized type whose trait impl
             // needs the inner type-param dicts bound. Build a real wrapper dict (see
             // build_wrapped_dict). Previously returned null → dispatch crash.
+            // Post-dict_lower this survives only in BinOp dispatch extra_dicts
+            // (which the LLVM Eq/Ord dispatch ignores — pre-existing gap).
             build_wrapped_dict(ctx, dict, trait_name, inner_dicts)
+        },
+    }
+}
+
+// Resolve a STATIC dict by name: impl-generated init function (ring_dict_init_*),
+// a dict_globals registration, a dict_lower wrapped-instance definition, or the
+// runtime builtin synthesis for primitive dicts.
+fn resolve_static_dict_by_name(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
+    // Try as a dict init function (generated from impl Trait for Type)
+    let init_fn_name = "ring_dict_init_${name}"
+    match ctx.functions.get(init_fn_name) {
+        some(init_fn) => {
+            let init_fn_ty = match ctx.fn_types.get(init_fn_name) {
+                some(t) => t,
+                none => {
+                    // Fallback: create a () -> ptr type
+                    LLVMFunctionType(ctx.ptr_type, [], 0)
+                },
+            }
+            // Call the init function to get the dict
+            LLVMBuildCall2(ctx.builder, init_fn_ty, init_fn, [], fresh_name(ctx, "dict"))
+        },
+        none => {
+            // Check dict_globals
+            match ctx.dict_globals.get(name) {
+                some(init_fn) => {
+                    let ft = LLVMFunctionType(ctx.ptr_type, [], 0)
+                    LLVMBuildCall2(ctx.builder, ft, init_fn, [], fresh_name(ctx, "dict"))
+                },
+                none => {
+                    // B-104 D4: a dict_lower static wrapped INSTANCE (inner != [])
+                    // — build it from its HDictDef (base dict + inner singletons).
+                    // PLAIN entries (inner == []) are footprint records only and
+                    // MUST fall through to the builtin synthesis (a plain entry
+                    // routed into build_wrapped_dict would yield a 0-slot dict —
+                    // dispatch crash).
+                    let inst_def = match ctx.static_dict_defs.get(name) {
+                        some(def) => if def.inner.len() > 0 { some(def) } else { none },
+                        none => none,
+                    }
+                    match inst_def {
+                        some(def) => {
+                            let mut inner_refs: List<DictRef> = []
+                            for inn in def.inner { inner_refs.push(DictRef::Static(inn)) }
+                            build_wrapped_dict(ctx, def.base_dict, def.trait_name, inner_refs)
+                        },
+                        none => {
+                            // Builtin primitive trait dicts (Eq for Str/Int/Float/Bool)
+                            // are not emitted as Ring impls; construct them via the runtime.
+                            let name_str = gen_str_lit(ctx, name)
+                            let bd_fn = get_or_declare_runtime_fn(ctx, "ring_get_builtin_dict", [ctx.ptr_type], ctx.ptr_type)
+                            let bd_ty = get_rt_fn_type(ctx, "ring_get_builtin_dict")
+                            LLVMBuildCall2(ctx.builder, bd_ty, bd_fn, [name_str], fresh_name(ctx, "bd"))
+                        },
+                    }
+                },
+            }
         },
     }
 }
@@ -3613,6 +3649,8 @@ fn collect_dispatch_dict(ctx: LlvmCtx, dispatch: TraitDispatch?, params: List<HP
 fn collect_dictref_names(ctx: LlvmCtx, dr: DictRef, params: List<HParam>, mut captures: List<Str>) {
     match dr {
         DictRef::Simple(name) => consider_capture_name(ctx, name, none, params, captures),
+        // B-104 D4: a module-level singleton — resolved globally, never captured.
+        DictRef::Static(_) => {},
         DictRef::Wrapped { dict, inner_dicts, .. } => {
             consider_capture_name(ctx, dict, none, params, captures)
             for inner in inner_dicts { collect_dictref_names(ctx, inner, params, captures) }
@@ -3648,6 +3686,13 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
                 some(dd) => consider_capture_name(ctx, dd.dict_param, none, params, captures),
                 none => {},
             }
+        },
+        // B-104 D4: a dict construction inside a closure body references dict
+        // params through its inner DictRefs — capture them (Static singletons
+        // and block-local dict locals are filtered out by consider_capture_name
+        // / the Static arm).
+        HExpr::DictConstruct { inner, .. } => {
+            for d in inner { collect_dictref_names(ctx, d, params, captures) }
         },
         HExpr::FieldAccess { receiver, .. } => {
             collect_captures(ctx, receiver, params, captures)

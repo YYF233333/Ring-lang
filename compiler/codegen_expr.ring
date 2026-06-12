@@ -22,6 +22,15 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
         HExpr::FloatLit { value, .. } => value.to_str(),
         HExpr::StrLit { value, .. } => json_stringify(value),
         HExpr::BoolLit { value, .. } => if value { "true" } else { "false" },
+        // B-104 D4: local construction of a DYNAMIC wrapped dict (dict_lower's
+        // `let __ring_dictlocal_N = …` init).  Same wrapper-object shape the
+        // Wrapped DictRef used to emit inline — behavior-identical for JS.
+        HExpr::DictConstruct { base_dict, trait_name, inner, .. } => {
+            let d = qualify(ctx, base_dict)
+            let mut inner_strs: List<Str> = []
+            for i in inner { inner_strs.push(dict_ref_to_js(ctx, i)) }
+            wrapped_dict_js(d, trait_name, inner_strs)
+        },
         HExpr::Ident { name, resolved_name, def_id, ty, dict_closure_dicts, .. } => {
             let qname = match resolved_name {
                 some(rn) => qualify(ctx, rn),
@@ -321,24 +330,34 @@ fn gen_ord_dispatch(mut ctx: CodegenCtx, op: BinOp, left: HExpr, right: HExpr, d
     }
 }
 
+// B-104 D4: the wrapper-dict object literal for a parameterized type's trait
+// dict (base dict's methods partially applied with the inner dicts).  Shared by
+// the inline forms (DictRef::Wrapped residuals, HExpr::DictConstruct) and the
+// module-level static instance consts (codegen.ring emit from HDictDef).
+pub fn wrapped_dict_js(d: Str, trait_name: Str, inner_strs: List<Str>) -> Str {
+    let inner_args = inner_strs.join(", ")
+    match trait_name {
+        "Eq" => "{ eq: (__a, __b) => ${d}.eq(__a, __b, ${inner_args}), ne: (__a, __b) => ${d}.ne(__a, __b, ${inner_args}) }",
+        "Clone" => "{ clone: (__a) => ${d}.clone(__a, ${inner_args}) }",
+        "Debug" => "{ debug: (__a) => ${d}.debug(__a, ${inner_args}) }",
+        "Ord" => "{ cmp: (__a, __b) => ${d}.cmp(__a, __b, ${inner_args}) }",
+        _ => d,
+    }
+}
+
 fn dict_ref_to_js(ctx: CodegenCtx, dr: DictRef) -> Str {
     match dr {
         DictRef::Simple(name) => qualify(ctx, name),
+        // A module-level static dict singleton (plain dict const / builtin
+        // preamble dict / dict_lower instance const) — reference by name.
+        DictRef::Static(name) => qualify(ctx, name),
         DictRef::Wrapped { dict, trait_name, inner_dicts } => {
             let d = qualify(ctx, dict)
             let mut inner_strs: List<Str> = []
             for inner in inner_dicts {
                 inner_strs.push(dict_ref_to_js(ctx, inner))
             }
-            let inner_args = inner_strs.join(", ")
-            // Generate a wrapper dict object that binds the inner dicts
-            match trait_name {
-                "Eq" => "{ eq: (__a, __b) => ${d}.eq(__a, __b, ${inner_args}), ne: (__a, __b) => ${d}.ne(__a, __b, ${inner_args}) }",
-                "Clone" => "{ clone: (__a) => ${d}.clone(__a, ${inner_args}) }",
-                "Debug" => "{ debug: (__a) => ${d}.debug(__a, ${inner_args}) }",
-                "Ord" => "{ cmp: (__a, __b) => ${d}.cmp(__a, __b, ${inner_args}) }",
-                _ => d,
-            }
+            wrapped_dict_js(d, trait_name, inner_strs)
         },
     }
 }

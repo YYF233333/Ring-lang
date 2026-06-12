@@ -1337,7 +1337,7 @@ fn resolve_type_to_dict_ref(ctx: InferCtx, t: Type, subst: UnionFind, trait_name
         some(builtin_name) => match t {
             Type::StructType { .. } => {},
             Type::EnumType { .. } => {},
-            _ => { return some(DictRef::Simple(trait_dict_name(builtin_name, trait_name))) }
+            _ => { return some(DictRef::Static(trait_dict_name(builtin_name, trait_name))) }
         },
         none => {}
     }
@@ -1361,10 +1361,10 @@ fn resolve_type_to_dict_ref(ctx: InferCtx, t: Type, subst: UnionFind, trait_name
                             trait_name: trait_name,
                             inner_dicts: inner_dicts
                         }),
-                        none => some(DictRef::Simple(trait_dict_name(name, trait_name)))
+                        none => some(DictRef::Static(trait_dict_name(name, trait_name)))
                     }
                 } else {
-                    some(DictRef::Simple(trait_dict_name(name, trait_name)))
+                    some(DictRef::Static(trait_dict_name(name, trait_name)))
                 }
             } else { none }
         },
@@ -1378,10 +1378,10 @@ fn resolve_type_to_dict_ref(ctx: InferCtx, t: Type, subst: UnionFind, trait_name
                             trait_name: trait_name,
                             inner_dicts: inner_dicts
                         }),
-                        none => some(DictRef::Simple(trait_dict_name(name, trait_name)))
+                        none => some(DictRef::Static(trait_dict_name(name, trait_name)))
                     }
                 } else {
-                    some(DictRef::Simple(trait_dict_name(name, trait_name)))
+                    some(DictRef::Static(trait_dict_name(name, trait_name)))
                 }
             } else { none }
         },

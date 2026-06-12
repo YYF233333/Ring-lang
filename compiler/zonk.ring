@@ -186,6 +186,10 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
             HExpr::BoolLit { value: value, ty: z_ty, effects: z_eff, span: z_span },
         HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, .. } =>
             HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: z_ty, effects: z_eff, span: z_span },
+        // B-104 D4: synthesised by dict_lower AFTER checking/zonking — never
+        // seen here; ty is already concrete (TupleType{[]}).  Pass through.
+        HExpr::DictConstruct { base_dict, trait_name, inner, .. } =>
+            HExpr::DictConstruct { base_dict: base_dict, trait_name: trait_name, inner: inner, ty: z_ty, effects: z_eff, span: z_span },
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, .. } =>
             HExpr::BinOp { op: op, left: zonk_expr(ctx, left), right: zonk_expr(ctx, right), eq_dispatch: eq_dispatch, ord_dispatch: ord_dispatch, ty: z_ty, effects: z_eff, span: z_span },
         HExpr::UnaryOp { op, operand, .. } =>

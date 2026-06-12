@@ -982,6 +982,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         local_fn_effects: map_new(),
         fn_evidence_params: map_new(),
         dict_globals: map_new(),
+        static_dict_defs: map_new(),
         trait_method_order: map_new(),
         module_prefix: none,
         imports_map: map_new(),
@@ -1008,6 +1009,10 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // B-104 D1 rule ① (audit #139): extern type names, consulted by
     // register_struct_info / register_enum_info for drop_T field skipping.
     for en in collect_extern_type_names(program.decls) { ctx.extern_types.insert(en) }
+
+    // B-104 D4: static dict singleton definitions (resolve_static_dict_by_name
+    // builds wrapped instances from these).
+    for sd in program.static_dicts { ctx.static_dict_defs.insert(sd.name, sd) }
 
     // 6. Register built-in types (Option, Result — not in HDecl, handled by runtime)
     register_builtin_enums(ctx)
@@ -1117,6 +1122,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         local_fn_effects: map_new(),
         fn_evidence_params: map_new(),
         dict_globals: map_new(),
+        static_dict_defs: map_new(),
         trait_method_order: map_new(),
         module_prefix: none,
         imports_map: map_new(),
@@ -1152,6 +1158,11 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         // union is consistent); used for drop_T field skipping in the
         // forward-declare pass below.
         for en in collect_extern_type_names(program.decls) { ctx.extern_types.insert(en) }
+        // B-104 D4: union of all modules' static dict singleton definitions.
+        // Instance names deterministically encode their structure
+        // (dict_instance_name), so same-name entries from different modules are
+        // identical — map insert dedupes.
+        for sd in program.static_dicts { ctx.static_dict_defs.insert(sd.name, sd) }
         // #134: do NOT union boxed_vars across modules here.  def_ids are minted
         // per-module (each module is checked with a fresh InferCtx whose
         // next_def_id restarts at 0 — see checker.ring::new_infer_ctx), so a

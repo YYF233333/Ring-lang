@@ -90,7 +90,8 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
     HProgram {
         decls: mutated_decls,
         derived_impls: anf_program.derived_impls,
-        boxed_vars: anf_program.boxed_vars
+        boxed_vars: anf_program.boxed_vars,
+        static_dicts: anf_program.static_dicts
     }
 }
 
@@ -184,7 +185,8 @@ fn anf_normalize(program: HProgram, externs: Set<Str>) -> HProgram {
     HProgram {
         decls: new_decls,
         derived_impls: program.derived_impls,
-        boxed_vars: program.boxed_vars
+        boxed_vars: program.boxed_vars,
+        static_dicts: program.static_dicts
     }
 }
 
@@ -674,6 +676,10 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
         HExpr::StrLit { .. } => expr,
         HExpr::BoolLit { .. } => expr,
         HExpr::Ident { .. } => expr,
+        // B-104 D4: a dict construction is a leaf (its inners are DictRefs, not
+        // sub-expressions) and is ALWAYS the init of a dict_lower-synthesised
+        // `let __ring_dictlocal_N` — already bound, nothing to materialise.
+        HExpr::DictConstruct { .. } => expr,
 
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
             match op {
@@ -1755,6 +1761,12 @@ fn is_droppable_init(init: HExpr, externs: Set<Str>) -> Bool {
         HExpr::Block { tail, .. } => {
             match tail { some(t) => is_droppable_init(t, externs), none => false }
         },
+        // B-104 D4: a dict construction (dict_lower's `let __ring_dictlocal_N`
+        // init) is a FRESH TUPLE-of-closures the binding solely owns — the
+        // scope-end drop (runtime drop_dict, typeid DICT_DYN) reclaims it.  Its
+        // inner DictRefs are borrows (params / singletons), not owned by it at
+        // the HIR level (the runtime env-dup balances the env-drop internally).
+        HExpr::DictConstruct { .. } => true,
         // EffectOp / HandleExpr / TryCatch: value may alias resumed/handler state or
         // sit on an abort path (B-002) — conservatively NOT dropped (leak, crash-free).
         _ => false,
@@ -2063,6 +2075,11 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
         HExpr::FloatLit { .. } => expr,
         HExpr::StrLit { .. } => expr,
         HExpr::BoolLit { .. } => expr,
+        // B-104 D4: a dict construction is a FRESH value (leaf — its inners are
+        // DictRef borrows of params/locals/singletons, not sub-expressions).
+        // It only occurs as a dict_lower-synthesised Let init: the binding is
+        // owned (is_droppable_init → true) and scope-end-dropped.
+        HExpr::DictConstruct { .. } => expr,
 
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
             // Operands are borrows (read for the operation; comparison/arith does
