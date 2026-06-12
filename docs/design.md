@@ -1429,6 +1429,14 @@ D1/D2 收口后 re-measure（2026-06-12）显示 G-a 后两门未达，最大单
 - **有界性论证（与 R-clean 否 Type intern 不冲突）**：Type 随推断步无界新生，故 intern/never-drop 是死路；dict 集 = 程序文本的静态属性（#impl × #trait + builtin 组合，小常数）→ 单例真等价于安全 intern。单例建议 dedicated never-drop typeid 作纵深（stray drop 变 no-op）。
 - **范围边界**：只一等化 dict 的构造与生命周期；**不重构 evidence 参数传递机制**（`TraitDispatch::Dict{param}` / dict 实参线程化已工作，不动）。Ord cmp 结果 INT box（`gen_ord_dispatch_llvm` unbox 后不 drop，while-cond box 同家族）是独立 codegen 缺口，随 D4 一并补。
 
+**D5 归因后收口：none/const 单例化 + And/Or lower（2026-06-12 拍板，实现 = B-104 D6/D7）**：
+
+D4 后 residual 220.1M@2.382B 经 D5 全量定量归因（box-profile 校准 99.9~100.1%），三类真泄漏占 84%：**And/Or-cond 双臂 box ≈69M**（31%，top-2 源行占 87.5%）、**`none` 构造 ≈64M**（29%，`ring_Option_none` live=born=100% vs `some` 0.09%——JS frozen 单例 / LLVM per-eval fresh，#151 dict 同构偏离）、**const-getter/字面量重物化 ≈51M**（23%，`HDecl::Const` lower 成 zero-arg fn 每访问 fresh，JS = 模块级 const，又一 #151 同构）。#152 runtime HOF 泄漏类自编译份额 0.008% → 对 G-a 零杠杆，降级用户面收口项（脱离 G-a 关键路径，与 B-121 同档）。
+
+- **D6 = none + const Str 单例化先行**（≈115M = 52% residual，低风险快兑现）：有界性论证与 dict 同构——none 是 nullary ctor 单值、const 集 = 程序文本静态属性，单例真等价于安全 intern（与 R-clean 否 Type intern 不冲突——Type 随推断步无界新生）；直接复用 D4 基建（lazy memoised getter + dedicated never-drop typeid 纵深 + perceus borrow 语义 + verifier 零新增豁免）。JS 后端已是单例形态——行为不变、结构对齐。
+- **D7 = And/Or lower 成 if-else**（量最大单类、RC 模式改动有 D2-#3 UAF 前科 → 殿后）：checker 末端 pass（仿 dict_lower 先例，两后端同源）lower `a && b` → `if a { b } else { false }`、`a || b` → `if a { true } else { b }`——短路语义天然保持，臂变普通 block → D1 materialization + D2 verifier 统一覆盖整类（**含臂内子表达式 owned 临时**，D5 实证同漏）；既有 And/Or RC 特判（W3a 非 blanket-true 分析、D2-#3 visible-owned 门、D1 保守保留清单 And/Or 行）随 lower 退役。**否决 (a) cond 位 post-unbox drop 扩展**：只 drop 臂 box 本身、臂内临时仍在覆盖外（半套），且 And/Or 与 if-else 同语义应同一 RC 路径（⑧）。
+- 三类全落地理论 residual ≈36M（≈1.5%，plateau 形态）→ D7 后 **G-a 三门重验**。
+
 ### 7.12 unsafe 区域图景（2026-06-11 确定，细化归 B-106）
 
 **定位：unsafe 区是所有权模型全部张力的最终出处——它定义「语言不在安全区处理什么」。** 三栏总账，每个表达力缺口必居其一、不允许悬空：
