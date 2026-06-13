@@ -1453,6 +1453,10 @@ D8 归因（measurement-only，仪表 git `7d0d10f`，diff 仅 ring_runtime.cpp 
 - **D9 收口（实现，= B-104 D9）**：Part 1 = interp / `.map().join()` 字符串构建临时收口（codegen 合成、HIR/D1 不可见的 SB + 中间 String，#151 dict / D6 none/const 同类，SB 100% live==born 从不 drop）——**codegen-drop 是首选/原则 garbage-free 修法**（D9 worker 实测推翻原「codegen-drop 留豁免类」premise：interp SB 是 codegen 合成、从不进 HIR，codegen-drop 零新增 verifier 豁免——属 verify_rc 头注「codegen-level boundary」第 4 类，同 while-cond box drop / Set-iter list drop / range-loop bound drop；HIR-first 对 interp 反而不成比例——SB 构建过程过于普遍、lower 成 HIR 改动面大且 JS 后端 template literal 可读性退化、LLVM 端无收益，2026-06-13 用户拍 A 否决 B/C）。Part 2 ✅ = `Type::UnitType` 单例化（D6 none 同构，done `70db1ef`）。
 - **门① 判据 refine**：合法工作集（~35% residual）随被编译程序大小增长（编译器持有全程序 HIR/符号表至 codegen 结束）→ **「绝对 live plateau」对全程序编译器物理不成立、是误设判据**。门① 最终判据改为 **「孤儿类（SB/UnitType/interp-STR）→ ~0 + leak% → ~0/有界 + verifier 全绿 + 无 per-iteration 无界类」**，于 D9 re-verify 施加。**falsifiability 不减**——D8 即以此判据抓出 62-65% 真孤儿漏（= 公理⑥「RC 足够、无需 GC」claim 的可证伪锚点有牙）；refine 是把公理⑥ B-089 falsifiability 锚点「native RC plateau vs V8」中 "plateau" 的操作定义精确化，非移动球门。
 
+**✅ G-a 三门通过（2026-06-13 用户拍板，B-104 done）**：
+
+D9 两 part 落地后 re-measure @2.382B：leak 88%→1.2%（live 27.96M），SB 12.02M→**0**（−100%），STR 28.16M→21.10M（−25.1%）。门① refined 判据逐条：孤儿类→~0（SB=0 / Type 22.7M→0.3M / interp-STR 由 Part 1 codegen-drop 闭合）✅ + leak% 1.2% 递减有界 ✅ + verifier 全绿（self-verify 0 errors）✅ + 无 per-iteration 无界类 ✅。门② peak 10.6GB << 25.9GB ✅。门③ 自编译跑通 exit 0 ~10.42B ✅。**三门全达，B-104 完整 Perceus RC 里程碑完成**（leak 88%→1.2%@2.382B，D1-D9 九个落地棒）。解锁 B-089 native 终验 + B-122 SCC 拓扑序。Capstone 全强度 ASan 自编译（`quarantine_size_mb=256:malloc_context_size=12`）2026-06-13 启动，验证结果追记。
+
 ### 7.12 unsafe 区域图景（2026-06-11 确定，细化归 B-106）
 
 **定位：unsafe 区是所有权模型全部张力的最终出处——它定义「语言不在安全区处理什么」。** 三栏总账，每个表达力缺口必居其一、不允许悬空：
