@@ -1784,7 +1784,9 @@ Bootstrap 阶段（编译器跑在 JS/V8 上）：
 
 **内存管理**：LLVM 后端初期不回收（malloc only），直接过渡到 Perceus RC（B-012），无中间 GC 方案。编译器是短命进程，不回收不影响正确性。
 
-**值表示**：Uniform boxing——所有 Ring 值在 LLVM 层面统一为 `ptr`（opaque pointer，含 Int/Float/Bool）。极简 codegen，容器天然类型擦除，闭包捕获统一，递归类型自然工作。性能不是 bootstrap 阶段的目标。**标量表示演进（B-080，2026-06-08 拍板标记指针）**：bootstrap 后 Int/Bool 改 **低位 tag 编码进指针大小的字**（`int=(n<<1)|1`，真指针 8 对齐低位 0），标量在任何位置都不进堆——uniform word 表示完全保留，RC op `if(w&1)return` 跳过标量（OCaml/V8 标准做法；原 box-at-boundary unboxing 实测证伪——多态边界 box 消不掉）。**2026-06-09 订正：B-080 降级为后续 peak/perf 优化（只消 ~21% BOOL+INT 装箱 churn、非泄漏驱动），G-a 由 B-104 完整 Perceus RC 达成，见 §7.11**。Float 暂留 box。
+**值表示**：Uniform boxing——所有 Ring 值在 LLVM 层面统一为 `ptr`（opaque pointer，含 Int/Float/Bool）。极简 codegen，容器天然类型擦除，闭包捕获统一，递归类型自然工作。**标量表示演进（B-080，2026-06-13 重定位 P1/性能驱动）**：Int/Bool 改**低位 tag 编码进指针大小的字**——`int=(val<<1)|1`、`bool=(b<<1)|1`，真指针 8 对齐低位 0。标量在任何位置都不进堆，uniform word 表示完全保留，RC op `if(w&1)return` 跳过标量（OCaml/V8 标准做法）。**codegen inline 一步到位**：LLVM IR 直接生成 shl/or/ashr tag/untag 指令，不经 `ring_box_int`/`ring_unbox_int` runtime 函数（消除热路径函数调用开销）。Float 留 boxed（1-bit 尾数精度损失破双后端 llvm_diff 对等；NaN-boxing 复杂度不值得）。历史：06-08 拍板→06-09 loop-var fix + 降级 P2（只占 21% leak，G-a 由 B-104 达成）→06-13 native 自编译 7.2x 慢于 V8，从性能角度重新提升。
+
+**LLVM 优化管线（B-126）**：bootstrap 阶段 codegen 直出未优化 IR。B-126 接入 LLVM 22 PassBuilder API（`LLVMRunPasses(module, "default<O2>", tm, opts)`），在 emit .o 前跑标准 O2 管线（inlining/DCE/GVN/LICM 等）。与 §14.6 双层优化架构对齐——B-126 是 LLVM 层优化的第一块砖。
 
 **Runtime**：`ring_runtime.cpp`（~2200 行，初版 ~300 行），用 C++ STL 实现核心数据结构，`extern "C"` 暴露给 Ring：
 - `List<T>` → `std::vector<void*>`

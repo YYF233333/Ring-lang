@@ -425,49 +425,60 @@ fn test_fetch() {
 - **诊断工具 DONE**（git `799c600`，保留）：RING_BOX_PROFILE 扩到 STR + OPTION call-site 归因（`ring_enum_some` / `ring_alloc` STR typeid 接 `_ReturnAddress`→IR 站点）——total pass 落地后定位/验证残留漏点的眼睛。
 - **两个已知根因 → B-104 回归实例**（total pass + verifier 必须覆盖且 verifier 静态抓到）：① **struct-field 重赋值漏**（`self.pos = self.pos + 1` 存新 box 进 struct 字段、旧 box 不 drop——W4 标量 mut-var reassignment 的 struct-field 兄弟，Lexer/Parser 热路径）② **call-result Option/STR temp 不 drop**（`str_char_code_at` 返 `Some(box_int)`，调用方在 scrutinee/comparison 位不 drop）。**非标量 RC 有别名 soundness 风险（B-101 教训）→ verifier 兜底 + ASan 验，不靠人肉归因猜测。**
 
-### B-080 标量标记指针表示（tagged pointer）— 消残余标量(BOOL+INT churn)+perf [feature] [P2] [XL] [judgment] [queued] [deferred: B-104 完整 Perceus RC 先行]
+### B-080 值类型 unboxing：Int/Bool tagged pointer（codegen inline）[feature] [P1] [L] [judgment] [queued]
 
-> **⚠️ 降级（2026-06-09，重测数据推翻原定位）**：原立为「G-a 内存墙真解/唯一结构性解」，前提=「墙=标量装箱」。**两个 range-loop RC 修复 + 3 次重测证伪**：INT 47.8%→1.6% plateau（精确-RC 解决），墙现在 74.5% 是非标量。**B-080 标记指针只消 ~21%（BOOL 19.3%+INT 1.6%）、非墙驱动**。降级为后续优化（消残余标量 BOOL + INT/BOOL alloc churn + 干净标量 repr/perf），**G-a 终解改由 B-104 完整 Perceus RC（total drop pass + leak verifier）承担**。技术内容（标记指针实现配方）仍有效，见下文 P1 实现序 + memory `llvm-debug-state`。
+> **重定位（2026-06-13，性能驱动）**：原从 G-a 内存墙角度降级 P2/deferred（只占 21% leak）。Native 自编译首次成功后（B-104 D7），实测 native 7.2x 慢于 V8（635s vs 88s），标量装箱（10B+ 次 `ring_alloc` + RC inc/dec）是主因之一。从性能角度提升为 P1。设计变更：(1) 取消两阶段实现（runtime-first → codegen-inline），**一步到位 codegen inline**（目标是性能，不是内存）；(2) Float 留 boxed（编译器自编译中占比极小，且 1-bit 尾数精度损失破双后端 llvm_diff 对等；NaN-boxing 复杂度不值得）；(3) niche opt（Option<Int> 直接用 tagged int 表示）独立项暂缓。
+>
+> **历史**：2026-06-08 拍板标记指针 → 06-09 P0 诊断（call-site 归因，INT 97% 集中 exhaustive.ring range-loop）+ loop-var counter/bound 修复 → INT 47.8%→1.6% plateau → 降级 P2（B-104 先行）。06-09 box-at-boundary 方案实测证伪（多态边界 box 消不掉）。D1-D9 落地后 leak 88%→1.8%，BOOL 199M→43K（D7 And/Or lower），verify_rc 安全网到位。详见 git history。
 
-> **进度（2026-06-09）**：
-> **P0 决定性诊断 DONE（反预期结果）**——监督式 self-compile（`RING_BOX_PROFILE` 采样侧表）测出：残留存活 INT **97% 集中在 `exhaustive.ring` 一个模块**（`check_matrix` 66.8% + `specialize_row` 26.7% + `finite_type_ctors` 3.8%，全站点 `born==live` 纯泄漏），**不是 spec 假设的多态边界装箱分散**。机制 = `for i in a..b` range 计数器每轮 `box_int` 新装箱、perceus 把 for-binding 统一当借用从不 drop → 每轮漏一个 Int box，exhaustive 递归 checker 迭代量最大故集中爆。标量可兑现幅度 INT 47.8%+BOOL 10.4%=**58.1%**（标记指针上限），非标量 42%（STR/OPTION/CLOSURE/TUPLE）**同样线性泄漏**→ 标记指针单独破不了 G-a，需配精确 RC。轨迹线性无界无 plateau，15GB 时 allocs 1.31B/live 400M。
-> **用户拍板（避免第四次误判）：先修 loop-var RC gap 再重测**，不直接上 XL 标记指针。
-> **loop-var counter 修复 DONE**（git `15b5318`，`codegen_llvm_stmt.ring` `emit_range_counter_drop`）：range for-loop 在 `incr_bb` 开头 drop 上轮 boxed 计数器（normal fall-through + continue 都经此；perceus borrow→escape dup 平衡 box_int，无双重释放）。残留 break/return 中途退出漏 1 box/loop-run（O(loop)非 O(迭代)，热点不 early-exit 故≈0）。
-> **re-measure 确认（scale）**：INT @可比 alloc 减半（~191M→~96M），live 400M→305M（−24%），leak 30%→23.3%，到 15GB 用时 98s→125s（+27%）。但暴露 range preamble **bound box** 新漏：`for i in 1..xs.len()` 把 start 字面量 + `.len()` 结果各 box_int→unbox→不 drop，O(loop 入口) 但 check_matrix 深递归 → 数千万 INT box（修复后 top INT 站点）。
-> **bound-box 修复 DONE**（`emit_for_in_range_direct` unbox 后 `emit_drop_value(start_val/end_val)`）：perceus rc_expr(RangeExpr) 一律 rc_escape 边界 → start/end 值总是 owned（字面量/call fresh box，Ident→Clone dup +1）→ unbox 消费后无条件 drop sound（Ident dup rc 2→1 留源变量）。**JS 733 + llvm_diff 53×3 全绿**。
-> **combined re-measure（决定性，2026-06-09）→ 里程碑 redirect**：counter+bound 合并后 INT **47.8%→1.6% 且 plateau**（~4.99M 恒定，box-profile check_matrix/specialize_row 站点全消，bound 修复证实有效）。**墙现在 74.5% 是非标量**（STR 24.3/OPTION 22.1/BOOL 19.3[标量,非range驱动]/CLOSURE 16.7/TUPLE 8.4/INT 1.6），墙外推 P0 98s/1.31B→146s/2.147B。**B-080 标记指针只消 ~21%（BOOL+INT）、非墙驱动 → 降级**（见上）。disasm 挖出 2 个非标量根因：①struct-field 重赋值漏（旧 box 不 drop）②call-result Option/STR temp 不 drop。**用户拍板：里程碑转 B-104 完整 Perceus RC（total drop pass + leak verifier，B-109 非标量精确-RC 已折入）**（P0 的 P1 标记指针实现序保留于下，B-080 deferred）。
+Int/Bool 从 uniform-boxed 堆 ptr 改为**低位 tag 编码进指针大小的字**——标量在任何位置都不进堆（局部/临时/结构体字段/容器元素/Option 载荷/泛型槽/dict 槽）。OCaml/V8 标准做法。uniform `void*` 表示完全保留（一切仍是一个字），只是这个字可能是 tagged 标量或真指针。
 
-Int/Bool（及可选 Float）从 uniform-boxed 堆 ptr 改为 **低位 tag 编码进指针大小的字**——标量在**任何位置都不进堆**（局部/临时/结构体字段/容器元素/Option 载荷/泛型槽/dict 槽）。OCaml/V8/LuaJIT 标准做法。uniform 表示完全保留（一切仍是一个字），只是这个字可能是标记标量或真指针。当前 uniform boxing 一切皆 `void*`（含标量：Int=boxed i64、Bool=boxed i1，各带 typeid header）。
+**tag 约定**：真指针 8 字节对齐（低 3 位 0），tagged 标量低位 1。
+- Int：`(val << 1) | 1`，63 位有符号范围（±4.6 × 10^18）
+- Bool：`true = 3 ((1<<1)|1)`，`false = 1 ((0<<1)|1)`
+- Float：留 boxed（typeid 1，正常 RC）
+- `ring_dup`/`ring_drop`：`if ((uintptr_t)ptr & 1) return;`——tagged 标量跳过 RC，不查对象头
+- **省力洞察**：tagged-int 编码双射 → 两 tagged-int「字相等⟺值相等」，纯 word 比较的 eq 天然正确，只有 DEREF（读 payload/header）才崩
 
-> **2026-06-08 拍板标记指针（用户拍板，native on-par 统一规划 P1，见上「native on-par 统一规划」块）。取代原 box-at-boundary 方案**——后者已在工作树实测证伪：
-> - **box-at-boundary（inline 标量字段 + 边界 box/unbox）实测不破墙**：未提交的 A1（标量结构体字段 inline i64）跑 native 自编译，`a1d @ 402M` 的 INT = 63.3M ≈ W4 基线 63M——**字段 box 拆了，INT 一点没降** → 残留 INT 根本不在字段里，而在**多态边界**（List<Int>/Option<Int>/泛型/dict/tuple/variant 槽），uniform void* 在那里**必须 box**，inline 字段/加 RC 波都消不掉。a1d 大规模仍 ~30% leak、INT 线性爬（63M→175M@1.2B）、peak OOM。
-> - **精确-RC 四波（B-104 W1/W2/W3a/W4）已尽**：四波回收了 Option/Str/容器/BOOL 临时，INT 纹丝不动（W4 隔离测试证明标量重赋值 drop 真工作，但全自编译 INT ~flat → mut-var 重赋值在编译器本就小，函数式 for-in 为主）。残留 INT 绝对主导 = 合法存活/边界装箱的标量。
-> - **标记指针是唯一结构性解**：低位 tag 让标量哪都不进堆 → INT/BOOL 堆对象整类、在所有位置一次性消失 → 边界 box 不存在 → 无所谓泄漏还是膨胀。box-at-boundary 是天花板写死的半措施，继续追 = patch treadmill（用户明确拒绝）。
-
-**P0 前置 — 决定性诊断（半天，避免第四次误判）**：给 INT box 的分配点加 **call-site 归因**（不只 typeid），一次性确认残留 INT 是边界 box 泄漏 / 边界 box 合法存活膨胀 / 某具体 RC gap，并扫一遍有无非标量大头被掩盖。无论哪种，标记指针都能解（没有 box 就无所谓泄漏还是膨胀）；诊断只为锁定兑现幅度 + 确认范围，不是另起炉灶。
-
-**核心设计**：
-- **tag 约定**：真指针 8 对齐（低 3 位 0），标记 Int = `(n<<1)|1`（低位 1），Bool 同类编码（如 true=`0x3`/false=`0x1` 或复用 int-tag）。`ring_dup`/`ring_drop`/通用 RC op 开头 `if (w & 1) return;`——标量跳过 RC、不查对象头。
-- **Float**：暂留 box（编译器里 Float 极少，残留是 INT/BOOL，不挡 G-a）；后续可 NaN-box 或 float-array 特化，独立项。
-- **撤未提交的 inline-A1**：标量哪都不 box，字段自然不 box，inline-字段方案被取代 → **B-080 第一步 = 撤掉工作树未提交的 codegen_llvm*/perceus 改动 + 清 a1*.txt/asan*.txt/bis*.txt 实验残留**（git 工作树当前带这批未提交实验）。
-
-**P1 实现序（2026-06-09 推导，de-scope——主要是 RUNTIME 改动，非 150 站点 codegen 契约改）**：标记指针**保留 uniform `void*` 表示**（字 = tagged 标量 or 真指针），codegen 的 uniform ptr 流不变 → **codegen 几乎不动就达 G-a**。两子步：**(1) runtime tag/untag**（`ring_box_int`→`(void*)((val<<1)|1)` 无堆 / `ring_unbox_int`→`(intptr_t)p>>1` / bool 同 / dup/drop 加 `if((uintptr_t)ptr&1)return`）→ G-a（alloc-stats tid0/tid2 直接归零，因 box_int 不再 call ring_alloc）；codegen 仍 call 这些 fn 故不动。**(2) codegen inline tag/untag**（inttoptr/ptrtoint/shift 代 runtime call）= perf 验收项（热路径无 box/unbox），G-a 不需。**难点 = value-op deref 审计**：哪些 runtime op DEREF 可能-tagged 的值需加 tag 处理（dup/drop/unbox/print/eq/compare/hash/list_contains/map/sort）。**省力洞察：tagged-int 编码双射 → 两 tagged-int「字相等⟺值相等」，纯 word 比较的 eq 天然对，只有 DEREF（读 payload/header）才崩**。**审计法 = 改完核心 6 函数跑 llvm_diff 53 经验性暴露**，逐个修。**⚠️ 注：曾误判为 box-at-boundary 全 SSA unboxing（改 gen_llvm_expr 返回契约 150 站点）→ 错，已撤工作树地基（box_value/unbox_value/llvm_repr_type 未提交、已 checkout）。** Float 暂留 box（real ptr bit0=0 → dup/drop 不跳 → RC 正确）。
+**codegen inline**（一步到位，不经 runtime 函数）：LLVM IR 直接生成 tag/untag 指令：
+- tag：`shl i64 %val, 1` → `or i64 %shifted, 1` → `inttoptr i64 %tagged to ptr`
+- untag：`ptrtoint ptr %p to i64` → `ashr i64 %raw, 1`（算术右移保符号）
+- 算术/比较：untag 两操作数 → 计算 → re-tag 结果（零堆分配）
+- 条件 Bool：比较产 `i1`，`zext i1 → i64 → tag`（零 box）
 
 **涉及修改**：
-1. `ring_runtime.cpp`：ring_dup/drop/eq/print 等 RC/通用 op 识别低位 tag，标量不进 RC/堆；与外部 C ABI 交界处（Map key、FFI）按需 box/unbox；alloc-stats 标量计数归零。
-2. `compiler/codegen_llvm_expr.ring` / `_stmt.ring` / `_decl.ring`：Int/Bool 字面量、算术、比较、condition 产标记字；字段/容器/Option/泛型/dict 槽直接存标记字（无 box/unbox）；ptr 解引用前按需 mask；condition lowering 用 i1（comparison 产 i1，不经 box）→ **condition-Bool 泄漏随之消失**（折入本项，原 W4 [观察]）。
-3. `compiler/perceus.ring`：scalar-typed 值全程不参与 RC（无 dup/drop/Clone）——`is_scalar_type`（W4 已有）扩到全 RC 决策；W4 的 scalar-reassign-drop + inline-A1 的 `is_inline_scalar_field` 在标记指针下变 no-op/删除（标量无 box 可 drop）。
-4. `compiler/codegen.ring`（JS 后端）：JS 标量本是原生值，确保双后端 parity（LLVM 新 repr 行为须与 JS oracle 一致）。
+1. `ring_runtime.cpp`：`ring_dup`/`ring_drop` 开头加 `if ((uintptr_t)ptr & 1) return`。`ring_box_int`/`ring_box_bool`/`ring_unbox_int`/`ring_unbox_bool` 保留给 runtime 内部使用（如 `ring_str_to_int` 返回 `Option<Int>`），但 codegen 不再调用。`ring_print`/`ring_eq` 等 typeid-dispatch 函数需适配：tagged 标量无 header，由 codegen 改调类型特化版本或传 typeid 参数。
+2. `compiler/codegen_llvm_expr.ring`：Int/Bool 字面量、算术、比较、condition 生成 inline tag/untag IR，替换 `ring_box_int`/`ring_unbox_int` 调用。
+3. `compiler/codegen_llvm_stmt.ring`：for-range 计数器、赋值等涉及 Int/Bool 的位置适配。
+4. `compiler/perceus.ring`：`is_scalar_type` 扩展到全 RC 决策——scalar 不发 dup/drop/Clone。
+5. `compiler/verify_rc.ring`：scalar 类型不计入 LEAK/UAF/BALANCE 检查。
+6. `compiler/codegen.ring`（JS 后端）：JS 标量本是原生值，确保 parity（预期不需改动，验证即可）。
 
 **验收标准**：
-- 标量（Int/Bool）在**所有位置**不再堆分配（alloc-stats：tid0 INT / tid2 BOOL 归零或趋零，不再线性爬）
-- 算术/比较/condition 热路径无 box/unbox/对象头访问
-- **condition-Bool 泄漏消失**（i1 比较，无 box 可漏；原隔离测试 `while i<N` 10M 循环 tid2 不再爬）
-- 容器/Option/泛型/dict 存取标量行为不变，双后端 parity
-- **native 自编译 peak RSS << 25.9GB 且本机可运行**（G-a 判据，counter live plateau）
-- 全 E2E + `llvm_diff` 不回归（≥53 例）；double-bootstrap 字节一致；全程 ASan-clean
-- **本机可做，native-worktree-unfriendly**（缺 gitignored addon）→ 主仓做，长任务尽早 commit 半成品
-- **验证工具链 = B-104 配方**（alloc/free 计数器 `-DRING_ALLOC_STATS`、ASan 链、监督式 self-compile 15GB kill），见 B-104
+- alloc-stats：tid0 INT / tid2 BOOL 归零（不再经 `ring_alloc`）
+- native 自编译 exit 0 + alloc 总数大幅下降（量化对比）
+- 全 E2E + llvm_diff ×3 不回归；verify_rc 全绿
+- double-bootstrap 字节一致；ASan-clean
+
+### B-126 LLVM optimization pass pipeline [feature] [P1] [S] [judgment] [queued]
+
+> 2026-06-13 立项。LLVM 后端当前生成 IR 后直接 `LLVMTargetMachineEmitToFile`，零 IR 级优化 pass。`CodeGenOptLevel=2`（Default）只控制机器码生成阶段内部优化，不跑 IR 级 pass。Native 自编译 635s（7.2x 慢于 V8 的 88s），缺少 inlining/DCE/constant-fold/GVN 等基本优化是主因之一。`LLVMPassManagerRef` 已声明但从未使用。用 LLVM 22 PassBuilder API（new-style pipeline）接入标准优化管线。
+
+**做法**：
+1. `compiler/llvm_ffi.ring`：加 `LLVMRunPasses`、`LLVMCreatePassBuilderOptions`、`LLVMDisposePassBuilderOptions`、`LLVMGetErrorMessage`、`LLVMConsumeError` 五个 extern fn
+2. `compiler/llvm-addon/llvm_addon.cpp`：对应 N-API wrapper + module 注册
+3. `compiler/codegen_llvm.ring`：`generate_llvm` / `generate_llvm_project` 在 `LLVMTargetMachineEmitToFile` 前插入 `LLVMRunPasses(module, "default<O2>", tm, opts)`
+
+**涉及修改**：
+1. `compiler/llvm_ffi.ring`：5 个 extern fn 声明
+2. `compiler/llvm-addon/llvm_addon.cpp`：5 个 N-API wrapper 函数 + module 注册
+3. `compiler/codegen_llvm.ring`：两个 emit 路径各加 ~10 行 pass pipeline 调用
+
+**验收标准**：
+- LLVM IR 经 O2 pipeline 优化后 emit .o
+- llvm_diff 全绿 ×3
+- native 自编译耗时显著下降（量化对比 635s 基线）
+- dist-llvm 重建 + ring.exe 链接正常
 
 ### B-117 LLVM 函数/参数属性标注（nonnull/nounwind/memory 类）[feature] [P3] [S] [judgment] [queued]
 
