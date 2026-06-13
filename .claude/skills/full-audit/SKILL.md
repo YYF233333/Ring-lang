@@ -13,8 +13,8 @@ description: Use when user requests a full codebase review, code audit, cross-va
 
 ## Trigger
 
-- User says: "审查", "review", "自查", "全面检查", "交叉验证", or `/full-audit` → **标准审计**（单轮 fan-out + verify）
-- User says "彻底审查", "audit until dry", "审到收敛" → **thorough 档**（loop-until-dry，连续 2 轮零新 confirmed 才停）
+- User says: "审查", "review", "自查", "全面检查", "交叉验证", or `/full-audit` → **标准审计**（默认，单轮 fan-out + verify，workflow 跑完即停）
+- User says "彻底审查", "audit until dry", "审到收敛" → **thorough 档**（loop-until-dry，连续 2 轮零新 confirmed 才停；token 消耗约为标准档 2-3 倍）
 - User says "审豁免", "豁免抽审", or `/full-audit exemptions` → **豁免清单对抗抽审**专项模式（见下）
 
 ## 写入范围
@@ -61,7 +61,7 @@ description: Use when user requests a full codebase review, code audit, cross-va
    - `refute-correctness`：读源码证明该 finding 是误读（行为实际正确 / 防御已存在 / 类型不可达）
    - `reproduce`：构造最小复现（探针程序 / 推演执行路径）——复现不出 = refuted。**立项前实测前提**条款（workflow.md）在此强制执行
    - `already-tracked`：对照 backlog `planning`/`doing` 项 + audit-report 现有 `[open]` 项——已有追踪 = refuted（标注对应 ID 后丢弃）
-3. **收敛**：standard 档 = 单轮；thorough 档 = loop-until-dry（dedup 对 `seen` 全集做，不对 confirmed——否则被 refute 的 finding 每轮复活，永不收敛）。
+3. **收敛**：standard 档（默认）= **单轮，find + verify 后直接 return，不循环**；thorough 档 = loop-until-dry（dedup 对 `seen` 全集做，不对 confirmed——否则被 refute 的 finding 每轮复活，永不收敛）。
 
 ```js
 export const meta = {
@@ -77,7 +77,7 @@ const VERDICT = {type:'object', required:['refuted','reason'], properties:{refut
 const key = f => `${f.file}:${f.title}`
 const seen = new Set(/* 现有 [open] 项的 file:title，Phase 0 注入 */), confirmed = []
 let dry = 0
-while (dry < DRY) {            // standard: DRY=1 且首轮后强制 break；thorough: DRY=2
+while (dry < DRY) {            // standard（默认）: DRY=1，首轮 find+verify 后无条件 break（不循环）；thorough: DRY=2
   const found = (await parallel(LENSES.map(l => () =>
     agent(l.prompt, {label:`find:${l.key}`, phase:'Find', schema:FINDINGS})
   ))).filter(Boolean).flatMap(r => r.findings)
