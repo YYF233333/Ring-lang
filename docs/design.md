@@ -1465,6 +1465,16 @@ D4 后 residual 220.1M@2.382B 经 D5 全量定量归因（box-profile 校准 99.
 - **D7 = And/Or lower 成 if-else**（量最大单类、RC 模式改动有 D2-#3 UAF 前科 → 殿后）：checker 末端 pass（仿 dict_lower 先例，两后端同源）lower `a && b` → `if a { b } else { false }`、`a || b` → `if a { true } else { b }`——短路语义天然保持，臂变普通 block → D1 materialization + D2 verifier 统一覆盖整类（**含臂内子表达式 owned 临时**，D5 实证同漏）；既有 And/Or RC 特判（W3a 非 blanket-true 分析、D2-#3 visible-owned 门、D1 保守保留清单 And/Or 行）随 lower 退役。**否决 (a) cond 位 post-unbox drop 扩展**：只 drop 臂 box 本身、臂内临时仍在覆盖外（半套），且 And/Or 与 if-else 同语义应同一 RC 路径（⑧）。
 - 三类全落地理论 residual ≈36M（≈1.5%，plateau 形态）→ D7 后 **G-a 三门重验**。
 
+**门① 残余归因先行（D8，2026-06-13 拍板 = 方案 A，承 D7 三门重验）**：
+
+D7 后 G-a 三门：③自编译**首次完整跑通**（exit 0，~10.42B allocs）✅ + ②peak ~10.6GB << 25.9GB ✅ + **①live plateau ✗**。门①未达的精确形态：full self-compile 全程 live 55.6M@2.38B → 185.2M@10.42B，leak% 2.3%→1.8% 单调递减、亚线性、非 plateau；爬升几乎全在 STR 101.9M（字面量/interp）+ SB 47.3M（type_to_string/interp 机器）+ Type 22.7M（D5 已判偏合法存活）= 171.9M/185.2M。**关键签名**：live 涨 3.33× / allocs 涨 4.38×（亚线性）+ leak% 单调递减 = "有界泄漏 + 合法存活增长"，而非 per-iteration 无界泄漏（后者 leak% 持平/上升）。**未归因前无法判定门①是"还差一个收口"还是"判据对持有全程序 HIR 的编译器本就误设"**。
+
+**拍板（方案 A，否决 B 直接当 leak 收口 STR/SB、否决 C 直接重定义门① 收 G-a）= 归因先行**：复刻 D5「先归因再动手」纪律——对 STR/SB/Type 爬升类做 reachable-from-roots 切分（box-profile 站点采样扩成"活根可达 vs 孤儿"判定），定量回桌后分叉（不预批任一支）：
+- **孤儿主导** → 真 RC 漏点（候选 type_to_string 瞬态 map-key / interp SB / const-getter 残余）→ 收口（D9），继续逼近 plateau。
+- **合法持有主导** → 门①「绝对 plateau」对持有全程序 HIR 的编译器是误设判据 → 重定义门① = 「leak% 有界/→0 + verifier 全绿 + 无 per-iteration 无界类」（现状已满足），收 G-a。
+
+实现 = B-104 D8（measurement-only，不动 RC 语义）。
+
 ### 7.12 unsafe 区域图景（2026-06-11 确定，细化归 B-106）
 
 **定位：unsafe 区是所有权模型全部张力的最终出处——它定义「语言不在安全区处理什么」。** 三栏总账，每个表达力缺口必居其一、不允许悬空：
