@@ -1102,22 +1102,22 @@ function gen_call(ctx, callee, args, resolved_dicts, dict_dispatch) {
         if (__ring_m33._tag === "EnumType") {
           const name = __ring_m33.name;
           if ((name === hir$BUILTIN_OPTION)) {
+            const tag_f = hir$ENUM_TAG_FIELD;
+            const some_t = hir$OPTION_SOME_TAG;
+            const pay_f = hir$OPTION_PAYLOAD_FIELD;
             if ((method === "map")) {
-              return gen_option_hof(ctx, receiver, args, "{ _tag: \"some\", _0: __f(__o._0) }", "__o");
+              return gen_option_hof(ctx, receiver, args, `{ ${tag_f}: "${some_t}", ${pay_f}: __f(__o.${pay_f}) }`, "__o");
             }
             if ((method === "and_then")) {
-              return gen_option_hof(ctx, receiver, args, "__f(__o._0)", "__o");
+              return gen_option_hof(ctx, receiver, args, `__f(__o.${pay_f})`, "__o");
             }
             if ((method === "unwrap_or_else")) {
-              return gen_option_hof(ctx, receiver, args, "__o._0", "__f()");
+              return gen_option_hof(ctx, receiver, args, `__o.${pay_f}`, "__f()");
             }
             if ((method === "to_fail")) {
               const r = gen_expr(ctx, receiver);
               const err_arg = gen_first_arg_or_undefined(ctx, args);
               const ev = hir$evidence_param_name("fail");
-              const tag_f = hir$ENUM_TAG_FIELD;
-              const some_t = hir$OPTION_SOME_TAG;
-              const pay_f = hir$OPTION_PAYLOAD_FIELD;
               return `((v) => v.${tag_f} === "${some_t}" ? v.${pay_f} : ${ev}.raise(${err_arg}))(${r})`;
             }
           }
@@ -1346,13 +1346,19 @@ function gen_hof_all(ctx, sh, receiver, args) {
 function gen_list_find_expr(ctx, receiver, args, found) {
   const r = gen_expr(ctx, receiver);
   const cb = gen_lambda_capture_evidence(ctx, args, 0);
-  return `((__a) => { const __i = __a.findIndex(${cb}); return __i >= 0 ? { _tag: "some", _0: ${found} } : { _tag: "none" }; })(${r})`;
+  const tag_f = hir$ENUM_TAG_FIELD;
+  const some_t = hir$OPTION_SOME_TAG;
+  const none_t = hir$OPTION_NONE_TAG;
+  const pay_f = hir$OPTION_PAYLOAD_FIELD;
+  return `((__a) => { const __i = __a.findIndex(${cb}); return __i >= 0 ? { ${tag_f}: "${some_t}", ${pay_f}: ${found} } : { ${tag_f}: "${none_t}" }; })(${r})`;
 }
 
 function gen_option_hof(ctx, receiver, args, on_some, on_none) {
   const r = gen_expr(ctx, receiver);
   const cb = gen_lambda_capture_evidence(ctx, args, 0);
-  return `((__o, __f) => __o._tag === "some" ? ${on_some} : ${on_none})(${r}, ${cb})`;
+  const tag_f = hir$ENUM_TAG_FIELD;
+  const some_t = hir$OPTION_SOME_TAG;
+  return `((__o, __f) => __o.${tag_f} === "${some_t}" ? ${on_some} : ${on_none})(${r}, ${cb})`;
 }
 
 function gen_struct_lit(ctx, name, fields, spread) {

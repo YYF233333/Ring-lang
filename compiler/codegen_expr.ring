@@ -515,22 +515,22 @@ fn gen_call(mut ctx: CodegenCtx, callee: HExpr, args: List<HExpr>, resolved_dict
                 },
                 Type::EnumType { name, .. } => {
                     if (name == BUILTIN_OPTION) {
+                        let tag_f = ENUM_TAG_FIELD
+                        let some_t = OPTION_SOME_TAG
+                        let pay_f = OPTION_PAYLOAD_FIELD
                         if method == "map" {
-                            return gen_option_hof(ctx, receiver, args, "{ _tag: \"some\", _0: __f(__o._0) }", "__o")
+                            return gen_option_hof(ctx, receiver, args, "{ ${tag_f}: \"${some_t}\", ${pay_f}: __f(__o.${pay_f}) }", "__o")
                         }
                         if method == "and_then" {
-                            return gen_option_hof(ctx, receiver, args, "__f(__o._0)", "__o")
+                            return gen_option_hof(ctx, receiver, args, "__f(__o.${pay_f})", "__o")
                         }
                         if method == "unwrap_or_else" {
-                            return gen_option_hof(ctx, receiver, args, "__o._0", "__f()")
+                            return gen_option_hof(ctx, receiver, args, "__o.${pay_f}", "__f()")
                         }
                         if method == "to_fail" {
                             let r = gen_expr(ctx, receiver)
                             let err_arg = gen_first_arg_or_undefined(ctx, args)
                             let ev = evidence_param_name("fail")
-                            let tag_f = ENUM_TAG_FIELD
-                            let some_t = OPTION_SOME_TAG
-                            let pay_f = OPTION_PAYLOAD_FIELD
                             return "((v) => v.${tag_f} === \"${some_t}\" ? v.${pay_f} : ${ev}.raise(${err_arg}))(${r})"
                         }
                     }
@@ -722,7 +722,11 @@ fn gen_hof_all(mut ctx: CodegenCtx, sh: HofIterShape, receiver: HExpr, args: Lis
 fn gen_list_find_expr(mut ctx: CodegenCtx, receiver: HExpr, args: List<HExpr>, found: Str) -> Str {
     let r = gen_expr(ctx, receiver)
     let cb = gen_lambda_capture_evidence(ctx, args, 0)
-    "((__a) => { const __i = __a.findIndex(${cb}); return __i >= 0 ? { _tag: \"some\", _0: ${found} } : { _tag: \"none\" }; })(${r})"
+    let tag_f = ENUM_TAG_FIELD
+    let some_t = OPTION_SOME_TAG
+    let none_t = OPTION_NONE_TAG
+    let pay_f = OPTION_PAYLOAD_FIELD
+    "((__a) => { const __i = __a.findIndex(${cb}); return __i >= 0 ? { ${tag_f}: \"${some_t}\", ${pay_f}: ${found} } : { ${tag_f}: \"${none_t}\" }; })(${r})"
 }
 
 // Option map/and_then/unwrap_or_else share one shape: test the tag, then
@@ -730,7 +734,9 @@ fn gen_list_find_expr(mut ctx: CodegenCtx, receiver: HExpr, args: List<HExpr>, f
 fn gen_option_hof(mut ctx: CodegenCtx, receiver: HExpr, args: List<HExpr>, on_some: Str, on_none: Str) -> Str {
     let r = gen_expr(ctx, receiver)
     let cb = gen_lambda_capture_evidence(ctx, args, 0)
-    "((__o, __f) => __o._tag === \"some\" ? ${on_some} : ${on_none})(${r}, ${cb})"
+    let tag_f = ENUM_TAG_FIELD
+    let some_t = OPTION_SOME_TAG
+    "((__o, __f) => __o.${tag_f} === \"${some_t}\" ? ${on_some} : ${on_none})(${r}, ${cb})"
 }
 
 // ============================================================
