@@ -18,6 +18,7 @@ use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
 use derive::{run_derive_pass}
+use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names}
 
 // ============================================================
 // Pass 2: Check declarations (from infer.ts)
@@ -1499,6 +1500,225 @@ fn check_one_decl(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
     for di in delegate_decls { hdecls.push(di) }
 }
 
+// B-122: Check a declaration and rebind fn/impl-method types with resolved types.
+// After check_fn_decl, the registered type scheme still has unresolved fresh vars
+// from Pass 1. Rebinding replaces it with the fully-resolved type from inference,
+// so that subsequent callers (in SCC topological order) see correct return types.
+fn check_one_decl_with_rebind(mut ctx: InferCtx, decl: Decl, mut hdecls: List<HDecl>) {
+    let hd = check_decl(ctx, decl)
+
+    // Update fn effects and rebind resolved types
+    match hd {
+        HDecl::Fn { name, params, return_type, effects, .. } => {
+            if effects.effects.len() > 0 {
+                update_fn_effects(ctx.env, name, effects)
+            }
+            // B-122: Rebind with fully-resolved type from inference
+            rebind_fn_type(ctx, name, params, return_type, effects)
+        },
+        HDecl::Impl { methods, .. } => {
+            // Rebind each impl method's resolved type
+            for method in methods {
+                match method {
+                    HDecl::Fn { name: mname, params: mparams, return_type: mret, effects: meff, .. } => {
+                        if meff.effects.len() > 0 {
+                            update_fn_effects(ctx.env, mname, meff)
+                        }
+                        rebind_fn_type(ctx, mname, mparams, mret, meff)
+                    },
+                    _ => {}
+                }
+            }
+        },
+        _ => {}
+    }
+
+    // Delegate expansion (same as check_one_decl)
+    let mut delegate_decls: List<HDecl> = []
+    match decl {
+        Decl::Impl { target_type, type_params, methods, span, .. } => {
+            for m in methods {
+                match m {
+                    Decl::Delegate { field, trait_names, span: dspan } => {
+                        let delegate_impls = expand_delegate_impls(ctx, target_type, type_params, field, trait_names, dspan)
+                        for di in delegate_impls { delegate_decls.push(di) }
+                    },
+                    _ => {}
+                }
+            }
+        },
+        _ => {}
+    }
+
+    hdecls.push(hd)
+    for di in delegate_decls { hdecls.push(di) }
+}
+
+// B-122: Rebind a fn's type scheme with resolved return type and effects.
+//
+// After check_fn_decl, the registered type scheme may have a free TypeVar for
+// the return type (from Pass 1 registration of unannotated returns). This var
+// is never bound globally — each caller independently instantiates it, making
+// the return type effectively polymorphic (#149).
+//
+// We fix this by replacing the scheme's return type with the concrete resolved
+// type from inference. For polymorphic fns where the resolved return type still
+// contains TypeVars (e.g., generic identity fn), we build a mapping from
+// check-time var ids to registration-time var ids using param correspondence,
+// so the scheme remains consistent.
+fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_type: Type, effects: EffectRow) {
+    match ctx.env.lookup(name) {
+        some(scheme) => match scheme.ty {
+            Type::FnType { params: reg_params, return_type: reg_ret, .. } => {
+                // Build mapping: check-time var id → registration-time var id
+                // by comparing resolved params with registered params position-by-position.
+                let mut var_mapping: Map<Int, Type> = map_new()
+                let mut pi = 0
+                for p in params {
+                    match reg_params.get(pi) {
+                        some(reg_p) => {
+                            build_var_mapping(p.ty, reg_p, var_mapping)
+                        },
+                        none => {}
+                    }
+                    pi = pi + 1
+                }
+
+                // Map the resolved return type back to registration-time vars
+                let mapped_ret = apply_var_mapping(return_type, var_mapping)
+
+                // Also map effects
+                let mapped_effects = map_effect_row(effects, var_mapping)
+
+                let new_type = Type::FnType {
+                    params: reg_params, return_type: mapped_ret, effects: mapped_effects
+                }
+                ctx.env.rebind(name, TypeScheme { ..scheme, ty: new_type })
+            },
+            _ => {}
+        },
+        none => {}
+    }
+}
+
+// Build a var-id mapping by structurally comparing two types.
+// If check_ty = TypeVar(?42) and reg_ty = TypeVar(?1), records ?42 → ?1.
+fn build_var_mapping(check_ty: Type, reg_ty: Type, mut mapping: Map<Int, Type>) {
+    match (check_ty, reg_ty) {
+        (Type::TypeVar { id: check_id, .. }, _) => {
+            if !mapping.contains_key(check_id) {
+                mapping.insert(check_id, reg_ty)
+            }
+        },
+        (Type::FnType { params: cp, return_type: cr, .. },
+         Type::FnType { params: rp, return_type: rr, .. }) => {
+            let mut i = 0
+            for c in cp {
+                match rp.get(i) {
+                    some(r) => build_var_mapping(c, r, mapping),
+                    none => {}
+                }
+                i = i + 1
+            }
+            build_var_mapping(cr, rr, mapping)
+        },
+        (Type::StructType { type_params: ct, .. }, Type::StructType { type_params: rt, .. }) => {
+            let mut i = 0
+            for c in ct {
+                match rt.get(i) {
+                    some(r) => build_var_mapping(c, r, mapping),
+                    none => {}
+                }
+                i = i + 1
+            }
+        },
+        (Type::EnumType { type_params: ct, .. }, Type::EnumType { type_params: rt, .. }) => {
+            let mut i = 0
+            for c in ct {
+                match rt.get(i) {
+                    some(r) => build_var_mapping(c, r, mapping),
+                    none => {}
+                }
+                i = i + 1
+            }
+        },
+        (Type::TupleType { elements: ce }, Type::TupleType { elements: re }) => {
+            let mut i = 0
+            for c in ce {
+                match re.get(i) {
+                    some(r) => build_var_mapping(c, r, mapping),
+                    none => {}
+                }
+                i = i + 1
+            }
+        },
+        _ => {}
+    }
+}
+
+// Apply var-id mapping to a type: replace check-time TypeVars with registration-time types.
+fn apply_var_mapping(ty: Type, mapping: Map<Int, Type>) -> Type {
+    match ty {
+        Type::TypeVar { id, .. } => {
+            match mapping.get(id) {
+                some(mapped) => mapped,
+                none => ty  // unmapped var — keep as-is (concrete types don't have this)
+            }
+        },
+        Type::FnType { params, return_type, effects } => {
+            let mut mapped_params: List<Type> = []
+            for p in params { mapped_params.push(apply_var_mapping(p, mapping)) }
+            Type::FnType {
+                params: mapped_params,
+                return_type: apply_var_mapping(return_type, mapping),
+                effects: map_effect_row(effects, mapping)
+            }
+        },
+        Type::StructType { name, type_params, fields } => {
+            let mut mapped_tps: List<Type> = []
+            for tp in type_params { mapped_tps.push(apply_var_mapping(tp, mapping)) }
+            Type::StructType { name: name, type_params: mapped_tps, fields: fields }
+        },
+        Type::EnumType { name, type_params, variants } => {
+            let mut mapped_tps: List<Type> = []
+            for tp in type_params { mapped_tps.push(apply_var_mapping(tp, mapping)) }
+            Type::EnumType { name: name, type_params: mapped_tps, variants: variants }
+        },
+        Type::TupleType { elements } => {
+            let mut mapped_els: List<Type> = []
+            for e in elements { mapped_els.push(apply_var_mapping(e, mapping)) }
+            Type::TupleType { elements: mapped_els }
+        },
+        Type::GenericType { base, args } => {
+            let mut mapped_args: List<Type> = []
+            for a in args { mapped_args.push(apply_var_mapping(a, mapping)) }
+            Type::GenericType { base: apply_var_mapping(base, mapping), args: mapped_args }
+        },
+        _ => ty  // IntType, FloatType, StrType, BoolType, UnitType, etc. — concrete, no mapping needed
+    }
+}
+
+// Apply var-id mapping to an effect row
+fn map_effect_row(row: EffectRow, mapping: Map<Int, Type>) -> EffectRow {
+    if mapping.len() == 0 { return row }
+    let mut mapped_effects: List<Effect> = []
+    for eff in row.effects {
+        match eff {
+            Effect::FailEffect { error_type } =>
+                mapped_effects.push(Effect::FailEffect { error_type: apply_var_mapping(error_type, mapping) }),
+            Effect::MutEffect { state_type } =>
+                mapped_effects.push(Effect::MutEffect { state_type: apply_var_mapping(state_type, mapping) }),
+            Effect::CustomEffect { name, type_args } => {
+                let mut mapped_args: List<Type> = []
+                for a in type_args { mapped_args.push(apply_var_mapping(a, mapping)) }
+                mapped_effects.push(Effect::CustomEffect { name: name, type_args: mapped_args })
+            },
+            Effect::IoEffect => mapped_effects.push(eff)
+        }
+    }
+    EffectRow { effects: mapped_effects, tail: row.tail }
+}
+
 // ============================================================
 // Default effect handler cycle detection
 // ============================================================
@@ -1596,9 +1816,102 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
         }
     }
 
-    let mut hdecls: List<HDecl> = []
+    // B-122: Build SCC for fn/impl declaration ordering.
+    // Callees are checked before callers so that rebinding makes resolved
+    // return types visible to callers (fixing the #149 unsound ret-var hole).
+    let registered_fns = collect_registered_fn_names(program.decls)
+    let call_graph = build_call_graph(program.decls, registered_fns)
+    let scc_groups = tarjan_scc(call_graph)
+
+    // Build lookup: SCC node name → index in program.decls
+    let mut fn_name_to_idx: Map<Str, Int> = map_new()
+    let mut impl_node_to_idx: Map<Str, Int> = map_new()
+    let mut idx = 0
     for decl in program.decls {
-        let result = some(check_one_decl(ctx, decl, hdecls)) catch { _ => none }
+        match decl {
+            Decl::Fn { name, .. } => {
+                fn_name_to_idx.insert(name, idx)
+            },
+            Decl::Impl { target_type, trait_name, .. } => {
+                let inode = match trait_name {
+                    some(tn) => "impl::${target_type}::${tn}",
+                    none => "impl::${target_type}"
+                }
+                impl_node_to_idx.insert(inode, idx)
+            },
+            _ => {}
+        }
+        idx = idx + 1
+    }
+
+    let mut hdecls: List<HDecl> = []
+    let mut checked: Set<Int> = set_new()
+
+    // Phase 1: Check non-fn/non-impl declarations in source order.
+    // These (struct, enum, effect, trait, extern, const, type-alias, sig, test, mod)
+    // do not participate in the fn call graph.
+    let mut di = 0
+    for decl in program.decls {
+        match decl {
+            Decl::Fn { .. } => {},
+            Decl::Impl { .. } => {},
+            _ => {
+                let result = some(check_one_decl_with_rebind(ctx, decl, hdecls)) catch { _ => none }
+                checked.insert(di)
+            }
+        }
+        di = di + 1
+    }
+
+    // Phase 2a: Check impl blocks in source order (before top-level fns).
+    // This re-checks impls with effects populated by the pre-pass.
+    // Must happen before top-level fns so that method effects are visible
+    // to callers (method calls are invisible to the call graph).
+    let mut ii = 0
+    for decl in program.decls {
+        match decl {
+            Decl::Impl { .. } => {
+                if !checked.contains(ii) {
+                    let result = some(check_one_decl_with_rebind(ctx, decl, hdecls)) catch { _ => none }
+                    checked.insert(ii)
+                }
+            },
+            _ => {}
+        }
+        ii = ii + 1
+    }
+
+    // Phase 2b: Check top-level fn declarations in SCC topological order.
+    // tarjan_scc returns SCCs with leaf dependencies first (reverse topo),
+    // so callees are checked before callers. After each check, rebinding
+    // makes the resolved return type visible to subsequent callers.
+    for scc_group in scc_groups {
+        for name in scc_group {
+            match fn_name_to_idx.get(name) {
+                some(i) => {
+                    if !checked.contains(i) {
+                        match program.decls.get(i) {
+                            some(decl) => {
+                                let result = some(check_one_decl_with_rebind(ctx, decl, hdecls)) catch { _ => none }
+                                checked.insert(i)
+                            },
+                            none => {}
+                        }
+                    }
+                },
+                none => {}
+            }
+        }
+    }
+
+    // Phase 3: Check any remaining unchecked decls (safety net for decls
+    // not reached by SCC — e.g., dead code or decls with no call graph edges).
+    let mut ri = 0
+    for decl in program.decls {
+        if !checked.contains(ri) {
+            let result = some(check_one_decl_with_rebind(ctx, decl, hdecls)) catch { _ => none }
+        }
+        ri = ri + 1
     }
 
     // Check for cyclic dependencies in default effect handlers

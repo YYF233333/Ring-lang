@@ -442,35 +442,17 @@ function check(program, sink) {
   return new CheckResult(dict_lower$lower_dicts(andor_lower$lower_andor(assembled)), ctx.env, ctx.fn_mut_params);
 }
 
-function check_module(program, module_exports, sink) {
-  let ctx = new_infer_ctx(sink);
-  const prelude_hdecls = load_prelude(ctx);
-  inject_module_exports(ctx, module_exports);
-  resolve_uses(ctx, program.uses, module_exports);
-  const hprogram = infer_decl$check(ctx, program);
-  let all_decls = list_clone(prelude_hdecls);
-  const __ring_iter_8 = __List_Iterable.iter(hprogram.decls);
+function inject_module_exports(ctx, exports) {
+  const __ring_iter_8 = __List_Iterable.iter(exports);
   while (true) {
     const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
     if (__ring_next_8._tag === "none") break;
-    const d = __ring_next_8._0;
-    List_push(all_decls, d);
-  }
-  const assembled = new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars, []);
-  return new CheckResult(dict_lower$lower_dicts(andor_lower$lower_andor(assembled)), ctx.env, ctx.fn_mut_params);
-}
-
-function inject_module_exports(ctx, exports) {
-  const __ring_iter_9 = __List_Iterable.iter(exports);
-  while (true) {
-    const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
-    if (__ring_next_9._tag === "none") break;
-    const mod_ = __ring_next_9._0;
-    const __ring_iter_10 = __List_Iterable.iter(_Map_entries(mod_.types));
+    const mod_ = __ring_next_8._0;
+    const __ring_iter_9 = __List_Iterable.iter(_Map_entries(mod_.types));
     while (true) {
-      const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-      if (__ring_next_10._tag === "none") break;
-      const entry = __ring_next_10._0;
+      const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+      if (__ring_next_9._tag === "none") break;
+      const entry = __ring_next_9._0;
       const __ring_dt0 = entry;
       const name = __ring_dt0[0];
       const def = __ring_dt0[1];
@@ -484,11 +466,11 @@ function inject_module_exports(ctx, exports) {
         if (__ring_m14._tag === "EnumDef_") {
           const edef = __ring_m14._0;
           _Map_insert(ctx.env.types.enums, name, edef);
-          const __ring_iter_11 = __List_Iterable.iter(edef.variants);
+          const __ring_iter_10 = __List_Iterable.iter(edef.variants);
           while (true) {
-            const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
-            if (__ring_next_11._tag === "none") break;
-            const v = __ring_next_11._0;
+            const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+            if (__ring_next_10._tag === "none") break;
+            const v = __ring_next_10._0;
             _Map_insert(ctx.env.types.variant_to_enum, v.name, name);
           }
           break __ring_match14;
@@ -496,48 +478,48 @@ function inject_module_exports(ctx, exports) {
         __match_fail(__ring_m14);
       }
     }
-    const __ring_iter_12 = __List_Iterable.iter(_Map_entries(mod_.effects));
+    const __ring_iter_11 = __List_Iterable.iter(_Map_entries(mod_.effects));
     while (true) {
-      const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-      if (__ring_next_12._tag === "none") break;
-      const entry = __ring_next_12._0;
+      const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+      if (__ring_next_11._tag === "none") break;
+      const entry = __ring_next_11._0;
       const __ring_dt1 = entry;
       const name = __ring_dt1[0];
       const effdef = __ring_dt1[1];
       _Map_insert(ctx.env.types.effects, name, effdef);
     }
-    const __ring_iter_13 = __List_Iterable.iter(_Map_entries(mod_.effect_aliases));
+    const __ring_iter_12 = __List_Iterable.iter(_Map_entries(mod_.effect_aliases));
     while (true) {
-      const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-      if (__ring_next_13._tag === "none") break;
-      const entry = __ring_next_13._0;
+      const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+      if (__ring_next_12._tag === "none") break;
+      const entry = __ring_next_12._0;
       const __ring_dt2 = entry;
       const name = __ring_dt2[0];
       const adef = __ring_dt2[1];
       _Map_insert(ctx.env.types.effect_aliases, name, adef);
     }
-    const __ring_iter_14 = __List_Iterable.iter(_Map_entries(mod_.traits));
+    const __ring_iter_13 = __List_Iterable.iter(_Map_entries(mod_.traits));
     while (true) {
-      const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
-      if (__ring_next_14._tag === "none") break;
-      const entry = __ring_next_14._0;
+      const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+      if (__ring_next_13._tag === "none") break;
+      const entry = __ring_next_13._0;
       const __ring_dt3 = entry;
       const name = __ring_dt3[0];
       const tdef = __ring_dt3[1];
       _Map_insert(ctx.env.trait_reg.traits, name, tdef);
     }
-    const __ring_iter_15 = __List_Iterable.iter(mod_.trait_impls);
+    const __ring_iter_14 = __List_Iterable.iter(mod_.trait_impls);
+    while (true) {
+      const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+      if (__ring_next_14._tag === "none") break;
+      const impl_ = __ring_next_14._0;
+      env$add_impl(ctx.env.trait_reg, impl_);
+    }
+    const __ring_iter_15 = __List_Iterable.iter(_Map_entries(mod_.impl_methods));
     while (true) {
       const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
       if (__ring_next_15._tag === "none") break;
-      const impl_ = __ring_next_15._0;
-      env$add_impl(ctx.env.trait_reg, impl_);
-    }
-    const __ring_iter_16 = __List_Iterable.iter(_Map_entries(mod_.impl_methods));
-    while (true) {
-      const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
-      if (__ring_next_16._tag === "none") break;
-      const entry = __ring_next_16._0;
+      const entry = __ring_next_15._0;
       const __ring_dt4 = entry;
       const type_name = __ring_dt4[0];
       const methods = __ring_dt4[1];
@@ -545,11 +527,11 @@ function inject_module_exports(ctx, exports) {
         const __ring_m15 = _Map_get(ctx.env.trait_reg.impl_methods, type_name);
         if (__ring_m15._tag === "some") {
           const existing = __ring_m15._0;
-          const __ring_iter_17 = __List_Iterable.iter(_Map_entries(methods));
+          const __ring_iter_16 = __List_Iterable.iter(_Map_entries(methods));
           while (true) {
-            const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
-            if (__ring_next_17._tag === "none") break;
-            const mentry = __ring_next_17._0;
+            const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+            if (__ring_next_16._tag === "none") break;
+            const mentry = __ring_next_16._0;
             const __ring_dt5 = mentry;
             const method_name = __ring_dt5[0];
             const scheme = __ring_dt5[1];
@@ -564,11 +546,11 @@ function inject_module_exports(ctx, exports) {
         __match_fail(__ring_m15);
       }
     }
-    const __ring_iter_18 = __List_Iterable.iter(_Map_entries(mod_.mut_methods));
+    const __ring_iter_17 = __List_Iterable.iter(_Map_entries(mod_.mut_methods));
     while (true) {
-      const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
-      if (__ring_next_18._tag === "none") break;
-      const entry = __ring_next_18._0;
+      const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+      if (__ring_next_17._tag === "none") break;
+      const entry = __ring_next_17._0;
       const __ring_dt6 = entry;
       const type_name = __ring_dt6[0];
       const method_set = __ring_dt6[1];
@@ -576,22 +558,22 @@ function inject_module_exports(ctx, exports) {
         const __ring_m16 = _Map_get(ctx.env.trait_reg.mut_methods, type_name);
         if (__ring_m16._tag === "some") {
           const existing = __ring_m16._0;
-          const __ring_iter_19 = __List_Iterable.iter(_Set_to_list(method_set));
+          const __ring_iter_18 = __List_Iterable.iter(_Set_to_list(method_set));
           while (true) {
-            const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
-            if (__ring_next_19._tag === "none") break;
-            const m = __ring_next_19._0;
+            const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+            if (__ring_next_18._tag === "none") break;
+            const m = __ring_next_18._0;
             _Set_insert(existing, m);
           }
           break __ring_match16;
         }
         if (__ring_m16._tag === "none") {
           let new_set = set_new();
-          const __ring_iter_20 = __List_Iterable.iter(_Set_to_list(method_set));
+          const __ring_iter_19 = __List_Iterable.iter(_Set_to_list(method_set));
           while (true) {
-            const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
-            if (__ring_next_20._tag === "none") break;
-            const m = __ring_next_20._0;
+            const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+            if (__ring_next_19._tag === "none") break;
+            const m = __ring_next_19._0;
             _Set_insert(new_set, m);
           }
           _Map_insert(ctx.env.trait_reg.mut_methods, type_name, new_set);
@@ -600,11 +582,11 @@ function inject_module_exports(ctx, exports) {
         __match_fail(__ring_m16);
       }
     }
-    const __ring_iter_21 = __List_Iterable.iter(_Map_entries(mod_.fn_mut_params));
+    const __ring_iter_20 = __List_Iterable.iter(_Map_entries(mod_.fn_mut_params));
     while (true) {
-      const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
-      if (__ring_next_21._tag === "none") break;
-      const entry = __ring_next_21._0;
+      const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+      if (__ring_next_20._tag === "none") break;
+      const entry = __ring_next_20._0;
       const __ring_dt7 = entry;
       const fn_name = __ring_dt7[0];
       const flags = __ring_dt7[1];
@@ -615,18 +597,18 @@ function inject_module_exports(ctx, exports) {
 
 function resolve_uses(ctx, uses, available_modules) {
   let module_map = map_new();
-  const __ring_iter_22 = __List_Iterable.iter(available_modules);
+  const __ring_iter_21 = __List_Iterable.iter(available_modules);
+  while (true) {
+    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+    if (__ring_next_21._tag === "none") break;
+    const mod_ = __ring_next_21._0;
+    _Map_insert(module_map, mod_.module_key, mod_);
+  }
+  const __ring_iter_22 = __List_Iterable.iter(uses);
   while (true) {
     const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
     if (__ring_next_22._tag === "none") break;
-    const mod_ = __ring_next_22._0;
-    _Map_insert(module_map, mod_.module_key, mod_);
-  }
-  const __ring_iter_23 = __List_Iterable.iter(uses);
-  while (true) {
-    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
-    if (__ring_next_23._tag === "none") break;
-    const use_decl = __ring_next_23._0;
+    const use_decl = __ring_next_22._0;
     const first_seg = Option_unwrap_or(List_get(use_decl.path.segments, 0), "");
     if (((first_seg === "self") ? true : (first_seg === "super"))) {
       const d = diagnostics$make_diag(codes$E0705, diagnostics$Severity_SevError, `Cannot use '${first_seg}::' at file level — relative paths are only supported inside mod blocks`, use_decl.path.span, diagnostics$DiagnosticContext_OtherContext(Option_some("relative path out of scope")));
@@ -647,11 +629,11 @@ function resolve_uses(ctx, uses, available_modules) {
           const __ring_m18 = use_decl.imports;
           if (__ring_m18._tag === "NamedItems") {
             const names = __ring_m18.names;
-            const __ring_iter_24 = __List_Iterable.iter(names);
+            const __ring_iter_23 = __List_Iterable.iter(names);
             while (true) {
-              const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-              if (__ring_next_24._tag === "none") break;
-              const item = __ring_next_24._0;
+              const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+              if (__ring_next_23._tag === "none") break;
+              const item = __ring_next_23._0;
               const local_name = (function() {
   const __ring_m = item.alias;
   if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
@@ -681,11 +663,11 @@ function resolve_uses(ctx, uses, available_modules) {
                     const __ring_m21 = tdef;
                     if (__ring_m21._tag === "EnumDef_") {
                       const edef = __ring_m21._0;
-                      const __ring_iter_25 = __List_Iterable.iter(edef.variants);
+                      const __ring_iter_24 = __List_Iterable.iter(edef.variants);
                       while (true) {
-                        const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
-                        if (__ring_next_25._tag === "none") break;
-                        const v = __ring_next_25._0;
+                        const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+                        if (__ring_next_24._tag === "none") break;
+                        const v = __ring_next_24._0;
                         __ring_match22: {
                           const __ring_m22 = _Map_get(mod_.values, v.name);
                           if (__ring_m22._tag === "some") {
@@ -727,32 +709,32 @@ function resolve_uses(ctx, uses, available_modules) {
             break __ring_match18;
           }
           if (__ring_m18._tag === "Module") {
-            const __ring_iter_26 = __List_Iterable.iter(_Map_entries(mod_.values));
+            const __ring_iter_25 = __List_Iterable.iter(_Map_entries(mod_.values));
             while (true) {
-              const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
-              if (__ring_next_26._tag === "none") break;
-              const entry = __ring_next_26._0;
+              const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+              if (__ring_next_25._tag === "none") break;
+              const entry = __ring_next_25._0;
               const __ring_dt8 = entry;
               const name = __ring_dt8[0];
               const scheme = __ring_dt8[1];
               env$TypeEnv_bind(ctx.env, name, scheme);
             }
-            const __ring_iter_27 = __List_Iterable.iter(_Map_entries(mod_.types));
+            const __ring_iter_26 = __List_Iterable.iter(_Map_entries(mod_.types));
             while (true) {
-              const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
-              if (__ring_next_27._tag === "none") break;
-              const entry = __ring_next_27._0;
+              const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+              if (__ring_next_26._tag === "none") break;
+              const entry = __ring_next_26._0;
               const __ring_dt9 = entry;
               const tdef = __ring_dt9[1];
               __ring_match23: {
                 const __ring_m23 = tdef;
                 if (__ring_m23._tag === "EnumDef_") {
                   const edef = __ring_m23._0;
-                  const __ring_iter_28 = __List_Iterable.iter(edef.variants);
+                  const __ring_iter_27 = __List_Iterable.iter(edef.variants);
                   while (true) {
-                    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
-                    if (__ring_next_28._tag === "none") break;
-                    const v = __ring_next_28._0;
+                    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+                    if (__ring_next_27._tag === "none") break;
+                    const v = __ring_next_27._0;
                     __ring_match24: {
                       const __ring_m24 = _Map_get(mod_.values, v.name);
                       if (__ring_m24._tag === "some") {
@@ -780,6 +762,24 @@ function resolve_uses(ctx, uses, available_modules) {
       __match_fail(__ring_m17);
     }
   }
+}
+
+function check_module(program, module_exports, sink) {
+  let ctx = new_infer_ctx(sink);
+  const prelude_hdecls = load_prelude(ctx);
+  inject_module_exports(ctx, module_exports);
+  resolve_uses(ctx, program.uses, module_exports);
+  const hprogram = infer_decl$check(ctx, program);
+  let all_decls = list_clone(prelude_hdecls);
+  const __ring_iter_28 = __List_Iterable.iter(hprogram.decls);
+  while (true) {
+    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+    if (__ring_next_28._tag === "none") break;
+    const d = __ring_next_28._0;
+    List_push(all_decls, d);
+  }
+  const assembled = new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars, []);
+  return new CheckResult(dict_lower$lower_dicts(andor_lower$lower_andor(assembled)), ctx.env, ctx.fn_mut_params);
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

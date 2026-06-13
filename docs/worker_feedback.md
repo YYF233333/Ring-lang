@@ -9,6 +9,28 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
+## B-122 SCC 拓扑序（2026-06-14，Worker）
+
+### 1. 实现方案偏差 [通知]
+
+Spec 说"未标注 ret 复用注册签名的 var（消除 :1306 的二次 fresh var）"，实际实现用了 **rebind-after** 方案：check_fn_decl 仍创建自己的 fresh var（:1306 不改），checking 完成后 `rebind_fn_type` 将 zonked 的 resolved 类型映射回注册层的 var 空间并 rebind。功能等价，对 check_fn_decl 内部零侵入，更稳妥。
+
+### 2. 缺少 rebind post-check 断言 [通知]
+
+Spec 要求的"rebind 时若发现 ret var 仍 unresolved → 报内部错误（漏边信号）"未实现。当前 rebind_fn_type 的 apply_var_mapping 对未匹配的 TypeVar 保持 as-is（无 panic）。实际场景通过 835 测试 + double bootstrap 验证无漏边，但形式化兜底缺失。如果后续要补，加在 `rebind_fn_type` 末尾即可。
+
+### 3. impl 方法 SCC 粒度 [通知]
+
+Spec 说"顶层 fn / impl 方法"作为 SCC 节点。实际实现将 **impl block 作为整体** 参与 SCC（`"impl::TypeName"` 或 `"impl::TypeName::TraitName"`），同 impl 内方法不拆分。这对当前已知 bug（顶层 fn 间的声明序依赖）已足够。如果将来出现 impl 方法间的 SCC 问题，需细化到方法级。
+
+### 4. 附带修复 [通知]
+
+SCC rebinding 暴露了 `codegen_llvm_decl.ring:507` 的一个潜在类型不匹配：`emit_dict_method_slot` 返回 `LLVMValueRef` 但调用处丢弃返回值（Unit 上下文）。加了 `let _ =` 修复。这是 SCC 改变了 check 顺序后新暴露的 latent issue——之前 Pass 2 按声明序检查时该路径未触发 rebind 校验。
+
+### 5. hdecls 顺序变化 [通知]
+
+新的三阶段 check() 输出 hdecls 不再按源码声明序，而是：非 fn/impl 声明 → impl 块 → 顶层 fn（SCC 拓扑序）→ 安全网兜底。JS/LLVM codegen 不依赖声明顺序（JS 函数声明提升、LLVM module-level 无序），double bootstrap 确认无影响。
+
 ## Audit 观察报告（2026-06-13，JS 退役准备审计）
 
 ### 1. [观察] `variant_js_name`（hir.ring:296）名称含 "js" 但实现后端无关

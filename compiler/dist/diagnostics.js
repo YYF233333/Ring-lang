@@ -240,29 +240,6 @@ const Severity_SevWarning = Object.freeze({ _tag: "SevWarning" });
 const Severity_SevInfo = Object.freeze({ _tag: "SevInfo" });
 const Severity_SevHint = Object.freeze({ _tag: "SevHint" });
 
-function severity_to_str(s) {
-  __ring_match6: {
-    const __ring_m6 = s;
-    if (__ring_m6._tag === "SevError") {
-      return "error";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "SevWarning") {
-      return "warning";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "SevInfo") {
-      return "info";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "SevHint") {
-      return "hint";
-      break __ring_match6;
-    }
-    __match_fail(__ring_m6);
-  }
-}
-
 class DiagnosticNote {
   constructor(message, span) {
     this.message = message;
@@ -316,24 +293,12 @@ class Diagnostic {
   }
 }
 
-function dummy_span() {
-  return new ast$Span("", new ast$Position(0, 0, 0), new ast$Position(0, 0, 0));
-}
-
 
 class CollectingSink {
   constructor(items, seen) {
     this.items = items;
     this.seen = seen;
   }
-}
-
-function diag_key(d) {
-  return `${d.code}@${d.span.file}:${d.span.start.offset}`;
-}
-
-function new_collecting_sink() {
-  return new CollectingSink([], map_new());
 }
 
 function CollectingSink_report(self, d) {
@@ -390,6 +355,41 @@ function __CollectingSink_DiagnosticSink_get_diagnostics(self) {
   return self.items;
 }
 const __CollectingSink_DiagnosticSink = { report: __CollectingSink_DiagnosticSink_report, has_errors: __CollectingSink_DiagnosticSink_has_errors, get_diagnostics: __CollectingSink_DiagnosticSink_get_diagnostics };
+
+function severity_to_str(s) {
+  __ring_match6: {
+    const __ring_m6 = s;
+    if (__ring_m6._tag === "SevError") {
+      return "error";
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "SevWarning") {
+      return "warning";
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "SevInfo") {
+      return "info";
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "SevHint") {
+      return "hint";
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+}
+
+function dummy_span() {
+  return new ast$Span("", new ast$Position(0, 0, 0), new ast$Position(0, 0, 0));
+}
+
+function diag_key(d) {
+  return `${d.code}@${d.span.file}:${d.span.start.offset}`;
+}
+
+function new_collecting_sink() {
+  return new CollectingSink([], map_new());
+}
 
 function make_diagnostic(code, severity, message, span, context, notes) {
   return new Diagnostic(severity, code, message, span, notes, context, [], Option_some(codes$error_category(code)));

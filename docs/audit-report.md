@@ -22,11 +22,9 @@
 
 **决策（2026-05-23）**：长期容忍。当前方案正确且无性能问题，改动大（L-XL）收益主要在未来后端。等 LLVM 后端需要时与 #16 一并重构。
 
-### #149 未标注 fn 的返回类型被过度泛化为自由 TypeVar（健全性洞）[critical] [judgment] [open] [queued: B-122]
+### #149 未标注 fn 的返回类型被过度泛化为自由 TypeVar（健全性洞）[critical] [judgment] [done] [fixed: B-122, 2026-06-14]
 
-> 2026-06-12 拍板：根修 = **方案 B（顶层推断改依赖 SCC 拓扑序，标准 HM）**，立项 **B-122 [P1] [XL]**（时序 B-104 后、B-089 前）。机制核实比下文更广——洞不限于 Unit 案例，**所有未标注 ret 的 fn** 的 ret 都等效隐式 forall（Pass 1 bind_mono open var + Pass 2 per-decl subst + check 时二次 fresh var，注册 ?N 永不绑定），完整机制与方案见 B-122。本条留作发现记录，B-122 落地后删除。
-
-`fn tp(mut xs: List<Int>) { xs.push(1) }`（无 `-> T` 标注）的返回类型在 generalization 后是**自由类型变量**——`let x: Str = tp([1])` **通过类型检查**（实测 `check` OK）。JS 后端 x = undefined 静默流动；native 后端是**致命组合**：tp 的 body tail 是 receiver-returning Unit builtin（`xs.push` 结果 Unit-typed 被 rc 排除 → move verbatim 不 dup）→ ABI 返回**活 receiver 指针**、call-site 类型却是 TypeVar → 规则②（Unit 类型级排除）拦不住 → 任何 droppable 位置（`let r = tp(a)` 自 B-103 起；arg/receiver/statement 位随 Stage 2 各轮）把它 scope-end-drop → **与 caller 容器 double-free**（ASan 双向实证：c470d13 上 `let r = tp(a)` UAF；守卫后 EXIT 0）。**Perceus 侧已加 unknown-ownership 守卫**（`is_unresolved_var_type`：TypeVar/ErrorType 不材料化、不 droppable，Clone 保留；git 89d2eb7，泄漏方向，单态 call-site zonk 后不受影响）。**本条是 checker 根修**：未标注 fn 的 expected_ret fresh var 应与 body 类型 unify 后不被 generalize（infer_decl.ring:1304-1311 路径），修复方向需拍板（涉及推断语义）。回归：`tests/cases/llvm/exprstmt_discard_drop.ring` #149 段锁守卫；checker 修复后应加负面测试断言 `let x: Str = tp([1])` 报错。Stage 2 commit message 中曾以 #148 引用。发现者：B-104 D1 Stage 2（Round C3，llvm_diff `mutator_result_binding.ring` ×3 确定性触发后追根）。
+> **已修复**：B-122 落地——checker Pass 2 改为 SCC 拓扑序驱动 + `rebind_fn_type` 将推断后的 ret 映射回注册层。负面测试 `scc_ret_soundness.ring`（E0301）+ 正面测试 `scc_mutual_recursion.ring` 已覆盖。Perceus `is_unresolved_var_type` 守卫保留作 invariant 防线。
 
 
 

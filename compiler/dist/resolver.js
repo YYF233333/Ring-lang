@@ -300,203 +300,16 @@ function resolve_module_file(use_path_segments, project_root) {
   }
 }
 
-function build_module_graph(entry_file) {
-  const abs_entry = path_resolve(entry_file);
-  const project_root = path_dirname(abs_entry);
-  const entry_basename = Str_replace(path_basename(abs_entry), ".ring", "");
-  const entry_id = new ModuleId([entry_basename], abs_entry);
-  const entry_key = module_key(entry_id.path_segments);
-  let modules = map_new();
-  let dependencies = map_new();
-  let asts_map = map_new();
-  _Map_insert(modules, entry_key, entry_id);
-  let empty_deps = [];
-  _Map_insert(dependencies, entry_key, empty_deps);
-  let queue = [entry_key];
-  while ((List_len(queue) > 0)) {
-    __ring_match7: {
-      const __ring_m7 = List_shift(queue);
-      if (__ring_m7._tag === "some") {
-        const current_key = __ring_m7._0;
-        __ring_match8: {
-          const __ring_m8 = _Map_get(modules, current_key);
-          if (__ring_m8._tag === "some") {
-            const current_mod = __ring_m8._0;
-            const source = read_file(current_mod.file_path);
-            const resolve_sink = diagnostics$new_collecting_sink();
-            const ast = parser$parse(source, current_mod.file_path, resolve_sink);
-            if (diagnostics$CollectingSink_has_errors(resolve_sink)) {
-              eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(resolve_sink), source));
-              return Option_none;
-            }
-            if ((List_len(resolve_sink.items) > 0)) {
-              eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(resolve_sink), source));
-            }
-            _Map_insert(asts_map, current_key, ast);
-            let deps = [];
-            const __ring_iter_3 = __List_Iterable.iter(ast.uses);
-            while (true) {
-              const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
-              if (__ring_next_3._tag === "none") break;
-              const use_decl = __ring_next_3._0;
-              const segments = use_decl.path.segments;
-              const dep_key = module_key(segments);
-              if (List_contains(deps, dep_key, __Str_Eq)) {
-              } else {
-                __ring_match9: {
-                  const __ring_m9 = resolve_module_file(segments, project_root);
-                  if (__ring_m9._tag === "some") {
-                    const resolved = __ring_m9._0;
-                    const abs_resolved = path_resolve(resolved);
-                    __ring_match10: {
-                      const __ring_m10 = _Map_get(modules, dep_key);
-                      if (__ring_m10._tag === "none") {
-                        const dep_id = new ModuleId(list_clone(segments), abs_resolved);
-                        _Map_insert(modules, dep_key, dep_id);
-                        let empty = [];
-                        _Map_insert(dependencies, dep_key, empty);
-                        List_push(queue, dep_key);
-                        break __ring_match10;
-                      }
-                      if (__ring_m10._tag === "some") {
-                        break __ring_match10;
-                      }
-                      __match_fail(__ring_m10);
-                    }
-                    List_push(deps, dep_key);
-                    break __ring_match9;
-                  }
-                  if (__ring_m9._tag === "none") {
-                    const mod_path = List_join(segments, "::");
-                    const diag = diagnostics$make_diag(codes$E0702, diagnostics$Severity_SevError, `Module '${mod_path}' not found`, use_decl.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`no file '${mod_path}.ring' in project root`)));
-                    let err_sink = diagnostics$new_collecting_sink();
-                    diagnostics$CollectingSink_report(err_sink, diag);
-                    eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), source));
-                    return Option_none;
-                    break __ring_match9;
-                  }
-                  __match_fail(__ring_m9);
-                }
-              }
-            }
-            _Map_insert(dependencies, current_key, deps);
-            break __ring_match8;
-          }
-          if (__ring_m8._tag === "none") {
-            break __ring_match8;
-          }
-          __match_fail(__ring_m8);
-        }
-        break __ring_match7;
-      }
-      if (__ring_m7._tag === "none") {
-        break __ring_match7;
-      }
-      __match_fail(__ring_m7);
-    }
-  }
-  let dep_count = map_new();
-  const __ring_iter_4 = __List_Iterable.iter(_Map_entries(dependencies));
-  while (true) {
-    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-    if (__ring_next_4._tag === "none") break;
-    const entry = __ring_next_4._0;
-    const __ring_dt0 = entry;
-    const key = __ring_dt0[0];
-    const deps = __ring_dt0[1];
-    _Map_insert(dep_count, key, List_len(deps));
-  }
-  let topo_order = [];
-  let ready = [];
-  const __ring_iter_5 = __List_Iterable.iter(_Map_entries(dep_count));
-  while (true) {
-    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-    if (__ring_next_5._tag === "none") break;
-    const entry = __ring_next_5._0;
-    const __ring_dt1 = entry;
-    const key = __ring_dt1[0];
-    const count = __ring_dt1[1];
-    if ((count === 0)) {
-      List_push(ready, key);
-    }
-  }
-  while ((List_len(ready) > 0)) {
-    __ring_match11: {
-      const __ring_m11 = List_shift(ready);
-      if (__ring_m11._tag === "some") {
-        const node = __ring_m11._0;
-        List_push(topo_order, node);
-        const __ring_iter_6 = __List_Iterable.iter(_Map_entries(dependencies));
-        while (true) {
-          const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-          if (__ring_next_6._tag === "none") break;
-          const entry = __ring_next_6._0;
-          const __ring_dt2 = entry;
-          const key = __ring_dt2[0];
-          const deps = __ring_dt2[1];
-          if (List_contains(deps, node, __Str_Eq)) {
-            __ring_match12: {
-              const __ring_m12 = _Map_get(dep_count, key);
-              if (__ring_m12._tag === "some") {
-                const c = __ring_m12._0;
-                const new_count = (c - 1);
-                _Map_insert(dep_count, key, new_count);
-                if ((new_count === 0)) {
-                  List_push(ready, key);
-                }
-                break __ring_match12;
-              }
-              if (__ring_m12._tag === "none") {
-                break __ring_match12;
-              }
-              __match_fail(__ring_m12);
-            }
-          }
-        }
-        break __ring_match11;
-      }
-      if (__ring_m11._tag === "none") {
-        break __ring_match11;
-      }
-      __match_fail(__ring_m11);
-    }
-  }
-  if ((List_len(topo_order) !== _Map_len(modules))) {
-    let cycle_nodes = [];
-    const __ring_iter_7 = __List_Iterable.iter(_Map_entries(modules));
-    while (true) {
-      const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-      if (__ring_next_7._tag === "none") break;
-      const entry = __ring_next_7._0;
-      const __ring_dt3 = entry;
-      const key = __ring_dt3[0];
-      if ((!List_contains(topo_order, key, __Str_Eq))) {
-        List_push(cycle_nodes, key);
-      }
-    }
-    const cycle_path = find_cycle_path(cycle_nodes, dependencies);
-    const cycle_desc = List_join(cycle_path, " -> ");
-    const file_span = new ast$Span(abs_entry, new ast$Position(1, 0, 0), new ast$Position(1, 0, 0));
-    const diag = diagnostics$make_diag(codes$E0704, diagnostics$Severity_SevError, `Circular dependency detected: ${cycle_desc}`, file_span, diagnostics$DiagnosticContext_OtherContext(Option_some("modules form a dependency cycle")));
-    let err_sink = diagnostics$new_collecting_sink();
-    diagnostics$CollectingSink_report(err_sink, diag);
-    const entry_source = read_file(abs_entry);
-    eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), entry_source));
-    return Option_none;
-  }
-  return Option_some(new ModuleGraph(new ModuleId([entry_basename], abs_entry), modules, dependencies, topo_order, asts_map));
-}
-
 function find_cycle_path(cycle_nodes, dependencies) {
   if ((List_len(cycle_nodes) === 0)) {
     return ["(unknown)"];
   }
   const cycle_set = set_from(cycle_nodes);
-  const __ring_iter_8 = __List_Iterable.iter(cycle_nodes);
+  const __ring_iter_3 = __List_Iterable.iter(cycle_nodes);
   while (true) {
-    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
-    if (__ring_next_8._tag === "none") break;
-    const start_node = __ring_next_8._0;
+    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+    if (__ring_next_3._tag === "none") break;
+    const start_node = __ring_next_3._0;
     let path = [start_node];
     let current = start_node;
     let visited = set_new();
@@ -509,11 +322,11 @@ function find_cycle_path(cycle_nodes, dependencies) {
       }
       const deps = Option_unwrap(maybe_deps);
       let advanced = false;
-      const __ring_iter_9 = __List_Iterable.iter(deps);
+      const __ring_iter_4 = __List_Iterable.iter(deps);
       while (true) {
-        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
-        if (__ring_next_9._tag === "none") break;
-        const dep = __ring_next_9._0;
+        const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+        if (__ring_next_4._tag === "none") break;
+        const dep = __ring_next_4._0;
         if (_Set_contains(cycle_set, dep, __Str_Eq)) {
           if ((dep === start_node)) {
             List_push(path, dep);
@@ -539,26 +352,213 @@ function find_cycle_path(cycle_nodes, dependencies) {
     }
   }
   let fallback = [];
-  const __ring_iter_10 = __List_Iterable.iter(cycle_nodes);
+  const __ring_iter_5 = __List_Iterable.iter(cycle_nodes);
   while (true) {
-    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-    if (__ring_next_10._tag === "none") break;
-    const n = __ring_next_10._0;
+    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+    if (__ring_next_5._tag === "none") break;
+    const n = __ring_next_5._0;
     List_push(fallback, n);
   }
-  __ring_match13: {
-    const __ring_m13 = List_get(cycle_nodes, 0);
-    if (__ring_m13._tag === "some") {
-      const first = __ring_m13._0;
+  __ring_match7: {
+    const __ring_m7 = List_get(cycle_nodes, 0);
+    if (__ring_m7._tag === "some") {
+      const first = __ring_m7._0;
       List_push(fallback, first);
-      break __ring_match13;
+      break __ring_match7;
     }
-    if (__ring_m13._tag === "none") {
-      break __ring_match13;
+    if (__ring_m7._tag === "none") {
+      break __ring_match7;
     }
-    __match_fail(__ring_m13);
+    __match_fail(__ring_m7);
   }
   return fallback;
+}
+
+function build_module_graph(entry_file) {
+  const abs_entry = path_resolve(entry_file);
+  const project_root = path_dirname(abs_entry);
+  const entry_basename = Str_replace(path_basename(abs_entry), ".ring", "");
+  const entry_id = new ModuleId([entry_basename], abs_entry);
+  const entry_key = module_key(entry_id.path_segments);
+  let modules = map_new();
+  let dependencies = map_new();
+  let asts_map = map_new();
+  _Map_insert(modules, entry_key, entry_id);
+  let empty_deps = [];
+  _Map_insert(dependencies, entry_key, empty_deps);
+  let queue = [entry_key];
+  while ((List_len(queue) > 0)) {
+    __ring_match8: {
+      const __ring_m8 = List_shift(queue);
+      if (__ring_m8._tag === "some") {
+        const current_key = __ring_m8._0;
+        __ring_match9: {
+          const __ring_m9 = _Map_get(modules, current_key);
+          if (__ring_m9._tag === "some") {
+            const current_mod = __ring_m9._0;
+            const source = read_file(current_mod.file_path);
+            const resolve_sink = diagnostics$new_collecting_sink();
+            const ast = parser$parse(source, current_mod.file_path, resolve_sink);
+            if (diagnostics$CollectingSink_has_errors(resolve_sink)) {
+              eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(resolve_sink), source));
+              return Option_none;
+            }
+            if ((List_len(resolve_sink.items) > 0)) {
+              eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(resolve_sink), source));
+            }
+            _Map_insert(asts_map, current_key, ast);
+            let deps = [];
+            const __ring_iter_6 = __List_Iterable.iter(ast.uses);
+            while (true) {
+              const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+              if (__ring_next_6._tag === "none") break;
+              const use_decl = __ring_next_6._0;
+              const segments = use_decl.path.segments;
+              const dep_key = module_key(segments);
+              if (List_contains(deps, dep_key, __Str_Eq)) {
+              } else {
+                __ring_match10: {
+                  const __ring_m10 = resolve_module_file(segments, project_root);
+                  if (__ring_m10._tag === "some") {
+                    const resolved = __ring_m10._0;
+                    const abs_resolved = path_resolve(resolved);
+                    __ring_match11: {
+                      const __ring_m11 = _Map_get(modules, dep_key);
+                      if (__ring_m11._tag === "none") {
+                        const dep_id = new ModuleId(list_clone(segments), abs_resolved);
+                        _Map_insert(modules, dep_key, dep_id);
+                        let empty = [];
+                        _Map_insert(dependencies, dep_key, empty);
+                        List_push(queue, dep_key);
+                        break __ring_match11;
+                      }
+                      if (__ring_m11._tag === "some") {
+                        break __ring_match11;
+                      }
+                      __match_fail(__ring_m11);
+                    }
+                    List_push(deps, dep_key);
+                    break __ring_match10;
+                  }
+                  if (__ring_m10._tag === "none") {
+                    const mod_path = List_join(segments, "::");
+                    const diag = diagnostics$make_diag(codes$E0702, diagnostics$Severity_SevError, `Module '${mod_path}' not found`, use_decl.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`no file '${mod_path}.ring' in project root`)));
+                    let err_sink = diagnostics$new_collecting_sink();
+                    diagnostics$CollectingSink_report(err_sink, diag);
+                    eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), source));
+                    return Option_none;
+                    break __ring_match10;
+                  }
+                  __match_fail(__ring_m10);
+                }
+              }
+            }
+            _Map_insert(dependencies, current_key, deps);
+            break __ring_match9;
+          }
+          if (__ring_m9._tag === "none") {
+            break __ring_match9;
+          }
+          __match_fail(__ring_m9);
+        }
+        break __ring_match8;
+      }
+      if (__ring_m8._tag === "none") {
+        break __ring_match8;
+      }
+      __match_fail(__ring_m8);
+    }
+  }
+  let dep_count = map_new();
+  const __ring_iter_7 = __List_Iterable.iter(_Map_entries(dependencies));
+  while (true) {
+    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+    if (__ring_next_7._tag === "none") break;
+    const entry = __ring_next_7._0;
+    const __ring_dt0 = entry;
+    const key = __ring_dt0[0];
+    const deps = __ring_dt0[1];
+    _Map_insert(dep_count, key, List_len(deps));
+  }
+  let topo_order = [];
+  let ready = [];
+  const __ring_iter_8 = __List_Iterable.iter(_Map_entries(dep_count));
+  while (true) {
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const entry = __ring_next_8._0;
+    const __ring_dt1 = entry;
+    const key = __ring_dt1[0];
+    const count = __ring_dt1[1];
+    if ((count === 0)) {
+      List_push(ready, key);
+    }
+  }
+  while ((List_len(ready) > 0)) {
+    __ring_match12: {
+      const __ring_m12 = List_shift(ready);
+      if (__ring_m12._tag === "some") {
+        const node = __ring_m12._0;
+        List_push(topo_order, node);
+        const __ring_iter_9 = __List_Iterable.iter(_Map_entries(dependencies));
+        while (true) {
+          const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+          if (__ring_next_9._tag === "none") break;
+          const entry = __ring_next_9._0;
+          const __ring_dt2 = entry;
+          const key = __ring_dt2[0];
+          const deps = __ring_dt2[1];
+          if (List_contains(deps, node, __Str_Eq)) {
+            __ring_match13: {
+              const __ring_m13 = _Map_get(dep_count, key);
+              if (__ring_m13._tag === "some") {
+                const c = __ring_m13._0;
+                const new_count = (c - 1);
+                _Map_insert(dep_count, key, new_count);
+                if ((new_count === 0)) {
+                  List_push(ready, key);
+                }
+                break __ring_match13;
+              }
+              if (__ring_m13._tag === "none") {
+                break __ring_match13;
+              }
+              __match_fail(__ring_m13);
+            }
+          }
+        }
+        break __ring_match12;
+      }
+      if (__ring_m12._tag === "none") {
+        break __ring_match12;
+      }
+      __match_fail(__ring_m12);
+    }
+  }
+  if ((List_len(topo_order) !== _Map_len(modules))) {
+    let cycle_nodes = [];
+    const __ring_iter_10 = __List_Iterable.iter(_Map_entries(modules));
+    while (true) {
+      const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+      if (__ring_next_10._tag === "none") break;
+      const entry = __ring_next_10._0;
+      const __ring_dt3 = entry;
+      const key = __ring_dt3[0];
+      if ((!List_contains(topo_order, key, __Str_Eq))) {
+        List_push(cycle_nodes, key);
+      }
+    }
+    const cycle_path = find_cycle_path(cycle_nodes, dependencies);
+    const cycle_desc = List_join(cycle_path, " -> ");
+    const file_span = new ast$Span(abs_entry, new ast$Position(1, 0, 0), new ast$Position(1, 0, 0));
+    const diag = diagnostics$make_diag(codes$E0704, diagnostics$Severity_SevError, `Circular dependency detected: ${cycle_desc}`, file_span, diagnostics$DiagnosticContext_OtherContext(Option_some("modules form a dependency cycle")));
+    let err_sink = diagnostics$new_collecting_sink();
+    diagnostics$CollectingSink_report(err_sink, diag);
+    const entry_source = read_file(abs_entry);
+    eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), entry_source));
+    return Option_none;
+  }
+  return Option_some(new ModuleGraph(new ModuleId([entry_basename], abs_entry), modules, dependencies, topo_order, asts_map));
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

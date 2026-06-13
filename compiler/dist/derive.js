@@ -236,6 +236,24 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
+const BUILTIN_TYPES = set_from(["Option", "Cell", "List", "Map", "Set", "Range"]);
+
+class UserType {
+  constructor(name, type_kind, struct_def, enum_def) {
+    this.name = name;
+    this.type_kind = type_kind;
+    this.struct_def = struct_def;
+    this.enum_def = enum_def;
+  }
+}
+
+class FieldEntry {
+  constructor(name, ty) {
+    this.name = name;
+    this.ty = ty;
+  }
+}
+
 function str_at(list, i) {
   __ring_match6: {
     const __ring_m6 = List_get(list, i);
@@ -300,27 +318,6 @@ function df_at(list, i) {
   }
 }
 
-const BUILTIN_TYPES = set_from(["Option", "Cell", "List", "Map", "Set", "Range"]);
-
-function run_derive_pass(env) {
-  let derived_impls = [];
-  const all_types = collect_user_types(env);
-  derive_trait(env, all_types, "Eq", derived_impls);
-  derive_trait(env, all_types, "Clone", derived_impls);
-  derive_trait(env, all_types, "Ord", derived_impls);
-  derive_trait(env, all_types, "Debug", derived_impls);
-  return derived_impls;
-}
-
-class UserType {
-  constructor(name, type_kind, struct_def, enum_def) {
-    this.name = name;
-    this.type_kind = type_kind;
-    this.struct_def = struct_def;
-    this.enum_def = enum_def;
-  }
-}
-
 function collect_user_types(env) {
   const builtins = BUILTIN_TYPES;
   let result = [];
@@ -360,431 +357,60 @@ function collect_user_types(env) {
   return result;
 }
 
-function derive_trait(env, all_types, trait_name, derived_impls) {
-  let known = set_new();
-  const __ring_iter_4 = __List_Iterable.iter(_Map_entries(env.trait_reg.trait_impls));
-  while (true) {
-    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-    if (__ring_next_4._tag === "none") break;
-    const entry = __ring_next_4._0;
-    const __ring_dt2 = entry;
-    const tname = __ring_dt2[0];
-    const impls = __ring_dt2[1];
-    const __ring_iter_5 = __List_Iterable.iter(impls);
-    while (true) {
-      const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-      if (__ring_next_5._tag === "none") break;
-      const imp = __ring_next_5._0;
-      if ((imp.trait_name === trait_name)) {
-        _Set_insert(known, imp.target_type_name);
-      }
-    }
-  }
-  _Set_insert(known, "Int");
-  _Set_insert(known, "Float");
-  _Set_insert(known, "Str");
-  _Set_insert(known, "Bool");
-  let changed = true;
-  while (changed) {
-    changed = false;
-    const __ring_iter_6 = __List_Iterable.iter(all_types);
-    while (true) {
-      const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-      if (__ring_next_6._tag === "none") break;
-      const ut = __ring_next_6._0;
-      if (_Set_contains(known, ut.name, __Str_Eq)) {
-      } else {
-        if (has_manual_impl(env, ut.name, trait_name)) {
-        } else {
-          const result = try_derive(env, ut, trait_name, known);
-          __ring_match10: {
-            const __ring_m10 = result;
-            if (__ring_m10._tag === "some") {
-              const di = __ring_m10._0;
-              _Set_insert(known, ut.name);
-              register_derived_impl(env, di, trait_name);
-              List_push(derived_impls, di);
-              changed = true;
-              break __ring_match10;
-            }
-            if (__ring_m10._tag === "none") {
-              break __ring_match10;
-            }
-            __match_fail(__ring_m10);
-          }
-        }
-      }
-    }
-  }
-}
-
 function has_manual_impl(env, type_name, trait_name) {
   return env$has_impl(env.trait_reg, type_name, trait_name);
 }
 
-function try_derive(env, ut, trait_name, known) {
-  let bounds = [];
-  __ring_match11: {
-    const __ring_m11 = ut.type_kind;
-    if (__ring_m11._tag === "StructKind") {
-      __ring_match12: {
-        const __ring_m12 = ut.struct_def;
-        if (__ring_m12._tag === "some") {
-          const def = __ring_m12._0;
-          const field_entries = def.fields.map((function(f) { return new FieldEntry(f.name, f.ty); }));
-          const fields = try_derive_fields(env, field_entries, def.type_param_vars, def.type_params, trait_name, known, ut.name, bounds);
-          __ring_match13: {
-            const __ring_m13 = fields;
-            if (__ring_m13._tag === "some") {
-              const fs = __ring_m13._0;
-              return Option_some(new hir$DerivedImpl(ut.name, trait_name, def.type_params, bounds, hir$TypeKind_StructKind, Option_some(fs), Option_none));
-              break __ring_match13;
-            }
-            if (__ring_m13._tag === "none") {
-              return Option_none;
-              break __ring_match13;
-            }
-            __match_fail(__ring_m13);
-          }
-          break __ring_match12;
-        }
-        if (__ring_m12._tag === "none") {
-          return Option_none;
-          break __ring_match12;
-        }
-        __match_fail(__ring_m12);
-      }
-      break __ring_match11;
+function index_of_int(list, target) {
+  const __ring_end4 = List_len(list);
+  for (let i = 0; i < __ring_end4; i++) {
+    if ((int_at(list, i) === target)) {
+      return i;
     }
-    if (__ring_m11._tag === "EnumKind") {
-      __ring_match14: {
-        const __ring_m14 = ut.enum_def;
-        if (__ring_m14._tag === "some") {
-          const def = __ring_m14._0;
-          let variants = [];
-          let ok = true;
-          const __ring_iter_7 = __List_Iterable.iter(def.variants);
-          while (true) {
-            const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-            if (__ring_next_7._tag === "none") break;
-            const v = __ring_next_7._0;
-            if (ok) {
-              const has_named_fields = (function() {
-  const __ring_m = v.field_names;
-  if (__ring_m._tag === "some") { const fns = __ring_m._0; return (List_len(fns) > 0); }
-  if (__ring_m._tag === "none") { return false; }
-  __match_fail(__ring_m);
-})();
-              let field_entries = [];
-              const __ring_end8 = List_len(v.fields);
-              for (let i = 0; i < __ring_end8; i++) {
-                const fname = (has_named_fields ? (function() {
-  const __ring_m = v.field_names;
-  if (__ring_m._tag === "some") { const fns = __ring_m._0; return str_at(fns, i); }
-  if (__ring_m._tag === "none") { return `_${i}`; }
-  __match_fail(__ring_m);
-})() : `_${i}`);
-                List_push(field_entries, new FieldEntry(fname, type_at(v.fields, i)));
-              }
-              const fields = try_derive_fields(env, field_entries, def.type_param_vars, def.type_params, trait_name, known, ut.name, bounds);
-              __ring_match15: {
-                const __ring_m15 = fields;
-                if (__ring_m15._tag === "some") {
-                  const fs = __ring_m15._0;
-                  let final_fields = fs;
-                  if ((has_named_fields === false)) {
-                    let updated = [];
-                    const __ring_end9 = List_len(fs);
-                    for (let j = 0; j < __ring_end9; j++) {
-                      const f = df_at(fs, j);
-                      List_push(updated, new hir$DerivedField(f.name, Option_some(j), f.action));
-                    }
-                    final_fields = updated;
-                  }
-                  List_push(variants, new hir$DerivedVariant(v.name, final_fields, has_named_fields));
-                  break __ring_match15;
-                }
-                if (__ring_m15._tag === "none") {
-                  ok = false;
-                  break __ring_match15;
-                }
-                __match_fail(__ring_m15);
-              }
-            }
-          }
-          if (ok) {
-            return Option_some(new hir$DerivedImpl(ut.name, trait_name, def.type_params, bounds, hir$TypeKind_EnumKind, Option_none, Option_some(variants)));
-          } else {
-            return Option_none;
-          }
-          break __ring_match14;
-        }
-        if (__ring_m14._tag === "none") {
-          return Option_none;
-          break __ring_match14;
-        }
-        __match_fail(__ring_m14);
-      }
-      break __ring_match11;
-    }
-    __match_fail(__ring_m11);
   }
+  return (0 - 1);
 }
 
-class FieldEntry {
-  constructor(name, ty) {
-    this.name = name;
-    this.ty = ty;
-  }
-}
-
-function try_derive_fields(env, fields, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds) {
-  let result = [];
-  const __ring_iter_10 = __List_Iterable.iter(fields);
+function has_bound(bounds, type_param, trait_name) {
+  const __ring_iter_5 = __List_Iterable.iter(bounds);
   while (true) {
-    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-    if (__ring_next_10._tag === "none") break;
-    const field = __ring_next_10._0;
-    const action = resolve_field_action(env, field.ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
-    __ring_match16: {
-      const __ring_m16 = action;
-      if (__ring_m16._tag === "some") {
-        const a = __ring_m16._0;
-        List_push(result, new hir$DerivedField(field.name, Option_none, a));
-        break __ring_match16;
+    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+    if (__ring_next_5._tag === "none") break;
+    const b = __ring_next_5._0;
+    if ((b.type_param === type_param)) {
+      if ((b.trait_name === trait_name)) {
+        return true;
       }
-      if (__ring_m16._tag === "none") {
-        return Option_none;
-        break __ring_match16;
-      }
-      __match_fail(__ring_m16);
     }
   }
-  return Option_some(result);
-}
-
-function resolve_field_action(env, field_type, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds) {
-  __ring_match17: {
-    const __ring_m17 = field_type;
-    if (__ring_m17._tag === "IntType") {
-      return Option_some(hir$FieldAction_Identity);
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "FloatType") {
-      return Option_some(hir$FieldAction_Identity);
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "StrType") {
-      return Option_some(hir$FieldAction_Identity);
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "BoolType") {
-      return Option_some(hir$FieldAction_Identity);
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "UnitType") {
-      return Option_some(hir$FieldAction_Identity);
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "TypeVar") {
-      const id = __ring_m17.id;
-      const param_idx = index_of_int(type_param_vars, id);
-      if ((param_idx < 0)) {
-        return Option_none;
-      }
-      const param_name = str_at(type_param_names, param_idx);
-      if ((has_bound(bounds, param_name, trait_name) === false)) {
-        List_push(bounds, new hir$TraitBound(param_name, trait_name));
-      }
-      return Option_some(hir$FieldAction_Call(hir$trait_bound_param_name(param_name, trait_name), []));
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "StructType") {
-      const name = __ring_m17.name; const type_params = __ring_m17.type_params;
-      if ((name === self_type_name)) {
-        const extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
-        __ring_match18: {
-          const __ring_m18 = extra;
-          if (__ring_m18._tag === "some") {
-            const e = __ring_m18._0;
-            return Option_some(hir$FieldAction_Call(hir$trait_dict_name(name, trait_name), e));
-            break __ring_match18;
-          }
-          if (__ring_m18._tag === "none") {
-            return Option_none;
-            break __ring_match18;
-          }
-          __match_fail(__ring_m18);
-        }
-      } else {
-        if (_Set_contains(known, name, __Str_Eq)) {
-          const extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
-          __ring_match19: {
-            const __ring_m19 = extra;
-            if (__ring_m19._tag === "some") {
-              const e = __ring_m19._0;
-              return Option_some(hir$FieldAction_Call(hir$trait_dict_name(name, trait_name), e));
-              break __ring_match19;
-            }
-            if (__ring_m19._tag === "none") {
-              return Option_none;
-              break __ring_match19;
-            }
-            __match_fail(__ring_m19);
-          }
-        } else {
-          return Option_none;
-        }
-      }
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "EnumType") {
-      const name = __ring_m17.name; const type_params = __ring_m17.type_params;
-      if ((name === self_type_name)) {
-        const extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
-        __ring_match20: {
-          const __ring_m20 = extra;
-          if (__ring_m20._tag === "some") {
-            const e = __ring_m20._0;
-            return Option_some(hir$FieldAction_Call(hir$trait_dict_name(name, trait_name), e));
-            break __ring_match20;
-          }
-          if (__ring_m20._tag === "none") {
-            return Option_none;
-            break __ring_match20;
-          }
-          __match_fail(__ring_m20);
-        }
-      } else {
-        if (_Set_contains(known, name, __Str_Eq)) {
-          const extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
-          __ring_match21: {
-            const __ring_m21 = extra;
-            if (__ring_m21._tag === "some") {
-              const e = __ring_m21._0;
-              return Option_some(hir$FieldAction_Call(hir$trait_dict_name(name, trait_name), e));
-              break __ring_match21;
-            }
-            if (__ring_m21._tag === "none") {
-              return Option_none;
-              break __ring_match21;
-            }
-            __match_fail(__ring_m21);
-          }
-        } else {
-          return Option_none;
-        }
-      }
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "TupleType") {
-      const elements = __ring_m17.elements;
-      let elem_actions = [];
-      let ok = true;
-      const __ring_iter_11 = __List_Iterable.iter(elements);
-      while (true) {
-        const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
-        if (__ring_next_11._tag === "none") break;
-        const elem_ty = __ring_next_11._0;
-        if (ok) {
-          const elem_action = resolve_field_action(env, elem_ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
-          __ring_match22: {
-            const __ring_m22 = elem_action;
-            if (__ring_m22._tag === "some") {
-              const a = __ring_m22._0;
-              List_push(elem_actions, a);
-              break __ring_match22;
-            }
-            if (__ring_m22._tag === "none") {
-              ok = false;
-              break __ring_match22;
-            }
-            __match_fail(__ring_m22);
-          }
-        }
-      }
-      if (ok) {
-        return Option_some(hir$FieldAction_Tuple(elem_actions));
-      } else {
-        return Option_none;
-      }
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "FnType") {
-      if ((trait_name === "Debug")) {
-        return Option_some(hir$FieldAction_FnLiteral);
-      } else {
-        return Option_none;
-      }
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "ErrorType") {
-      return Option_some(hir$FieldAction_Identity);
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "AnyType") {
-      return Option_some(hir$FieldAction_Identity);
-      break __ring_match17;
-    }
-    if (__ring_m17._tag === "NeverType") {
-      return Option_some(hir$FieldAction_Identity);
-      break __ring_match17;
-    }
-    return Option_none;
-    break __ring_match17;
-  }
-}
-
-function resolve_extra_dicts(type_args, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds) {
-  let dicts = [];
-  const __ring_iter_12 = __List_Iterable.iter(type_args);
-  while (true) {
-    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-    if (__ring_next_12._tag === "none") break;
-    const arg = __ring_next_12._0;
-    const dict = resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
-    __ring_match23: {
-      const __ring_m23 = dict;
-      if (__ring_m23._tag === "some") {
-        const d = __ring_m23._0;
-        List_push(dicts, d);
-        break __ring_match23;
-      }
-      if (__ring_m23._tag === "none") {
-        return Option_none;
-        break __ring_match23;
-      }
-      __match_fail(__ring_m23);
-    }
-  }
-  return Option_some(dicts);
+  return false;
 }
 
 function resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds) {
-  __ring_match24: {
-    const __ring_m24 = arg;
-    if (__ring_m24._tag === "IntType") {
+  __ring_match10: {
+    const __ring_m10 = arg;
+    if (__ring_m10._tag === "IntType") {
       return Option_some(hir$trait_dict_name("Int", trait_name));
-      break __ring_match24;
+      break __ring_match10;
     }
-    if (__ring_m24._tag === "FloatType") {
+    if (__ring_m10._tag === "FloatType") {
       return Option_some(hir$trait_dict_name("Float", trait_name));
-      break __ring_match24;
+      break __ring_match10;
     }
-    if (__ring_m24._tag === "StrType") {
+    if (__ring_m10._tag === "StrType") {
       return Option_some(hir$trait_dict_name("Str", trait_name));
-      break __ring_match24;
+      break __ring_match10;
     }
-    if (__ring_m24._tag === "BoolType") {
+    if (__ring_m10._tag === "BoolType") {
       return Option_some(hir$trait_dict_name("Bool", trait_name));
-      break __ring_match24;
+      break __ring_match10;
     }
-    if (__ring_m24._tag === "UnitType") {
+    if (__ring_m10._tag === "UnitType") {
       return Option_some(hir$trait_dict_name("Unit", trait_name));
-      break __ring_match24;
+      break __ring_match10;
     }
-    if (__ring_m24._tag === "TypeVar") {
-      const id = __ring_m24.id;
+    if (__ring_m10._tag === "TypeVar") {
+      const id = __ring_m10.id;
       const param_idx = index_of_int(type_param_vars, id);
       if ((param_idx < 0)) {
         return Option_none;
@@ -794,10 +420,10 @@ function resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_nam
         List_push(bounds, new hir$TraitBound(param_name, trait_name));
       }
       return Option_some(hir$trait_bound_param_name(param_name, trait_name));
-      break __ring_match24;
+      break __ring_match10;
     }
-    if (__ring_m24._tag === "StructType") {
-      const name = __ring_m24.name;
+    if (__ring_m10._tag === "StructType") {
+      const name = __ring_m10.name;
       if ((name === self_type_name)) {
         return Option_some(hir$trait_dict_name(name, trait_name));
       } else {
@@ -807,10 +433,10 @@ function resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_nam
           return Option_none;
         }
       }
-      break __ring_match24;
+      break __ring_match10;
     }
-    if (__ring_m24._tag === "EnumType") {
-      const name = __ring_m24.name;
+    if (__ring_m10._tag === "EnumType") {
+      const name = __ring_m10.name;
       if ((name === self_type_name)) {
         return Option_some(hir$trait_dict_name(name, trait_name));
       } else {
@@ -820,10 +446,441 @@ function resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_nam
           return Option_none;
         }
       }
-      break __ring_match24;
+      break __ring_match10;
     }
     return Option_none;
+    break __ring_match10;
+  }
+}
+
+function resolve_extra_dicts(type_args, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds) {
+  let dicts = [];
+  const __ring_iter_6 = __List_Iterable.iter(type_args);
+  while (true) {
+    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+    if (__ring_next_6._tag === "none") break;
+    const arg = __ring_next_6._0;
+    const dict = resolve_type_arg_dict(arg, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
+    __ring_match11: {
+      const __ring_m11 = dict;
+      if (__ring_m11._tag === "some") {
+        const d = __ring_m11._0;
+        List_push(dicts, d);
+        break __ring_match11;
+      }
+      if (__ring_m11._tag === "none") {
+        return Option_none;
+        break __ring_match11;
+      }
+      __match_fail(__ring_m11);
+    }
+  }
+  return Option_some(dicts);
+}
+
+function resolve_field_action(env, field_type, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds) {
+  __ring_match12: {
+    const __ring_m12 = field_type;
+    if (__ring_m12._tag === "IntType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "FloatType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "StrType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "BoolType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "UnitType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "TypeVar") {
+      const id = __ring_m12.id;
+      const param_idx = index_of_int(type_param_vars, id);
+      if ((param_idx < 0)) {
+        return Option_none;
+      }
+      const param_name = str_at(type_param_names, param_idx);
+      if ((has_bound(bounds, param_name, trait_name) === false)) {
+        List_push(bounds, new hir$TraitBound(param_name, trait_name));
+      }
+      return Option_some(hir$FieldAction_Call(hir$trait_bound_param_name(param_name, trait_name), []));
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "StructType") {
+      const name = __ring_m12.name; const type_params = __ring_m12.type_params;
+      if ((name === self_type_name)) {
+        const extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
+        __ring_match13: {
+          const __ring_m13 = extra;
+          if (__ring_m13._tag === "some") {
+            const e = __ring_m13._0;
+            return Option_some(hir$FieldAction_Call(hir$trait_dict_name(name, trait_name), e));
+            break __ring_match13;
+          }
+          if (__ring_m13._tag === "none") {
+            return Option_none;
+            break __ring_match13;
+          }
+          __match_fail(__ring_m13);
+        }
+      } else {
+        if (_Set_contains(known, name, __Str_Eq)) {
+          const extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
+          __ring_match14: {
+            const __ring_m14 = extra;
+            if (__ring_m14._tag === "some") {
+              const e = __ring_m14._0;
+              return Option_some(hir$FieldAction_Call(hir$trait_dict_name(name, trait_name), e));
+              break __ring_match14;
+            }
+            if (__ring_m14._tag === "none") {
+              return Option_none;
+              break __ring_match14;
+            }
+            __match_fail(__ring_m14);
+          }
+        } else {
+          return Option_none;
+        }
+      }
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "EnumType") {
+      const name = __ring_m12.name; const type_params = __ring_m12.type_params;
+      if ((name === self_type_name)) {
+        const extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
+        __ring_match15: {
+          const __ring_m15 = extra;
+          if (__ring_m15._tag === "some") {
+            const e = __ring_m15._0;
+            return Option_some(hir$FieldAction_Call(hir$trait_dict_name(name, trait_name), e));
+            break __ring_match15;
+          }
+          if (__ring_m15._tag === "none") {
+            return Option_none;
+            break __ring_match15;
+          }
+          __match_fail(__ring_m15);
+        }
+      } else {
+        if (_Set_contains(known, name, __Str_Eq)) {
+          const extra = resolve_extra_dicts(type_params, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
+          __ring_match16: {
+            const __ring_m16 = extra;
+            if (__ring_m16._tag === "some") {
+              const e = __ring_m16._0;
+              return Option_some(hir$FieldAction_Call(hir$trait_dict_name(name, trait_name), e));
+              break __ring_match16;
+            }
+            if (__ring_m16._tag === "none") {
+              return Option_none;
+              break __ring_match16;
+            }
+            __match_fail(__ring_m16);
+          }
+        } else {
+          return Option_none;
+        }
+      }
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "TupleType") {
+      const elements = __ring_m12.elements;
+      let elem_actions = [];
+      let ok = true;
+      const __ring_iter_7 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+        if (__ring_next_7._tag === "none") break;
+        const elem_ty = __ring_next_7._0;
+        if (ok) {
+          const elem_action = resolve_field_action(env, elem_ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
+          __ring_match17: {
+            const __ring_m17 = elem_action;
+            if (__ring_m17._tag === "some") {
+              const a = __ring_m17._0;
+              List_push(elem_actions, a);
+              break __ring_match17;
+            }
+            if (__ring_m17._tag === "none") {
+              ok = false;
+              break __ring_match17;
+            }
+            __match_fail(__ring_m17);
+          }
+        }
+      }
+      if (ok) {
+        return Option_some(hir$FieldAction_Tuple(elem_actions));
+      } else {
+        return Option_none;
+      }
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "FnType") {
+      if ((trait_name === "Debug")) {
+        return Option_some(hir$FieldAction_FnLiteral);
+      } else {
+        return Option_none;
+      }
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "ErrorType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "AnyType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match12;
+    }
+    if (__ring_m12._tag === "NeverType") {
+      return Option_some(hir$FieldAction_Identity);
+      break __ring_match12;
+    }
+    return Option_none;
+    break __ring_match12;
+  }
+}
+
+function try_derive_fields(env, fields, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds) {
+  let result = [];
+  const __ring_iter_8 = __List_Iterable.iter(fields);
+  while (true) {
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const field = __ring_next_8._0;
+    const action = resolve_field_action(env, field.ty, type_param_vars, type_param_names, trait_name, known, self_type_name, bounds);
+    __ring_match18: {
+      const __ring_m18 = action;
+      if (__ring_m18._tag === "some") {
+        const a = __ring_m18._0;
+        List_push(result, new hir$DerivedField(field.name, Option_none, a));
+        break __ring_match18;
+      }
+      if (__ring_m18._tag === "none") {
+        return Option_none;
+        break __ring_match18;
+      }
+      __match_fail(__ring_m18);
+    }
+  }
+  return Option_some(result);
+}
+
+function try_derive(env, ut, trait_name, known) {
+  let bounds = [];
+  __ring_match19: {
+    const __ring_m19 = ut.type_kind;
+    if (__ring_m19._tag === "StructKind") {
+      __ring_match20: {
+        const __ring_m20 = ut.struct_def;
+        if (__ring_m20._tag === "some") {
+          const def = __ring_m20._0;
+          const field_entries = def.fields.map((function(f) { return new FieldEntry(f.name, f.ty); }));
+          const fields = try_derive_fields(env, field_entries, def.type_param_vars, def.type_params, trait_name, known, ut.name, bounds);
+          __ring_match21: {
+            const __ring_m21 = fields;
+            if (__ring_m21._tag === "some") {
+              const fs = __ring_m21._0;
+              return Option_some(new hir$DerivedImpl(ut.name, trait_name, def.type_params, bounds, hir$TypeKind_StructKind, Option_some(fs), Option_none));
+              break __ring_match21;
+            }
+            if (__ring_m21._tag === "none") {
+              return Option_none;
+              break __ring_match21;
+            }
+            __match_fail(__ring_m21);
+          }
+          break __ring_match20;
+        }
+        if (__ring_m20._tag === "none") {
+          return Option_none;
+          break __ring_match20;
+        }
+        __match_fail(__ring_m20);
+      }
+      break __ring_match19;
+    }
+    if (__ring_m19._tag === "EnumKind") {
+      __ring_match22: {
+        const __ring_m22 = ut.enum_def;
+        if (__ring_m22._tag === "some") {
+          const def = __ring_m22._0;
+          let variants = [];
+          let ok = true;
+          const __ring_iter_9 = __List_Iterable.iter(def.variants);
+          while (true) {
+            const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+            if (__ring_next_9._tag === "none") break;
+            const v = __ring_next_9._0;
+            if (ok) {
+              const has_named_fields = (function() {
+  const __ring_m = v.field_names;
+  if (__ring_m._tag === "some") { const fns = __ring_m._0; return (List_len(fns) > 0); }
+  if (__ring_m._tag === "none") { return false; }
+  __match_fail(__ring_m);
+})();
+              let field_entries = [];
+              const __ring_end10 = List_len(v.fields);
+              for (let i = 0; i < __ring_end10; i++) {
+                const fname = (has_named_fields ? (function() {
+  const __ring_m = v.field_names;
+  if (__ring_m._tag === "some") { const fns = __ring_m._0; return str_at(fns, i); }
+  if (__ring_m._tag === "none") { return `_${i}`; }
+  __match_fail(__ring_m);
+})() : `_${i}`);
+                List_push(field_entries, new FieldEntry(fname, type_at(v.fields, i)));
+              }
+              const fields = try_derive_fields(env, field_entries, def.type_param_vars, def.type_params, trait_name, known, ut.name, bounds);
+              __ring_match23: {
+                const __ring_m23 = fields;
+                if (__ring_m23._tag === "some") {
+                  const fs = __ring_m23._0;
+                  let final_fields = fs;
+                  if ((has_named_fields === false)) {
+                    let updated = [];
+                    const __ring_end11 = List_len(fs);
+                    for (let j = 0; j < __ring_end11; j++) {
+                      const f = df_at(fs, j);
+                      List_push(updated, new hir$DerivedField(f.name, Option_some(j), f.action));
+                    }
+                    final_fields = updated;
+                  }
+                  List_push(variants, new hir$DerivedVariant(v.name, final_fields, has_named_fields));
+                  break __ring_match23;
+                }
+                if (__ring_m23._tag === "none") {
+                  ok = false;
+                  break __ring_match23;
+                }
+                __match_fail(__ring_m23);
+              }
+            }
+          }
+          if (ok) {
+            return Option_some(new hir$DerivedImpl(ut.name, trait_name, def.type_params, bounds, hir$TypeKind_EnumKind, Option_none, Option_some(variants)));
+          } else {
+            return Option_none;
+          }
+          break __ring_match22;
+        }
+        if (__ring_m22._tag === "none") {
+          return Option_none;
+          break __ring_match22;
+        }
+        __match_fail(__ring_m22);
+      }
+      break __ring_match19;
+    }
+    __match_fail(__ring_m19);
+  }
+}
+
+function get_method_names(trait_name) {
+  __ring_match24: {
+    const __ring_m24 = trait_name;
+    if (__ring_m24 === "Eq") {
+      let r = ["eq"];
+      List_push(r, "ne");
+      return r;
+      break __ring_match24;
+    }
+    if (__ring_m24 === "Clone") {
+      return ["clone"];
+      break __ring_match24;
+    }
+    if (__ring_m24 === "Debug") {
+      return ["debug"];
+      break __ring_match24;
+    }
+    if (__ring_m24 === "Ord") {
+      return ["cmp"];
+      break __ring_match24;
+    }
+    return [];
     break __ring_match24;
+  }
+}
+
+function build_self_type(env, type_name, type_kind, type_params) {
+  __ring_match25: {
+    const __ring_m25 = type_kind;
+    if (__ring_m25._tag === "StructKind") {
+      const def = _Map_get(env.types.structs, type_name);
+      const fields = (function() {
+  const __ring_m = def;
+  if (__ring_m._tag === "some") { const d = __ring_m._0; return d.fields.map((function(f) { return new types$StructField(f.name, f.ty, f.is_pub); })); }
+  if (__ring_m._tag === "none") { return (function() {
+  const e = [];
+  return e;
+})(); }
+  __match_fail(__ring_m);
+})();
+      return types$Type_StructType(type_name, type_params, fields);
+      break __ring_match25;
+    }
+    if (__ring_m25._tag === "EnumKind") {
+      const def = _Map_get(env.types.enums, type_name);
+      const variants = (function() {
+  const __ring_m = def;
+  if (__ring_m._tag === "some") { const d = __ring_m._0; return d.variants.map((function(v) { return new types$EnumVariant(v.name, v.fields, v.field_names); })); }
+  if (__ring_m._tag === "none") { return (function() {
+  const e = [];
+  return e;
+})(); }
+  __match_fail(__ring_m);
+})();
+      return types$Type_EnumType(type_name, type_params, variants);
+      break __ring_match25;
+    }
+    __match_fail(__ring_m25);
+  }
+}
+
+function index_of_str(list, target) {
+  const __ring_end12 = List_len(list);
+  for (let i = 0; i < __ring_end12; i++) {
+    if ((str_at(list, i) === target)) {
+      return i;
+    }
+  }
+  return (0 - 1);
+}
+
+function register_trait_methods(methods, trait_name, self_type, type_var_ids, bounds) {
+  __ring_match26: {
+    const __ring_m26 = trait_name;
+    if (__ring_m26 === "Eq") {
+      const eq_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
+      _Map_insert(methods, "eq", new env$TypeScheme(eq_fn, type_var_ids, bounds, Option_none));
+      const ne_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
+      return _Map_insert(methods, "ne", new env$TypeScheme(ne_fn, type_var_ids, bounds, Option_none));
+      break __ring_match26;
+    }
+    if (__ring_m26 === "Clone") {
+      const clone_fn = types$Type_FnType([self_type], self_type, types$EMPTY_ROW);
+      return _Map_insert(methods, "clone", new env$TypeScheme(clone_fn, type_var_ids, bounds, Option_none));
+      break __ring_match26;
+    }
+    if (__ring_m26 === "Ord") {
+      const cmp_fn = types$Type_FnType([self_type, self_type], types$INT, types$EMPTY_ROW);
+      return _Map_insert(methods, "cmp", new env$TypeScheme(cmp_fn, type_var_ids, bounds, Option_none));
+      break __ring_match26;
+    }
+    if (__ring_m26 === "Debug") {
+      const debug_fn = types$Type_FnType([self_type], types$STR, types$EMPTY_ROW);
+      return _Map_insert(methods, "debug", new env$TypeScheme(debug_fn, type_var_ids, bounds, Option_none));
+      break __ring_match26;
+    }
+    break __ring_match26;
   }
 }
 
@@ -859,129 +916,72 @@ function register_derived_impl(env, di, trait_name) {
   return _Map_insert(env.trait_reg.impl_methods, di.type_name, methods);
 }
 
-function get_method_names(trait_name) {
-  __ring_match25: {
-    const __ring_m25 = trait_name;
-    if (__ring_m25 === "Eq") {
-      let r = ["eq"];
-      List_push(r, "ne");
-      return r;
-      break __ring_match25;
-    }
-    if (__ring_m25 === "Clone") {
-      return ["clone"];
-      break __ring_match25;
-    }
-    if (__ring_m25 === "Debug") {
-      return ["debug"];
-      break __ring_match25;
-    }
-    if (__ring_m25 === "Ord") {
-      return ["cmp"];
-      break __ring_match25;
-    }
-    return [];
-    break __ring_match25;
-  }
-}
-
-function build_self_type(env, type_name, type_kind, type_params) {
-  __ring_match26: {
-    const __ring_m26 = type_kind;
-    if (__ring_m26._tag === "StructKind") {
-      const def = _Map_get(env.types.structs, type_name);
-      const fields = (function() {
-  const __ring_m = def;
-  if (__ring_m._tag === "some") { const d = __ring_m._0; return d.fields.map((function(f) { return new types$StructField(f.name, f.ty, f.is_pub); })); }
-  if (__ring_m._tag === "none") { return (function() {
-  const e = [];
-  return e;
-})(); }
-  __match_fail(__ring_m);
-})();
-      return types$Type_StructType(type_name, type_params, fields);
-      break __ring_match26;
-    }
-    if (__ring_m26._tag === "EnumKind") {
-      const def = _Map_get(env.types.enums, type_name);
-      const variants = (function() {
-  const __ring_m = def;
-  if (__ring_m._tag === "some") { const d = __ring_m._0; return d.variants.map((function(v) { return new types$EnumVariant(v.name, v.fields, v.field_names); })); }
-  if (__ring_m._tag === "none") { return (function() {
-  const e = [];
-  return e;
-})(); }
-  __match_fail(__ring_m);
-})();
-      return types$Type_EnumType(type_name, type_params, variants);
-      break __ring_match26;
-    }
-    __match_fail(__ring_m26);
-  }
-}
-
-function register_trait_methods(methods, trait_name, self_type, type_var_ids, bounds) {
-  __ring_match27: {
-    const __ring_m27 = trait_name;
-    if (__ring_m27 === "Eq") {
-      const eq_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
-      _Map_insert(methods, "eq", new env$TypeScheme(eq_fn, type_var_ids, bounds, Option_none));
-      const ne_fn = types$Type_FnType([self_type, self_type], types$BOOL, types$EMPTY_ROW);
-      return _Map_insert(methods, "ne", new env$TypeScheme(ne_fn, type_var_ids, bounds, Option_none));
-      break __ring_match27;
-    }
-    if (__ring_m27 === "Clone") {
-      const clone_fn = types$Type_FnType([self_type], self_type, types$EMPTY_ROW);
-      return _Map_insert(methods, "clone", new env$TypeScheme(clone_fn, type_var_ids, bounds, Option_none));
-      break __ring_match27;
-    }
-    if (__ring_m27 === "Ord") {
-      const cmp_fn = types$Type_FnType([self_type, self_type], types$INT, types$EMPTY_ROW);
-      return _Map_insert(methods, "cmp", new env$TypeScheme(cmp_fn, type_var_ids, bounds, Option_none));
-      break __ring_match27;
-    }
-    if (__ring_m27 === "Debug") {
-      const debug_fn = types$Type_FnType([self_type], types$STR, types$EMPTY_ROW);
-      return _Map_insert(methods, "debug", new env$TypeScheme(debug_fn, type_var_ids, bounds, Option_none));
-      break __ring_match27;
-    }
-    break __ring_match27;
-  }
-}
-
-function index_of_int(list, target) {
-  const __ring_end15 = List_len(list);
-  for (let i = 0; i < __ring_end15; i++) {
-    if ((int_at(list, i) === target)) {
-      return i;
-    }
-  }
-  return (0 - 1);
-}
-
-function index_of_str(list, target) {
-  const __ring_end16 = List_len(list);
-  for (let i = 0; i < __ring_end16; i++) {
-    if ((str_at(list, i) === target)) {
-      return i;
-    }
-  }
-  return (0 - 1);
-}
-
-function has_bound(bounds, type_param, trait_name) {
-  const __ring_iter_17 = __List_Iterable.iter(bounds);
+function derive_trait(env, all_types, trait_name, derived_impls) {
+  let known = set_new();
+  const __ring_iter_15 = __List_Iterable.iter(_Map_entries(env.trait_reg.trait_impls));
   while (true) {
-    const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
-    if (__ring_next_17._tag === "none") break;
-    const b = __ring_next_17._0;
-    if ((b.type_param === type_param)) {
-      if ((b.trait_name === trait_name)) {
-        return true;
+    const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+    if (__ring_next_15._tag === "none") break;
+    const entry = __ring_next_15._0;
+    const __ring_dt2 = entry;
+    const tname = __ring_dt2[0];
+    const impls = __ring_dt2[1];
+    const __ring_iter_16 = __List_Iterable.iter(impls);
+    while (true) {
+      const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+      if (__ring_next_16._tag === "none") break;
+      const imp = __ring_next_16._0;
+      if ((imp.trait_name === trait_name)) {
+        _Set_insert(known, imp.target_type_name);
       }
     }
   }
-  return false;
+  _Set_insert(known, "Int");
+  _Set_insert(known, "Float");
+  _Set_insert(known, "Str");
+  _Set_insert(known, "Bool");
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const __ring_iter_17 = __List_Iterable.iter(all_types);
+    while (true) {
+      const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+      if (__ring_next_17._tag === "none") break;
+      const ut = __ring_next_17._0;
+      if (_Set_contains(known, ut.name, __Str_Eq)) {
+      } else {
+        if (has_manual_impl(env, ut.name, trait_name)) {
+        } else {
+          const result = try_derive(env, ut, trait_name, known);
+          __ring_match27: {
+            const __ring_m27 = result;
+            if (__ring_m27._tag === "some") {
+              const di = __ring_m27._0;
+              _Set_insert(known, ut.name);
+              register_derived_impl(env, di, trait_name);
+              List_push(derived_impls, di);
+              changed = true;
+              break __ring_match27;
+            }
+            if (__ring_m27._tag === "none") {
+              break __ring_match27;
+            }
+            __match_fail(__ring_m27);
+          }
+        }
+      }
+    }
+  }
+}
+
+function run_derive_pass(env) {
+  let derived_impls = [];
+  const all_types = collect_user_types(env);
+  derive_trait(env, all_types, "Eq", derived_impls);
+  derive_trait(env, all_types, "Clone", derived_impls);
+  derive_trait(env, all_types, "Ord", derived_impls);
+  derive_trait(env, all_types, "Debug", derived_impls);
+  return derived_impls;
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

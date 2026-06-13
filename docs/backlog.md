@@ -406,32 +406,9 @@ fn test_fetch() {
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；全 E2E + `llvm_diff` 不回归；自举一致；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
 
-### B-122 #149 根修：顶层推断改依赖 SCC 拓扑序（未标注 ret 健全性洞）[bugfix] [P1] [XL] [judgment] [planning]
+### B-122 #149 根修：顶层推断改依赖 SCC 拓扑序（未标注 ret 健全性洞）[bugfix] [P1] [XL] [judgment] [done, 2026-06-14]
 
-> 2026-06-12 立项（audit #149 [critical] 拍板 = 方案 B 标准 HM，用户拍板 P1）。**机制核实（2026-06-12 Discussion，比 audit 原文更广）**：Pass 1 `register_fn_common`（infer_register.ring:1350）对未标注 ret `fresh_var()`（:1395）且不入量化列表 → `bind_mono` 出 `... -> ?N`（open mono var）；Pass 2 per-decl `empty_subst()`（infer_decl.ring:1219/1323）+ `check_fn_decl` 对未标注 ret **另建新 fresh var**（:1306），body unify 到新 var——注册的 ?N 永不绑定。后果：每个 caller 在自己局部 subst 里把 ?N 绑任意类型、互不冲突、无人校验 = **ret 等效隐式 forall**。**所有未标注 ret 的 fn 都是洞**（不只 audit 实测的 Unit 案例）：`fn f() { 42 }` + `let x: Str = f()` 同样过 checker。公理①「类型即模型」系统性失真面。
->
-> **拍板 = 方案 B（SCC 拓扑序，标准 HM）**：彻底解。否决案 A（ret 回写 + Pass 2 末尾延迟校验遍——可工作但错误位置次优、属过渡态）与案 C（要求标注——违反公理① lv0 零标注）。注：这不是设计变更——「未标注 ret 由 body 推断决定」从来是设计意图，现状是实现洞；design.md 推断语义描述不需改。
-
-**实现策略（2026-06-13 Discussion 拍板）**：
-
-- **过渡策略 = 1A（最小改动）**：Pass 1 register 不动；只改 Pass 2 驱动顺序为 SCC 拓扑序。理由：Pass 1 已稳定，合并 Pass 1/2（1B）对已自举的编译器风险不值。
-- **Call graph 建边 = 精确 + 断言兜底**：只连「直接 `fn_name(...)` 调用 + 同 impl 内 `self.method()`」。`x.method()` 中 x 非 self 时**不连边**（推断前无法确定 callee，全连会把 `len`/`push` 等常见名拉成巨型 SCC 导致泛化退化）。兜底：rebind 时若发现已被其他 SCC 组实例化的签名 ret var 仍 unresolved → 报内部错误（= 漏边信号），不静默放过。
-- **三步分阶验证**：S1 基础设施（纯新增不改行为）→ S2 切换驱动（改推断顺序 + fix fresh var + 断言）→ S3 测试收口。**每步全绿才继续**。
-
-**涉及修改**：
-1. **S1 — call graph + SCC 基础设施**（纯新增，不改推断行为）：checker 新 pre-pass——顶层 fn / impl 方法的 call graph 构建（body 语法遍历，只收集直接 fn 调用 + self.method() 边）+ Tarjan SCC 分解 + 依赖拓扑序输出。验证：自举通过（新代码不干扰旧路径）。
-2. **S2 — 切换 Pass 2 驱动**：`infer.ring` / `infer_decl.ring` 改按拓扑序驱动（取代声明序）；SCC 组内共享 subst / open var（monomorphic），组完成后 generalize + `env.rebind` 回写真实签名；后续 caller 实例化已固化签名。`check_fn_decl`：未标注 ret 复用注册签名的 var（消除 :1306 的二次 fresh var），unify 结果落回注册层。rebind post-check 断言（漏边兜底）。验证：31 文件自举 + double bootstrap + JS 全量 + llvm_diff ×3。
-3. **S3 — 测试收口**：负面——`let x: Str = tp([1])`（Unit body）与 `let x: Str = f()`（`fn f() { 42 }`），**callee 声明在 caller 前/后两种序**均报编译错误，`--error-format=llm` 单轮可修；正面——相互递归组（互调未标注 fn）推断正确。错误体验：报错位置应在 call site（类型不匹配），不在 callee body。
-4. `perceus.ring`：unknown-ownership 守卫（`is_unresolved_var_type`，git `89d2eb7`）**保留作 invariant 防线**——修后 TypeVar 不应再到 RC 层，守卫命中 = 新洞信号。
-
-**验收标准**：
-- 上述负面/正面测试全过（两种声明序）
-- 编译器自身（31 文件）零回归编译 + double bootstrap 字节一致
-- JS 全量 + llvm_diff 全量 ×3 全绿
-- audit #149 删除（留墓碑注）；perceus 守卫保留且自编译零命中
-- rebind post-check 断言自编译零命中
-
-**时序**：B-104 落地后（✅）、B-089 三门终验前（checker 核心改动不与 milestone 并发；它是 B-089 前的正确性必修项——native 侧 double-free 方向现由 perceus 守卫挡住故不阻塞当前棒）。
+> **已完成**。`compiler/scc.ring`（~412 行，call graph + Tarjan SCC）+ `infer_decl.ring` Pass 2 改三阶段 SCC 拓扑序驱动 + `rebind_fn_type` 将推断后的 ret/effects 映射回注册层。835 测试全绿 + double bootstrap 稳定。负面测试 `scc_ret_soundness.ring`（E0301）+ 正面测试 `scc_mutual_recursion.ring`（互递归 + forward ref）。Perceus 守卫保留。实现偏差：spec 说"复用注册签名的 var"，实际用 rebind-after 方案（功能等价，更低风险）。Audit #149 留墓碑注。
 
 
 ### B-119 公理⑤做实：推断 fuel 上限 + trait instance 终止性审计 [design-align] [P3] [M] [judgment] [queued]

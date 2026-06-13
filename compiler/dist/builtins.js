@@ -273,57 +273,6 @@ function make_set_struct(t) {
   return types$Type_StructType(types$BUILTIN_SET, [t], []);
 }
 
-function register_builtins(env) {
-  register_effects(env);
-  register_cell(env);
-  register_option(env);
-  register_eq_trait(env);
-  register_option_eq(env);
-  register_clone_trait(env);
-  register_option_clone(env);
-  register_ord_trait(env);
-  register_debug_trait(env);
-  register_option_debug(env);
-  return register_mut_methods(env);
-}
-
-function register_mut_methods(env) {
-  let list_mut = set_new();
-  const __ring_iter_2 = __List_Iterable.iter(["push", "pop", "set", "extend", "reverse", "sort", "shift", "clear", "sort_by"]);
-  while (true) {
-    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
-    if (__ring_next_2._tag === "none") break;
-    const m = __ring_next_2._0;
-    _Set_insert(list_mut, m);
-  }
-  _Map_insert(env.trait_reg.mut_methods, "List", list_mut);
-  let map_mut = set_new();
-  const __ring_iter_3 = __List_Iterable.iter(["insert", "remove", "clear"]);
-  while (true) {
-    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
-    if (__ring_next_3._tag === "none") break;
-    const m = __ring_next_3._0;
-    _Set_insert(map_mut, m);
-  }
-  _Map_insert(env.trait_reg.mut_methods, "Map", map_mut);
-  let set_mut = set_new();
-  const __ring_iter_4 = __List_Iterable.iter(["insert", "remove", "clear"]);
-  while (true) {
-    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-    if (__ring_next_4._tag === "none") break;
-    const m = __ring_next_4._0;
-    _Set_insert(set_mut, m);
-  }
-  return _Map_insert(env.trait_reg.mut_methods, "Set", set_mut);
-}
-
-function register_hof_intrinsics(env) {
-  register_list_hof(env);
-  register_map_hof(env);
-  register_set_hof(env);
-  return register_option_hof(env);
-}
-
 function register_effects(env) {
   _Map_insert(env.types.effects, "io", new env$EffectDef("io", [], [], [new env$EffectOpDef("read", [types$STR], types$STR, false), new env$EffectOpDef("write", [types$STR, types$STR], types$UNIT, false)], Option_some(env$BuiltInKind_BkIo), false));
   const fail_t_id = env$TypeEnv_fresh_var_id(env);
@@ -387,11 +336,11 @@ function register_eq_trait(env) {
   const eq_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
   const ne_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
   _Map_insert(env.trait_reg.traits, "Eq", new env$TraitDef("Eq", [], [self_var_id], [new env$TraitMethodDef("eq", eq_fn, false, [false, false], []), new env$TraitMethodDef("ne", ne_fn, true, [false, false], [])], [], []));
-  const __ring_iter_5 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
+  const __ring_iter_2 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
   while (true) {
-    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-    if (__ring_next_5._tag === "none") break;
-    const prim = __ring_next_5._0;
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const prim = __ring_next_2._0;
     env$add_impl(env.trait_reg, new env$ImplEntry("Eq", prim, [], ["eq", "ne"], map_new()));
   }
 }
@@ -412,18 +361,18 @@ function register_clone_trait(env) {
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const clone_fn = types$Type_FnType([self_var], self_var, types$EMPTY_ROW);
   _Map_insert(env.trait_reg.traits, "Clone", new env$TraitDef("Clone", [], [self_var_id], [new env$TraitMethodDef("clone", clone_fn, false, [false], [])], [], []));
-  const __ring_iter_6 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
+  const __ring_iter_3 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
   while (true) {
-    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-    if (__ring_next_6._tag === "none") break;
-    const prim = __ring_next_6._0;
+    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+    if (__ring_next_3._tag === "none") break;
+    const prim = __ring_next_3._0;
     env$add_impl(env.trait_reg, new env$ImplEntry("Clone", prim, [], ["clone"], map_new()));
   }
-  const __ring_iter_7 = __List_Iterable.iter(["List", "Map", "Set"]);
+  const __ring_iter_4 = __List_Iterable.iter(["List", "Map", "Set"]);
   while (true) {
-    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-    if (__ring_next_7._tag === "none") break;
-    const coll = __ring_next_7._0;
+    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+    if (__ring_next_4._tag === "none") break;
+    const coll = __ring_next_4._0;
     env$add_impl(env.trait_reg, new env$ImplEntry("Clone", coll, [], ["clone"], map_new()));
   }
 }
@@ -442,11 +391,11 @@ function register_ord_trait(env) {
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const cmp_fn = types$Type_FnType([self_var, self_var], types$INT, types$EMPTY_ROW);
   _Map_insert(env.trait_reg.traits, "Ord", new env$TraitDef("Ord", [], [self_var_id], [new env$TraitMethodDef("cmp", cmp_fn, false, [false, false], [])], [], []));
-  const __ring_iter_8 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
+  const __ring_iter_5 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
   while (true) {
-    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
-    if (__ring_next_8._tag === "none") break;
-    const prim = __ring_next_8._0;
+    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+    if (__ring_next_5._tag === "none") break;
+    const prim = __ring_next_5._0;
     env$add_impl(env.trait_reg, new env$ImplEntry("Ord", prim, [], ["cmp"], map_new()));
   }
 }
@@ -456,11 +405,11 @@ function register_debug_trait(env) {
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const debug_fn = types$Type_FnType([self_var], types$STR, types$EMPTY_ROW);
   _Map_insert(env.trait_reg.traits, "Debug", new env$TraitDef("Debug", [], [self_var_id], [new env$TraitMethodDef("debug", debug_fn, false, [false], [])], [], []));
-  const __ring_iter_9 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
+  const __ring_iter_6 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
   while (true) {
-    const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
-    if (__ring_next_9._tag === "none") break;
-    const prim = __ring_next_9._0;
+    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+    if (__ring_next_6._tag === "none") break;
+    const prim = __ring_next_6._0;
     env$add_impl(env.trait_reg, new env$ImplEntry("Debug", prim, [], ["debug"], map_new()));
   }
   let t_id = env$TypeEnv_fresh_var_id(env);
@@ -495,6 +444,50 @@ function register_option_debug(env) {
   let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
   _Map_insert(methods, "debug", new env$TypeScheme(types$Type_FnType([opt], types$STR, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Debug", [])], Option_none));
   return env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_OPTION, ["T"], ["debug"], map_new()));
+}
+
+function register_mut_methods(env) {
+  let list_mut = set_new();
+  const __ring_iter_7 = __List_Iterable.iter(["push", "pop", "set", "extend", "reverse", "sort", "shift", "clear", "sort_by"]);
+  while (true) {
+    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+    if (__ring_next_7._tag === "none") break;
+    const m = __ring_next_7._0;
+    _Set_insert(list_mut, m);
+  }
+  _Map_insert(env.trait_reg.mut_methods, "List", list_mut);
+  let map_mut = set_new();
+  const __ring_iter_8 = __List_Iterable.iter(["insert", "remove", "clear"]);
+  while (true) {
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const m = __ring_next_8._0;
+    _Set_insert(map_mut, m);
+  }
+  _Map_insert(env.trait_reg.mut_methods, "Map", map_mut);
+  let set_mut = set_new();
+  const __ring_iter_9 = __List_Iterable.iter(["insert", "remove", "clear"]);
+  while (true) {
+    const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+    if (__ring_next_9._tag === "none") break;
+    const m = __ring_next_9._0;
+    _Set_insert(set_mut, m);
+  }
+  return _Map_insert(env.trait_reg.mut_methods, "Set", set_mut);
+}
+
+function register_builtins(env) {
+  register_effects(env);
+  register_cell(env);
+  register_option(env);
+  register_eq_trait(env);
+  register_option_eq(env);
+  register_clone_trait(env);
+  register_option_clone(env);
+  register_ord_trait(env);
+  register_debug_trait(env);
+  register_option_debug(env);
+  return register_mut_methods(env);
 }
 
 function register_list_hof(env) {
@@ -635,6 +628,13 @@ function register_option_hof(env) {
   orow = open_row(env);
   cb = types$Type_FnType([], t, orow.eff);
   return _Map_insert(methods, "unwrap_or_else", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], t, orow.eff), [t_id, orow.tail_id], [], Option_none));
+}
+
+function register_hof_intrinsics(env) {
+  register_list_hof(env);
+  register_map_hof(env);
+  register_set_hof(env);
+  return register_option_hof(env);
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

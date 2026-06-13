@@ -288,14 +288,6 @@ class HDictDef {
   }
 }
 
-function dict_instance_name(base_dict, inner) {
-  if ((List_len(inner) === 0)) {
-    return base_dict;
-  } else {
-    return `${base_dict}$${List_join(inner, "$")}`;
-  }
-}
-
 const TraitDispatch_Builtin = Object.freeze({ _tag: "Builtin" });
 function TraitDispatch_Direct(dict, extra_dicts) {
   return { _tag: "Direct", dict, extra_dicts };
@@ -623,6 +615,26 @@ class HProgram {
   }
 }
 
+const ENUM_TAG_FIELD = "_tag";
+
+const OPTION_SOME_TAG = "some";
+
+const OPTION_NONE_TAG = "none";
+
+const OPTION_PAYLOAD_FIELD = "_0";
+
+const RUNTIME_EFFECT_ABORT = "__EffectAbort";
+
+const RUNTIME_MATCH_FAIL = "__match_fail";
+
+function dict_instance_name(base_dict, inner) {
+  if ((List_len(inner) === 0)) {
+    return base_dict;
+  } else {
+    return `${base_dict}$${List_join(inner, "$")}`;
+  }
+}
+
 function variant_js_name(enum_name, variant_name) {
   return `${enum_name}_${variant_name}`;
 }
@@ -679,18 +691,6 @@ function trait_bound_param_name(type_param, trait_name) {
 function default_method_self_name(type_name) {
   return `__ring_self_${type_name}`;
 }
-
-const ENUM_TAG_FIELD = "_tag";
-
-const OPTION_SOME_TAG = "some";
-
-const OPTION_NONE_TAG = "none";
-
-const OPTION_PAYLOAD_FIELD = "_0";
-
-const RUNTIME_EFFECT_ABORT = "__EffectAbort";
-
-const RUNTIME_MATCH_FAIL = "__match_fail";
 
 function hexpr_type(e) {
   __ring_match7: {
@@ -1088,12 +1088,6 @@ function hexpr_span(e) {
   }
 }
 
-function collect_extern_type_names(decls) {
-  let out = set_new();
-  collect_extern_type_names_rec(decls, out);
-  return out;
-}
-
 function collect_extern_type_names_rec(decls, out) {
   const __ring_iter_3 = __List_Iterable.iter(decls);
   while (true) {
@@ -1115,6 +1109,12 @@ function collect_extern_type_names_rec(decls, out) {
       break __ring_match10;
     }
   }
+}
+
+function collect_extern_type_names(decls) {
+  let out = set_new();
+  collect_extern_type_names_rec(decls, out);
+  return out;
 }
 
 function is_extern_handle_type(ty, externs) {
@@ -1143,15 +1143,6 @@ function is_rc_excluded_type(ty, externs) {
     }
     return is_extern_handle_type(ty, externs);
     break __ring_match12;
-  }
-}
-
-function type_contains_extern_handle(ty, externs) {
-  if ((_Set_len(externs) === 0)) {
-    return false;
-  } else {
-    let visited = set_new();
-    return type_contains_extern_rec(ty, externs, visited);
   }
 }
 
@@ -1276,6 +1267,15 @@ function type_contains_extern_rec(ty, externs, visited) {
   }
 }
 
+function type_contains_extern_handle(ty, externs) {
+  if ((_Set_len(externs) === 0)) {
+    return false;
+  } else {
+    let visited = set_new();
+    return type_contains_extern_rec(ty, externs, visited);
+  }
+}
+
 function is_borrow_returning_call(callee) {
   __ring_match14: {
     const __ring_m14 = callee;
@@ -1293,6 +1293,35 @@ function is_borrow_returning_call(callee) {
   }
 }
 
+function block_local_init(stmts, name) {
+  let found = Option_none;
+  const __ring_iter_12 = __List_Iterable.iter(stmts);
+  while (true) {
+    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+    if (__ring_next_12._tag === "none") break;
+    const s = __ring_next_12._0;
+    __ring_match15: {
+      const __ring_m15 = s;
+      if (__ring_m15._tag === "Let") {
+        const n = __ring_m15.name; const init = __ring_m15.init;
+        if ((n === name)) {
+          found = Option_some(init);
+        }
+        break __ring_match15;
+      }
+      if (__ring_m15._tag === "Var") {
+        const n = __ring_m15.name; const init = __ring_m15.init;
+        if ((n === name)) {
+          found = Option_some(init);
+        }
+        break __ring_match15;
+      }
+      break __ring_match15;
+    }
+  }
+  return found;
+}
+
 function is_fresh_owned_bool_value(expr) {
   const is_bool = (function() {
   const __ring_m = hexpr_type(expr);
@@ -1302,135 +1331,106 @@ function is_fresh_owned_bool_value(expr) {
   if ((is_bool === false)) {
     return false;
   }
-  __ring_match15: {
-    const __ring_m15 = expr;
-    if (__ring_m15._tag === "BinOp") {
+  __ring_match16: {
+    const __ring_m16 = expr;
+    if (__ring_m16._tag === "BinOp") {
       return true;
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "UnaryOp") {
+    if (__ring_m16._tag === "UnaryOp") {
       return true;
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "Call") {
-      const callee = __ring_m15.callee;
+    if (__ring_m16._tag === "Call") {
+      const callee = __ring_m16.callee;
       return (is_borrow_returning_call(callee) === false);
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "BoolLit") {
+    if (__ring_m16._tag === "BoolLit") {
       return true;
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "Clone") {
+    if (__ring_m16._tag === "Clone") {
       return true;
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "Block") {
-      const stmts = __ring_m15.stmts; const tail = __ring_m15.tail;
-      __ring_match16: {
-        const __ring_m16 = tail;
-        if (__ring_m16._tag === "some") {
-          const t = __ring_m16._0;
-          __ring_match17: {
-            const __ring_m17 = t;
-            if (__ring_m17._tag === "Ident") {
-              const name = __ring_m17.name;
-              __ring_match18: {
-                const __ring_m18 = block_local_init(stmts, name);
-                if (__ring_m18._tag === "some") {
-                  const init = __ring_m18._0;
+    if (__ring_m16._tag === "Block") {
+      const stmts = __ring_m16.stmts; const tail = __ring_m16.tail;
+      __ring_match17: {
+        const __ring_m17 = tail;
+        if (__ring_m17._tag === "some") {
+          const t = __ring_m17._0;
+          __ring_match18: {
+            const __ring_m18 = t;
+            if (__ring_m18._tag === "Ident") {
+              const name = __ring_m18.name;
+              __ring_match19: {
+                const __ring_m19 = block_local_init(stmts, name);
+                if (__ring_m19._tag === "some") {
+                  const init = __ring_m19._0;
                   return is_fresh_owned_bool_value(init);
-                  break __ring_match18;
+                  break __ring_match19;
                 }
-                if (__ring_m18._tag === "none") {
+                if (__ring_m19._tag === "none") {
                   return false;
-                  break __ring_match18;
+                  break __ring_match19;
                 }
-                __match_fail(__ring_m18);
+                __match_fail(__ring_m19);
               }
-              break __ring_match17;
+              break __ring_match18;
             }
             return is_fresh_owned_bool_value(t);
-            break __ring_match17;
+            break __ring_match18;
           }
-          break __ring_match16;
+          break __ring_match17;
         }
-        if (__ring_m16._tag === "none") {
+        if (__ring_m17._tag === "none") {
           return false;
-          break __ring_match16;
+          break __ring_match17;
         }
-        __match_fail(__ring_m16);
+        __match_fail(__ring_m17);
       }
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "IfExpr") {
-      const then_branch = __ring_m15.then_branch; const else_branch = __ring_m15.else_branch;
-      __ring_match19: {
-        const __ring_m19 = else_branch;
-        if (__ring_m19._tag === "none") {
+    if (__ring_m16._tag === "IfExpr") {
+      const then_branch = __ring_m16.then_branch; const else_branch = __ring_m16.else_branch;
+      __ring_match20: {
+        const __ring_m20 = else_branch;
+        if (__ring_m20._tag === "none") {
           return false;
-          break __ring_match19;
+          break __ring_match20;
         }
-        if (__ring_m19._tag === "some") {
-          const eb = __ring_m19._0;
+        if (__ring_m20._tag === "some") {
+          const eb = __ring_m20._0;
           if (is_fresh_owned_bool_value(then_branch)) {
             return is_fresh_owned_bool_value(eb);
           } else {
             return false;
           }
-          break __ring_match19;
+          break __ring_match20;
         }
-        __match_fail(__ring_m19);
+        __match_fail(__ring_m20);
       }
-      break __ring_match15;
+      break __ring_match16;
     }
-    if (__ring_m15._tag === "MatchExpr") {
-      const arms = __ring_m15.arms;
+    if (__ring_m16._tag === "MatchExpr") {
+      const arms = __ring_m16.arms;
       let all = (List_len(arms) > 0);
-      const __ring_iter_12 = __List_Iterable.iter(arms);
+      const __ring_iter_13 = __List_Iterable.iter(arms);
       while (true) {
-        const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-        if (__ring_next_12._tag === "none") break;
-        const arm = __ring_next_12._0;
+        const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+        if (__ring_next_13._tag === "none") break;
+        const arm = __ring_next_13._0;
         if ((is_fresh_owned_bool_value(arm.body) === false)) {
           all = false;
         }
       }
       return all;
-      break __ring_match15;
+      break __ring_match16;
     }
     return false;
-    break __ring_match15;
+    break __ring_match16;
   }
-}
-
-function block_local_init(stmts, name) {
-  let found = Option_none;
-  const __ring_iter_13 = __List_Iterable.iter(stmts);
-  while (true) {
-    const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-    if (__ring_next_13._tag === "none") break;
-    const s = __ring_next_13._0;
-    __ring_match20: {
-      const __ring_m20 = s;
-      if (__ring_m20._tag === "Let") {
-        const n = __ring_m20.name; const init = __ring_m20.init;
-        if ((n === name)) {
-          found = Option_some(init);
-        }
-        break __ring_match20;
-      }
-      if (__ring_m20._tag === "Var") {
-        const n = __ring_m20.name; const init = __ring_m20.init;
-        if ((n === name)) {
-          found = Option_some(init);
-        }
-        break __ring_match20;
-      }
-      break __ring_match20;
-    }
-  }
-  return found;
 }
 
 function __DictDispatchInfo_Eq_eq(self, other) {

@@ -237,15 +237,6 @@ function to_result(f) {
 
 const JS_RESERVED = set_from(["abstract", "arguments", "await", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue", "debugger", "default", "delete", "do", "double", "else", "enum", "eval", "export", "extends", "false", "final", "finally", "float", "for", "function", "goto", "if", "implements", "import", "in", "instanceof", "int", "interface", "let", "long", "native", "new", "null", "package", "private", "protected", "public", "return", "short", "static", "super", "switch", "synchronized", "this", "throw", "throws", "transient", "true", "try", "typeof", "undefined", "var", "void", "volatile", "while", "with", "yield", "Object", "Array", "Map", "Set", "String", "Number", "Boolean", "Symbol", "Promise", "Error", "RegExp", "Date", "Math", "JSON", "Proxy", "Reflect", "WeakMap", "WeakSet", "WeakRef", "BigInt", "ArrayBuffer", "DataView", "Int8Array", "Uint8Array", "Float32Array", "Float64Array", "NaN", "Infinity", "globalThis", "console", "process"]);
 
-function safe_ident(name) {
-  const result = (Str_contains(name, "::") ? Str_replace(name, "::", "$") : name);
-  if (_Set_contains(JS_RESERVED, result, __Str_Eq)) {
-    return `_${result}`;
-  } else {
-    return result;
-  }
-}
-
 class CodegenCtx {
   constructor(lines, indent_level, impl_methods, struct_field_order, trait_decls, match_counter, dt_counter, loop_counter, module_prefix, imports_map, skip_preamble, skip_main_call, local_names, local_fn_effects, current_fn_effects, in_try_fail, module_imports, module_exports, default_evidence_effects, default_evidence_params, effect_ops, boxed_vars, fn_mut_params, block_counter) {
     this.lines = lines;
@@ -280,6 +271,15 @@ class HTraitDeclInfo {
     this.name = name;
     this.methods = methods;
     this.supertraits = supertraits;
+  }
+}
+
+function safe_ident(name) {
+  const result = (Str_contains(name, "::") ? Str_replace(name, "::", "$") : name);
+  if (_Set_contains(JS_RESERVED, result, __Str_Eq)) {
+    return `_${result}`;
+  } else {
+    return result;
   }
 }
 
