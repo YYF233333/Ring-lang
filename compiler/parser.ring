@@ -11,7 +11,7 @@ use ast::{
 }
 use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
 use diagnostics::{CollectingSink, Severity, DiagnosticContext, new_collecting_sink, make_diag, make_diagnostic}
-use codes::{E0101, E0103, E0104, E0706, W0002}
+use codes::{E0101, E0103, E0104, E0105, E0706, W0002}
 
 extern fn __ring_raise_fail(msg: Str) -> Never
 
@@ -2137,11 +2137,11 @@ if self.check(TokenKind::TkIntLit) {
                     }
                 }
                 if !found {
-                    self.report_error("E0105", "type argument '${arg_name}' in target type is not a type parameter declared on the impl; expected one of the impl's type parameters", some(arg_tok.span))
+                    self.report_error(E0105, "type argument '${arg_name}' in target type is not a type parameter declared on the impl; expected one of the impl's type parameters", some(arg_tok.span))
                 }
                 self.advance()
             } else {
-                self.report_error("E0105", "expected type parameter name in target type arguments, got '${arg_tok.value}'", some(arg_tok.span))
+                self.report_error(E0105, "expected type parameter name in target type arguments, got '${arg_tok.value}'", some(arg_tok.span))
                 self.advance()
             }
             self.try_consume(TokenKind::TkComma)
