@@ -425,41 +425,6 @@ fn test_fetch() {
 - **诊断工具 DONE**（git `799c600`，保留）：RING_BOX_PROFILE 扩到 STR + OPTION call-site 归因（`ring_enum_some` / `ring_alloc` STR typeid 接 `_ReturnAddress`→IR 站点）——total pass 落地后定位/验证残留漏点的眼睛。
 - **两个已知根因 → B-104 回归实例**（total pass + verifier 必须覆盖且 verifier 静态抓到）：① **struct-field 重赋值漏**（`self.pos = self.pos + 1` 存新 box 进 struct 字段、旧 box 不 drop——W4 标量 mut-var reassignment 的 struct-field 兄弟，Lexer/Parser 热路径）② **call-result Option/STR temp 不 drop**（`str_char_code_at` 返 `Some(box_int)`，调用方在 scrutinee/comparison 位不 drop）。**非标量 RC 有别名 soundness 风险（B-101 教训）→ verifier 兜底 + ASan 验，不靠人肉归因猜测。**
 
-### B-080 值类型 unboxing：Int/Bool tagged pointer（codegen inline）[feature] [P1] [L] [judgment] [doing]
-
-> **重定位（2026-06-13，性能驱动）**：原从 G-a 内存墙角度降级 P2/deferred（只占 21% leak）。Native 自编译首次成功后（B-104 D7），实测 native 7.2x 慢于 V8（635s vs 88s），标量装箱（10B+ 次 `ring_alloc` + RC inc/dec）是主因之一。从性能角度提升为 P1。设计变更：(1) 取消两阶段实现（runtime-first → codegen-inline），**一步到位 codegen inline**（目标是性能，不是内存）；(2) Float 留 boxed（编译器自编译中占比极小，且 1-bit 尾数精度损失破双后端 llvm_diff 对等；NaN-boxing 复杂度不值得）；(3) niche opt（Option<Int> 直接用 tagged int 表示）独立项暂缓。
->
-> **历史**：2026-06-08 拍板标记指针 → 06-09 P0 诊断（call-site 归因，INT 97% 集中 exhaustive.ring range-loop）+ loop-var counter/bound 修复 → INT 47.8%→1.6% plateau → 降级 P2（B-104 先行）。06-09 box-at-boundary 方案实测证伪（多态边界 box 消不掉）。D1-D9 落地后 leak 88%→1.8%，BOOL 199M→43K（D7 And/Or lower），verify_rc 安全网到位。详见 git history。
-
-Int/Bool 从 uniform-boxed 堆 ptr 改为**低位 tag 编码进指针大小的字**——标量在任何位置都不进堆（局部/临时/结构体字段/容器元素/Option 载荷/泛型槽/dict 槽）。OCaml/V8 标准做法。uniform `void*` 表示完全保留（一切仍是一个字），只是这个字可能是 tagged 标量或真指针。
-
-**tag 约定**：真指针 8 字节对齐（低 3 位 0），tagged 标量低位 1。
-- Int：`(val << 1) | 1`，63 位有符号范围（±4.6 × 10^18）
-- Bool：`true = 3 ((1<<1)|1)`，`false = 1 ((0<<1)|1)`
-- Float：留 boxed（typeid 1，正常 RC）
-- `ring_dup`/`ring_drop`：`if ((uintptr_t)ptr & 1) return;`——tagged 标量跳过 RC，不查对象头
-- **省力洞察**：tagged-int 编码双射 → 两 tagged-int「字相等⟺值相等」，纯 word 比较的 eq 天然正确，只有 DEREF（读 payload/header）才崩
-
-**codegen inline**（一步到位，不经 runtime 函数）：LLVM IR 直接生成 tag/untag 指令：
-- tag：`shl i64 %val, 1` → `or i64 %shifted, 1` → `inttoptr i64 %tagged to ptr`
-- untag：`ptrtoint ptr %p to i64` → `ashr i64 %raw, 1`（算术右移保符号）
-- 算术/比较：untag 两操作数 → 计算 → re-tag 结果（零堆分配）
-- 条件 Bool：比较产 `i1`，`zext i1 → i64 → tag`（零 box）
-
-**涉及修改**：
-1. `ring_runtime.cpp`：`ring_dup`/`ring_drop` 开头加 `if ((uintptr_t)ptr & 1) return`。`ring_box_int`/`ring_box_bool`/`ring_unbox_int`/`ring_unbox_bool` 保留给 runtime 内部使用（如 `ring_str_to_int` 返回 `Option<Int>`），但 codegen 不再调用。`ring_print`/`ring_eq` 等 typeid-dispatch 函数需适配：tagged 标量无 header，由 codegen 改调类型特化版本或传 typeid 参数。
-2. `compiler/codegen_llvm_expr.ring`：Int/Bool 字面量、算术、比较、condition 生成 inline tag/untag IR，替换 `ring_box_int`/`ring_unbox_int` 调用。
-3. `compiler/codegen_llvm_stmt.ring`：for-range 计数器、赋值等涉及 Int/Bool 的位置适配。
-4. `compiler/perceus.ring`：`is_scalar_type` 扩展到全 RC 决策——scalar 不发 dup/drop/Clone。
-5. `compiler/verify_rc.ring`：scalar 类型不计入 LEAK/UAF/BALANCE 检查。
-6. `compiler/codegen.ring`（JS 后端）：JS 标量本是原生值，确保 parity（预期不需改动，验证即可）。
-
-**验收标准**：
-- alloc-stats：tid0 INT / tid2 BOOL 归零（不再经 `ring_alloc`）
-- native 自编译 exit 0 + alloc 总数大幅下降（量化对比）
-- 全 E2E + llvm_diff ×3 不回归；verify_rc 全绿
-- double-bootstrap 字节一致；ASan-clean
-
 
 ### B-117 LLVM 函数/参数属性标注（nonnull/nounwind/memory 类）[feature] [P3] [S] [judgment] [queued]
 
