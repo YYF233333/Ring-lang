@@ -102,10 +102,6 @@ ring_runtime.cpp 的 HOF 家族在循环内持有闭包结果/合成临时但从
 
 
 
-### #145 Option HOF/find inline 模板硬编码 `_tag`/`"some"`/`_0` JS 字符串 [low] [mechanical] [open]
-
-codegen_expr.ring 的 Option HOF（map/and_then/unwrap_or_else）与 find 模板硬编码 `_tag`/`"some"`/`_0`，而紧邻的 `to_fail` 分支用 `ENUM_TAG_FIELD`/`OPTION_SOME_TAG`/`OPTION_PAYLOAD_FIELD` 常量。pre-existing（#28 重构按「纯重构」如实保留）。修复：统一改用常量。发现者：#28 重构。
-
 ## 诊断 / CLI
 
 ### #141 parser.ring:301 catch 触发 W0001「handler 永不执行」[low] [judgment] [open]

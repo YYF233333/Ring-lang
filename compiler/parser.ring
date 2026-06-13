@@ -381,9 +381,6 @@ impl Parser {
             self.pos = saved_pos
             return self.parse_binding_stmt(false)
         }
-        if self.check(TokenKind::TkVar) {
-            return self.parse_binding_stmt(true)
-        }
         if self.check(TokenKind::TkReturn) {
             return self.parse_return_stmt()
         }
@@ -557,7 +554,7 @@ impl Parser {
 
     fn parse_binding_stmt(mut self, mutable: Bool) -> Stmt {
         let start = self.current_span_start()
-        if mutable { self.expect(TokenKind::TkVar) } else { self.expect(TokenKind::TkLet) }
+        self.expect(TokenKind::TkLet)
         self.parse_binding_body(mutable, start)
     }
 
@@ -2239,10 +2236,7 @@ if self.check(TokenKind::TkIntLit) {
     pub fn parse_param(mut self) -> Param {
         let start = self.current_span_start()
         let mut is_mutable = false
-        if self.check(TokenKind::TkVar) {
-            self.advance()
-            is_mutable = true
-        } else if self.check(TokenKind::TkMut) {
+        if self.check(TokenKind::TkMut) {
             self.advance()
             is_mutable = true
         }

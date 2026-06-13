@@ -745,23 +745,6 @@ source-map 支持 + 断点调试。
 
 ## 语法增强
 
-### B-120 `var` 关键字退役（公理⑧对齐）[design-align] [P3] [S] [mechanical] [queued]
-
-> 2026-06-12 立项（Discussion，文档健康检查发现 + 用户拍板）。lexer 同时接受 `var` 与 `let mut` 两种可变声明写法（lexer.ring:47/82 `TkVar`），违反公理⑧「一种事一种写法」；全部文档真值（design.md 偏好约束 / philosophy.md / CLAUDE.md）均为「`mut` 是唯一可变性关键字」。实测使用面：编译器自身 1 处（infer_ctx.ring:1445）+ 测试 3 处（effect_custom_multi_effect.ring:21-23），共 4 个声明站点。
-
-**涉及修改**：
-1. `compiler/infer_ctx.ring:1445`：`var i = 0` → `let mut i = 0`。
-2. `tests/cases/effect_custom_multi_effect.ring:21-23`：三处 `var` → `let mut`。
-3. `compiler/lexer.ring`：删 `"var" => some(TokenKind::TkVar)` 关键字映射（:82）+ `TkVar` 枚举成员及其显示映射（:47）——删 token 后 match 穷尽性检查自动暴露 parser 等全部残留引用点，逐一清除。
-4. 注意：`codegen_ctx.ring:12` 的 `"var"` 是 JS 保留字转义表，**不动**。
-5. 负面测试：`var x = 0` 断言编译错误（lexer 删除后 `var` 为普通标识符 → parse error；不要求定向错误提示）。
-6. 改动含 lexer → 按纪律重编 dist/ + dist-llvm/ 并提交。
-
-**验收标准**：
-- `var x = 0` 编译报错（负面测试锁定）
-- 全仓 `.ring` 源码零 `var` 声明残留
-- npm test 全量 + llvm_diff 全量绿；double bootstrap 字节一致
-
 ### B-069 默认参数 [feature] [P2] [M] [judgment] [queued]
 函数参数支持默认值。调用时可省略有默认值的参数。
 
@@ -801,20 +784,6 @@ connect("localhost", 3000)     // timeout=30
 - design.md/CLAUDE.md「已知限制」删除该条；双后端 e2e 通过；穷尽性检查与 Never arm 共存正确
 
 ## 已知 Bug / 技术债
-
-### B-114 HOF 闭包捕 `let mut`：回归锁定 + 过期已知限制行清理 [design-align] [P2] [S] [mechanical] [queued]
-
-> 2026-06-11 立项（Discussion，公理 1 违例簇）→ **同日 Discussion 探针实测证伪前提，缩水为回归锁定项**（B-115 同款过期备忘）。实测：inline lambda 捕 `let mut` 赋值传 `.map()`、named closure 传 `.map()`、`.filter()` 捕 mut——**JS 与 LLVM 双后端全部正确**（写穿语义对，输出 `6 3` / `24 2 2`）。原 spec 猜的两个根因（HOF inline codegen 不走 boxed-capture / effect row 拒绝 `mut<T>`）均不存在。现有 e2e（lambda_closure_effect 等）只覆盖只读捕获，**mut 写穿行为无任何测试锁定**——本项补锁。
-
-**涉及修改**：
-1. tests：e2e 一例（HOF 闭包捕 let mut 读写：inline lambda + named closure，map + filter）+ llvm_diff 一例（LLVM 后端 mut-cell 写穿，B-091 机制）。
-2. CLAUDE.md「已知限制/语法」：删「`.map()` 闭包不能捕获 `let mut` 变量，改用 `for` 循环」行；同文件「类型系统」段「Refinement `where` 子句只解析不验证」行订正为「struct-field 位 `where` 只解析不验证（W0002）；参数位 `where` 未实现（硬 parse error E0103）；均归 B-001」。
-3. design.md 对应描述已由 Discussion 同步（1.2 现状注记），无需动。
-
-**验收标准**：
-- 两个新用例双后端通过（不动 RC，llvm_diff 单跑即可）
-- CLAUDE.md 两行修正落地
-- 全部 E2E + llvm_diff 通过
 
 ### B-094 清理 to_int/to_float/enumerate 死映射 [refactor] [P3] [S] [mechanical] [queued]
 

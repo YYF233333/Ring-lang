@@ -1442,7 +1442,7 @@ fn build_instantiation_map(type_param_vars: List<Int>, resolved_expected: Type) 
             }
         },
         Type::StructType { type_params, .. } => {
-            var i = 0
+            let mut i = 0
             while i < type_param_vars.len() && i < type_params.len() {
                 match (type_param_vars.get(i), type_params.get(i)) {
                     (some(var_id), some(tp)) => { inst_map.insert(var_id, tp) },

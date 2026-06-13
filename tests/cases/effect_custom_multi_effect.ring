@@ -18,9 +18,9 @@ fn process(x: Int) -> Int {
 }
 
 fn main() {
-    var log_count = 0
-    var metric_count = 0
-    var last_gauge = 0
+    let mut log_count = 0
+    let mut metric_count = 0
+    let mut last_gauge = 0
 
     let result = handle {
         process(21)
