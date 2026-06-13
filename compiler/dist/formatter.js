@@ -235,6 +235,63 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
+function format_hint(d) {
+  __ring_match6: {
+    const __ring_m6 = d.context;
+    if (__ring_m6._tag === "TypeMismatch") {
+      const expected = __ring_m6.expected; const actual = __ring_m6.actual;
+      return `expected ${expected}, got ${actual}`;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "UndefinedVariable") {
+      return "not found in this scope";
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "MissingField") {
+      const field = __ring_m6.field;
+      return `field '${field}' not found`;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "EffectUnhandled") {
+      const eff = __ring_m6.eff;
+      return `effect '${eff}' must be handled`;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "ParseError") {
+      const expected = __ring_m6.expected;
+      __ring_match7: {
+        const __ring_m7 = expected;
+        if (__ring_m7._tag === "some") {
+          const exp = __ring_m7._0;
+          return `expected ${List_join(exp, " or ")}`;
+          break __ring_match7;
+        }
+        if (__ring_m7._tag === "none") {
+          return "";
+          break __ring_match7;
+        }
+        __match_fail(__ring_m7);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "PatternError") {
+      const detail = __ring_m6.detail;
+      return detail;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "TraitError") {
+      const detail = __ring_m6.detail;
+      return detail;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "OtherContext") {
+      return "";
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+}
+
 function format_human(diagnostics, source) {
   const lines = Str_split(source, "\n");
   let parts = [];
@@ -248,10 +305,10 @@ function format_human(diagnostics, source) {
     List_push(parts, "   |");
     const line_num = d.span.start.line;
     const source_line = List_get(lines, (line_num - 1));
-    __ring_match6: {
-      const __ring_m6 = source_line;
-      if (__ring_m6._tag === "some") {
-        const sl = __ring_m6._0;
+    __ring_match8: {
+      const __ring_m8 = source_line;
+      if (__ring_m8._tag === "some") {
+        const sl = __ring_m8._0;
         const gutter = Str_pad_start(Int_to_str(line_num), 3, " ");
         List_push(parts, `${gutter} | ${sl}`);
         const underline_start = d.span.start.column;
@@ -275,30 +332,30 @@ function format_human(diagnostics, source) {
         } else {
           List_push(parts, `   | ${padding}${carets}`);
         }
-        break __ring_match6;
+        break __ring_match8;
       }
-      if (__ring_m6._tag === "none") {
-        break __ring_match6;
+      if (__ring_m8._tag === "none") {
+        break __ring_match8;
       }
-      __match_fail(__ring_m6);
+      __match_fail(__ring_m8);
     }
     const __ring_iter_3 = __List_Iterable.iter(d.notes);
     while (true) {
       const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
       if (__ring_next_3._tag === "none") break;
       const n = __ring_next_3._0;
-      __ring_match7: {
-        const __ring_m7 = n.span;
-        if (__ring_m7._tag === "some") {
-          const note_span = __ring_m7._0;
+      __ring_match9: {
+        const __ring_m9 = n.span;
+        if (__ring_m9._tag === "some") {
+          const note_span = __ring_m9._0;
           List_push(parts, `   = note: ${n.message} (${note_span.file}:${Int_to_str(note_span.start.line)}:${Int_to_str(note_span.start.column)})`);
-          break __ring_match7;
+          break __ring_match9;
         }
-        if (__ring_m7._tag === "none") {
+        if (__ring_m9._tag === "none") {
           List_push(parts, `   = note: ${n.message}`);
-          break __ring_match7;
+          break __ring_match9;
         }
-        __match_fail(__ring_m7);
+        __match_fail(__ring_m9);
       }
     }
     const __ring_iter_4 = __List_Iterable.iter(d.suggestions);
@@ -314,61 +371,202 @@ function format_human(diagnostics, source) {
   return List_join(parts, "\n");
 }
 
-function format_hint(d) {
-  __ring_match8: {
-    const __ring_m8 = d.context;
-    if (__ring_m8._tag === "TypeMismatch") {
-      const expected = __ring_m8.expected; const actual = __ring_m8.actual;
-      return `expected ${expected}, got ${actual}`;
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "UndefinedVariable") {
-      return "not found in this scope";
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "MissingField") {
-      const field = __ring_m8.field;
-      return `field '${field}' not found`;
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "EffectUnhandled") {
-      const eff = __ring_m8.eff;
-      return `effect '${eff}' must be handled`;
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "ParseError") {
-      const expected = __ring_m8.expected;
-      __ring_match9: {
-        const __ring_m9 = expected;
-        if (__ring_m9._tag === "some") {
-          const exp = __ring_m9._0;
-          return `expected ${List_join(exp, " or ")}`;
-          break __ring_match9;
+function jq(s) {
+  const escaped = Str_replace(Str_replace(Str_replace(Str_replace(Str_replace(s, "\\", "\\\\"), "\"", "\\\""), "\n", "\\n"), "\t", "\\t"), "\r", "\\r");
+  return `"${escaped}"`;
+}
+
+function context_to_json(ctx) {
+  __ring_match10: {
+    const __ring_m10 = ctx;
+    if (__ring_m10._tag === "TypeMismatch") {
+      const expected = __ring_m10.expected; const actual = __ring_m10.actual; const expression = __ring_m10.expression;
+      let parts = [];
+      List_push(parts, "\"kind\": \"type_mismatch\"");
+      List_push(parts, `"expected": ${jq(expected)}`);
+      List_push(parts, `"actual": ${jq(actual)}`);
+      __ring_match11: {
+        const __ring_m11 = expression;
+        if (__ring_m11._tag === "some") {
+          const e = __ring_m11._0;
+          List_push(parts, `"expression": ${jq(e)}`);
+          break __ring_match11;
         }
-        if (__ring_m9._tag === "none") {
-          return "";
-          break __ring_match9;
+        if (__ring_m11._tag === "none") {
+          break __ring_match11;
         }
-        __match_fail(__ring_m9);
+        __match_fail(__ring_m11);
       }
-      break __ring_match8;
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match10;
     }
-    if (__ring_m8._tag === "PatternError") {
-      const detail = __ring_m8.detail;
-      return detail;
-      break __ring_match8;
+    if (__ring_m10._tag === "UndefinedVariable") {
+      const name = __ring_m10.name; const scope_locals = __ring_m10.scope_locals;
+      let parts = [];
+      List_push(parts, "\"kind\": \"undefined_variable\"");
+      List_push(parts, `"name": ${jq(name)}`);
+      __ring_match12: {
+        const __ring_m12 = scope_locals;
+        if (__ring_m12._tag === "some") {
+          const locals = __ring_m12._0;
+          const items = locals.map((function(s) { return jq(s); }));
+          List_push(parts, `"scope_locals": [${List_join(items, ", ")}]`);
+          break __ring_match12;
+        }
+        if (__ring_m12._tag === "none") {
+          break __ring_match12;
+        }
+        __match_fail(__ring_m12);
+      }
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match10;
     }
-    if (__ring_m8._tag === "TraitError") {
-      const detail = __ring_m8.detail;
-      return detail;
-      break __ring_match8;
+    if (__ring_m10._tag === "MissingField") {
+      const field = __ring_m10.field; const ty = __ring_m10.ty; const available = __ring_m10.available;
+      let parts = [];
+      List_push(parts, "\"kind\": \"missing_field\"");
+      List_push(parts, `"field": ${jq(field)}`);
+      List_push(parts, `"type": ${jq(ty)}`);
+      __ring_match13: {
+        const __ring_m13 = available;
+        if (__ring_m13._tag === "some") {
+          const avail = __ring_m13._0;
+          const items = avail.map((function(s) { return jq(s); }));
+          List_push(parts, `"available": [${List_join(items, ", ")}]`);
+          break __ring_match13;
+        }
+        if (__ring_m13._tag === "none") {
+          break __ring_match13;
+        }
+        __match_fail(__ring_m13);
+      }
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match10;
     }
-    if (__ring_m8._tag === "OtherContext") {
-      return "";
-      break __ring_match8;
+    if (__ring_m10._tag === "EffectUnhandled") {
+      const eff = __ring_m10.eff; const in_function = __ring_m10.in_function;
+      let parts = [];
+      List_push(parts, "\"kind\": \"effect_unhandled\"");
+      List_push(parts, `"effect": ${jq(eff)}`);
+      __ring_match14: {
+        const __ring_m14 = in_function;
+        if (__ring_m14._tag === "some") {
+          const f = __ring_m14._0;
+          List_push(parts, `"in_function": ${jq(f)}`);
+          break __ring_match14;
+        }
+        if (__ring_m14._tag === "none") {
+          break __ring_match14;
+        }
+        __match_fail(__ring_m14);
+      }
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match10;
     }
-    __match_fail(__ring_m8);
+    if (__ring_m10._tag === "ParseError") {
+      const token = __ring_m10.token; const expected = __ring_m10.expected;
+      let parts = [];
+      List_push(parts, "\"kind\": \"parse_error\"");
+      List_push(parts, `"token": ${jq(token)}`);
+      __ring_match15: {
+        const __ring_m15 = expected;
+        if (__ring_m15._tag === "some") {
+          const exp = __ring_m15._0;
+          const items = exp.map((function(s) { return jq(s); }));
+          List_push(parts, `"expected": [${List_join(items, ", ")}]`);
+          break __ring_match15;
+        }
+        if (__ring_m15._tag === "none") {
+          break __ring_match15;
+        }
+        __match_fail(__ring_m15);
+      }
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "PatternError") {
+      const detail = __ring_m10.detail;
+      return `{ "kind": "pattern_error", "detail": ${jq(detail)} }`;
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TraitError") {
+      const detail = __ring_m10.detail;
+      return `{ "kind": "trait_error", "detail": ${jq(detail)} }`;
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "OtherContext") {
+      const detail = __ring_m10.detail;
+      __ring_match16: {
+        const __ring_m16 = detail;
+        if (__ring_m16._tag === "some") {
+          const d = __ring_m16._0;
+          return `{ "kind": "other", "detail": ${jq(d)} }`;
+          break __ring_match16;
+        }
+        if (__ring_m16._tag === "none") {
+          return "{ \"kind\": \"other\" }";
+          break __ring_match16;
+        }
+        __match_fail(__ring_m16);
+      }
+      break __ring_match10;
+    }
+    __match_fail(__ring_m10);
   }
+}
+
+function notes_to_json(notes) {
+  if (List_is_empty(notes)) {
+    return "[]";
+  }
+  let items = [];
+  const __ring_iter_5 = __List_Iterable.iter(notes);
+  while (true) {
+    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+    if (__ring_next_5._tag === "none") break;
+    const n = __ring_next_5._0;
+    __ring_match17: {
+      const __ring_m17 = n.span;
+      if (__ring_m17._tag === "some") {
+        const sp = __ring_m17._0;
+        List_push(items, `{ "message": ${jq(n.message)}, "span": { "line": ${Int_to_str(sp.start.line)}, "col": ${Int_to_str(sp.start.column)} } }`);
+        break __ring_match17;
+      }
+      if (__ring_m17._tag === "none") {
+        List_push(items, `{ "message": ${jq(n.message)} }`);
+        break __ring_match17;
+      }
+      __match_fail(__ring_m17);
+    }
+  }
+  return `[${List_join(items, ", ")}]`;
+}
+
+function suggestions_to_json(suggestions) {
+  if (List_is_empty(suggestions)) {
+    return "[]";
+  }
+  let items = [];
+  const __ring_iter_6 = __List_Iterable.iter(suggestions);
+  while (true) {
+    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+    if (__ring_next_6._tag === "none") break;
+    const s = __ring_next_6._0;
+    __ring_match18: {
+      const __ring_m18 = s.replacement;
+      if (__ring_m18._tag === "some") {
+        const r = __ring_m18._0;
+        List_push(items, `{ "message": ${jq(s.message)}, "replacement": ${jq(r)} }`);
+        break __ring_match18;
+      }
+      if (__ring_m18._tag === "none") {
+        List_push(items, `{ "message": ${jq(s.message)} }`);
+        break __ring_match18;
+      }
+      __match_fail(__ring_m18);
+    }
+  }
+  return `[${List_join(items, ", ")}]`;
 }
 
 function format_llm(diagnostics, file) {
@@ -378,13 +576,13 @@ function format_llm(diagnostics, file) {
   List_push(parts, `  "file": ${jq(file)},
 `);
   List_push(parts, "  \"diagnostics\": [");
-  const __ring_end5 = List_len(diagnostics);
-  for (let i = 0; i < __ring_end5; i++) {
+  const __ring_end7 = List_len(diagnostics);
+  for (let i = 0; i < __ring_end7; i++) {
     const d = List_get(diagnostics, i);
-    __ring_match10: {
-      const __ring_m10 = d;
-      if (__ring_m10._tag === "some") {
-        const diag = __ring_m10._0;
+    __ring_match19: {
+      const __ring_m19 = d;
+      if (__ring_m19._tag === "some") {
+        const diag = __ring_m19._0;
         if ((i > 0)) {
           List_push(parts, ",");
         }
@@ -411,230 +609,32 @@ function format_llm(diagnostics, file) {
 `);
         List_push(parts, `      "suggestions": ${suggestions_to_json(diag.suggestions)},
 `);
-        __ring_match11: {
-          const __ring_m11 = diag.category;
-          if (__ring_m11._tag === "some") {
-            const cat = __ring_m11._0;
+        __ring_match20: {
+          const __ring_m20 = diag.category;
+          if (__ring_m20._tag === "some") {
+            const cat = __ring_m20._0;
             List_push(parts, `      "category": ${jq(cat)}
 `);
-            break __ring_match11;
+            break __ring_match20;
           }
-          if (__ring_m11._tag === "none") {
+          if (__ring_m20._tag === "none") {
             List_push(parts, "      \"category\": null\n");
-            break __ring_match11;
+            break __ring_match20;
           }
-          __match_fail(__ring_m11);
+          __match_fail(__ring_m20);
         }
         List_push(parts, "    }");
-        break __ring_match10;
-      }
-      if (__ring_m10._tag === "none") {
-        break __ring_match10;
-      }
-      __match_fail(__ring_m10);
-    }
-  }
-  List_push(parts, "\n  ]\n");
-  List_push(parts, "}");
-  return List_join(parts, "");
-}
-
-function jq(s) {
-  const escaped = Str_replace(Str_replace(Str_replace(Str_replace(Str_replace(s, "\\", "\\\\"), "\"", "\\\""), "\n", "\\n"), "\t", "\\t"), "\r", "\\r");
-  return `"${escaped}"`;
-}
-
-function context_to_json(ctx) {
-  __ring_match12: {
-    const __ring_m12 = ctx;
-    if (__ring_m12._tag === "TypeMismatch") {
-      const expected = __ring_m12.expected; const actual = __ring_m12.actual; const expression = __ring_m12.expression;
-      let parts = [];
-      List_push(parts, "\"kind\": \"type_mismatch\"");
-      List_push(parts, `"expected": ${jq(expected)}`);
-      List_push(parts, `"actual": ${jq(actual)}`);
-      __ring_match13: {
-        const __ring_m13 = expression;
-        if (__ring_m13._tag === "some") {
-          const e = __ring_m13._0;
-          List_push(parts, `"expression": ${jq(e)}`);
-          break __ring_match13;
-        }
-        if (__ring_m13._tag === "none") {
-          break __ring_match13;
-        }
-        __match_fail(__ring_m13);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match12;
-    }
-    if (__ring_m12._tag === "UndefinedVariable") {
-      const name = __ring_m12.name; const scope_locals = __ring_m12.scope_locals;
-      let parts = [];
-      List_push(parts, "\"kind\": \"undefined_variable\"");
-      List_push(parts, `"name": ${jq(name)}`);
-      __ring_match14: {
-        const __ring_m14 = scope_locals;
-        if (__ring_m14._tag === "some") {
-          const locals = __ring_m14._0;
-          const items = locals.map((function(s) { return jq(s); }));
-          List_push(parts, `"scope_locals": [${List_join(items, ", ")}]`);
-          break __ring_match14;
-        }
-        if (__ring_m14._tag === "none") {
-          break __ring_match14;
-        }
-        __match_fail(__ring_m14);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match12;
-    }
-    if (__ring_m12._tag === "MissingField") {
-      const field = __ring_m12.field; const ty = __ring_m12.ty; const available = __ring_m12.available;
-      let parts = [];
-      List_push(parts, "\"kind\": \"missing_field\"");
-      List_push(parts, `"field": ${jq(field)}`);
-      List_push(parts, `"type": ${jq(ty)}`);
-      __ring_match15: {
-        const __ring_m15 = available;
-        if (__ring_m15._tag === "some") {
-          const avail = __ring_m15._0;
-          const items = avail.map((function(s) { return jq(s); }));
-          List_push(parts, `"available": [${List_join(items, ", ")}]`);
-          break __ring_match15;
-        }
-        if (__ring_m15._tag === "none") {
-          break __ring_match15;
-        }
-        __match_fail(__ring_m15);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match12;
-    }
-    if (__ring_m12._tag === "EffectUnhandled") {
-      const eff = __ring_m12.eff; const in_function = __ring_m12.in_function;
-      let parts = [];
-      List_push(parts, "\"kind\": \"effect_unhandled\"");
-      List_push(parts, `"effect": ${jq(eff)}`);
-      __ring_match16: {
-        const __ring_m16 = in_function;
-        if (__ring_m16._tag === "some") {
-          const f = __ring_m16._0;
-          List_push(parts, `"in_function": ${jq(f)}`);
-          break __ring_match16;
-        }
-        if (__ring_m16._tag === "none") {
-          break __ring_match16;
-        }
-        __match_fail(__ring_m16);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match12;
-    }
-    if (__ring_m12._tag === "ParseError") {
-      const token = __ring_m12.token; const expected = __ring_m12.expected;
-      let parts = [];
-      List_push(parts, "\"kind\": \"parse_error\"");
-      List_push(parts, `"token": ${jq(token)}`);
-      __ring_match17: {
-        const __ring_m17 = expected;
-        if (__ring_m17._tag === "some") {
-          const exp = __ring_m17._0;
-          const items = exp.map((function(s) { return jq(s); }));
-          List_push(parts, `"expected": [${List_join(items, ", ")}]`);
-          break __ring_match17;
-        }
-        if (__ring_m17._tag === "none") {
-          break __ring_match17;
-        }
-        __match_fail(__ring_m17);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match12;
-    }
-    if (__ring_m12._tag === "PatternError") {
-      const detail = __ring_m12.detail;
-      return `{ "kind": "pattern_error", "detail": ${jq(detail)} }`;
-      break __ring_match12;
-    }
-    if (__ring_m12._tag === "TraitError") {
-      const detail = __ring_m12.detail;
-      return `{ "kind": "trait_error", "detail": ${jq(detail)} }`;
-      break __ring_match12;
-    }
-    if (__ring_m12._tag === "OtherContext") {
-      const detail = __ring_m12.detail;
-      __ring_match18: {
-        const __ring_m18 = detail;
-        if (__ring_m18._tag === "some") {
-          const d = __ring_m18._0;
-          return `{ "kind": "other", "detail": ${jq(d)} }`;
-          break __ring_match18;
-        }
-        if (__ring_m18._tag === "none") {
-          return "{ \"kind\": \"other\" }";
-          break __ring_match18;
-        }
-        __match_fail(__ring_m18);
-      }
-      break __ring_match12;
-    }
-    __match_fail(__ring_m12);
-  }
-}
-
-function notes_to_json(notes) {
-  if (List_is_empty(notes)) {
-    return "[]";
-  }
-  let items = [];
-  const __ring_iter_6 = __List_Iterable.iter(notes);
-  while (true) {
-    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-    if (__ring_next_6._tag === "none") break;
-    const n = __ring_next_6._0;
-    __ring_match19: {
-      const __ring_m19 = n.span;
-      if (__ring_m19._tag === "some") {
-        const sp = __ring_m19._0;
-        List_push(items, `{ "message": ${jq(n.message)}, "span": { "line": ${Int_to_str(sp.start.line)}, "col": ${Int_to_str(sp.start.column)} } }`);
         break __ring_match19;
       }
       if (__ring_m19._tag === "none") {
-        List_push(items, `{ "message": ${jq(n.message)} }`);
         break __ring_match19;
       }
       __match_fail(__ring_m19);
     }
   }
-  return `[${List_join(items, ", ")}]`;
-}
-
-function suggestions_to_json(suggestions) {
-  if (List_is_empty(suggestions)) {
-    return "[]";
-  }
-  let items = [];
-  const __ring_iter_7 = __List_Iterable.iter(suggestions);
-  while (true) {
-    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-    if (__ring_next_7._tag === "none") break;
-    const s = __ring_next_7._0;
-    __ring_match20: {
-      const __ring_m20 = s.replacement;
-      if (__ring_m20._tag === "some") {
-        const r = __ring_m20._0;
-        List_push(items, `{ "message": ${jq(s.message)}, "replacement": ${jq(r)} }`);
-        break __ring_match20;
-      }
-      if (__ring_m20._tag === "none") {
-        List_push(items, `{ "message": ${jq(s.message)} }`);
-        break __ring_match20;
-      }
-      __match_fail(__ring_m20);
-    }
-  }
-  return `[${List_join(items, ", ")}]`;
+  List_push(parts, "\n  ]\n");
+  List_push(parts, "}");
+  return List_join(parts, "");
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

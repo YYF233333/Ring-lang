@@ -316,515 +316,11 @@ const TokenKind_TkSemi = Object.freeze({ _tag: "TkSemi" });
 const TokenKind_TkEof = Object.freeze({ _tag: "TkEof" });
 const TokenKind_TkError = Object.freeze({ _tag: "TkError" });
 
-function token_kind_value(k) {
-  __ring_match6: {
-    const __ring_m6 = k;
-    if (__ring_m6._tag === "TkFn") {
-      return "fn";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkLet") {
-      return "let";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkMut") {
-      return "mut";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkConst") {
-      return "const";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkStruct") {
-      return "struct";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkEnum") {
-      return "enum";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkMatch") {
-      return "match";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkImpl") {
-      return "impl";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkEffect") {
-      return "effect";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkHandle") {
-      return "handle";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkWith") {
-      return "with";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkIf") {
-      return "if";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkElse") {
-      return "else";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkCatch") {
-      return "catch";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkTest") {
-      return "test";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkReturn") {
-      return "return";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkFor") {
-      return "for";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkIn") {
-      return "in";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkPub") {
-      return "pub";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkWhere") {
-      return "where";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkTrue") {
-      return "true";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkFalse") {
-      return "false";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkTrait") {
-      return "trait";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkTry") {
-      return "try";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkWhile") {
-      return "while";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkBreak") {
-      return "break";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkContinue") {
-      return "continue";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkLoop") {
-      return "loop";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkUse") {
-      return "use";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkAs") {
-      return "as";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkExtern") {
-      return "extern";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkMod") {
-      return "mod";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkSuper") {
-      return "super";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkSig") {
-      return "sig";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkRequires") {
-      return "requires";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkIntLit") {
-      return "int_lit";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkFloatLit") {
-      return "float_lit";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkStringLit") {
-      return "string_lit";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkStringInterpStart") {
-      return "string_interp_start";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkStringInterpMiddle") {
-      return "string_interp_middle";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkStringInterpEnd") {
-      return "string_interp_end";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkRawStringLit") {
-      return "raw_string_lit";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkIdent") {
-      return "ident";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkPlus") {
-      return "+";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkMinus") {
-      return "-";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkStar") {
-      return "*";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkSlash") {
-      return "/";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkPercent") {
-      return "%";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkEqEq") {
-      return "==";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkBangEq") {
-      return "!=";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkLt") {
-      return "<";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkGt") {
-      return ">";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkLtEq") {
-      return "<=";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkGtEq") {
-      return ">=";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkAmpAmp") {
-      return "&&";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkPipePipe") {
-      return "||";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkPipe") {
-      return "|";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkBang") {
-      return "!";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkEq") {
-      return "=";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkPlusEq") {
-      return "+=";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkMinusEq") {
-      return "-=";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkLParen") {
-      return "(";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkRParen") {
-      return ")";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkLBrace") {
-      return "{";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkRBrace") {
-      return "}";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkLBracket") {
-      return "[";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkRBracket") {
-      return "]";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkComma") {
-      return ",";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkColon") {
-      return ":";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkColonColon") {
-      return "::";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkDot") {
-      return ".";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkDotDot") {
-      return "..";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkDotDotEq") {
-      return "..=";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkFatArrow") {
-      return "=>";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkArrow") {
-      return "->";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkQuestion") {
-      return "?";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkSemi") {
-      return ";";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkEof") {
-      return "eof";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TkError") {
-      return "error_token";
-      break __ring_match6;
-    }
-    __match_fail(__ring_m6);
-  }
-}
-
-function keyword_lookup(word) {
-  __ring_match7: {
-    const __ring_m7 = word;
-    if (__ring_m7 === "fn") {
-      return Option_some(TokenKind_TkFn);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "let") {
-      return Option_some(TokenKind_TkLet);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "mut") {
-      return Option_some(TokenKind_TkMut);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "const") {
-      return Option_some(TokenKind_TkConst);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "struct") {
-      return Option_some(TokenKind_TkStruct);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "enum") {
-      return Option_some(TokenKind_TkEnum);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "match") {
-      return Option_some(TokenKind_TkMatch);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "impl") {
-      return Option_some(TokenKind_TkImpl);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "effect") {
-      return Option_some(TokenKind_TkEffect);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "handle") {
-      return Option_some(TokenKind_TkHandle);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "with") {
-      return Option_some(TokenKind_TkWith);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "if") {
-      return Option_some(TokenKind_TkIf);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "else") {
-      return Option_some(TokenKind_TkElse);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "catch") {
-      return Option_some(TokenKind_TkCatch);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "test") {
-      return Option_some(TokenKind_TkTest);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "return") {
-      return Option_some(TokenKind_TkReturn);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "for") {
-      return Option_some(TokenKind_TkFor);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "in") {
-      return Option_some(TokenKind_TkIn);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "pub") {
-      return Option_some(TokenKind_TkPub);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "where") {
-      return Option_some(TokenKind_TkWhere);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "true") {
-      return Option_some(TokenKind_TkTrue);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "false") {
-      return Option_some(TokenKind_TkFalse);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "trait") {
-      return Option_some(TokenKind_TkTrait);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "try") {
-      return Option_some(TokenKind_TkTry);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "while") {
-      return Option_some(TokenKind_TkWhile);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "break") {
-      return Option_some(TokenKind_TkBreak);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "continue") {
-      return Option_some(TokenKind_TkContinue);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "loop") {
-      return Option_some(TokenKind_TkLoop);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "use") {
-      return Option_some(TokenKind_TkUse);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "as") {
-      return Option_some(TokenKind_TkAs);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "extern") {
-      return Option_some(TokenKind_TkExtern);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "mod") {
-      return Option_some(TokenKind_TkMod);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "super") {
-      return Option_some(TokenKind_TkSuper);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "sig") {
-      return Option_some(TokenKind_TkSig);
-      break __ring_match7;
-    }
-    if (__ring_m7 === "requires") {
-      return Option_some(TokenKind_TkRequires);
-      break __ring_match7;
-    }
-    return Option_none;
-    break __ring_match7;
-  }
-}
-
 class Token {
   constructor(kind, value, span) {
     this.kind = kind;
     this.value = value;
     this.span = span;
-  }
-}
-
-function code_in_range(c, low, high) {
-  if (((c >= low) ? (c <= high) : false)) {
-    return true;
-  } else {
-    return false;
-  }
-}
-
-function is_digit(ch) {
-  return code_in_range(Option_unwrap_or(Str_char_code_at(ch, 0), 0), 48, 57);
-}
-
-function is_ident_start(ch) {
-  const c = Option_unwrap_or(Str_char_code_at(ch, 0), 0);
-  if (code_in_range(c, 97, 122)) {
-    return true;
-  } else {
-    if (code_in_range(c, 65, 90)) {
-      return true;
-    } else {
-      return (c === 95);
-    }
-  }
-}
-
-function is_ident_continue(ch) {
-  if (is_ident_start(ch)) {
-    return true;
-  } else {
-    return is_digit(ch);
   }
 }
 
@@ -845,10 +341,6 @@ class Lexer {
     this.sink = sink;
     this.interp_frames = interp_frames;
   }
-}
-
-function new_lexer(source, file, sink) {
-  return new Lexer(source, file, 0, 1, 0, sink, []);
 }
 
 function Lexer_tokenize(self) {
@@ -1253,66 +745,574 @@ function Lexer_make_token(self, kind, value, start, end) {
   return new Token(kind, value, new ast$Span(self.file, start, end));
 }
 function Lexer_last_frame_depth(self) {
+  __ring_match6: {
+    const __ring_m6 = List_last(self.interp_frames);
+    if (__ring_m6._tag === "some") {
+      const f = __ring_m6._0;
+      return f.depth;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "none") {
+      return 0;
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+}
+function Lexer_last_frame_span(self) {
+  __ring_match7: {
+    const __ring_m7 = List_last(self.interp_frames);
+    if (__ring_m7._tag === "some") {
+      const f = __ring_m7._0;
+      return f.start_span;
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "none") {
+      return new ast$Span(self.file, Lexer_current_position(self), Lexer_current_position(self));
+      break __ring_match7;
+    }
+    __match_fail(__ring_m7);
+  }
+}
+function Lexer_inc_last_depth(self) {
   __ring_match8: {
-    const __ring_m8 = List_last(self.interp_frames);
+    const __ring_m8 = List_pop(self.interp_frames);
     if (__ring_m8._tag === "some") {
       const f = __ring_m8._0;
-      return f.depth;
+      return List_push(self.interp_frames, new InterpFrame((f.depth + 1), f.start_span));
       break __ring_match8;
     }
     if (__ring_m8._tag === "none") {
-      return 0;
       break __ring_match8;
     }
     __match_fail(__ring_m8);
   }
 }
-function Lexer_last_frame_span(self) {
+function Lexer_dec_last_depth(self) {
   __ring_match9: {
-    const __ring_m9 = List_last(self.interp_frames);
+    const __ring_m9 = List_pop(self.interp_frames);
     if (__ring_m9._tag === "some") {
       const f = __ring_m9._0;
-      return f.start_span;
+      return List_push(self.interp_frames, new InterpFrame((f.depth - 1), f.start_span));
       break __ring_match9;
     }
     if (__ring_m9._tag === "none") {
-      return new ast$Span(self.file, Lexer_current_position(self), Lexer_current_position(self));
       break __ring_match9;
     }
     __match_fail(__ring_m9);
   }
 }
-function Lexer_inc_last_depth(self) {
+function Lexer_reset_last_frame(self, span) {
+  List_pop(self.interp_frames);
+  return List_push(self.interp_frames, new InterpFrame(0, span));
+}
+
+function token_kind_value(k) {
   __ring_match10: {
-    const __ring_m10 = List_pop(self.interp_frames);
-    if (__ring_m10._tag === "some") {
-      const f = __ring_m10._0;
-      return List_push(self.interp_frames, new InterpFrame((f.depth + 1), f.start_span));
+    const __ring_m10 = k;
+    if (__ring_m10._tag === "TkFn") {
+      return "fn";
       break __ring_match10;
     }
-    if (__ring_m10._tag === "none") {
+    if (__ring_m10._tag === "TkLet") {
+      return "let";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkMut") {
+      return "mut";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkConst") {
+      return "const";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkStruct") {
+      return "struct";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkEnum") {
+      return "enum";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkMatch") {
+      return "match";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkImpl") {
+      return "impl";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkEffect") {
+      return "effect";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkHandle") {
+      return "handle";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkWith") {
+      return "with";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkIf") {
+      return "if";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkElse") {
+      return "else";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkCatch") {
+      return "catch";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkTest") {
+      return "test";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkReturn") {
+      return "return";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkFor") {
+      return "for";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkIn") {
+      return "in";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkPub") {
+      return "pub";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkWhere") {
+      return "where";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkTrue") {
+      return "true";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkFalse") {
+      return "false";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkTrait") {
+      return "trait";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkTry") {
+      return "try";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkWhile") {
+      return "while";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkBreak") {
+      return "break";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkContinue") {
+      return "continue";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkLoop") {
+      return "loop";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkUse") {
+      return "use";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkAs") {
+      return "as";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkExtern") {
+      return "extern";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkMod") {
+      return "mod";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkSuper") {
+      return "super";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkSig") {
+      return "sig";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkRequires") {
+      return "requires";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkIntLit") {
+      return "int_lit";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkFloatLit") {
+      return "float_lit";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkStringLit") {
+      return "string_lit";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkStringInterpStart") {
+      return "string_interp_start";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkStringInterpMiddle") {
+      return "string_interp_middle";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkStringInterpEnd") {
+      return "string_interp_end";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkRawStringLit") {
+      return "raw_string_lit";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkIdent") {
+      return "ident";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkPlus") {
+      return "+";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkMinus") {
+      return "-";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkStar") {
+      return "*";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkSlash") {
+      return "/";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkPercent") {
+      return "%";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkEqEq") {
+      return "==";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkBangEq") {
+      return "!=";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkLt") {
+      return "<";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkGt") {
+      return ">";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkLtEq") {
+      return "<=";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkGtEq") {
+      return ">=";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkAmpAmp") {
+      return "&&";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkPipePipe") {
+      return "||";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkPipe") {
+      return "|";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkBang") {
+      return "!";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkEq") {
+      return "=";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkPlusEq") {
+      return "+=";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkMinusEq") {
+      return "-=";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkLParen") {
+      return "(";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkRParen") {
+      return ")";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkLBrace") {
+      return "{";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkRBrace") {
+      return "}";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkLBracket") {
+      return "[";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkRBracket") {
+      return "]";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkComma") {
+      return ",";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkColon") {
+      return ":";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkColonColon") {
+      return "::";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkDot") {
+      return ".";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkDotDot") {
+      return "..";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkDotDotEq") {
+      return "..=";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkFatArrow") {
+      return "=>";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkArrow") {
+      return "->";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkQuestion") {
+      return "?";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkSemi") {
+      return ";";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkEof") {
+      return "eof";
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "TkError") {
+      return "error_token";
       break __ring_match10;
     }
     __match_fail(__ring_m10);
   }
 }
-function Lexer_dec_last_depth(self) {
+
+function keyword_lookup(word) {
   __ring_match11: {
-    const __ring_m11 = List_pop(self.interp_frames);
-    if (__ring_m11._tag === "some") {
-      const f = __ring_m11._0;
-      return List_push(self.interp_frames, new InterpFrame((f.depth - 1), f.start_span));
+    const __ring_m11 = word;
+    if (__ring_m11 === "fn") {
+      return Option_some(TokenKind_TkFn);
       break __ring_match11;
     }
-    if (__ring_m11._tag === "none") {
+    if (__ring_m11 === "let") {
+      return Option_some(TokenKind_TkLet);
       break __ring_match11;
     }
-    __match_fail(__ring_m11);
+    if (__ring_m11 === "mut") {
+      return Option_some(TokenKind_TkMut);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "const") {
+      return Option_some(TokenKind_TkConst);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "struct") {
+      return Option_some(TokenKind_TkStruct);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "enum") {
+      return Option_some(TokenKind_TkEnum);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "match") {
+      return Option_some(TokenKind_TkMatch);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "impl") {
+      return Option_some(TokenKind_TkImpl);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "effect") {
+      return Option_some(TokenKind_TkEffect);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "handle") {
+      return Option_some(TokenKind_TkHandle);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "with") {
+      return Option_some(TokenKind_TkWith);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "if") {
+      return Option_some(TokenKind_TkIf);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "else") {
+      return Option_some(TokenKind_TkElse);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "catch") {
+      return Option_some(TokenKind_TkCatch);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "test") {
+      return Option_some(TokenKind_TkTest);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "return") {
+      return Option_some(TokenKind_TkReturn);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "for") {
+      return Option_some(TokenKind_TkFor);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "in") {
+      return Option_some(TokenKind_TkIn);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "pub") {
+      return Option_some(TokenKind_TkPub);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "where") {
+      return Option_some(TokenKind_TkWhere);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "true") {
+      return Option_some(TokenKind_TkTrue);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "false") {
+      return Option_some(TokenKind_TkFalse);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "trait") {
+      return Option_some(TokenKind_TkTrait);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "try") {
+      return Option_some(TokenKind_TkTry);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "while") {
+      return Option_some(TokenKind_TkWhile);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "break") {
+      return Option_some(TokenKind_TkBreak);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "continue") {
+      return Option_some(TokenKind_TkContinue);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "loop") {
+      return Option_some(TokenKind_TkLoop);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "use") {
+      return Option_some(TokenKind_TkUse);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "as") {
+      return Option_some(TokenKind_TkAs);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "extern") {
+      return Option_some(TokenKind_TkExtern);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "mod") {
+      return Option_some(TokenKind_TkMod);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "super") {
+      return Option_some(TokenKind_TkSuper);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "sig") {
+      return Option_some(TokenKind_TkSig);
+      break __ring_match11;
+    }
+    if (__ring_m11 === "requires") {
+      return Option_some(TokenKind_TkRequires);
+      break __ring_match11;
+    }
+    return Option_none;
+    break __ring_match11;
   }
 }
-function Lexer_reset_last_frame(self, span) {
-  List_pop(self.interp_frames);
-  return List_push(self.interp_frames, new InterpFrame(0, span));
+
+function code_in_range(c, low, high) {
+  if (((c >= low) ? (c <= high) : false)) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+function is_digit(ch) {
+  return code_in_range(Option_unwrap_or(Str_char_code_at(ch, 0), 0), 48, 57);
+}
+
+function is_ident_start(ch) {
+  const c = Option_unwrap_or(Str_char_code_at(ch, 0), 0);
+  if (code_in_range(c, 97, 122)) {
+    return true;
+  } else {
+    if (code_in_range(c, 65, 90)) {
+      return true;
+    } else {
+      return (c === 95);
+    }
+  }
+}
+
+function is_ident_continue(ch) {
+  if (is_ident_start(ch)) {
+    return true;
+  } else {
+    return is_digit(ch);
+  }
+}
+
+function new_lexer(source, file, sink) {
+  return new Lexer(source, file, 0, 1, 0, sink, []);
 }
 
 function __InterpFrame_Eq_eq(self, other) {

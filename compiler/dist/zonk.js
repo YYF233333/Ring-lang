@@ -245,11 +245,6 @@ class ZonkCtx {
   }
 }
 
-function zonk_type(ctx, t) {
-  const resolved = env$apply_subst(ctx.subst, t);
-  return label_vars(ctx.names, resolved);
-}
-
 function label_effect(names, e) {
   __ring_match6: {
     const __ring_m6 = e;
@@ -382,6 +377,11 @@ function label_vars(names, t) {
   }
 }
 
+function zonk_type(ctx, t) {
+  const resolved = env$apply_subst(ctx.subst, t);
+  return label_vars(ctx.names, resolved);
+}
+
 function zonk_row(ctx, r) {
   return env$apply_subst_row(ctx.subst, r);
 }
@@ -390,23 +390,180 @@ function zonk_param(ctx, p) {
   return new hir$HParam(p.name, zonk_type(ctx, p.ty), p.def_id, p.is_mutable);
 }
 
-function zonk_block(ctx, block) {
+function zonk_expr(ctx, expr) {
+  const z_ty = zonk_type(ctx, hir$hexpr_type(expr));
+  const z_eff = zonk_row(ctx, hir$hexpr_effects(expr));
+  const z_span = hir$hexpr_span(expr);
   __ring_match9: {
-    const __ring_m9 = block;
+    const __ring_m9 = expr;
+    if (__ring_m9._tag === "IntLit") {
+      const value = __ring_m9.value;
+      return hir$HExpr_IntLit(value, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "FloatLit") {
+      const value = __ring_m9.value;
+      return hir$HExpr_FloatLit(value, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "StrLit") {
+      const value = __ring_m9.value;
+      return hir$HExpr_StrLit(value, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "BoolLit") {
+      const value = __ring_m9.value;
+      return hir$HExpr_BoolLit(value, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "Ident") {
+      const name = __ring_m9.name; const resolved_name = __ring_m9.resolved_name; const def_id = __ring_m9.def_id; const dict_closure_dicts = __ring_m9.dict_closure_dicts;
+      return hir$HExpr_Ident(name, resolved_name, def_id, dict_closure_dicts, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "DictConstruct") {
+      const base_dict = __ring_m9.base_dict; const trait_name = __ring_m9.trait_name; const inner = __ring_m9.inner;
+      return hir$HExpr_DictConstruct(base_dict, trait_name, inner, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "BinOp") {
+      const op = __ring_m9.op; const left = __ring_m9.left; const right = __ring_m9.right; const eq_dispatch = __ring_m9.eq_dispatch; const ord_dispatch = __ring_m9.ord_dispatch;
+      return hir$HExpr_BinOp(op, zonk_expr(ctx, left), zonk_expr(ctx, right), eq_dispatch, ord_dispatch, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "UnaryOp") {
+      const op = __ring_m9.op; const operand = __ring_m9.operand;
+      return hir$HExpr_UnaryOp(op, zonk_expr(ctx, operand), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "Call") {
+      const callee = __ring_m9.callee; const args = __ring_m9.args; const type_args = __ring_m9.type_args; const resolved_dicts = __ring_m9.resolved_dicts; const dict_dispatch = __ring_m9.dict_dispatch;
+      return hir$HExpr_Call(zonk_expr(ctx, callee), args.map((function(a) { return zonk_expr(ctx, a); })), type_args.map((function(t) { return zonk_type(ctx, t); })), resolved_dicts, dict_dispatch, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "FieldAccess") {
+      const receiver = __ring_m9.receiver; const field = __ring_m9.field;
+      return hir$HExpr_FieldAccess(zonk_expr(ctx, receiver), field, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "StructLit") {
+      const name = __ring_m9.name; const type_args = __ring_m9.type_args; const fields = __ring_m9.fields; const spread = __ring_m9.spread;
+      const z_spread = (function() {
+  const __ring_m = spread;
+  if (__ring_m._tag === "some") { const s = __ring_m._0; return Option_some(zonk_expr(ctx, s)); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+      return hir$HExpr_StructLit(name, type_args.map((function(t) { return zonk_type(ctx, t); })), fields.map((function(f) { return new hir$HStructFieldInit(f.name, zonk_expr(ctx, f.value)); })), z_spread, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "NamedVariantConstruct") {
+      const enum_name = __ring_m9.enum_name; const variant_name = __ring_m9.variant_name; const fields = __ring_m9.fields; const spread = __ring_m9.spread;
+      const z_spread = (function() {
+  const __ring_m = spread;
+  if (__ring_m._tag === "some") { const s = __ring_m._0; return Option_some(zonk_expr(ctx, s)); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+      return hir$HExpr_NamedVariantConstruct(enum_name, variant_name, fields.map((function(f) { return new hir$HStructFieldInit(f.name, zonk_expr(ctx, f.value)); })), z_spread, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "MatchExpr") {
+      const scrutinee = __ring_m9.scrutinee; const arms = __ring_m9.arms;
+      return hir$HExpr_MatchExpr(zonk_expr(ctx, scrutinee), arms.map((function(a) { return (function() {
+  const z_guard = (function() {
+  const __ring_m = a.guard;
+  if (__ring_m._tag === "some") { const g = __ring_m._0; return Option_some(zonk_expr(ctx, g)); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+  return new hir$HMatchArm(a.pattern, z_guard, zonk_expr(ctx, a.body), a.span);
+})(); })), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
     if (__ring_m9._tag === "Block") {
-      const stmts = __ring_m9.stmts; const tail = __ring_m9.tail; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
-      const z_stmts = stmts.map((function(s) { return zonk_stmt(ctx, s); }));
+      const stmts = __ring_m9.stmts; const tail = __ring_m9.tail;
       const z_tail = (function() {
   const __ring_m = tail;
   if (__ring_m._tag === "some") { const t = __ring_m._0; return Option_some(zonk_expr(ctx, t)); }
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-      return hir$HExpr_Block(z_stmts, z_tail, zonk_type(ctx, ty), zonk_row(ctx, effects), span);
+      return hir$HExpr_Block(stmts.map((function(s) { return zonk_stmt(ctx, s); })), z_tail, z_ty, z_eff, z_span);
       break __ring_match9;
     }
-    return zonk_expr(ctx, block);
-    break __ring_match9;
+    if (__ring_m9._tag === "IfExpr") {
+      const condition = __ring_m9.condition; const then_branch = __ring_m9.then_branch; const else_branch = __ring_m9.else_branch;
+      const z_else = (function() {
+  const __ring_m = else_branch;
+  if (__ring_m._tag === "some") { const eb = __ring_m._0; return Option_some(zonk_expr(ctx, eb)); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})();
+      return hir$HExpr_IfExpr(zonk_expr(ctx, condition), zonk_block(ctx, then_branch), z_else, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "StringInterp") {
+      const parts = __ring_m9.parts;
+      return hir$HExpr_StringInterp(parts.map((function(p) { return (function() {
+  const __ring_m = p;
+  if (__ring_m._tag === "Literal") { const s = __ring_m._0; return p; }
+  if (__ring_m._tag === "Expression") { const e = __ring_m._0; return hir$HStringInterpPart_Expression(zonk_expr(ctx, e)); }
+  __match_fail(__ring_m);
+})(); })), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "TryCatch") {
+      const body = __ring_m9.body; const arms = __ring_m9.arms;
+      return hir$HExpr_TryCatch(zonk_expr(ctx, body), arms.map((function(a) { return new hir$HMatchArm(a.pattern, (function() {
+  const __ring_m = a.guard;
+  if (__ring_m._tag === "some") { const g = __ring_m._0; return Option_some(zonk_expr(ctx, g)); }
+  if (__ring_m._tag === "none") { return Option_none; }
+  __match_fail(__ring_m);
+})(), zonk_expr(ctx, a.body), a.span); })), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "HandleExpr") {
+      const body = __ring_m9.body; const handlers = __ring_m9.handlers;
+      return hir$HExpr_HandleExpr(zonk_expr(ctx, body), handlers.map((function(h) { return new hir$HEffectHandler(h.effect_name, h.op_name, h.params.map((function(p) { return zonk_param(ctx, p); })), h.resume_name, zonk_expr(ctx, h.body)); })), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "Lambda") {
+      const params = __ring_m9.params; const return_type = __ring_m9.return_type; const body = __ring_m9.body;
+      return hir$HExpr_Lambda(params.map((function(p) { return zonk_param(ctx, p); })), zonk_type(ctx, return_type), zonk_expr(ctx, body), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "EffectOp") {
+      const effect_name = __ring_m9.effect_name; const op_name = __ring_m9.op_name; const args = __ring_m9.args;
+      return hir$HExpr_EffectOp(effect_name, op_name, args.map((function(a) { return zonk_expr(ctx, a); })), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "RangeExpr") {
+      const start = __ring_m9.start; const end = __ring_m9.end; const inclusive = __ring_m9.inclusive;
+      return hir$HExpr_RangeExpr(zonk_expr(ctx, start), zonk_expr(ctx, end), inclusive, z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "ListLit") {
+      const elements = __ring_m9.elements;
+      return hir$HExpr_ListLit(elements.map((function(e) { return zonk_expr(ctx, e); })), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "TupleLit") {
+      const elements = __ring_m9.elements;
+      return hir$HExpr_TupleLit(elements.map((function(e) { return zonk_expr(ctx, e); })), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "IndexExpr") {
+      const receiver = __ring_m9.receiver; const index = __ring_m9.index;
+      return hir$HExpr_IndexExpr(zonk_expr(ctx, receiver), zonk_expr(ctx, index), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "Clone") {
+      const inner = __ring_m9.inner;
+      return hir$HExpr_Clone(zonk_expr(ctx, inner), z_ty, z_eff, z_span);
+      break __ring_match9;
+    }
+    __match_fail(__ring_m9);
   }
 }
 
@@ -495,180 +652,23 @@ function zonk_stmt(ctx, stmt) {
   }
 }
 
-function zonk_expr(ctx, expr) {
-  const z_ty = zonk_type(ctx, hir$hexpr_type(expr));
-  const z_eff = zonk_row(ctx, hir$hexpr_effects(expr));
-  const z_span = hir$hexpr_span(expr);
+function zonk_block(ctx, block) {
   __ring_match11: {
-    const __ring_m11 = expr;
-    if (__ring_m11._tag === "IntLit") {
-      const value = __ring_m11.value;
-      return hir$HExpr_IntLit(value, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "FloatLit") {
-      const value = __ring_m11.value;
-      return hir$HExpr_FloatLit(value, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "StrLit") {
-      const value = __ring_m11.value;
-      return hir$HExpr_StrLit(value, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "BoolLit") {
-      const value = __ring_m11.value;
-      return hir$HExpr_BoolLit(value, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "Ident") {
-      const name = __ring_m11.name; const resolved_name = __ring_m11.resolved_name; const def_id = __ring_m11.def_id; const dict_closure_dicts = __ring_m11.dict_closure_dicts;
-      return hir$HExpr_Ident(name, resolved_name, def_id, dict_closure_dicts, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "DictConstruct") {
-      const base_dict = __ring_m11.base_dict; const trait_name = __ring_m11.trait_name; const inner = __ring_m11.inner;
-      return hir$HExpr_DictConstruct(base_dict, trait_name, inner, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "BinOp") {
-      const op = __ring_m11.op; const left = __ring_m11.left; const right = __ring_m11.right; const eq_dispatch = __ring_m11.eq_dispatch; const ord_dispatch = __ring_m11.ord_dispatch;
-      return hir$HExpr_BinOp(op, zonk_expr(ctx, left), zonk_expr(ctx, right), eq_dispatch, ord_dispatch, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "UnaryOp") {
-      const op = __ring_m11.op; const operand = __ring_m11.operand;
-      return hir$HExpr_UnaryOp(op, zonk_expr(ctx, operand), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "Call") {
-      const callee = __ring_m11.callee; const args = __ring_m11.args; const type_args = __ring_m11.type_args; const resolved_dicts = __ring_m11.resolved_dicts; const dict_dispatch = __ring_m11.dict_dispatch;
-      return hir$HExpr_Call(zonk_expr(ctx, callee), args.map((function(a) { return zonk_expr(ctx, a); })), type_args.map((function(t) { return zonk_type(ctx, t); })), resolved_dicts, dict_dispatch, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "FieldAccess") {
-      const receiver = __ring_m11.receiver; const field = __ring_m11.field;
-      return hir$HExpr_FieldAccess(zonk_expr(ctx, receiver), field, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "StructLit") {
-      const name = __ring_m11.name; const type_args = __ring_m11.type_args; const fields = __ring_m11.fields; const spread = __ring_m11.spread;
-      const z_spread = (function() {
-  const __ring_m = spread;
-  if (__ring_m._tag === "some") { const s = __ring_m._0; return Option_some(zonk_expr(ctx, s)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
-      return hir$HExpr_StructLit(name, type_args.map((function(t) { return zonk_type(ctx, t); })), fields.map((function(f) { return new hir$HStructFieldInit(f.name, zonk_expr(ctx, f.value)); })), z_spread, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "NamedVariantConstruct") {
-      const enum_name = __ring_m11.enum_name; const variant_name = __ring_m11.variant_name; const fields = __ring_m11.fields; const spread = __ring_m11.spread;
-      const z_spread = (function() {
-  const __ring_m = spread;
-  if (__ring_m._tag === "some") { const s = __ring_m._0; return Option_some(zonk_expr(ctx, s)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
-      return hir$HExpr_NamedVariantConstruct(enum_name, variant_name, fields.map((function(f) { return new hir$HStructFieldInit(f.name, zonk_expr(ctx, f.value)); })), z_spread, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "MatchExpr") {
-      const scrutinee = __ring_m11.scrutinee; const arms = __ring_m11.arms;
-      return hir$HExpr_MatchExpr(zonk_expr(ctx, scrutinee), arms.map((function(a) { return (function() {
-  const z_guard = (function() {
-  const __ring_m = a.guard;
-  if (__ring_m._tag === "some") { const g = __ring_m._0; return Option_some(zonk_expr(ctx, g)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
-  return new hir$HMatchArm(a.pattern, z_guard, zonk_expr(ctx, a.body), a.span);
-})(); })), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
+    const __ring_m11 = block;
     if (__ring_m11._tag === "Block") {
-      const stmts = __ring_m11.stmts; const tail = __ring_m11.tail;
+      const stmts = __ring_m11.stmts; const tail = __ring_m11.tail; const ty = __ring_m11.ty; const effects = __ring_m11.effects; const span = __ring_m11.span;
+      const z_stmts = stmts.map((function(s) { return zonk_stmt(ctx, s); }));
       const z_tail = (function() {
   const __ring_m = tail;
   if (__ring_m._tag === "some") { const t = __ring_m._0; return Option_some(zonk_expr(ctx, t)); }
   if (__ring_m._tag === "none") { return Option_none; }
   __match_fail(__ring_m);
 })();
-      return hir$HExpr_Block(stmts.map((function(s) { return zonk_stmt(ctx, s); })), z_tail, z_ty, z_eff, z_span);
+      return hir$HExpr_Block(z_stmts, z_tail, zonk_type(ctx, ty), zonk_row(ctx, effects), span);
       break __ring_match11;
     }
-    if (__ring_m11._tag === "IfExpr") {
-      const condition = __ring_m11.condition; const then_branch = __ring_m11.then_branch; const else_branch = __ring_m11.else_branch;
-      const z_else = (function() {
-  const __ring_m = else_branch;
-  if (__ring_m._tag === "some") { const eb = __ring_m._0; return Option_some(zonk_expr(ctx, eb)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
-      return hir$HExpr_IfExpr(zonk_expr(ctx, condition), zonk_block(ctx, then_branch), z_else, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "StringInterp") {
-      const parts = __ring_m11.parts;
-      return hir$HExpr_StringInterp(parts.map((function(p) { return (function() {
-  const __ring_m = p;
-  if (__ring_m._tag === "Literal") { const s = __ring_m._0; return p; }
-  if (__ring_m._tag === "Expression") { const e = __ring_m._0; return hir$HStringInterpPart_Expression(zonk_expr(ctx, e)); }
-  __match_fail(__ring_m);
-})(); })), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "TryCatch") {
-      const body = __ring_m11.body; const arms = __ring_m11.arms;
-      return hir$HExpr_TryCatch(zonk_expr(ctx, body), arms.map((function(a) { return new hir$HMatchArm(a.pattern, (function() {
-  const __ring_m = a.guard;
-  if (__ring_m._tag === "some") { const g = __ring_m._0; return Option_some(zonk_expr(ctx, g)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})(), zonk_expr(ctx, a.body), a.span); })), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "HandleExpr") {
-      const body = __ring_m11.body; const handlers = __ring_m11.handlers;
-      return hir$HExpr_HandleExpr(zonk_expr(ctx, body), handlers.map((function(h) { return new hir$HEffectHandler(h.effect_name, h.op_name, h.params.map((function(p) { return zonk_param(ctx, p); })), h.resume_name, zonk_expr(ctx, h.body)); })), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "Lambda") {
-      const params = __ring_m11.params; const return_type = __ring_m11.return_type; const body = __ring_m11.body;
-      return hir$HExpr_Lambda(params.map((function(p) { return zonk_param(ctx, p); })), zonk_type(ctx, return_type), zonk_expr(ctx, body), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "EffectOp") {
-      const effect_name = __ring_m11.effect_name; const op_name = __ring_m11.op_name; const args = __ring_m11.args;
-      return hir$HExpr_EffectOp(effect_name, op_name, args.map((function(a) { return zonk_expr(ctx, a); })), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "RangeExpr") {
-      const start = __ring_m11.start; const end = __ring_m11.end; const inclusive = __ring_m11.inclusive;
-      return hir$HExpr_RangeExpr(zonk_expr(ctx, start), zonk_expr(ctx, end), inclusive, z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "ListLit") {
-      const elements = __ring_m11.elements;
-      return hir$HExpr_ListLit(elements.map((function(e) { return zonk_expr(ctx, e); })), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "TupleLit") {
-      const elements = __ring_m11.elements;
-      return hir$HExpr_TupleLit(elements.map((function(e) { return zonk_expr(ctx, e); })), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "IndexExpr") {
-      const receiver = __ring_m11.receiver; const index = __ring_m11.index;
-      return hir$HExpr_IndexExpr(zonk_expr(ctx, receiver), zonk_expr(ctx, index), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "Clone") {
-      const inner = __ring_m11.inner;
-      return hir$HExpr_Clone(zonk_expr(ctx, inner), z_ty, z_eff, z_span);
-      break __ring_match11;
-    }
-    __match_fail(__ring_m11);
+    return zonk_expr(ctx, block);
+    break __ring_match11;
   }
 }
 

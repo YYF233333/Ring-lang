@@ -244,6 +244,97 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
+class CliArgs {
+  constructor(command, file, debug, error_format, out_dir, target, verify_rc, verify_strict, rc_mutate) {
+    this.command = command;
+    this.file = file;
+    this.debug = debug;
+    this.error_format = error_format;
+    this.out_dir = out_dir;
+    this.target = target;
+    this.verify_rc = verify_rc;
+    this.verify_strict = verify_strict;
+    this.rc_mutate = rc_mutate;
+  }
+}
+
+function parse_cli_args(args) {
+  let debug = false;
+  let error_format = "human";
+  let out_dir = "dist";
+  let target = "js";
+  let verify_rc = false;
+  let verify_strict = false;
+  let rc_mutate = "";
+  let positional = [];
+  const __ring_iter_2 = __List_Iterable.iter(args);
+  while (true) {
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const arg = __ring_next_2._0;
+    if ((arg === "--debug")) {
+      debug = true;
+    } else {
+      if ((arg === "--verify-rc")) {
+        verify_rc = true;
+      } else {
+        if ((arg === "--verify-rc-strict")) {
+          verify_strict = true;
+        } else {
+          if (Str_starts_with(arg, "--rc-mutate=")) {
+            rc_mutate = Str_slice(arg, 12, Str_len(arg));
+          } else {
+            if (Str_starts_with(arg, "--error-format=")) {
+              error_format = Str_slice(arg, 15, Str_len(arg));
+            } else {
+              if (Str_starts_with(arg, "--out-dir=")) {
+                out_dir = Str_slice(arg, 10, Str_len(arg));
+              } else {
+                if (Str_starts_with(arg, "--target=")) {
+                  target = Str_slice(arg, 9, Str_len(arg));
+                } else {
+                  List_push(positional, arg);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  const command = (function() {
+  const __ring_m = List_get(positional, 0);
+  if (__ring_m._tag === "some") { const c = __ring_m._0; return c; }
+  if (__ring_m._tag === "none") { return "help"; }
+  __match_fail(__ring_m);
+})();
+  const file = (function() {
+  const __ring_m = List_get(positional, 1);
+  if (__ring_m._tag === "some") { const f = __ring_m._0; return f; }
+  if (__ring_m._tag === "none") { return ""; }
+  __match_fail(__ring_m);
+})();
+  return new CliArgs(command, file, debug, error_format, out_dir, target, verify_rc, verify_strict, rc_mutate);
+}
+
+function usage(__ring_ev_io) {
+  print("Ring-lang compiler v0.1.0 (Ring bootstrap)", __ring_ev_io);
+  print("", __ring_ev_io);
+  print("Usage:", __ring_ev_io);
+  print("  ring build <file.ring>    Compile to .js file(s)", __ring_ev_io);
+  print("  ring run <file.ring>      Compile and execute with Node.js", __ring_ev_io);
+  print("  ring check <file.ring>    Type-check only", __ring_ev_io);
+  print("  ring help                 Show this help", __ring_ev_io);
+  print("", __ring_ev_io);
+  print("Options:", __ring_ev_io);
+  print("  --debug                   Print intermediate info", __ring_ev_io);
+  print("  --error-format=human|llm  Error output format (default: human)", __ring_ev_io);
+  print("  --out-dir=<path>          Output directory (default: dist)", __ring_ev_io);
+  print("  --target=js|llvm          Code generation target (default: js)", __ring_ev_io);
+  print("  --verify-rc               (check) static RC leak/UAF verification of the post-RC HIR", __ring_ev_io);
+  return print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail", __ring_ev_io);
+}
+
 function cli_main(__ring_ev_io) {
   const args = argv();
   const parsed = parse_cli_args(args);
@@ -372,18 +463,18 @@ function cli_main(__ring_ev_io) {
     return;
   }
   let warning_diags = [];
-  const __ring_iter_2 = __List_Iterable.iter(parse_sink.items);
-  while (true) {
-    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
-    if (__ring_next_2._tag === "none") break;
-    const d = __ring_next_2._0;
-    List_push(warning_diags, d);
-  }
-  const __ring_iter_3 = __List_Iterable.iter(sink.items);
+  const __ring_iter_3 = __List_Iterable.iter(parse_sink.items);
   while (true) {
     const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
     if (__ring_next_3._tag === "none") break;
     const d = __ring_next_3._0;
+    List_push(warning_diags, d);
+  }
+  const __ring_iter_4 = __List_Iterable.iter(sink.items);
+  while (true) {
+    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+    if (__ring_next_4._tag === "none") break;
+    const d = __ring_next_4._0;
     List_push(warning_diags, d);
   }
   if ((List_len(warning_diags) > 0)) {
@@ -441,97 +532,6 @@ function cli_main(__ring_ev_io) {
       }
     }
   }
-}
-
-class CliArgs {
-  constructor(command, file, debug, error_format, out_dir, target, verify_rc, verify_strict, rc_mutate) {
-    this.command = command;
-    this.file = file;
-    this.debug = debug;
-    this.error_format = error_format;
-    this.out_dir = out_dir;
-    this.target = target;
-    this.verify_rc = verify_rc;
-    this.verify_strict = verify_strict;
-    this.rc_mutate = rc_mutate;
-  }
-}
-
-function parse_cli_args(args) {
-  let debug = false;
-  let error_format = "human";
-  let out_dir = "dist";
-  let target = "js";
-  let verify_rc = false;
-  let verify_strict = false;
-  let rc_mutate = "";
-  let positional = [];
-  const __ring_iter_4 = __List_Iterable.iter(args);
-  while (true) {
-    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-    if (__ring_next_4._tag === "none") break;
-    const arg = __ring_next_4._0;
-    if ((arg === "--debug")) {
-      debug = true;
-    } else {
-      if ((arg === "--verify-rc")) {
-        verify_rc = true;
-      } else {
-        if ((arg === "--verify-rc-strict")) {
-          verify_strict = true;
-        } else {
-          if (Str_starts_with(arg, "--rc-mutate=")) {
-            rc_mutate = Str_slice(arg, 12, Str_len(arg));
-          } else {
-            if (Str_starts_with(arg, "--error-format=")) {
-              error_format = Str_slice(arg, 15, Str_len(arg));
-            } else {
-              if (Str_starts_with(arg, "--out-dir=")) {
-                out_dir = Str_slice(arg, 10, Str_len(arg));
-              } else {
-                if (Str_starts_with(arg, "--target=")) {
-                  target = Str_slice(arg, 9, Str_len(arg));
-                } else {
-                  List_push(positional, arg);
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  const command = (function() {
-  const __ring_m = List_get(positional, 0);
-  if (__ring_m._tag === "some") { const c = __ring_m._0; return c; }
-  if (__ring_m._tag === "none") { return "help"; }
-  __match_fail(__ring_m);
-})();
-  const file = (function() {
-  const __ring_m = List_get(positional, 1);
-  if (__ring_m._tag === "some") { const f = __ring_m._0; return f; }
-  if (__ring_m._tag === "none") { return ""; }
-  __match_fail(__ring_m);
-})();
-  return new CliArgs(command, file, debug, error_format, out_dir, target, verify_rc, verify_strict, rc_mutate);
-}
-
-function usage(__ring_ev_io) {
-  print("Ring-lang compiler v0.1.0 (Ring bootstrap)", __ring_ev_io);
-  print("", __ring_ev_io);
-  print("Usage:", __ring_ev_io);
-  print("  ring build <file.ring>    Compile to .js file(s)", __ring_ev_io);
-  print("  ring run <file.ring>      Compile and execute with Node.js", __ring_ev_io);
-  print("  ring check <file.ring>    Type-check only", __ring_ev_io);
-  print("  ring help                 Show this help", __ring_ev_io);
-  print("", __ring_ev_io);
-  print("Options:", __ring_ev_io);
-  print("  --debug                   Print intermediate info", __ring_ev_io);
-  print("  --error-format=human|llm  Error output format (default: human)", __ring_ev_io);
-  print("  --out-dir=<path>          Output directory (default: dist)", __ring_ev_io);
-  print("  --target=js|llvm          Code generation target (default: js)", __ring_ev_io);
-  print("  --verify-rc               (check) static RC leak/UAF verification of the post-RC HIR", __ring_ev_io);
-  return print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail", __ring_ev_io);
 }
 
 function __CliArgs_Eq_eq(self, other) {

@@ -280,22 +280,6 @@ class EnumDef {
   }
 }
 
-function lookup_variant(def, name) {
-  __ring_match6: {
-    const __ring_m6 = _Map_get(def.variant_index, name);
-    if (__ring_m6._tag === "some") {
-      const idx = __ring_m6._0;
-      return List_get(def.variants, idx);
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "none") {
-      return Option_none;
-      break __ring_match6;
-    }
-    __match_fail(__ring_m6);
-  }
-}
-
 class EffectOpDef {
   constructor(name, params, return_type, has_default) {
     this.name = name;
@@ -448,15 +432,6 @@ class TypeEnv {
   }
 }
 
-function mono(ty) {
-  return new TypeScheme(ty, [], [], Option_none);
-}
-
-function new_type_env() {
-  const initial_scope = new Scope(map_new());
-  return new TypeEnv(new TypeRegistry(map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new()), new TraitRegistry(map_new(), map_new(), map_new(), map_new()), new ScopeManager([initial_scope], map_new(), map_new(), map_new(), set_new(), set_new(), set_new()), new IdGen(0, 0));
-}
-
 function TypeEnv_current_var_id(self) {
   return self.ids.next_type_var_id;
 }
@@ -492,18 +467,18 @@ function TypeEnv_bind(self, name, scheme) {
   __match_fail(__ring_m);
 })();
   const idx = (List_len(self.scope.scopes) - 1);
-  __ring_match7: {
-    const __ring_m7 = List_get(self.scope.scopes, idx);
-    if (__ring_m7._tag === "some") {
-      const scope = __ring_m7._0;
+  __ring_match6: {
+    const __ring_m6 = List_get(self.scope.scopes, idx);
+    if (__ring_m6._tag === "some") {
+      const scope = __ring_m6._0;
       return _Map_insert(scope.variables, name, s);
-      break __ring_match7;
+      break __ring_match6;
     }
-    if (__ring_m7._tag === "none") {
+    if (__ring_m6._tag === "none") {
       return panic("unreachable: no current scope");
-      break __ring_match7;
+      break __ring_match6;
     }
-    __match_fail(__ring_m7);
+    __match_fail(__ring_m6);
   }
 }
 function TypeEnv_bind_mono(self, name, ty) {
@@ -515,20 +490,20 @@ function TypeEnv_record_def_span(self, def_id, span) {
 function TypeEnv_rebind(self, name, scheme) {
   let i = (List_len(self.scope.scopes) - 1);
   while ((i >= 0)) {
-    __ring_match8: {
-      const __ring_m8 = List_get(self.scope.scopes, i);
-      if (__ring_m8._tag === "some") {
-        const scope = __ring_m8._0;
+    __ring_match7: {
+      const __ring_m7 = List_get(self.scope.scopes, i);
+      if (__ring_m7._tag === "some") {
+        const scope = __ring_m7._0;
         if (_Map_contains_key(scope.variables, name)) {
           _Map_insert(scope.variables, name, scheme);
           return;
         }
-        break __ring_match8;
+        break __ring_match7;
       }
-      if (__ring_m8._tag === "none") {
-        break __ring_match8;
+      if (__ring_m7._tag === "none") {
+        break __ring_match7;
       }
-      __match_fail(__ring_m8);
+      __match_fail(__ring_m7);
     }
     i = (i - 1);
   }
@@ -567,14 +542,14 @@ function TypeEnv_instantiate(self, scheme) {
     const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
     if (__ring_next_3._tag === "none") break;
     const bound = __ring_next_3._0;
-    __ring_match9: {
-      const __ring_m9 = _Map_get(mapping, bound.type_var);
-      if (__ring_m9._tag === "some") {
-        const fresh = __ring_m9._0;
-        __ring_match10: {
-          const __ring_m10 = fresh;
-          if (__ring_m10._tag === "TypeVar") {
-            const id = __ring_m10.id;
+    __ring_match8: {
+      const __ring_m8 = _Map_get(mapping, bound.type_var);
+      if (__ring_m8._tag === "some") {
+        const fresh = __ring_m8._0;
+        __ring_match9: {
+          const __ring_m9 = fresh;
+          if (__ring_m9._tag === "TypeVar") {
+            const id = __ring_m9.id;
             let existing = (function() {
   const __ring_m = _Map_get(self.scope.var_bounds, id);
   if (__ring_m._tag === "some") { const s = __ring_m._0; return s; }
@@ -583,19 +558,44 @@ function TypeEnv_instantiate(self, scheme) {
 })();
             _Set_insert(existing, bound.trait_name);
             _Map_insert(self.scope.var_bounds, id, existing);
-            break __ring_match10;
+            break __ring_match9;
           }
-          break __ring_match10;
+          break __ring_match9;
         }
-        break __ring_match9;
+        break __ring_match8;
       }
-      if (__ring_m9._tag === "none") {
-        break __ring_match9;
+      if (__ring_m8._tag === "none") {
+        break __ring_match8;
       }
-      __match_fail(__ring_m9);
+      __match_fail(__ring_m8);
     }
   }
   return apply_subst_map(mapping, scheme.ty);
+}
+
+function lookup_variant(def, name) {
+  __ring_match10: {
+    const __ring_m10 = _Map_get(def.variant_index, name);
+    if (__ring_m10._tag === "some") {
+      const idx = __ring_m10._0;
+      return List_get(def.variants, idx);
+      break __ring_match10;
+    }
+    if (__ring_m10._tag === "none") {
+      return Option_none;
+      break __ring_match10;
+    }
+    __match_fail(__ring_m10);
+  }
+}
+
+function mono(ty) {
+  return new TypeScheme(ty, [], [], Option_none);
+}
+
+function new_type_env() {
+  const initial_scope = new Scope(map_new());
+  return new TypeEnv(new TypeRegistry(map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new()), new TraitRegistry(map_new(), map_new(), map_new(), map_new()), new ScopeManager([initial_scope], map_new(), map_new(), map_new(), set_new(), set_new(), set_new()), new IdGen(0, 0));
 }
 
 function add_impl(reg, entry) {
@@ -648,458 +648,458 @@ function find_impl(reg, type_name, trait_name) {
   }
 }
 
-function chase_type_var_map(subst, id, depth) {
-  if ((depth > 100)) {
-    return types$Type_TypeVar(id, Option_none);
-  }
-  __ring_match14: {
-    const __ring_m14 = _Map_get(subst, id);
-    if (__ring_m14._tag === "some") {
-      const resolved = __ring_m14._0;
-      __ring_match15: {
-        const __ring_m15 = resolved;
-        if (__ring_m15._tag === "TypeVar") {
-          const next_id = __ring_m15.id;
-          return chase_type_var_map(subst, next_id, (depth + 1));
-          break __ring_match15;
-        }
-        return apply_subst_map(subst, resolved);
-        break __ring_match15;
-      }
-      break __ring_match14;
-    }
-    if (__ring_m14._tag === "none") {
-      return types$Type_TypeVar(id, Option_none);
-      break __ring_match14;
-    }
-    __match_fail(__ring_m14);
-  }
-}
-
-function apply_subst_map(subst, t) {
-  __ring_match16: {
-    const __ring_m16 = t;
-    if (__ring_m16._tag === "IntType") {
-      return t;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "FloatType") {
-      return t;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "StrType") {
-      return t;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "BoolType") {
-      return t;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "UnitType") {
-      return t;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "NeverType") {
-      return t;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "AnyType") {
-      return t;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "TypeVar") {
-      const id = __ring_m16.id;
-      return chase_type_var_map(subst, id, 0);
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "FnType") {
-      const params = __ring_m16.params; const return_type = __ring_m16.return_type; const effects = __ring_m16.effects;
-      return types$Type_FnType(params.map((function(p) { return apply_subst_map(subst, p); })), apply_subst_map(subst, return_type), apply_subst_row_map(subst, effects));
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "StructType") {
-      const name = __ring_m16.name; const type_params = __ring_m16.type_params; const fields = __ring_m16.fields;
-      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })), fields);
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "EnumType") {
-      const name = __ring_m16.name; const type_params = __ring_m16.type_params; const variants = __ring_m16.variants;
-      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })), variants);
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "GenericType") {
-      const base = __ring_m16.base; const args = __ring_m16.args;
-      return types$Type_GenericType(apply_subst_map(subst, base), args.map((function(a) { return apply_subst_map(subst, a); })));
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "RecordType") {
-      const fields = __ring_m16.fields; const tail = __ring_m16.tail; const tail_name = __ring_m16.tail_name;
-      const mapped_fields = fields.map((function(f) { return new types$RecordField(f.name, apply_subst_map(subst, f.ty)); }));
-      __ring_match17: {
-        const __ring_m17 = tail;
-        if (__ring_m17._tag === "some") {
-          const t_id = __ring_m17._0;
-          __ring_match18: {
-            const __ring_m18 = _Map_get(subst, t_id);
-            if (__ring_m18._tag === "some") {
-              const resolved = __ring_m18._0;
-              const chased = apply_subst_map(subst, resolved);
-              __ring_match19: {
-                const __ring_m19 = chased;
-                if (__ring_m19._tag === "TypeVar") {
-                  const new_id = __ring_m19.id; const new_name = __ring_m19.name;
-                  return types$Type_RecordType(mapped_fields, Option_some(new_id), new_name);
-                  break __ring_match19;
-                }
-                if (__ring_m19._tag === "RecordType") {
-                  const extra_fields = __ring_m19.fields; const extra_tail = __ring_m19.tail; const extra_tn = __ring_m19.tail_name;
-                  let all_fields = list_clone(mapped_fields);
-                  const __ring_iter_4 = __List_Iterable.iter(extra_fields);
-                  while (true) {
-                    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-                    if (__ring_next_4._tag === "none") break;
-                    const ef = __ring_next_4._0;
-                    List_push(all_fields, new types$RecordField(ef.name, apply_subst_map(subst, ef.ty)));
-                  }
-                  return types$Type_RecordType(all_fields, extra_tail, extra_tn);
-                  break __ring_match19;
-                }
-                return types$Type_RecordType(mapped_fields, Option_none, Option_none);
-                break __ring_match19;
-              }
-              break __ring_match18;
-            }
-            if (__ring_m18._tag === "none") {
-              return types$Type_RecordType(mapped_fields, Option_some(t_id), tail_name);
-              break __ring_match18;
-            }
-            __match_fail(__ring_m18);
-          }
-          break __ring_match17;
-        }
-        if (__ring_m17._tag === "none") {
-          return types$Type_RecordType(mapped_fields, Option_none, tail_name);
-          break __ring_match17;
-        }
-        __match_fail(__ring_m17);
-      }
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "EffectRowType") {
-      const effects = __ring_m16.effects; const tail = __ring_m16.tail;
-      const row = apply_subst_row_map(subst, new types$EffectRow(effects, tail));
-      return types$Type_EffectRowType(row.effects, row.tail);
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "TupleType") {
-      const elements = __ring_m16.elements;
-      return types$Type_TupleType(elements.map((function(e) { return apply_subst_map(subst, e); })));
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "ErrorType") {
-      return t;
-      break __ring_match16;
-    }
-    __match_fail(__ring_m16);
-  }
-}
-
 function apply_subst_effect_map(subst, e) {
-  __ring_match20: {
-    const __ring_m20 = e;
-    if (__ring_m20._tag === "FailEffect") {
-      const error_type = __ring_m20.error_type;
+  __ring_match14: {
+    const __ring_m14 = e;
+    if (__ring_m14._tag === "FailEffect") {
+      const error_type = __ring_m14.error_type;
       return types$Effect_FailEffect(apply_subst_map(subst, error_type));
-      break __ring_match20;
+      break __ring_match14;
     }
-    if (__ring_m20._tag === "MutEffect") {
-      const state_type = __ring_m20.state_type;
+    if (__ring_m14._tag === "MutEffect") {
+      const state_type = __ring_m14.state_type;
       return types$Effect_MutEffect(apply_subst_map(subst, state_type));
-      break __ring_match20;
+      break __ring_match14;
     }
-    if (__ring_m20._tag === "CustomEffect") {
-      const name = __ring_m20.name; const type_args = __ring_m20.type_args;
+    if (__ring_m14._tag === "CustomEffect") {
+      const name = __ring_m14.name; const type_args = __ring_m14.type_args;
       return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst_map(subst, a); })));
-      break __ring_match20;
+      break __ring_match14;
     }
     return e;
-    break __ring_match20;
+    break __ring_match14;
   }
 }
 
 function apply_subst_row_map(subst, row) {
   const effects = row.effects.map((function(e) { return apply_subst_effect_map(subst, e); }));
-  __ring_match21: {
-    const __ring_m21 = row.tail;
-    if (__ring_m21._tag === "some") {
-      const t_id = __ring_m21._0;
-      __ring_match22: {
-        const __ring_m22 = _Map_get(subst, t_id);
-        if (__ring_m22._tag === "some") {
-          const resolved = __ring_m22._0;
+  __ring_match15: {
+    const __ring_m15 = row.tail;
+    if (__ring_m15._tag === "some") {
+      const t_id = __ring_m15._0;
+      __ring_match16: {
+        const __ring_m16 = _Map_get(subst, t_id);
+        if (__ring_m16._tag === "some") {
+          const resolved = __ring_m16._0;
           const chased = apply_subst_map(subst, resolved);
-          __ring_match23: {
-            const __ring_m23 = chased;
-            if (__ring_m23._tag === "TypeVar") {
-              const new_id = __ring_m23.id;
+          __ring_match17: {
+            const __ring_m17 = chased;
+            if (__ring_m17._tag === "TypeVar") {
+              const new_id = __ring_m17.id;
               return new types$EffectRow(effects, Option_some(new_id));
-              break __ring_match23;
+              break __ring_match17;
             }
-            if (__ring_m23._tag === "EffectRowType") {
-              const extra_effs = __ring_m23.effects; const extra_tail = __ring_m23.tail;
+            if (__ring_m17._tag === "EffectRowType") {
+              const extra_effs = __ring_m17.effects; const extra_tail = __ring_m17.tail;
               let merged = list_clone(effects);
-              const __ring_iter_5 = __List_Iterable.iter(extra_effs);
+              const __ring_iter_4 = __List_Iterable.iter(extra_effs);
               while (true) {
-                const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-                if (__ring_next_5._tag === "none") break;
-                const ee = __ring_next_5._0;
+                const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+                if (__ring_next_4._tag === "none") break;
+                const ee = __ring_next_4._0;
                 List_push(merged, apply_subst_effect_map(subst, ee));
               }
               return new types$EffectRow(merged, extra_tail);
-              break __ring_match23;
+              break __ring_match17;
             }
             return new types$EffectRow(effects, Option_none);
-            break __ring_match23;
+            break __ring_match17;
           }
-          break __ring_match22;
+          break __ring_match16;
         }
-        if (__ring_m22._tag === "none") {
+        if (__ring_m16._tag === "none") {
           return new types$EffectRow(effects, Option_some(t_id));
-          break __ring_match22;
+          break __ring_match16;
         }
-        __match_fail(__ring_m22);
+        __match_fail(__ring_m16);
       }
-      break __ring_match21;
+      break __ring_match15;
     }
-    if (__ring_m21._tag === "none") {
+    if (__ring_m15._tag === "none") {
       return new types$EffectRow(effects, Option_none);
-      break __ring_match21;
+      break __ring_match15;
     }
-    __match_fail(__ring_m21);
+    __match_fail(__ring_m15);
+  }
+}
+
+function apply_subst_map(subst, t) {
+  __ring_match18: {
+    const __ring_m18 = t;
+    if (__ring_m18._tag === "IntType") {
+      return t;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "FloatType") {
+      return t;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "StrType") {
+      return t;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "BoolType") {
+      return t;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "UnitType") {
+      return t;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "NeverType") {
+      return t;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "AnyType") {
+      return t;
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "TypeVar") {
+      const id = __ring_m18.id;
+      return chase_type_var_map(subst, id, 0);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "FnType") {
+      const params = __ring_m18.params; const return_type = __ring_m18.return_type; const effects = __ring_m18.effects;
+      return types$Type_FnType(params.map((function(p) { return apply_subst_map(subst, p); })), apply_subst_map(subst, return_type), apply_subst_row_map(subst, effects));
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "StructType") {
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const fields = __ring_m18.fields;
+      return types$Type_StructType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })), fields);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "EnumType") {
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const variants = __ring_m18.variants;
+      return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst_map(subst, p); })), variants);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "GenericType") {
+      const base = __ring_m18.base; const args = __ring_m18.args;
+      return types$Type_GenericType(apply_subst_map(subst, base), args.map((function(a) { return apply_subst_map(subst, a); })));
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "RecordType") {
+      const fields = __ring_m18.fields; const tail = __ring_m18.tail; const tail_name = __ring_m18.tail_name;
+      const mapped_fields = fields.map((function(f) { return new types$RecordField(f.name, apply_subst_map(subst, f.ty)); }));
+      __ring_match19: {
+        const __ring_m19 = tail;
+        if (__ring_m19._tag === "some") {
+          const t_id = __ring_m19._0;
+          __ring_match20: {
+            const __ring_m20 = _Map_get(subst, t_id);
+            if (__ring_m20._tag === "some") {
+              const resolved = __ring_m20._0;
+              const chased = apply_subst_map(subst, resolved);
+              __ring_match21: {
+                const __ring_m21 = chased;
+                if (__ring_m21._tag === "TypeVar") {
+                  const new_id = __ring_m21.id; const new_name = __ring_m21.name;
+                  return types$Type_RecordType(mapped_fields, Option_some(new_id), new_name);
+                  break __ring_match21;
+                }
+                if (__ring_m21._tag === "RecordType") {
+                  const extra_fields = __ring_m21.fields; const extra_tail = __ring_m21.tail; const extra_tn = __ring_m21.tail_name;
+                  let all_fields = list_clone(mapped_fields);
+                  const __ring_iter_5 = __List_Iterable.iter(extra_fields);
+                  while (true) {
+                    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+                    if (__ring_next_5._tag === "none") break;
+                    const ef = __ring_next_5._0;
+                    List_push(all_fields, new types$RecordField(ef.name, apply_subst_map(subst, ef.ty)));
+                  }
+                  return types$Type_RecordType(all_fields, extra_tail, extra_tn);
+                  break __ring_match21;
+                }
+                return types$Type_RecordType(mapped_fields, Option_none, Option_none);
+                break __ring_match21;
+              }
+              break __ring_match20;
+            }
+            if (__ring_m20._tag === "none") {
+              return types$Type_RecordType(mapped_fields, Option_some(t_id), tail_name);
+              break __ring_match20;
+            }
+            __match_fail(__ring_m20);
+          }
+          break __ring_match19;
+        }
+        if (__ring_m19._tag === "none") {
+          return types$Type_RecordType(mapped_fields, Option_none, tail_name);
+          break __ring_match19;
+        }
+        __match_fail(__ring_m19);
+      }
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "EffectRowType") {
+      const effects = __ring_m18.effects; const tail = __ring_m18.tail;
+      const row = apply_subst_row_map(subst, new types$EffectRow(effects, tail));
+      return types$Type_EffectRowType(row.effects, row.tail);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "TupleType") {
+      const elements = __ring_m18.elements;
+      return types$Type_TupleType(elements.map((function(e) { return apply_subst_map(subst, e); })));
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "ErrorType") {
+      return t;
+      break __ring_match18;
+    }
+    __match_fail(__ring_m18);
+  }
+}
+
+function chase_type_var_map(subst, id, depth) {
+  if ((depth > 100)) {
+    return types$Type_TypeVar(id, Option_none);
+  }
+  __ring_match22: {
+    const __ring_m22 = _Map_get(subst, id);
+    if (__ring_m22._tag === "some") {
+      const resolved = __ring_m22._0;
+      __ring_match23: {
+        const __ring_m23 = resolved;
+        if (__ring_m23._tag === "TypeVar") {
+          const next_id = __ring_m23.id;
+          return chase_type_var_map(subst, next_id, (depth + 1));
+          break __ring_match23;
+        }
+        return apply_subst_map(subst, resolved);
+        break __ring_match23;
+      }
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "none") {
+      return types$Type_TypeVar(id, Option_none);
+      break __ring_match22;
+    }
+    __match_fail(__ring_m22);
+  }
+}
+
+function apply_subst_effect(subst, e) {
+  __ring_match24: {
+    const __ring_m24 = e;
+    if (__ring_m24._tag === "FailEffect") {
+      const error_type = __ring_m24.error_type;
+      return types$Effect_FailEffect(apply_subst(subst, error_type));
+      break __ring_match24;
+    }
+    if (__ring_m24._tag === "MutEffect") {
+      const state_type = __ring_m24.state_type;
+      return types$Effect_MutEffect(apply_subst(subst, state_type));
+      break __ring_match24;
+    }
+    if (__ring_m24._tag === "CustomEffect") {
+      const name = __ring_m24.name; const type_args = __ring_m24.type_args;
+      return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst(subst, a); })));
+      break __ring_match24;
+    }
+    return e;
+    break __ring_match24;
+  }
+}
+
+function apply_subst_row(subst, row) {
+  const effects = row.effects.map((function(e) { return apply_subst_effect(subst, e); }));
+  __ring_match25: {
+    const __ring_m25 = row.tail;
+    if (__ring_m25._tag === "some") {
+      const t_id = __ring_m25._0;
+      const root_id = union_find$uf_find(subst, t_id);
+      __ring_match26: {
+        const __ring_m26 = union_find$uf_lookup(subst, root_id);
+        if (__ring_m26._tag === "some") {
+          const resolved = __ring_m26._0;
+          const chased = apply_subst(subst, resolved);
+          __ring_match27: {
+            const __ring_m27 = chased;
+            if (__ring_m27._tag === "TypeVar") {
+              const new_id = __ring_m27.id;
+              return new types$EffectRow(effects, Option_some(new_id));
+              break __ring_match27;
+            }
+            if (__ring_m27._tag === "EffectRowType") {
+              const extra_effs = __ring_m27.effects; const extra_tail = __ring_m27.tail;
+              let merged = list_clone(effects);
+              const __ring_iter_6 = __List_Iterable.iter(extra_effs);
+              while (true) {
+                const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+                if (__ring_next_6._tag === "none") break;
+                const ee = __ring_next_6._0;
+                List_push(merged, apply_subst_effect(subst, ee));
+              }
+              return new types$EffectRow(merged, extra_tail);
+              break __ring_match27;
+            }
+            return new types$EffectRow(effects, Option_none);
+            break __ring_match27;
+          }
+          break __ring_match26;
+        }
+        if (__ring_m26._tag === "none") {
+          const actual_id = ((root_id === t_id) ? t_id : root_id);
+          return new types$EffectRow(effects, Option_some(actual_id));
+          break __ring_match26;
+        }
+        __match_fail(__ring_m26);
+      }
+      break __ring_match25;
+    }
+    if (__ring_m25._tag === "none") {
+      return new types$EffectRow(effects, Option_none);
+      break __ring_match25;
+    }
+    __match_fail(__ring_m25);
   }
 }
 
 function apply_subst(subst, t) {
-  __ring_match24: {
-    const __ring_m24 = t;
-    if (__ring_m24._tag === "IntType") {
+  __ring_match28: {
+    const __ring_m28 = t;
+    if (__ring_m28._tag === "IntType") {
       return t;
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "FloatType") {
+    if (__ring_m28._tag === "FloatType") {
       return t;
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "StrType") {
+    if (__ring_m28._tag === "StrType") {
       return t;
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "BoolType") {
+    if (__ring_m28._tag === "BoolType") {
       return t;
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "UnitType") {
+    if (__ring_m28._tag === "UnitType") {
       return t;
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "NeverType") {
+    if (__ring_m28._tag === "NeverType") {
       return t;
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "AnyType") {
+    if (__ring_m28._tag === "AnyType") {
       return t;
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "TypeVar") {
-      const id = __ring_m24.id;
-      __ring_match25: {
-        const __ring_m25 = union_find$uf_lookup(subst, id);
-        if (__ring_m25._tag === "some") {
-          const resolved = __ring_m25._0;
+    if (__ring_m28._tag === "TypeVar") {
+      const id = __ring_m28.id;
+      __ring_match29: {
+        const __ring_m29 = union_find$uf_lookup(subst, id);
+        if (__ring_m29._tag === "some") {
+          const resolved = __ring_m29._0;
           return apply_subst(subst, resolved);
-          break __ring_match25;
+          break __ring_match29;
         }
-        if (__ring_m25._tag === "none") {
+        if (__ring_m29._tag === "none") {
           const root = union_find$uf_find(subst, id);
           if ((root === id)) {
             return t;
           } else {
             return types$Type_TypeVar(root, Option_none);
           }
-          break __ring_match25;
+          break __ring_match29;
         }
-        __match_fail(__ring_m25);
+        __match_fail(__ring_m29);
       }
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "FnType") {
-      const params = __ring_m24.params; const return_type = __ring_m24.return_type; const effects = __ring_m24.effects;
+    if (__ring_m28._tag === "FnType") {
+      const params = __ring_m28.params; const return_type = __ring_m28.return_type; const effects = __ring_m28.effects;
       return types$Type_FnType(params.map((function(p) { return apply_subst(subst, p); })), apply_subst(subst, return_type), apply_subst_row(subst, effects));
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "StructType") {
-      const name = __ring_m24.name; const type_params = __ring_m24.type_params; const fields = __ring_m24.fields;
+    if (__ring_m28._tag === "StructType") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const fields = __ring_m28.fields;
       return types$Type_StructType(name, type_params.map((function(p) { return apply_subst(subst, p); })), fields);
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "EnumType") {
-      const name = __ring_m24.name; const type_params = __ring_m24.type_params; const variants = __ring_m24.variants;
+    if (__ring_m28._tag === "EnumType") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const variants = __ring_m28.variants;
       return types$Type_EnumType(name, type_params.map((function(p) { return apply_subst(subst, p); })), variants);
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "GenericType") {
-      const base = __ring_m24.base; const args = __ring_m24.args;
+    if (__ring_m28._tag === "GenericType") {
+      const base = __ring_m28.base; const args = __ring_m28.args;
       return types$Type_GenericType(apply_subst(subst, base), args.map((function(a) { return apply_subst(subst, a); })));
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "RecordType") {
-      const fields = __ring_m24.fields; const tail = __ring_m24.tail; const tail_name = __ring_m24.tail_name;
+    if (__ring_m28._tag === "RecordType") {
+      const fields = __ring_m28.fields; const tail = __ring_m28.tail; const tail_name = __ring_m28.tail_name;
       const mapped_fields = fields.map((function(f) { return new types$RecordField(f.name, apply_subst(subst, f.ty)); }));
-      __ring_match26: {
-        const __ring_m26 = tail;
-        if (__ring_m26._tag === "some") {
-          const t_id = __ring_m26._0;
+      __ring_match30: {
+        const __ring_m30 = tail;
+        if (__ring_m30._tag === "some") {
+          const t_id = __ring_m30._0;
           const root_id = union_find$uf_find(subst, t_id);
-          __ring_match27: {
-            const __ring_m27 = union_find$uf_lookup(subst, root_id);
-            if (__ring_m27._tag === "some") {
-              const resolved = __ring_m27._0;
+          __ring_match31: {
+            const __ring_m31 = union_find$uf_lookup(subst, root_id);
+            if (__ring_m31._tag === "some") {
+              const resolved = __ring_m31._0;
               const chased = apply_subst(subst, resolved);
-              __ring_match28: {
-                const __ring_m28 = chased;
-                if (__ring_m28._tag === "TypeVar") {
-                  const new_id = __ring_m28.id; const new_name = __ring_m28.name;
+              __ring_match32: {
+                const __ring_m32 = chased;
+                if (__ring_m32._tag === "TypeVar") {
+                  const new_id = __ring_m32.id; const new_name = __ring_m32.name;
                   return types$Type_RecordType(mapped_fields, Option_some(new_id), new_name);
-                  break __ring_match28;
+                  break __ring_match32;
                 }
-                if (__ring_m28._tag === "RecordType") {
-                  const extra_fields = __ring_m28.fields; const extra_tail = __ring_m28.tail; const extra_tn = __ring_m28.tail_name;
+                if (__ring_m32._tag === "RecordType") {
+                  const extra_fields = __ring_m32.fields; const extra_tail = __ring_m32.tail; const extra_tn = __ring_m32.tail_name;
                   let all_fields = list_clone(mapped_fields);
-                  const __ring_iter_6 = __List_Iterable.iter(extra_fields);
+                  const __ring_iter_7 = __List_Iterable.iter(extra_fields);
                   while (true) {
-                    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-                    if (__ring_next_6._tag === "none") break;
-                    const ef = __ring_next_6._0;
+                    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+                    if (__ring_next_7._tag === "none") break;
+                    const ef = __ring_next_7._0;
                     List_push(all_fields, new types$RecordField(ef.name, apply_subst(subst, ef.ty)));
                   }
                   return types$Type_RecordType(all_fields, extra_tail, extra_tn);
-                  break __ring_match28;
+                  break __ring_match32;
                 }
                 return types$Type_RecordType(mapped_fields, Option_none, Option_none);
-                break __ring_match28;
+                break __ring_match32;
               }
-              break __ring_match27;
+              break __ring_match31;
             }
-            if (__ring_m27._tag === "none") {
+            if (__ring_m31._tag === "none") {
               const actual_id = ((root_id === t_id) ? t_id : root_id);
               return types$Type_RecordType(mapped_fields, Option_some(actual_id), tail_name);
-              break __ring_match27;
+              break __ring_match31;
             }
-            __match_fail(__ring_m27);
+            __match_fail(__ring_m31);
           }
-          break __ring_match26;
+          break __ring_match30;
         }
-        if (__ring_m26._tag === "none") {
+        if (__ring_m30._tag === "none") {
           return types$Type_RecordType(mapped_fields, Option_none, tail_name);
-          break __ring_match26;
+          break __ring_match30;
         }
-        __match_fail(__ring_m26);
+        __match_fail(__ring_m30);
       }
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "EffectRowType") {
-      const effects = __ring_m24.effects; const tail = __ring_m24.tail;
+    if (__ring_m28._tag === "EffectRowType") {
+      const effects = __ring_m28.effects; const tail = __ring_m28.tail;
       const row = apply_subst_row(subst, new types$EffectRow(effects, tail));
       return types$Type_EffectRowType(row.effects, row.tail);
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "TupleType") {
-      const elements = __ring_m24.elements;
+    if (__ring_m28._tag === "TupleType") {
+      const elements = __ring_m28.elements;
       return types$Type_TupleType(elements.map((function(e) { return apply_subst(subst, e); })));
-      break __ring_match24;
+      break __ring_match28;
     }
-    if (__ring_m24._tag === "ErrorType") {
+    if (__ring_m28._tag === "ErrorType") {
       return t;
-      break __ring_match24;
+      break __ring_match28;
     }
-    __match_fail(__ring_m24);
-  }
-}
-
-function apply_subst_effect(subst, e) {
-  __ring_match29: {
-    const __ring_m29 = e;
-    if (__ring_m29._tag === "FailEffect") {
-      const error_type = __ring_m29.error_type;
-      return types$Effect_FailEffect(apply_subst(subst, error_type));
-      break __ring_match29;
-    }
-    if (__ring_m29._tag === "MutEffect") {
-      const state_type = __ring_m29.state_type;
-      return types$Effect_MutEffect(apply_subst(subst, state_type));
-      break __ring_match29;
-    }
-    if (__ring_m29._tag === "CustomEffect") {
-      const name = __ring_m29.name; const type_args = __ring_m29.type_args;
-      return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst(subst, a); })));
-      break __ring_match29;
-    }
-    return e;
-    break __ring_match29;
-  }
-}
-
-function apply_subst_row(subst, row) {
-  const effects = row.effects.map((function(e) { return apply_subst_effect(subst, e); }));
-  __ring_match30: {
-    const __ring_m30 = row.tail;
-    if (__ring_m30._tag === "some") {
-      const t_id = __ring_m30._0;
-      const root_id = union_find$uf_find(subst, t_id);
-      __ring_match31: {
-        const __ring_m31 = union_find$uf_lookup(subst, root_id);
-        if (__ring_m31._tag === "some") {
-          const resolved = __ring_m31._0;
-          const chased = apply_subst(subst, resolved);
-          __ring_match32: {
-            const __ring_m32 = chased;
-            if (__ring_m32._tag === "TypeVar") {
-              const new_id = __ring_m32.id;
-              return new types$EffectRow(effects, Option_some(new_id));
-              break __ring_match32;
-            }
-            if (__ring_m32._tag === "EffectRowType") {
-              const extra_effs = __ring_m32.effects; const extra_tail = __ring_m32.tail;
-              let merged = list_clone(effects);
-              const __ring_iter_7 = __List_Iterable.iter(extra_effs);
-              while (true) {
-                const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-                if (__ring_next_7._tag === "none") break;
-                const ee = __ring_next_7._0;
-                List_push(merged, apply_subst_effect(subst, ee));
-              }
-              return new types$EffectRow(merged, extra_tail);
-              break __ring_match32;
-            }
-            return new types$EffectRow(effects, Option_none);
-            break __ring_match32;
-          }
-          break __ring_match31;
-        }
-        if (__ring_m31._tag === "none") {
-          const actual_id = ((root_id === t_id) ? t_id : root_id);
-          return new types$EffectRow(effects, Option_some(actual_id));
-          break __ring_match31;
-        }
-        __match_fail(__ring_m31);
-      }
-      break __ring_match30;
-    }
-    if (__ring_m30._tag === "none") {
-      return new types$EffectRow(effects, Option_none);
-      break __ring_match30;
-    }
-    __match_fail(__ring_m30);
+    __match_fail(__ring_m28);
   }
 }
 

@@ -504,7 +504,7 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     for i in 0..method_count {
         match method_order.get(i) {
             some(method_name) => {
-                emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, alloc_fn, alloc_ty, i)
+                let _ = emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, alloc_fn, alloc_ty, i)
             },
             none => {},
         }

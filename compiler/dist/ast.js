@@ -249,10 +249,6 @@ class Span {
   }
 }
 
-function span_zero() {
-  return new Span("<unknown>", new Position(1, 0, 0), new Position(1, 0, 0));
-}
-
 class RecordTypeField {
   constructor(name, ty, span) {
     this.name = name;
@@ -654,6 +650,10 @@ class Program {
     this.decls = decls;
     this.span = span;
   }
+}
+
+function span_zero() {
+  return new Span("<unknown>", new Position(1, 0, 0), new Position(1, 0, 0));
 }
 
 function __Position_Eq_eq(self, other) {

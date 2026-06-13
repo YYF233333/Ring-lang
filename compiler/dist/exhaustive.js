@@ -403,14 +403,20 @@ function ctor_at(list, i) {
   }
 }
 
-function type_is_recursive(env, ty, key) {
+function type_contains_key(env, ty, key, visited) {
+  const ty_str = types$type_to_string(ty);
+  if ((ty_str === key)) {
+    return true;
+  }
+  if (_Set_contains(visited, ty_str, __Str_Eq)) {
+    return false;
+  }
+  _Set_insert(visited, ty_str);
   __ring_match14: {
     const __ring_m14 = ty;
     if (__ring_m14._tag === "EnumType") {
       const name = __ring_m14.name; const type_params = __ring_m14.type_params; const variants = __ring_m14.variants;
       const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
-      let visited = set_new();
-      _Set_insert(visited, key);
       const __ring_iter_4 = __List_Iterable.iter(inst_variants);
       while (true) {
         const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
@@ -429,35 +435,72 @@ function type_is_recursive(env, ty, key) {
       return false;
       break __ring_match14;
     }
+    if (__ring_m14._tag === "StructType") {
+      const name = __ring_m14.name; const type_params = __ring_m14.type_params; const fields = __ring_m14.fields;
+      const inst_fields = instantiate_struct_fields(env, name, type_params, fields);
+      const __ring_iter_6 = __List_Iterable.iter(inst_fields);
+      while (true) {
+        const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+        if (__ring_next_6._tag === "none") break;
+        const f = __ring_next_6._0;
+        if (type_contains_key(env, f.ty, key, visited)) {
+          return true;
+        }
+      }
+      return false;
+      break __ring_match14;
+    }
+    if (__ring_m14._tag === "TupleType") {
+      const elements = __ring_m14.elements;
+      const __ring_iter_7 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+        if (__ring_next_7._tag === "none") break;
+        const e = __ring_next_7._0;
+        if (type_contains_key(env, e, key, visited)) {
+          return true;
+        }
+      }
+      return false;
+      break __ring_match14;
+    }
+    if (__ring_m14._tag === "FnType") {
+      const params = __ring_m14.params; const return_type = __ring_m14.return_type;
+      const __ring_iter_8 = __List_Iterable.iter(params);
+      while (true) {
+        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+        if (__ring_next_8._tag === "none") break;
+        const p = __ring_next_8._0;
+        if (type_contains_key(env, p, key, visited)) {
+          return true;
+        }
+      }
+      return type_contains_key(env, return_type, key, visited);
+      break __ring_match14;
+    }
     return false;
     break __ring_match14;
   }
 }
 
-function type_contains_key(env, ty, key, visited) {
-  const ty_str = types$type_to_string(ty);
-  if ((ty_str === key)) {
-    return true;
-  }
-  if (_Set_contains(visited, ty_str, __Str_Eq)) {
-    return false;
-  }
-  _Set_insert(visited, ty_str);
+function type_is_recursive(env, ty, key) {
   __ring_match15: {
     const __ring_m15 = ty;
     if (__ring_m15._tag === "EnumType") {
       const name = __ring_m15.name; const type_params = __ring_m15.type_params; const variants = __ring_m15.variants;
       const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
-      const __ring_iter_6 = __List_Iterable.iter(inst_variants);
+      let visited = set_new();
+      _Set_insert(visited, key);
+      const __ring_iter_9 = __List_Iterable.iter(inst_variants);
       while (true) {
-        const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-        if (__ring_next_6._tag === "none") break;
-        const v = __ring_next_6._0;
-        const __ring_iter_7 = __List_Iterable.iter(v.fields);
+        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+        if (__ring_next_9._tag === "none") break;
+        const v = __ring_next_9._0;
+        const __ring_iter_10 = __List_Iterable.iter(v.fields);
         while (true) {
-          const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-          if (__ring_next_7._tag === "none") break;
-          const ft = __ring_next_7._0;
+          const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+          if (__ring_next_10._tag === "none") break;
+          const ft = __ring_next_10._0;
           if (type_contains_key(env, ft, key, visited)) {
             return true;
           }
@@ -466,475 +509,70 @@ function type_contains_key(env, ty, key, visited) {
       return false;
       break __ring_match15;
     }
-    if (__ring_m15._tag === "StructType") {
-      const name = __ring_m15.name; const type_params = __ring_m15.type_params; const fields = __ring_m15.fields;
-      const inst_fields = instantiate_struct_fields(env, name, type_params, fields);
-      const __ring_iter_8 = __List_Iterable.iter(inst_fields);
-      while (true) {
-        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
-        if (__ring_next_8._tag === "none") break;
-        const f = __ring_next_8._0;
-        if (type_contains_key(env, f.ty, key, visited)) {
-          return true;
-        }
-      }
-      return false;
-      break __ring_match15;
-    }
-    if (__ring_m15._tag === "TupleType") {
-      const elements = __ring_m15.elements;
-      const __ring_iter_9 = __List_Iterable.iter(elements);
-      while (true) {
-        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
-        if (__ring_next_9._tag === "none") break;
-        const e = __ring_next_9._0;
-        if (type_contains_key(env, e, key, visited)) {
-          return true;
-        }
-      }
-      return false;
-      break __ring_match15;
-    }
-    if (__ring_m15._tag === "FnType") {
-      const params = __ring_m15.params; const return_type = __ring_m15.return_type;
-      const __ring_iter_10 = __List_Iterable.iter(params);
-      while (true) {
-        const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-        if (__ring_next_10._tag === "none") break;
-        const p = __ring_next_10._0;
-        if (type_contains_key(env, p, key, visited)) {
-          return true;
-        }
-      }
-      return type_contains_key(env, return_type, key, visited);
-      break __ring_match15;
-    }
     return false;
     break __ring_match15;
   }
 }
 
-function check_exhaustive(env, arms, scrutinee_type, subst) {
-  let patterns = [];
-  const __ring_iter_11 = __List_Iterable.iter(arms);
+function expand_or_patterns(patterns) {
+  let result = [];
+  const __ring_iter_11 = __List_Iterable.iter(patterns);
   while (true) {
     const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
     if (__ring_next_11._tag === "none") break;
-    const arm = __ring_next_11._0;
+    const p = __ring_next_11._0;
     __ring_match16: {
-      const __ring_m16 = arm.guard;
-      if (__ring_m16._tag === "some") {
-        break __ring_match16;
-      }
-      if (__ring_m16._tag === "none") {
-        List_push(patterns, arm.pattern);
-        break __ring_match16;
-      }
-      __match_fail(__ring_m16);
-    }
-  }
-  return check_patterns(env, patterns, scrutinee_type, subst);
-}
-
-function expand_or_patterns(patterns) {
-  let result = [];
-  const __ring_iter_12 = __List_Iterable.iter(patterns);
-  while (true) {
-    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-    if (__ring_next_12._tag === "none") break;
-    const p = __ring_next_12._0;
-    __ring_match17: {
-      const __ring_m17 = p;
-      if (__ring_m17._tag === "OrPattern") {
-        const sub_pats = __ring_m17.patterns;
-        const __ring_iter_13 = __List_Iterable.iter(sub_pats);
+      const __ring_m16 = p;
+      if (__ring_m16._tag === "OrPattern") {
+        const sub_pats = __ring_m16.patterns;
+        const __ring_iter_12 = __List_Iterable.iter(sub_pats);
         while (true) {
-          const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-          if (__ring_next_13._tag === "none") break;
-          const sp = __ring_next_13._0;
+          const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+          if (__ring_next_12._tag === "none") break;
+          const sp = __ring_next_12._0;
           List_push(result, sp);
         }
-        break __ring_match17;
+        break __ring_match16;
       }
       List_push(result, p);
-      break __ring_match17;
+      break __ring_match16;
     }
   }
   return result;
-}
-
-function check_patterns(env, patterns, ty, subst) {
-  const resolved = env$apply_subst(subst, ty);
-  const expanded = expand_or_patterns(patterns);
-  const __ring_iter_14 = __List_Iterable.iter(expanded);
-  while (true) {
-    const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
-    if (__ring_next_14._tag === "none") break;
-    const p = __ring_next_14._0;
-    __ring_match18: {
-      const __ring_m18 = p;
-      if (__ring_m18._tag === "Wildcard") {
-        return Option_none;
-        break __ring_match18;
-      }
-      if (__ring_m18._tag === "Binding") {
-        return Option_none;
-        break __ring_match18;
-      }
-      break __ring_match18;
-    }
-  }
-  __ring_match19: {
-    const __ring_m19 = resolved;
-    if (__ring_m19._tag === "EnumType") {
-      const name = __ring_m19.name; const type_params = __ring_m19.type_params; const variants = __ring_m19.variants;
-      const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
-      const variant_names = inst_variants.map((function(v) { return v.name; }));
-      let covered = set_new();
-      const __ring_iter_15 = __List_Iterable.iter(inst_variants);
-      while (true) {
-        const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
-        if (__ring_next_15._tag === "none") break;
-        const v = __ring_next_15._0;
-        let sub_patterns_for_variant = [];
-        const __ring_iter_16 = __List_Iterable.iter(expanded);
-        while (true) {
-          const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
-          if (__ring_next_16._tag === "none") break;
-          const p = __ring_next_16._0;
-          __ring_match20: {
-            const __ring_m20 = p;
-            if (__ring_m20._tag === "Constructor") {
-              const pname = __ring_m20.name; const fields = __ring_m20.fields;
-              if ((pname === v.name)) {
-                _Set_insert(covered, v.name);
-                List_push(sub_patterns_for_variant, fields);
-              }
-              break __ring_match20;
-            }
-            if (__ring_m20._tag === "NamedConstructor") {
-              const pname = __ring_m20.name; const nfields = __ring_m20.fields;
-              __ring_match21: {
-                const __ring_m21 = v.field_names;
-                if (__ring_m21._tag === "some") {
-                  const fnames = __ring_m21._0;
-                  if ((pname === v.name)) {
-                    _Set_insert(covered, v.name);
-                    const positional = named_pattern_to_positional(nfields, fnames, List_len(v.fields));
-                    List_push(sub_patterns_for_variant, positional);
-                  }
-                  break __ring_match21;
-                }
-                if (__ring_m21._tag === "none") {
-                  break __ring_match21;
-                }
-                __match_fail(__ring_m21);
-              }
-              break __ring_match20;
-            }
-            break __ring_match20;
-          }
-        }
-        if ((_Set_contains(covered, v.name, __Str_Eq) === false)) {
-        } else {
-          if ((List_len(v.fields) > 0)) {
-            const wild = ast$Pattern_Wildcard(ast$span_zero());
-            let normalized = [];
-            const __ring_iter_17 = __List_Iterable.iter(sub_patterns_for_variant);
-            while (true) {
-              const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
-              if (__ring_next_17._tag === "none") break;
-              const row = __ring_next_17._0;
-              let padded = list_clone(row);
-              while ((List_len(padded) < List_len(v.fields))) {
-                List_push(padded, wild);
-              }
-              List_push(normalized, padded);
-            }
-            let expanding = set_new();
-            _Set_insert(expanding, types$type_to_string(resolved));
-            const missing_fields = check_matrix(env, normalized, v.fields, subst, expanding);
-            __ring_match22: {
-              const __ring_m22 = missing_fields;
-              if (__ring_m22._tag === "some") {
-                const mf = __ring_m22._0;
-                const joined = join_strs(mf, ", ");
-                return Option_some(`${v.name}(${joined})`);
-                break __ring_match22;
-              }
-              if (__ring_m22._tag === "none") {
-                break __ring_match22;
-              }
-              __match_fail(__ring_m22);
-            }
-          }
-        }
-      }
-      const __ring_iter_18 = __List_Iterable.iter(variant_names);
-      while (true) {
-        const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
-        if (__ring_next_18._tag === "none") break;
-        const vn = __ring_next_18._0;
-        if ((_Set_contains(covered, vn, __Str_Eq) === false)) {
-          return Option_some(vn);
-        }
-      }
-      return Option_none;
-      break __ring_match19;
-    }
-    if (__ring_m19._tag === "BoolType") {
-      let has_true = false;
-      let has_false = false;
-      const __ring_iter_19 = __List_Iterable.iter(expanded);
-      while (true) {
-        const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
-        if (__ring_next_19._tag === "none") break;
-        const p = __ring_next_19._0;
-        __ring_match23: {
-          const __ring_m23 = p;
-          if (__ring_m23._tag === "Literal") {
-            const value = __ring_m23.value;
-            __ring_match24: {
-              const __ring_m24 = value;
-              if (__ring_m24._tag === "BoolVal") {
-                const b = __ring_m24._0;
-                if (b) {
-                  has_true = true;
-                } else {
-                  has_false = true;
-                }
-                break __ring_match24;
-              }
-              break __ring_match24;
-            }
-            break __ring_match23;
-          }
-          break __ring_match23;
-        }
-      }
-      if ((has_true === true)) {
-        if ((has_false === true)) {
-          return Option_none;
-        } else {
-          return Option_some("false");
-        }
-      } else {
-        return Option_some("true");
-      }
-      break __ring_match19;
-    }
-    if (__ring_m19._tag === "StructType") {
-      const sname = __ring_m19.name; const stp = __ring_m19.type_params; const sfields = __ring_m19.fields;
-      const inst_fields = instantiate_struct_fields(env, sname, stp, sfields);
-      let covered = false;
-      let sub_patterns = [];
-      let field_names = [];
-      let field_types = [];
-      const __ring_iter_20 = __List_Iterable.iter(inst_fields);
-      while (true) {
-        const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
-        if (__ring_next_20._tag === "none") break;
-        const f = __ring_next_20._0;
-        List_push(field_names, f.name);
-        List_push(field_types, f.ty);
-      }
-      const __ring_iter_21 = __List_Iterable.iter(expanded);
-      while (true) {
-        const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
-        if (__ring_next_21._tag === "none") break;
-        const p = __ring_next_21._0;
-        __ring_match25: {
-          const __ring_m25 = p;
-          if (__ring_m25._tag === "NamedConstructor") {
-            const pname = __ring_m25.name; const nfields = __ring_m25.fields;
-            if (names_match_struct(pname, sname)) {
-              covered = true;
-              const positional = named_pattern_to_positional(nfields, field_names, List_len(sfields));
-              List_push(sub_patterns, positional);
-            }
-            break __ring_match25;
-          }
-          if (__ring_m25._tag === "Constructor") {
-            const pname = __ring_m25.name; const cfields = __ring_m25.fields;
-            if (names_match_struct(pname, sname)) {
-              covered = true;
-              List_push(sub_patterns, cfields);
-            }
-            break __ring_match25;
-          }
-          break __ring_match25;
-        }
-      }
-      if ((covered === false)) {
-        return Option_some(sname);
-      }
-      if ((List_len(inst_fields) > 0)) {
-        const wild = ast$Pattern_Wildcard(ast$span_zero());
-        let normalized = [];
-        const __ring_iter_22 = __List_Iterable.iter(sub_patterns);
-        while (true) {
-          const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
-          if (__ring_next_22._tag === "none") break;
-          const row = __ring_next_22._0;
-          let padded = list_clone(row);
-          while ((List_len(padded) < List_len(inst_fields))) {
-            List_push(padded, wild);
-          }
-          List_push(normalized, padded);
-        }
-        let expanding = set_new();
-        _Set_insert(expanding, types$type_to_string(resolved));
-        const missing_fields = check_matrix(env, normalized, field_types, subst, expanding);
-        __ring_match26: {
-          const __ring_m26 = missing_fields;
-          if (__ring_m26._tag === "some") {
-            const mf = __ring_m26._0;
-            const joined = join_strs(mf, ", ");
-            return Option_some(`${sname}(${joined})`);
-            break __ring_match26;
-          }
-          if (__ring_m26._tag === "none") {
-            break __ring_match26;
-          }
-          __match_fail(__ring_m26);
-        }
-      }
-      return Option_none;
-      break __ring_match19;
-    }
-    if (__ring_m19._tag === "UnitType") {
-      return Option_none;
-      break __ring_match19;
-    }
-    if (__ring_m19._tag === "TupleType") {
-      const elements = __ring_m19.elements;
-      let matrix = [];
-      const __ring_iter_23 = __List_Iterable.iter(expanded);
-      while (true) {
-        const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
-        if (__ring_next_23._tag === "none") break;
-        const p = __ring_next_23._0;
-        __ring_match27: {
-          const __ring_m27 = p;
-          if (__ring_m27._tag === "TuplePattern") {
-            const pelems = __ring_m27.elements;
-            if ((List_len(pelems) === List_len(elements))) {
-              List_push(matrix, pelems);
-            }
-            break __ring_match27;
-          }
-          break __ring_match27;
-        }
-      }
-      if ((List_len(matrix) === 0)) {
-        const underscores = elements.map((function(e) { return "_"; }));
-        const joined = join_strs(underscores, ", ");
-        return Option_some(`(${joined})`);
-      }
-      const missing = check_matrix(env, matrix, elements, subst, set_new());
-      __ring_match28: {
-        const __ring_m28 = missing;
-        if (__ring_m28._tag === "some") {
-          const m = __ring_m28._0;
-          const joined = join_strs(m, ", ");
-          return Option_some(`(${joined})`);
-          break __ring_match28;
-        }
-        if (__ring_m28._tag === "none") {
-          return Option_none;
-          break __ring_match28;
-        }
-        __match_fail(__ring_m28);
-      }
-      break __ring_match19;
-    }
-    return Option_some("_");
-    break __ring_match19;
-  }
-}
-
-function finite_type_ctors(env, ty) {
-  __ring_match29: {
-    const __ring_m29 = ty;
-    if (__ring_m29._tag === "BoolType") {
-      let result = [];
-      List_push(result, new Ctor("true", 0, [], Option_none, false));
-      List_push(result, new Ctor("false", 0, [], Option_none, false));
-      return Option_some(result);
-      break __ring_match29;
-    }
-    if (__ring_m29._tag === "EnumType") {
-      const name = __ring_m29.name; const type_params = __ring_m29.type_params; const variants = __ring_m29.variants;
-      const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
-      let result = [];
-      const __ring_iter_24 = __List_Iterable.iter(inst_variants);
-      while (true) {
-        const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-        if (__ring_next_24._tag === "none") break;
-        const v = __ring_next_24._0;
-        List_push(result, new Ctor(v.name, List_len(v.fields), v.fields, v.field_names, false));
-      }
-      return Option_some(result);
-      break __ring_match29;
-    }
-    if (__ring_m29._tag === "StructType") {
-      const name = __ring_m29.name; const type_params = __ring_m29.type_params; const fields = __ring_m29.fields;
-      const inst_fields = instantiate_struct_fields(env, name, type_params, fields);
-      let field_types = [];
-      let field_names = [];
-      const __ring_iter_25 = __List_Iterable.iter(inst_fields);
-      while (true) {
-        const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
-        if (__ring_next_25._tag === "none") break;
-        const f = __ring_next_25._0;
-        List_push(field_types, f.ty);
-        List_push(field_names, f.name);
-      }
-      let result = [];
-      List_push(result, new Ctor(name, List_len(inst_fields), field_types, Option_some(field_names), false));
-      return Option_some(result);
-      break __ring_match29;
-    }
-    if (__ring_m29._tag === "UnitType") {
-      let result = [];
-      List_push(result, new Ctor("()", 0, [], Option_none, false));
-      return Option_some(result);
-      break __ring_match29;
-    }
-    if (__ring_m29._tag === "TupleType") {
-      const elements = __ring_m29.elements;
-      let result = [];
-      List_push(result, new Ctor("", List_len(elements), elements, Option_none, true));
-      return Option_some(result);
-      break __ring_match29;
-    }
-    return Option_none;
-    break __ring_match29;
-  }
 }
 
 function wild_pattern() {
   return ast$Pattern_Wildcard(ast$span_zero());
 }
 
+function index_of(list, target) {
+  const __ring_end13 = List_len(list);
+  for (let i = 0; i < __ring_end13; i++) {
+    if ((str_at(list, i) === target)) {
+      return i;
+    }
+  }
+  return (0 - 1);
+}
+
 function named_pattern_to_positional(fields, field_names, arity) {
   const wild = wild_pattern();
   let result = [];
-  const __ring_end26 = arity;
-  for (let i = 0; i < __ring_end26; i++) {
+  const __ring_end14 = arity;
+  for (let i = 0; i < __ring_end14; i++) {
     List_push(result, wild);
   }
-  const __ring_iter_27 = __List_Iterable.iter(fields);
+  const __ring_iter_15 = __List_Iterable.iter(fields);
   while (true) {
-    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
-    if (__ring_next_27._tag === "none") break;
-    const f = __ring_next_27._0;
+    const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+    if (__ring_next_15._tag === "none") break;
+    const f = __ring_next_15._0;
     const idx = index_of(field_names, f.name);
     if ((idx >= 0)) {
       if ((idx < arity)) {
         let new_result = [];
-        const __ring_end28 = List_len(result);
-        for (let j = 0; j < __ring_end28; j++) {
+        const __ring_end16 = List_len(result);
+        for (let j = 0; j < __ring_end16; j++) {
           if ((j === idx)) {
             List_push(new_result, f.pattern);
           } else {
@@ -948,68 +586,125 @@ function named_pattern_to_positional(fields, field_names, arity) {
   return result;
 }
 
-function index_of(list, target) {
-  const __ring_end29 = List_len(list);
-  for (let i = 0; i < __ring_end29; i++) {
-    if ((str_at(list, i) === target)) {
-      return i;
+function finite_type_ctors(env, ty) {
+  __ring_match17: {
+    const __ring_m17 = ty;
+    if (__ring_m17._tag === "BoolType") {
+      let result = [];
+      List_push(result, new Ctor("true", 0, [], Option_none, false));
+      List_push(result, new Ctor("false", 0, [], Option_none, false));
+      return Option_some(result);
+      break __ring_match17;
     }
+    if (__ring_m17._tag === "EnumType") {
+      const name = __ring_m17.name; const type_params = __ring_m17.type_params; const variants = __ring_m17.variants;
+      const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
+      let result = [];
+      const __ring_iter_17 = __List_Iterable.iter(inst_variants);
+      while (true) {
+        const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+        if (__ring_next_17._tag === "none") break;
+        const v = __ring_next_17._0;
+        List_push(result, new Ctor(v.name, List_len(v.fields), v.fields, v.field_names, false));
+      }
+      return Option_some(result);
+      break __ring_match17;
+    }
+    if (__ring_m17._tag === "StructType") {
+      const name = __ring_m17.name; const type_params = __ring_m17.type_params; const fields = __ring_m17.fields;
+      const inst_fields = instantiate_struct_fields(env, name, type_params, fields);
+      let field_types = [];
+      let field_names = [];
+      const __ring_iter_18 = __List_Iterable.iter(inst_fields);
+      while (true) {
+        const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+        if (__ring_next_18._tag === "none") break;
+        const f = __ring_next_18._0;
+        List_push(field_types, f.ty);
+        List_push(field_names, f.name);
+      }
+      let result = [];
+      List_push(result, new Ctor(name, List_len(inst_fields), field_types, Option_some(field_names), false));
+      return Option_some(result);
+      break __ring_match17;
+    }
+    if (__ring_m17._tag === "UnitType") {
+      let result = [];
+      List_push(result, new Ctor("()", 0, [], Option_none, false));
+      return Option_some(result);
+      break __ring_match17;
+    }
+    if (__ring_m17._tag === "TupleType") {
+      const elements = __ring_m17.elements;
+      let result = [];
+      List_push(result, new Ctor("", List_len(elements), elements, Option_none, true));
+      return Option_some(result);
+      break __ring_match17;
+    }
+    return Option_none;
+    break __ring_match17;
   }
-  return (0 - 1);
+}
+
+function names_match_struct(pattern_name, type_name) {
+  if ((pattern_name === type_name)) {
+    return true;
+  }
+  return Str_ends_with(type_name, `::${pattern_name}`);
 }
 
 function specialize_row(row, ctor) {
   const first = pat_at(row, 0);
   let rest = [];
-  const __ring_end30 = List_len(row);
-  for (let i = 1; i < __ring_end30; i++) {
+  const __ring_end19 = List_len(row);
+  for (let i = 1; i < __ring_end19; i++) {
     List_push(rest, pat_at(row, i));
   }
-  __ring_match30: {
-    const __ring_m30 = first;
-    if (__ring_m30._tag === "Wildcard") {
+  __ring_match18: {
+    const __ring_m18 = first;
+    if (__ring_m18._tag === "Wildcard") {
       let result = [];
       const wild = wild_pattern();
-      const __ring_end31 = ctor.arity;
-      for (let i = 0; i < __ring_end31; i++) {
+      const __ring_end20 = ctor.arity;
+      for (let i = 0; i < __ring_end20; i++) {
         List_push(result, wild);
       }
       List_extend(result, rest);
       return Option_some(result);
-      break __ring_match30;
+      break __ring_match18;
     }
-    if (__ring_m30._tag === "Binding") {
+    if (__ring_m18._tag === "Binding") {
       let result = [];
       const wild = wild_pattern();
-      const __ring_end32 = ctor.arity;
-      for (let i = 0; i < __ring_end32; i++) {
+      const __ring_end21 = ctor.arity;
+      for (let i = 0; i < __ring_end21; i++) {
         List_push(result, wild);
       }
       List_extend(result, rest);
       return Option_some(result);
-      break __ring_match30;
+      break __ring_match18;
     }
-    if (__ring_m30._tag === "Literal") {
-      const value = __ring_m30.value;
-      __ring_match31: {
-        const __ring_m31 = value;
-        if (__ring_m31._tag === "BoolVal") {
-          const b = __ring_m31._0;
+    if (__ring_m18._tag === "Literal") {
+      const value = __ring_m18.value;
+      __ring_match19: {
+        const __ring_m19 = value;
+        if (__ring_m19._tag === "BoolVal") {
+          const b = __ring_m19._0;
           const match_name = (b ? "true" : "false");
           if ((match_name === ctor.name)) {
             return Option_some(rest);
           } else {
             return Option_none;
           }
-          break __ring_match31;
+          break __ring_match19;
         }
         return Option_none;
-        break __ring_match31;
+        break __ring_match19;
       }
-      break __ring_match30;
+      break __ring_match18;
     }
-    if (__ring_m30._tag === "Constructor") {
-      const name = __ring_m30.name; const fields = __ring_m30.fields;
+    if (__ring_m18._tag === "Constructor") {
+      const name = __ring_m18.name; const fields = __ring_m18.fields;
       if (names_match_struct(name, ctor.name)) {
         let sub = list_clone(fields);
         const wild = wild_pattern();
@@ -1021,10 +716,10 @@ function specialize_row(row, ctor) {
       } else {
         return Option_none;
       }
-      break __ring_match30;
+      break __ring_match18;
     }
-    if (__ring_m30._tag === "NamedConstructor") {
-      const name = __ring_m30.name; const nfields = __ring_m30.fields;
+    if (__ring_m18._tag === "NamedConstructor") {
+      const name = __ring_m18.name; const nfields = __ring_m18.fields;
       if (names_match_struct(name, ctor.name)) {
         const field_names = (function() {
   const __ring_m = ctor.field_names;
@@ -1041,10 +736,10 @@ function specialize_row(row, ctor) {
       } else {
         return Option_none;
       }
-      break __ring_match30;
+      break __ring_match18;
     }
-    if (__ring_m30._tag === "TuplePattern") {
-      const elements = __ring_m30.elements;
+    if (__ring_m18._tag === "TuplePattern") {
+      const elements = __ring_m18.elements;
       if ((ctor.is_tuple === true)) {
         if ((List_len(elements) === ctor.arity)) {
           let result = list_clone(elements);
@@ -1056,35 +751,48 @@ function specialize_row(row, ctor) {
       } else {
         return Option_none;
       }
-      break __ring_match30;
+      break __ring_match18;
     }
-    if (__ring_m30._tag === "OrPattern") {
-      const sub_pats = __ring_m30.patterns;
-      const __ring_iter_33 = __List_Iterable.iter(sub_pats);
+    if (__ring_m18._tag === "OrPattern") {
+      const sub_pats = __ring_m18.patterns;
+      const __ring_iter_22 = __List_Iterable.iter(sub_pats);
       while (true) {
-        const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
-        if (__ring_next_33._tag === "none") break;
-        const sp = __ring_next_33._0;
+        const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+        if (__ring_next_22._tag === "none") break;
+        const sp = __ring_next_22._0;
         let trial_row = [sp];
         List_extend(trial_row, rest);
         const result = specialize_row(trial_row, ctor);
-        __ring_match32: {
-          const __ring_m32 = result;
-          if (__ring_m32._tag === "some") {
+        __ring_match20: {
+          const __ring_m20 = result;
+          if (__ring_m20._tag === "some") {
             return result;
-            break __ring_match32;
+            break __ring_match20;
           }
-          if (__ring_m32._tag === "none") {
-            break __ring_match32;
+          if (__ring_m20._tag === "none") {
+            break __ring_match20;
           }
-          __match_fail(__ring_m32);
+          __match_fail(__ring_m20);
         }
       }
       return Option_none;
-      break __ring_match30;
+      break __ring_match18;
     }
-    __match_fail(__ring_m30);
+    __match_fail(__ring_m18);
   }
+}
+
+function join_strs(parts, sep) {
+  let result = "";
+  const __ring_end23 = List_len(parts);
+  for (let i = 0; i < __ring_end23; i++) {
+    if ((i > 0)) {
+      result = `${result}${sep}`;
+    }
+    const part = str_at(parts, i);
+    result = `${result}${part}`;
+  }
+  return result;
 }
 
 function check_matrix(env, rows, col_types, subst, expanding) {
@@ -1098,8 +806,8 @@ function check_matrix(env, rows, col_types, subst, expanding) {
   }
   const first_type = env$apply_subst(subst, type_at(col_types, 0));
   let rest_types = [];
-  const __ring_end34 = List_len(col_types);
-  for (let i = 1; i < __ring_end34; i++) {
+  const __ring_end24 = List_len(col_types);
+  for (let i = 1; i < __ring_end24; i++) {
     List_push(rest_types, type_at(col_types, i));
   }
   const type_key = (function() {
@@ -1109,56 +817,56 @@ function check_matrix(env, rows, col_types, subst, expanding) {
 })();
   const is_reentrant = ((type_key !== "") ? _Set_contains(expanding, type_key, __Str_Eq) : false);
   const ctors = (is_reentrant ? Option_none : finite_type_ctors(env, first_type));
-  __ring_match33: {
-    const __ring_m33 = ctors;
-    if (__ring_m33._tag === "some") {
-      const ctor_list = __ring_m33._0;
+  __ring_match21: {
+    const __ring_m21 = ctors;
+    if (__ring_m21._tag === "some") {
+      const ctor_list = __ring_m21._0;
       let new_expanding = set_clone(expanding);
       if ((type_key !== "")) {
         if (type_is_recursive(env, first_type, type_key)) {
           _Set_insert(new_expanding, type_key);
         }
       }
-      const __ring_iter_35 = __List_Iterable.iter(ctor_list);
+      const __ring_iter_25 = __List_Iterable.iter(ctor_list);
       while (true) {
-        const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
-        if (__ring_next_35._tag === "none") break;
-        const ctor = __ring_next_35._0;
+        const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+        if (__ring_next_25._tag === "none") break;
+        const ctor = __ring_next_25._0;
         let specialized = [];
-        const __ring_iter_36 = __List_Iterable.iter(rows);
+        const __ring_iter_26 = __List_Iterable.iter(rows);
         while (true) {
-          const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
-          if (__ring_next_36._tag === "none") break;
-          const row = __ring_next_36._0;
-          __ring_match34: {
-            const __ring_m34 = specialize_row(row, ctor);
-            if (__ring_m34._tag === "some") {
-              const s = __ring_m34._0;
+          const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+          if (__ring_next_26._tag === "none") break;
+          const row = __ring_next_26._0;
+          __ring_match22: {
+            const __ring_m22 = specialize_row(row, ctor);
+            if (__ring_m22._tag === "some") {
+              const s = __ring_m22._0;
               List_push(specialized, s);
-              break __ring_match34;
+              break __ring_match22;
             }
-            if (__ring_m34._tag === "none") {
-              break __ring_match34;
+            if (__ring_m22._tag === "none") {
+              break __ring_match22;
             }
-            __match_fail(__ring_m34);
+            __match_fail(__ring_m22);
           }
         }
         let new_types = [];
         List_extend(new_types, ctor.field_types);
         List_extend(new_types, rest_types);
         const sub = check_matrix(env, specialized, new_types, subst, new_expanding);
-        __ring_match35: {
-          const __ring_m35 = sub;
-          if (__ring_m35._tag === "some") {
-            const sub_result = __ring_m35._0;
+        __ring_match23: {
+          const __ring_m23 = sub;
+          if (__ring_m23._tag === "some") {
+            const sub_result = __ring_m23._0;
             let ctor_sub = [];
-            const __ring_end37 = ctor.arity;
-            for (let i = 0; i < __ring_end37; i++) {
+            const __ring_end27 = ctor.arity;
+            for (let i = 0; i < __ring_end27; i++) {
               List_push(ctor_sub, str_at(sub_result, i));
             }
             let rest_sub = [];
-            const __ring_end38 = List_len(sub_result);
-            for (let i = ctor.arity; i < __ring_end38; i++) {
+            const __ring_end28 = List_len(sub_result);
+            for (let i = ctor.arity; i < __ring_end28; i++) {
               List_push(rest_sub, str_at(sub_result, i));
             }
             let ctor_str = "";
@@ -1177,6 +885,320 @@ function check_matrix(env, rows, col_types, subst, expanding) {
             List_push(result, ctor_str);
             List_extend(result, rest_sub);
             return Option_some(result);
+            break __ring_match23;
+          }
+          if (__ring_m23._tag === "none") {
+            break __ring_match23;
+          }
+          __match_fail(__ring_m23);
+        }
+      }
+      return Option_none;
+      break __ring_match21;
+    }
+    if (__ring_m21._tag === "none") {
+      let defaults = [];
+      const __ring_iter_29 = __List_Iterable.iter(rows);
+      while (true) {
+        const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+        if (__ring_next_29._tag === "none") break;
+        const row = __ring_next_29._0;
+        const first = pat_at(row, 0);
+        let is_default = false;
+        __ring_match24: {
+          const __ring_m24 = first;
+          if (__ring_m24._tag === "Wildcard") {
+            is_default = true;
+            break __ring_match24;
+          }
+          if (__ring_m24._tag === "Binding") {
+            is_default = true;
+            break __ring_match24;
+          }
+          if (__ring_m24._tag === "OrPattern") {
+            const sub_pats = __ring_m24.patterns;
+            const __ring_iter_30 = __List_Iterable.iter(sub_pats);
+            while (true) {
+              const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+              if (__ring_next_30._tag === "none") break;
+              const sp = __ring_next_30._0;
+              __ring_match25: {
+                const __ring_m25 = sp;
+                if (__ring_m25._tag === "Wildcard") {
+                  is_default = true;
+                  break __ring_match25;
+                }
+                if (__ring_m25._tag === "Binding") {
+                  is_default = true;
+                  break __ring_match25;
+                }
+                break __ring_match25;
+              }
+            }
+            break __ring_match24;
+          }
+          break __ring_match24;
+        }
+        if (is_default) {
+          let tail = [];
+          const __ring_end31 = List_len(row);
+          for (let i = 1; i < __ring_end31; i++) {
+            List_push(tail, pat_at(row, i));
+          }
+          List_push(defaults, tail);
+        }
+      }
+      const sub = check_matrix(env, defaults, rest_types, subst, expanding);
+      __ring_match26: {
+        const __ring_m26 = sub;
+        if (__ring_m26._tag === "some") {
+          const s = __ring_m26._0;
+          let result = [];
+          List_push(result, "_");
+          List_extend(result, s);
+          return Option_some(result);
+          break __ring_match26;
+        }
+        if (__ring_m26._tag === "none") {
+          return Option_none;
+          break __ring_match26;
+        }
+        __match_fail(__ring_m26);
+      }
+      break __ring_match21;
+    }
+    __match_fail(__ring_m21);
+  }
+}
+
+function check_patterns(env, patterns, ty, subst) {
+  const resolved = env$apply_subst(subst, ty);
+  const expanded = expand_or_patterns(patterns);
+  const __ring_iter_32 = __List_Iterable.iter(expanded);
+  while (true) {
+    const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+    if (__ring_next_32._tag === "none") break;
+    const p = __ring_next_32._0;
+    __ring_match27: {
+      const __ring_m27 = p;
+      if (__ring_m27._tag === "Wildcard") {
+        return Option_none;
+        break __ring_match27;
+      }
+      if (__ring_m27._tag === "Binding") {
+        return Option_none;
+        break __ring_match27;
+      }
+      break __ring_match27;
+    }
+  }
+  __ring_match28: {
+    const __ring_m28 = resolved;
+    if (__ring_m28._tag === "EnumType") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const variants = __ring_m28.variants;
+      const inst_variants = instantiate_enum_variants(env, name, type_params, variants);
+      const variant_names = inst_variants.map((function(v) { return v.name; }));
+      let covered = set_new();
+      const __ring_iter_33 = __List_Iterable.iter(inst_variants);
+      while (true) {
+        const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+        if (__ring_next_33._tag === "none") break;
+        const v = __ring_next_33._0;
+        let sub_patterns_for_variant = [];
+        const __ring_iter_34 = __List_Iterable.iter(expanded);
+        while (true) {
+          const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+          if (__ring_next_34._tag === "none") break;
+          const p = __ring_next_34._0;
+          __ring_match29: {
+            const __ring_m29 = p;
+            if (__ring_m29._tag === "Constructor") {
+              const pname = __ring_m29.name; const fields = __ring_m29.fields;
+              if ((pname === v.name)) {
+                _Set_insert(covered, v.name);
+                List_push(sub_patterns_for_variant, fields);
+              }
+              break __ring_match29;
+            }
+            if (__ring_m29._tag === "NamedConstructor") {
+              const pname = __ring_m29.name; const nfields = __ring_m29.fields;
+              __ring_match30: {
+                const __ring_m30 = v.field_names;
+                if (__ring_m30._tag === "some") {
+                  const fnames = __ring_m30._0;
+                  if ((pname === v.name)) {
+                    _Set_insert(covered, v.name);
+                    const positional = named_pattern_to_positional(nfields, fnames, List_len(v.fields));
+                    List_push(sub_patterns_for_variant, positional);
+                  }
+                  break __ring_match30;
+                }
+                if (__ring_m30._tag === "none") {
+                  break __ring_match30;
+                }
+                __match_fail(__ring_m30);
+              }
+              break __ring_match29;
+            }
+            break __ring_match29;
+          }
+        }
+        if ((_Set_contains(covered, v.name, __Str_Eq) === false)) {
+        } else {
+          if ((List_len(v.fields) > 0)) {
+            const wild = ast$Pattern_Wildcard(ast$span_zero());
+            let normalized = [];
+            const __ring_iter_35 = __List_Iterable.iter(sub_patterns_for_variant);
+            while (true) {
+              const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+              if (__ring_next_35._tag === "none") break;
+              const row = __ring_next_35._0;
+              let padded = list_clone(row);
+              while ((List_len(padded) < List_len(v.fields))) {
+                List_push(padded, wild);
+              }
+              List_push(normalized, padded);
+            }
+            let expanding = set_new();
+            _Set_insert(expanding, types$type_to_string(resolved));
+            const missing_fields = check_matrix(env, normalized, v.fields, subst, expanding);
+            __ring_match31: {
+              const __ring_m31 = missing_fields;
+              if (__ring_m31._tag === "some") {
+                const mf = __ring_m31._0;
+                const joined = join_strs(mf, ", ");
+                return Option_some(`${v.name}(${joined})`);
+                break __ring_match31;
+              }
+              if (__ring_m31._tag === "none") {
+                break __ring_match31;
+              }
+              __match_fail(__ring_m31);
+            }
+          }
+        }
+      }
+      const __ring_iter_36 = __List_Iterable.iter(variant_names);
+      while (true) {
+        const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+        if (__ring_next_36._tag === "none") break;
+        const vn = __ring_next_36._0;
+        if ((_Set_contains(covered, vn, __Str_Eq) === false)) {
+          return Option_some(vn);
+        }
+      }
+      return Option_none;
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "BoolType") {
+      let has_true = false;
+      let has_false = false;
+      const __ring_iter_37 = __List_Iterable.iter(expanded);
+      while (true) {
+        const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+        if (__ring_next_37._tag === "none") break;
+        const p = __ring_next_37._0;
+        __ring_match32: {
+          const __ring_m32 = p;
+          if (__ring_m32._tag === "Literal") {
+            const value = __ring_m32.value;
+            __ring_match33: {
+              const __ring_m33 = value;
+              if (__ring_m33._tag === "BoolVal") {
+                const b = __ring_m33._0;
+                if (b) {
+                  has_true = true;
+                } else {
+                  has_false = true;
+                }
+                break __ring_match33;
+              }
+              break __ring_match33;
+            }
+            break __ring_match32;
+          }
+          break __ring_match32;
+        }
+      }
+      if ((has_true === true)) {
+        if ((has_false === true)) {
+          return Option_none;
+        } else {
+          return Option_some("false");
+        }
+      } else {
+        return Option_some("true");
+      }
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "StructType") {
+      const sname = __ring_m28.name; const stp = __ring_m28.type_params; const sfields = __ring_m28.fields;
+      const inst_fields = instantiate_struct_fields(env, sname, stp, sfields);
+      let covered = false;
+      let sub_patterns = [];
+      let field_names = [];
+      let field_types = [];
+      const __ring_iter_38 = __List_Iterable.iter(inst_fields);
+      while (true) {
+        const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
+        if (__ring_next_38._tag === "none") break;
+        const f = __ring_next_38._0;
+        List_push(field_names, f.name);
+        List_push(field_types, f.ty);
+      }
+      const __ring_iter_39 = __List_Iterable.iter(expanded);
+      while (true) {
+        const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
+        if (__ring_next_39._tag === "none") break;
+        const p = __ring_next_39._0;
+        __ring_match34: {
+          const __ring_m34 = p;
+          if (__ring_m34._tag === "NamedConstructor") {
+            const pname = __ring_m34.name; const nfields = __ring_m34.fields;
+            if (names_match_struct(pname, sname)) {
+              covered = true;
+              const positional = named_pattern_to_positional(nfields, field_names, List_len(sfields));
+              List_push(sub_patterns, positional);
+            }
+            break __ring_match34;
+          }
+          if (__ring_m34._tag === "Constructor") {
+            const pname = __ring_m34.name; const cfields = __ring_m34.fields;
+            if (names_match_struct(pname, sname)) {
+              covered = true;
+              List_push(sub_patterns, cfields);
+            }
+            break __ring_match34;
+          }
+          break __ring_match34;
+        }
+      }
+      if ((covered === false)) {
+        return Option_some(sname);
+      }
+      if ((List_len(inst_fields) > 0)) {
+        const wild = ast$Pattern_Wildcard(ast$span_zero());
+        let normalized = [];
+        const __ring_iter_40 = __List_Iterable.iter(sub_patterns);
+        while (true) {
+          const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
+          if (__ring_next_40._tag === "none") break;
+          const row = __ring_next_40._0;
+          let padded = list_clone(row);
+          while ((List_len(padded) < List_len(inst_fields))) {
+            List_push(padded, wild);
+          }
+          List_push(normalized, padded);
+        }
+        let expanding = set_new();
+        _Set_insert(expanding, types$type_to_string(resolved));
+        const missing_fields = check_matrix(env, normalized, field_types, subst, expanding);
+        __ring_match35: {
+          const __ring_m35 = missing_fields;
+          if (__ring_m35._tag === "some") {
+            const mf = __ring_m35._0;
+            const joined = join_strs(mf, ", ");
+            return Option_some(`${sname}(${joined})`);
             break __ring_match35;
           }
           if (__ring_m35._tag === "none") {
@@ -1186,101 +1208,79 @@ function check_matrix(env, rows, col_types, subst, expanding) {
         }
       }
       return Option_none;
-      break __ring_match33;
+      break __ring_match28;
     }
-    if (__ring_m33._tag === "none") {
-      let defaults = [];
-      const __ring_iter_39 = __List_Iterable.iter(rows);
+    if (__ring_m28._tag === "UnitType") {
+      return Option_none;
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "TupleType") {
+      const elements = __ring_m28.elements;
+      let matrix = [];
+      const __ring_iter_41 = __List_Iterable.iter(expanded);
       while (true) {
-        const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
-        if (__ring_next_39._tag === "none") break;
-        const row = __ring_next_39._0;
-        const first = pat_at(row, 0);
-        let is_default = false;
+        const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
+        if (__ring_next_41._tag === "none") break;
+        const p = __ring_next_41._0;
         __ring_match36: {
-          const __ring_m36 = first;
-          if (__ring_m36._tag === "Wildcard") {
-            is_default = true;
-            break __ring_match36;
-          }
-          if (__ring_m36._tag === "Binding") {
-            is_default = true;
-            break __ring_match36;
-          }
-          if (__ring_m36._tag === "OrPattern") {
-            const sub_pats = __ring_m36.patterns;
-            const __ring_iter_40 = __List_Iterable.iter(sub_pats);
-            while (true) {
-              const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
-              if (__ring_next_40._tag === "none") break;
-              const sp = __ring_next_40._0;
-              __ring_match37: {
-                const __ring_m37 = sp;
-                if (__ring_m37._tag === "Wildcard") {
-                  is_default = true;
-                  break __ring_match37;
-                }
-                if (__ring_m37._tag === "Binding") {
-                  is_default = true;
-                  break __ring_match37;
-                }
-                break __ring_match37;
-              }
+          const __ring_m36 = p;
+          if (__ring_m36._tag === "TuplePattern") {
+            const pelems = __ring_m36.elements;
+            if ((List_len(pelems) === List_len(elements))) {
+              List_push(matrix, pelems);
             }
             break __ring_match36;
           }
           break __ring_match36;
         }
-        if (is_default) {
-          let tail = [];
-          const __ring_end41 = List_len(row);
-          for (let i = 1; i < __ring_end41; i++) {
-            List_push(tail, pat_at(row, i));
-          }
-          List_push(defaults, tail);
-        }
       }
-      const sub = check_matrix(env, defaults, rest_types, subst, expanding);
-      __ring_match38: {
-        const __ring_m38 = sub;
-        if (__ring_m38._tag === "some") {
-          const s = __ring_m38._0;
-          let result = [];
-          List_push(result, "_");
-          List_extend(result, s);
-          return Option_some(result);
-          break __ring_match38;
+      if ((List_len(matrix) === 0)) {
+        const underscores = elements.map((function(e) { return "_"; }));
+        const joined = join_strs(underscores, ", ");
+        return Option_some(`(${joined})`);
+      }
+      const missing = check_matrix(env, matrix, elements, subst, set_new());
+      __ring_match37: {
+        const __ring_m37 = missing;
+        if (__ring_m37._tag === "some") {
+          const m = __ring_m37._0;
+          const joined = join_strs(m, ", ");
+          return Option_some(`(${joined})`);
+          break __ring_match37;
         }
-        if (__ring_m38._tag === "none") {
+        if (__ring_m37._tag === "none") {
           return Option_none;
-          break __ring_match38;
+          break __ring_match37;
         }
-        __match_fail(__ring_m38);
+        __match_fail(__ring_m37);
       }
-      break __ring_match33;
+      break __ring_match28;
     }
-    __match_fail(__ring_m33);
+    return Option_some("_");
+    break __ring_match28;
   }
 }
 
-function names_match_struct(pattern_name, type_name) {
-  if ((pattern_name === type_name)) {
-    return true;
-  }
-  return Str_ends_with(type_name, `::${pattern_name}`);
-}
-
-function join_strs(parts, sep) {
-  let result = "";
-  const __ring_end42 = List_len(parts);
-  for (let i = 0; i < __ring_end42; i++) {
-    if ((i > 0)) {
-      result = `${result}${sep}`;
+function check_exhaustive(env, arms, scrutinee_type, subst) {
+  let patterns = [];
+  const __ring_iter_42 = __List_Iterable.iter(arms);
+  while (true) {
+    const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
+    if (__ring_next_42._tag === "none") break;
+    const arm = __ring_next_42._0;
+    __ring_match38: {
+      const __ring_m38 = arm.guard;
+      if (__ring_m38._tag === "some") {
+        break __ring_match38;
+      }
+      if (__ring_m38._tag === "none") {
+        List_push(patterns, arm.pattern);
+        break __ring_match38;
+      }
+      __match_fail(__ring_m38);
     }
-    const part = str_at(parts, i);
-    result = `${result}${part}`;
   }
-  return result;
+  return check_patterns(env, patterns, scrutinee_type, subst);
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
