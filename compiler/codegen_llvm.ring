@@ -175,7 +175,6 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_list_all", [ptr, ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_list_find", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_list_flat_map", [ptr, ptr], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_list_enumerate", [ptr], ptr)
 
     // Map
     get_or_declare_runtime_fn(ctx, "ring_map_new", [], ptr)

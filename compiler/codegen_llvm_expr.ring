@@ -2140,8 +2140,6 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Str" && method == "char_at" { some("ring_str_char_at") }
     else { if type_name == "Str" && method == "char_code_at" { some("ring_str_char_code_at") }
     else { if type_name == "Str" && method == "index_of" { some("ring_str_index_of") }
-    else { if type_name == "Str" && method == "to_int" { some("ring_str_to_int") }
-    else { if type_name == "Str" && method == "to_float" { some("ring_str_to_float") }
     else { if type_name == "Str" && method == "pad_start" { some("ring_str_pad_start") }
     else { if type_name == "Str" && method == "pad_end" { some("ring_str_pad_end") }
     else { if type_name == "Str" && method == "repeat" { some("ring_str_repeat") }
@@ -2185,7 +2183,6 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "find_index" { some("ring_list_find_index") }
     else { if type_name == "List" && method == "fold" { some("ring_list_fold") }
     else { if type_name == "List" && method == "flat_map" { some("ring_list_flat_map") }
-    else { if type_name == "List" && method == "enumerate" { some("ring_list_enumerate") }
     else { if type_name == "List" && method == "clear" { some("ring_list_clear") }
     else { if type_name == "List" && method == "shift" { some("ring_list_shift") }
     else { if type_name == "List" && method == "extend" { some("ring_list_extend") }
@@ -2220,7 +2217,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
     else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
     else { if type_name == "Option" && method == "to_fail" { some("ring_Option_to_fail") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {

@@ -376,7 +376,6 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_all", [ptr, ptr], i64);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_find", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_flat_map", [ptr, ptr], ptr);
-  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_enumerate", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_new", [], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_get", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_set", [ptr, ptr, ptr], ptr);
