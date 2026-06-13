@@ -52,11 +52,7 @@
 
 B-103 全量枚举 ring_runtime.cpp 时发现：`method_to_runtime`（codegen_llvm_expr.ring）映射了 5 个 **ring_runtime.cpp 中不存在**的符号——`ring_str_to_int`（Str.to_int）、`ring_str_to_float`（Str.to_float）、`ring_list_enumerate`（List.enumerate，且在 codegen_llvm.ring:174 被无条件 declare）、`ring_map_is_empty`（Map.is_empty）、`ring_set_is_empty`（Set.is_empty）。任何程序在 `--target=llvm` 下调用这些方法 → 链接失败（undefined symbol）。当前编译器/测试零使用（`.enumerate` 仅注释提及）→ latent。修复方向：补 runtime 实现或删映射改走 Ring impl；**注意其中 to_int/to_float/enumerate 三个已由 B-094 拍板「确定不加、清死映射」（2026-06-03，enumerate 真做时归 B-095）——本条净增量 = `ring_map_is_empty`/`ring_set_is_empty` 两个，修复时勿与 B-094 决策冲突**。发现者：B-103 Wave A。
 
-### #137 List.reverse / List.sort 后端语义分歧（JS 原地 vs LLVM fresh 丢弃）[medium] [judgment] [open] [queued: B-123]
-
-> 2026-06-12 拍板：案 ① LLVM runtime 原地化，立项 **B-123 [P1] [M]**（时序 B-104 后——D5 归因测量期不动 runtime 分配行为）。含 runtime 同族审计 + 顺序/别名差分用例。本条留作发现记录，B-123 落地后删除。
-
-std/list.ring 声明 `reverse`/`sort` 返回 Unit（原地变异语义）；JS 后端确实原地（runtime.ring:87 `self.reverse()`，sort 同）。但 LLVM runtime `ring_list_reverse`/`ring_list_sort_default` **构造 fresh 副本返回、不动接收者**——语句位调用在 native 等于 no-op。编译器自身有 8 处 `.sort(`（穷尽性/codegen 排序等），native 自编译产出的 JS 与 node 版可能**顺序不一致 → G-b（double-bootstrap 字节一致门）地雷**。B-103 已为两个 runtime fn 补元素 dup（RC 健全），但语义分歧未动（修复方向需拍板：LLVM runtime 改原地、或 codegen 把结果写回 receiver alloca）。`tests/cases/llvm/list_share_ops_rc.ring` 的 reverse 用例刻意只断言 len 不断言顺序。发现者：B-103 Wave A。
+<!-- #137 closed: B-123 落地（reverse/sort/sort_default 改原地），2026-06-13 -->
 
 ### #138 std 已声明但 method_to_runtime 未映射的方法在 native 落 panic-stub [low] [judgment] [open]
 
