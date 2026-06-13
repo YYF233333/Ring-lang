@@ -580,6 +580,8 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_unhandled_effect.ring", error_pattern: "E0403" },
     { file: "error_assign_temp_field.ring", error_pattern: "E0205" },
     { file: "try_reserved.ring", error_pattern: "E0101" },
+    // B-120: `var` retired — no longer a keyword, so `var x = 0` fails to compile.
+    { file: "error_var_keyword.ring", error_pattern: "E0201" },
     { file: "exhaustive_nonfinite_msg.ring", error_pattern: "non-finite type" },
     { file: "effect_alias_cycle.ring", error_pattern: "E0406" },
     { file: "unknown_effect.ring", error_pattern: "E0407" },

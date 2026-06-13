@@ -1,4 +1,4 @@
-// Test: mut keyword in parameter position (alias for var)
+// Test: mut keyword in parameter position
 
 fn double_in_place(mut x: Int) -> Int {
     x = x * 2
@@ -20,10 +20,10 @@ fn main() {
     assert(items.len() == 1, "mut list param modifies caller list")
     assert(items.get(0).unwrap_or(-1) == 42, "mut list param has correct value")
 
-    // var param still works (backward compat)
+    // passing a mut local into a mut param
     let mut n = 100
     let r2 = double_in_place(n)
-    assert(r2 == 200, "var param still works")
+    assert(r2 == 200, "mut local passed into mut param")
 
     print("let_mut_param: all tests passed")
 }
