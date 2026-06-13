@@ -158,8 +158,13 @@ static void ring_drop_by_typeid(uint32_t tid, void* data);
 // from the direct [hof-stats] counters below, the profile cross-validates and
 // attributes the non-HOF remainder, e.g. And/Or phi sites).
 struct RingBoxRec { void* ra; uint32_t tid; };
+// B-104 D8: born record now carries the tid so per-class born can be aggregated
+// over ALL recorded sites (including sites whose every sample has since been
+// freed) — a born-only/0-live site would otherwise vanish from g_box_live and
+// silently inflate the retention% of a plateauing class.
+struct RingBornRec { uint64_t born; uint32_t tid; };
 static std::unordered_map<void*, RingBoxRec>* g_box_live = nullptr; // live ptr -> (RA, typeid)
-static std::unordered_map<void*, uint64_t>*   g_box_born = nullptr; // RA -> cumulative sampled births
+static std::unordered_map<void*, RingBornRec>* g_box_born = nullptr; // RA -> (cumulative sampled births, tid)
 static uint64_t g_box_seq = 0;
 static uintptr_t ring_image_base() {
 #ifdef _WIN32
@@ -173,17 +178,18 @@ static const char* ring_tid_name(uint32_t tid) {
     switch (tid) {
         case 0:  return "INT";    case 2:  return "BOOL";   case 3:  return "STR";
         case 7:  return "CLOSURE"; case 8: return "OPTION"; case 10: return "TUPLE";
-        default: return "?";
+        case 13: return "SB";     // B-104 D8: StringBuilder
+        default: return (tid >= RING_TYPEID_USER_BASE) ? "USER" : "?"; // D8: user types (Type≈tid103)
     }
 }
 static void ring_box_profile_record(void* ptr, void* ra, uint32_t tid) {
     if (!g_box_live) {
         g_box_live = new std::unordered_map<void*, RingBoxRec>();
-        g_box_born = new std::unordered_map<void*, uint64_t>();
+        g_box_born = new std::unordered_map<void*, RingBornRec>();
     }
     if ((g_box_seq++ & (RING_BOX_PROFILE_SAMPLE - 1)) != 0) return; // sample 1/N
     (*g_box_live)[ptr] = RingBoxRec{ ra, tid };
-    (*g_box_born)[ra]++;
+    RingBornRec& b = (*g_box_born)[ra]; b.born++; b.tid = tid;
 }
 static void ring_box_profile_erase(void* ptr) {
     if (g_box_live) g_box_live->erase(ptr);
@@ -195,6 +201,33 @@ static void ring_box_profile_report() {
     std::unordered_map<uint32_t, std::unordered_map<void*, uint64_t>> per; // tid -> ra -> live
     std::unordered_map<uint32_t, uint64_t> tid_total;
     for (auto& kv : *g_box_live) { per[kv.second.tid][kv.second.ra]++; tid_total[kv.second.tid]++; }
+    // B-104 D8 — per-class retention summary (live samples / born samples → %),
+    // aggregated over all sites of the tid.  retention≈100% & rising = pure leak
+    // (orphan); retention«100% & plateau = legit working set; «100% & rising =
+    // growth-type (cache-like or slow leak, flag for human review).  born is the
+    // cumulative sampled births recorded at every recorded site of this tid.
+    {
+        // born aggregated over the FULL born map (every site that ever recorded
+        // this tid), not just currently-live sites — so a born-only site can't
+        // vanish and inflate retention.
+        std::unordered_map<uint32_t, uint64_t> born_per; // tid -> cumulative born
+        for (auto& kv : *g_box_born) born_per[kv.second.tid] += kv.second.born;
+        // emit a [box-summary] line for every tid that has born or live samples
+        std::unordered_map<uint32_t, char> seen;
+        for (auto& tp : tid_total) seen[tp.first] = 1;
+        for (auto& tp : born_per)   seen[tp.first] = 1;
+        for (auto& s : seen) {
+            uint32_t tid = s.first;
+            uint64_t live = tid_total.count(tid) ? tid_total[tid] : 0;
+            uint64_t born = born_per.count(tid) ? born_per[tid] : 0;
+            double ret = born ? (100.0 * (double)live / (double)born) : 0.0;
+            fprintf(stderr, "[box-summary] tid%u(%s) live_samp=%llu born_samp=%llu retention=%.1f%% (x%d: ~%lluM live / ~%lluM born)\n",
+                    tid, ring_tid_name(tid), (unsigned long long)live, (unsigned long long)born, ret,
+                    RING_BOX_PROFILE_SAMPLE,
+                    (unsigned long long)(live * RING_BOX_PROFILE_SAMPLE / 1000000),
+                    (unsigned long long)(born * RING_BOX_PROFILE_SAMPLE / 1000000));
+        }
+    }
     for (auto& tp : per) {
         uint32_t tid = tp.first;
         std::vector<std::pair<void*, uint64_t>> v(tp.second.begin(), tp.second.end());
@@ -206,7 +239,7 @@ static void ring_box_profile_report() {
         int n = (int)v.size(); if (n > 12) n = 12;
         for (int i = 0; i < n; i++) {
             void* ra = v[i].first;
-            uint64_t born = (*g_box_born)[ra];
+            uint64_t born = (*g_box_born)[ra].born;
             fprintf(stderr, "  [%s] rva=0x%llx live=%llu born=%llu (RA=%p)\n",
                     ring_tid_name(tid), (unsigned long long)((uintptr_t)ra - base),
                     (unsigned long long)v[i].second, (unsigned long long)born, ra);
@@ -306,6 +339,13 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
     // INT is recorded at ring_box_int, STR at ring_str_from_cstr / ring_sb_to_str
     // (IR-site RA; see the box-profile header note).
     if (typeid_val == RING_TYPEID_OPTION) ring_box_profile_record(raw + 8, _ReturnAddress(), RING_TYPEID_OPTION);
+    // B-104 D8 — user-type attribution (Type≈tid103 + every other user struct/enum):
+    // IR-level struct/enum constructors call ring_alloc directly, so _ReturnAddress()
+    // is the IR ctor site (same as OPTION).  Records ALL user typeids (>=64) rather
+    // than hard-coding 103; the per-typeid report splits them out and the dominant
+    // user tid IS Type (cross-check the tid via the [drop-reg] RVA → ring_drop_<Name>).
+    else if (typeid_val >= RING_TYPEID_USER_BASE && typeid_val < 4096)
+        ring_box_profile_record(raw + 8, _ReturnAddress(), (uint32_t)typeid_val);
 #endif
     return raw + 8;                               // return data pointer
 }
@@ -336,7 +376,12 @@ extern "C" void ring_drop(void* ptr) {
     if (*rc <= 1) {
         ring_drop_by_typeid(tid, ptr);
 #ifdef RING_BOX_PROFILE
-        if (tid == RING_TYPEID_INT || tid == RING_TYPEID_BOOL || tid == RING_TYPEID_STR || tid == RING_TYPEID_OPTION) ring_box_profile_erase(ptr);
+        // B-104 D8: erase covers every profiled class — scalars + STR + OPTION +
+        // SB + all user typeids (>=64).  Cheap: erase is a no-op miss for unsampled
+        // ptrs.  Erasing all profiled tids keeps g_box_live = live-set exactly.
+        if (tid == RING_TYPEID_INT || tid == RING_TYPEID_BOOL || tid == RING_TYPEID_STR ||
+            tid == RING_TYPEID_OPTION || tid == RING_TYPEID_SB || tid >= RING_TYPEID_USER_BASE)
+            ring_box_profile_erase(ptr);
 #endif
         free((char*)ptr - 8);
 #ifdef RING_ALLOC_STATS
@@ -1880,6 +1925,13 @@ extern "C" void* ring_cwd() {
 extern "C" void* ring_sb_new() {
     void* data = ring_alloc(sizeof(std::string), RING_TYPEID_SB);
     new (data) std::string();
+#ifdef RING_BOX_PROFILE
+    // B-104 D8: StringBuilder births — RA = the IR site allocating the SB (the
+    // type_to_string / interp machinery is the dominant class per D5).  Distinct
+    // from the STR recorded at ring_sb_to_str (that's the RESULT string, this is
+    // the builder itself).
+    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_SB);
+#endif
     return data;
 }
 
