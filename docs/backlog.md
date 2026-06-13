@@ -451,22 +451,7 @@ fn test_fetch() {
 - llvm_diff 全绿 ×3（动 codegen 值路径，按 RC 改动纪律跑）
 - dist-llvm 自编译正常；自举一致
 
-### B-121 LLVM dict dispatch 双缺口：BinOp 丢 extra_dicts + delegate null-dict fallback [bugfix] [P2] [M] [judgment] [queued]
-
-> 2026-06-12 立项（B-104 D4 worker feedback 两条 pre-existing [决策]，用户拍板合并立项）。两者同区域（codegen_llvm dict dispatch）、同基建（D4 后 wrapped-dict 构造 + `resolve_static_dict_by_name` 现成），G-c parity 向、不阻塞 G-a；**时序：B-104 落地后执行**（避免与 milestone session 并发改 codegen_llvm，同 B-117/B-118 约定）。
-
-**缺口 1 — BinOp dispatch 忽略 `extra_dicts`（行为错误向，M）**：`resolve_dispatch_dict`（codegen_llvm_expr.ring）对 `TraitDispatch::Direct` 只取 base dict、丢弃 `extra_dicts`，JS 后端则把 extra 作尾参传入。后果：参数化类型值**直接用 `==`/`<`**（非经泛型 fn 中转，如两个 `Pair<T,Int>` 值在泛型上下文里直接比较）时，LLVM 用未绑 inner 的 base dict 派发 → 行为错误。现无测试命中（llvm_diff 全绿 = 覆盖缺口）。注：dict_lower 已对此位置做静态实例化（JS 受益），动态残留按原样保留。
-
-**缺口 2 — `gen_dict_dispatch_call` named_values miss → ConstPointerNull（崩溃向，S）**：delegate 展开合成的 `dict_dispatch.dict_param` 是静态 dict 名（非参数），LLVM 在 named_values 查不到时直接返回 null → 后续 slot load 即崩。疑似 audit #93/#123 族（delegate 复杂路径残留）实证。
-
-**涉及修改**：
-1. `compiler/codegen_llvm_expr.ring`：BinOp dispatch 路径对带 extra 的 `Direct` 改走 wrapped-dict 构造（与 call 路径同机制，D4 后基建现成）。
-2. `compiler/codegen_llvm_expr.ring`：`gen_dict_dispatch_call` named_values miss 时 fallback `resolve_static_dict_by_name`（一行修）。
-3. `tests/cases/llvm/`：差分回归各一例——① 泛型上下文两个参数化类型值直接 `==`/`<`（触发带 extra 的 Direct BinOp）② delegate 静态 dict 派发路径。
-
-**验收标准**：
-- 两回归用例 JS/LLVM 行为一致（缺口 1 修前 LLVM 结果错误、缺口 2 修前崩溃 → 修后差分全绿）
-- llvm_diff 全量 ×3 零回归；自举一致
+<!-- B-121 done: git e0a9c61, 2026-06-13 worker. Gap 1 resolve_dispatch_dict + trait_name_hint; Gap 2 gen_dict_dispatch_call fallback. JS 831 / llvm_diff ×3 79/79 / double-bootstrap. -->
 
 ### B-122 #149 根修：顶层推断改依赖 SCC 拓扑序（未标注 ret 健全性洞）[bugfix] [P1] [XL] [judgment] [queued]
 

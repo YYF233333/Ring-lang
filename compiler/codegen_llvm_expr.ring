@@ -583,7 +583,7 @@ fn gen_binop(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, eq_dispatch
 }
 
 // Resolve the dict value for a trait dispatch (Eq/Ord).
-fn resolve_dispatch_dict(mut ctx: LlvmCtx, dispatch: TraitDispatch) -> LLVMValueRef {
+fn resolve_dispatch_dict(mut ctx: LlvmCtx, dispatch: TraitDispatch, trait_name_hint: Str?) -> LLVMValueRef {
     match dispatch {
         TraitDispatch::Dict { param } => {
             match ctx.named_values.get(param) {
@@ -591,7 +591,20 @@ fn resolve_dispatch_dict(mut ctx: LlvmCtx, dispatch: TraitDispatch) -> LLVMValue
                 none => LLVMConstPointerNull(ctx.ptr_type),
             }
         },
-        TraitDispatch::Direct { dict, .. } => resolve_dict_ref(ctx, DictRef::Simple(dict)),
+        TraitDispatch::Direct { dict, extra_dicts } => {
+            if extra_dicts.len() == 0 {
+                resolve_dict_ref(ctx, DictRef::Simple(dict))
+            } else {
+                // B-121 gap 1: extra_dicts non-empty — build a wrapped dict so
+                // inner type-param dicts are bound (matching the call-path
+                // mechanism).  trait_name_hint is required; if absent, fall back
+                // to base-only resolution (pre-existing behaviour).
+                match trait_name_hint {
+                    some(tn) => build_wrapped_dict(ctx, dict, tn, extra_dicts),
+                    none => resolve_dict_ref(ctx, DictRef::Simple(dict)),
+                }
+            }
+        },
         TraitDispatch::Builtin => LLVMConstPointerNull(ctx.ptr_type),
     }
 }
@@ -610,7 +623,7 @@ fn load_dict_method(mut ctx: LlvmCtx, dict_ptr: LLVMValueRef, slot: Int) -> LLVM
 fn gen_eq_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> LLVMValueRef {
     let lhs = gen_llvm_expr(ctx, left)
     let rhs = gen_llvm_expr(ctx, right)
-    let dict_ptr = resolve_dispatch_dict(ctx, dispatch)
+    let dict_ptr = resolve_dispatch_dict(ctx, dispatch, some("Eq"))
     let eq_closure = load_dict_method(ctx, dict_ptr, 0)
     let result = gen_closure_call(ctx, eq_closure, [lhs, rhs])
     match op {
@@ -638,7 +651,7 @@ fn gen_eq_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, 
 fn gen_ord_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, dispatch: TraitDispatch) -> LLVMValueRef {
     let lhs = gen_llvm_expr(ctx, left)
     let rhs = gen_llvm_expr(ctx, right)
-    let dict_ptr = resolve_dispatch_dict(ctx, dispatch)
+    let dict_ptr = resolve_dispatch_dict(ctx, dispatch, some("Ord"))
     let cmp_closure = load_dict_method(ctx, dict_ptr, 0)
     let cmp_result = gen_closure_call(ctx, cmp_closure, [lhs, rhs])
     // B-080: inline untag
@@ -1541,40 +1554,27 @@ fn gen_dict_dispatch_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, dd
         }
     }
 
-    // Look up the dict parameter in named_values
-    match ctx.named_values.get(dd.dict_param) {
-        some(dict_alloca) => {
-            let dict_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, dict_alloca, fresh_name(ctx, "dp"))
-            // The dict is a struct of ptr (one per method).
-            // We need the method index. For now, use method name to find index.
-            // In the dict struct, methods are stored in alphabetical order (matching JS backend convention).
-            // For simplicity in Wave 2c: we look up the method index from trait_dict_methods in ctx.
-            // Since we don't have that info readily, use a fixed scheme: try index 0 for common methods.
-            // Actually, for built-in traits we know the order:
-            //   Eq: { eq, ne } → 0, 1
-            //   Clone: { clone } → 0
-            //   Ord: { compare } → 0
-            //   Debug: { debug } → 0
-            let method_idx = get_trait_method_index(ctx, dd.dict_param, dd.method)
-
-            // Build dict struct type (B-104 D4 count-prefixed layout: { i64
-            // method_count, ptr m0, ... }).  We don't know the exact slot count,
-            // but a conservative 4-slot type suffices for the GEP — method slot
-            // i lives at struct index i+1.
-            let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
-
-            // GEP to the method slot
-            let method_slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, method_idx + 1, fresh_name(ctx, "ms"))
-            let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, method_slot_ptr, fresh_name(ctx, "cp"))
-
-            // Call through closure (same as gen_closure_call)
-            gen_closure_call(ctx, closure_ptr, call_args)
-        },
-        none => {
-            // Dict parameter not found — return null
-            LLVMConstPointerNull(ctx.ptr_type)
-        },
+    // Look up the dict parameter in named_values; if missing (delegate-expanded
+    // static dict name), fall back to resolve_static_dict_by_name (B-121 gap 2,
+    // matching resolve_dict_ref's DictRef::Simple none branch).
+    let dict_ptr = match ctx.named_values.get(dd.dict_param) {
+        some(dict_alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, dict_alloca, fresh_name(ctx, "dp")),
+        none => resolve_static_dict_by_name(ctx, dd.dict_param),
     }
+    let method_idx = get_trait_method_index(ctx, dd.dict_param, dd.method)
+
+    // Build dict struct type (B-104 D4 count-prefixed layout: { i64
+    // method_count, ptr m0, ... }).  We don't know the exact slot count,
+    // but a conservative 4-slot type suffices for the GEP — method slot
+    // i lives at struct index i+1.
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+
+    // GEP to the method slot
+    let method_slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, method_idx + 1, fresh_name(ctx, "ms"))
+    let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, method_slot_ptr, fresh_name(ctx, "cp"))
+
+    // Call through closure (same as gen_closure_call)
+    gen_closure_call(ctx, closure_ptr, call_args)
 }
 
 // Get the index of a method within a trait's dict struct.
