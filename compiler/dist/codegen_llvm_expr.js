@@ -1669,7 +1669,7 @@ function emit_memoised_dict_getter(ctx, name, build_fn, build_fn_ty) {
   return fn_val;
 }
 
-function emit_memoised_const_body(ctx, fn_val, mangled, init) {
+function emit_memoised_const_body(ctx, fn_val, mangled, init, intern_fn_name) {
   const g = LLVMAddGlobal(ctx.module, ctx.ptr_type, `__ring_constg_${mangled}`);
   LLVMSetInitializer(g, LLVMConstPointerNull(ctx.ptr_type));
   const saved_fn = ctx.current_fn;
@@ -1685,8 +1685,8 @@ function emit_memoised_const_body(ctx, fn_val, mangled, init) {
   discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb));
   LLVMPositionBuilderAtEnd(ctx.builder, build_bb);
   const built = gen_llvm_expr(ctx, init);
-  const intern_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_const_intern", [ctx.ptr_type], ctx.ptr_type);
-  const intern_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_const_intern");
+  const intern_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, intern_fn_name, [ctx.ptr_type], ctx.ptr_type);
+  const intern_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, intern_fn_name);
   const interned = LLVMBuildCall2(ctx.builder, intern_ty, intern_fn, [built], codegen_llvm_ctx$fresh_name(ctx, "ci"));
   discard(LLVMBuildStore(ctx.builder, interned, g));
   discard(LLVMBuildBr(ctx.builder, done_bb));

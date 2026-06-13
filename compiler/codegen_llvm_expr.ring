@@ -1202,10 +1202,12 @@ pub fn emit_memoised_dict_getter(mut ctx: LlvmCtx, name: Str, build_fn: LLVMValu
 //   entry: %c = load @__ring_constg_<fn> ; br (%c == null), build, done
 //   build: %v = ring_const_intern(<init expr>) ; store %v, @g ; br done
 //   done:  ret load @g
-// ring_const_intern retags the once-built value with the never-drop
-// CONST_STATIC typeid (defense in depth: stray dup/drop on the singleton are
-// no-ops; data layout untouched).
-pub fn emit_memoised_const_body(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled: Str, init: HExpr) {
+// The intern fn (intern_fn_name) retags the once-built value with a never-drop
+// typeid (defense in depth: stray dup/drop on the singleton are no-ops; data
+// layout untouched).  B-104 D6: ring_const_intern → CONST_STATIC for Str consts.
+// B-104 D9 Part 2: ring_unit_intern → CONST_HEAP_STATIC for zero-field enum
+// consts (Type::UnitType & the other Type scalar consts).
+pub fn emit_memoised_const_body(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled: Str, init: HExpr, intern_fn_name: Str) {
     let g = LLVMAddGlobal(ctx.module, ctx.ptr_type, "__ring_constg_${mangled}")
     LLVMSetInitializer(g, LLVMConstPointerNull(ctx.ptr_type))
 
@@ -1226,8 +1228,8 @@ pub fn emit_memoised_const_body(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled:
 
     LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
     let built = gen_llvm_expr(ctx, init)
-    let intern_fn = get_or_declare_runtime_fn(ctx, "ring_const_intern", [ctx.ptr_type], ctx.ptr_type)
-    let intern_ty = get_rt_fn_type(ctx, "ring_const_intern")
+    let intern_fn = get_or_declare_runtime_fn(ctx, intern_fn_name, [ctx.ptr_type], ctx.ptr_type)
+    let intern_ty = get_rt_fn_type(ctx, intern_fn_name)
     let interned = LLVMBuildCall2(ctx.builder, intern_ty, intern_fn, [built], fresh_name(ctx, "ci"))
     discard(LLVMBuildStore(ctx.builder, interned, g))
     discard(LLVMBuildBr(ctx.builder, done_bb))

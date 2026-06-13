@@ -183,6 +183,25 @@ fn emit_fn_body(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: Effe
 // Const body emission (emits as zero-arg getter function)
 // ============================================================
 
+// B-104 D9 Part 2: a const whose VALUE TYPE is a user enum (e.g.
+// `const UNIT: Type = Type::UnitType`).  A fieldless variant value resolves to
+// an Ident (bind_mono — not a NamedVariantConstruct node), and codegen lowers
+// the const getter to a `ring_<Enum>_<Variant>()` constructor call; matching on
+// the init HExpr shape is therefore unreliable, so we key off the value type.
+// An enum const is an IMMUTABLE module-level value (const semantics) — sharing
+// one process-wide singleton is always correct (the JS backend already does, as
+// a module `const`).  The compiler's enum consts are exactly the 7 `Type`
+// scalar consts (UNIT/INT/STR/BOOL/FLOAT/NEVER/ANY = Type::UnitType/IntType/…),
+// all zero-field; payload-bearing enum consts (none in the compiler) would also
+// be safe — the bounded one-per-const payload simply stays immortal, same as
+// the value itself.
+fn is_enum_const_type(ty: Type) -> Bool {
+    match ty {
+        Type::EnumType { .. } => true,
+        _ => false,
+    }
+}
+
 fn emit_const_body(mut ctx: LlvmCtx, name: Str, init: HExpr) {
     let const_fn_name = match ctx.module_prefix {
         some(prefix) => llvm_mangle_fn_with_prefix(prefix, name),
@@ -203,8 +222,26 @@ fn emit_const_body(mut ctx: LlvmCtx, name: Str, init: HExpr) {
                 Type::StrType => true,
                 _ => false,
             }
+            // B-104 D9 Part 2: an enum-typed const (the compiler's `Type` scalar
+            // consts UNIT/INT/STR/BOOL/FLOAT/NEVER/ANY = Type::UnitType/IntType/…)
+            // is a heap value that pre-D9 was re-constructed fresh on EVERY
+            // access — and never dropped, because use sites borrow it like a
+            // module-level value (JS-backend `const` semantics).  D8 attributed
+            // Type::UnitType ≈22.7M live @2.382B self-compile (98.7% pure leak;
+            // the recursive `unwrap_or(UNIT)` leaves in type_to_string).
+            // Singletonise it the same way as D6 Str consts: a lazy memoised
+            // getter interned via ring_unit_intern (dedicated never-drop typeid).
+            // Other heap consts (EffectRow EMPTY_ROW, List/Set method tables) are
+            // NOT singletonised here — value semantics over their mutable
+            // interiors make the aliasing surface non-trivial; deferred unless
+            // re-measure shows them dominant.  Plain scalar consts (Int/Float/
+            // Bool) keep the per-access form: their boxes are FRESH-owned and
+            // correctly dropped at use sites today — not a leak class.
+            let is_enum_const = is_enum_const_type(hexpr_type(init))
             if is_str_const {
-                emit_memoised_const_body(ctx, fn_val, const_fn_name, init)
+                emit_memoised_const_body(ctx, fn_val, const_fn_name, init, "ring_const_intern")
+            } else if is_enum_const {
+                emit_memoised_const_body(ctx, fn_val, const_fn_name, init, "ring_unit_intern")
             } else {
                 let saved_fn = ctx.current_fn
                 ctx.current_fn = some(fn_val)

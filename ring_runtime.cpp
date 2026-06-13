@@ -96,6 +96,19 @@
 //                  Str is still read as std::string* by every str op).
 #define RING_TYPEID_OPTION_NONE 18
 #define RING_TYPEID_CONST_STATIC 19
+// B-104 D9 Part 2: a module-level `const` whose initialiser is a heap-allocating
+// non-Str value (the compiler's `Type`-valued consts UNIT/INT/STR/.../ANY +
+// EffectRow EMPTY_ROW etc. — zero-field enum / pure struct singletons).  Pre-D9
+// each access re-evaluated the const getter, constructing a fresh box that
+// nobody dropped (use sites borrow a module-level value, mirroring the JS
+// backend's module `const` — D8 attributed Type::UnitType ≈22.7M live @2.382B,
+// 98.7% pure leak).  Now the getter is a lazy memoised SINGLETON (D6
+// CONST_STATIC mirror, dedicated typeid for clean per-class counting), retagged
+// once via ring_unit_intern.  NEVER-DROP: stray dup/drop are no-ops.  Layout is
+// untouched by the retag — a retagged Type enum is still read by its tag/payload
+// exactly as before (nothing dispatches on this typeid except dup/drop +
+// diagnostics; the immortal Type-scalar consts have no payload to free anyway).
+#define RING_TYPEID_CONST_HEAP_STATIC 20
 #define RING_TYPEID_USER_BASE 64  // user-defined types start here
 
 // ============================================================================
@@ -447,6 +460,28 @@ extern "C" void* ring_const_intern(void* p) {
     return p;
 }
 
+// B-104 D9 Part 2: retag a freshly built heap-valued (non-Str) `const`
+// initialiser as an immortal module-level singleton.  Called exactly once per
+// such const, from the build leg of the codegen-emitted memoised getter
+// (emit_const_body's heap-const path).  Sibling of ring_const_intern — only the
+// header typeid changes (data layout untouched); see RING_TYPEID_CONST_HEAP_STATIC.
+extern "C" void* ring_unit_intern(void* p) {
+    if (!p) return p;
+    uint32_t* tid_p = (uint32_t*)((char*)p - 4);
+#ifdef RING_ALLOC_STATS
+    // Move the live-count to the CONST_HEAP_STATIC class so the original class
+    // (e.g. the user Type tid) is not polluted by one immortal entry per const.
+    if (*tid_p < 4096) g_live_tid[*tid_p]--;
+    g_live_tid[RING_TYPEID_CONST_HEAP_STATIC]++;
+#endif
+#ifdef RING_BOX_PROFILE
+    // Drop the box-profile sample recorded at allocation (immortal by design).
+    ring_box_profile_erase(p);
+#endif
+    *tid_p = RING_TYPEID_CONST_HEAP_STATIC;
+    return p;
+}
+
 static void ring_drop_by_typeid(uint32_t tid, void* data) {
     if (tid < 4096 && drop_table[tid]) {
         drop_table[tid](data);
@@ -558,6 +593,9 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
     // are immortal module-level values (bounded: 1 none + one per const decl).
     never_drop_table[RING_TYPEID_OPTION_NONE] = true;
     never_drop_table[RING_TYPEID_CONST_STATIC] = true;
+    // B-104 D9 Part 2: heap-valued non-Str const singletons (Type/EffectRow
+    // consts) — immortal module-level values (bounded: one per such const decl).
+    never_drop_table[RING_TYPEID_CONST_HEAP_STATIC] = true;
 }
 
 // ============================================================================
