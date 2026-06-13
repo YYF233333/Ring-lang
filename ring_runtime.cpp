@@ -1495,7 +1495,7 @@ extern "C" void* ring_map_int_new() {
 
 extern "C" void* ring_map_int_get(void* map, void* key) {
     RingMapInt* m = (RingMapInt*)map;
-    int64_t k = *(int64_t*)key;
+    int64_t k = ring_unbox_int(key);
     auto it = m->find(k);
     if (it == m->end()) {
         fprintf(stderr, "ring panic: map key not found: %lld\n", (long long)k);
@@ -1506,7 +1506,7 @@ extern "C" void* ring_map_int_get(void* map, void* key) {
 
 extern "C" void* ring_map_int_get_opt(void* map, void* key) {
     RingMapInt* m = (RingMapInt*)map;
-    int64_t k = *(int64_t*)key;
+    int64_t k = ring_unbox_int(key);
     auto it = m->find(k);
     if (it == m->end()) return ring_enum_none();
     ring_dup(it->second);  // B-098: fresh Option co-owns the value (see ring_list_get_opt)
@@ -1516,7 +1516,7 @@ extern "C" void* ring_map_int_get_opt(void* map, void* key) {
 extern "C" void* ring_map_int_set(void* map, void* key, void* val) {
     CHK("map_int_set");
     RingMapInt* m = (RingMapInt*)map;
-    int64_t k = *(int64_t*)key;
+    int64_t k = ring_unbox_int(key);
     // B-104 D1 rule ④ — duplicate-key insert must DROP the old value (the map
     // owns +1 per value via the ".insert" sink dup; see ring_map_set).  The key
     // is an unboxed int64 read out of the caller's box — value-inlined, no RC
@@ -1534,13 +1534,13 @@ extern "C" void* ring_map_int_set(void* map, void* key, void* val) {
 
 extern "C" int64_t ring_map_int_has(void* map, void* key) {
     RingMapInt* m = (RingMapInt*)map;
-    int64_t k = *(int64_t*)key;
+    int64_t k = ring_unbox_int(key);
     return m->count(k) > 0 ? 1 : 0;
 }
 
 extern "C" void* ring_map_int_delete(void* map, void* key) {
     RingMapInt* m = (RingMapInt*)map;
-    int64_t k = *(int64_t*)key;
+    int64_t k = ring_unbox_int(key);
     // B-104 D1 rule ④ — removal must DROP the owned value (see ring_map_delete);
     // the int64 key is value-inlined, no RC account.
     auto it = m->find(k);
@@ -1627,7 +1627,7 @@ extern "C" void* ring_map_int_from(void* entries) {
     for (size_t i = 0; i < vec->size(); i++) {
         auto* pair = (std::vector<void*>*)((*vec)[i]);
         if (pair->size() >= 2) {
-            int64_t key = *(int64_t*)((*pair)[0]);
+            int64_t key = ring_unbox_int((*pair)[0]);
             void* val = (*pair)[1];
             // B-103: dup — fresh map co-owns the value (see ring_map_from).
             ring_dup(val);
@@ -1733,18 +1733,18 @@ extern "C" void* ring_set_int_new() {
 }
 
 extern "C" void* ring_set_int_add(void* set, void* elem) {
-    int64_t k = *(int64_t*)elem;
+    int64_t k = ring_unbox_int(elem);
     ((RingSetInt*)set)->insert(k);
     return set;
 }
 
 extern "C" int64_t ring_set_int_has(void* set, void* elem) {
-    int64_t k = *(int64_t*)elem;
+    int64_t k = ring_unbox_int(elem);
     return ((RingSetInt*)set)->count(k) > 0 ? 1 : 0;
 }
 
 extern "C" void* ring_set_int_delete(void* set, void* elem) {
-    int64_t k = *(int64_t*)elem;
+    int64_t k = ring_unbox_int(elem);
     ((RingSetInt*)set)->erase(k);
     return set;
 }
@@ -1769,7 +1769,7 @@ extern "C" void* ring_set_int_from_list(void* list) {
     void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
     auto* result = new (data) RingSetInt();
     for (size_t i = 0; i < vec->size(); i++) {
-        int64_t k = *(int64_t*)((*vec)[i]);
+        int64_t k = ring_unbox_int((*vec)[i]);
         result->insert(k);
     }
     return data;
@@ -1912,7 +1912,7 @@ extern "C" void* ring_write_file(void* path, void* content) {
 }
 
 extern "C" void* ring_exit(void* boxed_code) {
-    int64_t code = *(int64_t*)boxed_code;
+    int64_t code = ring_unbox_int(boxed_code);
     fprintf(stderr, "[RING_EXIT] code=%lld\n", (long long)code);
     fflush(stderr);
     exit((int)code);
@@ -2612,20 +2612,22 @@ extern "C" void* ring_json_stringify(void* val) {
 
 extern "C" void* ring_cl_eq_str(void* env, void* a, void* b) { return ring_box_bool(ring_str_eq(a, b)); }
 extern "C" void* ring_cl_ne_str(void* env, void* a, void* b) { return ring_box_bool(ring_str_eq(a, b) ? 0 : 1); }
-extern "C" void* ring_cl_eq_int(void* env, void* a, void* b) { return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 1 : 0); }
-extern "C" void* ring_cl_ne_int(void* env, void* a, void* b) { return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 0 : 1); }
+extern "C" void* ring_cl_eq_int(void* env, void* a, void* b) { return ring_box_bool((ring_unbox_int(a) == ring_unbox_int(b)) ? 1 : 0); }
+extern "C" void* ring_cl_ne_int(void* env, void* a, void* b) { return ring_box_bool((ring_unbox_int(a) == ring_unbox_int(b)) ? 0 : 1); }
 extern "C" void* ring_cl_eq_float(void* env, void* a, void* b) { return ring_box_bool((*(double*)a == *(double*)b) ? 1 : 0); }
 extern "C" void* ring_cl_ne_float(void* env, void* a, void* b) { return ring_box_bool((*(double*)a == *(double*)b) ? 0 : 1); }
-extern "C" void* ring_cl_eq_bool(void* env, void* a, void* b) { return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 1 : 0); }
-extern "C" void* ring_cl_ne_bool(void* env, void* a, void* b) { return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 0 : 1); }
+extern "C" void* ring_cl_eq_bool(void* env, void* a, void* b) { return ring_box_bool((ring_unbox_bool(a) == ring_unbox_bool(b)) ? 1 : 0); }
+extern "C" void* ring_cl_ne_bool(void* env, void* a, void* b) { return ring_box_bool((ring_unbox_bool(a) == ring_unbox_bool(b)) ? 0 : 1); }
 // Tag comparison for enum Eq dicts (correct for field-less enum variants, which
 // is what the bootstrap compiler compares with `==`). Reads the leading i64 tag.
 extern "C" void* ring_cl_eq_tag(void* env, void* a, void* b) {
-    if (!a || !b) return ring_box_bool((a == b) ? 1 : 0);
+    if (!a || !b || ((uintptr_t)a & 1) || ((uintptr_t)b & 1))
+        return ring_box_bool((a == b) ? 1 : 0);
     return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 1 : 0);
 }
 extern "C" void* ring_cl_ne_tag(void* env, void* a, void* b) {
-    if (!a || !b) return ring_box_bool((a == b) ? 0 : 1);
+    if (!a || !b || ((uintptr_t)a & 1) || ((uintptr_t)b & 1))
+        return ring_box_bool((a == b) ? 0 : 1);
     return ring_box_bool((*(int64_t*)a == *(int64_t*)b) ? 0 : 1);
 }
 
@@ -2634,7 +2636,7 @@ extern "C" void* ring_cl_ne_tag(void* env, void* a, void* b) {
 // to load_dict_method(dict, 0) + compare the unboxed result against 0. The same
 // closure ABI as Eq: fn(env, a, b) -> boxed value.
 extern "C" void* ring_cl_cmp_int(void* env, void* a, void* b) {
-    int64_t x = *(int64_t*)a, y = *(int64_t*)b;
+    int64_t x = ring_unbox_int(a), y = ring_unbox_int(b);
     return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
 }
 extern "C" void* ring_cl_cmp_float(void* env, void* a, void* b) {
@@ -2647,7 +2649,7 @@ extern "C" void* ring_cl_cmp_str(void* env, void* a, void* b) {
     return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
 }
 extern "C" void* ring_cl_cmp_bool(void* env, void* a, void* b) {
-    int64_t x = *(int64_t*)a, y = *(int64_t*)b;
+    int64_t x = ring_unbox_bool(a), y = ring_unbox_bool(b);
     return ring_box_int(x < y ? -1 : (x > y ? 1 : 0));
 }
 
