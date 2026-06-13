@@ -127,6 +127,15 @@ pub extern fn LLVMIsNullPtr(val: LLVMValueRef) -> Int
 // attr_index: Int (0 = return, 1.. = params, -1 = function)
 pub extern fn LLVMAddAttributeAtIndex(fn_val: LLVMValueRef, attr_index: Int, attr: LLVMAttributeRef) -> Unit
 
+// B-117: Attribute creation for nonnull / nounwind
+// LLVMGetEnumAttributeKindForName: look up attribute kind ID by name (e.g. "nonnull", "nounwind").
+// Returns 0 if the name is unknown.
+pub extern fn LLVMGetEnumAttributeKindForName(name: Str, s_len: Int) -> Int
+
+// LLVMCreateEnumAttribute: create an enum attribute given kind ID and value.
+// For boolean attributes like nonnull/nounwind, value = 0.
+pub extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -> LLVMAttributeRef
+
 // ============================================================
 // Basic Blocks
 // ============================================================

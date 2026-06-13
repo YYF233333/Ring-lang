@@ -1,4 +1,4 @@
-use types::{Type, Effect, EffectRow, effect_kind_name}
+use types::{Type, Effect, EffectRow, effect_kind_name, is_option_type}
 use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp,
@@ -73,6 +73,12 @@ extern fn LLVMBuildBr(builder: LLVMBuilderRef, dest: LLVMBasicBlockRef) -> LLVMV
 extern fn LLVMBuildRetVoid(builder: LLVMBuilderRef) -> LLVMValueRef
 extern fn LLVMBuildSwitch(builder: LLVMBuilderRef, val: LLVMValueRef, default_dest: LLVMBasicBlockRef, num_cases: Int) -> LLVMValueRef
 extern fn LLVMAddCase(switch_val: LLVMValueRef, on_val: LLVMValueRef, dest: LLVMBasicBlockRef) -> Unit
+
+// B-117: Attribute API for nonnull / nounwind
+extern type LLVMAttributeRef
+extern fn LLVMAddAttributeAtIndex(fn_val: LLVMValueRef, attr_index: Int, attr: LLVMAttributeRef) -> Unit
+extern fn LLVMGetEnumAttributeKindForName(name: Str, s_len: Int) -> Int
+extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -> LLVMAttributeRef
 
 // Discard an LLVMValueRef (to avoid type mismatch in Unit-returning contexts)
 fn discard(v: LLVMValueRef) {
@@ -375,6 +381,49 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
     }
 }
 
+// ============================================================
+// B-117: apply_fn_attributes — nonnull (params) + nounwind (function)
+// ============================================================
+
+fn has_fail_effect(effects: EffectRow) -> Bool {
+    for e in effects.effects {
+        match e {
+            Effect::FailEffect { .. } => { return true },
+            _ => {},
+        }
+    }
+    false
+}
+
+fn apply_fn_attributes(ctx: LlvmCtx, fn_val: LLVMValueRef, params: List<HParam>, effects: EffectRow) {
+    // nounwind: function-level attribute if no fail effect
+    // Functions with fail effect may longjmp, so they can unwind.
+    if has_fail_effect(effects) == false {
+        let nounwind_kind = LLVMGetEnumAttributeKindForName("nounwind", 8)
+        if nounwind_kind > 0 {
+            let nounwind_attr = LLVMCreateEnumAttribute(ctx.context, nounwind_kind, 0)
+            // attr_index -1 = LLVMAttributeFunctionIndex
+            LLVMAddAttributeAtIndex(fn_val, 0 - 1, nounwind_attr)
+        }
+    }
+
+    // nonnull: per-parameter attribute for non-Option params
+    // In uniform boxing, all Ring values are pointers. Non-Option values are
+    // guaranteed non-null (Int/Bool use tagged pointers which are still non-null).
+    let nonnull_kind = LLVMGetEnumAttributeKindForName("nonnull", 6)
+    if nonnull_kind > 0 {
+        let nonnull_attr = LLVMCreateEnumAttribute(ctx.context, nonnull_kind, 0)
+        let mut idx = 0
+        for p in params {
+            if is_option_type(p.ty) == false {
+                // LLVM param indices start at 1 (0 = return value)
+                LLVMAddAttributeAtIndex(fn_val, idx + 1, nonnull_attr)
+            }
+            idx = idx + 1
+        }
+    }
+}
+
 fn forward_declare_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: EffectRow, trait_bounds: List<TraitBound>, prefix: Str?) {
     let mangled = match prefix {
         some(p) => llvm_mangle_fn_with_prefix(p, name),
@@ -413,6 +462,9 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
     // Return type is always ptr (uniform boxing)
     let fn_ty = LLVMFunctionType(ptr, param_types, 0)
     let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
+
+    // B-117: apply nonnull / nounwind attributes
+    apply_fn_attributes(ctx, fn_val, params, effective_effects)
 
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)

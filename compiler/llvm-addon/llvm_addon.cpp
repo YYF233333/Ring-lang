@@ -338,6 +338,22 @@ static napi_value w_LLVMAddAttributeAtIndex(napi_env env, napi_callback_info inf
     return make_undef(env);
 }
 
+// B-117: Attribute creation for nonnull / nounwind
+static napi_value w_LLVMGetEnumAttributeKindForName(napi_env env, napi_callback_info info) {
+    ARGS(2);
+    auto name = get_str(env, _argv[0]);
+    // _argv[1] is s_len from Ring; we use name.size() from get_str directly
+    unsigned kind = LLVMGetEnumAttributeKindForName(name.c_str(), name.size());
+    return make_i64(env, (int64_t)kind);
+}
+static napi_value w_LLVMCreateEnumAttribute(napi_env env, napi_callback_info info) {
+    ARGS(3);
+    auto ctx = (LLVMContextRef)get_ext(env, _argv[0]);
+    unsigned kind_id = (unsigned)get_i64(env, _argv[1]);
+    uint64_t val = (uint64_t)get_i64(env, _argv[2]);
+    return make_ext(env, LLVMCreateEnumAttribute(ctx, kind_id, val));
+}
+
 // ============================================================
 // Basic Blocks / Builder
 // ============================================================
@@ -766,6 +782,8 @@ static napi_value Init(napi_env env, napi_value exports) {
         REG(LLVMGetEntryBasicBlock),
         REG(LLVMGetBasicBlockParent),
         REG(LLVMAddAttributeAtIndex),
+        REG(LLVMGetEnumAttributeKindForName),
+        REG(LLVMCreateEnumAttribute),
         // Basic Blocks / Builder
         REG(LLVMAppendBasicBlockInContext),
         REG(LLVMGetInsertBlock),

@@ -425,18 +425,7 @@ fn test_fetch() {
 - **两个已知根因 → B-104 回归实例**（total pass + verifier 必须覆盖且 verifier 静态抓到）：① **struct-field 重赋值漏**（`self.pos = self.pos + 1` 存新 box 进 struct 字段、旧 box 不 drop——W4 标量 mut-var reassignment 的 struct-field 兄弟，Lexer/Parser 热路径）② **call-result Option/STR temp 不 drop**（`str_char_code_at` 返 `Some(box_int)`，调用方在 scrutinee/comparison 位不 drop）。**非标量 RC 有别名 soundness 风险（B-101 教训）→ verifier 兜底 + ASan 验，不靠人肉归因猜测。**
 
 
-### B-117 LLVM 函数/参数属性标注（nonnull/nounwind/memory 类）[feature] [P3] [S] [judgment] [queued]
-
-> 2026-06-11 立项（Discussion）。design.md §14.6 要求「LLVM 属性标注从第一天就做」——核实：`llvm_ffi.ring` 已声明 Attribute API，但 `codegen_llvm*.ring` **零调用**。支柱 3（语义驱动性能）当前落地为零，本项是第一块砖：信息 HIR 现成（每 HExpr 带 Type + EffectRow），每函数几行调用。
-
-**涉及修改**（规则基于 design.md §14.6，含一处订正）：
-1. 参数级：非 Option 类型 → `nonnull`（uniform boxing 下所有 Ring 值均非空指针）。
-2. 函数级：无 fail effect → `nounwind`；仅 fail → 不标（longjmp）。
-3. ⚠️ **design.md §14.6「纯函数 → readnone」不可直接照搬**：uniform boxing 下纯 Ring 函数仍调用 ring_alloc/dup/drop（内存效应），裸标 readnone 会被 LLVM 错误优化。需评估 LLVM 22 `memory(...)` 细粒度属性（如 inaccessiblememonly 类）按可证明粒度收紧；先落 nonnull/nounwind 两个无风险项。
-4. 时序：B-104 完整 RC 落地后做（避免与 milestone 并发改 codegen_llvm）。
-
-**验收标准**：
-- 产出 IR 含属性（抽查 dump）；llvm_diff 全绿 ×3（错标会被 LLVM 优化出错，差分即安全网）；native 自编译产物正常
+<!-- B-117 done: git f2f541e, 2026-06-13 worker. nounwind (no fail) + nonnull (non-Option params). llvm_ffi +2 API + llvm_addon wrapper. JS 832 / llvm_diff ×3 80/80 / double-bootstrap. readnone/memory 留后续。 -->
 
 <!-- B-118 done: git 4057133, 2026-06-13 worker. gen_call 两路径 Unit→null, is_unit_type helper. JS 832 / llvm_diff ×3 80/80 / double-bootstrap. -->
 

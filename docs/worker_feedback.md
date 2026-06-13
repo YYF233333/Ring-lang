@@ -30,3 +30,17 @@ JS 831 / llvm_diff ×3 79/79。
 ### 1. 实现形态 [通知]
 
 `gen_call` 两个路径（dict dispatch early return + 普通 callee match）在 `result_ty` 为 `UnitType` 时替换返回值为 `LLVMConstPointerNull`。新增 `is_unit_type` helper（仿 `is_str_type`/`is_bool_type` 格式）。codegen_llvm_stmt.ring 未改（stmt 层不产 Unit 值流入 RC sink 的场景）。JS 832 / llvm_diff ×3 80/80。
+
+## B-117 LLVM 属性标注
+
+### 1. 实现形态 [通知]
+
+`apply_fn_attributes` 在 `forward_declare_fn_with_name`（`LLVMAddFunction` 后）调用：
+- **nounwind**（function-level，attr_index=-1）：无 FailEffect 时标注
+- **nonnull**（per-param，attr_index=idx+1）：非 Option 参数标注
+
+新增 llvm_ffi.ring 声明（`LLVMGetEnumAttributeKindForName` / `LLVMCreateEnumAttribute` / `LLVMAddAttributeAtIndex` + `LLVMAttributeRef` 类型）和 llvm-addon N-API wrapper。extern fn 不标注。readnone/memory 类留后续。JS 832 / llvm_diff ×3 80/80。
+
+### 2. llvm-addon 源码改动 [通知]
+
+agent 修改了 `compiler/llvm-addon/llvm_addon.cpp` 添加两个 N-API wrapper。这是 gitignored 的本地构建目录中的源码——源码本身入 git，但 build 产出（.node）不入 git。其他机器需 `cd compiler/llvm-addon && npm run build` 重建 addon。
