@@ -111,7 +111,7 @@ Ring-lang/
 
 ## 路线图
 
-**当前**：B-104 完整 Perceus RC（D1-D9 ✅，leak 88%→1.8%）。Native 自编译跑通（exit 0，~10.42B allocs，peak ~10.6GB）。G-a 三门中 ②③ 已达、① live plateau 未达（残余爬升类 = STR/SB/Type，详见 design.md §7.11）。B-104 D9 codegen-drop 拍定暂停。攻坚中：B-080 tagged pointer（性能）、B-123 runtime 原地化、B-122 SCC 拓扑序（checker 正确性）。
+**当前**：B-104 完整 Perceus RC（D1-D9 ✅，leak 88%→1.8%）。Native 自编译跑通（exit 0，~10.42B allocs，peak ~10.6GB）。G-a 三门中 ②③ 已达、① live plateau 未达（残余爬升类 = STR/SB，详见 design.md §7.11）。B-104 D9 Part 1 codegen-drop queued。B-080 tagged pointer ✅（290s vs 492s = 41% 加速，tid0/tid2 归零）。待攻坚：B-122 SCC 拓扑序（checker 正确性）。
 
 **后续**：B-089 native 自举终验（G-a/b/c）→ B-099 native LLVM-C 链接（Node 消除）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
