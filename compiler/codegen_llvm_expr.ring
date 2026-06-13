@@ -516,6 +516,13 @@ fn is_bool_type(ty: Type) -> Bool {
     }
 }
 
+fn is_unit_type(ty: Type) -> Bool {
+    match ty {
+        Type::UnitType => true,
+        _ => false,
+    }
+}
+
 fn operand_type_from_binop(left: HExpr) -> Type {
     hexpr_type(left)
 }
@@ -981,7 +988,13 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
     // Handle dict dispatch (trait method call through dict parameter)
     match dict_dispatch {
         some(dd) => {
-            return gen_dict_dispatch_call(ctx, callee, args, dd)
+            // B-118: Unit-returning dict dispatch calls must emit null, not the
+            // runtime's ABI return value (which may be the receiver pointer).
+            let raw = gen_dict_dispatch_call(ctx, callee, args, dd)
+            if is_unit_type(result_ty) {
+                return LLVMConstPointerNull(ctx.ptr_type)
+            }
+            return raw
         },
         none => {},
     }
@@ -1013,7 +1026,7 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
     let dict_vals = resolve_dict_refs(ctx, resolved_dicts)
 
     // Determine function to call
-    match callee {
+    let raw = match callee {
         HExpr::Ident { name, resolved_name, .. } => {
             let call_name = match resolved_name {
                 some(rn) => rn,
@@ -1069,6 +1082,14 @@ fn gen_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, resolved_dicts: 
             gen_closure_call(ctx, closure_val, arg_vals)
         },
     }
+    // B-118: Unit-typed call results must be null, not the runtime's ABI
+    // return value.  Mutator functions (List.push etc.) return the receiver
+    // pointer for convenience, but that is an ABI accident — a Unit value
+    // must never carry a live object pointer that RC might try to free.
+    if is_unit_type(result_ty) {
+        return LLVMConstPointerNull(ctx.ptr_type)
+    }
+    raw
 }
 
 // ============================================================

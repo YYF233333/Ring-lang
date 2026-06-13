@@ -438,18 +438,7 @@ fn test_fetch() {
 **验收标准**：
 - 产出 IR 含属性（抽查 dump）；llvm_diff 全绿 ×3（错标会被 LLVM 优化出错，差分即安全网）；native 自编译产物正常
 
-### B-118 LLVM codegen：Unit 类型值统一 emit null（消 receiver-return ABI 偶然）[refactor] [P3] [S] [judgment] [queued]
-
-> 2026-06-11 立项（B-104 D1 Stage 1 feedback，用户拍板）。D1 规则② 把 Unit 定为类型级不 Clone/不 Drop/不计 owned，但 LLVM runtime mutator（List.push 等 `-> Unit` 函数）ABI 上仍 `return receiver;`——**残留理论洞**：Unit 值流入 RC sink（病态形态如 `[xs.push(v)]` 构造 `List<Unit>`）会把 receiver 裸指针 un-dup'd 存入容器，容器 drop 时 free 活容器。真实代码不出现（mutator 结果存容器无意义），但从根消除 ABI 偶然才闭环——Unit 值不再携带任何可被误当所有权的指针。
-
-**涉及修改**：
-1. `compiler/codegen_llvm_expr.ring`（含 stmt 层对应位置）：静态类型为 Unit 的表达式值统一 emit null 常量，不透传 callee 返回值。
-2. 时序：**B-104 完整 RC 落地后执行**（避免与 milestone session 并发改 codegen_llvm；同 B-117 约定）。
-
-**验收标准**：
-- 病态形态（Unit 值进容器/绑定）双后端行为一致、ASan-clean
-- llvm_diff 全绿 ×3（动 codegen 值路径，按 RC 改动纪律跑）
-- dist-llvm 自编译正常；自举一致
+<!-- B-118 done: git 4057133, 2026-06-13 worker. gen_call 两路径 Unit→null, is_unit_type helper. JS 832 / llvm_diff ×3 80/80 / double-bootstrap. -->
 
 <!-- B-121 done: git e0a9c61, 2026-06-13 worker. Gap 1 resolve_dispatch_dict + trait_name_hint; Gap 2 gen_dict_dispatch_call fallback. JS 831 / llvm_diff ×3 79/79 / double-bootstrap. -->
 

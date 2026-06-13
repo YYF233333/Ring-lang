@@ -24,3 +24,9 @@
 - `dict_dispatch_delegate_static.ring`：delegate Eq 到 struct field — 触发 dict_dispatch 的 named_values miss 路径
 
 JS 831 / llvm_diff ×3 79/79。
+
+## B-118 Unit emit null
+
+### 1. 实现形态 [通知]
+
+`gen_call` 两个路径（dict dispatch early return + 普通 callee match）在 `result_ty` 为 `UnitType` 时替换返回值为 `LLVMConstPointerNull`。新增 `is_unit_type` helper（仿 `is_str_type`/`is_bool_type` 格式）。codegen_llvm_stmt.ring 未改（stmt 层不产 Unit 值流入 RC sink 的场景）。JS 832 / llvm_diff ×3 80/80。
