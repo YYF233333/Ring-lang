@@ -72,6 +72,10 @@ extern fn LLVMBuildSwitch(builder: LLVMBuilderRef, val: LLVMValueRef, else_bb: L
 extern fn LLVMAddCase(switch_val: LLVMValueRef, on_val: LLVMValueRef, dest: LLVMBasicBlockRef) -> Unit
 extern fn LLVMBuildIntToPtr(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildPtrToInt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
+// B-080: bitwise ops for tagged-pointer inline encoding
+extern fn LLVMBuildShl(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildAShr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildOr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 
 // ============================================================
 // Type-aware map/set dispatch helpers
@@ -176,10 +180,11 @@ fn gen_clone(mut ctx: LlvmCtx, inner: HExpr) -> LLVMValueRef {
 // ============================================================
 
 fn gen_int_lit(mut ctx: LlvmCtx, value: Int) -> LLVMValueRef {
+    // B-080: inline tagged pointer — (val << 1) | 1, constant-folded to inttoptr.
     let raw = LLVMConstInt(ctx.i64_type, value, 1)
-    let box_fn = get_or_declare_runtime_fn(ctx, "ring_box_int", [ctx.i64_type], ctx.ptr_type)
-    let box_fn_ty = get_rt_fn_type(ctx, "ring_box_int")
-    LLVMBuildCall2(ctx.builder, box_fn_ty, box_fn, [raw], fresh_name(ctx, "int"))
+    let shifted = LLVMBuildShl(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), fresh_name(ctx, "sh"))
+    let tagged = LLVMBuildOr(ctx.builder, shifted, LLVMConstInt(ctx.i64_type, 1, 0), fresh_name(ctx, "tg"))
+    LLVMBuildIntToPtr(ctx.builder, tagged, ctx.ptr_type, fresh_name(ctx, "int"))
 }
 
 fn gen_float_lit(mut ctx: LlvmCtx, value: Float) -> LLVMValueRef {
@@ -197,10 +202,9 @@ fn gen_str_lit(mut ctx: LlvmCtx, value: Str) -> LLVMValueRef {
 }
 
 fn gen_bool_lit(mut ctx: LlvmCtx, value: Bool) -> LLVMValueRef {
-    let raw = if value { LLVMConstInt(ctx.i64_type, 1, 0) } else { LLVMConstInt(ctx.i64_type, 0, 0) }
-    let box_fn = get_or_declare_runtime_fn(ctx, "ring_box_bool", [ctx.i64_type], ctx.ptr_type)
-    let box_fn_ty = get_rt_fn_type(ctx, "ring_box_bool")
-    LLVMBuildCall2(ctx.builder, box_fn_ty, box_fn, [raw], fresh_name(ctx, "bool"))
+    // B-080: inline tagged pointer — true = inttoptr 3, false = inttoptr 1.
+    let val = if value { LLVMConstInt(ctx.i64_type, 3, 0) } else { LLVMConstInt(ctx.i64_type, 1, 0) }
+    LLVMBuildIntToPtr(ctx.builder, val, ctx.ptr_type, fresh_name(ctx, "bool"))
 }
 
 // ============================================================
@@ -611,13 +615,14 @@ fn gen_eq_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr, 
     let result = gen_closure_call(ctx, eq_closure, [lhs, rhs])
     match op {
         BinOp::Neq => {
-            let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
-            let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
-            let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [result], fresh_name(ctx, "ub"))
+            // B-080: inline untag
+            let raw = unbox_int(ctx, result)
             // B-104 D4: the eq closure's Bool box is INTERNAL on the Neq path —
             // unboxed then replaced by a fresh negated box.  Drop it (the shim /
             // Ring impl returns an OWNED fresh box; same family as the
-            // while-cond post-unbox drop).
+            // while-cond post-unbox drop).  B-080: ring_drop early-returns for
+            // tagged scalars, so this is a harmless no-op — kept for correctness
+            // if the dispatch path ever returns a boxed value.
             let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
             let drop_ty = get_rt_fn_type(ctx, "ring_drop")
             discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [result], ""))
@@ -636,13 +641,11 @@ fn gen_ord_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr,
     let dict_ptr = resolve_dispatch_dict(ctx, dispatch)
     let cmp_closure = load_dict_method(ctx, dict_ptr, 0)
     let cmp_result = gen_closure_call(ctx, cmp_closure, [lhs, rhs])
-    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-    let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [cmp_result], fresh_name(ctx, "uc"))
+    // B-080: inline untag
+    let raw = unbox_int(ctx, cmp_result)
     // B-104 D4 (#151 probe D): the cmp INT box is INTERNAL — unboxed here and
     // replaced by a fresh Bool box below; it leaked once per Ord dispatch.
-    // The shim / Ring impl returns an OWNED fresh box — drop it post-unbox
-    // (same family as the while-cond box drop).
+    // B-080: ring_drop early-returns for tagged scalars — kept for correctness.
     let cmp_drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
     let cmp_drop_ty = get_rt_fn_type(ctx, "ring_drop")
     discard(LLVMBuildCall2(ctx.builder, cmp_drop_ty, cmp_drop_fn, [cmp_result], ""))
@@ -660,10 +663,9 @@ fn gen_ord_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr,
 }
 
 fn gen_int_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
-    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-    let lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], fresh_name(ctx, "l"))
-    let rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], fresh_name(ctx, "r"))
+    // B-080: inline untag
+    let lhs_raw = unbox_int(ctx, lhs)
+    let rhs_raw = unbox_int(ctx, rhs)
 
     match op {
         BinOp::Add => {
@@ -808,10 +810,9 @@ fn gen_str_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueR
 }
 
 fn gen_bool_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
-    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
-    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
-    let lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], fresh_name(ctx, "lb"))
-    let rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], fresh_name(ctx, "rb"))
+    // B-080: inline untag
+    let lhs_raw = unbox_int(ctx, lhs)
+    let rhs_raw = unbox_int(ctx, rhs)
 
     match op {
         BinOp::Eq => {
@@ -842,9 +843,8 @@ fn gen_unaryop(mut ctx: LlvmCtx, op: UnaryOp, operand: HExpr, ty: Type) -> LLVMV
     match op {
         UnaryOp::Neg => {
             if is_int_type(ty) {
-                let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-                let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-                let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], fresh_name(ctx, "un"))
+                // B-080: inline untag
+                let raw = unbox_int(ctx, val)
                 let zero = LLVMConstInt(ctx.i64_type, 0, 0)
                 let neg = LLVMBuildSub(ctx.builder, zero, raw, fresh_name(ctx, "neg"))
                 box_int(ctx, neg)
@@ -858,9 +858,8 @@ fn gen_unaryop(mut ctx: LlvmCtx, op: UnaryOp, operand: HExpr, ty: Type) -> LLVMV
             }
         },
         UnaryOp::Not => {
-            let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
-            let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
-            let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], fresh_name(ctx, "un"))
+            // B-080: inline untag
+            let raw = unbox_int(ctx, val)
             let one = LLVMConstInt(ctx.i64_type, 1, 0)
             let neg = LLVMBuildSub(ctx.builder, one, raw, fresh_name(ctx, "not"))
             box_bool(ctx, neg)
@@ -2018,9 +2017,8 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
 
             // Handle receiver
             if rt_method_needs_recv_unbox_int(rt_name) {
-                let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-                let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-                let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [recv], fresh_name(ctx, "ui"))
+                // B-080: inline untag
+                let raw = unbox_int(ctx, recv)
                 call_args.push(raw)
             } else {
                 if rt_method_needs_recv_unbox_float(rt_name) {
@@ -2030,9 +2028,8 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                     call_args.push(raw)
                 } else {
                     if rt_method_needs_recv_unbox_bool(rt_name) {
-                        let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
-                        let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
-                        let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [recv], fresh_name(ctx, "ub"))
+                        // B-080: inline untag
+                        let raw = unbox_int(ctx, recv)
                         call_args.push(raw)
                     } else {
                         call_args.push(recv)
@@ -2046,9 +2043,8 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
             let mut ai_idx = 0
             for a in args {
                 if ai_idx < int_arg_count {
-                    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-                    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-                    let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [a], fresh_name(ctx, "ai"))
+                    // B-080: inline untag
+                    let raw = unbox_int(ctx, a)
                     call_args.push(raw)
                 } else {
                     call_args.push(a)
@@ -2475,10 +2471,8 @@ fn convert_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, ty: Type) -> LLVMValueRef
         val
     } else {
         if is_int_type(ty) {
-            // ring_int_to_str takes i64, need to unbox first
-            let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-            let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-            let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], fresh_name(ctx, "ui"))
+            // B-080: inline untag
+            let raw = unbox_int(ctx, val)
             let to_str_fn = get_or_declare_runtime_fn(ctx, "ring_int_to_str", [ctx.i64_type], ctx.ptr_type)
             let to_str_ty = get_rt_fn_type(ctx, "ring_int_to_str")
             LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "its"))
@@ -2493,18 +2487,15 @@ fn convert_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, ty: Type) -> LLVMValueRef
                 LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "fts"))
             } else {
                 if is_bool_type(ty) {
-                    // ring_bool_to_str takes i64, need to unbox first
-                    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
-                    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
-                    let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], fresh_name(ctx, "ub"))
+                    // B-080: inline untag
+                    let raw = unbox_int(ctx, val)
                     let to_str_fn = get_or_declare_runtime_fn(ctx, "ring_bool_to_str", [ctx.i64_type], ctx.ptr_type)
                     let to_str_ty = get_rt_fn_type(ctx, "ring_bool_to_str")
                     LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "bts"))
                 } else {
                     // Default: pass as ptr, try ring_int_to_str after unbox
-                    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-                    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-                    let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], fresh_name(ctx, "ui"))
+                    // B-080: inline untag
+                    let raw = unbox_int(ctx, val)
                     let to_str_fn = get_or_declare_runtime_fn(ctx, "ring_int_to_str", [ctx.i64_type], ctx.ptr_type)
                     let to_str_ty = get_rt_fn_type(ctx, "ring_int_to_str")
                     LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "ts"))
@@ -2519,9 +2510,10 @@ fn convert_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, ty: Type) -> LLVMValueRef
 // ============================================================
 
 pub fn box_int(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef {
-    let box_fn = get_or_declare_runtime_fn(ctx, "ring_box_int", [ctx.i64_type], ctx.ptr_type)
-    let box_ty = get_rt_fn_type(ctx, "ring_box_int")
-    LLVMBuildCall2(ctx.builder, box_ty, box_fn, [raw], fresh_name(ctx, "bi"))
+    // B-080: inline tagged pointer — (val << 1) | 1, then inttoptr.
+    let shifted = LLVMBuildShl(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), fresh_name(ctx, "sh"))
+    let tagged = LLVMBuildOr(ctx.builder, shifted, LLVMConstInt(ctx.i64_type, 1, 0), fresh_name(ctx, "tg"))
+    LLVMBuildIntToPtr(ctx.builder, tagged, ctx.ptr_type, fresh_name(ctx, "bi"))
 }
 
 pub fn box_float(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef {
@@ -2531,9 +2523,10 @@ pub fn box_float(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef {
 }
 
 pub fn box_bool(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef {
-    let box_fn = get_or_declare_runtime_fn(ctx, "ring_box_bool", [ctx.i64_type], ctx.ptr_type)
-    let box_ty = get_rt_fn_type(ctx, "ring_box_bool")
-    LLVMBuildCall2(ctx.builder, box_ty, box_fn, [raw], fresh_name(ctx, "bb"))
+    // B-080: inline tagged pointer — (val << 1) | 1, then inttoptr.
+    let shifted = LLVMBuildShl(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), fresh_name(ctx, "sh"))
+    let tagged = LLVMBuildOr(ctx.builder, shifted, LLVMConstInt(ctx.i64_type, 1, 0), fresh_name(ctx, "tg"))
+    LLVMBuildIntToPtr(ctx.builder, tagged, ctx.ptr_type, fresh_name(ctx, "bb"))
 }
 
 // ============================================================
@@ -2541,10 +2534,16 @@ pub fn box_bool(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef {
 // ============================================================
 
 pub fn unbox_to_i1(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef {
-    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
-    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
-    let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], fresh_name(ctx, "ub"))
-    LLVMBuildTrunc(ctx.builder, raw, ctx.i1_type, fresh_name(ctx, "i1"))
+    // B-080: inline untag — ptrtoint, ashr 1, trunc to i1.
+    let raw = LLVMBuildPtrToInt(ctx.builder, val, ctx.i64_type, fresh_name(ctx, "ub"))
+    let shifted = LLVMBuildAShr(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), fresh_name(ctx, "sh"))
+    LLVMBuildTrunc(ctx.builder, shifted, ctx.i1_type, fresh_name(ctx, "i1"))
+}
+
+// B-080: inline untag for Int — ptrtoint, ashr 1 → i64 value.
+pub fn unbox_int(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef {
+    let raw = LLVMBuildPtrToInt(ctx.builder, val, ctx.i64_type, fresh_name(ctx, "ui"))
+    LLVMBuildAShr(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), fresh_name(ctx, "uv"))
 }
 
 // Discard an LLVMValueRef (to avoid type mismatch in Unit-returning match arms)
@@ -3381,16 +3380,14 @@ fn tuple_element_type(ty: Type, idx: Int) -> Type {
 fn gen_literal_pattern_cond(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, value: LiteralValue) -> LLVMValueRef {
     match value {
         LiteralValue::IntVal(n) => {
-            let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-            let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-            let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [scrut_val], fresh_name(ctx, "ui"))
+            // B-080: inline untag
+            let raw = unbox_int(ctx, scrut_val)
             let lit = LLVMConstInt(ctx.i64_type, n, 1)
             LLVMBuildICmp(ctx.builder, 32, raw, lit, fresh_name(ctx, "eq"))
         },
         LiteralValue::BoolVal(b) => {
-            let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
-            let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
-            let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [scrut_val], fresh_name(ctx, "ub"))
+            // B-080: inline untag
+            let raw = unbox_int(ctx, scrut_val)
             let lit = if b { LLVMConstInt(ctx.i64_type, 1, 0) } else { LLVMConstInt(ctx.i64_type, 0, 0) }
             LLVMBuildICmp(ctx.builder, 32, raw, lit, fresh_name(ctx, "eq"))
         },
@@ -3522,18 +3519,16 @@ fn gen_index_expr(mut ctx: LlvmCtx, receiver: HExpr, index: HExpr, ty: Type) -> 
         none => "Unknown",
     }
 
-    // Unbox index to i64
-    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
+    // B-080: inline untag index to i64
 
     if type_name == "List" {
-        let raw_idx = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [idx_val], fresh_name(ctx, "ix"))
+        let raw_idx = unbox_int(ctx, idx_val)
         let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
         let get_ty = get_rt_fn_type(ctx, "ring_list_get")
         LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], fresh_name(ctx, "lg"))
     } else {
         if type_name == "Str" {
-            let raw_idx = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [idx_val], fresh_name(ctx, "ix"))
+            let raw_idx = unbox_int(ctx, idx_val)
             let get_fn = get_or_declare_runtime_fn(ctx, "ring_str_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
             let get_ty = get_rt_fn_type(ctx, "ring_str_get")
             LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], fresh_name(ctx, "sg"))
@@ -3546,7 +3541,7 @@ fn gen_index_expr(mut ctx: LlvmCtx, receiver: HExpr, index: HExpr, ty: Type) -> 
                 LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], fresh_name(ctx, "mg"))
             } else {
                 // Fallback: try list_get
-                let raw_idx = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [idx_val], fresh_name(ctx, "ix"))
+                let raw_idx = unbox_int(ctx, idx_val)
                 let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
                 let get_ty = get_rt_fn_type(ctx, "ring_list_get")
                 LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], fresh_name(ctx, "ig"))

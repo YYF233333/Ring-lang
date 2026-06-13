@@ -5,6 +5,7 @@ import { dict_instance_name as hir$dict_instance_name, variant_js_name as hir$va
 import { RING_TYPEID_CELL as codegen_llvm_ctx$RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV as codegen_llvm_ctx$RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC as codegen_llvm_ctx$RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN as codegen_llvm_ctx$RING_TYPEID_DICT_DYN, llvm_mangle_fn as codegen_llvm_ctx$llvm_mangle_fn, llvm_mangle_fn_with_prefix as codegen_llvm_ctx$llvm_mangle_fn_with_prefix, llvm_mangle_method as codegen_llvm_ctx$llvm_mangle_method, llvm_resolve_fn as codegen_llvm_ctx$llvm_resolve_fn, llvm_resolve_method as codegen_llvm_ctx$llvm_resolve_method, fresh_name as codegen_llvm_ctx$fresh_name, get_or_declare_runtime_fn as codegen_llvm_ctx$get_or_declare_runtime_fn, get_rt_fn_type as codegen_llvm_ctx$get_rt_fn_type, get_or_assign_typeid as codegen_llvm_ctx$get_or_assign_typeid, get_builtin_typeid as codegen_llvm_ctx$get_builtin_typeid, build_entry_alloca as codegen_llvm_ctx$build_entry_alloca, StructFieldInfo as codegen_llvm_ctx$StructFieldInfo, EnumVariantInfo as codegen_llvm_ctx$EnumVariantInfo, EnumTypeInfo as codegen_llvm_ctx$EnumTypeInfo, LlvmCtx as codegen_llvm_ctx$LlvmCtx, __EnumVariantInfo_Clone as codegen_llvm_ctx$__EnumVariantInfo_Clone, __EnumVariantInfo_Debug as codegen_llvm_ctx$__EnumVariantInfo_Debug } from "./codegen_llvm_ctx.js";
 import { gen_llvm_expr as codegen_llvm_expr$gen_llvm_expr } from "./codegen_llvm_expr.js";
 import { unbox_to_i1 as codegen_llvm_expr$unbox_to_i1 } from "./codegen_llvm_expr.js";
+import { unbox_int as codegen_llvm_expr$unbox_int } from "./codegen_llvm_expr.js";
 import { box_int as codegen_llvm_expr$box_int } from "./codegen_llvm_expr.js";
 import { box_bool as codegen_llvm_expr$box_bool } from "./codegen_llvm_expr.js";
 import { is_boxed_def as codegen_llvm_expr$is_boxed_def } from "./codegen_llvm_expr.js";
@@ -243,6 +244,12 @@ function Result_is_err(self) {
 function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
+
+
+
+
+
+
 
 
 
@@ -587,10 +594,8 @@ function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
 })();
   const start_val = codegen_llvm_expr$gen_llvm_expr(ctx, start);
   const end_val = codegen_llvm_expr$gen_llvm_expr(ctx, end);
-  const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-  const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-  const start_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [start_val], codegen_llvm_ctx$fresh_name(ctx, "si"));
-  const end_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [end_val], codegen_llvm_ctx$fresh_name(ctx, "ei"));
+  const start_raw = codegen_llvm_expr$unbox_int(ctx, start_val);
+  const end_raw = codegen_llvm_expr$unbox_int(ctx, end_val);
   emit_drop_value(ctx, start_val);
   emit_drop_value(ctx, end_val);
   const counter_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "i"));
@@ -643,13 +648,9 @@ function emit_for_in_range_var(ctx, binding, iterable, body) {
   const end_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, end_slot, codegen_llvm_ctx$fresh_name(ctx, "eb"));
   const incl_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 2, codegen_llvm_ctx$fresh_name(ctx, "ri"));
   const incl_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, incl_slot, codegen_llvm_ctx$fresh_name(ctx, "ib"));
-  const unbox_int_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-  const unbox_int_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-  const start_raw = LLVMBuildCall2(ctx.builder, unbox_int_ty, unbox_int_fn, [start_box], codegen_llvm_ctx$fresh_name(ctx, "si"));
-  const end_raw = LLVMBuildCall2(ctx.builder, unbox_int_ty, unbox_int_fn, [end_box], codegen_llvm_ctx$fresh_name(ctx, "ei"));
-  const unbox_bool_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
-  const unbox_bool_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
-  const incl_raw = LLVMBuildCall2(ctx.builder, unbox_bool_ty, unbox_bool_fn, [incl_box], codegen_llvm_ctx$fresh_name(ctx, "ic"));
+  const start_raw = codegen_llvm_expr$unbox_int(ctx, start_box);
+  const end_raw = codegen_llvm_expr$unbox_int(ctx, end_box);
+  const incl_raw = codegen_llvm_expr$unbox_int(ctx, incl_box);
   const one = LLVMConstInt(ctx.i64_type, 1, 0);
   const one_minus_incl = LLVMBuildSub(ctx.builder, one, incl_raw, codegen_llvm_ctx$fresh_name(ctx, "omi"));
   const end_bound = LLVMBuildSub(ctx.builder, end_raw, one_minus_incl, codegen_llvm_ctx$fresh_name(ctx, "eb2"));

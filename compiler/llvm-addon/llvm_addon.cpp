@@ -384,6 +384,11 @@ BINOP(LLVMBuildSub)
 BINOP(LLVMBuildMul)
 BINOP(LLVMBuildSDiv)
 BINOP(LLVMBuildSRem)
+// B-080: bitwise ops for tagged-pointer inline encoding
+BINOP(LLVMBuildShl)
+BINOP(LLVMBuildAShr)
+BINOP(LLVMBuildOr)
+
 BINOP(LLVMBuildFAdd)
 BINOP(LLVMBuildFSub)
 BINOP(LLVMBuildFMul)
@@ -773,6 +778,9 @@ static napi_value Init(napi_env env, napi_value exports) {
         REG(LLVMBuildMul),
         REG(LLVMBuildSDiv),
         REG(LLVMBuildSRem),
+        REG(LLVMBuildShl),
+        REG(LLVMBuildAShr),
+        REG(LLVMBuildOr),
         REG(LLVMBuildFAdd),
         REG(LLVMBuildFSub),
         REG(LLVMBuildFMul),

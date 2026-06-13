@@ -365,6 +365,7 @@ extern "C" void* ring_alloc(int64_t size, int64_t typeid_val) {
 
 extern "C" void ring_dup(void* ptr) {
     if (!ptr) return;
+    if ((uintptr_t)ptr & 1) return;  // B-080: tagged scalar — no RC
     uint32_t tid = *(uint32_t*)((char*)ptr - 4);
     if (tid < 4096 && never_drop_table[tid]) return; // B-101: interned, no RC
     uint32_t* rc = (uint32_t*)((char*)ptr - 8);
@@ -373,6 +374,7 @@ extern "C" void ring_dup(void* ptr) {
 
 extern "C" void ring_drop(void* ptr) {
     if (!ptr) return;
+    if ((uintptr_t)ptr & 1) return;  // B-080: tagged scalar — no RC
     uint32_t tid = *(uint32_t*)((char*)ptr - 4);
 #ifdef RING_RC_DEBUG
     {
@@ -603,16 +605,15 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
 // ============================================================================
 
 extern "C" void* ring_box_int(int64_t val) {
-    CHK("box_int");
-    void* data = ring_alloc(sizeof(int64_t), RING_TYPEID_INT);
-    *(int64_t*)data = val;
-#ifdef RING_BOX_PROFILE
-    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_INT);
-#endif
-    return data;
+    // B-080: tagged pointer — no heap allocation.
+    // Encoding: (val << 1) | 1.  63-bit signed range.
+    return (void*)(((uintptr_t)val << 1) | 1);
 }
 
 extern "C" int64_t ring_unbox_int(void* p) {
+    // B-080: tagged pointer — (val << 1) | 1; arithmetic shift right recovers val.
+    if ((uintptr_t)p & 1) return (int64_t)((intptr_t)p >> 1);
+    // Legacy boxed path (runtime internal — e.g. Option<Int> payload)
     CHK("unbox_int");
     if (!p) { fprintf(stderr, "ring panic: unbox_int(null)\n"); exit(1); }
     return *(int64_t*)p;
@@ -629,16 +630,14 @@ extern "C" double ring_unbox_float(void* p) {
 }
 
 extern "C" void* ring_box_bool(int64_t val) {
-    CHK("box_bool");
-    void* data = ring_alloc(sizeof(int64_t), RING_TYPEID_BOOL);
-    *(int64_t*)data = (val != 0) ? 1 : 0;
-#ifdef RING_BOX_PROFILE
-    ring_box_profile_record(data, _ReturnAddress(), RING_TYPEID_BOOL); // B-104 D5
-#endif
-    return data;
+    // B-080: tagged pointer — true = 3 ((1<<1)|1), false = 1 ((0<<1)|1).
+    return (void*)((((uintptr_t)(val != 0 ? 1 : 0)) << 1) | 1);
 }
 
 extern "C" int64_t ring_unbox_bool(void* p) {
+    // B-080: tagged pointer — same encoding as Int.
+    if ((uintptr_t)p & 1) return (int64_t)((intptr_t)p >> 1);
+    // Legacy boxed path (runtime internal)
     CHK("unbox_bool");
     if (!p) { fprintf(stderr, "ring panic: unbox_bool(null)\n"); exit(1); }
     return *(int64_t*)p;

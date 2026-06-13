@@ -291,6 +291,9 @@ function to_result(f) {
 
 
 
+
+
+
 function is_int_keyed_map(ty) {
   __ring_match6: {
     const __ring_m6 = ty;
@@ -480,9 +483,9 @@ function gen_clone(ctx, inner) {
 
 function gen_int_lit(ctx, value) {
   const raw = LLVMConstInt(ctx.i64_type, value, 1);
-  const box_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_box_int", [ctx.i64_type], ctx.ptr_type);
-  const box_fn_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_box_int");
-  return LLVMBuildCall2(ctx.builder, box_fn_ty, box_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "int"));
+  const shifted = LLVMBuildShl(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), codegen_llvm_ctx$fresh_name(ctx, "sh"));
+  const tagged = LLVMBuildOr(ctx.builder, shifted, LLVMConstInt(ctx.i64_type, 1, 0), codegen_llvm_ctx$fresh_name(ctx, "tg"));
+  return LLVMBuildIntToPtr(ctx.builder, tagged, ctx.ptr_type, codegen_llvm_ctx$fresh_name(ctx, "int"));
 }
 
 function gen_float_lit(ctx, value) {
@@ -500,10 +503,8 @@ function gen_str_lit(ctx, value) {
 }
 
 function gen_bool_lit(ctx, value) {
-  const raw = (value ? LLVMConstInt(ctx.i64_type, 1, 0) : LLVMConstInt(ctx.i64_type, 0, 0));
-  const box_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_box_bool", [ctx.i64_type], ctx.ptr_type);
-  const box_fn_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_box_bool");
-  return LLVMBuildCall2(ctx.builder, box_fn_ty, box_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "bool"));
+  const val = (value ? LLVMConstInt(ctx.i64_type, 3, 0) : LLVMConstInt(ctx.i64_type, 1, 0));
+  return LLVMBuildIntToPtr(ctx.builder, val, ctx.ptr_type, codegen_llvm_ctx$fresh_name(ctx, "bool"));
 }
 
 function is_boxed_def(ctx, def_id) {
@@ -1029,9 +1030,7 @@ function gen_eq_dispatch_llvm(ctx, op, left, right, dispatch) {
   __ring_match34: {
     const __ring_m34 = op;
     if (__ring_m34._tag === "Neq") {
-      const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
-      const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
-      const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [result], codegen_llvm_ctx$fresh_name(ctx, "ub"));
+      const raw = unbox_int(ctx, result);
       const drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
       const drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
       discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [result], ""));
@@ -1051,9 +1050,7 @@ function gen_ord_dispatch_llvm(ctx, op, left, right, dispatch) {
   const dict_ptr = resolve_dispatch_dict(ctx, dispatch);
   const cmp_closure = load_dict_method(ctx, dict_ptr, 0);
   const cmp_result = gen_closure_call(ctx, cmp_closure, [lhs, rhs]);
-  const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-  const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-  const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [cmp_result], codegen_llvm_ctx$fresh_name(ctx, "uc"));
+  const raw = unbox_int(ctx, cmp_result);
   const cmp_drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
   const cmp_drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
   discard(LLVMBuildCall2(ctx.builder, cmp_drop_ty, cmp_drop_fn, [cmp_result], ""));
@@ -1072,10 +1069,8 @@ function gen_ord_dispatch_llvm(ctx, op, left, right, dispatch) {
 }
 
 function gen_int_binop(ctx, op, lhs, rhs) {
-  const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-  const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-  const lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], codegen_llvm_ctx$fresh_name(ctx, "l"));
-  const rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], codegen_llvm_ctx$fresh_name(ctx, "r"));
+  const lhs_raw = unbox_int(ctx, lhs);
+  const rhs_raw = unbox_int(ctx, rhs);
   __ring_match35: {
     const __ring_m35 = op;
     if (__ring_m35._tag === "Add") {
@@ -1251,10 +1246,8 @@ function gen_str_binop(ctx, op, lhs, rhs) {
 }
 
 function gen_bool_binop(ctx, op, lhs, rhs) {
-  const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
-  const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
-  const lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], codegen_llvm_ctx$fresh_name(ctx, "lb"));
-  const rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], codegen_llvm_ctx$fresh_name(ctx, "rb"));
+  const lhs_raw = unbox_int(ctx, lhs);
+  const rhs_raw = unbox_int(ctx, rhs);
   __ring_match38: {
     const __ring_m38 = op;
     if (__ring_m38._tag === "Eq") {
@@ -1280,9 +1273,7 @@ function gen_unaryop(ctx, op, operand, ty) {
     const __ring_m39 = op;
     if (__ring_m39._tag === "Neg") {
       if (is_int_type(ty)) {
-        const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-        const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-        const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], codegen_llvm_ctx$fresh_name(ctx, "un"));
+        const raw = unbox_int(ctx, val);
         const zero = LLVMConstInt(ctx.i64_type, 0, 0);
         const neg = LLVMBuildSub(ctx.builder, zero, raw, codegen_llvm_ctx$fresh_name(ctx, "neg"));
         return box_int(ctx, neg);
@@ -1297,9 +1288,7 @@ function gen_unaryop(ctx, op, operand, ty) {
       break __ring_match39;
     }
     if (__ring_m39._tag === "Not") {
-      const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
-      const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
-      const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], codegen_llvm_ctx$fresh_name(ctx, "un"));
+      const raw = unbox_int(ctx, val);
       const one = LLVMConstInt(ctx.i64_type, 1, 0);
       const neg = LLVMBuildSub(ctx.builder, one, raw, codegen_llvm_ctx$fresh_name(ctx, "not"));
       return box_bool(ctx, neg);
@@ -2784,9 +2773,7 @@ function gen_method_call(ctx, recv, recv_type, method, args, dict_vals) {
 })() : base_rt_name));
       let call_args = [];
       if (rt_method_needs_recv_unbox_int(rt_name)) {
-        const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-        const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-        const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [recv], codegen_llvm_ctx$fresh_name(ctx, "ui"));
+        const raw = unbox_int(ctx, recv);
         List_push(call_args, raw);
       } else {
         if (rt_method_needs_recv_unbox_float(rt_name)) {
@@ -2796,9 +2783,7 @@ function gen_method_call(ctx, recv, recv_type, method, args, dict_vals) {
           List_push(call_args, raw);
         } else {
           if (rt_method_needs_recv_unbox_bool(rt_name)) {
-            const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
-            const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
-            const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [recv], codegen_llvm_ctx$fresh_name(ctx, "ub"));
+            const raw = unbox_int(ctx, recv);
             List_push(call_args, raw);
           } else {
             List_push(call_args, recv);
@@ -2813,9 +2798,7 @@ function gen_method_call(ctx, recv, recv_type, method, args, dict_vals) {
         if (__ring_next_31._tag === "none") break;
         const a = __ring_next_31._0;
         if ((ai_idx < int_arg_count)) {
-          const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-          const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-          const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [a], codegen_llvm_ctx$fresh_name(ctx, "ai"));
+          const raw = unbox_int(ctx, a);
           List_push(call_args, raw);
         } else {
           List_push(call_args, a);
@@ -3489,9 +3472,7 @@ function convert_to_str(ctx, val, ty) {
     return val;
   } else {
     if (is_int_type(ty)) {
-      const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-      const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-      const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], codegen_llvm_ctx$fresh_name(ctx, "ui"));
+      const raw = unbox_int(ctx, val);
       const to_str_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_int_to_str", [ctx.i64_type], ctx.ptr_type);
       const to_str_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_int_to_str");
       return LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "its"));
@@ -3505,16 +3486,12 @@ function convert_to_str(ctx, val, ty) {
         return LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "fts"));
       } else {
         if (is_bool_type(ty)) {
-          const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
-          const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
-          const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], codegen_llvm_ctx$fresh_name(ctx, "ub"));
+          const raw = unbox_int(ctx, val);
           const to_str_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_bool_to_str", [ctx.i64_type], ctx.ptr_type);
           const to_str_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_bool_to_str");
           return LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "bts"));
         } else {
-          const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-          const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-          const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], codegen_llvm_ctx$fresh_name(ctx, "ui"));
+          const raw = unbox_int(ctx, val);
           const to_str_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_int_to_str", [ctx.i64_type], ctx.ptr_type);
           const to_str_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_int_to_str");
           return LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "ts"));
@@ -3525,9 +3502,9 @@ function convert_to_str(ctx, val, ty) {
 }
 
 function box_int(ctx, raw) {
-  const box_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_box_int", [ctx.i64_type], ctx.ptr_type);
-  const box_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_box_int");
-  return LLVMBuildCall2(ctx.builder, box_ty, box_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "bi"));
+  const shifted = LLVMBuildShl(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), codegen_llvm_ctx$fresh_name(ctx, "sh"));
+  const tagged = LLVMBuildOr(ctx.builder, shifted, LLVMConstInt(ctx.i64_type, 1, 0), codegen_llvm_ctx$fresh_name(ctx, "tg"));
+  return LLVMBuildIntToPtr(ctx.builder, tagged, ctx.ptr_type, codegen_llvm_ctx$fresh_name(ctx, "bi"));
 }
 
 function box_float(ctx, raw) {
@@ -3537,16 +3514,20 @@ function box_float(ctx, raw) {
 }
 
 function box_bool(ctx, raw) {
-  const box_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_box_bool", [ctx.i64_type], ctx.ptr_type);
-  const box_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_box_bool");
-  return LLVMBuildCall2(ctx.builder, box_ty, box_fn, [raw], codegen_llvm_ctx$fresh_name(ctx, "bb"));
+  const shifted = LLVMBuildShl(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), codegen_llvm_ctx$fresh_name(ctx, "sh"));
+  const tagged = LLVMBuildOr(ctx.builder, shifted, LLVMConstInt(ctx.i64_type, 1, 0), codegen_llvm_ctx$fresh_name(ctx, "tg"));
+  return LLVMBuildIntToPtr(ctx.builder, tagged, ctx.ptr_type, codegen_llvm_ctx$fresh_name(ctx, "bb"));
 }
 
 function unbox_to_i1(ctx, val) {
-  const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
-  const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
-  const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], codegen_llvm_ctx$fresh_name(ctx, "ub"));
-  return LLVMBuildTrunc(ctx.builder, raw, ctx.i1_type, codegen_llvm_ctx$fresh_name(ctx, "i1"));
+  const raw = LLVMBuildPtrToInt(ctx.builder, val, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "ub"));
+  const shifted = LLVMBuildAShr(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), codegen_llvm_ctx$fresh_name(ctx, "sh"));
+  return LLVMBuildTrunc(ctx.builder, shifted, ctx.i1_type, codegen_llvm_ctx$fresh_name(ctx, "i1"));
+}
+
+function unbox_int(ctx, val) {
+  const raw = LLVMBuildPtrToInt(ctx.builder, val, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "ui"));
+  return LLVMBuildAShr(ctx.builder, raw, LLVMConstInt(ctx.i64_type, 1, 0), codegen_llvm_ctx$fresh_name(ctx, "uv"));
 }
 
 function discard(v) {
@@ -4569,18 +4550,14 @@ function gen_literal_pattern_cond(ctx, scrut_val, scrut_ty, value) {
     const __ring_m138 = value;
     if (__ring_m138._tag === "IntVal") {
       const n = __ring_m138._0;
-      const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-      const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
-      const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [scrut_val], codegen_llvm_ctx$fresh_name(ctx, "ui"));
+      const raw = unbox_int(ctx, scrut_val);
       const lit = LLVMConstInt(ctx.i64_type, n, 1);
       return LLVMBuildICmp(ctx.builder, 32, raw, lit, codegen_llvm_ctx$fresh_name(ctx, "eq"));
       break __ring_match138;
     }
     if (__ring_m138._tag === "BoolVal") {
       const b = __ring_m138._0;
-      const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type);
-      const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_bool");
-      const raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [scrut_val], codegen_llvm_ctx$fresh_name(ctx, "ub"));
+      const raw = unbox_int(ctx, scrut_val);
       const lit = (b ? LLVMConstInt(ctx.i64_type, 1, 0) : LLVMConstInt(ctx.i64_type, 0, 0));
       return LLVMBuildICmp(ctx.builder, 32, raw, lit, codegen_llvm_ctx$fresh_name(ctx, "eq"));
       break __ring_match138;
@@ -4724,16 +4701,14 @@ function gen_index_expr(ctx, receiver, index, ty) {
   if (__ring_m._tag === "none") { return "Unknown"; }
   __match_fail(__ring_m);
 })();
-  const unbox_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type);
-  const unbox_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_unbox_int");
   if ((type_name === "List")) {
-    const raw_idx = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [idx_val], codegen_llvm_ctx$fresh_name(ctx, "ix"));
+    const raw_idx = unbox_int(ctx, idx_val);
     const get_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type);
     const get_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_list_get");
     return LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], codegen_llvm_ctx$fresh_name(ctx, "lg"));
   } else {
     if ((type_name === "Str")) {
-      const raw_idx = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [idx_val], codegen_llvm_ctx$fresh_name(ctx, "ix"));
+      const raw_idx = unbox_int(ctx, idx_val);
       const get_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_str_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type);
       const get_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_str_get");
       return LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], codegen_llvm_ctx$fresh_name(ctx, "sg"));
@@ -4744,7 +4719,7 @@ function gen_index_expr(ctx, receiver, index, ty) {
         const get_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, map_get_name);
         return LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], codegen_llvm_ctx$fresh_name(ctx, "mg"));
       } else {
-        const raw_idx = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [idx_val], codegen_llvm_ctx$fresh_name(ctx, "ix"));
+        const raw_idx = unbox_int(ctx, idx_val);
         const get_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type);
         const get_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_list_get");
         return LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], codegen_llvm_ctx$fresh_name(ctx, "ig"));
@@ -5778,4 +5753,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { gen_llvm_expr, is_boxed_def, build_cell_alloc, build_cell_store, get_or_create_dict_global, emit_memoised_dict_getter, emit_memoised_const_body, box_int, box_float, box_bool, unbox_to_i1 };
+export { gen_llvm_expr, is_boxed_def, build_cell_alloc, build_cell_store, get_or_create_dict_global, emit_memoised_dict_getter, emit_memoised_const_body, box_int, box_float, box_bool, unbox_to_i1, unbox_int };

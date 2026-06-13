@@ -31,10 +31,17 @@ extern fn LLVMBuildCall2(builder: LLVMBuilderRef, fn_ty: LLVMTypeRef, fn_val: LL
 extern fn LLVMBuildPhi(builder: LLVMBuilderRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMAddIncoming(phi: LLVMValueRef, vals: List<LLVMValueRef>, blocks: List<LLVMBasicBlockRef>) -> Unit
 extern fn LLVMBuildTrunc(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
+// B-080: bitwise ops for tagged-pointer inline encoding
+extern fn LLVMBuildShl(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildAShr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildOr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildIntToPtr(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildPtrToInt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 
 // Forward declaration to break circular dependency with codegen_llvm_expr
 extern fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef
 extern fn unbox_to_i1(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef
+extern fn unbox_int(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef
 extern fn box_int(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef
 extern fn box_bool(mut ctx: LlvmCtx, raw: LLVMValueRef) -> LLVMValueRef
 // B-091: boxed mut-cell helpers (defined in codegen_llvm_expr).
@@ -326,11 +333,9 @@ fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: H
     let start_val = gen_llvm_expr(ctx, start)
     let end_val = gen_llvm_expr(ctx, end)
 
-    // Unbox start and end to i64
-    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-    let start_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [start_val], fresh_name(ctx, "si"))
-    let end_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [end_val], fresh_name(ctx, "ei"))
+    // B-080: inline untag start and end to i64
+    let start_raw = unbox_int(ctx, start_val)
+    let end_raw = unbox_int(ctx, end_val)
 
     // B-104b: start_val/end_val are OWNED boxes — perceus rc_expr(RangeExpr) always
     // rc_escapes the bounds (fresh literal/call boxes stay owned; Ident/field/index
@@ -420,13 +425,10 @@ fn emit_for_in_range_var(mut ctx: LlvmCtx, binding: Str, iterable: HExpr, body: 
     let incl_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 2, fresh_name(ctx, "ri"))
     let incl_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, incl_slot, fresh_name(ctx, "ib"))
 
-    let unbox_int_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_int", [ctx.ptr_type], ctx.i64_type)
-    let unbox_int_ty = get_rt_fn_type(ctx, "ring_unbox_int")
-    let start_raw = LLVMBuildCall2(ctx.builder, unbox_int_ty, unbox_int_fn, [start_box], fresh_name(ctx, "si"))
-    let end_raw = LLVMBuildCall2(ctx.builder, unbox_int_ty, unbox_int_fn, [end_box], fresh_name(ctx, "ei"))
-    let unbox_bool_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_bool", [ctx.ptr_type], ctx.i64_type)
-    let unbox_bool_ty = get_rt_fn_type(ctx, "ring_unbox_bool")
-    let incl_raw = LLVMBuildCall2(ctx.builder, unbox_bool_ty, unbox_bool_fn, [incl_box], fresh_name(ctx, "ic"))
+    // B-080: inline untag
+    let start_raw = unbox_int(ctx, start_box)
+    let end_raw = unbox_int(ctx, end_box)
+    let incl_raw = unbox_int(ctx, incl_box)
 
     // end_bound = end_raw - (1 - incl_raw): when inclusive (incl=1) → end; else end-1.
     let one = LLVMConstInt(ctx.i64_type, 1, 0)
