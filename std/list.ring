@@ -21,7 +21,7 @@ impl<T> List {
     pub extern fn extend(self: List<T>, other: List<T>) -> Unit
     pub extern fn slice(self: List<T>, start: Int, end: Int) -> List<T>
     pub extern fn reverse(self: List<T>) -> Unit
-    pub extern fn join(self: List<T>, separator: Str) -> Str
+    pub extern fn join(self: List<Str>, separator: Str) -> Str
     pub extern fn sort(self: List<T>) -> Unit
     pub extern fn shift(self: List<T>) -> Option<T>
     pub extern fn clear(self: List<T>) -> Unit
