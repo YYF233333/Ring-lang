@@ -1475,6 +1475,14 @@ D7 后 G-a 三门：③自编译**首次完整跑通**（exit 0，~10.42B allocs
 
 实现 = B-104 D8（measurement-only，不动 RC 语义）。
 
+**门① 收尾（D9，2026-06-13 拍板 = 收口路线 + 判据 refine，承 D8 归因）**：
+
+D8 归因（measurement-only，仪表 git `7d0d10f`，diff 仅 ring_runtime.cpp 未碰 RC）切分终点 ~185M live：**孤儿泄漏 62-65% 主导（非工作集）**，单点高度收敛 `compiler/types.ring:361 type_to_string`——SB ~47M=100% 纯泄漏（插值 StringBuilder 中间临时从不 drop）、Type ~22.7M≈98.7% 泄漏（`Type::UnitType` 叶子构造）、STR ~101M 混合（~85% 合法 churn + 头部 type_to_string 站点 ~45-50M 泄漏）；其余 ~35% 合法工作集（已回收 STR churn + Type/TokenKind plateau）。
+
+**拍板（否决 D8-C「只重定义门① 不修」——残余是真孤儿漏非工作集）= D9 收口 + 门① 判据 refine，两者并存**：
+- **D9 收口（实现，= B-104 D9）**：Part 1 = interp / `.map().join()` 字符串构建临时收口（codegen 合成、HIR/D1 不可见的 SB + 中间 String，#151 dict / D6 none/const 同类，SB 100% live==born 从不 drop）——**HIR-first 优先**（仿 D4：lower 成 HIR 可见 construct+append+to_str → D1 materialization + D2 verifier 自动覆盖、消豁免类、garbage-free by construction；worker 先读 codegen pinpoint 机制，过普遍致 HIR-first 不成比例则 feedback 升级兜底 codegen-drop——后者留 verifier 豁免类，违 D4「豁免类永存」否决理由故仅兜底）。Part 2 = `Type::UnitType` 单例化（D6 none 同构，lazy memoised getter + dedicated never-drop typeid，HIR/perceus/verify_rc 预期零改）。
+- **门① 判据 refine**：合法工作集（~35% residual）随被编译程序大小增长（编译器持有全程序 HIR/符号表至 codegen 结束）→ **「绝对 live plateau」对全程序编译器物理不成立、是误设判据**。门① 最终判据改为 **「孤儿类（SB/UnitType/interp-STR）→ ~0 + leak% → ~0/有界 + verifier 全绿 + 无 per-iteration 无界类」**，于 D9 re-verify 施加。**falsifiability 不减**——D8 即以此判据抓出 62-65% 真孤儿漏（= 公理⑥「RC 足够、无需 GC」claim 的可证伪锚点有牙）；refine 是把公理⑥ B-089 falsifiability 锚点「native RC plateau vs V8」中 "plateau" 的操作定义精确化，非移动球门。
+
 ### 7.12 unsafe 区域图景（2026-06-11 确定，细化归 B-106）
 
 **定位：unsafe 区是所有权模型全部张力的最终出处——它定义「语言不在安全区处理什么」。** 三栏总账，每个表达力缺口必居其一、不允许悬空：
