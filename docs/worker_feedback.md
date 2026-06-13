@@ -8,3 +8,25 @@
 >
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
+
+## Audit 观察报告（2026-06-13，JS 退役准备审计）
+
+### 1. [观察] `variant_js_name`（hir.ring:296）名称含 "js" 但实现后端无关
+
+**现状**：`variant_js_name(enum_name, variant_name)` 实现为 `"${enum_name}_${variant_name}"` 的简单拼接，无任何 JS 特有转义/保留字处理。注释写 "// JS codegen naming conventions" 但 LLVM 后端（codegen_llvm_expr.ring）同样使用此函数生成 enum tag 字符串。
+**为什么值得注意**：B-100 JS 退役清理时，若有人看到 "js" 前缀误以为是 JS 专属函数而删除，会导致 LLVM 后端 enum 匹配静默失败。建议在 B-100 清理阶段重命名为 `variant_tag_name` 或 `variant_canonical_name`，同时去掉 "JS codegen naming conventions" 注释。
+
+### 2. [观察] llvm_diff 测试套件零非 ASCII 覆盖
+
+**现状**：`tests/cases/llvm/` 全部测试用例仅使用 ASCII 字符串。#158 揭示的 UTF-8 字节 vs UTF-16 字符分歧对 ASCII 不可见。
+**为什么值得注意**：B-100 Phase 1 parity 认证门要求"穷举覆盖矩阵"。非 ASCII 测试缺失意味着字符串操作 parity 的整个角落未验证。建议 B-089/B-100 之前补 CJK/emoji 字符的 str 方法差分用例（len/index_of/char_at/slice）——如果 diff 测试失败，说明需要先解决 #158 的设计拍板。
+
+### 3. [观察] llvm_diff 覆盖率 ~72 vs ~820（~9% 特性覆盖）
+
+**现状**：`tests/cases/llvm/` 约 72 个测试文件，`tests/cases/` 约 820 个。约 91% 的语言特性测试仅 JS 后端运行。
+**为什么值得注意**：B-100 Phase 1 要求"不抽样的穷举特性覆盖"。当前差距巨大——特别是 closure/effect handler/pattern matching 等复杂特性的 LLVM 覆盖可能不足。此数字可作为 B-089/B-100 工作量估算的输入。
+
+### 4. [观察] #152 的 `[deferred: B-104]` 标记已过期
+
+**现状**：B-104 已于 2026-06-13 落地（G-a 三门通过）。#152（runtime HOF 内部临时不 drop）的 deferred 条件已满足。
+**为什么值得注意**：#152 原文已拍板"B-104 落地后与 B-121 同档排期"。deferred 标记应更新（移除或改标新的 deferred 条件），否则 Worker 扫描可能跳过。

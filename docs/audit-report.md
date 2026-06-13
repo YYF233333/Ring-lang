@@ -42,6 +42,43 @@
 - **升格定性（2026-06-13 Discussion）**：不止正确性债——identity 比较是 RC 实现泄进语义的**现行窗口**（dup 副本同地址 → contains 判 true，深拷贝异地址 → 按值判定；COW/dup 因此可观测，design.md §7.9 四通道之②）。配套语言层负面承诺：**永不提供 ptr_eq/is 类算子**（含 `Rc<T>` 上）。
 - 修复方向：Eq trait 派发统一（native contains/index_of 接 Eq dict 路径）；Map key 归 B-107（泛型 key + Hash trait）。
 
+### #158 字符串操作系统性字节 vs 字符索引分歧：native UTF-8 字节偏移 vs JS UTF-16 码元偏移 [medium] [judgment] [open]
+
+ring_runtime.cpp 的所有字符串操作使用 `std::string` 的字节级 API，JS 后端使用 JS 原生 UTF-16 码元级 API。对 ASCII 两者一致；对非 ASCII（CJK、emoji 等）**系统性发散**：
+
+| 操作 | JS（runtime.ring） | Native（ring_runtime.cpp） | 例：`"你好world"` |
+|------|-------------------|--------------------------|-----------------|
+| `len` | `self.length`（UTF-16 码元数） | `str->size()`（字节数） | JS=7, native=11 |
+| `index_of("world")` | `self.indexOf()`（码元偏移） | `str->find()`（字节偏移） | JS=2, native=6 |
+| `char_at(0)` | `self[0]`（返回字符 "你"） | `(*str)[0]`（返回单字节 0xE4，**无效 UTF-8**） | JS="你", native=乱码 |
+| `slice(0,1)` | `self.slice(0,1)`（码元切片） | `str->substr(0,1)`（字节切片，**切断多字节字符**） | JS="你", native=0xE4 |
+
+**影响**：
+- `char_at` 对多字节字符返回**无效 UTF-8 单字节**——不只是数值差异，是语义损坏
+- `slice` 可切断多字节字符产生无效 UTF-8 字符串——后续字符串操作可能行为未定义
+- 当前 llvm_diff 测试全部使用 ASCII → 分歧**不可见**（oracle 盲区）
+- JS 退役后 native 字节语义成为唯一行为，无安全网
+
+**修复方向**（需设计拍板）：
+- (A) Ring 定义字符串为 UTF-8 字节串（Rust 模型）→ native 正确，JS 是"临时近似"，退役后无影响。但 `char_at`/`slice` 对用户不友好（需 byte 级思考），且 `char_at` 返回无效 UTF-8 仍是 bug
+- (B) Ring 定义字符串为 Unicode 字符串（Python 模型）→ native 需改为 code-point 级操作（遍历 UTF-8 计数/切片），性能代价更高但语义正确
+- 不论选 A/B，`char_at` 返回无效 UTF-8 这条**两种模型下都是 bug**——A 模型也应改为返回完整 code point 或报错
+- **B-100 JS 退役前必须拍板**，否则语义在退役时静默变化
+
+发现者：Audit workflow (oracle-blind + backend-parity lens, 2026-06-13)
+
+### #159 ring_list_sort_default 对非 Int 类型按内存地址排序（垃圾结果）[medium] [judgment] [open]
+
+`ring_runtime.cpp:1127-1135` 的 `ring_list_sort_default`（`.sort()` 无 comparator 版本）使用 `ring_unbox_int(a) < ring_unbox_int(b)` 比较——对 tagged Int 正确，但对堆分配类型（Str、struct、enum 等）`ring_unbox_int` 把堆指针按位右移 1 位，结果是按半地址值排序，**输出垃圾但不 crash**。
+
+JS 后端（`runtime.ring:89`）：`self.sort(function(a, b) { return a < b ? -1 : a > b ? 1 : 0; })`——对 Str 做词典序（JS `<` 触发 toString），对对象做 `[object Object]` 比较（同样不正确但结果不同）。
+
+**两后端均不正确但方式不同** → 差分测试可能**两方都错 = diff 也通过**。当前编译器自身只用 `.sort_by()`（有 comparator），`.sort()` 零使用 → latent。但用户代码写 `strs.sort()` 会静默得到垃圾排序。
+
+与 #156（Eq 族 identity 比较）同属「runtime 操作缺 trait dispatch」家族，但 #156 是 Eq 侧（contains/index_of），本条是 Ord 侧（sort）。修复方向类似：ring_list_sort_default 应接 Ord dict 参数做真实比较，或对未提供 comparator 的 `.sort()` 要求 `T: Ord` bound（checker 层拦截）。
+
+发现者：Audit workflow (backend-parity + runtime-abi lens, 2026-06-13)
+
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
 可移植性问题。
