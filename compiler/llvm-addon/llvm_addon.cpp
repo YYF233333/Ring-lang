@@ -7,6 +7,8 @@
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitWriter.h>
+#include <llvm-c/Transforms/PassBuilder.h>
+#include <llvm-c/Error.h>
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -679,6 +681,36 @@ static napi_value w_LLVMTargetMachineEmitToFile(napi_env env, napi_callback_info
 }
 
 // ============================================================
+// Pass Pipeline (B-126)
+// ============================================================
+
+static napi_value w_LLVMCreatePassBuilderOptions(napi_env env, napi_callback_info info) {
+    return make_ext(env, LLVMCreatePassBuilderOptions());
+}
+
+static napi_value w_LLVMDisposePassBuilderOptions(napi_env env, napi_callback_info info) {
+    ARGS(1);
+    LLVMDisposePassBuilderOptions((LLVMPassBuilderOptionsRef)get_ext(env, _argv[0]));
+    return make_undef(env);
+}
+
+static napi_value w_LLVMRunPasses(napi_env env, napi_callback_info info) {
+    ARGS(4);
+    auto m = (LLVMModuleRef)get_ext(env, _argv[0]);
+    auto passes = get_str(env, _argv[1]);
+    auto tm = (LLVMTargetMachineRef)get_ext(env, _argv[2]);
+    auto opts = (LLVMPassBuilderOptionsRef)get_ext(env, _argv[3]);
+    LLVMErrorRef err = LLVMRunPasses(m, passes.c_str(), tm, opts);
+    if (err) {
+        char* msg = LLVMGetErrorMessage(err);
+        fprintf(stderr, "LLVM pass pipeline error: %s\n", msg);
+        LLVMDisposeErrorMessage(msg);
+        return make_i64(env, 1);
+    }
+    return make_i64(env, 0);
+}
+
+// ============================================================
 // Module registration
 // ============================================================
 
@@ -788,6 +820,10 @@ static napi_value Init(napi_env env, napi_value exports) {
         REG(LLVMCreateTargetMachine),
         REG(LLVMDisposeTargetMachine),
         REG(LLVMTargetMachineEmitToFile),
+        // Pass Pipeline (B-126)
+        REG(LLVMCreatePassBuilderOptions),
+        REG(LLVMDisposePassBuilderOptions),
+        REG(LLVMRunPasses),
         // Extra helpers
         REG(LLVMGetFirstInstruction),
         REG(LLVMPositionBuilderBefore),

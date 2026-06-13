@@ -293,6 +293,10 @@ function to_result(f) {
 
 
 
+
+
+
+
 function discard(v) {
 }
 
@@ -1232,6 +1236,12 @@ function generate_llvm(program, output_path, __ring_ev_io) {
   emit_c_main(ctx);
   const ir = LLVMPrintModuleToString(module);
   write_file("ring_output.ll", ir);
+  const pass_opts = LLVMCreatePassBuilderOptions();
+  const pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts);
+  if ((pass_result !== 0)) {
+    eprintln("LLVM optimization pass pipeline failed");
+  }
+  LLVMDisposePassBuilderOptions(pass_opts);
   const emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1);
   if ((emit_result !== 0)) {
     eprintln(`Failed to emit object file: ${output_path}`);
@@ -1335,6 +1345,12 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
   if ((verify_result !== 0)) {
     eprintln(`LLVM module verification failed (${verify_result} errors) — attempting emit anyway`);
   }
+  const pass_opts = LLVMCreatePassBuilderOptions();
+  const pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts);
+  if ((pass_result !== 0)) {
+    eprintln("LLVM optimization pass pipeline failed");
+  }
+  LLVMDisposePassBuilderOptions(pass_opts);
   const emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1);
   if ((emit_result !== 0)) {
     eprintln(`Failed to emit object file: ${output_path}`);

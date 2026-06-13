@@ -28,6 +28,7 @@ pub extern type LLVMTargetRef
 pub extern type LLVMTargetMachineRef
 pub extern type LLVMTargetDataRef
 pub extern type LLVMPassManagerRef
+pub extern type LLVMPassBuilderOptionsRef
 pub extern type LLVMMemoryBufferRef
 pub extern type LLVMAttributeRef
 pub extern type LLVMMetadataRef
@@ -260,3 +261,13 @@ pub extern fn LLVMDisposeTargetMachine(tm: LLVMTargetMachineRef) -> Unit
 // file_type: Int encoding of LLVMCodeGenFileType (0=Assembly, 1=Object)
 // N-API addon folds error output param; panics on error.
 pub extern fn LLVMTargetMachineEmitToFile(tm: LLVMTargetMachineRef, m: LLVMModuleRef, filename: Str, file_type: Int) -> Int
+
+// ============================================================
+// Pass Pipeline (B-126)
+// ============================================================
+
+// LLVM 13+ PassBuilder API (new-style pipeline).
+// LLVMRunPasses returns 0 on success; N-API addon prints error to stderr on failure.
+pub extern fn LLVMCreatePassBuilderOptions() -> LLVMPassBuilderOptionsRef
+pub extern fn LLVMDisposePassBuilderOptions(opts: LLVMPassBuilderOptionsRef) -> Unit
+pub extern fn LLVMRunPasses(m: LLVMModuleRef, passes: Str, tm: LLVMTargetMachineRef, opts: LLVMPassBuilderOptionsRef) -> Int

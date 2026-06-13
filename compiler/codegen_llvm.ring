@@ -21,6 +21,7 @@ extern type LLVMValueRef
 extern type LLVMBasicBlockRef
 extern type LLVMTargetRef
 extern type LLVMTargetMachineRef
+extern type LLVMPassBuilderOptionsRef
 
 extern fn LLVMContextCreate() -> LLVMContextRef
 extern fn LLVMContextDispose(ctx: LLVMContextRef) -> Unit
@@ -62,6 +63,9 @@ extern fn LLVMGetTargetFromTriple(triple: Str) -> LLVMTargetRef
 extern fn LLVMCreateTargetMachine(target: LLVMTargetRef, triple: Str, cpu: Str, features: Str, codegen: Int, reloc: Int, code_model: Int) -> LLVMTargetMachineRef
 extern fn LLVMDisposeTargetMachine(tm: LLVMTargetMachineRef) -> Unit
 extern fn LLVMTargetMachineEmitToFile(tm: LLVMTargetMachineRef, m: LLVMModuleRef, filename: Str, file_type: Int) -> Int
+extern fn LLVMCreatePassBuilderOptions() -> LLVMPassBuilderOptionsRef
+extern fn LLVMDisposePassBuilderOptions(opts: LLVMPassBuilderOptionsRef) -> Unit
+extern fn LLVMRunPasses(m: LLVMModuleRef, passes: Str, tm: LLVMTargetMachineRef, opts: LLVMPassBuilderOptionsRef) -> Int
 
 // Additional LLVM functions for Perceus RC drop function generation
 extern fn LLVMBuildLoad2(builder: LLVMBuilderRef, ty: LLVMTypeRef, ptr: LLVMValueRef, name: Str) -> LLVMValueRef
@@ -1049,7 +1053,15 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // Skip LLVMVerifyModule — N-API addon throws on failure instead of returning status.
     // Verification will be re-enabled when the addon is fixed or when targeting self-hosting.
 
-    // 12. Emit object file
+    // 12. Run LLVM optimization passes (B-126)
+    let pass_opts = LLVMCreatePassBuilderOptions()
+    let pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts)
+    if pass_result != 0 {
+        eprintln("LLVM optimization pass pipeline failed")
+    }
+    LLVMDisposePassBuilderOptions(pass_opts)
+
+    // 13. Emit object file
     // file_type: 1 = Object file
     let emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1)
     if emit_result != 0 {
@@ -1058,7 +1070,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         print("Compiled: ${output_path}")
     }
 
-    // 13. Cleanup
+    // 14. Cleanup
     LLVMDisposeBuilder(builder)
     LLVMDisposeTargetMachine(tm)
     LLVMDisposeModule(module)
@@ -1221,7 +1233,15 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         eprintln("LLVM module verification failed (${verify_result} errors) — attempting emit anyway")
     }
 
-    // 12. Emit object file
+    // 12. Run LLVM optimization passes (B-126)
+    let pass_opts = LLVMCreatePassBuilderOptions()
+    let pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts)
+    if pass_result != 0 {
+        eprintln("LLVM optimization pass pipeline failed")
+    }
+    LLVMDisposePassBuilderOptions(pass_opts)
+
+    // 13. Emit object file
     let emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1)
     if emit_result != 0 {
         eprintln("Failed to emit object file: ${output_path}")
