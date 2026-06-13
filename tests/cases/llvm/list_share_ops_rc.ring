@@ -1,11 +1,12 @@
 // B-103 regression: FRESH-CONTAINER CONSTRUCTORS that copy element pointers out
 // of a source container must DUP them (owned-container-constructor rule, design
-// §7.11) — ring_list_filter / concat / slice / reverse / sort_default /
-// flat_map / ring_map_from previously copied source-owned pointers WITHOUT a dup,
-// so the fresh result CO-OWNED the source's elements with only one refcount.
+// §7.11) — ring_list_filter / concat / slice / flat_map / ring_map_from
+// previously copied source-owned pointers WITHOUT a dup, so the fresh result
+// CO-OWNED the source's elements with only one refcount.
 // Under is_droppable_init(Call)=true (B-103) both the result and the source get
 // deep-dropped → double-free / UAF (latent while the pre-B-103 leak régime never
 // dropped the sources).
+// B-123: reverse / sort / sort_default changed to in-place (no fresh copy).
 //
 // Each helper builds a derived container, lets it drop at scope end, and the
 // caller keeps reading the source afterwards; main's own scope end then drops the
@@ -26,14 +27,27 @@ fn drop_slice(xs: List<Str>) -> Str {
     s[0]
 }
 
-// List.reverse / List.sort are Unit-typed; binding the result still binds the
-// fresh copied list at the LLVM ABI (dropped at scope end).  Only lengths are
-// observed: the JS backend reverses/sorts IN PLACE while the LLVM runtime builds
-// a fresh copy (pre-existing backend divergence, see audit-report) — element
-// order after the call intentionally not asserted here.
+// B-123: reverse/sort are Unit-typed, both backends now in-place.
 fn drop_reverse(mut xs: List<Str>) -> Int {
-    let r = xs.reverse()
+    xs.reverse()
+    // Order assertion: ["a","b","c","d"] reversed = ["d","c","b","a"]
+    print("rev: ${xs[0]} ${xs[1]} ${xs[2]} ${xs[3]}")
     xs.len()
+}
+
+fn drop_sort(mut xs: List<Int>) -> Int {
+    xs.sort()
+    // Order assertion: [3,1,4,1,5] sorted = [1,1,3,4,5]
+    print("sorted: ${xs[0]} ${xs[1]} ${xs[2]} ${xs[3]} ${xs[4]}")
+    xs.len()
+}
+
+fn alias_visibility() {
+    // Alias test: sort mutates receiver in-place, alias sees the change.
+    let mut xs = [3, 1, 2]
+    let ys = xs
+    xs.sort()
+    print("alias: ${ys[0]} ${ys[1]} ${ys[2]}")
 }
 
 fn drop_flat(nested: List<List<Str>>) -> Int {
@@ -62,6 +76,13 @@ fn main() {
     print("alive3: ${xs[3]}")                    // alive3: d
 
     print("reverse: ${drop_reverse(xs)}")      // reverse: 4
+                                                // (also prints: rev: d c b a)
+
+    let nums = [3, 1, 4, 1, 5]
+    print("sort: ${drop_sort(nums)}")          // sort: 5
+                                                // (also prints: sorted: 1 1 3 4 5)
+
+    alias_visibility()                          // alias: 1 2 3
 
     let nested = [["1", "2"], ["3"]]
     print("flat: ${drop_flat(nested)}")        // flat: 3

@@ -1008,28 +1008,23 @@ extern "C" void* ring_list_get_opt(void* list, int64_t idx) {
 
 extern "C" void* ring_list_reverse(void* list) {
     auto* vec = (std::vector<void*>*)list;
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (data) std::vector<void*>(vec->rbegin(), vec->rend());
-    // B-103: dup — the fresh reversed list co-owns the source's elements
-    // (owned-container-constructor rule; see ring_list_concat).
-    for (void* el : *result) ring_dup(el);
-    return data;
+    // B-123: in-place permute — no ownership change, no dup/drop needed.
+    // Matches JS backend semantics (Unit-typed, mutates receiver).
+    std::reverse(vec->begin(), vec->end());
+    return list;
 }
 
 extern "C" void* ring_list_sort(void* list, void* closure) {
     auto* vec = (std::vector<void*>*)list;
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (data) std::vector<void*>(*vec);
-    // B-103: dup — the fresh sorted list co-owns the source's elements
-    // (owned-container-constructor rule; see ring_list_concat).
-    for (void* el : *result) ring_dup(el);
+    // B-123: in-place sort — no ownership change, no dup/drop needed.
+    // Matches JS backend semantics (Unit-typed, mutates receiver).
     RingClosure* cmp = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cmp->fn_ptr);
-    std::sort(result->begin(), result->end(), [fn, cmp](void* a, void* b) -> bool {
+    std::sort(vec->begin(), vec->end(), [fn, cmp](void* a, void* b) -> bool {
         void* r = fn(cmp->env_ptr, a, b);
         return ring_unbox_int(r) < 0;
     });
-    return data;
+    return list;
 }
 
 static void* ring_enum_some(void* val) {
@@ -1132,15 +1127,12 @@ extern "C" void* ring_Option_unwrap_or_else(void* opt, void* closure) {
 
 extern "C" void* ring_list_sort_default(void* list) {
     auto* vec = (std::vector<void*>*)list;
-    void* data = ring_alloc(sizeof(std::vector<void*>), RING_TYPEID_LIST);
-    auto* result = new (data) std::vector<void*>(*vec);
-    // B-103: dup — the fresh sorted list co-owns the source's elements
-    // (owned-container-constructor rule; see ring_list_concat).
-    for (void* el : *result) ring_dup(el);
-    std::sort(result->begin(), result->end(), [](void* a, void* b) -> bool {
+    // B-123: in-place sort — no ownership change, no dup/drop needed.
+    // Matches JS backend semantics (Unit-typed, mutates receiver).
+    std::sort(vec->begin(), vec->end(), [](void* a, void* b) -> bool {
         return ring_unbox_int(a) < ring_unbox_int(b);
     });
-    return data;
+    return list;
 }
 
 extern "C" int64_t ring_list_any(void* list, void* closure) {
