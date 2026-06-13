@@ -88,7 +88,7 @@ Ring-lang/
 ### 类型系统
 
 - Record row types 仅在参数位置使用（无匿名 record 字面量）
-- Refinement `where` 子句只解析不验证（编译时发 W0002 warning 提示未强制；B-001 落地后移除）
+- struct-field 位 `where` 只解析不验证（W0002）；参数位 `where` 未实现（硬 parse error E0103）；均归 B-001
 - 不支持 `dyn Trait` 动态分发、GATs
 - `pub` 可见性在单文件模式不强制（向后兼容）
 - 穷尽性检查：嵌套模式递归检查正常，多字段交叉组合不验证
@@ -99,7 +99,6 @@ Ring-lang/
 - 字符串无 `+` 拼接：用插值 `"${a}${b}"` 或 `join()`
 - `return` 不能出现在 match arm 表达式位置
 - `list[i]` / `map[key]` / `str[i]` 越界 panic，安全访问用 `.get()`
-- `.map()` 闭包不能捕获 `let mut` 变量，改用 `for` 循环
 - Struct literal 不能直接出现在 if/while/for/match 条件位置（`{` 歧义），需加括号或用变量
 
 ### 基础设施

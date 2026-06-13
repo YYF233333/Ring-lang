@@ -381,6 +381,7 @@ const cases: TestCase[] = [
   { file: "if_expr_type.ring", expected: "if_expr_type: all tests passed\n" },
   { file: "if_let_enum.ring", expected: "if_let_enum: all tests passed\n" },
   { file: "lambda_closure_effect.ring", expected: "lambda_closure_effect: all tests passed\n" },
+  { file: "hof_closure_mut_capture.ring", expected: "hof_closure_mut_capture: all tests passed\n" },
   { file: "list_flat_map.ring", expected: "list_flat_map: all tests passed\n" },
   { file: "list_method_chain.ring", expected: "list_method_chain: all tests passed\n" },
   { file: "list_push_mutate.ring", expected: "list_push_mutate: all tests passed\n" },
