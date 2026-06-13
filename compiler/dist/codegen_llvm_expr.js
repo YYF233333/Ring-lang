@@ -3438,6 +3438,8 @@ function gen_string_interp(ctx, parts) {
   const sb = LLVMBuildCall2(ctx.builder, sb_new_ty, sb_new_fn, [], codegen_llvm_ctx$fresh_name(ctx, "sb"));
   const sb_add_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type);
   const sb_add_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_sb_add");
+  const drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
+  const drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
   const __ring_iter_42 = __List_Iterable.iter(parts);
   while (true) {
     const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
@@ -3449,6 +3451,7 @@ function gen_string_interp(ctx, parts) {
         const s = __ring_m91._0;
         const str_val = gen_str_lit(ctx, s);
         LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, str_val], codegen_llvm_ctx$fresh_name(ctx, "sba"));
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [str_val], ""));
         break __ring_match91;
       }
       if (__ring_m91._tag === "Expression") {
@@ -3457,6 +3460,9 @@ function gen_string_interp(ctx, parts) {
         const expr_type = hir$hexpr_type(e);
         const str_val = convert_to_str(ctx, val, expr_type);
         LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, str_val], codegen_llvm_ctx$fresh_name(ctx, "sba"));
+        if ((!is_str_type(expr_type))) {
+          discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [str_val], ""));
+        }
         break __ring_match91;
       }
       __match_fail(__ring_m91);
@@ -3464,7 +3470,9 @@ function gen_string_interp(ctx, parts) {
   }
   const sb_to_str_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type);
   const sb_to_str_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_sb_to_str");
-  return LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], codegen_llvm_ctx$fresh_name(ctx, "interp"));
+  const result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], codegen_llvm_ctx$fresh_name(ctx, "interp"));
+  discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""));
+  return result;
 }
 
 function convert_to_str(ctx, val, ty) {

@@ -71,6 +71,11 @@
 //     temporary list; dropped by codegen — Stage 2 F round).
 //   * range-loop counter/bound boxes (emit_for_in_range_direct drops them —
 //     B-104b); a literal RangeExpr iterable is therefore accepted inline.
+//   * String interpolation SB + intermediate strings: gen_string_interp
+//     drops the SB after ring_sb_to_str, and drops each codegen-synthesised
+//     intermediate string (literal parts from ring_str_from_cstr, non-Str
+//     expression parts from convert_to_str) after ring_sb_add.  Str-typed
+//     expression parts are NOT dropped here (pass-through — D1 manages them).
 //   (the former "#151 codegen-synthesised Eq/Ord dicts" entry is RETIRED —
 //    B-104 D4 made dict evidence first-class: static dicts are never-drop
 //    module singletons (borrows, outside the account by construction) and
@@ -166,7 +171,7 @@ pub fn rc_fatal_count(findings: List<RcFinding>) -> Int {
 }
 
 pub fn rc_verify_boundary_note() -> Str {
-    "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), handler evidence/catch closures (B-096), abort paths (longjmp skips scope drops — B-002)."
+    "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), string interpolation SB + intermediate strings (gen_string_interp drops), handler evidence/catch closures (B-096), abort paths (longjmp skips scope drops — B-002)."
 }
 
 // Format findings: fatal lines always one-per-finding; exempt (documented)

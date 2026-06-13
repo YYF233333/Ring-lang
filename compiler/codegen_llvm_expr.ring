@@ -2444,11 +2444,19 @@ fn gen_string_interp(mut ctx: LlvmCtx, parts: List<HStringInterpPart>) -> LLVMVa
     let sb_add_fn = get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
     let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
 
+    // B-104 D9 Part 1: codegen-level drop for interp temporaries.
+    // ring_sb_add copies content (*sb += *s) — str_val ownership stays with caller.
+    // ring_sb_to_str copies sb content to a new string — sb itself still alive.
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+
     for part in parts {
         match part {
             HStringInterpPart::Literal(s) => {
                 let str_val = gen_str_lit(ctx, s)
                 LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, str_val], fresh_name(ctx, "sba"))
+                // D9: gen_str_lit calls ring_str_from_cstr → FRESH allocation; drop after sb_add.
+                discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [str_val], ""))
             },
             HStringInterpPart::Expression(e) => {
                 let val = gen_llvm_expr(ctx, e)
@@ -2456,6 +2464,13 @@ fn gen_string_interp(mut ctx: LlvmCtx, parts: List<HStringInterpPart>) -> LLVMVa
                 let expr_type = hexpr_type(e)
                 let str_val = convert_to_str(ctx, val, expr_type)
                 LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, str_val], fresh_name(ctx, "sba"))
+                // D9: drop str_val ONLY when convert_to_str allocated a new string
+                // (int_to_str / float_to_str / bool_to_str).  When is_str_type,
+                // convert_to_str is pass-through (returns val itself) — that value
+                // is D1-managed; dropping it here = double-drop = UAF.
+                if !is_str_type(expr_type) {
+                    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [str_val], ""))
+                }
             },
         }
     }
@@ -2463,7 +2478,10 @@ fn gen_string_interp(mut ctx: LlvmCtx, parts: List<HStringInterpPart>) -> LLVMVa
     // Convert StringBuilder to Str
     let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
     let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
-    LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "interp"))
+    let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "interp"))
+    // D9: drop the StringBuilder itself after extracting the result string.
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
+    result
 }
 
 fn convert_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, ty: Type) -> LLVMValueRef {
