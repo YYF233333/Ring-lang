@@ -825,6 +825,12 @@ fn gen_str_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueR
             let result = LLVMBuildCall2(ctx.builder, lt_ty, lt_fn, [lhs, rhs], fresh_name(ctx, "slt"))
             box_bool(ctx, result)
         },
+        BinOp::Gt => {
+            let lt_fn = get_or_declare_runtime_fn(ctx, "ring_str_lt", [ctx.ptr_type, ctx.ptr_type], ctx.i64_type)
+            let lt_ty = get_rt_fn_type(ctx, "ring_str_lt")
+            let result = LLVMBuildCall2(ctx.builder, lt_ty, lt_fn, [rhs, lhs], fresh_name(ctx, "sgt"))
+            box_bool(ctx, result)
+        },
         _ => panic("LLVM codegen: unsupported str binop"),
     }
 }
@@ -1774,7 +1780,9 @@ fn find_fn_precise(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
 // Try all known module prefixes from imports_map to find a function
 fn find_fn_by_prefix_enumeration(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
     let mut seen_prefixes: Set<Str> = set_new()
-    for entry in ctx.imports_map.entries() {
+    let mut sorted_imports = ctx.imports_map.entries()
+    sorted_imports.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_imports {
         let (_, qualified) = entry
         // Extract prefix: everything before "$$_"
         let maybe_idx = qualified.index_of("$$_")
@@ -1800,7 +1808,9 @@ fn find_fn_by_prefix_enumeration(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
 // Last-resort suffix match for cross-module resolution
 fn find_fn_by_suffix(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
     let suffix = "$$_${name}"
-    for entry in ctx.functions.entries() {
+    let mut sorted_fns = ctx.functions.entries()
+    sorted_fns.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_fns {
         let (fn_name, fn_val) = entry
         if fn_name.ends_with(suffix) {
             return some(FnLookupResult { fn_val: fn_val, fn_mangled: fn_name })
@@ -2181,6 +2191,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "slice" { some("ring_list_slice") }
     else { if type_name == "List" && method == "reverse" { some("ring_list_reverse") }
     else { if type_name == "List" && method == "sort" { some("ring_list_sort_default") }
+    else { if type_name == "List" && method == "sort_by" { some("ring_list_sort") }
     else { if type_name == "List" && method == "is_empty" { some("ring_list_is_empty") }
     else { if type_name == "List" && method == "first" { some("ring_list_first") }
     else { if type_name == "List" && method == "last" { some("ring_list_last") }
@@ -2234,7 +2245,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
     else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
     else { if type_name == "Option" && method == "to_fail" { some("ring_Option_to_fail") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {
@@ -3384,7 +3395,9 @@ fn find_enum_by_variant(ctx: LlvmCtx, variant_name: Str, qualifier: Str?) -> Enu
         none => {},
     }
     // Search all registered enums for this variant
-    for entry in ctx.enum_types.entries() {
+    let mut sorted_enums = ctx.enum_types.entries()
+    sorted_enums.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_enums {
         let (ename, einfo) = entry
         match einfo.variants.get(variant_name) {
             some(_) => { return some(einfo) },
@@ -4183,7 +4196,9 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
     let mut has_fail_abort = false
 
     // For each effect, create an evidence object
-    for entry in by_effect.entries() {
+    let mut sorted_by_effect = by_effect.entries()
+    sorted_by_effect.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_by_effect {
         let (effect_name, hs) = entry
         let ev_name = evidence_param_name(effect_name)
 

@@ -959,7 +959,9 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
     const __ring_m30 = external_fn_mut_params;
     if (__ring_m30._tag === "some") {
       const efmp = __ring_m30._0;
-      const __ring_iter_25 = __List_Iterable.iter(_Map_entries(efmp));
+      let sorted_entries = _Map_entries(efmp);
+      sorted_entries.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+      const __ring_iter_25 = __List_Iterable.iter(sorted_entries);
       while (true) {
         const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
         if (__ring_next_25._tag === "none") break;
@@ -980,7 +982,9 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
     const __ring_m31 = external_struct_fields;
     if (__ring_m31._tag === "some") {
       const esf = __ring_m31._0;
-      const __ring_iter_26 = __List_Iterable.iter(_Map_entries(esf));
+      let sorted_entries = _Map_entries(esf);
+      sorted_entries.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+      const __ring_iter_26 = __List_Iterable.iter(sorted_entries);
       while (true) {
         const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
         if (__ring_next_26._tag === "none") break;
@@ -1001,7 +1005,9 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
     const __ring_m32 = external_impl_methods;
     if (__ring_m32._tag === "some") {
       const eim = __ring_m32._0;
-      const __ring_iter_27 = __List_Iterable.iter(_Map_entries(eim));
+      let sorted_entries = _Map_entries(eim);
+      sorted_entries.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+      const __ring_iter_27 = __List_Iterable.iter(sorted_entries);
       while (true) {
         const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
         if (__ring_next_27._tag === "none") break;

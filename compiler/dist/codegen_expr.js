@@ -812,7 +812,9 @@ function gen_handle(ctx, body, handlers) {
   let has_abort = false;
   let abort_effect_names = [];
   const q = "\"";
-  const __ring_iter_11 = __List_Iterable.iter(_Map_entries(by_effect));
+  let sorted_by_effect = _Map_entries(by_effect);
+  sorted_by_effect.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+  const __ring_iter_11 = __List_Iterable.iter(sorted_by_effect);
   while (true) {
     const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
     if (__ring_next_11._tag === "none") break;

@@ -956,7 +956,8 @@ function emit_drop_functions(ctx) {
   const drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
   const register_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_register_drop", [i64, ptr], _void);
   const register_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_register_drop");
-  const struct_names = _Map_keys(ctx.struct_types);
+  let struct_names = _Map_keys(ctx.struct_types);
+  List_sort(struct_names);
   const __ring_iter_20 = __List_Iterable.iter(struct_names);
   while (true) {
     const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
@@ -1001,7 +1002,8 @@ function emit_drop_functions(ctx) {
       __match_fail(__ring_m16);
     }
   }
-  const enum_names = _Map_keys(ctx.enum_types);
+  let enum_names = _Map_keys(ctx.enum_types);
+  List_sort(enum_names);
   const __ring_iter_22 = __List_Iterable.iter(enum_names);
   while (true) {
     const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
@@ -1029,7 +1031,8 @@ function emit_drop_functions(ctx) {
         const tag_val = LLVMBuildLoad2(ctx.builder, i64, tag_ptr, "tag");
         const done_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "done");
         const default_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "default");
-        const variant_keys = _Map_keys(enum_info.variants);
+        let variant_keys = _Map_keys(enum_info.variants);
+        List_sort(variant_keys);
         const num_variants = List_len(variant_keys);
         if ((num_variants === 0)) {
           discard(LLVMBuildBr(ctx.builder, done_bb));
@@ -1093,8 +1096,9 @@ function emit_drop_registrations(ctx) {
   const _void = ctx.void_type;
   const register_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_register_drop", [i64, ptr], _void);
   const register_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_register_drop");
-  const struct_names = _Map_keys(ctx.struct_types);
-  const __ring_iter_25 = __List_Iterable.iter(struct_names);
+  let struct_names_reg = _Map_keys(ctx.struct_types);
+  List_sort(struct_names_reg);
+  const __ring_iter_25 = __List_Iterable.iter(struct_names_reg);
   while (true) {
     const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
     if (__ring_next_25._tag === "none") break;
@@ -1115,8 +1119,9 @@ function emit_drop_registrations(ctx) {
       __match_fail(__ring_m19);
     }
   }
-  const enum_names = _Map_keys(ctx.enum_types);
-  const __ring_iter_26 = __List_Iterable.iter(enum_names);
+  let enum_names_reg = _Map_keys(ctx.enum_types);
+  List_sort(enum_names_reg);
+  const __ring_iter_26 = __List_Iterable.iter(enum_names_reg);
   while (true) {
     const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
     if (__ring_next_26._tag === "none") break;

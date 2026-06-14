@@ -1374,7 +1374,9 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
     let mut abort_effect_names: List<Str> = []
     let q = "\""
 
-    for entry in by_effect.entries() {
+    let mut sorted_by_effect = by_effect.entries()
+    sorted_by_effect.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_by_effect {
         let (effect_name, hs) = entry
         let ev_name = evidence_param_name(effect_name)
         let mut handled_op_names: Set<Str> = set_new()

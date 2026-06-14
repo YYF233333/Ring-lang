@@ -20,7 +20,9 @@ fn resolve_struct_name(ctx: CodegenCtx, raw_name: Str) -> Str? {
     }
     // Fallback: search for a key ending with "$raw_name" (mod-qualified struct)
     let suffix = "\$${safe}"
-    for entry in ctx.struct_field_order.entries() {
+    let mut sorted_entries = ctx.struct_field_order.entries()
+    sorted_entries.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_entries {
         let (k, _v) = entry
         if k.ends_with(suffix) {
             return some(k)

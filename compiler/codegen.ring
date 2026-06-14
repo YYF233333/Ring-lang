@@ -40,7 +40,9 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     // Load external fn_mut_params from other modules
     match external_fn_mut_params {
         some(efmp) => {
-            for entry in efmp.entries() {
+            let mut sorted_entries = efmp.entries()
+            sorted_entries.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            for entry in sorted_entries {
                 let (k, v) = entry
                 ctx.fn_mut_params.insert(k, v)
             }
@@ -51,7 +53,9 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     // Load external struct fields
     match external_struct_fields {
         some(esf) => {
-            for entry in esf.entries() {
+            let mut sorted_entries = esf.entries()
+            sorted_entries.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            for entry in sorted_entries {
                 let (k, v) = entry
                 ctx.struct_field_order.insert(k, v)
             }
@@ -62,7 +66,9 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     // Load external impl methods
     match external_impl_methods {
         some(eim) => {
-            for entry in eim.entries() {
+            let mut sorted_entries = eim.entries()
+            sorted_entries.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            for entry in sorted_entries {
                 let (k, v) = entry
                 ctx.impl_methods.insert(k, v)
             }

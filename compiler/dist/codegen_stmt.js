@@ -246,7 +246,9 @@ function resolve_struct_name(ctx, raw_name) {
     return Option_some(qualified);
   }
   const suffix = `$${safe}`;
-  const __ring_iter_2 = __List_Iterable.iter(_Map_entries(ctx.struct_field_order));
+  let sorted_entries = _Map_entries(ctx.struct_field_order);
+  sorted_entries.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+  const __ring_iter_2 = __List_Iterable.iter(sorted_entries);
   while (true) {
     const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
     if (__ring_next_2._tag === "none") break;

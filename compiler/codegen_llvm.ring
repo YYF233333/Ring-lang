@@ -737,7 +737,8 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
     let register_ty = get_rt_fn_type(ctx, "ring_register_drop")
 
     // Generate drop functions for user structs
-    let struct_names = ctx.struct_types.keys()
+    let mut struct_names = ctx.struct_types.keys()
+    struct_names.sort()
     for sname in struct_names {
         // B-102 R-clean: Type-DAG structs get a normal recursive ring_drop_T
         // (per-field GEP + ring_drop), so the Type DAG is reclaimed by RC like any
@@ -786,7 +787,8 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
     }
 
     // Generate drop functions for user enums
-    let enum_names = ctx.enum_types.keys()
+    let mut enum_names = ctx.enum_types.keys()
+    enum_names.sort()
     for ename in enum_names {
         // Skip built-in enums (Option, Result) — they use generic ring_drop recursion
         if ename == "Option" { continue }
@@ -817,7 +819,8 @@ fn emit_drop_functions(mut ctx: LlvmCtx) {
                 let default_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "default")
 
                 // Collect variant info to build switch
-                let variant_keys = enum_info.variants.keys()
+                let mut variant_keys = enum_info.variants.keys()
+                variant_keys.sort()
                 let num_variants = variant_keys.len()
 
                 if num_variants == 0 {
@@ -877,8 +880,9 @@ fn emit_drop_registrations(mut ctx: LlvmCtx) {
     // Register struct drop functions
     // B-102 R-clean: Type-DAG types now have a normal recursive drop_T registered
     // here like any other type (A1's never-drop registration is removed).
-    let struct_names = ctx.struct_types.keys()
-    for sname in struct_names {
+    let mut struct_names_reg = ctx.struct_types.keys()
+    struct_names_reg.sort()
+    for sname in struct_names_reg {
         let drop_name = "ring_drop_${sname}"
         match ctx.dict_globals.get(drop_name) {
             some(drop_fn_val) => {
@@ -891,8 +895,9 @@ fn emit_drop_registrations(mut ctx: LlvmCtx) {
     }
 
     // Register enum drop functions
-    let enum_names = ctx.enum_types.keys()
-    for ename in enum_names {
+    let mut enum_names_reg = ctx.enum_types.keys()
+    enum_names_reg.sort()
+    for ename in enum_names_reg {
         if ename == "Option" { continue }
         if ename == "Result" { continue }
         let drop_name = "ring_drop_${ename}"
