@@ -117,7 +117,7 @@ B-103 全量枚举 ring_runtime.cpp 时发现：`method_to_runtime`（codegen_ll
 
 D9 probe-E 撞出：`let c = Color::Blue{shade}` 在循环内 matched-then-discarded（match 只投影标量 payload、不消费外壳），每轮泄 `tid68=n`。fresh owned payload-enum 作为 let 绑定应被 scope-end-drop 回收，但实际未 drop——疑似 perceus scope 建模对 matched-then-projected 的 let 绑定遗漏。与 D9 Part 2（UnitType 单例化、const-enum 类）无关，与 Part 1（interp SB codegen-drop）无关——是独立 RC gap。subagent 已改写 probe 绕开以隔离 const 类测量。发现者：B-104 D9 probe 构造期。
 
-### #152 runtime HOF 内部临时不 drop：谓词 Bool box / fold 中间累加器 / for_each 合成 key（leak 类）[medium] [judgment] [open] [deferred: B-104]
+### #152 runtime HOF 内部临时不 drop：谓词 Bool box / fold 中间累加器 / for_each 合成 key（leak 类）[medium] [judgment] [open]
 
 ring_runtime.cpp 的 HOF 家族在循环内持有闭包结果/合成临时但从不 drop（贴码核实，#150 收口时发现）：① `ring_list_filter` / `ring_list_any` / `ring_list_all` / `ring_list_find` / `ring_list_find_index`——谓词结果 Bool box `void* r = fn(...)` unbox 后既不 drop 也无人接手 → **每元素泄 1 BOOL**（闭包返回值经 clone-all-escape 必 owned）；② `ring_list_fold` 非空路径——`acc = fn(env, acc, elem)` 直接覆盖，中间累加器（闭包的 owned 结果）无 drop → **每次 fold 泄 n-1 个中间值**（init 是 borrow 不可 drop，但 i≥1 的旧 acc 是 fold 自有的 owned 值）；③ `ring_map_for_each` / `ring_set_for_each`——每 entry `ring_alloc` 合成 fresh STR key/elem 传给闭包后从不释放 → **每 entry 泄 1 STR**（int-keyed 变体 `ring_map_int_for_each`/`ring_set_int_for_each` 同形合成 INT box，D5 已核实）。全部 leak-direction、crash-free、HIR/codegen 双重不可见（runtime 内部，verifier/ANF 永远盖不到）。修复方向（需拍板）：runtime 循环内 `ring_drop(r)` / fold 对 i≥1 旧 acc drop / for_each 用后释放合成 key——属 runtime 改动但逐函数核对面大，建议独立 wave + ×3 全套。发现者：B-104 D1 Stage 3（#150 收口贴码）。
 

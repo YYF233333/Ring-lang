@@ -25,10 +25,10 @@
 
 三个验收门：
 - **G-a 内存** ✅：B-104 完整 Perceus RC 落地（2026-06-13），leak 88%→1.2%，native 自编译跑通
-- **G-b 双 bootstrap 一致**：待 B-122（SCC 拓扑序）+ B-089 emit 排序确定化
+- **G-b 双 bootstrap 一致**：待 B-089 emit 排序确定化（B-122 SCC 拓扑序 ✅）
 - **G-c 双后端 parity**：待 B-089 native E2E + llvm_diff 全量
 
-铺垫已全部完成（明细见 git）。**当前关键路径**：B-122 → B-089（Level 1 终点）→ B-099（Level 2）→ B-100（JS 退役）。详见上方「⭐ native on-par → JS 退役 统一路线」。
+铺垫已全部完成（明细见 git）。**当前关键路径**：B-089（Level 1 终点）→ B-099（Level 2）→ B-100（JS 退役）。详见上方「⭐ native on-par → JS 退役 统一路线」。
 
 ---
 
@@ -37,7 +37,7 @@
 > **现状（2026-06-13）**：B-104 完整 Perceus RC **✅**（G-a 三门通过）+ B-080 标记指针 **✅**。P0/P1 阶段完成。
 
 **Level 定义**：
-- **Level 1** = B-122 + B-089：native ring.exe 的前端 + JS 后端与 node 版对等，三门全绿。
+- **Level 1** = B-089（B-122 ✅）：native ring.exe 的前端 + JS 后端与 node 版对等，三门全绿。
 - **Level 2** = B-099：native 自产 .o、Node 从工具链消除。
 - **JS 退役** = B-100：parity 认证 + golden 快照 + 删 JS 后端。层 3 之前完成。
 
@@ -46,7 +46,7 @@
 | 阶段 | 内容 | item | 并行 |
 |------|------|------|------|
 | **✅ P0+P1** | 完整 Perceus RC + 标记指针 | B-104 ✅ + B-080 ✅ | — |
-| **P2a checker 健全** | 顶层推断改 SCC 拓扑序 | **B-122** [P1/XL] | 单独 |
+| **✅ P2a checker 健全** | 顶层推断改 SCC 拓扑序 | **B-122** ✅ | — |
 | **P2b 三门终验** | G-a/G-b（含 emit 排序确定化）/G-c | **B-089** [P1/L] | + B-097 [P2/M] + B-096 [P3/L] |
 | **P3 Node 消除** | LLVM-C marshalling + link libLLVM | **B-099** [P2/XL, deferred:B-089] | 单独 |
 | **P4 JS 退役** | parity 认证门 + golden 快照 + 删除 | **B-100** [P3/L, deferred:B-099] | 单独 |
@@ -405,10 +405,6 @@ fn test_fetch() {
 - **合法性边界（2026-06-12 D-1 拍板）**：last-use drop / 重用仅限「无用户 Drop impl 且非 `Weak<T>` 目标」的类型（as-if 条款，公理⑥ / design.md §7.11）；Weak 目标与带 Drop 类型钉死 scope-end，不得重用
 - **验收**：典型 FBIP 模式（list map/filter、tree insert）生成就地改写而非新分配；基准显示分配数下降；全 E2E + `llvm_diff` 不回归；自举一致；Weak/Drop 用例在 reuse 启用前后输出一致（D-1 锚点）
 
-
-### B-122 #149 根修：顶层推断改依赖 SCC 拓扑序（未标注 ret 健全性洞）[bugfix] [P1] [XL] [judgment] [done, 2026-06-14]
-
-> **已完成**。`compiler/scc.ring`（~412 行，call graph + Tarjan SCC）+ `infer_decl.ring` Pass 2 改三阶段 SCC 拓扑序驱动 + `rebind_fn_type` 将推断后的 ret/effects 映射回注册层。835 测试全绿 + double bootstrap 稳定。负面测试 `scc_ret_soundness.ring`（E0301）+ 正面测试 `scc_mutual_recursion.ring`（互递归 + forward ref）。Perceus 守卫保留。实现偏差：spec 说"复用注册签名的 var"，实际用 rebind-after 方案（功能等价，更低风险）。Audit #149 留墓碑注。
 
 
 ### B-119 公理⑤做实：推断 fuel 上限 + trait instance 终止性审计 [design-align] [P3] [M] [judgment] [queued]
