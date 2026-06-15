@@ -224,9 +224,11 @@ fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>) {
         if first != "self" && first != "super" { continue }
 
         // Build qualifier from relative segments
+        // First collect self/super prefix, then append remaining intermediate segments
         let mut qualifier = first
         let mut name_start_idx = 1
         let mut i = 1
+        // Collect chained super:: segments (e.g. super::super)
         while i < segments.len() {
             let seg = segments.get(i).unwrap_or("")
             if seg == "super" {
@@ -235,6 +237,22 @@ fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>) {
             } else {
                 break
             }
+            i = i + 1
+        }
+        // Determine how many remaining segments are intermediate path components.
+        // For NamedItems (use super::a::b::{Foo}): ALL remaining segments are path prefix.
+        // For Module (use super::a::b): all remaining except the last are path prefix;
+        //   the last segment is the imported name (handled in the Module branch below).
+        let remaining_end = match use_decl.imports {
+            UseImport::NamedItems { names } => segments.len(),
+            UseImport::Module => {
+                if segments.len() > 0 { segments.len() - 1 } else { 0 }
+            }
+        }
+        while i < remaining_end {
+            let seg = segments.get(i).unwrap_or("")
+            qualifier = "${qualifier}::${seg}"
+            name_start_idx = i + 1
             i = i + 1
         }
 
