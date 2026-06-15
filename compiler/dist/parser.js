@@ -590,12 +590,21 @@ function Parser_parse_if_let_stmt(self, start) {
   if (Parser_try_consume(self, lexer$TokenKind_TkElse)) {
     else_block = Option_some(Parser_parse_block_expr(self));
   }
-  const end_pos = (function() {
-  const __ring_m = else_block;
-  if (__ring_m._tag === "some") { const eb = __ring_m._0; return expr_span(eb).end; }
-  if (__ring_m._tag === "none") { return expr_span(then_block).end; }
-  __match_fail(__ring_m);
-})();
+  let __ring_blk0;
+  __ring_match9: {
+    const __ring_m9 = else_block;
+    if (__ring_m9._tag === "some") {
+      const eb = __ring_m9._0;
+      __ring_blk0 = expr_span(eb).end;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "none") {
+      __ring_blk0 = expr_span(then_block).end;
+      break __ring_match9;
+    }
+    __match_fail(__ring_m9);
+  }
+  const end_pos = __ring_blk0;
   return ast$Stmt_IfLet(pattern, expr, then_block, else_block, Parser_make_span(self, start, end_pos));
 }
 function Parser_parse_binding_stmt(self, mutable) {
@@ -651,19 +660,19 @@ function Parser_parse_block_expr(self) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     const stmt = Parser_parse_stmt(self);
     if (Parser_check(self, lexer$TokenKind_TkRBrace)) {
-      __ring_match9: {
-        const __ring_m9 = stmt;
-        if (__ring_m9._tag === "ExprStmt") {
-          const e = __ring_m9.expr; const hs = __ring_m9.has_semi;
+      __ring_match10: {
+        const __ring_m10 = stmt;
+        if (__ring_m10._tag === "ExprStmt") {
+          const e = __ring_m10.expr; const hs = __ring_m10.has_semi;
           if ((!hs)) {
             tail = Option_some(e);
           } else {
             List_push(stmts, stmt);
           }
-          break __ring_match9;
+          break __ring_match10;
         }
         List_push(stmts, stmt);
-        break __ring_match9;
+        break __ring_match10;
       }
     } else {
       List_push(stmts, stmt);
@@ -754,44 +763,44 @@ function Parser_parse_mod_block(self, is_pub) {
   while (((!Parser_check(self, lexer$TokenKind_TkRBrace)) ? (!Parser_at_end(self)) : false)) {
     if (Parser_check(self, lexer$TokenKind_TkUse)) {
       const use_result = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Option_some(Parser_parse_use_decl(self, false)); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-      __ring_match10: {
-        const __ring_m10 = use_result;
-        if (__ring_m10._tag === "some") {
-          const ud = __ring_m10._0;
+      __ring_match11: {
+        const __ring_m11 = use_result;
+        if (__ring_m11._tag === "some") {
+          const ud = __ring_m11._0;
           List_push(uses, ud);
-          break __ring_match10;
+          break __ring_match11;
         }
-        if (__ring_m10._tag === "none") {
+        if (__ring_m11._tag === "none") {
           while ((!Parser_at_end(self))) {
             if (((is_decl_start(Parser_peek(self).kind) ? true : Parser_check(self, lexer$TokenKind_TkUse)) ? true : Parser_check(self, lexer$TokenKind_TkRBrace))) {
               break;
             }
             Parser_advance(self);
           }
-          break __ring_match10;
+          break __ring_match11;
         }
-        __match_fail(__ring_m10);
+        __match_fail(__ring_m11);
       }
       continue;
     }
     const maybe_decl = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Parser_parse_decl(self); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return Option_none; } else { throw __ring_e; } } throw __ring_e; } })();
-    __ring_match11: {
-      const __ring_m11 = maybe_decl;
-      if (__ring_m11._tag === "some") {
-        const decl = __ring_m11._0;
+    __ring_match12: {
+      const __ring_m12 = maybe_decl;
+      if (__ring_m12._tag === "some") {
+        const decl = __ring_m12._0;
         List_push(decls, decl);
-        break __ring_match11;
+        break __ring_match12;
       }
-      if (__ring_m11._tag === "none") {
+      if (__ring_m12._tag === "none") {
         while ((!Parser_at_end(self))) {
           if ((is_decl_start(Parser_peek(self).kind) ? true : Parser_check(self, lexer$TokenKind_TkRBrace))) {
             break;
           }
           Parser_advance(self);
         }
-        break __ring_match11;
+        break __ring_match12;
       }
-      __match_fail(__ring_m11);
+      __match_fail(__ring_m12);
     }
   }
   const rbrace = Parser_expect(self, lexer$TokenKind_TkRBrace);
@@ -800,63 +809,63 @@ function Parser_parse_mod_block(self, is_pub) {
 function Parser_parse_decl(self) {
   const is_pub = Parser_try_consume(self, lexer$TokenKind_TkPub);
   const tok = Parser_peek(self);
-  __ring_match12: {
-    const __ring_m12 = tok.kind;
-    if (__ring_m12._tag === "TkMod") {
+  __ring_match13: {
+    const __ring_m13 = tok.kind;
+    if (__ring_m13._tag === "TkMod") {
       return Option_some(Parser_parse_mod_block(self, is_pub));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkFn") {
+    if (__ring_m13._tag === "TkFn") {
       return Option_some(Parser_parse_fn_decl(self, is_pub, false));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkStruct") {
+    if (__ring_m13._tag === "TkStruct") {
       return Option_some(Parser_parse_struct_decl(self, is_pub));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkEnum") {
+    if (__ring_m13._tag === "TkEnum") {
       return Option_some(Parser_parse_enum_decl(self, is_pub));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkImpl") {
+    if (__ring_m13._tag === "TkImpl") {
       return Option_some(Parser_parse_impl_decl(self));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkEffect") {
+    if (__ring_m13._tag === "TkEffect") {
       return Option_some(Parser_parse_effect_decl(self, is_pub));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkTest") {
+    if (__ring_m13._tag === "TkTest") {
       return Option_some(Parser_parse_test_decl(self));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkTrait") {
+    if (__ring_m13._tag === "TkTrait") {
       return Option_some(Parser_parse_trait_decl(self, is_pub));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkExtern") {
+    if (__ring_m13._tag === "TkExtern") {
       return Option_some(Parser_parse_extern_decl(self, is_pub));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkConst") {
+    if (__ring_m13._tag === "TkConst") {
       return Option_some(Parser_parse_const_decl(self, is_pub));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkSig") {
+    if (__ring_m13._tag === "TkSig") {
       return Option_some(Parser_parse_sig_block(self, is_pub));
-      break __ring_match12;
+      break __ring_match13;
     }
-    if (__ring_m12._tag === "TkIdent") {
+    if (__ring_m13._tag === "TkIdent") {
       if ((tok.value === "type")) {
         return Option_some(Parser_parse_type_alias_decl(self, is_pub));
       }
       Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
       return Option_none;
-      break __ring_match12;
+      break __ring_match13;
     }
     Parser_report_error(self, codes$E0101, `Expected declaration, got '${tok.value}' (${lexer$token_kind_value(tok.kind)})`, Option_some(tok.span));
     return Option_none;
-    break __ring_match12;
+    break __ring_match13;
   }
 }
 function Parser_parse_effect_list(self) {
@@ -1581,12 +1590,21 @@ function Parser_parse_if_expr(self) {
       else_branch = Option_some(Parser_parse_block_expr(self));
     }
   }
-  const end_pos = (function() {
-  const __ring_m = else_branch;
-  if (__ring_m._tag === "some") { const eb = __ring_m._0; return expr_span(eb).end; }
-  if (__ring_m._tag === "none") { return expr_span(then_branch).end; }
-  __match_fail(__ring_m);
-})();
+  let __ring_blk1;
+  __ring_match14: {
+    const __ring_m14 = else_branch;
+    if (__ring_m14._tag === "some") {
+      const eb = __ring_m14._0;
+      __ring_blk1 = expr_span(eb).end;
+      break __ring_match14;
+    }
+    if (__ring_m14._tag === "none") {
+      __ring_blk1 = expr_span(then_branch).end;
+      break __ring_match14;
+    }
+    __match_fail(__ring_m14);
+  }
+  const end_pos = __ring_blk1;
   return ast$Expr_IfExpr(condition, then_branch, else_branch, Parser_make_span(self, start, end_pos));
 }
 function Parser_parse_match_expr(self) {
@@ -1680,12 +1698,21 @@ function Parser_parse_pattern(self) {
     if ((is_uppercase(Option_unwrap_or(Str_char_at(name, 0), "")) ? Parser_check(self, lexer$TokenKind_TkColonColon) : false)) {
       Parser_advance(self);
       const variant_tok = Parser_expect(self, lexer$TokenKind_TkIdent);
-      qualifier = Option_some((function() {
-  const __ring_m = qualifier;
-  if (__ring_m._tag === "some") { const q = __ring_m._0; return `${q}::${name}`; }
-  if (__ring_m._tag === "none") { return name; }
-  __match_fail(__ring_m);
-})());
+      let __ring_blk2;
+      __ring_match15: {
+        const __ring_m15 = qualifier;
+        if (__ring_m15._tag === "some") {
+          const q = __ring_m15._0;
+          __ring_blk2 = `${q}::${name}`;
+          break __ring_match15;
+        }
+        if (__ring_m15._tag === "none") {
+          __ring_blk2 = name;
+          break __ring_match15;
+        }
+        __match_fail(__ring_m15);
+      }
+      qualifier = Option_some(__ring_blk2);
       name = variant_tok.value;
     }
     if (Parser_check(self, lexer$TokenKind_TkLParen)) {
@@ -2101,19 +2128,19 @@ function Parser_parse_params(self) {
     const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
     if (__ring_next_4._tag === "none") break;
     const p = __ring_next_4._0;
-    __ring_match13: {
-      const __ring_m13 = p.default_value;
-      if (__ring_m13._tag === "some") {
+    __ring_match16: {
+      const __ring_m16 = p.default_value;
+      if (__ring_m16._tag === "some") {
         seen_default = true;
-        break __ring_match13;
+        break __ring_match16;
       }
-      if (__ring_m13._tag === "none") {
+      if (__ring_m16._tag === "none") {
         if (seen_default) {
           diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0106, diagnostics$Severity_SevError, `Non-default parameter '${p.name}' after default parameter`, p.span, diagnostics$DiagnosticContext_ParseError(p.name, Option_none)));
         }
-        break __ring_match13;
+        break __ring_match16;
       }
-      __match_fail(__ring_m13);
+      __match_fail(__ring_m16);
     }
   }
   return params;
@@ -2143,300 +2170,300 @@ function dummy_type_expr() {
 }
 
 function expr_span(e) {
-  __ring_match14: {
-    const __ring_m14 = e;
-    if (__ring_m14._tag === "IntLit") {
-      const span = __ring_m14.span;
+  __ring_match17: {
+    const __ring_m17 = e;
+    if (__ring_m17._tag === "IntLit") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "FloatLit") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "FloatLit") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "StrLit") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "StrLit") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "BoolLit") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "BoolLit") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "Ident") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "Ident") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "BinOp") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "BinOp") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "UnaryOp") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "UnaryOp") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "Call") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "Call") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "MethodCall") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "MethodCall") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "FieldAccess") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "FieldAccess") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "StructLit") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "StructLit") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "MatchExpr") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "MatchExpr") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "Block") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "Block") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "IfExpr") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "IfExpr") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "StringInterp") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "StringInterp") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "CatchExpr") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "CatchExpr") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "HandleExpr") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "HandleExpr") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "Lambda") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "Lambda") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "Range") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "Range") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "ListLit") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "ListLit") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "TupleLit") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "TupleLit") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "IndexExpr") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "IndexExpr") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    if (__ring_m14._tag === "ReturnExpr") {
-      const span = __ring_m14.span;
+    if (__ring_m17._tag === "ReturnExpr") {
+      const span = __ring_m17.span;
       return span;
-      break __ring_match14;
+      break __ring_match17;
     }
-    __match_fail(__ring_m14);
+    __match_fail(__ring_m17);
   }
 }
 
 function is_decl_start(k) {
-  __ring_match15: {
-    const __ring_m15 = k;
-    if (__ring_m15._tag === "TkFn") {
+  __ring_match18: {
+    const __ring_m18 = k;
+    if (__ring_m18._tag === "TkFn") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkStruct") {
+    if (__ring_m18._tag === "TkStruct") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkEnum") {
+    if (__ring_m18._tag === "TkEnum") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkEffect") {
+    if (__ring_m18._tag === "TkEffect") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkTrait") {
+    if (__ring_m18._tag === "TkTrait") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkImpl") {
+    if (__ring_m18._tag === "TkImpl") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkExtern") {
+    if (__ring_m18._tag === "TkExtern") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkUse") {
+    if (__ring_m18._tag === "TkUse") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkPub") {
+    if (__ring_m18._tag === "TkPub") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkTest") {
+    if (__ring_m18._tag === "TkTest") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkConst") {
+    if (__ring_m18._tag === "TkConst") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkMod") {
+    if (__ring_m18._tag === "TkMod") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
-    if (__ring_m15._tag === "TkSig") {
+    if (__ring_m18._tag === "TkSig") {
       return true;
-      break __ring_match15;
+      break __ring_match18;
     }
     return false;
-    break __ring_match15;
+    break __ring_match18;
   }
 }
 
 function type_expr_span(te) {
-  __ring_match16: {
-    const __ring_m16 = te;
-    if (__ring_m16._tag === "Named") {
-      const span = __ring_m16.span;
+  __ring_match19: {
+    const __ring_m19 = te;
+    if (__ring_m19._tag === "Named") {
+      const span = __ring_m19.span;
       return span;
-      break __ring_match16;
+      break __ring_match19;
     }
-    if (__ring_m16._tag === "FnType") {
-      const span = __ring_m16.span;
+    if (__ring_m19._tag === "FnType") {
+      const span = __ring_m19.span;
       return span;
-      break __ring_match16;
+      break __ring_match19;
     }
-    if (__ring_m16._tag === "OptionType") {
-      const span = __ring_m16.span;
+    if (__ring_m19._tag === "OptionType") {
+      const span = __ring_m19.span;
       return span;
-      break __ring_match16;
+      break __ring_match19;
     }
-    if (__ring_m16._tag === "RecordType") {
-      const span = __ring_m16.span;
+    if (__ring_m19._tag === "RecordType") {
+      const span = __ring_m19.span;
       return span;
-      break __ring_match16;
+      break __ring_match19;
     }
-    if (__ring_m16._tag === "TupleType") {
-      const span = __ring_m16.span;
+    if (__ring_m19._tag === "TupleType") {
+      const span = __ring_m19.span;
       return span;
-      break __ring_match16;
+      break __ring_match19;
     }
-    __match_fail(__ring_m16);
+    __match_fail(__ring_m19);
   }
 }
 
 function infix_precedence(kind) {
-  __ring_match17: {
-    const __ring_m17 = kind;
-    if (__ring_m17._tag === "TkCatch") {
+  __ring_match20: {
+    const __ring_m20 = kind;
+    if (__ring_m20._tag === "TkCatch") {
       return PREC_CATCH;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkPipePipe") {
+    if (__ring_m20._tag === "TkPipePipe") {
       return PREC_LOGIC_OR;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkAmpAmp") {
+    if (__ring_m20._tag === "TkAmpAmp") {
       return PREC_LOGIC_AND;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkEqEq") {
+    if (__ring_m20._tag === "TkEqEq") {
       return PREC_EQUALITY;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkBangEq") {
+    if (__ring_m20._tag === "TkBangEq") {
       return PREC_EQUALITY;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkLt") {
+    if (__ring_m20._tag === "TkLt") {
       return PREC_COMPARE;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkGt") {
+    if (__ring_m20._tag === "TkGt") {
       return PREC_COMPARE;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkLtEq") {
+    if (__ring_m20._tag === "TkLtEq") {
       return PREC_COMPARE;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkGtEq") {
+    if (__ring_m20._tag === "TkGtEq") {
       return PREC_COMPARE;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkDotDot") {
+    if (__ring_m20._tag === "TkDotDot") {
       return PREC_RANGE;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkDotDotEq") {
+    if (__ring_m20._tag === "TkDotDotEq") {
       return PREC_RANGE;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkPlus") {
+    if (__ring_m20._tag === "TkPlus") {
       return PREC_ADD_SUB;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkMinus") {
+    if (__ring_m20._tag === "TkMinus") {
       return PREC_ADD_SUB;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkStar") {
+    if (__ring_m20._tag === "TkStar") {
       return PREC_MUL_DIV;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkSlash") {
+    if (__ring_m20._tag === "TkSlash") {
       return PREC_MUL_DIV;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkPercent") {
+    if (__ring_m20._tag === "TkPercent") {
       return PREC_MUL_DIV;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkDot") {
+    if (__ring_m20._tag === "TkDot") {
       return PREC_POSTFIX;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkLParen") {
+    if (__ring_m20._tag === "TkLParen") {
       return PREC_POSTFIX;
-      break __ring_match17;
+      break __ring_match20;
     }
-    if (__ring_m17._tag === "TkLBracket") {
+    if (__ring_m20._tag === "TkLBracket") {
       return PREC_POSTFIX;
-      break __ring_match17;
+      break __ring_match20;
     }
     return PREC_NONE;
-    break __ring_match17;
+    break __ring_match20;
   }
 }
 
@@ -2503,44 +2530,44 @@ function is_uppercase(ch) {
 }
 
 function pattern_span(p) {
-  __ring_match18: {
-    const __ring_m18 = p;
-    if (__ring_m18._tag === "Wildcard") {
-      const span = __ring_m18.span;
+  __ring_match21: {
+    const __ring_m21 = p;
+    if (__ring_m21._tag === "Wildcard") {
+      const span = __ring_m21.span;
       return span;
-      break __ring_match18;
+      break __ring_match21;
     }
-    if (__ring_m18._tag === "Binding") {
-      const span = __ring_m18.span;
+    if (__ring_m21._tag === "Binding") {
+      const span = __ring_m21.span;
       return span;
-      break __ring_match18;
+      break __ring_match21;
     }
-    if (__ring_m18._tag === "Constructor") {
-      const span = __ring_m18.span;
+    if (__ring_m21._tag === "Constructor") {
+      const span = __ring_m21.span;
       return span;
-      break __ring_match18;
+      break __ring_match21;
     }
-    if (__ring_m18._tag === "NamedConstructor") {
-      const span = __ring_m18.span;
+    if (__ring_m21._tag === "NamedConstructor") {
+      const span = __ring_m21.span;
       return span;
-      break __ring_match18;
+      break __ring_match21;
     }
-    if (__ring_m18._tag === "Literal") {
-      const span = __ring_m18.span;
+    if (__ring_m21._tag === "Literal") {
+      const span = __ring_m21.span;
       return span;
-      break __ring_match18;
+      break __ring_match21;
     }
-    if (__ring_m18._tag === "TuplePattern") {
-      const span = __ring_m18.span;
+    if (__ring_m21._tag === "TuplePattern") {
+      const span = __ring_m21.span;
       return span;
-      break __ring_match18;
+      break __ring_match21;
     }
-    if (__ring_m18._tag === "OrPattern") {
-      const span = __ring_m18.span;
+    if (__ring_m21._tag === "OrPattern") {
+      const span = __ring_m21.span;
       return span;
-      break __ring_match18;
+      break __ring_match21;
     }
-    __match_fail(__ring_m18);
+    __match_fail(__ring_m21);
   }
 }
 

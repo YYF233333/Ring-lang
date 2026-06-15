@@ -265,12 +265,21 @@ function al_stmt(s) {
     }
     if (__ring_m6._tag === "Return") {
       const value = __ring_m6.value; const span = __ring_m6.span;
-      const new_value = (function() {
-  const __ring_m = value;
-  if (__ring_m._tag === "some") { const v = __ring_m._0; return Option_some(al_expr(v)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
+      let __ring_blk0;
+      __ring_match7: {
+        const __ring_m7 = value;
+        if (__ring_m7._tag === "some") {
+          const v = __ring_m7._0;
+          __ring_blk0 = Option_some(al_expr(v));
+          break __ring_match7;
+        }
+        if (__ring_m7._tag === "none") {
+          __ring_blk0 = Option_none;
+          break __ring_match7;
+        }
+        __match_fail(__ring_m7);
+      }
+      const new_value = __ring_blk0;
       return hir$HStmt_Return(new_value, span);
       break __ring_match6;
     }
@@ -299,12 +308,21 @@ function al_stmt(s) {
     }
     if (__ring_m6._tag === "IfLet") {
       const pattern = __ring_m6.pattern; const expr = __ring_m6.expr; const then_block = __ring_m6.then_block; const else_block = __ring_m6.else_block; const span = __ring_m6.span;
-      const new_else = (function() {
-  const __ring_m = else_block;
-  if (__ring_m._tag === "some") { const eb = __ring_m._0; return Option_some(al_expr(eb)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
+      let __ring_blk1;
+      __ring_match8: {
+        const __ring_m8 = else_block;
+        if (__ring_m8._tag === "some") {
+          const eb = __ring_m8._0;
+          __ring_blk1 = Option_some(al_expr(eb));
+          break __ring_match8;
+        }
+        if (__ring_m8._tag === "none") {
+          __ring_blk1 = Option_none;
+          break __ring_match8;
+        }
+        __match_fail(__ring_m8);
+      }
+      const new_else = __ring_blk1;
       return hir$HStmt_IfLet(pattern, al_expr(expr), al_expr(then_block), new_else, span);
       break __ring_match6;
     }
@@ -321,54 +339,54 @@ function al_stmt(s) {
 }
 
 function al_expr(e) {
-  __ring_match7: {
-    const __ring_m7 = e;
-    if (__ring_m7._tag === "IntLit") {
+  __ring_match9: {
+    const __ring_m9 = e;
+    if (__ring_m9._tag === "IntLit") {
       return e;
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "FloatLit") {
+    if (__ring_m9._tag === "FloatLit") {
       return e;
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "StrLit") {
+    if (__ring_m9._tag === "StrLit") {
       return e;
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "BoolLit") {
+    if (__ring_m9._tag === "BoolLit") {
       return e;
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "Ident") {
+    if (__ring_m9._tag === "Ident") {
       return e;
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "BinOp") {
-      const op = __ring_m7.op; const left = __ring_m7.left; const right = __ring_m7.right; const eq_dispatch = __ring_m7.eq_dispatch; const ord_dispatch = __ring_m7.ord_dispatch; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "BinOp") {
+      const op = __ring_m9.op; const left = __ring_m9.left; const right = __ring_m9.right; const eq_dispatch = __ring_m9.eq_dispatch; const ord_dispatch = __ring_m9.ord_dispatch; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       const new_left = al_expr(left);
       const new_right = al_expr(right);
-      __ring_match8: {
-        const __ring_m8 = op;
-        if (__ring_m8._tag === "And") {
+      __ring_match10: {
+        const __ring_m10 = op;
+        if (__ring_m10._tag === "And") {
           return hir$HExpr_IfExpr(new_left, new_right, Option_some(hir$HExpr_BoolLit(false, types$Type_BoolType, types$EMPTY_ROW, span)), ty, effects, span);
-          break __ring_match8;
+          break __ring_match10;
         }
-        if (__ring_m8._tag === "Or") {
+        if (__ring_m10._tag === "Or") {
           return hir$HExpr_IfExpr(new_left, hir$HExpr_BoolLit(true, types$Type_BoolType, types$EMPTY_ROW, span), Option_some(new_right), ty, effects, span);
-          break __ring_match8;
+          break __ring_match10;
         }
         return hir$HExpr_BinOp(op, new_left, new_right, eq_dispatch, ord_dispatch, ty, effects, span);
-        break __ring_match8;
+        break __ring_match10;
       }
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "UnaryOp") {
-      const op = __ring_m7.op; const operand = __ring_m7.operand; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "UnaryOp") {
+      const op = __ring_m9.op; const operand = __ring_m9.operand; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       return hir$HExpr_UnaryOp(op, al_expr(operand), ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "Call") {
-      const callee = __ring_m7.callee; const args = __ring_m7.args; const type_args = __ring_m7.type_args; const resolved_dicts = __ring_m7.resolved_dicts; const dict_dispatch = __ring_m7.dict_dispatch; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "Call") {
+      const callee = __ring_m9.callee; const args = __ring_m9.args; const type_args = __ring_m9.type_args; const resolved_dicts = __ring_m9.resolved_dicts; const dict_dispatch = __ring_m9.dict_dispatch; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       const new_callee = al_expr(callee);
       let new_args = [];
       const __ring_iter_2 = __List_Iterable.iter(args);
@@ -379,15 +397,15 @@ function al_expr(e) {
         List_push(new_args, al_expr(a));
       }
       return hir$HExpr_Call(new_callee, new_args, type_args, resolved_dicts, dict_dispatch, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "FieldAccess") {
-      const receiver = __ring_m7.receiver; const field = __ring_m7.field; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "FieldAccess") {
+      const receiver = __ring_m9.receiver; const field = __ring_m9.field; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       return hir$HExpr_FieldAccess(al_expr(receiver), field, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "StructLit") {
-      const name = __ring_m7.name; const type_args = __ring_m7.type_args; const fields = __ring_m7.fields; const spread = __ring_m7.spread; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "StructLit") {
+      const name = __ring_m9.name; const type_args = __ring_m9.type_args; const fields = __ring_m9.fields; const spread = __ring_m9.spread; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       let new_fields = [];
       const __ring_iter_3 = __List_Iterable.iter(fields);
       while (true) {
@@ -396,17 +414,26 @@ function al_expr(e) {
         const f = __ring_next_3._0;
         List_push(new_fields, new hir$HStructFieldInit(f.name, al_expr(f.value)));
       }
-      const new_spread = (function() {
-  const __ring_m = spread;
-  if (__ring_m._tag === "some") { const s = __ring_m._0; return Option_some(al_expr(s)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
+      let __ring_blk2;
+      __ring_match11: {
+        const __ring_m11 = spread;
+        if (__ring_m11._tag === "some") {
+          const s = __ring_m11._0;
+          __ring_blk2 = Option_some(al_expr(s));
+          break __ring_match11;
+        }
+        if (__ring_m11._tag === "none") {
+          __ring_blk2 = Option_none;
+          break __ring_match11;
+        }
+        __match_fail(__ring_m11);
+      }
+      const new_spread = __ring_blk2;
       return hir$HExpr_StructLit(name, type_args, new_fields, new_spread, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "NamedVariantConstruct") {
-      const enum_name = __ring_m7.enum_name; const variant_name = __ring_m7.variant_name; const fields = __ring_m7.fields; const spread = __ring_m7.spread; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "NamedVariantConstruct") {
+      const enum_name = __ring_m9.enum_name; const variant_name = __ring_m9.variant_name; const fields = __ring_m9.fields; const spread = __ring_m9.spread; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       let new_fields = [];
       const __ring_iter_4 = __List_Iterable.iter(fields);
       while (true) {
@@ -415,22 +442,31 @@ function al_expr(e) {
         const f = __ring_next_4._0;
         List_push(new_fields, new hir$HStructFieldInit(f.name, al_expr(f.value)));
       }
-      const new_spread = (function() {
-  const __ring_m = spread;
-  if (__ring_m._tag === "some") { const s = __ring_m._0; return Option_some(al_expr(s)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
+      let __ring_blk3;
+      __ring_match12: {
+        const __ring_m12 = spread;
+        if (__ring_m12._tag === "some") {
+          const s = __ring_m12._0;
+          __ring_blk3 = Option_some(al_expr(s));
+          break __ring_match12;
+        }
+        if (__ring_m12._tag === "none") {
+          __ring_blk3 = Option_none;
+          break __ring_match12;
+        }
+        __match_fail(__ring_m12);
+      }
+      const new_spread = __ring_blk3;
       return hir$HExpr_NamedVariantConstruct(enum_name, variant_name, new_fields, new_spread, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "MatchExpr") {
-      const scrutinee = __ring_m7.scrutinee; const arms = __ring_m7.arms; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "MatchExpr") {
+      const scrutinee = __ring_m9.scrutinee; const arms = __ring_m9.arms; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       return hir$HExpr_MatchExpr(al_expr(scrutinee), al_arms(arms), ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "Block") {
-      const stmts = __ring_m7.stmts; const tail = __ring_m7.tail; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "Block") {
+      const stmts = __ring_m9.stmts; const tail = __ring_m9.tail; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       let new_stmts = [];
       const __ring_iter_5 = __List_Iterable.iter(stmts);
       while (true) {
@@ -439,59 +475,77 @@ function al_expr(e) {
         const s = __ring_next_5._0;
         List_push(new_stmts, al_stmt(s));
       }
-      const new_tail = (function() {
-  const __ring_m = tail;
-  if (__ring_m._tag === "some") { const t = __ring_m._0; return Option_some(al_expr(t)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
+      let __ring_blk4;
+      __ring_match13: {
+        const __ring_m13 = tail;
+        if (__ring_m13._tag === "some") {
+          const t = __ring_m13._0;
+          __ring_blk4 = Option_some(al_expr(t));
+          break __ring_match13;
+        }
+        if (__ring_m13._tag === "none") {
+          __ring_blk4 = Option_none;
+          break __ring_match13;
+        }
+        __match_fail(__ring_m13);
+      }
+      const new_tail = __ring_blk4;
       return hir$HExpr_Block(new_stmts, new_tail, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "IfExpr") {
-      const condition = __ring_m7.condition; const then_branch = __ring_m7.then_branch; const else_branch = __ring_m7.else_branch; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
-      const new_else = (function() {
-  const __ring_m = else_branch;
-  if (__ring_m._tag === "some") { const eb = __ring_m._0; return Option_some(al_expr(eb)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
+    if (__ring_m9._tag === "IfExpr") {
+      const condition = __ring_m9.condition; const then_branch = __ring_m9.then_branch; const else_branch = __ring_m9.else_branch; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
+      let __ring_blk5;
+      __ring_match14: {
+        const __ring_m14 = else_branch;
+        if (__ring_m14._tag === "some") {
+          const eb = __ring_m14._0;
+          __ring_blk5 = Option_some(al_expr(eb));
+          break __ring_match14;
+        }
+        if (__ring_m14._tag === "none") {
+          __ring_blk5 = Option_none;
+          break __ring_match14;
+        }
+        __match_fail(__ring_m14);
+      }
+      const new_else = __ring_blk5;
       return hir$HExpr_IfExpr(al_expr(condition), al_expr(then_branch), new_else, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "StringInterp") {
-      const parts = __ring_m7.parts; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "StringInterp") {
+      const parts = __ring_m9.parts; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       let new_parts = [];
       const __ring_iter_6 = __List_Iterable.iter(parts);
       while (true) {
         const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
         if (__ring_next_6._tag === "none") break;
         const p = __ring_next_6._0;
-        __ring_match9: {
-          const __ring_m9 = p;
-          if (__ring_m9._tag === "Literal") {
-            const s = __ring_m9._0;
+        __ring_match15: {
+          const __ring_m15 = p;
+          if (__ring_m15._tag === "Literal") {
+            const s = __ring_m15._0;
             List_push(new_parts, hir$HStringInterpPart_Literal(s));
-            break __ring_match9;
+            break __ring_match15;
           }
-          if (__ring_m9._tag === "Expression") {
-            const ex = __ring_m9._0;
+          if (__ring_m15._tag === "Expression") {
+            const ex = __ring_m15._0;
             List_push(new_parts, hir$HStringInterpPart_Expression(al_expr(ex)));
-            break __ring_match9;
+            break __ring_match15;
           }
-          __match_fail(__ring_m9);
+          __match_fail(__ring_m15);
         }
       }
       return hir$HExpr_StringInterp(new_parts, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "TryCatch") {
-      const body = __ring_m7.body; const arms = __ring_m7.arms; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "TryCatch") {
+      const body = __ring_m9.body; const arms = __ring_m9.arms; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       return hir$HExpr_TryCatch(al_expr(body), al_arms(arms), ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "HandleExpr") {
-      const body = __ring_m7.body; const handlers = __ring_m7.handlers; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "HandleExpr") {
+      const body = __ring_m9.body; const handlers = __ring_m9.handlers; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       let new_handlers = [];
       const __ring_iter_7 = __List_Iterable.iter(handlers);
       while (true) {
@@ -501,15 +555,15 @@ function al_expr(e) {
         List_push(new_handlers, new hir$HEffectHandler(h.effect_name, h.op_name, h.params, h.resume_name, al_expr(h.body)));
       }
       return hir$HExpr_HandleExpr(al_expr(body), new_handlers, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "Lambda") {
-      const params = __ring_m7.params; const return_type = __ring_m7.return_type; const body = __ring_m7.body; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "Lambda") {
+      const params = __ring_m9.params; const return_type = __ring_m9.return_type; const body = __ring_m9.body; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       return hir$HExpr_Lambda(params, return_type, al_expr(body), ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "EffectOp") {
-      const effect_name = __ring_m7.effect_name; const op_name = __ring_m7.op_name; const args = __ring_m7.args; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "EffectOp") {
+      const effect_name = __ring_m9.effect_name; const op_name = __ring_m9.op_name; const args = __ring_m9.args; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       let new_args = [];
       const __ring_iter_8 = __List_Iterable.iter(args);
       while (true) {
@@ -519,15 +573,15 @@ function al_expr(e) {
         List_push(new_args, al_expr(a));
       }
       return hir$HExpr_EffectOp(effect_name, op_name, new_args, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "RangeExpr") {
-      const start = __ring_m7.start; const end = __ring_m7.end; const inclusive = __ring_m7.inclusive; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "RangeExpr") {
+      const start = __ring_m9.start; const end = __ring_m9.end; const inclusive = __ring_m9.inclusive; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       return hir$HExpr_RangeExpr(al_expr(start), al_expr(end), inclusive, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "ListLit") {
-      const elements = __ring_m7.elements; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "ListLit") {
+      const elements = __ring_m9.elements; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       let new_elems = [];
       const __ring_iter_9 = __List_Iterable.iter(elements);
       while (true) {
@@ -537,10 +591,10 @@ function al_expr(e) {
         List_push(new_elems, al_expr(el));
       }
       return hir$HExpr_ListLit(new_elems, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "TupleLit") {
-      const elements = __ring_m7.elements; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "TupleLit") {
+      const elements = __ring_m9.elements; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       let new_elems = [];
       const __ring_iter_10 = __List_Iterable.iter(elements);
       while (true) {
@@ -550,40 +604,40 @@ function al_expr(e) {
         List_push(new_elems, al_expr(el));
       }
       return hir$HExpr_TupleLit(new_elems, ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "IndexExpr") {
-      const receiver = __ring_m7.receiver; const index = __ring_m7.index; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "IndexExpr") {
+      const receiver = __ring_m9.receiver; const index = __ring_m9.index; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       return hir$HExpr_IndexExpr(al_expr(receiver), al_expr(index), ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "DictConstruct") {
+    if (__ring_m9._tag === "DictConstruct") {
       return e;
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "Clone") {
-      const inner = __ring_m7.inner; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
+    if (__ring_m9._tag === "Clone") {
+      const inner = __ring_m9.inner; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
       return hir$HExpr_Clone(al_expr(inner), ty, effects, span);
-      break __ring_match7;
+      break __ring_match9;
     }
-    if (__ring_m7._tag === "ReturnExpr") {
-      const value = __ring_m7.value; const ty = __ring_m7.ty; const effects = __ring_m7.effects; const span = __ring_m7.span;
-      __ring_match10: {
-        const __ring_m10 = value;
-        if (__ring_m10._tag === "some") {
-          const v = __ring_m10._0;
+    if (__ring_m9._tag === "ReturnExpr") {
+      const value = __ring_m9.value; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
+      __ring_match16: {
+        const __ring_m16 = value;
+        if (__ring_m16._tag === "some") {
+          const v = __ring_m16._0;
           return hir$HExpr_ReturnExpr(Option_some(al_expr(v)), ty, effects, span);
-          break __ring_match10;
+          break __ring_match16;
         }
-        if (__ring_m10._tag === "none") {
+        if (__ring_m16._tag === "none") {
           return e;
-          break __ring_match10;
+          break __ring_match16;
         }
-        __match_fail(__ring_m10);
+        __match_fail(__ring_m16);
       }
-      break __ring_match7;
+      break __ring_match9;
     }
-    __match_fail(__ring_m7);
+    __match_fail(__ring_m9);
   }
 }
 
@@ -594,27 +648,36 @@ function al_arms(arms) {
     const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
     if (__ring_next_11._tag === "none") break;
     const arm = __ring_next_11._0;
-    const new_guard = (function() {
-  const __ring_m = arm.guard;
-  if (__ring_m._tag === "some") { const g = __ring_m._0; return Option_some(al_expr(g)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
+    let __ring_blk6;
+    __ring_match17: {
+      const __ring_m17 = arm.guard;
+      if (__ring_m17._tag === "some") {
+        const g = __ring_m17._0;
+        __ring_blk6 = Option_some(al_expr(g));
+        break __ring_match17;
+      }
+      if (__ring_m17._tag === "none") {
+        __ring_blk6 = Option_none;
+        break __ring_match17;
+      }
+      __match_fail(__ring_m17);
+    }
+    const new_guard = __ring_blk6;
     List_push(out, new hir$HMatchArm(arm.pattern, new_guard, al_expr(arm.body), arm.span));
   }
   return out;
 }
 
 function al_decl(d) {
-  __ring_match11: {
-    const __ring_m11 = d;
-    if (__ring_m11._tag === "Fn") {
-      const name = __ring_m11.name; const def_id = __ring_m11.def_id; const type_params = __ring_m11.type_params; const params = __ring_m11.params; const return_type = __ring_m11.return_type; const effects = __ring_m11.effects; const body = __ring_m11.body; const is_pub = __ring_m11.is_pub; const trait_bounds = __ring_m11.trait_bounds; const span = __ring_m11.span;
+  __ring_match18: {
+    const __ring_m18 = d;
+    if (__ring_m18._tag === "Fn") {
+      const name = __ring_m18.name; const def_id = __ring_m18.def_id; const type_params = __ring_m18.type_params; const params = __ring_m18.params; const return_type = __ring_m18.return_type; const effects = __ring_m18.effects; const body = __ring_m18.body; const is_pub = __ring_m18.is_pub; const trait_bounds = __ring_m18.trait_bounds; const span = __ring_m18.span;
       return hir$HDecl_Fn(name, def_id, type_params, params, return_type, effects, al_expr(body), is_pub, trait_bounds, span);
-      break __ring_match11;
+      break __ring_match18;
     }
-    if (__ring_m11._tag === "Impl") {
-      const target_type = __ring_m11.target_type; const type_params = __ring_m11.type_params; const trait_name = __ring_m11.trait_name; const methods = __ring_m11.methods; const assoc_types = __ring_m11.assoc_types; const span = __ring_m11.span;
+    if (__ring_m18._tag === "Impl") {
+      const target_type = __ring_m18.target_type; const type_params = __ring_m18.type_params; const trait_name = __ring_m18.trait_name; const methods = __ring_m18.methods; const assoc_types = __ring_m18.assoc_types; const span = __ring_m18.span;
       let new_methods = [];
       const __ring_iter_12 = __List_Iterable.iter(methods);
       while (true) {
@@ -624,20 +687,20 @@ function al_decl(d) {
         List_push(new_methods, al_decl(m));
       }
       return hir$HDecl_Impl(target_type, type_params, trait_name, new_methods, assoc_types, span);
-      break __ring_match11;
+      break __ring_match18;
     }
-    if (__ring_m11._tag === "Test") {
-      const description = __ring_m11.description; const body = __ring_m11.body; const span = __ring_m11.span;
+    if (__ring_m18._tag === "Test") {
+      const description = __ring_m18.description; const body = __ring_m18.body; const span = __ring_m18.span;
       return hir$HDecl_Test(description, al_expr(body), span);
-      break __ring_match11;
+      break __ring_match18;
     }
-    if (__ring_m11._tag === "Const") {
-      const name = __ring_m11.name; const def_id = __ring_m11.def_id; const ty = __ring_m11.ty; const init = __ring_m11.init; const is_pub = __ring_m11.is_pub; const span = __ring_m11.span;
+    if (__ring_m18._tag === "Const") {
+      const name = __ring_m18.name; const def_id = __ring_m18.def_id; const ty = __ring_m18.ty; const init = __ring_m18.init; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
       return hir$HDecl_Const(name, def_id, ty, al_expr(init), is_pub, span);
-      break __ring_match11;
+      break __ring_match18;
     }
-    if (__ring_m11._tag === "ModBlock") {
-      const name = __ring_m11.name; const decls = __ring_m11.decls; const is_pub = __ring_m11.is_pub; const span = __ring_m11.span;
+    if (__ring_m18._tag === "ModBlock") {
+      const name = __ring_m18.name; const decls = __ring_m18.decls; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
       let new_inner = [];
       const __ring_iter_13 = __List_Iterable.iter(decls);
       while (true) {
@@ -647,29 +710,38 @@ function al_decl(d) {
         List_push(new_inner, al_decl(md));
       }
       return hir$HDecl_ModBlock(name, new_inner, is_pub, span);
-      break __ring_match11;
+      break __ring_match18;
     }
-    if (__ring_m11._tag === "Trait") {
-      const name = __ring_m11.name; const type_params = __ring_m11.type_params; const methods = __ring_m11.methods; const supertraits = __ring_m11.supertraits; const assoc_types = __ring_m11.assoc_types; const is_pub = __ring_m11.is_pub; const span = __ring_m11.span;
+    if (__ring_m18._tag === "Trait") {
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const methods = __ring_m18.methods; const supertraits = __ring_m18.supertraits; const assoc_types = __ring_m18.assoc_types; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
       let new_methods = [];
       const __ring_iter_14 = __List_Iterable.iter(methods);
       while (true) {
         const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
         if (__ring_next_14._tag === "none") break;
         const tm = __ring_next_14._0;
-        const new_body = (function() {
-  const __ring_m = tm.body;
-  if (__ring_m._tag === "some") { const b = __ring_m._0; return Option_some(al_expr(b)); }
-  if (__ring_m._tag === "none") { return Option_none; }
-  __match_fail(__ring_m);
-})();
+        let __ring_blk7;
+        __ring_match19: {
+          const __ring_m19 = tm.body;
+          if (__ring_m19._tag === "some") {
+            const b = __ring_m19._0;
+            __ring_blk7 = Option_some(al_expr(b));
+            break __ring_match19;
+          }
+          if (__ring_m19._tag === "none") {
+            __ring_blk7 = Option_none;
+            break __ring_match19;
+          }
+          __match_fail(__ring_m19);
+        }
+        const new_body = __ring_blk7;
         List_push(new_methods, new hir$HTraitMethod(tm.name, tm.params, tm.return_type, tm.has_default, new_body));
       }
       return hir$HDecl_Trait(name, type_params, new_methods, supertraits, assoc_types, is_pub, span);
-      break __ring_match11;
+      break __ring_match18;
     }
     return d;
-    break __ring_match11;
+    break __ring_match18;
   }
 }
 

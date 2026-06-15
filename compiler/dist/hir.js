@@ -1188,98 +1188,104 @@ function is_extern_handle_type(ty, externs) {
 }
 
 function is_fresh_owned_bool_value(expr) {
-  const is_bool = (function() {
-  const __ring_m = hexpr_type(expr);
-  if (__ring_m._tag === "BoolType") { return true; }
-  return false;
-})();
+  let __ring_blk0;
+  __ring_match14: {
+    const __ring_m14 = hexpr_type(expr);
+    if (__ring_m14._tag === "BoolType") {
+      __ring_blk0 = true;
+      break __ring_match14;
+    }
+    __ring_blk0 = false;
+    break __ring_match14;
+  }
+  const is_bool = __ring_blk0;
   if ((is_bool === false)) {
     return false;
   }
-  __ring_match14: {
-    const __ring_m14 = expr;
-    if (__ring_m14._tag === "BinOp") {
+  __ring_match15: {
+    const __ring_m15 = expr;
+    if (__ring_m15._tag === "BinOp") {
       return true;
-      break __ring_match14;
+      break __ring_match15;
     }
-    if (__ring_m14._tag === "UnaryOp") {
+    if (__ring_m15._tag === "UnaryOp") {
       return true;
-      break __ring_match14;
+      break __ring_match15;
     }
-    if (__ring_m14._tag === "Call") {
-      const callee = __ring_m14.callee;
+    if (__ring_m15._tag === "Call") {
+      const callee = __ring_m15.callee;
       return (is_borrow_returning_call(callee) === false);
-      break __ring_match14;
+      break __ring_match15;
     }
-    if (__ring_m14._tag === "BoolLit") {
+    if (__ring_m15._tag === "BoolLit") {
       return true;
-      break __ring_match14;
+      break __ring_match15;
     }
-    if (__ring_m14._tag === "Clone") {
+    if (__ring_m15._tag === "Clone") {
       return true;
-      break __ring_match14;
+      break __ring_match15;
     }
-    if (__ring_m14._tag === "Block") {
-      const stmts = __ring_m14.stmts; const tail = __ring_m14.tail;
-      __ring_match15: {
-        const __ring_m15 = tail;
-        if (__ring_m15._tag === "some") {
-          const t = __ring_m15._0;
-          __ring_match16: {
-            const __ring_m16 = t;
-            if (__ring_m16._tag === "Ident") {
-              const name = __ring_m16.name;
-              __ring_match17: {
-                const __ring_m17 = block_local_init(stmts, name);
-                if (__ring_m17._tag === "some") {
-                  const init = __ring_m17._0;
+    if (__ring_m15._tag === "Block") {
+      const stmts = __ring_m15.stmts; const tail = __ring_m15.tail;
+      __ring_match16: {
+        const __ring_m16 = tail;
+        if (__ring_m16._tag === "some") {
+          const t = __ring_m16._0;
+          __ring_match17: {
+            const __ring_m17 = t;
+            if (__ring_m17._tag === "Ident") {
+              const name = __ring_m17.name;
+              __ring_match18: {
+                const __ring_m18 = block_local_init(stmts, name);
+                if (__ring_m18._tag === "some") {
+                  const init = __ring_m18._0;
                   return is_fresh_owned_bool_value(init);
-                  break __ring_match17;
+                  break __ring_match18;
                 }
-                if (__ring_m17._tag === "none") {
+                if (__ring_m18._tag === "none") {
                   return false;
-                  break __ring_match17;
+                  break __ring_match18;
                 }
-                __match_fail(__ring_m17);
+                __match_fail(__ring_m18);
               }
-              break __ring_match16;
+              break __ring_match17;
             }
             return is_fresh_owned_bool_value(t);
-            break __ring_match16;
+            break __ring_match17;
           }
-          break __ring_match15;
+          break __ring_match16;
         }
-        if (__ring_m15._tag === "none") {
+        if (__ring_m16._tag === "none") {
           return false;
-          break __ring_match15;
+          break __ring_match16;
         }
-        __match_fail(__ring_m15);
+        __match_fail(__ring_m16);
       }
-      break __ring_match14;
+      break __ring_match15;
     }
-    if (__ring_m14._tag === "IfExpr") {
-      const then_branch = __ring_m14.then_branch; const else_branch = __ring_m14.else_branch;
-      __ring_match18: {
-        const __ring_m18 = else_branch;
-        if (__ring_m18._tag === "none") {
+    if (__ring_m15._tag === "IfExpr") {
+      const then_branch = __ring_m15.then_branch; const else_branch = __ring_m15.else_branch;
+      __ring_match19: {
+        const __ring_m19 = else_branch;
+        if (__ring_m19._tag === "none") {
           return false;
-          break __ring_match18;
+          break __ring_match19;
         }
-        if (__ring_m18._tag === "some") {
-          const eb = __ring_m18._0;
+        if (__ring_m19._tag === "some") {
+          const eb = __ring_m19._0;
           if (is_fresh_owned_bool_value(then_branch)) {
             return is_fresh_owned_bool_value(eb);
           } else {
             return false;
           }
-          break __ring_match18;
+          break __ring_match19;
         }
-        __match_fail(__ring_m18);
+        __match_fail(__ring_m19);
       }
-      break __ring_match14;
+      break __ring_match15;
     }
-    if (__ring_m14._tag === "MatchExpr") {
-      const arms = __ring_m14.arms;
+    if (__ring_m15._tag === "MatchExpr") {
+      const arms = __ring_m15.arms;
       let all = (List_len(arms) > 0);
       const __ring_iter_5 = __List_Iterable.iter(arms);
       while (true) {
@@ -1291,22 +1297,22 @@ function is_fresh_owned_bool_value(expr) {
         }
       }
       return all;
-      break __ring_match14;
+      break __ring_match15;
     }
     return false;
-    break __ring_match14;
+    break __ring_match15;
   }
 }
 
 function is_rc_excluded_type(ty, externs) {
-  __ring_match19: {
-    const __ring_m19 = ty;
-    if (__ring_m19._tag === "UnitType") {
+  __ring_match20: {
+    const __ring_m20 = ty;
+    if (__ring_m20._tag === "UnitType") {
       return true;
-      break __ring_match19;
+      break __ring_match20;
     }
     return is_extern_handle_type(ty, externs);
-    break __ring_match19;
+    break __ring_match20;
   }
 }
 
@@ -1322,10 +1328,10 @@ function trait_dict_name(type_name, trait_name) {
 }
 
 function type_contains_extern_rec(ty, externs, visited) {
-  __ring_match20: {
-    const __ring_m20 = ty;
-    if (__ring_m20._tag === "StructType") {
-      const name = __ring_m20.name; const type_params = __ring_m20.type_params; const fields = __ring_m20.fields;
+  __ring_match21: {
+    const __ring_m21 = ty;
+    if (__ring_m21._tag === "StructType") {
+      const name = __ring_m21.name; const type_params = __ring_m21.type_params; const fields = __ring_m21.fields;
       if (_Set_contains(externs, name, __Str_Eq)) {
         return true;
       } else {
@@ -1355,10 +1361,10 @@ function type_contains_extern_rec(ty, externs, visited) {
           return found;
         }
       }
-      break __ring_match20;
+      break __ring_match21;
     }
-    if (__ring_m20._tag === "EnumType") {
-      const name = __ring_m20.name; const type_params = __ring_m20.type_params; const variants = __ring_m20.variants;
+    if (__ring_m21._tag === "EnumType") {
+      const name = __ring_m21.name; const type_params = __ring_m21.type_params; const variants = __ring_m21.variants;
       if (_Set_contains(visited, `E:${name}`, __Str_Eq)) {
         return false;
       } else {
@@ -1390,10 +1396,10 @@ function type_contains_extern_rec(ty, externs, visited) {
         }
         return found;
       }
-      break __ring_match20;
+      break __ring_match21;
     }
-    if (__ring_m20._tag === "TupleType") {
-      const elements = __ring_m20.elements;
+    if (__ring_m21._tag === "TupleType") {
+      const elements = __ring_m21.elements;
       let found = false;
       const __ring_iter_11 = __List_Iterable.iter(elements);
       while (true) {
@@ -1405,10 +1411,10 @@ function type_contains_extern_rec(ty, externs, visited) {
         }
       }
       return found;
-      break __ring_match20;
+      break __ring_match21;
     }
-    if (__ring_m20._tag === "GenericType") {
-      const base = __ring_m20.base; const args = __ring_m20.args;
+    if (__ring_m21._tag === "GenericType") {
+      const base = __ring_m21.base; const args = __ring_m21.args;
       let found = type_contains_extern_rec(base, externs, visited);
       const __ring_iter_12 = __List_Iterable.iter(args);
       while (true) {
@@ -1420,10 +1426,10 @@ function type_contains_extern_rec(ty, externs, visited) {
         }
       }
       return found;
-      break __ring_match20;
+      break __ring_match21;
     }
-    if (__ring_m20._tag === "RecordType") {
-      const fields = __ring_m20.fields;
+    if (__ring_m21._tag === "RecordType") {
+      const fields = __ring_m21.fields;
       let found = false;
       const __ring_iter_13 = __List_Iterable.iter(fields);
       while (true) {
@@ -1435,10 +1441,10 @@ function type_contains_extern_rec(ty, externs, visited) {
         }
       }
       return found;
-      break __ring_match20;
+      break __ring_match21;
     }
     return false;
-    break __ring_match20;
+    break __ring_match21;
   }
 }
 

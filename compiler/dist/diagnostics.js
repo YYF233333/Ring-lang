@@ -313,11 +313,19 @@ function CollectingSink_report(self, d) {
   }
 }
 function CollectingSink_has_errors(self) {
-  return self.items.some((function(d) { return (function() {
-  const __ring_m = d.severity;
-  if (__ring_m._tag === "SevError") { return true; }
-  return false;
-})(); }));
+  return self.items.some((function(d) {
+  let __ring_blk0;
+  __ring_match6: {
+    const __ring_m6 = d.severity;
+    if (__ring_m6._tag === "SevError") {
+      __ring_blk0 = true;
+      break __ring_match6;
+    }
+    __ring_blk0 = false;
+    break __ring_match6;
+  }
+  return __ring_blk0;
+}));
 }
 function CollectingSink_diagnostics(self) {
   return self.items;
@@ -349,11 +357,19 @@ function __CollectingSink_DiagnosticSink_report(self, d) {
   }
 }
 function __CollectingSink_DiagnosticSink_has_errors(self) {
-  return self.items.some((function(d) { return (function() {
-  const __ring_m = d.severity;
-  if (__ring_m._tag === "SevError") { return true; }
-  return false;
-})(); }));
+  return self.items.some((function(d) {
+  let __ring_blk1;
+  __ring_match7: {
+    const __ring_m7 = d.severity;
+    if (__ring_m7._tag === "SevError") {
+      __ring_blk1 = true;
+      break __ring_match7;
+    }
+    __ring_blk1 = false;
+    break __ring_match7;
+  }
+  return __ring_blk1;
+}));
 }
 function __CollectingSink_DiagnosticSink_get_diagnostics(self) {
   return self.items;
@@ -381,25 +397,25 @@ function new_collecting_sink() {
 }
 
 function severity_to_str(s) {
-  __ring_match6: {
-    const __ring_m6 = s;
-    if (__ring_m6._tag === "SevError") {
+  __ring_match8: {
+    const __ring_m8 = s;
+    if (__ring_m8._tag === "SevError") {
       return "error";
-      break __ring_match6;
+      break __ring_match8;
     }
-    if (__ring_m6._tag === "SevWarning") {
+    if (__ring_m8._tag === "SevWarning") {
       return "warning";
-      break __ring_match6;
+      break __ring_match8;
     }
-    if (__ring_m6._tag === "SevInfo") {
+    if (__ring_m8._tag === "SevInfo") {
       return "info";
-      break __ring_match6;
+      break __ring_match8;
     }
-    if (__ring_m6._tag === "SevHint") {
+    if (__ring_m8._tag === "SevHint") {
       return "hint";
-      break __ring_match6;
+      break __ring_match8;
     }
-    __match_fail(__ring_m6);
+    __match_fail(__ring_m8);
   }
 }
 

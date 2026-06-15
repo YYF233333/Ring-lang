@@ -391,6 +391,7 @@ const cases: TestCase[] = [
   { file: "map_ufcs_bug.ring", expected: "ok\n" },
   { file: "match_enum_deep.ring", expected: "match_enum_deep: all tests passed\n" },
   { file: "match_literal.ring", expected: "match_literal: all tests passed\n" },
+  { file: "match_in_lambda.ring", expected: "match_in_lambda: all tests passed\n" },
   { file: "match_return.ring", expected: "match_return: all tests passed\n" },
   { file: "match_return_expr.ring", expected: "alice\nbob\nunknown\none-ten\none-other\nother\n4\nprocessed 7\n" },
   { file: "match_tuple_pattern.ring", expected: "match_tuple_pattern: all tests passed\n" },

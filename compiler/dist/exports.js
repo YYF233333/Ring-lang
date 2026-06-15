@@ -1122,28 +1122,37 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
             const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
             if (__ring_next_19._tag === "none") break;
             const item = __ring_next_19._0;
-            const local_name = (function() {
-  const __ring_m = item.alias;
-  if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
-  if (__ring_m._tag === "none") { return item.name; }
-  __match_fail(__ring_m);
-})();
+            let __ring_blk0;
             __ring_match55: {
-              const __ring_m55 = env$TypeEnv_lookup(env, local_name);
+              const __ring_m55 = item.alias;
               if (__ring_m55._tag === "some") {
-                const scheme = __ring_m55._0;
-                _Map_insert(values, local_name, scheme);
+                const a = __ring_m55._0;
+                __ring_blk0 = a;
                 break __ring_match55;
               }
               if (__ring_m55._tag === "none") {
+                __ring_blk0 = item.name;
                 break __ring_match55;
               }
               __match_fail(__ring_m55);
             }
+            const local_name = __ring_blk0;
             __ring_match56: {
-              const __ring_m56 = _Map_get(env.types.structs, local_name);
+              const __ring_m56 = env$TypeEnv_lookup(env, local_name);
               if (__ring_m56._tag === "some") {
-                const sdef = __ring_m56._0;
+                const scheme = __ring_m56._0;
+                _Map_insert(values, local_name, scheme);
+                break __ring_match56;
+              }
+              if (__ring_m56._tag === "none") {
+                break __ring_match56;
+              }
+              __match_fail(__ring_m56);
+            }
+            __ring_match57: {
+              const __ring_m57 = _Map_get(env.types.structs, local_name);
+              if (__ring_m57._tag === "some") {
+                const sdef = __ring_m57._0;
                 _Map_insert(types, local_name, TypeDef_StructDef_(sdef));
                 let fnames = [];
                 const __ring_iter_20 = __List_Iterable.iter(sdef.fields);
@@ -1154,18 +1163,6 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
                   List_push(fnames, f.name);
                 }
                 _Map_insert(struct_field_orders, local_name, fnames);
-                break __ring_match56;
-              }
-              if (__ring_m56._tag === "none") {
-                break __ring_match56;
-              }
-              __match_fail(__ring_m56);
-            }
-            __ring_match57: {
-              const __ring_m57 = _Map_get(env.types.enums, local_name);
-              if (__ring_m57._tag === "some") {
-                const edef = __ring_m57._0;
-                _Map_insert(types, local_name, TypeDef_EnumDef_(edef));
                 break __ring_match57;
               }
               if (__ring_m57._tag === "none") {
@@ -1174,10 +1171,10 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
               __match_fail(__ring_m57);
             }
             __ring_match58: {
-              const __ring_m58 = _Map_get(env.types.effects, local_name);
+              const __ring_m58 = _Map_get(env.types.enums, local_name);
               if (__ring_m58._tag === "some") {
-                const effdef = __ring_m58._0;
-                _Map_insert(effects, local_name, effdef);
+                const edef = __ring_m58._0;
+                _Map_insert(types, local_name, TypeDef_EnumDef_(edef));
                 break __ring_match58;
               }
               if (__ring_m58._tag === "none") {
@@ -1186,16 +1183,28 @@ function extract_exports(module_key, module_prefix, program, hprogram, env, fn_m
               __match_fail(__ring_m58);
             }
             __ring_match59: {
-              const __ring_m59 = _Map_get(env.trait_reg.traits, local_name);
+              const __ring_m59 = _Map_get(env.types.effects, local_name);
               if (__ring_m59._tag === "some") {
-                const tdef = __ring_m59._0;
-                _Map_insert(traits, local_name, tdef);
+                const effdef = __ring_m59._0;
+                _Map_insert(effects, local_name, effdef);
                 break __ring_match59;
               }
               if (__ring_m59._tag === "none") {
                 break __ring_match59;
               }
               __match_fail(__ring_m59);
+            }
+            __ring_match60: {
+              const __ring_m60 = _Map_get(env.trait_reg.traits, local_name);
+              if (__ring_m60._tag === "some") {
+                const tdef = __ring_m60._0;
+                _Map_insert(traits, local_name, tdef);
+                break __ring_match60;
+              }
+              if (__ring_m60._tag === "none") {
+                break __ring_match60;
+              }
+              __match_fail(__ring_m60);
             }
           }
           break __ring_match54;

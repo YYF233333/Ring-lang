@@ -654,63 +654,72 @@ function resolve_uses(ctx, uses, available_modules) {
               const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
               if (__ring_next_23._tag === "none") break;
               const item = __ring_next_23._0;
-              const local_name = (function() {
-  const __ring_m = item.alias;
-  if (__ring_m._tag === "some") { const a = __ring_m._0; return a; }
-  if (__ring_m._tag === "none") { return item.name; }
-  __match_fail(__ring_m);
-})();
-              let found = false;
+              let __ring_blk0;
               __ring_match19: {
-                const __ring_m19 = _Map_get(mod_.values, item.name);
+                const __ring_m19 = item.alias;
                 if (__ring_m19._tag === "some") {
-                  const scheme = __ring_m19._0;
-                  env$TypeEnv_bind(ctx.env, local_name, scheme);
-                  found = true;
+                  const a = __ring_m19._0;
+                  __ring_blk0 = a;
                   break __ring_match19;
                 }
                 if (__ring_m19._tag === "none") {
+                  __ring_blk0 = item.name;
                   break __ring_match19;
                 }
                 __match_fail(__ring_m19);
               }
+              const local_name = __ring_blk0;
+              let found = false;
               __ring_match20: {
-                const __ring_m20 = _Map_get(mod_.types, item.name);
+                const __ring_m20 = _Map_get(mod_.values, item.name);
                 if (__ring_m20._tag === "some") {
-                  const tdef = __ring_m20._0;
+                  const scheme = __ring_m20._0;
+                  env$TypeEnv_bind(ctx.env, local_name, scheme);
                   found = true;
-                  __ring_match21: {
-                    const __ring_m21 = tdef;
-                    if (__ring_m21._tag === "EnumDef_") {
-                      const edef = __ring_m21._0;
-                      const __ring_iter_24 = __List_Iterable.iter(edef.variants);
-                      while (true) {
-                        const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-                        if (__ring_next_24._tag === "none") break;
-                        const v = __ring_next_24._0;
-                        __ring_match22: {
-                          const __ring_m22 = _Map_get(mod_.values, v.name);
-                          if (__ring_m22._tag === "some") {
-                            const vscheme = __ring_m22._0;
-                            env$TypeEnv_bind(ctx.env, v.name, vscheme);
-                            break __ring_match22;
-                          }
-                          if (__ring_m22._tag === "none") {
-                            break __ring_match22;
-                          }
-                          __match_fail(__ring_m22);
-                        }
-                      }
-                      break __ring_match21;
-                    }
-                    break __ring_match21;
-                  }
                   break __ring_match20;
                 }
                 if (__ring_m20._tag === "none") {
                   break __ring_match20;
                 }
                 __match_fail(__ring_m20);
+              }
+              __ring_match21: {
+                const __ring_m21 = _Map_get(mod_.types, item.name);
+                if (__ring_m21._tag === "some") {
+                  const tdef = __ring_m21._0;
+                  found = true;
+                  __ring_match22: {
+                    const __ring_m22 = tdef;
+                    if (__ring_m22._tag === "EnumDef_") {
+                      const edef = __ring_m22._0;
+                      const __ring_iter_24 = __List_Iterable.iter(edef.variants);
+                      while (true) {
+                        const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+                        if (__ring_next_24._tag === "none") break;
+                        const v = __ring_next_24._0;
+                        __ring_match23: {
+                          const __ring_m23 = _Map_get(mod_.values, v.name);
+                          if (__ring_m23._tag === "some") {
+                            const vscheme = __ring_m23._0;
+                            env$TypeEnv_bind(ctx.env, v.name, vscheme);
+                            break __ring_match23;
+                          }
+                          if (__ring_m23._tag === "none") {
+                            break __ring_match23;
+                          }
+                          __match_fail(__ring_m23);
+                        }
+                      }
+                      break __ring_match22;
+                    }
+                    break __ring_match22;
+                  }
+                  break __ring_match21;
+                }
+                if (__ring_m21._tag === "none") {
+                  break __ring_match21;
+                }
+                __match_fail(__ring_m21);
               }
               if (_Map_contains_key(mod_.effects, item.name)) {
                 found = true;
@@ -750,31 +759,31 @@ function resolve_uses(ctx, uses, available_modules) {
               const entry = __ring_next_26._0;
               const __ring_dt9 = entry;
               const tdef = __ring_dt9[1];
-              __ring_match23: {
-                const __ring_m23 = tdef;
-                if (__ring_m23._tag === "EnumDef_") {
-                  const edef = __ring_m23._0;
+              __ring_match24: {
+                const __ring_m24 = tdef;
+                if (__ring_m24._tag === "EnumDef_") {
+                  const edef = __ring_m24._0;
                   const __ring_iter_27 = __List_Iterable.iter(edef.variants);
                   while (true) {
                     const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
                     if (__ring_next_27._tag === "none") break;
                     const v = __ring_next_27._0;
-                    __ring_match24: {
-                      const __ring_m24 = _Map_get(mod_.values, v.name);
-                      if (__ring_m24._tag === "some") {
-                        const vscheme = __ring_m24._0;
+                    __ring_match25: {
+                      const __ring_m25 = _Map_get(mod_.values, v.name);
+                      if (__ring_m25._tag === "some") {
+                        const vscheme = __ring_m25._0;
                         env$TypeEnv_bind(ctx.env, v.name, vscheme);
-                        break __ring_match24;
+                        break __ring_match25;
                       }
-                      if (__ring_m24._tag === "none") {
-                        break __ring_match24;
+                      if (__ring_m25._tag === "none") {
+                        break __ring_match25;
                       }
-                      __match_fail(__ring_m24);
+                      __match_fail(__ring_m25);
                     }
                   }
-                  break __ring_match23;
+                  break __ring_match24;
                 }
-                break __ring_match23;
+                break __ring_match24;
               }
             }
             break __ring_match18;
