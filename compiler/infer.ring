@@ -1511,6 +1511,40 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
         ai = ai + 1
     }
 
+    // B-069: Fill in default arguments for missing trailing params
+    let callee_name_for_defaults: Str? = match callee { Expr::Ident { name: cn, .. } => some(cn), _ => none }
+    match callee_name_for_defaults {
+        some(cn) => {
+            match ctx.fn_defaults.get(cn) {
+                some(defaults) => {
+                    match ctx.fn_min_arity.get(cn) {
+                        some(min_ar) => {
+                            let total_arity = min_ar + defaults.len()
+                            if args.len() < total_arity && args.len() >= min_ar {
+                                // Append default HExprs for the missing params
+                                let defaults_start = args.len() - min_ar
+                                let mut di = defaults_start
+                                while di < defaults.len() {
+                                    match defaults.get(di) {
+                                        some(dh) => {
+                                            hargs.push(dh)
+                                            arg_types.push(hexpr_type(dh))
+                                        },
+                                        none => {}
+                                    }
+                                    di = di + 1
+                                }
+                            }
+                        },
+                        none => {}
+                    }
+                },
+                none => {}
+            }
+        },
+        none => {}
+    }
+
     let ret_var = ctx.env.fresh_var()
     let effect_tail = ctx.env.fresh_var_id()
     let expected_fn = Type::FnType {

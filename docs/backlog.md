@@ -616,28 +616,6 @@ source-map 支持 + 断点调试。
 
 ## 语法增强
 
-### B-069 默认参数 [feature] [P2] [M] [judgment] [doing]
-函数参数支持默认值。调用时可省略有默认值的参数。
-
-```ring
-fn connect(host: Str, port: Int = 8080, timeout: Int = 30) with {io} { ... }
-
-connect("localhost")           // port=8080, timeout=30
-connect("localhost", 3000)     // timeout=30
-```
-
-**设计约束**：
-- 默认值必须是编译期可求值的纯表达式（无 effect）
-- 只能从参数列表末尾开始省略（无命名参数时）
-- 默认值是签名的一部分，lv2 标注展示
-- 与 borrow/move/effect 系统无冲突
-
-**命名参数（2026-06-15 拍板：不在本项范围）**：命名参数是独立特性，不与默认参数捆绑。本项只做末尾省略，命名参数后续按需单独立项
-
-**前置依赖**：无
-**复杂度**：M（Parser 扩展 + Checker 参数匹配 + Codegen 展开）
-
-
 
 ## 已知 Bug / 技术债
 

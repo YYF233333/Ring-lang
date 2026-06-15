@@ -60,7 +60,12 @@ pub struct InferCtx {
     pub effect_default_deps: Map<Str, List<Str>>,
     // Qualified associated type scope: "T::Item" -> Type
     // Used to disambiguate when multiple type params have same-named associated types
-    pub qualified_assoc_scope: Map<Str, Type>
+    pub qualified_assoc_scope: Map<Str, Type>,
+    // B-069: Default parameter support
+    // fn_defaults: function name -> list of default-value HExprs (one per default param, in order)
+    pub fn_defaults: Map<Str, List<HExpr>>,
+    // fn_min_arity: function name -> minimum number of required (non-default) params
+    pub fn_min_arity: Map<Str, Int>
 }
 
 pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
@@ -80,7 +85,9 @@ pub fn new_infer_ctx(sink: CollectingSink) -> InferCtx {
         var_lambda_depth: map_new(),
         fn_mut_params: map_new(),
         effect_default_deps: map_new(),
-        qualified_assoc_scope: map_new()
+        qualified_assoc_scope: map_new(),
+        fn_defaults: map_new(),
+        fn_min_arity: map_new()
     }
 }
 

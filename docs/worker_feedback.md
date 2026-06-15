@@ -9,6 +9,16 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
+## B-069 默认参数
+
+### 1. HParam 不加 default_value 字段——避免 HExpr↔HParam 互递归 [通知]
+
+初始方案试图给 HParam 加 `default_value: HExpr?`，但 HParam 被 HExpr::Lambda 包含，形成 HParam↔HExpr 互递归环，SCC 类型推断排序崩溃。最终方案：defaults 只存在 InferCtx 的 `fn_defaults: Map<Str, List<HExpr>>` 中，call site 在 infer_call 中展开，HParam 结构不变。这意味着默认值信息不出现在 HIR 中——codegen 看到的是完整参数列表，零 codegen 改动。
+
+### 2. AST Param 加了 default_value 但 HIR 没有——非对称设计 [通知]
+
+AST `Param` 有 `default_value: Expr?`（parser 需要），但 HIR `HParam` 没有。如果未来需要在 HIR 层面看到默认值（比如 formatter/LSP），需要另想方案。当前这不是问题。
+
 ## B-130 List.sort() Ord bound
 
 ### 1. Checker 不强制 trait bound on impl blocks [通知]

@@ -16,7 +16,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     generalize, resolve_relative_qualifier}
 use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases, collect_all_supertraits, inject_assoc_types_from_bounds}
 use infer::{infer_block, infer_expr}
-use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block}
+use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block, zonk_expr}
 use derive::{run_derive_pass}
 use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names}
 
@@ -1264,6 +1264,7 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
     inject_assoc_types_from_bounds(ctx, type_params)
 
     let mut hparams: List<HParam> = []
+    let mut param_types: List<Type> = []
     for p in params {
         let ptype = match p.type_annotation {
             some(ta) => resolve_type_expr(ctx, ta),
@@ -1303,6 +1304,42 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
             },
             none => hparams.push(HParam { name: p.name, ty: ptype, def_id: none, is_mutable: p.is_mutable })
         }
+        param_types.push(ptype)
+    }
+
+    // B-069: Infer default value expressions and store in hparams
+    let mut default_hexprs: List<HExpr> = []
+    let mut min_arity = params.len()
+    let mut pi = 0
+    for p in params {
+        match p.default_value {
+            some(dv) => {
+                let dv_result = infer_expr(ctx, dv, ctx.subst)
+                ctx.subst = dv_result.subst
+                // Unify default value type with param type
+                match param_types.get(pi) {
+                    some(pt) => {
+                        ctx.subst = unify_at(ctx.sink, ctx.env, hexpr_type(dv_result.hexpr), pt, ctx.subst, p.span)
+                    },
+                    none => {}
+                }
+                // Check that default value is pure (no effects)
+                let dv_effects = dv_result.effects
+                if dv_effects.effects.len() > 0 {
+                    let _ = type_error(ctx.sink, E0404,
+                        "Default parameter value for '${p.name}' must be a pure expression (no effects)",
+                        p.span,
+                        DiagnosticContext::OtherContext { detail: some("default parameter effect") })
+                }
+                default_hexprs.push(dv_result.hexpr)
+                if min_arity == params.len() {
+                    // First default param sets the min arity
+                    min_arity = pi
+                }
+            },
+            none => {}
+        }
+        pi = pi + 1
     }
 
     let saved_fn_return = ctx.current_fn_return_type
@@ -1434,6 +1471,18 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
         fi = fi + 1
     }
     ctx.fn_mut_params.insert(name, mut_flags)
+
+    // B-069: Register default parameter info for call-site expansion
+    if default_hexprs.len() > 0 {
+        // Zonk the default HExprs so they are fully resolved
+        let zctx_defaults = ZonkCtx { subst: ctx.subst, names: map_new() }
+        let mut zonked_defaults: List<HExpr> = []
+        for dh in default_hexprs {
+            zonked_defaults.push(zonk_expr(zctx_defaults, dh))
+        }
+        ctx.fn_defaults.insert(name, zonked_defaults)
+        ctx.fn_min_arity.insert(name, min_arity)
+    }
 
     HDecl::Fn {
         name: name, def_id: fn_def_id, type_params: type_params,

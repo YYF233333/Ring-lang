@@ -3,7 +3,7 @@ import { ANY as types$ANY, BOOL as types$BOOL, BUILTIN_BOOL as types$BUILTIN_BOO
 import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, DestructureBinding as ast$DestructureBinding, EffectExpr as ast$EffectExpr, EffectHandler as ast$EffectHandler, EffectOpDecl as ast$EffectOpDecl, EnumVariantDecl as ast$EnumVariantDecl, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, Expr_ReturnExpr as ast$Expr_ReturnExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, MatchArm as ast$MatchArm, NamedEnumField as ast$NamedEnumField, NamedImport as ast$NamedImport, NamedPatternField as ast$NamedPatternField, Param as ast$Param, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, Position as ast$Position, Program as ast$Program, RecordTypeField as ast$RecordTypeField, SigMember as ast$SigMember, Span as ast$Span, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, StructFieldDecl as ast$StructFieldDecl, StructFieldInit as ast$StructFieldInit, TypeBound as ast$TypeBound, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, TypeParam as ast$TypeParam, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, UseDecl as ast$UseDecl, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UsePath as ast$UsePath, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug } from "./ast.js";
 import { BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, FLOAT_METHODS as hir$FLOAT_METHODS, INT_METHODS as hir$INT_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, SET_HOF_METHODS as hir$SET_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, STR_METHODS as hir$STR_METHODS, collect_extern_type_names as hir$collect_extern_type_names, default_evidence_name as hir$default_evidence_name, default_method_self_name as hir$default_method_self_name, dict_instance_name as hir$dict_instance_name, effect_op_slot as hir$effect_op_slot, evidence_param_name as hir$evidence_param_name, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, hexpr_type as hir$hexpr_type, is_borrow_returning_call as hir$is_borrow_returning_call, is_extern_handle_type as hir$is_extern_handle_type, is_fresh_owned_bool_value as hir$is_fresh_owned_bool_value, is_rc_excluded_type as hir$is_rc_excluded_type, trait_bound_param_name as hir$trait_bound_param_name, trait_dict_name as hir$trait_dict_name, type_contains_extern_handle as hir$type_contains_extern_handle, variant_js_name as hir$variant_js_name, DerivedField as hir$DerivedField, DerivedImpl as hir$DerivedImpl, DerivedVariant as hir$DerivedVariant, DictDispatchInfo as hir$DictDispatchInfo, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, DictRef_Static as hir$DictRef_Static, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, HAssocType as hir$HAssocType, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, HDictDef as hir$HDictDef, HEffectHandler as hir$HEffectHandler, HEffectOp as hir$HEffectOp, HEnumVariant as hir$HEnumVariant, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HExpr_DictConstruct as hir$HExpr_DictConstruct, HExpr_Clone as hir$HExpr_Clone, HExpr_ReturnExpr as hir$HExpr_ReturnExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HMatchArm as hir$HMatchArm, HParam as hir$HParam, HProgram as hir$HProgram, HSigMember as hir$HSigMember, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HStructField as hir$HStructField, HStructFieldInit as hir$HStructFieldInit, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __HDictDef_Clone as hir$__HDictDef_Clone, __HDictDef_Debug as hir$__HDictDef_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug } from "./hir.js";
 import { make_diag as diagnostics$make_diag, make_diagnostic as diagnostics$make_diagnostic, new_collecting_sink as diagnostics$new_collecting_sink, severity_to_str as diagnostics$severity_to_str, CollectingSink as diagnostics$CollectingSink, Diagnostic as diagnostics$Diagnostic, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, DiagnosticNote as diagnostics$DiagnosticNote, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, Suggestion as diagnostics$Suggestion, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
-import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0105 as codes$E0105, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0409 as codes$E0409, E0410 as codes$E0410, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, W0002 as codes$W0002, error_category as codes$error_category, error_description as codes$error_description } from "./codes.js";
+import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0105 as codes$E0105, E0106 as codes$E0106, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0409 as codes$E0409, E0410 as codes$E0410, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, W0002 as codes$W0002, error_category as codes$error_category, error_description as codes$error_description } from "./codes.js";
 import { new_union_find as union_find$new_union_find, uf_bind as union_find$uf_bind, uf_find as union_find$uf_find, uf_insert as union_find$uf_insert, uf_lookup as union_find$uf_lookup, uf_union as union_find$uf_union, UnionFind as union_find$UnionFind } from "./union_find.js";
 import { add_impl as env$add_impl, apply_subst as env$apply_subst, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_map as env$apply_subst_map, apply_subst_row as env$apply_subst_row, apply_subst_row_map as env$apply_subst_row_map, find_impl as env$find_impl, has_impl as env$has_impl, lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, AssocConstraintEntry as env$AssocConstraintEntry, AssocTypeDef as env$AssocTypeDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectAliasDef as env$EffectAliasDef, EffectDef as env$EffectDef, EffectOpDef as env$EffectOpDef, EnumDef as env$EnumDef, FnBound as env$FnBound, IdGen as env$IdGen, ImplEntry as env$ImplEntry, SchemeBound as env$SchemeBound, Scope as env$Scope, ScopeManager as env$ScopeManager, SigDef as env$SigDef, StructDef as env$StructDef, TraitDef as env$TraitDef, TraitMethodDef as env$TraitMethodDef, TraitRegistry as env$TraitRegistry, TypeAliasDef as env$TypeAliasDef, TypeEnv as env$TypeEnv, TypeRegistry as env$TypeRegistry, TypeScheme as env$TypeScheme, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 import { empty_subst as unify$empty_subst, occurs_in as unify$occurs_in, unify as unify$unify, unify_effect_params as unify$unify_effect_params, unify_effect_rows as unify$unify_effect_rows, UnificationError as unify$UnificationError, __UnificationError_Eq as unify$__UnificationError_Eq, __UnificationError_Clone as unify$__UnificationError_Clone, __UnificationError_Ord as unify$__UnificationError_Ord, __UnificationError_Debug as unify$__UnificationError_Debug } from "./unify.js";
@@ -3873,6 +3873,65 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
     List_push(arg_types, hir$hexpr_type(ar.hexpr));
     ai = (ai + 1);
   }
+  const callee_name_for_defaults = (function() {
+  const __ring_m = callee;
+  if (__ring_m._tag === "Ident") { const cn = __ring_m.name; return Option_some(cn); }
+  return Option_none;
+})();
+  __ring_match193: {
+    const __ring_m193 = callee_name_for_defaults;
+    if (__ring_m193._tag === "some") {
+      const cn = __ring_m193._0;
+      __ring_match194: {
+        const __ring_m194 = _Map_get(ctx.fn_defaults, cn);
+        if (__ring_m194._tag === "some") {
+          const defaults = __ring_m194._0;
+          __ring_match195: {
+            const __ring_m195 = _Map_get(ctx.fn_min_arity, cn);
+            if (__ring_m195._tag === "some") {
+              const min_ar = __ring_m195._0;
+              const total_arity = (min_ar + List_len(defaults));
+              if (((List_len(args) < total_arity) ? (List_len(args) >= min_ar) : false)) {
+                const defaults_start = (List_len(args) - min_ar);
+                let di = defaults_start;
+                while ((di < List_len(defaults))) {
+                  __ring_match196: {
+                    const __ring_m196 = List_get(defaults, di);
+                    if (__ring_m196._tag === "some") {
+                      const dh = __ring_m196._0;
+                      List_push(hargs, dh);
+                      List_push(arg_types, hir$hexpr_type(dh));
+                      break __ring_match196;
+                    }
+                    if (__ring_m196._tag === "none") {
+                      break __ring_match196;
+                    }
+                    __match_fail(__ring_m196);
+                  }
+                  di = (di + 1);
+                }
+              }
+              break __ring_match195;
+            }
+            if (__ring_m195._tag === "none") {
+              break __ring_match195;
+            }
+            __match_fail(__ring_m195);
+          }
+          break __ring_match194;
+        }
+        if (__ring_m194._tag === "none") {
+          break __ring_match194;
+        }
+        __match_fail(__ring_m194);
+      }
+      break __ring_match193;
+    }
+    if (__ring_m193._tag === "none") {
+      break __ring_match193;
+    }
+    __match_fail(__ring_m193);
+  }
   const ret_var = env$TypeEnv_fresh_var(ctx.env);
   const effect_tail = env$TypeEnv_fresh_var_id(ctx.env);
   const expected_fn = types$Type_FnType(arg_types, ret_var, new types$EffectRow([], Option_some(effect_tail)));
@@ -3884,107 +3943,107 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
   const call_notes = [new diagnostics$DiagnosticNote(`calling '${callee_name_for_note}' with ${Int_to_str(List_len(arg_types))} argument(s)`, Option_some(span))];
   s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(callee_r.hexpr), expected_fn, s, span, call_notes);
   const resolved_callee_type = env$apply_subst(s, hir$hexpr_type(callee_r.hexpr));
-  __ring_match193: {
-    const __ring_m193 = resolved_callee_type;
-    if (__ring_m193._tag === "FnType") {
-      const callee_params = __ring_m193.params; const fn_effects = __ring_m193.effects;
+  __ring_match197: {
+    const __ring_m197 = resolved_callee_type;
+    if (__ring_m197._tag === "FnType") {
+      const callee_params = __ring_m197.params; const fn_effects = __ring_m197.effects;
       const me = infer_ctx$merge_effects(ctx.env, effects, fn_effects, s, __ring_ev_fail);
       effects = me[0];
       s = me[1];
       effects = cancel_local_mut_effects(ctx, effects, callee_params, fn_effects, hargs, 0, s);
-      break __ring_match193;
+      break __ring_match197;
     }
-    break __ring_match193;
+    break __ring_match197;
   }
   const result_type = env$apply_subst(s, ret_var);
   let resolved_dicts = [];
-  __ring_match194: {
-    const __ring_m194 = callee;
-    if (__ring_m194._tag === "Ident") {
-      const callee_name = __ring_m194.name;
-      __ring_match195: {
-        const __ring_m195 = env$TypeEnv_lookup(ctx.env, callee_name);
-        if (__ring_m195._tag === "some") {
-          const callee_scheme = __ring_m195._0;
+  __ring_match198: {
+    const __ring_m198 = callee;
+    if (__ring_m198._tag === "Ident") {
+      const callee_name = __ring_m198.name;
+      __ring_match199: {
+        const __ring_m199 = env$TypeEnv_lookup(ctx.env, callee_name);
+        if (__ring_m199._tag === "some") {
+          const callee_scheme = __ring_m199._0;
           if ((List_len(callee_scheme.bounds) > 0)) {
             resolved_dicts = infer_ctx$resolve_dicts_from_scheme(ctx.sink, ctx.env, ctx.current_fn_bounds, callee_scheme, hir$hexpr_type(callee_r.hexpr), s, span);
           }
-          break __ring_match195;
+          break __ring_match199;
         }
-        if (__ring_m195._tag === "none") {
-          break __ring_match195;
+        if (__ring_m199._tag === "none") {
+          break __ring_match199;
         }
-        __match_fail(__ring_m195);
+        __match_fail(__ring_m199);
       }
-      break __ring_match194;
+      break __ring_match198;
     }
-    break __ring_match194;
+    break __ring_match198;
   }
-  __ring_match196: {
-    const __ring_m196 = callee;
-    if (__ring_m196._tag === "Ident") {
-      const callee_name = __ring_m196.name;
-      __ring_match197: {
-        const __ring_m197 = _Map_get(ctx.fn_mut_params, callee_name);
-        if (__ring_m197._tag === "some") {
-          const mut_flags = __ring_m197._0;
+  __ring_match200: {
+    const __ring_m200 = callee;
+    if (__ring_m200._tag === "Ident") {
+      const callee_name = __ring_m200.name;
+      __ring_match201: {
+        const __ring_m201 = _Map_get(ctx.fn_mut_params, callee_name);
+        if (__ring_m201._tag === "some") {
+          const mut_flags = __ring_m201._0;
           let mi = 0;
           while (((mi < List_len(mut_flags)) ? (mi < List_len(args)) : false)) {
-            __ring_match198: {
-              const __ring_m198 = [List_get(mut_flags, mi), List_get(hargs, mi)];
-              if (Array.isArray(__ring_m198) && __ring_m198.length === 2 && __ring_m198[0]._tag === "some" && __ring_m198[1]._tag === "some") {
-                const is_mut = __ring_m198[0]._0; const harg = __ring_m198[1]._0;
+            __ring_match202: {
+              const __ring_m202 = [List_get(mut_flags, mi), List_get(hargs, mi)];
+              if (Array.isArray(__ring_m202) && __ring_m202.length === 2 && __ring_m202[0]._tag === "some" && __ring_m202[1]._tag === "some") {
+                const is_mut = __ring_m202[0]._0; const harg = __ring_m202[1]._0;
                 if (is_mut) {
-                  __ring_match199: {
-                    const __ring_m199 = harg;
-                    if (__ring_m199._tag === "Ident" && __ring_m199.def_id._tag === "some") {
-                      const arg_did = __ring_m199.def_id._0;
+                  __ring_match203: {
+                    const __ring_m203 = harg;
+                    if (__ring_m203._tag === "Ident" && __ring_m203.def_id._tag === "some") {
+                      const arg_did = __ring_m203.def_id._0;
                       if (_Set_contains(ctx.env.scope.mutable_vars, arg_did, __Int_Eq)) {
-                        __ring_match200: {
-                          const __ring_m200 = resolved_callee_type;
-                          if (__ring_m200._tag === "FnType") {
-                            const fn_params = __ring_m200.params;
-                            __ring_match201: {
-                              const __ring_m201 = List_get(fn_params, mi);
-                              if (__ring_m201._tag === "some") {
-                                const pt = __ring_m201._0;
+                        __ring_match204: {
+                          const __ring_m204 = resolved_callee_type;
+                          if (__ring_m204._tag === "FnType") {
+                            const fn_params = __ring_m204.params;
+                            __ring_match205: {
+                              const __ring_m205 = List_get(fn_params, mi);
+                              if (__ring_m205._tag === "some") {
+                                const pt = __ring_m205._0;
                                 const resolved_pt = env$apply_subst(s, pt);
                                 if (is_value_type(resolved_pt)) {
                                   _Set_insert(ctx.boxed_vars, arg_did);
                                 }
-                                break __ring_match201;
+                                break __ring_match205;
                               }
-                              if (__ring_m201._tag === "none") {
-                                break __ring_match201;
+                              if (__ring_m205._tag === "none") {
+                                break __ring_match205;
                               }
-                              __match_fail(__ring_m201);
+                              __match_fail(__ring_m205);
                             }
-                            break __ring_match200;
+                            break __ring_match204;
                           }
-                          break __ring_match200;
+                          break __ring_match204;
                         }
                       }
-                      break __ring_match199;
+                      break __ring_match203;
                     }
-                    break __ring_match199;
+                    break __ring_match203;
                   }
                 }
-                break __ring_match198;
+                break __ring_match202;
               }
-              break __ring_match198;
+              break __ring_match202;
             }
             mi = (mi + 1);
           }
-          break __ring_match197;
+          break __ring_match201;
         }
-        if (__ring_m197._tag === "none") {
-          break __ring_match197;
+        if (__ring_m201._tag === "none") {
+          break __ring_match201;
         }
-        __match_fail(__ring_m197);
+        __match_fail(__ring_m201);
       }
-      break __ring_match196;
+      break __ring_match200;
     }
-    break __ring_match196;
+    break __ring_match200;
   }
   let final_hargs = [];
   const __ring_iter_39 = __List_Iterable.iter(hargs);
@@ -4001,139 +4060,139 @@ function infer_unary_op(ctx, op, operand, span, subst, __ring_ev_fail) {
   const r = infer_expr(ctx, operand, subst, __ring_ev_fail);
   let s = r.subst;
   let result_type = types$UNIT;
-  __ring_match202: {
-    const __ring_m202 = op;
-    if (__ring_m202._tag === "Neg") {
+  __ring_match206: {
+    const __ring_m206 = op;
+    if (__ring_m206._tag === "Neg") {
       const resolved = env$apply_subst(s, hir$hexpr_type(r.hexpr));
-      __ring_match203: {
-        const __ring_m203 = resolved;
-        if (__ring_m203._tag === "TypeVar") {
+      __ring_match207: {
+        const __ring_m207 = resolved;
+        if (__ring_m207._tag === "TypeVar") {
           s = infer_ctx$unify_at(ctx.sink, ctx.env, resolved, types$INT, s, span);
           result_type = types$INT;
-          break __ring_match203;
+          break __ring_match207;
         }
-        if (__ring_m203._tag === "IntType") {
+        if (__ring_m207._tag === "IntType") {
           result_type = types$INT;
-          break __ring_match203;
+          break __ring_match207;
         }
-        if (__ring_m203._tag === "FloatType") {
+        if (__ring_m207._tag === "FloatType") {
           result_type = types$FLOAT;
-          break __ring_match203;
+          break __ring_match207;
         }
         const _ = infer_ctx$type_error(ctx.sink, codes$E0303, `Unary - requires numeric type, got ${types$type_to_string(resolved)}`, span, diagnostics$DiagnosticContext_TypeMismatch("Int or Float", types$type_to_string(resolved), Option_none));
-        break __ring_match203;
+        break __ring_match207;
       }
-      break __ring_match202;
+      break __ring_match206;
     }
-    if (__ring_m202._tag === "Not") {
+    if (__ring_m206._tag === "Not") {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(r.hexpr), types$BOOL, s, span);
       result_type = types$BOOL;
-      break __ring_match202;
+      break __ring_match206;
     }
-    __match_fail(__ring_m202);
+    __match_fail(__ring_m206);
   }
   return new infer_ctx$InferResult(hir$HExpr_UnaryOp(op, r.hexpr, result_type, r.effects, span), s, r.effects);
 }
 
 function infer_expr(ctx, expr, subst, __ring_ev_fail) {
-  __ring_match204: {
-    const __ring_m204 = expr;
-    if (__ring_m204._tag === "IntLit") {
-      const value = __ring_m204.value; const span = __ring_m204.span;
+  __ring_match208: {
+    const __ring_m208 = expr;
+    if (__ring_m208._tag === "IntLit") {
+      const value = __ring_m208.value; const span = __ring_m208.span;
       return new infer_ctx$InferResult(hir$HExpr_IntLit(value, types$INT, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "FloatLit") {
-      const value = __ring_m204.value; const span = __ring_m204.span;
+    if (__ring_m208._tag === "FloatLit") {
+      const value = __ring_m208.value; const span = __ring_m208.span;
       return new infer_ctx$InferResult(hir$HExpr_FloatLit(value, types$FLOAT, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "StrLit") {
-      const value = __ring_m204.value; const span = __ring_m204.span;
+    if (__ring_m208._tag === "StrLit") {
+      const value = __ring_m208.value; const span = __ring_m208.span;
       return new infer_ctx$InferResult(hir$HExpr_StrLit(value, types$STR, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "BoolLit") {
-      const value = __ring_m204.value; const span = __ring_m204.span;
+    if (__ring_m208._tag === "BoolLit") {
+      const value = __ring_m208.value; const span = __ring_m208.span;
       return new infer_ctx$InferResult(hir$HExpr_BoolLit(value, types$BOOL, types$EMPTY_ROW, span), subst, types$EMPTY_ROW);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "Ident") {
-      const name = __ring_m204.name; const qualifier = __ring_m204.qualifier; const span = __ring_m204.span;
+    if (__ring_m208._tag === "Ident") {
+      const name = __ring_m208.name; const qualifier = __ring_m208.qualifier; const span = __ring_m208.span;
       return infer_ident(ctx, name, span, subst, qualifier);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "BinOp") {
-      const op = __ring_m204.op; const left = __ring_m204.left; const right = __ring_m204.right; const span = __ring_m204.span;
+    if (__ring_m208._tag === "BinOp") {
+      const op = __ring_m208.op; const left = __ring_m208.left; const right = __ring_m208.right; const span = __ring_m208.span;
       return infer_bin_op(ctx, op, left, right, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "UnaryOp") {
-      const op = __ring_m204.op; const operand = __ring_m204.operand; const span = __ring_m204.span;
+    if (__ring_m208._tag === "UnaryOp") {
+      const op = __ring_m208.op; const operand = __ring_m208.operand; const span = __ring_m208.span;
       return infer_unary_op(ctx, op, operand, span, subst);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "Call") {
-      const callee = __ring_m204.callee; const args = __ring_m204.args; const span = __ring_m204.span;
+    if (__ring_m208._tag === "Call") {
+      const callee = __ring_m208.callee; const args = __ring_m208.args; const span = __ring_m208.span;
       return infer_call(ctx, callee, args, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "MethodCall") {
-      const receiver = __ring_m204.receiver; const method = __ring_m204.method; const args = __ring_m204.args; const span = __ring_m204.span;
+    if (__ring_m208._tag === "MethodCall") {
+      const receiver = __ring_m208.receiver; const method = __ring_m208.method; const args = __ring_m208.args; const span = __ring_m208.span;
       return infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "FieldAccess") {
-      const receiver = __ring_m204.receiver; const field = __ring_m204.field; const span = __ring_m204.span;
+    if (__ring_m208._tag === "FieldAccess") {
+      const receiver = __ring_m208.receiver; const field = __ring_m208.field; const span = __ring_m208.span;
       return infer_field_access(ctx, receiver, field, span, subst);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "StructLit") {
-      const name = __ring_m204.name; const qualifier = __ring_m204.qualifier; const fields = __ring_m204.fields; const spread = __ring_m204.spread; const span = __ring_m204.span;
+    if (__ring_m208._tag === "StructLit") {
+      const name = __ring_m208.name; const qualifier = __ring_m208.qualifier; const fields = __ring_m208.fields; const spread = __ring_m208.spread; const span = __ring_m208.span;
       return infer_struct_lit(ctx, name, fields, spread, span, subst, qualifier, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "MatchExpr") {
-      const scrutinee = __ring_m204.scrutinee; const arms = __ring_m204.arms; const span = __ring_m204.span;
+    if (__ring_m208._tag === "MatchExpr") {
+      const scrutinee = __ring_m208.scrutinee; const arms = __ring_m208.arms; const span = __ring_m208.span;
       return infer_match(ctx, scrutinee, arms, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "Block") {
+    if (__ring_m208._tag === "Block") {
       return infer_block(ctx, expr, Option_some(subst), __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "IfExpr") {
-      const condition = __ring_m204.condition; const then_branch = __ring_m204.then_branch; const else_branch = __ring_m204.else_branch; const span = __ring_m204.span;
+    if (__ring_m208._tag === "IfExpr") {
+      const condition = __ring_m208.condition; const then_branch = __ring_m208.then_branch; const else_branch = __ring_m208.else_branch; const span = __ring_m208.span;
       return infer_if(ctx, condition, then_branch, else_branch, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "StringInterp") {
-      const parts = __ring_m204.parts; const span = __ring_m204.span;
+    if (__ring_m208._tag === "StringInterp") {
+      const parts = __ring_m208.parts; const span = __ring_m208.span;
       return infer_string_interp(ctx, parts, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "CatchExpr") {
-      const catch_expr = __ring_m204.expr; const arms = __ring_m204.arms; const span = __ring_m204.span;
+    if (__ring_m208._tag === "CatchExpr") {
+      const catch_expr = __ring_m208.expr; const arms = __ring_m208.arms; const span = __ring_m208.span;
       return infer_catch(ctx, catch_expr, arms, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "HandleExpr") {
-      const body = __ring_m204.body; const handlers = __ring_m204.handlers; const span = __ring_m204.span;
+    if (__ring_m208._tag === "HandleExpr") {
+      const body = __ring_m208.body; const handlers = __ring_m208.handlers; const span = __ring_m208.span;
       return infer_handle(ctx, body, handlers, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "Lambda") {
-      const params = __ring_m204.params; const body = __ring_m204.body; const span = __ring_m204.span;
+    if (__ring_m208._tag === "Lambda") {
+      const params = __ring_m208.params; const body = __ring_m208.body; const span = __ring_m208.span;
       return infer_lambda(ctx, params, body, span, subst, Option_none, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "ListLit") {
-      const elements = __ring_m204.elements; const span = __ring_m204.span;
+    if (__ring_m208._tag === "ListLit") {
+      const elements = __ring_m208.elements; const span = __ring_m208.span;
       return infer_list_literal(ctx, elements, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "TupleLit") {
-      const elements = __ring_m204.elements; const span = __ring_m204.span;
+    if (__ring_m208._tag === "TupleLit") {
+      const elements = __ring_m208.elements; const span = __ring_m208.span;
       let s = subst;
       let helements = [];
       let combined_effects = types$EMPTY_ROW;
@@ -4159,10 +4218,10 @@ function infer_expr(ctx, expr, subst, __ring_ev_fail) {
       }
       const tuple_type = types$Type_TupleType(elem_types);
       return new infer_ctx$InferResult(hir$HExpr_TupleLit(helements, tuple_type, combined_effects, span), s, combined_effects);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "Range") {
-      const start = __ring_m204.start; const end = __ring_m204.end; const inclusive = __ring_m204.inclusive; const span = __ring_m204.span;
+    if (__ring_m208._tag === "Range") {
+      const start = __ring_m208.start; const end = __ring_m208.end; const inclusive = __ring_m208.inclusive; const span = __ring_m208.span;
       const start_r = infer_expr(ctx, start, subst, __ring_ev_fail);
       let s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(start_r.hexpr), types$INT, start_r.subst, span);
       const end_r = infer_expr(ctx, end, s, __ring_ev_fail);
@@ -4172,59 +4231,59 @@ function infer_expr(ctx, expr, subst, __ring_ev_fail) {
       s = me[1];
       const range_type = types$Type_EnumType(hir$BUILTIN_RANGE, [types$INT], []);
       return new infer_ctx$InferResult(hir$HExpr_RangeExpr(start_r.hexpr, end_r.hexpr, inclusive, range_type, range_effects, span), s, range_effects);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "IndexExpr") {
-      const receiver = __ring_m204.receiver; const index = __ring_m204.index; const span = __ring_m204.span;
+    if (__ring_m208._tag === "IndexExpr") {
+      const receiver = __ring_m208.receiver; const index = __ring_m208.index; const span = __ring_m208.span;
       return infer_index_expr(ctx, receiver, index, span, subst, __ring_ev_fail);
-      break __ring_match204;
+      break __ring_match208;
     }
-    if (__ring_m204._tag === "ReturnExpr") {
-      const value = __ring_m204.value; const span = __ring_m204.span;
-      __ring_match205: {
-        const __ring_m205 = value;
-        if (__ring_m205._tag === "some") {
-          const v = __ring_m205._0;
+    if (__ring_m208._tag === "ReturnExpr") {
+      const value = __ring_m208.value; const span = __ring_m208.span;
+      __ring_match209: {
+        const __ring_m209 = value;
+        if (__ring_m209._tag === "some") {
+          const v = __ring_m209._0;
           const r = infer_expr(ctx, v, subst, __ring_ev_fail);
           let s = r.subst;
-          __ring_match206: {
-            const __ring_m206 = ctx.current_fn_return_type;
-            if (__ring_m206._tag === "some") {
-              const ret_type = __ring_m206._0;
+          __ring_match210: {
+            const __ring_m210 = ctx.current_fn_return_type;
+            if (__ring_m210._tag === "some") {
+              const ret_type = __ring_m210._0;
               const return_notes = [new diagnostics$DiagnosticNote(`function return type is '${types$type_to_string(env$apply_subst(s, ret_type))}'`, Option_none), new diagnostics$DiagnosticNote(`return value has type '${types$type_to_string(env$apply_subst(s, hir$hexpr_type(r.hexpr)))}'`, Option_some(hir$hexpr_span(r.hexpr)))];
               s = infer_ctx$unify_at_noted(ctx.sink, ctx.env, hir$hexpr_type(r.hexpr), ret_type, s, span, return_notes);
-              break __ring_match206;
+              break __ring_match210;
             }
-            if (__ring_m206._tag === "none") {
-              break __ring_match206;
+            if (__ring_m210._tag === "none") {
+              break __ring_match210;
             }
-            __match_fail(__ring_m206);
+            __match_fail(__ring_m210);
           }
           return new infer_ctx$InferResult(hir$HExpr_ReturnExpr(Option_some(r.hexpr), types$NEVER, r.effects, span), s, r.effects);
-          break __ring_match205;
+          break __ring_match209;
         }
-        if (__ring_m205._tag === "none") {
+        if (__ring_m209._tag === "none") {
           let s = subst;
-          __ring_match207: {
-            const __ring_m207 = ctx.current_fn_return_type;
-            if (__ring_m207._tag === "some") {
-              const ret_type = __ring_m207._0;
+          __ring_match211: {
+            const __ring_m211 = ctx.current_fn_return_type;
+            if (__ring_m211._tag === "some") {
+              const ret_type = __ring_m211._0;
               s = infer_ctx$unify_at(ctx.sink, ctx.env, types$UNIT, ret_type, s, span);
-              break __ring_match207;
+              break __ring_match211;
             }
-            if (__ring_m207._tag === "none") {
-              break __ring_match207;
+            if (__ring_m211._tag === "none") {
+              break __ring_match211;
             }
-            __match_fail(__ring_m207);
+            __match_fail(__ring_m211);
           }
           return new infer_ctx$InferResult(hir$HExpr_ReturnExpr(Option_none, types$NEVER, types$EMPTY_ROW, span), s, types$EMPTY_ROW);
-          break __ring_match205;
+          break __ring_match209;
         }
-        __match_fail(__ring_m205);
+        __match_fail(__ring_m209);
       }
-      break __ring_match204;
+      break __ring_match208;
     }
-    __match_fail(__ring_m204);
+    __match_fail(__ring_m208);
   }
 }
 
@@ -4235,34 +4294,34 @@ function infer_bin_op(ctx, op, left, right, span, subst, __ring_ev_fail) {
   let result_type = types$UNIT;
   let eq_dispatch = Option_none;
   let ord_dispatch = Option_none;
-  __ring_match208: {
-    const __ring_m208 = op;
-    if (__ring_m208._tag === "Add") {
+  __ring_match212: {
+    const __ring_m212 = op;
+    if (__ring_m212._tag === "Add") {
       result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "+");
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      break __ring_match208;
+      break __ring_match212;
     }
-    if (__ring_m208._tag === "Sub") {
+    if (__ring_m212._tag === "Sub") {
       result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "-");
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      break __ring_match208;
+      break __ring_match212;
     }
-    if (__ring_m208._tag === "Mul") {
+    if (__ring_m212._tag === "Mul") {
       result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "*");
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      break __ring_match208;
+      break __ring_match212;
     }
-    if (__ring_m208._tag === "Div") {
+    if (__ring_m212._tag === "Div") {
       result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "/");
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      break __ring_match208;
+      break __ring_match212;
     }
-    if (__ring_m208._tag === "Mod") {
+    if (__ring_m212._tag === "Mod") {
       result_type = infer_numeric_op(ctx, lr.hexpr, rr.hexpr, s, span, "%");
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
-      break __ring_match208;
+      break __ring_match212;
     }
-    if ((__ring_m208._tag === "Eq") || (__ring_m208._tag === "Neq")) {
+    if ((__ring_m212._tag === "Eq") || (__ring_m212._tag === "Neq")) {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
       result_type = types$BOOL;
       const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
@@ -4273,9 +4332,9 @@ function infer_bin_op(ctx, op, left, right, span, subst, __ring_ev_fail) {
   return "!=";
 })();
       eq_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Eq", codes$E0307, s, span, op_sym, is_builtin));
-      break __ring_match208;
+      break __ring_match212;
     }
-    if ((__ring_m208._tag === "Lt") || (__ring_m208._tag === "Lte") || (__ring_m208._tag === "Gt") || (__ring_m208._tag === "Gte")) {
+    if ((__ring_m212._tag === "Lt") || (__ring_m212._tag === "Lte") || (__ring_m212._tag === "Gt") || (__ring_m212._tag === "Gte")) {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), hir$hexpr_type(rr.hexpr), s, span);
       result_type = types$BOOL;
       const resolved = env$apply_subst(s, hir$hexpr_type(lr.hexpr));
@@ -4287,21 +4346,21 @@ function infer_bin_op(ctx, op, left, right, span, subst, __ring_ev_fail) {
   return ">=";
 })();
       ord_dispatch = Option_some(resolve_trait_dispatch(ctx, resolved, "Ord", codes$E0308, s, span, op_sym, is_primitive_ord(resolved)));
-      break __ring_match208;
+      break __ring_match212;
     }
-    if (__ring_m208._tag === "And") {
+    if (__ring_m212._tag === "And") {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), types$BOOL, s, span);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(rr.hexpr), types$BOOL, s, span);
       result_type = types$BOOL;
-      break __ring_match208;
+      break __ring_match212;
     }
-    if (__ring_m208._tag === "Or") {
+    if (__ring_m212._tag === "Or") {
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(lr.hexpr), types$BOOL, s, span);
       s = infer_ctx$unify_at(ctx.sink, ctx.env, hir$hexpr_type(rr.hexpr), types$BOOL, s, span);
       result_type = types$BOOL;
-      break __ring_match208;
+      break __ring_match212;
     }
-    __match_fail(__ring_m208);
+    __match_fail(__ring_m212);
   }
   const me = infer_ctx$merge_effects(ctx.env, lr.effects, rr.effects, s, __ring_ev_fail);
   let effects = me[0];
