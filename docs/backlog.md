@@ -570,6 +570,22 @@ source-map 支持 + 断点调试。
 - 三候选关键风险点逐条**核实**（非纸面比较）：Windows API 可行性 / Perceus 交互 / FFI 边界
 - design.md 记录决策；B-007 spec 含选定模型的实现策略
 
+### B-131 字符串编码模型 design-probe（#158 前置）[design-align] [P2] [S] [judgment] [queued]
+
+> 2026-06-15 立项（Discussion，audit #158）。**design-probe，非实现项**。`ring_runtime.cpp` 字符串操作全部按 UTF-8 字节级 API（`std::string`），JS 后端按 UTF-16 码元级 API。对非 ASCII（CJK、emoji）系统性发散——`len`/`index_of`/`char_at`/`slice` 全不同。当前 llvm_diff 全 ASCII → 分歧不可见（oracle 盲区）。**B-100 JS 退役前必须定模型**，否则语义静默变化。
+
+**要回答的设计问题**（两候选）：
+1. **(A) UTF-8 字节串（Rust 模型）**：Ring Str = UTF-8 字节序列。`len` = 字节数，`index`/`slice` = 字节级。`char_at` 改返回完整 code point（或改名 `byte_at`，另提供 `chars()` 迭代器）。系统编程友好、零开销，但用户处理非 ASCII 需显式 code-point 迭代。核实：Ring 定位（用户面 vs 系统面），现有 std API 中哪些隐含「字符」语义需调整，LLM 写非 ASCII 代码的自然度（公理①）。
+2. **(B) Unicode 字符串（Python 模型）**：Ring Str = Unicode code point 序列。`len` = code point 数，`index`/`slice` = code point 级。native 需 UTF-8 遍历实现（每次 index O(n)，或维护 code-point offset 表 O(1) 但增内存）。用户直觉友好，但性能代价（紧循环字符串操作降速）。核实：性能影响量级，是否需 `ByteStr` 类型补位系统侧。
+3. **共同项**：不论 A/B，`char_at` 返回无效 UTF-8 单字节**两种模型下都是 bug**——A 模型应返回完整 code point 或报错，B 模型应返回 code point 字符。grapheme cluster（emoji 组合字符）两模型都不完美，评估是否需要第三类 API。
+
+**产出**：design.md 增「字符串编码模型」节（决策 + 否决理由 + 迁移影响清单）+ 如决定实现则立 backlog item。
+
+**验收标准**：
+- 两候选影响面逐条核实（std API 清单 / 性能量级 / LLM 友好性 / 现有代码迁移量）
+- design.md 记录决策
+- `char_at` 无效 UTF-8 修复方向确定（不论选 A/B）
+
 ## 语法增强
 
 ### B-069 默认参数 [feature] [P2] [M] [judgment] [doing]
@@ -651,6 +667,24 @@ connect("localhost", 3000)     // timeout=30
 **验收标准**：
 - Map for_each + Set for_each llvm_diff 用例两后端输出一致
 - 全部 E2E + llvm_diff 通过
+
+### B-130 `List.sort()` Ord bound + runtime 死代码清理（#156/#159 收口）[bugfix] [P2] [M] [judgment] [queued]
+
+> 2026-06-15 立项（Discussion，audit #159 + #156 死代码收口）。`.sort()` 无 comparator 版本两后端均不正确——JS 用 `<` 运算符（对 Str 碰巧词典序、对 struct/enum 出 `[object Object]` 垃圾），LLVM 用 `ring_unbox_int`（非 Int 按半地址排序出垃圾）。审查确认：编译器所有 `.sort()` 调用为 `List<Str>` 或 `List<Int>`（均有 Ord），加 bound 零迁移破坏。同步清理 #156 修后遗留的 runtime 死代码（`ring_list_contains`/`ring_list_index_of` 自 `impl<T: Eq> List` Ring impl 落地后不再被任何后端调用）。
+
+**涉及修改**：
+1. `std/list.ring`：`sort` 从 `impl<T> List`（`pub extern fn`）移到新的 `impl<T: Ord> List` 块，改为 Ring 实现——`self.sort_by(fn(a, b) { if a < b { -1 } else { if a > b { 1 } else { 0 } } })`。`impl<T> List` 中 `pub extern fn sort` 行删除。
+2. JS `compiler/runtime.ring`：删除 `List_sort` 函数定义 + `LIST_RUNTIME_FNS` 数组中 `"List_sort"` 条目（改走 Ring impl，不再调 JS runtime）。
+3. `ring_runtime.cpp`：删除 `ring_list_sort_default`（本条主修）。同时删除已死的 `ring_list_contains`、`ring_list_index_of`（自 contains/index_of 移入 Ring impl 后不再被任何后端调用，注释自认 "pointer comparison (bootstrap)"）。
+4. `compiler/codegen_llvm.ring`：删除 `ring_list_sort_default` / `ring_list_contains` / `ring_list_index_of` 的 `get_or_declare_runtime_fn` 声明。
+5. `compiler/codegen_llvm_expr.ring`：`method_to_runtime` 中 `"List"/"sort"` → `"ring_list_sort_default"` 的映射删除（改走 Ring impl 生成的 `ring_List_sort`）；`is_bool_returning_call` 中 `ring_list_contains` 条目删除；`is_int_returning_call` 中 `ring_list_contains` / `ring_list_index_of` 条目删除；2217-2221 行「NOTE: contains / index_of intentionally NOT mapped」注释清理（不再需要——没有映射可跳过了）。
+6. `CLAUDE.md`：已知限制中 "`List.find` / `Map` key 查找仍用 JS `===`（其他 contains 方法已用 Eq trait）" 更新——删除 `List.find`（谓词式，不涉及 `===`），保留 `Map` key（追踪于 B-107）。
+
+**验收标准**：
+- `List<Str>.sort()` / `List<Int>.sort()` 两后端行为一致且正确（词典序 / 数值序）
+- `List<UserStruct>.sort()` 无 `Ord` derive → 编译错误；有 `Ord` derive → 正确排序（E2E）
+- 已删 runtime 函数不残留（grep `ring_list_sort_default` / `ring_list_contains` / `ring_list_index_of` 全仓零命中）
+- 全部 E2E + llvm_diff 通过；自举一致（double bootstrap 字节一致）
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。
