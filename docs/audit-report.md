@@ -93,9 +93,7 @@ B-103 全量枚举 ring_runtime.cpp 时发现：`method_to_runtime`（codegen_ll
 
 <!-- #148 closed: B-124 落地（join 签名收紧为 List<Str>），2026-06-13 -->
 
-### #157 fresh payload-enum 局部 match-then-discard 未 scope-end-drop（leak 类）[low] [judgment] [doing]
-
-D9 probe-E 撞出：`let c = Color::Blue{shade}` 在循环内 matched-then-discarded（match 只投影标量 payload、不消费外壳），每轮泄 `tid68=n`。fresh owned payload-enum 作为 let 绑定应被 scope-end-drop 回收，但实际未 drop——疑似 perceus scope 建模对 matched-then-projected 的 let 绑定遗漏。与 D9 Part 2（UnitType 单例化、const-enum 类）无关，与 Part 1（interp SB codegen-drop）无关——是独立 RC gap。subagent 已改写 probe 绕开以隔离 const 类测量。发现者：B-104 D9 probe 构造期。
+<!-- #157 closed: 调查确认不复现——perceus 已正确 scope-end-drop fresh payload-enum let 绑定（NamedVariantConstruct → is_droppable_init=true → Drop emitted）。verify_rc 通过 0 errors。D9 probe 的 tid68 泄漏可能是自编译场景下更复杂的组合或已在 D9 Part 2 单例化后消除。回归测试：tests/cases/llvm/enum_payload_drop.ring。 -->
 
 <!-- #152 runtime HOF 三类 drop 修复已落地并删除（2026-06-15）：谓词 Bool box / fold 中间累加器 / for_each 合成 key。ring_runtime.cpp 10 函数修复 + D5 诊断计数器删除 + 回归 tests/cases/llvm/hof_drop_runtime.ring。待 ×3 llvm_diff 终验。 -->
 

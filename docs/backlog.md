@@ -670,23 +670,6 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - local cancellation 规则仍生效（局部变量 mutation 不传播）
 - 全部 E2E 测试通过
 
-### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [doing]
-> ✅ Phase 1 已完成（2026-05-29）：基础设施 + 10 个关键 unify 调用点 + notes 渲染。剩余场景（空集合、row poly、effect 不匹配专用消息）后续迭代。
-
-**已完成**：
-- `type_error_with_notes()` + `unify_at_noted()` 基础设施
-- 10 个 unify 调用点加了约束来源 notes（let/var/assign/return/call/method/struct-field/match/if-else）
-- `format_human` 渲染 `= note:` 行，`format_llm` 输出 `notes` 数组
-- 5 个新测试验证 notes 功能
-
-**待做（后续迭代）**：
-- 空集合推断失败 → 建议加类型标注
-- Row poly 字段缺失 → 指向字段访问点
-- Effect 不匹配 → 说明缺少的 effect + handler
-- `--error-format=llm` 修复建议增强
-
-
-
 
 
 ### B-070 固定长度数组 `[T; N]` [feature] [P2] [M] [judgment] [queued]
