@@ -3,7 +3,7 @@ use ast::{Program, Decl, UseDecl, UseImport, NamedImport}
 use infer_register::{prefix_decl_name}
 use hir::{HProgram, HDecl, trait_dict_name}
 use diagnostics::{CollectingSink, Diagnostic, new_collecting_sink}
-use formatter::{format_human}
+use formatter::{format_human, format_llm}
 use env::{TypeEnv, add_impl}
 use checker::{CheckResult, check as check_single, check_module}
 use codegen::{generate}
@@ -37,8 +37,8 @@ struct CompilePhaseResult {
     module_exports_map: Map<Str, ModuleExports>
 }
 
-fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
-    match build_module_graph(entry_file) {
+fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
+    match build_module_graph(entry_file, error_format) {
         none => none,
         some(graph) => {
             let mut module_asts: Map<Str, Program> = map_new()
@@ -73,14 +73,24 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
                             }
                             let result = check_module(ast, dep_exports, sink)
                             if sink.has_errors() {
-                                let src = read_file(match graph.modules.get(key) { some(m) => m.file_path, none => "" })
-                                eprintln(format_human(sink.diagnostics(), src))
+                                let mod_file = match graph.modules.get(key) { some(m) => m.file_path, none => "" }
+                                if error_format == "llm" {
+                                    eprintln(format_llm(sink.diagnostics(), mod_file))
+                                } else {
+                                    let src = read_file(mod_file)
+                                    eprintln(format_human(sink.diagnostics(), src))
+                                }
                                 check_ok = false
                             } else {
                                 // Surface check warnings (non-error diagnostics) without failing the build
                                 if sink.items.len() > 0 {
-                                    let src = read_file(match graph.modules.get(key) { some(m) => m.file_path, none => "" })
-                                    eprintln(format_human(sink.diagnostics(), src))
+                                    let mod_file = match graph.modules.get(key) { some(m) => m.file_path, none => "" }
+                                    if error_format == "llm" {
+                                        eprintln(format_llm(sink.diagnostics(), mod_file))
+                                    } else {
+                                        let src = read_file(mod_file)
+                                        eprintln(format_human(sink.diagnostics(), src))
+                                    }
                                 }
                                 module_hirs.insert(key, result.program)
                                 match graph.modules.get(key) {
@@ -113,8 +123,8 @@ fn compile_phases(entry_file: Str) -> CompilePhaseResult? {
 // Bundle mode
 // ============================================================
 
-pub fn compile_project(entry_file: Str) -> CompileProjectResult {
-    match compile_phases(entry_file) {
+pub fn compile_project(entry_file: Str, error_format: Str) -> CompileProjectResult {
+    match compile_phases(entry_file, error_format) {
         none => CompileProjectResult { js: "", success: false },
         some(phases) => {
             let entry_key = module_key(phases.graph.entry.path_segments)
@@ -159,8 +169,8 @@ pub struct LlvmCompileResult {
     pub success: Bool
 }
 
-pub fn compile_project_llvm(entry_file: Str, output_path: Str) -> LlvmCompileResult {
-    match compile_phases(entry_file) {
+pub fn compile_project_llvm(entry_file: Str, output_path: Str, error_format: Str) -> LlvmCompileResult {
+    match compile_phases(entry_file, error_format) {
         none => LlvmCompileResult { success: false },
         some(phases) => {
             let entry_key = module_key(phases.graph.entry.path_segments)
@@ -210,8 +220,8 @@ pub struct RcProjectVerifyResult {
     pub report: Str
 }
 
-pub fn verify_project_rc(entry_file: Str, mutate: Str, strict: Bool) -> RcProjectVerifyResult {
-    match compile_phases(entry_file) {
+pub fn verify_project_rc(entry_file: Str, mutate: Str, strict: Bool, error_format: Str) -> RcProjectVerifyResult {
+    match compile_phases(entry_file, error_format) {
         none => RcProjectVerifyResult { success: false, fatal: 0, exempt: 0, report: "" },
         some(phases) => {
             let mut all: List<RcFinding> = []
@@ -239,8 +249,8 @@ pub fn verify_project_rc(entry_file: Str, mutate: Str, strict: Bool) -> RcProjec
 // ESM multi-file output mode
 // ============================================================
 
-pub fn compile_project_esm(entry_file: Str, out_dir: Str) -> EsmCompileResult {
-    match compile_phases(entry_file) {
+pub fn compile_project_esm(entry_file: Str, out_dir: Str, error_format: Str) -> EsmCompileResult {
+    match compile_phases(entry_file, error_format) {
         none => EsmCompileResult { success: false, entry_js_path: "" },
         some(phases) => {
             let entry_key = module_key(phases.graph.entry.path_segments)

@@ -370,7 +370,7 @@ function find_cycle_path(cycle_nodes, dependencies) {
   return fallback;
 }
 
-function build_module_graph(entry_file) {
+function build_module_graph(entry_file, error_format) {
   const abs_entry = path_resolve(entry_file);
   const project_root = path_dirname(abs_entry);
   const entry_basename = Str_replace(path_basename(abs_entry), ".ring", "");
@@ -396,11 +396,19 @@ function build_module_graph(entry_file) {
             const resolve_sink = diagnostics$new_collecting_sink();
             const ast = parser$parse(source, current_mod.file_path, resolve_sink);
             if (diagnostics$CollectingSink_has_errors(resolve_sink)) {
-              eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(resolve_sink), source));
+              if ((error_format === "llm")) {
+                eprintln(formatter$format_llm(diagnostics$CollectingSink_diagnostics(resolve_sink), current_mod.file_path));
+              } else {
+                eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(resolve_sink), source));
+              }
               return Option_none;
             }
             if ((List_len(resolve_sink.items) > 0)) {
-              eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(resolve_sink), source));
+              if ((error_format === "llm")) {
+                eprintln(formatter$format_llm(diagnostics$CollectingSink_diagnostics(resolve_sink), current_mod.file_path));
+              } else {
+                eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(resolve_sink), source));
+              }
             }
             _Map_insert(asts_map, current_key, ast);
             let deps = [];
@@ -441,7 +449,11 @@ function build_module_graph(entry_file) {
                     const diag = diagnostics$make_diag(codes$E0702, diagnostics$Severity_SevError, `Module '${mod_path}' not found`, use_decl.span, diagnostics$DiagnosticContext_OtherContext(Option_some(`no file '${mod_path}.ring' in project root`)));
                     let err_sink = diagnostics$new_collecting_sink();
                     diagnostics$CollectingSink_report(err_sink, diag);
-                    eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), source));
+                    if ((error_format === "llm")) {
+                      eprintln(formatter$format_llm(diagnostics$CollectingSink_diagnostics(err_sink), current_mod.file_path));
+                    } else {
+                      eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), source));
+                    }
                     return Option_none;
                     break __ring_match10;
                   }
@@ -556,8 +568,12 @@ function build_module_graph(entry_file) {
     const diag = diagnostics$make_diag(codes$E0704, diagnostics$Severity_SevError, `Circular dependency detected: ${cycle_desc}`, file_span, diagnostics$DiagnosticContext_OtherContext(Option_some("modules form a dependency cycle")));
     let err_sink = diagnostics$new_collecting_sink();
     diagnostics$CollectingSink_report(err_sink, diag);
-    const entry_source = read_file(abs_entry);
-    eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), entry_source));
+    if ((error_format === "llm")) {
+      eprintln(formatter$format_llm(diagnostics$CollectingSink_diagnostics(err_sink), abs_entry));
+    } else {
+      const entry_source = read_file(abs_entry);
+      eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(err_sink), entry_source));
+    }
     return Option_none;
   }
   return Option_some(new ModuleGraph(new ModuleId([entry_basename], abs_entry), modules, dependencies, topo_order, asts_map));

@@ -60,7 +60,7 @@ pub fn cli_main() {
         // check; --verify-rc on the `check` command).  Runs the same per-module
         // perceus_transform as the LLVM pipeline, then verify_rc_program.
         if parsed.command == "check" && (parsed.verify_rc || parsed.verify_strict) {
-            let res = verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict)
+            let res = verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict, parsed.error_format)
             if res.success == false {
                 eprintln("Compilation failed")
                 exit_process(1)
@@ -77,7 +77,7 @@ pub fn cli_main() {
         if parsed.target == "llvm" {
             // LLVM multi-file mode: all modules → single .o
             if parsed.command == "check" {
-                let result = compile_project(file_path)
+                let result = compile_project(file_path, parsed.error_format)
                 if result.success {
                     print("OK")
                 } else {
@@ -88,7 +88,7 @@ pub fn cli_main() {
                 if parsed.command == "build" {
                     let out_dir = path_resolve(parsed.out_dir)
                     let out_path = path_join(out_dir, path_basename(file_path).replace(".ring", ".o"))
-                    let result = compile_project_llvm(file_path, out_path)
+                    let result = compile_project_llvm(file_path, out_path, parsed.error_format)
                     if result.success {
                         // success message printed by generate_llvm_project
                     } else {
@@ -103,7 +103,7 @@ pub fn cli_main() {
             return
         }
         if parsed.command == "check" {
-            let result = compile_project(file_path)
+            let result = compile_project(file_path, parsed.error_format)
             if result.success {
                 print("OK")
             } else {
@@ -113,7 +113,7 @@ pub fn cli_main() {
         } else {
             if parsed.command == "build" {
                 let out_dir = path_resolve(parsed.out_dir)
-                let result = compile_project_esm(file_path, out_dir)
+                let result = compile_project_esm(file_path, out_dir, parsed.error_format)
                 if result.success {
                     print("Compiled: ${out_dir}/")
                 } else {
@@ -124,7 +124,7 @@ pub fn cli_main() {
                 if parsed.command == "run" {
                     // Use temp dir for ESM output
                     let tmp_dir = path_join(path_dirname(file_path), ".ring_tmp")
-                    let result = compile_project_esm(file_path, tmp_dir)
+                    let result = compile_project_esm(file_path, tmp_dir, parsed.error_format)
                     if result.success {
                         // Execute the entry JS file
                         // Note: exec_sync not yet available as extern fn

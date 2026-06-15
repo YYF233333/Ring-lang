@@ -373,7 +373,7 @@ function cli_main(__ring_ev_io) {
   }
   if ((List_len(ast.uses) > 0)) {
     if (((parsed.command === "check") ? (parsed.verify_rc ? true : parsed.verify_strict) : false)) {
-      const res = compiler_mod$verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict);
+      const res = compiler_mod$verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict, parsed.error_format);
       if ((res.success === false)) {
         eprintln("Compilation failed");
         exit_process(1);
@@ -389,7 +389,7 @@ function cli_main(__ring_ev_io) {
     }
     if ((parsed.target === "llvm")) {
       if ((parsed.command === "check")) {
-        const result = compiler_mod$compile_project(file_path);
+        const result = compiler_mod$compile_project(file_path, parsed.error_format);
         if (result.success) {
           print("OK", __ring_ev_io);
         } else {
@@ -400,7 +400,7 @@ function cli_main(__ring_ev_io) {
         if ((parsed.command === "build")) {
           const out_dir = path_resolve(parsed.out_dir);
           const out_path = path_join(out_dir, Str_replace(path_basename(file_path), ".ring", ".o"));
-          const result = compiler_mod$compile_project_llvm(file_path, out_path, __ring_ev_io);
+          const result = compiler_mod$compile_project_llvm(file_path, out_path, parsed.error_format, __ring_ev_io);
           if (result.success) {
           } else {
             eprintln("Compilation failed");
@@ -414,7 +414,7 @@ function cli_main(__ring_ev_io) {
       return;
     }
     if ((parsed.command === "check")) {
-      const result = compiler_mod$compile_project(file_path);
+      const result = compiler_mod$compile_project(file_path, parsed.error_format);
       if (result.success) {
         print("OK", __ring_ev_io);
       } else {
@@ -424,7 +424,7 @@ function cli_main(__ring_ev_io) {
     } else {
       if ((parsed.command === "build")) {
         const out_dir = path_resolve(parsed.out_dir);
-        const result = compiler_mod$compile_project_esm(file_path, out_dir);
+        const result = compiler_mod$compile_project_esm(file_path, out_dir, parsed.error_format);
         if (result.success) {
           print(`Compiled: ${out_dir}/`, __ring_ev_io);
         } else {
@@ -434,7 +434,7 @@ function cli_main(__ring_ev_io) {
       } else {
         if ((parsed.command === "run")) {
           const tmp_dir = path_join(path_dirname(file_path), ".ring_tmp");
-          const result = compiler_mod$compile_project_esm(file_path, tmp_dir);
+          const result = compiler_mod$compile_project_esm(file_path, tmp_dir, parsed.error_format);
           if (result.success) {
             eprintln("Multi-file run not yet implemented in Ring bootstrap");
             exit_process(1);

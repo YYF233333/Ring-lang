@@ -1063,9 +1063,9 @@ function empty_module_exports_list() {
   return x;
 }
 
-function compile_phases(entry_file) {
+function compile_phases(entry_file, error_format) {
   __ring_match30: {
-    const __ring_m30 = resolver$build_module_graph(entry_file);
+    const __ring_m30 = resolver$build_module_graph(entry_file, error_format);
     if (__ring_m30._tag === "none") {
       return Option_none;
       break __ring_match30;
@@ -1132,23 +1132,33 @@ function compile_phases(entry_file) {
               }
               const result = checker$check_module(ast, dep_exports, sink);
               if (diagnostics$CollectingSink_has_errors(sink)) {
-                const src = read_file((function() {
+                const mod_file = (function() {
   const __ring_m = _Map_get(graph.modules, key);
   if (__ring_m._tag === "some") { const m = __ring_m._0; return m.file_path; }
   if (__ring_m._tag === "none") { return ""; }
   __match_fail(__ring_m);
-})());
-                eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(sink), src));
+})();
+                if ((error_format === "llm")) {
+                  eprintln(formatter$format_llm(diagnostics$CollectingSink_diagnostics(sink), mod_file));
+                } else {
+                  const src = read_file(mod_file);
+                  eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(sink), src));
+                }
                 check_ok = false;
               } else {
                 if ((List_len(sink.items) > 0)) {
-                  const src = read_file((function() {
+                  const mod_file = (function() {
   const __ring_m = _Map_get(graph.modules, key);
   if (__ring_m._tag === "some") { const m = __ring_m._0; return m.file_path; }
   if (__ring_m._tag === "none") { return ""; }
   __match_fail(__ring_m);
-})());
-                  eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(sink), src));
+})();
+                  if ((error_format === "llm")) {
+                    eprintln(formatter$format_llm(diagnostics$CollectingSink_diagnostics(sink), mod_file));
+                  } else {
+                    const src = read_file(mod_file);
+                    eprintln(formatter$format_human(diagnostics$CollectingSink_diagnostics(sink), src));
+                  }
                 }
                 _Map_insert(module_hirs, key, result.program);
                 __ring_match34: {
@@ -1186,9 +1196,9 @@ function compile_phases(entry_file) {
   }
 }
 
-function compile_project(entry_file) {
+function compile_project(entry_file, error_format) {
   __ring_match35: {
-    const __ring_m35 = compile_phases(entry_file);
+    const __ring_m35 = compile_phases(entry_file, error_format);
     if (__ring_m35._tag === "none") {
       return new CompileProjectResult("", false);
       break __ring_match35;
@@ -1326,9 +1336,9 @@ function resolve_extern_fn_imports(ast, key, graph, exports_map, imports_map, im
   }
 }
 
-function compile_project_esm(entry_file, out_dir) {
+function compile_project_esm(entry_file, out_dir, error_format) {
   __ring_match42: {
-    const __ring_m42 = compile_phases(entry_file);
+    const __ring_m42 = compile_phases(entry_file, error_format);
     if (__ring_m42._tag === "none") {
       return new EsmCompileResult(false, "");
       break __ring_match42;
@@ -1384,9 +1394,9 @@ function compile_project_esm(entry_file, out_dir) {
   }
 }
 
-function compile_project_llvm(entry_file, output_path, __ring_ev_io) {
+function compile_project_llvm(entry_file, output_path, error_format, __ring_ev_io) {
   __ring_match44: {
-    const __ring_m44 = compile_phases(entry_file);
+    const __ring_m44 = compile_phases(entry_file, error_format);
     if (__ring_m44._tag === "none") {
       return new LlvmCompileResult(false);
       break __ring_match44;
@@ -1434,9 +1444,9 @@ function compile_project_llvm(entry_file, output_path, __ring_ev_io) {
   }
 }
 
-function verify_project_rc(entry_file, mutate, strict) {
+function verify_project_rc(entry_file, mutate, strict, error_format) {
   __ring_match46: {
-    const __ring_m46 = compile_phases(entry_file);
+    const __ring_m46 = compile_phases(entry_file, error_format);
     if (__ring_m46._tag === "none") {
       return new RcProjectVerifyResult(false, 0, 0, "");
       break __ring_match46;

@@ -2,7 +2,7 @@ use ast::{Program, Span, Position}
 use parser::{parse}
 use diagnostics::{CollectingSink, Diagnostic, Severity, DiagnosticContext,
     new_collecting_sink, make_diag}
-use formatter::{format_human}
+use formatter::{format_human, format_llm}
 use codes::{E0702, E0704}
 
 // ============================================================
@@ -59,7 +59,7 @@ pub fn resolve_module_file(use_path_segments: List<Str>, project_root: Str) -> S
 // build_module_graph
 // ============================================================
 
-pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
+pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
     let abs_entry = path_resolve(entry_file)
     let project_root = path_dirname(abs_entry)
 
@@ -89,12 +89,20 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                         let resolve_sink = new_collecting_sink()
                         let ast = parse(source, current_mod.file_path, resolve_sink)
                         if resolve_sink.has_errors() {
-                            eprintln(format_human(resolve_sink.diagnostics(), source))
+                            if error_format == "llm" {
+                                eprintln(format_llm(resolve_sink.diagnostics(), current_mod.file_path))
+                            } else {
+                                eprintln(format_human(resolve_sink.diagnostics(), source))
+                            }
                             return none
                         }
                         // Surface parse warnings (non-error diagnostics) without failing the build
                         if resolve_sink.items.len() > 0 {
-                            eprintln(format_human(resolve_sink.diagnostics(), source))
+                            if error_format == "llm" {
+                                eprintln(format_llm(resolve_sink.diagnostics(), current_mod.file_path))
+                            } else {
+                                eprintln(format_human(resolve_sink.diagnostics(), source))
+                            }
                         }
                         asts_map.insert(current_key, ast)
 
@@ -133,7 +141,11 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
                                         )
                                         let mut err_sink = new_collecting_sink()
                                         err_sink.report(diag)
-                                        eprintln(format_human(err_sink.diagnostics(), source))
+                                        if error_format == "llm" {
+                                            eprintln(format_llm(err_sink.diagnostics(), current_mod.file_path))
+                                        } else {
+                                            eprintln(format_human(err_sink.diagnostics(), source))
+                                        }
                                         return none
                                     },
                                 }
@@ -217,8 +229,12 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
         )
         let mut err_sink = new_collecting_sink()
         err_sink.report(diag)
-        let entry_source = read_file(abs_entry)
-        eprintln(format_human(err_sink.diagnostics(), entry_source))
+        if error_format == "llm" {
+            eprintln(format_llm(err_sink.diagnostics(), abs_entry))
+        } else {
+            let entry_source = read_file(abs_entry)
+            eprintln(format_human(err_sink.diagnostics(), entry_source))
+        }
         return none
     }
 
