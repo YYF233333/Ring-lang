@@ -7,6 +7,9 @@ import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -18,9 +21,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -162,12 +162,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -178,60 +178,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -374,7 +374,7 @@ function resolve_module_file(use_path_segments, project_root) {
   }
 }
 
-function build_module_graph(entry_file, error_format) {
+function build_module_graph(entry_file, error_format, __ring_ev_fail) {
   const abs_entry = path_resolve(entry_file);
   const project_root = path_dirname(abs_entry);
   const entry_basename = Str_replace(path_basename(abs_entry), ".ring", "");
@@ -398,7 +398,7 @@ function build_module_graph(entry_file, error_format) {
             const current_mod = __ring_m9._0;
             const source = read_file(current_mod.file_path);
             const resolve_sink = diagnostics$new_collecting_sink();
-            const ast = parser$parse(source, current_mod.file_path, resolve_sink);
+            const ast = parser$parse(source, current_mod.file_path, resolve_sink, __ring_ev_fail);
             if (diagnostics$CollectingSink_has_errors(resolve_sink)) {
               if ((error_format === "llm")) {
                 eprintln(formatter$format_llm(diagnostics$CollectingSink_diagnostics(resolve_sink), current_mod.file_path));

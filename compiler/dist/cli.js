@@ -13,6 +13,9 @@ import { format_rc_findings as verify_rc$format_rc_findings, rc_fatal_count as v
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -24,9 +27,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -168,12 +168,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -184,60 +184,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -357,7 +357,7 @@ function usage(__ring_ev_io) {
   return print("  --verify-rc-strict        like --verify-rc, but documented-exempt findings also fail", __ring_ev_io);
 }
 
-function cli_main(__ring_ev_io) {
+function cli_main(__ring_ev_fail, __ring_ev_io) {
   const args = argv();
   const parsed = parse_cli_args(args);
   if (((parsed.command === "help") ? true : (parsed.command === ""))) {
@@ -382,7 +382,7 @@ function cli_main(__ring_ev_io) {
   }
   const source = read_file(file_path);
   const parse_sink = diagnostics$new_collecting_sink();
-  const ast = parser$parse(source, file_path, parse_sink);
+  const ast = parser$parse(source, file_path, parse_sink, __ring_ev_fail);
   if (diagnostics$CollectingSink_has_errors(parse_sink)) {
     const diagnostics = parse_sink.items;
     if ((parsed.error_format === "llm")) {
@@ -395,7 +395,7 @@ function cli_main(__ring_ev_io) {
   }
   if ((List_len(ast.uses) > 0)) {
     if (((parsed.command === "check") ? (parsed.verify_rc ? true : parsed.verify_strict) : false)) {
-      const res = compiler_mod$verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict, parsed.error_format);
+      const res = compiler_mod$verify_project_rc(file_path, parsed.rc_mutate, parsed.verify_strict, parsed.error_format, __ring_ev_fail);
       if ((res.success === false)) {
         eprintln("Compilation failed");
         exit_process(1);
@@ -411,7 +411,7 @@ function cli_main(__ring_ev_io) {
     }
     if ((parsed.target === "llvm")) {
       if ((parsed.command === "check")) {
-        const result = compiler_mod$compile_project(file_path, parsed.error_format);
+        const result = compiler_mod$compile_project(file_path, parsed.error_format, __ring_ev_fail);
         if (result.success) {
           print("OK", __ring_ev_io);
         } else {
@@ -422,7 +422,7 @@ function cli_main(__ring_ev_io) {
         if ((parsed.command === "build")) {
           const out_dir = path_resolve(parsed.out_dir);
           const out_path = path_join(out_dir, Str_replace(path_basename(file_path), ".ring", ".o"));
-          const result = compiler_mod$compile_project_llvm(file_path, out_path, parsed.error_format, __ring_ev_io);
+          const result = compiler_mod$compile_project_llvm(file_path, out_path, parsed.error_format, __ring_ev_fail, __ring_ev_io);
           if (result.success) {
           } else {
             eprintln("Compilation failed");
@@ -436,7 +436,7 @@ function cli_main(__ring_ev_io) {
       return;
     }
     if ((parsed.command === "check")) {
-      const result = compiler_mod$compile_project(file_path, parsed.error_format);
+      const result = compiler_mod$compile_project(file_path, parsed.error_format, __ring_ev_fail);
       if (result.success) {
         print("OK", __ring_ev_io);
       } else {
@@ -446,7 +446,7 @@ function cli_main(__ring_ev_io) {
     } else {
       if ((parsed.command === "build")) {
         const out_dir = path_resolve(parsed.out_dir);
-        const result = compiler_mod$compile_project_esm(file_path, out_dir, parsed.error_format);
+        const result = compiler_mod$compile_project_esm(file_path, out_dir, parsed.error_format, __ring_ev_fail);
         if (result.success) {
           print(`Compiled: ${out_dir}/`, __ring_ev_io);
         } else {
@@ -456,7 +456,7 @@ function cli_main(__ring_ev_io) {
       } else {
         if ((parsed.command === "run")) {
           const tmp_dir = path_join(path_dirname(file_path), ".ring_tmp");
-          const result = compiler_mod$compile_project_esm(file_path, tmp_dir, parsed.error_format);
+          const result = compiler_mod$compile_project_esm(file_path, tmp_dir, parsed.error_format, __ring_ev_fail);
           if (result.success) {
             eprintln("Multi-file run not yet implemented in Ring bootstrap");
             exit_process(1);
@@ -473,7 +473,7 @@ function cli_main(__ring_ev_io) {
     return;
   }
   const sink = diagnostics$new_collecting_sink();
-  const check_result = checker$check(ast, sink);
+  const check_result = checker$check(ast, sink, __ring_ev_fail);
   if (diagnostics$CollectingSink_has_errors(sink)) {
     const diagnostics = sink.items;
     if ((parsed.error_format === "llm")) {

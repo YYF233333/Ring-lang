@@ -18,6 +18,9 @@ import { empty_subst as unify$empty_subst, occurs_in as unify$occurs_in, unify a
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -29,9 +32,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -173,12 +173,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -189,60 +189,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -277,7 +277,7 @@ function find_std_dir() {
   return Option_none;
 }
 
-function load_prelude(ctx) {
+function load_prelude(ctx, __ring_ev_fail) {
   let prelude_hdecls = [];
   __ring_match6: {
     const __ring_m6 = find_std_dir();
@@ -293,7 +293,7 @@ function load_prelude(ctx) {
         if (file_exists(file_path)) {
           const source = read_file(file_path);
           const prelude_sink = diagnostics$new_collecting_sink();
-          const ast = parser$parse(source, file_path, prelude_sink);
+          const ast = parser$parse(source, file_path, prelude_sink, __ring_ev_fail);
           const __ring_iter_4 = __List_Iterable.iter(ast.decls);
           while (true) {
             const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
@@ -430,9 +430,9 @@ function new_infer_ctx(sink) {
   return new infer_ctx$InferCtx(env, unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new(), set_new(), 0, map_new(), map_new(), map_new(), map_new(), map_new(), map_new());
 }
 
-function check(program, sink) {
+function check(program, sink, __ring_ev_fail) {
   let ctx = new_infer_ctx(sink);
-  const prelude_hdecls = load_prelude(ctx);
+  const prelude_hdecls = load_prelude(ctx, __ring_ev_fail);
   const hprogram = infer_decl$check(ctx, program);
   let all_decls = list_clone(prelude_hdecls);
   const __ring_iter_7 = __List_Iterable.iter(hprogram.decls);
@@ -797,9 +797,9 @@ function resolve_uses(ctx, uses, available_modules) {
   }
 }
 
-function check_module(program, module_exports, sink) {
+function check_module(program, module_exports, sink, __ring_ev_fail) {
   let ctx = new_infer_ctx(sink);
-  const prelude_hdecls = load_prelude(ctx);
+  const prelude_hdecls = load_prelude(ctx, __ring_ev_fail);
   inject_module_exports(ctx, module_exports);
   resolve_uses(ctx, program.uses, module_exports);
   const hprogram = infer_decl$check(ctx, program);

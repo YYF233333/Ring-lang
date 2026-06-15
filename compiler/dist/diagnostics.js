@@ -4,6 +4,9 @@ import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -15,9 +18,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -159,12 +159,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -175,60 +175,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -305,12 +305,12 @@ class CollectingSink {
   }
 }
 
-function CollectingSink_report(self, d) {
-  const key = diag_key(d);
-  if ((!_Map_contains_key(self.seen, key))) {
-    _Map_insert(self.seen, key, true);
-    return List_push(self.items, d);
-  }
+function CollectingSink_clear(self) {
+  List_clear(self.items);
+  return _Map_clear(self.seen);
+}
+function CollectingSink_diagnostics(self) {
+  return self.items;
 }
 function CollectingSink_has_errors(self) {
   return self.items.some((function(d) {
@@ -327,15 +327,12 @@ function CollectingSink_has_errors(self) {
   return __ring_blk0;
 }));
 }
-function CollectingSink_diagnostics(self) {
-  return self.items;
-}
-function CollectingSink_clear(self) {
-  List_clear(self.items);
-  return _Map_clear(self.seen);
-}
-function CollectingSink_save(self) {
-  return List_len(self.items);
+function CollectingSink_report(self, d) {
+  const key = diag_key(d);
+  if ((!_Map_contains_key(self.seen, key))) {
+    _Map_insert(self.seen, key, true);
+    return List_push(self.items, d);
+  }
 }
 function CollectingSink_restore(self, checkpoint) {
   self.items = List_slice(self.items, 0, checkpoint);
@@ -348,13 +345,12 @@ function CollectingSink_restore(self, checkpoint) {
     _Map_insert(self.seen, diag_key(d), true);
   }
 }
+function CollectingSink_save(self) {
+  return List_len(self.items);
+}
 
-function __CollectingSink_DiagnosticSink_report(self, d) {
-  const key = diag_key(d);
-  if ((!_Map_contains_key(self.seen, key))) {
-    _Map_insert(self.seen, key, true);
-    return List_push(self.items, d);
-  }
+function __CollectingSink_DiagnosticSink_get_diagnostics(self) {
+  return self.items;
 }
 function __CollectingSink_DiagnosticSink_has_errors(self) {
   return self.items.some((function(d) {
@@ -371,10 +367,14 @@ function __CollectingSink_DiagnosticSink_has_errors(self) {
   return __ring_blk1;
 }));
 }
-function __CollectingSink_DiagnosticSink_get_diagnostics(self) {
-  return self.items;
+function __CollectingSink_DiagnosticSink_report(self, d) {
+  const key = diag_key(d);
+  if ((!_Map_contains_key(self.seen, key))) {
+    _Map_insert(self.seen, key, true);
+    return List_push(self.items, d);
+  }
 }
-const __CollectingSink_DiagnosticSink = { report: __CollectingSink_DiagnosticSink_report, has_errors: __CollectingSink_DiagnosticSink_has_errors, get_diagnostics: __CollectingSink_DiagnosticSink_get_diagnostics };
+const __CollectingSink_DiagnosticSink = { get_diagnostics: __CollectingSink_DiagnosticSink_get_diagnostics, has_errors: __CollectingSink_DiagnosticSink_has_errors, report: __CollectingSink_DiagnosticSink_report };
 
 function diag_key(d) {
   return `${d.code}@${d.span.file}:${d.span.start.offset}`;

@@ -13,7 +13,7 @@ use lexer::{TokenKind, Token, Lexer, new_lexer, token_kind_value}
 use diagnostics::{CollectingSink, Severity, DiagnosticContext, new_collecting_sink, make_diag, make_diagnostic}
 use codes::{E0101, E0103, E0104, E0105, E0106, E0706, W0002}
 
-extern fn __ring_raise_fail(msg: Str) -> Never
+extern fn __ring_raise_fail(msg: Str) -> Never with {fail}
 
 // ============================================================
 // Operator Precedence
