@@ -1028,17 +1028,26 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
     }
     __match_fail(__ring_m32);
   }
-  const has_imports = (function() {
-  const __ring_m = ctx.module_imports;
-  if (__ring_m._tag === "some") { const imports = __ring_m._0; return (List_len(imports) > 0); }
-  if (__ring_m._tag === "none") { return false; }
-  __match_fail(__ring_m);
-})();
+  let __ring_blk0;
+  __ring_match33: {
+    const __ring_m33 = ctx.module_imports;
+    if (__ring_m33._tag === "some") {
+      const imports = __ring_m33._0;
+      __ring_blk0 = (List_len(imports) > 0);
+      break __ring_match33;
+    }
+    if (__ring_m33._tag === "none") {
+      __ring_blk0 = false;
+      break __ring_match33;
+    }
+    __match_fail(__ring_m33);
+  }
+  const has_imports = __ring_blk0;
   if (has_imports) {
-    __ring_match33: {
-      const __ring_m33 = ctx.module_imports;
-      if (__ring_m33._tag === "some") {
-        const imports = __ring_m33._0;
+    __ring_match34: {
+      const __ring_m34 = ctx.module_imports;
+      if (__ring_m34._tag === "some") {
+        const imports = __ring_m34._0;
         const __ring_iter_28 = __List_Iterable.iter(imports);
         while (true) {
           const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
@@ -1046,12 +1055,12 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
           const imp = __ring_next_28._0;
           codegen_ctx$emit_raw(ctx, imp);
         }
-        break __ring_match33;
+        break __ring_match34;
       }
-      if (__ring_m33._tag === "none") {
-        break __ring_match33;
+      if (__ring_m34._tag === "none") {
+        break __ring_match34;
       }
-      __match_fail(__ring_m33);
+      __match_fail(__ring_m34);
     }
     const empty = "";
     codegen_ctx$emit_raw(ctx, empty);
@@ -1087,13 +1096,13 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
           const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
           if (__ring_next_31._tag === "none") break;
           const callee = __ring_next_31._0;
-          __ring_match34: {
-            const __ring_m34 = _Map_get(ctx.local_fn_effects, callee);
-            if (__ring_m34._tag === "some") {
-              const callee_effects = __ring_m34._0;
-              __ring_match35: {
-                const __ring_m35 = _Map_get(ctx.local_fn_effects, name);
-                if (__ring_m35._tag === "none") {
+          __ring_match35: {
+            const __ring_m35 = _Map_get(ctx.local_fn_effects, callee);
+            if (__ring_m35._tag === "some") {
+              const callee_effects = __ring_m35._0;
+              __ring_match36: {
+                const __ring_m36 = _Map_get(ctx.local_fn_effects, name);
+                if (__ring_m36._tag === "none") {
                   let effs = [];
                   const __ring_iter_32 = __List_Iterable.iter(callee_effects.effects);
                   while (true) {
@@ -1104,10 +1113,10 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
                   }
                   _Map_insert(ctx.local_fn_effects, name, new types$EffectRow(effs, Option_none));
                   changed = true;
-                  break __ring_match35;
+                  break __ring_match36;
                 }
-                if (__ring_m35._tag === "some") {
-                  const current = __ring_m35._0;
+                if (__ring_m36._tag === "some") {
+                  const current = __ring_m36._0;
                   const __ring_iter_33 = __List_Iterable.iter(callee_effects.effects);
                   while (true) {
                     const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
@@ -1129,16 +1138,16 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
                       changed = true;
                     }
                   }
-                  break __ring_match35;
+                  break __ring_match36;
                 }
-                __match_fail(__ring_m35);
+                __match_fail(__ring_m36);
               }
-              break __ring_match34;
+              break __ring_match35;
             }
-            if (__ring_m34._tag === "none") {
-              break __ring_match34;
+            if (__ring_m35._tag === "none") {
+              break __ring_match35;
             }
-            __match_fail(__ring_m34);
+            __match_fail(__ring_m35);
           }
         }
       }
@@ -1184,16 +1193,16 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
       if (__ring_next_38._tag === "none") break;
       const method_name = __ring_next_38._0;
       const key = `${codegen_ctx$qualify(ctx, impl_.type_name)}.${method_name}`;
-      __ring_match36: {
-        const __ring_m36 = _Map_get(ctx.impl_methods, key);
-        if (__ring_m36._tag === "none") {
+      __ring_match37: {
+        const __ring_m37 = _Map_get(ctx.impl_methods, key);
+        if (__ring_m37._tag === "none") {
           _Map_insert(ctx.impl_methods, key, Option_some(impl_.trait_name));
-          break __ring_match36;
+          break __ring_match37;
         }
-        if (__ring_m36._tag === "some") {
-          break __ring_match36;
+        if (__ring_m37._tag === "some") {
+          break __ring_match37;
         }
-        __match_fail(__ring_m36);
+        __match_fail(__ring_m37);
       }
     }
   }
@@ -1242,10 +1251,10 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
       const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
       if (__ring_next_43._tag === "none") break;
       const decl = __ring_next_43._0;
-      __ring_match37: {
-        const __ring_m37 = decl;
-        if (__ring_m37._tag === "Fn") {
-          const name = __ring_m37.name; const effects = __ring_m37.effects;
+      __ring_match38: {
+        const __ring_m38 = decl;
+        if (__ring_m38._tag === "Fn") {
+          const name = __ring_m38.name; const effects = __ring_m38.effects;
           if ((name === "main")) {
             const fn_name = codegen_ctx$qualify(ctx, "main");
             const ev_params = codegen_ctx$get_evidence_params(effects);
@@ -1257,27 +1266,27 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
               codegen_ctx$emit(ctx, `${fn_name}();`);
             }
           }
-          break __ring_match37;
+          break __ring_match38;
         }
-        break __ring_match37;
+        break __ring_match38;
       }
     }
   }
-  __ring_match38: {
-    const __ring_m38 = ctx.module_exports;
-    if (__ring_m38._tag === "some") {
-      const exports = __ring_m38._0;
+  __ring_match39: {
+    const __ring_m39 = ctx.module_exports;
+    if (__ring_m39._tag === "some") {
+      const exports = __ring_m39._0;
       if ((List_len(exports) > 0)) {
         codegen_ctx$emit_raw(ctx, "");
         const joined = List_join(exports, ", ");
         codegen_ctx$emit_raw(ctx, `export { ${joined} };`);
       }
-      break __ring_match38;
+      break __ring_match39;
     }
-    if (__ring_m38._tag === "none") {
-      break __ring_match38;
+    if (__ring_m39._tag === "none") {
+      break __ring_match39;
     }
-    __match_fail(__ring_m38);
+    __match_fail(__ring_m39);
   }
   return List_join(ctx.lines, "\n");
 }

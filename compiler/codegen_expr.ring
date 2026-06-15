@@ -152,8 +152,8 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
         // expression through transparently for exhaustiveness.
         HExpr::Clone { inner, .. } => gen_expr(ctx, inner),
         // B-113: return in match arm expression position — emit as JS return statement.
-        // This arm produces a statement-level `return`, so the surrounding gen_match
-        // must use the labeled-block pattern (match_contains_return detects it).
+        // gen_match always uses the labeled-block pattern (B-055), so return in arm
+        // bodies is handled by emit_branch_as_assign.
         HExpr::ReturnExpr { value, .. } => match value {
             some(v) => {
                 let v_js = gen_expr(ctx, v)
@@ -884,100 +884,54 @@ fn gen_named_variant_construct(mut ctx: CodegenCtx, enum_name: Str, variant_name
 // Match expression (expression-mode — IIFE)
 // ============================================================
 
-fn match_contains_return(arms: List<HMatchArm>) -> Bool {
-    for arm in arms {
-        if expr_contains_return(arm.body) { return true }
-    }
-    false
-}
-
 fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> Str {
-    // When any arm body contains `return`, use labeled-block + temp variable
-    // instead of IIFE, to avoid capturing the return.
-    if match_contains_return(arms) {
-        let tmp = "__ring_blk${ctx.block_counter}"
-        ctx.block_counter = ctx.block_counter + 1
-        let label = "__ring_match${ctx.match_counter}"
-        ctx.match_counter = ctx.match_counter + 1
-        let scrut_js = gen_expr(ctx, scrutinee)
-        emit(ctx, "let ${tmp};")
-        emit(ctx, "${label}: {")
-        push_indent(ctx)
-        let scrut_var = "__ring_m${ctx.match_counter - 1}"
-        emit(ctx, "const ${scrut_var} = ${scrut_js};")
+    // B-055: All match expressions use labeled-block + temp variable pattern.
+    // No IIFE — avoids closure allocation.  The emitted statements go into
+    // ctx.lines; callers that build string expressions (gen_lambda, etc.)
+    // save/restore ctx.lines to capture them.
+    let tmp = "__ring_blk${ctx.block_counter}"
+    ctx.block_counter = ctx.block_counter + 1
+    let label = "__ring_match${ctx.match_counter}"
+    ctx.match_counter = ctx.match_counter + 1
+    let scrut_js = gen_expr(ctx, scrutinee)
+    emit(ctx, "let ${tmp};")
+    emit(ctx, "${label}: {")
+    push_indent(ctx)
+    let scrut_var = "__ring_m${ctx.match_counter - 1}"
+    emit(ctx, "const ${scrut_var} = ${scrut_js};")
 
-        for arm in arms {
-            let cond = gen_pattern_condition(ctx, scrut_var, arm.pattern)
-            let bindings_str = gen_pattern_bindings(ctx, scrut_var, arm.pattern)
-            match arm.guard {
-                none => {
-                    if cond == "true" {
-                        if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
-                        emit_branch_as_assign(ctx, arm.body, tmp)
-                        emit(ctx, "break ${label};")
-                    } else {
-                        emit(ctx, "if (${cond}) {")
-                        push_indent(ctx)
-                        if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
-                        emit_branch_as_assign(ctx, arm.body, tmp)
-                        emit(ctx, "break ${label};")
-                        pop_indent(ctx)
-                        emit(ctx, "}")
-                    }
-                },
-                some(guard) => {
+    for arm in arms {
+        let cond = gen_pattern_condition(ctx, scrut_var, arm.pattern)
+        let bindings_str = gen_pattern_bindings(ctx, scrut_var, arm.pattern)
+        match arm.guard {
+            none => {
+                if cond == "true" {
+                    if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
+                    emit_branch_as_assign(ctx, arm.body, tmp)
+                    emit(ctx, "break ${label};")
+                } else {
                     emit(ctx, "if (${cond}) {")
                     push_indent(ctx)
                     if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
-                    let guard_js = gen_expr(ctx, guard)
-                    emit(ctx, "if (${guard_js}) {")
-                    push_indent(ctx)
                     emit_branch_as_assign(ctx, arm.body, tmp)
                     emit(ctx, "break ${label};")
                     pop_indent(ctx)
                     emit(ctx, "}")
-                    pop_indent(ctx)
-                    emit(ctx, "}")
-                },
-            }
-        }
-
-        let mut has_catchall = false
-        for a in arms {
-            match a.guard { some(_) => {}, none => {
-                if pattern_is_catchall(a.pattern) { has_catchall = true }
-            }}
-        }
-        if has_catchall == false {
-            let mf = RUNTIME_MATCH_FAIL
-            emit(ctx, "${mf}(${scrut_var});")
-        }
-
-        pop_indent(ctx)
-        emit(ctx, "}")
-        return tmp
-    }
-
-    let scrut = gen_expr(ctx, scrutinee)
-    let mut parts: List<Str> = []
-    parts.push("(function() {")
-    parts.push("  const __ring_m = ${scrut};")
-
-    for arm in arms {
-        let cond = gen_pattern_condition(ctx, "__ring_m", arm.pattern)
-        let bindings = gen_pattern_bindings(ctx, "__ring_m", arm.pattern)
-        let body = gen_expr(ctx, arm.body)
-        match arm.guard {
-            none => {
-                if cond == "true" {
-                    parts.push("  ${bindings}return ${body};")
-                } else {
-                    parts.push("  if (${cond}) { ${bindings}return ${body}; }")
                 }
             },
-            some(g) => {
-                let guard_js = gen_expr(ctx, g)
-                parts.push("  if (${cond}) { ${bindings}if (${guard_js}) { return ${body}; } }")
+            some(guard) => {
+                emit(ctx, "if (${cond}) {")
+                push_indent(ctx)
+                if bindings_str.len() > 0 { emit(ctx, bindings_str.trim()) }
+                let guard_js = gen_expr(ctx, guard)
+                emit(ctx, "if (${guard_js}) {")
+                push_indent(ctx)
+                emit_branch_as_assign(ctx, arm.body, tmp)
+                emit(ctx, "break ${label};")
+                pop_indent(ctx)
+                emit(ctx, "}")
+                pop_indent(ctx)
+                emit(ctx, "}")
             },
         }
     }
@@ -990,11 +944,12 @@ fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> St
     }
     if has_catchall == false {
         let mf = RUNTIME_MATCH_FAIL
-        parts.push("  ${mf}(__ring_m);")
+        emit(ctx, "${mf}(${scrut_var});")
     }
 
-    parts.push("})()")
-    parts.join("\n")
+    pop_indent(ctx)
+    emit(ctx, "}")
+    tmp
 }
 
 // ============================================================
@@ -1318,28 +1273,99 @@ fn gen_catch_pattern_condition(ctx: CodegenCtx, target: Str, pat: Pattern) -> St
 fn gen_try_catch(mut ctx: CodegenCtx, body: HExpr, arms: List<HMatchArm>) -> Str {
     let saved_in_try = ctx.in_try_fail
     ctx.in_try_fail = true
+    // B-055: Save/restore to capture emit()-based expressions in try body
+    let saved_lines_body = ctx.lines
+    let saved_indent_body = ctx.indent_level
+    ctx.lines = []
+    ctx.indent_level = 2
     let body_js = gen_expr(ctx, body)
+    let body_extra_lines = ctx.lines
+    ctx.lines = saved_lines_body
+    ctx.indent_level = saved_indent_body
     ctx.in_try_fail = saved_in_try
 
     let ev = evidence_param_name("fail")
     let ea = RUNTIME_EFFECT_ABORT
     let q = "\""
 
-    // Generate arm code
-    let mut arm_js: List<Str> = []
+    // Generate arm code — each arm may emit statements (B-055)
+    let mut arm_conds: List<Str> = []
+    let mut arm_bindings_list: List<Str> = []
+    let mut arm_body_jss: List<Str> = []
+    let mut arm_body_lines_list: List<List<Str>> = []
+    let mut arm_guard_jss: List<Str> = []
     for arm in arms {
         let cond = gen_catch_pattern_condition(ctx, "__ring_err", arm.pattern)
         let bindings = gen_pattern_bindings(ctx, "__ring_err", arm.pattern)
+        let saved_a = ctx.lines
+        let saved_ai = ctx.indent_level
+        ctx.lines = []
+        ctx.indent_level = 2
         let arm_body_js = gen_expr(ctx, arm.body)
+        let arm_body_lines = ctx.lines
+        ctx.lines = saved_a
+        ctx.indent_level = saved_ai
 
-        // Check for guard
         let mut guard_js = ""
         match arm.guard {
             some(g) => { guard_js = " && (${gen_expr(ctx, g)})" },
             none => {}
         }
 
-        arm_js.push("if (${cond}${guard_js}) { ${bindings}return ${arm_body_js}; }")
+        arm_conds.push(cond)
+        arm_bindings_list.push(bindings)
+        arm_body_jss.push(arm_body_js)
+        arm_body_lines_list.push(arm_body_lines)
+        arm_guard_jss.push(guard_js)
+    }
+
+    // Check if any arm or body emitted extra lines — if so, use multi-line format
+    let mut has_extra = body_extra_lines.len() > 0
+    if !has_extra {
+        for abl in arm_body_lines_list {
+            if abl.len() > 0 { has_extra = true }
+        }
+    }
+
+    if has_extra {
+        // Multi-line format to accommodate emitted statements
+        let mut r: List<Str> = []
+        r.push("(function() {")
+        r.push("  const ${ev} = { raise: (__ring_err) => { throw new ${ea}(${q}fail${q}, __ring_err); } };")
+        r.push("  try {")
+        r.extend(body_extra_lines)
+        r.push("    return ${body_js};")
+        r.push("  } catch (__ring_e) {")
+        r.push("    if (__ring_e instanceof ${ea} && __ring_e.effect === ${q}fail${q}) {")
+        r.push("      const __ring_err = __ring_e.value;")
+        for i in 0..arm_conds.len() {
+            let lines = arm_body_lines_list[i]
+            let cond_s = arm_conds[i]
+            let bind_s = arm_bindings_list[i]
+            let bodyj_s = arm_body_jss[i]
+            let guardj_s = arm_guard_jss[i]
+            if lines.len() > 0 {
+                r.push("      if (${cond_s}${guardj_s}) {")
+                r.push("        ${bind_s}")
+                r.extend(lines)
+                r.push("        return ${bodyj_s};")
+                r.push("      }")
+            } else {
+                r.push("      if (${cond_s}${guardj_s}) { ${bind_s}return ${bodyj_s}; }")
+            }
+        }
+        r.push("      throw __ring_e;")
+        r.push("    }")
+        r.push("    throw __ring_e;")
+        r.push("  }")
+        r.push("})()")
+        return r.join("\n")
+    }
+
+    // Compact single-line format (no emitted statements)
+    let mut arm_js: List<Str> = []
+    for i in 0..arm_conds.len() {
+        arm_js.push("if (${arm_conds[i]}${arm_guard_jss[i]}) { ${arm_bindings_list[i]}return ${arm_body_jss[i]}; }")
     }
 
     let mut p: List<Str> = []
@@ -1413,15 +1439,41 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
             let mut params: List<Str> = []
             for p in h.params { params.push(safe_ident(p.name)) }
             let params_str = params.join(", ")
+            // B-055: Save/restore to capture emit()-based expressions in handler body
+            let saved_hb = ctx.lines
+            let saved_hbi = ctx.indent_level
+            ctx.lines = []
+            ctx.indent_level = 1
             let b = gen_expr(ctx, h.body)
+            let hb_lines = ctx.lines
+            ctx.lines = saved_hb
+            ctx.indent_level = saved_hbi
             let is_abort = effect_name == "fail" && h.op_name == "raise"
             if is_abort {
                 has_abort = true
                 abort_effect_names.push(effect_name)
                 let ea = RUNTIME_EFFECT_ABORT
-                ev_decls.push("${ev_name}.${h.op_name} = (${params_str}) => { throw new ${ea}(${q}${effect_name}${q}, ${b}); };")
+                if hb_lines.len() > 0 {
+                    let mut hb_parts: List<Str> = []
+                    hb_parts.push("${ev_name}.${h.op_name} = (${params_str}) => {")
+                    hb_parts.extend(hb_lines)
+                    hb_parts.push("  throw new ${ea}(${q}${effect_name}${q}, ${b});")
+                    hb_parts.push("};")
+                    ev_decls.push(hb_parts.join("\n"))
+                } else {
+                    ev_decls.push("${ev_name}.${h.op_name} = (${params_str}) => { throw new ${ea}(${q}${effect_name}${q}, ${b}); };")
+                }
             } else {
-                ev_decls.push("${ev_name}.${h.op_name} = (${params_str}) => (${b});")
+                if hb_lines.len() > 0 {
+                    let mut hb_parts: List<Str> = []
+                    hb_parts.push("${ev_name}.${h.op_name} = (${params_str}) => {")
+                    hb_parts.extend(hb_lines)
+                    hb_parts.push("  return ${b};")
+                    hb_parts.push("};")
+                    ev_decls.push(hb_parts.join("\n"))
+                } else {
+                    ev_decls.push("${ev_name}.${h.op_name} = (${params_str}) => (${b});")
+                }
             }
         }
         // Merge default bodies for unhandled ops (#72)
@@ -1434,8 +1486,25 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
                                 let mut dparams: List<Str> = []
                                 for p in op.params { dparams.push(safe_ident(p.name)) }
                                 let dparams_str = dparams.join(", ")
+                                // B-055: Save/restore for default handler body
+                                let saved_db = ctx.lines
+                                let saved_dbi = ctx.indent_level
+                                ctx.lines = []
+                                ctx.indent_level = 1
                                 let db = gen_expr(ctx, dbody)
-                                ev_decls.push("${ev_name}.${safe_ident(op.name)} = (${dparams_str}) => (${db});")
+                                let db_lines = ctx.lines
+                                ctx.lines = saved_db
+                                ctx.indent_level = saved_dbi
+                                if db_lines.len() > 0 {
+                                    let mut db_parts: List<Str> = []
+                                    db_parts.push("${ev_name}.${safe_ident(op.name)} = (${dparams_str}) => {")
+                                    db_parts.extend(db_lines)
+                                    db_parts.push("  return ${db};")
+                                    db_parts.push("};")
+                                    ev_decls.push(db_parts.join("\n"))
+                                } else {
+                                    ev_decls.push("${ev_name}.${safe_ident(op.name)} = (${dparams_str}) => (${db});")
+                                }
                             },
                             none => {},
                         }
@@ -1487,8 +1556,25 @@ fn gen_handle_body(mut ctx: CodegenCtx, expr: HExpr, ev_params: Str) -> Str {
             match tail {
                 some(t) => {
                     if stmts.len() == 0 {
+                        // B-055: Save/restore to capture emit()-based match/if in handle body
+                        let saved_lines = ctx.lines
+                        let saved_indent = ctx.indent_level
+                        ctx.lines = []
+                        ctx.indent_level = 1
                         let b = gen_expr(ctx, t)
-                        return "(function(${ev_params}) { return ${b}; })(${ev_params})"
+                        let inner_lines = ctx.lines
+                        ctx.lines = saved_lines
+                        ctx.indent_level = saved_indent
+                        if inner_lines.len() == 0 {
+                            return "(function(${ev_params}) { return ${b}; })(${ev_params})"
+                        } else {
+                            let mut r: List<Str> = []
+                            r.push("(function(${ev_params}) {")
+                            r.extend(inner_lines)
+                            r.push("  return ${b};")
+                            r.push("})(${ev_params})")
+                            return r.join("\n")
+                        }
                     }
                 },
                 none => {},
@@ -1508,8 +1594,25 @@ fn gen_handle_body(mut ctx: CodegenCtx, expr: HExpr, ev_params: Str) -> Str {
             result.join("\n")
         },
         _ => {
+            // B-055: Save/restore to capture emit()-based match/if in handle body
+            let saved_lines = ctx.lines
+            let saved_indent = ctx.indent_level
+            ctx.lines = []
+            ctx.indent_level = 1
             let b = gen_expr(ctx, expr)
-            "(function(${ev_params}) { return ${b}; })(${ev_params})"
+            let inner_lines = ctx.lines
+            ctx.lines = saved_lines
+            ctx.indent_level = saved_indent
+            if inner_lines.len() == 0 {
+                "(function(${ev_params}) { return ${b}; })(${ev_params})"
+            } else {
+                let mut r: List<Str> = []
+                r.push("(function(${ev_params}) {")
+                r.extend(inner_lines)
+                r.push("  return ${b};")
+                r.push("})(${ev_params})")
+                r.join("\n")
+            }
         },
     }
 }
@@ -1530,8 +1633,28 @@ fn gen_lambda(mut ctx: CodegenCtx, params: List<HParam>, body: HExpr, ty: Type) 
     all.extend(p_names)
     all.extend(ev_params)
     let all_str = all.join(", ")
+    // B-055: Save/restore ctx.lines so that emit()-based expressions
+    // (match labeled-block, if-with-return, block-with-return) inside
+    // the lambda body are captured into the lambda function body rather
+    // than leaking to the enclosing scope.
+    let saved_lines = ctx.lines
+    let saved_indent = ctx.indent_level
+    ctx.lines = []
+    ctx.indent_level = 1
     let b = gen_expr(ctx, body)
-    "(function(${all_str}) { return ${b}; })"
+    let body_lines = ctx.lines
+    ctx.lines = saved_lines
+    ctx.indent_level = saved_indent
+    if body_lines.len() == 0 {
+        "(function(${all_str}) { return ${b}; })"
+    } else {
+        let mut result: List<Str> = []
+        result.push("(function(${all_str}) {")
+        result.extend(body_lines)
+        result.push("  return ${b};")
+        result.push("})")
+        result.join("\n")
+    }
 }
 
 fn gen_lambda_capture_evidence(mut ctx: CodegenCtx, args: List<HExpr>, idx: Int) -> Str {
@@ -1541,8 +1664,25 @@ fn gen_lambda_capture_evidence(mut ctx: CodegenCtx, args: List<HExpr>, idx: Int)
                 let mut p_names: List<Str> = []
                 for p in params { p_names.push(safe_ident(p.name)) }
                 let params_str = p_names.join(", ")
+                // B-055: Save/restore to capture emit()-based expressions in lambda body
+                let saved_lines = ctx.lines
+                let saved_indent = ctx.indent_level
+                ctx.lines = []
+                ctx.indent_level = 1
                 let b = gen_expr(ctx, body)
-                "(function(${params_str}) { return ${b}; })"
+                let body_lines = ctx.lines
+                ctx.lines = saved_lines
+                ctx.indent_level = saved_indent
+                if body_lines.len() == 0 {
+                    "(function(${params_str}) { return ${b}; })"
+                } else {
+                    let mut result: List<Str> = []
+                    result.push("(function(${params_str}) {")
+                    result.extend(body_lines)
+                    result.push("  return ${b};")
+                    result.push("})")
+                    result.join("\n")
+                }
             },
             _ => {
                 let fn_expr = gen_expr(ctx, arg)

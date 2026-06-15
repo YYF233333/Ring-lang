@@ -292,59 +292,51 @@ function uf_union(uf, a, b) {
   if ((ra === rb)) {
     return;
   }
-  const rank_a = (function() {
-  const __ring_m = _Map_get(uf.rank, ra);
-  if (__ring_m._tag === "some") { const r = __ring_m._0; return r; }
-  if (__ring_m._tag === "none") { return 0; }
-  __match_fail(__ring_m);
-})();
-  const rank_b = (function() {
-  const __ring_m = _Map_get(uf.rank, rb);
-  if (__ring_m._tag === "some") { const r = __ring_m._0; return r; }
-  if (__ring_m._tag === "none") { return 0; }
-  __match_fail(__ring_m);
-})();
+  let __ring_blk0;
+  __ring_match7: {
+    const __ring_m7 = _Map_get(uf.rank, ra);
+    if (__ring_m7._tag === "some") {
+      const r = __ring_m7._0;
+      __ring_blk0 = r;
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "none") {
+      __ring_blk0 = 0;
+      break __ring_match7;
+    }
+    __match_fail(__ring_m7);
+  }
+  const rank_a = __ring_blk0;
+  let __ring_blk1;
+  __ring_match8: {
+    const __ring_m8 = _Map_get(uf.rank, rb);
+    if (__ring_m8._tag === "some") {
+      const r = __ring_m8._0;
+      __ring_blk1 = r;
+      break __ring_match8;
+    }
+    if (__ring_m8._tag === "none") {
+      __ring_blk1 = 0;
+      break __ring_match8;
+    }
+    __match_fail(__ring_m8);
+  }
+  const rank_b = __ring_blk1;
   if ((rank_a < rank_b)) {
     _Map_insert(uf.parent, ra, rb);
-    __ring_match7: {
-      const __ring_m7 = _Map_get(uf.types, ra);
-      if (__ring_m7._tag === "some") {
-        const ty = __ring_m7._0;
-        __ring_match8: {
-          const __ring_m8 = _Map_get(uf.types, rb);
-          if (__ring_m8._tag === "none") {
-            return _Map_insert(uf.types, rb, ty);
-            break __ring_match8;
-          }
-          if (__ring_m8._tag === "some") {
-            const existing = __ring_m8._0;
-            return panic("unreachable: uf_union both nodes have type bindings");
-            break __ring_match8;
-          }
-          __match_fail(__ring_m8);
-        }
-        break __ring_match7;
-      }
-      if (__ring_m7._tag === "none") {
-        break __ring_match7;
-      }
-      __match_fail(__ring_m7);
-    }
-  } else {
-    _Map_insert(uf.parent, rb, ra);
     __ring_match9: {
-      const __ring_m9 = _Map_get(uf.types, rb);
+      const __ring_m9 = _Map_get(uf.types, ra);
       if (__ring_m9._tag === "some") {
         const ty = __ring_m9._0;
         __ring_match10: {
-          const __ring_m10 = _Map_get(uf.types, ra);
+          const __ring_m10 = _Map_get(uf.types, rb);
           if (__ring_m10._tag === "none") {
-            _Map_insert(uf.types, ra, ty);
+            return _Map_insert(uf.types, rb, ty);
             break __ring_match10;
           }
           if (__ring_m10._tag === "some") {
             const existing = __ring_m10._0;
-            panic("unreachable: uf_union both nodes have type bindings");
+            return panic("unreachable: uf_union both nodes have type bindings");
             break __ring_match10;
           }
           __match_fail(__ring_m10);
@@ -355,6 +347,32 @@ function uf_union(uf, a, b) {
         break __ring_match9;
       }
       __match_fail(__ring_m9);
+    }
+  } else {
+    _Map_insert(uf.parent, rb, ra);
+    __ring_match11: {
+      const __ring_m11 = _Map_get(uf.types, rb);
+      if (__ring_m11._tag === "some") {
+        const ty = __ring_m11._0;
+        __ring_match12: {
+          const __ring_m12 = _Map_get(uf.types, ra);
+          if (__ring_m12._tag === "none") {
+            _Map_insert(uf.types, ra, ty);
+            break __ring_match12;
+          }
+          if (__ring_m12._tag === "some") {
+            const existing = __ring_m12._0;
+            panic("unreachable: uf_union both nodes have type bindings");
+            break __ring_match12;
+          }
+          __match_fail(__ring_m12);
+        }
+        break __ring_match11;
+      }
+      if (__ring_m11._tag === "none") {
+        break __ring_match11;
+      }
+      __match_fail(__ring_m11);
     }
     if ((rank_a === rank_b)) {
       return _Map_insert(uf.rank, ra, (rank_a + 1));

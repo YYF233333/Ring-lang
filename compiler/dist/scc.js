@@ -628,21 +628,30 @@ function collect_decl_edges(decl, registered_fns, graph, impl_node) {
     const __ring_m19 = decl;
     if (__ring_m19._tag === "Fn") {
       const name = __ring_m19.name; const body = __ring_m19.body;
-      const caller = (function() {
-  const __ring_m = impl_node;
-  if (__ring_m._tag === "some") { const inode = __ring_m._0; return inode; }
-  if (__ring_m._tag === "none") { return name; }
-  __match_fail(__ring_m);
-})();
+      let __ring_blk0;
+      __ring_match20: {
+        const __ring_m20 = impl_node;
+        if (__ring_m20._tag === "some") {
+          const inode = __ring_m20._0;
+          __ring_blk0 = inode;
+          break __ring_match20;
+        }
+        if (__ring_m20._tag === "none") {
+          __ring_blk0 = name;
+          break __ring_match20;
+        }
+        __match_fail(__ring_m20);
+      }
+      const caller = __ring_blk0;
       if ((!_Map_contains_key(graph, caller))) {
         _Map_insert(graph, caller, []);
       }
       let edges = set_new();
       collect_expr_callees(body, registered_fns, edges);
-      __ring_match20: {
-        const __ring_m20 = _Map_get(graph, caller);
-        if (__ring_m20._tag === "some") {
-          const existing = __ring_m20._0;
+      __ring_match21: {
+        const __ring_m21 = _Map_get(graph, caller);
+        if (__ring_m21._tag === "some") {
+          const existing = __ring_m21._0;
           const __ring_iter_13 = ___Set_Iterable.iter(edges);
           while (true) {
             const __ring_next_13 = __SetIterator_Iterator.next(__ring_iter_13);
@@ -652,9 +661,9 @@ function collect_decl_edges(decl, registered_fns, graph, impl_node) {
               List_push(existing, e);
             }
           }
-          break __ring_match20;
+          break __ring_match21;
         }
-        if (__ring_m20._tag === "none") {
+        if (__ring_m21._tag === "none") {
           let edge_list = [];
           const __ring_iter_14 = ___Set_Iterable.iter(edges);
           while (true) {
@@ -666,20 +675,29 @@ function collect_decl_edges(decl, registered_fns, graph, impl_node) {
             }
           }
           return _Map_insert(graph, caller, edge_list);
-          break __ring_match20;
+          break __ring_match21;
         }
-        __match_fail(__ring_m20);
+        __match_fail(__ring_m21);
       }
       break __ring_match19;
     }
     if (__ring_m19._tag === "Impl") {
       const target_type = __ring_m19.target_type; const trait_name = __ring_m19.trait_name; const methods = __ring_m19.methods;
-      const inode = (function() {
-  const __ring_m = trait_name;
-  if (__ring_m._tag === "some") { const tn = __ring_m._0; return `impl::${target_type}::${tn}`; }
-  if (__ring_m._tag === "none") { return `impl::${target_type}`; }
-  __match_fail(__ring_m);
-})();
+      let __ring_blk1;
+      __ring_match22: {
+        const __ring_m22 = trait_name;
+        if (__ring_m22._tag === "some") {
+          const tn = __ring_m22._0;
+          __ring_blk1 = `impl::${target_type}::${tn}`;
+          break __ring_match22;
+        }
+        if (__ring_m22._tag === "none") {
+          __ring_blk1 = `impl::${target_type}`;
+          break __ring_match22;
+        }
+        __match_fail(__ring_m22);
+      }
+      const inode = __ring_blk1;
       if ((!_Map_contains_key(graph, inode))) {
         _Map_insert(graph, inode, []);
       }
@@ -735,56 +753,83 @@ function collect_fn_names_from_decls(decls, names, mod_prefix) {
     const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
     if (__ring_next_19._tag === "none") break;
     const decl = __ring_next_19._0;
-    __ring_match21: {
-      const __ring_m21 = decl;
-      if (__ring_m21._tag === "Fn") {
-        const name = __ring_m21.name;
-        const full_name = (function() {
-  const __ring_m = mod_prefix;
-  if (__ring_m._tag === "some") { const p = __ring_m._0; return `${p}::${name}`; }
-  if (__ring_m._tag === "none") { return name; }
-  __match_fail(__ring_m);
-})();
+    __ring_match23: {
+      const __ring_m23 = decl;
+      if (__ring_m23._tag === "Fn") {
+        const name = __ring_m23.name;
+        let __ring_blk2;
+        __ring_match24: {
+          const __ring_m24 = mod_prefix;
+          if (__ring_m24._tag === "some") {
+            const p = __ring_m24._0;
+            __ring_blk2 = `${p}::${name}`;
+            break __ring_match24;
+          }
+          if (__ring_m24._tag === "none") {
+            __ring_blk2 = name;
+            break __ring_match24;
+          }
+          __match_fail(__ring_m24);
+        }
+        const full_name = __ring_blk2;
         _Set_insert(names, full_name);
-        break __ring_match21;
+        break __ring_match23;
       }
-      if (__ring_m21._tag === "Impl") {
-        const methods = __ring_m21.methods;
+      if (__ring_m23._tag === "Impl") {
+        const methods = __ring_m23.methods;
         const __ring_iter_20 = __List_Iterable.iter(methods);
         while (true) {
           const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
           if (__ring_next_20._tag === "none") break;
           const method = __ring_next_20._0;
-          __ring_match22: {
-            const __ring_m22 = method;
-            if (__ring_m22._tag === "Fn") {
-              const mname = __ring_m22.name;
-              const full_name = (function() {
-  const __ring_m = mod_prefix;
-  if (__ring_m._tag === "some") { const p = __ring_m._0; return `${p}::${mname}`; }
-  if (__ring_m._tag === "none") { return mname; }
-  __match_fail(__ring_m);
-})();
+          __ring_match25: {
+            const __ring_m25 = method;
+            if (__ring_m25._tag === "Fn") {
+              const mname = __ring_m25.name;
+              let __ring_blk3;
+              __ring_match26: {
+                const __ring_m26 = mod_prefix;
+                if (__ring_m26._tag === "some") {
+                  const p = __ring_m26._0;
+                  __ring_blk3 = `${p}::${mname}`;
+                  break __ring_match26;
+                }
+                if (__ring_m26._tag === "none") {
+                  __ring_blk3 = mname;
+                  break __ring_match26;
+                }
+                __match_fail(__ring_m26);
+              }
+              const full_name = __ring_blk3;
               _Set_insert(names, full_name);
-              break __ring_match22;
+              break __ring_match25;
             }
-            break __ring_match22;
+            break __ring_match25;
           }
         }
-        break __ring_match21;
+        break __ring_match23;
       }
-      if (__ring_m21._tag === "ModBlock") {
-        const mod_name = __ring_m21.name; const mod_decls = __ring_m21.decls;
-        const prefix = (function() {
-  const __ring_m = mod_prefix;
-  if (__ring_m._tag === "some") { const p = __ring_m._0; return `${p}::${mod_name}`; }
-  if (__ring_m._tag === "none") { return mod_name; }
-  __match_fail(__ring_m);
-})();
+      if (__ring_m23._tag === "ModBlock") {
+        const mod_name = __ring_m23.name; const mod_decls = __ring_m23.decls;
+        let __ring_blk4;
+        __ring_match27: {
+          const __ring_m27 = mod_prefix;
+          if (__ring_m27._tag === "some") {
+            const p = __ring_m27._0;
+            __ring_blk4 = `${p}::${mod_name}`;
+            break __ring_match27;
+          }
+          if (__ring_m27._tag === "none") {
+            __ring_blk4 = mod_name;
+            break __ring_match27;
+          }
+          __match_fail(__ring_m27);
+        }
+        const prefix = __ring_blk4;
         collect_fn_names_from_decls(mod_decls, names, Option_some(prefix));
-        break __ring_match21;
+        break __ring_match23;
       }
-      break __ring_match21;
+      break __ring_match23;
     }
   }
 }
@@ -802,12 +847,21 @@ function tarjan_strongconnect(v, graph, index_counter, stack, on_stack, indices,
   _Map_insert(lowlinks, v, v_index);
   List_push(stack, v);
   _Set_insert(on_stack, v);
-  const successors = (function() {
-  const __ring_m = _Map_get(graph, v);
-  if (__ring_m._tag === "some") { const s = __ring_m._0; return s; }
-  if (__ring_m._tag === "none") { return []; }
-  __match_fail(__ring_m);
-})();
+  let __ring_blk5;
+  __ring_match28: {
+    const __ring_m28 = _Map_get(graph, v);
+    if (__ring_m28._tag === "some") {
+      const s = __ring_m28._0;
+      __ring_blk5 = s;
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "none") {
+      __ring_blk5 = [];
+      break __ring_match28;
+    }
+    __match_fail(__ring_m28);
+  }
+  const successors = __ring_blk5;
   const __ring_iter_21 = __List_Iterable.iter(successors);
   while (true) {
     const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
@@ -836,22 +890,22 @@ function tarjan_strongconnect(v, graph, index_counter, stack, on_stack, indices,
     let scc = [];
     let done = false;
     while ((!done)) {
-      __ring_match23: {
-        const __ring_m23 = List_pop(stack);
-        if (__ring_m23._tag === "some") {
-          const w = __ring_m23._0;
+      __ring_match29: {
+        const __ring_m29 = List_pop(stack);
+        if (__ring_m29._tag === "some") {
+          const w = __ring_m29._0;
           _Set_remove(on_stack, w);
           List_push(scc, w);
           if ((w === v)) {
             done = true;
           }
-          break __ring_match23;
+          break __ring_match29;
         }
-        if (__ring_m23._tag === "none") {
+        if (__ring_m29._tag === "none") {
           done = true;
-          break __ring_match23;
+          break __ring_match29;
         }
-        __match_fail(__ring_m23);
+        __match_fail(__ring_m29);
       }
     }
     return List_push(result, scc);
