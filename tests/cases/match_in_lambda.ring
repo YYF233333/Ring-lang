@@ -69,5 +69,33 @@ fn main() {
     }
     assert(result, "nested match-in-lambda-in-match should find warning")
 
+    // match with guard inside lambda
+    let nums = [1, 2, 3, 10, 20]
+    let big_evens = nums.filter(fn(n) {
+        match n {
+            x if x > 5 => true,
+            _ => false,
+        }
+    })
+    assert(big_evens.len() == 2, "should have 2 big numbers")
+    assert(big_evens[0] == 10, "first big")
+    assert(big_evens[1] == 20, "second big")
+
+    // nested lambda: map that returns a lambda, each lambda uses match
+    let classifiers = [1, 2].map(fn(threshold) {
+        fn(val: Int) -> Str {
+            match val {
+                x if x > threshold => "above",
+                _ => "at-or-below",
+            }
+        }
+    })
+    let c0 = classifiers[0]  // threshold=1
+    let c1 = classifiers[1]  // threshold=2
+    assert(c0(2) == "above", "c0(2) should be above")
+    assert(c0(1) == "at-or-below", "c0(1) should be at-or-below")
+    assert(c1(3) == "above", "c1(3) should be above")
+    assert(c1(2) == "at-or-below", "c1(2) should be at-or-below")
+
     print("match_in_lambda: all tests passed")
 }

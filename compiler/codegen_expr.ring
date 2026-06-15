@@ -881,7 +881,7 @@ fn gen_named_variant_construct(mut ctx: CodegenCtx, enum_name: Str, variant_name
 }
 
 // ============================================================
-// Match expression (expression-mode — IIFE)
+// Match expression (expression-mode — labeled-block + temp variable, B-055)
 // ============================================================
 
 fn gen_match(mut ctx: CodegenCtx, scrutinee: HExpr, arms: List<HMatchArm>) -> Str {
