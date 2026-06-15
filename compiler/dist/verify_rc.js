@@ -359,38 +359,6 @@ function synthetic_vspan() {
   return new ast$Span("<verify-rc>", pos, pos);
 }
 
-function v_type_excluded(ty, externs) {
-  if (hir$is_rc_excluded_type(ty, externs)) {
-    return true;
-  } else {
-    if (perceus$is_unresolved_var_type(ty)) {
-      return true;
-    } else {
-      __ring_match6: {
-        const __ring_m6 = ty;
-        if (__ring_m6._tag === "NeverType") {
-          return true;
-          break __ring_match6;
-        }
-        return false;
-        break __ring_match6;
-      }
-    }
-  }
-}
-
-function v_cls_of_fresh(ty, externs) {
-  if (v_type_excluded(ty, externs)) {
-    return CLS_EXCLUDED;
-  } else {
-    if (hir$type_contains_extern_handle(ty, externs)) {
-      return CLS_EXCLUDED;
-    } else {
-      return CLS_OWNED;
-    }
-  }
-}
-
 function v_lookup(ctx, name) {
   let i = (List_len(ctx.names) - 1);
   let found = (0 - 1);
@@ -405,69 +373,6 @@ function v_lookup(ctx, name) {
 
 function v_report(ctx, _class, fatal, msg, span) {
   return List_push(ctx.findings, new RcFinding(_class, fatal, `in ${ctx.fn_name}: ${msg}`, ctx.fn_name, span));
-}
-
-function v_ident(name, ty, span, mode, ctx) {
-  if (v_type_excluded(ty, ctx.externs)) {
-    return CLS_EXCLUDED;
-  }
-  const idx = v_lookup(ctx, name);
-  if ((idx < 0)) {
-    return CLS_BORROW;
-  }
-  if ((__ring_index(ctx.kinds, idx) === K_OWNED)) {
-    if ((__ring_index(ctx.states, idx) === S_DROPPED)) {
-      v_report(ctx, "uaf-use-after-drop", true, `read of '${name}' after its Drop`, span);
-      return CLS_BORROW;
-    } else {
-      if ((__ring_index(ctx.states, idx) === S_MOVED)) {
-        v_report(ctx, "uaf-use-after-drop", true, `read of '${name}' after its value was moved out`, span);
-        return CLS_BORROW;
-      } else {
-        if ((mode === M_CONSUMED)) {
-          List_set(ctx.states, idx, S_MOVED);
-          return CLS_OWNED;
-        } else {
-          return CLS_BORROW;
-        }
-      }
-    }
-  } else {
-    if (((__ring_index(ctx.kinds, idx) === K_NONOWNED) ? (mode === M_CONSUMED) : false)) {
-      List_set(ctx.states, idx, S_MOVED);
-      return CLS_OPAQUE;
-    } else {
-      return CLS_BORROW;
-    }
-  }
-}
-
-function v_list_has_int(xs, x) {
-  let found = false;
-  const __ring_iter_4 = __List_Iterable.iter(xs);
-  while (true) {
-    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-    if (__ring_next_4._tag === "none") break;
-    const v = __ring_next_4._0;
-    if ((v === x)) {
-      found = true;
-    }
-  }
-  return found;
-}
-
-function v_new_ctx(boxed, externs, findings, label) {
-  const names = [];
-  const kinds = [];
-  const states = [];
-  const spans = [];
-  const frames = [];
-  const loop_bases = [];
-  return new VCtx(names, kinds, states, spans, frames, loop_bases, boxed, externs, findings, label);
-}
-
-function v_push_frame(ctx) {
-  return List_push(ctx.frames, List_len(ctx.names));
 }
 
 function v_bind(ctx, name, kind, span) {
@@ -492,13 +397,101 @@ function v_bind(ctx, name, kind, span) {
   }
 }
 
+function v_frame_base(ctx) {
+  const n = List_len(ctx.frames);
+  if ((n === 0)) {
+    return 0;
+  } else {
+    return __ring_index(ctx.frames, (n - 1));
+  }
+}
+
+function v_check_frame_leaks(ctx) {
+  const base = v_frame_base(ctx);
+  let i = base;
+  while ((i < List_len(ctx.names))) {
+    if (((__ring_index(ctx.kinds, i) === K_OWNED) ? (__ring_index(ctx.states, i) === S_LIVE) : false)) {
+      v_report(ctx, "leak-binding", true, `owned binding '${__ring_index(ctx.names, i)}' is never consumed (no drop/move) on the fall-through path`, __ring_index(ctx.spans, i));
+    }
+    i = (i + 1);
+  }
+}
+
+function v_pop_frame(ctx) {
+  let __ring_blk0;
+  __ring_match6: {
+    const __ring_m6 = List_pop(ctx.frames);
+    if (__ring_m6._tag === "some") {
+      const b = __ring_m6._0;
+      __ring_blk0 = b;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "none") {
+      __ring_blk0 = 0;
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+  const base = __ring_blk0;
+  while ((List_len(ctx.names) > base)) {
+    List_pop(ctx.names);
+    List_pop(ctx.kinds);
+    List_pop(ctx.states);
+    List_pop(ctx.spans);
+  }
+}
+
+function v_push_frame(ctx) {
+  return List_push(ctx.frames, List_len(ctx.names));
+}
+
+function v_check_loop_exit(ctx, span, what) {
+  const n = List_len(ctx.loop_bases);
+  if ((n === 0)) {
+    return;
+  }
+  const base = __ring_index(ctx.loop_bases, (n - 1));
+  let i = base;
+  while ((i < List_len(ctx.names))) {
+    if (((__ring_index(ctx.kinds, i) === K_OWNED) ? (__ring_index(ctx.states, i) === S_LIVE) : false)) {
+      v_report(ctx, "leak-loop-exit", true, `owned binding '${__ring_index(ctx.names, i)}' is live (not dropped) at this ${what}`, span);
+    }
+    i = (i + 1);
+  }
+}
+
+function v_drop(name, span, ctx) {
+  const idx = v_lookup(ctx, name);
+  if ((idx < 0)) {
+    v_report(ctx, "uaf-drop-unknown", true, `Drop of '${name}' which is not in scope`, span);
+    return;
+  }
+  if ((__ring_index(ctx.kinds, idx) === K_BORROW)) {
+    v_report(ctx, "uaf-drop-borrow", true, `Drop of borrowed binding '${name}' (param/pattern/for-in projection) — frees a reference owned elsewhere`, span);
+    return;
+  }
+  if ((__ring_index(ctx.kinds, idx) === K_NONOWNED)) {
+    v_report(ctx, "uaf-drop-borrow", true, `Drop of non-droppable binding '${name}' (And-Or/effect/excluded init — possibly a borrow)`, span);
+    return;
+  }
+  if ((__ring_index(ctx.states, idx) === S_DROPPED)) {
+    v_report(ctx, "uaf-double-drop", true, `second Drop of '${name}' on the same path`, span);
+    return;
+  }
+  if ((__ring_index(ctx.states, idx) === S_MOVED)) {
+    v_report(ctx, "uaf-double-drop", true, `Drop of '${name}' after its value was moved out`, span);
+    return;
+  }
+  return List_set(ctx.states, idx, S_DROPPED);
+}
+
 function v_block_local_init(stmts, name) {
   let found = Option_none;
-  const __ring_iter_5 = __List_Iterable.iter(stmts);
+  const __ring_iter_4 = __List_Iterable.iter(stmts);
   while (true) {
-    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-    if (__ring_next_5._tag === "none") break;
-    const s = __ring_next_5._0;
+    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+    if (__ring_next_4._tag === "none") break;
+    const s = __ring_next_4._0;
     __ring_match7: {
       const __ring_m7 = s;
       if (__ring_m7._tag === "Let") {
@@ -650,11 +643,11 @@ function v_droppable_init(init, externs) {
     if (__ring_m9._tag === "MatchExpr") {
       const arms = __ring_m9.arms;
       let all = (List_len(arms) > 0);
-      const __ring_iter_6 = __List_Iterable.iter(arms);
+      const __ring_iter_5 = __List_Iterable.iter(arms);
       while (true) {
-        const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-        if (__ring_next_6._tag === "none") break;
-        const arm = __ring_next_6._0;
+        const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+        if (__ring_next_5._tag === "none") break;
+        const arm = __ring_next_5._0;
         if ((v_droppable_branch(arm.body, externs) === false)) {
           all = false;
         }
@@ -741,8 +734,12 @@ function v_opaque_exempt_class(init) {
   }
 }
 
-function v_snapshot(ctx) {
-  return List_concat(ctx.states, []);
+function v_restore(ctx, snap) {
+  let i = 0;
+  while (((i < List_len(ctx.states)) ? (i < List_len(snap)) : false)) {
+    List_set(ctx.states, i, __ring_index(snap, i));
+    i = (i + 1);
+  }
 }
 
 function v_states_equal(a, b, upto) {
@@ -755,120 +752,6 @@ function v_states_equal(a, b, upto) {
     i = (i + 1);
   }
   return eq;
-}
-
-function v_restore(ctx, snap) {
-  let i = 0;
-  while (((i < List_len(ctx.states)) ? (i < List_len(snap)) : false)) {
-    List_set(ctx.states, i, __ring_index(snap, i));
-    i = (i + 1);
-  }
-}
-
-function v_pop_frame(ctx) {
-  let __ring_blk0;
-  __ring_match15: {
-    const __ring_m15 = List_pop(ctx.frames);
-    if (__ring_m15._tag === "some") {
-      const b = __ring_m15._0;
-      __ring_blk0 = b;
-      break __ring_match15;
-    }
-    if (__ring_m15._tag === "none") {
-      __ring_blk0 = 0;
-      break __ring_match15;
-    }
-    __match_fail(__ring_m15);
-  }
-  const base = __ring_blk0;
-  while ((List_len(ctx.names) > base)) {
-    List_pop(ctx.names);
-    List_pop(ctx.kinds);
-    List_pop(ctx.states);
-    List_pop(ctx.spans);
-  }
-}
-
-function v_check_loop_exit(ctx, span, what) {
-  const n = List_len(ctx.loop_bases);
-  if ((n === 0)) {
-    return;
-  }
-  const base = __ring_index(ctx.loop_bases, (n - 1));
-  let i = base;
-  while ((i < List_len(ctx.names))) {
-    if (((__ring_index(ctx.kinds, i) === K_OWNED) ? (__ring_index(ctx.states, i) === S_LIVE) : false)) {
-      v_report(ctx, "leak-loop-exit", true, `owned binding '${__ring_index(ctx.names, i)}' is live (not dropped) at this ${what}`, span);
-    }
-    i = (i + 1);
-  }
-}
-
-function v_pattern_bindings(pat, out) {
-  __ring_match16: {
-    const __ring_m16 = pat;
-    if (__ring_m16._tag === "Wildcard") {
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "Binding") {
-      const name = __ring_m16.name;
-      return List_push(out, name);
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "Constructor") {
-      const fields = __ring_m16.fields;
-      const __ring_iter_7 = __List_Iterable.iter(fields);
-      while (true) {
-        const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-        if (__ring_next_7._tag === "none") break;
-        const f = __ring_next_7._0;
-        v_pattern_bindings(f, out);
-      }
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "NamedConstructor") {
-      const fields = __ring_m16.fields;
-      const __ring_iter_8 = __List_Iterable.iter(fields);
-      while (true) {
-        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
-        if (__ring_next_8._tag === "none") break;
-        const f = __ring_next_8._0;
-        v_pattern_bindings(f.pattern, out);
-      }
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "Literal") {
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "TuplePattern") {
-      const elements = __ring_m16.elements;
-      const __ring_iter_9 = __List_Iterable.iter(elements);
-      while (true) {
-        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
-        if (__ring_next_9._tag === "none") break;
-        const e = __ring_next_9._0;
-        v_pattern_bindings(e, out);
-      }
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "OrPattern") {
-      const patterns = __ring_m16.patterns;
-      __ring_match17: {
-        const __ring_m17 = List_get(patterns, 0);
-        if (__ring_m17._tag === "some") {
-          const p0 = __ring_m17._0;
-          return v_pattern_bindings(p0, out);
-          break __ring_match17;
-        }
-        if (__ring_m17._tag === "none") {
-          break __ring_match17;
-        }
-        __match_fail(__ring_m17);
-      }
-      break __ring_match16;
-    }
-    __match_fail(__ring_m16);
-  }
 }
 
 function v_merge_two(ctx, t_div, snap_t, e_div, snap_e, snap0, span) {
@@ -890,48 +773,94 @@ function v_merge_two(ctx, t_div, snap_t, e_div, snap_e, snap0, span) {
   }
 }
 
-function v_drop(name, span, ctx) {
-  const idx = v_lookup(ctx, name);
-  if ((idx < 0)) {
-    v_report(ctx, "uaf-drop-unknown", true, `Drop of '${name}' which is not in scope`, span);
-    return;
-  }
-  if ((__ring_index(ctx.kinds, idx) === K_BORROW)) {
-    v_report(ctx, "uaf-drop-borrow", true, `Drop of borrowed binding '${name}' (param/pattern/for-in projection) — frees a reference owned elsewhere`, span);
-    return;
-  }
-  if ((__ring_index(ctx.kinds, idx) === K_NONOWNED)) {
-    v_report(ctx, "uaf-drop-borrow", true, `Drop of non-droppable binding '${name}' (And-Or/effect/excluded init — possibly a borrow)`, span);
-    return;
-  }
-  if ((__ring_index(ctx.states, idx) === S_DROPPED)) {
-    v_report(ctx, "uaf-double-drop", true, `second Drop of '${name}' on the same path`, span);
-    return;
-  }
-  if ((__ring_index(ctx.states, idx) === S_MOVED)) {
-    v_report(ctx, "uaf-double-drop", true, `Drop of '${name}' after its value was moved out`, span);
-    return;
-  }
-  return List_set(ctx.states, idx, S_DROPPED);
-}
-
-function v_frame_base(ctx) {
-  const n = List_len(ctx.frames);
-  if ((n === 0)) {
-    return 0;
-  } else {
-    return __ring_index(ctx.frames, (n - 1));
-  }
-}
-
-function v_check_frame_leaks(ctx) {
-  const base = v_frame_base(ctx);
-  let i = base;
-  while ((i < List_len(ctx.names))) {
-    if (((__ring_index(ctx.kinds, i) === K_OWNED) ? (__ring_index(ctx.states, i) === S_LIVE) : false)) {
-      v_report(ctx, "leak-binding", true, `owned binding '${__ring_index(ctx.names, i)}' is never consumed (no drop/move) on the fall-through path`, __ring_index(ctx.spans, i));
+function v_pattern_bindings(pat, out) {
+  __ring_match15: {
+    const __ring_m15 = pat;
+    if (__ring_m15._tag === "Wildcard") {
+      break __ring_match15;
     }
-    i = (i + 1);
+    if (__ring_m15._tag === "Binding") {
+      const name = __ring_m15.name;
+      return List_push(out, name);
+      break __ring_match15;
+    }
+    if (__ring_m15._tag === "Constructor") {
+      const fields = __ring_m15.fields;
+      const __ring_iter_6 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+        if (__ring_next_6._tag === "none") break;
+        const f = __ring_next_6._0;
+        v_pattern_bindings(f, out);
+      }
+      break __ring_match15;
+    }
+    if (__ring_m15._tag === "NamedConstructor") {
+      const fields = __ring_m15.fields;
+      const __ring_iter_7 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+        if (__ring_next_7._tag === "none") break;
+        const f = __ring_next_7._0;
+        v_pattern_bindings(f.pattern, out);
+      }
+      break __ring_match15;
+    }
+    if (__ring_m15._tag === "Literal") {
+      break __ring_match15;
+    }
+    if (__ring_m15._tag === "TuplePattern") {
+      const elements = __ring_m15.elements;
+      const __ring_iter_8 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+        if (__ring_next_8._tag === "none") break;
+        const e = __ring_next_8._0;
+        v_pattern_bindings(e, out);
+      }
+      break __ring_match15;
+    }
+    if (__ring_m15._tag === "OrPattern") {
+      const patterns = __ring_m15.patterns;
+      __ring_match16: {
+        const __ring_m16 = List_get(patterns, 0);
+        if (__ring_m16._tag === "some") {
+          const p0 = __ring_m16._0;
+          return v_pattern_bindings(p0, out);
+          break __ring_match16;
+        }
+        if (__ring_m16._tag === "none") {
+          break __ring_match16;
+        }
+        __match_fail(__ring_m16);
+      }
+      break __ring_match15;
+    }
+    __match_fail(__ring_m15);
+  }
+}
+
+function v_snapshot(ctx) {
+  return List_concat(ctx.states, []);
+}
+
+function v_type_excluded(ty, externs) {
+  if (hir$is_rc_excluded_type(ty, externs)) {
+    return true;
+  } else {
+    if (perceus$is_unresolved_var_type(ty)) {
+      return true;
+    } else {
+      __ring_match17: {
+        const __ring_m17 = ty;
+        if (__ring_m17._tag === "NeverType") {
+          return true;
+          break __ring_match17;
+        }
+        return false;
+        break __ring_match17;
+      }
+    }
   }
 }
 
@@ -944,11 +873,11 @@ function v_cf_class(ty, results, mode, ctx) {
   }
   let all_owned = true;
   let any = false;
-  const __ring_iter_10 = __List_Iterable.iter(results);
+  const __ring_iter_9 = __List_Iterable.iter(results);
   while (true) {
-    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-    if (__ring_next_10._tag === "none") break;
-    const r = __ring_next_10._0;
+    const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+    if (__ring_next_9._tag === "none") break;
+    const r = __ring_next_9._0;
     if ((r[1] === false)) {
       any = true;
       if (((r[0] !== CLS_OWNED) ? (r[0] !== CLS_EXCLUDED) : false)) {
@@ -961,6 +890,77 @@ function v_cf_class(ty, results, mode, ctx) {
   } else {
     return CLS_OPAQUE;
   }
+}
+
+function v_cls_of_fresh(ty, externs) {
+  if (v_type_excluded(ty, externs)) {
+    return CLS_EXCLUDED;
+  } else {
+    if (hir$type_contains_extern_handle(ty, externs)) {
+      return CLS_EXCLUDED;
+    } else {
+      return CLS_OWNED;
+    }
+  }
+}
+
+function v_new_ctx(boxed, externs, findings, label) {
+  const names = [];
+  const kinds = [];
+  const states = [];
+  const spans = [];
+  const frames = [];
+  const loop_bases = [];
+  return new VCtx(names, kinds, states, spans, frames, loop_bases, boxed, externs, findings, label);
+}
+
+function v_ident(name, ty, span, mode, ctx) {
+  if (v_type_excluded(ty, ctx.externs)) {
+    return CLS_EXCLUDED;
+  }
+  const idx = v_lookup(ctx, name);
+  if ((idx < 0)) {
+    return CLS_BORROW;
+  }
+  if ((__ring_index(ctx.kinds, idx) === K_OWNED)) {
+    if ((__ring_index(ctx.states, idx) === S_DROPPED)) {
+      v_report(ctx, "uaf-use-after-drop", true, `read of '${name}' after its Drop`, span);
+      return CLS_BORROW;
+    } else {
+      if ((__ring_index(ctx.states, idx) === S_MOVED)) {
+        v_report(ctx, "uaf-use-after-drop", true, `read of '${name}' after its value was moved out`, span);
+        return CLS_BORROW;
+      } else {
+        if ((mode === M_CONSUMED)) {
+          List_set(ctx.states, idx, S_MOVED);
+          return CLS_OWNED;
+        } else {
+          return CLS_BORROW;
+        }
+      }
+    }
+  } else {
+    if (((__ring_index(ctx.kinds, idx) === K_NONOWNED) ? (mode === M_CONSUMED) : false)) {
+      List_set(ctx.states, idx, S_MOVED);
+      return CLS_OPAQUE;
+    } else {
+      return CLS_BORROW;
+    }
+  }
+}
+
+function v_list_has_int(xs, x) {
+  let found = false;
+  const __ring_iter_10 = __List_Iterable.iter(xs);
+  while (true) {
+    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+    if (__ring_next_10._tag === "none") break;
+    const v = __ring_next_10._0;
+    if ((v === x)) {
+      found = true;
+    }
+  }
+  return found;
 }
 
 function v_handler_scope(h, ctx) {
@@ -998,16 +998,39 @@ function v_handler_scope(h, ctx) {
   return v_pop_frame(hctx);
 }
 
-function v_branch(body, mode, ctx) {
+function v_fn_scope(params, body, label, boxed, externs, findings) {
+  let ctx = v_new_ctx(boxed, externs, findings, label);
+  v_push_frame(ctx);
+  const __ring_iter_12 = __List_Iterable.iter(params);
+  while (true) {
+    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+    if (__ring_next_12._tag === "none") break;
+    const p = __ring_next_12._0;
+    v_bind(ctx, p.name, K_BORROW, synthetic_vspan());
+  }
   __ring_match20: {
     const __ring_m20 = body;
     if (__ring_m20._tag === "Block") {
-      return v_block(body, mode, ctx);
+      v_block(body, M_CONSUMED, ctx);
       break __ring_match20;
+    }
+    v_consume(body, ctx);
+    [0, false];
+    break __ring_match20;
+  }
+  return v_pop_frame(ctx);
+}
+
+function v_branch(body, mode, ctx) {
+  __ring_match21: {
+    const __ring_m21 = body;
+    if (__ring_m21._tag === "Block") {
+      return v_block(body, mode, ctx);
+      break __ring_match21;
     }
     const cls = ((mode === M_CONSUMED) ? v_consume(body, ctx) : v_expr(body, M_BORROWED, ctx));
     return [cls, perceus$expr_diverges(body)];
-    break __ring_match20;
+    break __ring_match21;
   }
 }
 
@@ -1017,52 +1040,6 @@ function v_cf_branch(body, mode, ctx) {
     v_report(ctx, "x-cf-value", false, "control-flow branch yields an owned value in a non-consuming position (documented leak)", hir$hexpr_span(body));
   }
   return r;
-}
-
-function v_block_tail(t, mode, ctx) {
-  const base = v_frame_base(ctx);
-  __ring_match21: {
-    const __ring_m21 = t;
-    if (__ring_m21._tag === "Ident") {
-      const name = __ring_m21.name;
-      const idx = v_lookup(ctx, name);
-      if (((idx >= base) ? (idx >= 0) : false)) {
-        if (((__ring_index(ctx.kinds, idx) === K_OWNED) ? (__ring_index(ctx.states, idx) === S_LIVE) : false)) {
-          List_set(ctx.states, idx, S_MOVED);
-          return CLS_OWNED;
-        } else {
-          if (((__ring_index(ctx.kinds, idx) === K_NONOWNED) ? (__ring_index(ctx.states, idx) === S_LIVE) : false)) {
-            List_set(ctx.states, idx, S_MOVED);
-            return CLS_OPAQUE;
-          } else {
-            return v_expr(t, M_BORROWED, ctx);
-          }
-        }
-      } else {
-        if ((mode === M_CONSUMED)) {
-          return v_consume(t, ctx);
-        } else {
-          return v_expr(t, M_BORROWED, ctx);
-        }
-      }
-      break __ring_match21;
-    }
-    if ((mode === M_CONSUMED)) {
-      return v_consume(t, ctx);
-    } else {
-      return v_expr(t, mode, ctx);
-    }
-    break __ring_match21;
-  }
-}
-
-function v_cond(expr, ctx) {
-  const cls = v_expr(expr, M_BORROWED, ctx);
-  if ((cls === CLS_OWNED)) {
-    if ((hir$is_fresh_owned_bool_value(expr) === false)) {
-      return v_report(ctx, "leak-temp", true, "owned condition value not covered by the codegen post-unbox drop", hir$hexpr_span(expr));
-    }
-  }
 }
 
 function v_let_like(name, init, span, ctx) {
@@ -1087,6 +1064,15 @@ function v_let_like(name, init, span, ctx) {
       if ((cls === CLS_OPAQUE)) {
         return v_report(ctx, v_opaque_exempt_class(init), false, `possibly-owned value bound by non-droppable binding '${name}' (documented leak class)`, bind_span);
       }
+    }
+  }
+}
+
+function v_cond(expr, ctx) {
+  const cls = v_expr(expr, M_BORROWED, ctx);
+  if ((cls === CLS_OWNED)) {
+    if ((hir$is_fresh_owned_bool_value(expr) === false)) {
+      return v_report(ctx, "leak-temp", true, "owned condition value not covered by the codegen post-unbox drop", hir$hexpr_span(expr));
     }
   }
 }
@@ -1177,11 +1163,11 @@ function v_stmt(stmt, ctx) {
         const __ring_m25 = destructure;
         if (__ring_m25._tag === "some") {
           const ds = __ring_m25._0;
-          const __ring_iter_12 = __List_Iterable.iter(ds);
+          const __ring_iter_13 = __List_Iterable.iter(ds);
           while (true) {
-            const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-            if (__ring_next_12._tag === "none") break;
-            const d = __ring_next_12._0;
+            const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+            if (__ring_next_13._tag === "none") break;
+            const d = __ring_next_13._0;
             v_bind(ctx, d.name, K_BORROW, span);
           }
           break __ring_match25;
@@ -1217,11 +1203,11 @@ function v_stmt(stmt, ctx) {
     if (__ring_m22._tag === "LetDestructure") {
       const bindings = __ring_m22.bindings; const init = __ring_m22.init; const span = __ring_m22.span;
       v_borrow(init, "", ctx);
-      const __ring_iter_13 = __List_Iterable.iter(bindings);
+      const __ring_iter_14 = __List_Iterable.iter(bindings);
       while (true) {
-        const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-        if (__ring_next_13._tag === "none") break;
-        const b = __ring_next_13._0;
+        const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+        if (__ring_next_14._tag === "none") break;
+        const b = __ring_next_14._0;
         v_bind(ctx, b.name, K_BORROW, span);
       }
       return false;
@@ -1234,11 +1220,11 @@ function v_stmt(stmt, ctx) {
       v_push_frame(ctx);
       let bnames = [];
       v_pattern_bindings(pattern, bnames);
-      const __ring_iter_14 = __List_Iterable.iter(bnames);
+      const __ring_iter_15 = __List_Iterable.iter(bnames);
       while (true) {
-        const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
-        if (__ring_next_14._tag === "none") break;
-        const bn = __ring_next_14._0;
+        const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+        if (__ring_next_15._tag === "none") break;
+        const bn = __ring_next_15._0;
         v_bind(ctx, bn, K_BORROW, span);
       }
       const rt = v_block(then_block, M_BORROWED, ctx);
@@ -1290,18 +1276,63 @@ function v_stmt(stmt, ctx) {
   }
 }
 
-function v_block(block, mode, ctx) {
+function v_consume(expr, ctx) {
+  const cls = v_expr(expr, M_CONSUMED, ctx);
+  if ((cls === CLS_BORROW)) {
+    v_report(ctx, "uaf-escaped-borrow", true, "a borrowed value escapes into an owning position without a Clone", hir$hexpr_span(expr));
+  }
+  return cls;
+}
+
+function v_block_tail(t, mode, ctx) {
+  const base = v_frame_base(ctx);
   __ring_match27: {
-    const __ring_m27 = block;
-    if (__ring_m27._tag === "Block") {
-      const stmts = __ring_m27.stmts; const tail = __ring_m27.tail;
+    const __ring_m27 = t;
+    if (__ring_m27._tag === "Ident") {
+      const name = __ring_m27.name;
+      const idx = v_lookup(ctx, name);
+      if (((idx >= base) ? (idx >= 0) : false)) {
+        if (((__ring_index(ctx.kinds, idx) === K_OWNED) ? (__ring_index(ctx.states, idx) === S_LIVE) : false)) {
+          List_set(ctx.states, idx, S_MOVED);
+          return CLS_OWNED;
+        } else {
+          if (((__ring_index(ctx.kinds, idx) === K_NONOWNED) ? (__ring_index(ctx.states, idx) === S_LIVE) : false)) {
+            List_set(ctx.states, idx, S_MOVED);
+            return CLS_OPAQUE;
+          } else {
+            return v_expr(t, M_BORROWED, ctx);
+          }
+        }
+      } else {
+        if ((mode === M_CONSUMED)) {
+          return v_consume(t, ctx);
+        } else {
+          return v_expr(t, M_BORROWED, ctx);
+        }
+      }
+      break __ring_match27;
+    }
+    if ((mode === M_CONSUMED)) {
+      return v_consume(t, ctx);
+    } else {
+      return v_expr(t, mode, ctx);
+    }
+    break __ring_match27;
+  }
+}
+
+function v_block(block, mode, ctx) {
+  __ring_match28: {
+    const __ring_m28 = block;
+    if (__ring_m28._tag === "Block") {
+      const stmts = __ring_m28.stmts; const tail = __ring_m28.tail;
       v_push_frame(ctx);
       let diverged = false;
-      const __ring_iter_15 = __List_Iterable.iter(stmts);
+      const __ring_iter_16 = __List_Iterable.iter(stmts);
       while (true) {
-        const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
-        if (__ring_next_15._tag === "none") break;
-        const s = __ring_next_15._0;
+        const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+        if (__ring_next_16._tag === "none") break;
+        const s = __ring_next_16._0;
         if ((diverged === false)) {
           if (v_stmt(s, ctx)) {
             diverged = true;
@@ -1310,20 +1341,20 @@ function v_block(block, mode, ctx) {
       }
       let cls = CLS_EXCLUDED;
       if ((diverged === false)) {
-        __ring_match28: {
-          const __ring_m28 = tail;
-          if (__ring_m28._tag === "some") {
-            const t = __ring_m28._0;
+        __ring_match29: {
+          const __ring_m29 = tail;
+          if (__ring_m29._tag === "some") {
+            const t = __ring_m29._0;
             cls = v_block_tail(t, mode, ctx);
             if (perceus$expr_diverges(t)) {
               diverged = true;
             }
-            break __ring_match28;
+            break __ring_match29;
           }
-          if (__ring_m28._tag === "none") {
-            break __ring_match28;
+          if (__ring_m29._tag === "none") {
+            break __ring_match29;
           }
-          __match_fail(__ring_m28);
+          __match_fail(__ring_m29);
         }
       }
       if ((diverged === false)) {
@@ -1331,47 +1362,12 @@ function v_block(block, mode, ctx) {
       }
       v_pop_frame(ctx);
       return [cls, diverged];
-      break __ring_match27;
+      break __ring_match28;
     }
     const cls = ((mode === M_CONSUMED) ? v_consume(block, ctx) : v_expr(block, M_BORROWED, ctx));
     return [cls, perceus$expr_diverges(block)];
-    break __ring_match27;
+    break __ring_match28;
   }
-}
-
-function v_fn_scope(params, body, label, boxed, externs, findings) {
-  let ctx = v_new_ctx(boxed, externs, findings, label);
-  v_push_frame(ctx);
-  const __ring_iter_16 = __List_Iterable.iter(params);
-  while (true) {
-    const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
-    if (__ring_next_16._tag === "none") break;
-    const p = __ring_next_16._0;
-    v_bind(ctx, p.name, K_BORROW, synthetic_vspan());
-  }
-  __ring_match29: {
-    const __ring_m29 = body;
-    if (__ring_m29._tag === "Block") {
-      v_block(body, M_CONSUMED, ctx);
-      break __ring_match29;
-    }
-    v_consume(body, ctx);
-    [0, false];
-    break __ring_match29;
-  }
-  return v_pop_frame(ctx);
-}
-
-function v_borrow(expr, exempt, ctx) {
-  const cls = v_expr(expr, M_BORROWED, ctx);
-  if ((cls === CLS_OWNED)) {
-    if ((exempt === "")) {
-      v_report(ctx, "leak-temp", true, "owned temporary is never consumed (no binding, no drop) in a read position", hir$hexpr_span(expr));
-    } else {
-      v_report(ctx, exempt, false, "owned value in a non-consuming position (documented leak class)", hir$hexpr_span(expr));
-    }
-  }
-  return cls;
 }
 
 function v_expr(expr, mode, ctx) {
@@ -1776,10 +1772,14 @@ function v_expr(expr, mode, ctx) {
   }
 }
 
-function v_consume(expr, ctx) {
-  const cls = v_expr(expr, M_CONSUMED, ctx);
-  if ((cls === CLS_BORROW)) {
-    v_report(ctx, "uaf-escaped-borrow", true, "a borrowed value escapes into an owning position without a Clone", hir$hexpr_span(expr));
+function v_borrow(expr, exempt, ctx) {
+  const cls = v_expr(expr, M_BORROWED, ctx);
+  if ((cls === CLS_OWNED)) {
+    if ((exempt === "")) {
+      v_report(ctx, "leak-temp", true, "owned temporary is never consumed (no binding, no drop) in a read position", hir$hexpr_span(expr));
+    } else {
+      v_report(ctx, exempt, false, "owned value in a non-consuming position (documented leak class)", hir$hexpr_span(expr));
+    }
   }
   return cls;
 }

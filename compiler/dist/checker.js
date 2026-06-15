@@ -263,13 +263,6 @@ class CheckResult {
 
 const STD_FILES = ["io.ring", "iterator.ring", "list.ring", "map.ring", "set.ring", "str.ring", "num.ring", "result.ring", "fs.ring", "path.ring", "process.ring"];
 
-function new_infer_ctx(sink) {
-  let env = env$new_type_env();
-  builtins$register_builtins(env);
-  builtins$register_hof_intrinsics(env);
-  return new infer_ctx$InferCtx(env, unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new(), set_new(), 0, map_new(), map_new(), map_new(), map_new(), map_new(), map_new());
-}
-
 function find_std_dir() {
   const candidates = [path_resolve(path_join(path_dirname(path_resolve(".")), "std")), path_resolve("std")];
   const __ring_iter_2 = __List_Iterable.iter(candidates);
@@ -428,6 +421,13 @@ function load_prelude(ctx) {
     __match_fail(__ring_m6);
   }
   return prelude_hdecls;
+}
+
+function new_infer_ctx(sink) {
+  let env = env$new_type_env();
+  builtins$register_builtins(env);
+  builtins$register_hof_intrinsics(env);
+  return new infer_ctx$InferCtx(env, unify$empty_subst(), sink, map_new(), Option_none, [], [], 0, [], map_new(), set_new(), 0, map_new(), map_new(), map_new(), map_new(), map_new(), map_new());
 }
 
 function check(program, sink) {

@@ -466,12 +466,7 @@ function emit_drop_value(ctx, val) {
   return discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""));
 }
 
-function emit_range_counter_drop(ctx, binding_alloca) {
-  const iter_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, binding_alloca, codegen_llvm_ctx$fresh_name(ctx, "ibx"));
-  return emit_drop_value(ctx, iter_box);
-}
-
-function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
+function emit_for_in_list(ctx, binding, destructure, iterable, body) {
   let __ring_blk4;
   __ring_match16: {
     const __ring_m16 = ctx.current_fn;
@@ -481,12 +476,142 @@ function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
       break __ring_match16;
     }
     if (__ring_m16._tag === "none") {
-      __ring_blk4 = panic("LLVM codegen: for-in range outside function");
+      __ring_blk4 = panic("LLVM codegen: for-in list outside function");
       break __ring_match16;
     }
     __match_fail(__ring_m16);
   }
   const current_fn = __ring_blk4;
+  const list_val_raw = codegen_llvm_expr$gen_llvm_expr(ctx, iterable);
+  let set_converted = false;
+  let __ring_blk5;
+  __ring_match17: {
+    const __ring_m17 = hir$hexpr_type(iterable);
+    if (__ring_m17._tag === "StructType") {
+      const name = __ring_m17.name; const type_params = __ring_m17.type_params; const fields = __ring_m17.fields;
+      __ring_blk5 = ((((name === "Set") ? (List_len(type_params) === 1) : false) ? (List_len(fields) === 0) : false) ? (function() {
+  let __ring_blk6;
+  __ring_match18: {
+    const __ring_m18 = __ring_index(type_params, 0);
+    if (__ring_m18._tag === "IntType") {
+      __ring_blk6 = true;
+      break __ring_match18;
+    }
+    __ring_blk6 = false;
+    break __ring_match18;
+  }
+  const is_int_elem = __ring_blk6;
+  const conv_name = (is_int_elem ? "ring_set_int_to_list" : "ring_set_to_list");
+  const conv_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type);
+  const conv_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, conv_name);
+  set_converted = true;
+  return LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], codegen_llvm_ctx$fresh_name(ctx, "s2l"));
+})() : list_val_raw);
+      break __ring_match17;
+    }
+    __ring_blk5 = list_val_raw;
+    break __ring_match17;
+  }
+  const list_val = __ring_blk5;
+  const len_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_len", [ctx.ptr_type], ctx.i64_type);
+  const len_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_list_len");
+  const list_len = LLVMBuildCall2(ctx.builder, len_ty, len_fn, [list_val], codegen_llvm_ctx$fresh_name(ctx, "len"));
+  const counter_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "idx"));
+  const zero = LLVMConstInt(ctx.i64_type, 0, 0);
+  discard(LLVMBuildStore(ctx.builder, zero, counter_alloca));
+  const cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.cond");
+  const body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.body");
+  const incr_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.incr");
+  const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.merge");
+  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, cond_bb);
+  const current_idx = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
+  const cond = LLVMBuildICmp(ctx.builder, 40, current_idx, list_len, codegen_llvm_ctx$fresh_name(ctx, "cmp"));
+  discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
+  const saved_break = ctx.loop_break_bb;
+  const saved_continue = ctx.loop_continue_bb;
+  ctx.loop_break_bb = Option_some(merge_bb);
+  ctx.loop_continue_bb = Option_some(incr_bb);
+  LLVMPositionBuilderAtEnd(ctx.builder, body_bb);
+  const get_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type);
+  const get_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_list_get");
+  const elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [list_val, current_idx], codegen_llvm_ctx$fresh_name(ctx, "el"));
+  __ring_match19: {
+    const __ring_m19 = destructure;
+    if (__ring_m19._tag === "some") {
+      const ds = __ring_m19._0;
+      if ((List_len(ds) > 0)) {
+        const __ring_end3 = List_len(ds);
+        for (let i = 0; i < __ring_end3; i++) {
+          __ring_match20: {
+            const __ring_m20 = List_get(ds, i);
+            if (__ring_m20._tag === "some") {
+              const d = __ring_m20._0;
+              const idx_val = LLVMConstInt(ctx.i64_type, i, 0);
+              const sub_elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [elem, idx_val], codegen_llvm_ctx$fresh_name(ctx, "de"));
+              const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, d.name);
+              discard(LLVMBuildStore(ctx.builder, sub_elem, alloca));
+              _Map_insert(ctx.named_values, d.name, alloca);
+              break __ring_match20;
+            }
+            if (__ring_m20._tag === "none") {
+              break __ring_match20;
+            }
+            __match_fail(__ring_m20);
+          }
+        }
+      } else {
+        const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
+        discard(LLVMBuildStore(ctx.builder, elem, alloca));
+        _Map_insert(ctx.named_values, binding, alloca);
+      }
+      break __ring_match19;
+    }
+    if (__ring_m19._tag === "none") {
+      const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
+      discard(LLVMBuildStore(ctx.builder, elem, alloca));
+      _Map_insert(ctx.named_values, binding, alloca);
+      break __ring_match19;
+    }
+    __match_fail(__ring_m19);
+  }
+  discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
+  discard(LLVMBuildBr(ctx.builder, incr_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, incr_bb);
+  const current_idx2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
+  const one = LLVMConstInt(ctx.i64_type, 1, 0);
+  const next_idx = LLVMBuildAdd(ctx.builder, current_idx2, one, codegen_llvm_ctx$fresh_name(ctx, "ni"));
+  discard(LLVMBuildStore(ctx.builder, next_idx, counter_alloca));
+  discard(LLVMBuildBr(ctx.builder, cond_bb));
+  ctx.loop_break_bb = saved_break;
+  ctx.loop_continue_bb = saved_continue;
+  LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
+  if (set_converted) {
+    return emit_drop_value(ctx, list_val);
+  }
+}
+
+function emit_range_counter_drop(ctx, binding_alloca) {
+  const iter_box = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, binding_alloca, codegen_llvm_ctx$fresh_name(ctx, "ibx"));
+  return emit_drop_value(ctx, iter_box);
+}
+
+function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
+  let __ring_blk7;
+  __ring_match21: {
+    const __ring_m21 = ctx.current_fn;
+    if (__ring_m21._tag === "some") {
+      const f = __ring_m21._0;
+      __ring_blk7 = f;
+      break __ring_match21;
+    }
+    if (__ring_m21._tag === "none") {
+      __ring_blk7 = panic("LLVM codegen: for-in range outside function");
+      break __ring_match21;
+    }
+    __match_fail(__ring_m21);
+  }
+  const current_fn = __ring_blk7;
   const start_val = codegen_llvm_expr$gen_llvm_expr(ctx, start);
   const end_val = codegen_llvm_expr$gen_llvm_expr(ctx, end);
   const start_raw = codegen_llvm_expr$unbox_int(ctx, start_val);
@@ -529,21 +654,21 @@ function emit_for_in_range_direct(ctx, binding, start, end, inclusive, body) {
 }
 
 function emit_for_in_range_var(ctx, binding, iterable, body) {
-  let __ring_blk5;
-  __ring_match17: {
-    const __ring_m17 = ctx.current_fn;
-    if (__ring_m17._tag === "some") {
-      const f = __ring_m17._0;
-      __ring_blk5 = f;
-      break __ring_match17;
+  let __ring_blk8;
+  __ring_match22: {
+    const __ring_m22 = ctx.current_fn;
+    if (__ring_m22._tag === "some") {
+      const f = __ring_m22._0;
+      __ring_blk8 = f;
+      break __ring_match22;
     }
-    if (__ring_m17._tag === "none") {
-      __ring_blk5 = panic("LLVM codegen: for-in range var outside function");
-      break __ring_match17;
+    if (__ring_m22._tag === "none") {
+      __ring_blk8 = panic("LLVM codegen: for-in range var outside function");
+      break __ring_match22;
     }
-    __match_fail(__ring_m17);
+    __match_fail(__ring_m22);
   }
-  const current_fn = __ring_blk5;
+  const current_fn = __ring_blk8;
   const range_val = codegen_llvm_expr$gen_llvm_expr(ctx, iterable);
   const range_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0);
   const start_slot = LLVMBuildStructGEP2(ctx.builder, range_struct_ty, range_val, 0, codegen_llvm_ctx$fresh_name(ctx, "rs"));
@@ -589,131 +714,6 @@ function emit_for_in_range_var(ctx, binding, iterable, body) {
   ctx.loop_break_bb = saved_break;
   ctx.loop_continue_bb = saved_continue;
   return LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
-}
-
-function emit_for_in_list(ctx, binding, destructure, iterable, body) {
-  let __ring_blk6;
-  __ring_match18: {
-    const __ring_m18 = ctx.current_fn;
-    if (__ring_m18._tag === "some") {
-      const f = __ring_m18._0;
-      __ring_blk6 = f;
-      break __ring_match18;
-    }
-    if (__ring_m18._tag === "none") {
-      __ring_blk6 = panic("LLVM codegen: for-in list outside function");
-      break __ring_match18;
-    }
-    __match_fail(__ring_m18);
-  }
-  const current_fn = __ring_blk6;
-  const list_val_raw = codegen_llvm_expr$gen_llvm_expr(ctx, iterable);
-  let set_converted = false;
-  let __ring_blk7;
-  __ring_match19: {
-    const __ring_m19 = hir$hexpr_type(iterable);
-    if (__ring_m19._tag === "StructType") {
-      const name = __ring_m19.name; const type_params = __ring_m19.type_params; const fields = __ring_m19.fields;
-      __ring_blk7 = ((((name === "Set") ? (List_len(type_params) === 1) : false) ? (List_len(fields) === 0) : false) ? (function() {
-  let __ring_blk8;
-  __ring_match20: {
-    const __ring_m20 = __ring_index(type_params, 0);
-    if (__ring_m20._tag === "IntType") {
-      __ring_blk8 = true;
-      break __ring_match20;
-    }
-    __ring_blk8 = false;
-    break __ring_match20;
-  }
-  const is_int_elem = __ring_blk8;
-  const conv_name = (is_int_elem ? "ring_set_int_to_list" : "ring_set_to_list");
-  const conv_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type);
-  const conv_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, conv_name);
-  set_converted = true;
-  return LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], codegen_llvm_ctx$fresh_name(ctx, "s2l"));
-})() : list_val_raw);
-      break __ring_match19;
-    }
-    __ring_blk7 = list_val_raw;
-    break __ring_match19;
-  }
-  const list_val = __ring_blk7;
-  const len_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_len", [ctx.ptr_type], ctx.i64_type);
-  const len_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_list_len");
-  const list_len = LLVMBuildCall2(ctx.builder, len_ty, len_fn, [list_val], codegen_llvm_ctx$fresh_name(ctx, "len"));
-  const counter_alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.i64_type, codegen_llvm_ctx$fresh_name(ctx, "idx"));
-  const zero = LLVMConstInt(ctx.i64_type, 0, 0);
-  discard(LLVMBuildStore(ctx.builder, zero, counter_alloca));
-  const cond_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.cond");
-  const body_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.body");
-  const incr_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.incr");
-  const merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "forl.merge");
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
-  LLVMPositionBuilderAtEnd(ctx.builder, cond_bb);
-  const current_idx = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
-  const cond = LLVMBuildICmp(ctx.builder, 40, current_idx, list_len, codegen_llvm_ctx$fresh_name(ctx, "cmp"));
-  discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb));
-  const saved_break = ctx.loop_break_bb;
-  const saved_continue = ctx.loop_continue_bb;
-  ctx.loop_break_bb = Option_some(merge_bb);
-  ctx.loop_continue_bb = Option_some(incr_bb);
-  LLVMPositionBuilderAtEnd(ctx.builder, body_bb);
-  const get_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type);
-  const get_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_list_get");
-  const elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [list_val, current_idx], codegen_llvm_ctx$fresh_name(ctx, "el"));
-  __ring_match21: {
-    const __ring_m21 = destructure;
-    if (__ring_m21._tag === "some") {
-      const ds = __ring_m21._0;
-      if ((List_len(ds) > 0)) {
-        const __ring_end3 = List_len(ds);
-        for (let i = 0; i < __ring_end3; i++) {
-          __ring_match22: {
-            const __ring_m22 = List_get(ds, i);
-            if (__ring_m22._tag === "some") {
-              const d = __ring_m22._0;
-              const idx_val = LLVMConstInt(ctx.i64_type, i, 0);
-              const sub_elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [elem, idx_val], codegen_llvm_ctx$fresh_name(ctx, "de"));
-              const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, d.name);
-              discard(LLVMBuildStore(ctx.builder, sub_elem, alloca));
-              _Map_insert(ctx.named_values, d.name, alloca);
-              break __ring_match22;
-            }
-            if (__ring_m22._tag === "none") {
-              break __ring_match22;
-            }
-            __match_fail(__ring_m22);
-          }
-        }
-      } else {
-        const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
-        discard(LLVMBuildStore(ctx.builder, elem, alloca));
-        _Map_insert(ctx.named_values, binding, alloca);
-      }
-      break __ring_match21;
-    }
-    if (__ring_m21._tag === "none") {
-      const alloca = codegen_llvm_ctx$build_entry_alloca(ctx, ctx.ptr_type, binding);
-      discard(LLVMBuildStore(ctx.builder, elem, alloca));
-      _Map_insert(ctx.named_values, binding, alloca);
-      break __ring_match21;
-    }
-    __match_fail(__ring_m21);
-  }
-  discard(codegen_llvm_expr$gen_llvm_expr(ctx, body));
-  discard(LLVMBuildBr(ctx.builder, incr_bb));
-  LLVMPositionBuilderAtEnd(ctx.builder, incr_bb);
-  const current_idx2 = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, codegen_llvm_ctx$fresh_name(ctx, "ci"));
-  const one = LLVMConstInt(ctx.i64_type, 1, 0);
-  const next_idx = LLVMBuildAdd(ctx.builder, current_idx2, one, codegen_llvm_ctx$fresh_name(ctx, "ni"));
-  discard(LLVMBuildStore(ctx.builder, next_idx, counter_alloca));
-  discard(LLVMBuildBr(ctx.builder, cond_bb));
-  ctx.loop_break_bb = saved_break;
-  ctx.loop_continue_bb = saved_continue;
-  LLVMPositionBuilderAtEnd(ctx.builder, merge_bb);
-  if (set_converted) {
-    return emit_drop_value(ctx, list_val);
-  }
 }
 
 function emit_for_in(ctx, binding, destructure, iterable, body, iterable_type_name, iter_type_name) {

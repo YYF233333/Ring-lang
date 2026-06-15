@@ -2510,6 +2510,15 @@ function str_to_binop(s) {
   return panic(`unreachable: unknown binary operator '${s}'`);
 }
 
+function is_uppercase(ch) {
+  const c = Option_unwrap_or(Str_char_code_at(ch, 0), 0);
+  if ((c >= 65)) {
+    return (c <= 90);
+  } else {
+    return false;
+  }
+}
+
 function str_to_unaryop(s) {
   if ((s === "-")) {
     return ast$UnaryOp_Neg;
@@ -2518,15 +2527,6 @@ function str_to_unaryop(s) {
     return ast$UnaryOp_Not;
   }
   return panic(`unreachable: unknown unary operator '${s}'`);
-}
-
-function is_uppercase(ch) {
-  const c = Option_unwrap_or(Str_char_code_at(ch, 0), 0);
-  if ((c >= 65)) {
-    return (c <= 90);
-  } else {
-    return false;
-  }
 }
 
 function pattern_span(p) {

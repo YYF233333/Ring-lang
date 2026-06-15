@@ -1292,7 +1292,7 @@ function register_builtin_enums(ctx) {
   return discard(LLVMBuildRet(ctx.builder, err_ptr));
 }
 
-function scan_fn_effects(decls, local_fn_effects) {
+function register_effect_ops_llvm(decls, effect_ops) {
   const __ring_iter_24 = __List_Iterable.iter(decls);
   while (true) {
     const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
@@ -1300,37 +1300,14 @@ function scan_fn_effects(decls, local_fn_effects) {
     const decl = __ring_next_24._0;
     __ring_match30: {
       const __ring_m30 = decl;
-      if (__ring_m30._tag === "Fn") {
-        const name = __ring_m30.name; const effects = __ring_m30.effects;
-        if ((List_len(effects.effects) > 0)) {
-          _Map_insert(local_fn_effects, name, effects);
-        }
-        break __ring_match30;
-      }
-      if (__ring_m30._tag === "Impl") {
-        const methods = __ring_m30.methods;
-        const __ring_iter_25 = __List_Iterable.iter(methods);
-        while (true) {
-          const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
-          if (__ring_next_25._tag === "none") break;
-          const m = __ring_next_25._0;
-          __ring_match31: {
-            const __ring_m31 = m;
-            if (__ring_m31._tag === "Fn") {
-              const mn = __ring_m31.name; const me = __ring_m31.effects;
-              if ((List_len(me.effects) > 0)) {
-                _Map_insert(local_fn_effects, mn, me);
-              }
-              break __ring_match31;
-            }
-            break __ring_match31;
-          }
-        }
+      if (__ring_m30._tag === "Effect") {
+        const name = __ring_m30.name; const ops = __ring_m30.ops;
+        _Map_insert(effect_ops, name, ops);
         break __ring_match30;
       }
       if (__ring_m30._tag === "ModBlock") {
         const md = __ring_m30.decls;
-        scan_fn_effects(md, local_fn_effects);
+        register_effect_ops_llvm(md, effect_ops);
         break __ring_match30;
       }
       break __ring_match30;
@@ -1338,46 +1315,49 @@ function scan_fn_effects(decls, local_fn_effects) {
   }
 }
 
-function scan_trait_decls(decls, trait_method_order) {
-  const __ring_iter_26 = __List_Iterable.iter(decls);
+function scan_fn_effects(decls, local_fn_effects) {
+  const __ring_iter_25 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
-    if (__ring_next_26._tag === "none") break;
-    const decl = __ring_next_26._0;
-    __ring_match32: {
-      const __ring_m32 = decl;
-      if (__ring_m32._tag === "Trait") {
-        const name = __ring_m32.name; const methods = __ring_m32.methods;
-        let method_names = [];
-        const __ring_iter_27 = __List_Iterable.iter(methods);
-        while (true) {
-          const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
-          if (__ring_next_27._tag === "none") break;
-          const m = __ring_next_27._0;
-          List_push(method_names, m.name);
+    const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+    if (__ring_next_25._tag === "none") break;
+    const decl = __ring_next_25._0;
+    __ring_match31: {
+      const __ring_m31 = decl;
+      if (__ring_m31._tag === "Fn") {
+        const name = __ring_m31.name; const effects = __ring_m31.effects;
+        if ((List_len(effects.effects) > 0)) {
+          _Map_insert(local_fn_effects, name, effects);
         }
-        _Map_insert(trait_method_order, name, method_names);
-        break __ring_match32;
+        break __ring_match31;
       }
-      if (__ring_m32._tag === "ModBlock") {
-        const md = __ring_m32.decls;
-        scan_trait_decls(md, trait_method_order);
-        break __ring_match32;
+      if (__ring_m31._tag === "Impl") {
+        const methods = __ring_m31.methods;
+        const __ring_iter_26 = __List_Iterable.iter(methods);
+        while (true) {
+          const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+          if (__ring_next_26._tag === "none") break;
+          const m = __ring_next_26._0;
+          __ring_match32: {
+            const __ring_m32 = m;
+            if (__ring_m32._tag === "Fn") {
+              const mn = __ring_m32.name; const me = __ring_m32.effects;
+              if ((List_len(me.effects) > 0)) {
+                _Map_insert(local_fn_effects, mn, me);
+              }
+              break __ring_match32;
+            }
+            break __ring_match32;
+          }
+        }
+        break __ring_match31;
       }
-      break __ring_match32;
+      if (__ring_m31._tag === "ModBlock") {
+        const md = __ring_m31.decls;
+        scan_fn_effects(md, local_fn_effects);
+        break __ring_match31;
+      }
+      break __ring_match31;
     }
-  }
-  if (Option_is_none(_Map_get(trait_method_order, "Eq"))) {
-    _Map_insert(trait_method_order, "Eq", ["eq", "ne"]);
-  }
-  if (Option_is_none(_Map_get(trait_method_order, "Clone"))) {
-    _Map_insert(trait_method_order, "Clone", ["clone"]);
-  }
-  if (Option_is_none(_Map_get(trait_method_order, "Ord"))) {
-    _Map_insert(trait_method_order, "Ord", ["compare"]);
-  }
-  if (Option_is_none(_Map_get(trait_method_order, "Debug"))) {
-    return _Map_insert(trait_method_order, "Debug", ["debug"]);
   }
 }
 
@@ -1407,11 +1387,11 @@ function llvm_is_value_type(t) {
 
 function mut_param_flags(params) {
   let flags = [];
-  const __ring_iter_28 = __List_Iterable.iter(params);
+  const __ring_iter_27 = __List_Iterable.iter(params);
   while (true) {
-    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
-    if (__ring_next_28._tag === "none") break;
-    const p = __ring_next_28._0;
+    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+    if (__ring_next_27._tag === "none") break;
+    const p = __ring_next_27._0;
     if (((p.name === "self") ? true : (!p.is_mutable))) {
       List_push(flags, false);
     } else {
@@ -1422,11 +1402,11 @@ function mut_param_flags(params) {
 }
 
 function scan_fn_mut_params_llvm(decls, fn_mut_params) {
-  const __ring_iter_29 = __List_Iterable.iter(decls);
+  const __ring_iter_28 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
-    if (__ring_next_29._tag === "none") break;
-    const decl = __ring_next_29._0;
+    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+    if (__ring_next_28._tag === "none") break;
+    const decl = __ring_next_28._0;
     __ring_match34: {
       const __ring_m34 = decl;
       if (__ring_m34._tag === "Fn") {
@@ -1436,11 +1416,11 @@ function scan_fn_mut_params_llvm(decls, fn_mut_params) {
       }
       if (__ring_m34._tag === "Impl") {
         const target_type = __ring_m34.target_type; const methods = __ring_m34.methods;
-        const __ring_iter_30 = __List_Iterable.iter(methods);
+        const __ring_iter_29 = __List_Iterable.iter(methods);
         while (true) {
-          const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
-          if (__ring_next_30._tag === "none") break;
-          const m = __ring_next_30._0;
+          const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+          if (__ring_next_29._tag === "none") break;
+          const m = __ring_next_29._0;
           __ring_match35: {
             const __ring_m35 = m;
             if (__ring_m35._tag === "Fn") {
@@ -1464,26 +1444,46 @@ function scan_fn_mut_params_llvm(decls, fn_mut_params) {
   }
 }
 
-function register_effect_ops_llvm(decls, effect_ops) {
-  const __ring_iter_31 = __List_Iterable.iter(decls);
+function scan_trait_decls(decls, trait_method_order) {
+  const __ring_iter_30 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
-    if (__ring_next_31._tag === "none") break;
-    const decl = __ring_next_31._0;
+    const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+    if (__ring_next_30._tag === "none") break;
+    const decl = __ring_next_30._0;
     __ring_match36: {
       const __ring_m36 = decl;
-      if (__ring_m36._tag === "Effect") {
-        const name = __ring_m36.name; const ops = __ring_m36.ops;
-        _Map_insert(effect_ops, name, ops);
+      if (__ring_m36._tag === "Trait") {
+        const name = __ring_m36.name; const methods = __ring_m36.methods;
+        let method_names = [];
+        const __ring_iter_31 = __List_Iterable.iter(methods);
+        while (true) {
+          const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+          if (__ring_next_31._tag === "none") break;
+          const m = __ring_next_31._0;
+          List_push(method_names, m.name);
+        }
+        _Map_insert(trait_method_order, name, method_names);
         break __ring_match36;
       }
       if (__ring_m36._tag === "ModBlock") {
         const md = __ring_m36.decls;
-        register_effect_ops_llvm(md, effect_ops);
+        scan_trait_decls(md, trait_method_order);
         break __ring_match36;
       }
       break __ring_match36;
     }
+  }
+  if (Option_is_none(_Map_get(trait_method_order, "Eq"))) {
+    _Map_insert(trait_method_order, "Eq", ["eq", "ne"]);
+  }
+  if (Option_is_none(_Map_get(trait_method_order, "Clone"))) {
+    _Map_insert(trait_method_order, "Clone", ["clone"]);
+  }
+  if (Option_is_none(_Map_get(trait_method_order, "Ord"))) {
+    _Map_insert(trait_method_order, "Ord", ["compare"]);
+  }
+  if (Option_is_none(_Map_get(trait_method_order, "Debug"))) {
+    return _Map_insert(trait_method_order, "Debug", ["debug"]);
   }
 }
 

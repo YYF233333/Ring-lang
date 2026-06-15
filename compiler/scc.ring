@@ -60,8 +60,12 @@ fn collect_fn_names_from_decls(decls: List<Decl>, mut names: Set<Str>, mod_prefi
 pub fn build_call_graph(decls: List<Decl>, registered_fns: Set<Str>) -> Map<Str, List<Str>> {
     let mut graph: Map<Str, List<Str>> = map_new()
 
-    // Ensure every registered fn has an entry (even if no outgoing edges)
-    for name in registered_fns {
+    // Ensure every registered fn has an entry (even if no outgoing edges).
+    // Sort to ensure deterministic graph construction order across backends.
+    let mut sorted_names: List<Str> = []
+    for name in registered_fns { sorted_names.push(name) }
+    sorted_names.sort()
+    for name in sorted_names {
         if !graph.contains_key(name) {
             graph.insert(name, [])
         }
@@ -84,24 +88,17 @@ fn collect_decl_edges(decl: Decl, registered_fns: Set<Str>, mut graph: Map<Str, 
             }
             let mut edges: Set<Str> = set_new()
             collect_expr_callees(body, registered_fns, edges)
-            // For impl methods, filter out calls to sibling methods (same impl node)
-            // This is handled by not adding self.method() calls as edges (see collect_expr_callees)
+            let mut sorted_edges: List<Str> = []
+            for e in edges {
+                if e != caller { sorted_edges.push(e) }
+            }
+            sorted_edges.sort()
             match graph.get(caller) {
                 some(existing) => {
-                    for e in edges {
-                        if e != caller {
-                            existing.push(e)
-                        }
-                    }
+                    for e in sorted_edges { existing.push(e) }
                 },
                 none => {
-                    let mut edge_list: List<Str> = []
-                    for e in edges {
-                        if e != caller {
-                            edge_list.push(e)
-                        }
-                    }
-                    graph.insert(caller, edge_list)
+                    graph.insert(caller, sorted_edges)
                 }
             }
         },
@@ -352,7 +349,10 @@ pub fn tarjan_scc(graph: Map<Str, List<Str>>) -> List<List<Str>> {
         }
     }
 
-    for node in all_nodes {
+    let mut sorted_nodes: List<Str> = []
+    for n in all_nodes { sorted_nodes.push(n) }
+    sorted_nodes.sort()
+    for node in sorted_nodes {
         if !indices.contains_key(node) {
             tarjan_strongconnect(node, graph, index_counter, stack, on_stack, indices, lowlinks, result)
         }

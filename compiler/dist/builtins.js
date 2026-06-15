@@ -277,13 +277,6 @@ function open_row(env) {
   return new OpenRow(new types$EffectRow([], Option_some(tail_id)), tail_id);
 }
 
-function register_effects(env) {
-  _Map_insert(env.types.effects, "io", new env$EffectDef("io", [], [], [new env$EffectOpDef("read", [types$STR], types$STR, false), new env$EffectOpDef("write", [types$STR, types$STR], types$UNIT, false)], Option_some(env$BuiltInKind_BkIo), false));
-  const fail_t_id = env$TypeEnv_fresh_var_id(env);
-  const fail_t = types$Type_TypeVar(fail_t_id, Option_none);
-  return _Map_insert(env.types.effects, "fail", new env$EffectDef("fail", ["E"], [fail_t_id], [new env$EffectOpDef("raise", [fail_t], types$NEVER, false)], Option_some(env$BuiltInKind_BkFail), false));
-}
-
 function register_cell(env) {
   const cell_t_id = env$TypeEnv_fresh_var_id(env);
   const cell_t = types$Type_TypeVar(cell_t_id, Option_none);
@@ -302,6 +295,116 @@ function register_cell(env) {
   const update_cb = types$Type_FnType([m_t], m_t, types$EMPTY_ROW);
   _Map_insert(methods, "update", new env$TypeScheme(types$Type_FnType([self_type, update_cb], types$UNIT, mut_row), [m_t_id], [], Option_none));
   return _Map_insert(env.trait_reg.impl_methods, types$BUILTIN_CELL, methods);
+}
+
+function register_clone_trait(env) {
+  const self_var_id = env$TypeEnv_fresh_var_id(env);
+  const self_var = types$Type_TypeVar(self_var_id, Option_none);
+  const clone_fn = types$Type_FnType([self_var], self_var, types$EMPTY_ROW);
+  _Map_insert(env.trait_reg.traits, "Clone", new env$TraitDef("Clone", [], [self_var_id], [new env$TraitMethodDef("clone", clone_fn, false, [false], [])], [], []));
+  const __ring_iter_2 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
+  while (true) {
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const prim = __ring_next_2._0;
+    env$add_impl(env.trait_reg, new env$ImplEntry("Clone", prim, [], ["clone"], map_new()));
+  }
+  const __ring_iter_3 = __List_Iterable.iter(["List", "Map", "Set"]);
+  while (true) {
+    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+    if (__ring_next_3._tag === "none") break;
+    const coll = __ring_next_3._0;
+    env$add_impl(env.trait_reg, new env$ImplEntry("Clone", coll, [], ["clone"], map_new()));
+  }
+}
+
+function register_debug_trait(env) {
+  const self_var_id = env$TypeEnv_fresh_var_id(env);
+  const self_var = types$Type_TypeVar(self_var_id, Option_none);
+  const debug_fn = types$Type_FnType([self_var], types$STR, types$EMPTY_ROW);
+  _Map_insert(env.trait_reg.traits, "Debug", new env$TraitDef("Debug", [], [self_var_id], [new env$TraitMethodDef("debug", debug_fn, false, [false], [])], [], []));
+  const __ring_iter_4 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
+  while (true) {
+    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+    if (__ring_next_4._tag === "none") break;
+    const prim = __ring_next_4._0;
+    env$add_impl(env.trait_reg, new env$ImplEntry("Debug", prim, [], ["debug"], map_new()));
+  }
+  let t_id = env$TypeEnv_fresh_var_id(env);
+  let t = types$Type_TypeVar(t_id, Option_none);
+  const list_self = types$Type_StructType(types$BUILTIN_LIST, [t], []);
+  const list_debug_fn = types$Type_FnType([list_self], types$STR, types$EMPTY_ROW);
+  let list_methods = get_or_create_methods(env, types$BUILTIN_LIST);
+  _Map_insert(list_methods, "debug", new env$TypeScheme(list_debug_fn, [t_id], [new env$SchemeBound(t_id, "Debug", [])], Option_none));
+  env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_LIST, ["T"], ["debug"], map_new()));
+  const k_id = env$TypeEnv_fresh_var_id(env);
+  const k = types$Type_TypeVar(k_id, Option_none);
+  const v_id = env$TypeEnv_fresh_var_id(env);
+  const v = types$Type_TypeVar(v_id, Option_none);
+  const map_self = types$make_map_type(k, v);
+  const map_debug_fn = types$Type_FnType([map_self], types$STR, types$EMPTY_ROW);
+  let map_methods = get_or_create_methods(env, types$BUILTIN_MAP);
+  _Map_insert(map_methods, "debug", new env$TypeScheme(map_debug_fn, [k_id, v_id], [], Option_none));
+  env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_MAP, ["K", "V"], ["debug"], map_new()));
+  t_id = env$TypeEnv_fresh_var_id(env);
+  t = types$Type_TypeVar(t_id, Option_none);
+  const set_self = types$Type_StructType(types$BUILTIN_SET, [t], []);
+  const set_debug_fn = types$Type_FnType([set_self], types$STR, types$EMPTY_ROW);
+  let set_methods = get_or_create_methods(env, types$BUILTIN_SET);
+  _Map_insert(set_methods, "debug", new env$TypeScheme(set_debug_fn, [t_id], [], Option_none));
+  return env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_SET, ["T"], ["debug"], map_new()));
+}
+
+function register_effects(env) {
+  _Map_insert(env.types.effects, "io", new env$EffectDef("io", [], [], [new env$EffectOpDef("read", [types$STR], types$STR, false), new env$EffectOpDef("write", [types$STR, types$STR], types$UNIT, false)], Option_some(env$BuiltInKind_BkIo), false));
+  const fail_t_id = env$TypeEnv_fresh_var_id(env);
+  const fail_t = types$Type_TypeVar(fail_t_id, Option_none);
+  return _Map_insert(env.types.effects, "fail", new env$EffectDef("fail", ["E"], [fail_t_id], [new env$EffectOpDef("raise", [fail_t], types$NEVER, false)], Option_some(env$BuiltInKind_BkFail), false));
+}
+
+function register_eq_trait(env) {
+  const self_var_id = env$TypeEnv_fresh_var_id(env);
+  const self_var = types$Type_TypeVar(self_var_id, Option_none);
+  const eq_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
+  const ne_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
+  _Map_insert(env.trait_reg.traits, "Eq", new env$TraitDef("Eq", [], [self_var_id], [new env$TraitMethodDef("eq", eq_fn, false, [false, false], []), new env$TraitMethodDef("ne", ne_fn, true, [false, false], [])], [], []));
+  const __ring_iter_5 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
+  while (true) {
+    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+    if (__ring_next_5._tag === "none") break;
+    const prim = __ring_next_5._0;
+    env$add_impl(env.trait_reg, new env$ImplEntry("Eq", prim, [], ["eq", "ne"], map_new()));
+  }
+}
+
+function register_mut_methods(env) {
+  let list_mut = set_new();
+  const __ring_iter_6 = __List_Iterable.iter(["push", "pop", "set", "extend", "reverse", "sort", "shift", "clear", "sort_by"]);
+  while (true) {
+    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+    if (__ring_next_6._tag === "none") break;
+    const m = __ring_next_6._0;
+    _Set_insert(list_mut, m);
+  }
+  _Map_insert(env.trait_reg.mut_methods, "List", list_mut);
+  let map_mut = set_new();
+  const __ring_iter_7 = __List_Iterable.iter(["insert", "remove", "clear"]);
+  while (true) {
+    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+    if (__ring_next_7._tag === "none") break;
+    const m = __ring_next_7._0;
+    _Set_insert(map_mut, m);
+  }
+  _Map_insert(env.trait_reg.mut_methods, "Map", map_mut);
+  let set_mut = set_new();
+  const __ring_iter_8 = __List_Iterable.iter(["insert", "remove", "clear"]);
+  while (true) {
+    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+    if (__ring_next_8._tag === "none") break;
+    const m = __ring_next_8._0;
+    _Set_insert(set_mut, m);
+  }
+  return _Map_insert(env.trait_reg.mut_methods, "Set", set_mut);
 }
 
 function register_option(env) {
@@ -334,19 +437,22 @@ function register_option(env) {
   return _Map_insert(methods, "to_fail", new env$TypeScheme(types$Type_FnType([self_type2, e], types$Type_TypeVar(t_id, Option_none), new types$EffectRow([fail_eff], Option_none)), [t_id, e_id], [], Option_none));
 }
 
-function register_eq_trait(env) {
-  const self_var_id = env$TypeEnv_fresh_var_id(env);
-  const self_var = types$Type_TypeVar(self_var_id, Option_none);
-  const eq_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
-  const ne_fn = types$Type_FnType([self_var, self_var], types$BOOL, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Eq", new env$TraitDef("Eq", [], [self_var_id], [new env$TraitMethodDef("eq", eq_fn, false, [false, false], []), new env$TraitMethodDef("ne", ne_fn, true, [false, false], [])], [], []));
-  const __ring_iter_2 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
-  while (true) {
-    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
-    if (__ring_next_2._tag === "none") break;
-    const prim = __ring_next_2._0;
-    env$add_impl(env.trait_reg, new env$ImplEntry("Eq", prim, [], ["eq", "ne"], map_new()));
-  }
+function register_option_clone(env) {
+  const t_id = env$TypeEnv_fresh_var_id(env);
+  const t = types$Type_TypeVar(t_id, Option_none);
+  const opt = types$make_option_type(t);
+  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  _Map_insert(methods, "clone", new env$TypeScheme(types$Type_FnType([opt], opt, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Clone", [])], Option_none));
+  return env$add_impl(env.trait_reg, new env$ImplEntry("Clone", types$BUILTIN_OPTION, ["T"], ["clone"], map_new()));
+}
+
+function register_option_debug(env) {
+  const t_id = env$TypeEnv_fresh_var_id(env);
+  const t = types$Type_TypeVar(t_id, Option_none);
+  const opt = types$make_option_type(t);
+  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  _Map_insert(methods, "debug", new env$TypeScheme(types$Type_FnType([opt], types$STR, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Debug", [])], Option_none));
+  return env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_OPTION, ["T"], ["debug"], map_new()));
 }
 
 function register_option_eq(env) {
@@ -360,124 +466,18 @@ function register_option_eq(env) {
   return env$add_impl(env.trait_reg, new env$ImplEntry("Eq", types$BUILTIN_OPTION, ["T"], ["eq", "ne"], map_new()));
 }
 
-function register_clone_trait(env) {
-  const self_var_id = env$TypeEnv_fresh_var_id(env);
-  const self_var = types$Type_TypeVar(self_var_id, Option_none);
-  const clone_fn = types$Type_FnType([self_var], self_var, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Clone", new env$TraitDef("Clone", [], [self_var_id], [new env$TraitMethodDef("clone", clone_fn, false, [false], [])], [], []));
-  const __ring_iter_3 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
-  while (true) {
-    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
-    if (__ring_next_3._tag === "none") break;
-    const prim = __ring_next_3._0;
-    env$add_impl(env.trait_reg, new env$ImplEntry("Clone", prim, [], ["clone"], map_new()));
-  }
-  const __ring_iter_4 = __List_Iterable.iter(["List", "Map", "Set"]);
-  while (true) {
-    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-    if (__ring_next_4._tag === "none") break;
-    const coll = __ring_next_4._0;
-    env$add_impl(env.trait_reg, new env$ImplEntry("Clone", coll, [], ["clone"], map_new()));
-  }
-}
-
-function register_option_clone(env) {
-  const t_id = env$TypeEnv_fresh_var_id(env);
-  const t = types$Type_TypeVar(t_id, Option_none);
-  const opt = types$make_option_type(t);
-  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
-  _Map_insert(methods, "clone", new env$TypeScheme(types$Type_FnType([opt], opt, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Clone", [])], Option_none));
-  return env$add_impl(env.trait_reg, new env$ImplEntry("Clone", types$BUILTIN_OPTION, ["T"], ["clone"], map_new()));
-}
-
 function register_ord_trait(env) {
   const self_var_id = env$TypeEnv_fresh_var_id(env);
   const self_var = types$Type_TypeVar(self_var_id, Option_none);
   const cmp_fn = types$Type_FnType([self_var, self_var], types$INT, types$EMPTY_ROW);
   _Map_insert(env.trait_reg.traits, "Ord", new env$TraitDef("Ord", [], [self_var_id], [new env$TraitMethodDef("cmp", cmp_fn, false, [false, false], [])], [], []));
-  const __ring_iter_5 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
-  while (true) {
-    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-    if (__ring_next_5._tag === "none") break;
-    const prim = __ring_next_5._0;
-    env$add_impl(env.trait_reg, new env$ImplEntry("Ord", prim, [], ["cmp"], map_new()));
-  }
-}
-
-function register_debug_trait(env) {
-  const self_var_id = env$TypeEnv_fresh_var_id(env);
-  const self_var = types$Type_TypeVar(self_var_id, Option_none);
-  const debug_fn = types$Type_FnType([self_var], types$STR, types$EMPTY_ROW);
-  _Map_insert(env.trait_reg.traits, "Debug", new env$TraitDef("Debug", [], [self_var_id], [new env$TraitMethodDef("debug", debug_fn, false, [false], [])], [], []));
-  const __ring_iter_6 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
-  while (true) {
-    const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-    if (__ring_next_6._tag === "none") break;
-    const prim = __ring_next_6._0;
-    env$add_impl(env.trait_reg, new env$ImplEntry("Debug", prim, [], ["debug"], map_new()));
-  }
-  let t_id = env$TypeEnv_fresh_var_id(env);
-  let t = types$Type_TypeVar(t_id, Option_none);
-  const list_self = types$Type_StructType(types$BUILTIN_LIST, [t], []);
-  const list_debug_fn = types$Type_FnType([list_self], types$STR, types$EMPTY_ROW);
-  let list_methods = get_or_create_methods(env, types$BUILTIN_LIST);
-  _Map_insert(list_methods, "debug", new env$TypeScheme(list_debug_fn, [t_id], [new env$SchemeBound(t_id, "Debug", [])], Option_none));
-  env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_LIST, ["T"], ["debug"], map_new()));
-  const k_id = env$TypeEnv_fresh_var_id(env);
-  const k = types$Type_TypeVar(k_id, Option_none);
-  const v_id = env$TypeEnv_fresh_var_id(env);
-  const v = types$Type_TypeVar(v_id, Option_none);
-  const map_self = types$make_map_type(k, v);
-  const map_debug_fn = types$Type_FnType([map_self], types$STR, types$EMPTY_ROW);
-  let map_methods = get_or_create_methods(env, types$BUILTIN_MAP);
-  _Map_insert(map_methods, "debug", new env$TypeScheme(map_debug_fn, [k_id, v_id], [], Option_none));
-  env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_MAP, ["K", "V"], ["debug"], map_new()));
-  t_id = env$TypeEnv_fresh_var_id(env);
-  t = types$Type_TypeVar(t_id, Option_none);
-  const set_self = types$Type_StructType(types$BUILTIN_SET, [t], []);
-  const set_debug_fn = types$Type_FnType([set_self], types$STR, types$EMPTY_ROW);
-  let set_methods = get_or_create_methods(env, types$BUILTIN_SET);
-  _Map_insert(set_methods, "debug", new env$TypeScheme(set_debug_fn, [t_id], [], Option_none));
-  return env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_SET, ["T"], ["debug"], map_new()));
-}
-
-function register_option_debug(env) {
-  const t_id = env$TypeEnv_fresh_var_id(env);
-  const t = types$Type_TypeVar(t_id, Option_none);
-  const opt = types$make_option_type(t);
-  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
-  _Map_insert(methods, "debug", new env$TypeScheme(types$Type_FnType([opt], types$STR, types$EMPTY_ROW), [t_id], [new env$SchemeBound(t_id, "Debug", [])], Option_none));
-  return env$add_impl(env.trait_reg, new env$ImplEntry("Debug", types$BUILTIN_OPTION, ["T"], ["debug"], map_new()));
-}
-
-function register_mut_methods(env) {
-  let list_mut = set_new();
-  const __ring_iter_7 = __List_Iterable.iter(["push", "pop", "set", "extend", "reverse", "sort", "shift", "clear", "sort_by"]);
-  while (true) {
-    const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-    if (__ring_next_7._tag === "none") break;
-    const m = __ring_next_7._0;
-    _Set_insert(list_mut, m);
-  }
-  _Map_insert(env.trait_reg.mut_methods, "List", list_mut);
-  let map_mut = set_new();
-  const __ring_iter_8 = __List_Iterable.iter(["insert", "remove", "clear"]);
-  while (true) {
-    const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
-    if (__ring_next_8._tag === "none") break;
-    const m = __ring_next_8._0;
-    _Set_insert(map_mut, m);
-  }
-  _Map_insert(env.trait_reg.mut_methods, "Map", map_mut);
-  let set_mut = set_new();
-  const __ring_iter_9 = __List_Iterable.iter(["insert", "remove", "clear"]);
+  const __ring_iter_9 = __List_Iterable.iter(["Int", "Float", "Str", "Bool"]);
   while (true) {
     const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
     if (__ring_next_9._tag === "none") break;
-    const m = __ring_next_9._0;
-    _Set_insert(set_mut, m);
+    const prim = __ring_next_9._0;
+    env$add_impl(env.trait_reg, new env$ImplEntry("Ord", prim, [], ["cmp"], map_new()));
   }
-  return _Map_insert(env.trait_reg.mut_methods, "Set", set_mut);
 }
 
 function register_builtins(env) {
@@ -585,6 +585,29 @@ function register_map_hof(env) {
   return _Map_insert(methods, "any", new env$TypeScheme(types$Type_FnType([types$make_map_type(k, v), cb], types$BOOL, orow.eff), [k_id, v_id, orow.tail_id], [], Option_none));
 }
 
+function register_option_hof(env) {
+  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
+  let t_id = env$TypeEnv_fresh_var_id(env);
+  let t = types$Type_TypeVar(t_id, Option_none);
+  let u_id = env$TypeEnv_fresh_var_id(env);
+  let u = types$Type_TypeVar(u_id, Option_none);
+  let orow = open_row(env);
+  let cb = types$Type_FnType([t], u, orow.eff);
+  _Map_insert(methods, "map", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], types$make_option_type(u), orow.eff), [t_id, u_id, orow.tail_id], [], Option_none));
+  t_id = env$TypeEnv_fresh_var_id(env);
+  t = types$Type_TypeVar(t_id, Option_none);
+  u_id = env$TypeEnv_fresh_var_id(env);
+  u = types$Type_TypeVar(u_id, Option_none);
+  orow = open_row(env);
+  cb = types$Type_FnType([t], types$make_option_type(u), orow.eff);
+  _Map_insert(methods, "and_then", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], types$make_option_type(u), orow.eff), [t_id, u_id, orow.tail_id], [], Option_none));
+  t_id = env$TypeEnv_fresh_var_id(env);
+  t = types$Type_TypeVar(t_id, Option_none);
+  orow = open_row(env);
+  cb = types$Type_FnType([], t, orow.eff);
+  return _Map_insert(methods, "unwrap_or_else", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], t, orow.eff), [t_id, orow.tail_id], [], Option_none));
+}
+
 function register_set_hof(env) {
   let methods = get_or_create_methods(env, types$BUILTIN_SET);
   let t_id = env$TypeEnv_fresh_var_id(env);
@@ -609,29 +632,6 @@ function register_set_hof(env) {
   orow = open_row(env);
   cb = types$Type_FnType([t], types$BOOL, orow.eff);
   return _Map_insert(methods, "all", new env$TypeScheme(types$Type_FnType([make_set_struct(t), cb], types$BOOL, orow.eff), [t_id, orow.tail_id], [], Option_none));
-}
-
-function register_option_hof(env) {
-  let methods = get_or_create_methods(env, types$BUILTIN_OPTION);
-  let t_id = env$TypeEnv_fresh_var_id(env);
-  let t = types$Type_TypeVar(t_id, Option_none);
-  let u_id = env$TypeEnv_fresh_var_id(env);
-  let u = types$Type_TypeVar(u_id, Option_none);
-  let orow = open_row(env);
-  let cb = types$Type_FnType([t], u, orow.eff);
-  _Map_insert(methods, "map", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], types$make_option_type(u), orow.eff), [t_id, u_id, orow.tail_id], [], Option_none));
-  t_id = env$TypeEnv_fresh_var_id(env);
-  t = types$Type_TypeVar(t_id, Option_none);
-  u_id = env$TypeEnv_fresh_var_id(env);
-  u = types$Type_TypeVar(u_id, Option_none);
-  orow = open_row(env);
-  cb = types$Type_FnType([t], types$make_option_type(u), orow.eff);
-  _Map_insert(methods, "and_then", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], types$make_option_type(u), orow.eff), [t_id, u_id, orow.tail_id], [], Option_none));
-  t_id = env$TypeEnv_fresh_var_id(env);
-  t = types$Type_TypeVar(t_id, Option_none);
-  orow = open_row(env);
-  cb = types$Type_FnType([], t, orow.eff);
-  return _Map_insert(methods, "unwrap_or_else", new env$TypeScheme(types$Type_FnType([types$make_option_type(t), cb], t, orow.eff), [t_id, orow.tail_id], [], Option_none));
 }
 
 function register_hof_intrinsics(env) {

@@ -648,33 +648,32 @@ function collect_decl_edges(decl, registered_fns, graph, impl_node) {
       }
       let edges = set_new();
       collect_expr_callees(body, registered_fns, edges);
+      let sorted_edges = [];
+      const __ring_iter_13 = ___Set_Iterable.iter(edges);
+      while (true) {
+        const __ring_next_13 = __SetIterator_Iterator.next(__ring_iter_13);
+        if (__ring_next_13._tag === "none") break;
+        const e = __ring_next_13._0;
+        if ((e !== caller)) {
+          List_push(sorted_edges, e);
+        }
+      }
+      List_sort(sorted_edges, __Str_Ord);
       __ring_match21: {
         const __ring_m21 = _Map_get(graph, caller);
         if (__ring_m21._tag === "some") {
           const existing = __ring_m21._0;
-          const __ring_iter_13 = ___Set_Iterable.iter(edges);
+          const __ring_iter_14 = __List_Iterable.iter(sorted_edges);
           while (true) {
-            const __ring_next_13 = __SetIterator_Iterator.next(__ring_iter_13);
-            if (__ring_next_13._tag === "none") break;
-            const e = __ring_next_13._0;
-            if ((e !== caller)) {
-              List_push(existing, e);
-            }
+            const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+            if (__ring_next_14._tag === "none") break;
+            const e = __ring_next_14._0;
+            List_push(existing, e);
           }
           break __ring_match21;
         }
         if (__ring_m21._tag === "none") {
-          let edge_list = [];
-          const __ring_iter_14 = ___Set_Iterable.iter(edges);
-          while (true) {
-            const __ring_next_14 = __SetIterator_Iterator.next(__ring_iter_14);
-            if (__ring_next_14._tag === "none") break;
-            const e = __ring_next_14._0;
-            if ((e !== caller)) {
-              List_push(edge_list, e);
-            }
-          }
-          return _Map_insert(graph, caller, edge_list);
+          return _Map_insert(graph, caller, sorted_edges);
           break __ring_match21;
         }
         __match_fail(__ring_m21);
@@ -728,31 +727,40 @@ function collect_decl_edges(decl, registered_fns, graph, impl_node) {
 
 function build_call_graph(decls, registered_fns) {
   let graph = map_new();
+  let sorted_names = [];
   const __ring_iter_17 = ___Set_Iterable.iter(registered_fns);
   while (true) {
     const __ring_next_17 = __SetIterator_Iterator.next(__ring_iter_17);
     if (__ring_next_17._tag === "none") break;
     const name = __ring_next_17._0;
+    List_push(sorted_names, name);
+  }
+  List_sort(sorted_names, __Str_Ord);
+  const __ring_iter_18 = __List_Iterable.iter(sorted_names);
+  while (true) {
+    const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+    if (__ring_next_18._tag === "none") break;
+    const name = __ring_next_18._0;
     if ((!_Map_contains_key(graph, name))) {
       _Map_insert(graph, name, []);
     }
   }
-  const __ring_iter_18 = __List_Iterable.iter(decls);
+  const __ring_iter_19 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
-    if (__ring_next_18._tag === "none") break;
-    const decl = __ring_next_18._0;
+    const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+    if (__ring_next_19._tag === "none") break;
+    const decl = __ring_next_19._0;
     collect_decl_edges(decl, registered_fns, graph, Option_none);
   }
   return graph;
 }
 
 function collect_fn_names_from_decls(decls, names, mod_prefix) {
-  const __ring_iter_19 = __List_Iterable.iter(decls);
+  const __ring_iter_20 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
-    if (__ring_next_19._tag === "none") break;
-    const decl = __ring_next_19._0;
+    const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+    if (__ring_next_20._tag === "none") break;
+    const decl = __ring_next_20._0;
     __ring_match23: {
       const __ring_m23 = decl;
       if (__ring_m23._tag === "Fn") {
@@ -777,11 +785,11 @@ function collect_fn_names_from_decls(decls, names, mod_prefix) {
       }
       if (__ring_m23._tag === "Impl") {
         const methods = __ring_m23.methods;
-        const __ring_iter_20 = __List_Iterable.iter(methods);
+        const __ring_iter_21 = __List_Iterable.iter(methods);
         while (true) {
-          const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
-          if (__ring_next_20._tag === "none") break;
-          const method = __ring_next_20._0;
+          const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+          if (__ring_next_21._tag === "none") break;
+          const method = __ring_next_21._0;
           __ring_match25: {
             const __ring_m25 = method;
             if (__ring_m25._tag === "Fn") {
@@ -862,11 +870,11 @@ function tarjan_strongconnect(v, graph, index_counter, stack, on_stack, indices,
     __match_fail(__ring_m28);
   }
   const successors = __ring_blk5;
-  const __ring_iter_21 = __List_Iterable.iter(successors);
+  const __ring_iter_22 = __List_Iterable.iter(successors);
   while (true) {
-    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
-    if (__ring_next_21._tag === "none") break;
-    const w = __ring_next_21._0;
+    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+    if (__ring_next_22._tag === "none") break;
+    const w = __ring_next_22._0;
     if ((!_Map_contains_key(indices, w))) {
       tarjan_strongconnect(w, graph, index_counter, stack, on_stack, indices, lowlinks, result);
       const v_low = Option_unwrap_or(_Map_get(lowlinks, v), 0);
@@ -922,28 +930,37 @@ function tarjan_scc(graph) {
   let all_nodes = set_new();
   let sorted_graph = _Map_entries(graph);
   sorted_graph.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
-  const __ring_iter_22 = __List_Iterable.iter(sorted_graph);
+  const __ring_iter_23 = __List_Iterable.iter(sorted_graph);
   while (true) {
-    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
-    if (__ring_next_22._tag === "none") break;
-    const entry = __ring_next_22._0;
+    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+    if (__ring_next_23._tag === "none") break;
+    const entry = __ring_next_23._0;
     const __ring_dt0 = entry;
     const node = __ring_dt0[0];
     const targets = __ring_dt0[1];
     _Set_insert(all_nodes, node);
-    const __ring_iter_23 = __List_Iterable.iter(targets);
+    const __ring_iter_24 = __List_Iterable.iter(targets);
     while (true) {
-      const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
-      if (__ring_next_23._tag === "none") break;
-      const t = __ring_next_23._0;
+      const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+      if (__ring_next_24._tag === "none") break;
+      const t = __ring_next_24._0;
       _Set_insert(all_nodes, t);
     }
   }
-  const __ring_iter_24 = ___Set_Iterable.iter(all_nodes);
+  let sorted_nodes = [];
+  const __ring_iter_25 = ___Set_Iterable.iter(all_nodes);
   while (true) {
-    const __ring_next_24 = __SetIterator_Iterator.next(__ring_iter_24);
-    if (__ring_next_24._tag === "none") break;
-    const node = __ring_next_24._0;
+    const __ring_next_25 = __SetIterator_Iterator.next(__ring_iter_25);
+    if (__ring_next_25._tag === "none") break;
+    const n = __ring_next_25._0;
+    List_push(sorted_nodes, n);
+  }
+  List_sort(sorted_nodes, __Str_Ord);
+  const __ring_iter_26 = __List_Iterable.iter(sorted_nodes);
+  while (true) {
+    const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+    if (__ring_next_26._tag === "none") break;
+    const node = __ring_next_26._0;
     if ((!_Map_contains_key(indices, node))) {
       tarjan_strongconnect(node, graph, index_counter, stack, on_stack, indices, lowlinks, result);
     }

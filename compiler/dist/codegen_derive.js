@@ -253,6 +253,26 @@ function collect_dict_params(impl_, trait_name) {
   return params;
 }
 
+function field_accessor(v, f) {
+  if (v.has_named_fields) {
+    return codegen_ctx$safe_ident(f.name);
+  } else {
+    __ring_match6: {
+      const __ring_m6 = f.positional_index;
+      if (__ring_m6._tag === "some") {
+        const pi = __ring_m6._0;
+        return `_${pi}`;
+        break __ring_match6;
+      }
+      if (__ring_m6._tag === "none") {
+        return f.name;
+        break __ring_match6;
+      }
+      __match_fail(__ring_m6);
+    }
+  }
+}
+
 function extra_dicts_str(dicts) {
   if ((List_len(dicts) > 0)) {
     const joined = List_join(dicts, ", ");
@@ -263,69 +283,49 @@ function extra_dicts_str(dicts) {
 }
 
 function gen_action_clone(expr, action) {
-  __ring_match6: {
-    const __ring_m6 = action;
-    if (__ring_m6._tag === "Identity") {
+  __ring_match7: {
+    const __ring_m7 = action;
+    if (__ring_m7._tag === "Identity") {
       return expr;
-      break __ring_match6;
+      break __ring_match7;
     }
-    if (__ring_m6._tag === "Call") {
-      const dict_name = __ring_m6.dict_name; const extra_dicts = __ring_m6.extra_dicts;
+    if (__ring_m7._tag === "Call") {
+      const dict_name = __ring_m7.dict_name; const extra_dicts = __ring_m7.extra_dicts;
       const extra = extra_dicts_str(extra_dicts);
       return `${dict_name}.clone(${expr}${extra})`;
-      break __ring_match6;
+      break __ring_match7;
     }
-    if (__ring_m6._tag === "Tuple") {
-      const element_actions = __ring_m6.element_actions;
+    if (__ring_m7._tag === "Tuple") {
+      const element_actions = __ring_m7.element_actions;
       let parts = [];
       const __ring_end3 = List_len(element_actions);
       for (let i = 0; i < __ring_end3; i++) {
-        __ring_match7: {
-          const __ring_m7 = List_get(element_actions, i);
-          if (__ring_m7._tag === "some") {
-            const ea = __ring_m7._0;
+        __ring_match8: {
+          const __ring_m8 = List_get(element_actions, i);
+          if (__ring_m8._tag === "some") {
+            const ea = __ring_m8._0;
             List_push(parts, gen_action_clone(`${expr}[${i}]`, ea));
-            break __ring_match7;
+            break __ring_match8;
           }
-          if (__ring_m7._tag === "none") {
-            break __ring_match7;
+          if (__ring_m8._tag === "none") {
+            break __ring_match8;
           }
-          __match_fail(__ring_m7);
+          __match_fail(__ring_m8);
         }
       }
       return `[${List_join(parts, ", ")}]`;
-      break __ring_match6;
+      break __ring_match7;
     }
-    if (__ring_m6._tag === "FnLiteral") {
+    if (__ring_m7._tag === "FnLiteral") {
       return panic("unreachable: FnLiteral in Clone derive");
-      break __ring_match6;
+      break __ring_match7;
     }
-    __match_fail(__ring_m6);
+    __match_fail(__ring_m7);
   }
 }
 
 function gen_field_clone(expr, field) {
   return gen_action_clone(expr, field.action);
-}
-
-function field_accessor(v, f) {
-  if (v.has_named_fields) {
-    return codegen_ctx$safe_ident(f.name);
-  } else {
-    __ring_match8: {
-      const __ring_m8 = f.positional_index;
-      if (__ring_m8._tag === "some") {
-        const pi = __ring_m8._0;
-        return `_${pi}`;
-        break __ring_match8;
-      }
-      if (__ring_m8._tag === "none") {
-        return f.name;
-        break __ring_match8;
-      }
-      __match_fail(__ring_m8);
-    }
-  }
 }
 
 function emit_derived_clone(ctx, impl_) {

@@ -457,41 +457,41 @@ function is_never(t) {
   }
 }
 
-function var_id(t) {
-  __ring_match12: {
-    const __ring_m12 = t;
-    if (__ring_m12._tag === "TypeVar") {
-      const id = __ring_m12.id;
-      return Option_some(id);
-      break __ring_match12;
-    }
-    return Option_none;
-    break __ring_match12;
-  }
+function unify_error_msg(detail, __ring_ev_fail) {
+  return __ring_ev_fail.raise(new UnificationError(detail, false));
 }
 
 function unify_error(t1, t2, detail, __ring_ev_fail) {
   const base = `Type mismatch: cannot unify ${types$type_to_string(t1)} with ${types$type_to_string(t2)}`;
   let __ring_blk2;
-  __ring_match13: {
-    const __ring_m13 = detail;
-    if (__ring_m13._tag === "some") {
-      const d = __ring_m13._0;
+  __ring_match12: {
+    const __ring_m12 = detail;
+    if (__ring_m12._tag === "some") {
+      const d = __ring_m12._0;
       __ring_blk2 = `${base} — ${d}`;
-      break __ring_match13;
+      break __ring_match12;
     }
-    if (__ring_m13._tag === "none") {
+    if (__ring_m12._tag === "none") {
       __ring_blk2 = base;
-      break __ring_match13;
+      break __ring_match12;
     }
-    __match_fail(__ring_m13);
+    __match_fail(__ring_m12);
   }
   const msg = __ring_blk2;
   return __ring_ev_fail.raise(new UnificationError(msg, false));
 }
 
-function unify_error_msg(detail, __ring_ev_fail) {
-  return __ring_ev_fail.raise(new UnificationError(detail, false));
+function var_id(t) {
+  __ring_match13: {
+    const __ring_m13 = t;
+    if (__ring_m13._tag === "TypeVar") {
+      const id = __ring_m13.id;
+      return Option_some(id);
+      break __ring_match13;
+    }
+    return Option_none;
+    break __ring_match13;
+  }
 }
 
 function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {

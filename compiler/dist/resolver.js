@@ -266,50 +266,16 @@ class GraphError {
   }
 }
 
-function module_key(segments) {
-  return List_join(segments, "::");
-}
-
-function resolve_module_file(use_path_segments, project_root) {
-  let path_part = "";
-  const __ring_end2 = List_len(use_path_segments);
-  for (let i = 0; i < __ring_end2; i++) {
-    __ring_match6: {
-      const __ring_m6 = List_get(use_path_segments, i);
-      if (__ring_m6._tag === "some") {
-        const seg = __ring_m6._0;
-        if ((i === 0)) {
-          path_part = seg;
-        } else {
-          path_part = path_join(path_part, seg);
-        }
-        break __ring_match6;
-      }
-      if (__ring_m6._tag === "none") {
-        break __ring_match6;
-      }
-      __match_fail(__ring_m6);
-    }
-  }
-  const ring_file = `${path_part}.ring`;
-  const absolute = path_resolve(path_join(project_root, ring_file));
-  if (file_exists(absolute)) {
-    return Option_some(absolute);
-  } else {
-    return Option_none;
-  }
-}
-
 function find_cycle_path(cycle_nodes, dependencies) {
   if ((List_len(cycle_nodes) === 0)) {
     return ["(unknown)"];
   }
   const cycle_set = set_from(cycle_nodes);
-  const __ring_iter_3 = __List_Iterable.iter(cycle_nodes);
+  const __ring_iter_2 = __List_Iterable.iter(cycle_nodes);
   while (true) {
-    const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
-    if (__ring_next_3._tag === "none") break;
-    const start_node = __ring_next_3._0;
+    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+    if (__ring_next_2._tag === "none") break;
+    const start_node = __ring_next_2._0;
     let path = [start_node];
     let current = start_node;
     let visited = set_new();
@@ -322,11 +288,11 @@ function find_cycle_path(cycle_nodes, dependencies) {
       }
       const deps = Option_unwrap(maybe_deps);
       let advanced = false;
-      const __ring_iter_4 = __List_Iterable.iter(deps);
+      const __ring_iter_3 = __List_Iterable.iter(deps);
       while (true) {
-        const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-        if (__ring_next_4._tag === "none") break;
-        const dep = __ring_next_4._0;
+        const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+        if (__ring_next_3._tag === "none") break;
+        const dep = __ring_next_3._0;
         if (_Set_contains(cycle_set, dep, __Str_Eq)) {
           if ((dep === start_node)) {
             List_push(path, dep);
@@ -352,26 +318,60 @@ function find_cycle_path(cycle_nodes, dependencies) {
     }
   }
   let fallback = [];
-  const __ring_iter_5 = __List_Iterable.iter(cycle_nodes);
+  const __ring_iter_4 = __List_Iterable.iter(cycle_nodes);
   while (true) {
-    const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-    if (__ring_next_5._tag === "none") break;
-    const n = __ring_next_5._0;
+    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+    if (__ring_next_4._tag === "none") break;
+    const n = __ring_next_4._0;
     List_push(fallback, n);
   }
-  __ring_match7: {
-    const __ring_m7 = List_get(cycle_nodes, 0);
-    if (__ring_m7._tag === "some") {
-      const first = __ring_m7._0;
+  __ring_match6: {
+    const __ring_m6 = List_get(cycle_nodes, 0);
+    if (__ring_m6._tag === "some") {
+      const first = __ring_m6._0;
       List_push(fallback, first);
-      break __ring_match7;
+      break __ring_match6;
     }
-    if (__ring_m7._tag === "none") {
-      break __ring_match7;
+    if (__ring_m6._tag === "none") {
+      break __ring_match6;
     }
-    __match_fail(__ring_m7);
+    __match_fail(__ring_m6);
   }
   return fallback;
+}
+
+function module_key(segments) {
+  return List_join(segments, "::");
+}
+
+function resolve_module_file(use_path_segments, project_root) {
+  let path_part = "";
+  const __ring_end5 = List_len(use_path_segments);
+  for (let i = 0; i < __ring_end5; i++) {
+    __ring_match7: {
+      const __ring_m7 = List_get(use_path_segments, i);
+      if (__ring_m7._tag === "some") {
+        const seg = __ring_m7._0;
+        if ((i === 0)) {
+          path_part = seg;
+        } else {
+          path_part = path_join(path_part, seg);
+        }
+        break __ring_match7;
+      }
+      if (__ring_m7._tag === "none") {
+        break __ring_match7;
+      }
+      __match_fail(__ring_m7);
+    }
+  }
+  const ring_file = `${path_part}.ring`;
+  const absolute = path_resolve(path_join(project_root, ring_file));
+  if (file_exists(absolute)) {
+    return Option_some(absolute);
+  } else {
+    return Option_none;
+  }
 }
 
 function build_module_graph(entry_file, error_format) {

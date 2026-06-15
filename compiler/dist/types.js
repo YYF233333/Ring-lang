@@ -632,32 +632,6 @@ function effects_list_equal(a, b) {
   return true;
 }
 
-function type_lists_equal(a, b) {
-  if ((List_len(a) !== List_len(b))) {
-    return false;
-  }
-  let i = 0;
-  while ((i < List_len(a))) {
-    {
-      const __ring_t = List_get(a, i);
-      if (__ring_t._tag === "some") {
-        const x = __ring_t._0;
-        {
-          const __ring_t = List_get(b, i);
-          if (__ring_t._tag === "some") {
-            const y = __ring_t._0;
-            if ((!types_equal(x, y))) {
-              return false;
-            }
-          }
-        }
-      }
-    }
-    i = (i + 1);
-  }
-  return true;
-}
-
 function types_equal(a, b) {
   __ring_match15: {
     const __ring_m15 = a;
@@ -899,6 +873,32 @@ function types_equal(a, b) {
     }
     __match_fail(__ring_m15);
   }
+}
+
+function type_lists_equal(a, b) {
+  if ((List_len(a) !== List_len(b))) {
+    return false;
+  }
+  let i = 0;
+  while ((i < List_len(a))) {
+    {
+      const __ring_t = List_get(a, i);
+      if (__ring_t._tag === "some") {
+        const x = __ring_t._0;
+        {
+          const __ring_t = List_get(b, i);
+          if (__ring_t._tag === "some") {
+            const y = __ring_t._0;
+            if ((!types_equal(x, y))) {
+              return false;
+            }
+          }
+        }
+      }
+    }
+    i = (i + 1);
+  }
+  return true;
 }
 
 function effects_equal(a, b) {

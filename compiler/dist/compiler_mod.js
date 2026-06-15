@@ -397,167 +397,167 @@ function build_dep_import_pairs(dep_exports, dep_prefix) {
   return import_pairs;
 }
 
-function collect_pub_decl_exports(decl, export_names) {
-  __ring_match8: {
-    const __ring_m8 = decl;
-    if (__ring_m8._tag === "Fn") {
-      const name = __ring_m8.name; const is_pub = __ring_m8.is_pub;
-      if (is_pub) {
-        return List_push(export_names, codegen_ctx$safe_ident(name));
-      }
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "Struct") {
-      const name = __ring_m8.name; const is_pub = __ring_m8.is_pub;
-      if (is_pub) {
-        return List_push(export_names, codegen_ctx$safe_ident(name));
-      }
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "Enum") {
-      const name = __ring_m8.name; const is_pub = __ring_m8.is_pub; const variants = __ring_m8.variants;
-      if (is_pub) {
-        const __ring_iter_10 = __List_Iterable.iter(variants);
-        while (true) {
-          const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-          if (__ring_next_10._tag === "none") break;
-          const v = __ring_next_10._0;
-          const sn = codegen_ctx$safe_ident(name);
-          List_push(export_names, `${sn}_${v.name}`);
-        }
-      }
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "Const") {
-      const name = __ring_m8.name; const is_pub = __ring_m8.is_pub;
-      if (is_pub) {
-        return List_push(export_names, codegen_ctx$safe_ident(name));
-      }
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "ExternType") {
-      const name = __ring_m8.name; const is_pub = __ring_m8.is_pub;
-      if (is_pub) {
-        return List_push(export_names, codegen_ctx$safe_ident(name));
-      }
-      break __ring_match8;
-    }
-    if (__ring_m8._tag === "ModBlock") {
-      const mod_name = __ring_m8.name; const mod_decls = __ring_m8.decls; const mpub = __ring_m8.is_pub;
-      if (mpub) {
-        const __ring_iter_11 = __List_Iterable.iter(mod_decls);
-        while (true) {
-          const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
-          if (__ring_next_11._tag === "none") break;
-          const subdecl = __ring_next_11._0;
-          const prefixed = infer_register$prefix_decl_name(mod_name, subdecl);
-          collect_pub_decl_exports(prefixed, export_names);
-        }
-      }
-      break __ring_match8;
-    }
-    break __ring_match8;
-  }
-}
-
 function is_pub_type_in_decls(type_name, decls) {
   let result = false;
-  const __ring_iter_12 = __List_Iterable.iter(decls);
+  const __ring_iter_10 = __List_Iterable.iter(decls);
   while (true) {
-    const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-    if (__ring_next_12._tag === "none") break;
-    const d = __ring_next_12._0;
-    __ring_match9: {
-      const __ring_m9 = d;
-      if (__ring_m9._tag === "Struct") {
-        const dn = __ring_m9.name; const dp = __ring_m9.is_pub;
+    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+    if (__ring_next_10._tag === "none") break;
+    const d = __ring_next_10._0;
+    __ring_match8: {
+      const __ring_m8 = d;
+      if (__ring_m8._tag === "Struct") {
+        const dn = __ring_m8.name; const dp = __ring_m8.is_pub;
         if (((dn === type_name) ? dp : false)) {
           result = true;
         }
-        break __ring_match9;
+        break __ring_match8;
       }
-      if (__ring_m9._tag === "Enum") {
-        const dn = __ring_m9.name; const dp = __ring_m9.is_pub;
+      if (__ring_m8._tag === "Enum") {
+        const dn = __ring_m8.name; const dp = __ring_m8.is_pub;
         if (((dn === type_name) ? dp : false)) {
           result = true;
         }
-        break __ring_match9;
+        break __ring_match8;
       }
-      if (__ring_m9._tag === "ModBlock") {
-        const mod_name = __ring_m9.name; const mod_decls = __ring_m9.decls; const mpub = __ring_m9.is_pub;
+      if (__ring_m8._tag === "ModBlock") {
+        const mod_name = __ring_m8.name; const mod_decls = __ring_m8.decls; const mpub = __ring_m8.is_pub;
         if (mpub) {
-          const __ring_iter_13 = __List_Iterable.iter(mod_decls);
+          const __ring_iter_11 = __List_Iterable.iter(mod_decls);
           while (true) {
-            const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-            if (__ring_next_13._tag === "none") break;
-            const sd = __ring_next_13._0;
+            const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+            if (__ring_next_11._tag === "none") break;
+            const sd = __ring_next_11._0;
             const prefixed = infer_register$prefix_decl_name(mod_name, sd);
-            __ring_match10: {
-              const __ring_m10 = prefixed;
-              if (__ring_m10._tag === "Struct") {
-                const sn = __ring_m10.name; const sp = __ring_m10.is_pub;
+            __ring_match9: {
+              const __ring_m9 = prefixed;
+              if (__ring_m9._tag === "Struct") {
+                const sn = __ring_m9.name; const sp = __ring_m9.is_pub;
                 if (((sn === type_name) ? sp : false)) {
                   result = true;
                 }
-                break __ring_match10;
+                break __ring_match9;
               }
-              if (__ring_m10._tag === "Enum") {
-                const en = __ring_m10.name; const ep = __ring_m10.is_pub;
+              if (__ring_m9._tag === "Enum") {
+                const en = __ring_m9.name; const ep = __ring_m9.is_pub;
                 if (((en === type_name) ? ep : false)) {
                   result = true;
                 }
-                break __ring_match10;
+                break __ring_match9;
               }
-              break __ring_match10;
+              break __ring_match9;
             }
           }
         }
-        break __ring_match9;
+        break __ring_match8;
       }
-      break __ring_match9;
+      break __ring_match8;
     }
   }
   return result;
 }
 
 function collect_impl_exports(decl, all_decls, export_names) {
-  __ring_match11: {
-    const __ring_m11 = decl;
-    if (__ring_m11._tag === "Impl") {
-      const target_type = __ring_m11.target_type; const impl_trait = __ring_m11.trait_name; const methods = __ring_m11.methods;
+  __ring_match10: {
+    const __ring_m10 = decl;
+    if (__ring_m10._tag === "Impl") {
+      const target_type = __ring_m10.target_type; const impl_trait = __ring_m10.trait_name; const methods = __ring_m10.methods;
       if (is_pub_type_in_decls(target_type, all_decls)) {
-        __ring_match12: {
-          const __ring_m12 = impl_trait;
-          if (__ring_m12._tag === "some") {
-            const tn = __ring_m12._0;
+        __ring_match11: {
+          const __ring_m11 = impl_trait;
+          if (__ring_m11._tag === "some") {
+            const tn = __ring_m11._0;
             return List_push(export_names, hir$trait_dict_name(codegen_ctx$safe_ident(target_type), codegen_ctx$safe_ident(tn)));
-            break __ring_match12;
+            break __ring_match11;
           }
-          if (__ring_m12._tag === "none") {
-            const __ring_iter_14 = __List_Iterable.iter(methods);
+          if (__ring_m11._tag === "none") {
+            const __ring_iter_12 = __List_Iterable.iter(methods);
             while (true) {
-              const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
-              if (__ring_next_14._tag === "none") break;
-              const m = __ring_next_14._0;
-              __ring_match13: {
-                const __ring_m13 = m;
-                if (__ring_m13._tag === "Fn") {
-                  const mn = __ring_m13.name;
+              const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+              if (__ring_next_12._tag === "none") break;
+              const m = __ring_next_12._0;
+              __ring_match12: {
+                const __ring_m12 = m;
+                if (__ring_m12._tag === "Fn") {
+                  const mn = __ring_m12.name;
                   List_push(export_names, `${codegen_ctx$safe_ident(target_type)}_${mn}`);
-                  break __ring_match13;
+                  break __ring_match12;
                 }
-                break __ring_match13;
+                break __ring_match12;
               }
             }
-            break __ring_match12;
+            break __ring_match11;
           }
-          __match_fail(__ring_m12);
+          __match_fail(__ring_m11);
         }
       }
-      break __ring_match11;
+      break __ring_match10;
     }
-    if (__ring_m11._tag === "ModBlock") {
-      const mod_name = __ring_m11.name; const mod_decls = __ring_m11.decls; const mpub = __ring_m11.is_pub;
+    if (__ring_m10._tag === "ModBlock") {
+      const mod_name = __ring_m10.name; const mod_decls = __ring_m10.decls; const mpub = __ring_m10.is_pub;
+      if (mpub) {
+        const __ring_iter_13 = __List_Iterable.iter(mod_decls);
+        while (true) {
+          const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+          if (__ring_next_13._tag === "none") break;
+          const subdecl = __ring_next_13._0;
+          const prefixed = infer_register$prefix_decl_name(mod_name, subdecl);
+          collect_impl_exports(prefixed, all_decls, export_names);
+        }
+      }
+      break __ring_match10;
+    }
+    break __ring_match10;
+  }
+}
+
+function collect_pub_decl_exports(decl, export_names) {
+  __ring_match13: {
+    const __ring_m13 = decl;
+    if (__ring_m13._tag === "Fn") {
+      const name = __ring_m13.name; const is_pub = __ring_m13.is_pub;
+      if (is_pub) {
+        return List_push(export_names, codegen_ctx$safe_ident(name));
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Struct") {
+      const name = __ring_m13.name; const is_pub = __ring_m13.is_pub;
+      if (is_pub) {
+        return List_push(export_names, codegen_ctx$safe_ident(name));
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Enum") {
+      const name = __ring_m13.name; const is_pub = __ring_m13.is_pub; const variants = __ring_m13.variants;
+      if (is_pub) {
+        const __ring_iter_14 = __List_Iterable.iter(variants);
+        while (true) {
+          const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+          if (__ring_next_14._tag === "none") break;
+          const v = __ring_next_14._0;
+          const sn = codegen_ctx$safe_ident(name);
+          List_push(export_names, `${sn}_${v.name}`);
+        }
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Const") {
+      const name = __ring_m13.name; const is_pub = __ring_m13.is_pub;
+      if (is_pub) {
+        return List_push(export_names, codegen_ctx$safe_ident(name));
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "ExternType") {
+      const name = __ring_m13.name; const is_pub = __ring_m13.is_pub;
+      if (is_pub) {
+        return List_push(export_names, codegen_ctx$safe_ident(name));
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "ModBlock") {
+      const mod_name = __ring_m13.name; const mod_decls = __ring_m13.decls; const mpub = __ring_m13.is_pub;
       if (mpub) {
         const __ring_iter_15 = __List_Iterable.iter(mod_decls);
         while (true) {
@@ -565,12 +565,12 @@ function collect_impl_exports(decl, all_decls, export_names) {
           if (__ring_next_15._tag === "none") break;
           const subdecl = __ring_next_15._0;
           const prefixed = infer_register$prefix_decl_name(mod_name, subdecl);
-          collect_impl_exports(prefixed, all_decls, export_names);
+          collect_pub_decl_exports(prefixed, export_names);
         }
       }
-      break __ring_match11;
+      break __ring_match13;
     }
-    break __ring_match11;
+    break __ring_match13;
   }
 }
 
@@ -922,75 +922,14 @@ function build_imports_map(graph, exports_map, key) {
   return imports_map;
 }
 
-function collect_named_reexports(names, src_exports, src_prefix, export_names, reexport_aliases) {
-  const __ring_iter_34 = __List_Iterable.iter(names);
-  while (true) {
-    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
-    if (__ring_next_34._tag === "none") break;
-    const item = __ring_next_34._0;
-    let __ring_blk1;
-    __ring_match26: {
-      const __ring_m26 = item.alias;
-      if (__ring_m26._tag === "some") {
-        const a = __ring_m26._0;
-        __ring_blk1 = a;
-        break __ring_match26;
-      }
-      if (__ring_m26._tag === "none") {
-        __ring_blk1 = item.name;
-        break __ring_match26;
-      }
-      __match_fail(__ring_m26);
-    }
-    const local_name = __ring_blk1;
-    const src_js = (_Set_contains(src_exports.extern_values, item.name, __Str_Eq) ? codegen_ctx$safe_ident(item.name) : `${src_prefix}$${codegen_ctx$safe_ident(item.name)}`);
-    const local_js = codegen_ctx$safe_ident(local_name);
-    if ((local_js !== src_js)) {
-      List_push(reexport_aliases, `const ${local_js} = ${src_js};`);
-    }
-    List_push(export_names, local_js);
-    __ring_match27: {
-      const __ring_m27 = _Map_get(src_exports.types, item.name);
-      if (__ring_m27._tag === "some") {
-        const tdef = __ring_m27._0;
-        __ring_match28: {
-          const __ring_m28 = tdef;
-          if (__ring_m28._tag === "EnumDef_") {
-            const edef = __ring_m28._0;
-            const __ring_iter_35 = __List_Iterable.iter(edef.variants);
-            while (true) {
-              const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
-              if (__ring_next_35._tag === "none") break;
-              const v = __ring_next_35._0;
-              const src_v = `${src_prefix}$${codegen_ctx$safe_ident(item.name)}_${v.name}`;
-              const local_v = `${codegen_ctx$safe_ident(local_name)}_${v.name}`;
-              if ((local_v !== src_v)) {
-                List_push(reexport_aliases, `const ${local_v} = ${src_v};`);
-              }
-              List_push(export_names, local_v);
-            }
-            break __ring_match28;
-          }
-          break __ring_match28;
-        }
-        break __ring_match27;
-      }
-      if (__ring_m27._tag === "none") {
-        break __ring_match27;
-      }
-      __match_fail(__ring_m27);
-    }
-  }
-}
-
 function collect_module_reexports(src_exports, src_prefix, export_names, reexport_aliases) {
   let sorted_values = _Map_entries(src_exports.values);
   sorted_values.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
-  const __ring_iter_36 = __List_Iterable.iter(sorted_values);
+  const __ring_iter_34 = __List_Iterable.iter(sorted_values);
   while (true) {
-    const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
-    if (__ring_next_36._tag === "none") break;
-    const ventry = __ring_next_36._0;
+    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+    if (__ring_next_34._tag === "none") break;
+    const ventry = __ring_next_34._0;
     const __ring_dt11 = ventry;
     const vname = __ring_dt11[0];
     if ((!_Set_contains(src_exports.extern_values, vname, __Str_Eq))) {
@@ -1004,11 +943,11 @@ function collect_module_reexports(src_exports, src_prefix, export_names, reexpor
   }
   let sorted_types = _Map_entries(src_exports.types);
   sorted_types.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
-  const __ring_iter_37 = __List_Iterable.iter(sorted_types);
+  const __ring_iter_35 = __List_Iterable.iter(sorted_types);
   while (true) {
-    const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
-    if (__ring_next_37._tag === "none") break;
-    const tentry = __ring_next_37._0;
+    const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+    if (__ring_next_35._tag === "none") break;
+    const tentry = __ring_next_35._0;
     const __ring_dt12 = tentry;
     const tname = __ring_dt12[0];
     const tdef = __ring_dt12[1];
@@ -1018,15 +957,15 @@ function collect_module_reexports(src_exports, src_prefix, export_names, reexpor
       List_push(reexport_aliases, `const ${local_js} = ${src_js};`);
     }
     List_push(export_names, local_js);
-    __ring_match29: {
-      const __ring_m29 = tdef;
-      if (__ring_m29._tag === "EnumDef_") {
-        const edef = __ring_m29._0;
-        const __ring_iter_38 = __List_Iterable.iter(edef.variants);
+    __ring_match26: {
+      const __ring_m26 = tdef;
+      if (__ring_m26._tag === "EnumDef_") {
+        const edef = __ring_m26._0;
+        const __ring_iter_36 = __List_Iterable.iter(edef.variants);
         while (true) {
-          const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
-          if (__ring_next_38._tag === "none") break;
-          const v = __ring_next_38._0;
+          const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+          if (__ring_next_36._tag === "none") break;
+          const v = __ring_next_36._0;
           const src_v = `${src_prefix}$${codegen_ctx$safe_ident(tname)}_${v.name}`;
           const local_v = `${codegen_ctx$safe_ident(tname)}_${v.name}`;
           if ((local_v !== src_v)) {
@@ -1034,9 +973,70 @@ function collect_module_reexports(src_exports, src_prefix, export_names, reexpor
           }
           List_push(export_names, local_v);
         }
-        break __ring_match29;
+        break __ring_match26;
       }
-      break __ring_match29;
+      break __ring_match26;
+    }
+  }
+}
+
+function collect_named_reexports(names, src_exports, src_prefix, export_names, reexport_aliases) {
+  const __ring_iter_37 = __List_Iterable.iter(names);
+  while (true) {
+    const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+    if (__ring_next_37._tag === "none") break;
+    const item = __ring_next_37._0;
+    let __ring_blk1;
+    __ring_match27: {
+      const __ring_m27 = item.alias;
+      if (__ring_m27._tag === "some") {
+        const a = __ring_m27._0;
+        __ring_blk1 = a;
+        break __ring_match27;
+      }
+      if (__ring_m27._tag === "none") {
+        __ring_blk1 = item.name;
+        break __ring_match27;
+      }
+      __match_fail(__ring_m27);
+    }
+    const local_name = __ring_blk1;
+    const src_js = (_Set_contains(src_exports.extern_values, item.name, __Str_Eq) ? codegen_ctx$safe_ident(item.name) : `${src_prefix}$${codegen_ctx$safe_ident(item.name)}`);
+    const local_js = codegen_ctx$safe_ident(local_name);
+    if ((local_js !== src_js)) {
+      List_push(reexport_aliases, `const ${local_js} = ${src_js};`);
+    }
+    List_push(export_names, local_js);
+    __ring_match28: {
+      const __ring_m28 = _Map_get(src_exports.types, item.name);
+      if (__ring_m28._tag === "some") {
+        const tdef = __ring_m28._0;
+        __ring_match29: {
+          const __ring_m29 = tdef;
+          if (__ring_m29._tag === "EnumDef_") {
+            const edef = __ring_m29._0;
+            const __ring_iter_38 = __List_Iterable.iter(edef.variants);
+            while (true) {
+              const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
+              if (__ring_next_38._tag === "none") break;
+              const v = __ring_next_38._0;
+              const src_v = `${src_prefix}$${codegen_ctx$safe_ident(item.name)}_${v.name}`;
+              const local_v = `${codegen_ctx$safe_ident(local_name)}_${v.name}`;
+              if ((local_v !== src_v)) {
+                List_push(reexport_aliases, `const ${local_v} = ${src_v};`);
+              }
+              List_push(export_names, local_v);
+            }
+            break __ring_match29;
+          }
+          break __ring_match29;
+        }
+        break __ring_match28;
+      }
+      if (__ring_m28._tag === "none") {
+        break __ring_match28;
+      }
+      __match_fail(__ring_m28);
     }
   }
 }

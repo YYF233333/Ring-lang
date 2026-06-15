@@ -759,66 +759,6 @@ function pattern_is_catchall(pat) {
   }
 }
 
-function emit_iterator_for_in(ctx, binding, destructure, iterable, body, iterable_type_name, iter_type_name) {
-  const counter = ctx.loop_counter;
-  ctx.loop_counter = (ctx.loop_counter + 1);
-  const it_expr = codegen_expr$gen_expr(ctx, iterable);
-  __ring_match20: {
-    const __ring_m20 = [iterable_type_name, iter_type_name];
-    if (Array.isArray(__ring_m20) && __ring_m20.length === 2 && __ring_m20[0]._tag === "some" && __ring_m20[1]._tag === "some") {
-      const itn = __ring_m20[0]._0; const iter_tn = __ring_m20[1]._0;
-      const iter_dict = hir$trait_dict_name(codegen_ctx$qualify(ctx, itn), "Iterable");
-      const next_dict = hir$trait_dict_name(codegen_ctx$qualify(ctx, iter_tn), "Iterator");
-      const iter_var = `__ring_iter_${counter}`;
-      const next_var = `__ring_next_${counter}`;
-      codegen_ctx$emit(ctx, `const ${iter_var} = ${iter_dict}.iter(${it_expr});`);
-      codegen_ctx$emit(ctx, "while (true) {");
-      codegen_ctx$push_indent(ctx);
-      codegen_ctx$emit(ctx, `const ${next_var} = ${next_dict}.next(${iter_var});`);
-      codegen_ctx$emit(ctx, `if (${next_var}._tag === "none") break;`);
-      __ring_match21: {
-        const __ring_m21 = destructure;
-        if (__ring_m21._tag === "some") {
-          const ds = __ring_m21._0;
-          if ((List_len(ds) > 0)) {
-            let names = [];
-            const __ring_iter_21 = __List_Iterable.iter(ds);
-            while (true) {
-              const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
-              if (__ring_next_21._tag === "none") break;
-              const d = __ring_next_21._0;
-              List_push(names, codegen_ctx$safe_ident(d.name));
-            }
-            const joined = List_join(names, ", ");
-            codegen_ctx$emit(ctx, `const [${joined}] = ${next_var}._0;`);
-          } else {
-            const b = codegen_ctx$safe_ident(binding);
-            codegen_ctx$emit(ctx, `const ${b} = ${next_var}._0;`);
-          }
-          break __ring_match21;
-        }
-        if (__ring_m21._tag === "none") {
-          const b = codegen_ctx$safe_ident(binding);
-          codegen_ctx$emit(ctx, `const ${b} = ${next_var}._0;`);
-          break __ring_match21;
-        }
-        __match_fail(__ring_m21);
-      }
-      emit_block_in_stmt_context(ctx, body, "discard");
-      codegen_ctx$pop_indent(ctx);
-      return codegen_ctx$emit(ctx, "}");
-      break __ring_match20;
-    }
-    const b = codegen_ctx$safe_ident(binding);
-    codegen_ctx$emit(ctx, `for (const ${b} of ${it_expr}) {`);
-    codegen_ctx$push_indent(ctx);
-    emit_block_in_stmt_context(ctx, body, "discard");
-    codegen_ctx$pop_indent(ctx);
-    return codegen_ctx$emit(ctx, "}");
-    break __ring_match20;
-  }
-}
-
 function emit_match_stmt(ctx, scrutinee, arms, mode) {
   const label = `__ring_match${ctx.match_counter}`;
   ctx.match_counter = (ctx.match_counter + 1);
@@ -827,16 +767,16 @@ function emit_match_stmt(ctx, scrutinee, arms, mode) {
   codegen_ctx$push_indent(ctx);
   const scrut_var = `__ring_m${(ctx.match_counter - 1)}`;
   codegen_ctx$emit(ctx, `const ${scrut_var} = ${scrut_js};`);
-  const __ring_iter_22 = __List_Iterable.iter(arms);
+  const __ring_iter_21 = __List_Iterable.iter(arms);
   while (true) {
-    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
-    if (__ring_next_22._tag === "none") break;
-    const arm = __ring_next_22._0;
+    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+    if (__ring_next_21._tag === "none") break;
+    const arm = __ring_next_21._0;
     const cond = gen_pattern_condition(ctx, scrut_var, arm.pattern);
     const bindings_str = gen_pattern_bindings(ctx, scrut_var, arm.pattern);
-    __ring_match22: {
-      const __ring_m22 = arm.guard;
-      if (__ring_m22._tag === "none") {
+    __ring_match20: {
+      const __ring_m20 = arm.guard;
+      if (__ring_m20._tag === "none") {
         if ((cond === "true")) {
           if ((Str_len(bindings_str) > 0)) {
             codegen_ctx$emit(ctx, Str_trim(bindings_str));
@@ -854,10 +794,10 @@ function emit_match_stmt(ctx, scrutinee, arms, mode) {
           codegen_ctx$pop_indent(ctx);
           codegen_ctx$emit(ctx, "}");
         }
-        break __ring_match22;
+        break __ring_match20;
       }
-      if (__ring_m22._tag === "some") {
-        const guard = __ring_m22._0;
+      if (__ring_m20._tag === "some") {
+        const guard = __ring_m20._0;
         codegen_ctx$emit(ctx, `if (${cond}) {`);
         codegen_ctx$push_indent(ctx);
         if ((Str_len(bindings_str) > 0)) {
@@ -872,29 +812,29 @@ function emit_match_stmt(ctx, scrutinee, arms, mode) {
         codegen_ctx$emit(ctx, "}");
         codegen_ctx$pop_indent(ctx);
         codegen_ctx$emit(ctx, "}");
-        break __ring_match22;
+        break __ring_match20;
       }
-      __match_fail(__ring_m22);
+      __match_fail(__ring_m20);
     }
   }
   let has_catchall = false;
-  const __ring_iter_23 = __List_Iterable.iter(arms);
+  const __ring_iter_22 = __List_Iterable.iter(arms);
   while (true) {
-    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
-    if (__ring_next_23._tag === "none") break;
-    const a = __ring_next_23._0;
-    __ring_match23: {
-      const __ring_m23 = a.guard;
-      if (__ring_m23._tag === "some") {
-        break __ring_match23;
+    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+    if (__ring_next_22._tag === "none") break;
+    const a = __ring_next_22._0;
+    __ring_match21: {
+      const __ring_m21 = a.guard;
+      if (__ring_m21._tag === "some") {
+        break __ring_match21;
       }
-      if (__ring_m23._tag === "none") {
+      if (__ring_m21._tag === "none") {
         if (pattern_is_catchall(a.pattern)) {
           has_catchall = true;
         }
-        break __ring_match23;
+        break __ring_match21;
       }
-      __match_fail(__ring_m23);
+      __match_fail(__ring_m21);
     }
   }
   if ((has_catchall === false)) {
@@ -907,6 +847,40 @@ function emit_match_stmt(ctx, scrutinee, arms, mode) {
 function emit_else_if(ctx, condition, then_branch, else_branch, mode) {
   const cond = codegen_expr$gen_expr(ctx, condition);
   codegen_ctx$emit(ctx, `} else if (${cond}) {`);
+  codegen_ctx$push_indent(ctx);
+  emit_block_in_stmt_context(ctx, then_branch, mode);
+  codegen_ctx$pop_indent(ctx);
+  __ring_match22: {
+    const __ring_m22 = else_branch;
+    if (__ring_m22._tag === "none") {
+      return codegen_ctx$emit(ctx, "}");
+      break __ring_match22;
+    }
+    if (__ring_m22._tag === "some") {
+      const eb = __ring_m22._0;
+      __ring_match23: {
+        const __ring_m23 = eb;
+        if (__ring_m23._tag === "IfExpr") {
+          const ec = __ring_m23.condition; const et = __ring_m23.then_branch; const ee = __ring_m23.else_branch;
+          return emit_else_if(ctx, ec, et, ee, mode);
+          break __ring_match23;
+        }
+        codegen_ctx$emit(ctx, "} else {");
+        codegen_ctx$push_indent(ctx);
+        emit_block_in_stmt_context(ctx, eb, mode);
+        codegen_ctx$pop_indent(ctx);
+        return codegen_ctx$emit(ctx, "}");
+        break __ring_match23;
+      }
+      break __ring_match22;
+    }
+    __match_fail(__ring_m22);
+  }
+}
+
+function emit_if_stmt(ctx, condition, then_branch, else_branch, mode) {
+  const cond = codegen_expr$gen_expr(ctx, condition);
+  codegen_ctx$emit(ctx, `if (${cond}) {`);
   codegen_ctx$push_indent(ctx);
   emit_block_in_stmt_context(ctx, then_branch, mode);
   codegen_ctx$pop_indent(ctx);
@@ -938,162 +912,120 @@ function emit_else_if(ctx, condition, then_branch, else_branch, mode) {
   }
 }
 
-function emit_block_in_stmt_context_inner(ctx, stmts, tail, mode) {
-  const __ring_iter_24 = __List_Iterable.iter(stmts);
-  while (true) {
-    const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-    if (__ring_next_24._tag === "none") break;
-    const stmt = __ring_next_24._0;
-    emit_stmt(ctx, stmt);
-  }
+function emit_iterator_for_in(ctx, binding, destructure, iterable, body, iterable_type_name, iter_type_name) {
+  const counter = ctx.loop_counter;
+  ctx.loop_counter = (ctx.loop_counter + 1);
+  const it_expr = codegen_expr$gen_expr(ctx, iterable);
   __ring_match26: {
-    const __ring_m26 = tail;
-    if (__ring_m26._tag === "some") {
-      const t = __ring_m26._0;
-      return emit_in_stmt_context(ctx, t, mode);
+    const __ring_m26 = [iterable_type_name, iter_type_name];
+    if (Array.isArray(__ring_m26) && __ring_m26.length === 2 && __ring_m26[0]._tag === "some" && __ring_m26[1]._tag === "some") {
+      const itn = __ring_m26[0]._0; const iter_tn = __ring_m26[1]._0;
+      const iter_dict = hir$trait_dict_name(codegen_ctx$qualify(ctx, itn), "Iterable");
+      const next_dict = hir$trait_dict_name(codegen_ctx$qualify(ctx, iter_tn), "Iterator");
+      const iter_var = `__ring_iter_${counter}`;
+      const next_var = `__ring_next_${counter}`;
+      codegen_ctx$emit(ctx, `const ${iter_var} = ${iter_dict}.iter(${it_expr});`);
+      codegen_ctx$emit(ctx, "while (true) {");
+      codegen_ctx$push_indent(ctx);
+      codegen_ctx$emit(ctx, `const ${next_var} = ${next_dict}.next(${iter_var});`);
+      codegen_ctx$emit(ctx, `if (${next_var}._tag === "none") break;`);
+      __ring_match27: {
+        const __ring_m27 = destructure;
+        if (__ring_m27._tag === "some") {
+          const ds = __ring_m27._0;
+          if ((List_len(ds) > 0)) {
+            let names = [];
+            const __ring_iter_23 = __List_Iterable.iter(ds);
+            while (true) {
+              const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+              if (__ring_next_23._tag === "none") break;
+              const d = __ring_next_23._0;
+              List_push(names, codegen_ctx$safe_ident(d.name));
+            }
+            const joined = List_join(names, ", ");
+            codegen_ctx$emit(ctx, `const [${joined}] = ${next_var}._0;`);
+          } else {
+            const b = codegen_ctx$safe_ident(binding);
+            codegen_ctx$emit(ctx, `const ${b} = ${next_var}._0;`);
+          }
+          break __ring_match27;
+        }
+        if (__ring_m27._tag === "none") {
+          const b = codegen_ctx$safe_ident(binding);
+          codegen_ctx$emit(ctx, `const ${b} = ${next_var}._0;`);
+          break __ring_match27;
+        }
+        __match_fail(__ring_m27);
+      }
+      emit_block_in_stmt_context(ctx, body, "discard");
+      codegen_ctx$pop_indent(ctx);
+      return codegen_ctx$emit(ctx, "}");
       break __ring_match26;
     }
-    if (__ring_m26._tag === "none") {
-      break __ring_match26;
-    }
-    __match_fail(__ring_m26);
+    const b = codegen_ctx$safe_ident(binding);
+    codegen_ctx$emit(ctx, `for (const ${b} of ${it_expr}) {`);
+    codegen_ctx$push_indent(ctx);
+    emit_block_in_stmt_context(ctx, body, "discard");
+    codegen_ctx$pop_indent(ctx);
+    return codegen_ctx$emit(ctx, "}");
+    break __ring_match26;
   }
 }
 
 function emit_block_in_stmt_context(ctx, block, mode) {
-  __ring_match27: {
-    const __ring_m27 = block;
-    if (__ring_m27._tag === "Block") {
-      const stmts = __ring_m27.stmts; const tail = __ring_m27.tail;
+  __ring_match28: {
+    const __ring_m28 = block;
+    if (__ring_m28._tag === "Block") {
+      const stmts = __ring_m28.stmts; const tail = __ring_m28.tail;
       return emit_block_in_stmt_context_inner(ctx, stmts, tail, mode);
-      break __ring_match27;
+      break __ring_match28;
     }
     return emit_in_stmt_context(ctx, block, mode);
-    break __ring_match27;
-  }
-}
-
-function emit_if_stmt(ctx, condition, then_branch, else_branch, mode) {
-  const cond = codegen_expr$gen_expr(ctx, condition);
-  codegen_ctx$emit(ctx, `if (${cond}) {`);
-  codegen_ctx$push_indent(ctx);
-  emit_block_in_stmt_context(ctx, then_branch, mode);
-  codegen_ctx$pop_indent(ctx);
-  __ring_match28: {
-    const __ring_m28 = else_branch;
-    if (__ring_m28._tag === "none") {
-      return codegen_ctx$emit(ctx, "}");
-      break __ring_match28;
-    }
-    if (__ring_m28._tag === "some") {
-      const eb = __ring_m28._0;
-      __ring_match29: {
-        const __ring_m29 = eb;
-        if (__ring_m29._tag === "IfExpr") {
-          const ec = __ring_m29.condition; const et = __ring_m29.then_branch; const ee = __ring_m29.else_branch;
-          return emit_else_if(ctx, ec, et, ee, mode);
-          break __ring_match29;
-        }
-        codegen_ctx$emit(ctx, "} else {");
-        codegen_ctx$push_indent(ctx);
-        emit_block_in_stmt_context(ctx, eb, mode);
-        codegen_ctx$pop_indent(ctx);
-        return codegen_ctx$emit(ctx, "}");
-        break __ring_match29;
-      }
-      break __ring_match28;
-    }
-    __match_fail(__ring_m28);
-  }
-}
-
-function emit_in_stmt_context(ctx, expr, mode) {
-  __ring_match30: {
-    const __ring_m30 = expr;
-    if (__ring_m30._tag === "IfExpr") {
-      const condition = __ring_m30.condition; const then_branch = __ring_m30.then_branch; const else_branch = __ring_m30.else_branch;
-      return emit_if_stmt(ctx, condition, then_branch, else_branch, mode);
-      break __ring_match30;
-    }
-    if (__ring_m30._tag === "Block") {
-      const stmts = __ring_m30.stmts; const tail = __ring_m30.tail;
-      return emit_block_in_stmt_context_inner(ctx, stmts, tail, mode);
-      break __ring_match30;
-    }
-    if (__ring_m30._tag === "MatchExpr") {
-      const scrutinee = __ring_m30.scrutinee; const arms = __ring_m30.arms;
-      return emit_match_stmt(ctx, scrutinee, arms, mode);
-      break __ring_match30;
-    }
-    if (__ring_m30._tag === "ReturnExpr") {
-      const value = __ring_m30.value;
-      __ring_match31: {
-        const __ring_m31 = value;
-        if (__ring_m31._tag === "some") {
-          const v = __ring_m31._0;
-          const v_js = codegen_expr$gen_expr(ctx, v);
-          return codegen_ctx$emit(ctx, `return ${v_js};`);
-          break __ring_match31;
-        }
-        if (__ring_m31._tag === "none") {
-          return codegen_ctx$emit(ctx, "return;");
-          break __ring_match31;
-        }
-        __match_fail(__ring_m31);
-      }
-      break __ring_match30;
-    }
-    const e = codegen_expr$gen_expr(ctx, expr);
-    if ((mode === "return")) {
-      return codegen_ctx$emit(ctx, `return ${e};`);
-    } else {
-      return codegen_ctx$emit(ctx, `${e};`);
-    }
-    break __ring_match30;
+    break __ring_match28;
   }
 }
 
 function emit_stmt(ctx, stmt) {
-  __ring_match32: {
-    const __ring_m32 = stmt;
-    if (__ring_m32._tag === "ExprStmt") {
-      const expr = __ring_m32.expr;
+  __ring_match29: {
+    const __ring_m29 = stmt;
+    if (__ring_m29._tag === "ExprStmt") {
+      const expr = __ring_m29.expr;
       return emit_in_stmt_context(ctx, expr, "discard");
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "Return") {
-      const value = __ring_m32.value;
-      __ring_match33: {
-        const __ring_m33 = value;
-        if (__ring_m33._tag === "some") {
-          const v = __ring_m33._0;
+    if (__ring_m29._tag === "Return") {
+      const value = __ring_m29.value;
+      __ring_match30: {
+        const __ring_m30 = value;
+        if (__ring_m30._tag === "some") {
+          const v = __ring_m30._0;
           return emit_in_stmt_context(ctx, v, "return");
-          break __ring_match33;
+          break __ring_match30;
         }
-        if (__ring_m33._tag === "none") {
+        if (__ring_m30._tag === "none") {
           return codegen_ctx$emit(ctx, "return;");
-          break __ring_match33;
+          break __ring_match30;
         }
-        __match_fail(__ring_m33);
+        __match_fail(__ring_m30);
       }
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "While") {
-      const condition = __ring_m32.condition; const body = __ring_m32.body;
+    if (__ring_m29._tag === "While") {
+      const condition = __ring_m29.condition; const body = __ring_m29.body;
       const cond = codegen_expr$gen_expr(ctx, condition);
       codegen_ctx$emit(ctx, `while (${cond}) {`);
       codegen_ctx$push_indent(ctx);
       emit_block_in_stmt_context(ctx, body, "discard");
       codegen_ctx$pop_indent(ctx);
       return codegen_ctx$emit(ctx, "}");
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "ForIn") {
-      const binding = __ring_m32.binding; const destructure = __ring_m32.destructure; const iterable = __ring_m32.iterable; const body = __ring_m32.body; const iterable_type_name = __ring_m32.iterable_type_name; const iter_type_name = __ring_m32.iter_type_name;
-      __ring_match34: {
-        const __ring_m34 = iterable;
-        if (__ring_m34._tag === "RangeExpr") {
-          const start = __ring_m34.start; const end = __ring_m34.end; const inclusive = __ring_m34.inclusive;
+    if (__ring_m29._tag === "ForIn") {
+      const binding = __ring_m29.binding; const destructure = __ring_m29.destructure; const iterable = __ring_m29.iterable; const body = __ring_m29.body; const iterable_type_name = __ring_m29.iterable_type_name; const iter_type_name = __ring_m29.iter_type_name;
+      __ring_match31: {
+        const __ring_m31 = iterable;
+        if (__ring_m31._tag === "RangeExpr") {
+          const start = __ring_m31.start; const end = __ring_m31.end; const inclusive = __ring_m31.inclusive;
           const start_js = codegen_expr$gen_expr(ctx, start);
           const end_js = codegen_expr$gen_expr(ctx, end);
           const b = codegen_ctx$safe_ident(binding);
@@ -1106,19 +1038,19 @@ function emit_stmt(ctx, stmt) {
           emit_block_in_stmt_context(ctx, body, "discard");
           codegen_ctx$pop_indent(ctx);
           return codegen_ctx$emit(ctx, "}");
-          break __ring_match34;
+          break __ring_match31;
         }
         const iter_htype = hir$hexpr_type(iterable);
         let __ring_blk1;
-        __ring_match35: {
-          const __ring_m35 = iter_htype;
-          if (__ring_m35._tag === "EnumType") {
-            const name = __ring_m35.name;
+        __ring_match32: {
+          const __ring_m32 = iter_htype;
+          if (__ring_m32._tag === "EnumType") {
+            const name = __ring_m32.name;
             __ring_blk1 = (name === types$BUILTIN_RANGE);
-            break __ring_match35;
+            break __ring_match32;
           }
           __ring_blk1 = false;
-          break __ring_match35;
+          break __ring_match32;
         }
         const is_range = __ring_blk1;
         if (is_range) {
@@ -1135,46 +1067,46 @@ function emit_stmt(ctx, stmt) {
         } else {
           return emit_iterator_for_in(ctx, binding, destructure, iterable, body, iterable_type_name, iter_type_name);
         }
-        break __ring_match34;
+        break __ring_match31;
       }
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "Break") {
+    if (__ring_m29._tag === "Break") {
       return codegen_ctx$emit(ctx, "break;");
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "Continue") {
+    if (__ring_m29._tag === "Continue") {
       return codegen_ctx$emit(ctx, "continue;");
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "LetDestructure") {
-      const bindings = __ring_m32.bindings; const init = __ring_m32.init;
+    if (__ring_m29._tag === "LetDestructure") {
+      const bindings = __ring_m29.bindings; const init = __ring_m29.init;
       const init_js = codegen_expr$gen_expr(ctx, init);
       const tmp = `__ring_dt${ctx.dt_counter}`;
       ctx.dt_counter = (ctx.dt_counter + 1);
       codegen_ctx$emit(ctx, `const ${tmp} = ${init_js};`);
-      const __ring_end25 = List_len(bindings);
-      for (let i = 0; i < __ring_end25; i++) {
-        __ring_match36: {
-          const __ring_m36 = List_get(bindings, i);
-          if (__ring_m36._tag === "some") {
-            const b = __ring_m36._0;
+      const __ring_end24 = List_len(bindings);
+      for (let i = 0; i < __ring_end24; i++) {
+        __ring_match33: {
+          const __ring_m33 = List_get(bindings, i);
+          if (__ring_m33._tag === "some") {
+            const b = __ring_m33._0;
             if ((b.name !== "_")) {
               const sname = codegen_ctx$safe_ident(b.name);
               codegen_ctx$emit(ctx, `const ${sname} = ${tmp}[${i}];`);
             }
-            break __ring_match36;
+            break __ring_match33;
           }
-          if (__ring_m36._tag === "none") {
-            break __ring_match36;
+          if (__ring_m33._tag === "none") {
+            break __ring_match33;
           }
-          __match_fail(__ring_m36);
+          __match_fail(__ring_m33);
         }
       }
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "IfLet") {
-      const pattern = __ring_m32.pattern; const expr = __ring_m32.expr; const then_block = __ring_m32.then_block; const else_block = __ring_m32.else_block;
+    if (__ring_m29._tag === "IfLet") {
+      const pattern = __ring_m29.pattern; const expr = __ring_m29.expr; const then_block = __ring_m29.then_block; const else_block = __ring_m29.else_block;
       codegen_ctx$emit(ctx, "{");
       codegen_ctx$push_indent(ctx);
       const scrutinee = codegen_expr$gen_expr(ctx, expr);
@@ -1188,51 +1120,51 @@ function emit_stmt(ctx, stmt) {
       }
       emit_block_in_stmt_context(ctx, then_block, "discard");
       codegen_ctx$pop_indent(ctx);
-      __ring_match37: {
-        const __ring_m37 = else_block;
-        if (__ring_m37._tag === "some") {
-          const eb = __ring_m37._0;
+      __ring_match34: {
+        const __ring_m34 = else_block;
+        if (__ring_m34._tag === "some") {
+          const eb = __ring_m34._0;
           codegen_ctx$emit(ctx, "} else {");
           codegen_ctx$push_indent(ctx);
           emit_block_in_stmt_context(ctx, eb, "discard");
           codegen_ctx$pop_indent(ctx);
           codegen_ctx$emit(ctx, "}");
-          break __ring_match37;
+          break __ring_match34;
         }
-        if (__ring_m37._tag === "none") {
+        if (__ring_m34._tag === "none") {
           codegen_ctx$emit(ctx, "}");
-          break __ring_match37;
+          break __ring_match34;
         }
-        __match_fail(__ring_m37);
+        __match_fail(__ring_m34);
       }
       codegen_ctx$pop_indent(ctx);
       return codegen_ctx$emit(ctx, "}");
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "Let") {
-      const name = __ring_m32.name; const init = __ring_m32.init;
+    if (__ring_m29._tag === "Let") {
+      const name = __ring_m29.name; const init = __ring_m29.init;
       const sname = codegen_ctx$safe_ident(name);
       const init_js = codegen_expr$gen_expr(ctx, init);
       return codegen_ctx$emit(ctx, `const ${sname} = ${init_js};`);
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "Var") {
-      const name = __ring_m32.name; const def_id = __ring_m32.def_id; const init = __ring_m32.init;
+    if (__ring_m29._tag === "Var") {
+      const name = __ring_m29.name; const def_id = __ring_m29.def_id; const init = __ring_m29.init;
       const sname = codegen_ctx$safe_ident(name);
       const init_js = codegen_expr$gen_expr(ctx, init);
       let __ring_blk2;
-      __ring_match38: {
-        const __ring_m38 = def_id;
-        if (__ring_m38._tag === "some") {
-          const did = __ring_m38._0;
+      __ring_match35: {
+        const __ring_m35 = def_id;
+        if (__ring_m35._tag === "some") {
+          const did = __ring_m35._0;
           __ring_blk2 = _Set_contains(ctx.boxed_vars, did, __Int_Eq);
-          break __ring_match38;
+          break __ring_match35;
         }
-        if (__ring_m38._tag === "none") {
+        if (__ring_m35._tag === "none") {
           __ring_blk2 = false;
-          break __ring_match38;
+          break __ring_match35;
         }
-        __match_fail(__ring_m38);
+        __match_fail(__ring_m35);
       }
       const is_boxed = __ring_blk2;
       if (is_boxed) {
@@ -1240,22 +1172,90 @@ function emit_stmt(ctx, stmt) {
       } else {
         return codegen_ctx$emit(ctx, `let ${sname} = ${init_js};`);
       }
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "Assign") {
-      const target = __ring_m32.target; const value = __ring_m32.value;
+    if (__ring_m29._tag === "Assign") {
+      const target = __ring_m29.target; const value = __ring_m29.value;
       const t = codegen_expr$gen_expr(ctx, target);
       const v = codegen_expr$gen_expr(ctx, value);
       return codegen_ctx$emit(ctx, `${t} = ${v};`);
-      break __ring_match32;
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "Drop") {
-      break __ring_match32;
+    if (__ring_m29._tag === "Drop") {
+      break __ring_match29;
     }
-    if (__ring_m32._tag === "Dup") {
-      break __ring_match32;
+    if (__ring_m29._tag === "Dup") {
+      break __ring_match29;
     }
-    __match_fail(__ring_m32);
+    __match_fail(__ring_m29);
+  }
+}
+
+function emit_block_in_stmt_context_inner(ctx, stmts, tail, mode) {
+  const __ring_iter_25 = __List_Iterable.iter(stmts);
+  while (true) {
+    const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+    if (__ring_next_25._tag === "none") break;
+    const stmt = __ring_next_25._0;
+    emit_stmt(ctx, stmt);
+  }
+  __ring_match36: {
+    const __ring_m36 = tail;
+    if (__ring_m36._tag === "some") {
+      const t = __ring_m36._0;
+      return emit_in_stmt_context(ctx, t, mode);
+      break __ring_match36;
+    }
+    if (__ring_m36._tag === "none") {
+      break __ring_match36;
+    }
+    __match_fail(__ring_m36);
+  }
+}
+
+function emit_in_stmt_context(ctx, expr, mode) {
+  __ring_match37: {
+    const __ring_m37 = expr;
+    if (__ring_m37._tag === "IfExpr") {
+      const condition = __ring_m37.condition; const then_branch = __ring_m37.then_branch; const else_branch = __ring_m37.else_branch;
+      return emit_if_stmt(ctx, condition, then_branch, else_branch, mode);
+      break __ring_match37;
+    }
+    if (__ring_m37._tag === "Block") {
+      const stmts = __ring_m37.stmts; const tail = __ring_m37.tail;
+      return emit_block_in_stmt_context_inner(ctx, stmts, tail, mode);
+      break __ring_match37;
+    }
+    if (__ring_m37._tag === "MatchExpr") {
+      const scrutinee = __ring_m37.scrutinee; const arms = __ring_m37.arms;
+      return emit_match_stmt(ctx, scrutinee, arms, mode);
+      break __ring_match37;
+    }
+    if (__ring_m37._tag === "ReturnExpr") {
+      const value = __ring_m37.value;
+      __ring_match38: {
+        const __ring_m38 = value;
+        if (__ring_m38._tag === "some") {
+          const v = __ring_m38._0;
+          const v_js = codegen_expr$gen_expr(ctx, v);
+          return codegen_ctx$emit(ctx, `return ${v_js};`);
+          break __ring_match38;
+        }
+        if (__ring_m38._tag === "none") {
+          return codegen_ctx$emit(ctx, "return;");
+          break __ring_match38;
+        }
+        __match_fail(__ring_m38);
+      }
+      break __ring_match37;
+    }
+    const e = codegen_expr$gen_expr(ctx, expr);
+    if ((mode === "return")) {
+      return codegen_ctx$emit(ctx, `return ${e};`);
+    } else {
+      return codegen_ctx$emit(ctx, `${e};`);
+    }
+    break __ring_match37;
   }
 }
 
