@@ -446,14 +446,20 @@ pub fn generalize(env: TypeEnv, t: Type, subst: UnionFind) -> TypeScheme {
     let ftv_type = free_type_vars(resolved, empty_subst())
     let ftv_env = free_type_vars_in_env(env, subst)
     let mut type_vars: List<Int> = []
-    for v in ftv_type {
+    let mut sorted_ftv: List<Int> = []
+    for v in ftv_type { sorted_ftv.push(v) }
+    sorted_ftv.sort_by(fn(a, b) { if a < b { -1 } else if a > b { 1 } else { 0 } })
+    for v in sorted_ftv {
         if !ftv_env.contains(v) { type_vars.push(v) }
     }
     let mut bounds: List<SchemeBound> = []
     for tv in type_vars {
         match env.scope.var_bounds.get(tv) {
             some(traits) => {
-                for trait_name in traits {
+                let mut sorted_traits: List<Str> = []
+                for t in traits { sorted_traits.push(t) }
+                sorted_traits.sort()
+                for trait_name in sorted_traits {
                     bounds.push(SchemeBound { type_var: tv, trait_name: trait_name, assoc_constraints: [] })
                 }
             },
@@ -941,7 +947,9 @@ fn resolve_assoc_type(mut ctx: InferCtx, type_param_name: Str, assoc_name: Str, 
                 Type::TypeVar { id, .. } => {
                     match ctx.env.scope.var_bounds.get(id) {
                         some(bound_set) => {
-                            for bound_name in bound_set.to_list() {
+                            let mut sorted_bounds = bound_set.to_list()
+                            sorted_bounds.sort()
+                            for bound_name in sorted_bounds {
                                 match ctx.env.trait_reg.traits.get(bound_name) {
                                     some(tdef) => {
                                         for atdef in tdef.assoc_types {

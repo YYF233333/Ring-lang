@@ -1490,30 +1490,48 @@ function generalize(env, t, subst) {
   const ftv_type = free_type_vars(resolved, unify$empty_subst());
   const ftv_env = free_type_vars_in_env(env, subst);
   let type_vars = [];
+  let sorted_ftv = [];
   const __ring_iter_23 = ___Set_Iterable.iter(ftv_type);
   while (true) {
     const __ring_next_23 = __SetIterator_Iterator.next(__ring_iter_23);
     if (__ring_next_23._tag === "none") break;
     const v = __ring_next_23._0;
+    List_push(sorted_ftv, v);
+  }
+  sorted_ftv.sort((function(a, b) { return ((a < b) ? (-1) : ((a > b) ? 1 : 0)); }));
+  const __ring_iter_24 = __List_Iterable.iter(sorted_ftv);
+  while (true) {
+    const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+    if (__ring_next_24._tag === "none") break;
+    const v = __ring_next_24._0;
     if ((!_Set_contains(ftv_env, v, __Int_Eq))) {
       List_push(type_vars, v);
     }
   }
   let bounds = [];
-  const __ring_iter_24 = __List_Iterable.iter(type_vars);
+  const __ring_iter_25 = __List_Iterable.iter(type_vars);
   while (true) {
-    const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-    if (__ring_next_24._tag === "none") break;
-    const tv = __ring_next_24._0;
+    const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+    if (__ring_next_25._tag === "none") break;
+    const tv = __ring_next_25._0;
     __ring_match67: {
       const __ring_m67 = _Map_get(env.scope.var_bounds, tv);
       if (__ring_m67._tag === "some") {
         const traits = __ring_m67._0;
-        const __ring_iter_25 = ___Set_Iterable.iter(traits);
+        let sorted_traits = [];
+        const __ring_iter_26 = ___Set_Iterable.iter(traits);
         while (true) {
-          const __ring_next_25 = __SetIterator_Iterator.next(__ring_iter_25);
-          if (__ring_next_25._tag === "none") break;
-          const trait_name = __ring_next_25._0;
+          const __ring_next_26 = __SetIterator_Iterator.next(__ring_iter_26);
+          if (__ring_next_26._tag === "none") break;
+          const t = __ring_next_26._0;
+          List_push(sorted_traits, t);
+        }
+        List_sort(sorted_traits, __Str_Ord);
+        const __ring_iter_27 = __List_Iterable.iter(sorted_traits);
+        while (true) {
+          const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+          if (__ring_next_27._tag === "none") break;
+          const trait_name = __ring_next_27._0;
           List_push(bounds, new env$SchemeBound(tv, trait_name, []));
         }
         break __ring_match67;
@@ -1532,16 +1550,16 @@ function merge_effects(env, a, b, s, __ring_ev_fail) {
   const resolved_b = env$apply_subst_row(s, b);
   const m = types$row_merge(resolved_a, resolved_b);
   let result_s = s;
-  const __ring_iter_26 = __List_Iterable.iter(resolved_b.effects);
+  const __ring_iter_28 = __List_Iterable.iter(resolved_b.effects);
   while (true) {
-    const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
-    if (__ring_next_26._tag === "none") break;
-    const eff_b = __ring_next_26._0;
-    const __ring_iter_27 = __List_Iterable.iter(resolved_a.effects);
+    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+    if (__ring_next_28._tag === "none") break;
+    const eff_b = __ring_next_28._0;
+    const __ring_iter_29 = __List_Iterable.iter(resolved_a.effects);
     while (true) {
-      const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
-      if (__ring_next_27._tag === "none") break;
-      const eff_a = __ring_next_27._0;
+      const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+      if (__ring_next_29._tag === "none") break;
+      const eff_a = __ring_next_29._0;
       if (types$effects_match_kind(eff_a, eff_b)) {
         result_s = (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return unify$unify_effect_params(eff_a, eff_b, result_s, env, __ring_ev_fail); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { return result_s; } else { throw __ring_e; } } throw __ring_e; } })();
         break;
@@ -1618,21 +1636,21 @@ function resolve_assoc_type(ctx, type_param_name, assoc_name, span) {
   }
   let found_types = [];
   let found_trait_names = [];
-  const __ring_iter_28 = __List_Iterable.iter(ctx.current_fn_bounds);
+  const __ring_iter_30 = __List_Iterable.iter(ctx.current_fn_bounds);
   while (true) {
-    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
-    if (__ring_next_28._tag === "none") break;
-    const fb = __ring_next_28._0;
+    const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+    if (__ring_next_30._tag === "none") break;
+    const fb = __ring_next_30._0;
     if ((fb.type_param_name === type_param_name)) {
       __ring_match72: {
         const __ring_m72 = _Map_get(ctx.env.trait_reg.traits, fb.trait_name);
         if (__ring_m72._tag === "some") {
           const tdef = __ring_m72._0;
-          const __ring_iter_29 = __List_Iterable.iter(tdef.assoc_types);
+          const __ring_iter_31 = __List_Iterable.iter(tdef.assoc_types);
           while (true) {
-            const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
-            if (__ring_next_29._tag === "none") break;
-            const atdef = __ring_next_29._0;
+            const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+            if (__ring_next_31._tag === "none") break;
+            const atdef = __ring_next_31._0;
             if ((atdef.name === assoc_name)) {
               const at_var = env$TypeEnv_fresh_var(ctx.env);
               List_push(found_types, at_var);
@@ -1661,20 +1679,22 @@ function resolve_assoc_type(ctx, type_param_name, assoc_name, span) {
               const __ring_m75 = _Map_get(ctx.env.scope.var_bounds, id);
               if (__ring_m75._tag === "some") {
                 const bound_set = __ring_m75._0;
-                const __ring_iter_30 = __List_Iterable.iter(_Set_to_list(bound_set));
+                let sorted_bounds = _Set_to_list(bound_set);
+                List_sort(sorted_bounds, __Str_Ord);
+                const __ring_iter_32 = __List_Iterable.iter(sorted_bounds);
                 while (true) {
-                  const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
-                  if (__ring_next_30._tag === "none") break;
-                  const bound_name = __ring_next_30._0;
+                  const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+                  if (__ring_next_32._tag === "none") break;
+                  const bound_name = __ring_next_32._0;
                   __ring_match76: {
                     const __ring_m76 = _Map_get(ctx.env.trait_reg.traits, bound_name);
                     if (__ring_m76._tag === "some") {
                       const tdef = __ring_m76._0;
-                      const __ring_iter_31 = __List_Iterable.iter(tdef.assoc_types);
+                      const __ring_iter_33 = __List_Iterable.iter(tdef.assoc_types);
                       while (true) {
-                        const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
-                        if (__ring_next_31._tag === "none") break;
-                        const atdef = __ring_next_31._0;
+                        const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+                        if (__ring_next_33._tag === "none") break;
+                        const atdef = __ring_next_33._0;
                         if ((atdef.name === assoc_name)) {
                           const at_var = env$TypeEnv_fresh_var(ctx.env);
                           List_push(found_types, at_var);
@@ -1721,11 +1741,11 @@ function resolve_assoc_type(ctx, type_param_name, assoc_name, span) {
 
 function resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span) {
   let result = [];
-  const __ring_iter_32 = __List_Iterable.iter(type_params);
+  const __ring_iter_34 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
-    if (__ring_next_32._tag === "none") break;
-    const param = __ring_next_32._0;
+    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+    if (__ring_next_34._tag === "none") break;
+    const param = __ring_next_34._0;
     const concrete = env$apply_subst(s, param);
     List_push(result, resolve_concrete_type_to_dict_ref(sink, env, current_fn_bounds, concrete, s, trait_name, span));
   }
@@ -1816,11 +1836,11 @@ function resolve_dicts_from_scheme(sink, env, current_fn_bounds, scheme, callee_
   }
   const var_map = build_scheme_var_map(scheme, callee_type);
   let resolved_dicts = [];
-  const __ring_iter_33 = __List_Iterable.iter(scheme.bounds);
+  const __ring_iter_35 = __List_Iterable.iter(scheme.bounds);
   while (true) {
-    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
-    if (__ring_next_33._tag === "none") break;
-    const bound = __ring_next_33._0;
+    const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+    if (__ring_next_35._tag === "none") break;
+    const bound = __ring_next_35._0;
     let found = false;
     __ring_match81: {
       const __ring_m81 = _Map_get(var_map, bound.type_var);
@@ -1983,19 +2003,19 @@ function resolve_named_type(ctx, name, type_args, span) {
         }
         let resolved_params = [];
         if ((List_len(type_args) > 0)) {
-          const __ring_iter_34 = __List_Iterable.iter(type_args);
+          const __ring_iter_36 = __List_Iterable.iter(type_args);
           while (true) {
-            const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
-            if (__ring_next_34._tag === "none") break;
-            const a = __ring_next_34._0;
+            const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+            if (__ring_next_36._tag === "none") break;
+            const a = __ring_next_36._0;
             List_push(resolved_params, resolve_type_expr(ctx, a));
           }
         } else {
-          const __ring_iter_35 = __List_Iterable.iter(def.type_params);
+          const __ring_iter_37 = __List_Iterable.iter(def.type_params);
           while (true) {
-            const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
-            if (__ring_next_35._tag === "none") break;
-            const _ = __ring_next_35._0;
+            const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+            if (__ring_next_37._tag === "none") break;
+            const _ = __ring_next_37._0;
             List_push(resolved_params, env$TypeEnv_fresh_var(ctx.env));
           }
         }
@@ -2018,19 +2038,19 @@ function resolve_named_type(ctx, name, type_args, span) {
         }
         let resolved_params = [];
         if ((List_len(type_args) > 0)) {
-          const __ring_iter_36 = __List_Iterable.iter(type_args);
+          const __ring_iter_38 = __List_Iterable.iter(type_args);
           while (true) {
-            const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
-            if (__ring_next_36._tag === "none") break;
-            const a = __ring_next_36._0;
+            const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
+            if (__ring_next_38._tag === "none") break;
+            const a = __ring_next_38._0;
             List_push(resolved_params, resolve_type_expr(ctx, a));
           }
         } else {
-          const __ring_iter_37 = __List_Iterable.iter(def.type_params);
+          const __ring_iter_39 = __List_Iterable.iter(def.type_params);
           while (true) {
-            const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
-            if (__ring_next_37._tag === "none") break;
-            const _ = __ring_next_37._0;
+            const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
+            if (__ring_next_39._tag === "none") break;
+            const _ = __ring_next_39._0;
             List_push(resolved_params, env$TypeEnv_fresh_var(ctx.env));
           }
         }
@@ -2054,11 +2074,11 @@ function resolve_named_type(ctx, name, type_args, span) {
         return alias.ty;
       }
       let resolved_args = [];
-      const __ring_iter_38 = __List_Iterable.iter(type_args);
+      const __ring_iter_40 = __List_Iterable.iter(type_args);
       while (true) {
-        const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
-        if (__ring_next_38._tag === "none") break;
-        const a = __ring_next_38._0;
+        const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
+        if (__ring_next_40._tag === "none") break;
+        const a = __ring_next_40._0;
         List_push(resolved_args, resolve_type_expr(ctx, a));
       }
       let mapping = map_new();
@@ -2157,21 +2177,21 @@ function resolve_type_expr(ctx, texpr) {
     if (__ring_m92._tag === "FnType") {
       const params = __ring_m92.params; const return_type = __ring_m92.return_type; const effects = __ring_m92.effects;
       let resolved_params = [];
-      const __ring_iter_39 = __List_Iterable.iter(params);
+      const __ring_iter_41 = __List_Iterable.iter(params);
       while (true) {
-        const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
-        if (__ring_next_39._tag === "none") break;
-        const p = __ring_next_39._0;
+        const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
+        if (__ring_next_41._tag === "none") break;
+        const p = __ring_next_41._0;
         List_push(resolved_params, resolve_type_expr(ctx, p));
       }
       const ret = resolve_type_expr(ctx, return_type);
       const eff_row = ((List_len(effects) > 0) ? (function() {
   let resolved_effects = [];
-  const __ring_iter_40 = __List_Iterable.iter(effects);
+  const __ring_iter_42 = __List_Iterable.iter(effects);
   while (true) {
-    const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
-    if (__ring_next_40._tag === "none") break;
-    const e = __ring_next_40._0;
+    const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
+    if (__ring_next_42._tag === "none") break;
+    const e = __ring_next_42._0;
     List_push(resolved_effects, resolve_fn_type_effect(ctx, e));
   }
   return new types$EffectRow(resolved_effects, Option_none);
@@ -2190,11 +2210,11 @@ function resolve_type_expr(ctx, texpr) {
     if (__ring_m92._tag === "RecordType") {
       const fields = __ring_m92.fields; const rest = __ring_m92.rest;
       let resolved_fields = [];
-      const __ring_iter_41 = __List_Iterable.iter(fields);
+      const __ring_iter_43 = __List_Iterable.iter(fields);
       while (true) {
-        const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
-        if (__ring_next_41._tag === "none") break;
-        const f = __ring_next_41._0;
+        const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
+        if (__ring_next_43._tag === "none") break;
+        const f = __ring_next_43._0;
         List_push(resolved_fields, new types$RecordField(f.name, resolve_type_expr(ctx, f.ty)));
       }
       __ring_match96: {
@@ -2226,11 +2246,11 @@ function resolve_type_expr(ctx, texpr) {
     if (__ring_m92._tag === "TupleType") {
       const elements = __ring_m92.elements;
       let resolved_elems = [];
-      const __ring_iter_42 = __List_Iterable.iter(elements);
+      const __ring_iter_44 = __List_Iterable.iter(elements);
       while (true) {
-        const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
-        if (__ring_next_42._tag === "none") break;
-        const e = __ring_next_42._0;
+        const __ring_next_44 = __ListIterator_Iterator.next(__ring_iter_44);
+        if (__ring_next_44._tag === "none") break;
+        const e = __ring_next_44._0;
         List_push(resolved_elems, resolve_type_expr(ctx, e));
       }
       return types$Type_TupleType(resolved_elems);
@@ -2281,11 +2301,11 @@ function resolve_fn_type_effect(ctx, eff) {
     return types$Effect_FailEffect(err_type);
   }
   let resolved_args = [];
-  const __ring_iter_43 = __List_Iterable.iter(eff.type_args);
+  const __ring_iter_45 = __List_Iterable.iter(eff.type_args);
   while (true) {
-    const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
-    if (__ring_next_43._tag === "none") break;
-    const ta = __ring_next_43._0;
+    const __ring_next_45 = __ListIterator_Iterator.next(__ring_iter_45);
+    if (__ring_next_45._tag === "none") break;
+    const ta = __ring_next_45._0;
     List_push(resolved_args, resolve_type_expr(ctx, ta));
   }
   return types$Effect_CustomEffect(eff.name, resolved_args);
