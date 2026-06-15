@@ -389,6 +389,49 @@ fn test_fetch() {
 - 现有 `Map<Str,...>` 全部不回归
 - 全部 E2E + llvm_diff 通过；自举一致
 
+### B-133 UTF-8 字节串模型落地（B-131 probe 拍板 A）[feature] [P3] [L] [judgment] [queued]
+
+> 2026-06-15 立项（Discussion，B-131 design-probe 拍板 A = UTF-8 字节串 Rust 模型）。**设计真值 = design.md §1.7.1**（完整分析 + API 设计 + 迁移清单）。现状：design.md 写的 code point 语义两后端都没实现——LLVM 按字节、JS 按 UTF-16 码元；对 ASCII 两后端行为一致，非 ASCII 全失真。
+
+**分阶段实施**（各阶段可独立提交，顺序依赖标注于下）：
+
+| 阶段 | 内容 | 依赖 | 量 |
+|------|------|------|----|
+| P0 | design.md §1.7 表格修正 + CLAUDE.md 已知限制更新 | 无 | S |
+| P1 | `ring_str_to_upper`/`to_lower` ASCII-only bug 修复（多字节 UTF-8 破坏） | 无 | S |
+| P2 | 新增 `char_count()`/`chars()` 到 `std/str.ring` + 两后端实现 | 无 | M |
+| P3 | JS 后端 `Str_len` 等改为字节语义 + `ring_str_slice` 加 UTF-8 边界检查 | P2 | L |
+| P4 | `char_at`/`char_code_at` 命名决策（改 `byte_at`？）+ 实施 | P2 | M |
+| P5 | 新增 llvm_diff 非 ASCII 测试用例（CJK + emoji + mixed） | P3 | M |
+| P6 | `split("")` 改为 code-point 级拆分 | P2 | S |
+
+**涉及修改**：
+1. `ring_runtime.cpp`：修 `to_upper`/`to_lower`（ASCII-only 保留非 ASCII 原样）；新增 `ring_str_char_count`/`ring_str_chars`；`ring_str_slice` 加 UTF-8 边界 panic
+2. `compiler/runtime.ring`（JS）：`Str_len` 改 `TextEncoder` 字节数；`Str_char_at`/`Str_slice` 等改字节级；新增 `Str_char_count`/`Str_chars`
+3. `std/str.ring`：新增 `char_count`/`chars` 方法签名
+4. `compiler/builtins.ring`：注册新方法
+5. `tests/cases/llvm/`：非 ASCII 差分用例
+
+**验收标准**：
+- `"你好".len() == 6`（字节数）两后端一致
+- `"😀".len() == 4`（字节数）两后端一致
+- `"你好".char_count() == 2` 两后端一致
+- `"你好".chars()` 返回 `["你", "好"]` 两后端一致
+- 非 code-point 边界 `slice` → panic
+- `to_upper`/`to_lower` 不破坏多字节 UTF-8
+- 全部 E2E + llvm_diff 通过；自举一致
+
+### B-134 内建类型 `name ==` 裸检查统一加固 [refactor] [P3] [S] [mechanical] [queued]
+
+> 2026-06-15 立项（Discussion，B-128 worker 通知）。B-128 修了 Set for-in 的 `name == "Set"` 裸检查，但同类模式在多处存在：`codegen_llvm_ctx.ring`（`get_builtin_typeid`）、`codegen_llvm_expr.ring`（`method_to_runtime` / `is_int_set` / `is_int_keyed_map`）、`types.ring`（`is_set_type` / `is_map_type` / `is_list_type`）。当前零冲突（无同名用户类型），但模式不一致。
+
+**涉及修改**：
+1. 上述站点的 `name == "X"` 检查统一加结构校验（`type_params` 数量 + `fields` 为空），与 B-128 修法一致
+
+**验收标准**：
+- 所有 `name == "Set"` / `"Map"` / `"List"` 检查均含结构校验
+- 全部 E2E + llvm_diff 通过；自举一致
+
 ## 性能优化（愿景：语义驱动的编译优化）
 
 > **核心论点**：Ring 的类型系统（effect + refinement + linear）不仅用于安全性，还为编译器提供其他语言没有的优化信息。性能是 Ring 的核心卖点之一——目标不是"接近 C++/Rust"而是在特定场景**超越**。

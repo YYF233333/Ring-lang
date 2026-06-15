@@ -452,16 +452,16 @@ Ring 语言的语义规范，两个后端都必须符合。LLVM 落地后 JS 后
 | **整数范围** | 各类型固定宽度（I64 = ±2^63，I32 = ±2^31 等） | JS 后端 I64 受限于 ±2^53，已知差异 |
 | **整数溢出** | Debug panic / Release 二补数回绕 | Rust 模型。JS 后端静默溢出为 float，已知差异 |
 | **浮点精度** | F64 = IEEE 754 double，F32 = IEEE 754 single | 两后端一致（JS 后端只有 F64） |
-| **字符串编码** | UTF-8 | JS 后端内部 UTF-16，已知差异 |
-| **`str[i]`** | 第 i 个 Unicode code point | O(n)，安全访问用 `.get(i)` 返回 `Option`。未来引入 `Char` 类型 |
-| **`str.len()`** | Unicode code point 数 | 另提供 `.byte_len()` 返回 UTF-8 字节数 |
+| **字符串编码** | UTF-8 字节串（Rust 模型，§1.7.1 拍板） | JS 后端内部 UTF-16，已知差异（B-100 前修正） |
+| **`str[i]`** | 第 i 个字节（返回单字节 `Str`），越界 panic | code point 级访问用 `.chars()` 迭代器 |
+| **`str.len()`** | 字节数，O(1) | code point 数用 `.char_count()`，O(n) |
 | **数组越界** | panic | 安全访问用 `.get(i)` 返回 `Option<T>`。已是当前行为 |
 | **整数除零** | panic | JS 后端当前返回 Infinity，需修正 |
 | **栈溢出** | 实现定义的 panic 或 abort | LLVM 用 stack guard page，JS 有 RangeError。不保证所有平台均可捕获 |
 
 #### 1.7.1 字符串编码模型（B-131 design-probe，2026-06-15）
 
-**状态：推荐选 A（UTF-8 字节串），待用户拍板。**
+**状态：已拍板选 A（UTF-8 字节串），2026-06-15 用户确认。实现 = B-133。**
 
 上表（1.7）第 5-6 行当前写的是「UTF-8 编码、code point 级 `len`/`index`」，即 A+B 混合体——内部存储 UTF-8（A 的选择），但公开 API 按 code point 计数（B 的选择）。这是自相矛盾的：要么承受 B 的 O(n) index 代价并把语义完全兑现，要么选 A 的字节级 API 并获得 O(1) 性能。两条路都不走 = 留一个「设计文档写了但两个后端都没实现」的空头支票。本节分析两个候选并给出推荐。
 
@@ -2078,6 +2078,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | 2026-06-12 | 公理名单与实战否决记录错位 + 性能地位空白（D-6） | ⑧「一种事一种写法」⑨「语法借用」自「语法原则」升格为层 2 公理；性能成文为非公理工程目标（让位全部公理，受 ⑥⑦ 间接保护，优先级锚点=层 0 判据） | 元决策 | — |
 | 2026-06-12 | ② 可见性载体失真（D-8）：「IDE 幽灵标注」对主受众 LLM 无效（agent 读源码文本/编译器输出，LSP 亦不存在） | 主载体改写 = formatter 物化标注 + 模块签名 + `--error-format=llm`；IDE 为人类适配层（B-016）；formatter 等级系统待优先级专题讨论；io 效果粒度记 lang-design §10 待议 | 规则 2 | — |
 | 2026-06-12 | B-111 优先级（D-7）：层 0 判据（公理④「LLM 写 Ring 优于 TS」）至今零测量、缺测量仪 | B-111 P2→P1，地位等价公理⑥的 B-089 锚点；只改优先级不动排程（B-104 里程碑照旧先行）。条目见 backlog B-111 | 规则 2（层 0 判据） | B-111 验收 |
+| 2026-06-15 | 字符串编码模型：code point API（设计文档）vs 两后端实际行为（LLVM 字节 / JS UTF-16 码元）全面失真 | 选 A（UTF-8 字节串 Rust 模型）：`len`=字节数 O(1)、`chars()`/`char_count()` 提供 code point 级 API；否决 B（code point）理由=O(n) len 自编译 2-5x 退化 + 需 ByteStr 补位违反⑧。§1.7 表格已修正。实现 = B-133 | ⑥⑦⑧（5/7 判据 A 胜出） | B-133 P5：非 ASCII llvm_diff 两后端一致 |
 
 ## 附录：实现状态（持续更新；建表 2026-05-24）
 
