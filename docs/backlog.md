@@ -589,25 +589,6 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
-### B-126 codegen first-match 隐式消歧改显式报错 [bugfix] [P3] [M] [judgment] [doing]
-
-> 2026-06-15 立项（Discussion，B-089 G-b worker 观察）。codegen 中 3 个 Map 迭代站点使用 `return some(first_match)` 模式——排序后确定化但根因（多模块同名函数/struct 歧义）仍在：排序只把"随机选一个"变成"选字典序最小的一个"，仍是隐式消歧。当前编译器自举无实存歧义（测试全绿），但用户代码出现真实同名冲突时会静默选错。
-
-**涉及站点**：
-1. `codegen_stmt.ring:23` — struct suffix 查找（多 module 同名 struct 时 first match）
-2. `codegen_llvm_expr.ring:1777` — imports_map 前缀枚举（多 module 同名 fn 时 first match）
-3. `codegen_llvm_expr.ring:1803` — functions 后缀回退（同上）
-
-**涉及修改（2026-06-15 拍板：resolver/checker 层拦截）**：
-1. `resolver.ring`：多模块导入同名函数/struct 时，若调用点无 qualifier 消歧 → 报编译错误（E 码 + 提示用模块限定名）
-2. codegen 的 3 个 first-match 站点在上游保证无歧义后自然唯一命中，无需改动（但可加 assertion 防御）
-
-**验收标准**：
-- 多模块同名函数/struct 歧义 → 编译错误（负面测试）
-- 单模块无歧义场景行为不变
-- 全部 E2E + llvm_diff 通过；自举一致
-
-
 
 ### B-129 Map/Set for_each llvm_diff 覆盖 [bugfix] [P3] [S] [mechanical] [queued] [deferred: B-089]
 
@@ -623,28 +604,6 @@ source-map 支持 + 断点调试。
 
 
 
-### B-138 impl 方法 effect 传播：impl 内 SCC 排序（方案 A）[bugfix] [P2] [M] [judgment] [doing]
-
-> 2026-06-15 立项（Discussion，#141 W0001 根因分析）。同一 impl 块内方法按源码序检查，先检查的方法看不到后检查方法的推断 effect。B-122 SCC 拓扑排序只覆盖顶层函数，impl 方法不参与（`scc.ring` 把整个 impl 当单节点）。表现：`parse_use_decl`（源码序在前）调用 `error()`（源码序在后），`error()` 的 `fail` effect 对 `parse_use_decl` 不可见 → W0001 误报。
-
-**两层修复**：
-
-| 层 | 内容 | 说明 |
-|----|------|------|
-| **层 1** | `__ring_raise_fail` extern fn 加 `with {fail}` 声明 | effect 种子——已验证直接调用者获得 fail |
-| **层 2** | `check_impl_decl` 内方法按 SCC 拓扑排序 | 镜像 B-122 对顶层函数的方案，缩到 impl 内 |
-
-**方案选择记录**：方案 A（impl 内 SCC）vs B（两遍检查，重检可能引入类型推断不一致）vs C（全局 SCC 纳入 impl 方法，手术面 L，跨 impl 直接互调无实例）。选 A——改动集中在 `check_impl_decl` 内部，不动全局 SCC 架构；将来需要跨 impl 排序时从 A 升级到 C 是自然增量。
-
-**涉及修改**：
-1. `compiler/parser.ring`：`__ring_raise_fail` 声明加 `with {fail}`（层 1，un-revert）
-2. `compiler/infer_decl.ring`：`check_impl_decl` 内部——检查方法前先扫描方法体构建 impl 内调用图 → SCC 排序 → 按拓扑序检查方法（callee 先于 caller）。复用 `scc.ring` 的 `tarjan_scc`。impl 上下文（self_type/bounds/assoc_types）建立保持不变，只改方法循环的迭代顺序
-3. 测试：负面测试——impl 方法 A 调用方法 B（源码序 A 在前），B 有 fail effect，验证 A 正确推断 fail；W0001 不再对编译器自身 parser 误报
-
-**验收标准**：
-- `npm test` 无 W0001 对 parser 的误报
-- impl 方法间 effect 传播正确（新增负面测试）
-- 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。

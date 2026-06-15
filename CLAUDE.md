@@ -106,11 +106,11 @@ Ring-lang/
 - 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
 - Checker 多错误恢复是 declaration 级（同一函数内停于首错）
 - LSP 暂不可用（TS 实现未移植）
-- **Impl 方法 effect 传播不完整（B-138）**：同一 impl 块内方法按源码序检查，先检查的方法看不到后检查方法的推断 effect。根因：B-122 SCC 拓扑排序只覆盖顶层函数，impl 块内方法不参与 SCC（`scc.ring` 把整个 impl 当单节点）。表现：`__ring_raise_fail`（extern fn，无 effect 声明）→ `error()`（impl method）→ `parse_use_decl()`（同 impl，源码序在前）= fail effect 断链 → W0001 误报。Workaround：`__ring_raise_fail` 直接调用绕过 impl 方法链。**不要尝试给 extern fn 加 `with {fail}` 单独修——层 1 可行但层 2（impl 内排序）不修的话 W0001 不消**
+- **Impl 方法 effect 传播**：B-138 ✅ impl 内方法按 SCC 拓扑排序检查（callee 先于 caller），非环依赖的 effect 正确传播。**残留限制**：impl 内互递归方法（SCC 环，如 `parse_mod_block` ↔ `parse_decl`）仍有 effect 遗漏，与顶层 SCC（B-122）同一限制
 
 ## 路线图
 
-**当前**：B-104 完整 Perceus RC ✅（G-a 三门 2026-06-13 通过，leak 88%→1.2%@2.382B，D1-D9 九棒全落地）。Native 自编译跑通（exit 0，~10.42B allocs，peak ~10.6GB）。B-080 tagged pointer ✅（290s vs 492s = 41% 加速）。B-122 SCC 拓扑序 ✅（checker Pass 2 改 SCC 驱动 + fn type rebinding，#149 健全性洞关闭）。待攻坚：B-089 native 终验（G-b emit 排序确定化 + G-c parity）。
+**当前**：B-104 完整 Perceus RC ✅（G-a 三门 2026-06-13 通过，leak 88%→1.2%@2.382B，D1-D9 九棒全落地）。Native 自编译跑通（exit 0，~10.42B allocs，peak ~10.6GB）。B-080 tagged pointer ✅（290s vs 492s = 41% 加速）。B-122 SCC 拓扑序 ✅（checker Pass 2 改 SCC 驱动 + fn type rebinding，#149 健全性洞关闭）。B-138 impl SCC 排序 ✅ + B-137 codegen effect 传播修复 ✅ + B-126 E0707 歧义检测 ✅。待攻坚：B-089 native 终验（G-b emit 排序确定化 + G-c parity）。
 
 **后续**：B-089 native 自举终验（G-b/c）→ B-099 native LLVM-C 链接（Node 消除）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 

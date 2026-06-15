@@ -5,6 +5,9 @@ import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, Bin
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -16,9 +19,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -160,12 +160,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -176,60 +176,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -436,32 +436,10 @@ class TypeEnv {
   }
 }
 
-function TypeEnv_current_var_id(self) {
-  return self.ids.next_type_var_id;
-}
-function TypeEnv_fresh_var(self) {
-  const id = self.ids.next_type_var_id;
-  self.ids.next_type_var_id = (id + 1);
-  return types$Type_TypeVar(id, Option_none);
-}
-function TypeEnv_fresh_var_id(self) {
-  const id = self.ids.next_type_var_id;
-  self.ids.next_type_var_id = (id + 1);
-  return id;
-}
 function TypeEnv_fresh_def_id(self) {
   const id = self.ids.next_def_id;
   self.ids.next_def_id = (id + 1);
   return id;
-}
-function TypeEnv_push_scope(self) {
-  return List_push(self.scope.scopes, new Scope(map_new()));
-}
-function TypeEnv_pop_scope(self) {
-  if ((List_len(self.scope.scopes) <= 1)) {
-    panic("unreachable: cannot pop global scope");
-  }
-  return List_pop(self.scope.scopes);
 }
 function TypeEnv_bind(self, name, scheme) {
   let __ring_blk0;
@@ -496,55 +474,18 @@ function TypeEnv_bind(self, name, scheme) {
 function TypeEnv_bind_mono(self, name, ty) {
   return TypeEnv_bind(self, name, mono(ty));
 }
-function TypeEnv_record_def_span(self, def_id, span) {
-  return _Map_insert(self.scope.def_spans, def_id, span);
+function TypeEnv_current_var_id(self) {
+  return self.ids.next_type_var_id;
 }
-function TypeEnv_rebind(self, name, scheme) {
-  let i = (List_len(self.scope.scopes) - 1);
-  while ((i >= 0)) {
-    __ring_match8: {
-      const __ring_m8 = List_get(self.scope.scopes, i);
-      if (__ring_m8._tag === "some") {
-        const scope = __ring_m8._0;
-        if (_Map_contains_key(scope.variables, name)) {
-          _Map_insert(scope.variables, name, scheme);
-          return;
-        }
-        break __ring_match8;
-      }
-      if (__ring_m8._tag === "none") {
-        break __ring_match8;
-      }
-      __match_fail(__ring_m8);
-    }
-    i = (i - 1);
-  }
-  return panic(`unreachable: rebind failed — variable '${name}' not found in any scope`);
+function TypeEnv_fresh_var(self) {
+  const id = self.ids.next_type_var_id;
+  self.ids.next_type_var_id = (id + 1);
+  return types$Type_TypeVar(id, Option_none);
 }
-function TypeEnv_lookup(self, name) {
-  let i = (List_len(self.scope.scopes) - 1);
-  while ((i >= 0)) {
-    let __ring_blk1;
-    __ring_match9: {
-      const __ring_m9 = List_get(self.scope.scopes, i);
-      if (__ring_m9._tag === "some") {
-        const scope = __ring_m9._0;
-        __ring_blk1 = _Map_get(scope.variables, name);
-        break __ring_match9;
-      }
-      if (__ring_m9._tag === "none") {
-        __ring_blk1 = Option_none;
-        break __ring_match9;
-      }
-      __match_fail(__ring_m9);
-    }
-    const found = __ring_blk1;
-    if (Option_is_some(found)) {
-      return found;
-    }
-    i = (i - 1);
-  }
-  return Option_none;
+function TypeEnv_fresh_var_id(self) {
+  const id = self.ids.next_type_var_id;
+  self.ids.next_type_var_id = (id + 1);
+  return id;
 }
 function TypeEnv_instantiate(self, scheme) {
   if ((List_len(scheme.type_vars) === 0)) {
@@ -563,44 +504,103 @@ function TypeEnv_instantiate(self, scheme) {
     const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
     if (__ring_next_3._tag === "none") break;
     const bound = __ring_next_3._0;
-    __ring_match10: {
-      const __ring_m10 = _Map_get(mapping, bound.type_var);
-      if (__ring_m10._tag === "some") {
-        const fresh = __ring_m10._0;
-        __ring_match11: {
-          const __ring_m11 = fresh;
-          if (__ring_m11._tag === "TypeVar") {
-            const id = __ring_m11.id;
-            let __ring_blk2;
-            __ring_match12: {
-              const __ring_m12 = _Map_get(self.scope.var_bounds, id);
-              if (__ring_m12._tag === "some") {
-                const s = __ring_m12._0;
-                __ring_blk2 = s;
-                break __ring_match12;
+    __ring_match8: {
+      const __ring_m8 = _Map_get(mapping, bound.type_var);
+      if (__ring_m8._tag === "some") {
+        const fresh = __ring_m8._0;
+        __ring_match9: {
+          const __ring_m9 = fresh;
+          if (__ring_m9._tag === "TypeVar") {
+            const id = __ring_m9.id;
+            let __ring_blk1;
+            __ring_match10: {
+              const __ring_m10 = _Map_get(self.scope.var_bounds, id);
+              if (__ring_m10._tag === "some") {
+                const s = __ring_m10._0;
+                __ring_blk1 = s;
+                break __ring_match10;
               }
-              if (__ring_m12._tag === "none") {
-                __ring_blk2 = set_new();
-                break __ring_match12;
+              if (__ring_m10._tag === "none") {
+                __ring_blk1 = set_new();
+                break __ring_match10;
               }
-              __match_fail(__ring_m12);
+              __match_fail(__ring_m10);
             }
-            let existing = __ring_blk2;
+            let existing = __ring_blk1;
             _Set_insert(existing, bound.trait_name);
             _Map_insert(self.scope.var_bounds, id, existing);
-            break __ring_match11;
+            break __ring_match9;
           }
-          break __ring_match11;
+          break __ring_match9;
         }
-        break __ring_match10;
+        break __ring_match8;
       }
-      if (__ring_m10._tag === "none") {
-        break __ring_match10;
+      if (__ring_m8._tag === "none") {
+        break __ring_match8;
       }
-      __match_fail(__ring_m10);
+      __match_fail(__ring_m8);
     }
   }
   return apply_subst_map(mapping, scheme.ty);
+}
+function TypeEnv_lookup(self, name) {
+  let i = (List_len(self.scope.scopes) - 1);
+  while ((i >= 0)) {
+    let __ring_blk2;
+    __ring_match11: {
+      const __ring_m11 = List_get(self.scope.scopes, i);
+      if (__ring_m11._tag === "some") {
+        const scope = __ring_m11._0;
+        __ring_blk2 = _Map_get(scope.variables, name);
+        break __ring_match11;
+      }
+      if (__ring_m11._tag === "none") {
+        __ring_blk2 = Option_none;
+        break __ring_match11;
+      }
+      __match_fail(__ring_m11);
+    }
+    const found = __ring_blk2;
+    if (Option_is_some(found)) {
+      return found;
+    }
+    i = (i - 1);
+  }
+  return Option_none;
+}
+function TypeEnv_pop_scope(self) {
+  if ((List_len(self.scope.scopes) <= 1)) {
+    panic("unreachable: cannot pop global scope");
+  }
+  return List_pop(self.scope.scopes);
+}
+function TypeEnv_push_scope(self) {
+  return List_push(self.scope.scopes, new Scope(map_new()));
+}
+function TypeEnv_rebind(self, name, scheme) {
+  let i = (List_len(self.scope.scopes) - 1);
+  while ((i >= 0)) {
+    __ring_match12: {
+      const __ring_m12 = List_get(self.scope.scopes, i);
+      if (__ring_m12._tag === "some") {
+        const scope = __ring_m12._0;
+        if (_Map_contains_key(scope.variables, name)) {
+          _Map_insert(scope.variables, name, scheme);
+          return;
+        }
+        break __ring_match12;
+      }
+      if (__ring_m12._tag === "none") {
+        break __ring_match12;
+      }
+      __match_fail(__ring_m12);
+    }
+    i = (i - 1);
+  }
+  return panic(`unreachable: rebind failed — variable '${name}' not found in any scope`);
+}
+function TypeEnv_record_def_span(self, def_id, span) {
+  return _Map_insert(self.scope.def_spans, def_id, span);
 }
 
 function add_impl(reg, entry) {

@@ -3,6 +3,9 @@ import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, Bin
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -14,9 +17,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -158,12 +158,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -174,60 +174,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -848,6 +848,365 @@ function collect_registered_fn_names(decls) {
   return names;
 }
 
+function collect_self_method_stmt_callees(stmt, method_names, callees) {
+  __ring_match28: {
+    const __ring_m28 = stmt;
+    if (__ring_m28._tag === "Let") {
+      const init = __ring_m28.init;
+      return collect_self_method_callees(init, method_names, callees);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Var") {
+      const init = __ring_m28.init;
+      return collect_self_method_callees(init, method_names, callees);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Assign") {
+      const target = __ring_m28.target; const value = __ring_m28.value;
+      collect_self_method_callees(target, method_names, callees);
+      return collect_self_method_callees(value, method_names, callees);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "ExprStmt") {
+      const expr = __ring_m28.expr;
+      return collect_self_method_callees(expr, method_names, callees);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Return") {
+      const value = __ring_m28.value;
+      __ring_match29: {
+        const __ring_m29 = value;
+        if (__ring_m29._tag === "some") {
+          const v = __ring_m29._0;
+          return collect_self_method_callees(v, method_names, callees);
+          break __ring_match29;
+        }
+        if (__ring_m29._tag === "none") {
+          break __ring_match29;
+        }
+        __match_fail(__ring_m29);
+      }
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "While") {
+      const condition = __ring_m28.condition; const body = __ring_m28.body;
+      collect_self_method_callees(condition, method_names, callees);
+      return collect_self_method_callees(body, method_names, callees);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "ForIn") {
+      const iterable = __ring_m28.iterable; const body = __ring_m28.body;
+      collect_self_method_callees(iterable, method_names, callees);
+      return collect_self_method_callees(body, method_names, callees);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "LetDestructure") {
+      const init = __ring_m28.init;
+      return collect_self_method_callees(init, method_names, callees);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "IfLet") {
+      const expr = __ring_m28.expr; const then_block = __ring_m28.then_block; const else_block = __ring_m28.else_block;
+      collect_self_method_callees(expr, method_names, callees);
+      collect_self_method_callees(then_block, method_names, callees);
+      __ring_match30: {
+        const __ring_m30 = else_block;
+        if (__ring_m30._tag === "some") {
+          const eb = __ring_m30._0;
+          return collect_self_method_callees(eb, method_names, callees);
+          break __ring_match30;
+        }
+        if (__ring_m30._tag === "none") {
+          break __ring_match30;
+        }
+        __match_fail(__ring_m30);
+      }
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Break") {
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Continue") {
+      break __ring_match28;
+    }
+    __match_fail(__ring_m28);
+  }
+}
+
+function collect_self_method_callees(expr, method_names, callees) {
+  __ring_match31: {
+    const __ring_m31 = expr;
+    if (__ring_m31._tag === "Call") {
+      const callee = __ring_m31.callee; const args = __ring_m31.args;
+      collect_self_method_callees(callee, method_names, callees);
+      const __ring_iter_22 = __List_Iterable.iter(args);
+      while (true) {
+        const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+        if (__ring_next_22._tag === "none") break;
+        const arg = __ring_next_22._0;
+        collect_self_method_callees(arg, method_names, callees);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "MethodCall") {
+      const receiver = __ring_m31.receiver; const method = __ring_m31.method; const args = __ring_m31.args;
+      __ring_match32: {
+        const __ring_m32 = receiver;
+        if (__ring_m32._tag === "Ident") {
+          const name = __ring_m32.name;
+          if (((name === "self") ? _Set_contains(method_names, method, __Str_Eq) : false)) {
+            _Set_insert(callees, method);
+          }
+          break __ring_match32;
+        }
+        break __ring_match32;
+      }
+      collect_self_method_callees(receiver, method_names, callees);
+      const __ring_iter_23 = __List_Iterable.iter(args);
+      while (true) {
+        const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+        if (__ring_next_23._tag === "none") break;
+        const arg = __ring_next_23._0;
+        collect_self_method_callees(arg, method_names, callees);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "Ident") {
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "Block") {
+      const stmts = __ring_m31.stmts; const tail = __ring_m31.tail;
+      const __ring_iter_24 = __List_Iterable.iter(stmts);
+      while (true) {
+        const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+        if (__ring_next_24._tag === "none") break;
+        const stmt = __ring_next_24._0;
+        collect_self_method_stmt_callees(stmt, method_names, callees);
+      }
+      __ring_match33: {
+        const __ring_m33 = tail;
+        if (__ring_m33._tag === "some") {
+          const t = __ring_m33._0;
+          return collect_self_method_callees(t, method_names, callees);
+          break __ring_match33;
+        }
+        if (__ring_m33._tag === "none") {
+          break __ring_match33;
+        }
+        __match_fail(__ring_m33);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "IfExpr") {
+      const condition = __ring_m31.condition; const then_branch = __ring_m31.then_branch; const else_branch = __ring_m31.else_branch;
+      collect_self_method_callees(condition, method_names, callees);
+      collect_self_method_callees(then_branch, method_names, callees);
+      __ring_match34: {
+        const __ring_m34 = else_branch;
+        if (__ring_m34._tag === "some") {
+          const eb = __ring_m34._0;
+          return collect_self_method_callees(eb, method_names, callees);
+          break __ring_match34;
+        }
+        if (__ring_m34._tag === "none") {
+          break __ring_match34;
+        }
+        __match_fail(__ring_m34);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "MatchExpr") {
+      const scrutinee = __ring_m31.scrutinee; const arms = __ring_m31.arms;
+      collect_self_method_callees(scrutinee, method_names, callees);
+      const __ring_iter_25 = __List_Iterable.iter(arms);
+      while (true) {
+        const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+        if (__ring_next_25._tag === "none") break;
+        const arm = __ring_next_25._0;
+        __ring_match35: {
+          const __ring_m35 = arm.guard;
+          if (__ring_m35._tag === "some") {
+            const g = __ring_m35._0;
+            collect_self_method_callees(g, method_names, callees);
+            break __ring_match35;
+          }
+          if (__ring_m35._tag === "none") {
+            break __ring_match35;
+          }
+          __match_fail(__ring_m35);
+        }
+        collect_self_method_callees(arm.body, method_names, callees);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "Lambda") {
+      const body = __ring_m31.body;
+      return collect_self_method_callees(body, method_names, callees);
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "BinOp") {
+      const left = __ring_m31.left; const right = __ring_m31.right;
+      collect_self_method_callees(left, method_names, callees);
+      return collect_self_method_callees(right, method_names, callees);
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "UnaryOp") {
+      const operand = __ring_m31.operand;
+      return collect_self_method_callees(operand, method_names, callees);
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "FieldAccess") {
+      const receiver = __ring_m31.receiver;
+      return collect_self_method_callees(receiver, method_names, callees);
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "IndexExpr") {
+      const receiver = __ring_m31.receiver; const index = __ring_m31.index;
+      collect_self_method_callees(receiver, method_names, callees);
+      return collect_self_method_callees(index, method_names, callees);
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "StructLit") {
+      const fields = __ring_m31.fields; const spread = __ring_m31.spread;
+      const __ring_iter_26 = __List_Iterable.iter(fields);
+      while (true) {
+        const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+        if (__ring_next_26._tag === "none") break;
+        const f = __ring_next_26._0;
+        collect_self_method_callees(f.value, method_names, callees);
+      }
+      __ring_match36: {
+        const __ring_m36 = spread;
+        if (__ring_m36._tag === "some") {
+          const s = __ring_m36._0;
+          return collect_self_method_callees(s, method_names, callees);
+          break __ring_match36;
+        }
+        if (__ring_m36._tag === "none") {
+          break __ring_match36;
+        }
+        __match_fail(__ring_m36);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "CatchExpr") {
+      const inner = __ring_m31.expr; const arms = __ring_m31.arms;
+      collect_self_method_callees(inner, method_names, callees);
+      const __ring_iter_27 = __List_Iterable.iter(arms);
+      while (true) {
+        const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+        if (__ring_next_27._tag === "none") break;
+        const arm = __ring_next_27._0;
+        __ring_match37: {
+          const __ring_m37 = arm.guard;
+          if (__ring_m37._tag === "some") {
+            const g = __ring_m37._0;
+            collect_self_method_callees(g, method_names, callees);
+            break __ring_match37;
+          }
+          if (__ring_m37._tag === "none") {
+            break __ring_match37;
+          }
+          __match_fail(__ring_m37);
+        }
+        collect_self_method_callees(arm.body, method_names, callees);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "HandleExpr") {
+      const body = __ring_m31.body; const handlers = __ring_m31.handlers;
+      collect_self_method_callees(body, method_names, callees);
+      const __ring_iter_28 = __List_Iterable.iter(handlers);
+      while (true) {
+        const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+        if (__ring_next_28._tag === "none") break;
+        const handler = __ring_next_28._0;
+        collect_self_method_callees(handler.body, method_names, callees);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "StringInterp") {
+      const parts = __ring_m31.parts;
+      const __ring_iter_29 = __List_Iterable.iter(parts);
+      while (true) {
+        const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+        if (__ring_next_29._tag === "none") break;
+        const part = __ring_next_29._0;
+        __ring_match38: {
+          const __ring_m38 = part;
+          if (__ring_m38._tag === "ExprPart") {
+            const e = __ring_m38._0;
+            collect_self_method_callees(e, method_names, callees);
+            break __ring_match38;
+          }
+          if (__ring_m38._tag === "LitPart") {
+            break __ring_match38;
+          }
+          __match_fail(__ring_m38);
+        }
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "Range") {
+      const start = __ring_m31.start; const end = __ring_m31.end;
+      collect_self_method_callees(start, method_names, callees);
+      return collect_self_method_callees(end, method_names, callees);
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "ListLit") {
+      const elements = __ring_m31.elements;
+      const __ring_iter_30 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+        if (__ring_next_30._tag === "none") break;
+        const el = __ring_next_30._0;
+        collect_self_method_callees(el, method_names, callees);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "TupleLit") {
+      const elements = __ring_m31.elements;
+      const __ring_iter_31 = __List_Iterable.iter(elements);
+      while (true) {
+        const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+        if (__ring_next_31._tag === "none") break;
+        const el = __ring_next_31._0;
+        collect_self_method_callees(el, method_names, callees);
+      }
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "IntLit") {
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "FloatLit") {
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "StrLit") {
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "BoolLit") {
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "ReturnExpr") {
+      const value = __ring_m31.value;
+      __ring_match39: {
+        const __ring_m39 = value;
+        if (__ring_m39._tag === "some") {
+          const v = __ring_m39._0;
+          return collect_self_method_callees(v, method_names, callees);
+          break __ring_match39;
+        }
+        if (__ring_m39._tag === "none") {
+          break __ring_match39;
+        }
+        __match_fail(__ring_m39);
+      }
+      break __ring_match31;
+    }
+    __match_fail(__ring_m31);
+  }
+}
+
 function tarjan_strongconnect(v, graph, index_counter, stack, on_stack, indices, lowlinks, result) {
   const v_index = index_counter.value;
   index_counter.value = (index_counter.value + 1);
@@ -856,25 +1215,25 @@ function tarjan_strongconnect(v, graph, index_counter, stack, on_stack, indices,
   List_push(stack, v);
   _Set_insert(on_stack, v);
   let __ring_blk5;
-  __ring_match28: {
-    const __ring_m28 = _Map_get(graph, v);
-    if (__ring_m28._tag === "some") {
-      const s = __ring_m28._0;
+  __ring_match40: {
+    const __ring_m40 = _Map_get(graph, v);
+    if (__ring_m40._tag === "some") {
+      const s = __ring_m40._0;
       __ring_blk5 = s;
-      break __ring_match28;
+      break __ring_match40;
     }
-    if (__ring_m28._tag === "none") {
+    if (__ring_m40._tag === "none") {
       __ring_blk5 = [];
-      break __ring_match28;
+      break __ring_match40;
     }
-    __match_fail(__ring_m28);
+    __match_fail(__ring_m40);
   }
   const successors = __ring_blk5;
-  const __ring_iter_22 = __List_Iterable.iter(successors);
+  const __ring_iter_32 = __List_Iterable.iter(successors);
   while (true) {
-    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
-    if (__ring_next_22._tag === "none") break;
-    const w = __ring_next_22._0;
+    const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+    if (__ring_next_32._tag === "none") break;
+    const w = __ring_next_32._0;
     if ((!_Map_contains_key(indices, w))) {
       tarjan_strongconnect(w, graph, index_counter, stack, on_stack, indices, lowlinks, result);
       const v_low = Option_unwrap_or(_Map_get(lowlinks, v), 0);
@@ -898,22 +1257,22 @@ function tarjan_strongconnect(v, graph, index_counter, stack, on_stack, indices,
     let scc = [];
     let done = false;
     while ((!done)) {
-      __ring_match29: {
-        const __ring_m29 = List_pop(stack);
-        if (__ring_m29._tag === "some") {
-          const w = __ring_m29._0;
+      __ring_match41: {
+        const __ring_m41 = List_pop(stack);
+        if (__ring_m41._tag === "some") {
+          const w = __ring_m41._0;
           _Set_remove(on_stack, w);
           List_push(scc, w);
           if ((w === v)) {
             done = true;
           }
-          break __ring_match29;
+          break __ring_match41;
         }
-        if (__ring_m29._tag === "none") {
+        if (__ring_m41._tag === "none") {
           done = true;
-          break __ring_match29;
+          break __ring_match41;
         }
-        __match_fail(__ring_m29);
+        __match_fail(__ring_m41);
       }
     }
     return List_push(result, scc);
@@ -930,37 +1289,37 @@ function tarjan_scc(graph) {
   let all_nodes = set_new();
   let sorted_graph = _Map_entries(graph);
   sorted_graph.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
-  const __ring_iter_23 = __List_Iterable.iter(sorted_graph);
+  const __ring_iter_33 = __List_Iterable.iter(sorted_graph);
   while (true) {
-    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
-    if (__ring_next_23._tag === "none") break;
-    const entry = __ring_next_23._0;
+    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+    if (__ring_next_33._tag === "none") break;
+    const entry = __ring_next_33._0;
     const __ring_dt0 = entry;
     const node = __ring_dt0[0];
     const targets = __ring_dt0[1];
     _Set_insert(all_nodes, node);
-    const __ring_iter_24 = __List_Iterable.iter(targets);
+    const __ring_iter_34 = __List_Iterable.iter(targets);
     while (true) {
-      const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-      if (__ring_next_24._tag === "none") break;
-      const t = __ring_next_24._0;
+      const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+      if (__ring_next_34._tag === "none") break;
+      const t = __ring_next_34._0;
       _Set_insert(all_nodes, t);
     }
   }
   let sorted_nodes = [];
-  const __ring_iter_25 = ___Set_Iterable.iter(all_nodes);
+  const __ring_iter_35 = ___Set_Iterable.iter(all_nodes);
   while (true) {
-    const __ring_next_25 = __SetIterator_Iterator.next(__ring_iter_25);
-    if (__ring_next_25._tag === "none") break;
-    const n = __ring_next_25._0;
+    const __ring_next_35 = __SetIterator_Iterator.next(__ring_iter_35);
+    if (__ring_next_35._tag === "none") break;
+    const n = __ring_next_35._0;
     List_push(sorted_nodes, n);
   }
   List_sort(sorted_nodes, __Str_Ord);
-  const __ring_iter_26 = __List_Iterable.iter(sorted_nodes);
+  const __ring_iter_36 = __List_Iterable.iter(sorted_nodes);
   while (true) {
-    const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
-    if (__ring_next_26._tag === "none") break;
-    const node = __ring_next_26._0;
+    const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+    if (__ring_next_36._tag === "none") break;
+    const node = __ring_next_36._0;
     if ((!_Map_contains_key(indices, node))) {
       tarjan_strongconnect(node, graph, index_counter, stack, on_stack, indices, lowlinks, result);
     }
@@ -1030,4 +1389,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { collect_registered_fn_names, build_call_graph, tarjan_scc };
+export { collect_registered_fn_names, build_call_graph, collect_self_method_callees, tarjan_scc };

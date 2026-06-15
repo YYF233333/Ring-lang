@@ -5,6 +5,9 @@ import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -16,9 +19,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -160,12 +160,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -176,60 +176,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -347,206 +347,93 @@ class Lexer {
   }
 }
 
-function Lexer_tokenize(self) {
-  let tokens = [];
-  while (true) {
-    const tok = Lexer_next_token(self);
-    let __ring_blk0;
-    __ring_match6: {
-      const __ring_m6 = tok.kind;
-      if (__ring_m6._tag === "TkEof") {
-        __ring_blk0 = true;
-        break __ring_match6;
-      }
-      __ring_blk0 = false;
+function Lexer_advance(self) {
+  if ((self.pos < Str_len(self.source))) {
+    if ((Option_unwrap_or(Str_char_at(self.source, self.pos), "") === "\n")) {
+      self.line = (self.line + 1);
+      self.column = 0;
+    } else {
+      self.column = (self.column + 1);
+    }
+    self.pos = (self.pos + 1);
+  }
+}
+function Lexer_current_position(self) {
+  return new ast$Position(self.line, self.column, self.pos);
+}
+function Lexer_dec_last_depth(self) {
+  __ring_match6: {
+    const __ring_m6 = List_pop(self.interp_frames);
+    if (__ring_m6._tag === "some") {
+      const f = __ring_m6._0;
+      return List_push(self.interp_frames, new InterpFrame((f.depth - 1), f.start_span));
       break __ring_match6;
     }
-    const is_eof = __ring_blk0;
-    List_push(tokens, tok);
-    if (is_eof) {
-      break;
+    if (__ring_m6._tag === "none") {
+      break __ring_match6;
     }
+    __match_fail(__ring_m6);
   }
-  return tokens;
 }
-function Lexer_next_token(self) {
-  Lexer_skip_whitespace_and_comments(self);
-  if ((self.pos >= Str_len(self.source))) {
-    if ((List_len(self.interp_frames) > 0)) {
-      const interp_span = Lexer_last_frame_span(self);
-      diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated string interpolation: missing '}' to close '${'", interp_span, diagnostics$DiagnosticContext_ParseError("${", Option_none)));
-      while ((List_len(self.interp_frames) > 0)) {
-        List_pop(self.interp_frames);
-      }
+function Lexer_inc_last_depth(self) {
+  __ring_match7: {
+    const __ring_m7 = List_pop(self.interp_frames);
+    if (__ring_m7._tag === "some") {
+      const f = __ring_m7._0;
+      return List_push(self.interp_frames, new InterpFrame((f.depth + 1), f.start_span));
+      break __ring_match7;
     }
-    return Lexer_make_token(self, TokenKind_TkEof, "", Lexer_current_position(self), Lexer_current_position(self));
-  }
-  if ((List_len(self.interp_frames) > 0)) {
-    if (((Lexer_last_frame_depth(self) === 0) ? (Lexer_peek(self) === "}") : false)) {
-      Lexer_advance(self);
-      return Lexer_lex_string_continuation(self);
+    if (__ring_m7._tag === "none") {
+      break __ring_match7;
     }
+    __match_fail(__ring_m7);
   }
-  const start = Lexer_current_position(self);
-  const ch = Lexer_peek(self);
-  if (((ch === "r") ? ((self.pos + 1) < Str_len(self.source)) : false)) {
-    const next_ch = Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "");
-    if (((next_ch === "#") ? true : (next_ch === "\""))) {
-      return Lexer_lex_raw_string(self, start);
+}
+function Lexer_last_frame_depth(self) {
+  __ring_match8: {
+    const __ring_m8 = List_last(self.interp_frames);
+    if (__ring_m8._tag === "some") {
+      const f = __ring_m8._0;
+      return f.depth;
+      break __ring_match8;
     }
+    if (__ring_m8._tag === "none") {
+      return 0;
+      break __ring_match8;
+    }
+    __match_fail(__ring_m8);
   }
-  if ((ch === "\"")) {
-    return Lexer_lex_string(self, start);
-  }
-  if (is_digit(ch)) {
-    return Lexer_lex_number(self, start);
-  }
-  if (is_ident_start(ch)) {
-    return Lexer_lex_ident(self, start);
-  }
-  return Lexer_lex_punctuation(self, start);
 }
-function Lexer_lex_string(self, start) {
-  Lexer_advance(self);
-  return Lexer_lex_string_body(self, start, true);
+function Lexer_last_frame_span(self) {
+  __ring_match9: {
+    const __ring_m9 = List_last(self.interp_frames);
+    if (__ring_m9._tag === "some") {
+      const f = __ring_m9._0;
+      return f.start_span;
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "none") {
+      return new ast$Span(self.file, Lexer_current_position(self), Lexer_current_position(self));
+      break __ring_match9;
+    }
+    __match_fail(__ring_m9);
+  }
 }
-function Lexer_lex_string_continuation(self) {
-  const start = Lexer_current_position(self);
-  return Lexer_lex_string_body(self, start, false);
+function Lexer_make_token(self, kind, value, start, end) {
+  return new Token(kind, value, new ast$Span(self.file, start, end));
 }
-function Lexer_lex_string_body(self, start, is_new) {
+function Lexer_peek(self) {
+  return Option_unwrap_or(Str_char_at(self.source, self.pos), "");
+}
+function Lexer_lex_ident(self, start) {
   let value = "";
-  while ((self.pos < Str_len(self.source))) {
-    const ch = Lexer_peek(self);
-    if ((ch === "\"")) {
-      Lexer_advance(self);
-      const end = Lexer_current_position(self);
-      if (is_new) {
-        return Lexer_make_token(self, TokenKind_TkStringLit, value, start, end);
-      } else {
-        List_pop(self.interp_frames);
-        return Lexer_make_token(self, TokenKind_TkStringInterpEnd, value, start, end);
-      }
-    }
-    if ((((ch === "$") ? ((self.pos + 1) < Str_len(self.source)) : false) ? (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "{") : false)) {
-      const interp_start = Lexer_current_position(self);
-      Lexer_advance(self);
-      Lexer_advance(self);
-      const end = Lexer_current_position(self);
-      const interp_span = new ast$Span(self.file, interp_start, end);
-      if (is_new) {
-        List_push(self.interp_frames, new InterpFrame(0, interp_span));
-        return Lexer_make_token(self, TokenKind_TkStringInterpStart, value, start, end);
-      } else {
-        Lexer_reset_last_frame(self, interp_span);
-        return Lexer_make_token(self, TokenKind_TkStringInterpMiddle, value, start, end);
-      }
-    }
-    if ((ch === "\\")) {
-      Lexer_advance(self);
-      if ((self.pos >= Str_len(self.source))) {
-        value = `${value}\\`;
-        break;
-      }
-      const esc = Lexer_peek(self);
-      Lexer_advance(self);
-      if ((esc === "n")) {
-        value = `${value}
-`;
-      } else {
-        if ((esc === "t")) {
-          value = `${value}	`;
-        } else {
-          if ((esc === "r")) {
-            value = `${value}\r`;
-          } else {
-            if ((esc === "\\")) {
-              value = `${value}\\`;
-            } else {
-              if ((esc === "\"")) {
-                value = `${value}"`;
-              } else {
-                if ((esc === "$")) {
-                  value = `${value}$`;
-                } else {
-                  value = `${value}${esc}`;
-                }
-              }
-            }
-          }
-        }
-      }
-    } else {
-      if ((ch !== "\r")) {
-        value = `${value}${ch}`;
-      }
-      Lexer_advance(self);
-    }
-  }
-  if ((is_new === false)) {
-    List_pop(self.interp_frames);
+  while (((self.pos < Str_len(self.source)) ? is_ident_continue(Lexer_peek(self)) : false)) {
+    value = `${value}${Lexer_peek(self)}`;
+    Lexer_advance(self);
   }
   const end = Lexer_current_position(self);
-  const span = new ast$Span(self.file, start, end);
-  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
-  return Lexer_make_token(self, TokenKind_TkError, value, start, end);
-}
-function Lexer_lex_raw_string(self, start) {
-  Lexer_advance(self);
-  const has_hash = (Lexer_peek(self) === "#");
-  if (has_hash) {
-    const saved_line = self.line;
-    Lexer_advance(self);
-    if ((Lexer_peek(self) !== "\"")) {
-      self.pos = (self.pos - 1);
-      self.column = (self.column - 1);
-      self.line = saved_line;
-      const end = Lexer_current_position(self);
-      return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
-    }
-    Lexer_advance(self);
-    let value = "";
-    while ((self.pos < Str_len(self.source))) {
-      const ch = Lexer_peek(self);
-      if ((((ch === "\"") ? ((self.pos + 1) < Str_len(self.source)) : false) ? (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "#") : false)) {
-        Lexer_advance(self);
-        Lexer_advance(self);
-        const end = Lexer_current_position(self);
-        return Lexer_make_token(self, TokenKind_TkRawStringLit, value, start, end);
-      }
-      if ((ch !== "\r")) {
-        value = `${value}${ch}`;
-      }
-      Lexer_advance(self);
-    }
-    const span = new ast$Span(self.file, start, Lexer_current_position(self));
-    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
-    const end = Lexer_current_position(self);
-    return Lexer_make_token(self, TokenKind_TkError, value, start, end);
-  } else {
-    if ((Lexer_peek(self) !== "\"")) {
-      const end = Lexer_current_position(self);
-      return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
-    }
-    Lexer_advance(self);
-    let value = "";
-    while ((self.pos < Str_len(self.source))) {
-      const ch = Lexer_peek(self);
-      if ((ch === "\"")) {
-        Lexer_advance(self);
-        const end = Lexer_current_position(self);
-        return Lexer_make_token(self, TokenKind_TkRawStringLit, value, start, end);
-      }
-      if ((ch !== "\r")) {
-        value = `${value}${ch}`;
-      }
-      Lexer_advance(self);
-    }
-    const span = new ast$Span(self.file, start, Lexer_current_position(self));
-    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
-    const end = Lexer_current_position(self);
-    return Lexer_make_token(self, TokenKind_TkError, value, start, end);
-  }
+  const kind = Option_unwrap_or(keyword_lookup(value), TokenKind_TkIdent);
+  return Lexer_make_token(self, kind, value, start, end);
 }
 function Lexer_lex_number(self, start) {
   let value = "";
@@ -570,16 +457,6 @@ function Lexer_lex_number(self, start) {
   } else {
     return Lexer_make_token(self, TokenKind_TkIntLit, value, start, end);
   }
-}
-function Lexer_lex_ident(self, start) {
-  let value = "";
-  while (((self.pos < Str_len(self.source)) ? is_ident_continue(Lexer_peek(self)) : false)) {
-    value = `${value}${Lexer_peek(self)}`;
-    Lexer_advance(self);
-  }
-  const end = Lexer_current_position(self);
-  const kind = Option_unwrap_or(keyword_lookup(value), TokenKind_TkIdent);
-  return Lexer_make_token(self, kind, value, start, end);
 }
 function Lexer_lex_punctuation(self, start) {
   const ch = Lexer_peek(self);
@@ -714,6 +591,152 @@ function Lexer_lex_punctuation(self, start) {
   diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0101, diagnostics$Severity_SevError, `Unexpected character '${ch}'`, tok.span, diagnostics$DiagnosticContext_ParseError(ch, Option_none)));
   return tok;
 }
+function Lexer_lex_raw_string(self, start) {
+  Lexer_advance(self);
+  const has_hash = (Lexer_peek(self) === "#");
+  if (has_hash) {
+    const saved_line = self.line;
+    Lexer_advance(self);
+    if ((Lexer_peek(self) !== "\"")) {
+      self.pos = (self.pos - 1);
+      self.column = (self.column - 1);
+      self.line = saved_line;
+      const end = Lexer_current_position(self);
+      return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
+    }
+    Lexer_advance(self);
+    let value = "";
+    while ((self.pos < Str_len(self.source))) {
+      const ch = Lexer_peek(self);
+      if ((((ch === "\"") ? ((self.pos + 1) < Str_len(self.source)) : false) ? (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "#") : false)) {
+        Lexer_advance(self);
+        Lexer_advance(self);
+        const end = Lexer_current_position(self);
+        return Lexer_make_token(self, TokenKind_TkRawStringLit, value, start, end);
+      }
+      if ((ch !== "\r")) {
+        value = `${value}${ch}`;
+      }
+      Lexer_advance(self);
+    }
+    const span = new ast$Span(self.file, start, Lexer_current_position(self));
+    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
+    const end = Lexer_current_position(self);
+    return Lexer_make_token(self, TokenKind_TkError, value, start, end);
+  } else {
+    if ((Lexer_peek(self) !== "\"")) {
+      const end = Lexer_current_position(self);
+      return Lexer_make_token(self, TokenKind_TkIdent, "r", start, end);
+    }
+    Lexer_advance(self);
+    let value = "";
+    while ((self.pos < Str_len(self.source))) {
+      const ch = Lexer_peek(self);
+      if ((ch === "\"")) {
+        Lexer_advance(self);
+        const end = Lexer_current_position(self);
+        return Lexer_make_token(self, TokenKind_TkRawStringLit, value, start, end);
+      }
+      if ((ch !== "\r")) {
+        value = `${value}${ch}`;
+      }
+      Lexer_advance(self);
+    }
+    const span = new ast$Span(self.file, start, Lexer_current_position(self));
+    diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated raw string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
+    const end = Lexer_current_position(self);
+    return Lexer_make_token(self, TokenKind_TkError, value, start, end);
+  }
+}
+function Lexer_reset_last_frame(self, span) {
+  List_pop(self.interp_frames);
+  return List_push(self.interp_frames, new InterpFrame(0, span));
+}
+function Lexer_lex_string_body(self, start, is_new) {
+  let value = "";
+  while ((self.pos < Str_len(self.source))) {
+    const ch = Lexer_peek(self);
+    if ((ch === "\"")) {
+      Lexer_advance(self);
+      const end = Lexer_current_position(self);
+      if (is_new) {
+        return Lexer_make_token(self, TokenKind_TkStringLit, value, start, end);
+      } else {
+        List_pop(self.interp_frames);
+        return Lexer_make_token(self, TokenKind_TkStringInterpEnd, value, start, end);
+      }
+    }
+    if ((((ch === "$") ? ((self.pos + 1) < Str_len(self.source)) : false) ? (Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "") === "{") : false)) {
+      const interp_start = Lexer_current_position(self);
+      Lexer_advance(self);
+      Lexer_advance(self);
+      const end = Lexer_current_position(self);
+      const interp_span = new ast$Span(self.file, interp_start, end);
+      if (is_new) {
+        List_push(self.interp_frames, new InterpFrame(0, interp_span));
+        return Lexer_make_token(self, TokenKind_TkStringInterpStart, value, start, end);
+      } else {
+        Lexer_reset_last_frame(self, interp_span);
+        return Lexer_make_token(self, TokenKind_TkStringInterpMiddle, value, start, end);
+      }
+    }
+    if ((ch === "\\")) {
+      Lexer_advance(self);
+      if ((self.pos >= Str_len(self.source))) {
+        value = `${value}\\`;
+        break;
+      }
+      const esc = Lexer_peek(self);
+      Lexer_advance(self);
+      if ((esc === "n")) {
+        value = `${value}
+`;
+      } else {
+        if ((esc === "t")) {
+          value = `${value}	`;
+        } else {
+          if ((esc === "r")) {
+            value = `${value}\r`;
+          } else {
+            if ((esc === "\\")) {
+              value = `${value}\\`;
+            } else {
+              if ((esc === "\"")) {
+                value = `${value}"`;
+              } else {
+                if ((esc === "$")) {
+                  value = `${value}$`;
+                } else {
+                  value = `${value}${esc}`;
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      if ((ch !== "\r")) {
+        value = `${value}${ch}`;
+      }
+      Lexer_advance(self);
+    }
+  }
+  if ((is_new === false)) {
+    List_pop(self.interp_frames);
+  }
+  const end = Lexer_current_position(self);
+  const span = new ast$Span(self.file, start, end);
+  diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated string literal", span, diagnostics$DiagnosticContext_ParseError(value, Option_none)));
+  return Lexer_make_token(self, TokenKind_TkError, value, start, end);
+}
+function Lexer_lex_string(self, start) {
+  Lexer_advance(self);
+  return Lexer_lex_string_body(self, start, true);
+}
+function Lexer_lex_string_continuation(self) {
+  const start = Lexer_current_position(self);
+  return Lexer_lex_string_body(self, start, false);
+}
 function Lexer_skip_whitespace_and_comments(self) {
   while ((self.pos < Str_len(self.source))) {
     const ch = Lexer_peek(self);
@@ -734,87 +757,64 @@ function Lexer_skip_whitespace_and_comments(self) {
     }
   }
 }
-function Lexer_peek(self) {
-  return Option_unwrap_or(Str_char_at(self.source, self.pos), "");
-}
-function Lexer_advance(self) {
-  if ((self.pos < Str_len(self.source))) {
-    if ((Option_unwrap_or(Str_char_at(self.source, self.pos), "") === "\n")) {
-      self.line = (self.line + 1);
-      self.column = 0;
-    } else {
-      self.column = (self.column + 1);
+function Lexer_next_token(self) {
+  Lexer_skip_whitespace_and_comments(self);
+  if ((self.pos >= Str_len(self.source))) {
+    if ((List_len(self.interp_frames) > 0)) {
+      const interp_span = Lexer_last_frame_span(self);
+      diagnostics$CollectingSink_report(self.sink, diagnostics$make_diag(codes$E0102, diagnostics$Severity_SevError, "Unterminated string interpolation: missing '}' to close '${'", interp_span, diagnostics$DiagnosticContext_ParseError("${", Option_none)));
+      while ((List_len(self.interp_frames) > 0)) {
+        List_pop(self.interp_frames);
+      }
     }
-    self.pos = (self.pos + 1);
+    return Lexer_make_token(self, TokenKind_TkEof, "", Lexer_current_position(self), Lexer_current_position(self));
   }
-}
-function Lexer_current_position(self) {
-  return new ast$Position(self.line, self.column, self.pos);
-}
-function Lexer_make_token(self, kind, value, start, end) {
-  return new Token(kind, value, new ast$Span(self.file, start, end));
-}
-function Lexer_last_frame_depth(self) {
-  __ring_match7: {
-    const __ring_m7 = List_last(self.interp_frames);
-    if (__ring_m7._tag === "some") {
-      const f = __ring_m7._0;
-      return f.depth;
-      break __ring_match7;
+  if ((List_len(self.interp_frames) > 0)) {
+    if (((Lexer_last_frame_depth(self) === 0) ? (Lexer_peek(self) === "}") : false)) {
+      Lexer_advance(self);
+      return Lexer_lex_string_continuation(self);
     }
-    if (__ring_m7._tag === "none") {
-      return 0;
-      break __ring_match7;
-    }
-    __match_fail(__ring_m7);
   }
-}
-function Lexer_last_frame_span(self) {
-  __ring_match8: {
-    const __ring_m8 = List_last(self.interp_frames);
-    if (__ring_m8._tag === "some") {
-      const f = __ring_m8._0;
-      return f.start_span;
-      break __ring_match8;
+  const start = Lexer_current_position(self);
+  const ch = Lexer_peek(self);
+  if (((ch === "r") ? ((self.pos + 1) < Str_len(self.source)) : false)) {
+    const next_ch = Option_unwrap_or(Str_char_at(self.source, (self.pos + 1)), "");
+    if (((next_ch === "#") ? true : (next_ch === "\""))) {
+      return Lexer_lex_raw_string(self, start);
     }
-    if (__ring_m8._tag === "none") {
-      return new ast$Span(self.file, Lexer_current_position(self), Lexer_current_position(self));
-      break __ring_match8;
-    }
-    __match_fail(__ring_m8);
   }
-}
-function Lexer_inc_last_depth(self) {
-  __ring_match9: {
-    const __ring_m9 = List_pop(self.interp_frames);
-    if (__ring_m9._tag === "some") {
-      const f = __ring_m9._0;
-      return List_push(self.interp_frames, new InterpFrame((f.depth + 1), f.start_span));
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "none") {
-      break __ring_match9;
-    }
-    __match_fail(__ring_m9);
+  if ((ch === "\"")) {
+    return Lexer_lex_string(self, start);
   }
+  if (is_digit(ch)) {
+    return Lexer_lex_number(self, start);
+  }
+  if (is_ident_start(ch)) {
+    return Lexer_lex_ident(self, start);
+  }
+  return Lexer_lex_punctuation(self, start);
 }
-function Lexer_dec_last_depth(self) {
-  __ring_match10: {
-    const __ring_m10 = List_pop(self.interp_frames);
-    if (__ring_m10._tag === "some") {
-      const f = __ring_m10._0;
-      return List_push(self.interp_frames, new InterpFrame((f.depth - 1), f.start_span));
+function Lexer_tokenize(self) {
+  let tokens = [];
+  while (true) {
+    const tok = Lexer_next_token(self);
+    let __ring_blk0;
+    __ring_match10: {
+      const __ring_m10 = tok.kind;
+      if (__ring_m10._tag === "TkEof") {
+        __ring_blk0 = true;
+        break __ring_match10;
+      }
+      __ring_blk0 = false;
       break __ring_match10;
     }
-    if (__ring_m10._tag === "none") {
-      break __ring_match10;
+    const is_eof = __ring_blk0;
+    List_push(tokens, tok);
+    if (is_eof) {
+      break;
     }
-    __match_fail(__ring_m10);
   }
-}
-function Lexer_reset_last_frame(self, span) {
-  List_pop(self.interp_frames);
-  return List_push(self.interp_frames, new InterpFrame(0, span));
+  return tokens;
 }
 
 function code_in_range(c, low, high) {

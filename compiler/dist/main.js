@@ -3,6 +3,9 @@ import { cli_main as cli$cli_main } from "./cli.js";
 
 
 
+function List_is_empty(self) {
+  return (List_len(self) === 0);
+}
 function List_first(self) {
   if (List_is_empty(self)) {
     return Option_none;
@@ -14,9 +17,6 @@ function List_last(self) {
     return Option_none;
   }
   return List_get(self, (List_len(self) - 1));
-}
-function List_is_empty(self) {
-  return (List_len(self) === 0);
 }
 
 class ListIterator {
@@ -158,12 +158,12 @@ function Result_Err(_0) {
   return { _tag: "Err", _0 };
 }
 
-function Result_map(self, f) {
+function Result_and_then(self, f) {
   __ring_match1: {
     const __ring_m1 = self;
     if (__ring_m1._tag === "Ok") {
       const v = __ring_m1._0;
-      return Result_Ok(f(v));
+      return f(v);
       break __ring_match1;
     }
     if (__ring_m1._tag === "Err") {
@@ -174,60 +174,60 @@ function Result_map(self, f) {
     __match_fail(__ring_m1);
   }
 }
-function Result_and_then(self, f) {
+function Result_is_err(self) {
   __ring_match2: {
     const __ring_m2 = self;
     if (__ring_m2._tag === "Ok") {
-      const v = __ring_m2._0;
-      return f(v);
+      return false;
       break __ring_match2;
     }
     if (__ring_m2._tag === "Err") {
-      const e = __ring_m2._0;
-      return Result_Err(e);
+      return true;
       break __ring_match2;
     }
     __match_fail(__ring_m2);
   }
 }
-function Result_unwrap_or(self, _default) {
+function Result_is_ok(self) {
   __ring_match3: {
     const __ring_m3 = self;
     if (__ring_m3._tag === "Ok") {
-      const v = __ring_m3._0;
-      return v;
+      return true;
       break __ring_match3;
     }
     if (__ring_m3._tag === "Err") {
-      return _default;
+      return false;
       break __ring_match3;
     }
     __match_fail(__ring_m3);
   }
 }
-function Result_is_ok(self) {
+function Result_map(self, f) {
   __ring_match4: {
     const __ring_m4 = self;
     if (__ring_m4._tag === "Ok") {
-      return true;
+      const v = __ring_m4._0;
+      return Result_Ok(f(v));
       break __ring_match4;
     }
     if (__ring_m4._tag === "Err") {
-      return false;
+      const e = __ring_m4._0;
+      return Result_Err(e);
       break __ring_match4;
     }
     __match_fail(__ring_m4);
   }
 }
-function Result_is_err(self) {
+function Result_unwrap_or(self, _default) {
   __ring_match5: {
     const __ring_m5 = self;
     if (__ring_m5._tag === "Ok") {
-      return false;
+      const v = __ring_m5._0;
+      return v;
       break __ring_match5;
     }
     if (__ring_m5._tag === "Err") {
-      return true;
+      return _default;
       break __ring_match5;
     }
     __match_fail(__ring_m5);
@@ -238,8 +238,8 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
-function main(__ring_ev_io) {
-  return cli$cli_main(__ring_ev_io);
+function main(__ring_ev_fail, __ring_ev_io) {
+  return cli$cli_main(__ring_ev_fail, __ring_ev_io);
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
@@ -303,4 +303,5 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 }
 const __Result_Debug = { debug: __Result_Debug_debug };
 
-main(__ring_ev_io);
+const __ring_ev_fail = { raise: (error) => { throw error; } };
+main(__ring_ev_fail, __ring_ev_io);

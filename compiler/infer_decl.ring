@@ -18,7 +18,7 @@ use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block, zonk_expr}
 use derive::{run_derive_pass}
-use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names}
+use scc::{build_call_graph, tarjan_scc, collect_registered_fn_names, collect_self_method_callees}
 
 // ============================================================
 // Pass 2: Check declarations (from infer.ts)
@@ -609,8 +609,68 @@ fn check_impl_decl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePa
         }
     }
 
-    let mut hmethods: List<HDecl> = []
+    // B-138: Reorder impl methods by SCC topological order so that callees
+    // are checked before callers, enabling correct effect propagation.
+    // Step 1: Collect Decl::Fn method names
+    let mut impl_fn_names: Set<Str> = set_new()
+    let mut impl_fn_map: Map<Str, Decl> = map_new()
     for method in methods {
+        match method {
+            Decl::Fn { name, .. } => {
+                impl_fn_names.insert(name)
+                impl_fn_map.insert(name, method)
+            },
+            _ => {}
+        }
+    }
+
+    // Step 2: Build impl-internal call graph (self.method() edges)
+    let mut impl_call_graph: Map<Str, List<Str>> = map_new()
+    for method in methods {
+        match method {
+            Decl::Fn { name, body, .. } => {
+                let mut callees: Set<Str> = set_new()
+                collect_self_method_callees(body, impl_fn_names, callees)
+                let mut sorted_callees: List<Str> = []
+                for c in callees {
+                    if c != name { sorted_callees.push(c) }
+                }
+                sorted_callees.sort()
+                impl_call_graph.insert(name, sorted_callees)
+            },
+            _ => {}
+        }
+    }
+
+    // Step 3: Run Tarjan SCC to get reverse topo order (callees first)
+    let sccs = tarjan_scc(impl_call_graph)
+
+    // Step 4: Build reordered method list — SCC-ordered Fn methods, then non-Fn decls
+    let mut ordered_methods: List<Decl> = []
+    let mut ordered_fn_names: Set<Str> = set_new()
+    for scc in sccs {
+        for name in scc {
+            if !ordered_fn_names.contains(name) {
+                match impl_fn_map.get(name) {
+                    some(decl) => {
+                        ordered_methods.push(decl)
+                        ordered_fn_names.insert(name)
+                    },
+                    none => {}
+                }
+            }
+        }
+    }
+    // Append non-Fn decls (ExternFn, AssocType, Delegate) in original order
+    for method in methods {
+        match method {
+            Decl::Fn { .. } => {},  // Already in ordered_methods
+            _ => ordered_methods.push(method)
+        }
+    }
+
+    let mut hmethods: List<HDecl> = []
+    for method in ordered_methods {
         match method {
             Decl::ExternFn { name, type_params: mtps, params, return_type, declared_effects, is_pub, span: mspan } =>
                 hmethods.push(check_extern_fn_decl(ctx, name, mtps, params, declared_effects, is_pub, mspan)),

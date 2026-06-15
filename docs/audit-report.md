@@ -105,9 +105,7 @@ D9 probe-E 撞出：`let c = Color::Blue{shade}` 在循环内 matched-then-disca
 
 ## 诊断 / CLI
 
-### #141 parser.ring:301 catch 触发 W0001「handler 永不执行」[low] [judgment] [open]
-
-`some(self.parse_use_decl(false)) catch { _ => none }` 被 checker 判定无 fail effect。B-112 把 warnings 接到出口后，每次 self-compile stderr 打 12 条（parser 5 + infer 5 + infer_register 1 + infer_decl 1）。**已确认（2026-06-15）：`parse_use_decl` 确实可 fail**（`expect` → `error` → `__ring_raise_fail`），W0001 是假阳性。根因 = impl 方法 effect 传播限制——同 impl 块内方法全部检查完才 `update_fn_effects`，中间方法的 fail effect 对后续方法不可见。给 `extern fn __ring_raise_fail` 加 `with {fail}` 只解决直接调用者，间接链仍断裂。**修复需 checker 架构改造**（impl 方法逐个检查 + 逐个更新 effect，或多轮固定点），非 S 级。发现者：B-112。
+<!-- #141 closed: B-138 修复 impl SCC 排序后 parser W0001 假阳性从 5 降到 1（仅剩互递归 SCC 环），self-compile W0001 总数 12→8。2026-06-15 -->
 
 <!-- #142 --error-format=llm 多文件已修复并删除（2026-06-15）：error_format 从 cli.ring plumb 到 resolver/compiler_mod，所有 format_human 调用点加 llm 分支。回归 2 个 E2E 测试。 -->
 
