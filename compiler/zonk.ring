@@ -325,6 +325,11 @@ pub fn zonk_expr(ctx: ZonkCtx, expr: HExpr) -> HExpr {
         // reaches zonk in practice; the arm exists only for match exhaustiveness.
         HExpr::Clone { inner, .. } =>
             HExpr::Clone { inner: zonk_expr(ctx, inner), ty: z_ty, effects: z_eff, span: z_span },
+        // B-113: return in expression position (match arm)
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(v) => HExpr::ReturnExpr { value: some(zonk_expr(ctx, v)), ty: z_ty, effects: z_eff, span: z_span },
+            none => HExpr::ReturnExpr { value: none, ty: z_ty, effects: z_eff, span: z_span },
+        },
     }
 }
 

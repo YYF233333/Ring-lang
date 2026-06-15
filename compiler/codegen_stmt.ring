@@ -43,6 +43,14 @@ pub fn emit_in_stmt_context(mut ctx: CodegenCtx, expr: HExpr, mode: Str) {
             emit_block_in_stmt_context_inner(ctx, stmts, tail, mode),
         HExpr::MatchExpr { scrutinee, arms, .. } =>
             emit_match_stmt(ctx, scrutinee, arms, mode),
+        // B-113: ReturnExpr already emits its own `return` — no mode wrapping needed.
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(v) => {
+                let v_js = gen_expr(ctx, v)
+                emit(ctx, "return ${v_js};")
+            },
+            none => emit(ctx, "return;"),
+        },
         _ => {
             let e = gen_expr(ctx, expr)
             if mode == "return" {

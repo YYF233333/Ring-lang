@@ -922,7 +922,40 @@ pub fn infer_expr(mut ctx: InferCtx, expr: Expr, subst: UnionFind) -> InferResul
             }
         },
         Expr::IndexExpr { receiver, index, span } =>
-            infer_index_expr(ctx, receiver, index, span, subst)
+            infer_index_expr(ctx, receiver, index, span, subst),
+        Expr::ReturnExpr { value, span } => match value {
+            some(v) => {
+                let r = infer_expr(ctx, v, subst)
+                let mut s = r.subst
+                match ctx.current_fn_return_type {
+                    some(ret_type) => {
+                        let return_notes: List<DiagnosticNote> = [
+                            DiagnosticNote { message: "function return type is '${type_to_string(apply_subst(s, ret_type))}'", span: none },
+                            DiagnosticNote { message: "return value has type '${type_to_string(apply_subst(s, hexpr_type(r.hexpr)))}'", span: some(hexpr_span(r.hexpr)) }
+                        ]
+                        s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(r.hexpr), ret_type, s, span, return_notes)
+                    },
+                    none => {}
+                }
+                InferResult {
+                    hexpr: HExpr::ReturnExpr { value: some(r.hexpr), ty: NEVER, effects: r.effects, span: span },
+                    subst: s, effects: r.effects
+                }
+            },
+            none => {
+                let mut s = subst
+                match ctx.current_fn_return_type {
+                    some(ret_type) => {
+                        s = unify_at(ctx.sink, ctx.env, UNIT, ret_type, s, span)
+                    },
+                    none => {}
+                }
+                InferResult {
+                    hexpr: HExpr::ReturnExpr { value: none, ty: NEVER, effects: EMPTY_ROW, span: span },
+                    subst: s, effects: EMPTY_ROW
+                }
+            }
+        }
     }
 }
 

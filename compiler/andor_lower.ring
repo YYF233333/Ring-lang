@@ -235,6 +235,11 @@ fn al_expr(e: HExpr) -> HExpr {
         // Clone is inserted by perceus (runs after this pass) — never present.
         HExpr::Clone { inner, ty, effects, span } =>
             HExpr::Clone { inner: al_expr(inner), ty: ty, effects: effects, span: span },
+        // B-113: return in expression position (match arm)
+        HExpr::ReturnExpr { value, ty, effects, span } => match value {
+            some(v) => HExpr::ReturnExpr { value: some(al_expr(v)), ty: ty, effects: effects, span: span },
+            none => e,
+        },
     }
 }
 

@@ -97,7 +97,6 @@ Ring-lang/
 ### 语法
 
 - 字符串无 `+` 拼接：用插值 `"${a}${b}"` 或 `join()`
-- `return` 不能出现在 match arm 表达式位置
 - `list[i]` / `map[key]` / `str[i]` 越界 panic，安全访问用 `.get()`
 - Struct literal 不能直接出现在 if/while/for/match 条件位置（`{` 歧义），需加括号或用变量
 

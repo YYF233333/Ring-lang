@@ -150,7 +150,8 @@ pub enum HExpr {
     // container read result) so the escape gets its own owned reference rather
     // than aliasing the still-live source.  codegen lowers `Clone{inner}` to
     // eval inner -> ring_dup(result) -> result (ty/effects/span taken from inner).
-    Clone { inner: HExpr, ty: Type, effects: EffectRow, span: Span }
+    Clone { inner: HExpr, ty: Type, effects: EffectRow, span: Span },
+    ReturnExpr { value: HExpr?, ty: Type, effects: EffectRow, span: Span }
 }
 
 pub struct HForInDestructure {
@@ -378,7 +379,8 @@ pub fn hexpr_type(e: HExpr) -> Type {
         HExpr::TupleLit { ty, .. } => ty,
         HExpr::IndexExpr { ty, .. } => ty,
         HExpr::DictConstruct { ty, .. } => ty,
-        HExpr::Clone { ty, .. } => ty
+        HExpr::Clone { ty, .. } => ty,
+        HExpr::ReturnExpr { ty, .. } => ty
     }
 }
 
@@ -408,7 +410,8 @@ pub fn hexpr_effects(e: HExpr) -> EffectRow {
         HExpr::TupleLit { effects, .. } => effects,
         HExpr::IndexExpr { effects, .. } => effects,
         HExpr::DictConstruct { effects, .. } => effects,
-        HExpr::Clone { effects, .. } => effects
+        HExpr::Clone { effects, .. } => effects,
+        HExpr::ReturnExpr { effects, .. } => effects
     }
 }
 
@@ -438,7 +441,8 @@ pub fn hexpr_span(e: HExpr) -> Span {
         HExpr::TupleLit { span, .. } => span,
         HExpr::IndexExpr { span, .. } => span,
         HExpr::DictConstruct { span, .. } => span,
-        HExpr::Clone { span, .. } => span
+        HExpr::Clone { span, .. } => span,
+        HExpr::ReturnExpr { span, .. } => span
     }
 }
 

@@ -990,6 +990,16 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
 
         // Clone is inserted by perceus (after ANF); never present in input.
         HExpr::Clone { .. } => expr,
+
+        // B-113: return in expression position (match arm).
+        // Normalise the return value as a tail value (same as HStmt::Return in anf_stmt).
+        HExpr::ReturnExpr { value, ty, effects, span } => match value {
+            some(v) => {
+                let new_v = anf_tail_value(v, hoists, externs, counter)
+                HExpr::ReturnExpr { value: some(new_v), ty: ty, effects: effects, span: span }
+            },
+            none => expr,
+        },
     }
 }
 
@@ -2351,6 +2361,37 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
         // Clone should not appear in the input HIR (this pass inserts it); pass
         // through idempotently if seen.
         HExpr::Clone { .. } => expr,
+
+        // B-113: return in expression position (match arm).
+        // Same drop semantics as HStmt::Return in rc_stmt: escape the return value,
+        // drop all owned locals, emit ReturnExpr.  The result is wrapped in a Block
+        // that hoists the value + drops, then has the ReturnExpr as the tail
+        // (unreachable for the surrounding match, but structurally sound).
+        HExpr::ReturnExpr { value, ty, effects, span } => match value {
+            some(v) => {
+                let new_v = rc_escape(v, owned, boxed, externs, gensym, loop_base)
+                let mut out: List<HStmt> = []
+                let tmp = fresh_scope_tmp(gensym)
+                let tt = hexpr_type(v)
+                let te = hexpr_effects(v)
+                let ts = hexpr_span(v)
+                out.push(HStmt::Let { name: tmp, name_span: synthetic_span(),
+                    def_id: none, ty: tt, init: new_v, span: synthetic_span() })
+                for d in drops_for(owned) { out.push(d) }
+                let tmp_id = HExpr::Ident { name: tmp, resolved_name: none, def_id: none,
+                    dict_closure_dicts: none, ty: tt, effects: te, span: ts }
+                let ret_expr = HExpr::ReturnExpr { value: some(tmp_id), ty: ty, effects: effects, span: span }
+                HExpr::Block { stmts: out, tail: some(ret_expr),
+                    ty: ty, effects: effects, span: span }
+            },
+            none => {
+                let mut out: List<HStmt> = []
+                for d in drops_for(owned) { out.push(d) }
+                let ret_expr = HExpr::ReturnExpr { value: none, ty: ty, effects: effects, span: span }
+                HExpr::Block { stmts: out, tail: some(ret_expr),
+                    ty: ty, effects: effects, span: span }
+            }
+        },
     }
 }
 
@@ -2481,6 +2522,8 @@ pub fn expr_diverges(expr: HExpr) -> Bool {
             }
             all
         },
+        // B-113: return in expression position always diverges.
+        HExpr::ReturnExpr { .. } => true,
         _ => false,
     }
 }
