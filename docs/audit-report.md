@@ -22,12 +22,6 @@
 
 **决策（2026-05-23）**：长期容忍。当前方案正确且无性能问题，改动大（L-XL）收益主要在未来后端。等 LLVM 后端需要时与 #16 一并重构。
 
-### #149 未标注 fn 的返回类型被过度泛化为自由 TypeVar（健全性洞）[critical] [judgment] [done] [fixed: B-122, 2026-06-14]
-
-> **已修复**：B-122 落地——checker Pass 2 改为 SCC 拓扑序驱动 + `rebind_fn_type` 将推断后的 ret 映射回注册层。负面测试 `scc_ret_soundness.ring`（E0301）+ 正面测试 `scc_mutual_recursion.ring` 已覆盖。Perceus `is_unresolved_var_type` 守卫保留作 invariant 防线。
-
-
-
 
 
 

@@ -612,8 +612,23 @@ connect("localhost", 3000)     // timeout=30
 
 ## 已知 Bug / 技术债
 
+### B-126 codegen first-match 隐式消歧改显式报错 [bugfix] [P3] [M] [judgment] [queued]
 
+> 2026-06-15 立项（Discussion，B-089 G-b worker 观察）。codegen 中 3 个 Map 迭代站点使用 `return some(first_match)` 模式——排序后确定化但根因（多模块同名函数/struct 歧义）仍在：排序只把"随机选一个"变成"选字典序最小的一个"，仍是隐式消歧。当前编译器自举无实存歧义（测试全绿），但用户代码出现真实同名冲突时会静默选错。
 
+**涉及站点**：
+1. `codegen_stmt.ring:23` — struct suffix 查找（多 module 同名 struct 时 first match）
+2. `codegen_llvm_expr.ring:1777` — imports_map 前缀枚举（多 module 同名 fn 时 first match）
+3. `codegen_llvm_expr.ring:1803` — functions 后缀回退（同上）
+
+**涉及修改**：
+1. 检测到多模块同名命中时报编译错误（或 warning），要求用户用 qualifier 消歧
+2. 或在 resolver/checker 层拦截，不让歧义流入 codegen
+
+**验收标准**：
+- 多模块同名函数/struct 歧义 → 编译错误（负面测试）
+- 单模块无歧义场景行为不变
+- 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。
