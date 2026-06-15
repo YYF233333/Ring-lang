@@ -282,21 +282,6 @@ static uint64_t g_frees  = 0;
 static int64_t  g_live_tid[4096] = {0};
 static uint64_t g_next_report = (1ULL << 25); // first report at 32M allocs
 // ─────────────────────────────────────────────────────────────────────────────
-// B-104 D5 — direct attribution counters for runtime-internal discarded
-// temporaries (audit #152).  Each increment = one allocation created by / handed
-// to a runtime HOF loop that nobody drops, so the counter value IS the exact
-// cumulative count for that site class (no sampling).  Splits the BOOL residual
-// (HOF predicate share vs And/Or-phi-and-other remainder, read against
-// g_live_tid[2]) and the STR residual (for_each synthesized keys vs other string
-// ops).  Caveat: counts boxes DISCARDED by the HOF; if a predicate returned a
-// dup'd shared box rather than a fresh one, the discard leaks a reference, not
-// an allocation — cross-check against [box-profile] BOOL totals.
-// ─────────────────────────────────────────────────────────────────────────────
-static uint64_t g_hof_pred_bool   = 0; // filter/any/all/find/find_index predicate result Bool box
-static uint64_t g_hof_fold_acc    = 0; // fold intermediate accumulator overwritten (i >= 1)
-static uint64_t g_foreach_key_str = 0; // map/set for_each synthesized STR key/elem
-static uint64_t g_foreach_key_int = 0; // map_int/set_int for_each synthesized INT key box
-#define RING_D5_COUNT(counter) ((counter)++)
 static void ring_alloc_stats_report() {
     uint64_t live = g_allocs - g_frees;
     double pct = g_allocs ? (100.0 * (double)live / (double)g_allocs) : 0.0;
@@ -318,9 +303,6 @@ static void ring_alloc_stats_report() {
         if (top[s] >= 0) fprintf(stderr, " tid%d=%lld", top[s], (long long)g_live_tid[top[s]]);
     }
     fprintf(stderr, "\n");
-    fprintf(stderr, "[hof-stats] pred_bool=%llu fold_acc=%llu foreach_key_str=%llu foreach_key_int=%llu\n",
-            (unsigned long long)g_hof_pred_bool, (unsigned long long)g_hof_fold_acc,
-            (unsigned long long)g_foreach_key_str, (unsigned long long)g_foreach_key_int);
     fflush(stderr);
 #ifdef RING_BOX_PROFILE
     ring_box_profile_report();
@@ -1140,8 +1122,9 @@ extern "C" int64_t ring_list_any(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
-        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
-        if (ring_unbox_int(r) != 0) return 1;
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);  // #152 ①: drop predicate Bool box
+        if (match) return 1;
     }
     return 0;
 }
@@ -1152,8 +1135,9 @@ extern "C" int64_t ring_list_all(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
-        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
-        if (ring_unbox_int(r) == 0) return 0;
+        int match = ring_unbox_int(r) == 0;
+        ring_drop(r);  // #152 ①: drop predicate Bool box
+        if (match) return 0;
     }
     return 1;
 }
@@ -1164,8 +1148,9 @@ extern "C" void* ring_list_find(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
-        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
-        if (ring_unbox_int(r) != 0) {
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);  // #152 ①: drop predicate Bool box
+        if (match) {
             // B-103: .find builds a FRESH owned Option that co-owns the matched
             // element (same owned-container-constructor rule as ring_list_get_opt /
             // first / last — dup the element so drop_option is balanced).  Was a
@@ -1191,8 +1176,9 @@ extern "C" void* ring_list_find_index(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
-        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
-        if (ring_unbox_int(r) != 0) {
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);  // #152 ①: drop predicate Bool box
+        if (match) {
             return ring_enum_some(ring_box_int((int64_t)i));
         }
     }
@@ -1219,9 +1205,9 @@ extern "C" void* ring_list_fold(void* list, void* init, void* closure) {
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     void* acc = init;
     for (size_t i = 0; i < vec->size(); i++) {
-        if (i > 0) RING_D5_COUNT(g_hof_fold_acc); // audit #152 ②: the i>=1 overwrite
-                                                  // discards the previous owned acc
-        acc = fn(cls->env_ptr, acc, (*vec)[i]);
+        void* old_acc = acc;
+        acc = fn(cls->env_ptr, old_acc, (*vec)[i]);
+        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
     }
     return acc;
 }
@@ -1252,8 +1238,9 @@ extern "C" void* ring_list_filter(void* list, void* closure) {
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (size_t i = 0; i < vec->size(); i++) {
         void* r = fn(cls->env_ptr, (*vec)[i]);
-        RING_D5_COUNT(g_hof_pred_bool); // audit #152 ①: r is never dropped
-        if (ring_unbox_int(r) != 0) {
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);  // #152 ①: drop predicate Bool box
+        if (match) {
             // B-103: dup — the fresh filtered list co-owns the source's element
             // (owned-container-constructor rule; see ring_list_concat).
             ring_dup((*vec)[i]);
@@ -1477,8 +1464,8 @@ extern "C" void* ring_map_for_each(void* map, void* closure) {
     for (auto& kv : *m) {
         void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
         new (sd) std::string(kv.first);
-        RING_D5_COUNT(g_foreach_key_str); // audit #152 ③: synthesized key never freed
         fn(cls->env_ptr, sd, kv.second);
+        ring_drop(sd);  // #152 ③: drop synthesized key after closure returns
     }
     return nullptr;
 }
@@ -1604,8 +1591,9 @@ extern "C" void* ring_map_int_for_each(void* map, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
     for (auto& kv : *m) {
-        RING_D5_COUNT(g_foreach_key_int); // audit #152 ③ int-keyed variant: synthesized box never freed
-        fn(cls->env_ptr, ring_box_int(kv.first), kv.second);
+        void* kb = ring_box_int(kv.first);
+        fn(cls->env_ptr, kb, kv.second);
+        ring_drop(kb);  // #152 ③: drop synthesized INT key box
     }
     return nullptr;
 }
@@ -1716,8 +1704,8 @@ extern "C" void* ring_set_for_each(void* set, void* closure) {
     for (auto& elem : *s) {
         void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
         new (sd) std::string(elem);
-        RING_D5_COUNT(g_foreach_key_str); // audit #152 ③: synthesized elem never freed
         fn(cls->env_ptr, sd);
+        ring_drop(sd);  // #152 ③: drop synthesized STR elem after closure returns
     }
     return nullptr;
 }
@@ -1780,8 +1768,9 @@ extern "C" void* ring_set_int_for_each(void* set, void* closure) {
     RingClosure* cls = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
     for (auto& elem : *s) {
-        RING_D5_COUNT(g_foreach_key_int); // audit #152 ③ int-keyed variant: synthesized box never freed
-        fn(cls->env_ptr, ring_box_int(elem));
+        void* eb = ring_box_int(elem);
+        fn(cls->env_ptr, eb);
+        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
     }
     return nullptr;
 }
