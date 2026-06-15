@@ -956,22 +956,6 @@ extern "C" void* ring_list_pop(void* list) {
     return data;
 }
 
-extern "C" int64_t ring_list_contains(void* list, void* val) {
-    auto* vec = (std::vector<void*>*)list;
-    for (size_t i = 0; i < vec->size(); i++) {
-        if ((*vec)[i] == val) return 1;  // pointer comparison (bootstrap)
-    }
-    return 0;
-}
-
-extern "C" int64_t ring_list_index_of(void* list, void* val) {
-    auto* vec = (std::vector<void*>*)list;
-    for (size_t i = 0; i < vec->size(); i++) {
-        if ((*vec)[i] == val) return (int64_t)i;  // pointer comparison
-    }
-    return -1;
-}
-
 extern "C" void* ring_list_get_opt(void* list, int64_t idx) {
     auto* vec = (std::vector<void*>*)list;
     if (idx < 0 || idx >= (int64_t)vec->size()) {
@@ -1104,16 +1088,6 @@ extern "C" void* ring_Option_unwrap_or_else(void* opt, void* closure) {
     typedef void* (*ring_fn_0)(void* env);
     ring_fn_0 fn = (ring_fn_0)cl->fn_ptr;
     return fn(cl->env_ptr);
-}
-
-extern "C" void* ring_list_sort_default(void* list) {
-    auto* vec = (std::vector<void*>*)list;
-    // B-123: in-place sort — no ownership change, no dup/drop needed.
-    // Matches JS backend semantics (Unit-typed, mutates receiver).
-    std::sort(vec->begin(), vec->end(), [](void* a, void* b) -> bool {
-        return ring_unbox_int(a) < ring_unbox_int(b);
-    });
-    return list;
 }
 
 extern "C" int64_t ring_list_any(void* list, void* closure) {

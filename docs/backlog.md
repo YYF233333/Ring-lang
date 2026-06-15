@@ -672,23 +672,6 @@ connect("localhost", 3000)     // timeout=30
 - Map for_each + Set for_each llvm_diff 用例两后端输出一致
 - 全部 E2E + llvm_diff 通过
 
-### B-130 `List.sort()` Ord bound + runtime 死代码清理（#156/#159 收口）[bugfix] [P2] [M] [judgment] [queued]
-
-> 2026-06-15 立项（Discussion，audit #159 + #156 死代码收口）。`.sort()` 无 comparator 版本两后端均不正确——JS 用 `<` 运算符（对 Str 碰巧词典序、对 struct/enum 出 `[object Object]` 垃圾），LLVM 用 `ring_unbox_int`（非 Int 按半地址排序出垃圾）。审查确认：编译器所有 `.sort()` 调用为 `List<Str>` 或 `List<Int>`（均有 Ord），加 bound 零迁移破坏。同步清理 #156 修后遗留的 runtime 死代码（`ring_list_contains`/`ring_list_index_of` 自 `impl<T: Eq> List` Ring impl 落地后不再被任何后端调用）。
-
-**涉及修改**：
-1. `std/list.ring`：`sort` 从 `impl<T> List`（`pub extern fn`）移到新的 `impl<T: Ord> List` 块，改为 Ring 实现——`self.sort_by(fn(a, b) { if a < b { -1 } else { if a > b { 1 } else { 0 } } })`。`impl<T> List` 中 `pub extern fn sort` 行删除。
-2. JS `compiler/runtime.ring`：删除 `List_sort` 函数定义 + `LIST_RUNTIME_FNS` 数组中 `"List_sort"` 条目（改走 Ring impl，不再调 JS runtime）。
-3. `ring_runtime.cpp`：删除 `ring_list_sort_default`（本条主修）。同时删除已死的 `ring_list_contains`、`ring_list_index_of`（自 contains/index_of 移入 Ring impl 后不再被任何后端调用，注释自认 "pointer comparison (bootstrap)"）。
-4. `compiler/codegen_llvm.ring`：删除 `ring_list_sort_default` / `ring_list_contains` / `ring_list_index_of` 的 `get_or_declare_runtime_fn` 声明。
-5. `compiler/codegen_llvm_expr.ring`：`method_to_runtime` 中 `"List"/"sort"` → `"ring_list_sort_default"` 的映射删除（改走 Ring impl 生成的 `ring_List_sort`）；`is_bool_returning_call` 中 `ring_list_contains` 条目删除；`is_int_returning_call` 中 `ring_list_contains` / `ring_list_index_of` 条目删除；2217-2221 行「NOTE: contains / index_of intentionally NOT mapped」注释清理（不再需要——没有映射可跳过了）。
-6. `CLAUDE.md`：已知限制中 "`List.find` / `Map` key 查找仍用 JS `===`（其他 contains 方法已用 Eq trait）" 更新——删除 `List.find`（谓词式，不涉及 `===`），保留 `Map` key（追踪于 B-107）。
-
-**验收标准**：
-- `List<Str>.sort()` / `List<Int>.sort()` 两后端行为一致且正确（词典序 / 数值序）
-- `List<UserStruct>.sort()` 无 `Ord` derive → 编译错误；有 `Ord` derive → 正确排序（E2E）
-- 已删 runtime 函数不残留（grep `ring_list_sort_default` / `ring_list_contains` / `ring_list_index_of` 全仓零命中）
-- 全部 E2E + llvm_diff 通过；自举一致（double bootstrap 字节一致）
 
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]

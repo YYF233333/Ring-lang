@@ -9,6 +9,16 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
+## B-130 List.sort() Ord bound
+
+### 1. Checker 不强制 trait bound on impl blocks [通知]
+
+`List<NonOrdType>.sort()` 通过类型检查但运行时产生错误结果。原因：checker 不验证 `impl<T: Ord> List` 的 `T: Ord` bound 在调用点是否满足。这是**预存问题**——`impl<T: Eq> List.contains()` 也有同样行为。负面测试（`List<UserStruct>.sort()` → 编译错误）因此未能加入。应作为独立 issue 跟踪。
+
+### 2. 三遍 bootstrap 才收敛 [通知]
+
+Ring impl 生成的 `List_sort` 与 runtime 的 `List_sort` 同名冲突，需要三遍 bootstrap：第一遍用旧 dist 编译新源码（产出含冲突），手动 patch 中间 dist（删 runtime 中的 List_sort），再编译一遍得到稳定产出。worktree agent 自行解决了这个问题。
+
 ## B-132 穷尽性检查性能优化
 
 ### 1. 自编译 129s → 79s（-39%），未达 60s 目标 [通知]

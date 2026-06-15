@@ -83,7 +83,6 @@ function List_extend(self, other) { for (var i = 0; i < other.length; i++) self.
 function List_slice(self, start, end) { return self.slice(start, end); }
 function List_reverse(self) { self.reverse(); }
 function List_join(self, sep) { return self.join(sep); }
-function List_sort(self) { self.sort(function(a, b) { return a < b ? -1 : a > b ? 1 : 0; }); }
 function List_sort_by(self, cmp) { self.sort(cmp); }
 function List_pop(self) { return self.length > 0 ? { _tag: "some", _0: self.pop() } : { _tag: "none" }; }
 function List_shift(self) { return self.length > 0 ? { _tag: "some", _0: self.shift() } : { _tag: "none" }; }
@@ -220,7 +219,7 @@ pub const RUNTIME_EXPORT_NAMES: List<Str> =
      "Int_to_str", "Float_to_str", "parse_int", "parse_float",
      "List_len", "List_get",
      "List_push", "List_concat", "List_extend", "List_slice",
-     "List_reverse", "List_join", "List_sort", "List_sort_by",
+     "List_reverse", "List_join", "List_sort_by",
      "List_set", "List_pop", "List_shift", "List_clear", "List_find_index",
      "list_clone",
      "map_new", "map_from", "map_clone",
