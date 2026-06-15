@@ -160,7 +160,8 @@ pub enum Expr {
     Range { start: Expr, end: Expr, inclusive: Bool, span: Span },
     ListLit { elements: List<Expr>, span: Span },
     TupleLit { elements: List<Expr>, span: Span },
-    IndexExpr { receiver: Expr, index: Expr, span: Span }
+    IndexExpr { receiver: Expr, index: Expr, span: Span },
+    ReturnExpr { value: Expr?, span: Span }
 }
 
 // ============================================================

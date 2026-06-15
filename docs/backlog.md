@@ -638,18 +638,6 @@ connect("localhost", 3000)     // timeout=30
 **复杂度**：M（Parser 扩展 + Checker 参数匹配 + Codegen 展开）
 
 
-### B-113 `return` 在 match arm 表达式位置 [feature] [P2] [M] [judgment] [doing]
-
-> 2026-06-11 立项（Discussion，公理 1 违例簇）。Rust 允许 match arm 内 return，LLM 高频本能写法；Ring 当前拒绝。语义无歧义：含 return 的 arm 类型为 `Never`，与其他 arm 自然 unify（`fail.raise` 已走此路，机制存在）。
-
-**涉及修改（2026-06-15 拍板：独立做，不等 B-055）**：
-1. parser/checker：放行 match arm 内 `return`；arm 类型推为 Never 参与 unify。
-2. codegen（JS）：含 return 的 match arm 用现有 labeled block + temp variable 方案（IIFE 保留，B-055 后续统一清理）。
-3. codegen（LLVM）：核对 match lowering 对 arm 内 early-return 的 basic block + Perceus return 路径 drop。
-4. e2e：JS + llvm_diff（match arm return / 嵌套 match / loop 内 match return）。
-
-**验收标准**：
-- design.md/CLAUDE.md「已知限制」删除该条；双后端 e2e 通过；穷尽性检查与 Never arm 共存正确
 
 ## 已知 Bug / 技术债
 

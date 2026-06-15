@@ -151,6 +151,20 @@ pub fn gen_expr(mut ctx: CodegenCtx, expr: HExpr) -> Str {
         // and never runs the Perceus pass, so this is unreachable — pass the inner
         // expression through transparently for exhaustiveness.
         HExpr::Clone { inner, .. } => gen_expr(ctx, inner),
+        // B-113: return in match arm expression position — emit as JS return statement.
+        // This arm produces a statement-level `return`, so the surrounding gen_match
+        // must use the labeled-block pattern (match_contains_return detects it).
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(v) => {
+                let v_js = gen_expr(ctx, v)
+                emit(ctx, "return ${v_js};")
+                "undefined"
+            },
+            none => {
+                emit(ctx, "return;")
+                "undefined"
+            }
+        },
     }
 }
 
@@ -1015,6 +1029,8 @@ fn expr_contains_return(expr: HExpr) -> Bool {
         },
         // Lambda has its own return context — do NOT recurse into it
         HExpr::Lambda { .. } => false,
+        // B-113: ReturnExpr is itself a return in expression position
+        HExpr::ReturnExpr { .. } => true,
         _ => false,
     }
 }
@@ -1161,6 +1177,15 @@ fn emit_branch_as_assign(mut ctx: CodegenCtx, branch: HExpr, tmp: Str) {
                 },
                 none => {},
             }
+        },
+        // B-113: ReturnExpr already emits `return` — skip the tmp assignment
+        // (the return exits the function, making subsequent code dead).
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(v) => {
+                let v_js = gen_expr(ctx, v)
+                emit(ctx, "return ${v_js};")
+            },
+            none => emit(ctx, "return;"),
         },
         _ => {
             let v = gen_expr(ctx, branch)

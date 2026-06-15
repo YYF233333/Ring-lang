@@ -787,6 +787,19 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             for a in args { v_borrow(a, "", ctx) }
             if v_type_excluded(ty, ctx.externs) { CLS_EXCLUDED } else { CLS_OPAQUE }
         },
+
+        // B-113: return in expression position (match arm).
+        // The return value is consumed (escaped to the caller), and the path
+        // diverges — same accounting as HStmt::Return in v_stmt.
+        HExpr::ReturnExpr { value, .. } => {
+            match value {
+                some(v) => { let _ = v_consume(v, ctx) },
+                none => {},
+            }
+            // Mark as diverging (all owned drops already handled by the
+            // Perceus-inserted block wrapping).
+            CLS_EXCLUDED
+        },
     }
 }
 

@@ -281,7 +281,12 @@ fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, mut callees: Set<S
         Expr::IntLit { .. } => {},
         Expr::FloatLit { .. } => {},
         Expr::StrLit { .. } => {},
-        Expr::BoolLit { .. } => {}
+        Expr::BoolLit { .. } => {},
+        // B-113: return in expression position (match arm)
+        Expr::ReturnExpr { value, .. } => match value {
+            some(v) => collect_expr_callees(v, registered_fns, callees),
+            none => {}
+        }
     }
 }
 

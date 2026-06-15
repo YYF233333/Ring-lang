@@ -341,6 +341,11 @@ fn dl_expr(e: HExpr, mut defs: List<HDictDef>, mut seen: Set<Str>, mut counter: 
         // Clone is inserted by perceus (runs after this pass) — never present.
         HExpr::Clone { inner, ty, effects, span } =>
             HExpr::Clone { inner: dl_expr(inner, defs, seen, counter), ty: ty, effects: effects, span: span },
+        // B-113: return in expression position (match arm)
+        HExpr::ReturnExpr { value, ty, effects, span } => match value {
+            some(v) => HExpr::ReturnExpr { value: some(dl_expr(v, defs, seen, counter)), ty: ty, effects: effects, span: span },
+            none => e,
+        },
     }
 }
 

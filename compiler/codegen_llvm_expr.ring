@@ -155,6 +155,30 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
             gen_index_expr(ctx, receiver, index, ty),
         HExpr::Clone { inner, .. } =>
             gen_clone(ctx, inner),
+        // B-113: return in match arm expression position — emit LLVM ret.
+        // Same logic as emit_return in codegen_llvm_stmt.ring.
+        HExpr::ReturnExpr { value, .. } => {
+            match value {
+                some(v) => {
+                    let val = gen_llvm_expr(ctx, v)
+                    discard(LLVMBuildRet(ctx.builder, val))
+                },
+                none => {
+                    let null = LLVMConstPointerNull(ctx.ptr_type)
+                    discard(LLVMBuildRet(ctx.builder, null))
+                },
+            }
+            // Create a dead block after return so subsequent code doesn't pollute the terminated block
+            match ctx.current_fn {
+                some(f) => {
+                    let dead_bb = LLVMAppendBasicBlockInContext(ctx.context, f, "after.ret")
+                    LLVMPositionBuilderAtEnd(ctx.builder, dead_bb)
+                },
+                none => {},
+            }
+            // Return a null pointer as placeholder (unreachable).
+            LLVMConstPointerNull(ctx.ptr_type)
+        },
     }
 }
 
@@ -4009,6 +4033,11 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
         // returns a captured outer local) still references its inner expression's
         // free variables — recurse so the capture is collected into the env.
         HExpr::Clone { inner, .. } => collect_captures(ctx, inner, params, captures),
+        // B-113: return in expression position — recurse into the value to collect captures.
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(v) => collect_captures(ctx, v, params, captures),
+            none => {},
+        },
         _ => {},
     }
 }

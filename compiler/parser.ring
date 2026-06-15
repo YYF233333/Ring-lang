@@ -135,7 +135,8 @@ pub fn expr_span(e: Expr) -> Span {
         Range { span, .. } => span,
         ListLit { span, .. } => span,
         TupleLit { span, .. } => span,
-        IndexExpr { span, .. } => span
+        IndexExpr { span, .. } => span,
+        ReturnExpr { span, .. } => span
     }
 }
 
@@ -588,6 +589,19 @@ impl Parser {
         self.try_consume(TokenKind::TkSemi)
         let end = self.current_span_start()
         Stmt::Return { value: value, span: self.make_span(start, end) }
+    }
+
+    fn parse_return_expr(mut self) -> Expr {
+        let start = self.current_span_start()
+        self.expect(TokenKind::TkReturn)
+        let mut value: Expr? = none
+        // In match arm expression position, the return value ends before
+        // '}' (end of match / block), ',' (arm separator), or EOF.
+        if !self.check(TokenKind::TkRBrace) && !self.check(TokenKind::TkComma) && !self.at_end() {
+            value = some(self.parse_expr())
+        }
+        let end = self.current_span_start()
+        Expr::ReturnExpr { value: value, span: self.make_span(start, end) }
     }
 
     // ============================================================
@@ -1688,7 +1702,11 @@ if self.check(TokenKind::TkIntLit) {
             guard = some(self.parse_expr())
         }
         self.expect(TokenKind::TkFatArrow)
-        let body = self.parse_expr()
+        let body = if self.check(TokenKind::TkReturn) {
+            self.parse_return_expr()
+        } else {
+            self.parse_expr()
+        }
         MatchArm { pattern: pattern, guard: guard, body: body, span: self.make_span(start, expr_span(body).end) }
     }
 
