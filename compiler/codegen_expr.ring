@@ -1422,7 +1422,9 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
     }
 
     let mut ev_param_names: List<Str> = []
-    for entry in by_effect.entries() {
+    let mut sorted_by_eff = by_effect.entries()
+    sorted_by_eff.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_by_eff {
         let (ename, _) = entry
         ev_param_names.push(evidence_param_name(ename))
     }

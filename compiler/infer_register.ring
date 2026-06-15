@@ -743,7 +743,9 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
     let impl_self_type = resolve_impl_self_type(ctx, target_type, type_params)
     ctx.type_param_scope.insert("Self", impl_self_type)
     // Inject Self::Item into qualified_assoc_scope
-    for entry in assoc_type_map.entries() {
+    let mut sorted_assoc_map = assoc_type_map.entries()
+    sorted_assoc_map.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_assoc_map {
         let (aname, aty) = entry
         ctx.qualified_assoc_scope.insert("Self::${aname}", aty)
     }
@@ -778,7 +780,9 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
 
                     // Validate associated types
                     let mut impl_assoc_names: Set<Str> = set_new()
-                    for entry in assoc_type_map.entries() {
+                    let mut sorted_assoc_map2 = assoc_type_map.entries()
+                    sorted_assoc_map2.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                    for entry in sorted_assoc_map2 {
                         let (aname, _) = entry
                         impl_assoc_names.insert(aname)
                     }
@@ -803,7 +807,9 @@ fn register_impl(mut ctx: InferCtx, target_type: Str, type_params: List<TypePara
                     for atdef in trait_def.assoc_types {
                         trait_assoc_names.insert(atdef.name)
                     }
-                    for entry in assoc_type_map.entries() {
+                    let mut sorted_assoc_map3 = assoc_type_map.entries()
+                    sorted_assoc_map3.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                    for entry in sorted_assoc_map3 {
                         let (aname, _) = entry
                         if !trait_assoc_names.contains(aname) {
                             let _ = type_error(ctx.sink, E0514,
@@ -928,11 +934,13 @@ fn register_impl_method(
     // Non-extern methods: filter unused type variables from outer scope
     if !is_extern {
         let mut declared_names: Set<Str> = set_new()
-        for entry in ctx.type_param_scope.entries() {
+        let mut sorted_tp_scope = ctx.type_param_scope.entries()
+        sorted_tp_scope.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        for entry in sorted_tp_scope {
             let (tpname, _) = entry
             if outer_saved.contains_key(tpname) { declared_names.insert(tpname) }
         }
-        for entry in ctx.type_param_scope.entries() {
+        for entry in sorted_tp_scope {
             let (tpname, tv) = entry
             if !outer_saved.contains_key(tpname) && !declared_names.contains(tpname) {
                 match tv { Type::TypeVar { id, .. } => {
@@ -1396,7 +1404,9 @@ fn register_fn_common(
 
     let mut declared_names: Set<Str> = set_new()
     for tp in type_params { declared_names.insert(tp.name) }
-    for entry in ctx.type_param_scope.entries() {
+    let mut sorted_tp_scope3 = ctx.type_param_scope.entries()
+    sorted_tp_scope3.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_tp_scope3 {
         let (tpname, tv) = entry
         if !saved.contains_key(tpname) && !declared_names.contains(tpname) {
             match tv { Type::TypeVar { id, .. } => { type_vars.push(id) }, _ => {} }

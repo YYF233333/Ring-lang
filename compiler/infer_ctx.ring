@@ -409,7 +409,9 @@ pub fn collect_free_vars(t: Type, mut result: Set<Int>) {
 pub fn free_type_vars_in_env(env: TypeEnv, subst: UnionFind) -> Set<Int> {
     let mut result: Set<Int> = set_new()
     for scope in env.scope.scopes {
-        for entry in scope.variables.entries() {
+        let mut sorted_vars = scope.variables.entries()
+        sorted_vars.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        for entry in sorted_vars {
             let (_, scheme) = entry
             let ftv = free_type_vars(scheme.ty, subst)
             let mut quantified: Set<Int> = set_new()

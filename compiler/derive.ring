@@ -50,7 +50,9 @@ struct UserType {
 fn collect_user_types(env: TypeEnv) -> List<UserType> {
     let builtins = BUILTIN_TYPES
     let mut result: List<UserType> = []
-    for entry in env.types.structs.entries() {
+    let mut sorted_structs = env.types.structs.entries()
+    sorted_structs.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_structs {
         let (name, def) = entry
         // Skip mod aliases (e.g. "Point" aliasing "geo::Point") to avoid duplicate derives
         if name != def.name { continue }
@@ -61,7 +63,9 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
             result.push(UserType { name: name, type_kind: TypeKind::StructKind, struct_def: some(def), enum_def: none })
         }
     }
-    for entry in env.types.enums.entries() {
+    let mut sorted_enums = env.types.enums.entries()
+    sorted_enums.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_enums {
         let (name, def) = entry
         // Skip mod aliases to avoid duplicate derives
         if name != def.name { continue }
@@ -78,7 +82,9 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
 
 fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mut derived_impls: List<DerivedImpl>) {
     let mut known = set_new()
-    for entry in env.trait_reg.trait_impls.entries() {
+    let mut sorted_impls = env.trait_reg.trait_impls.entries()
+    sorted_impls.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_impls {
         let (tname, impls) = entry
         for imp in impls {
             if imp.trait_name == trait_name {

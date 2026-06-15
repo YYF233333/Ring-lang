@@ -1,6 +1,6 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
-import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, AssocConstraint as ast$AssocConstraint, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
-import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
+import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, DestructureBinding as ast$DestructureBinding, EffectExpr as ast$EffectExpr, EffectHandler as ast$EffectHandler, EffectOpDecl as ast$EffectOpDecl, EnumVariantDecl as ast$EnumVariantDecl, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, MatchArm as ast$MatchArm, NamedEnumField as ast$NamedEnumField, NamedImport as ast$NamedImport, NamedPatternField as ast$NamedPatternField, Param as ast$Param, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, Position as ast$Position, Program as ast$Program, RecordTypeField as ast$RecordTypeField, SigMember as ast$SigMember, Span as ast$Span, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, StructFieldDecl as ast$StructFieldDecl, StructFieldInit as ast$StructFieldInit, TypeBound as ast$TypeBound, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, TypeParam as ast$TypeParam, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, UseDecl as ast$UseDecl, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UsePath as ast$UsePath, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug } from "./ast.js";
+import { make_diag as diagnostics$make_diag, make_diagnostic as diagnostics$make_diagnostic, new_collecting_sink as diagnostics$new_collecting_sink, severity_to_str as diagnostics$severity_to_str, CollectingSink as diagnostics$CollectingSink, Diagnostic as diagnostics$Diagnostic, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, DiagnosticNote as diagnostics$DiagnosticNote, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, Suggestion as diagnostics$Suggestion, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
 
 
 
@@ -235,60 +235,204 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
-function format_hint(d) {
+function jq(s) {
+  const escaped = Str_replace(Str_replace(Str_replace(Str_replace(Str_replace(s, "\\", "\\\\"), "\"", "\\\""), "\n", "\\n"), "\t", "\\t"), "\r", "\\r");
+  return `"${escaped}"`;
+}
+
+function context_to_json(ctx) {
   __ring_match6: {
-    const __ring_m6 = d.context;
+    const __ring_m6 = ctx;
     if (__ring_m6._tag === "TypeMismatch") {
-      const expected = __ring_m6.expected; const actual = __ring_m6.actual;
-      return `expected ${expected}, got ${actual}`;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "UndefinedVariable") {
-      return "not found in this scope";
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "MissingField") {
-      const field = __ring_m6.field;
-      return `field '${field}' not found`;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "EffectUnhandled") {
-      const eff = __ring_m6.eff;
-      return `effect '${eff}' must be handled`;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "ParseError") {
-      const expected = __ring_m6.expected;
+      const expected = __ring_m6.expected; const actual = __ring_m6.actual; const expression = __ring_m6.expression;
+      let parts = [];
+      List_push(parts, "\"kind\": \"type_mismatch\"");
+      List_push(parts, `"expected": ${jq(expected)}`);
+      List_push(parts, `"actual": ${jq(actual)}`);
       __ring_match7: {
-        const __ring_m7 = expected;
+        const __ring_m7 = expression;
         if (__ring_m7._tag === "some") {
-          const exp = __ring_m7._0;
-          return `expected ${List_join(exp, " or ")}`;
+          const e = __ring_m7._0;
+          List_push(parts, `"expression": ${jq(e)}`);
           break __ring_match7;
         }
         if (__ring_m7._tag === "none") {
-          return "";
           break __ring_match7;
         }
         __match_fail(__ring_m7);
       }
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "UndefinedVariable") {
+      const name = __ring_m6.name; const scope_locals = __ring_m6.scope_locals;
+      let parts = [];
+      List_push(parts, "\"kind\": \"undefined_variable\"");
+      List_push(parts, `"name": ${jq(name)}`);
+      __ring_match8: {
+        const __ring_m8 = scope_locals;
+        if (__ring_m8._tag === "some") {
+          const locals = __ring_m8._0;
+          const items = locals.map((function(s) { return jq(s); }));
+          List_push(parts, `"scope_locals": [${List_join(items, ", ")}]`);
+          break __ring_match8;
+        }
+        if (__ring_m8._tag === "none") {
+          break __ring_match8;
+        }
+        __match_fail(__ring_m8);
+      }
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "MissingField") {
+      const field = __ring_m6.field; const ty = __ring_m6.ty; const available = __ring_m6.available;
+      let parts = [];
+      List_push(parts, "\"kind\": \"missing_field\"");
+      List_push(parts, `"field": ${jq(field)}`);
+      List_push(parts, `"type": ${jq(ty)}`);
+      __ring_match9: {
+        const __ring_m9 = available;
+        if (__ring_m9._tag === "some") {
+          const avail = __ring_m9._0;
+          const items = avail.map((function(s) { return jq(s); }));
+          List_push(parts, `"available": [${List_join(items, ", ")}]`);
+          break __ring_match9;
+        }
+        if (__ring_m9._tag === "none") {
+          break __ring_match9;
+        }
+        __match_fail(__ring_m9);
+      }
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "EffectUnhandled") {
+      const eff = __ring_m6.eff; const in_function = __ring_m6.in_function;
+      let parts = [];
+      List_push(parts, "\"kind\": \"effect_unhandled\"");
+      List_push(parts, `"effect": ${jq(eff)}`);
+      __ring_match10: {
+        const __ring_m10 = in_function;
+        if (__ring_m10._tag === "some") {
+          const f = __ring_m10._0;
+          List_push(parts, `"in_function": ${jq(f)}`);
+          break __ring_match10;
+        }
+        if (__ring_m10._tag === "none") {
+          break __ring_match10;
+        }
+        __match_fail(__ring_m10);
+      }
+      return `{ ${List_join(parts, ", ")} }`;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "ParseError") {
+      const token = __ring_m6.token; const expected = __ring_m6.expected;
+      let parts = [];
+      List_push(parts, "\"kind\": \"parse_error\"");
+      List_push(parts, `"token": ${jq(token)}`);
+      __ring_match11: {
+        const __ring_m11 = expected;
+        if (__ring_m11._tag === "some") {
+          const exp = __ring_m11._0;
+          const items = exp.map((function(s) { return jq(s); }));
+          List_push(parts, `"expected": [${List_join(items, ", ")}]`);
+          break __ring_match11;
+        }
+        if (__ring_m11._tag === "none") {
+          break __ring_match11;
+        }
+        __match_fail(__ring_m11);
+      }
+      return `{ ${List_join(parts, ", ")} }`;
       break __ring_match6;
     }
     if (__ring_m6._tag === "PatternError") {
       const detail = __ring_m6.detail;
-      return detail;
+      return `{ "kind": "pattern_error", "detail": ${jq(detail)} }`;
       break __ring_match6;
     }
     if (__ring_m6._tag === "TraitError") {
       const detail = __ring_m6.detail;
-      return detail;
+      return `{ "kind": "trait_error", "detail": ${jq(detail)} }`;
       break __ring_match6;
     }
     if (__ring_m6._tag === "OtherContext") {
-      return "";
+      const detail = __ring_m6.detail;
+      __ring_match12: {
+        const __ring_m12 = detail;
+        if (__ring_m12._tag === "some") {
+          const d = __ring_m12._0;
+          return `{ "kind": "other", "detail": ${jq(d)} }`;
+          break __ring_match12;
+        }
+        if (__ring_m12._tag === "none") {
+          return "{ \"kind\": \"other\" }";
+          break __ring_match12;
+        }
+        __match_fail(__ring_m12);
+      }
       break __ring_match6;
     }
     __match_fail(__ring_m6);
+  }
+}
+
+function format_hint(d) {
+  __ring_match13: {
+    const __ring_m13 = d.context;
+    if (__ring_m13._tag === "TypeMismatch") {
+      const expected = __ring_m13.expected; const actual = __ring_m13.actual;
+      return `expected ${expected}, got ${actual}`;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "UndefinedVariable") {
+      return "not found in this scope";
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "MissingField") {
+      const field = __ring_m13.field;
+      return `field '${field}' not found`;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "EffectUnhandled") {
+      const eff = __ring_m13.eff;
+      return `effect '${eff}' must be handled`;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "ParseError") {
+      const expected = __ring_m13.expected;
+      __ring_match14: {
+        const __ring_m14 = expected;
+        if (__ring_m14._tag === "some") {
+          const exp = __ring_m14._0;
+          return `expected ${List_join(exp, " or ")}`;
+          break __ring_match14;
+        }
+        if (__ring_m14._tag === "none") {
+          return "";
+          break __ring_match14;
+        }
+        __match_fail(__ring_m14);
+      }
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "PatternError") {
+      const detail = __ring_m13.detail;
+      return detail;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "TraitError") {
+      const detail = __ring_m13.detail;
+      return detail;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "OtherContext") {
+      return "";
+      break __ring_match13;
+    }
+    __match_fail(__ring_m13);
   }
 }
 
@@ -305,10 +449,10 @@ function format_human(diagnostics, source) {
     List_push(parts, "   |");
     const line_num = d.span.start.line;
     const source_line = List_get(lines, (line_num - 1));
-    __ring_match8: {
-      const __ring_m8 = source_line;
-      if (__ring_m8._tag === "some") {
-        const sl = __ring_m8._0;
+    __ring_match15: {
+      const __ring_m15 = source_line;
+      if (__ring_m15._tag === "some") {
+        const sl = __ring_m15._0;
         const gutter = Str_pad_start(Int_to_str(line_num), 3, " ");
         List_push(parts, `${gutter} | ${sl}`);
         const underline_start = d.span.start.column;
@@ -332,30 +476,30 @@ function format_human(diagnostics, source) {
         } else {
           List_push(parts, `   | ${padding}${carets}`);
         }
-        break __ring_match8;
+        break __ring_match15;
       }
-      if (__ring_m8._tag === "none") {
-        break __ring_match8;
+      if (__ring_m15._tag === "none") {
+        break __ring_match15;
       }
-      __match_fail(__ring_m8);
+      __match_fail(__ring_m15);
     }
     const __ring_iter_3 = __List_Iterable.iter(d.notes);
     while (true) {
       const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
       if (__ring_next_3._tag === "none") break;
       const n = __ring_next_3._0;
-      __ring_match9: {
-        const __ring_m9 = n.span;
-        if (__ring_m9._tag === "some") {
-          const note_span = __ring_m9._0;
+      __ring_match16: {
+        const __ring_m16 = n.span;
+        if (__ring_m16._tag === "some") {
+          const note_span = __ring_m16._0;
           List_push(parts, `   = note: ${n.message} (${note_span.file}:${Int_to_str(note_span.start.line)}:${Int_to_str(note_span.start.column)})`);
-          break __ring_match9;
+          break __ring_match16;
         }
-        if (__ring_m9._tag === "none") {
+        if (__ring_m16._tag === "none") {
           List_push(parts, `   = note: ${n.message}`);
-          break __ring_match9;
+          break __ring_match16;
         }
-        __match_fail(__ring_m9);
+        __match_fail(__ring_m16);
       }
     }
     const __ring_iter_4 = __List_Iterable.iter(d.suggestions);
@@ -369,150 +513,6 @@ function format_human(diagnostics, source) {
     List_push(parts, "");
   }
   return List_join(parts, "\n");
-}
-
-function jq(s) {
-  const escaped = Str_replace(Str_replace(Str_replace(Str_replace(Str_replace(s, "\\", "\\\\"), "\"", "\\\""), "\n", "\\n"), "\t", "\\t"), "\r", "\\r");
-  return `"${escaped}"`;
-}
-
-function context_to_json(ctx) {
-  __ring_match10: {
-    const __ring_m10 = ctx;
-    if (__ring_m10._tag === "TypeMismatch") {
-      const expected = __ring_m10.expected; const actual = __ring_m10.actual; const expression = __ring_m10.expression;
-      let parts = [];
-      List_push(parts, "\"kind\": \"type_mismatch\"");
-      List_push(parts, `"expected": ${jq(expected)}`);
-      List_push(parts, `"actual": ${jq(actual)}`);
-      __ring_match11: {
-        const __ring_m11 = expression;
-        if (__ring_m11._tag === "some") {
-          const e = __ring_m11._0;
-          List_push(parts, `"expression": ${jq(e)}`);
-          break __ring_match11;
-        }
-        if (__ring_m11._tag === "none") {
-          break __ring_match11;
-        }
-        __match_fail(__ring_m11);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "UndefinedVariable") {
-      const name = __ring_m10.name; const scope_locals = __ring_m10.scope_locals;
-      let parts = [];
-      List_push(parts, "\"kind\": \"undefined_variable\"");
-      List_push(parts, `"name": ${jq(name)}`);
-      __ring_match12: {
-        const __ring_m12 = scope_locals;
-        if (__ring_m12._tag === "some") {
-          const locals = __ring_m12._0;
-          const items = locals.map((function(s) { return jq(s); }));
-          List_push(parts, `"scope_locals": [${List_join(items, ", ")}]`);
-          break __ring_match12;
-        }
-        if (__ring_m12._tag === "none") {
-          break __ring_match12;
-        }
-        __match_fail(__ring_m12);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "MissingField") {
-      const field = __ring_m10.field; const ty = __ring_m10.ty; const available = __ring_m10.available;
-      let parts = [];
-      List_push(parts, "\"kind\": \"missing_field\"");
-      List_push(parts, `"field": ${jq(field)}`);
-      List_push(parts, `"type": ${jq(ty)}`);
-      __ring_match13: {
-        const __ring_m13 = available;
-        if (__ring_m13._tag === "some") {
-          const avail = __ring_m13._0;
-          const items = avail.map((function(s) { return jq(s); }));
-          List_push(parts, `"available": [${List_join(items, ", ")}]`);
-          break __ring_match13;
-        }
-        if (__ring_m13._tag === "none") {
-          break __ring_match13;
-        }
-        __match_fail(__ring_m13);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "EffectUnhandled") {
-      const eff = __ring_m10.eff; const in_function = __ring_m10.in_function;
-      let parts = [];
-      List_push(parts, "\"kind\": \"effect_unhandled\"");
-      List_push(parts, `"effect": ${jq(eff)}`);
-      __ring_match14: {
-        const __ring_m14 = in_function;
-        if (__ring_m14._tag === "some") {
-          const f = __ring_m14._0;
-          List_push(parts, `"in_function": ${jq(f)}`);
-          break __ring_match14;
-        }
-        if (__ring_m14._tag === "none") {
-          break __ring_match14;
-        }
-        __match_fail(__ring_m14);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "ParseError") {
-      const token = __ring_m10.token; const expected = __ring_m10.expected;
-      let parts = [];
-      List_push(parts, "\"kind\": \"parse_error\"");
-      List_push(parts, `"token": ${jq(token)}`);
-      __ring_match15: {
-        const __ring_m15 = expected;
-        if (__ring_m15._tag === "some") {
-          const exp = __ring_m15._0;
-          const items = exp.map((function(s) { return jq(s); }));
-          List_push(parts, `"expected": [${List_join(items, ", ")}]`);
-          break __ring_match15;
-        }
-        if (__ring_m15._tag === "none") {
-          break __ring_match15;
-        }
-        __match_fail(__ring_m15);
-      }
-      return `{ ${List_join(parts, ", ")} }`;
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "PatternError") {
-      const detail = __ring_m10.detail;
-      return `{ "kind": "pattern_error", "detail": ${jq(detail)} }`;
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TraitError") {
-      const detail = __ring_m10.detail;
-      return `{ "kind": "trait_error", "detail": ${jq(detail)} }`;
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "OtherContext") {
-      const detail = __ring_m10.detail;
-      __ring_match16: {
-        const __ring_m16 = detail;
-        if (__ring_m16._tag === "some") {
-          const d = __ring_m16._0;
-          return `{ "kind": "other", "detail": ${jq(d)} }`;
-          break __ring_match16;
-        }
-        if (__ring_m16._tag === "none") {
-          return "{ \"kind\": \"other\" }";
-          break __ring_match16;
-        }
-        __match_fail(__ring_m16);
-      }
-      break __ring_match10;
-    }
-    __match_fail(__ring_m10);
-  }
 }
 
 function notes_to_json(notes) {

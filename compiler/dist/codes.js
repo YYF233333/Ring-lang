@@ -335,6 +335,34 @@ const W0001 = "W0001";
 
 const W0002 = "W0002";
 
+function error_category(code) {
+  if (Str_starts_with(code, "E01")) {
+    return "parse";
+  }
+  if (Str_starts_with(code, "E02")) {
+    return "resolution";
+  }
+  if (Str_starts_with(code, "E03")) {
+    return "type";
+  }
+  if (Str_starts_with(code, "E04")) {
+    return "effect";
+  }
+  if (Str_starts_with(code, "E05")) {
+    return "trait";
+  }
+  if (Str_starts_with(code, "E06")) {
+    return "pattern";
+  }
+  if (Str_starts_with(code, "E07")) {
+    return "module";
+  }
+  if (Str_starts_with(code, "W")) {
+    return "warning";
+  }
+  return "unknown";
+}
+
 function error_description(code) {
   if ((code === "E0101")) {
     return "Unexpected token";
@@ -490,34 +518,6 @@ function error_description(code) {
     return "Refinement where clause not enforced";
   }
   return "Unknown error";
-}
-
-function error_category(code) {
-  if (Str_starts_with(code, "E01")) {
-    return "parse";
-  }
-  if (Str_starts_with(code, "E02")) {
-    return "resolution";
-  }
-  if (Str_starts_with(code, "E03")) {
-    return "type";
-  }
-  if (Str_starts_with(code, "E04")) {
-    return "effect";
-  }
-  if (Str_starts_with(code, "E05")) {
-    return "trait";
-  }
-  if (Str_starts_with(code, "E06")) {
-    return "pattern";
-  }
-  if (Str_starts_with(code, "E07")) {
-    return "module";
-  }
-  if (Str_starts_with(code, "W")) {
-    return "warning";
-  }
-  return "unknown";
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

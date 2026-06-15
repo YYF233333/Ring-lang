@@ -1,7 +1,7 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
-import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, effect_kind_name as types$effect_kind_name, effects_match_kind as types$effects_match_kind, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, effects_same_kind as types$effects_same_kind, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
-import { new_union_find as union_find$new_union_find, uf_find as union_find$uf_find, uf_bind as union_find$uf_bind, uf_lookup as union_find$uf_lookup, uf_union as union_find$uf_union, uf_insert as union_find$uf_insert, UnionFind as union_find$UnionFind } from "./union_find.js";
-import { lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, add_impl as env$add_impl, has_impl as env$has_impl, find_impl as env$find_impl, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, AssocConstraintEntry as env$AssocConstraintEntry, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
+import { ANY as types$ANY, BOOL as types$BOOL, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_INT as types$BUILTIN_INT, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, EMPTY_ROW as types$EMPTY_ROW, FLOAT as types$FLOAT, INT as types$INT, NEVER as types$NEVER, STR as types$STR, UNIT as types$UNIT, effect_kind_name as types$effect_kind_name, effect_row as types$effect_row, effect_row_to_string as types$effect_row_to_string, effect_to_string as types$effect_to_string, effects_equal as types$effects_equal, effects_match_kind as types$effects_match_kind, effects_same_kind as types$effects_same_kind, is_list_type as types$is_list_type, is_map_type as types$is_map_type, is_option_type as types$is_option_type, is_set_type as types$is_set_type, list_element as types$list_element, make_list_type as types$make_list_type, make_map_type as types$make_map_type, make_option_type as types$make_option_type, make_set_type as types$make_set_type, open_effect_row as types$open_effect_row, option_inner as types$option_inner, row_contains as types$row_contains, row_merge as types$row_merge, type_to_builtin_name as types$type_to_builtin_name, type_to_string as types$type_to_string, types_equal as types$types_equal, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, EnumVariant as types$EnumVariant, RecordField as types$RecordField, RowMergeResult as types$RowMergeResult, StructField as types$StructField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType } from "./types.js";
+import { new_union_find as union_find$new_union_find, uf_bind as union_find$uf_bind, uf_find as union_find$uf_find, uf_insert as union_find$uf_insert, uf_lookup as union_find$uf_lookup, uf_union as union_find$uf_union, UnionFind as union_find$UnionFind } from "./union_find.js";
+import { add_impl as env$add_impl, apply_subst as env$apply_subst, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_map as env$apply_subst_map, apply_subst_row as env$apply_subst_row, apply_subst_row_map as env$apply_subst_row_map, find_impl as env$find_impl, has_impl as env$has_impl, lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, AssocConstraintEntry as env$AssocConstraintEntry, AssocTypeDef as env$AssocTypeDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectAliasDef as env$EffectAliasDef, EffectDef as env$EffectDef, EffectOpDef as env$EffectOpDef, EnumDef as env$EnumDef, FnBound as env$FnBound, IdGen as env$IdGen, ImplEntry as env$ImplEntry, SchemeBound as env$SchemeBound, Scope as env$Scope, ScopeManager as env$ScopeManager, SigDef as env$SigDef, StructDef as env$StructDef, TraitDef as env$TraitDef, TraitMethodDef as env$TraitMethodDef, TraitRegistry as env$TraitRegistry, TypeAliasDef as env$TypeAliasDef, TypeEnv as env$TypeEnv, TypeRegistry as env$TypeRegistry, TypeScheme as env$TypeScheme, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
 
 
 
@@ -243,30 +243,6 @@ class UnificationError {
   }
 }
 
-function empty_subst() {
-  return union_find$new_union_find();
-}
-
-function unify_error(t1, t2, detail, __ring_ev_fail) {
-  const base = `Type mismatch: cannot unify ${types$type_to_string(t1)} with ${types$type_to_string(t2)}`;
-  const msg = (function() {
-  const __ring_m = detail;
-  if (__ring_m._tag === "some") { const d = __ring_m._0; return `${base} — ${d}`; }
-  if (__ring_m._tag === "none") { return base; }
-  __match_fail(__ring_m);
-})();
-  return __ring_ev_fail.raise(new UnificationError(msg, false));
-}
-
-function unify_error_occurs(t1, t2, __ring_ev_fail) {
-  const msg = `Type mismatch: cannot unify ${types$type_to_string(t1)} with ${types$type_to_string(t2)} — infinite type (occurs check)`;
-  return __ring_ev_fail.raise(new UnificationError(msg, true));
-}
-
-function unify_error_msg(detail, __ring_ev_fail) {
-  return __ring_ev_fail.raise(new UnificationError(detail, false));
-}
-
 function occurs_in_effect(var_id, e, subst) {
   __ring_match6: {
     const __ring_m6 = e;
@@ -402,29 +378,9 @@ function occurs_in(var_id, t, subst) {
   }
 }
 
-function is_any(t) {
-  __ring_match8: {
-    const __ring_m8 = t;
-    if (__ring_m8._tag === "AnyType") {
-      return true;
-      break __ring_match8;
-    }
-    return false;
-    break __ring_match8;
-  }
-}
-
-function var_id(t) {
-  __ring_match9: {
-    const __ring_m9 = t;
-    if (__ring_m9._tag === "TypeVar") {
-      const id = __ring_m9.id;
-      return Option_some(id);
-      break __ring_match9;
-    }
-    return Option_none;
-    break __ring_match9;
-  }
+function unify_error_occurs(t1, t2, __ring_ev_fail) {
+  const msg = `Type mismatch: cannot unify ${types$type_to_string(t1)} with ${types$type_to_string(t2)} — infinite type (occurs check)`;
+  return __ring_ev_fail.raise(new UnificationError(msg, true));
 }
 
 function bind_var(id, target, t1, t2, subst, __ring_ev_fail) {
@@ -435,16 +391,8 @@ function bind_var(id, target, t1, t2, subst, __ring_ev_fail) {
   return subst;
 }
 
-function is_never(t) {
-  __ring_match10: {
-    const __ring_m10 = t;
-    if (__ring_m10._tag === "NeverType") {
-      return true;
-      break __ring_match10;
-    }
-    return false;
-    break __ring_match10;
-  }
+function empty_subst() {
+  return union_find$new_union_find();
 }
 
 function filter_by_index_not_in(effects, excluded) {
@@ -461,6 +409,58 @@ function filter_by_index_not_in(effects, excluded) {
     idx = (idx + 1);
   }
   return result;
+}
+
+function is_any(t) {
+  __ring_match8: {
+    const __ring_m8 = t;
+    if (__ring_m8._tag === "AnyType") {
+      return true;
+      break __ring_match8;
+    }
+    return false;
+    break __ring_match8;
+  }
+}
+
+function is_never(t) {
+  __ring_match9: {
+    const __ring_m9 = t;
+    if (__ring_m9._tag === "NeverType") {
+      return true;
+      break __ring_match9;
+    }
+    return false;
+    break __ring_match9;
+  }
+}
+
+function var_id(t) {
+  __ring_match10: {
+    const __ring_m10 = t;
+    if (__ring_m10._tag === "TypeVar") {
+      const id = __ring_m10.id;
+      return Option_some(id);
+      break __ring_match10;
+    }
+    return Option_none;
+    break __ring_match10;
+  }
+}
+
+function unify_error(t1, t2, detail, __ring_ev_fail) {
+  const base = `Type mismatch: cannot unify ${types$type_to_string(t1)} with ${types$type_to_string(t2)}`;
+  const msg = (function() {
+  const __ring_m = detail;
+  if (__ring_m._tag === "some") { const d = __ring_m._0; return `${base} — ${d}`; }
+  if (__ring_m._tag === "none") { return base; }
+  __match_fail(__ring_m);
+})();
+  return __ring_ev_fail.raise(new UnificationError(msg, false));
+}
+
+function unify_error_msg(detail, __ring_ev_fail) {
+  return __ring_ev_fail.raise(new UnificationError(detail, false));
 }
 
 function unify_struct_with_record(st, rt, subst, env, __ring_ev_fail) {
@@ -644,6 +644,38 @@ function unify_record_rows(ra, rb, subst, env, __ring_ev_fail) {
   }
 }
 
+function unify_effect_params(a, b, subst, env, __ring_ev_fail) {
+  __ring_match20: {
+    const __ring_m20 = [a, b];
+    if (Array.isArray(__ring_m20) && __ring_m20.length === 2 && __ring_m20[0]._tag === "FailEffect" && __ring_m20[1]._tag === "FailEffect") {
+      const et_a = __ring_m20[0].error_type; const et_b = __ring_m20[1].error_type;
+      return unify(et_a, et_b, subst, env, __ring_ev_fail);
+      break __ring_match20;
+    }
+    if (Array.isArray(__ring_m20) && __ring_m20.length === 2 && __ring_m20[0]._tag === "MutEffect" && __ring_m20[1]._tag === "MutEffect") {
+      const sa = __ring_m20[0].state_type; const sb = __ring_m20[1].state_type;
+      return unify(sa, sb, subst, env, __ring_ev_fail);
+      break __ring_match20;
+    }
+    if (Array.isArray(__ring_m20) && __ring_m20.length === 2 && __ring_m20[0]._tag === "CustomEffect" && __ring_m20[1]._tag === "CustomEffect") {
+      const name = __ring_m20[0].name; const ta_a = __ring_m20[0].type_args; const ta_b = __ring_m20[1].type_args;
+      if ((List_len(ta_a) !== List_len(ta_b))) {
+        unify_error_msg(`effect '${name}' type argument count mismatch: ${List_len(ta_a)} vs ${List_len(ta_b)}`, __ring_ev_fail);
+      }
+      let s = subst;
+      let i = 0;
+      while ((i < List_len(ta_a))) {
+        s = unify(Option_unwrap_or(List_get(ta_a, i), types$UNIT), Option_unwrap_or(List_get(ta_b, i), types$UNIT), s, env, __ring_ev_fail);
+        i = (i + 1);
+      }
+      return s;
+      break __ring_match20;
+    }
+    return subst;
+    break __ring_match20;
+  }
+}
+
 function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
   let s = subst;
   const ra = env$apply_subst_row(s, a);
@@ -655,19 +687,19 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
     let bi = 0;
     while ((bi < List_len(rb.effects))) {
       if ((!_Set_contains(b_matched, bi, __Int_Eq))) {
-        __ring_match20: {
-          const __ring_m20 = [List_get(ra.effects, ai), List_get(rb.effects, bi)];
-          if (Array.isArray(__ring_m20) && __ring_m20.length === 2 && __ring_m20[0]._tag === "some" && __ring_m20[1]._tag === "some") {
-            const eff_a = __ring_m20[0]._0; const eff_b = __ring_m20[1]._0;
+        __ring_match21: {
+          const __ring_m21 = [List_get(ra.effects, ai), List_get(rb.effects, bi)];
+          if (Array.isArray(__ring_m21) && __ring_m21.length === 2 && __ring_m21[0]._tag === "some" && __ring_m21[1]._tag === "some") {
+            const eff_a = __ring_m21[0]._0; const eff_b = __ring_m21[1]._0;
             if (types$effects_match_kind(eff_a, eff_b)) {
               s = unify_effect_params(eff_a, eff_b, s, env, __ring_ev_fail);
               _Set_insert(a_matched, ai);
               _Set_insert(b_matched, bi);
               break;
             }
-            break __ring_match20;
+            break __ring_match21;
           }
-          break __ring_match20;
+          break __ring_match21;
         }
       }
       bi = (bi + 1);
@@ -684,10 +716,10 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
     const names = List_join(b_unmatched.map((function(e) { return types$effect_kind_name(e); })), ", ");
     unify_error_msg(`effect mismatch: effects [${names}] not allowed in pure context`, __ring_ev_fail);
   }
-  __ring_match21: {
-    const __ring_m21 = [ra.tail, rb.tail];
-    if (Array.isArray(__ring_m21) && __ring_m21.length === 2 && __ring_m21[0]._tag === "some" && __ring_m21[1]._tag === "some") {
-      const ta = __ring_m21[0]._0; const tb = __ring_m21[1]._0;
+  __ring_match22: {
+    const __ring_m22 = [ra.tail, rb.tail];
+    if (Array.isArray(__ring_m22) && __ring_m22.length === 2 && __ring_m22[0]._tag === "some" && __ring_m22[1]._tag === "some") {
+      const ta = __ring_m22[0]._0; const tb = __ring_m22[1]._0;
       if ((ta === tb)) {
         if (((List_len(a_unmatched) > 0) ? true : (List_len(b_unmatched) > 0))) {
           const fresh = env$TypeEnv_fresh_var_id(env);
@@ -737,10 +769,10 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
           }
         }
       }
-      break __ring_match21;
+      break __ring_match22;
     }
-    if (Array.isArray(__ring_m21) && __ring_m21.length === 2 && __ring_m21[0]._tag === "none" && __ring_m21[1]._tag === "some") {
-      const tb = __ring_m21[1]._0;
+    if (Array.isArray(__ring_m22) && __ring_m22.length === 2 && __ring_m22[0]._tag === "none" && __ring_m22[1]._tag === "some") {
+      const tb = __ring_m22[1]._0;
       if ((List_len(a_unmatched) > 0)) {
         const row_for_b_tail = types$Type_EffectRowType(a_unmatched, Option_none);
         if (occurs_in(tb, row_for_b_tail, s)) {
@@ -748,10 +780,10 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
         }
         union_find$uf_insert(s, tb, row_for_b_tail);
       }
-      break __ring_match21;
+      break __ring_match22;
     }
-    if (Array.isArray(__ring_m21) && __ring_m21.length === 2 && __ring_m21[0]._tag === "some" && __ring_m21[1]._tag === "none") {
-      const ta = __ring_m21[0]._0;
+    if (Array.isArray(__ring_m22) && __ring_m22.length === 2 && __ring_m22[0]._tag === "some" && __ring_m22[1]._tag === "none") {
+      const ta = __ring_m22[0]._0;
       if ((List_len(b_unmatched) > 0)) {
         const row_for_a_tail = types$Type_EffectRowType(b_unmatched, Option_none);
         if (occurs_in(ta, row_for_a_tail, s)) {
@@ -759,12 +791,12 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
         }
         union_find$uf_insert(s, ta, row_for_a_tail);
       }
-      break __ring_match21;
+      break __ring_match22;
     }
-    if (Array.isArray(__ring_m21) && __ring_m21.length === 2 && __ring_m21[0]._tag === "none" && __ring_m21[1]._tag === "none") {
-      break __ring_match21;
+    if (Array.isArray(__ring_m22) && __ring_m22.length === 2 && __ring_m22[0]._tag === "none" && __ring_m22[1]._tag === "none") {
+      break __ring_match22;
     }
-    __match_fail(__ring_m21);
+    __match_fail(__ring_m22);
   }
   return s;
 }
@@ -772,55 +804,43 @@ function unify_effect_rows(a, b, subst, env, __ring_ev_fail) {
 function unify(t1, t2, subst, env, __ring_ev_fail) {
   const a = env$apply_subst(subst, t1);
   const b = env$apply_subst(subst, t2);
-  __ring_match22: {
-    const __ring_m22 = a;
-    if (__ring_m22._tag === "ErrorType") {
-      return subst;
-      break __ring_match22;
-    }
-    break __ring_match22;
-  }
   __ring_match23: {
-    const __ring_m23 = b;
+    const __ring_m23 = a;
     if (__ring_m23._tag === "ErrorType") {
       return subst;
       break __ring_match23;
     }
     break __ring_match23;
   }
+  __ring_match24: {
+    const __ring_m24 = b;
+    if (__ring_m24._tag === "ErrorType") {
+      return subst;
+      break __ring_match24;
+    }
+    break __ring_match24;
+  }
   if ((is_any(a) ? true : is_any(b))) {
     return subst;
   }
   const va = var_id(a);
   const vb = var_id(b);
-  __ring_match24: {
-    const __ring_m24 = [va, vb];
-    if (Array.isArray(__ring_m24) && __ring_m24.length === 2 && __ring_m24[0]._tag === "some" && __ring_m24[1]._tag === "some") {
-      const ia = __ring_m24[0]._0; const ib = __ring_m24[1]._0;
+  __ring_match25: {
+    const __ring_m25 = [va, vb];
+    if (Array.isArray(__ring_m25) && __ring_m25.length === 2 && __ring_m25[0]._tag === "some" && __ring_m25[1]._tag === "some") {
+      const ia = __ring_m25[0]._0; const ib = __ring_m25[1]._0;
       if ((ia === ib)) {
         return subst;
       }
-      break __ring_match24;
-    }
-    break __ring_match24;
-  }
-  __ring_match25: {
-    const __ring_m25 = va;
-    if (__ring_m25._tag === "some") {
-      const id = __ring_m25._0;
-      return bind_var(id, b, t1, t2, subst, __ring_ev_fail);
       break __ring_match25;
     }
-    if (__ring_m25._tag === "none") {
-      break __ring_match25;
-    }
-    __match_fail(__ring_m25);
+    break __ring_match25;
   }
   __ring_match26: {
-    const __ring_m26 = vb;
+    const __ring_m26 = va;
     if (__ring_m26._tag === "some") {
       const id = __ring_m26._0;
-      return bind_var(id, a, t1, t2, subst, __ring_ev_fail);
+      return bind_var(id, b, t1, t2, subst, __ring_ev_fail);
       break __ring_match26;
     }
     if (__ring_m26._tag === "none") {
@@ -828,33 +848,45 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
     }
     __match_fail(__ring_m26);
   }
+  __ring_match27: {
+    const __ring_m27 = vb;
+    if (__ring_m27._tag === "some") {
+      const id = __ring_m27._0;
+      return bind_var(id, a, t1, t2, subst, __ring_ev_fail);
+      break __ring_match27;
+    }
+    if (__ring_m27._tag === "none") {
+      break __ring_match27;
+    }
+    __match_fail(__ring_m27);
+  }
   if ((is_never(a) ? true : is_never(b))) {
     return subst;
   }
-  __ring_match27: {
-    const __ring_m27 = [a, b];
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "IntType" && __ring_m27[1]._tag === "IntType") {
+  __ring_match28: {
+    const __ring_m28 = [a, b];
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "IntType" && __ring_m28[1]._tag === "IntType") {
       return subst;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "FloatType" && __ring_m27[1]._tag === "FloatType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "FloatType" && __ring_m28[1]._tag === "FloatType") {
       return subst;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "StrType" && __ring_m27[1]._tag === "StrType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "StrType" && __ring_m28[1]._tag === "StrType") {
       return subst;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "BoolType" && __ring_m27[1]._tag === "BoolType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "BoolType" && __ring_m28[1]._tag === "BoolType") {
       return subst;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "UnitType" && __ring_m27[1]._tag === "UnitType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "UnitType" && __ring_m28[1]._tag === "UnitType") {
       return subst;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "FnType" && __ring_m27[1]._tag === "FnType") {
-      const pa = __ring_m27[0].params; const ra = __ring_m27[0].return_type; const ea = __ring_m27[0].effects; const pb = __ring_m27[1].params; const rb = __ring_m27[1].return_type; const eb = __ring_m27[1].effects;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "FnType" && __ring_m28[1]._tag === "FnType") {
+      const pa = __ring_m28[0].params; const ra = __ring_m28[0].return_type; const ea = __ring_m28[0].effects; const pb = __ring_m28[1].params; const rb = __ring_m28[1].return_type; const eb = __ring_m28[1].effects;
       if ((List_len(pa) !== List_len(pb))) {
         unify_error(t1, t2, Option_some(`parameter count mismatch: ${List_len(pa)} vs ${List_len(pb)}`), __ring_ev_fail);
       }
@@ -867,10 +899,10 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
       s = unify(ra, rb, s, env, __ring_ev_fail);
       s = unify_effect_rows(ea, eb, s, env, __ring_ev_fail);
       return s;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "StructType" && __ring_m27[1]._tag === "StructType") {
-      const na = __ring_m27[0].name; const tpa = __ring_m27[0].type_params; const nb = __ring_m27[1].name; const tpb = __ring_m27[1].type_params;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "StructType" && __ring_m28[1]._tag === "StructType") {
+      const na = __ring_m28[0].name; const tpa = __ring_m28[0].type_params; const nb = __ring_m28[1].name; const tpb = __ring_m28[1].type_params;
       if ((na !== nb)) {
         unify_error(t1, t2, Option_some("different struct types"), __ring_ev_fail);
       }
@@ -884,10 +916,10 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "EnumType" && __ring_m27[1]._tag === "EnumType") {
-      const na = __ring_m27[0].name; const tpa = __ring_m27[0].type_params; const nb = __ring_m27[1].name; const tpb = __ring_m27[1].type_params;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "EnumType" && __ring_m28[1]._tag === "EnumType") {
+      const na = __ring_m28[0].name; const tpa = __ring_m28[0].type_params; const nb = __ring_m28[1].name; const tpb = __ring_m28[1].type_params;
       if ((na !== nb)) {
         unify_error(t1, t2, Option_some("different enum types"), __ring_ev_fail);
       }
@@ -901,10 +933,10 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "GenericType" && __ring_m27[1]._tag === "GenericType") {
-      const ba = __ring_m27[0].base; const aa = __ring_m27[0].args; const bb = __ring_m27[1].base; const ab = __ring_m27[1].args;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "GenericType" && __ring_m28[1]._tag === "GenericType") {
+      const ba = __ring_m28[0].base; const aa = __ring_m28[0].args; const bb = __ring_m28[1].base; const ab = __ring_m28[1].args;
       let s = unify(ba, bb, subst, env, __ring_ev_fail);
       if ((List_len(aa) !== List_len(ab))) {
         unify_error(t1, t2, Option_some("different type argument counts"), __ring_ev_fail);
@@ -915,19 +947,19 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "RecordType" && __ring_m27[1]._tag === "RecordType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "RecordType" && __ring_m28[1]._tag === "RecordType") {
       return unify_record_rows(a, b, subst, env, __ring_ev_fail);
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "EffectRowType" && __ring_m27[1]._tag === "EffectRowType") {
-      const ea = __ring_m27[0].effects; const ta = __ring_m27[0].tail; const eb = __ring_m27[1].effects; const tb = __ring_m27[1].tail;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "EffectRowType" && __ring_m28[1]._tag === "EffectRowType") {
+      const ea = __ring_m28[0].effects; const ta = __ring_m28[0].tail; const eb = __ring_m28[1].effects; const tb = __ring_m28[1].tail;
       return unify_effect_rows(new types$EffectRow(ea, ta), new types$EffectRow(eb, tb), subst, env, __ring_ev_fail);
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "TupleType" && __ring_m27[1]._tag === "TupleType") {
-      const ea = __ring_m27[0].elements; const eb = __ring_m27[1].elements;
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "TupleType" && __ring_m28[1]._tag === "TupleType") {
+      const ea = __ring_m28[0].elements; const eb = __ring_m28[1].elements;
       if ((List_len(ea) !== List_len(eb))) {
         unify_error(t1, t2, Option_some(`tuple arity mismatch: ${List_len(ea)} vs ${List_len(eb)}`), __ring_ev_fail);
       }
@@ -938,49 +970,17 @@ function unify(t1, t2, subst, env, __ring_ev_fail) {
         i = (i + 1);
       }
       return s;
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "StructType" && __ring_m27[1]._tag === "RecordType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "StructType" && __ring_m28[1]._tag === "RecordType") {
       return unify_struct_with_record(a, b, subst, env, __ring_ev_fail);
-      break __ring_match27;
+      break __ring_match28;
     }
-    if (Array.isArray(__ring_m27) && __ring_m27.length === 2 && __ring_m27[0]._tag === "RecordType" && __ring_m27[1]._tag === "StructType") {
+    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "RecordType" && __ring_m28[1]._tag === "StructType") {
       return unify_struct_with_record(b, a, subst, env, __ring_ev_fail);
-      break __ring_match27;
+      break __ring_match28;
     }
     return unify_error(t1, t2, Option_none, __ring_ev_fail);
-    break __ring_match27;
-  }
-}
-
-function unify_effect_params(a, b, subst, env, __ring_ev_fail) {
-  __ring_match28: {
-    const __ring_m28 = [a, b];
-    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "FailEffect" && __ring_m28[1]._tag === "FailEffect") {
-      const et_a = __ring_m28[0].error_type; const et_b = __ring_m28[1].error_type;
-      return unify(et_a, et_b, subst, env, __ring_ev_fail);
-      break __ring_match28;
-    }
-    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "MutEffect" && __ring_m28[1]._tag === "MutEffect") {
-      const sa = __ring_m28[0].state_type; const sb = __ring_m28[1].state_type;
-      return unify(sa, sb, subst, env, __ring_ev_fail);
-      break __ring_match28;
-    }
-    if (Array.isArray(__ring_m28) && __ring_m28.length === 2 && __ring_m28[0]._tag === "CustomEffect" && __ring_m28[1]._tag === "CustomEffect") {
-      const name = __ring_m28[0].name; const ta_a = __ring_m28[0].type_args; const ta_b = __ring_m28[1].type_args;
-      if ((List_len(ta_a) !== List_len(ta_b))) {
-        unify_error_msg(`effect '${name}' type argument count mismatch: ${List_len(ta_a)} vs ${List_len(ta_b)}`, __ring_ev_fail);
-      }
-      let s = subst;
-      let i = 0;
-      while ((i < List_len(ta_a))) {
-        s = unify(Option_unwrap_or(List_get(ta_a, i), types$UNIT), Option_unwrap_or(List_get(ta_b, i), types$UNIT), s, env, __ring_ev_fail);
-        i = (i + 1);
-      }
-      return s;
-      break __ring_match28;
-    }
-    return subst;
     break __ring_match28;
   }
 }

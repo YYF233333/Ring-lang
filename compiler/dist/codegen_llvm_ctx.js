@@ -1,6 +1,6 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
-import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, effect_kind_name as types$effect_kind_name, effects_match_kind as types$effects_match_kind, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, effects_same_kind as types$effects_same_kind, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
-import { dict_instance_name as hir$dict_instance_name, variant_js_name as hir$variant_js_name, trait_dict_name as hir$trait_dict_name, evidence_param_name as hir$evidence_param_name, default_evidence_name as hir$default_evidence_name, effect_op_slot as hir$effect_op_slot, trait_bound_param_name as hir$trait_bound_param_name, default_method_self_name as hir$default_method_self_name, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, hexpr_type as hir$hexpr_type, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, collect_extern_type_names as hir$collect_extern_type_names, is_extern_handle_type as hir$is_extern_handle_type, is_rc_excluded_type as hir$is_rc_excluded_type, type_contains_extern_handle as hir$type_contains_extern_handle, is_borrow_returning_call as hir$is_borrow_returning_call, is_fresh_owned_bool_value as hir$is_fresh_owned_bool_value, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, STR_METHODS as hir$STR_METHODS, INT_METHODS as hir$INT_METHODS, FLOAT_METHODS as hir$FLOAT_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, SET_HOF_METHODS as hir$SET_HOF_METHODS, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, HParam as hir$HParam, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, DictRef_Static as hir$DictRef_Static, HDictDef as hir$HDictDef, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, DictDispatchInfo as hir$DictDispatchInfo, HStructFieldInit as hir$HStructFieldInit, HMatchArm as hir$HMatchArm, HEffectHandler as hir$HEffectHandler, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HExpr_DictConstruct as hir$HExpr_DictConstruct, HExpr_Clone as hir$HExpr_Clone, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStructField as hir$HStructField, HEnumVariant as hir$HEnumVariant, HEffectOp as hir$HEffectOp, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, HAssocType as hir$HAssocType, HSigMember as hir$HSigMember, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, DerivedField as hir$DerivedField, DerivedVariant as hir$DerivedVariant, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, DerivedImpl as hir$DerivedImpl, HProgram as hir$HProgram, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug, __HDictDef_Clone as hir$__HDictDef_Clone, __HDictDef_Debug as hir$__HDictDef_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug } from "./hir.js";
+import { ANY as types$ANY, BOOL as types$BOOL, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_INT as types$BUILTIN_INT, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, EMPTY_ROW as types$EMPTY_ROW, FLOAT as types$FLOAT, INT as types$INT, NEVER as types$NEVER, STR as types$STR, UNIT as types$UNIT, effect_kind_name as types$effect_kind_name, effect_row as types$effect_row, effect_row_to_string as types$effect_row_to_string, effect_to_string as types$effect_to_string, effects_equal as types$effects_equal, effects_match_kind as types$effects_match_kind, effects_same_kind as types$effects_same_kind, is_list_type as types$is_list_type, is_map_type as types$is_map_type, is_option_type as types$is_option_type, is_set_type as types$is_set_type, list_element as types$list_element, make_list_type as types$make_list_type, make_map_type as types$make_map_type, make_option_type as types$make_option_type, make_set_type as types$make_set_type, open_effect_row as types$open_effect_row, option_inner as types$option_inner, row_contains as types$row_contains, row_merge as types$row_merge, type_to_builtin_name as types$type_to_builtin_name, type_to_string as types$type_to_string, types_equal as types$types_equal, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, EnumVariant as types$EnumVariant, RecordField as types$RecordField, RowMergeResult as types$RowMergeResult, StructField as types$StructField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType } from "./types.js";
+import { BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, FLOAT_METHODS as hir$FLOAT_METHODS, INT_METHODS as hir$INT_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, SET_HOF_METHODS as hir$SET_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, STR_METHODS as hir$STR_METHODS, collect_extern_type_names as hir$collect_extern_type_names, default_evidence_name as hir$default_evidence_name, default_method_self_name as hir$default_method_self_name, dict_instance_name as hir$dict_instance_name, effect_op_slot as hir$effect_op_slot, evidence_param_name as hir$evidence_param_name, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, hexpr_type as hir$hexpr_type, is_borrow_returning_call as hir$is_borrow_returning_call, is_extern_handle_type as hir$is_extern_handle_type, is_fresh_owned_bool_value as hir$is_fresh_owned_bool_value, is_rc_excluded_type as hir$is_rc_excluded_type, trait_bound_param_name as hir$trait_bound_param_name, trait_dict_name as hir$trait_dict_name, type_contains_extern_handle as hir$type_contains_extern_handle, variant_js_name as hir$variant_js_name, DerivedField as hir$DerivedField, DerivedImpl as hir$DerivedImpl, DerivedVariant as hir$DerivedVariant, DictDispatchInfo as hir$DictDispatchInfo, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, DictRef_Static as hir$DictRef_Static, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, HAssocType as hir$HAssocType, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, HDictDef as hir$HDictDef, HEffectHandler as hir$HEffectHandler, HEffectOp as hir$HEffectOp, HEnumVariant as hir$HEnumVariant, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HExpr_DictConstruct as hir$HExpr_DictConstruct, HExpr_Clone as hir$HExpr_Clone, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HMatchArm as hir$HMatchArm, HParam as hir$HParam, HProgram as hir$HProgram, HSigMember as hir$HSigMember, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HStructField as hir$HStructField, HStructFieldInit as hir$HStructFieldInit, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __HDictDef_Clone as hir$__HDictDef_Clone, __HDictDef_Debug as hir$__HDictDef_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug } from "./hir.js";
 
 
 
@@ -330,58 +330,110 @@ const RING_TYPEID_DICT_STATIC = 16;
 
 const RING_TYPEID_DICT_DYN = 17;
 
-function llvm_mangle_fn(name) {
-  return `ring_${name}`;
-}
-
-function llvm_mangle_fn_with_prefix(prefix, name) {
-  return `ring_${prefix}$$_${name}`;
-}
-
-function llvm_mangle_method(type_name, method_name) {
-  return `ring_${type_name}_${method_name}`;
-}
-
-function llvm_resolve_fn(ctx, name) {
-  __ring_match6: {
-    const __ring_m6 = _Map_get(ctx.imports_map, name);
-    if (__ring_m6._tag === "some") {
-      const qualified = __ring_m6._0;
-      return qualified;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "none") {
-      __ring_match7: {
-        const __ring_m7 = ctx.module_prefix;
-        if (__ring_m7._tag === "some") {
-          const prefix = __ring_m7._0;
-          if (_Set_contains(ctx.local_names, name, __Str_Eq)) {
-            return llvm_mangle_fn_with_prefix(prefix, name);
-          } else {
-            return llvm_mangle_fn(name);
-          }
-          break __ring_match7;
-        }
-        if (__ring_m7._tag === "none") {
-          return llvm_mangle_fn(name);
-          break __ring_match7;
-        }
-        __match_fail(__ring_m7);
-      }
-      break __ring_match6;
-    }
-    __match_fail(__ring_m6);
+function build_entry_alloca(ctx, ty, name) {
+  const current_bb = LLVMGetInsertBlock(ctx.builder);
+  const fn_val = LLVMGetBasicBlockParent(current_bb);
+  const entry_bb = LLVMGetEntryBasicBlock(fn_val);
+  const first_instr = LLVMGetFirstInstruction(entry_bb);
+  if ((LLVMIsNullPtr(first_instr) === 0)) {
+    LLVMPositionBuilderBefore(ctx.builder, first_instr);
+  } else {
+    LLVMPositionBuilderAtEnd(ctx.builder, entry_bb);
   }
-}
-
-function llvm_resolve_method(ctx, type_name, method_name) {
-  return llvm_mangle_method(type_name, method_name);
+  const alloca = LLVMBuildAlloca(ctx.builder, ty, name);
+  LLVMPositionBuilderAtEnd(ctx.builder, current_bb);
+  return alloca;
 }
 
 function fresh_name(ctx, prefix) {
   const n = ctx.tmp_counter;
   ctx.tmp_counter = (ctx.tmp_counter + 1);
   return `${prefix}${n}`;
+}
+
+function get_builtin_typeid(ty) {
+  __ring_match6: {
+    const __ring_m6 = ty;
+    if (__ring_m6._tag === "IntType") {
+      return 0;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "FloatType") {
+      return 1;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "BoolType") {
+      return 2;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "StrType") {
+      return 3;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "UnitType") {
+      return 9;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "TupleType") {
+      return 10;
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "StructType") {
+      const name = __ring_m6.name;
+      if ((name === "List")) {
+        return 4;
+      } else {
+        if ((name === "Map")) {
+          return 5;
+        } else {
+          if ((name === "Set")) {
+            return 6;
+          } else {
+            if ((name === "StringBuilder")) {
+              return 13;
+            } else {
+              return (-1);
+            }
+          }
+        }
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "EnumType") {
+      const name = __ring_m6.name;
+      if ((name === "Option")) {
+        return 8;
+      } else {
+        return (-1);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "FnType") {
+      return 7;
+      break __ring_match6;
+    }
+    return (-1);
+    break __ring_match6;
+  }
+}
+
+function get_or_assign_typeid(ctx, type_name) {
+  __ring_match7: {
+    const __ring_m7 = _Map_get(ctx.type_to_typeid, type_name);
+    if (__ring_m7._tag === "some") {
+      const id = __ring_m7._0;
+      return id;
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "none") {
+      const id = ctx.next_user_typeid;
+      ctx.next_user_typeid = (id + 1);
+      _Map_insert(ctx.type_to_typeid, type_name, id);
+      return id;
+      break __ring_match7;
+    }
+    __match_fail(__ring_m7);
+  }
 }
 
 function get_or_declare_runtime_fn(ctx, name, param_types, ret_type) {
@@ -420,104 +472,52 @@ function get_rt_fn_type(ctx, name) {
   }
 }
 
-function get_or_assign_typeid(ctx, type_name) {
+function llvm_mangle_fn(name) {
+  return `ring_${name}`;
+}
+
+function llvm_mangle_fn_with_prefix(prefix, name) {
+  return `ring_${prefix}$$_${name}`;
+}
+
+function llvm_mangle_method(type_name, method_name) {
+  return `ring_${type_name}_${method_name}`;
+}
+
+function llvm_resolve_fn(ctx, name) {
   __ring_match10: {
-    const __ring_m10 = _Map_get(ctx.type_to_typeid, type_name);
+    const __ring_m10 = _Map_get(ctx.imports_map, name);
     if (__ring_m10._tag === "some") {
-      const id = __ring_m10._0;
-      return id;
+      const qualified = __ring_m10._0;
+      return qualified;
       break __ring_match10;
     }
     if (__ring_m10._tag === "none") {
-      const id = ctx.next_user_typeid;
-      ctx.next_user_typeid = (id + 1);
-      _Map_insert(ctx.type_to_typeid, type_name, id);
-      return id;
+      __ring_match11: {
+        const __ring_m11 = ctx.module_prefix;
+        if (__ring_m11._tag === "some") {
+          const prefix = __ring_m11._0;
+          if (_Set_contains(ctx.local_names, name, __Str_Eq)) {
+            return llvm_mangle_fn_with_prefix(prefix, name);
+          } else {
+            return llvm_mangle_fn(name);
+          }
+          break __ring_match11;
+        }
+        if (__ring_m11._tag === "none") {
+          return llvm_mangle_fn(name);
+          break __ring_match11;
+        }
+        __match_fail(__ring_m11);
+      }
       break __ring_match10;
     }
     __match_fail(__ring_m10);
   }
 }
 
-function get_builtin_typeid(ty) {
-  __ring_match11: {
-    const __ring_m11 = ty;
-    if (__ring_m11._tag === "IntType") {
-      return 0;
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "FloatType") {
-      return 1;
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "BoolType") {
-      return 2;
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "StrType") {
-      return 3;
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "UnitType") {
-      return 9;
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "TupleType") {
-      return 10;
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "StructType") {
-      const name = __ring_m11.name;
-      if ((name === "List")) {
-        return 4;
-      } else {
-        if ((name === "Map")) {
-          return 5;
-        } else {
-          if ((name === "Set")) {
-            return 6;
-          } else {
-            if ((name === "StringBuilder")) {
-              return 13;
-            } else {
-              return (-1);
-            }
-          }
-        }
-      }
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "EnumType") {
-      const name = __ring_m11.name;
-      if ((name === "Option")) {
-        return 8;
-      } else {
-        return (-1);
-      }
-      break __ring_match11;
-    }
-    if (__ring_m11._tag === "FnType") {
-      return 7;
-      break __ring_match11;
-    }
-    return (-1);
-    break __ring_match11;
-  }
-}
-
-function build_entry_alloca(ctx, ty, name) {
-  const current_bb = LLVMGetInsertBlock(ctx.builder);
-  const fn_val = LLVMGetBasicBlockParent(current_bb);
-  const entry_bb = LLVMGetEntryBasicBlock(fn_val);
-  const first_instr = LLVMGetFirstInstruction(entry_bb);
-  if ((LLVMIsNullPtr(first_instr) === 0)) {
-    LLVMPositionBuilderBefore(ctx.builder, first_instr);
-  } else {
-    LLVMPositionBuilderAtEnd(ctx.builder, entry_bb);
-  }
-  const alloca = LLVMBuildAlloca(ctx.builder, ty, name);
-  LLVMPositionBuilderAtEnd(ctx.builder, current_bb);
-  return alloca;
+function llvm_resolve_method(ctx, type_name, method_name) {
+  return llvm_mangle_method(type_name, method_name);
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
@@ -530,6 +530,11 @@ function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
 }
 const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
 
+function __EnumVariantInfo_Clone_clone(self) {
+  return new EnumVariantInfo(self.tag, self.field_count, __List_Clone.clone(self.field_names, __Str_Clone), __List_Clone.clone(self.field_rc_skip, __Bool_Clone));
+}
+const __EnumVariantInfo_Clone = { clone: __EnumVariantInfo_Clone_clone };
+
 function __ListIterator_Clone_clone(self, __ring_T_Clone) {
   return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
 }
@@ -539,11 +544,6 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
   return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
-
-function __EnumVariantInfo_Clone_clone(self) {
-  return new EnumVariantInfo(self.tag, self.field_count, __List_Clone.clone(self.field_names, __Str_Clone), __List_Clone.clone(self.field_rc_skip, __Bool_Clone));
-}
-const __EnumVariantInfo_Clone = { clone: __EnumVariantInfo_Clone_clone };
 
 function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   switch (self._tag) {
@@ -567,6 +567,11 @@ function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
 }
 const __Result_Ord = { cmp: __Result_Ord_cmp };
 
+function __EnumVariantInfo_Debug_debug(self) {
+  return "EnumVariantInfo { " + "tag: " + String(self.tag) + ", " + "field_count: " + String(self.field_count) + ", " + "field_names: " + __List_Debug.debug(self.field_names, __Str_Debug) + ", " + "field_rc_skip: " + __List_Debug.debug(self.field_rc_skip, __Bool_Debug) + " }";
+}
+const __EnumVariantInfo_Debug = { debug: __EnumVariantInfo_Debug_debug };
+
 function __ListIterator_Debug_debug(self, __ring_T_Debug) {
   return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
@@ -576,11 +581,6 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
   return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
-function __EnumVariantInfo_Debug_debug(self) {
-  return "EnumVariantInfo { " + "tag: " + String(self.tag) + ", " + "field_count: " + String(self.field_count) + ", " + "field_names: " + __List_Debug.debug(self.field_names, __Str_Debug) + ", " + "field_rc_skip: " + __List_Debug.debug(self.field_rc_skip, __Bool_Debug) + " }";
-}
-const __EnumVariantInfo_Debug = { debug: __EnumVariantInfo_Debug_debug };
 
 function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
   switch (self._tag) {

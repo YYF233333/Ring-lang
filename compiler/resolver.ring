@@ -150,7 +150,9 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
 
     // Topological sort (Kahn's algorithm)
     let mut dep_count: Map<Str, Int> = map_new()
-    for entry in dependencies.entries() {
+    let mut sorted_dependencies = dependencies.entries()
+    sorted_dependencies.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_dependencies {
         let (key, deps) = entry
         dep_count.insert(key, deps.len())
     }
@@ -158,7 +160,9 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
     let mut topo_order: List<Str> = []
     let mut ready: List<Str> = []
 
-    for entry in dep_count.entries() {
+    let mut sorted_dep_count = dep_count.entries()
+    sorted_dep_count.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_dep_count {
         let (key, count) = entry
         if count == 0 { ready.push(key) }
     }
@@ -167,7 +171,7 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
         match ready.shift() {
             some(node) => {
                 topo_order.push(node)
-                for entry in dependencies.entries() {
+                for entry in sorted_dependencies {
                     let (key, deps) = entry
                     if deps.contains(node) {
                         match dep_count.get(key) {
@@ -188,7 +192,9 @@ pub fn build_module_graph(entry_file: Str) -> ModuleGraph? {
     if topo_order.len() != modules.len() {
         // Cycle detected — find and report the cycle path
         let mut cycle_nodes: List<Str> = []
-        for entry in modules.entries() {
+        let mut sorted_modules = modules.entries()
+        sorted_modules.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        for entry in sorted_modules {
             let (key, _) = entry
             if !topo_order.contains(key) {
                 cycle_nodes.push(key)

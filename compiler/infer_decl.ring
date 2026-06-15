@@ -904,7 +904,9 @@ fn expand_delegate_impls(
 
                                 // #128: Build HAssocType list from field type's assoc_types
                                 let mut h_assoc_types: List<HAssocType> = []
-                                for entry in field_assoc_map.entries() {
+                                let mut sorted_assoc = field_assoc_map.entries()
+                                sorted_assoc.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                                for entry in sorted_assoc {
                                     let (aname, aty) = entry
                                     h_assoc_types.push(HAssocType { name: aname, bounds: [], concrete: some(aty) })
                                 }
@@ -1164,7 +1166,9 @@ fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     }
     let mut declared_names: Set<Str> = set_new()
     for tp in type_params { declared_names.insert(tp.name) }
-    for entry in ctx.type_param_scope.entries() {
+    let mut sorted_tp_scope2 = ctx.type_param_scope.entries()
+    sorted_tp_scope2.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_tp_scope2 {
         let (tpname, tv) = entry
         if !saved_tp_scope.contains_key(tpname) && !declared_names.contains(tpname) {
             match tv {
@@ -1733,7 +1737,9 @@ fn check_default_effect_cycles(mut ctx: InferCtx, decls: List<Decl>) {
     let mut state: Map<Str, Int> = map_new()
     let mut path: List<Str> = []
 
-    for entry in ctx.effect_default_deps.entries() {
+    let mut sorted_edd = ctx.effect_default_deps.entries()
+    sorted_edd.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_edd {
         let (eff_name, _) = entry
         if !state.contains_key(eff_name) {
             dfs_detect_cycle(ctx, eff_name, state, path, effect_spans)

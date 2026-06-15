@@ -1,8 +1,8 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
-import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, AssocConstraint as ast$AssocConstraint, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
-import { token_kind_value as lexer$token_kind_value, new_lexer as lexer$new_lexer, TokenKind_TkFn as lexer$TokenKind_TkFn, TokenKind_TkLet as lexer$TokenKind_TkLet, TokenKind_TkMut as lexer$TokenKind_TkMut, TokenKind_TkConst as lexer$TokenKind_TkConst, TokenKind_TkStruct as lexer$TokenKind_TkStruct, TokenKind_TkEnum as lexer$TokenKind_TkEnum, TokenKind_TkMatch as lexer$TokenKind_TkMatch, TokenKind_TkImpl as lexer$TokenKind_TkImpl, TokenKind_TkEffect as lexer$TokenKind_TkEffect, TokenKind_TkHandle as lexer$TokenKind_TkHandle, TokenKind_TkWith as lexer$TokenKind_TkWith, TokenKind_TkIf as lexer$TokenKind_TkIf, TokenKind_TkElse as lexer$TokenKind_TkElse, TokenKind_TkCatch as lexer$TokenKind_TkCatch, TokenKind_TkTest as lexer$TokenKind_TkTest, TokenKind_TkReturn as lexer$TokenKind_TkReturn, TokenKind_TkFor as lexer$TokenKind_TkFor, TokenKind_TkIn as lexer$TokenKind_TkIn, TokenKind_TkPub as lexer$TokenKind_TkPub, TokenKind_TkWhere as lexer$TokenKind_TkWhere, TokenKind_TkTrue as lexer$TokenKind_TkTrue, TokenKind_TkFalse as lexer$TokenKind_TkFalse, TokenKind_TkTrait as lexer$TokenKind_TkTrait, TokenKind_TkTry as lexer$TokenKind_TkTry, TokenKind_TkWhile as lexer$TokenKind_TkWhile, TokenKind_TkBreak as lexer$TokenKind_TkBreak, TokenKind_TkContinue as lexer$TokenKind_TkContinue, TokenKind_TkLoop as lexer$TokenKind_TkLoop, TokenKind_TkUse as lexer$TokenKind_TkUse, TokenKind_TkAs as lexer$TokenKind_TkAs, TokenKind_TkExtern as lexer$TokenKind_TkExtern, TokenKind_TkMod as lexer$TokenKind_TkMod, TokenKind_TkSuper as lexer$TokenKind_TkSuper, TokenKind_TkSig as lexer$TokenKind_TkSig, TokenKind_TkRequires as lexer$TokenKind_TkRequires, TokenKind_TkIntLit as lexer$TokenKind_TkIntLit, TokenKind_TkFloatLit as lexer$TokenKind_TkFloatLit, TokenKind_TkStringLit as lexer$TokenKind_TkStringLit, TokenKind_TkStringInterpStart as lexer$TokenKind_TkStringInterpStart, TokenKind_TkStringInterpMiddle as lexer$TokenKind_TkStringInterpMiddle, TokenKind_TkStringInterpEnd as lexer$TokenKind_TkStringInterpEnd, TokenKind_TkRawStringLit as lexer$TokenKind_TkRawStringLit, TokenKind_TkIdent as lexer$TokenKind_TkIdent, TokenKind_TkPlus as lexer$TokenKind_TkPlus, TokenKind_TkMinus as lexer$TokenKind_TkMinus, TokenKind_TkStar as lexer$TokenKind_TkStar, TokenKind_TkSlash as lexer$TokenKind_TkSlash, TokenKind_TkPercent as lexer$TokenKind_TkPercent, TokenKind_TkEqEq as lexer$TokenKind_TkEqEq, TokenKind_TkBangEq as lexer$TokenKind_TkBangEq, TokenKind_TkLt as lexer$TokenKind_TkLt, TokenKind_TkGt as lexer$TokenKind_TkGt, TokenKind_TkLtEq as lexer$TokenKind_TkLtEq, TokenKind_TkGtEq as lexer$TokenKind_TkGtEq, TokenKind_TkAmpAmp as lexer$TokenKind_TkAmpAmp, TokenKind_TkPipePipe as lexer$TokenKind_TkPipePipe, TokenKind_TkPipe as lexer$TokenKind_TkPipe, TokenKind_TkBang as lexer$TokenKind_TkBang, TokenKind_TkEq as lexer$TokenKind_TkEq, TokenKind_TkPlusEq as lexer$TokenKind_TkPlusEq, TokenKind_TkMinusEq as lexer$TokenKind_TkMinusEq, TokenKind_TkLParen as lexer$TokenKind_TkLParen, TokenKind_TkRParen as lexer$TokenKind_TkRParen, TokenKind_TkLBrace as lexer$TokenKind_TkLBrace, TokenKind_TkRBrace as lexer$TokenKind_TkRBrace, TokenKind_TkLBracket as lexer$TokenKind_TkLBracket, TokenKind_TkRBracket as lexer$TokenKind_TkRBracket, TokenKind_TkComma as lexer$TokenKind_TkComma, TokenKind_TkColon as lexer$TokenKind_TkColon, TokenKind_TkColonColon as lexer$TokenKind_TkColonColon, TokenKind_TkDot as lexer$TokenKind_TkDot, TokenKind_TkDotDot as lexer$TokenKind_TkDotDot, TokenKind_TkDotDotEq as lexer$TokenKind_TkDotDotEq, TokenKind_TkFatArrow as lexer$TokenKind_TkFatArrow, TokenKind_TkArrow as lexer$TokenKind_TkArrow, TokenKind_TkQuestion as lexer$TokenKind_TkQuestion, TokenKind_TkSemi as lexer$TokenKind_TkSemi, TokenKind_TkEof as lexer$TokenKind_TkEof, TokenKind_TkError as lexer$TokenKind_TkError, Token as lexer$Token, Lexer as lexer$Lexer, __TokenKind_Eq as lexer$__TokenKind_Eq, __TokenKind_Clone as lexer$__TokenKind_Clone, __TokenKind_Ord as lexer$__TokenKind_Ord, __TokenKind_Debug as lexer$__TokenKind_Debug, __Token_Eq as lexer$__Token_Eq, __Token_Clone as lexer$__Token_Clone, __Token_Ord as lexer$__Token_Ord, __Token_Debug as lexer$__Token_Debug, __Lexer_Clone as lexer$__Lexer_Clone, __Lexer_Debug as lexer$__Lexer_Debug, Lexer_tokenize as lexer$Lexer_tokenize, Lexer_next_token as lexer$Lexer_next_token, Lexer_lex_string as lexer$Lexer_lex_string, Lexer_lex_string_continuation as lexer$Lexer_lex_string_continuation, Lexer_lex_string_body as lexer$Lexer_lex_string_body, Lexer_lex_raw_string as lexer$Lexer_lex_raw_string, Lexer_lex_number as lexer$Lexer_lex_number, Lexer_lex_ident as lexer$Lexer_lex_ident, Lexer_lex_punctuation as lexer$Lexer_lex_punctuation, Lexer_skip_whitespace_and_comments as lexer$Lexer_skip_whitespace_and_comments, Lexer_peek as lexer$Lexer_peek, Lexer_advance as lexer$Lexer_advance, Lexer_current_position as lexer$Lexer_current_position, Lexer_make_token as lexer$Lexer_make_token, Lexer_last_frame_depth as lexer$Lexer_last_frame_depth, Lexer_last_frame_span as lexer$Lexer_last_frame_span, Lexer_inc_last_depth as lexer$Lexer_inc_last_depth, Lexer_dec_last_depth as lexer$Lexer_dec_last_depth, Lexer_reset_last_frame as lexer$Lexer_reset_last_frame } from "./lexer.js";
-import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
-import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0105 as codes$E0105, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0409 as codes$E0409, E0410 as codes$E0410, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, W0002 as codes$W0002, error_description as codes$error_description, error_category as codes$error_category } from "./codes.js";
+import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, DestructureBinding as ast$DestructureBinding, EffectExpr as ast$EffectExpr, EffectHandler as ast$EffectHandler, EffectOpDecl as ast$EffectOpDecl, EnumVariantDecl as ast$EnumVariantDecl, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, MatchArm as ast$MatchArm, NamedEnumField as ast$NamedEnumField, NamedImport as ast$NamedImport, NamedPatternField as ast$NamedPatternField, Param as ast$Param, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, Position as ast$Position, Program as ast$Program, RecordTypeField as ast$RecordTypeField, SigMember as ast$SigMember, Span as ast$Span, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, StructFieldDecl as ast$StructFieldDecl, StructFieldInit as ast$StructFieldInit, TypeBound as ast$TypeBound, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, TypeParam as ast$TypeParam, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, UseDecl as ast$UseDecl, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UsePath as ast$UsePath, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug } from "./ast.js";
+import { new_lexer as lexer$new_lexer, token_kind_value as lexer$token_kind_value, Lexer as lexer$Lexer, Token as lexer$Token, TokenKind_TkFn as lexer$TokenKind_TkFn, TokenKind_TkLet as lexer$TokenKind_TkLet, TokenKind_TkMut as lexer$TokenKind_TkMut, TokenKind_TkConst as lexer$TokenKind_TkConst, TokenKind_TkStruct as lexer$TokenKind_TkStruct, TokenKind_TkEnum as lexer$TokenKind_TkEnum, TokenKind_TkMatch as lexer$TokenKind_TkMatch, TokenKind_TkImpl as lexer$TokenKind_TkImpl, TokenKind_TkEffect as lexer$TokenKind_TkEffect, TokenKind_TkHandle as lexer$TokenKind_TkHandle, TokenKind_TkWith as lexer$TokenKind_TkWith, TokenKind_TkIf as lexer$TokenKind_TkIf, TokenKind_TkElse as lexer$TokenKind_TkElse, TokenKind_TkCatch as lexer$TokenKind_TkCatch, TokenKind_TkTest as lexer$TokenKind_TkTest, TokenKind_TkReturn as lexer$TokenKind_TkReturn, TokenKind_TkFor as lexer$TokenKind_TkFor, TokenKind_TkIn as lexer$TokenKind_TkIn, TokenKind_TkPub as lexer$TokenKind_TkPub, TokenKind_TkWhere as lexer$TokenKind_TkWhere, TokenKind_TkTrue as lexer$TokenKind_TkTrue, TokenKind_TkFalse as lexer$TokenKind_TkFalse, TokenKind_TkTrait as lexer$TokenKind_TkTrait, TokenKind_TkTry as lexer$TokenKind_TkTry, TokenKind_TkWhile as lexer$TokenKind_TkWhile, TokenKind_TkBreak as lexer$TokenKind_TkBreak, TokenKind_TkContinue as lexer$TokenKind_TkContinue, TokenKind_TkLoop as lexer$TokenKind_TkLoop, TokenKind_TkUse as lexer$TokenKind_TkUse, TokenKind_TkAs as lexer$TokenKind_TkAs, TokenKind_TkExtern as lexer$TokenKind_TkExtern, TokenKind_TkMod as lexer$TokenKind_TkMod, TokenKind_TkSuper as lexer$TokenKind_TkSuper, TokenKind_TkSig as lexer$TokenKind_TkSig, TokenKind_TkRequires as lexer$TokenKind_TkRequires, TokenKind_TkIntLit as lexer$TokenKind_TkIntLit, TokenKind_TkFloatLit as lexer$TokenKind_TkFloatLit, TokenKind_TkStringLit as lexer$TokenKind_TkStringLit, TokenKind_TkStringInterpStart as lexer$TokenKind_TkStringInterpStart, TokenKind_TkStringInterpMiddle as lexer$TokenKind_TkStringInterpMiddle, TokenKind_TkStringInterpEnd as lexer$TokenKind_TkStringInterpEnd, TokenKind_TkRawStringLit as lexer$TokenKind_TkRawStringLit, TokenKind_TkIdent as lexer$TokenKind_TkIdent, TokenKind_TkPlus as lexer$TokenKind_TkPlus, TokenKind_TkMinus as lexer$TokenKind_TkMinus, TokenKind_TkStar as lexer$TokenKind_TkStar, TokenKind_TkSlash as lexer$TokenKind_TkSlash, TokenKind_TkPercent as lexer$TokenKind_TkPercent, TokenKind_TkEqEq as lexer$TokenKind_TkEqEq, TokenKind_TkBangEq as lexer$TokenKind_TkBangEq, TokenKind_TkLt as lexer$TokenKind_TkLt, TokenKind_TkGt as lexer$TokenKind_TkGt, TokenKind_TkLtEq as lexer$TokenKind_TkLtEq, TokenKind_TkGtEq as lexer$TokenKind_TkGtEq, TokenKind_TkAmpAmp as lexer$TokenKind_TkAmpAmp, TokenKind_TkPipePipe as lexer$TokenKind_TkPipePipe, TokenKind_TkPipe as lexer$TokenKind_TkPipe, TokenKind_TkBang as lexer$TokenKind_TkBang, TokenKind_TkEq as lexer$TokenKind_TkEq, TokenKind_TkPlusEq as lexer$TokenKind_TkPlusEq, TokenKind_TkMinusEq as lexer$TokenKind_TkMinusEq, TokenKind_TkLParen as lexer$TokenKind_TkLParen, TokenKind_TkRParen as lexer$TokenKind_TkRParen, TokenKind_TkLBrace as lexer$TokenKind_TkLBrace, TokenKind_TkRBrace as lexer$TokenKind_TkRBrace, TokenKind_TkLBracket as lexer$TokenKind_TkLBracket, TokenKind_TkRBracket as lexer$TokenKind_TkRBracket, TokenKind_TkComma as lexer$TokenKind_TkComma, TokenKind_TkColon as lexer$TokenKind_TkColon, TokenKind_TkColonColon as lexer$TokenKind_TkColonColon, TokenKind_TkDot as lexer$TokenKind_TkDot, TokenKind_TkDotDot as lexer$TokenKind_TkDotDot, TokenKind_TkDotDotEq as lexer$TokenKind_TkDotDotEq, TokenKind_TkFatArrow as lexer$TokenKind_TkFatArrow, TokenKind_TkArrow as lexer$TokenKind_TkArrow, TokenKind_TkQuestion as lexer$TokenKind_TkQuestion, TokenKind_TkSemi as lexer$TokenKind_TkSemi, TokenKind_TkEof as lexer$TokenKind_TkEof, TokenKind_TkError as lexer$TokenKind_TkError, __Lexer_Clone as lexer$__Lexer_Clone, __Lexer_Debug as lexer$__Lexer_Debug, __Token_Eq as lexer$__Token_Eq, __Token_Clone as lexer$__Token_Clone, __Token_Ord as lexer$__Token_Ord, __Token_Debug as lexer$__Token_Debug, __TokenKind_Eq as lexer$__TokenKind_Eq, __TokenKind_Clone as lexer$__TokenKind_Clone, __TokenKind_Ord as lexer$__TokenKind_Ord, __TokenKind_Debug as lexer$__TokenKind_Debug, Lexer_tokenize as lexer$Lexer_tokenize, Lexer_next_token as lexer$Lexer_next_token, Lexer_lex_string as lexer$Lexer_lex_string, Lexer_lex_string_continuation as lexer$Lexer_lex_string_continuation, Lexer_lex_string_body as lexer$Lexer_lex_string_body, Lexer_lex_raw_string as lexer$Lexer_lex_raw_string, Lexer_lex_number as lexer$Lexer_lex_number, Lexer_lex_ident as lexer$Lexer_lex_ident, Lexer_lex_punctuation as lexer$Lexer_lex_punctuation, Lexer_skip_whitespace_and_comments as lexer$Lexer_skip_whitespace_and_comments, Lexer_peek as lexer$Lexer_peek, Lexer_advance as lexer$Lexer_advance, Lexer_current_position as lexer$Lexer_current_position, Lexer_make_token as lexer$Lexer_make_token, Lexer_last_frame_depth as lexer$Lexer_last_frame_depth, Lexer_last_frame_span as lexer$Lexer_last_frame_span, Lexer_inc_last_depth as lexer$Lexer_inc_last_depth, Lexer_dec_last_depth as lexer$Lexer_dec_last_depth, Lexer_reset_last_frame as lexer$Lexer_reset_last_frame } from "./lexer.js";
+import { make_diag as diagnostics$make_diag, make_diagnostic as diagnostics$make_diagnostic, new_collecting_sink as diagnostics$new_collecting_sink, severity_to_str as diagnostics$severity_to_str, CollectingSink as diagnostics$CollectingSink, Diagnostic as diagnostics$Diagnostic, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, DiagnosticNote as diagnostics$DiagnosticNote, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, Suggestion as diagnostics$Suggestion, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
+import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0105 as codes$E0105, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0409 as codes$E0409, E0410 as codes$E0410, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, W0002 as codes$W0002, error_category as codes$error_category, error_description as codes$error_description } from "./codes.js";
 
 
 
@@ -2099,145 +2099,125 @@ function Parser_parse_param(self) {
   return new ast$Param(name, is_mutable, type_annotation, Parser_make_span(self, start, end));
 }
 
-function infix_precedence(kind) {
-  __ring_match13: {
-    const __ring_m13 = kind;
-    if (__ring_m13._tag === "TkCatch") {
-      return PREC_CATCH;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkPipePipe") {
-      return PREC_LOGIC_OR;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkAmpAmp") {
-      return PREC_LOGIC_AND;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkEqEq") {
-      return PREC_EQUALITY;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkBangEq") {
-      return PREC_EQUALITY;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkLt") {
-      return PREC_COMPARE;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkGt") {
-      return PREC_COMPARE;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkLtEq") {
-      return PREC_COMPARE;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkGtEq") {
-      return PREC_COMPARE;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkDotDot") {
-      return PREC_RANGE;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkDotDotEq") {
-      return PREC_RANGE;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkPlus") {
-      return PREC_ADD_SUB;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkMinus") {
-      return PREC_ADD_SUB;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkStar") {
-      return PREC_MUL_DIV;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkSlash") {
-      return PREC_MUL_DIV;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkPercent") {
-      return PREC_MUL_DIV;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkDot") {
-      return PREC_POSTFIX;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkLParen") {
-      return PREC_POSTFIX;
-      break __ring_match13;
-    }
-    if (__ring_m13._tag === "TkLBracket") {
-      return PREC_POSTFIX;
-      break __ring_match13;
-    }
-    return PREC_NONE;
-    break __ring_match13;
-  }
-}
-
-function str_to_binop(s) {
-  if ((s === "+")) {
-    return ast$BinOp_Add;
-  }
-  if ((s === "-")) {
-    return ast$BinOp_Sub;
-  }
-  if ((s === "*")) {
-    return ast$BinOp_Mul;
-  }
-  if ((s === "/")) {
-    return ast$BinOp_Div;
-  }
-  if ((s === "%")) {
-    return ast$BinOp_Mod;
-  }
-  if ((s === "==")) {
-    return ast$BinOp_Eq;
-  }
-  if ((s === "!=")) {
-    return ast$BinOp_Neq;
-  }
-  if ((s === "<")) {
-    return ast$BinOp_Lt;
-  }
-  if ((s === "<=")) {
-    return ast$BinOp_Lte;
-  }
-  if ((s === ">")) {
-    return ast$BinOp_Gt;
-  }
-  if ((s === ">=")) {
-    return ast$BinOp_Gte;
-  }
-  if ((s === "&&")) {
-    return ast$BinOp_And;
-  }
-  if ((s === "||")) {
-    return ast$BinOp_Or;
-  }
-  return panic(`unreachable: unknown binary operator '${s}'`);
-}
-
-function str_to_unaryop(s) {
-  if ((s === "-")) {
-    return ast$UnaryOp_Neg;
-  }
-  if ((s === "!")) {
-    return ast$UnaryOp_Not;
-  }
-  return panic(`unreachable: unknown unary operator '${s}'`);
-}
-
 function dummy_type_expr() {
   return ast$TypeExpr_Named("", Option_none, [], ast$span_zero());
+}
+
+function expr_span(e) {
+  __ring_match13: {
+    const __ring_m13 = e;
+    if (__ring_m13._tag === "IntLit") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "FloatLit") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "StrLit") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "BoolLit") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Ident") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "BinOp") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "UnaryOp") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Call") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "MethodCall") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "FieldAccess") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "StructLit") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "MatchExpr") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Block") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "IfExpr") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "StringInterp") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "CatchExpr") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "HandleExpr") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Lambda") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "Range") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "ListLit") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "TupleLit") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    if (__ring_m13._tag === "IndexExpr") {
+      const span = __ring_m13.span;
+      return span;
+      break __ring_match13;
+    }
+    __match_fail(__ring_m13);
+  }
 }
 
 function is_decl_start(k) {
@@ -2300,15 +2280,6 @@ function is_decl_start(k) {
   }
 }
 
-function is_uppercase(ch) {
-  const c = Option_unwrap_or(Str_char_code_at(ch, 0), 0);
-  if ((c >= 65)) {
-    return (c <= 90);
-  } else {
-    return false;
-  }
-}
-
 function type_expr_span(te) {
   __ring_match15: {
     const __ring_m15 = te;
@@ -2341,120 +2312,149 @@ function type_expr_span(te) {
   }
 }
 
-function expr_span(e) {
+function infix_precedence(kind) {
   __ring_match16: {
-    const __ring_m16 = e;
-    if (__ring_m16._tag === "IntLit") {
-      const span = __ring_m16.span;
-      return span;
+    const __ring_m16 = kind;
+    if (__ring_m16._tag === "TkCatch") {
+      return PREC_CATCH;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "FloatLit") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkPipePipe") {
+      return PREC_LOGIC_OR;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "StrLit") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkAmpAmp") {
+      return PREC_LOGIC_AND;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "BoolLit") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkEqEq") {
+      return PREC_EQUALITY;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "Ident") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkBangEq") {
+      return PREC_EQUALITY;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "BinOp") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkLt") {
+      return PREC_COMPARE;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "UnaryOp") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkGt") {
+      return PREC_COMPARE;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "Call") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkLtEq") {
+      return PREC_COMPARE;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "MethodCall") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkGtEq") {
+      return PREC_COMPARE;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "FieldAccess") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkDotDot") {
+      return PREC_RANGE;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "StructLit") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkDotDotEq") {
+      return PREC_RANGE;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "MatchExpr") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkPlus") {
+      return PREC_ADD_SUB;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "Block") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkMinus") {
+      return PREC_ADD_SUB;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "IfExpr") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkStar") {
+      return PREC_MUL_DIV;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "StringInterp") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkSlash") {
+      return PREC_MUL_DIV;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "CatchExpr") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkPercent") {
+      return PREC_MUL_DIV;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "HandleExpr") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkDot") {
+      return PREC_POSTFIX;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "Lambda") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkLParen") {
+      return PREC_POSTFIX;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "Range") {
-      const span = __ring_m16.span;
-      return span;
+    if (__ring_m16._tag === "TkLBracket") {
+      return PREC_POSTFIX;
       break __ring_match16;
     }
-    if (__ring_m16._tag === "ListLit") {
-      const span = __ring_m16.span;
-      return span;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "TupleLit") {
-      const span = __ring_m16.span;
-      return span;
-      break __ring_match16;
-    }
-    if (__ring_m16._tag === "IndexExpr") {
-      const span = __ring_m16.span;
-      return span;
-      break __ring_match16;
-    }
-    __match_fail(__ring_m16);
+    return PREC_NONE;
+    break __ring_match16;
+  }
+}
+
+function str_to_binop(s) {
+  if ((s === "+")) {
+    return ast$BinOp_Add;
+  }
+  if ((s === "-")) {
+    return ast$BinOp_Sub;
+  }
+  if ((s === "*")) {
+    return ast$BinOp_Mul;
+  }
+  if ((s === "/")) {
+    return ast$BinOp_Div;
+  }
+  if ((s === "%")) {
+    return ast$BinOp_Mod;
+  }
+  if ((s === "==")) {
+    return ast$BinOp_Eq;
+  }
+  if ((s === "!=")) {
+    return ast$BinOp_Neq;
+  }
+  if ((s === "<")) {
+    return ast$BinOp_Lt;
+  }
+  if ((s === "<=")) {
+    return ast$BinOp_Lte;
+  }
+  if ((s === ">")) {
+    return ast$BinOp_Gt;
+  }
+  if ((s === ">=")) {
+    return ast$BinOp_Gte;
+  }
+  if ((s === "&&")) {
+    return ast$BinOp_And;
+  }
+  if ((s === "||")) {
+    return ast$BinOp_Or;
+  }
+  return panic(`unreachable: unknown binary operator '${s}'`);
+}
+
+function str_to_unaryop(s) {
+  if ((s === "-")) {
+    return ast$UnaryOp_Neg;
+  }
+  if ((s === "!")) {
+    return ast$UnaryOp_Not;
+  }
+  return panic(`unreachable: unknown unary operator '${s}'`);
+}
+
+function is_uppercase(ch) {
+  const c = Option_unwrap_or(Str_char_code_at(ch, 0), 0);
+  if ((c >= 65)) {
+    return (c <= 90);
+  } else {
+    return false;
   }
 }
 
@@ -2526,15 +2526,15 @@ function __ListIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
 
-function __SetIterator_Clone_clone(self, __ring_T_Clone) {
-  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
-}
-const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
-
 function __Parser_Clone_clone(self) {
   return new Parser(__List_Clone.clone(self.tokens, __Token_Clone), self.pos, self.file, __CollectingSink_Clone.clone(self.sink), self.error_count);
 }
 const __Parser_Clone = { clone: __Parser_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   switch (self._tag) {
@@ -2563,15 +2563,15 @@ function __ListIterator_Debug_debug(self, __ring_T_Debug) {
 }
 const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
 
-function __SetIterator_Debug_debug(self, __ring_T_Debug) {
-  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
-}
-const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
 function __Parser_Debug_debug(self) {
   return "Parser { " + "tokens: " + __List_Debug.debug(self.tokens, __Token_Debug) + ", " + "pos: " + String(self.pos) + ", " + "file: " + String(self.file) + ", " + "sink: " + __CollectingSink_Debug.debug(self.sink) + ", " + "error_count: " + String(self.error_count) + " }";
 }
 const __Parser_Debug = { debug: __Parser_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
   switch (self._tag) {

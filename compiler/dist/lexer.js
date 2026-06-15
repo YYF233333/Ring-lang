@@ -1,7 +1,7 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
-import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, AssocConstraint as ast$AssocConstraint, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
-import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
-import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0105 as codes$E0105, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0409 as codes$E0409, E0410 as codes$E0410, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, W0002 as codes$W0002, error_description as codes$error_description, error_category as codes$error_category } from "./codes.js";
+import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, DestructureBinding as ast$DestructureBinding, EffectExpr as ast$EffectExpr, EffectHandler as ast$EffectHandler, EffectOpDecl as ast$EffectOpDecl, EnumVariantDecl as ast$EnumVariantDecl, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, MatchArm as ast$MatchArm, NamedEnumField as ast$NamedEnumField, NamedImport as ast$NamedImport, NamedPatternField as ast$NamedPatternField, Param as ast$Param, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, Position as ast$Position, Program as ast$Program, RecordTypeField as ast$RecordTypeField, SigMember as ast$SigMember, Span as ast$Span, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, StructFieldDecl as ast$StructFieldDecl, StructFieldInit as ast$StructFieldInit, TypeBound as ast$TypeBound, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, TypeParam as ast$TypeParam, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, UseDecl as ast$UseDecl, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UsePath as ast$UsePath, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug } from "./ast.js";
+import { make_diag as diagnostics$make_diag, make_diagnostic as diagnostics$make_diagnostic, new_collecting_sink as diagnostics$new_collecting_sink, severity_to_str as diagnostics$severity_to_str, CollectingSink as diagnostics$CollectingSink, Diagnostic as diagnostics$Diagnostic, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, DiagnosticNote as diagnostics$DiagnosticNote, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, Suggestion as diagnostics$Suggestion, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
+import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0105 as codes$E0105, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0409 as codes$E0409, E0410 as codes$E0410, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, W0002 as codes$W0002, error_category as codes$error_category, error_description as codes$error_description } from "./codes.js";
 
 
 
@@ -807,477 +807,6 @@ function Lexer_reset_last_frame(self, span) {
   return List_push(self.interp_frames, new InterpFrame(0, span));
 }
 
-function token_kind_value(k) {
-  __ring_match10: {
-    const __ring_m10 = k;
-    if (__ring_m10._tag === "TkFn") {
-      return "fn";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkLet") {
-      return "let";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkMut") {
-      return "mut";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkConst") {
-      return "const";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkStruct") {
-      return "struct";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkEnum") {
-      return "enum";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkMatch") {
-      return "match";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkImpl") {
-      return "impl";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkEffect") {
-      return "effect";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkHandle") {
-      return "handle";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkWith") {
-      return "with";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkIf") {
-      return "if";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkElse") {
-      return "else";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkCatch") {
-      return "catch";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkTest") {
-      return "test";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkReturn") {
-      return "return";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkFor") {
-      return "for";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkIn") {
-      return "in";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkPub") {
-      return "pub";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkWhere") {
-      return "where";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkTrue") {
-      return "true";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkFalse") {
-      return "false";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkTrait") {
-      return "trait";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkTry") {
-      return "try";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkWhile") {
-      return "while";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkBreak") {
-      return "break";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkContinue") {
-      return "continue";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkLoop") {
-      return "loop";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkUse") {
-      return "use";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkAs") {
-      return "as";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkExtern") {
-      return "extern";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkMod") {
-      return "mod";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkSuper") {
-      return "super";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkSig") {
-      return "sig";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkRequires") {
-      return "requires";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkIntLit") {
-      return "int_lit";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkFloatLit") {
-      return "float_lit";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkStringLit") {
-      return "string_lit";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkStringInterpStart") {
-      return "string_interp_start";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkStringInterpMiddle") {
-      return "string_interp_middle";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkStringInterpEnd") {
-      return "string_interp_end";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkRawStringLit") {
-      return "raw_string_lit";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkIdent") {
-      return "ident";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkPlus") {
-      return "+";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkMinus") {
-      return "-";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkStar") {
-      return "*";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkSlash") {
-      return "/";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkPercent") {
-      return "%";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkEqEq") {
-      return "==";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkBangEq") {
-      return "!=";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkLt") {
-      return "<";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkGt") {
-      return ">";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkLtEq") {
-      return "<=";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkGtEq") {
-      return ">=";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkAmpAmp") {
-      return "&&";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkPipePipe") {
-      return "||";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkPipe") {
-      return "|";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkBang") {
-      return "!";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkEq") {
-      return "=";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkPlusEq") {
-      return "+=";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkMinusEq") {
-      return "-=";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkLParen") {
-      return "(";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkRParen") {
-      return ")";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkLBrace") {
-      return "{";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkRBrace") {
-      return "}";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkLBracket") {
-      return "[";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkRBracket") {
-      return "]";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkComma") {
-      return ",";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkColon") {
-      return ":";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkColonColon") {
-      return "::";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkDot") {
-      return ".";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkDotDot") {
-      return "..";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkDotDotEq") {
-      return "..=";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkFatArrow") {
-      return "=>";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkArrow") {
-      return "->";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkQuestion") {
-      return "?";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkSemi") {
-      return ";";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkEof") {
-      return "eof";
-      break __ring_match10;
-    }
-    if (__ring_m10._tag === "TkError") {
-      return "error_token";
-      break __ring_match10;
-    }
-    __match_fail(__ring_m10);
-  }
-}
-
-function keyword_lookup(word) {
-  __ring_match11: {
-    const __ring_m11 = word;
-    if (__ring_m11 === "fn") {
-      return Option_some(TokenKind_TkFn);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "let") {
-      return Option_some(TokenKind_TkLet);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "mut") {
-      return Option_some(TokenKind_TkMut);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "const") {
-      return Option_some(TokenKind_TkConst);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "struct") {
-      return Option_some(TokenKind_TkStruct);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "enum") {
-      return Option_some(TokenKind_TkEnum);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "match") {
-      return Option_some(TokenKind_TkMatch);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "impl") {
-      return Option_some(TokenKind_TkImpl);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "effect") {
-      return Option_some(TokenKind_TkEffect);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "handle") {
-      return Option_some(TokenKind_TkHandle);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "with") {
-      return Option_some(TokenKind_TkWith);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "if") {
-      return Option_some(TokenKind_TkIf);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "else") {
-      return Option_some(TokenKind_TkElse);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "catch") {
-      return Option_some(TokenKind_TkCatch);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "test") {
-      return Option_some(TokenKind_TkTest);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "return") {
-      return Option_some(TokenKind_TkReturn);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "for") {
-      return Option_some(TokenKind_TkFor);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "in") {
-      return Option_some(TokenKind_TkIn);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "pub") {
-      return Option_some(TokenKind_TkPub);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "where") {
-      return Option_some(TokenKind_TkWhere);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "true") {
-      return Option_some(TokenKind_TkTrue);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "false") {
-      return Option_some(TokenKind_TkFalse);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "trait") {
-      return Option_some(TokenKind_TkTrait);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "try") {
-      return Option_some(TokenKind_TkTry);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "while") {
-      return Option_some(TokenKind_TkWhile);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "break") {
-      return Option_some(TokenKind_TkBreak);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "continue") {
-      return Option_some(TokenKind_TkContinue);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "loop") {
-      return Option_some(TokenKind_TkLoop);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "use") {
-      return Option_some(TokenKind_TkUse);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "as") {
-      return Option_some(TokenKind_TkAs);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "extern") {
-      return Option_some(TokenKind_TkExtern);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "mod") {
-      return Option_some(TokenKind_TkMod);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "super") {
-      return Option_some(TokenKind_TkSuper);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "sig") {
-      return Option_some(TokenKind_TkSig);
-      break __ring_match11;
-    }
-    if (__ring_m11 === "requires") {
-      return Option_some(TokenKind_TkRequires);
-      break __ring_match11;
-    }
-    return Option_none;
-    break __ring_match11;
-  }
-}
-
 function code_in_range(c, low, high) {
   if (((c >= low) ? (c <= high) : false)) {
     return true;
@@ -1311,8 +840,479 @@ function is_ident_continue(ch) {
   }
 }
 
+function keyword_lookup(word) {
+  __ring_match10: {
+    const __ring_m10 = word;
+    if (__ring_m10 === "fn") {
+      return Option_some(TokenKind_TkFn);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "let") {
+      return Option_some(TokenKind_TkLet);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "mut") {
+      return Option_some(TokenKind_TkMut);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "const") {
+      return Option_some(TokenKind_TkConst);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "struct") {
+      return Option_some(TokenKind_TkStruct);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "enum") {
+      return Option_some(TokenKind_TkEnum);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "match") {
+      return Option_some(TokenKind_TkMatch);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "impl") {
+      return Option_some(TokenKind_TkImpl);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "effect") {
+      return Option_some(TokenKind_TkEffect);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "handle") {
+      return Option_some(TokenKind_TkHandle);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "with") {
+      return Option_some(TokenKind_TkWith);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "if") {
+      return Option_some(TokenKind_TkIf);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "else") {
+      return Option_some(TokenKind_TkElse);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "catch") {
+      return Option_some(TokenKind_TkCatch);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "test") {
+      return Option_some(TokenKind_TkTest);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "return") {
+      return Option_some(TokenKind_TkReturn);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "for") {
+      return Option_some(TokenKind_TkFor);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "in") {
+      return Option_some(TokenKind_TkIn);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "pub") {
+      return Option_some(TokenKind_TkPub);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "where") {
+      return Option_some(TokenKind_TkWhere);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "true") {
+      return Option_some(TokenKind_TkTrue);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "false") {
+      return Option_some(TokenKind_TkFalse);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "trait") {
+      return Option_some(TokenKind_TkTrait);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "try") {
+      return Option_some(TokenKind_TkTry);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "while") {
+      return Option_some(TokenKind_TkWhile);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "break") {
+      return Option_some(TokenKind_TkBreak);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "continue") {
+      return Option_some(TokenKind_TkContinue);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "loop") {
+      return Option_some(TokenKind_TkLoop);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "use") {
+      return Option_some(TokenKind_TkUse);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "as") {
+      return Option_some(TokenKind_TkAs);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "extern") {
+      return Option_some(TokenKind_TkExtern);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "mod") {
+      return Option_some(TokenKind_TkMod);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "super") {
+      return Option_some(TokenKind_TkSuper);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "sig") {
+      return Option_some(TokenKind_TkSig);
+      break __ring_match10;
+    }
+    if (__ring_m10 === "requires") {
+      return Option_some(TokenKind_TkRequires);
+      break __ring_match10;
+    }
+    return Option_none;
+    break __ring_match10;
+  }
+}
+
 function new_lexer(source, file, sink) {
   return new Lexer(source, file, 0, 1, 0, sink, []);
+}
+
+function token_kind_value(k) {
+  __ring_match11: {
+    const __ring_m11 = k;
+    if (__ring_m11._tag === "TkFn") {
+      return "fn";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkLet") {
+      return "let";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkMut") {
+      return "mut";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkConst") {
+      return "const";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkStruct") {
+      return "struct";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkEnum") {
+      return "enum";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkMatch") {
+      return "match";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkImpl") {
+      return "impl";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkEffect") {
+      return "effect";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkHandle") {
+      return "handle";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkWith") {
+      return "with";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkIf") {
+      return "if";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkElse") {
+      return "else";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkCatch") {
+      return "catch";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkTest") {
+      return "test";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkReturn") {
+      return "return";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkFor") {
+      return "for";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkIn") {
+      return "in";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkPub") {
+      return "pub";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkWhere") {
+      return "where";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkTrue") {
+      return "true";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkFalse") {
+      return "false";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkTrait") {
+      return "trait";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkTry") {
+      return "try";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkWhile") {
+      return "while";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkBreak") {
+      return "break";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkContinue") {
+      return "continue";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkLoop") {
+      return "loop";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkUse") {
+      return "use";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkAs") {
+      return "as";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkExtern") {
+      return "extern";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkMod") {
+      return "mod";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkSuper") {
+      return "super";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkSig") {
+      return "sig";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkRequires") {
+      return "requires";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkIntLit") {
+      return "int_lit";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkFloatLit") {
+      return "float_lit";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkStringLit") {
+      return "string_lit";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkStringInterpStart") {
+      return "string_interp_start";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkStringInterpMiddle") {
+      return "string_interp_middle";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkStringInterpEnd") {
+      return "string_interp_end";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkRawStringLit") {
+      return "raw_string_lit";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkIdent") {
+      return "ident";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkPlus") {
+      return "+";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkMinus") {
+      return "-";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkStar") {
+      return "*";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkSlash") {
+      return "/";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkPercent") {
+      return "%";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkEqEq") {
+      return "==";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkBangEq") {
+      return "!=";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkLt") {
+      return "<";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkGt") {
+      return ">";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkLtEq") {
+      return "<=";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkGtEq") {
+      return ">=";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkAmpAmp") {
+      return "&&";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkPipePipe") {
+      return "||";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkPipe") {
+      return "|";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkBang") {
+      return "!";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkEq") {
+      return "=";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkPlusEq") {
+      return "+=";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkMinusEq") {
+      return "-=";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkLParen") {
+      return "(";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkRParen") {
+      return ")";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkLBrace") {
+      return "{";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkRBrace") {
+      return "}";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkLBracket") {
+      return "[";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkRBracket") {
+      return "]";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkComma") {
+      return ",";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkColon") {
+      return ":";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkColonColon") {
+      return "::";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkDot") {
+      return ".";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkDotDot") {
+      return "..";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkDotDotEq") {
+      return "..=";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkFatArrow") {
+      return "=>";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkArrow") {
+      return "->";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkQuestion") {
+      return "?";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkSemi") {
+      return ";";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkEof") {
+      return "eof";
+      break __ring_match11;
+    }
+    if (__ring_m11._tag === "TkError") {
+      return "error_token";
+      break __ring_match11;
+    }
+    __match_fail(__ring_m11);
+  }
 }
 
 function __InterpFrame_Eq_eq(self, other) {
@@ -1341,16 +1341,6 @@ function __Token_Eq_eq(self, other) {
 }
 const __Token_Eq = { eq: __Token_Eq_eq, ne: function(self, other) { return !__Token_Eq_eq(self, other); } };
 
-function __ListIterator_Clone_clone(self, __ring_T_Clone) {
-  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
-}
-const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
-
-function __SetIterator_Clone_clone(self, __ring_T_Clone) {
-  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
-}
-const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
-
 function __InterpFrame_Clone_clone(self) {
   return new InterpFrame(self.depth, __Span_Clone.clone(self.start_span));
 }
@@ -1360,6 +1350,16 @@ function __Lexer_Clone_clone(self) {
   return new Lexer(self.source, self.file, self.pos, self.line, self.column, __CollectingSink_Clone.clone(self.sink), __List_Clone.clone(self.interp_frames, __InterpFrame_Clone));
 }
 const __Lexer_Clone = { clone: __Lexer_Clone_clone };
+
+function __ListIterator_Clone_clone(self, __ring_T_Clone) {
+  return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
+}
+const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
+
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   switch (self._tag) {
@@ -1501,16 +1501,6 @@ function __Token_Ord_cmp(self, other) {
 }
 const __Token_Ord = { cmp: __Token_Ord_cmp };
 
-function __ListIterator_Debug_debug(self, __ring_T_Debug) {
-  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
-}
-const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
-
-function __SetIterator_Debug_debug(self, __ring_T_Debug) {
-  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
-}
-const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
 function __InterpFrame_Debug_debug(self) {
   return "InterpFrame { " + "depth: " + String(self.depth) + ", " + "start_span: " + __Span_Debug.debug(self.start_span) + " }";
 }
@@ -1520,6 +1510,16 @@ function __Lexer_Debug_debug(self) {
   return "Lexer { " + "source: " + String(self.source) + ", " + "file: " + String(self.file) + ", " + "pos: " + String(self.pos) + ", " + "line: " + String(self.line) + ", " + "column: " + String(self.column) + ", " + "sink: " + __CollectingSink_Debug.debug(self.sink) + ", " + "interp_frames: " + __List_Debug.debug(self.interp_frames, __InterpFrame_Debug) + " }";
 }
 const __Lexer_Debug = { debug: __Lexer_Debug_debug };
+
+function __ListIterator_Debug_debug(self, __ring_T_Debug) {
+  return "ListIterator { " + "list: " + __List_Debug.debug(self.list, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
   switch (self._tag) {

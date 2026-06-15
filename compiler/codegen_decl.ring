@@ -550,7 +550,9 @@ fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
         in_deg.insert(name, 0)
         rev_deps.insert(name, { let mut l: List<Str> = []; l })
     }
-    for entry in deps.entries() {
+    let mut sorted_deps = deps.entries()
+    sorted_deps.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_deps {
         let (name, dep_list) = entry
         in_deg.insert(name, dep_list.len())
         for dep in dep_list {
@@ -567,7 +569,9 @@ fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
 
     // Start with effects that have no dependencies (in_deg == 0)
     let mut queue: List<Str> = []
-    for entry in in_deg.entries() {
+    let mut sorted_in_deg = in_deg.entries()
+    sorted_in_deg.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_in_deg {
         let (name, deg) = entry
         if deg == 0 { queue.push(name) }
     }

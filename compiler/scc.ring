@@ -337,7 +337,9 @@ pub fn tarjan_scc(graph: Map<Str, List<Str>>) -> List<List<Str>> {
 
     // Collect all nodes (some might only appear as targets, not keys)
     let mut all_nodes: Set<Str> = set_new()
-    for entry in graph.entries() {
+    let mut sorted_graph = graph.entries()
+    sorted_graph.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for entry in sorted_graph {
         let (node, targets) = entry
         all_nodes.insert(node)
         for t in targets {

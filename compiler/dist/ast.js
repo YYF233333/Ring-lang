@@ -666,20 +666,11 @@ function __Span_Eq_eq(self, other) {
 }
 const __Span_Eq = { eq: __Span_Eq_eq, ne: function(self, other) { return !__Span_Eq_eq(self, other); } };
 
-function __NamedImport_Eq_eq(self, other) {
-  return (self.name === other.name) && __Option_Eq.eq(self.alias, other.alias, __Str_Eq) && __Span_Eq.eq(self.span, other.span);
-}
-const __NamedImport_Eq = { eq: __NamedImport_Eq_eq, ne: function(self, other) { return !__NamedImport_Eq_eq(self, other); } };
-
-function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
+function __BinOp_Eq_eq(self, other) {
   if (self._tag !== other._tag) return false;
-  switch (self._tag) {
-    case "Ok": return __ring_T_Eq.eq(self._0, other._0);
-    case "Err": return __ring_E_Eq.eq(self._0, other._0);
-    default: return true;
-  }
+  return true;
 }
-const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
+const __BinOp_Eq = { eq: __BinOp_Eq_eq, ne: function(self, other) { return !__BinOp_Eq_eq(self, other); } };
 
 function __LiteralValue_Eq_eq(self, other) {
   if (self._tag !== other._tag) return false;
@@ -693,11 +684,15 @@ function __LiteralValue_Eq_eq(self, other) {
 }
 const __LiteralValue_Eq = { eq: __LiteralValue_Eq_eq, ne: function(self, other) { return !__LiteralValue_Eq_eq(self, other); } };
 
-function __BinOp_Eq_eq(self, other) {
+function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
-  return true;
+  switch (self._tag) {
+    case "Ok": return __ring_T_Eq.eq(self._0, other._0);
+    case "Err": return __ring_E_Eq.eq(self._0, other._0);
+    default: return true;
+  }
 }
-const __BinOp_Eq = { eq: __BinOp_Eq_eq, ne: function(self, other) { return !__BinOp_Eq_eq(self, other); } };
+const __Result_Eq = { eq: __Result_Eq_eq, ne: function(self, other, __ring_T_Eq, __ring_E_Eq) { return !__Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq); } };
 
 function __UnaryOp_Eq_eq(self, other) {
   if (self._tag !== other._tag) return false;
@@ -705,60 +700,35 @@ function __UnaryOp_Eq_eq(self, other) {
 }
 const __UnaryOp_Eq = { eq: __UnaryOp_Eq_eq, ne: function(self, other) { return !__UnaryOp_Eq_eq(self, other); } };
 
+function __NamedImport_Eq_eq(self, other) {
+  return (self.name === other.name) && __Option_Eq.eq(self.alias, other.alias, __Str_Eq) && __Span_Eq.eq(self.span, other.span);
+}
+const __NamedImport_Eq = { eq: __NamedImport_Eq_eq, ne: function(self, other) { return !__NamedImport_Eq_eq(self, other); } };
+
 function __ListIterator_Clone_clone(self, __ring_T_Clone) {
   return new ListIterator(__List_Clone.clone(self.list, __ring_T_Clone), self.index);
 }
 const __ListIterator_Clone = { clone: __ListIterator_Clone_clone };
-
-function __SetIterator_Clone_clone(self, __ring_T_Clone) {
-  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
-}
-const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
 function __Position_Clone_clone(self) {
   return new Position(self.line, self.column, self.offset);
 }
 const __Position_Clone = { clone: __Position_Clone_clone };
 
+function __SetIterator_Clone_clone(self, __ring_T_Clone) {
+  return new SetIterator(__List_Clone.clone(self.items, __ring_T_Clone), self.index);
+}
+const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
+
 function __Span_Clone_clone(self) {
   return new Span(self.file, __Position_Clone.clone(self.start), __Position_Clone.clone(self.end));
 }
 const __Span_Clone = { clone: __Span_Clone_clone };
 
-function __DestructureBinding_Clone_clone(self) {
-  return new DestructureBinding(__List_Clone.clone(self.names, __Str_Clone), __List_Clone.clone(self.spans, __Span_Clone));
-}
-const __DestructureBinding_Clone = { clone: __DestructureBinding_Clone_clone };
-
 function __UsePath_Clone_clone(self) {
   return new UsePath(__List_Clone.clone(self.segments, __Str_Clone), __Span_Clone.clone(self.span));
 }
 const __UsePath_Clone = { clone: __UsePath_Clone_clone };
-
-function __NamedImport_Clone_clone(self) {
-  return new NamedImport(self.name, __Option_Clone.clone(self.alias, __Str_Clone), __Span_Clone.clone(self.span));
-}
-const __NamedImport_Clone = { clone: __NamedImport_Clone_clone };
-
-function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
-  switch (self._tag) {
-    case "Ok": return Result_Ok(__ring_T_Clone.clone(self._0));
-    case "Err": return Result_Err(__ring_E_Clone.clone(self._0));
-    default: return self;
-  }
-}
-const __Result_Clone = { clone: __Result_Clone_clone };
-
-function __LiteralValue_Clone_clone(self) {
-  switch (self._tag) {
-    case "IntVal": return LiteralValue_IntVal(self._0);
-    case "FloatVal": return LiteralValue_FloatVal(self._0);
-    case "StrVal": return LiteralValue_StrVal(self._0);
-    case "BoolVal": return LiteralValue_BoolVal(self._0);
-    default: return self;
-  }
-}
-const __LiteralValue_Clone = { clone: __LiteralValue_Clone_clone };
 
 function __BinOp_Clone_clone(self) {
   switch (self._tag) {
@@ -780,6 +750,26 @@ function __BinOp_Clone_clone(self) {
 }
 const __BinOp_Clone = { clone: __BinOp_Clone_clone };
 
+function __LiteralValue_Clone_clone(self) {
+  switch (self._tag) {
+    case "IntVal": return LiteralValue_IntVal(self._0);
+    case "FloatVal": return LiteralValue_FloatVal(self._0);
+    case "StrVal": return LiteralValue_StrVal(self._0);
+    case "BoolVal": return LiteralValue_BoolVal(self._0);
+    default: return self;
+  }
+}
+const __LiteralValue_Clone = { clone: __LiteralValue_Clone_clone };
+
+function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
+  switch (self._tag) {
+    case "Ok": return Result_Ok(__ring_T_Clone.clone(self._0));
+    case "Err": return Result_Err(__ring_E_Clone.clone(self._0));
+    default: return self;
+  }
+}
+const __Result_Clone = { clone: __Result_Clone_clone };
+
 function __UnaryOp_Clone_clone(self) {
   switch (self._tag) {
     case "Neg": return UnaryOp_Neg;
@@ -788,6 +778,16 @@ function __UnaryOp_Clone_clone(self) {
   }
 }
 const __UnaryOp_Clone = { clone: __UnaryOp_Clone_clone };
+
+function __DestructureBinding_Clone_clone(self) {
+  return new DestructureBinding(__List_Clone.clone(self.names, __Str_Clone), __List_Clone.clone(self.spans, __Span_Clone));
+}
+const __DestructureBinding_Clone = { clone: __DestructureBinding_Clone_clone };
+
+function __NamedImport_Clone_clone(self) {
+  return new NamedImport(self.name, __Option_Clone.clone(self.alias, __Str_Clone), __Span_Clone.clone(self.span));
+}
+const __NamedImport_Clone = { clone: __NamedImport_Clone_clone };
 
 function __UseImport_Clone_clone(self) {
   switch (self._tag) {
@@ -823,18 +823,14 @@ function __Span_Ord_cmp(self, other) {
 }
 const __Span_Ord = { cmp: __Span_Ord_cmp };
 
-const __Result_tag_order = { "Ok": 0, "Err": 1 };
-function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
-  var t1 = __Result_tag_order[self._tag];
-  var t2 = __Result_tag_order[other._tag];
+const __BinOp_tag_order = { "Add": 0, "Sub": 1, "Mul": 2, "Div": 3, "Mod": 4, "Eq": 5, "Neq": 6, "Lt": 7, "Lte": 8, "Gt": 9, "Gte": 10, "And": 11, "Or": 12 };
+function __BinOp_Ord_cmp(self, other) {
+  var t1 = __BinOp_tag_order[self._tag];
+  var t2 = __BinOp_tag_order[other._tag];
   if (t1 !== t2) return (t1 < t2 ? -1 : 1);
-  switch (self._tag) {
-    case "Ok": return __ring_T_Ord.cmp(self._0, other._0);
-    case "Err": return __ring_E_Ord.cmp(self._0, other._0);
-    default: return 0;
-  }
+  return 0;
 }
-const __Result_Ord = { cmp: __Result_Ord_cmp };
+const __BinOp_Ord = { cmp: __BinOp_Ord_cmp };
 
 const __LiteralValue_tag_order = { "IntVal": 0, "FloatVal": 1, "StrVal": 2, "BoolVal": 3 };
 function __LiteralValue_Ord_cmp(self, other) {
@@ -851,14 +847,18 @@ function __LiteralValue_Ord_cmp(self, other) {
 }
 const __LiteralValue_Ord = { cmp: __LiteralValue_Ord_cmp };
 
-const __BinOp_tag_order = { "Add": 0, "Sub": 1, "Mul": 2, "Div": 3, "Mod": 4, "Eq": 5, "Neq": 6, "Lt": 7, "Lte": 8, "Gt": 9, "Gte": 10, "And": 11, "Or": 12 };
-function __BinOp_Ord_cmp(self, other) {
-  var t1 = __BinOp_tag_order[self._tag];
-  var t2 = __BinOp_tag_order[other._tag];
+const __Result_tag_order = { "Ok": 0, "Err": 1 };
+function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
+  var t1 = __Result_tag_order[self._tag];
+  var t2 = __Result_tag_order[other._tag];
   if (t1 !== t2) return (t1 < t2 ? -1 : 1);
-  return 0;
+  switch (self._tag) {
+    case "Ok": return __ring_T_Ord.cmp(self._0, other._0);
+    case "Err": return __ring_E_Ord.cmp(self._0, other._0);
+    default: return 0;
+  }
 }
-const __BinOp_Ord = { cmp: __BinOp_Ord_cmp };
+const __Result_Ord = { cmp: __Result_Ord_cmp };
 
 const __UnaryOp_tag_order = { "Neg": 0, "Not": 1 };
 function __UnaryOp_Ord_cmp(self, other) {
@@ -874,55 +874,25 @@ function __ListIterator_Debug_debug(self, __ring_T_Debug) {
 }
 const __ListIterator_Debug = { debug: __ListIterator_Debug_debug };
 
-function __SetIterator_Debug_debug(self, __ring_T_Debug) {
-  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
-}
-const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
-
 function __Position_Debug_debug(self) {
   return "Position { " + "line: " + String(self.line) + ", " + "column: " + String(self.column) + ", " + "offset: " + String(self.offset) + " }";
 }
 const __Position_Debug = { debug: __Position_Debug_debug };
+
+function __SetIterator_Debug_debug(self, __ring_T_Debug) {
+  return "SetIterator { " + "items: " + __List_Debug.debug(self.items, __ring_T_Debug) + ", " + "index: " + String(self.index) + " }";
+}
+const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
 function __Span_Debug_debug(self) {
   return "Span { " + "file: " + String(self.file) + ", " + "start: " + __Position_Debug.debug(self.start) + ", " + "end: " + __Position_Debug.debug(self.end) + " }";
 }
 const __Span_Debug = { debug: __Span_Debug_debug };
 
-function __DestructureBinding_Debug_debug(self) {
-  return "DestructureBinding { " + "names: " + __List_Debug.debug(self.names, __Str_Debug) + ", " + "spans: " + __List_Debug.debug(self.spans, __Span_Debug) + " }";
-}
-const __DestructureBinding_Debug = { debug: __DestructureBinding_Debug_debug };
-
 function __UsePath_Debug_debug(self) {
   return "UsePath { " + "segments: " + __List_Debug.debug(self.segments, __Str_Debug) + ", " + "span: " + __Span_Debug.debug(self.span) + " }";
 }
 const __UsePath_Debug = { debug: __UsePath_Debug_debug };
-
-function __NamedImport_Debug_debug(self) {
-  return "NamedImport { " + "name: " + String(self.name) + ", " + "alias: " + __Option_Debug.debug(self.alias, __Str_Debug) + ", " + "span: " + __Span_Debug.debug(self.span) + " }";
-}
-const __NamedImport_Debug = { debug: __NamedImport_Debug_debug };
-
-function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
-  switch (self._tag) {
-    case "Ok": return "Ok(" + __ring_T_Debug.debug(self._0) + ")";
-    case "Err": return "Err(" + __ring_E_Debug.debug(self._0) + ")";
-    default: return self._tag;
-  }
-}
-const __Result_Debug = { debug: __Result_Debug_debug };
-
-function __LiteralValue_Debug_debug(self) {
-  switch (self._tag) {
-    case "IntVal": return "IntVal(" + String(self._0) + ")";
-    case "FloatVal": return "FloatVal(" + String(self._0) + ")";
-    case "StrVal": return "StrVal(" + String(self._0) + ")";
-    case "BoolVal": return "BoolVal(" + String(self._0) + ")";
-    default: return self._tag;
-  }
-}
-const __LiteralValue_Debug = { debug: __LiteralValue_Debug_debug };
 
 function __BinOp_Debug_debug(self) {
   switch (self._tag) {
@@ -944,6 +914,26 @@ function __BinOp_Debug_debug(self) {
 }
 const __BinOp_Debug = { debug: __BinOp_Debug_debug };
 
+function __LiteralValue_Debug_debug(self) {
+  switch (self._tag) {
+    case "IntVal": return "IntVal(" + String(self._0) + ")";
+    case "FloatVal": return "FloatVal(" + String(self._0) + ")";
+    case "StrVal": return "StrVal(" + String(self._0) + ")";
+    case "BoolVal": return "BoolVal(" + String(self._0) + ")";
+    default: return self._tag;
+  }
+}
+const __LiteralValue_Debug = { debug: __LiteralValue_Debug_debug };
+
+function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
+  switch (self._tag) {
+    case "Ok": return "Ok(" + __ring_T_Debug.debug(self._0) + ")";
+    case "Err": return "Err(" + __ring_E_Debug.debug(self._0) + ")";
+    default: return self._tag;
+  }
+}
+const __Result_Debug = { debug: __Result_Debug_debug };
+
 function __UnaryOp_Debug_debug(self) {
   switch (self._tag) {
     case "Neg": return "Neg";
@@ -952,6 +942,16 @@ function __UnaryOp_Debug_debug(self) {
   }
 }
 const __UnaryOp_Debug = { debug: __UnaryOp_Debug_debug };
+
+function __DestructureBinding_Debug_debug(self) {
+  return "DestructureBinding { " + "names: " + __List_Debug.debug(self.names, __Str_Debug) + ", " + "spans: " + __List_Debug.debug(self.spans, __Span_Debug) + " }";
+}
+const __DestructureBinding_Debug = { debug: __DestructureBinding_Debug_debug };
+
+function __NamedImport_Debug_debug(self) {
+  return "NamedImport { " + "name: " + String(self.name) + ", " + "alias: " + __Option_Debug.debug(self.alias, __Str_Debug) + ", " + "span: " + __Span_Debug.debug(self.span) + " }";
+}
+const __NamedImport_Debug = { debug: __NamedImport_Debug_debug };
 
 function __UseImport_Debug_debug(self) {
   switch (self._tag) {
@@ -968,4 +968,4 @@ function __UseDecl_Debug_debug(self) {
 const __UseDecl_Debug = { debug: __UseDecl_Debug_debug };
 
 
-export { Position, Span, span_zero, RecordTypeField, TypeExpr_Named, TypeExpr_FnType, TypeExpr_OptionType, TypeExpr_RecordType, TypeExpr_TupleType, EffectExpr, LiteralValue_IntVal, LiteralValue_FloatVal, LiteralValue_StrVal, LiteralValue_BoolVal, NamedPatternField, Pattern_Wildcard, Pattern_Binding, Pattern_Constructor, Pattern_NamedConstructor, Pattern_Literal, Pattern_TuplePattern, Pattern_OrPattern, BinOp_Add, BinOp_Sub, BinOp_Mul, BinOp_Div, BinOp_Mod, BinOp_Eq, BinOp_Neq, BinOp_Lt, BinOp_Lte, BinOp_Gt, BinOp_Gte, BinOp_And, BinOp_Or, UnaryOp_Neg, UnaryOp_Not, Param, MatchArm, StructFieldInit, EffectHandler, StringInterpPart_LitPart, StringInterpPart_ExprPart, Expr_IntLit, Expr_FloatLit, Expr_StrLit, Expr_BoolLit, Expr_Ident, Expr_BinOp, Expr_UnaryOp, Expr_Call, Expr_MethodCall, Expr_FieldAccess, Expr_StructLit, Expr_MatchExpr, Expr_Block, Expr_IfExpr, Expr_StringInterp, Expr_CatchExpr, Expr_HandleExpr, Expr_Lambda, Expr_Range, Expr_ListLit, Expr_TupleLit, Expr_IndexExpr, DestructureBinding, Stmt_Let, Stmt_Var, Stmt_Assign, Stmt_ExprStmt, Stmt_Return, Stmt_While, Stmt_ForIn, Stmt_Break, Stmt_Continue, Stmt_LetDestructure, Stmt_IfLet, UsePath, NamedImport, UseImport_NamedItems, UseImport_Module, UseDecl, AssocConstraint, TypeBound, TypeParam, StructFieldDecl, NamedEnumField, EnumVariantDecl, EffectOpDecl, SigMember, Decl_Fn, Decl_Struct, Decl_Enum, Decl_Impl, Decl_Effect, Decl_Test, Decl_Trait, Decl_ExternFn, Decl_ExternType, Decl_TypeAlias, Decl_Const, Decl_ModBlock, Decl_Sig, Decl_EffectAlias, Decl_Delegate, Decl_AssocType, Program, __Position_Eq, __Span_Eq, __NamedImport_Eq, __LiteralValue_Eq, __BinOp_Eq, __UnaryOp_Eq, __Position_Clone, __Span_Clone, __DestructureBinding_Clone, __UsePath_Clone, __NamedImport_Clone, __LiteralValue_Clone, __BinOp_Clone, __UnaryOp_Clone, __UseImport_Clone, __UseDecl_Clone, __Position_Ord, __Span_Ord, __LiteralValue_Ord, __BinOp_Ord, __UnaryOp_Ord, __Position_Debug, __Span_Debug, __DestructureBinding_Debug, __UsePath_Debug, __NamedImport_Debug, __LiteralValue_Debug, __BinOp_Debug, __UnaryOp_Debug, __UseImport_Debug, __UseDecl_Debug };
+export { Position, Span, span_zero, RecordTypeField, TypeExpr_Named, TypeExpr_FnType, TypeExpr_OptionType, TypeExpr_RecordType, TypeExpr_TupleType, EffectExpr, LiteralValue_IntVal, LiteralValue_FloatVal, LiteralValue_StrVal, LiteralValue_BoolVal, NamedPatternField, Pattern_Wildcard, Pattern_Binding, Pattern_Constructor, Pattern_NamedConstructor, Pattern_Literal, Pattern_TuplePattern, Pattern_OrPattern, BinOp_Add, BinOp_Sub, BinOp_Mul, BinOp_Div, BinOp_Mod, BinOp_Eq, BinOp_Neq, BinOp_Lt, BinOp_Lte, BinOp_Gt, BinOp_Gte, BinOp_And, BinOp_Or, UnaryOp_Neg, UnaryOp_Not, Param, MatchArm, StructFieldInit, EffectHandler, StringInterpPart_LitPart, StringInterpPart_ExprPart, Expr_IntLit, Expr_FloatLit, Expr_StrLit, Expr_BoolLit, Expr_Ident, Expr_BinOp, Expr_UnaryOp, Expr_Call, Expr_MethodCall, Expr_FieldAccess, Expr_StructLit, Expr_MatchExpr, Expr_Block, Expr_IfExpr, Expr_StringInterp, Expr_CatchExpr, Expr_HandleExpr, Expr_Lambda, Expr_Range, Expr_ListLit, Expr_TupleLit, Expr_IndexExpr, DestructureBinding, Stmt_Let, Stmt_Var, Stmt_Assign, Stmt_ExprStmt, Stmt_Return, Stmt_While, Stmt_ForIn, Stmt_Break, Stmt_Continue, Stmt_LetDestructure, Stmt_IfLet, UsePath, NamedImport, UseImport_NamedItems, UseImport_Module, UseDecl, AssocConstraint, TypeBound, TypeParam, StructFieldDecl, NamedEnumField, EnumVariantDecl, EffectOpDecl, SigMember, Decl_Fn, Decl_Struct, Decl_Enum, Decl_Impl, Decl_Effect, Decl_Test, Decl_Trait, Decl_ExternFn, Decl_ExternType, Decl_TypeAlias, Decl_Const, Decl_ModBlock, Decl_Sig, Decl_EffectAlias, Decl_Delegate, Decl_AssocType, Program, __Position_Eq, __Span_Eq, __BinOp_Eq, __LiteralValue_Eq, __UnaryOp_Eq, __NamedImport_Eq, __Position_Clone, __Span_Clone, __UsePath_Clone, __BinOp_Clone, __LiteralValue_Clone, __UnaryOp_Clone, __DestructureBinding_Clone, __NamedImport_Clone, __UseImport_Clone, __UseDecl_Clone, __Position_Ord, __Span_Ord, __BinOp_Ord, __LiteralValue_Ord, __UnaryOp_Ord, __Position_Debug, __Span_Debug, __UsePath_Debug, __BinOp_Debug, __LiteralValue_Debug, __UnaryOp_Debug, __DestructureBinding_Debug, __NamedImport_Debug, __UseImport_Debug, __UseDecl_Debug };

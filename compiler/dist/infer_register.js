@@ -1,10 +1,10 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
-import { BUILTIN_INT as types$BUILTIN_INT, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, INT as types$INT, FLOAT as types$FLOAT, STR as types$STR, BOOL as types$BOOL, UNIT as types$UNIT, NEVER as types$NEVER, ANY as types$ANY, EMPTY_ROW as types$EMPTY_ROW, effect_kind_name as types$effect_kind_name, effects_match_kind as types$effects_match_kind, type_to_builtin_name as types$type_to_builtin_name, make_option_type as types$make_option_type, is_option_type as types$is_option_type, option_inner as types$option_inner, make_list_type as types$make_list_type, is_list_type as types$is_list_type, list_element as types$list_element, make_map_type as types$make_map_type, is_map_type as types$is_map_type, make_set_type as types$make_set_type, is_set_type as types$is_set_type, effect_row as types$effect_row, open_effect_row as types$open_effect_row, row_contains as types$row_contains, effects_same_kind as types$effects_same_kind, row_merge as types$row_merge, effects_equal as types$effects_equal, types_equal as types$types_equal, type_to_string as types$type_to_string, effect_to_string as types$effect_to_string, effect_row_to_string as types$effect_row_to_string, StructField as types$StructField, EnumVariant as types$EnumVariant, RecordField as types$RecordField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, RowMergeResult as types$RowMergeResult } from "./types.js";
-import { span_zero as ast$span_zero, Position as ast$Position, Span as ast$Span, RecordTypeField as ast$RecordTypeField, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, EffectExpr as ast$EffectExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, NamedPatternField as ast$NamedPatternField, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, Param as ast$Param, MatchArm as ast$MatchArm, StructFieldInit as ast$StructFieldInit, EffectHandler as ast$EffectHandler, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, DestructureBinding as ast$DestructureBinding, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, UsePath as ast$UsePath, NamedImport as ast$NamedImport, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UseDecl as ast$UseDecl, AssocConstraint as ast$AssocConstraint, TypeBound as ast$TypeBound, TypeParam as ast$TypeParam, StructFieldDecl as ast$StructFieldDecl, NamedEnumField as ast$NamedEnumField, EnumVariantDecl as ast$EnumVariantDecl, EffectOpDecl as ast$EffectOpDecl, SigMember as ast$SigMember, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, Program as ast$Program, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug } from "./ast.js";
-import { lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, add_impl as env$add_impl, has_impl as env$has_impl, find_impl as env$find_impl, apply_subst_map as env$apply_subst_map, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_row_map as env$apply_subst_row_map, apply_subst as env$apply_subst, apply_subst_row as env$apply_subst_row, AssocConstraintEntry as env$AssocConstraintEntry, SchemeBound as env$SchemeBound, TypeScheme as env$TypeScheme, StructDef as env$StructDef, EnumDef as env$EnumDef, EffectOpDef as env$EffectOpDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectDef as env$EffectDef, TraitMethodDef as env$TraitMethodDef, AssocTypeDef as env$AssocTypeDef, TraitDef as env$TraitDef, ImplEntry as env$ImplEntry, TypeAliasDef as env$TypeAliasDef, EffectAliasDef as env$EffectAliasDef, FnBound as env$FnBound, SigDef as env$SigDef, Scope as env$Scope, TypeRegistry as env$TypeRegistry, TraitRegistry as env$TraitRegistry, ScopeManager as env$ScopeManager, IdGen as env$IdGen, TypeEnv as env$TypeEnv, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
-import { severity_to_str as diagnostics$severity_to_str, new_collecting_sink as diagnostics$new_collecting_sink, make_diagnostic as diagnostics$make_diagnostic, make_diag as diagnostics$make_diag, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, DiagnosticNote as diagnostics$DiagnosticNote, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, Suggestion as diagnostics$Suggestion, Diagnostic as diagnostics$Diagnostic, CollectingSink as diagnostics$CollectingSink, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
-import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0105 as codes$E0105, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0409 as codes$E0409, E0410 as codes$E0410, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, W0002 as codes$W0002, error_description as codes$error_description, error_category as codes$error_category } from "./codes.js";
-import { new_infer_ctx as infer_ctx$new_infer_ctx, type_error as infer_ctx$type_error, type_error_with_notes as infer_ctx$type_error_with_notes, merge_effects as infer_ctx$merge_effects, unify_at as infer_ctx$unify_at, unify_at_noted as infer_ctx$unify_at_noted, free_type_vars as infer_ctx$free_type_vars, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, update_fn_effects as infer_ctx$update_fn_effects, build_scheme_var_map as infer_ctx$build_scheme_var_map, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_type_expr as infer_ctx$resolve_type_expr, resolve_self_type as infer_ctx$resolve_self_type, resolve_named_type as infer_ctx$resolve_named_type, bind_pattern as infer_ctx$bind_pattern, remove_fail_effect as infer_ctx$remove_fail_effect, resolve_relative_qualifier as infer_ctx$resolve_relative_qualifier, InferResult as infer_ctx$InferResult, FnBoundsEntry as infer_ctx$FnBoundsEntry, CompileError as infer_ctx$CompileError, InferCtx as infer_ctx$InferCtx, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug, __CompileError_Eq as infer_ctx$__CompileError_Eq, __CompileError_Clone as infer_ctx$__CompileError_Clone, __CompileError_Ord as infer_ctx$__CompileError_Ord, __CompileError_Debug as infer_ctx$__CompileError_Debug } from "./infer_ctx.js";
+import { ANY as types$ANY, BOOL as types$BOOL, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_INT as types$BUILTIN_INT, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, EMPTY_ROW as types$EMPTY_ROW, FLOAT as types$FLOAT, INT as types$INT, NEVER as types$NEVER, STR as types$STR, UNIT as types$UNIT, effect_kind_name as types$effect_kind_name, effect_row as types$effect_row, effect_row_to_string as types$effect_row_to_string, effect_to_string as types$effect_to_string, effects_equal as types$effects_equal, effects_match_kind as types$effects_match_kind, effects_same_kind as types$effects_same_kind, is_list_type as types$is_list_type, is_map_type as types$is_map_type, is_option_type as types$is_option_type, is_set_type as types$is_set_type, list_element as types$list_element, make_list_type as types$make_list_type, make_map_type as types$make_map_type, make_option_type as types$make_option_type, make_set_type as types$make_set_type, open_effect_row as types$open_effect_row, option_inner as types$option_inner, row_contains as types$row_contains, row_merge as types$row_merge, type_to_builtin_name as types$type_to_builtin_name, type_to_string as types$type_to_string, types_equal as types$types_equal, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, EnumVariant as types$EnumVariant, RecordField as types$RecordField, RowMergeResult as types$RowMergeResult, StructField as types$StructField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType } from "./types.js";
+import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, DestructureBinding as ast$DestructureBinding, EffectExpr as ast$EffectExpr, EffectHandler as ast$EffectHandler, EffectOpDecl as ast$EffectOpDecl, EnumVariantDecl as ast$EnumVariantDecl, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, MatchArm as ast$MatchArm, NamedEnumField as ast$NamedEnumField, NamedImport as ast$NamedImport, NamedPatternField as ast$NamedPatternField, Param as ast$Param, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, Position as ast$Position, Program as ast$Program, RecordTypeField as ast$RecordTypeField, SigMember as ast$SigMember, Span as ast$Span, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, StructFieldDecl as ast$StructFieldDecl, StructFieldInit as ast$StructFieldInit, TypeBound as ast$TypeBound, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, TypeParam as ast$TypeParam, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, UseDecl as ast$UseDecl, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UsePath as ast$UsePath, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug } from "./ast.js";
+import { add_impl as env$add_impl, apply_subst as env$apply_subst, apply_subst_effect_map as env$apply_subst_effect_map, apply_subst_map as env$apply_subst_map, apply_subst_row as env$apply_subst_row, apply_subst_row_map as env$apply_subst_row_map, find_impl as env$find_impl, has_impl as env$has_impl, lookup_variant as env$lookup_variant, mono as env$mono, new_type_env as env$new_type_env, AssocConstraintEntry as env$AssocConstraintEntry, AssocTypeDef as env$AssocTypeDef, BuiltInKind_BkIo as env$BuiltInKind_BkIo, BuiltInKind_BkFail as env$BuiltInKind_BkFail, BuiltInKind_BkMut as env$BuiltInKind_BkMut, EffectAliasDef as env$EffectAliasDef, EffectDef as env$EffectDef, EffectOpDef as env$EffectOpDef, EnumDef as env$EnumDef, FnBound as env$FnBound, IdGen as env$IdGen, ImplEntry as env$ImplEntry, SchemeBound as env$SchemeBound, Scope as env$Scope, ScopeManager as env$ScopeManager, SigDef as env$SigDef, StructDef as env$StructDef, TraitDef as env$TraitDef, TraitMethodDef as env$TraitMethodDef, TraitRegistry as env$TraitRegistry, TypeAliasDef as env$TypeAliasDef, TypeEnv as env$TypeEnv, TypeRegistry as env$TypeRegistry, TypeScheme as env$TypeScheme, __BuiltInKind_Eq as env$__BuiltInKind_Eq, __BuiltInKind_Clone as env$__BuiltInKind_Clone, __BuiltInKind_Ord as env$__BuiltInKind_Ord, __BuiltInKind_Debug as env$__BuiltInKind_Debug, __FnBound_Eq as env$__FnBound_Eq, __FnBound_Clone as env$__FnBound_Clone, __FnBound_Ord as env$__FnBound_Ord, __FnBound_Debug as env$__FnBound_Debug, __IdGen_Eq as env$__IdGen_Eq, __IdGen_Clone as env$__IdGen_Clone, __IdGen_Ord as env$__IdGen_Ord, __IdGen_Debug as env$__IdGen_Debug, TypeEnv_current_var_id as env$TypeEnv_current_var_id, TypeEnv_fresh_var as env$TypeEnv_fresh_var, TypeEnv_fresh_var_id as env$TypeEnv_fresh_var_id, TypeEnv_fresh_def_id as env$TypeEnv_fresh_def_id, TypeEnv_push_scope as env$TypeEnv_push_scope, TypeEnv_pop_scope as env$TypeEnv_pop_scope, TypeEnv_bind as env$TypeEnv_bind, TypeEnv_bind_mono as env$TypeEnv_bind_mono, TypeEnv_record_def_span as env$TypeEnv_record_def_span, TypeEnv_rebind as env$TypeEnv_rebind, TypeEnv_lookup as env$TypeEnv_lookup, TypeEnv_instantiate as env$TypeEnv_instantiate } from "./env.js";
+import { make_diag as diagnostics$make_diag, make_diagnostic as diagnostics$make_diagnostic, new_collecting_sink as diagnostics$new_collecting_sink, severity_to_str as diagnostics$severity_to_str, CollectingSink as diagnostics$CollectingSink, Diagnostic as diagnostics$Diagnostic, DiagnosticContext_TypeMismatch as diagnostics$DiagnosticContext_TypeMismatch, DiagnosticContext_UndefinedVariable as diagnostics$DiagnosticContext_UndefinedVariable, DiagnosticContext_MissingField as diagnostics$DiagnosticContext_MissingField, DiagnosticContext_EffectUnhandled as diagnostics$DiagnosticContext_EffectUnhandled, DiagnosticContext_ParseError as diagnostics$DiagnosticContext_ParseError, DiagnosticContext_PatternError as diagnostics$DiagnosticContext_PatternError, DiagnosticContext_TraitError as diagnostics$DiagnosticContext_TraitError, DiagnosticContext_OtherContext as diagnostics$DiagnosticContext_OtherContext, DiagnosticNote as diagnostics$DiagnosticNote, Severity_SevError as diagnostics$Severity_SevError, Severity_SevWarning as diagnostics$Severity_SevWarning, Severity_SevInfo as diagnostics$Severity_SevInfo, Severity_SevHint as diagnostics$Severity_SevHint, Suggestion as diagnostics$Suggestion, __CollectingSink_DiagnosticSink as diagnostics$__CollectingSink_DiagnosticSink, __CollectingSink_Clone as diagnostics$__CollectingSink_Clone, __CollectingSink_Debug as diagnostics$__CollectingSink_Debug, __Diagnostic_Clone as diagnostics$__Diagnostic_Clone, __Diagnostic_Debug as diagnostics$__Diagnostic_Debug, __DiagnosticContext_Clone as diagnostics$__DiagnosticContext_Clone, __DiagnosticContext_Debug as diagnostics$__DiagnosticContext_Debug, __DiagnosticNote_Eq as diagnostics$__DiagnosticNote_Eq, __DiagnosticNote_Clone as diagnostics$__DiagnosticNote_Clone, __DiagnosticNote_Debug as diagnostics$__DiagnosticNote_Debug, __Severity_Eq as diagnostics$__Severity_Eq, __Severity_Clone as diagnostics$__Severity_Clone, __Severity_Ord as diagnostics$__Severity_Ord, __Severity_Debug as diagnostics$__Severity_Debug, __Suggestion_Eq as diagnostics$__Suggestion_Eq, __Suggestion_Clone as diagnostics$__Suggestion_Clone, __Suggestion_Debug as diagnostics$__Suggestion_Debug, CollectingSink_report as diagnostics$CollectingSink_report, CollectingSink_has_errors as diagnostics$CollectingSink_has_errors, CollectingSink_diagnostics as diagnostics$CollectingSink_diagnostics, CollectingSink_clear as diagnostics$CollectingSink_clear, CollectingSink_save as diagnostics$CollectingSink_save, CollectingSink_restore as diagnostics$CollectingSink_restore } from "./diagnostics.js";
+import { E0101 as codes$E0101, E0102 as codes$E0102, E0103 as codes$E0103, E0104 as codes$E0104, E0105 as codes$E0105, E0201 as codes$E0201, E0203 as codes$E0203, E0204 as codes$E0204, E0205 as codes$E0205, E0206 as codes$E0206, E0207 as codes$E0207, E0208 as codes$E0208, E0301 as codes$E0301, E0302 as codes$E0302, E0303 as codes$E0303, E0304 as codes$E0304, E0305 as codes$E0305, E0306 as codes$E0306, E0307 as codes$E0307, E0308 as codes$E0308, E0402 as codes$E0402, E0403 as codes$E0403, E0404 as codes$E0404, E0405 as codes$E0405, E0406 as codes$E0406, E0407 as codes$E0407, E0408 as codes$E0408, E0409 as codes$E0409, E0410 as codes$E0410, E0501 as codes$E0501, E0502 as codes$E0502, E0503 as codes$E0503, E0504 as codes$E0504, E0505 as codes$E0505, E0506 as codes$E0506, E0507 as codes$E0507, E0508 as codes$E0508, E0509 as codes$E0509, E0510 as codes$E0510, E0511 as codes$E0511, E0512 as codes$E0512, E0513 as codes$E0513, E0514 as codes$E0514, E0601 as codes$E0601, E0702 as codes$E0702, E0703 as codes$E0703, E0704 as codes$E0704, E0705 as codes$E0705, E0706 as codes$E0706, W0001 as codes$W0001, W0002 as codes$W0002, error_category as codes$error_category, error_description as codes$error_description } from "./codes.js";
+import { bind_pattern as infer_ctx$bind_pattern, build_scheme_var_map as infer_ctx$build_scheme_var_map, collect_free_vars as infer_ctx$collect_free_vars, free_type_vars as infer_ctx$free_type_vars, free_type_vars_in_env as infer_ctx$free_type_vars_in_env, generalize as infer_ctx$generalize, merge_effects as infer_ctx$merge_effects, new_infer_ctx as infer_ctx$new_infer_ctx, remove_fail_effect as infer_ctx$remove_fail_effect, resolve_dicts_from_scheme as infer_ctx$resolve_dicts_from_scheme, resolve_named_type as infer_ctx$resolve_named_type, resolve_relative_qualifier as infer_ctx$resolve_relative_qualifier, resolve_self_type as infer_ctx$resolve_self_type, resolve_type_expr as infer_ctx$resolve_type_expr, type_error as infer_ctx$type_error, type_error_with_notes as infer_ctx$type_error_with_notes, unify_at as infer_ctx$unify_at, unify_at_noted as infer_ctx$unify_at_noted, update_fn_effects as infer_ctx$update_fn_effects, CompileError as infer_ctx$CompileError, FnBoundsEntry as infer_ctx$FnBoundsEntry, InferCtx as infer_ctx$InferCtx, InferResult as infer_ctx$InferResult, __CompileError_Eq as infer_ctx$__CompileError_Eq, __CompileError_Clone as infer_ctx$__CompileError_Clone, __CompileError_Ord as infer_ctx$__CompileError_Ord, __CompileError_Debug as infer_ctx$__CompileError_Debug, __FnBoundsEntry_Eq as infer_ctx$__FnBoundsEntry_Eq, __FnBoundsEntry_Clone as infer_ctx$__FnBoundsEntry_Clone, __FnBoundsEntry_Ord as infer_ctx$__FnBoundsEntry_Ord, __FnBoundsEntry_Debug as infer_ctx$__FnBoundsEntry_Debug } from "./infer_ctx.js";
 
 
 
@@ -239,92 +239,6 @@ function to_result(f) {
   return (function() { const __ring_ev_fail = { raise: (__ring_err) => { throw new __EffectAbort("fail", __ring_err); } }; try { return Result_Ok(f()); } catch (__ring_e) { if (__ring_e instanceof __EffectAbort && __ring_e.effect === "fail") { const __ring_err = __ring_e.value; if (true) { const e = __ring_err; return Result_Err(e); } else { throw __ring_e; } } throw __ring_e; } })();
 }
 
-function preregister_struct(ctx, name, type_params) {
-  let tp_names = [];
-  let tp_vars = [];
-  const __ring_iter_2 = __List_Iterable.iter(type_params);
-  while (true) {
-    const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
-    if (__ring_next_2._tag === "none") break;
-    const tp = __ring_next_2._0;
-    List_push(tp_names, tp.name);
-    const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match6: {
-      const __ring_m6 = tv;
-      if (__ring_m6._tag === "TypeVar") {
-        const id = __ring_m6.id;
-        List_push(tp_vars, id);
-        break __ring_match6;
-      }
-      break __ring_match6;
-    }
-    _Map_insert(ctx.type_param_scope, tp.name, tv);
-  }
-  const def = new env$StructDef(name, tp_names, tp_vars, [], false);
-  return _Map_insert(ctx.env.types.structs, name, def);
-}
-
-function complete_struct_fields(ctx, name, fields) {
-  __ring_match7: {
-    const __ring_m7 = _Map_get(ctx.env.types.structs, name);
-    if (__ring_m7._tag === "some") {
-      const def = __ring_m7._0;
-      const saved = map_clone(ctx.type_param_scope);
-      let i = 0;
-      while ((i < List_len(def.type_params))) {
-        __ring_match8: {
-          const __ring_m8 = [List_get(def.type_params, i), List_get(def.type_param_vars, i)];
-          if (Array.isArray(__ring_m8) && __ring_m8.length === 2 && __ring_m8[0]._tag === "some" && __ring_m8[1]._tag === "some") {
-            const tp_name = __ring_m8[0]._0; const tp_var = __ring_m8[1]._0;
-            _Map_insert(ctx.type_param_scope, tp_name, types$Type_TypeVar(tp_var, Option_none));
-            break __ring_match8;
-          }
-          break __ring_match8;
-        }
-        i = (i + 1);
-      }
-      const __ring_iter_3 = __List_Iterable.iter(fields);
-      while (true) {
-        const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
-        if (__ring_next_3._tag === "none") break;
-        const f = __ring_next_3._0;
-        List_push(def.fields, new types$StructField(f.name, infer_ctx$resolve_type_expr(ctx, f.type_annotation), f.is_pub));
-      }
-      ctx.type_param_scope = saved;
-      break __ring_match7;
-    }
-    if (__ring_m7._tag === "none") {
-      break __ring_match7;
-    }
-    __match_fail(__ring_m7);
-  }
-}
-
-function preregister_enum(ctx, name, type_params) {
-  let tp_names = [];
-  let tv_ids = [];
-  const __ring_iter_4 = __List_Iterable.iter(type_params);
-  while (true) {
-    const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
-    if (__ring_next_4._tag === "none") break;
-    const tp = __ring_next_4._0;
-    List_push(tp_names, tp.name);
-    const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match9: {
-      const __ring_m9 = tv;
-      if (__ring_m9._tag === "TypeVar") {
-        const id = __ring_m9.id;
-        List_push(tv_ids, id);
-        break __ring_match9;
-      }
-      break __ring_match9;
-    }
-    _Map_insert(ctx.type_param_scope, tp.name, tv);
-  }
-  const def = new env$EnumDef(name, tp_names, tv_ids, [], map_new());
-  return _Map_insert(ctx.env.types.enums, name, def);
-}
-
 function bind_variant_constructor(ctx, variant_name, enum_type, tv_ids) {
   if ((List_len(tv_ids) > 0)) {
     return env$TypeEnv_bind(ctx.env, variant_name, new env$TypeScheme(enum_type, tv_ids, [], Option_none));
@@ -333,87 +247,174 @@ function bind_variant_constructor(ctx, variant_name, enum_type, tv_ids) {
   }
 }
 
+function check_duplicate_def(ctx, name, span) {
+  __ring_match6: {
+    const __ring_m6 = env$TypeEnv_lookup(ctx.env, name);
+    if (__ring_m6._tag === "some") {
+      const existing = __ring_m6._0;
+      __ring_match7: {
+        const __ring_m7 = existing.def_id;
+        if (__ring_m7._tag === "some") {
+          const did = __ring_m7._0;
+          __ring_match8: {
+            const __ring_m8 = _Map_get(ctx.env.scope.def_spans, did);
+            if (__ring_m8._tag === "some") {
+              const _ = infer_ctx$type_error(ctx.sink, codes$E0207, `Duplicate definition: '${name}' is already defined`, span, diagnostics$DiagnosticContext_TypeMismatch("unique name", name, Option_none));
+              break __ring_match8;
+            }
+            if (__ring_m8._tag === "none") {
+              break __ring_match8;
+            }
+            __match_fail(__ring_m8);
+          }
+          break __ring_match7;
+        }
+        if (__ring_m7._tag === "none") {
+          break __ring_match7;
+        }
+        __match_fail(__ring_m7);
+      }
+      break __ring_match6;
+    }
+    if (__ring_m6._tag === "none") {
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+}
+
+function collect_all_supertraits(ctx, trait_name) {
+  let result = [];
+  let visited = set_new();
+  let stack = [];
+  __ring_match9: {
+    const __ring_m9 = _Map_get(ctx.env.trait_reg.traits, trait_name);
+    if (__ring_m9._tag === "some") {
+      const tdef = __ring_m9._0;
+      const __ring_iter_2 = __List_Iterable.iter(tdef.supertraits);
+      while (true) {
+        const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
+        if (__ring_next_2._tag === "none") break;
+        const st = __ring_next_2._0;
+        List_push(stack, st);
+      }
+      break __ring_match9;
+    }
+    if (__ring_m9._tag === "none") {
+      break __ring_match9;
+    }
+    __match_fail(__ring_m9);
+  }
+  while ((List_len(stack) > 0)) {
+    const current = Option_unwrap(List_pop(stack));
+    if (_Set_contains(visited, current, __Str_Eq)) {
+      continue;
+    }
+    _Set_insert(visited, current);
+    List_push(result, current);
+    __ring_match10: {
+      const __ring_m10 = _Map_get(ctx.env.trait_reg.traits, current);
+      if (__ring_m10._tag === "some") {
+        const parent_def = __ring_m10._0;
+        const __ring_iter_3 = __List_Iterable.iter(parent_def.supertraits);
+        while (true) {
+          const __ring_next_3 = __ListIterator_Iterator.next(__ring_iter_3);
+          if (__ring_next_3._tag === "none") break;
+          const parent_st = __ring_next_3._0;
+          List_push(stack, parent_st);
+        }
+        break __ring_match10;
+      }
+      if (__ring_m10._tag === "none") {
+        break __ring_match10;
+      }
+      __match_fail(__ring_m10);
+    }
+  }
+  return result;
+}
+
 function complete_enum_variants(ctx, name, type_params, variants) {
-  __ring_match10: {
-    const __ring_m10 = _Map_get(ctx.env.types.enums, name);
-    if (__ring_m10._tag === "some") {
-      const def = __ring_m10._0;
+  __ring_match11: {
+    const __ring_m11 = _Map_get(ctx.env.types.enums, name);
+    if (__ring_m11._tag === "some") {
+      const def = __ring_m11._0;
       const saved = map_clone(ctx.type_param_scope);
       let tv_types = [];
       let i = 0;
       while ((i < List_len(def.type_params))) {
-        __ring_match11: {
-          const __ring_m11 = [List_get(def.type_params, i), List_get(def.type_param_vars, i)];
-          if (Array.isArray(__ring_m11) && __ring_m11.length === 2 && __ring_m11[0]._tag === "some" && __ring_m11[1]._tag === "some") {
-            const tp_name = __ring_m11[0]._0; const tp_var = __ring_m11[1]._0;
+        __ring_match12: {
+          const __ring_m12 = [List_get(def.type_params, i), List_get(def.type_param_vars, i)];
+          if (Array.isArray(__ring_m12) && __ring_m12.length === 2 && __ring_m12[0]._tag === "some" && __ring_m12[1]._tag === "some") {
+            const tp_name = __ring_m12[0]._0; const tp_var = __ring_m12[1]._0;
             const tv = types$Type_TypeVar(tp_var, Option_none);
             _Map_insert(ctx.type_param_scope, tp_name, tv);
             List_push(tv_types, tv);
-            break __ring_match11;
+            break __ring_match12;
           }
-          break __ring_match11;
+          break __ring_match12;
         }
         i = (i + 1);
       }
       let vi = 0;
-      const __ring_iter_5 = __List_Iterable.iter(variants);
+      const __ring_iter_4 = __List_Iterable.iter(variants);
       while (true) {
-        const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
-        if (__ring_next_5._tag === "none") break;
-        const v = __ring_next_5._0;
-        __ring_match12: {
-          const __ring_m12 = v.named_fields;
-          if (__ring_m12._tag === "some") {
-            const nf = __ring_m12._0;
+        const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
+        if (__ring_next_4._tag === "none") break;
+        const v = __ring_next_4._0;
+        __ring_match13: {
+          const __ring_m13 = v.named_fields;
+          if (__ring_m13._tag === "some") {
+            const nf = __ring_m13._0;
             if ((List_len(nf) > 0)) {
               let field_types = [];
               let field_names = [];
-              const __ring_iter_6 = __List_Iterable.iter(nf);
+              const __ring_iter_5 = __List_Iterable.iter(nf);
               while (true) {
-                const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
-                if (__ring_next_6._tag === "none") break;
-                const f = __ring_next_6._0;
+                const __ring_next_5 = __ListIterator_Iterator.next(__ring_iter_5);
+                if (__ring_next_5._tag === "none") break;
+                const f = __ring_next_5._0;
                 List_push(field_types, infer_ctx$resolve_type_expr(ctx, f.type_expr));
                 List_push(field_names, f.name);
               }
               List_push(def.variants, new types$EnumVariant(v.name, field_types, Option_some(field_names)));
             } else {
               let field_types = [];
-              const __ring_iter_7 = __List_Iterable.iter(v.fields);
+              const __ring_iter_6 = __List_Iterable.iter(v.fields);
               while (true) {
-                const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
-                if (__ring_next_7._tag === "none") break;
-                const f = __ring_next_7._0;
+                const __ring_next_6 = __ListIterator_Iterator.next(__ring_iter_6);
+                if (__ring_next_6._tag === "none") break;
+                const f = __ring_next_6._0;
                 List_push(field_types, infer_ctx$resolve_type_expr(ctx, f));
               }
               List_push(def.variants, new types$EnumVariant(v.name, field_types, Option_none));
             }
-            break __ring_match12;
+            break __ring_match13;
           }
-          if (__ring_m12._tag === "none") {
+          if (__ring_m13._tag === "none") {
             let field_types = [];
-            const __ring_iter_8 = __List_Iterable.iter(v.fields);
+            const __ring_iter_7 = __List_Iterable.iter(v.fields);
             while (true) {
-              const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
-              if (__ring_next_8._tag === "none") break;
-              const f = __ring_next_8._0;
+              const __ring_next_7 = __ListIterator_Iterator.next(__ring_iter_7);
+              if (__ring_next_7._tag === "none") break;
+              const f = __ring_next_7._0;
               List_push(field_types, infer_ctx$resolve_type_expr(ctx, f));
             }
             List_push(def.variants, new types$EnumVariant(v.name, field_types, Option_none));
-            break __ring_match12;
+            break __ring_match13;
           }
-          __match_fail(__ring_m12);
+          __match_fail(__ring_m13);
         }
         _Map_insert(def.variant_index, v.name, vi);
         vi = (vi + 1);
       }
       const enum_type = types$Type_EnumType(name, tv_types, def.variants);
       const tv_ids = def.type_param_vars;
-      const __ring_iter_9 = __List_Iterable.iter(def.variants);
+      const __ring_iter_8 = __List_Iterable.iter(def.variants);
       while (true) {
-        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
-        if (__ring_next_9._tag === "none") break;
-        const variant = __ring_next_9._0;
+        const __ring_next_8 = __ListIterator_Iterator.next(__ring_iter_8);
+        if (__ring_next_8._tag === "none") break;
+        const variant = __ring_next_8._0;
         _Map_insert(ctx.env.types.variant_to_enum, variant.name, name);
         if (Option_is_some(variant.field_names)) {
           bind_variant_constructor(ctx, variant.name, enum_type, tv_ids);
@@ -431,183 +432,48 @@ function complete_enum_variants(ctx, name, type_params, variants) {
         }
       }
       ctx.type_param_scope = saved;
-      break __ring_match10;
+      break __ring_match11;
     }
-    if (__ring_m10._tag === "none") {
-      break __ring_match10;
+    if (__ring_m11._tag === "none") {
+      break __ring_match11;
     }
-    __match_fail(__ring_m10);
+    __match_fail(__ring_m11);
   }
 }
 
-function register_effect(ctx, name, type_params, ops) {
-  const saved = map_clone(ctx.type_param_scope);
-  let tp_names = [];
-  let tp_vars = [];
-  const __ring_iter_10 = __List_Iterable.iter(type_params);
-  while (true) {
-    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
-    if (__ring_next_10._tag === "none") break;
-    const tp = __ring_next_10._0;
-    List_push(tp_names, tp.name);
-    const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match13: {
-      const __ring_m13 = tv;
-      if (__ring_m13._tag === "TypeVar") {
-        const id = __ring_m13.id;
-        List_push(tp_vars, id);
-        break __ring_match13;
-      }
-      break __ring_match13;
-    }
-    _Map_insert(ctx.type_param_scope, tp.name, tv);
-  }
-  let effect_ops = [];
-  const __ring_iter_11 = __List_Iterable.iter(ops);
-  while (true) {
-    const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
-    if (__ring_next_11._tag === "none") break;
-    const op = __ring_next_11._0;
-    let param_types = [];
-    const __ring_iter_12 = __List_Iterable.iter(op.params);
-    while (true) {
-      const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
-      if (__ring_next_12._tag === "none") break;
-      const p = __ring_next_12._0;
-      __ring_match14: {
-        const __ring_m14 = p.type_annotation;
-        if (__ring_m14._tag === "some") {
-          const ta = __ring_m14._0;
-          List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-          break __ring_match14;
+function complete_struct_fields(ctx, name, fields) {
+  __ring_match14: {
+    const __ring_m14 = _Map_get(ctx.env.types.structs, name);
+    if (__ring_m14._tag === "some") {
+      const def = __ring_m14._0;
+      const saved = map_clone(ctx.type_param_scope);
+      let i = 0;
+      while ((i < List_len(def.type_params))) {
+        __ring_match15: {
+          const __ring_m15 = [List_get(def.type_params, i), List_get(def.type_param_vars, i)];
+          if (Array.isArray(__ring_m15) && __ring_m15.length === 2 && __ring_m15[0]._tag === "some" && __ring_m15[1]._tag === "some") {
+            const tp_name = __ring_m15[0]._0; const tp_var = __ring_m15[1]._0;
+            _Map_insert(ctx.type_param_scope, tp_name, types$Type_TypeVar(tp_var, Option_none));
+            break __ring_match15;
+          }
+          break __ring_match15;
         }
-        if (__ring_m14._tag === "none") {
-          List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-          break __ring_match14;
-        }
-        __match_fail(__ring_m14);
+        i = (i + 1);
       }
-    }
-    const ret = infer_ctx$resolve_type_expr(ctx, op.return_type);
-    const op_has_default = Option_is_some(op.body);
-    List_push(effect_ops, new env$EffectOpDef(op.name, param_types, ret, op_has_default));
-  }
-  let all_defaults = true;
-  const __ring_iter_13 = __List_Iterable.iter(effect_ops);
-  while (true) {
-    const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
-    if (__ring_next_13._tag === "none") break;
-    const eop = __ring_next_13._0;
-    if ((!eop.has_default)) {
-      all_defaults = false;
-    }
-  }
-  if ((List_len(effect_ops) === 0)) {
-    all_defaults = false;
-  }
-  ctx.type_param_scope = saved;
-  return _Map_insert(ctx.env.types.effects, name, new env$EffectDef(name, tp_names, tp_vars, effect_ops, Option_none, all_defaults));
-}
-
-function collect_all_supertraits(ctx, trait_name) {
-  let result = [];
-  let visited = set_new();
-  let stack = [];
-  __ring_match15: {
-    const __ring_m15 = _Map_get(ctx.env.trait_reg.traits, trait_name);
-    if (__ring_m15._tag === "some") {
-      const tdef = __ring_m15._0;
-      const __ring_iter_14 = __List_Iterable.iter(tdef.supertraits);
+      const __ring_iter_9 = __List_Iterable.iter(fields);
       while (true) {
-        const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
-        if (__ring_next_14._tag === "none") break;
-        const st = __ring_next_14._0;
-        List_push(stack, st);
+        const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
+        if (__ring_next_9._tag === "none") break;
+        const f = __ring_next_9._0;
+        List_push(def.fields, new types$StructField(f.name, infer_ctx$resolve_type_expr(ctx, f.type_annotation), f.is_pub));
       }
-      break __ring_match15;
+      ctx.type_param_scope = saved;
+      break __ring_match14;
     }
-    if (__ring_m15._tag === "none") {
-      break __ring_match15;
+    if (__ring_m14._tag === "none") {
+      break __ring_match14;
     }
-    __match_fail(__ring_m15);
-  }
-  while ((List_len(stack) > 0)) {
-    const current = Option_unwrap(List_pop(stack));
-    if (_Set_contains(visited, current, __Str_Eq)) {
-      continue;
-    }
-    _Set_insert(visited, current);
-    List_push(result, current);
-    __ring_match16: {
-      const __ring_m16 = _Map_get(ctx.env.trait_reg.traits, current);
-      if (__ring_m16._tag === "some") {
-        const parent_def = __ring_m16._0;
-        const __ring_iter_15 = __List_Iterable.iter(parent_def.supertraits);
-        while (true) {
-          const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
-          if (__ring_next_15._tag === "none") break;
-          const parent_st = __ring_next_15._0;
-          List_push(stack, parent_st);
-        }
-        break __ring_match16;
-      }
-      if (__ring_m16._tag === "none") {
-        break __ring_match16;
-      }
-      __match_fail(__ring_m16);
-    }
-  }
-  return result;
-}
-
-function resolve_impl_self_type(ctx, target_type, impl_type_params) {
-  if ((List_len(impl_type_params) === 0)) {
-    return infer_ctx$resolve_self_type(ctx, target_type);
-  }
-  let impl_tp_types = [];
-  const __ring_iter_16 = __List_Iterable.iter(impl_type_params);
-  while (true) {
-    const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
-    if (__ring_next_16._tag === "none") break;
-    const tp = __ring_next_16._0;
-    __ring_match17: {
-      const __ring_m17 = _Map_get(ctx.type_param_scope, tp.name);
-      if (__ring_m17._tag === "some") {
-        const tv = __ring_m17._0;
-        List_push(impl_tp_types, tv);
-        break __ring_match17;
-      }
-      if (__ring_m17._tag === "none") {
-        List_push(impl_tp_types, env$TypeEnv_fresh_var(ctx.env));
-        break __ring_match17;
-      }
-      __match_fail(__ring_m17);
-    }
-  }
-  __ring_match18: {
-    const __ring_m18 = _Map_get(ctx.env.types.structs, target_type);
-    if (__ring_m18._tag === "some") {
-      const def = __ring_m18._0;
-      return types$Type_StructType(def.name, impl_tp_types, def.fields);
-      break __ring_match18;
-    }
-    if (__ring_m18._tag === "none") {
-      __ring_match19: {
-        const __ring_m19 = _Map_get(ctx.env.types.enums, target_type);
-        if (__ring_m19._tag === "some") {
-          const def = __ring_m19._0;
-          return types$Type_EnumType(def.name, impl_tp_types, def.variants);
-          break __ring_match19;
-        }
-        if (__ring_m19._tag === "none") {
-          return infer_ctx$resolve_self_type(ctx, target_type);
-          break __ring_match19;
-        }
-        __match_fail(__ring_m19);
-      }
-      break __ring_match18;
-    }
-    __match_fail(__ring_m18);
+    __match_fail(__ring_m14);
   }
 }
 
@@ -643,11 +509,11 @@ function resolve_effect_expr(ctx, eff) {
   __match_fail(__ring_m);
 })();
   let resolved_args = [];
-  const __ring_iter_17 = __List_Iterable.iter(eff.type_args);
+  const __ring_iter_10 = __List_Iterable.iter(eff.type_args);
   while (true) {
-    const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
-    if (__ring_next_17._tag === "none") break;
-    const ta = __ring_next_17._0;
+    const __ring_next_10 = __ListIterator_Iterator.next(__ring_iter_10);
+    if (__ring_next_10._tag === "none") break;
+    const ta = __ring_next_10._0;
     List_push(resolved_args, infer_ctx$resolve_type_expr(ctx, ta));
   }
   return types$Effect_CustomEffect(canonical_name, resolved_args);
@@ -655,95 +521,566 @@ function resolve_effect_expr(ctx, eff) {
 
 function expand_effect_exprs(ctx, decl_effects, expanding) {
   let effects = [];
-  const __ring_iter_18 = __List_Iterable.iter(decl_effects);
+  const __ring_iter_11 = __List_Iterable.iter(decl_effects);
   while (true) {
-    const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
-    if (__ring_next_18._tag === "none") break;
-    const eff = __ring_next_18._0;
-    __ring_match20: {
-      const __ring_m20 = _Map_get(ctx.env.types.effect_aliases, eff.name);
-      if (__ring_m20._tag === "some") {
-        const alias_def = __ring_m20._0;
+    const __ring_next_11 = __ListIterator_Iterator.next(__ring_iter_11);
+    if (__ring_next_11._tag === "none") break;
+    const eff = __ring_next_11._0;
+    __ring_match16: {
+      const __ring_m16 = _Map_get(ctx.env.types.effect_aliases, eff.name);
+      if (__ring_m16._tag === "some") {
+        const alias_def = __ring_m16._0;
         if (_Set_contains(expanding, eff.name, __Str_Eq)) {
           const _ = infer_ctx$type_error(ctx.sink, codes$E0406, `Cyclic effect alias: '${eff.name}' references itself`, eff.span, diagnostics$DiagnosticContext_OtherContext(Option_some("cyclic effect alias")));
         } else {
           _Set_insert(expanding, eff.name);
           let saved_scope = [];
           let vi = 0;
-          const __ring_iter_19 = __List_Iterable.iter(alias_def.type_params);
+          const __ring_iter_12 = __List_Iterable.iter(alias_def.type_params);
           while (true) {
-            const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
-            if (__ring_next_19._tag === "none") break;
-            const tp_name = __ring_next_19._0;
+            const __ring_next_12 = __ListIterator_Iterator.next(__ring_iter_12);
+            if (__ring_next_12._tag === "none") break;
+            const tp_name = __ring_next_12._0;
             List_push(saved_scope, [tp_name, _Map_get(ctx.type_param_scope, tp_name)]);
-            __ring_match21: {
-              const __ring_m21 = List_get(alias_def.type_param_vars, vi);
-              if (__ring_m21._tag === "some") {
-                const var_id = __ring_m21._0;
+            __ring_match17: {
+              const __ring_m17 = List_get(alias_def.type_param_vars, vi);
+              if (__ring_m17._tag === "some") {
+                const var_id = __ring_m17._0;
                 _Map_insert(ctx.type_param_scope, tp_name, types$Type_TypeVar(var_id, Option_none));
-                break __ring_match21;
+                break __ring_match17;
               }
-              if (__ring_m21._tag === "none") {
-                break __ring_match21;
+              if (__ring_m17._tag === "none") {
+                break __ring_match17;
               }
-              __match_fail(__ring_m21);
+              __match_fail(__ring_m17);
             }
             vi = (vi + 1);
           }
           const expanded = expand_effect_exprs(ctx, alias_def.effects, expanding);
-          const __ring_iter_20 = __List_Iterable.iter(saved_scope);
+          const __ring_iter_13 = __List_Iterable.iter(saved_scope);
           while (true) {
-            const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
-            if (__ring_next_20._tag === "none") break;
-            const entry = __ring_next_20._0;
-            __ring_match22: {
-              const __ring_m22 = entry;
-              if (Array.isArray(__ring_m22) && __ring_m22.length === 2 && __ring_m22[1]._tag === "some") {
-                const name = __ring_m22[0]; const prev_type = __ring_m22[1]._0;
+            const __ring_next_13 = __ListIterator_Iterator.next(__ring_iter_13);
+            if (__ring_next_13._tag === "none") break;
+            const entry = __ring_next_13._0;
+            __ring_match18: {
+              const __ring_m18 = entry;
+              if (Array.isArray(__ring_m18) && __ring_m18.length === 2 && __ring_m18[1]._tag === "some") {
+                const name = __ring_m18[0]; const prev_type = __ring_m18[1]._0;
                 _Map_insert(ctx.type_param_scope, name, prev_type);
-                break __ring_match22;
+                break __ring_match18;
               }
-              if (Array.isArray(__ring_m22) && __ring_m22.length === 2 && __ring_m22[1]._tag === "none") {
-                const name = __ring_m22[0];
+              if (Array.isArray(__ring_m18) && __ring_m18.length === 2 && __ring_m18[1]._tag === "none") {
+                const name = __ring_m18[0];
                 _Map_remove(ctx.type_param_scope, name);
-                break __ring_match22;
+                break __ring_match18;
               }
-              __match_fail(__ring_m22);
+              __match_fail(__ring_m18);
             }
           }
           let subst_map = map_new();
           let si = 0;
           while (((si < List_len(alias_def.type_param_vars)) ? (si < List_len(eff.type_args)) : false)) {
-            __ring_match23: {
-              const __ring_m23 = [List_get(alias_def.type_param_vars, si), List_get(eff.type_args, si)];
-              if (Array.isArray(__ring_m23) && __ring_m23.length === 2 && __ring_m23[0]._tag === "some" && __ring_m23[1]._tag === "some") {
-                const var_id = __ring_m23[0]._0; const ta = __ring_m23[1]._0;
+            __ring_match19: {
+              const __ring_m19 = [List_get(alias_def.type_param_vars, si), List_get(eff.type_args, si)];
+              if (Array.isArray(__ring_m19) && __ring_m19.length === 2 && __ring_m19[0]._tag === "some" && __ring_m19[1]._tag === "some") {
+                const var_id = __ring_m19[0]._0; const ta = __ring_m19[1]._0;
                 _Map_insert(subst_map, var_id, infer_ctx$resolve_type_expr(ctx, ta));
-                break __ring_match23;
+                break __ring_match19;
               }
-              break __ring_match23;
+              break __ring_match19;
             }
             si = (si + 1);
           }
-          const __ring_iter_21 = __List_Iterable.iter(expanded);
+          const __ring_iter_14 = __List_Iterable.iter(expanded);
           while (true) {
-            const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
-            if (__ring_next_21._tag === "none") break;
-            const e = __ring_next_21._0;
+            const __ring_next_14 = __ListIterator_Iterator.next(__ring_iter_14);
+            if (__ring_next_14._tag === "none") break;
+            const e = __ring_next_14._0;
             List_push(effects, env$apply_subst_effect_map(subst_map, e));
           }
           _Set_remove(expanding, eff.name);
         }
-        break __ring_match20;
+        break __ring_match16;
       }
-      if (__ring_m20._tag === "none") {
+      if (__ring_m16._tag === "none") {
         List_push(effects, resolve_effect_expr(ctx, eff));
-        break __ring_match20;
+        break __ring_match16;
       }
-      __match_fail(__ring_m20);
+      __match_fail(__ring_m16);
     }
   }
   return effects;
+}
+
+function inject_assoc_types_from_bounds(ctx, type_params) {
+  const __ring_iter_15 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_15 = __ListIterator_Iterator.next(__ring_iter_15);
+    if (__ring_next_15._tag === "none") break;
+    const tp = __ring_next_15._0;
+    const __ring_iter_16 = __List_Iterable.iter(tp.bounds);
+    while (true) {
+      const __ring_next_16 = __ListIterator_Iterator.next(__ring_iter_16);
+      if (__ring_next_16._tag === "none") break;
+      const b = __ring_next_16._0;
+      const __ring_iter_17 = __List_Iterable.iter(b.assoc_constraints);
+      while (true) {
+        const __ring_next_17 = __ListIterator_Iterator.next(__ring_iter_17);
+        if (__ring_next_17._tag === "none") break;
+        const ac = __ring_next_17._0;
+        const concrete_ty = infer_ctx$resolve_type_expr(ctx, ac.ty);
+        _Map_insert(ctx.type_param_scope, ac.name, concrete_ty);
+        _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${ac.name}`, concrete_ty);
+      }
+      __ring_match20: {
+        const __ring_m20 = _Map_get(ctx.env.trait_reg.traits, b.trait_name);
+        if (__ring_m20._tag === "some") {
+          const tdef = __ring_m20._0;
+          const __ring_iter_18 = __List_Iterable.iter(tdef.assoc_types);
+          while (true) {
+            const __ring_next_18 = __ListIterator_Iterator.next(__ring_iter_18);
+            if (__ring_next_18._tag === "none") break;
+            const atdef = __ring_next_18._0;
+            if ((!_Map_contains_key(ctx.type_param_scope, atdef.name))) {
+              const at_var = env$TypeEnv_fresh_var(ctx.env);
+              _Map_insert(ctx.type_param_scope, atdef.name, at_var);
+              _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${atdef.name}`, at_var);
+            } else {
+              const at_var = env$TypeEnv_fresh_var(ctx.env);
+              _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${atdef.name}`, at_var);
+            }
+          }
+          break __ring_match20;
+        }
+        if (__ring_m20._tag === "none") {
+          break __ring_match20;
+        }
+        __match_fail(__ring_m20);
+      }
+    }
+  }
+}
+
+function insert_mod_aliases(ctx, mod_name, decls, guard) {
+  const __ring_iter_19 = __List_Iterable.iter(decls);
+  while (true) {
+    const __ring_next_19 = __ListIterator_Iterator.next(__ring_iter_19);
+    if (__ring_next_19._tag === "none") break;
+    const d = __ring_next_19._0;
+    __ring_match21: {
+      const __ring_m21 = d;
+      if (__ring_m21._tag === "Struct") {
+        const name = __ring_m21.name;
+        const qualified = `${mod_name}::${name}`;
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.structs, name)))) {
+          __ring_match22: {
+            const __ring_m22 = _Map_get(ctx.env.types.structs, qualified);
+            if (__ring_m22._tag === "some") {
+              const sdef = __ring_m22._0;
+              _Map_insert(ctx.env.types.structs, name, sdef);
+              break __ring_match22;
+            }
+            if (__ring_m22._tag === "none") {
+              break __ring_match22;
+            }
+            __match_fail(__ring_m22);
+          }
+        }
+        break __ring_match21;
+      }
+      if (__ring_m21._tag === "Enum") {
+        const name = __ring_m21.name;
+        const qualified = `${mod_name}::${name}`;
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.enums, name)))) {
+          __ring_match23: {
+            const __ring_m23 = _Map_get(ctx.env.types.enums, qualified);
+            if (__ring_m23._tag === "some") {
+              const edef = __ring_m23._0;
+              _Map_insert(ctx.env.types.enums, name, edef);
+              break __ring_match23;
+            }
+            if (__ring_m23._tag === "none") {
+              break __ring_match23;
+            }
+            __match_fail(__ring_m23);
+          }
+        }
+        break __ring_match21;
+      }
+      if (__ring_m21._tag === "Trait") {
+        const name = __ring_m21.name;
+        const qualified = `${mod_name}::${name}`;
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.trait_reg.traits, name)))) {
+          __ring_match24: {
+            const __ring_m24 = _Map_get(ctx.env.trait_reg.traits, qualified);
+            if (__ring_m24._tag === "some") {
+              const tdef = __ring_m24._0;
+              _Map_insert(ctx.env.trait_reg.traits, name, tdef);
+              break __ring_match24;
+            }
+            if (__ring_m24._tag === "none") {
+              break __ring_match24;
+            }
+            __match_fail(__ring_m24);
+          }
+        }
+        break __ring_match21;
+      }
+      if (__ring_m21._tag === "Effect") {
+        const name = __ring_m21.name;
+        const qualified = `${mod_name}::${name}`;
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.effects, name)))) {
+          __ring_match25: {
+            const __ring_m25 = _Map_get(ctx.env.types.effects, qualified);
+            if (__ring_m25._tag === "some") {
+              const edef = __ring_m25._0;
+              _Map_insert(ctx.env.types.effects, name, edef);
+              break __ring_match25;
+            }
+            if (__ring_m25._tag === "none") {
+              break __ring_match25;
+            }
+            __match_fail(__ring_m25);
+          }
+        }
+        break __ring_match21;
+      }
+      if (__ring_m21._tag === "EffectAlias") {
+        const name = __ring_m21.name;
+        const qualified = `${mod_name}::${name}`;
+        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.effect_aliases, name)))) {
+          __ring_match26: {
+            const __ring_m26 = _Map_get(ctx.env.types.effect_aliases, qualified);
+            if (__ring_m26._tag === "some") {
+              const adef = __ring_m26._0;
+              _Map_insert(ctx.env.types.effect_aliases, name, adef);
+              break __ring_match26;
+            }
+            if (__ring_m26._tag === "none") {
+              break __ring_match26;
+            }
+            __match_fail(__ring_m26);
+          }
+        }
+        break __ring_match21;
+      }
+      break __ring_match21;
+    }
+  }
+}
+
+function is_register_value_type(t) {
+  __ring_match27: {
+    const __ring_m27 = t;
+    if (__ring_m27._tag === "IntType") {
+      return true;
+      break __ring_match27;
+    }
+    if (__ring_m27._tag === "FloatType") {
+      return true;
+      break __ring_match27;
+    }
+    if (__ring_m27._tag === "BoolType") {
+      return true;
+      break __ring_match27;
+    }
+    if (__ring_m27._tag === "StrType") {
+      return true;
+      break __ring_match27;
+    }
+    return false;
+    break __ring_match27;
+  }
+}
+
+function prefix_decl_name(mod_name, decl) {
+  __ring_match28: {
+    const __ring_m28 = decl;
+    if (__ring_m28._tag === "Fn") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const params = __ring_m28.params; const return_type = __ring_m28.return_type; const declared_effects = __ring_m28.declared_effects; const body = __ring_m28.body; const is_pub = __ring_m28.is_pub; const is_abstract = __ring_m28.is_abstract; const span = __ring_m28.span;
+      return ast$Decl_Fn(`${mod_name}::${name}`, type_params, params, return_type, declared_effects, body, is_pub, is_abstract, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Struct") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const fields = __ring_m28.fields; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_Struct(`${mod_name}::${name}`, type_params, fields, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Enum") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const variants = __ring_m28.variants; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_Enum(`${mod_name}::${name}`, type_params, variants, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "ExternFn") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const params = __ring_m28.params; const return_type = __ring_m28.return_type; const declared_effects = __ring_m28.declared_effects; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_ExternFn(`${mod_name}::${name}`, type_params, params, return_type, declared_effects, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Const") {
+      const name = __ring_m28.name; const type_annotation = __ring_m28.type_annotation; const init = __ring_m28.init; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_Const(`${mod_name}::${name}`, type_annotation, init, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Sig") {
+      const name = __ring_m28.name; const members = __ring_m28.members; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_Sig(`${mod_name}::${name}`, members, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Impl") {
+      const target_type = __ring_m28.target_type; const type_params = __ring_m28.type_params; const trait_name = __ring_m28.trait_name; const methods = __ring_m28.methods; const span = __ring_m28.span;
+      const prefixed_target = (Str_contains(target_type, "::") ? target_type : `${mod_name}::${target_type}`);
+      return ast$Decl_Impl(prefixed_target, type_params, trait_name, methods, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Trait") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const supertraits = __ring_m28.supertraits; const methods = __ring_m28.methods; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_Trait(`${mod_name}::${name}`, type_params, supertraits, methods, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "Effect") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const ops = __ring_m28.ops; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_Effect(`${mod_name}::${name}`, type_params, ops, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "ExternType") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_ExternType(`${mod_name}::${name}`, type_params, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "TypeAlias") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const type_expr = __ring_m28.type_expr; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_TypeAlias(`${mod_name}::${name}`, type_params, type_expr, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "EffectAlias") {
+      const name = __ring_m28.name; const type_params = __ring_m28.type_params; const effects = __ring_m28.effects; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_EffectAlias(`${mod_name}::${name}`, type_params, effects, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "ModBlock") {
+      const name = __ring_m28.name; const uses = __ring_m28.uses; const decls = __ring_m28.decls; const required_effects = __ring_m28.required_effects; const is_pub = __ring_m28.is_pub; const span = __ring_m28.span;
+      return ast$Decl_ModBlock(`${mod_name}::${name}`, uses, decls, required_effects, is_pub, span);
+      break __ring_match28;
+    }
+    if (__ring_m28._tag === "AssocType") {
+      return decl;
+      break __ring_match28;
+    }
+    return decl;
+    break __ring_match28;
+  }
+}
+
+function preregister_enum(ctx, name, type_params) {
+  let tp_names = [];
+  let tv_ids = [];
+  const __ring_iter_20 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_20 = __ListIterator_Iterator.next(__ring_iter_20);
+    if (__ring_next_20._tag === "none") break;
+    const tp = __ring_next_20._0;
+    List_push(tp_names, tp.name);
+    const tv = env$TypeEnv_fresh_var(ctx.env);
+    __ring_match29: {
+      const __ring_m29 = tv;
+      if (__ring_m29._tag === "TypeVar") {
+        const id = __ring_m29.id;
+        List_push(tv_ids, id);
+        break __ring_match29;
+      }
+      break __ring_match29;
+    }
+    _Map_insert(ctx.type_param_scope, tp.name, tv);
+  }
+  const def = new env$EnumDef(name, tp_names, tv_ids, [], map_new());
+  return _Map_insert(ctx.env.types.enums, name, def);
+}
+
+function preregister_struct(ctx, name, type_params) {
+  let tp_names = [];
+  let tp_vars = [];
+  const __ring_iter_21 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_21 = __ListIterator_Iterator.next(__ring_iter_21);
+    if (__ring_next_21._tag === "none") break;
+    const tp = __ring_next_21._0;
+    List_push(tp_names, tp.name);
+    const tv = env$TypeEnv_fresh_var(ctx.env);
+    __ring_match30: {
+      const __ring_m30 = tv;
+      if (__ring_m30._tag === "TypeVar") {
+        const id = __ring_m30.id;
+        List_push(tp_vars, id);
+        break __ring_match30;
+      }
+      break __ring_match30;
+    }
+    _Map_insert(ctx.type_param_scope, tp.name, tv);
+  }
+  const def = new env$StructDef(name, tp_names, tp_vars, [], false);
+  return _Map_insert(ctx.env.types.structs, name, def);
+}
+
+function register_const(ctx, name, type_annotation, span) {
+  check_duplicate_def(ctx, name, span);
+  __ring_match31: {
+    const __ring_m31 = type_annotation;
+    if (__ring_m31._tag === "some") {
+      const texpr = __ring_m31._0;
+      const ty = infer_ctx$resolve_type_expr(ctx, texpr);
+      env$TypeEnv_bind_mono(ctx.env, name, ty);
+      break __ring_match31;
+    }
+    if (__ring_m31._tag === "none") {
+      const tv = env$TypeEnv_fresh_var(ctx.env);
+      env$TypeEnv_bind_mono(ctx.env, name, tv);
+      break __ring_match31;
+    }
+    __match_fail(__ring_m31);
+  }
+  __ring_match32: {
+    const __ring_m32 = env$TypeEnv_lookup(ctx.env, name);
+    if (__ring_m32._tag === "some") {
+      const s = __ring_m32._0;
+      __ring_match33: {
+        const __ring_m33 = s.def_id;
+        if (__ring_m33._tag === "some") {
+          const did = __ring_m33._0;
+          return env$TypeEnv_record_def_span(ctx.env, did, span);
+          break __ring_match33;
+        }
+        if (__ring_m33._tag === "none") {
+          break __ring_match33;
+        }
+        __match_fail(__ring_m33);
+      }
+      break __ring_match32;
+    }
+    if (__ring_m32._tag === "none") {
+      break __ring_match32;
+    }
+    __match_fail(__ring_m32);
+  }
+}
+
+function register_effect(ctx, name, type_params, ops) {
+  const saved = map_clone(ctx.type_param_scope);
+  let tp_names = [];
+  let tp_vars = [];
+  const __ring_iter_22 = __List_Iterable.iter(type_params);
+  while (true) {
+    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
+    if (__ring_next_22._tag === "none") break;
+    const tp = __ring_next_22._0;
+    List_push(tp_names, tp.name);
+    const tv = env$TypeEnv_fresh_var(ctx.env);
+    __ring_match34: {
+      const __ring_m34 = tv;
+      if (__ring_m34._tag === "TypeVar") {
+        const id = __ring_m34.id;
+        List_push(tp_vars, id);
+        break __ring_match34;
+      }
+      break __ring_match34;
+    }
+    _Map_insert(ctx.type_param_scope, tp.name, tv);
+  }
+  let effect_ops = [];
+  const __ring_iter_23 = __List_Iterable.iter(ops);
+  while (true) {
+    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
+    if (__ring_next_23._tag === "none") break;
+    const op = __ring_next_23._0;
+    let param_types = [];
+    const __ring_iter_24 = __List_Iterable.iter(op.params);
+    while (true) {
+      const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
+      if (__ring_next_24._tag === "none") break;
+      const p = __ring_next_24._0;
+      __ring_match35: {
+        const __ring_m35 = p.type_annotation;
+        if (__ring_m35._tag === "some") {
+          const ta = __ring_m35._0;
+          List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
+          break __ring_match35;
+        }
+        if (__ring_m35._tag === "none") {
+          List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
+          break __ring_match35;
+        }
+        __match_fail(__ring_m35);
+      }
+    }
+    const ret = infer_ctx$resolve_type_expr(ctx, op.return_type);
+    const op_has_default = Option_is_some(op.body);
+    List_push(effect_ops, new env$EffectOpDef(op.name, param_types, ret, op_has_default));
+  }
+  let all_defaults = true;
+  const __ring_iter_25 = __List_Iterable.iter(effect_ops);
+  while (true) {
+    const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
+    if (__ring_next_25._tag === "none") break;
+    const eop = __ring_next_25._0;
+    if ((!eop.has_default)) {
+      all_defaults = false;
+    }
+  }
+  if ((List_len(effect_ops) === 0)) {
+    all_defaults = false;
+  }
+  ctx.type_param_scope = saved;
+  return _Map_insert(ctx.env.types.effects, name, new env$EffectDef(name, tp_names, tp_vars, effect_ops, Option_none, all_defaults));
+}
+
+function resolve_impl_self_type(ctx, target_type, impl_type_params) {
+  if ((List_len(impl_type_params) === 0)) {
+    return infer_ctx$resolve_self_type(ctx, target_type);
+  }
+  let impl_tp_types = [];
+  const __ring_iter_26 = __List_Iterable.iter(impl_type_params);
+  while (true) {
+    const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
+    if (__ring_next_26._tag === "none") break;
+    const tp = __ring_next_26._0;
+    __ring_match36: {
+      const __ring_m36 = _Map_get(ctx.type_param_scope, tp.name);
+      if (__ring_m36._tag === "some") {
+        const tv = __ring_m36._0;
+        List_push(impl_tp_types, tv);
+        break __ring_match36;
+      }
+      if (__ring_m36._tag === "none") {
+        List_push(impl_tp_types, env$TypeEnv_fresh_var(ctx.env));
+        break __ring_match36;
+      }
+      __match_fail(__ring_m36);
+    }
+  }
+  __ring_match37: {
+    const __ring_m37 = _Map_get(ctx.env.types.structs, target_type);
+    if (__ring_m37._tag === "some") {
+      const def = __ring_m37._0;
+      return types$Type_StructType(def.name, impl_tp_types, def.fields);
+      break __ring_match37;
+    }
+    if (__ring_m37._tag === "none") {
+      __ring_match38: {
+        const __ring_m38 = _Map_get(ctx.env.types.enums, target_type);
+        if (__ring_m38._tag === "some") {
+          const def = __ring_m38._0;
+          return types$Type_EnumType(def.name, impl_tp_types, def.variants);
+          break __ring_match38;
+        }
+        if (__ring_m38._tag === "none") {
+          return infer_ctx$resolve_self_type(ctx, target_type);
+          break __ring_match38;
+        }
+        __match_fail(__ring_m38);
+      }
+      break __ring_match37;
+    }
+    __match_fail(__ring_m37);
+  }
 }
 
 function resolve_declared_effects(ctx, decl_effects) {
@@ -751,11 +1088,11 @@ function resolve_declared_effects(ctx, decl_effects) {
   const effects = expand_effect_exprs(ctx, decl_effects, expanding);
   let deduped = [];
   let seen = set_new();
-  const __ring_iter_22 = __List_Iterable.iter(effects);
+  const __ring_iter_27 = __List_Iterable.iter(effects);
   while (true) {
-    const __ring_next_22 = __ListIterator_Iterator.next(__ring_iter_22);
-    if (__ring_next_22._tag === "none") break;
-    const eff = __ring_next_22._0;
+    const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
+    if (__ring_next_27._tag === "none") break;
+    const eff = __ring_next_27._0;
     const key = types$effect_to_string(eff);
     if ((!_Set_contains(seen, key, __Str_Eq))) {
       _Set_insert(seen, key);
@@ -768,46 +1105,46 @@ function resolve_declared_effects(ctx, decl_effects) {
 function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, outer_saved, impl_type_params, is_extern) {
   const saved_method = map_clone(ctx.type_param_scope);
   let method_tv_ids = [];
-  const __ring_iter_23 = __List_Iterable.iter(mtps);
+  const __ring_iter_28 = __List_Iterable.iter(mtps);
   while (true) {
-    const __ring_next_23 = __ListIterator_Iterator.next(__ring_iter_23);
-    if (__ring_next_23._tag === "none") break;
-    const mtp = __ring_next_23._0;
+    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
+    if (__ring_next_28._tag === "none") break;
+    const mtp = __ring_next_28._0;
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match24: {
-      const __ring_m24 = tv;
-      if (__ring_m24._tag === "TypeVar") {
-        const id = __ring_m24.id;
+    __ring_match39: {
+      const __ring_m39 = tv;
+      if (__ring_m39._tag === "TypeVar") {
+        const id = __ring_m39.id;
         List_push(method_tv_ids, id);
-        break __ring_match24;
+        break __ring_match39;
       }
-      break __ring_match24;
+      break __ring_match39;
     }
     _Map_insert(ctx.type_param_scope, mtp.name, tv);
   }
   const self_type = resolve_impl_self_type(ctx, target_type, impl_type_params);
   let param_types = [];
-  const __ring_iter_24 = __List_Iterable.iter(params);
+  const __ring_iter_29 = __List_Iterable.iter(params);
   while (true) {
-    const __ring_next_24 = __ListIterator_Iterator.next(__ring_iter_24);
-    if (__ring_next_24._tag === "none") break;
-    const p = __ring_next_24._0;
-    __ring_match25: {
-      const __ring_m25 = p.type_annotation;
-      if (__ring_m25._tag === "some") {
-        const ta = __ring_m25._0;
+    const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
+    if (__ring_next_29._tag === "none") break;
+    const p = __ring_next_29._0;
+    __ring_match40: {
+      const __ring_m40 = p.type_annotation;
+      if (__ring_m40._tag === "some") {
+        const ta = __ring_m40._0;
         List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-        break __ring_match25;
+        break __ring_match40;
       }
-      if (__ring_m25._tag === "none") {
+      if (__ring_m40._tag === "none") {
         if ((p.name === "self")) {
           List_push(param_types, self_type);
         } else {
           List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
         }
-        break __ring_match25;
+        break __ring_match40;
       }
-      __match_fail(__ring_m25);
+      __match_fail(__ring_m40);
     }
   }
   const ret = (function() {
@@ -817,45 +1154,47 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
   __match_fail(__ring_m);
 })();
   let all_tvs = list_clone(impl_tv_ids);
-  const __ring_iter_25 = __List_Iterable.iter(method_tv_ids);
+  const __ring_iter_30 = __List_Iterable.iter(method_tv_ids);
   while (true) {
-    const __ring_next_25 = __ListIterator_Iterator.next(__ring_iter_25);
-    if (__ring_next_25._tag === "none") break;
-    const mtv = __ring_next_25._0;
+    const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
+    if (__ring_next_30._tag === "none") break;
+    const mtv = __ring_next_30._0;
     List_push(all_tvs, mtv);
   }
   if ((!is_extern)) {
     let declared_names = set_new();
-    const __ring_iter_26 = __List_Iterable.iter(_Map_entries(ctx.type_param_scope));
+    let sorted_tp_scope = _Map_entries(ctx.type_param_scope);
+    sorted_tp_scope.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+    const __ring_iter_31 = __List_Iterable.iter(sorted_tp_scope);
     while (true) {
-      const __ring_next_26 = __ListIterator_Iterator.next(__ring_iter_26);
-      if (__ring_next_26._tag === "none") break;
-      const entry = __ring_next_26._0;
+      const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
+      if (__ring_next_31._tag === "none") break;
+      const entry = __ring_next_31._0;
       const __ring_dt0 = entry;
       const tpname = __ring_dt0[0];
       if (_Map_contains_key(outer_saved, tpname)) {
         _Set_insert(declared_names, tpname);
       }
     }
-    const __ring_iter_27 = __List_Iterable.iter(_Map_entries(ctx.type_param_scope));
+    const __ring_iter_32 = __List_Iterable.iter(sorted_tp_scope);
     while (true) {
-      const __ring_next_27 = __ListIterator_Iterator.next(__ring_iter_27);
-      if (__ring_next_27._tag === "none") break;
-      const entry = __ring_next_27._0;
+      const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
+      if (__ring_next_32._tag === "none") break;
+      const entry = __ring_next_32._0;
       const __ring_dt1 = entry;
       const tpname = __ring_dt1[0];
       const tv = __ring_dt1[1];
       if (((!_Map_contains_key(outer_saved, tpname)) ? (!_Set_contains(declared_names, tpname, __Str_Eq)) : false)) {
-        __ring_match26: {
-          const __ring_m26 = tv;
-          if (__ring_m26._tag === "TypeVar") {
-            const id = __ring_m26.id;
+        __ring_match41: {
+          const __ring_m41 = tv;
+          if (__ring_m41._tag === "TypeVar") {
+            const id = __ring_m41.id;
             if ((!List_contains(all_tvs, id, __Int_Eq))) {
               List_push(all_tvs, id);
             }
-            break __ring_match26;
+            break __ring_match41;
           }
-          break __ring_match26;
+          break __ring_match41;
         }
       }
     }
@@ -869,10 +1208,10 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
   const fn_type = types$Type_FnType(param_types, ret, impl_m_effects);
   _Map_insert(methods_map, mname, new env$TypeScheme(fn_type, all_tvs, impl_scheme_bounds, Option_none));
   if ((List_len(params) > 0)) {
-    __ring_match27: {
-      const __ring_m27 = List_first(params);
-      if (__ring_m27._tag === "some") {
-        const first_p = __ring_m27._0;
+    __ring_match42: {
+      const __ring_m42 = List_first(params);
+      if (__ring_m42._tag === "some") {
+        const first_p = __ring_m42._0;
         if (((first_p.name === "self") ? first_p.is_mutable : false)) {
           let mut_set = (function() {
   const __ring_m = _Map_get(ctx.env.trait_reg.mut_methods, target_type);
@@ -886,12 +1225,12 @@ function register_impl_method(ctx, methods_map, impl_tv_ids, target_type, mname,
 })();
           _Set_insert(mut_set, mname);
         }
-        break __ring_match27;
+        break __ring_match42;
       }
-      if (__ring_m27._tag === "none") {
-        break __ring_match27;
+      if (__ring_m42._tag === "none") {
+        break __ring_match42;
       }
-      __match_fail(__ring_m27);
+      __match_fail(__ring_m42);
     }
   }
   ctx.type_param_scope = saved_method;
@@ -911,44 +1250,44 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span)
   const saved = map_clone(ctx.type_param_scope);
   const saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope);
   let impl_tv_ids = [];
-  const __ring_iter_28 = __List_Iterable.iter(type_params);
+  const __ring_iter_33 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_28 = __ListIterator_Iterator.next(__ring_iter_28);
-    if (__ring_next_28._tag === "none") break;
-    const tp = __ring_next_28._0;
+    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
+    if (__ring_next_33._tag === "none") break;
+    const tp = __ring_next_33._0;
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match28: {
-      const __ring_m28 = tv;
-      if (__ring_m28._tag === "TypeVar") {
-        const id = __ring_m28.id;
+    __ring_match43: {
+      const __ring_m43 = tv;
+      if (__ring_m43._tag === "TypeVar") {
+        const id = __ring_m43.id;
         List_push(impl_tv_ids, id);
-        break __ring_match28;
+        break __ring_match43;
       }
-      break __ring_match28;
+      break __ring_match43;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
   let impl_scheme_bounds = [];
   let tp_idx = 0;
-  const __ring_iter_29 = __List_Iterable.iter(type_params);
+  const __ring_iter_34 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_29 = __ListIterator_Iterator.next(__ring_iter_29);
-    if (__ring_next_29._tag === "none") break;
-    const tp = __ring_next_29._0;
-    const __ring_iter_30 = __List_Iterable.iter(tp.bounds);
+    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
+    if (__ring_next_34._tag === "none") break;
+    const tp = __ring_next_34._0;
+    const __ring_iter_35 = __List_Iterable.iter(tp.bounds);
     while (true) {
-      const __ring_next_30 = __ListIterator_Iterator.next(__ring_iter_30);
-      if (__ring_next_30._tag === "none") break;
-      const b = __ring_next_30._0;
+      const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
+      if (__ring_next_35._tag === "none") break;
+      const b = __ring_next_35._0;
       if ((tp_idx < List_len(impl_tv_ids))) {
         const tv_id = Option_unwrap(List_get(impl_tv_ids, tp_idx));
         List_push(impl_scheme_bounds, new env$SchemeBound(tv_id, b.trait_name, []));
         const supers = collect_all_supertraits(ctx, b.trait_name);
-        const __ring_iter_31 = __List_Iterable.iter(supers);
+        const __ring_iter_36 = __List_Iterable.iter(supers);
         while (true) {
-          const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
-          if (__ring_next_31._tag === "none") break;
-          const st_name = __ring_next_31._0;
+          const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
+          if (__ring_next_36._tag === "none") break;
+          const st_name = __ring_next_36._0;
           List_push(impl_scheme_bounds, new env$SchemeBound(tv_id, st_name, []));
         }
       }
@@ -956,362 +1295,259 @@ function register_impl(ctx, target_type, type_params, trait_name, methods, span)
     tp_idx = (tp_idx + 1);
   }
   let assoc_type_map = map_new();
-  const __ring_iter_32 = __List_Iterable.iter(methods);
+  const __ring_iter_37 = __List_Iterable.iter(methods);
   while (true) {
-    const __ring_next_32 = __ListIterator_Iterator.next(__ring_iter_32);
-    if (__ring_next_32._tag === "none") break;
-    const method = __ring_next_32._0;
-    __ring_match29: {
-      const __ring_m29 = method;
-      if (__ring_m29._tag === "AssocType") {
-        const aname = __ring_m29.name; const avalue = __ring_m29.value; const aspan = __ring_m29.span;
-        __ring_match30: {
-          const __ring_m30 = avalue;
-          if (__ring_m30._tag === "some") {
-            const v = __ring_m30._0;
+    const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
+    if (__ring_next_37._tag === "none") break;
+    const method = __ring_next_37._0;
+    __ring_match44: {
+      const __ring_m44 = method;
+      if (__ring_m44._tag === "AssocType") {
+        const aname = __ring_m44.name; const avalue = __ring_m44.value; const aspan = __ring_m44.span;
+        __ring_match45: {
+          const __ring_m45 = avalue;
+          if (__ring_m45._tag === "some") {
+            const v = __ring_m45._0;
             const resolved_ty = infer_ctx$resolve_type_expr(ctx, v);
             _Map_insert(assoc_type_map, aname, resolved_ty);
             _Map_insert(ctx.type_param_scope, aname, resolved_ty);
-            break __ring_match30;
+            break __ring_match45;
           }
-          if (__ring_m30._tag === "none") {
+          if (__ring_m45._tag === "none") {
             const _ = infer_ctx$type_error(ctx.sink, codes$E0510, `Associated type '${aname}' must have a value in impl`, aspan, diagnostics$DiagnosticContext_TraitError("missing associated type value"));
-            break __ring_match30;
+            break __ring_match45;
           }
-          __match_fail(__ring_m30);
+          __match_fail(__ring_m45);
         }
-        break __ring_match29;
+        break __ring_match44;
       }
-      break __ring_match29;
+      break __ring_match44;
     }
   }
   const impl_self_type = resolve_impl_self_type(ctx, target_type, type_params);
   _Map_insert(ctx.type_param_scope, "Self", impl_self_type);
-  const __ring_iter_33 = __List_Iterable.iter(_Map_entries(assoc_type_map));
+  let sorted_assoc_map = _Map_entries(assoc_type_map);
+  sorted_assoc_map.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+  const __ring_iter_38 = __List_Iterable.iter(sorted_assoc_map);
   while (true) {
-    const __ring_next_33 = __ListIterator_Iterator.next(__ring_iter_33);
-    if (__ring_next_33._tag === "none") break;
-    const entry = __ring_next_33._0;
+    const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
+    if (__ring_next_38._tag === "none") break;
+    const entry = __ring_next_38._0;
     const __ring_dt2 = entry;
     const aname = __ring_dt2[0];
     const aty = __ring_dt2[1];
     _Map_insert(ctx.qualified_assoc_scope, `Self::${aname}`, aty);
   }
-  const __ring_iter_34 = __List_Iterable.iter(methods);
+  const __ring_iter_39 = __List_Iterable.iter(methods);
   while (true) {
-    const __ring_next_34 = __ListIterator_Iterator.next(__ring_iter_34);
-    if (__ring_next_34._tag === "none") break;
-    const method = __ring_next_34._0;
-    __ring_match31: {
-      const __ring_m31 = method;
-      if (__ring_m31._tag === "Fn") {
-        const mname = __ring_m31.name; const mtps = __ring_m31.type_params; const params = __ring_m31.params; const return_type = __ring_m31.return_type; const declared_effects = __ring_m31.declared_effects;
+    const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
+    if (__ring_next_39._tag === "none") break;
+    const method = __ring_next_39._0;
+    __ring_match46: {
+      const __ring_m46 = method;
+      if (__ring_m46._tag === "Fn") {
+        const mname = __ring_m46.name; const mtps = __ring_m46.type_params; const params = __ring_m46.params; const return_type = __ring_m46.return_type; const declared_effects = __ring_m46.declared_effects;
         register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params, false);
-        break __ring_match31;
+        break __ring_match46;
       }
-      if (__ring_m31._tag === "ExternFn") {
-        const mname = __ring_m31.name; const mtps = __ring_m31.type_params; const params = __ring_m31.params; const return_type = __ring_m31.return_type; const declared_effects = __ring_m31.declared_effects;
+      if (__ring_m46._tag === "ExternFn") {
+        const mname = __ring_m46.name; const mtps = __ring_m46.type_params; const params = __ring_m46.params; const return_type = __ring_m46.return_type; const declared_effects = __ring_m46.declared_effects;
         register_impl_method(ctx, impl_methods_map, impl_tv_ids, target_type, mname, mtps, params, return_type, declared_effects, impl_scheme_bounds, saved, type_params, true);
-        break __ring_match31;
+        break __ring_match46;
       }
-      if (__ring_m31._tag === "Delegate") {
-        break __ring_match31;
+      if (__ring_m46._tag === "Delegate") {
+        break __ring_match46;
       }
-      if (__ring_m31._tag === "AssocType") {
-        break __ring_match31;
+      if (__ring_m46._tag === "AssocType") {
+        break __ring_match46;
       }
-      break __ring_match31;
+      break __ring_match46;
     }
   }
-  __ring_match32: {
-    const __ring_m32 = trait_name;
-    if (__ring_m32._tag === "some") {
-      const tname = __ring_m32._0;
-      __ring_match33: {
-        const __ring_m33 = _Map_get(ctx.env.trait_reg.traits, tname);
-        if (__ring_m33._tag === "some") {
-          const trait_def = __ring_m33._0;
+  __ring_match47: {
+    const __ring_m47 = trait_name;
+    if (__ring_m47._tag === "some") {
+      const tname = __ring_m47._0;
+      __ring_match48: {
+        const __ring_m48 = _Map_get(ctx.env.trait_reg.traits, tname);
+        if (__ring_m48._tag === "some") {
+          const trait_def = __ring_m48._0;
           let impl_method_names = set_new();
-          const __ring_iter_35 = __List_Iterable.iter(methods);
+          const __ring_iter_40 = __List_Iterable.iter(methods);
           while (true) {
-            const __ring_next_35 = __ListIterator_Iterator.next(__ring_iter_35);
-            if (__ring_next_35._tag === "none") break;
-            const m = __ring_next_35._0;
-            __ring_match34: {
-              const __ring_m34 = m;
-              if (__ring_m34._tag === "Fn") {
-                const mn = __ring_m34.name;
+            const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
+            if (__ring_next_40._tag === "none") break;
+            const m = __ring_next_40._0;
+            __ring_match49: {
+              const __ring_m49 = m;
+              if (__ring_m49._tag === "Fn") {
+                const mn = __ring_m49.name;
                 _Set_insert(impl_method_names, mn);
-                break __ring_match34;
+                break __ring_match49;
               }
-              break __ring_match34;
+              break __ring_match49;
             }
           }
-          const __ring_iter_36 = __List_Iterable.iter(trait_def.methods);
+          const __ring_iter_41 = __List_Iterable.iter(trait_def.methods);
           while (true) {
-            const __ring_next_36 = __ListIterator_Iterator.next(__ring_iter_36);
-            if (__ring_next_36._tag === "none") break;
-            const tm = __ring_next_36._0;
+            const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
+            if (__ring_next_41._tag === "none") break;
+            const tm = __ring_next_41._0;
             if (((!tm.has_default) ? (!_Set_contains(impl_method_names, tm.name, __Str_Eq)) : false)) {
               const _ = infer_ctx$type_error(ctx.sink, codes$E0502, `Missing method '${tm.name}' in impl ${tname} for ${target_type}`, span, diagnostics$DiagnosticContext_TraitError(`missing method '${tm.name}'`));
             }
           }
           let impl_assoc_names = set_new();
-          const __ring_iter_37 = __List_Iterable.iter(_Map_entries(assoc_type_map));
+          let sorted_assoc_map2 = _Map_entries(assoc_type_map);
+          sorted_assoc_map2.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+          const __ring_iter_42 = __List_Iterable.iter(sorted_assoc_map2);
           while (true) {
-            const __ring_next_37 = __ListIterator_Iterator.next(__ring_iter_37);
-            if (__ring_next_37._tag === "none") break;
-            const entry = __ring_next_37._0;
+            const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
+            if (__ring_next_42._tag === "none") break;
+            const entry = __ring_next_42._0;
             const __ring_dt3 = entry;
             const aname = __ring_dt3[0];
             _Set_insert(impl_assoc_names, aname);
           }
-          const __ring_iter_38 = __List_Iterable.iter(trait_def.assoc_types);
+          const __ring_iter_43 = __List_Iterable.iter(trait_def.assoc_types);
           while (true) {
-            const __ring_next_38 = __ListIterator_Iterator.next(__ring_iter_38);
-            if (__ring_next_38._tag === "none") break;
-            const atdef = __ring_next_38._0;
+            const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
+            if (__ring_next_43._tag === "none") break;
+            const atdef = __ring_next_43._0;
             if ((!_Set_contains(impl_assoc_names, atdef.name, __Str_Eq))) {
-              __ring_match35: {
-                const __ring_m35 = atdef.default_type;
-                if (__ring_m35._tag === "some") {
-                  const dt = __ring_m35._0;
+              __ring_match50: {
+                const __ring_m50 = atdef.default_type;
+                if (__ring_m50._tag === "some") {
+                  const dt = __ring_m50._0;
                   _Map_insert(assoc_type_map, atdef.name, dt);
-                  break __ring_match35;
+                  break __ring_match50;
                 }
-                if (__ring_m35._tag === "none") {
+                if (__ring_m50._tag === "none") {
                   const _ = infer_ctx$type_error(ctx.sink, codes$E0510, `Missing associated type '${atdef.name}' in impl ${tname} for ${target_type}`, span, diagnostics$DiagnosticContext_TraitError(`missing associated type '${atdef.name}'`));
-                  break __ring_match35;
+                  break __ring_match50;
                 }
-                __match_fail(__ring_m35);
+                __match_fail(__ring_m50);
               }
             }
           }
           let trait_assoc_names = set_new();
-          const __ring_iter_39 = __List_Iterable.iter(trait_def.assoc_types);
+          const __ring_iter_44 = __List_Iterable.iter(trait_def.assoc_types);
           while (true) {
-            const __ring_next_39 = __ListIterator_Iterator.next(__ring_iter_39);
-            if (__ring_next_39._tag === "none") break;
-            const atdef = __ring_next_39._0;
+            const __ring_next_44 = __ListIterator_Iterator.next(__ring_iter_44);
+            if (__ring_next_44._tag === "none") break;
+            const atdef = __ring_next_44._0;
             _Set_insert(trait_assoc_names, atdef.name);
           }
-          const __ring_iter_40 = __List_Iterable.iter(_Map_entries(assoc_type_map));
+          let sorted_assoc_map3 = _Map_entries(assoc_type_map);
+          sorted_assoc_map3.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+          const __ring_iter_45 = __List_Iterable.iter(sorted_assoc_map3);
           while (true) {
-            const __ring_next_40 = __ListIterator_Iterator.next(__ring_iter_40);
-            if (__ring_next_40._tag === "none") break;
-            const entry = __ring_next_40._0;
+            const __ring_next_45 = __ListIterator_Iterator.next(__ring_iter_45);
+            if (__ring_next_45._tag === "none") break;
+            const entry = __ring_next_45._0;
             const __ring_dt4 = entry;
             const aname = __ring_dt4[0];
             if ((!_Set_contains(trait_assoc_names, aname, __Str_Eq))) {
               const _ = infer_ctx$type_error(ctx.sink, codes$E0514, `Unexpected associated type '${aname}' in impl ${tname} for ${target_type}; trait '${tname}' does not declare it`, span, diagnostics$DiagnosticContext_TraitError(`unexpected associated type '${aname}'`));
             }
           }
-          const __ring_iter_41 = __List_Iterable.iter(trait_def.assoc_types);
+          const __ring_iter_46 = __List_Iterable.iter(trait_def.assoc_types);
           while (true) {
-            const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
-            if (__ring_next_41._tag === "none") break;
-            const atdef = __ring_next_41._0;
+            const __ring_next_46 = __ListIterator_Iterator.next(__ring_iter_46);
+            if (__ring_next_46._tag === "none") break;
+            const atdef = __ring_next_46._0;
             if ((List_len(atdef.bounds) > 0)) {
-              __ring_match36: {
-                const __ring_m36 = _Map_get(assoc_type_map, atdef.name);
-                if (__ring_m36._tag === "some") {
-                  const concrete_ty = __ring_m36._0;
+              __ring_match51: {
+                const __ring_m51 = _Map_get(assoc_type_map, atdef.name);
+                if (__ring_m51._tag === "some") {
+                  const concrete_ty = __ring_m51._0;
                   const concrete_name = types$type_to_builtin_name(concrete_ty);
-                  __ring_match37: {
-                    const __ring_m37 = concrete_name;
-                    if (__ring_m37._tag === "some") {
-                      const cname = __ring_m37._0;
-                      const __ring_iter_42 = __List_Iterable.iter(atdef.bounds);
+                  __ring_match52: {
+                    const __ring_m52 = concrete_name;
+                    if (__ring_m52._tag === "some") {
+                      const cname = __ring_m52._0;
+                      const __ring_iter_47 = __List_Iterable.iter(atdef.bounds);
                       while (true) {
-                        const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
-                        if (__ring_next_42._tag === "none") break;
-                        const bound_trait = __ring_next_42._0;
+                        const __ring_next_47 = __ListIterator_Iterator.next(__ring_iter_47);
+                        if (__ring_next_47._tag === "none") break;
+                        const bound_trait = __ring_next_47._0;
                         if ((!env$has_impl(ctx.env.trait_reg, cname, bound_trait))) {
                           const _ = infer_ctx$type_error(ctx.sink, codes$E0513, `Associated type '${atdef.name}' requires '${bound_trait}', but '${types$type_to_string(concrete_ty)}' does not implement it`, span, diagnostics$DiagnosticContext_TraitError(`associated type bound '${bound_trait}' not satisfied by '${cname}'`));
                         }
                       }
-                      break __ring_match37;
+                      break __ring_match52;
                     }
-                    if (__ring_m37._tag === "none") {
-                      break __ring_match37;
+                    if (__ring_m52._tag === "none") {
+                      break __ring_match52;
                     }
-                    __match_fail(__ring_m37);
+                    __match_fail(__ring_m52);
                   }
-                  break __ring_match36;
+                  break __ring_match51;
                 }
-                if (__ring_m36._tag === "none") {
-                  break __ring_match36;
+                if (__ring_m51._tag === "none") {
+                  break __ring_match51;
                 }
-                __match_fail(__ring_m36);
+                __match_fail(__ring_m51);
               }
             }
           }
           const all_supertraits = collect_all_supertraits(ctx, tname);
-          const __ring_iter_43 = __List_Iterable.iter(all_supertraits);
+          const __ring_iter_48 = __List_Iterable.iter(all_supertraits);
           while (true) {
-            const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
-            if (__ring_next_43._tag === "none") break;
-            const required_st = __ring_next_43._0;
+            const __ring_next_48 = __ListIterator_Iterator.next(__ring_iter_48);
+            if (__ring_next_48._tag === "none") break;
+            const required_st = __ring_next_48._0;
             if ((!env$has_impl(ctx.env.trait_reg, target_type, required_st))) {
               const _ = infer_ctx$type_error(ctx.sink, codes$E0505, `Type '${target_type}' does not implement supertrait '${required_st}' required by '${tname}'`, span, diagnostics$DiagnosticContext_TraitError(`missing supertrait impl '${required_st}'`));
             }
           }
           let tp_names = [];
-          const __ring_iter_44 = __List_Iterable.iter(type_params);
-          while (true) {
-            const __ring_next_44 = __ListIterator_Iterator.next(__ring_iter_44);
-            if (__ring_next_44._tag === "none") break;
-            const tp = __ring_next_44._0;
-            List_push(tp_names, tp.name);
-          }
-          let method_names = [];
-          const __ring_iter_45 = __List_Iterable.iter(methods);
-          while (true) {
-            const __ring_next_45 = __ListIterator_Iterator.next(__ring_iter_45);
-            if (__ring_next_45._tag === "none") break;
-            const m = __ring_next_45._0;
-            __ring_match38: {
-              const __ring_m38 = m;
-              if (__ring_m38._tag === "Fn") {
-                const mn = __ring_m38.name;
-                List_push(method_names, mn);
-                break __ring_match38;
-              }
-              if (__ring_m38._tag === "ExternFn") {
-                const mn = __ring_m38.name;
-                List_push(method_names, mn);
-                break __ring_match38;
-              }
-              break __ring_match38;
-            }
-          }
-          env$add_impl(ctx.env.trait_reg, new env$ImplEntry(tname, target_type, tp_names, method_names, map_clone(assoc_type_map)));
-          break __ring_match33;
-        }
-        if (__ring_m33._tag === "none") {
-          const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${tname}`, span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${tname}'`));
-          break __ring_match33;
-        }
-        __match_fail(__ring_m33);
-      }
-      break __ring_match32;
-    }
-    if (__ring_m32._tag === "none") {
-      break __ring_match32;
-    }
-    __match_fail(__ring_m32);
-  }
-  ctx.type_param_scope = saved;
-  ctx.qualified_assoc_scope = saved_qualified_assoc;
-}
-
-function check_duplicate_def(ctx, name, span) {
-  __ring_match39: {
-    const __ring_m39 = env$TypeEnv_lookup(ctx.env, name);
-    if (__ring_m39._tag === "some") {
-      const existing = __ring_m39._0;
-      __ring_match40: {
-        const __ring_m40 = existing.def_id;
-        if (__ring_m40._tag === "some") {
-          const did = __ring_m40._0;
-          __ring_match41: {
-            const __ring_m41 = _Map_get(ctx.env.scope.def_spans, did);
-            if (__ring_m41._tag === "some") {
-              const _ = infer_ctx$type_error(ctx.sink, codes$E0207, `Duplicate definition: '${name}' is already defined`, span, diagnostics$DiagnosticContext_TypeMismatch("unique name", name, Option_none));
-              break __ring_match41;
-            }
-            if (__ring_m41._tag === "none") {
-              break __ring_match41;
-            }
-            __match_fail(__ring_m41);
-          }
-          break __ring_match40;
-        }
-        if (__ring_m40._tag === "none") {
-          break __ring_match40;
-        }
-        __match_fail(__ring_m40);
-      }
-      break __ring_match39;
-    }
-    if (__ring_m39._tag === "none") {
-      break __ring_match39;
-    }
-    __match_fail(__ring_m39);
-  }
-}
-
-function inject_assoc_types_from_bounds(ctx, type_params) {
-  const __ring_iter_46 = __List_Iterable.iter(type_params);
-  while (true) {
-    const __ring_next_46 = __ListIterator_Iterator.next(__ring_iter_46);
-    if (__ring_next_46._tag === "none") break;
-    const tp = __ring_next_46._0;
-    const __ring_iter_47 = __List_Iterable.iter(tp.bounds);
-    while (true) {
-      const __ring_next_47 = __ListIterator_Iterator.next(__ring_iter_47);
-      if (__ring_next_47._tag === "none") break;
-      const b = __ring_next_47._0;
-      const __ring_iter_48 = __List_Iterable.iter(b.assoc_constraints);
-      while (true) {
-        const __ring_next_48 = __ListIterator_Iterator.next(__ring_iter_48);
-        if (__ring_next_48._tag === "none") break;
-        const ac = __ring_next_48._0;
-        const concrete_ty = infer_ctx$resolve_type_expr(ctx, ac.ty);
-        _Map_insert(ctx.type_param_scope, ac.name, concrete_ty);
-        _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${ac.name}`, concrete_ty);
-      }
-      __ring_match42: {
-        const __ring_m42 = _Map_get(ctx.env.trait_reg.traits, b.trait_name);
-        if (__ring_m42._tag === "some") {
-          const tdef = __ring_m42._0;
-          const __ring_iter_49 = __List_Iterable.iter(tdef.assoc_types);
+          const __ring_iter_49 = __List_Iterable.iter(type_params);
           while (true) {
             const __ring_next_49 = __ListIterator_Iterator.next(__ring_iter_49);
             if (__ring_next_49._tag === "none") break;
-            const atdef = __ring_next_49._0;
-            if ((!_Map_contains_key(ctx.type_param_scope, atdef.name))) {
-              const at_var = env$TypeEnv_fresh_var(ctx.env);
-              _Map_insert(ctx.type_param_scope, atdef.name, at_var);
-              _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${atdef.name}`, at_var);
-            } else {
-              const at_var = env$TypeEnv_fresh_var(ctx.env);
-              _Map_insert(ctx.qualified_assoc_scope, `${tp.name}::${atdef.name}`, at_var);
+            const tp = __ring_next_49._0;
+            List_push(tp_names, tp.name);
+          }
+          let method_names = [];
+          const __ring_iter_50 = __List_Iterable.iter(methods);
+          while (true) {
+            const __ring_next_50 = __ListIterator_Iterator.next(__ring_iter_50);
+            if (__ring_next_50._tag === "none") break;
+            const m = __ring_next_50._0;
+            __ring_match53: {
+              const __ring_m53 = m;
+              if (__ring_m53._tag === "Fn") {
+                const mn = __ring_m53.name;
+                List_push(method_names, mn);
+                break __ring_match53;
+              }
+              if (__ring_m53._tag === "ExternFn") {
+                const mn = __ring_m53.name;
+                List_push(method_names, mn);
+                break __ring_match53;
+              }
+              break __ring_match53;
             }
           }
-          break __ring_match42;
+          env$add_impl(ctx.env.trait_reg, new env$ImplEntry(tname, target_type, tp_names, method_names, map_clone(assoc_type_map)));
+          break __ring_match48;
         }
-        if (__ring_m42._tag === "none") {
-          break __ring_match42;
+        if (__ring_m48._tag === "none") {
+          const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${tname}`, span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${tname}'`));
+          break __ring_match48;
         }
-        __match_fail(__ring_m42);
+        __match_fail(__ring_m48);
       }
+      break __ring_match47;
     }
+    if (__ring_m47._tag === "none") {
+      break __ring_match47;
+    }
+    __match_fail(__ring_m47);
   }
-}
-
-function is_register_value_type(t) {
-  __ring_match43: {
-    const __ring_m43 = t;
-    if (__ring_m43._tag === "IntType") {
-      return true;
-      break __ring_match43;
-    }
-    if (__ring_m43._tag === "FloatType") {
-      return true;
-      break __ring_match43;
-    }
-    if (__ring_m43._tag === "BoolType") {
-      return true;
-      break __ring_match43;
-    }
-    if (__ring_m43._tag === "StrType") {
-      return true;
-      break __ring_match43;
-    }
-    return false;
-    break __ring_match43;
-  }
+  ctx.type_param_scope = saved;
+  ctx.qualified_assoc_scope = saved_qualified_assoc;
 }
 
 function register_fn_common(ctx, name, type_params, params, return_type, declared_effects, span, check_dup, track_mut_params, track_fn_bounds) {
@@ -1321,20 +1557,20 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
   let type_vars = [];
   const saved = map_clone(ctx.type_param_scope);
   const saved_qualified = map_clone(ctx.qualified_assoc_scope);
-  const __ring_iter_50 = __List_Iterable.iter(type_params);
+  const __ring_iter_51 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_50 = __ListIterator_Iterator.next(__ring_iter_50);
-    if (__ring_next_50._tag === "none") break;
-    const tp = __ring_next_50._0;
+    const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
+    if (__ring_next_51._tag === "none") break;
+    const tp = __ring_next_51._0;
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match44: {
-      const __ring_m44 = tv;
-      if (__ring_m44._tag === "TypeVar") {
-        const id = __ring_m44.id;
+    __ring_match54: {
+      const __ring_m54 = tv;
+      if (__ring_m54._tag === "TypeVar") {
+        const id = __ring_m54.id;
         List_push(type_vars, id);
-        break __ring_match44;
+        break __ring_match54;
       }
-      break __ring_match44;
+      break __ring_match54;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -1342,11 +1578,11 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
   let param_types = [];
   if (track_mut_params) {
     let mut_flags = [];
-    const __ring_iter_51 = __List_Iterable.iter(params);
+    const __ring_iter_52 = __List_Iterable.iter(params);
     while (true) {
-      const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
-      if (__ring_next_51._tag === "none") break;
-      const p = __ring_next_51._0;
+      const __ring_next_52 = __ListIterator_Iterator.next(__ring_iter_52);
+      if (__ring_next_52._tag === "none") break;
+      const p = __ring_next_52._0;
       const pt = (function() {
   const __ring_m = p.type_annotation;
   if (__ring_m._tag === "some") { const ta = __ring_m._0; return infer_ctx$resolve_type_expr(ctx, ta); }
@@ -1362,23 +1598,23 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
     }
     _Map_insert(ctx.fn_mut_params, name, mut_flags);
   } else {
-    const __ring_iter_52 = __List_Iterable.iter(params);
+    const __ring_iter_53 = __List_Iterable.iter(params);
     while (true) {
-      const __ring_next_52 = __ListIterator_Iterator.next(__ring_iter_52);
-      if (__ring_next_52._tag === "none") break;
-      const p = __ring_next_52._0;
-      __ring_match45: {
-        const __ring_m45 = p.type_annotation;
-        if (__ring_m45._tag === "some") {
-          const ta = __ring_m45._0;
+      const __ring_next_53 = __ListIterator_Iterator.next(__ring_iter_53);
+      if (__ring_next_53._tag === "none") break;
+      const p = __ring_next_53._0;
+      __ring_match55: {
+        const __ring_m55 = p.type_annotation;
+        if (__ring_m55._tag === "some") {
+          const ta = __ring_m55._0;
           List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-          break __ring_match45;
+          break __ring_match55;
         }
-        if (__ring_m45._tag === "none") {
+        if (__ring_m55._tag === "none") {
           List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-          break __ring_match45;
+          break __ring_match55;
         }
-        __match_fail(__ring_m45);
+        __match_fail(__ring_m55);
       }
     }
   }
@@ -1389,30 +1625,32 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
   __match_fail(__ring_m);
 })();
   let declared_names = set_new();
-  const __ring_iter_53 = __List_Iterable.iter(type_params);
-  while (true) {
-    const __ring_next_53 = __ListIterator_Iterator.next(__ring_iter_53);
-    if (__ring_next_53._tag === "none") break;
-    const tp = __ring_next_53._0;
-    _Set_insert(declared_names, tp.name);
-  }
-  const __ring_iter_54 = __List_Iterable.iter(_Map_entries(ctx.type_param_scope));
+  const __ring_iter_54 = __List_Iterable.iter(type_params);
   while (true) {
     const __ring_next_54 = __ListIterator_Iterator.next(__ring_iter_54);
     if (__ring_next_54._tag === "none") break;
-    const entry = __ring_next_54._0;
+    const tp = __ring_next_54._0;
+    _Set_insert(declared_names, tp.name);
+  }
+  let sorted_tp_scope3 = _Map_entries(ctx.type_param_scope);
+  sorted_tp_scope3.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+  const __ring_iter_55 = __List_Iterable.iter(sorted_tp_scope3);
+  while (true) {
+    const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
+    if (__ring_next_55._tag === "none") break;
+    const entry = __ring_next_55._0;
     const __ring_dt5 = entry;
     const tpname = __ring_dt5[0];
     const tv = __ring_dt5[1];
     if (((!_Map_contains_key(saved, tpname)) ? (!_Set_contains(declared_names, tpname, __Str_Eq)) : false)) {
-      __ring_match46: {
-        const __ring_m46 = tv;
-        if (__ring_m46._tag === "TypeVar") {
-          const id = __ring_m46.id;
+      __ring_match56: {
+        const __ring_m56 = tv;
+        if (__ring_m56._tag === "TypeVar") {
+          const id = __ring_m56.id;
           List_push(type_vars, id);
-          break __ring_match46;
+          break __ring_match56;
         }
-        break __ring_match46;
+        break __ring_match56;
       }
     }
   }
@@ -1425,17 +1663,17 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
   const fn_type = types$Type_FnType(param_types, ret, effects);
   let fn_bounds_list = [];
   let scheme_bounds = [];
-  const __ring_iter_55 = __List_Iterable.iter(type_params);
+  const __ring_iter_56 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
-    if (__ring_next_55._tag === "none") break;
-    const tp = __ring_next_55._0;
+    const __ring_next_56 = __ListIterator_Iterator.next(__ring_iter_56);
+    if (__ring_next_56._tag === "none") break;
+    const tp = __ring_next_56._0;
     const tv = _Map_get(ctx.type_param_scope, tp.name);
-    const __ring_iter_56 = __List_Iterable.iter(tp.bounds);
+    const __ring_iter_57 = __List_Iterable.iter(tp.bounds);
     while (true) {
-      const __ring_next_56 = __ListIterator_Iterator.next(__ring_iter_56);
-      if (__ring_next_56._tag === "none") break;
-      const b = __ring_next_56._0;
+      const __ring_next_57 = __ListIterator_Iterator.next(__ring_iter_57);
+      if (__ring_next_57._tag === "none") break;
+      const b = __ring_next_57._0;
       if ((!_Map_contains_key(ctx.env.trait_reg.traits, b.trait_name))) {
         const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown trait: ${b.trait_name}`, tp.span, diagnostics$DiagnosticContext_TraitError(`unknown trait '${b.trait_name}'`));
       }
@@ -1443,62 +1681,62 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
         List_push(fn_bounds_list, new env$FnBound(tp.name, b.trait_name));
       }
       let assoc_entries = [];
-      const __ring_iter_57 = __List_Iterable.iter(b.assoc_constraints);
-      while (true) {
-        const __ring_next_57 = __ListIterator_Iterator.next(__ring_iter_57);
-        if (__ring_next_57._tag === "none") break;
-        const ac = __ring_next_57._0;
-        const concrete_ty = infer_ctx$resolve_type_expr(ctx, ac.ty);
-        List_push(assoc_entries, new env$AssocConstraintEntry(ac.name, concrete_ty));
-      }
-      __ring_match47: {
-        const __ring_m47 = tv;
-        if (__ring_m47._tag === "some") {
-          const t = __ring_m47._0;
-          __ring_match48: {
-            const __ring_m48 = t;
-            if (__ring_m48._tag === "TypeVar") {
-              const id = __ring_m48.id;
-              List_push(scheme_bounds, new env$SchemeBound(id, b.trait_name, assoc_entries));
-              break __ring_match48;
-            }
-            break __ring_match48;
-          }
-          break __ring_match47;
-        }
-        if (__ring_m47._tag === "none") {
-          break __ring_match47;
-        }
-        __match_fail(__ring_m47);
-      }
-      const supers = collect_all_supertraits(ctx, b.trait_name);
-      const __ring_iter_58 = __List_Iterable.iter(supers);
+      const __ring_iter_58 = __List_Iterable.iter(b.assoc_constraints);
       while (true) {
         const __ring_next_58 = __ListIterator_Iterator.next(__ring_iter_58);
         if (__ring_next_58._tag === "none") break;
-        const st_name = __ring_next_58._0;
+        const ac = __ring_next_58._0;
+        const concrete_ty = infer_ctx$resolve_type_expr(ctx, ac.ty);
+        List_push(assoc_entries, new env$AssocConstraintEntry(ac.name, concrete_ty));
+      }
+      __ring_match57: {
+        const __ring_m57 = tv;
+        if (__ring_m57._tag === "some") {
+          const t = __ring_m57._0;
+          __ring_match58: {
+            const __ring_m58 = t;
+            if (__ring_m58._tag === "TypeVar") {
+              const id = __ring_m58.id;
+              List_push(scheme_bounds, new env$SchemeBound(id, b.trait_name, assoc_entries));
+              break __ring_match58;
+            }
+            break __ring_match58;
+          }
+          break __ring_match57;
+        }
+        if (__ring_m57._tag === "none") {
+          break __ring_match57;
+        }
+        __match_fail(__ring_m57);
+      }
+      const supers = collect_all_supertraits(ctx, b.trait_name);
+      const __ring_iter_59 = __List_Iterable.iter(supers);
+      while (true) {
+        const __ring_next_59 = __ListIterator_Iterator.next(__ring_iter_59);
+        if (__ring_next_59._tag === "none") break;
+        const st_name = __ring_next_59._0;
         if (track_fn_bounds) {
           List_push(fn_bounds_list, new env$FnBound(tp.name, st_name));
         }
-        __ring_match49: {
-          const __ring_m49 = tv;
-          if (__ring_m49._tag === "some") {
-            const t = __ring_m49._0;
-            __ring_match50: {
-              const __ring_m50 = t;
-              if (__ring_m50._tag === "TypeVar") {
-                const id = __ring_m50.id;
+        __ring_match59: {
+          const __ring_m59 = tv;
+          if (__ring_m59._tag === "some") {
+            const t = __ring_m59._0;
+            __ring_match60: {
+              const __ring_m60 = t;
+              if (__ring_m60._tag === "TypeVar") {
+                const id = __ring_m60.id;
                 List_push(scheme_bounds, new env$SchemeBound(id, st_name, []));
-                break __ring_match50;
+                break __ring_match60;
               }
-              break __ring_match50;
+              break __ring_match60;
             }
-            break __ring_match49;
+            break __ring_match59;
           }
-          if (__ring_m49._tag === "none") {
-            break __ring_match49;
+          if (__ring_m59._tag === "none") {
+            break __ring_match59;
           }
-          __match_fail(__ring_m49);
+          __match_fail(__ring_m59);
         }
       }
     }
@@ -1513,28 +1751,28 @@ function register_fn_common(ctx, name, type_params, params, return_type, declare
   } else {
     env$TypeEnv_bind_mono(ctx.env, name, fn_type);
   }
-  __ring_match51: {
-    const __ring_m51 = env$TypeEnv_lookup(ctx.env, name);
-    if (__ring_m51._tag === "some") {
-      const s = __ring_m51._0;
-      __ring_match52: {
-        const __ring_m52 = s.def_id;
-        if (__ring_m52._tag === "some") {
-          const did = __ring_m52._0;
+  __ring_match61: {
+    const __ring_m61 = env$TypeEnv_lookup(ctx.env, name);
+    if (__ring_m61._tag === "some") {
+      const s = __ring_m61._0;
+      __ring_match62: {
+        const __ring_m62 = s.def_id;
+        if (__ring_m62._tag === "some") {
+          const did = __ring_m62._0;
           return env$TypeEnv_record_def_span(ctx.env, did, span);
-          break __ring_match52;
+          break __ring_match62;
         }
-        if (__ring_m52._tag === "none") {
-          break __ring_match52;
+        if (__ring_m62._tag === "none") {
+          break __ring_match62;
         }
-        __match_fail(__ring_m52);
+        __match_fail(__ring_m62);
       }
-      break __ring_match51;
+      break __ring_match61;
     }
-    if (__ring_m51._tag === "none") {
-      break __ring_match51;
+    if (__ring_m61._tag === "none") {
+      break __ring_match61;
     }
-    __match_fail(__ring_m51);
+    __match_fail(__ring_m61);
   }
 }
 
@@ -1547,41 +1785,41 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
   const saved_qualified_assoc = map_clone(ctx.qualified_assoc_scope);
   let tp_names = [];
   let tp_vars = [];
-  const __ring_iter_59 = __List_Iterable.iter(type_params);
+  const __ring_iter_60 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_59 = __ListIterator_Iterator.next(__ring_iter_59);
-    if (__ring_next_59._tag === "none") break;
-    const tp = __ring_next_59._0;
+    const __ring_next_60 = __ListIterator_Iterator.next(__ring_iter_60);
+    if (__ring_next_60._tag === "none") break;
+    const tp = __ring_next_60._0;
     List_push(tp_names, tp.name);
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match53: {
-      const __ring_m53 = tv;
-      if (__ring_m53._tag === "TypeVar") {
-        const id = __ring_m53.id;
+    __ring_match63: {
+      const __ring_m63 = tv;
+      if (__ring_m63._tag === "TypeVar") {
+        const id = __ring_m63.id;
         List_push(tp_vars, id);
-        break __ring_match53;
+        break __ring_match63;
       }
-      break __ring_match53;
+      break __ring_match63;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
   let supertrait_names = [];
-  const __ring_iter_60 = __List_Iterable.iter(supertraits);
+  const __ring_iter_61 = __List_Iterable.iter(supertraits);
   while (true) {
-    const __ring_next_60 = __ListIterator_Iterator.next(__ring_iter_60);
-    if (__ring_next_60._tag === "none") break;
-    const st = __ring_next_60._0;
+    const __ring_next_61 = __ListIterator_Iterator.next(__ring_iter_61);
+    if (__ring_next_61._tag === "none") break;
+    const st = __ring_next_61._0;
     if ((!_Map_contains_key(ctx.env.trait_reg.traits, st.trait_name))) {
       const _ = infer_ctx$type_error(ctx.sink, codes$E0501, `Unknown supertrait: ${st.trait_name}`, span, diagnostics$DiagnosticContext_TraitError(`unknown supertrait '${st.trait_name}'`));
     } else {
       List_push(supertrait_names, st.trait_name);
     }
   }
-  const __ring_iter_61 = __List_Iterable.iter(supertrait_names);
+  const __ring_iter_62 = __List_Iterable.iter(supertrait_names);
   while (true) {
-    const __ring_next_61 = __ListIterator_Iterator.next(__ring_iter_61);
-    if (__ring_next_61._tag === "none") break;
-    const st_name = __ring_next_61._0;
+    const __ring_next_62 = __ListIterator_Iterator.next(__ring_iter_62);
+    if (__ring_next_62._tag === "none") break;
+    const st_name = __ring_next_62._0;
     let visited = set_new();
     _Set_insert(visited, name);
     let stack = [st_name];
@@ -1592,46 +1830,46 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
         break;
       }
       _Set_insert(visited, current);
-      __ring_match54: {
-        const __ring_m54 = _Map_get(ctx.env.trait_reg.traits, current);
-        if (__ring_m54._tag === "some") {
-          const parent_def = __ring_m54._0;
-          const __ring_iter_62 = __List_Iterable.iter(parent_def.supertraits);
+      __ring_match64: {
+        const __ring_m64 = _Map_get(ctx.env.trait_reg.traits, current);
+        if (__ring_m64._tag === "some") {
+          const parent_def = __ring_m64._0;
+          const __ring_iter_63 = __List_Iterable.iter(parent_def.supertraits);
           while (true) {
-            const __ring_next_62 = __ListIterator_Iterator.next(__ring_iter_62);
-            if (__ring_next_62._tag === "none") break;
-            const parent_st = __ring_next_62._0;
+            const __ring_next_63 = __ListIterator_Iterator.next(__ring_iter_63);
+            if (__ring_next_63._tag === "none") break;
+            const parent_st = __ring_next_63._0;
             List_push(stack, parent_st);
           }
-          break __ring_match54;
+          break __ring_match64;
         }
-        if (__ring_m54._tag === "none") {
-          break __ring_match54;
+        if (__ring_m64._tag === "none") {
+          break __ring_match64;
         }
-        __match_fail(__ring_m54);
+        __match_fail(__ring_m64);
       }
     }
   }
   const self_var = env$TypeEnv_fresh_var(ctx.env);
   let assoc_type_defs = [];
-  const __ring_iter_63 = __List_Iterable.iter(methods);
+  const __ring_iter_64 = __List_Iterable.iter(methods);
   while (true) {
-    const __ring_next_63 = __ListIterator_Iterator.next(__ring_iter_63);
-    if (__ring_next_63._tag === "none") break;
-    const method = __ring_next_63._0;
-    __ring_match55: {
-      const __ring_m55 = method;
-      if (__ring_m55._tag === "AssocType") {
-        const aname = __ring_m55.name; const abounds = __ring_m55.bounds; const avalue = __ring_m55.value;
+    const __ring_next_64 = __ListIterator_Iterator.next(__ring_iter_64);
+    if (__ring_next_64._tag === "none") break;
+    const method = __ring_next_64._0;
+    __ring_match65: {
+      const __ring_m65 = method;
+      if (__ring_m65._tag === "AssocType") {
+        const aname = __ring_m65.name; const abounds = __ring_m65.bounds; const avalue = __ring_m65.value;
         const at_var_id = env$TypeEnv_fresh_var_id(ctx.env);
         const at_var = types$Type_TypeVar(at_var_id, Option_some(aname));
         _Map_insert(ctx.type_param_scope, aname, at_var);
         let bound_names = [];
-        const __ring_iter_64 = __List_Iterable.iter(abounds);
+        const __ring_iter_65 = __List_Iterable.iter(abounds);
         while (true) {
-          const __ring_next_64 = __ListIterator_Iterator.next(__ring_iter_64);
-          if (__ring_next_64._tag === "none") break;
-          const b = __ring_next_64._0;
+          const __ring_next_65 = __ListIterator_Iterator.next(__ring_iter_65);
+          if (__ring_next_65._tag === "none") break;
+          const b = __ring_next_65._0;
           List_push(bound_names, b.trait_name);
         }
         const default_ty = (function() {
@@ -1641,63 +1879,63 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
   __match_fail(__ring_m);
 })();
         List_push(assoc_type_defs, new env$AssocTypeDef(aname, bound_names, default_ty, at_var_id));
-        break __ring_match55;
+        break __ring_match65;
       }
-      break __ring_match55;
+      break __ring_match65;
     }
   }
   _Map_insert(ctx.type_param_scope, "Self", self_var);
-  const __ring_iter_65 = __List_Iterable.iter(assoc_type_defs);
-  while (true) {
-    const __ring_next_65 = __ListIterator_Iterator.next(__ring_iter_65);
-    if (__ring_next_65._tag === "none") break;
-    const atd = __ring_next_65._0;
-    __ring_match56: {
-      const __ring_m56 = _Map_get(ctx.type_param_scope, atd.name);
-      if (__ring_m56._tag === "some") {
-        const at_ty = __ring_m56._0;
-        _Map_insert(ctx.qualified_assoc_scope, `Self::${atd.name}`, at_ty);
-        break __ring_match56;
-      }
-      if (__ring_m56._tag === "none") {
-        break __ring_match56;
-      }
-      __match_fail(__ring_m56);
-    }
-  }
-  let trait_methods = [];
-  const __ring_iter_66 = __List_Iterable.iter(methods);
+  const __ring_iter_66 = __List_Iterable.iter(assoc_type_defs);
   while (true) {
     const __ring_next_66 = __ListIterator_Iterator.next(__ring_iter_66);
     if (__ring_next_66._tag === "none") break;
-    const method = __ring_next_66._0;
-    __ring_match57: {
-      const __ring_m57 = method;
-      if (__ring_m57._tag === "Fn") {
-        const mname = __ring_m57.name; const method_tps = __ring_m57.type_params; const params = __ring_m57.params; const return_type = __ring_m57.return_type; const declared_effects = __ring_m57.declared_effects; const is_abstract = __ring_m57.is_abstract;
+    const atd = __ring_next_66._0;
+    __ring_match66: {
+      const __ring_m66 = _Map_get(ctx.type_param_scope, atd.name);
+      if (__ring_m66._tag === "some") {
+        const at_ty = __ring_m66._0;
+        _Map_insert(ctx.qualified_assoc_scope, `Self::${atd.name}`, at_ty);
+        break __ring_match66;
+      }
+      if (__ring_m66._tag === "none") {
+        break __ring_match66;
+      }
+      __match_fail(__ring_m66);
+    }
+  }
+  let trait_methods = [];
+  const __ring_iter_67 = __List_Iterable.iter(methods);
+  while (true) {
+    const __ring_next_67 = __ListIterator_Iterator.next(__ring_iter_67);
+    if (__ring_next_67._tag === "none") break;
+    const method = __ring_next_67._0;
+    __ring_match67: {
+      const __ring_m67 = method;
+      if (__ring_m67._tag === "Fn") {
+        const mname = __ring_m67.name; const method_tps = __ring_m67.type_params; const params = __ring_m67.params; const return_type = __ring_m67.return_type; const declared_effects = __ring_m67.declared_effects; const is_abstract = __ring_m67.is_abstract;
         let param_types = [];
         let param_muts = [];
-        const __ring_iter_67 = __List_Iterable.iter(params);
+        const __ring_iter_68 = __List_Iterable.iter(params);
         while (true) {
-          const __ring_next_67 = __ListIterator_Iterator.next(__ring_iter_67);
-          if (__ring_next_67._tag === "none") break;
-          const p = __ring_next_67._0;
+          const __ring_next_68 = __ListIterator_Iterator.next(__ring_iter_68);
+          if (__ring_next_68._tag === "none") break;
+          const p = __ring_next_68._0;
           List_push(param_muts, p.is_mutable);
           if ((p.name === "self")) {
             List_push(param_types, self_var);
           } else {
-            __ring_match58: {
-              const __ring_m58 = p.type_annotation;
-              if (__ring_m58._tag === "some") {
-                const ta = __ring_m58._0;
+            __ring_match68: {
+              const __ring_m68 = p.type_annotation;
+              if (__ring_m68._tag === "some") {
+                const ta = __ring_m68._0;
                 List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-                break __ring_match58;
+                break __ring_match68;
               }
-              if (__ring_m58._tag === "none") {
+              if (__ring_m68._tag === "none") {
                 List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-                break __ring_match58;
+                break __ring_match68;
               }
-              __match_fail(__ring_m58);
+              __match_fail(__ring_m68);
             }
           }
         }
@@ -1715,9 +1953,9 @@ function register_trait(ctx, name, type_params, supertraits, methods, span) {
 })();
         const fn_type = types$Type_FnType(param_types, ret, method_effects);
         List_push(trait_methods, new env$TraitMethodDef(mname, fn_type, (!is_abstract), param_muts, method_tps));
-        break __ring_match57;
+        break __ring_match67;
       }
-      break __ring_match57;
+      break __ring_match67;
     }
   }
   ctx.type_param_scope = saved;
@@ -1733,21 +1971,21 @@ function register_extern_type(ctx, name, type_params) {
   let tp_names = [];
   const saved = map_clone(ctx.type_param_scope);
   let tp_vars = [];
-  const __ring_iter_68 = __List_Iterable.iter(type_params);
+  const __ring_iter_69 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_68 = __ListIterator_Iterator.next(__ring_iter_68);
-    if (__ring_next_68._tag === "none") break;
-    const tp = __ring_next_68._0;
+    const __ring_next_69 = __ListIterator_Iterator.next(__ring_iter_69);
+    if (__ring_next_69._tag === "none") break;
+    const tp = __ring_next_69._0;
     List_push(tp_names, tp.name);
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match59: {
-      const __ring_m59 = tv;
-      if (__ring_m59._tag === "TypeVar") {
-        const id = __ring_m59.id;
+    __ring_match69: {
+      const __ring_m69 = tv;
+      if (__ring_m69._tag === "TypeVar") {
+        const id = __ring_m69.id;
         List_push(tp_vars, id);
-        break __ring_match59;
+        break __ring_match69;
       }
-      break __ring_match59;
+      break __ring_match69;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
@@ -1758,123 +1996,81 @@ function register_extern_type(ctx, name, type_params) {
 function register_type_alias(ctx, name, type_params, type_expr) {
   const saved = map_clone(ctx.type_param_scope);
   let tp_vars = [];
-  const __ring_iter_69 = __List_Iterable.iter(type_params);
+  const __ring_iter_70 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_69 = __ListIterator_Iterator.next(__ring_iter_69);
-    if (__ring_next_69._tag === "none") break;
-    const tp = __ring_next_69._0;
+    const __ring_next_70 = __ListIterator_Iterator.next(__ring_iter_70);
+    if (__ring_next_70._tag === "none") break;
+    const tp = __ring_next_70._0;
     const tv = env$TypeEnv_fresh_var(ctx.env);
-    __ring_match60: {
-      const __ring_m60 = tv;
-      if (__ring_m60._tag === "TypeVar") {
-        const id = __ring_m60.id;
+    __ring_match70: {
+      const __ring_m70 = tv;
+      if (__ring_m70._tag === "TypeVar") {
+        const id = __ring_m70.id;
         List_push(tp_vars, id);
-        break __ring_match60;
+        break __ring_match70;
       }
-      break __ring_match60;
+      break __ring_match70;
     }
     _Map_insert(ctx.type_param_scope, tp.name, tv);
   }
   const resolved = infer_ctx$resolve_type_expr(ctx, type_expr);
   ctx.type_param_scope = saved;
   let tp_names = [];
-  const __ring_iter_70 = __List_Iterable.iter(type_params);
+  const __ring_iter_71 = __List_Iterable.iter(type_params);
   while (true) {
-    const __ring_next_70 = __ListIterator_Iterator.next(__ring_iter_70);
-    if (__ring_next_70._tag === "none") break;
-    const tp = __ring_next_70._0;
+    const __ring_next_71 = __ListIterator_Iterator.next(__ring_iter_71);
+    if (__ring_next_71._tag === "none") break;
+    const tp = __ring_next_71._0;
     List_push(tp_names, tp.name);
   }
   return _Map_insert(ctx.env.types.type_aliases, name, new env$TypeAliasDef(tp_names, tp_vars, resolved));
 }
 
-function register_const(ctx, name, type_annotation, span) {
-  check_duplicate_def(ctx, name, span);
-  __ring_match61: {
-    const __ring_m61 = type_annotation;
-    if (__ring_m61._tag === "some") {
-      const texpr = __ring_m61._0;
-      const ty = infer_ctx$resolve_type_expr(ctx, texpr);
-      env$TypeEnv_bind_mono(ctx.env, name, ty);
-      break __ring_match61;
-    }
-    if (__ring_m61._tag === "none") {
-      const tv = env$TypeEnv_fresh_var(ctx.env);
-      env$TypeEnv_bind_mono(ctx.env, name, tv);
-      break __ring_match61;
-    }
-    __match_fail(__ring_m61);
-  }
-  __ring_match62: {
-    const __ring_m62 = env$TypeEnv_lookup(ctx.env, name);
-    if (__ring_m62._tag === "some") {
-      const s = __ring_m62._0;
-      __ring_match63: {
-        const __ring_m63 = s.def_id;
-        if (__ring_m63._tag === "some") {
-          const did = __ring_m63._0;
-          return env$TypeEnv_record_def_span(ctx.env, did, span);
-          break __ring_match63;
-        }
-        if (__ring_m63._tag === "none") {
-          break __ring_match63;
-        }
-        __match_fail(__ring_m63);
-      }
-      break __ring_match62;
-    }
-    if (__ring_m62._tag === "none") {
-      break __ring_match62;
-    }
-    __match_fail(__ring_m62);
-  }
-}
-
 function register_sig(ctx, name, members, is_pub) {
   const saved = map_clone(ctx.type_param_scope);
   let sig_members = map_new();
-  const __ring_iter_71 = __List_Iterable.iter(members);
+  const __ring_iter_72 = __List_Iterable.iter(members);
   while (true) {
-    const __ring_next_71 = __ListIterator_Iterator.next(__ring_iter_71);
-    if (__ring_next_71._tag === "none") break;
-    const m = __ring_next_71._0;
+    const __ring_next_72 = __ListIterator_Iterator.next(__ring_iter_72);
+    if (__ring_next_72._tag === "none") break;
+    const m = __ring_next_72._0;
     let type_vars = [];
     const msaved = map_clone(ctx.type_param_scope);
-    const __ring_iter_72 = __List_Iterable.iter(m.type_params);
+    const __ring_iter_73 = __List_Iterable.iter(m.type_params);
     while (true) {
-      const __ring_next_72 = __ListIterator_Iterator.next(__ring_iter_72);
-      if (__ring_next_72._tag === "none") break;
-      const tp = __ring_next_72._0;
+      const __ring_next_73 = __ListIterator_Iterator.next(__ring_iter_73);
+      if (__ring_next_73._tag === "none") break;
+      const tp = __ring_next_73._0;
       const tv = env$TypeEnv_fresh_var(ctx.env);
-      __ring_match64: {
-        const __ring_m64 = tv;
-        if (__ring_m64._tag === "TypeVar") {
-          const id = __ring_m64.id;
+      __ring_match71: {
+        const __ring_m71 = tv;
+        if (__ring_m71._tag === "TypeVar") {
+          const id = __ring_m71.id;
           List_push(type_vars, id);
-          break __ring_match64;
+          break __ring_match71;
         }
-        break __ring_match64;
+        break __ring_match71;
       }
       _Map_insert(ctx.type_param_scope, tp.name, tv);
     }
     let param_types = [];
-    const __ring_iter_73 = __List_Iterable.iter(m.params);
+    const __ring_iter_74 = __List_Iterable.iter(m.params);
     while (true) {
-      const __ring_next_73 = __ListIterator_Iterator.next(__ring_iter_73);
-      if (__ring_next_73._tag === "none") break;
-      const p = __ring_next_73._0;
-      __ring_match65: {
-        const __ring_m65 = p.type_annotation;
-        if (__ring_m65._tag === "some") {
-          const ta = __ring_m65._0;
+      const __ring_next_74 = __ListIterator_Iterator.next(__ring_iter_74);
+      if (__ring_next_74._tag === "none") break;
+      const p = __ring_next_74._0;
+      __ring_match72: {
+        const __ring_m72 = p.type_annotation;
+        if (__ring_m72._tag === "some") {
+          const ta = __ring_m72._0;
           List_push(param_types, infer_ctx$resolve_type_expr(ctx, ta));
-          break __ring_match65;
+          break __ring_match72;
         }
-        if (__ring_m65._tag === "none") {
+        if (__ring_m72._tag === "none") {
           List_push(param_types, env$TypeEnv_fresh_var(ctx.env));
-          break __ring_match65;
+          break __ring_match72;
         }
-        __match_fail(__ring_m65);
+        __match_fail(__ring_m72);
       }
     }
     const ret = (function() {
@@ -1897,210 +2093,24 @@ function register_effect_alias(ctx, name, type_params, effects, span) {
   } else {
     let tp_names = [];
     let tp_vars = [];
-    const __ring_iter_74 = __List_Iterable.iter(type_params);
+    const __ring_iter_75 = __List_Iterable.iter(type_params);
     while (true) {
-      const __ring_next_74 = __ListIterator_Iterator.next(__ring_iter_74);
-      if (__ring_next_74._tag === "none") break;
-      const tp = __ring_next_74._0;
+      const __ring_next_75 = __ListIterator_Iterator.next(__ring_iter_75);
+      if (__ring_next_75._tag === "none") break;
+      const tp = __ring_next_75._0;
       List_push(tp_names, tp.name);
       const tv = env$TypeEnv_fresh_var(ctx.env);
-      __ring_match66: {
-        const __ring_m66 = tv;
-        if (__ring_m66._tag === "TypeVar") {
-          const id = __ring_m66.id;
+      __ring_match73: {
+        const __ring_m73 = tv;
+        if (__ring_m73._tag === "TypeVar") {
+          const id = __ring_m73.id;
           List_push(tp_vars, id);
-          break __ring_match66;
+          break __ring_match73;
         }
-        break __ring_match66;
+        break __ring_match73;
       }
     }
     return _Map_insert(ctx.env.types.effect_aliases, name, new env$EffectAliasDef(name, tp_names, tp_vars, effects, span));
-  }
-}
-
-function prefix_decl_name(mod_name, decl) {
-  __ring_match67: {
-    const __ring_m67 = decl;
-    if (__ring_m67._tag === "Fn") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const params = __ring_m67.params; const return_type = __ring_m67.return_type; const declared_effects = __ring_m67.declared_effects; const body = __ring_m67.body; const is_pub = __ring_m67.is_pub; const is_abstract = __ring_m67.is_abstract; const span = __ring_m67.span;
-      return ast$Decl_Fn(`${mod_name}::${name}`, type_params, params, return_type, declared_effects, body, is_pub, is_abstract, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Struct") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const fields = __ring_m67.fields; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_Struct(`${mod_name}::${name}`, type_params, fields, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Enum") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const variants = __ring_m67.variants; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_Enum(`${mod_name}::${name}`, type_params, variants, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "ExternFn") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const params = __ring_m67.params; const return_type = __ring_m67.return_type; const declared_effects = __ring_m67.declared_effects; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_ExternFn(`${mod_name}::${name}`, type_params, params, return_type, declared_effects, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Const") {
-      const name = __ring_m67.name; const type_annotation = __ring_m67.type_annotation; const init = __ring_m67.init; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_Const(`${mod_name}::${name}`, type_annotation, init, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Sig") {
-      const name = __ring_m67.name; const members = __ring_m67.members; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_Sig(`${mod_name}::${name}`, members, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Impl") {
-      const target_type = __ring_m67.target_type; const type_params = __ring_m67.type_params; const trait_name = __ring_m67.trait_name; const methods = __ring_m67.methods; const span = __ring_m67.span;
-      const prefixed_target = (Str_contains(target_type, "::") ? target_type : `${mod_name}::${target_type}`);
-      return ast$Decl_Impl(prefixed_target, type_params, trait_name, methods, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Trait") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const supertraits = __ring_m67.supertraits; const methods = __ring_m67.methods; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_Trait(`${mod_name}::${name}`, type_params, supertraits, methods, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "Effect") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const ops = __ring_m67.ops; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_Effect(`${mod_name}::${name}`, type_params, ops, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "ExternType") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_ExternType(`${mod_name}::${name}`, type_params, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "TypeAlias") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const type_expr = __ring_m67.type_expr; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_TypeAlias(`${mod_name}::${name}`, type_params, type_expr, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "EffectAlias") {
-      const name = __ring_m67.name; const type_params = __ring_m67.type_params; const effects = __ring_m67.effects; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_EffectAlias(`${mod_name}::${name}`, type_params, effects, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "ModBlock") {
-      const name = __ring_m67.name; const uses = __ring_m67.uses; const decls = __ring_m67.decls; const required_effects = __ring_m67.required_effects; const is_pub = __ring_m67.is_pub; const span = __ring_m67.span;
-      return ast$Decl_ModBlock(`${mod_name}::${name}`, uses, decls, required_effects, is_pub, span);
-      break __ring_match67;
-    }
-    if (__ring_m67._tag === "AssocType") {
-      return decl;
-      break __ring_match67;
-    }
-    return decl;
-    break __ring_match67;
-  }
-}
-
-function insert_mod_aliases(ctx, mod_name, decls, guard) {
-  const __ring_iter_75 = __List_Iterable.iter(decls);
-  while (true) {
-    const __ring_next_75 = __ListIterator_Iterator.next(__ring_iter_75);
-    if (__ring_next_75._tag === "none") break;
-    const d = __ring_next_75._0;
-    __ring_match68: {
-      const __ring_m68 = d;
-      if (__ring_m68._tag === "Struct") {
-        const name = __ring_m68.name;
-        const qualified = `${mod_name}::${name}`;
-        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.structs, name)))) {
-          __ring_match69: {
-            const __ring_m69 = _Map_get(ctx.env.types.structs, qualified);
-            if (__ring_m69._tag === "some") {
-              const sdef = __ring_m69._0;
-              _Map_insert(ctx.env.types.structs, name, sdef);
-              break __ring_match69;
-            }
-            if (__ring_m69._tag === "none") {
-              break __ring_match69;
-            }
-            __match_fail(__ring_m69);
-          }
-        }
-        break __ring_match68;
-      }
-      if (__ring_m68._tag === "Enum") {
-        const name = __ring_m68.name;
-        const qualified = `${mod_name}::${name}`;
-        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.enums, name)))) {
-          __ring_match70: {
-            const __ring_m70 = _Map_get(ctx.env.types.enums, qualified);
-            if (__ring_m70._tag === "some") {
-              const edef = __ring_m70._0;
-              _Map_insert(ctx.env.types.enums, name, edef);
-              break __ring_match70;
-            }
-            if (__ring_m70._tag === "none") {
-              break __ring_match70;
-            }
-            __match_fail(__ring_m70);
-          }
-        }
-        break __ring_match68;
-      }
-      if (__ring_m68._tag === "Trait") {
-        const name = __ring_m68.name;
-        const qualified = `${mod_name}::${name}`;
-        if (((!guard) ? true : (!_Map_contains_key(ctx.env.trait_reg.traits, name)))) {
-          __ring_match71: {
-            const __ring_m71 = _Map_get(ctx.env.trait_reg.traits, qualified);
-            if (__ring_m71._tag === "some") {
-              const tdef = __ring_m71._0;
-              _Map_insert(ctx.env.trait_reg.traits, name, tdef);
-              break __ring_match71;
-            }
-            if (__ring_m71._tag === "none") {
-              break __ring_match71;
-            }
-            __match_fail(__ring_m71);
-          }
-        }
-        break __ring_match68;
-      }
-      if (__ring_m68._tag === "Effect") {
-        const name = __ring_m68.name;
-        const qualified = `${mod_name}::${name}`;
-        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.effects, name)))) {
-          __ring_match72: {
-            const __ring_m72 = _Map_get(ctx.env.types.effects, qualified);
-            if (__ring_m72._tag === "some") {
-              const edef = __ring_m72._0;
-              _Map_insert(ctx.env.types.effects, name, edef);
-              break __ring_match72;
-            }
-            if (__ring_m72._tag === "none") {
-              break __ring_match72;
-            }
-            __match_fail(__ring_m72);
-          }
-        }
-        break __ring_match68;
-      }
-      if (__ring_m68._tag === "EffectAlias") {
-        const name = __ring_m68.name;
-        const qualified = `${mod_name}::${name}`;
-        if (((!guard) ? true : (!_Map_contains_key(ctx.env.types.effect_aliases, name)))) {
-          __ring_match73: {
-            const __ring_m73 = _Map_get(ctx.env.types.effect_aliases, qualified);
-            if (__ring_m73._tag === "some") {
-              const adef = __ring_m73._0;
-              _Map_insert(ctx.env.types.effect_aliases, name, adef);
-              break __ring_match73;
-            }
-            if (__ring_m73._tag === "none") {
-              break __ring_match73;
-            }
-            __match_fail(__ring_m73);
-          }
-        }
-        break __ring_match68;
-      }
-      break __ring_match68;
-    }
   }
 }
 

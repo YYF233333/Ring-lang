@@ -339,7 +339,9 @@ fn build_dep_import_pairs(dep_exports: ModuleExports, dep_prefix: Str) -> List<S
 
     // Collect bare variant names (no JS declaration)
     let mut bare_variants: Set<Str> = set_new()
-    for tentry in dep_exports.types.entries() {
+    let mut sorted_types = dep_exports.types.entries()
+    sorted_types.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for tentry in sorted_types {
         let (_, tdef) = tentry
         match tdef {
             TypeDef::EnumDef_(edef) => {
@@ -350,7 +352,9 @@ fn build_dep_import_pairs(dep_exports: ModuleExports, dep_prefix: Str) -> List<S
     }
 
     // Import values
-    for ventry in dep_exports.values.entries() {
+    let mut sorted_values = dep_exports.values.entries()
+    sorted_values.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for ventry in sorted_values {
         let (name, _) = ventry
         if !dep_exports.extern_values.contains(name) && !bare_variants.contains(name) {
             let si = safe_ident(name)
@@ -360,7 +364,7 @@ fn build_dep_import_pairs(dep_exports: ModuleExports, dep_prefix: Str) -> List<S
     }
 
     // Import types (struct constructors, enum variant constructors)
-    for tentry in dep_exports.types.entries() {
+    for tentry in sorted_types {
         let (name, tdef) = tentry
         let si = safe_ident(name)
         match tdef {
@@ -385,7 +389,9 @@ fn build_dep_import_pairs(dep_exports: ModuleExports, dep_prefix: Str) -> List<S
     }
 
     // Import inherent method names
-    for ientry in dep_exports.inherent_methods.entries() {
+    let mut sorted_inherent = dep_exports.inherent_methods.entries()
+    sorted_inherent.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for ientry in sorted_inherent {
         let (type_name, method_names) = ientry
         for mname in method_names {
             let method_js = "${safe_ident(type_name)}_${mname}"
@@ -433,7 +439,9 @@ fn resolve_extern_fn_imports(ast: Program, key: Str, graph: ModuleGraph,
         match decl {
             Decl::ExternFn { name, .. } => {
                 if !imports_map.contains_key(name) {
-                    for eentry in exports_map.entries() {
+                    let mut sorted_exports = exports_map.entries()
+                    sorted_exports.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                    for eentry in sorted_exports {
                         let (other_key, other_exports) = eentry
                         if other_key != key && other_exports.values.contains_key(name) && !other_exports.extern_values.contains(name) {
                             match graph.modules.get(other_key) {
@@ -627,7 +635,9 @@ fn collect_named_reexports(names: List<NamedImport>, src_exports: ModuleExports,
 
 fn collect_module_reexports(src_exports: ModuleExports, src_prefix: Str,
     mut export_names: List<Str>, mut reexport_aliases: List<Str>) {
-    for ventry in src_exports.values.entries() {
+    let mut sorted_values = src_exports.values.entries()
+    sorted_values.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for ventry in sorted_values {
         let (vname, _) = ventry
         if !src_exports.extern_values.contains(vname) {
             let src_js = "${src_prefix}$${safe_ident(vname)}"
@@ -638,7 +648,9 @@ fn collect_module_reexports(src_exports: ModuleExports, src_prefix: Str,
             export_names.push(local_js)
         }
     }
-    for tentry in src_exports.types.entries() {
+    let mut sorted_types = src_exports.types.entries()
+    sorted_types.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    for tentry in sorted_types {
         let (tname, tdef) = tentry
         let src_js = "${src_prefix}$${safe_ident(tname)}"
         let local_js = safe_ident(tname)
@@ -677,7 +689,9 @@ fn build_imports_map(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, k
 
                         // Collect bare variant names (no JS declaration)
                         let mut bare_variants: Set<Str> = set_new()
-                        for tentry in dep_exports.types.entries() {
+                        let mut sorted_dep_types = dep_exports.types.entries()
+                        sorted_dep_types.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                        for tentry in sorted_dep_types {
                             let (_, tdef) = tentry
                             match tdef {
                                 TypeDef::EnumDef_(edef) => {
@@ -687,7 +701,9 @@ fn build_imports_map(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, k
                             }
                         }
 
-                        for entry in dep_exports.values.entries() {
+                        let mut sorted_dep_values = dep_exports.values.entries()
+                        sorted_dep_values.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                        for entry in sorted_dep_values {
                             let (name, _) = entry
                             if dep_exports.extern_values.contains(name) {
                                 imports_map.insert(name, safe_ident(name))
@@ -701,7 +717,7 @@ fn build_imports_map(graph: ModuleGraph, exports_map: Map<Str, ModuleExports>, k
                                 imports_map.insert(name, "${dep_prefix}$${si}")
                             }
                         }
-                        for entry in dep_exports.types.entries() {
+                        for entry in sorted_dep_types {
                             let (name, type_def) = entry
                             let si = safe_ident(name)
                             imports_map.insert(name, "${dep_prefix}$${si}")
@@ -738,7 +754,9 @@ fn build_external_struct_fields(graph: ModuleGraph, exports_map: Map<Str, Module
                 match exports_map.get(dk) {
                     some(dep_exports) => {
                         let dep_prefix = dep_exports.module_prefix
-                        for entry in dep_exports.struct_field_orders.entries() {
+                        let mut sorted_sfo = dep_exports.struct_field_orders.entries()
+                        sorted_sfo.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                        for entry in sorted_sfo {
                             let (name, fields) = entry
                             let si = safe_ident(name)
                             result.insert("${dep_prefix}$${si}", fields)
@@ -771,10 +789,14 @@ fn build_external_impl_methods(graph: ModuleGraph, exports_map: Map<Str, ModuleE
                 match exports_map.get(dk) {
                     some(dep_exports) => {
                         let dep_prefix = dep_exports.module_prefix
-                        for entry in dep_exports.impl_methods.entries() {
+                        let mut sorted_impl = dep_exports.impl_methods.entries()
+                        sorted_impl.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                        for entry in sorted_impl {
                             let (type_name, methods) = entry
                             let si = safe_ident(type_name)
-                            for mentry in methods.entries() {
+                            let mut sorted_methods = methods.entries()
+                            sorted_methods.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                            for mentry in sorted_methods {
                                 let (mname, _) = mentry
                                 result.insert("${dep_prefix}$${si}.${mname}", none)
                             }
@@ -797,7 +819,9 @@ fn build_external_fn_mut_params(graph: ModuleGraph, exports_map: Map<Str, Module
                 match exports_map.get(dk) {
                     some(dep_exports) => {
                         let dep_prefix = dep_exports.module_prefix
-                        for entry in dep_exports.fn_mut_params.entries() {
+                        let mut sorted_fmp = dep_exports.fn_mut_params.entries()
+                        sorted_fmp.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                        for entry in sorted_fmp {
                             let (fn_name, flags) = entry
                             // Register under both the raw name and the qualified name
                             result.insert(fn_name, flags)

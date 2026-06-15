@@ -1201,7 +1201,9 @@ fn infer_numeric_op(ctx: InferCtx, left: HExpr, right: HExpr, s: UnionFind, span
             // Rigid type params should not silently unify to Int — report E0303.
             // Fresh inference variables (e.g. from fold callback) can unify to Int.
             let mut rigid_ids: Set<Int> = set_new()
-            for entry in ctx.type_param_scope.entries() {
+            let mut sorted_tp_scope = ctx.type_param_scope.entries()
+            sorted_tp_scope.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            for entry in sorted_tp_scope {
                 let tp_type = entry.1
                 match tp_type {
                     Type::TypeVar { id: tp_id, .. } => {

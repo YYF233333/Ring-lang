@@ -112,7 +112,9 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
         let mut changed = true
         while changed {
             changed = false
-            for entry in fn_callees.entries() {
+            let mut sorted_callees = fn_callees.entries()
+            sorted_callees.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            for entry in sorted_callees {
                 let (name, callees) = entry
                 for callee in callees.to_list() {
                     match ctx.local_fn_effects.get(callee) {
