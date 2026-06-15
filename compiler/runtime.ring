@@ -145,6 +145,7 @@ function argv() { return process.argv.slice(2); }
 function exit_process(code) { process.exit(code); }
 function eprintln(msg) { process.stderr.write(msg + "\n"); }
 function cwd() { return process.cwd(); }
+function exec_sync(cmd, args) { var r = __require("child_process").spawnSync(cmd, args, { stdio: "inherit" }); if (r.error) { process.stderr.write("Error: " + r.error.message + "\n"); return 1; } return r.status !== null ? r.status : 1; }
 
 const __Int_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
 const __Float_Eq = { eq: function(a, b) { return a === b; }, ne: function(a, b) { return a !== b; } };
@@ -234,7 +235,7 @@ pub const RUNTIME_EXPORT_NAMES: List<Str> =
      "StringBuilder_to_str", "StringBuilder_len",
      "read_file", "write_file", "file_exists", "delete_file",
      "path_join", "path_resolve", "path_dirname", "path_basename", "path_extname",
-     "argv", "exit_process", "eprintln", "cwd",
+     "argv", "exit_process", "eprintln", "cwd", "exec_sync",
      "__Int_Eq", "__Float_Eq", "__Str_Eq", "__Bool_Eq", "__Option_Eq",
      "__Int_Clone", "__Float_Clone", "__Str_Clone", "__Bool_Clone",
      "__List_Clone", "__Map_Clone", "__Set_Clone", "__Option_Clone",
