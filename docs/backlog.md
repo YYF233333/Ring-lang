@@ -590,6 +590,29 @@ source-map 支持 + 断点调试。
 ## 已知 Bug / 技术债
 
 
+### B-139 impl method effect 传播 E2E 测试 [bugfix] [P3] [S] [mechanical] [queued]
+
+> 2026-06-15 立项（Discussion，Wave A 通知 #1）。B-138 impl SCC 排序已落地（triple bootstrap 验证），但 spec 要求的独立 E2E 测试未加。补一个 `impl_method_effect.ring` 锁定 impl 内方法 effect 传播（非环依赖场景：callee 的 effect 正确传播到 caller）。
+
+**涉及修改**：
+1. `tests/cases/impl_method_effect.ring`：impl 内方法 A 调方法 B（B 有 fail effect），验证 A 推断出 fail effect
+
+**验收标准**：
+- 测试锁定 impl 内非环依赖方法的 effect 传播
+- 全部 E2E 通过
+
+### B-140 多段相对路径导入丢失中间段 [bugfix] [P3] [S] [judgment] [queued]
+
+> 2026-06-15 立项（Discussion，Wave A 通知 #4，B-126 执行中发现的 pre-existing bug）。`resolve_mod_uses()` 在 `infer_decl.ring` 中，`use super::a::{do_thing}` 路径 `["super", "a"]` 会丢失中间段 `"a"`，解析为 `"do_thing"` 而非 `"a::do_thing"`。多段相对路径导入可能静默查找错误名字。
+
+**涉及修改**：
+1. `compiler/infer_decl.ring`：`resolve_mod_uses` 路径拼接逻辑修复，保留中间段
+
+**验收标准**：
+- `use super::a::{Foo}` 正确解析为 `a::Foo`
+- 负面测试：错误路径报编译错误而非静默绑定错误名字
+- 全部 E2E 通过；自举一致
+
 ### B-129 Map/Set for_each llvm_diff 覆盖 [bugfix] [P3] [S] [mechanical] [queued] [deferred: B-089]
 
 > 2026-06-15 立项（Discussion，#152 worker 通知 #3）。#152 HOF 内存泄漏修复中 Map/Set for_each drop 修复未入 llvm_diff 回归——两后端迭代顺序不同导致 diff 必然失败。B-089 G-b 排序确定化完成后迭代序一致，可补覆盖。
@@ -623,7 +646,7 @@ Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
-### B-054 Parser expression-level 错误恢复 [feature] [P3] [M] [judgment] [queued]
+### B-054 Parser expression-level 错误恢复 [feature] [P3] [M] [judgment] [doing]
 Parser 有声明级错误恢复，但 `handle...with` 等复合表达式无恢复机制，单个 malformed 表达式会 poison 整个声明的解析。
 
 **涉及修改**：
@@ -647,7 +670,7 @@ B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<
 - local cancellation 规则仍生效（局部变量 mutation 不传播）
 - 全部 E2E 测试通过
 
-### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [queued]
+### B-071 推断失败错误信息 UX [feature] [P2] [M] [judgment] [doing]
 > ✅ Phase 1 已完成（2026-05-29）：基础设施 + 10 个关键 unify 调用点 + notes 渲染。剩余场景（空集合、row poly、effect 不匹配专用消息）后续迭代。
 
 **已完成**：
