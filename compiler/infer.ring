@@ -301,10 +301,31 @@ pub fn infer_stmt(mut ctx: InferCtx, stmt: Stmt, subst: UnionFind) -> StmtResult
             let mut s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(target_r.hexpr), hexpr_type(value_r.hexpr), value_r.subst, span, assign_notes)
             let me = merge_effects(ctx.env, target_r.effects, value_r.effects, s)
             s = me.1
+            let mut effects = me.0
+            // B-056: Inject mut<T> effect when assigning to a captured outer mutable variable
+            match get_assign_target_root_def_id(ctx, target) {
+                some(did) => {
+                    if ctx.env.scope.mutable_vars.contains(did) {
+                        match ctx.var_lambda_depth.get(did) {
+                            some(def_depth) => {
+                                if ctx.lambda_depth > def_depth {
+                                    let var_type = apply_subst(s, get_hexpr_root_type(target_r.hexpr))
+                                    let mut_eff = Effect::MutEffect { state_type: var_type }
+                                    let me2 = merge_effects(ctx.env, effects, effect_row([mut_eff]), s)
+                                    effects = me2.0
+                                    s = me2.1
+                                }
+                            },
+                            none => {}
+                        }
+                    }
+                },
+                none => {}
+            }
             StmtResult {
                 hstmt: HStmt::Assign { target: target_r.hexpr, value: value_r.hexpr, span: span },
                 subst: s,
-                effects: me.0
+                effects: effects
             }
         },
         Stmt::ExprStmt { expr, span, .. } => {
@@ -825,6 +846,29 @@ fn find_root_expr(e: Expr) -> Expr {
         Expr::FieldAccess { receiver, .. } => find_root_expr(receiver),
         Expr::IndexExpr { receiver, .. } => find_root_expr(receiver),
         _ => e
+    }
+}
+
+// B-056: Get def_id of root variable in an assignment target (AST level).
+fn get_assign_target_root_def_id(ctx: InferCtx, target: Expr) -> Int? {
+    let root = find_root_expr(target)
+    match root {
+        Expr::Ident { name, .. } => {
+            match ctx.env.lookup(name) {
+                some(s) => s.def_id,
+                none => none
+            }
+        },
+        _ => none
+    }
+}
+
+// B-056: Get type of root HExpr in an assignment target (HIR level).
+fn get_hexpr_root_type(target: HExpr) -> Type {
+    match target {
+        HExpr::FieldAccess { receiver, .. } => get_hexpr_root_type(receiver),
+        HExpr::IndexExpr { receiver, .. } => get_hexpr_root_type(receiver),
+        _ => hexpr_type(target)
     }
 }
 
