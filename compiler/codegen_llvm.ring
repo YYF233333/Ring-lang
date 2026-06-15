@@ -239,7 +239,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
 
     // Catch / raise (setjmp/longjmp based)
     get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ptr)
-    get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_catch_get_buf", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], void)
     get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_raise", [ptr], void)

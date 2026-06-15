@@ -76,6 +76,11 @@ extern fn LLVMBuildPtrToInt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty:
 extern fn LLVMBuildShl(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildAShr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildOr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+// B-089 G-b: attribute API for _setjmp returns_twice
+extern type LLVMAttributeRef
+extern fn LLVMAddAttributeAtIndex(fn_val: LLVMValueRef, attr_index: Int, attr: LLVMAttributeRef) -> Unit
+extern fn LLVMGetEnumAttributeKindForName(name: Str, s_len: Int) -> Int
+extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -> LLVMAttributeRef
 
 // ============================================================
 // Type-aware map/set dispatch helpers
@@ -4111,28 +4116,65 @@ fn collect_captures_stmt(ctx: LlvmCtx, stmt: HStmt, params: List<HParam>, mut ca
 // TryCatch — inline setjmp/longjmp (B-089 G-b)
 // ============================================================
 
+// Declare platform _setjmp with returns_twice attribute.
+// _setjmp(jmp_buf*) -> i32. Must be called directly from the LLVM-generated
+// function so that longjmp returns into a live frame.
+fn get_or_declare_setjmp(mut ctx: LlvmCtx) -> (LLVMValueRef, LLVMTypeRef) {
+    let name = "_setjmp"
+    match ctx.rt_fns.get(name) {
+        some(f) => {
+            match ctx.rt_fn_types.get(name) {
+                some(t) => (f, t),
+                none => panic("LLVM codegen: _setjmp type not found"),
+            }
+        },
+        none => {
+            let fn_ty = LLVMFunctionType(ctx.i32_type, [ctx.ptr_type], 0)
+            let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
+            let rt_kind = LLVMGetEnumAttributeKindForName("returns_twice", 13)
+            if rt_kind > 0 {
+                let rt_attr = LLVMCreateEnumAttribute(ctx.context, rt_kind, 0)
+                LLVMAddAttributeAtIndex(fn_val, 0 - 1, rt_attr)
+            }
+            ctx.rt_fns.insert(name, fn_val)
+            ctx.rt_fn_types.insert(name, fn_ty)
+            (fn_val, fn_ty)
+        },
+    }
+}
+
 fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMValueRef {
     // Inline setjmp: body and catch arms execute in the current stack frame,
     // sharing all local allocas. This fixes the closure-capture-by-value bug
     // where `let mut` assignments inside the body were invisible to the outer
     // scope (closures copy the alloca value, not the alloca pointer).
+    //
+    // We call _setjmp DIRECTLY from the generated function (not via a C wrapper)
+    // because setjmp's saved state includes the stack pointer — longjmp must
+    // return into a frame that is still alive. A wrapper that returns before the
+    // body runs leaves a dead frame → UB on longjmp.
     let current_fn = match ctx.current_fn {
         some(f) => f,
         none => panic("LLVM codegen: try-catch outside function"),
     }
+
+    let sj = get_or_declare_setjmp(ctx)
 
     // ring_catch_push() -> frame ptr
     let push_fn = get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ctx.ptr_type)
     let push_ty = get_rt_fn_type(ctx, "ring_catch_push")
     let frame = LLVMBuildCall2(ctx.builder, push_ty, push_fn, [], fresh_name(ctx, "frame"))
 
-    // ring_catch_setjmp(frame) -> i64: 0=normal, 1=caught
-    let setjmp_fn = get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ctx.ptr_type], ctx.i64_type)
-    let setjmp_ty = get_rt_fn_type(ctx, "ring_catch_setjmp")
-    let sjresult = LLVMBuildCall2(ctx.builder, setjmp_ty, setjmp_fn, [frame], fresh_name(ctx, "sj"))
+    // Get jmp_buf pointer from the catch frame
+    let getbuf_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_buf", [ctx.ptr_type], ctx.ptr_type)
+    let getbuf_ty = get_rt_fn_type(ctx, "ring_catch_get_buf")
+    let buf_ptr = LLVMBuildCall2(ctx.builder, getbuf_ty, getbuf_fn, [frame], fresh_name(ctx, "buf"))
+
+    // Call _setjmp directly from THIS function's frame (returns_twice)
+    let sjresult = LLVMBuildCall2(ctx.builder, sj.1, sj.0, [buf_ptr], fresh_name(ctx, "sj"))
 
     // cond = (sjresult == 0)
-    let zero = LLVMConstInt(ctx.i64_type, 0, 0)
+    let zero = LLVMConstInt(ctx.i32_type, 0, 0)
     let cond = LLVMBuildICmp(ctx.builder, 32, sjresult, zero, fresh_name(ctx, "sjcmp"))
 
     let normal_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.normal")
@@ -4265,15 +4307,19 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
             none => panic("LLVM codegen: handle expr outside function"),
         }
 
+        let sj = get_or_declare_setjmp(ctx)
+
         let push_fn = get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ctx.ptr_type)
         let push_ty = get_rt_fn_type(ctx, "ring_catch_push")
         let frame = LLVMBuildCall2(ctx.builder, push_ty, push_fn, [], fresh_name(ctx, "frame"))
 
-        let setjmp_fn = get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ctx.ptr_type], ctx.i64_type)
-        let setjmp_ty = get_rt_fn_type(ctx, "ring_catch_setjmp")
-        let sjresult = LLVMBuildCall2(ctx.builder, setjmp_ty, setjmp_fn, [frame], fresh_name(ctx, "sj"))
+        let getbuf_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_buf", [ctx.ptr_type], ctx.ptr_type)
+        let getbuf_ty = get_rt_fn_type(ctx, "ring_catch_get_buf")
+        let buf_ptr = LLVMBuildCall2(ctx.builder, getbuf_ty, getbuf_fn, [frame], fresh_name(ctx, "buf"))
 
-        let zero = LLVMConstInt(ctx.i64_type, 0, 0)
+        let sjresult = LLVMBuildCall2(ctx.builder, sj.1, sj.0, [buf_ptr], fresh_name(ctx, "sj"))
+
+        let zero = LLVMConstInt(ctx.i32_type, 0, 0)
         let cond = LLVMBuildICmp(ctx.builder, 32, sjresult, zero, fresh_name(ctx, "sjcmp"))
 
         let normal_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "hdl.normal")

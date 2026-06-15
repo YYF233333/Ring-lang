@@ -698,7 +698,7 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_difference", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_clear", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ptr);
-  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_catch_get_buf", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], _void);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_raise", [ptr], _void);

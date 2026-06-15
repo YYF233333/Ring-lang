@@ -2011,6 +2011,10 @@ extern "C" void* ring_catch_get_error(void* frame_ptr) {
     return ((RingCatchFrame*)frame_ptr)->error_value;
 }
 
+extern "C" void* ring_catch_get_buf(void* frame_ptr) {
+    return (void*)((RingCatchFrame*)frame_ptr)->buf;
+}
+
 extern "C" void ring_catch_pop() {
     RingCatchFrame* frame = ring_catch_stack;
     ring_catch_stack = frame->prev;
