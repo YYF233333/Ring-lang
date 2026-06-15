@@ -2045,6 +2045,13 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
                     }
                     i = i + 1
                 }
+                // Check for excess arguments (mt_params[0] is self)
+                let expected_args = mt_params.len() - 1
+                if hargs.len() > expected_args {
+                    let _ = type_error(ctx.sink, E0301,
+                        "Method '${method}' expects ${expected_args.to_str()} argument(s), got ${hargs.len().to_str()}",
+                        span, DiagnosticContext::TypeMismatch { expected: "${expected_args.to_str()} args", actual: "${hargs.len().to_str()} args", expression: none })
+                }
                 result_type = apply_subst(s, mt_ret)
                 let me = merge_effects(ctx.env, effects, mt_effects, s)
                 effects = me.0

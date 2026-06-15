@@ -2560,6 +2560,10 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
             }
             i = (i + 1);
           }
+          const expected_args = (List_len(mt_params) - 1);
+          if ((List_len(hargs) > expected_args)) {
+            const _ = infer_ctx$type_error(ctx.sink, codes$E0301, `Method '${method}' expects ${Int_to_str(expected_args)} argument(s), got ${Int_to_str(List_len(hargs))}`, span, diagnostics$DiagnosticContext_TypeMismatch(`${Int_to_str(expected_args)} args`, `${Int_to_str(List_len(hargs))} args`, Option_none));
+          }
           result_type = env$apply_subst(s, mt_ret);
           const me = infer_ctx$merge_effects(ctx.env, effects, mt_effects, s, __ring_ev_fail);
           effects = me[0];
