@@ -113,9 +113,7 @@ D9 probe-E 撞出：`let c = Color::Blue{shade}` 在循环内 matched-then-disca
 
 <!-- #143 closed: E0105 注册 codes.ring + parser 改用常量，2026-06-13 -->
 
-### #144 单文件 `run` 子命令是 stub 且泄漏临时文件 [low] [judgment] [open]
-
-cli.ring:177 "Single-file run not yet implemented"（EXIT 1），且在源文件目录残留 `.ring_tmp_run.js`（orchestrator 实测复现）。CLAUDE.md 常用命令已改为 build + node 流。修复方向：实现单文件 run（编译 + 执行 + 清理临时产物），或删 stub 改提示 build 流；`--debug` 同路径一并处理。发现者：B-115。
+<!-- #144 closed: 单文件 run 实现 + 临时文件清理，2026-06-15 -->
 
 ## 代码质量 / 可维护性
 
