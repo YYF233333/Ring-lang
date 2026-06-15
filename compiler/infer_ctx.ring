@@ -611,7 +611,7 @@ pub fn resolve_dicts_from_scheme(
                     Type::StructType { name, type_params, .. } => {
                         if has_impl(env.trait_reg, name, bound.trait_name) {
                             if type_params.len() > 0 {
-                                let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, bound.trait_name)
+                                let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, bound.trait_name, span)
                                 resolved_dicts.push(DictRef::Wrapped {
                                     dict: trait_dict_name(name, bound.trait_name),
                                     trait_name: bound.trait_name,
@@ -628,7 +628,7 @@ pub fn resolve_dicts_from_scheme(
                     Type::EnumType { name, type_params, .. } => {
                         if has_impl(env.trait_reg, name, bound.trait_name) {
                             if type_params.len() > 0 {
-                                let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, bound.trait_name)
+                                let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, bound.trait_name, span)
                                 resolved_dicts.push(DictRef::Wrapped {
                                     dict: trait_dict_name(name, bound.trait_name),
                                     trait_name: bound.trait_name,
@@ -714,26 +714,26 @@ fn check_assoc_constraints(
 }
 
 fn resolve_inner_dicts_from_type_params(
-    env: TypeEnv,
+    sink: CollectingSink, env: TypeEnv,
     current_fn_bounds: List<FnBoundsEntry>,
     type_params: List<Type>,
     s: UnionFind,
-    trait_name: Str
+    trait_name: Str, span: Span
 ) -> List<DictRef> {
     let mut result: List<DictRef> = []
     for param in type_params {
         let concrete = apply_subst(s, param)
-        result.push(resolve_concrete_type_to_dict_ref(env, current_fn_bounds, concrete, s, trait_name))
+        result.push(resolve_concrete_type_to_dict_ref(sink, env, current_fn_bounds, concrete, s, trait_name, span))
     }
     result
 }
 
 fn resolve_concrete_type_to_dict_ref(
-    env: TypeEnv,
+    sink: CollectingSink, env: TypeEnv,
     current_fn_bounds: List<FnBoundsEntry>,
     t: Type,
     s: UnionFind,
-    trait_name: Str
+    trait_name: Str, span: Span
 ) -> DictRef {
     match type_to_builtin_name(t) {
         some(builtin_name) => match t {
@@ -756,7 +756,7 @@ fn resolve_concrete_type_to_dict_ref(
         Type::StructType { name, type_params, .. } => {
             if has_impl(env.trait_reg, name, trait_name) {
                 if type_params.len() > 0 {
-                    let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name)
+                    let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span)
                     DictRef::Wrapped {
                         dict: trait_dict_name(name, trait_name),
                         trait_name: trait_name,
@@ -766,13 +766,16 @@ fn resolve_concrete_type_to_dict_ref(
                     DictRef::Static(trait_dict_name(name, trait_name))
                 }
             } else {
+                let _ = type_error(sink, E0503,
+                    "Type '${name}' does not implement trait '${trait_name}'",
+                    span, DiagnosticContext::TraitError { detail: "type '${name}' does not satisfy '${trait_name}'" })
                 DictRef::Static(trait_dict_name(name, trait_name))
             }
         },
         Type::EnumType { name, type_params, .. } => {
             if has_impl(env.trait_reg, name, trait_name) {
                 if type_params.len() > 0 {
-                    let inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name)
+                    let inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span)
                     DictRef::Wrapped {
                         dict: trait_dict_name(name, trait_name),
                         trait_name: trait_name,
@@ -782,6 +785,9 @@ fn resolve_concrete_type_to_dict_ref(
                     DictRef::Static(trait_dict_name(name, trait_name))
                 }
             } else {
+                let _ = type_error(sink, E0503,
+                    "Type '${name}' does not implement trait '${trait_name}'",
+                    span, DiagnosticContext::TraitError { detail: "type '${name}' does not satisfy '${trait_name}'" })
                 DictRef::Static(trait_dict_name(name, trait_name))
             }
         },

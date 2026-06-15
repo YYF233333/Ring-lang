@@ -1702,7 +1702,7 @@ function resolve_assoc_type(ctx, type_param_name, assoc_name, span) {
   return Option_unwrap_or(List_get(found_types, 0), env$TypeEnv_fresh_var(ctx.env));
 }
 
-function resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name) {
+function resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span) {
   let result = [];
   const __ring_iter_32 = __List_Iterable.iter(type_params);
   while (true) {
@@ -1710,12 +1710,12 @@ function resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_param
     if (__ring_next_32._tag === "none") break;
     const param = __ring_next_32._0;
     const concrete = env$apply_subst(s, param);
-    List_push(result, resolve_concrete_type_to_dict_ref(env, current_fn_bounds, concrete, s, trait_name));
+    List_push(result, resolve_concrete_type_to_dict_ref(sink, env, current_fn_bounds, concrete, s, trait_name, span));
   }
   return result;
 }
 
-function resolve_concrete_type_to_dict_ref(env, current_fn_bounds, t, s, trait_name) {
+function resolve_concrete_type_to_dict_ref(sink, env, current_fn_bounds, t, s, trait_name, span) {
   __ring_match75: {
     const __ring_m75 = types$type_to_builtin_name(t);
     if (__ring_m75._tag === "some") {
@@ -1762,12 +1762,13 @@ function resolve_concrete_type_to_dict_ref(env, current_fn_bounds, t, s, trait_n
       const name = __ring_m77.name; const type_params = __ring_m77.type_params;
       if (env$has_impl(env.trait_reg, name, trait_name)) {
         if ((List_len(type_params) > 0)) {
-          const inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name);
+          const inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span);
           return hir$DictRef_Wrapped(hir$trait_dict_name(name, trait_name), trait_name, inner);
         } else {
           return hir$DictRef_Static(hir$trait_dict_name(name, trait_name));
         }
       } else {
+        const _ = type_error(sink, codes$E0503, `Type '${name}' does not implement trait '${trait_name}'`, span, diagnostics$DiagnosticContext_TraitError(`type '${name}' does not satisfy '${trait_name}'`));
         return hir$DictRef_Static(hir$trait_dict_name(name, trait_name));
       }
       break __ring_match77;
@@ -1776,12 +1777,13 @@ function resolve_concrete_type_to_dict_ref(env, current_fn_bounds, t, s, trait_n
       const name = __ring_m77.name; const type_params = __ring_m77.type_params;
       if (env$has_impl(env.trait_reg, name, trait_name)) {
         if ((List_len(type_params) > 0)) {
-          const inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, trait_name);
+          const inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, trait_name, span);
           return hir$DictRef_Wrapped(hir$trait_dict_name(name, trait_name), trait_name, inner);
         } else {
           return hir$DictRef_Static(hir$trait_dict_name(name, trait_name));
         }
       } else {
+        const _ = type_error(sink, codes$E0503, `Type '${name}' does not implement trait '${trait_name}'`, span, diagnostics$DiagnosticContext_TraitError(`type '${name}' does not satisfy '${trait_name}'`));
         return hir$DictRef_Static(hir$trait_dict_name(name, trait_name));
       }
       break __ring_match77;
@@ -1814,7 +1816,7 @@ function resolve_dicts_from_scheme(sink, env, current_fn_bounds, scheme, callee_
             const name = __ring_m80.name; const type_params = __ring_m80.type_params;
             if (env$has_impl(env.trait_reg, name, bound.trait_name)) {
               if ((List_len(type_params) > 0)) {
-                const inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, bound.trait_name);
+                const inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, bound.trait_name, span);
                 List_push(resolved_dicts, hir$DictRef_Wrapped(hir$trait_dict_name(name, bound.trait_name), bound.trait_name, inner));
               } else {
                 List_push(resolved_dicts, hir$DictRef_Static(hir$trait_dict_name(name, bound.trait_name)));
@@ -1828,7 +1830,7 @@ function resolve_dicts_from_scheme(sink, env, current_fn_bounds, scheme, callee_
             const name = __ring_m80.name; const type_params = __ring_m80.type_params;
             if (env$has_impl(env.trait_reg, name, bound.trait_name)) {
               if ((List_len(type_params) > 0)) {
-                const inner = resolve_inner_dicts_from_type_params(env, current_fn_bounds, type_params, s, bound.trait_name);
+                const inner = resolve_inner_dicts_from_type_params(sink, env, current_fn_bounds, type_params, s, bound.trait_name, span);
                 List_push(resolved_dicts, hir$DictRef_Wrapped(hir$trait_dict_name(name, bound.trait_name), bound.trait_name, inner));
               } else {
                 List_push(resolved_dicts, hir$DictRef_Static(hir$trait_dict_name(name, bound.trait_name)));
