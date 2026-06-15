@@ -622,6 +622,40 @@ source-map 支持 + 断点调试。
 
 
 
+### B-137 collect_local_calls 漏 ReturnExpr/Clone [bugfix] [P3] [S] [judgment] [queued]
+
+> 2026-06-15 立项（Discussion，B-136 worker 通知）。`codegen.ring:390-491` 的 `collect_local_calls` 末尾 `_ => {}` wildcard 静默丢弃 `HExpr::ReturnExpr` 和 `HExpr::Clone`——仅通过 return 表达式调用其他本地函数的模式（`return some_fn(x)`）不会被收入 callee 图 → 传递闭包漏效果传播。两后端行为一致故不影响 G-b 差分，但是独立正确性 bug。
+
+**涉及修改**：
+1. `compiler/codegen.ring`：`collect_local_calls` 补 `HExpr::ReturnExpr { expr, .. }` 分支（递归 `collect_local_calls(expr, ...)`）和 `HExpr::Clone { expr, .. }` 分支（同理）
+
+**验收标准**：
+- `return some_fn(x)` 模式中 `some_fn` 被收入 callee 图
+- 全部 E2E + llvm_diff 通过；自举一致
+
+### B-138 impl 方法 effect 传播：impl 内 SCC 排序（方案 A）[bugfix] [P2] [M] [judgment] [queued]
+
+> 2026-06-15 立项（Discussion，#141 W0001 根因分析）。同一 impl 块内方法按源码序检查，先检查的方法看不到后检查方法的推断 effect。B-122 SCC 拓扑排序只覆盖顶层函数，impl 方法不参与（`scc.ring` 把整个 impl 当单节点）。表现：`parse_use_decl`（源码序在前）调用 `error()`（源码序在后），`error()` 的 `fail` effect 对 `parse_use_decl` 不可见 → W0001 误报。
+
+**两层修复**：
+
+| 层 | 内容 | 说明 |
+|----|------|------|
+| **层 1** | `__ring_raise_fail` extern fn 加 `with {fail}` 声明 | effect 种子——已验证直接调用者获得 fail |
+| **层 2** | `check_impl_decl` 内方法按 SCC 拓扑排序 | 镜像 B-122 对顶层函数的方案，缩到 impl 内 |
+
+**方案选择记录**：方案 A（impl 内 SCC）vs B（两遍检查，重检可能引入类型推断不一致）vs C（全局 SCC 纳入 impl 方法，手术面 L，跨 impl 直接互调无实例）。选 A——改动集中在 `check_impl_decl` 内部，不动全局 SCC 架构；将来需要跨 impl 排序时从 A 升级到 C 是自然增量。
+
+**涉及修改**：
+1. `compiler/parser.ring`：`__ring_raise_fail` 声明加 `with {fail}`（层 1，un-revert）
+2. `compiler/infer_decl.ring`：`check_impl_decl` 内部——检查方法前先扫描方法体构建 impl 内调用图 → SCC 排序 → 按拓扑序检查方法（callee 先于 caller）。复用 `scc.ring` 的 `tarjan_scc`。impl 上下文（self_type/bounds/assoc_types）建立保持不变，只改方法循环的迭代顺序
+3. 测试：负面测试——impl 方法 A 调用方法 B（源码序 A 在前），B 有 fail effect，验证 A 正确推断 fail；W0001 不再对编译器自身 parser 误报
+
+**验收标准**：
+- `npm test` 无 W0001 对 parser 的误报
+- impl 方法间 effect 传播正确（新增负面测试）
+- 全部 E2E + llvm_diff 通过；自举一致
+
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。
 

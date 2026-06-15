@@ -106,7 +106,7 @@ Ring-lang/
 - 模块系统不支持 first-class modules、`mod : SigName` 一致性检查
 - Checker 多错误恢复是 declaration 级（同一函数内停于首错）
 - LSP 暂不可用（TS 实现未移植）
-- Impl 方法 effect 传播有 `__ring_raise_fail` workaround（跨模块 effect 传播的独立问题）
+- **Impl 方法 effect 传播不完整（B-138）**：同一 impl 块内方法按源码序检查，先检查的方法看不到后检查方法的推断 effect。根因：B-122 SCC 拓扑排序只覆盖顶层函数，impl 块内方法不参与 SCC（`scc.ring` 把整个 impl 当单节点）。表现：`__ring_raise_fail`（extern fn，无 effect 声明）→ `error()`（impl method）→ `parse_use_decl()`（同 impl，源码序在前）= fail effect 断链 → W0001 误报。Workaround：`__ring_raise_fail` 直接调用绕过 impl 方法链。**不要尝试给 extern fn 加 `with {fail}` 单独修——层 1 可行但层 2（impl 内排序）不修的话 W0001 不消**
 
 ## 路线图
 
@@ -114,7 +114,7 @@ Ring-lang/
 
 **后续**：B-089 native 自举终验（G-b/c）→ B-099 native LLVM-C 链接（Node 消除）→ L1 用户面（B-068）/ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
-**遗留**：impl effect 传播修复、LSP 移植、技术债清理（见 `docs/audit-report.md`）
+**遗留**：impl effect 传播修复（B-138，impl 内 SCC 排序）、LSP 移植、技术债清理（见 `docs/audit-report.md`）
 
 ## 常用命令
 
