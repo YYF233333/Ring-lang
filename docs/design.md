@@ -459,6 +459,233 @@ Ring 语言的语义规范，两个后端都必须符合。LLVM 落地后 JS 后
 | **整数除零** | panic | JS 后端当前返回 Infinity，需修正 |
 | **栈溢出** | 实现定义的 panic 或 abort | LLVM 用 stack guard page，JS 有 RangeError。不保证所有平台均可捕获 |
 
+#### 1.7.1 字符串编码模型（B-131 design-probe，2026-06-15）
+
+**状态：推荐选 A（UTF-8 字节串），待用户拍板。**
+
+上表（1.7）第 5-6 行当前写的是「UTF-8 编码、code point 级 `len`/`index`」，即 A+B 混合体——内部存储 UTF-8（A 的选择），但公开 API 按 code point 计数（B 的选择）。这是自相矛盾的：要么承受 B 的 O(n) index 代价并把语义完全兑现，要么选 A 的字节级 API 并获得 O(1) 性能。两条路都不走 = 留一个「设计文档写了但两个后端都没实现」的空头支票。本节分析两个候选并给出推荐。
+
+##### 现状审计：两后端的实际行为
+
+**LLVM 后端（`ring_runtime.cpp`，std::string = UTF-8 字节序列）：**
+
+| 函数 | 行为 | 语义单位 |
+|------|------|---------|
+| `ring_str_len` (L650) | `std::string::size()` → **字节数** | 字节 |
+| `ring_str_get` (L671) | `(*str)[(size_t)idx]`，取单字节构造 `std::string(1, byte)` → **字节级索引** | 字节 |
+| `ring_str_char_at` (L2319) | 同 `ring_str_get`，`std::string(1, (*str)[idx])` → **字节级** | 字节 |
+| `ring_str_char_code_at` (L2398) | `(unsigned char)(*str)[idx]` → **字节值** | 字节 |
+| `ring_str_slice` (L683) | `str->substr(start, end-start)` → **字节级切片** | 字节 |
+| `ring_str_index_of` (L2329) | `std::string::find()` → **字节偏移** | 字节 |
+| `ring_str_last_index_of` (L2339) | `std::string::rfind()` → **字节偏移** | 字节 |
+| `ring_str_split` (L715) | 空分隔符时逐字节拆分 `str->size()` 个元素 | 字节 |
+| `ring_str_contains` (L697) | `std::string::find()` → 字节匹配（对 valid UTF-8 子串正确） | 不受影响 |
+| `ring_str_starts_with` (L701) | `str->compare(0, pre->size(), *pre)` → 字节匹配（正确） | 不受影响 |
+| `ring_str_ends_with` (L708) | 同上，字节匹配（正确） | 不受影响 |
+| `ring_str_replace` (L754) | `std::string::find()` + `replace` → 字节匹配替换（对 valid UTF-8 正确） | 不受影响 |
+| `ring_str_pad_start/end` (L2353/2371) | 以 `str->size()`（字节数）判断长度 | 字节 |
+| `ring_str_to_upper/lower` (L2299/2309) | 逐字节 `toupper`/`tolower` — **仅 ASCII 正确**，多字节 UTF-8 破坏 | 字节（bug） |
+| `ring_str_trim*` (L2262-2297) | ASCII 空白字符集 — 对 UTF-8 BOM/全角空格不处理 | 不受影响（仅 ASCII 空白） |
+
+**JS 后端（`compiler/runtime.ring`，JS string = UTF-16 码元序列）：**
+
+| 函数 | 行为 | 语义单位 |
+|------|------|---------|
+| `Str_len` (L51) | `self.length` → **UTF-16 码元数** | 码元 |
+| `Str_char_at` (L61) | `self[i]` → **UTF-16 码元级索引**（surrogate pair 被拆成两个字符） | 码元 |
+| `Str_char_code_at` (L67) | `self.charCodeAt(i)` → **UTF-16 码元值** | 码元 |
+| `Str_index_of` (L62) | `self.indexOf(s)` → **UTF-16 码元偏移** | 码元 |
+| `Str_slice` (L55) | `self.slice(start, end)` → **UTF-16 码元级切片** | 码元 |
+| `Str_split` (L60) | `self.split(sep)` — 空字符串分隔符产出 UTF-16 码元数组 | 码元 |
+| `Str_pad_start/end` (L64-65) | `padStart`/`padEnd` → 码元级 | 码元 |
+| `Str_to_upper/lower` (L57-58) | `toUpperCase`/`toLowerCase` → **Unicode 感知**（JS 引擎实现 ICU 级别） | 正确 |
+
+**发散总结**：对 ASCII 字符串，两后端行为一致（1 byte = 1 UTF-16 码元 = 1 code point）。对非 ASCII：
+- `"你好".len()` → LLVM: 6（字节）；JS: 2（码元，碰巧 = code point）
+- `"😀".len()` → LLVM: 4（字节）；JS: 2（码元 ≠ 1 code point）
+- `"你好".char_at(0)` → LLVM: `some("\xe4")`（UTF-8 首字节，破碎）；JS: `some("你")`（正确）
+- `"😀".char_at(0)` → LLVM: `some("\xf0")`（破碎）；JS: `some("\ud83d")`（high surrogate，也破碎）
+
+**两个后端对非 ASCII 字符串都不完全正确**——LLVM 按字节，JS 按 UTF-16 码元，design.md 写的 code point 级语义两边都没实现。
+
+##### 候选 A：UTF-8 字节串（Rust/Go/Koka 模型）
+
+**定义**：`Str` 内部表示 = UTF-8 字节序列。`len` 返回字节数。`str[i]` 返回第 i 个字节（或编译错误/改名）。按 code point 操作通过显式 API 提供。
+
+**API 设计**：
+
+```
+impl Str {
+    // 字节级（O(1)，零开销）
+    fn len(self) -> Int              // 字节数
+    fn byte_at(self, i: Int) -> Int  // 第 i 字节值（0-255），越界 panic
+    fn slice(self, start: Int, end: Int) -> Str  // 字节级切片，非边界时 panic 或 fail
+
+    // Code point 级（O(n)，显式成本）
+    fn chars(self) -> Iterator<Str>  // 迭代 code point（每个为 1-char Str）
+    fn char_count(self) -> Int       // code point 数，O(n)
+    fn char_at(self, i: Int) -> Option<Str>  // 第 i 个 code point，O(n)
+
+    // 子串操作（UTF-8 安全，O(n)，因为操作对象本身是 valid UTF-8）
+    fn contains(self, s: Str) -> Bool       // 不受编码影响
+    fn starts_with(self, s: Str) -> Bool    // 不受编码影响
+    fn ends_with(self, s: Str) -> Bool      // 不受编码影响
+    fn index_of(self, s: Str) -> Option<Int>  // 返回字节偏移
+    fn split(self, sep: Str) -> List<Str>     // UTF-8 安全（按子串匹配）
+    fn replace(self, old: Str, new: Str) -> Str  // UTF-8 安全
+}
+```
+
+**优势**：
+1. **公理⑥（确定性资源语义）**：O(1) `len`/`slice` = 确定性性能成本，无隐藏 O(n) 操作。字节级操作的性能模型对 agent 完全透明——不存在「看起来 O(1) 实际 O(n)」的隐形陷阱
+2. **公理⑦（场景不可堵死）**：系统编程需要字节级控制（协议解析、二进制格式、文件 I/O 的 BOM 处理）。纯 code point 模型做这些需要 escape hatch（`ByteStr` 或 `as_bytes()`），增加一种类型违反公理⑧
+3. **竞品共识**：Rust/Go/Koka/Zig/C++ 全选 UTF-8 字节串。系统编程语言中只有 Swift 选了 grapheme cluster 级（且为此付出了 String 操作普遍 O(n) 的代价）。Python 模型在 CPython 内部其实也是 UTF-8（PEP 393 flexible string representation），code point 级 API 是抽象层的代价
+4. **LLVM 后端几乎就绪**：`ring_runtime.cpp` 当前的全部实现已经是字节级，选 A 只需修 3 个函数（`to_upper`/`to_lower` 的 ASCII-only bug + `char_at`/`char_code_at` 语义澄清）+ 新增 `chars()`/`char_count()` 迭代器
+5. **公理⑨（语法借用）**：Rust 的 `.len()` = 字节数、`.chars()` 迭代 code points 对 LLM 是最强先验——Rust 字符串是 LLM 训练数据里最高频的 UTF-8 字节串 API
+
+**劣势**：
+1. **字节级 `slice` 可在多字节字符中间切断**，产出 invalid UTF-8 → panic/fail 或静默乱码。Rust 用 `&str[range]` panic 解决，Go 允许静默产出 `\xfffd`。Ring 的选择：**非 code-point 边界切片 → panic**（与 Rust 一致，公理④ 失真必须响）
+2. **`split("")` 逐字节拆分**对非 ASCII 不直觉——但空分隔符语义本身就是边缘情况，可改为「空分隔符 = 按 code point 拆分」作为例外
+3. **LLM 写 CJK 字符串处理代码时**，`"你好".len() == 6` 而非 2 可能不直觉。但实测 LLM 对 Rust 字符串的这一特性已完全适应（训练数据中 Rust 使用量远超 Ring）
+
+##### 候选 B：Unicode code point 序列（Python 模型）
+
+**定义**：`Str` 对外行为 = Unicode code point 序列。`len` 返回 code point 数。`str[i]` 返回第 i 个 code point。内部可以是 UTF-8 但 API 完全隐藏字节细节。
+
+**实现成本**：
+1. **`len` = O(n)**：每次调用需遍历 UTF-8 计算 code point 数。或维护冗余的 code point 计数字段（+8 bytes/string，内存 + 每次拼接/切片需更新）
+2. **`char_at(i)` = O(n)**：从头遍历跳过 i 个 code points。或维护 offset 索引表（O(1) 查询 + O(n) 构建 + 内存 = 每字符串 ~4 bytes/code point 的辅助数组）
+3. **`slice(start, end)` = O(n)**：先找到 start/end 对应的字节偏移，再 `substr`
+4. **`index_of` 返回 code point 偏移 = O(n)**：找到字节偏移后需回溯计算 code point 数
+
+**性能影响估算（自编译场景）**：编译器自身 ~35k 行 Ring，是全 ASCII（标识符/关键字/运算符）。自编译的所有 `str.len()` 调用（源码读取、token 比较、字符串拼接检查等）从 O(1) 退化为 O(n)。影响程度取决于字符串操作频率——编译器是字符串密集型程序（lexer 逐字符扫描、parser 构建 AST 字符串、codegen 拼接输出），估计 2-5x 性能退化。对于 ~20s 自编译来说退化为 ~40-100s——不可接受。
+
+**需要补充 `ByteStr` 类型**：系统编程场景（协议解析、二进制 I/O）无法用 code point 级 API 完成，需引入 `ByteStr` 或 `Bytes` 类型 + 相互转换 API。这违反公理⑧（一种事两种写法——字符串处理有两种类型可选）。
+
+**优势**：
+1. 对 LLM 直觉友好：`"你好".len() == 2`、`"hello".len() == 5` 符合自然语言理解
+2. Python 模型是 LLM 训练数据最高频的字符串 API——LLM 对 `len()` = 字符数的先验最强
+3. 不可能意外切断多字节字符——API 在 code point 边界上操作 by construction
+
+**劣势**：
+1. **性能模型不透明**（违反⑥的精神——「可从代码推导」的扩展含义：O(1) 写法实际 O(n) = 隐性成本）
+2. **需要 `ByteStr` 补位**（违反⑧）
+3. **Python 的 O(1) 假象**：CPython 3.12+ 内部用 compact UTF-8 存储，`.encode()` 才触发 UTF-8→UTF-8（实际 no-op），但 `s[i]` 是 O(1)（PEP 393 通过 kind flag + latin1/UCS2/UCS4 表示达成）。Ring 没有这个实现——native 用 `std::string` UTF-8 存储，做 O(1) code point index 需要重新设计字符串内部表示（如 UTF-32 存储 = 4x 内存，或 PEP 393 式 flexible representation = 巨大复杂度）
+4. **编译器自身吃 dog food**：自编译是性能关键路径，O(n) `len` 不可承受
+
+##### 竞品对比
+
+| 语言 | 内部表示 | `len()` | `s[i]` | 子串搜索 | 系统编程 |
+|------|---------|---------|--------|---------|---------|
+| **Rust** | UTF-8 | 字节数 O(1) | `as_bytes()[i]` / `.chars().nth(i)` O(n) | 字节偏移 | 完全支持 |
+| **Go** | UTF-8 | 字节数 O(1) | 字节 / `for range` 迭代 rune | 字节偏移 | 完全支持 |
+| **Koka** | UTF-8 | 字节数 O(1) | `.head()`/`.tail()` | 内部实现 | 函数式，不面向系统编程 |
+| **Zig** | UTF-8 | 字节数 O(1) | 字节 / `std.unicode.utf8Decode` | 字节偏移 | 完全支持 |
+| **Python** | Flexible (PEP 393) | code point O(1) | code point O(1) | code point 偏移 | 不面向系统编程 |
+| **Swift** | UTF-8 (5.0+) | grapheme cluster O(n) | grapheme O(n) | grapheme 偏移 | 受限 |
+| **JS** | UTF-16 | 码元数 O(1) | 码元 O(1) | 码元偏移 | 不面向系统编程 |
+
+系统编程语言（Rust/Go/Zig/C++）无一例外选 UTF-8 字节级 API。code point 级 API 只出现在不面向系统编程的语言中（Python/JS）。Swift 是唯一的例外（grapheme 级），但 String 的 O(n) 特性是 Swift 社区长期抱怨点。
+
+##### Grapheme cluster 考量
+
+无论选 A 或 B，code point 级 API 对 emoji 组合字符（`"👨‍👩‍👧‍👦"` = 7 code points = 25 bytes = 1 grapheme cluster）都不完美。方案：
+- 不作为 `Str` 内置方法——grapheme cluster 分割需要 Unicode 规范表数据（ICU 级别），与公理⑦（零强制 runtime）冲突
+- 提供 `std/unicode` 库模块（opt-in），包含 `graphemes(s: Str) -> Iterator<Str>`
+- 这与 Rust（`unicode-segmentation` crate）、Go（`golang.org/x/text`）策略一致
+
+##### 推荐：A（UTF-8 字节串）
+
+权重分析：
+
+| 判据 | A (UTF-8 字节) | B (code point) | 权重 |
+|------|---------------|----------------|------|
+| 公理⑥ 确定性 | O(1) len/index，性能可推导 | O(n) 隐藏成本 | A 赢，高 |
+| 公理⑦ 场景不堵死 | 原生支持系统编程 | 需 ByteStr 补位 | A 赢，高 |
+| 公理⑧ 一种写法 | Str 一种类型 | Str + ByteStr 两种 | A 赢，中 |
+| 公理⑨ 语法借用 | Rust 模型（LLM 强先验） | Python 模型（LLM 也熟） | 微 A |
+| 公理① LLM 友好 | `len` = 字节数不直觉 | `len` = 字符数直觉 | B 赢，中 |
+| 实现成本 | LLVM 后端已 90% 就绪 | 两后端都需大改 | A 赢，高 |
+| 自编译性能 | 无退化 | 2-5x 退化 | A 赢，高 |
+
+A 在 5/7 判据胜出（其中 3 个高权重），B 只在 LLM 直觉性一项有明确优势。**推荐选 A**。
+
+##### 否决 B 的理由
+
+1. **性能不可承受**：Ring 编译器自身是 dog food——O(n) `len` 对 ~35k 行全 ASCII 编译器无性能影响，但**语义规范不能只为 ASCII 优化**。一旦标准库或用户代码处理 CJK/emoji 文本，O(n) `len` 在循环中成为二次复杂度来源
+2. **引入第二种字符串类型**：`ByteStr` 违反公理⑧。Rust 有 `&[u8]` vs `&str` 的区分，但 Rust 的 `&str` 本身就是字节级 `len`——两种类型是数据类型层面的区分（valid UTF-8 vs arbitrary bytes），不是 API 语义层面的区分
+3. **不可逆性不对称**（镜像公理⑥的 GC 取舍逻辑）：选 B 后退回 A = breaking change（所有依赖 `len` = code point 数的代码需改写）。选 A 后需要 B 的便利 = 加 `.char_count()` 方法（additive，不 breaking）
+4. **设计文档当前写的 code point 语义两个后端都没实现**——选 B 需要两个后端同时大改，选 A 只需修正 JS 后端 + 少量 LLVM 修补
+
+##### 迁移影响清单（选 A 时）
+
+**1. design.md 本表（§1.7）修正**：
+
+| 行 | 当前 | 改为 |
+|----|------|------|
+| 字符串编码 | UTF-8 | UTF-8（不变） |
+| `str[i]` | 第 i 个 Unicode code point | 第 i 个字节（返回单字节 `Str`），越界 panic |
+| `str.len()` | Unicode code point 数 | 字节数。另提供 `.char_count()` 返回 code point 数 |
+
+**2. `std/str.ring` API 变更**：
+
+| 方法 | 当前签名 | 变更 |
+|------|---------|------|
+| `len` | `fn len(self) -> Int` | 语义澄清为字节数（签名不变，文档改） |
+| `char_at` | `fn char_at(self, i: Int) -> Option<Str>` | 语义改为第 i 字节。**或改名为 `byte_at`**，另加 code point 级 `char_at` 通过 `chars()` 迭代器 |
+| `char_code_at` | `fn char_code_at(self, i: Int) -> Option<Int>` | 语义改为第 i 字节值（0-255）。**或改名为 `byte_at`** 返回 `Int` |
+| `index_of` | `fn index_of(self, s: Str) -> Option<Int>` | 语义澄清返回字节偏移（两后端已是如此） |
+| `slice` | `fn slice(self, start: Int, end: Int) -> Str` | 语义澄清为字节级切片。**新增：非 code-point 边界 → panic** |
+| `pad_start`/`pad_end` | 按当前长度判断 | 语义澄清为字节级长度 |
+| 新增 `char_count` | — | `fn char_count(self) -> Int`，O(n) 返回 code point 数 |
+| 新增 `chars` | — | `fn chars(self) -> List<Str>`（或 `Iterator<Str>`），迭代 code points |
+| 新增 `byte_len` | — | 不需要——`len` 已经是字节数。若需语义明确可加 alias |
+| 新增 `is_valid_utf8` | — | 暂不需要——所有 `Str` 保证 valid UTF-8 by construction |
+
+**3. `ring_runtime.cpp` 修复清单**：
+
+| 函数 | 问题 | 修复 |
+|------|------|------|
+| `ring_str_to_upper` (L2299) | 逐字节 `toupper`，破坏多字节 UTF-8 | 改用 ICU 或实现 ASCII-only 语义（非 ASCII 字节原样保留） |
+| `ring_str_to_lower` (L2309) | 同上 | 同上 |
+| `ring_str_split` (L715) | 空分隔符逐字节拆分 | 改为逐 code point 拆分（唯一的 code-point 级例外，匹配用户直觉） |
+| `ring_str_slice` (L683) | 无 UTF-8 边界检查 | 加 validity check：`start`/`end` 非 code-point 边界 → panic |
+| `ring_str_char_at` (L2319) | 名称暗示 "char" 但返回单字节 | 改名为 `ring_str_byte_at` 或改为 code-point 级（设计选择见上） |
+| 新增 `ring_str_char_count` | — | 遍历 UTF-8 计算 code point 数 |
+| 新增 `ring_str_chars` | — | 返回 code point 列表 |
+
+**4. `compiler/runtime.ring`（JS 后端）修正**：
+
+| 函数 | 问题 | 修复 |
+|------|------|------|
+| `Str_len` (L51) | `self.length` = UTF-16 码元数 | 改为 `new TextEncoder().encode(self).length`（UTF-8 字节数） |
+| `Str_char_at` (L61) | `self[i]` = UTF-16 码元级 | 改为字节级（`TextEncoder` + 索引 `Uint8Array`） |
+| `Str_char_code_at` (L67) | `charCodeAt` = UTF-16 码元值 | 改为字节值 |
+| `Str_index_of` (L62) | `indexOf` = UTF-16 码元偏移 | 改为字节偏移（`TextEncoder` 计算） |
+| `Str_slice` (L55) | `self.slice` = UTF-16 码元级 | 改为字节级（encode → slice → decode） |
+| `Str_pad_start/end` (L64-65) | UTF-16 码元级长度 | 改为字节级长度 |
+| `__ring_str_index` (L125) | `s.length` = UTF-16 码元数 | 改为字节级 |
+| 新增 `Str_char_count` | — | `[...self].length`（spread = code point 迭代） |
+| 新增 `Str_chars` | — | `[...self]`（spread = code point 数组） |
+
+**5. 编译器自身（`compiler/*.ring`）的影响**：编译器全 ASCII 源码处理，`len`/`slice`/`index_of` 语义不变。**零改动**。唯一注意：读取非 ASCII 源文件（Ring 支持 UTF-8 源码、字符串字面量中可包含 CJK/emoji）的 lexer 用字节索引——当前实现已是字节级，与选 A 天然一致。
+
+**6. llvm_diff 测试**：新增非 ASCII 字符串用例（CJK + emoji），断言两后端一致。这是 B-131 的直接验收门。
+
+##### 分阶段实施建议
+
+| 阶段 | 内容 | 依赖 | 估计量 |
+|------|------|------|--------|
+| P0 | 修正 design.md §1.7 表格（本节完成后） + 更新 CLAUDE.md 已知限制 | 无 | S |
+| P1 | 修 `ring_str_to_upper`/`to_lower` 的 ASCII-only bug | 无 | S |
+| P2 | 新增 `char_count()`/`chars()` 到 `std/str.ring` + 两后端实现 | 无 | M |
+| P3 | JS 后端 `Str_len` 等改为字节语义 + `ring_str_slice` 加 UTF-8 边界检查 | P2（先有替代 API） | L |
+| P4 | `char_at`/`char_code_at` 命名决策 + 实施 | P2 | M |
+| P5 | 新增 llvm_diff 非 ASCII 测试用例（CJK + emoji + mixed） | P3 | M |
+| P6 | `split("")` 改为 code-point 级拆分 | P2 | S |
+
+注意：P3（JS 后端语义修正）是 **breaking change**——现有代码中 `s.len()` 对 ASCII 不变，但对非 ASCII 字符串行为改变。由于当前测试全 ASCII、且 JS 后端终将退役（B-100），影响面有限。但仍应在 P2 先提供 `char_count()` 替代 API，再改 `len` 语义。
+
 ---
 
 ## 2. Effect 系统

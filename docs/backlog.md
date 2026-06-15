@@ -570,21 +570,6 @@ source-map 支持 + 断点调试。
 - 三候选关键风险点逐条**核实**（非纸面比较）：Windows API 可行性 / Perceus 交互 / FFI 边界
 - design.md 记录决策；B-007 spec 含选定模型的实现策略
 
-### B-131 字符串编码模型 design-probe（#158 前置）[design-align] [P2] [S] [judgment] [queued]
-
-> 2026-06-15 立项（Discussion，audit #158）。**design-probe，非实现项**。`ring_runtime.cpp` 字符串操作全部按 UTF-8 字节级 API（`std::string`），JS 后端按 UTF-16 码元级 API。对非 ASCII（CJK、emoji）系统性发散——`len`/`index_of`/`char_at`/`slice` 全不同。当前 llvm_diff 全 ASCII → 分歧不可见（oracle 盲区）。**B-100 JS 退役前必须定模型**，否则语义静默变化。
-
-**要回答的设计问题**（两候选）：
-1. **(A) UTF-8 字节串（Rust 模型）**：Ring Str = UTF-8 字节序列。`len` = 字节数，`index`/`slice` = 字节级。`char_at` 改返回完整 code point（或改名 `byte_at`，另提供 `chars()` 迭代器）。系统编程友好、零开销，但用户处理非 ASCII 需显式 code-point 迭代。核实：Ring 定位（用户面 vs 系统面），现有 std API 中哪些隐含「字符」语义需调整，LLM 写非 ASCII 代码的自然度（公理①）。
-2. **(B) Unicode 字符串（Python 模型）**：Ring Str = Unicode code point 序列。`len` = code point 数，`index`/`slice` = code point 级。native 需 UTF-8 遍历实现（每次 index O(n)，或维护 code-point offset 表 O(1) 但增内存）。用户直觉友好，但性能代价（紧循环字符串操作降速）。核实：性能影响量级，是否需 `ByteStr` 类型补位系统侧。
-3. **共同项**：不论 A/B，`char_at` 返回无效 UTF-8 单字节**两种模型下都是 bug**——A 模型应返回完整 code point 或报错，B 模型应返回 code point 字符。grapheme cluster（emoji 组合字符）两模型都不完美，评估是否需要第三类 API。
-
-**产出**：design.md 增「字符串编码模型」节（决策 + 否决理由 + 迁移影响清单）+ 如决定实现则立 backlog item。
-
-**验收标准**：
-- 两候选影响面逐条核实（std API 清单 / 性能量级 / LLM 友好性 / 现有代码迁移量）
-- design.md 记录决策
-- `char_at` 无效 UTF-8 修复方向确定（不论选 A/B）
 
 ## 语法增强
 
@@ -644,7 +629,7 @@ connect("localhost", 3000)     // timeout=30
 - 全部 E2E + llvm_diff 通过；自举一致
 
 
-### B-128 Set for-in 检测按 name == "Set" 无 type_params 校验 [bugfix] [P3] [S] [judgment] [queued]
+### B-128 Set for-in 检测按 name == "Set" 无 type_params 校验 [bugfix] [P3] [S] [judgment] [doing]
 
 > 2026-06-15 立项（Discussion，lateral audit 观察 #6）。`codegen_llvm_stmt.ring:503-521` 的 `emit_for_in` 仅检查 `Type::StructType { name, .. } => name == "Set"`，不校验是否为内置 Set 类型。若未来引入同名 struct（如 `mod io { struct Set { ... } }`），会被误识别走 `ring_set_to_list` 路径。当前代码库零冲突。
 
