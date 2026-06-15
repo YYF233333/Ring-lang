@@ -629,18 +629,6 @@ connect("localhost", 3000)     // timeout=30
 - 全部 E2E + llvm_diff 通过；自举一致
 
 
-### B-128 Set for-in 检测按 name == "Set" 无 type_params 校验 [bugfix] [P3] [S] [judgment] [doing]
-
-> 2026-06-15 立项（Discussion，lateral audit 观察 #6）。`codegen_llvm_stmt.ring:503-521` 的 `emit_for_in` 仅检查 `Type::StructType { name, .. } => name == "Set"`，不校验是否为内置 Set 类型。若未来引入同名 struct（如 `mod io { struct Set { ... } }`），会被误识别走 `ring_set_to_list` 路径。当前代码库零冲突。
-
-**涉及修改**：
-1. `codegen_llvm_stmt.ring`：Set 检测改为同时校验 module 来源或 type_params 结构，确保只匹配内置 `std/set` 的 Set
-2. 或在 codegen 入口统一用 type id / qualifier 区分内置 vs 用户类型
-
-**验收标准**：
-- 用户同名 struct "Set" 不触发 set_to_list 路径（负面测试或代码审查）
-- 内置 Set for-in 行为不变
-- 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-129 Map/Set for_each llvm_diff 覆盖 [bugfix] [P3] [S] [mechanical] [queued] [deferred: B-089]
 
