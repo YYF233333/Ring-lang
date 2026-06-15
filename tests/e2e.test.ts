@@ -518,6 +518,7 @@ const cases: TestCase[] = [
   { file: "or_pattern.ring", expected: "or pattern: ok\n" },
   { file: "exhaustive_generic_payload.ring", expected: "exhaustive_generic_payload: all tests passed\n" },
   { file: "where_clause_warning.ring", expected: "5\n" },
+  { file: "default_params.ring", expected: "15\n25\nHello, World!\nHi, World!\nHey, World.\nlocalhost:8080 (timeout=30)\nlocalhost:3000 (timeout=30)\nlocalhost:3000 (timeout=60)\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -608,6 +609,8 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_assoc_type_name_display.ring", error_pattern: "Item" },
     { file: "error_impl_target_type_arg.ring", error_pattern: "E0105" },
     { file: "error_diagnostic_notes.ring", error_pattern: "E0301" },
+    { file: "error_default_params_non_trailing.ring", error_pattern: "E0106" },
+    { file: "error_default_params_too_few.ring", error_pattern: "E0301" },
   ];
 
   for (const tc of negative_cases) {

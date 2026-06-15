@@ -342,10 +342,11 @@ const UnaryOp_Neg = Object.freeze({ _tag: "Neg" });
 const UnaryOp_Not = Object.freeze({ _tag: "Not" });
 
 class Param {
-  constructor(name, is_mutable, type_annotation, span) {
+  constructor(name, is_mutable, type_annotation, default_value, span) {
     this.name = name;
     this.is_mutable = is_mutable;
     this.type_annotation = type_annotation;
+    this.default_value = default_value;
     this.span = span;
   }
 }
