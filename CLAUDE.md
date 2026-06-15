@@ -148,6 +148,15 @@ node compiler/dist/main.js build examples/hello.ring --target=llvm
 
 # LLVM 后端：编译编译器自身（多文件）
 node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm
+
+# Native 构建（需 clang）
+powershell compiler/scripts/build_native.ps1
+
+# Native 构建（含 alloc 计数器）
+powershell compiler/scripts/build_native.ps1 -Stats
+
+# 全量测试（e2e + llvm + native，各阶段缺依赖自动 skip）
+cd compiler && npm run test:all
 ```
 
 ## ASan 跑法（两档，2026-06-11 定）
