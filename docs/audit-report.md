@@ -123,9 +123,7 @@ D9 probe-E 撞出：`let c = Color::Blue{shade}` 在循环内 matched-then-disca
 
 `some(self.parse_use_decl(false)) catch { _ => none }` 被 checker 判定无 fail effect。B-112 把 warnings 接到出口后，每次 self-compile stderr 打 1 条。若 `parse_use_decl` 确实可 fail → impl-effect-propagation bug（CLAUDE.md 已知限制）的假阳性实证；若不可 fail → dead catch 应删。二者皆需拍板，顺带消除 self-compile 噪音。发现者：B-112。
 
-### #142 多文件管线 `--error-format=llm` 整体失效 [low] [judgment] [doing]
-
-resolver / compiler_mod 的 error 与 warning 输出内联 `eprintln(format_human(...))`，`error_format` 未下传——multi-file 模式 `--error-format=llm` 静默退化为 human（error 与 warning 皆然，pre-existing）。修复方向：诊断收集上提至 cli.ring 统一格式化，或 plumbing error_format。发现者：B-112。
+<!-- #142 --error-format=llm 多文件已修复并删除（2026-06-15）：error_format 从 cli.ring plumb 到 resolver/compiler_mod，所有 format_human 调用点加 llm 分支。回归 2 个 E2E 测试。 -->
 
 <!-- #143 closed: E0105 注册 codes.ring + parser 改用常量，2026-06-13 -->
 
@@ -135,9 +133,7 @@ cli.ring:177 "Single-file run not yet implemented"（EXIT 1），且在源文件
 
 ## 代码质量 / 可维护性
 
-### #6 `runtime.ring` 用数百个 `.push()` 拼接 JS 运行时代码 [low] [mechanical] [doing]
-
-应改用 raw string 或外部 .js 文件。
+<!-- #6 runtime.ring push 重构已落地并删除（2026-06-15）：~240 个 push 调用合并为 ~30 个 raw string 块，生成 JS 字节一致。 -->
 
 ### #7 `infer.ring` 2826 行单文件 [low] [judgment] [open]
 
