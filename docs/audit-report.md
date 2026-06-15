@@ -93,7 +93,7 @@ B-103 全量枚举 ring_runtime.cpp 时发现：`method_to_runtime`（codegen_ll
 
 <!-- #148 closed: B-124 落地（join 签名收紧为 List<Str>），2026-06-13 -->
 
-### #157 fresh payload-enum 局部 match-then-discard 未 scope-end-drop（leak 类）[low] [judgment] [open]
+### #157 fresh payload-enum 局部 match-then-discard 未 scope-end-drop（leak 类）[low] [judgment] [doing]
 
 D9 probe-E 撞出：`let c = Color::Blue{shade}` 在循环内 matched-then-discarded（match 只投影标量 payload、不消费外壳），每轮泄 `tid68=n`。fresh owned payload-enum 作为 let 绑定应被 scope-end-drop 回收，但实际未 drop——疑似 perceus scope 建模对 matched-then-projected 的 let 绑定遗漏。与 D9 Part 2（UnitType 单例化、const-enum 类）无关，与 Part 1（interp SB codegen-drop）无关——是独立 RC gap。subagent 已改写 probe 绕开以隔离 const 类测量。发现者：B-104 D9 probe 构造期。
 

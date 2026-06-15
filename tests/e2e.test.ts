@@ -617,6 +617,8 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_diagnostic_notes.ring", error_pattern: "E0301" },
     { file: "error_default_params_non_trailing.ring", error_pattern: "E0106" },
     { file: "error_default_params_too_few.ring", error_pattern: "E0301" },
+    { file: "error_empty_list_suggestion.ring", error_pattern: "E0301" },
+    { file: "error_effect_suggestion.ring", error_pattern: "E0403" },
   ];
 
   for (const tc of negative_cases) {
@@ -807,6 +809,77 @@ describe("e2e: diagnostic suggestions and categories", { concurrency: true }, ()
       `Expected note about declared return type, got: ${noteText}`);
     assert.ok(noteText.includes("body") || noteText.includes("evaluates"),
       `Expected note about function body type, got: ${noteText}`);
+  });
+
+  test("empty list type mismatch suggests type annotation", () => {
+    const filePath = path.join(CASES_DIR, "error_empty_list_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const diags = sink.items.filter((d: any) => d.severity._tag === "SevError");
+    assert.ok(diags.length > 0, "Expected at least one error diagnostic");
+    const d = diags[0] as any;
+    assert.ok(d.suggestions.length > 0, "Expected at least one suggestion for empty list type mismatch");
+    const sugText = d.suggestions.map((s: any) => s.message).join(" ");
+    assert.ok(sugText.includes("type annotation") || sugText.includes("List<"),
+      `Expected suggestion about type annotation, got: ${sugText}`);
+  });
+
+  test("unhandled effect in main produces handler suggestion", () => {
+    const filePath = path.join(CASES_DIR, "error_effect_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const diags = sink.items.filter((d: any) => d.severity._tag === "SevError");
+    assert.ok(diags.length > 0, "Expected at least one error diagnostic");
+    const d = diags[0] as any;
+    // Verify notes are present with effect name
+    assert.ok(d.notes.length >= 1, `Expected at least 1 note for unhandled effect, got ${d.notes.length}`);
+    const noteText = d.notes.map((n: any) => n.message).join(" ");
+    assert.ok(noteText.includes("Logger"), `Expected note mentioning 'Logger' effect, got: ${noteText}`);
+    // Verify suggestion is present
+    assert.ok(d.suggestions.length > 0, "Expected at least one suggestion for unhandled effect");
+    const sugText = d.suggestions.map((s: any) => s.message).join(" ");
+    assert.ok(sugText.includes("handle") && sugText.includes("Logger"),
+      `Expected suggestion about handling Logger effect, got: ${sugText}`);
+  });
+
+  test("unhandled effect suggestion includes replacement in format_llm", () => {
+    const filePath = path.join(CASES_DIR, "error_effect_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const json_output = format_llm(sink.items, filePath);
+    const parsed = JSON.parse(json_output);
+    assert.ok(parsed.diagnostics.length > 0, "Expected diagnostics in LLM output");
+    const d = parsed.diagnostics[0];
+    assert.ok(d.suggestions.length > 0, "Expected suggestions in LLM JSON output");
+    assert.ok(d.suggestions[0].replacement !== null && d.suggestions[0].replacement !== undefined,
+      "Expected replacement field in suggestion for LLM format");
+    assert.ok(d.suggestions[0].replacement.includes("handle"),
+      `Expected replacement to include 'handle', got: ${d.suggestions[0].replacement}`);
+  });
+
+  test("empty list suggestion includes replacement in format_llm", () => {
+    const filePath = path.join(CASES_DIR, "error_empty_list_suggestion.ring");
+    const source = fs.readFileSync(filePath, "utf-8");
+    const sink = new_collecting_sink();
+    const ast = parse(source, filePath, sink);
+    const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+    try { check(ast, sink, fail_ev); } catch {}
+    const json_output = format_llm(sink.items, filePath);
+    const parsed = JSON.parse(json_output);
+    assert.ok(parsed.diagnostics.length > 0, "Expected diagnostics in LLM output");
+    const d = parsed.diagnostics[0];
+    const emptySugs = d.suggestions.filter((s: any) => s.message.includes("type annotation"));
+    assert.ok(emptySugs.length > 0, "Expected suggestion about type annotation in LLM output");
+    assert.ok(emptySugs[0].replacement !== null, "Expected replacement for empty list suggestion");
   });
 });
 

@@ -128,6 +128,27 @@ fn infer_suggestion(code: Str, message: Str, context: DiagnosticContext) -> List
                 span: none
             })
         }
+        // Row poly field missing — suggest which field is needed
+        if message.contains("missing field") {
+            suggestions.push(Suggestion {
+                message: "The function requires a struct with specific fields; check the field access in the function body",
+                replacement: none,
+                span: none
+            })
+        }
+        // Empty collection type inference — suggest type annotation
+        match context {
+            TypeMismatch { expected, actual, .. } => {
+                if has_unresolved_collection_type(expected) || has_unresolved_collection_type(actual) {
+                    suggestions.push(Suggestion {
+                        message: "Empty collection needs a type annotation, e.g.: let xs: List<Int> = []",
+                        replacement: some(": List<Type>"),
+                        span: none
+                    })
+                }
+            },
+            _ => {}
+        }
     }
 
     // Numeric type required (E0303) — string concatenation attempt
@@ -204,7 +225,7 @@ fn infer_suggestion(code: Str, message: Str, context: DiagnosticContext) -> List
     if code == "E0205" {
         suggestions.push(Suggestion {
             message: "Declare the variable with 'let mut' instead of 'let' to allow reassignment",
-            replacement: none,
+            replacement: some("let mut"),
             span: none
         })
     }
@@ -218,7 +239,52 @@ fn infer_suggestion(code: Str, message: Str, context: DiagnosticContext) -> List
         })
     }
 
+    // Unhandled effect — suggest handler
+    if code == "E0403" {
+        match context {
+            EffectUnhandled { eff, .. } => {
+                suggestions.push(Suggestion {
+                    message: "Handle the '${eff}' effect using 'handle expr with { ${eff} { ... } }' or wrap in a function with 'with {${eff}}' annotation",
+                    replacement: some("handle <expr> with { ${eff} { op(args) => result } }"),
+                    span: none
+                })
+            },
+            _ => {}
+        }
+    }
+
+    // Effect mismatch — suggest handler when effects leak into pure context
+    if code == "E0301" || code == "E0302" {
+        if message.contains("effect mismatch") && message.contains("not allowed in pure context") {
+            // Extract the effect names from the message for a concrete suggestion
+            if message.contains("fail") {
+                suggestions.push(Suggestion {
+                    message: "Use 'catch { err => <handler> }' to handle the fail effect",
+                    replacement: some("catch { err => <handler> }"),
+                    span: none
+                })
+            } else {
+                suggestions.push(Suggestion {
+                    message: "Use 'handle ... with { ... }' for custom effects, or 'catch { ... }' for fail effects",
+                    replacement: none,
+                    span: none
+                })
+            }
+        }
+    }
+
     suggestions
+}
+
+// Check if a type string representation contains an unresolved type variable
+// inside a collection type (e.g. "List<?0>", "Map<?1, ?2>", "Set<?3>")
+fn has_unresolved_collection_type(type_str: Str) -> Bool {
+    // Type variables in Ring are rendered as "?N" (e.g. "?0", "?1")
+    // Check for patterns like "List<?" or "Map<?" or "Set<?"
+    if type_str.contains("List<?") { return true }
+    if type_str.contains("Map<?") { return true }
+    if type_str.contains("Set<?") { return true }
+    false
 }
 
 fn find_similar_name(target: Str, candidates: List<Str>) -> Str? {
