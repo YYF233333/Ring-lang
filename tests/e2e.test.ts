@@ -440,6 +440,7 @@ const cases: TestCase[] = [
   { file: "impl_effect_chain.ring", expected: "impl_effect_chain: all tests passed\n" },
   { file: "impl_effect_order.ring", expected: "impl_effect_order: all tests passed\n" },
   { file: "impl_effect_intra.ring", expected: "impl_effect_intra: all tests passed\n" },
+  { file: "impl_method_effect.ring", expected: "caught: empty input\nimpl_method_effect: all tests passed\n" },
   { file: "scc_mutual_recursion.ring", expected: "scc_mutual_recursion: all tests passed\n" },
   { file: "catch_exhaustive.ring", expected: "catch exhaustive tests passed\n" },
   { file: "multiline_string.ring", expected: "multiline_string: all tests passed\n" },
