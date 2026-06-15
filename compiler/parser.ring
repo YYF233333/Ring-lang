@@ -87,6 +87,10 @@ fn dummy_type_expr() -> TypeExpr {
     TypeExpr::Named { name: "", qualifier: none, type_args: [], span: span_zero() }
 }
 
+fn dummy_expr() -> Expr {
+    Expr::BoolLit { value: false, span: span_zero() }
+}
+
 fn is_decl_start(k: TokenKind) -> Bool {
     match k {
         TkFn => true, TkStruct => true, TkEnum => true,
@@ -242,6 +246,33 @@ impl Parser {
 
     pub fn at_end(self) -> Bool {
         self.check(TokenKind::TkEof)
+    }
+
+    // ============================================================
+    // Recovery helpers
+    // ============================================================
+
+    // Skip tokens until we reach one of the stop tokens at brace depth 0,
+    // or an unmatched closing brace. Tracks brace nesting so we don't stop
+    // inside a nested block.
+    fn skip_to_recovery_point(mut self, stop_tokens: List<TokenKind>) {
+        let mut brace_depth = 0
+        while !self.at_end() {
+            let kind = self.peek().kind
+            // Check stop tokens before tracking braces, so that TkLBrace
+            // itself can be a stop token (stops at the opening brace).
+            if brace_depth == 0 {
+                for stop in stop_tokens {
+                    if kind == stop { return }
+                }
+            }
+            if kind == TokenKind::TkRBrace {
+                if brace_depth == 0 { return }
+                brace_depth = brace_depth - 1
+            }
+            if kind == TokenKind::TkLBrace { brace_depth = brace_depth + 1 }
+            self.advance()
+        }
     }
 
     // ============================================================
@@ -1647,14 +1678,45 @@ if self.check(TokenKind::TkIntLit) {
     pub fn parse_if_expr(mut self) -> Expr {
         let start = self.current_span_start()
         self.expect(TokenKind::TkIf)
-        let condition = self.parse_expr_no_struct()
-        let then_branch = self.parse_block_expr()
+
+        // Try parsing condition; on failure, skip to '{' and use a dummy
+        let cond_result: Expr? = some(self.parse_expr_no_struct()) catch { _ => none }
+        let condition = match cond_result {
+            some(c) => c,
+            none => {
+                self.skip_to_recovery_point([TokenKind::TkLBrace])
+                dummy_expr()
+            }
+        }
+
+        // Try parsing then branch; on failure, skip to 'else' or next decl
+        let then_result: Expr? = some(self.parse_block_expr()) catch { _ => none }
+        let then_branch = match then_result {
+            some(t) => t,
+            none => {
+                self.skip_to_recovery_point([TokenKind::TkElse])
+                Expr::Block { stmts: [], tail: none, span: self.make_span(start, self.current_span_start()) }
+            }
+        }
+
         let mut else_branch: Expr? = none
         if self.try_consume(TokenKind::TkElse) {
             if self.check(TokenKind::TkIf) {
-                else_branch = some(self.parse_if_expr())
+                let else_result: Expr? = some(self.parse_if_expr()) catch { _ => none }
+                match else_result {
+                    some(e) => { else_branch = some(e) },
+                    none => {
+                        self.skip_to_recovery_point([])
+                    }
+                }
             } else {
-                else_branch = some(self.parse_block_expr())
+                let else_result: Expr? = some(self.parse_block_expr()) catch { _ => none }
+                match else_result {
+                    some(e) => { else_branch = some(e) },
+                    none => {
+                        self.skip_to_recovery_point([])
+                    }
+                }
             }
         }
         let end_pos = match else_branch {
@@ -1675,7 +1737,14 @@ if self.check(TokenKind::TkIntLit) {
         self.expect(TokenKind::TkLBrace)
         let mut arms: List<MatchArm> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
-            arms.push(self.parse_match_arm())
+            let arm_result: MatchArm? = some(self.parse_match_arm()) catch { _ => none }
+            match arm_result {
+                some(arm) => arms.push(arm),
+                none => {
+                    // Skip to next comma (arm separator), or closing brace
+                    self.skip_to_recovery_point([TokenKind::TkComma])
+                }
+            }
             self.try_consume(TokenKind::TkComma)
         }
         let rbrace = self.expect(TokenKind::TkRBrace)
@@ -1865,7 +1934,14 @@ if self.check(TokenKind::TkIntLit) {
         self.expect(TokenKind::TkLBrace)
         let mut handlers: List<EffectHandler> = []
         while !self.check(TokenKind::TkRBrace) && !self.at_end() {
-            handlers.push(self.parse_effect_handler())
+            let handler_result: EffectHandler? = some(self.parse_effect_handler()) catch { _ => none }
+            match handler_result {
+                some(h) => handlers.push(h),
+                none => {
+                    // Skip to next comma (handler separator), or closing brace
+                    self.skip_to_recovery_point([TokenKind::TkComma])
+                }
+            }
             self.try_consume(TokenKind::TkComma)
         }
         let rbrace = self.expect(TokenKind::TkRBrace)

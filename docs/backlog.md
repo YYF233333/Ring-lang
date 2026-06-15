@@ -646,17 +646,6 @@ Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05
 - 全部 E2E 测试通过
 - 自举编译器正常编译自身
 
-### B-054 Parser expression-level 错误恢复 [feature] [P3] [M] [judgment] [doing]
-Parser 有声明级错误恢复，但 `handle...with` 等复合表达式无恢复机制，单个 malformed 表达式会 poison 整个声明的解析。
-
-**涉及修改**：
-1. `parser.ring`：在 `handle`/`match`/`if` 等复合表达式解析失败时，尝试跳到 `}`/`)` 等闭合 token 恢复
-
-**验收标准**：
-- malformed `handle` 表达式不阻止后续声明的解析
-- 错误报告质量不下降
-- 全部 E2E 测试通过
-
 
 ### B-056 闭包捕获 `let mut` 变量时注入 `mut<T>` effect [feature] [P3] [M] [judgment] [queued]
 B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<T>` effect，使 effect 追踪完整。核心的 local effect cancellation 已在 B-048 完成。
