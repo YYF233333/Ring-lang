@@ -484,6 +484,15 @@ fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>) {
             collect_local_calls(receiver, local_names, out)
             collect_local_calls(index, local_names, out)
         },
+        HExpr::ReturnExpr { value, .. } => {
+            match value {
+                some(v) => collect_local_calls(v, local_names, out),
+                none => {},
+            }
+        },
+        HExpr::Clone { inner, .. } => {
+            collect_local_calls(inner, local_names, out)
+        },
         _ => {},
     }
 }

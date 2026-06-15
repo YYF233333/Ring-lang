@@ -589,7 +589,7 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
-### B-126 codegen first-match 隐式消歧改显式报错 [bugfix] [P3] [M] [judgment] [queued]
+### B-126 codegen first-match 隐式消歧改显式报错 [bugfix] [P3] [M] [judgment] [doing]
 
 > 2026-06-15 立项（Discussion，B-089 G-b worker 观察）。codegen 中 3 个 Map 迭代站点使用 `return some(first_match)` 模式——排序后确定化但根因（多模块同名函数/struct 歧义）仍在：排序只把"随机选一个"变成"选字典序最小的一个"，仍是隐式消歧。当前编译器自举无实存歧义（测试全绿），但用户代码出现真实同名冲突时会静默选错。
 
@@ -622,18 +622,8 @@ source-map 支持 + 断点调试。
 
 
 
-### B-137 collect_local_calls 漏 ReturnExpr/Clone [bugfix] [P3] [S] [judgment] [queued]
 
-> 2026-06-15 立项（Discussion，B-136 worker 通知）。`codegen.ring:390-491` 的 `collect_local_calls` 末尾 `_ => {}` wildcard 静默丢弃 `HExpr::ReturnExpr` 和 `HExpr::Clone`——仅通过 return 表达式调用其他本地函数的模式（`return some_fn(x)`）不会被收入 callee 图 → 传递闭包漏效果传播。两后端行为一致故不影响 G-b 差分，但是独立正确性 bug。
-
-**涉及修改**：
-1. `compiler/codegen.ring`：`collect_local_calls` 补 `HExpr::ReturnExpr { expr, .. }` 分支（递归 `collect_local_calls(expr, ...)`）和 `HExpr::Clone { expr, .. }` 分支（同理）
-
-**验收标准**：
-- `return some_fn(x)` 模式中 `some_fn` 被收入 callee 图
-- 全部 E2E + llvm_diff 通过；自举一致
-
-### B-138 impl 方法 effect 传播：impl 内 SCC 排序（方案 A）[bugfix] [P2] [M] [judgment] [queued]
+### B-138 impl 方法 effect 传播：impl 内 SCC 排序（方案 A）[bugfix] [P2] [M] [judgment] [doing]
 
 > 2026-06-15 立项（Discussion，#141 W0001 根因分析）。同一 impl 块内方法按源码序检查，先检查的方法看不到后检查方法的推断 effect。B-122 SCC 拓扑排序只覆盖顶层函数，impl 方法不参与（`scc.ring` 把整个 impl 当单节点）。表现：`parse_use_decl`（源码序在前）调用 `error()`（源码序在后），`error()` 的 `fail` effect 对 `parse_use_decl` 不可见 → W0001 误报。
 

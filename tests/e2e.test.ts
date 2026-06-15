@@ -521,6 +521,7 @@ const cases: TestCase[] = [
   { file: "exhaustive_generic_payload.ring", expected: "exhaustive_generic_payload: all tests passed\n" },
   { file: "where_clause_warning.ring", expected: "5\n" },
   { file: "default_params.ring", expected: "15\n25\nHello, World!\nHi, World!\nHey, World.\nlocalhost:8080 (timeout=30)\nlocalhost:3000 (timeout=30)\nlocalhost:3000 (timeout=60)\n" },
+  { file: "return_call_effect.ring", expected: "return_call_effect: all tests passed\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
