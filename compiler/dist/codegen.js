@@ -1376,4 +1376,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { generate };
+export { generate, collect_fn_callees, collect_local_calls, collect_local_calls_stmt };

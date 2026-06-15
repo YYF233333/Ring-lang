@@ -356,7 +356,7 @@ fn register_decl_info(decls: List<HDecl>, mut ctx: CodegenCtx) {
 }
 
 // Recursively collect fn callees for transitive effect closure computation (B-049).
-fn collect_fn_callees(decls: List<HDecl>, local_names: Set<Str>, mut fn_callees: Map<Str, Set<Str>>) {
+pub fn collect_fn_callees(decls: List<HDecl>, local_names: Set<Str>, mut fn_callees: Map<Str, Set<Str>>) {
     for decl in decls {
         match decl {
             HDecl::Fn { name, body, .. } => {
@@ -384,7 +384,7 @@ fn collect_fn_callees(decls: List<HDecl>, local_names: Set<Str>, mut fn_callees:
     }
 }
 
-fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>) {
+pub fn collect_local_calls(expr: HExpr, local_names: Set<Str>, mut out: Set<Str>) {
     match expr {
         HExpr::Call { callee, args, .. } => {
             match callee {
@@ -567,7 +567,7 @@ fn scan_fn_mut_params(decls: List<HDecl>, mut ctx: CodegenCtx) {
     }
 }
 
-fn collect_local_calls_stmt(stmt: HStmt, local_names: Set<Str>, mut out: Set<Str>) {
+pub fn collect_local_calls_stmt(stmt: HStmt, local_names: Set<Str>, mut out: Set<Str>) {
     match stmt {
         HStmt::Let { init, .. } => collect_local_calls(init, local_names, out),
         HStmt::Var { init, .. } => collect_local_calls(init, local_names, out),

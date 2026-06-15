@@ -11,6 +11,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
 use codegen_llvm_expr::{gen_llvm_expr}
 use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info}
 use codegen_ctx::{extract_effect_names}
+use codegen::{collect_fn_callees}
 
 // Re-declare LLVM types and functions to avoid ESM cross-module import issues
 extern type LLVMContextRef
@@ -582,6 +583,58 @@ fn register_builtin_enums(mut ctx: LlvmCtx) {
 }
 
 // ============================================================
+// compute_transitive_effect_closure — propagate effects through call graph
+// B-089 G-b: mirrors codegen.ring:108-151 (JS backend had this, LLVM didn't)
+// ============================================================
+
+fn compute_transitive_effect_closure(decls: List<HDecl>, mut local_fn_effects: Map<Str, EffectRow>) {
+    if local_fn_effects.len() == 0 { return }
+    let mut local_names: Set<Str> = set_new()
+    collect_local_names_rec(decls, local_names)
+    let mut fn_callees: Map<Str, Set<Str>> = map_new()
+    collect_fn_callees(decls, local_names, fn_callees)
+    let mut changed = true
+    while changed {
+        changed = false
+        let mut sorted_callees = fn_callees.entries()
+        sorted_callees.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        for entry in sorted_callees {
+            let (name, callees) = entry
+            let mut sorted_callee_names = callees.to_list()
+            sorted_callee_names.sort()
+            for callee in sorted_callee_names {
+                match local_fn_effects.get(callee) {
+                    some(callee_effects) => {
+                        match local_fn_effects.get(name) {
+                            none => {
+                                let mut effs: List<Effect> = []
+                                for e in callee_effects.effects { effs.push(e) }
+                                local_fn_effects.insert(name, EffectRow { effects: effs, tail: none })
+                                changed = true
+                            },
+                            some(current) => {
+                                for e in callee_effects.effects {
+                                    let ename = effect_kind_name(e)
+                                    let mut found = false
+                                    for ce in current.effects {
+                                        if effect_kind_name(ce) == ename { found = true }
+                                    }
+                                    if found == false {
+                                        current.effects.push(e)
+                                        changed = true
+                                    }
+                                }
+                            },
+                        }
+                    },
+                    none => {},
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
 // scan_fn_effects — collect local function effects for transitive closure
 // ============================================================
 
@@ -1087,6 +1140,9 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // gen_effect_op share the evidence-struct slot layout via effect_op_slot.
     register_effect_ops_llvm(program.decls, ctx.effect_ops)
 
+    // 7a. Compute transitive effect closure (B-089 G-b: mirrors codegen.ring:108-151)
+    compute_transitive_effect_closure(program.decls, ctx.local_fn_effects)
+
     // 7b. Declare runtime functions
     declare_runtime_fns(ctx)
 
@@ -1242,6 +1298,14 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         // of code_in_range got double-unboxed).  boxed_vars is set per-module in
         // the body-generation pass below instead.
     }
+
+    // 7a. Compute transitive effect closure across all modules (B-089 G-b)
+    let mut all_decls: List<HDecl> = []
+    for m in modules {
+        let (_prefix, program, _uses) = m
+        for d in program.decls { all_decls.push(d) }
+    }
+    compute_transitive_effect_closure(all_decls, ctx.local_fn_effects)
 
     // 7b. Declare runtime functions
     declare_runtime_fns(ctx)
@@ -1416,7 +1480,14 @@ fn collect_local_names_rec(decls: List<HDecl>, mut names: Set<Str>) {
             HDecl::ExternFn { name, .. } => { names.insert(name) },
             HDecl::ExternType { name, .. } => { names.insert(name) },
             HDecl::TypeAlias { name, .. } => { names.insert(name) },
-            HDecl::Impl { .. } => {},
+            HDecl::Impl { methods, .. } => {
+                for m in methods {
+                    match m {
+                        HDecl::Fn { name: mn, .. } => { names.insert(mn) },
+                        _ => {},
+                    }
+                }
+            },
             HDecl::Effect { name, .. } => { names.insert(name) },
             HDecl::ModBlock { decls: md, .. } => { collect_local_names_rec(md, names) },
             HDecl::Test { .. } => {},
