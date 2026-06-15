@@ -1,6 +1,6 @@
 ---
 name: full-audit
-description: Use when user requests a full codebase review, code audit, cross-validation review, or says "审查", "review", "自查". Runs a multi-lens adversarial audit workflow (finder fan-out + skeptic verify + loop-until-dry), triages findings, writes to audit-report.md. Audit-only — fixes go to Worker via backlog/audit-report. Also supports exemption-list adversarial spot-check mode ("审豁免").
+description: Use when user requests a full codebase review, code audit, cross-validation review, or says "审查", "review", "自查". Runs Claude + DS parallel audit, triages findings, writes to audit-report.md. Audit-only — fixes go to Worker via backlog/audit-report. Also supports exemption-list adversarial spot-check mode ("审豁免").
 ---
 
 # Audit Agent
@@ -9,12 +9,9 @@ description: Use when user requests a full codebase review, code audit, cross-va
 
 **工作流规范见 `docs/workflow.md`**
 
-> 2026-06-12 升级：审计执行从「双 agent 单轮」升级为 **Workflow 对抗审计编排**（finder fan-out → adversarial verify → loop-until-dry）。目的：误报在到用户手上之前被 skeptic 杀掉（用户 triage 时间是真实成本），漏报由视角多样性 + dry 收敛压低。本 skill 的指令即 Workflow 工具的用户 opt-in。
-
 ## Trigger
 
-- User says: "审查", "review", "自查", "全面检查", "交叉验证", or `/full-audit` → **标准审计**（默认，单轮 fan-out + verify，workflow 跑完即停）
-- User says "彻底审查", "audit until dry", "审到收敛" → **thorough 档**（loop-until-dry，连续 2 轮零新 confirmed 才停；token 消耗约为标准档 2-3 倍）
+- User says: "审查", "review", "自查", "全面检查", "交叉验证", or `/full-audit` → **标准审计**
 - User says "审豁免", "豁免抽审", or `/full-audit exemptions` → **豁免清单对抗抽审**专项模式（见下）
 
 ## 写入范围
@@ -36,77 +33,68 @@ description: Use when user requests a full codebase review, code audit, cross-va
 
 ## Workflow
 
-### Phase 0: 准备
+### Phase 1: Parallel Audit
 
-1. 读 `docs/backlog.md`（`planning`/`doing` 项清单——喂给 verify 阶段的 already-tracked 视角）+ `docs/audit-report.md` 现有 `[open]` 项（喂给 dedup）。
-2. 确定本轮 **finder lens 集**。基准六维（按近期改动面增删，每轮在 prompt 里写明该 lens 的近期重点文件）：
+**必须派发两个独立 agent 并行审计——这是不可跳过的步骤。**
 
-| lens | 关注面 | 历史战果类型 |
-|------|--------|------------|
-| `rc-memory` | perceus / verify_rc / runtime dup-drop 配对、UAF/泄漏/double-free | #150 fold 洞、W4 UAF |
-| `type-soundness` | checker/infer 健全性、过度泛化、说谎的类型 | #149 TypeVar 洞、B-107 Map key |
-| `backend-parity` | codegen vs codegen_llvm 语义分歧、G-b/G-c 地雷 | #137 reverse/sort 分歧 |
-| `runtime-abi` | ring_runtime.cpp C ABI 边界、堆溢出、panic-stub、missing symbol | #148 join 溢出、#136/#138 |
-| `design-drift` | design.md/CLAUDE.md 陈述 vs 实现一致性 | 立项前实测前提条款的源头 |
-| `oracle-blind` | JS oracle 自身失真、差分测不出的类（B-100 登记类） | #148 同属此类 |
+交叉验证是本审计流程的核心价值：不同模型的知识盲区不同，Claude 擅长类型系统和语义正确性，DS 擅长边界条件和模式匹配遗漏。单模型审计会有系统性盲点，双模型交叉才能覆盖。历史数据表明 DS 独立发现了约 30% 的 critical bug（如 #71、#75、#76）是 Claude 未发现的。
 
-3. **DS Agent 条款（独立模型交叉验证）**：DS CLI 可用的机器上**必须**并行派发一路 DS 独立审计（`deepseek exec --auto --json --disable subagents`，禁 sub-agent 保前缀缓存），其 findings 注入 Phase 1 的 verify 阶段与 Claude findings 同等对待。**本机现状无 deepseek CLI**（见 memory）→ 该路不可达时不阻塞审计，由 workflow 多 lens fan-out 的视角多样性部分替代；不得以此为由在 DS 可用的机器上省略 DS。
+**禁止省略 DS agent。** 即使时间紧张、即使觉得"这次改动很小不需要"、即使 DS 上次没发现什么——都必须派发。审计的价值在于独立视角，不在于每次都有发现。
 
-### Phase 1: Workflow 对抗审计
+**DS Agent 条款**：DS CLI 可用的机器上**必须**并行派发一路 DS 独立审计（`deepseek exec --auto --json --disable subagents`，禁 sub-agent 保前缀缓存）。**本机现状无 deepseek CLI**（见 memory）→ 该路不可达时不阻塞审计，由多 Claude agent 的视角多样性部分替代；不得以此为由在 DS 可用的机器上省略 DS。
 
-用 Workflow 工具执行（脚本骨架如下，lens prompt 按 Phase 0 现写）。结构三要点：
+Dispatch two independent review agents simultaneously:
 
-1. **Find**：每 lens 一个 finder agent，结构化输出 findings（read-only，禁止修代码）。
-2. **Verify（对抗，核心）**：每个 fresh finding 派 3 个**不同视角** skeptic，每个默认 `refuted=true`，≥2 票不可证伪才存活：
-   - `refute-correctness`：读源码证明该 finding 是误读（行为实际正确 / 防御已存在 / 类型不可达）
-   - `reproduce`：构造最小复现（探针程序 / 推演执行路径）——复现不出 = refuted。**立项前实测前提**条款（workflow.md）在此强制执行
-   - `already-tracked`：对照 backlog `planning`/`doing` 项 + audit-report 现有 `[open]` 项——已有追踪 = refuted（标注对应 ID 后丢弃）
-3. **收敛**：standard 档（默认）= **单轮，find + verify 后直接 return，不循环**；thorough 档 = loop-until-dry（dedup 对 `seen` 全集做，不对 confirmed——否则被 refute 的 finding 每轮复活，永不收敛）。
+1. **Claude Agent** (subagent_type: general-purpose, model: opus):
+   - Read all compiler source files
+   - Check for bugs, type unsoundness, edge cases
+   - Verify behavior matches CLAUDE.md and docs/design.md descriptions
+   - Test least-surprise principle: would a user be confused by any behavior?
+   - Write e2e test cases for suspicious code paths and run them
 
-```js
-export const meta = {
-  name: 'full-audit',
-  description: 'Multi-lens adversarial codebase audit',
-  phases: [{ title: 'Find' }, { title: 'Verify' }],
-}
-const FINDINGS = {type:'object', required:['findings'], properties:{findings:{type:'array', items:{
-  type:'object', required:['title','file','severity','evidence'],
-  properties:{title:{type:'string'}, file:{type:'string'}, line:{type:'number'},
-    severity:{enum:['critical','medium','low']}, evidence:{type:'string'}, fix_direction:{type:'string'}}}}}}
-const VERDICT = {type:'object', required:['refuted','reason'], properties:{refuted:{type:'boolean'}, reason:{type:'string'}}}
-const key = f => `${f.file}:${f.title}`
-const seen = new Set(/* 现有 [open] 项的 file:title，Phase 0 注入 */), confirmed = []
-let dry = 0
-while (dry < DRY) {            // standard（默认）: DRY=1，首轮 find+verify 后无条件 break（不循环）；thorough: DRY=2
-  const found = (await parallel(LENSES.map(l => () =>
-    agent(l.prompt, {label:`find:${l.key}`, phase:'Find', schema:FINDINGS})
-  ))).filter(Boolean).flatMap(r => r.findings)
-  const fresh = found.filter(f => !seen.has(key(f)))
-  if (!fresh.length) { dry++; continue }
-  dry = 0; fresh.forEach(f => seen.add(key(f)))
-  const judged = await parallel(fresh.map(f => () =>
-    parallel(['refute-correctness','reproduce','already-tracked'].map(v => () =>
-      agent(VERIFY_PROMPTS[v](f), {label:`verify:${f.title}`, phase:'Verify', schema:VERDICT})))
-      .then(vs => ({f, alive: vs.filter(Boolean).filter(x => !x.refuted).length >= 2,
-                    reasons: vs.filter(Boolean).map(x => x.reason)}))))
-  confirmed.push(...judged.filter(j => j.alive).map(j => ({...j.f, verify_notes: j.reasons})))
-  log(`round: +${judged.filter(j=>j.alive).length} confirmed (total ${confirmed.length}), killed ${judged.filter(j=>!j.alive).length}`)
-}
-return { confirmed, killed_total: seen.size - confirmed.length }
+2. **DS Agent** (via deepseek-dispatch skill, **必须派发**):
+   - Independent read-only audit
+   - Focus on: missed error handling, unsafe patterns, design-implementation gaps
+   - Compare implementation against design.md specification
+   - DS 视角独特：更关注具体执行路径、边界条件、模式遗漏，与 Claude 的类型/语义视角互补
+   - **必须加 `--disable subagents`**：审计是长任务，sub-agent 会把单长 session 碎片化成多个短 session，破坏 DeepSeek 前缀缓存积累（75-80% → 90%+）。派发示例：
+     ```powershell
+     deepseek exec --auto --json --disable subagents --model deepseek-v4-pro -p @'
+     <audit prompt>
+     '@ 2>&1 | Out-File -Encoding utf8 "ds-audit.json"
+     ```
+
+Both agents output structured findings (严重度只允许 `critical` / `medium` / `low`):
+```
+## [severity: critical|medium|low]
+### Title
+- **File**: path:line
+- **Description**: what's wrong
+- **Evidence**: code snippet or test that demonstrates
+- **Fix**: proposed solution (if trivial) or "needs discussion"
 ```
 
-**No silent caps**：若因预算砍了 lens 或轮次，Summary 必须写明砍了什么。
+### Phase 2: Triage & Merge
 
-### Phase 2: Orchestrator Triage（workflow 之后，人工不可省的部分）
+1. **Deduplicate**: same finding from multiple agents → one entry
+2. **Verify critical findings**: for Critical severity, read code yourself to confirm
+3. **Check backlog overlap**: if finding matches a `planning`/`doing` item → skip or note "in progress"
+4. **Classify** (严重度 + dispatch):
 
-workflow 已做掉 dedup + 三视角验证。orchestrator 余下：
+| Category | 严重度标记 | 写入位置 |
+|----------|-----------|---------|
+| **Critical** (confirmed bug, 运行时错误/类型不安全) | `[critical]` | audit-report.md |
+| **Medium** (definite issue, 非致命但影响正确性/健壮性) | `[medium]` | audit-report.md |
+| **Low** (low impact, 代码质量/可维护性/潜在问题) | `[low]` | audit-report.md |
+| **Observation** (不算 bug 但值得注意的现象) | — | worker_feedback.md |
+| **False positive** | — | 丢弃并说明原因 |
 
-1. **Critical 亲自确认**：`[critical]` 级 finding 必须自己读码复核（skeptic 多数票不替代这条规则）
-2. **严重度/dispatch 终审**（标准沿用）：
-   - 严重度只允许 `critical` / `medium` / `low`
-   - `mechanical`：修复方向唯一确定，spec 能完整描述"改哪里、怎么改"
-   - `judgment`：涉及设计选择、架构权衡、effect system 推理
-3. 被 skeptic 杀掉的 findings 不进报告，但 Summary 给一行统计（数量 + 典型 refute 理由）——保证「Never skip a finding silently」可审计
+**严重度只允许三级**：`critical` / `medium` / `low`。不使用 Important/Minor/Style 等其他词汇。
+
+5. **标注 dispatch**（每个写入 audit-report 的条目必须标注）：
+   - `mechanical`：修复方向唯一确定，spec 能完整描述"改哪里、怎么改"。典型：补递归遍历、加 null check、提取重复代码、补 match 分支。
+   - `judgment`：修复涉及设计选择、架构权衡、effect system 推理。典型：重构大文件结构、改变 dispatch 策略、修复 effect 传播。
+   - 判断依据：如果给一个不了解项目全局的开发者只看修复描述就能正确实现 → `mechanical`；需要理解项目约定或在多种方案中选择 → `judgment`。
 
 ### Phase 3: Update audit-report.md
 
@@ -120,19 +108,42 @@ workflow 已做掉 dedup + 三视角验证。orchestrator 余下：
 
 <问题描述，含文件路径、行号、影响、建议修复方向>
 
-发现者：<lens 名 / DS / Opus+DS>
+发现者：<agent 名>
 ```
 
 - **`[open]` 标记不可省略**——没有 `[open]` 的条目 Worker 扫描不到
-- **严重度只能是 `critical` / `medium` / `low`**；**dispatch 只能是 `mechanical` / `judgment`**
+- **严重度只能是 `critical` / `medium` / `low`**
+- **dispatch 只能是 `mechanical` / `judgment`**——Worker 据此决定执行者（DS 或 Claude）
+  - `mechanical`：修复方向唯一确定，不需要设计判断（如补递归遍历、提取公共 pattern、加 validation check）
+  - `judgment`：涉及设计选择、架构决策、effect system 推理、或多种可行方案需选择
 - **禁止使用表格格式**——必须用 `###` heading
-- 新发现追加到对应分类 section 末尾；编号从现有最大编号 +1 继续
-- **清理规则**：检查现有 `[open]` 项是否已被修复（grep 代码确认）——已修复的直接删除整个条目，commit message 留记录
-- **格式验证（写入后自检）**：`grep -n "\[open\]" docs/audit-report.md`，新条目必须在输出中
+
+**追加规则**：
+- 新发现追加到对应分类 section 末尾
+- 编号从现有最大编号 +1 继续
+- 每个发现标注发现者（如 `Opus`、`DS`、`Opus+DS`）
+
+**清理规则**：
+- 检查现有 `[open]` 状态的 item 是否已被修复（grep 代码确认）
+- 已修复的：**直接删除整个 heading + body**（不是标删除线）
+- 在 commit message 中记录删除了哪些已修复的 item
+
+**格式验证（写入后自检）**：
+```bash
+# 写入完成后执行，确认所有新条目都能被 Worker 扫描到
+grep -n "\[open\]" docs/audit-report.md
+```
+如果新写入的条目不在输出中，说明格式错误，必须立即修正。
 
 ### Phase 3.5: Write Observations to Feedback
 
-不算 bug 但值得注意的现象写入 `docs/worker_feedback.md`（`[观察]`）：代码异味、设计-实现微妙不一致、潜在改进方向、技术上正确但令人困惑的行为。
+不算 bug 但值得注意的现象写入 `docs/worker_feedback.md`：
+- 代码异味（不违反规范但不符合直觉）
+- 设计-实现微妙不一致（不影响正确性但可能误导读者）
+- 潜在改进方向（不是当前阶段的优先事项但值得记录）
+- 令人困惑的行为（用户可能被绊倒但编译器行为"技术上正确"）
+
+格式：
 
 ```markdown
 ## Audit 观察报告（日期）
@@ -147,13 +158,12 @@ workflow 已做掉 dedup + 三视角验证。orchestrator 余下：
 
 ```
 ## Audit Summary
-- 档位: standard | thorough（N 轮收敛）
 - 新发现: N 项（X critical, Y medium, Z low）
-- skeptic 杀掉: M 项（典型理由：…）
 - 观察: O 项（写入 worker_feedback.md）
-- 清理已修复: P 项删除
-- 当前 open 总数: K 项；需要关注的 critical: (列出)
-- 覆盖缺口（如有砍删）: …
+- 清理已修复: M 项删除
+- 当前 open 总数: K 项
+- 需要关注的 critical: (列出)
+- audit-report.md 已更新
 - 格式验证: grep "\[open\]" 命中 K 项 ✓
 ```
 
@@ -171,9 +181,8 @@ workflow 已做掉 dedup + 三视角验证。orchestrator 余下：
 
 ## Rules
 
-- **Never skip a finding silently.** Every finding must be either recorded, or counted in the killed statistics with a refute reason.
+- **Never skip a finding silently.** Every item must be either recorded or explicitly marked as false positive.
 - **Never fix in audit session.** Audit = observe + record.
-- **Critical findings need orchestrator's own eyes.** Skeptic 票数不替代亲自读码。
+- **Cross-validate critical findings.** For Critical items, verify code yourself before recording.
 - **Respect Worker state.** Check backlog for `planning`/`doing` items; don't report issues that are being actively worked on.
 - **Clean as you go.** Delete fixed items from the report. The report should only contain open issues.
-- **No silent caps.** 预算导致的 lens/轮次裁剪必须出现在 Summary。
