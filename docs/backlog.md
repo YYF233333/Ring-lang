@@ -572,7 +572,7 @@ source-map 支持 + 断点调试。
 
 ## 语法增强
 
-### B-069 默认参数 [feature] [P2] [M] [judgment] [queued]
+### B-069 默认参数 [feature] [P2] [M] [judgment] [doing]
 函数参数支持默认值。调用时可省略有默认值的参数。
 
 ```ring
@@ -594,7 +594,7 @@ connect("localhost", 3000)     // timeout=30
 **复杂度**：M（Parser 扩展 + Checker 参数匹配 + Codegen 展开）
 
 
-### B-113 `return` 在 match arm 表达式位置 [feature] [P2] [M] [judgment] [queued]
+### B-113 `return` 在 match arm 表达式位置 [feature] [P2] [M] [judgment] [doing]
 
 > 2026-06-11 立项（Discussion，公理 1 违例簇）。Rust 允许 match arm 内 return，LLM 高频本能写法；Ring 当前拒绝。语义无歧义：含 return 的 arm 类型为 `Never`，与其他 arm 自然 unify（`fail.raise` 已走此路，机制存在）。
 
@@ -627,16 +627,6 @@ connect("localhost", 3000)     // timeout=30
 - 单模块无歧义场景行为不变
 - 全部 E2E + llvm_diff 通过；自举一致
 
-### B-127 nested closure 捕获 llvm_diff 回归用例 [bugfix] [P3] [S] [mechanical] [queued]
-
-> 2026-06-15 立项（Discussion，lateral audit 观察 #2）。`codegen_llvm_expr.ring` 的 `collect_captures` 在内层 lambda 时下降收集、`gen_lambda` 独立查找——理论正确但零测试覆盖。`tests/cases/llvm/` 中无 closure-in-closure 用例。
-
-**涉及修改**：
-1. `tests/cases/llvm/`：新增 nested closure 差分用例——closure 捕获外层变量、内层 closure 再捕获外层+中层变量、嵌套 closure 作为 HOF 参数传递。
-
-**验收标准**：
-- ≥1 个 closure-in-closure llvm_diff 用例两后端输出一致
-- 全部 E2E + llvm_diff 通过
 
 ### B-128 Set for-in 检测按 name == "Set" 无 type_params 校验 [bugfix] [P3] [S] [judgment] [queued]
 
