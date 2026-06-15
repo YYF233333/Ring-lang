@@ -1937,7 +1937,11 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     else { if name == "ring_map_int_len" { true }
     else { if name == "ring_set_int_has" { true }
     else { if name == "ring_set_int_len" { true }
-    else { false } } } } } } } } } } } } } } } } } } }
+    else { if name == "ring_map_is_empty" { true }
+    else { if name == "ring_set_is_empty" { true }
+    else { if name == "ring_map_int_is_empty" { true }
+    else { if name == "ring_set_int_is_empty" { true }
+    else { false } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 // Check if a runtime method returns bool (i64 that needs boxing to Bool)
@@ -1955,7 +1959,12 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     else { if name == "ring_Option_is_none" { true }
     else { if name == "ring_map_int_has" { true }
     else { if name == "ring_set_int_has" { true }
-    else { false } } } } } } } } } } } } }
+    else { if name == "ring_map_is_empty" { true }
+    else { if name == "ring_set_is_empty" { true }
+    else { if name == "ring_map_int_is_empty" { true }
+    else { if name == "ring_set_int_is_empty" { true }
+    else { if name == "ring_str_is_empty" { true }
+    else { false } } } } } } } } } } } } } } } } } }
 }
 
 // Number of LEADING (post-receiver) args that must be unboxed from ptr to i64.
@@ -1974,7 +1983,8 @@ fn rt_method_int_arg_count(name: Str) -> Int {
     else { if name == "ring_str_pad_start" { 1 }
     else { if name == "ring_str_pad_end" { 1 }
     else { if name == "ring_str_repeat" { 1 }
-    else { 0 } } } } } } } } } } }
+    else { if name == "ring_sb_add_int" { 1 }
+    else { 0 } } } } } } } } } } } }
 }
 
 // Method needs receiver unboxed to i64 (Int.to_str)
@@ -2025,6 +2035,7 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                     "for_each" => "ring_map_int_for_each",
                     "clear" => "ring_map_int_clear",
                     "clone" => "ring_map_int_clone",
+                    "is_empty" => "ring_map_int_is_empty",
                     _ => base_rt_name,
                 }
             } else { if is_int_set(recv_type) {
@@ -2040,6 +2051,10 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
                     "remove" => "ring_set_int_delete",
                     "clear" => "ring_set_int_clear",
                     "clone" => "ring_set_int_clone",
+                    "is_empty" => "ring_set_int_is_empty",
+                    "union" => "ring_set_int_union",
+                    "intersect" => "ring_set_int_intersect",
+                    "difference" => "ring_set_int_difference",
                     _ => base_rt_name,
                 }
             } else { base_rt_name } }
@@ -2182,6 +2197,8 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "StringBuilder" && method == "add" { some("ring_sb_add") }
     else { if type_name == "StringBuilder" && method == "to_str" { some("ring_sb_to_str") }
     else { if type_name == "StringBuilder" && method == "len" { some("ring_sb_len") }
+    else { if type_name == "StringBuilder" && method == "line" { some("ring_sb_line") }
+    else { if type_name == "StringBuilder" && method == "add_int" { some("ring_sb_add_int") }
     // List methods
     else { if type_name == "List" && method == "push" { some("ring_list_push") }
     else { if type_name == "List" && method == "len" { some("ring_list_len") }
@@ -2226,6 +2243,9 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Map" && method == "is_empty" { some("ring_map_is_empty") }
     else { if type_name == "Map" && method == "for_each" { some("ring_map_for_each") }
     else { if type_name == "Map" && method == "clear" { some("ring_map_clear") }
+    // NOTE: Map.clone / List.clone / Set.clone are compiler-internal (HExpr::Clone
+    // from Perceus RC), not user-callable methods — they are NOT in this table.
+    // NOTE: Map.fold — no runtime symbol exists (#138); falls through to user-impl panic-stub
     // Set methods
     else { if type_name == "Set" && method == "add" { some("ring_set_add") }
     else { if type_name == "Set" && method == "insert" { some("ring_set_add") }
@@ -2237,6 +2257,11 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Set" && method == "from_list" { some("ring_set_from_list") }
     else { if type_name == "Set" && method == "for_each" { some("ring_set_for_each") }
     else { if type_name == "Set" && method == "remove" { some("ring_set_delete") }
+    else { if type_name == "Set" && method == "clear" { some("ring_set_clear") }
+    else { if type_name == "Set" && method == "union" { some("ring_set_union") }
+    else { if type_name == "Set" && method == "intersect" { some("ring_set_intersect") }
+    else { if type_name == "Set" && method == "difference" { some("ring_set_difference") }
+    // NOTE: Set.fold — no runtime symbol exists (#138); falls through to user-impl panic-stub
     // Option methods
     else { if type_name == "Option" && method == "unwrap_or" { some("ring_Option_unwrap_or") }
     else { if type_name == "Option" && method == "unwrap" { some("ring_Option_unwrap") }
@@ -2245,7 +2270,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
     else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
     else { if type_name == "Option" && method == "to_fail" { some("ring_Option_to_fail") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {

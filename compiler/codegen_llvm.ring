@@ -192,6 +192,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_map_values", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_entries", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_map_is_empty", [ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_map_for_each", [ptr, ptr], ptr)
 
     // Map<Int>
@@ -205,6 +206,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_map_int_values", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_int_entries", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_int_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_map_int_is_empty", [ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_map_int_for_each", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_int_clone", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_map_int_from", [ptr], ptr)
@@ -217,6 +219,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_set_delete", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_to_list", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_set_is_empty", [ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_set_from_list", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_for_each", [ptr, ptr], ptr)
 
@@ -227,6 +230,7 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     get_or_declare_runtime_fn(ctx, "ring_set_int_delete", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_int_to_list", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_int_len", [ptr], i64)
+    get_or_declare_runtime_fn(ctx, "ring_set_int_is_empty", [ptr], i64)
     get_or_declare_runtime_fn(ctx, "ring_set_int_from_list", [ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_int_for_each", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_set_int_clone", [ptr], ptr)

@@ -1457,6 +1457,10 @@ extern "C" int64_t ring_map_len(void* map) {
     return (int64_t)((RingMap*)map)->size();
 }
 
+extern "C" int64_t ring_map_is_empty(void* map) {
+    return ((RingMap*)map)->empty() ? 1 : 0;
+}
+
 extern "C" void* ring_map_for_each(void* map, void* closure) {
     RingMap* m = (RingMap*)map;
     RingClosure* cls = (RingClosure*)closure;
@@ -1586,6 +1590,10 @@ extern "C" int64_t ring_map_int_len(void* map) {
     return (int64_t)((RingMapInt*)map)->size();
 }
 
+extern "C" int64_t ring_map_int_is_empty(void* map) {
+    return ((RingMapInt*)map)->empty() ? 1 : 0;
+}
+
 extern "C" void* ring_map_int_for_each(void* map, void* closure) {
     RingMapInt* m = (RingMapInt*)map;
     RingClosure* cls = (RingClosure*)closure;
@@ -1687,6 +1695,10 @@ extern "C" int64_t ring_set_len(void* set) {
     return (int64_t)((RingSet*)set)->size();
 }
 
+extern "C" int64_t ring_set_is_empty(void* set) {
+    return ((RingSet*)set)->empty() ? 1 : 0;
+}
+
 extern "C" void* ring_set_from_list(void* list) {
     auto* vec = (std::vector<void*>*)list;
     void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
@@ -1750,6 +1762,10 @@ extern "C" void* ring_set_int_to_list(void* set) {
 
 extern "C" int64_t ring_set_int_len(void* set) {
     return (int64_t)((RingSetInt*)set)->size();
+}
+
+extern "C" int64_t ring_set_int_is_empty(void* set) {
+    return ((RingSetInt*)set)->empty() ? 1 : 0;
 }
 
 extern "C" void* ring_set_int_from_list(void* list) {

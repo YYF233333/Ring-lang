@@ -544,6 +544,7 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_values", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_entries", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_len", [ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_is_empty", [ptr], i64);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_for_each", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_new", [], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_get", [ptr, ptr], ptr);
@@ -555,6 +556,7 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_values", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_entries", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_len", [ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_is_empty", [ptr], i64);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_for_each", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_clone", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_map_int_from", [ptr], ptr);
@@ -565,6 +567,7 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_delete", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_to_list", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_len", [ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_is_empty", [ptr], i64);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_from_list", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_for_each", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_new", [], ptr);
@@ -573,6 +576,7 @@ function declare_runtime_fns(ctx) {
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_delete", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_to_list", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_len", [ptr], i64);
+  codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_is_empty", [ptr], i64);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_from_list", [ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_for_each", [ptr, ptr], ptr);
   codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_set_int_clone", [ptr], ptr);
