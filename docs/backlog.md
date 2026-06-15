@@ -590,28 +590,6 @@ source-map 支持 + 断点调试。
 ## 已知 Bug / 技术债
 
 
-### B-139 impl method effect 传播 E2E 测试 [bugfix] [P3] [S] [mechanical] [queued]
-
-> 2026-06-15 立项（Discussion，Wave A 通知 #1）。B-138 impl SCC 排序已落地（triple bootstrap 验证），但 spec 要求的独立 E2E 测试未加。补一个 `impl_method_effect.ring` 锁定 impl 内方法 effect 传播（非环依赖场景：callee 的 effect 正确传播到 caller）。
-
-**涉及修改**：
-1. `tests/cases/impl_method_effect.ring`：impl 内方法 A 调方法 B（B 有 fail effect），验证 A 推断出 fail effect
-
-**验收标准**：
-- 测试锁定 impl 内非环依赖方法的 effect 传播
-- 全部 E2E 通过
-
-### B-140 多段相对路径导入丢失中间段 [bugfix] [P3] [S] [judgment] [queued]
-
-> 2026-06-15 立项（Discussion，Wave A 通知 #4，B-126 执行中发现的 pre-existing bug）。`resolve_mod_uses()` 在 `infer_decl.ring` 中，`use super::a::{do_thing}` 路径 `["super", "a"]` 会丢失中间段 `"a"`，解析为 `"do_thing"` 而非 `"a::do_thing"`。多段相对路径导入可能静默查找错误名字。
-
-**涉及修改**：
-1. `compiler/infer_decl.ring`：`resolve_mod_uses` 路径拼接逻辑修复，保留中间段
-
-**验收标准**：
-- `use super::a::{Foo}` 正确解析为 `a::Foo`
-- 负面测试：错误路径报编译错误而非静默绑定错误名字
-- 全部 E2E 通过；自举一致
 
 ### B-129 Map/Set for_each llvm_diff 覆盖 [bugfix] [P3] [S] [mechanical] [queued] [deferred: B-089]
 
@@ -647,17 +625,6 @@ Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05
 - 自举编译器正常编译自身
 
 
-### B-056 闭包捕获 `let mut` 变量时注入 `mut<T>` effect [feature] [P3] [M] [judgment] [queued]
-B-048 遗留。闭包捕获 `let mut` 变量时，应在闭包签名注入 `mut<T>` effect，使 effect 追踪完整。核心的 local effect cancellation 已在 B-048 完成。
-
-**涉及修改**：
-1. `infer.ring`：lambda 推断时分析捕获列表，对捕获的 `let mut` 变量注入 `mut<T>` effect
-
-**验收标准**：
-- 闭包捕获 `let mut` 变量 → 闭包类型携带 `mut<T>` effect
-- 闭包内修改捕获的 mut 变量 → `mut` effect 正确传播到调用者
-- local cancellation 规则仍生效（局部变量 mutation 不传播）
-- 全部 E2E 测试通过
 
 
 
