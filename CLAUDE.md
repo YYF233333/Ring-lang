@@ -119,8 +119,8 @@ Ring-lang/
 ## 常用命令
 
 ```bash
-# 运行单文件（run 子命令对单文件是未实现 stub——audit #144；先 build 再 node）
-node compiler/dist/main.js build examples/hello.ring && node examples/hello.js
+# 运行单文件
+node compiler/dist/main.js run examples/hello.ring
 
 # 编译为 JS
 node compiler/dist/main.js build examples/hello.ring
@@ -140,7 +140,7 @@ cd compiler && npm run test:llvm
 # 重新编译编译器自身
 node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
 
-# 调试模式（多文件入口；单文件同受 #144 限制）
+# 调试模式（多文件入口）
 node compiler/dist/main.js run --debug <project-entry>.ring
 
 # LLVM 后端：编译为 native .o

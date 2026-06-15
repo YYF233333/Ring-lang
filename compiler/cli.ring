@@ -215,11 +215,14 @@ pub fn cli_main() {
             print("Compiled: ${out_path}")
         } else {
             if parsed.command == "run" {
-                let tmp_file = path_join(path_dirname(file_path), ".ring_tmp_run.js")
+                let basename = path_basename(file_path).replace(".ring", "")
+                let tmp_file = path_join(path_dirname(file_path), ".${basename}.ring_tmp.js")
                 write_file(tmp_file, js)
-                // Note: exec_sync needed for run
-                eprintln("Single-file run not yet implemented in Ring bootstrap")
-                exit_process(1)
+                let code = exec_sync("node", [tmp_file])
+                delete_file(tmp_file)
+                if code != 0 {
+                    exit_process(code)
+                }
             } else {
                 eprintln("Unknown command: ${parsed.command}")
                 exit_process(1)
