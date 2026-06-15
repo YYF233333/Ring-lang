@@ -154,7 +154,7 @@ pub fn make_list_type(element: Type) -> Type {
 
 pub fn is_list_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, .. } => name == BUILTIN_LIST,
+        Type::StructType { name, type_params, fields } => name == BUILTIN_LIST && type_params.len() == 1 && fields.len() == 0,
         _ => false
     }
 }
@@ -172,7 +172,7 @@ pub fn make_map_type(key: Type, value: Type) -> Type {
 
 pub fn is_map_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, .. } => name == BUILTIN_MAP,
+        Type::StructType { name, type_params, fields } => name == BUILTIN_MAP && type_params.len() == 2 && fields.len() == 0,
         _ => false
     }
 }
@@ -183,7 +183,7 @@ pub fn make_set_type(element: Type) -> Type {
 
 pub fn is_set_type(t: Type) -> Bool {
     match t {
-        Type::StructType { name, .. } => name == BUILTIN_SET,
+        Type::StructType { name, type_params, fields } => name == BUILTIN_SET && type_params.len() == 1 && fields.len() == 0,
         _ => false
     }
 }

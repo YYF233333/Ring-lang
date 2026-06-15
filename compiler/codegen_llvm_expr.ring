@@ -83,8 +83,8 @@ extern fn LLVMBuildOr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValue
 
 fn is_int_keyed_map(ty: Type) -> Bool {
     match ty {
-        Type::StructType { name, type_params, .. } =>
-            name == "Map" && type_params.len() > 0 && match type_params[0] {
+        Type::StructType { name, type_params, fields } =>
+            name == "Map" && type_params.len() == 2 && fields.len() == 0 && match type_params[0] {
                 Type::IntType => true,
                 _ => false,
             },
@@ -94,11 +94,26 @@ fn is_int_keyed_map(ty: Type) -> Bool {
 
 fn is_int_set(ty: Type) -> Bool {
     match ty {
-        Type::StructType { name, type_params, .. } =>
-            name == "Set" && type_params.len() > 0 && match type_params[0] {
+        Type::StructType { name, type_params, fields } =>
+            name == "Set" && type_params.len() == 1 && fields.len() == 0 && match type_params[0] {
                 Type::IntType => true,
                 _ => false,
             },
+        _ => false,
+    }
+}
+
+// B-134: Validate that a StructType claiming to be List/Map/Set has the correct
+// structural signature (type_params count + no fields). Returns false for user
+// structs that happen to share a builtin collection name.
+fn is_builtin_collection(ty: Type) -> Bool {
+    match ty {
+        Type::StructType { name, type_params, fields } => {
+            if name == "List" { type_params.len() == 1 && fields.len() == 0 }
+            else if name == "Map" { type_params.len() == 2 && fields.len() == 0 }
+            else if name == "Set" { type_params.len() == 1 && fields.len() == 0 }
+            else { false }
+        },
         _ => false,
     }
 }
@@ -2039,7 +2054,14 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
     }
 
     // Map to runtime function name
-    let rt_method = method_to_runtime(type_name, method)
+    // B-134: Only dispatch to runtime builtins if the collection type has the
+    // correct structural signature (prevents user structs named List/Map/Set
+    // from being misrouted to C runtime functions).
+    let rt_method = if (type_name == "List" || type_name == "Map" || type_name == "Set") && !is_builtin_collection(recv_type) {
+        none
+    } else {
+        method_to_runtime(type_name, method)
+    }
     match rt_method {
         some(base_rt_name) => {
             // Dispatch to int-keyed variants if applicable
@@ -3616,7 +3638,9 @@ fn gen_index_expr(mut ctx: LlvmCtx, receiver: HExpr, index: HExpr, ty: Type) -> 
 
     // B-080: inline untag index to i64
 
-    if type_name == "List" {
+    // B-134: structural validation — only dispatch to builtin runtime for true
+    // builtin List/Map (not user structs that share the name).
+    if type_name == "List" && is_builtin_collection(recv_type) {
         let raw_idx = unbox_int(ctx, idx_val)
         let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
         let get_ty = get_rt_fn_type(ctx, "ring_list_get")
@@ -3628,7 +3652,7 @@ fn gen_index_expr(mut ctx: LlvmCtx, receiver: HExpr, index: HExpr, ty: Type) -> 
             let get_ty = get_rt_fn_type(ctx, "ring_str_get")
             LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, raw_idx], fresh_name(ctx, "sg"))
         } else {
-            if type_name == "Map" {
+            if type_name == "Map" && is_builtin_collection(recv_type) {
                 // Map subscript — use int-keyed variant if applicable
                 let map_get_name = if is_int_keyed_map(recv_type) { "ring_map_int_get" } else { "ring_map_get" }
                 let get_fn = get_or_declare_runtime_fn(ctx, map_get_name, [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)

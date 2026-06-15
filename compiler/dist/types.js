@@ -1097,8 +1097,12 @@ function is_list_type(t) {
   __ring_match47: {
     const __ring_m47 = t;
     if (__ring_m47._tag === "StructType") {
-      const name = __ring_m47.name;
-      return (name === BUILTIN_LIST);
+      const name = __ring_m47.name; const type_params = __ring_m47.type_params; const fields = __ring_m47.fields;
+      if (((name === BUILTIN_LIST) ? (List_len(type_params) === 1) : false)) {
+        return (List_len(fields) === 0);
+      } else {
+        return false;
+      }
       break __ring_match47;
     }
     return false;
@@ -1110,8 +1114,12 @@ function is_map_type(t) {
   __ring_match48: {
     const __ring_m48 = t;
     if (__ring_m48._tag === "StructType") {
-      const name = __ring_m48.name;
-      return (name === BUILTIN_MAP);
+      const name = __ring_m48.name; const type_params = __ring_m48.type_params; const fields = __ring_m48.fields;
+      if (((name === BUILTIN_MAP) ? (List_len(type_params) === 2) : false)) {
+        return (List_len(fields) === 0);
+      } else {
+        return false;
+      }
       break __ring_match48;
     }
     return false;
@@ -1140,8 +1148,12 @@ function is_set_type(t) {
   __ring_match50: {
     const __ring_m50 = t;
     if (__ring_m50._tag === "StructType") {
-      const name = __ring_m50.name;
-      return (name === BUILTIN_SET);
+      const name = __ring_m50.name; const type_params = __ring_m50.type_params; const fields = __ring_m50.fields;
+      if (((name === BUILTIN_SET) ? (List_len(type_params) === 1) : false)) {
+        return (List_len(fields) === 0);
+      } else {
+        return false;
+      }
       break __ring_match50;
     }
     return false;
