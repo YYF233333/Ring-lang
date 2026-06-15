@@ -1188,7 +1188,8 @@ function check_fn_decl(ctx, name, type_params, params, return_type, declared_eff
             __match_fail(__ring_m45);
           }
           if ((!skip)) {
-            const _ = infer_ctx$type_error(ctx.sink, codes$E0403, `Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main`, span, diagnostics$DiagnosticContext_EffectUnhandled(eff_name, Option_some("main")));
+            const effect_notes = [new diagnostics$DiagnosticNote(`effect '${eff_name}' is used but not handled in main`, Option_some(span)), new diagnostics$DiagnosticNote(`use 'handle ... with { ${eff_name} { op_name(args) => result } }' to handle this effect`, Option_none)];
+            const _ = infer_ctx$type_error_with_notes(ctx.sink, codes$E0403, `Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main`, span, diagnostics$DiagnosticContext_EffectUnhandled(eff_name, Option_some("main")), effect_notes);
           }
           break __ring_match44;
         }

@@ -1525,10 +1525,15 @@ fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, par
                         none => {}
                     }
                     if !skip {
-                        let _ = type_error(ctx.sink, E0403,
+                        let effect_notes: List<DiagnosticNote> = [
+                            DiagnosticNote { message: "effect '${eff_name}' is used but not handled in main", span: some(span) },
+                            DiagnosticNote { message: "use 'handle ... with { ${eff_name} { op_name(args) => result } }' to handle this effect", span: none }
+                        ]
+                        let _ = type_error_with_notes(ctx.sink, E0403,
                             "Unhandled effect '${eff_name}' in main function; custom effects must be handled before reaching main",
                             span,
-                            DiagnosticContext::EffectUnhandled { eff: eff_name, in_function: some("main") })
+                            DiagnosticContext::EffectUnhandled { eff: eff_name, in_function: some("main") },
+                            effect_notes)
                     }
                 },
                 _ => {}
