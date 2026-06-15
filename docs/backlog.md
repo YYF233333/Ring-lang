@@ -57,6 +57,20 @@
 
 ## 类型系统
 
+### B-135 impl block trait bound 调用点不强制 [bugfix] [P2] [M] [judgment] [queued]
+
+> 2026-06-15 立项（Discussion，B-130 worker 通知）。`impl<T: Ord> List` 的 `T: Ord` bound 在调用点不验证——`List<NonOrdType>.sort()` 通过类型检查但运行时产生错误结果。**影响所有带 bound 的 impl block**（`impl<T: Eq> List.contains()` 同理）。类型系统说谎的缺口。
+
+**涉及修改**：
+1. `compiler/infer.ring`（或 method resolution 路径）：方法调用解析到 `impl<T: Bound> Type` 的方法时，验证实参类型满足 `Bound`；不满足 → 编译错误（E 码 + 提示缺少 trait impl）
+2. 负面测试：`List<UserStructWithoutOrd>.sort()` → 编译错误；`List<Int>.sort()` 正常
+
+**验收标准**：
+- `List<NonOrdType>.sort()` 编译错误，提示 `T: Ord` 不满足
+- `List<NonEqType>.contains(x)` 编译错误，提示 `T: Eq` 不满足
+- 满足 bound 的调用不回归
+- 全部 E2E + llvm_diff 通过；自举一致
+
 ### B-001 Refinement Types [feature] [P2] [XL] [judgment] [queued]
 design.md 1.2。类型附带谓词，编译期静态验证 + 运行时检查兜底。
 
