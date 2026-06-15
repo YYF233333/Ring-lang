@@ -905,6 +905,40 @@ describe("e2e: --error-format=llm", { concurrency: true }, () => {
     const result = ring_check(path.join(CASES_DIR, "hello.ring"));
     assert.ok(result.success);
   });
+
+  test("multi-file: resolver error (E0702) outputs JSON on stderr", () => {
+    const mainFile = path.join(MODULES_DIR, "error_not_found", "main.ring");
+    const r = spawnSync("node", [RING, "check", mainFile, "--error-format=llm"], {
+      encoding: "utf-8", timeout: 15000,
+    });
+    assert.notEqual(r.status, 0, "should fail with non-zero exit");
+    const stderr = (r.stderr || "").trim();
+    // stderr contains the JSON diagnostic block followed by "Compilation failed"
+    const jsonMatch = stderr.match(/^\{[\s\S]*\}/);
+    assert.ok(jsonMatch, "stderr should contain a JSON object");
+    const parsed = JSON.parse(jsonMatch![0]);
+    assert.equal(parsed.version, 1);
+    assert.ok(parsed.diagnostics.length >= 1);
+    assert.ok(parsed.diagnostics[0].code === "E0702",
+      `Expected E0702, got ${parsed.diagnostics[0].code}`);
+  });
+
+  test("multi-file: checker error (E0703) outputs JSON on stderr", () => {
+    const mainFile = path.join(MODULES_DIR, "error_symbol_not_found", "main.ring");
+    const r = spawnSync("node", [RING, "check", mainFile, "--error-format=llm"], {
+      encoding: "utf-8", timeout: 15000,
+    });
+    assert.notEqual(r.status, 0, "should fail with non-zero exit");
+    const stderr = (r.stderr || "").trim();
+    // stderr contains the JSON diagnostic block followed by "Compilation failed"
+    const jsonMatch = stderr.match(/^\{[\s\S]*\}/);
+    assert.ok(jsonMatch, "stderr should contain a JSON object");
+    const parsed = JSON.parse(jsonMatch![0]);
+    assert.equal(parsed.version, 1);
+    assert.ok(parsed.diagnostics.length >= 1);
+    assert.ok(parsed.diagnostics[0].code === "E0703",
+      `Expected E0703, got ${parsed.diagnostics[0].code}`);
+  });
 });
 
 // ============================================================
