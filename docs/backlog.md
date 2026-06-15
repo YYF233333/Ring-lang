@@ -690,26 +690,6 @@ connect("localhost", 3000)     // timeout=30
 - 已删 runtime 函数不残留（grep `ring_list_sort_default` / `ring_list_contains` / `ring_list_index_of` 全仓零命中）
 - 全部 E2E + llvm_diff 通过；自举一致（double bootstrap 字节一致）
 
-### B-132 穷尽性检查性能：编译时间 55% 瓶颈 [refactor] [P2] [M] [judgment] [queued]
-
-> 2026-06-15 立项（Discussion，V8 profiling 实测）。自编译 ~135s 中 exhaustive.ring 吃 ~55% CPU（`check_matrix` 19.6% + `type_contains_key` 15.1% + `ArrayPrototypePush` 18.2% + `finite_type_ctors` 5.1% + `specialize_row` 5.0%）。直接影响 `npm test` 耗时（verify_rc self-verify = 129s）和迭代速度。
-
-**根因**（V8 `--prof` 实测三大热点）：
-1. `type_contains_key`：每次调 `type_to_string` 生成字符串做 visited set 的 key——O(n) 字符串化作 hash，且同一类型递归展开重复计算。与 D8/D9 识别的 SB ~47M 内存泄漏同源（type_to_string 瞬态 SB）。
-2. `instantiate_enum_variants` / `instantiate_struct_fields`：同一 enum/struct 类型在一次编译中被多次 instantiate（每个 match arm 的 `finite_type_ctors` 都重新 instantiate），结果未缓存。
-3. 大量临时 List 创建：`specialize_row` 每次 clone rest；`named_pattern_to_positional` 因 `List.set` 缺失用 O(n) 重建（见 exhaustive.ring:437-445）。
-
-**涉及修改**：
-1. `exhaustive.ring`：`type_is_recursive` / `type_contains_key` 结果缓存——对 `(type_key, target_key)` 组合 memoize（Map 或模块级 cache），避免重复递归+重复 `type_to_string`。
-2. `exhaustive.ring`：`finite_type_ctors` 结果缓存——以 `type_to_string(ty)` 为 key 的 memoize map，同一类型只 instantiate 一次。
-3. `exhaustive.ring`：`specialize_row` 中 rest 子列表改用 slice 语义或 index 传递，避免 O(n) clone；`named_pattern_to_positional` 重建替换改就地更新（或加 `List.set` 内建方法）。
-4. 性能验证：自编译耗时和 `npm test` 耗时对比修前基线。
-
-**验收标准**：
-- 自编译耗时降至 ≤60s（当前 135s 的 ≤45%）
-- `npm test` 耗时降至 ≤60s（当前 132s）
-- 全部 E2E + llvm_diff 通过；自举一致（double bootstrap 字节一致）
-- exhaustive.ring 在 V8 profiling 中不再占 >20% 总 CPU
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。

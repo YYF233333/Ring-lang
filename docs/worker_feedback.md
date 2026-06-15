@@ -9,6 +9,16 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
+## B-132 穷尽性检查性能优化
+
+### 1. 自编译 129s → 79s（-39%），未达 60s 目标 [通知]
+
+四项优化：(1) Set<Str>→Map<Str,Bool>（O(1) lookup，主力提升 ~50s）(2) finite_type_ctors + type_is_recursive memoize (3) named_pattern_to_positional 用 List.set 替代 O(n) 重建 (4) specialize_row 用 slice 替代逐元素 copy。exhaustive 从 ~74s 降到 ~21s（-72%）。残余 ~58s 是其他编译器阶段（lexer/parser/checker/codegen），超出 B-132 scope。
+
+### 2. 根因：Set<Str> 用 __ring_deep_eq 线性扫描 [通知]
+
+最大性能杀手是 JS 后端的 Set<Str> 实现——每次 contains/insert 都走 __ring_deep_eq O(n) 线性扫描。改用 Map<Str,Bool>（底层 JS Map.has() O(1)）后一项就省了 ~50s。这个问题影响所有使用 Set<Str> 的编译器代码，但只在 exhaustive 中因为高频调用暴露出来。
+
 ## B-113 return in match arm
 
 ### 1. 实现完整覆盖所有编译器 pass [通知]

@@ -13,6 +13,18 @@ struct Ctor {
 }
 
 // ============================================================
+// B-132 Performance: Using Map<Str, _> instead of Set<Str> for O(1)
+// string lookups (Set<Str> uses __ring_deep_eq linear scan in JS backend).
+// Memoize caches are threaded through function parameters.
+// ============================================================
+
+// B-132: Cache containers threaded through check_matrix and friends.
+struct ExhCache {
+    ftc: Map<Str, List<Ctor>?>,
+    tir: Map<Str, Bool>
+}
+
+// ============================================================
 // B-102 Phase 2 / A2 soundness fix: instantiate variant/field templates.
 //
 // apply_subst substitutes a composite type's `type_params` but leaves its
@@ -99,29 +111,40 @@ fn ctor_at(list: List<Ctor>, i: Int) -> Ctor {
     match list.get(i) { some(v) => v, none => panic("unreachable: ctor_at out of bounds") }
 }
 
-// Check if a type recursively contains itself (used to decide expanding set)
-fn type_is_recursive(env: TypeEnv, ty: Type, key: Str) -> Bool {
-    match ty {
+// Check if a type recursively contains itself (used to decide expanding set).
+// Memoized via cache.tir to avoid redundant recursive walks.
+fn type_is_recursive(env: TypeEnv, ty: Type, key: Str, mut cache: ExhCache) -> Bool {
+    match cache.tir.get(key) {
+        some(cached) => { return cached },
+        none => {}
+    }
+    let result = match ty {
         Type::EnumType { name, type_params, variants } => {
             let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
-            let mut visited: Set<Str> = set_new()
-            visited.insert(key)
+            // Use Map<Str, Bool> instead of Set<Str> for O(1) lookups
+            let mut visited: Map<Str, Bool> = map_new()
+            visited.insert(key, true)
+            let mut found = false
             for v in inst_variants {
                 for ft in v.fields {
-                    if type_contains_key(env, ft, key, visited) { return true }
+                    if type_contains_key(env, ft, key, visited) { found = true }
                 }
             }
-            false
+            found
         },
         _ => false,
     }
+    cache.tir.insert(key, result)
+    result
 }
 
-fn type_contains_key(env: TypeEnv, ty: Type, key: Str, mut visited: Set<Str>) -> Bool {
+// Use Map<Str, Bool> instead of Set<Str> for O(1) string lookups.
+// Set<Str> in the JS backend uses __ring_deep_eq linear scan — O(n) per lookup.
+fn type_contains_key(env: TypeEnv, ty: Type, key: Str, mut visited: Map<Str, Bool>) -> Bool {
     let ty_str = type_to_string(ty)
     if ty_str == key { return true }
-    if visited.contains(ty_str) { return false }
-    visited.insert(ty_str)
+    if visited.contains_key(ty_str) { return false }
+    visited.insert(ty_str, true)
     match ty {
         Type::EnumType { name, type_params, variants } => {
             let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
@@ -194,13 +217,17 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
         }
     }
 
+    // B-132: create per-check_patterns cache for memoizing finite_type_ctors and type_is_recursive
+    let mut cache = ExhCache { ftc: map_new(), tir: map_new() }
+
     match resolved {
         Type::EnumType { name, type_params, variants } => {
             // Re-derive variant payloads with this instantiation's type_params
             // (A2 soundness: template variants reference the enum def's vars).
             let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
             let variant_names = inst_variants.map(fn(v) { v.name })
-            let mut covered = set_new()
+            // B-132: use Map<Str, Bool> for O(1) lookups instead of Set<Str>
+            let mut covered: Map<Str, Bool> = map_new()
 
             for v in inst_variants {
                 let mut sub_patterns_for_variant: List<List<Pattern>> = []
@@ -208,7 +235,7 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                     match p {
                         Pattern::Constructor { name: pname, fields, .. } => {
                             if pname == v.name {
-                                covered.insert(v.name)
+                                covered.insert(v.name, true)
                                 sub_patterns_for_variant.push(fields)
                             }
                         },
@@ -216,7 +243,7 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                             match v.field_names {
                                 some(fnames) => {
                                     if pname == v.name {
-                                        covered.insert(v.name)
+                                        covered.insert(v.name, true)
                                         let positional = named_pattern_to_positional(nfields, fnames, v.fields.len())
                                         sub_patterns_for_variant.push(positional)
                                     }
@@ -228,7 +255,7 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                     }
                 }
 
-                if covered.contains(v.name) == false {
+                if covered.contains_key(v.name) == false {
                     // not covered yet, skip field checking
                 } else {
                     if v.fields.len() > 0 {
@@ -241,9 +268,10 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                             }
                             normalized.push(padded)
                         }
-                        let mut expanding = set_new()
-                        expanding.insert(type_to_string(resolved))
-                        let missing_fields = check_matrix(env, normalized, v.fields, subst, expanding)
+                        // B-132: use Map<Str, Bool> instead of Set<Str>
+                        let mut expanding: Map<Str, Bool> = map_new()
+                        expanding.insert(type_to_string(resolved), true)
+                        let missing_fields = check_matrix(env, normalized, v.fields, subst, expanding, cache)
                         match missing_fields {
                             some(mf) => {
                                 let joined = join_strs(mf, ", ")
@@ -256,7 +284,7 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
             }
 
             for vn in variant_names {
-                if covered.contains(vn) == false {
+                if covered.contains_key(vn) == false {
                     return some(vn)
                 }
             }
@@ -328,9 +356,10 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                     }
                     normalized.push(padded)
                 }
-                let mut expanding = set_new()
-                expanding.insert(type_to_string(resolved))
-                let missing_fields = check_matrix(env, normalized, field_types, subst, expanding)
+                // B-132: use Map<Str, Bool> instead of Set<Str>
+                let mut expanding: Map<Str, Bool> = map_new()
+                expanding.insert(type_to_string(resolved), true)
+                let missing_fields = check_matrix(env, normalized, field_types, subst, expanding, cache)
                 match missing_fields {
                     some(mf) => {
                         let joined = join_strs(mf, ", ")
@@ -359,7 +388,7 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
                 let joined = join_strs(underscores, ", ")
                 return some("(${joined})")
             }
-            let missing = check_matrix(env, matrix, elements, subst, set_new())
+            let missing = check_matrix(env, matrix, elements, subst, map_new(), cache)
             match missing {
                 some(m) => {
                     let joined = join_strs(m, ", ")
@@ -374,22 +403,29 @@ fn check_patterns(env: TypeEnv, patterns: List<Pattern>, ty: Type, subst: UnionF
 
 // === Maranget-style pattern matrix exhaustiveness ===
 
-fn finite_type_ctors(env: TypeEnv, ty: Type) -> List<Ctor>? {
-    match ty {
+// Memoized via cache.ftc to avoid redundant instantiate_enum_variants /
+// instantiate_struct_fields calls for the same type across match arms.
+fn finite_type_ctors(env: TypeEnv, ty: Type, mut cache: ExhCache) -> List<Ctor>? {
+    let cache_key = type_to_string(ty)
+    match cache.ftc.get(cache_key) {
+        some(cached) => { return cached },
+        none => {}
+    }
+    let result = match ty {
         Type::BoolType => {
-            let mut result: List<Ctor> = []
-            result.push(Ctor { name: "true", arity: 0, field_types: [], field_names: none, is_tuple: false })
-            result.push(Ctor { name: "false", arity: 0, field_types: [], field_names: none, is_tuple: false })
-            some(result)
+            let mut r: List<Ctor> = []
+            r.push(Ctor { name: "true", arity: 0, field_types: [], field_names: none, is_tuple: false })
+            r.push(Ctor { name: "false", arity: 0, field_types: [], field_names: none, is_tuple: false })
+            some(r)
         },
         Type::EnumType { name, type_params, variants } => {
             // Re-derive variant payloads with this instantiation's type_params (A2 soundness).
             let inst_variants = instantiate_enum_variants(env, name, type_params, variants)
-            let mut result: List<Ctor> = []
+            let mut r: List<Ctor> = []
             for v in inst_variants {
-                result.push(Ctor { name: v.name, arity: v.fields.len(), field_types: v.fields, field_names: v.field_names, is_tuple: false })
+                r.push(Ctor { name: v.name, arity: v.fields.len(), field_types: v.fields, field_names: v.field_names, is_tuple: false })
             }
-            some(result)
+            some(r)
         },
         Type::StructType { name, type_params, fields } => {
             // Re-derive field types with this instantiation's type_params (A2 soundness).
@@ -400,22 +436,24 @@ fn finite_type_ctors(env: TypeEnv, ty: Type) -> List<Ctor>? {
                 field_types.push(f.ty)
                 field_names.push(f.name)
             }
-            let mut result: List<Ctor> = []
-            result.push(Ctor { name: name, arity: inst_fields.len(), field_types: field_types, field_names: some(field_names), is_tuple: false })
-            some(result)
+            let mut r: List<Ctor> = []
+            r.push(Ctor { name: name, arity: inst_fields.len(), field_types: field_types, field_names: some(field_names), is_tuple: false })
+            some(r)
         },
         Type::UnitType => {
-            let mut result: List<Ctor> = []
-            result.push(Ctor { name: "()", arity: 0, field_types: [], field_names: none, is_tuple: false })
-            some(result)
+            let mut r: List<Ctor> = []
+            r.push(Ctor { name: "()", arity: 0, field_types: [], field_names: none, is_tuple: false })
+            some(r)
         },
         Type::TupleType { elements } => {
-            let mut result: List<Ctor> = []
-            result.push(Ctor { name: "", arity: elements.len(), field_types: elements, field_names: none, is_tuple: true })
-            some(result)
+            let mut r: List<Ctor> = []
+            r.push(Ctor { name: "", arity: elements.len(), field_types: elements, field_names: none, is_tuple: true })
+            some(r)
         },
         _ => none,
     }
+    cache.ftc.insert(cache_key, result)
+    result
 }
 
 fn wild_pattern() -> Pattern {
@@ -432,17 +470,8 @@ fn named_pattern_to_positional(fields: List<NamedPatternField>, field_names: Lis
         let idx = index_of(field_names, f.name)
         if idx >= 0 {
             if idx < arity {
-                // Replace result[idx] with f.pattern
-                // Ring has no List.set — rebuild with replacement
-                let mut new_result: List<Pattern> = []
-                for j in 0..result.len() {
-                    if j == idx {
-                        new_result.push(f.pattern)
-                    } else {
-                        new_result.push(pat_at(result, j))
-                    }
-                }
-                result = new_result
+                // B-132: use List.set for O(1) replacement instead of O(n) rebuild
+                result.set(idx, f.pattern)
             }
         }
     }
@@ -458,10 +487,8 @@ fn index_of(list: List<Str>, target: Str) -> Int {
 
 fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
     let first = pat_at(row, 0)
-    let mut rest: List<Pattern> = []
-    for i in 1..row.len() {
-        rest.push(pat_at(row, i))
-    }
+    // B-132: use List.slice instead of element-by-element O(n) copy
+    let rest = row.slice(1, row.len())
 
     match first {
         Pattern::Wildcard { .. } => {
@@ -553,7 +580,10 @@ fn specialize_row(row: List<Pattern>, ctor: Ctor) -> List<Pattern>? {
     }
 }
 
-fn check_matrix(env: TypeEnv, rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFind, expanding: Set<Str>) -> List<Str>? {
+// B-132: expanding uses Map<Str, Bool> for O(1) string lookups instead of
+// Set<Str> which uses __ring_deep_eq linear scan in the JS backend.
+// cache is threaded through for memoizing finite_type_ctors and type_is_recursive.
+fn check_matrix(env: TypeEnv, rows: List<List<Pattern>>, col_types: List<Type>, subst: UnionFind, expanding: Map<Str, Bool>, mut cache: ExhCache) -> List<Str>? {
     if col_types.len() == 0 {
         if rows.len() > 0 {
             return none
@@ -564,24 +594,22 @@ fn check_matrix(env: TypeEnv, rows: List<List<Pattern>>, col_types: List<Type>, 
     }
 
     let first_type = apply_subst(subst, type_at(col_types, 0))
-    let mut rest_types: List<Type> = []
-    for i in 1..col_types.len() {
-        rest_types.push(type_at(col_types, i))
-    }
+    // B-132: use List.slice instead of element-by-element O(n) copy
+    let rest_types = col_types.slice(1, col_types.len())
 
     let type_key = match first_type {
         Type::EnumType { .. } => type_to_string(first_type),
         _ => "",
     }
-    let is_reentrant = if type_key != "" { expanding.contains(type_key) } else { false }
-    let ctors = if is_reentrant { none } else { finite_type_ctors(env, first_type) }
+    let is_reentrant = if type_key != "" { expanding.contains_key(type_key) } else { false }
+    let ctors = if is_reentrant { none } else { finite_type_ctors(env, first_type, cache) }
 
     match ctors {
         some(ctor_list) => {
-            let mut new_expanding = set_clone(expanding)
+            let mut new_expanding = map_clone(expanding)
             if type_key != "" {
-                if type_is_recursive(env, first_type, type_key) {
-                    new_expanding.insert(type_key)
+                if type_is_recursive(env, first_type, type_key, cache) {
+                    new_expanding.insert(type_key, true)
                 }
             }
             for ctor in ctor_list {
@@ -595,17 +623,12 @@ fn check_matrix(env: TypeEnv, rows: List<List<Pattern>>, col_types: List<Type>, 
                 let mut new_types: List<Type> = []
                 new_types.extend(ctor.field_types)
                 new_types.extend(rest_types)
-                let sub = check_matrix(env, specialized, new_types, subst, new_expanding)
+                let sub = check_matrix(env, specialized, new_types, subst, new_expanding, cache)
                 match sub {
                     some(sub_result) => {
-                        let mut ctor_sub: List<Str> = []
-                        for i in 0..ctor.arity {
-                            ctor_sub.push(str_at(sub_result, i))
-                        }
-                        let mut rest_sub: List<Str> = []
-                        for i in ctor.arity..sub_result.len() {
-                            rest_sub.push(str_at(sub_result, i))
-                        }
+                        // B-132: use List.slice instead of element-by-element copy
+                        let ctor_sub = sub_result.slice(0, ctor.arity)
+                        let rest_sub = sub_result.slice(ctor.arity, sub_result.len())
                         let mut ctor_str = ""
                         if ctor.is_tuple {
                             let joined_sub = join_strs(ctor_sub, ", ")
@@ -648,14 +671,12 @@ fn check_matrix(env: TypeEnv, rows: List<List<Pattern>>, col_types: List<Type>, 
                     _ => {},
                 }
                 if is_default {
-                    let mut tail: List<Pattern> = []
-                    for i in 1..row.len() {
-                        tail.push(pat_at(row, i))
-                    }
+                    // B-132: use List.slice instead of element-by-element O(n) copy
+                    let tail = row.slice(1, row.len())
                     defaults.push(tail)
                 }
             }
-            let sub = check_matrix(env, defaults, rest_types, subst, expanding)
+            let sub = check_matrix(env, defaults, rest_types, subst, expanding, cache)
             match sub {
                 some(s) => {
                     let mut result: List<Str> = []
