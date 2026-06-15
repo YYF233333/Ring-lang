@@ -12,7 +12,7 @@ pub const FLOAT_METHODS: List<Str> = ["to_str"]
 pub const LIST_NON_HOF_METHODS: List<Str> =
     ["len", "get", "set", "first", "last", "is_empty",
      "push", "pop", "concat", "extend", "slice", "reverse",
-     "join", "sort", "shift", "clear"]
+     "join", "shift", "clear"]
 
 pub const LIST_HOF_METHODS: List<Str> =
     ["map", "filter", "flat_map", "fold", "any", "all", "find", "find_index", "sort_by"]

@@ -22,7 +22,6 @@ impl<T> List {
     pub extern fn slice(self: List<T>, start: Int, end: Int) -> List<T>
     pub extern fn reverse(self: List<T>) -> Unit
     pub extern fn join(self: List<Str>, separator: Str) -> Str
-    pub extern fn sort(self: List<T>) -> Unit
     pub extern fn shift(self: List<T>) -> Option<T>
     pub extern fn clear(self: List<T>) -> Unit
     // index_of moved to impl<T: Eq> List below
@@ -70,5 +69,11 @@ impl<T: Eq> List {
             i = i + 1
         }
         none
+    }
+}
+
+impl<T: Ord> List {
+    pub fn sort(mut self: List<T>) -> Unit {
+        self.sort_by(fn(a, b) { if a < b { -1 } else { if a > b { 1 } else { 0 } } })
     }
 }

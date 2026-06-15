@@ -1949,8 +1949,6 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     else { if name == "ring_str_eq" { true }
     else { if name == "ring_str_lt" { true }
     else { if name == "ring_list_len" { true }
-    else { if name == "ring_list_contains" { true }
-    else { if name == "ring_list_index_of" { true }
     else { if name == "ring_list_is_empty" { true }
     else { if name == "ring_map_has" { true }
     else { if name == "ring_map_len" { true }
@@ -1965,7 +1963,7 @@ fn rt_method_returns_i64(name: Str) -> Bool {
     else { if name == "ring_set_is_empty" { true }
     else { if name == "ring_map_int_is_empty" { true }
     else { if name == "ring_set_int_is_empty" { true }
-    else { false } } } } } } } } } } } } } } } } } } } } } } }
+    else { false } } } } } } } } } } } } } } } } } } } } }
 }
 
 // Check if a runtime method returns bool (i64 that needs boxing to Bool)
@@ -1973,7 +1971,6 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     if name == "ring_str_contains" { true }
     else { if name == "ring_str_starts_with" { true }
     else { if name == "ring_str_ends_with" { true }
-    else { if name == "ring_list_contains" { true }
     else { if name == "ring_list_is_empty" { true }
     else { if name == "ring_map_has" { true }
     else { if name == "ring_set_has" { true }
@@ -1988,7 +1985,7 @@ fn rt_method_returns_bool(name: Str) -> Bool {
     else { if name == "ring_map_int_is_empty" { true }
     else { if name == "ring_set_int_is_empty" { true }
     else { if name == "ring_str_is_empty" { true }
-    else { false } } } } } } } } } } } } } } } } } }
+    else { false } } } } } } } } } } } } } } } } }
 }
 
 // Number of LEADING (post-receiver) args that must be unboxed from ptr to i64.
@@ -2231,18 +2228,15 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "List" && method == "concat" { some("ring_list_concat") }
     else { if type_name == "List" && method == "slice" { some("ring_list_slice") }
     else { if type_name == "List" && method == "reverse" { some("ring_list_reverse") }
-    else { if type_name == "List" && method == "sort" { some("ring_list_sort_default") }
     else { if type_name == "List" && method == "sort_by" { some("ring_list_sort") }
     else { if type_name == "List" && method == "is_empty" { some("ring_list_is_empty") }
     else { if type_name == "List" && method == "first" { some("ring_list_first") }
     else { if type_name == "List" && method == "last" { some("ring_list_last") }
     else { if type_name == "List" && method == "pop" { some("ring_list_pop") }
     else { if type_name == "List" && method == "set" { some("ring_list_set") }
-    // NOTE: contains / index_of are intentionally NOT mapped to runtime functions.
-    // They live in `impl<T: Eq> List` and must dispatch element equality through the
-    // Eq trait dict (the runtime ring_list_contains only does pointer comparison,
-    // which is wrong for Str/struct elements). Falling through here routes the call
-    // to the generated Ring impl `ring_List_contains` / `ring_List_index_of`.
+    // NOTE: contains / index_of / sort are intentionally NOT mapped to runtime
+    // functions. They live in bounded impl blocks (impl<T: Eq/Ord> List) and must
+    // dispatch through trait dicts. Falling through routes to the generated Ring impls.
     else { if type_name == "List" && method == "map" { some("ring_list_map") }
     else { if type_name == "List" && method == "filter" { some("ring_list_filter") }
     else { if type_name == "List" && method == "for_each" { some("ring_list_for_each") }
@@ -2294,7 +2288,7 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
     else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
     else { if type_name == "Option" && method == "to_fail" { some("ring_Option_to_fail") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {

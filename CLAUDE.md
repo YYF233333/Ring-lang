@@ -92,7 +92,7 @@ Ring-lang/
 - 不支持 `dyn Trait` 动态分发、GATs
 - `pub` 可见性在单文件模式不强制（向后兼容）
 - 穷尽性检查：嵌套模式递归检查正常，多字段交叉组合不验证
-- `List.find` / `Map` key 查找仍用 JS `===`（其他 contains 方法已用 Eq trait）
+- `Map` key 查找仍用 JS `===`（追踪于 B-107；List 方法已全部通过 trait dict dispatch）
 
 ### 语法
 

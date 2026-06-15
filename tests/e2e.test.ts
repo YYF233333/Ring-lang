@@ -334,6 +334,7 @@ const cases: TestCase[] = [
   { file: "mutual_recursive_types.ring", expected: "Int\nfail<Int>\nFoo\n" },
   { file: "list_extra_methods.ring", expected: "list_extra_methods: all tests passed\n" },
   { file: "sort_by.ring", expected: "sort_by: all tests passed\n" },
+  { file: "list_sort_ord.ring", expected: "list_sort_ord: all tests passed\n" },
   { file: "map_clone.ring", expected: "map_clone: all tests passed\n" },
   { file: "os_api_basic.ring", expected: "os_api_basic: all tests passed\n" },
   { file: "var_self_test.ring", expected: "all var_self tests passed\n" },
