@@ -116,7 +116,9 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
             sorted_callees.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
             for entry in sorted_callees {
                 let (name, callees) = entry
-                for callee in callees.to_list() {
+                let mut sorted_callee_names = callees.to_list()
+                sorted_callee_names.sort()
+                for callee in sorted_callee_names {
                     match ctx.local_fn_effects.get(callee) {
                         some(callee_effects) => {
                             match ctx.local_fn_effects.get(name) {

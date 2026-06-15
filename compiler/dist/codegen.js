@@ -1091,7 +1091,9 @@ function generate(program, skip_preamble, skip_main_call, module_prefix, imports
         const __ring_dt3 = entry;
         const name = __ring_dt3[0];
         const callees = __ring_dt3[1];
-        const __ring_iter_31 = __List_Iterable.iter(_Set_to_list(callees));
+        let sorted_callee_names = _Set_to_list(callees);
+        List_sort(sorted_callee_names, __Str_Ord);
+        const __ring_iter_31 = __List_Iterable.iter(sorted_callee_names);
         while (true) {
           const __ring_next_31 = __ListIterator_Iterator.next(__ring_iter_31);
           if (__ring_next_31._tag === "none") break;
