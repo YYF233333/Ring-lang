@@ -589,21 +589,6 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
-### B-141 LLVM codegen impl 方法名解析混淆（parse_expr vs parse_expr_bp）[bugfix] [P1] [M] [judgment] [queued]
-
-> 2026-06-15 立项（Discussion，G-b 攻坚中发现）。LLVM codegen 在 emit function call 时，`self.parse_expr_bp(PREC_NONE, true)` 被解析到 `ring_Parser_parse_expr` 而非 `ring_Parser_parse_expr_bp`——LLVM verify error "Incorrect number of arguments"（3 args → 2 params）。native 仍可构建（emit anyway），但运行时 `parse_expr` 收到错误的 evidence 参数（PREC_NONE 被当作 __ring_ev_fail），可能是 G-b 8 文件差异的级联根因。
-
-**根因方向**：LLVM codegen 的函数查找（`find_fn_precise` / `find_fn_by_suffix` / `find_fn_by_prefix_enumeration`，codegen_llvm_expr.ring:1793-1859）或 method dispatch（`gen_method_call`）对 impl 方法名的匹配逻辑有前缀/后缀混淆。`parse_expr` 是 `parse_expr_bp` 的前缀——suffix match `$$_parse_expr` 会匹配到 `ring_Parser_parse_expr` 而漏掉 `ring_Parser_parse_expr_bp`（更长的才是正确目标）。
-
-**涉及修改**：
-1. `compiler/codegen_llvm_expr.ring`：`find_fn_by_suffix` / method dispatch 逻辑——确保完全匹配优先于前缀/后缀匹配；或改用精确查找（method name → mangled name 直接映射）
-2. 可能涉及 `codegen_llvm_expr.ring` 的 `gen_method_call` / `gen_call_expr` 中 method 到 function 的名称解析
-
-**验收标准**：
-- LLVM verify 0 errors（当前 1 error 消除）
-- `parse_expr_bp` 调用正确解析到 `ring_Parser_parse_expr_bp`
-- G-b 自编译差异文件数下降（预期从 8 显著减少或归零）
-- 全部 E2E + llvm_diff 通过；自举一致
 
 ### B-129 Map/Set for_each llvm_diff 覆盖 [bugfix] [P3] [S] [mechanical] [queued] [deferred: B-089]
 

@@ -903,7 +903,7 @@ function Parser_parse_param(self, __ring_ev_fail) {
   }
   let default_value = Option_none;
   if (Parser_try_consume(self, lexer$TokenKind_TkEq)) {
-    default_value = Option_some(Parser_parse_expr(self, PREC_NONE, __ring_ev_fail));
+    default_value = Option_some(Parser_parse_expr(self, __ring_ev_fail));
   }
   const end = Parser_current_span_start(self);
   return new ast$Param(name, is_mutable, type_annotation, default_value, Parser_make_span(self, start, end));

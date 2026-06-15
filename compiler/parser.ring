@@ -2359,7 +2359,7 @@ if self.check(TokenKind::TkIntLit) {
         }
         let mut default_value: Expr? = none
         if self.try_consume(TokenKind::TkEq) {
-            default_value = some(self.parse_expr(PREC_NONE))
+            default_value = some(self.parse_expr())
         }
         let end = self.current_span_start()
         Param { name: name, is_mutable: is_mutable, type_annotation: type_annotation, default_value: default_value, span: self.make_span(start, end) }
