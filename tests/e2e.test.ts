@@ -634,6 +634,67 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
 });
 
 // ============================================================
+// Parser recovery tests — verify multi-error reporting
+// ============================================================
+
+describe("e2e: parser expression-level recovery", { concurrency: true }, () => {
+  // These tests verify that parse errors in compound expressions (match/handle/if)
+  // do not poison subsequent declarations. We parse + check in-process, continuing
+  // past parse errors, and verify that both the parse error AND type errors in
+  // subsequent functions are reported.
+  const recovery_cases = [
+    {
+      file: "error_recovery_match.ring",
+      desc: "malformed match arm does not poison subsequent declarations",
+      error_patterns: ["E0103", "E0301"],
+      min_decls: 2,
+    },
+    {
+      file: "error_recovery_handle.ring",
+      desc: "malformed handler does not poison subsequent declarations",
+      error_patterns: ["E0103", "E0301"],
+      min_decls: 2,
+    },
+    {
+      file: "error_recovery_if.ring",
+      desc: "malformed if condition does not poison subsequent declarations",
+      error_patterns: ["E0103", "E0301"],
+      min_decls: 2,
+    },
+  ];
+
+  for (const tc of recovery_cases) {
+    test(`${tc.file}: ${tc.desc}`, () => {
+      const filePath = path.join(CASES_DIR, tc.file);
+      assert.ok(fs.existsSync(filePath), `Test file not found: ${filePath}`);
+      const source = fs.readFileSync(filePath, "utf-8");
+      const sink = new_collecting_sink();
+      const ast = parse(source, filePath, sink);
+      // Verify enough declarations survived parsing
+      assert.ok(
+        ast.decls.length >= tc.min_decls,
+        `Expected >= ${tc.min_decls} decls after recovery, got ${ast.decls.length}`
+      );
+      // Continue to type-check despite parse errors
+      try {
+        const fail_ev = { raise: (err: any) => { throw { _effect: "fail", _value: err }; } };
+        check(ast, sink, fail_ev);
+      } catch (_e) {}
+      const error_text = sink.items
+        .filter((d: any) => d.severity._tag === "SevError")
+        .map((d: any) => `${d.code}: ${d.message}`)
+        .join("\n");
+      for (const pat of tc.error_patterns) {
+        assert.ok(
+          error_text.toLowerCase().includes(pat.toLowerCase()),
+          `Expected error containing "${pat}", got: ${error_text.slice(0, 500)}`
+        );
+      }
+    });
+  }
+});
+
+// ============================================================
 // Warning tests — should pass type-check but emit warnings
 // ============================================================
 
