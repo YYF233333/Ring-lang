@@ -4108,109 +4108,63 @@ fn collect_captures_stmt(ctx: LlvmCtx, stmt: HStmt, params: List<HParam>, mut ca
 }
 
 // ============================================================
-// TryCatch — using setjmp/longjmp
+// TryCatch — inline setjmp/longjmp (B-089 G-b)
 // ============================================================
 
 fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMValueRef {
-    // The body and catch arms are emitted as closures and handed to the runtime
-    // ring_try(), which owns the setjmp. This is required for correctness: setjmp
-    // must live in the frame that longjmp returns to, and ring_try keeps that frame
-    // alive while the body runs nested inside it. (Doing setjmp in a wrapper that
-    // returns leaves a dangling jmp_buf and corrupts deep unwinds.)
-    let body_ty = hexpr_type(body)
-    let body_closure = gen_lambda(ctx, [], body_ty, body, body_ty)
-    let catch_closure = gen_catch_closure(ctx, arms)
-    let try_fn = get_or_declare_runtime_fn(ctx, "ring_try", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
-    let try_ty = get_rt_fn_type(ctx, "ring_try")
-    LLVMBuildCall2(ctx.builder, try_ty, try_fn, [body_closure, catch_closure], fresh_name(ctx, "try"))
-}
-
-// Build a 1-arg closure {fn(env, error) -> ptr, env} that runs the catch arms.
-// Mirrors gen_lambda but the body is the catch-arm matcher and the single param
-// is the caught error value.
-fn gen_catch_closure(mut ctx: LlvmCtx, arms: List<HMatchArm>) -> LLVMValueRef {
-    let fn_name = fresh_name(ctx, "ring_catch_")
-    ctx.lambda_counter = ctx.lambda_counter + 1
-
-    let err_param = HParam { name: "__catch_err", ty: Type::AnyType, def_id: none, is_mutable: false }
-    let params = [err_param]
-
-    // Collect captures referenced by the arm bodies (error param is excluded).
-    let mut captures: List<Str> = []
-    for arm in arms {
-        collect_captures(ctx, arm.body, params, captures)
+    // Inline setjmp: body and catch arms execute in the current stack frame,
+    // sharing all local allocas. This fixes the closure-capture-by-value bug
+    // where `let mut` assignments inside the body were invisible to the outer
+    // scope (closures copy the alloca value, not the alloca pointer).
+    let current_fn = match ctx.current_fn {
+        some(f) => f,
+        none => panic("LLVM codegen: try-catch outside function"),
     }
 
-    let mut env_elem_types: List<LLVMTypeRef> = []
-    for c in captures { env_elem_types.push(ctx.ptr_type) }
-    let env_ty = if captures.len() > 0 {
-        LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
-    } else {
-        LLVMStructTypeInContext(ctx.context, [ctx.ptr_type], 0)
-    }
+    // ring_catch_push() -> frame ptr
+    let push_fn = get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ctx.ptr_type)
+    let push_ty = get_rt_fn_type(ctx, "ring_catch_push")
+    let frame = LLVMBuildCall2(ctx.builder, push_ty, push_fn, [], fresh_name(ctx, "frame"))
 
-    // catch fn: (env_ptr, error) -> ptr
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
-    let catch_fn = LLVMAddFunction(ctx.module, fn_name, fn_ty)
+    // ring_catch_setjmp(frame) -> i64: 0=normal, 1=caught
+    let setjmp_fn = get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ctx.ptr_type], ctx.i64_type)
+    let setjmp_ty = get_rt_fn_type(ctx, "ring_catch_setjmp")
+    let sjresult = LLVMBuildCall2(ctx.builder, setjmp_ty, setjmp_fn, [frame], fresh_name(ctx, "sj"))
 
-    let saved_fn = ctx.current_fn
-    let saved_named = ctx.named_values
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(catch_fn)
-    ctx.named_values = map_new()
+    // cond = (sjresult == 0)
+    let zero = LLVMConstInt(ctx.i64_type, 0, 0)
+    let cond = LLVMBuildICmp(ctx.builder, 32, sjresult, zero, fresh_name(ctx, "sjcmp"))
 
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, catch_fn, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+    let normal_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.normal")
+    let catch_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.catch")
+    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.merge")
 
-    let env_ptr = LLVMGetParam(catch_fn, 0)
-    for i in 0..captures.len() {
-        match captures.get(i) {
-            some(cap_name) => {
-                let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_ptr, i, fresh_name(ctx, "ce"))
-                let cap_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, cap_ptr, fresh_name(ctx, cap_name))
-                let alloca = build_entry_alloca(ctx, ctx.ptr_type, cap_name)
-                discard(LLVMBuildStore(ctx.builder, cap_val, alloca))
-                ctx.named_values.insert(cap_name, alloca)
-            },
-            none => {},
-        }
-    }
+    discard(LLVMBuildCondBr(ctx.builder, cond, normal_bb, catch_bb))
 
-    let error_val = LLVMGetParam(catch_fn, 1)
+    // --- normal path: execute body inline, then pop frame ---
+    LLVMPositionBuilderAtEnd(ctx.builder, normal_bb)
+    let body_val = gen_llvm_expr(ctx, body)
+    let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
+    let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
+    discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
+    let normal_end_bb = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    // --- catch path: get error, pop frame, run catch arms inline ---
+    LLVMPositionBuilderAtEnd(ctx.builder, catch_bb)
+    let get_err_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ctx.ptr_type], ctx.ptr_type)
+    let get_err_ty = get_rt_fn_type(ctx, "ring_catch_get_error")
+    let error_val = LLVMBuildCall2(ctx.builder, get_err_ty, get_err_fn, [frame], fresh_name(ctx, "err"))
+    discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
     let catch_val = gen_catch_arms(ctx, error_val, arms)
-    discard(LLVMBuildRet(ctx.builder, catch_val))
+    let catch_end_bb = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
 
-    ctx.named_values = saved_named
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
-
-    // Build env + closure pair at the call site.
-    let env_size = LLVMSizeOf(env_ty)
-    let alloc_fn2 = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
-    let alloc_ty2 = get_rt_fn_type(ctx, "ring_alloc")
-    let catch_closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
-    let env_alloc = LLVMBuildCall2(ctx.builder, alloc_ty2, alloc_fn2, [env_size, catch_closure_typeid], fresh_name(ctx, "env"))
-    for i in 0..captures.len() {
-        match captures.get(i) {
-            some(cap_name) => {
-                let cap_val = match ctx.named_values.get(cap_name) {
-                    some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "cv")),
-                    none => LLVMConstPointerNull(ctx.ptr_type),
-                }
-                let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, i, fresh_name(ctx, "ep"))
-                discard(LLVMBuildStore(ctx.builder, cap_val, cap_ptr))
-            },
-            none => {},
-        }
-    }
-    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
-    let closure_size = LLVMSizeOf(closure_ty)
-    let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty2, alloc_fn2, [closure_size, catch_closure_typeid], fresh_name(ctx, "cls"))
-    let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
-    discard(LLVMBuildStore(ctx.builder, catch_fn, fn_ptr_slot))
-    let env_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "eps"))
-    discard(LLVMBuildStore(ctx.builder, env_alloc, env_ptr_slot))
-    closure_ptr
+    // --- merge: phi ---
+    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "tryv"))
+    LLVMAddIncoming(phi, [body_val, catch_val], [normal_end_bb, catch_end_bb])
+    phi
 }
 
 fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchArm>) -> LLVMValueRef {
@@ -4284,7 +4238,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         }
 
         if is_fail_abort {
-            // fail.raise routes through ring_try/ring_raise (setjmp/longjmp), not
+            // fail.raise routes through inline setjmp/ring_raise (longjmp), not
             // evidence — gen_effect_op never reads this slot. Keep the null
             // placeholder for ABI uniformity (callees still receive an evidence
             // ptr param for the effect).
@@ -4303,15 +4257,54 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
     }
 
     if has_fail_abort {
-        // Abort (fail.raise) handler: same setjmp scoping requirement as try-catch,
-        // so route through the runtime ring_try(). The abort handler's result is the
-        // value passed to fail.raise, so the catch closure just returns its argument.
-        let body_ty = hexpr_type(body)
-        let body_closure = gen_lambda(ctx, [], body_ty, body, body_ty)
-        let catch_closure = gen_return_error_closure(ctx)
-        let try_fn = get_or_declare_runtime_fn(ctx, "ring_try", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
-        let try_ty = get_rt_fn_type(ctx, "ring_try")
-        LLVMBuildCall2(ctx.builder, try_ty, try_fn, [body_closure, catch_closure], fresh_name(ctx, "hdl"))
+        // Abort (fail.raise) handler: inline setjmp like gen_try_catch (B-089 G-b).
+        // The catch path simply returns the error value (= the value passed to
+        // fail.raise), no catch arms needed.
+        let current_fn = match ctx.current_fn {
+            some(f) => f,
+            none => panic("LLVM codegen: handle expr outside function"),
+        }
+
+        let push_fn = get_or_declare_runtime_fn(ctx, "ring_catch_push", [], ctx.ptr_type)
+        let push_ty = get_rt_fn_type(ctx, "ring_catch_push")
+        let frame = LLVMBuildCall2(ctx.builder, push_ty, push_fn, [], fresh_name(ctx, "frame"))
+
+        let setjmp_fn = get_or_declare_runtime_fn(ctx, "ring_catch_setjmp", [ctx.ptr_type], ctx.i64_type)
+        let setjmp_ty = get_rt_fn_type(ctx, "ring_catch_setjmp")
+        let sjresult = LLVMBuildCall2(ctx.builder, setjmp_ty, setjmp_fn, [frame], fresh_name(ctx, "sj"))
+
+        let zero = LLVMConstInt(ctx.i64_type, 0, 0)
+        let cond = LLVMBuildICmp(ctx.builder, 32, sjresult, zero, fresh_name(ctx, "sjcmp"))
+
+        let normal_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "hdl.normal")
+        let catch_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "hdl.catch")
+        let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "hdl.merge")
+
+        discard(LLVMBuildCondBr(ctx.builder, cond, normal_bb, catch_bb))
+
+        // --- normal path ---
+        LLVMPositionBuilderAtEnd(ctx.builder, normal_bb)
+        let body_val = gen_llvm_expr(ctx, body)
+        let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
+        let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
+        discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
+        let normal_end_bb = LLVMGetInsertBlock(ctx.builder)
+        discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+        // --- catch path: error value IS the result ---
+        LLVMPositionBuilderAtEnd(ctx.builder, catch_bb)
+        let get_err_fn = get_or_declare_runtime_fn(ctx, "ring_catch_get_error", [ctx.ptr_type], ctx.ptr_type)
+        let get_err_ty = get_rt_fn_type(ctx, "ring_catch_get_error")
+        let error_val = LLVMBuildCall2(ctx.builder, get_err_ty, get_err_fn, [frame], fresh_name(ctx, "err"))
+        discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
+        let catch_end_bb = LLVMGetInsertBlock(ctx.builder)
+        discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+        // --- merge ---
+        LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+        let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "hdlv"))
+        LLVMAddIncoming(phi, [body_val, error_val], [normal_end_bb, catch_end_bb])
+        phi
     } else {
         // Non-abort handlers: just execute body with evidence set up
         gen_llvm_expr(ctx, body)
@@ -4333,8 +4326,8 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
 // (default-body injection #72 is B-097). Well-typed in-scope code only performs
 // handled ops, so the null slot is never GEP'd/loaded for those programs.
 //
-// D2: the evidence struct + handler closures are intentionally leaked (same as
-// ring_try's body closure) — proper drop is B-096. Pure leak, not UAF.
+// D2: the evidence struct + handler closures are intentionally leaked —
+// proper drop is B-096. Pure leak, not UAF.
 fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHandler>) -> LLVMValueRef {
     // Slot count = number of ops declared on the effect. Fall back to the
     // handler count only if the effect is unregistered (shouldn't happen for
@@ -4381,33 +4374,6 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
     }
 
     ev_ptr
-}
-
-// Build a closure {fn(env, error) -> error, null_env}: the abort handler result
-// is exactly the value passed to fail.raise.
-fn gen_return_error_closure(mut ctx: LlvmCtx) -> LLVMValueRef {
-    let fn_name = fresh_name(ctx, "ring_abort_")
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
-    let f = LLVMAddFunction(ctx.module, fn_name, fn_ty)
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(f)
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, f, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-    discard(LLVMBuildRet(ctx.builder, LLVMGetParam(f, 1)))
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
-    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
-    let closure_size = LLVMSizeOf(closure_ty)
-    let alloc_fn3 = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
-    let alloc_ty3 = get_rt_fn_type(ctx, "ring_alloc")
-    let fn_ref_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
-    let cp = LLVMBuildCall2(ctx.builder, alloc_ty3, alloc_fn3, [closure_size, fn_ref_typeid], fresh_name(ctx, "cls"))
-    let s0 = LLVMBuildStructGEP2(ctx.builder, closure_ty, cp, 0, fresh_name(ctx, "fps"))
-    discard(LLVMBuildStore(ctx.builder, f, s0))
-    let s1 = LLVMBuildStructGEP2(ctx.builder, closure_ty, cp, 1, fresh_name(ctx, "eps"))
-    discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), s1))
-    cp
 }
 
 // ============================================================
