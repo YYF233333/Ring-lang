@@ -8,7 +8,7 @@ use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
 use env::{TypeScheme, apply_subst, find_impl}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
-use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705}
+use codes::{E0201, E0204, E0402, E0403, E0404, E0405, E0409, E0410, E0501, E0507, E0705, E0707}
 use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     type_error, type_error_with_notes,
     unify_at, unify_at_noted, update_fn_effects,
@@ -212,6 +212,9 @@ fn check_sig_decl(mut ctx: InferCtx, name: Str, members: List<SigMember>, is_pub
 }
 
 fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>) {
+    // Track which qualified source each imported local name came from, for ambiguity detection
+    let mut import_origins: Map<Str, Str> = map_new()
+
     for use_decl in uses {
         let segments = use_decl.path.segments
         if segments.len() == 0 { continue }
@@ -255,9 +258,25 @@ fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>) {
                                 none => item.name
                             }
                             let qualified_name = if prefix == "" { item.name } else { "${prefix}::${item.name}" }
+
+                            // Check for ambiguous import
+                            match import_origins.get(local_name) {
+                                some(prev_qualified) => {
+                                    if prev_qualified != qualified_name {
+                                        let _ = type_error(ctx.sink, E0707,
+                                            "Ambiguous name '${local_name}': imported from both '${prev_qualified}' and '${qualified_name}'. Use qualified name to disambiguate",
+                                            item.span,
+                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") })
+                                        continue
+                                    }
+                                },
+                                none => {}
+                            }
+
                             match ctx.env.lookup(qualified_name) {
                                 some(scheme) => {
                                     ctx.env.bind(local_name, scheme)
+                                    import_origins.insert(local_name, qualified_name)
                                     // Track alias so codegen emits the qualified name
                                     if local_name != qualified_name {
                                         ctx.use_aliases.insert(local_name, qualified_name)
@@ -277,9 +296,25 @@ fn resolve_mod_uses(mut ctx: InferCtx, uses: List<UseDecl>) {
                         if name_start_idx < segments.len() {
                             let name = segments.get(segments.len() - 1).unwrap_or("")
                             let qualified_name = if prefix == "" { name } else { "${prefix}::${name}" }
+
+                            // Check for ambiguous import
+                            match import_origins.get(name) {
+                                some(prev_qualified) => {
+                                    if prev_qualified != qualified_name {
+                                        let _ = type_error(ctx.sink, E0707,
+                                            "Ambiguous name '${name}': imported from both '${prev_qualified}' and '${qualified_name}'. Use qualified name to disambiguate",
+                                            use_decl.path.span,
+                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") })
+                                        continue
+                                    }
+                                },
+                                none => {}
+                            }
+
                             match ctx.env.lookup(qualified_name) {
                                 some(scheme) => {
                                     ctx.env.bind(name, scheme)
+                                    import_origins.insert(name, qualified_name)
                                     // Track alias so codegen emits the qualified name
                                     if name != qualified_name {
                                         ctx.use_aliases.insert(name, qualified_name)

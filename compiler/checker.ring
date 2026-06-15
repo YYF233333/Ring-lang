@@ -10,7 +10,7 @@ use andor_lower::{lower_andor}
 use infer_ctx::{InferCtx}
 use infer_register::{register_decl_public}
 use exports::{ModuleExports, TypeDef}
-use codes::{E0702, E0703, E0705}
+use codes::{E0702, E0703, E0705, E0707}
 use parser::{parse}
 use union_find::{UnionFind}
 use unify::{empty_subst}
@@ -272,6 +272,9 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
         module_map.insert(mod_.module_key, mod_)
     }
 
+    // Track which module each imported name came from, for ambiguity detection
+    let mut import_origins: Map<Str, Str> = map_new()
+
     for use_decl in uses {
         // Reject relative paths (self::/super::) at file level
         let first_seg = use_decl.path.segments.get(0).unwrap_or("")
@@ -306,6 +309,23 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                 none => item.name,
                             }
                             let mut found = false
+
+                            // Check for ambiguous import before binding
+                            match import_origins.get(local_name) {
+                                some(prev_mod) => {
+                                    if prev_mod != mod_key {
+                                        let d = make_diag(
+                                            E0707, Severity::SevError,
+                                            "Ambiguous name '${local_name}': imported from both module '${prev_mod}' and module '${mod_key}'. Use qualified name (${prev_mod}::${local_name} / ${mod_key}::${local_name}) to disambiguate",
+                                            item.span,
+                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") }
+                                        )
+                                        ctx.sink.report(d)
+                                        continue
+                                    }
+                                },
+                                none => {}
+                            }
 
                             match mod_.values.get(item.name) {
                                 some(scheme) => {
@@ -345,6 +365,8 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                                     DiagnosticContext::OtherContext { detail: some("symbol not found") }
                                 )
                                 ctx.sink.report(d)
+                            } else {
+                                import_origins.insert(local_name, mod_key)
                             }
                         }
                     },
@@ -353,7 +375,24 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                         sorted_mod_values.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
                         for entry in sorted_mod_values {
                             let (name, scheme) = entry
+                            // Check for ambiguous wildcard import
+                            match import_origins.get(name) {
+                                some(prev_mod) => {
+                                    if prev_mod != mod_key {
+                                        let d = make_diag(
+                                            E0707, Severity::SevError,
+                                            "Ambiguous name '${name}': imported from both module '${prev_mod}' and module '${mod_key}'. Use qualified name to disambiguate",
+                                            use_decl.path.span,
+                                            DiagnosticContext::OtherContext { detail: some("ambiguous import") }
+                                        )
+                                        ctx.sink.report(d)
+                                        continue
+                                    }
+                                },
+                                none => {}
+                            }
                             ctx.env.bind(name, scheme)
+                            import_origins.insert(name, mod_key)
                         }
                         let mut sorted_mod_types = mod_.types.entries()
                         sorted_mod_types.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })

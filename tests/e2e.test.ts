@@ -877,6 +877,7 @@ describe("e2e: multi-file modules (negative)", () => {
     { dir: "error_private_import", desc: "private symbol import", error_pattern: "E0703" },
     { dir: "error_symbol_not_found", desc: "symbol not found in module", error_pattern: "E0703" },
     { dir: "error_cross_mut_immutable", desc: "immutable binding calling cross-module mut method", error_pattern: "E0208" },
+    { dir: "error_ambiguous_import", desc: "ambiguous import from two modules", error_pattern: "E0707" },
   ];
 
   for (const tc of module_negative_cases) {
