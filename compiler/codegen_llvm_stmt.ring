@@ -1,7 +1,7 @@
 use types::{Type, BUILTIN_RANGE}
 use ast::{Pattern, LiteralValue}
 use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type,
-    is_fresh_owned_bool_value, type_contains_extern_handle, is_rc_excluded_type}
+    is_fresh_owned_bool_value}
 use codegen_llvm_ctx::{LlvmCtx, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca}
 
 // Re-declare LLVM types and functions to avoid ESM import issues
@@ -105,38 +105,30 @@ pub fn emit_llvm_stmt(mut ctx: LlvmCtx, stmt: HStmt) {
             emit_if_let(ctx, pattern, expr, then_block, else_block)
         },
         // Perceus L0 — emit ring_drop / ring_dup
-        HStmt::Drop { name, ty, .. } => {
-            // B-099: skip drop for extern type values — ring_drop on a foreign
-            // pointer (LLVM opaque ref) corrupts memory (reads/frees non-Ring header).
-            if !is_rc_excluded_type(ty, ctx.extern_types) && !type_contains_extern_handle(ty, ctx.extern_types) {
-                match ctx.named_values.get(name) {
-                    some(var_ptr) => {
-                        let val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, fresh_name(ctx, "drop_val"))
-                        let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
-                        let drop_ty = get_rt_fn_type(ctx, "ring_drop")
-                        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""))
-                    },
-                    none => {
-                        eprintln("[rc-warn] Drop: variable '${name}' not found in named_values")
-                    },
-                }
+        HStmt::Drop { name, .. } => {
+            match ctx.named_values.get(name) {
+                some(var_ptr) => {
+                    let val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, fresh_name(ctx, "drop_val"))
+                    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+                    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+                    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""))
+                },
+                none => {
+                    eprintln("[rc-warn] Drop: variable '${name}' not found in named_values")
+                },
             }
         },
-        HStmt::Dup { name, ty, .. } => {
-            // B-099: skip dup for extern type values — ring_dup on a foreign
-            // pointer writes to ptr-8 (RC header), corrupting arbitrary memory.
-            if !is_rc_excluded_type(ty, ctx.extern_types) && !type_contains_extern_handle(ty, ctx.extern_types) {
-                match ctx.named_values.get(name) {
-                    some(var_ptr) => {
-                        let val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, fresh_name(ctx, "dup_val"))
-                        let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
-                        let dup_ty = get_rt_fn_type(ctx, "ring_dup")
-                        discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""))
-                    },
-                    none => {
-                        eprintln("[rc-warn] Dup: variable '${name}' not found in named_values")
-                    },
-                }
+        HStmt::Dup { name, .. } => {
+            match ctx.named_values.get(name) {
+                some(var_ptr) => {
+                    let val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, fresh_name(ctx, "dup_val"))
+                    let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
+                    let dup_ty = get_rt_fn_type(ctx, "ring_dup")
+                    discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""))
+                },
+                none => {
+                    eprintln("[rc-warn] Dup: variable '${name}' not found in named_values")
+                },
             }
         },
     }

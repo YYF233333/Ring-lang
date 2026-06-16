@@ -9,27 +9,23 @@
 > Agent session 很长，用户无法回看全部过程。这里是 agent → 用户的异步摘要。
 > Discussion agent 在每次对话开始时呈现，用户确认后删除。
 
-## B-099 native 自托管 LLVM 后端（进行中，2026-06-16）
+## B-099 native 自托管 LLVM 后端（2026-06-16 第二轮）
 
-### 1. 简单文件 native 编译已跑通 [通知]
+### 1. codegen-level extern-type RC guard 导致 ~20GB OOM regression [通知]
 
-`ring.exe build test.ring --target=llvm` → `.o` → link → 运行输出 "hello from native llvm"。B-099 codegen 核心（ExternFn C-ABI declare + call-site marshalling）+ 三层 extern-type RC 排除修复全部落地。879/879 E2E 测试全绿。
+**问题**：前轮 B-099 worker 在 codegen_llvm_stmt.ring（Drop/Dup）和 codegen_llvm_expr.ring（gen_clone）加了 `type_contains_extern_handle` guard，跳过包含 extern type 的值的 ring_drop/ring_dup/Clone emit。该函数递归检查类型树，导致 `LlvmCtx`、`Map<Str, LLVMValueRef>`、`ExternFnInfo` 等容器类型全部被排除——这些容器本身是 Ring 分配的（有 RC header），必须 drop。结果 native ring.exe 自编译从 ~700MB 暴涨到 19.5GB+（机器 OOM 硬重启）。
 
-### 2. extern-type RC 排除是本次最大发现 [通知]
+**根因**：guard 用了 `type_contains_extern_handle`（递归）而不是 `is_extern_handle_type`（直接）。容器类型不应跳过 drop——只有直接 extern type（LLVMContextRef 等裸 opaque ref）需要跳过。
 
-**根因**：Perceus 的 branch-balancing Dup/Drop 和 escape-clone（HExpr::Clone）对 extern type 值（LLVMValueRef 等）emit ring_dup/ring_drop。ring_dup 写 ptr-8（RC header），ring_drop 读 ptr-4 + free——对 LLVM opaque ref（无 Ring 分配 header）= 任意内存写入 → 静默损坏 → 后续 LLVM-C 调用 crash。
+**修复**：删除三处 codegen-level guard，回到 B-089 行为。extern type 的 RC 防护全靠 runtime guard（ring_dup/ring_drop 中的 tid/rc 校验，也是 B-099 引入的，这层没问题）。验证：自编译 697MB / 879 E2E 全绿。
 
-**修复三层**：(1) codegen_llvm_stmt: HStmt::Drop/Dup 检查 ty, extern type 跳过；(2) codegen_llvm_expr: gen_clone 检查 inner type, extern type 跳过；(3) ring_runtime: ring_dup + ring_drop 加 tid+rc 双重 guard（defense-in-depth，catch closure capture 等残余路径）。
+**过程违规**：该 guard 不在 B-099 spec 要求范围内（spec 只要求 runtime 级终验），worker 自行引入"defense-in-depth"未经讨论——违反「决策必须讨论」。
 
-### 3. 下一步：自编译 --target=llvm [通知]
+### 2. B-099 剩余 scope 待讨论 [通知]
 
-简单文件已通，但 `ring.exe build compiler/main.ring --target=llvm`（自编译）未测试。这是 B-099 的终极验收——native 自产 native 代码。下个 session 继续。
+codegen-level guard 删除后，B-099 的 extern-type RC 防护策略退化为 runtime-only（tid/rc 校验 in ring_dup/ring_drop）。这对 JS-target 自编译已验证安全（697MB，879 E2E）。但 B-099 的终极目标——`ring.exe build compiler/main.ring --target=llvm`（native 自编译 LLVM 目标）——尚未测试。该路径实际执行 codegen_llvm 函数，会碰 LLVMValueRef，届时 runtime guard 是否足够（还是需要更精确的 codegen-level 排除策略）需要 Discussion 拍板后再动。
 
-### 4. ListToDataAndCountI64 ring_list_len 类型不匹配 [通知]
+### 3. Windows OOM 无 OOM killer — 高内存 subagent 需安全措施 [通知]
 
-仅影响 LLVMConstArray2，低频。待自编译测试时核实。
-
-### 5. build_native.ps1 已加 LLVM-C 链接 [通知]
-
-`-LD:/software/Scoop/apps/llvm/current/lib -lLLVM-C`，路径硬编码（同 binding.gyp）。
+subagent 跑 build_native.ps1 触发 OOM，Windows 不像 Linux 有 OOM killer 精准杀进程——整台机器冻死需硬重启。已在 memory 记录反馈，后续高内存任务（build_native、self-compile）应加内存监控或由用户手动在独立终端跑。
 

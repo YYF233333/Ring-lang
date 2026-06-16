@@ -7,8 +7,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     BUILTIN_RANGE,
     effect_op_slot,
-    hexpr_type, hexpr_effects, is_fresh_owned_bool_value,
-    type_contains_extern_handle, is_rc_excluded_type}
+    hexpr_type, hexpr_effects, is_fresh_owned_bool_value}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
@@ -218,12 +217,6 @@ pub fn gen_llvm_expr(mut ctx: LlvmCtx, expr: HExpr) -> LLVMValueRef {
 // evaluate inner, ring_dup the result, return the (now owned) pointer.
 fn gen_clone(mut ctx: LlvmCtx, inner: HExpr) -> LLVMValueRef {
     let val = gen_llvm_expr(ctx, inner)
-    // B-099: skip dup for extern type values — ring_dup on a foreign pointer
-    // writes to ptr-8 (RC header), corrupting arbitrary memory.
-    let ty = hexpr_type(inner)
-    if is_rc_excluded_type(ty, ctx.extern_types) || type_contains_extern_handle(ty, ctx.extern_types) {
-        return val
-    }
     gen_dup_value(ctx, val)
 }
 

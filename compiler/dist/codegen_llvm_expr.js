@@ -5995,10 +5995,6 @@ function gen_effect_op(ctx, effect_name, op_name, args) {
 
 function gen_clone(ctx, inner) {
   const val = gen_llvm_expr(ctx, inner);
-  const ty = hir$hexpr_type(inner);
-  if ((hir$is_rc_excluded_type(ty, ctx.extern_types) ? true : hir$type_contains_extern_handle(ty, ctx.extern_types))) {
-    return val;
-  }
   return gen_dup_value(ctx, val);
 }
 
