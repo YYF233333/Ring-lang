@@ -17,6 +17,6 @@ clang $runtimeFlags
 
 # Step 3: Link
 Write-Host "Step 3/3: Linking ..."
-clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'"
+clang compiler/dist-llvm/main.o ring_runtime.o -o ring.exe -lmsvcrt "-Wl,/STACK:536870912" "-Wl,/MANIFEST:EMBED" "-Wl,/MANIFESTUAC:level='asInvoker'"
 
 Write-Host "Built: ring.exe"
