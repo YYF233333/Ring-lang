@@ -1295,8 +1295,7 @@ fn is_owner_bearing(expr: HExpr) -> Bool {
 //   ring_str_len / eq / lt / contains / starts_with / ends_with / is_empty,
 //   ring_list_len / contains / index_of / is_empty / any / all,
 //   ring_map_has / len, ring_map_int_has / len, ring_set_has / len,
-//   ring_set_int_has / len, ring_sb_len, ring_Option_is_some / is_none,
-//   ring_catch_setjmp (codegen-internal).
+//   ring_set_int_has / len, ring_sb_len, ring_Option_is_some / is_none.
 //
 // ── NULL / NEVER returners (RC-inert: ring_drop(null) is a no-op) ─────────────
 //   null:  ring_print / eprintln / write_file / delete_file / assert /

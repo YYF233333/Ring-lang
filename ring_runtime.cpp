@@ -1987,11 +1987,6 @@ extern "C" void* ring_catch_push() {
     return (void*)frame;
 }
 
-extern "C" int64_t ring_catch_setjmp(void* frame_ptr) {
-    RingCatchFrame* frame = (RingCatchFrame*)frame_ptr;
-    return (int64_t)setjmp(frame->buf);
-}
-
 extern "C" void ring_raise(void* error) {
     if (!ring_catch_stack) {
         fprintf(stderr, "ring panic: unhandled effect raise (no catch frame)\n");
