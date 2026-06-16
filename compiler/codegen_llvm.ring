@@ -378,13 +378,15 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                     some(p) => llvm_mangle_fn_with_prefix(p, name),
                     none => llvm_mangle_fn(name),
                 }
-                let fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
-                let fn_val = LLVMAddFunction(ctx.module, const_fn_name, fn_ty)
-                ctx.functions.insert(const_fn_name, fn_val)
-                ctx.fn_types.insert(const_fn_name, fn_ty)
-                // No evidence params for consts
-                let mut empty_ev: List<Str> = []
-                ctx.fn_evidence_params.insert(const_fn_name, empty_ev)
+                if ctx.functions.get(const_fn_name).is_none() {
+                    let fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0)
+                    let fn_val = LLVMAddFunction(ctx.module, const_fn_name, fn_ty)
+                    ctx.functions.insert(const_fn_name, fn_val)
+                    ctx.fn_types.insert(const_fn_name, fn_ty)
+                    // No evidence params for consts
+                    let mut empty_ev: List<Str> = []
+                    ctx.fn_evidence_params.insert(const_fn_name, empty_ev)
+                }
             },
             HDecl::Trait { .. } => {},
             HDecl::Test { .. } => {},
@@ -470,6 +472,13 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
 
     // Store evidence param names for this function
     ctx.fn_evidence_params.insert(mangled, ev_params)
+
+    // Dedup: skip if already declared (multi-module imports can re-declare).
+    // Map.insert drops old value, but LLVMValueRef is extern — ring_drop would
+    // free a non-Ring pointer → heap corruption.
+    if ctx.functions.get(mangled).is_some() {
+        return
+    }
 
     // Return type is always ptr (uniform boxing)
     let fn_ty = LLVMFunctionType(ptr, param_types, 0)
@@ -747,6 +756,9 @@ fn forward_declare_enum_ctors(mut ctx: LlvmCtx, name: Str, variants: List<HEnumV
     let ptr = ctx.ptr_type
     for v in variants {
         let ctor_name = "ring_${name}_${v.name}"
+        if ctx.functions.get(ctor_name).is_some() {
+            continue
+        }
         let mut param_types: List<LLVMTypeRef> = []
         for f in v.fields {
             param_types.push(ptr)

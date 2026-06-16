@@ -1153,6 +1153,9 @@ function forward_declare_enum_ctors(ctx, name, variants) {
     if (__ring_next_23._tag === "none") break;
     const v = __ring_next_23._0;
     const ctor_name = `ring_${name}_${v.name}`;
+    if (Option_is_some(_Map_get(ctx.functions, ctor_name))) {
+      continue;
+    }
     let param_types = [];
     const __ring_iter_24 = __List_Iterable.iter(v.fields);
     while (true) {
@@ -1383,6 +1386,9 @@ function forward_declare_fn_with_name(ctx, mangled, name, params, effects, trait
     List_push(param_types, ptr);
   }
   _Map_insert(ctx.fn_evidence_params, mangled, ev_params);
+  if (Option_is_some(_Map_get(ctx.functions, mangled))) {
+    return;
+  }
   const fn_ty = LLVMFunctionType(ptr, param_types, 0);
   const fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty);
   apply_fn_attributes(ctx, fn_val, params, effective_effects);
@@ -1489,12 +1495,14 @@ function forward_declare_functions_with_prefix(ctx, decls, prefix) {
           __match_fail(__ring_m36);
         }
         const const_fn_name = __ring_blk8;
-        const fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0);
-        const fn_val = LLVMAddFunction(ctx.module, const_fn_name, fn_ty);
-        _Map_insert(ctx.functions, const_fn_name, fn_val);
-        _Map_insert(ctx.fn_types, const_fn_name, fn_ty);
-        let empty_ev = [];
-        _Map_insert(ctx.fn_evidence_params, const_fn_name, empty_ev);
+        if (Option_is_none(_Map_get(ctx.functions, const_fn_name))) {
+          const fn_ty = LLVMFunctionType(ctx.ptr_type, [], 0);
+          const fn_val = LLVMAddFunction(ctx.module, const_fn_name, fn_ty);
+          _Map_insert(ctx.functions, const_fn_name, fn_val);
+          _Map_insert(ctx.fn_types, const_fn_name, fn_ty);
+          let empty_ev = [];
+          _Map_insert(ctx.fn_evidence_params, const_fn_name, empty_ev);
+        }
         break __ring_match34;
       }
       if (__ring_m34._tag === "Trait") {
