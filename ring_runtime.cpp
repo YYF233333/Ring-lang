@@ -851,6 +851,40 @@ extern "C" void* ring_bool_to_str(int64_t val) {
 }
 
 // ============================================================================
+// B-099: LLVM-C extern fn marshalling helpers
+// ============================================================================
+// When the Ring compiler is compiled to a native binary (--target=llvm), calls
+// to LLVM-C functions bypass the N-API addon and go through C-ABI directly.
+// These helpers convert Ring boxed values to C-ABI types at call sites.
+
+// Extract C string pointer from a Ring Str (std::string*)
+extern "C" const char* ring_str_to_cstr(void* str) {
+    return ((std::string*)str)->c_str();
+}
+
+// Extract the length of a Ring Str as unsigned (for LLVM-C APIs that need it)
+extern "C" unsigned ring_str_len_u32(void* str) {
+    return (unsigned)((std::string*)str)->size();
+}
+
+// Extract data pointer from a Ring List (std::vector<void*>*)
+extern "C" void** ring_list_data(void* list) {
+    return ((std::vector<void*>*)list)->data();
+}
+
+// Extract size from a Ring List as unsigned (for LLVM-C count params)
+extern "C" unsigned ring_list_size_u32(void* list) {
+    return (unsigned)((std::vector<void*>*)list)->size();
+}
+
+// LLVMIsNullPtr — custom helper (not part of LLVM-C API, provided by the N-API
+// addon for JS backend).  For native builds, we provide a C implementation.
+// Takes an opaque pointer, returns 1 if null, 0 if non-null.
+extern "C" int LLVMIsNullPtr(void* val) {
+    return val == nullptr ? 1 : 0;
+}
+
+// ============================================================================
 // List (~18)
 // ============================================================================
 

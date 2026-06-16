@@ -5,6 +5,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
     hexpr_type, hexpr_effects, collect_extern_type_names}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
+    ExternFnInfo, ExternParamMarshall, ExternRetMarshall,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     get_or_assign_typeid}
@@ -314,6 +315,13 @@ fn declare_runtime_fns(mut ctx: LlvmCtx) {
     // Effect workaround
     get_or_declare_runtime_fn(ctx, "__ring_raise_fail", [ptr], ptr)
 
+    // B-099: LLVM-C extern fn marshalling helpers
+    let i32 = ctx.i32_type
+    get_or_declare_runtime_fn(ctx, "ring_str_to_cstr", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_str_len_u32", [ptr], i32)
+    get_or_declare_runtime_fn(ctx, "ring_list_data", [ptr], ptr)
+    get_or_declare_runtime_fn(ctx, "ring_list_size_u32", [ptr], i32)
+
     // Option methods
     get_or_declare_runtime_fn(ctx, "ring_Option_unwrap_or", [ptr, ptr], ptr)
     get_or_declare_runtime_fn(ctx, "ring_Option_unwrap", [ptr], ptr)
@@ -356,7 +364,9 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                 forward_declare_enum_ctors(ctx, name, variants)
             },
             HDecl::Effect { .. } => {},
-            HDecl::ExternFn { .. } => {},
+            HDecl::ExternFn { name, params, return_type, .. } => {
+                forward_declare_extern_fn(ctx, name, params, return_type)
+            },
             HDecl::ModBlock { decls: mod_decls, .. } => {
                 forward_declare_functions_with_prefix(ctx, mod_decls, prefix)
             },
@@ -470,6 +480,244 @@ fn forward_declare_fn_with_name(mut ctx: LlvmCtx, mangled: Str, name: Str, param
 
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)
+}
+
+// ============================================================
+// B-099: forward_declare_extern_fn — declare LLVM-C extern fn with C-ABI types
+// ============================================================
+//
+// When --target=llvm compiles the compiler itself to native, LLVM-C extern fns
+// (LLVMBuildRet, etc.) must be declared with their real C-ABI signatures rather
+// than uniform boxing.  This function:
+//   1. Translates each Ring param type to C-ABI LLVM type(s)
+//   2. Emits an LLVMAddFunction with the C-ABI signature
+//   3. Stores an ExternFnInfo with per-param marshalling descriptors
+//   4. The info is consulted at call sites (gen_direct_call) to emit marshalling
+
+fn is_extern_type_ref(ty: Type, ctx: LlvmCtx) -> Bool {
+    match ty {
+        Type::StructType { name, type_params, fields } => {
+            if fields.len() == 0 && type_params.len() == 0 {
+                ctx.extern_types.contains(name)
+            } else { false }
+        },
+        _ => false,
+    }
+}
+
+fn is_list_type(ty: Type) -> Bool {
+    match ty {
+        Type::StructType { name, type_params, fields } => {
+            name == "List" && type_params.len() >= 1 && fields.len() == 0
+        },
+        _ => false,
+    }
+}
+
+fn forward_declare_extern_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, return_type: Type) {
+    // Skip extern fns that are already declared as runtime fns (print, panic, etc.)
+    // — those use the Ring uniform-boxing ABI via ring_runtime.cpp.
+    // Only LLVM-C functions (starting with "LLVM") need C-ABI declarations.
+    if !name.starts_with("LLVM") {
+        return
+    }
+
+    // Also skip if already declared (multiple modules re-declare the same extern fns)
+    if ctx.extern_fn_infos.get(name).is_some() {
+        return
+    }
+
+    let ptr = ctx.ptr_type
+    let i32_ty = ctx.i32_type
+    let i64_ty = ctx.i64_type
+    let void_ty = ctx.void_type
+    let dbl_ty = ctx.double_type
+
+    // Build C-ABI parameter types and marshalling descriptors
+    let mut c_param_types: List<LLVMTypeRef> = []
+    let mut param_marshalls: List<ExternParamMarshall> = []
+
+    // Special-case: LLVMConstStringInContext has a Str param that needs
+    // (cstr, len) expansion (the addon inserts the length automatically)
+    let is_const_string = name == "LLVMConstStringInContext"
+
+    for p in params {
+        let ty = p.ty
+        if is_extern_type_ref(ty, ctx) {
+            // Opaque extern type ref → ptr passthrough
+            c_param_types.push(ptr)
+            param_marshalls.push(ExternParamMarshall::PassthroughPtr)
+        } else {
+            match ty {
+                Type::StrType => {
+                    if is_const_string && p.name == "str" {
+                        // Special: LLVMConstStringInContext str → (cstr, len)
+                        c_param_types.push(ptr)    // const char*
+                        c_param_types.push(i32_ty) // unsigned len
+                        param_marshalls.push(ExternParamMarshall::StrToCstrAndLen)
+                    } else {
+                        // Normal Str → const char*
+                        c_param_types.push(ptr)
+                        param_marshalls.push(ExternParamMarshall::StrToCstr)
+                    }
+                },
+                Type::IntType => {
+                    // Most LLVM-C APIs use unsigned/int (32-bit) for Int params.
+                    // Exceptions that use uint64_t / int64_t / size_t:
+                    let needs_i64 = (name == "LLVMConstInt" && p.name == "val")
+                        || (name == "LLVMArrayType2" && p.name == "count")
+                        || (name == "LLVMGetEnumAttributeKindForName" && p.name == "s_len")
+                        || (name == "LLVMCreateEnumAttribute" && p.name == "val")
+                    if needs_i64 {
+                        c_param_types.push(i64_ty)
+                        param_marshalls.push(ExternParamMarshall::IntToI64)
+                    } else {
+                        c_param_types.push(i32_ty)
+                        param_marshalls.push(ExternParamMarshall::IntToI32)
+                    }
+                },
+                Type::FloatType => {
+                    c_param_types.push(dbl_ty)
+                    param_marshalls.push(ExternParamMarshall::FloatToDouble)
+                },
+                _ => {
+                    // Check for List<T> — expands to (T*, count)
+                    if is_list_type(ty) {
+                        c_param_types.push(ptr)    // T* data
+                        // LLVMConstArray2 uses uint64_t for count; most others use unsigned
+                        if name == "LLVMConstArray2" {
+                            c_param_types.push(i64_ty)
+                            param_marshalls.push(ExternParamMarshall::ListToDataAndCountI64)
+                        } else {
+                            c_param_types.push(i32_ty)
+                            param_marshalls.push(ExternParamMarshall::ListToDataAndCount)
+                        }
+                    } else {
+                        // Unknown type — treat as passthrough ptr (covers any
+                        // remaining opaque types the StructType match didn't catch)
+                        c_param_types.push(ptr)
+                        param_marshalls.push(ExternParamMarshall::PassthroughPtr)
+                    }
+                },
+            }
+        }
+    }
+
+    // Determine C return type and marshalling
+    let mut ret_marshall = ExternRetMarshall::RetPtr
+    let mut c_ret_type = ptr
+
+    match return_type {
+        Type::UnitType => {
+            c_ret_type = void_ty
+            ret_marshall = ExternRetMarshall::RetVoid
+        },
+        Type::IntType => {
+            // C functions returning int/LLVMBool → i32
+            c_ret_type = i32_ty
+            ret_marshall = ExternRetMarshall::RetIntToBoxed
+        },
+        Type::StrType => {
+            // C functions returning const char* (e.g. LLVMPrintModuleToString)
+            c_ret_type = ptr
+            ret_marshall = ExternRetMarshall::RetStrFromCstr
+        },
+        _ => {
+            // Opaque ref (extern type) or any other — ptr passthrough
+            c_ret_type = ptr
+            ret_marshall = ExternRetMarshall::RetPtr
+        },
+    }
+
+    // Special handling for output-param functions — these have different
+    // actual C signatures from what Ring declares.
+    let is_special = if name == "LLVMGetTargetFromTriple" { "LLVMGetTargetFromTriple" }
+        else { if name == "LLVMTargetMachineEmitToFile" { "LLVMTargetMachineEmitToFile" }
+        else { if name == "LLVMVerifyModule" { "LLVMVerifyModule" }
+        else { if name == "LLVMRunPasses" { "LLVMRunPasses" }
+        else { "" } } } }
+
+    if is_special == "LLVMGetTargetFromTriple" {
+        // C: LLVMBool LLVMGetTargetFromTriple(const char*, LLVMTargetRef*, char**)
+        // Ring: (triple: Str) -> LLVMTargetRef
+        // We build the real C signature.
+        let real_param_types: List<LLVMTypeRef> = [ptr, ptr, ptr]  // cstr, target*, error*
+        let real_ret = i32_ty  // LLVMBool
+        let fn_ty = LLVMFunctionType(real_ret, real_param_types, 0)
+        let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
+        ctx.extern_fn_infos.insert(name, ExternFnInfo {
+            c_fn_val: fn_val,
+            c_fn_type: fn_ty,
+            param_marshalls: param_marshalls,
+            ret_marshall: ret_marshall,
+            is_special: is_special
+        })
+        return
+    }
+
+    if is_special == "LLVMTargetMachineEmitToFile" {
+        // C: LLVMBool LLVMTargetMachineEmitToFile(TM, Module, char*, FileType, char**)
+        // Ring: (tm, m, filename: Str, file_type: Int) -> Int
+        // The actual C sig has an extra char** error output param.
+        let real_param_types: List<LLVMTypeRef> = [ptr, ptr, ptr, i32_ty, ptr]
+        let real_ret = i32_ty
+        let fn_ty = LLVMFunctionType(real_ret, real_param_types, 0)
+        let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
+        ctx.extern_fn_infos.insert(name, ExternFnInfo {
+            c_fn_val: fn_val,
+            c_fn_type: fn_ty,
+            param_marshalls: param_marshalls,
+            ret_marshall: ret_marshall,
+            is_special: is_special
+        })
+        return
+    }
+
+    if is_special == "LLVMVerifyModule" {
+        // C: LLVMBool LLVMVerifyModule(LLVMModuleRef, Action, char**)
+        // Ring: (module, action: Int) -> Int
+        let real_param_types: List<LLVMTypeRef> = [ptr, i32_ty, ptr]
+        let real_ret = i32_ty
+        let fn_ty = LLVMFunctionType(real_ret, real_param_types, 0)
+        let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
+        ctx.extern_fn_infos.insert(name, ExternFnInfo {
+            c_fn_val: fn_val,
+            c_fn_type: fn_ty,
+            param_marshalls: param_marshalls,
+            ret_marshall: ret_marshall,
+            is_special: is_special
+        })
+        return
+    }
+
+    if is_special == "LLVMRunPasses" {
+        // C: LLVMErrorRef LLVMRunPasses(Module, const char* passes, TM, Options)
+        // Ring: (m, passes: Str, tm, opts) -> Int
+        // LLVMErrorRef is a pointer (NULL on success). The addon returns 0/1.
+        let real_param_types: List<LLVMTypeRef> = [ptr, ptr, ptr, ptr]  // module, cstr, tm, opts
+        let real_ret = ptr  // LLVMErrorRef = void*
+        let fn_ty = LLVMFunctionType(real_ret, real_param_types, 0)
+        let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
+        ctx.extern_fn_infos.insert(name, ExternFnInfo {
+            c_fn_val: fn_val,
+            c_fn_type: fn_ty,
+            param_marshalls: param_marshalls,
+            ret_marshall: ret_marshall,
+            is_special: is_special
+        })
+        return
+    }
+
+    // Normal extern fn — use the computed C-ABI types
+    let fn_ty = LLVMFunctionType(c_ret_type, c_param_types, 0)
+    let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
+    ctx.extern_fn_infos.insert(name, ExternFnInfo {
+        c_fn_val: fn_val,
+        c_fn_type: fn_ty,
+        param_marshalls: param_marshalls,
+        ret_marshall: ret_marshall,
+        is_special: ""
+    })
 }
 
 // ============================================================
@@ -1114,7 +1362,8 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         boxed_vars: set_new(),
         fn_mut_params: map_new(),
         effect_ops: map_new(),
-        extern_types: set_new()
+        extern_types: set_new(),
+        extern_fn_infos: map_new()
     }
 
     // B-091: thread the auto-boxed mut-cell def_ids through so Var/read/write
@@ -1266,7 +1515,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         boxed_vars: set_new(),
         fn_mut_params: map_new(),
         effect_ops: map_new(),
-        extern_types: set_new()
+        extern_types: set_new(),
+        extern_fn_infos: map_new()
     }
 
     // 6. Register built-in types

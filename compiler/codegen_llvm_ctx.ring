@@ -54,6 +54,48 @@ pub struct EnumTypeInfo {
     pub llvm_type: LLVMTypeRef
 }
 
+// B-099: per-Ring-parameter marshalling action for LLVM-C extern fn call sites.
+// Each variant describes how to convert one Ring boxed argument into C-ABI arg(s).
+pub enum ExternParamMarshall {
+    // Opaque extern type ref — passthrough (already ptr)
+    PassthroughPtr,
+    // Ring Str → const char* via ring_str_to_cstr
+    StrToCstr,
+    // Ring Str → (const char*, unsigned len) — two C params (LLVMConstStringInContext)
+    StrToCstrAndLen,
+    // Ring Int → i32 via unbox_int + trunc
+    IntToI32,
+    // Ring Int → i64 via unbox_int (for LLVMConstInt val param, etc.)
+    IntToI64,
+    // Ring Float → double via ring_unbox_float
+    FloatToDouble,
+    // Ring List<T> → (T*, unsigned count) — two C params (u32 count)
+    ListToDataAndCount,
+    // Ring List<T> → (T*, uint64_t count) — two C params (u64 count)
+    ListToDataAndCountI64
+}
+
+// B-099: return type marshalling action for LLVM-C extern fn call sites.
+pub enum ExternRetMarshall {
+    // C returns ptr (opaque ref) — passthrough to Ring
+    RetPtr,
+    // C returns void — return null ptr to Ring
+    RetVoid,
+    // C returns int (LLVMBool / int) — box to Ring Int via box_int (with sext to i64)
+    RetIntToBoxed,
+    // C returns const char* (Str) — wrap in ring_str_from_cstr
+    RetStrFromCstr
+}
+
+// B-099: complete marshalling descriptor for one LLVM-C extern fn.
+pub struct ExternFnInfo {
+    pub c_fn_val: LLVMValueRef,       // the LLVM declaration (C-ABI signature)
+    pub c_fn_type: LLVMTypeRef,       // the LLVM function type
+    pub param_marshalls: List<ExternParamMarshall>,  // one per Ring param
+    pub ret_marshall: ExternRetMarshall,
+    pub is_special: Str               // "" for normal, function name for output-param specials
+}
+
 pub struct LlvmCtx {
     pub context: LLVMContextRef,
     pub module: LLVMModuleRef,
@@ -150,7 +192,13 @@ pub struct LlvmCtx {
     // codegen_llvm_* local re-declarations).  register_struct_info /
     // register_enum_info consult it (via hir::type_contains_extern_handle) to
     // mark fields whose drop_T emission must be skipped.
-    pub extern_types: Set<Str>
+    pub extern_types: Set<Str>,
+
+    // B-099: LLVM-C extern fn marshalling info — maps Ring function name to its
+    // C-ABI declaration + marshalling descriptor.  Populated by
+    // forward_declare_extern_fn in codegen_llvm.ring; consulted by gen_direct_call
+    // in codegen_llvm_expr.ring before the panic-stub fallback.
+    pub extern_fn_infos: Map<Str, ExternFnInfo>
 }
 
 // B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).

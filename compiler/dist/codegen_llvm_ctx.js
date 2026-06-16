@@ -281,8 +281,32 @@ class EnumTypeInfo {
   }
 }
 
+const ExternParamMarshall_PassthroughPtr = Object.freeze({ _tag: "PassthroughPtr" });
+const ExternParamMarshall_StrToCstr = Object.freeze({ _tag: "StrToCstr" });
+const ExternParamMarshall_StrToCstrAndLen = Object.freeze({ _tag: "StrToCstrAndLen" });
+const ExternParamMarshall_IntToI32 = Object.freeze({ _tag: "IntToI32" });
+const ExternParamMarshall_IntToI64 = Object.freeze({ _tag: "IntToI64" });
+const ExternParamMarshall_FloatToDouble = Object.freeze({ _tag: "FloatToDouble" });
+const ExternParamMarshall_ListToDataAndCount = Object.freeze({ _tag: "ListToDataAndCount" });
+const ExternParamMarshall_ListToDataAndCountI64 = Object.freeze({ _tag: "ListToDataAndCountI64" });
+
+const ExternRetMarshall_RetPtr = Object.freeze({ _tag: "RetPtr" });
+const ExternRetMarshall_RetVoid = Object.freeze({ _tag: "RetVoid" });
+const ExternRetMarshall_RetIntToBoxed = Object.freeze({ _tag: "RetIntToBoxed" });
+const ExternRetMarshall_RetStrFromCstr = Object.freeze({ _tag: "RetStrFromCstr" });
+
+class ExternFnInfo {
+  constructor(c_fn_val, c_fn_type, param_marshalls, ret_marshall, is_special) {
+    this.c_fn_val = c_fn_val;
+    this.c_fn_type = c_fn_type;
+    this.param_marshalls = param_marshalls;
+    this.ret_marshall = ret_marshall;
+    this.is_special = is_special;
+  }
+}
+
 class LlvmCtx {
-  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, static_dict_defs, dict_singletons, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params, effect_ops, extern_types) {
+  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, static_dict_defs, dict_singletons, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params, effect_ops, extern_types, extern_fn_infos) {
     this.context = context;
     this.module = module;
     this.builder = builder;
@@ -323,6 +347,7 @@ class LlvmCtx {
     this.fn_mut_params = fn_mut_params;
     this.effect_ops = effect_ops;
     this.extern_types = extern_types;
+    this.extern_fn_infos = extern_fn_infos;
   }
 }
 
@@ -524,6 +549,18 @@ function llvm_resolve_method(ctx, type_name, method_name) {
   return llvm_mangle_method(type_name, method_name);
 }
 
+function __ExternParamMarshall_Eq_eq(self, other) {
+  if (self._tag !== other._tag) return false;
+  return true;
+}
+const __ExternParamMarshall_Eq = { eq: __ExternParamMarshall_Eq_eq, ne: function(self, other) { return !__ExternParamMarshall_Eq_eq(self, other); } };
+
+function __ExternRetMarshall_Eq_eq(self, other) {
+  if (self._tag !== other._tag) return false;
+  return true;
+}
+const __ExternRetMarshall_Eq = { eq: __ExternRetMarshall_Eq_eq, ne: function(self, other) { return !__ExternRetMarshall_Eq_eq(self, other); } };
+
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
   if (self._tag !== other._tag) return false;
   switch (self._tag) {
@@ -549,6 +586,32 @@ function __SetIterator_Clone_clone(self, __ring_T_Clone) {
 }
 const __SetIterator_Clone = { clone: __SetIterator_Clone_clone };
 
+function __ExternParamMarshall_Clone_clone(self) {
+  switch (self._tag) {
+    case "PassthroughPtr": return ExternParamMarshall_PassthroughPtr;
+    case "StrToCstr": return ExternParamMarshall_StrToCstr;
+    case "StrToCstrAndLen": return ExternParamMarshall_StrToCstrAndLen;
+    case "IntToI32": return ExternParamMarshall_IntToI32;
+    case "IntToI64": return ExternParamMarshall_IntToI64;
+    case "FloatToDouble": return ExternParamMarshall_FloatToDouble;
+    case "ListToDataAndCount": return ExternParamMarshall_ListToDataAndCount;
+    case "ListToDataAndCountI64": return ExternParamMarshall_ListToDataAndCountI64;
+    default: return self;
+  }
+}
+const __ExternParamMarshall_Clone = { clone: __ExternParamMarshall_Clone_clone };
+
+function __ExternRetMarshall_Clone_clone(self) {
+  switch (self._tag) {
+    case "RetPtr": return ExternRetMarshall_RetPtr;
+    case "RetVoid": return ExternRetMarshall_RetVoid;
+    case "RetIntToBoxed": return ExternRetMarshall_RetIntToBoxed;
+    case "RetStrFromCstr": return ExternRetMarshall_RetStrFromCstr;
+    default: return self;
+  }
+}
+const __ExternRetMarshall_Clone = { clone: __ExternRetMarshall_Clone_clone };
+
 function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   switch (self._tag) {
     case "Ok": return Result_Ok(__ring_T_Clone.clone(self._0));
@@ -557,6 +620,24 @@ function __Result_Clone_clone(self, __ring_T_Clone, __ring_E_Clone) {
   }
 }
 const __Result_Clone = { clone: __Result_Clone_clone };
+
+const __ExternParamMarshall_tag_order = { "PassthroughPtr": 0, "StrToCstr": 1, "StrToCstrAndLen": 2, "IntToI32": 3, "IntToI64": 4, "FloatToDouble": 5, "ListToDataAndCount": 6, "ListToDataAndCountI64": 7 };
+function __ExternParamMarshall_Ord_cmp(self, other) {
+  var t1 = __ExternParamMarshall_tag_order[self._tag];
+  var t2 = __ExternParamMarshall_tag_order[other._tag];
+  if (t1 !== t2) return (t1 < t2 ? -1 : 1);
+  return 0;
+}
+const __ExternParamMarshall_Ord = { cmp: __ExternParamMarshall_Ord_cmp };
+
+const __ExternRetMarshall_tag_order = { "RetPtr": 0, "RetVoid": 1, "RetIntToBoxed": 2, "RetStrFromCstr": 3 };
+function __ExternRetMarshall_Ord_cmp(self, other) {
+  var t1 = __ExternRetMarshall_tag_order[self._tag];
+  var t2 = __ExternRetMarshall_tag_order[other._tag];
+  if (t1 !== t2) return (t1 < t2 ? -1 : 1);
+  return 0;
+}
+const __ExternRetMarshall_Ord = { cmp: __ExternRetMarshall_Ord_cmp };
 
 const __Result_tag_order = { "Ok": 0, "Err": 1 };
 function __Result_Ord_cmp(self, other, __ring_T_Ord, __ring_E_Ord) {
@@ -586,6 +667,32 @@ function __SetIterator_Debug_debug(self, __ring_T_Debug) {
 }
 const __SetIterator_Debug = { debug: __SetIterator_Debug_debug };
 
+function __ExternParamMarshall_Debug_debug(self) {
+  switch (self._tag) {
+    case "PassthroughPtr": return "PassthroughPtr";
+    case "StrToCstr": return "StrToCstr";
+    case "StrToCstrAndLen": return "StrToCstrAndLen";
+    case "IntToI32": return "IntToI32";
+    case "IntToI64": return "IntToI64";
+    case "FloatToDouble": return "FloatToDouble";
+    case "ListToDataAndCount": return "ListToDataAndCount";
+    case "ListToDataAndCountI64": return "ListToDataAndCountI64";
+    default: return self._tag;
+  }
+}
+const __ExternParamMarshall_Debug = { debug: __ExternParamMarshall_Debug_debug };
+
+function __ExternRetMarshall_Debug_debug(self) {
+  switch (self._tag) {
+    case "RetPtr": return "RetPtr";
+    case "RetVoid": return "RetVoid";
+    case "RetIntToBoxed": return "RetIntToBoxed";
+    case "RetStrFromCstr": return "RetStrFromCstr";
+    default: return self._tag;
+  }
+}
+const __ExternRetMarshall_Debug = { debug: __ExternRetMarshall_Debug_debug };
+
 function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
   switch (self._tag) {
     case "Ok": return "Ok(" + __ring_T_Debug.debug(self._0) + ")";
@@ -596,4 +703,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, get_builtin_typeid, build_entry_alloca, __EnumVariantInfo_Clone, __EnumVariantInfo_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr, ExternFnInfo, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, get_builtin_typeid, build_entry_alloca, __ExternParamMarshall_Eq, __ExternRetMarshall_Eq, __EnumVariantInfo_Clone, __ExternParamMarshall_Clone, __ExternRetMarshall_Clone, __ExternParamMarshall_Ord, __ExternRetMarshall_Ord, __EnumVariantInfo_Debug, __ExternParamMarshall_Debug, __ExternRetMarshall_Debug };
