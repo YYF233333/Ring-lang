@@ -589,7 +589,23 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
+### B-139 Delegate stub 不转发 custom effect evidence [bugfix] [P2] [M] [judgment] [queued]
 
+> 2026-06-17 立项（Discussion，B-097 worker feedback #2 转入）。与 audit #93（delegate expansion 绕过推断）同族。
+
+**现象**：当 trait 方法签名带 `with {CustomEffect}` 时，delegate stub（`__Wrapper_Trait_method`）正确接收 `__ring_ev_X` evidence 参数，但调用内层 `__Inner_Trait.method(self.inner)` 时漏传 evidence。两后端行为一致（JS 后端已有此问题）。
+
+**变通方案**（B-097 已验证）：在 trait 方法 body 内调用 free function（evidence 通过正常参数传递），不在 delegate 签名上直接标 custom effect。`delegate_custom_effect.ring` 测试使用此模式。
+
+**涉及修改**：
+1. `compiler/infer_decl.ring`（`expand_delegate_impls`）：合成 forwarding call 时，从 trait method 的 FnType 提取 effect row，为每个 effect 生成 evidence 参数并传递给内层调用
+2. `compiler/codegen_expr.ring` / `codegen_llvm_expr.ring`：确认 delegate dispatch 路径正确传递 evidence（两后端）
+
+**验收标准**：
+- `delegate` trait 方法带 `with {CustomEffect}` 时 evidence 正确转发，无需变通
+- 现有 delegate 测试（Eq/Clone/Ord/Debug）不回归
+- llvm_diff 用例覆盖 delegate + custom effect 场景
+- 全部 E2E + llvm_diff 通过；自举一致
 
 
 
