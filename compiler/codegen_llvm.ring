@@ -1443,8 +1443,6 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // 11. Dump IR for debugging
     let ir = LLVMPrintModuleToString(module)
     write_file("ring_output.ll", ir)
-    // Skip LLVMVerifyModule — N-API addon throws on failure instead of returning status.
-    // Verification will be re-enabled when the addon is fixed or when targeting self-hosting.
 
     // 12. Run LLVM optimization passes (B-126)
     let pass_opts = LLVMCreatePassBuilderOptions()

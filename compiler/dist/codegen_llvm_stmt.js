@@ -1071,42 +1071,46 @@ function emit_llvm_stmt(ctx, stmt) {
       break __ring_match39;
     }
     if (__ring_m39._tag === "Drop") {
-      const name = __ring_m39.name;
-      __ring_match40: {
-        const __ring_m40 = _Map_get(ctx.named_values, name);
-        if (__ring_m40._tag === "some") {
-          const var_ptr = __ring_m40._0;
-          const val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, codegen_llvm_ctx$fresh_name(ctx, "drop_val"));
-          const drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
-          const drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
-          return discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""));
-          break __ring_match40;
+      const name = __ring_m39.name; const ty = __ring_m39.ty;
+      if (((!hir$is_rc_excluded_type(ty, ctx.extern_types)) ? (!hir$type_contains_extern_handle(ty, ctx.extern_types)) : false)) {
+        __ring_match40: {
+          const __ring_m40 = _Map_get(ctx.named_values, name);
+          if (__ring_m40._tag === "some") {
+            const var_ptr = __ring_m40._0;
+            const val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, codegen_llvm_ctx$fresh_name(ctx, "drop_val"));
+            const drop_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type);
+            const drop_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_drop");
+            return discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [val], ""));
+            break __ring_match40;
+          }
+          if (__ring_m40._tag === "none") {
+            return eprintln(`[rc-warn] Drop: variable '${name}' not found in named_values`);
+            break __ring_match40;
+          }
+          __match_fail(__ring_m40);
         }
-        if (__ring_m40._tag === "none") {
-          return eprintln(`[rc-warn] Drop: variable '${name}' not found in named_values`);
-          break __ring_match40;
-        }
-        __match_fail(__ring_m40);
       }
       break __ring_match39;
     }
     if (__ring_m39._tag === "Dup") {
-      const name = __ring_m39.name;
-      __ring_match41: {
-        const __ring_m41 = _Map_get(ctx.named_values, name);
-        if (__ring_m41._tag === "some") {
-          const var_ptr = __ring_m41._0;
-          const val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, codegen_llvm_ctx$fresh_name(ctx, "dup_val"));
-          const dup_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type);
-          const dup_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_dup");
-          return discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""));
-          break __ring_match41;
+      const name = __ring_m39.name; const ty = __ring_m39.ty;
+      if (((!hir$is_rc_excluded_type(ty, ctx.extern_types)) ? (!hir$type_contains_extern_handle(ty, ctx.extern_types)) : false)) {
+        __ring_match41: {
+          const __ring_m41 = _Map_get(ctx.named_values, name);
+          if (__ring_m41._tag === "some") {
+            const var_ptr = __ring_m41._0;
+            const val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, var_ptr, codegen_llvm_ctx$fresh_name(ctx, "dup_val"));
+            const dup_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type);
+            const dup_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_dup");
+            return discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""));
+            break __ring_match41;
+          }
+          if (__ring_m41._tag === "none") {
+            return eprintln(`[rc-warn] Dup: variable '${name}' not found in named_values`);
+            break __ring_match41;
+          }
+          __match_fail(__ring_m41);
         }
-        if (__ring_m41._tag === "none") {
-          return eprintln(`[rc-warn] Dup: variable '${name}' not found in named_values`);
-          break __ring_match41;
-        }
-        __match_fail(__ring_m41);
       }
       break __ring_match39;
     }

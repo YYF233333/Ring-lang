@@ -349,15 +349,28 @@ extern "C" void ring_dup(void* ptr) {
     if (!ptr) return;
     if ((uintptr_t)ptr & 1) return;  // B-080: tagged scalar — no RC
     uint32_t tid = *(uint32_t*)((char*)ptr - 4);
-    if (tid < 4096 && never_drop_table[tid]) return; // B-101: interned, no RC
-    uint32_t* rc = (uint32_t*)((char*)ptr - 8);
-    *rc += 1;
+    // B-099: foreign-pointer guard — extern type values (LLVM opaque refs etc.)
+    // are NOT Ring-allocated.  Their ptr-4/ptr-8 bytes are arbitrary heap data.
+    // Validating tid + rc catches most foreign pointers cheaply (reads are safe;
+    // only writes corrupt).  This is defense-in-depth alongside codegen-level
+    // extern-type exclusion in HStmt::Dup/Drop and gen_clone.
+    if (tid >= 4096u) return;
+    uint32_t rc = *(uint32_t*)((char*)ptr - 8);
+    if (rc == 0u || rc > 100000u) return;
+    if (never_drop_table[tid]) return; // B-101: interned, no RC
+    *(uint32_t*)((char*)ptr - 8) = rc + 1;
 }
 
 extern "C" void ring_drop(void* ptr) {
     if (!ptr) return;
     if ((uintptr_t)ptr & 1) return;  // B-080: tagged scalar — no RC
     uint32_t tid = *(uint32_t*)((char*)ptr - 4);
+    // B-099: foreign-pointer guard (same rationale as ring_dup above).
+    if (tid >= 4096u) return;
+    {
+        uint32_t rcv = *(uint32_t*)((char*)ptr - 8);
+        if (rcv == 0u || rcv > 100000u) return;
+    }
 #ifdef RING_RC_DEBUG
     {
         uint32_t rcv = *(uint32_t*)((char*)ptr - 8);
