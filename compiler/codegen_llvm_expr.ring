@@ -1745,6 +1745,9 @@ fn gen_extern_fn_call(mut ctx: LlvmCtx, name: Str, arg_vals: List<LLVMValueRef>,
     if info.is_special == "LLVMRunPasses" {
         return gen_extern_LLVMRunPasses(ctx, arg_vals, info)
     }
+    if info.is_special == "LLVMAddIncoming" {
+        return gen_extern_LLVMAddIncoming(ctx, arg_vals, info)
+    }
 
     // Normal case: marshall each Ring arg to C-ABI
     let mut c_args: List<LLVMValueRef> = []
@@ -1955,6 +1958,28 @@ fn gen_extern_LLVMRunPasses(mut ctx: LlvmCtx, arg_vals: List<LLVMValueRef>, info
     let is_err = LLVMBuildICmp(ctx.builder, 33, err_ptr, null_ptr, fresh_name(ctx, "iserr"))
     let result = LLVMBuildZExt(ctx.builder, is_err, ctx.i64_type, fresh_name(ctx, "rperr"))
     box_int(ctx, result)
+}
+
+// LLVMAddIncoming: Ring (phi, vals: List<LLVMValueRef>, blocks: List<LLVMBasicBlockRef>) -> Unit
+// C: void LLVMAddIncoming(LLVMValueRef Phi, LLVMValueRef* Vals, LLVMBasicBlockRef* Blocks, unsigned Count)
+// Two Lists share ONE count — must extract data ptrs from both but count from only one.
+fn gen_extern_LLVMAddIncoming(mut ctx: LlvmCtx, arg_vals: List<LLVMValueRef>, info: ExternFnInfo) -> LLVMValueRef {
+    let phi_val = match arg_vals.get(0) { some(v) => v, none => panic("B-099: AddIncoming missing phi") }
+    let vals_list = match arg_vals.get(1) { some(v) => v, none => panic("B-099: AddIncoming missing vals") }
+    let blocks_list = match arg_vals.get(2) { some(v) => v, none => panic("B-099: AddIncoming missing blocks") }
+
+    let data_fn = get_or_declare_runtime_fn(ctx, "ring_list_data", [ctx.ptr_type], ctx.ptr_type)
+    let data_ty = get_rt_fn_type(ctx, "ring_list_data")
+    let size_fn = get_or_declare_runtime_fn(ctx, "ring_list_size_u32", [ctx.ptr_type], ctx.i32_type)
+    let size_ty = get_rt_fn_type(ctx, "ring_list_size_u32")
+
+    let vals_data = LLVMBuildCall2(ctx.builder, data_ty, data_fn, [vals_list], fresh_name(ctx, "vdata"))
+    let blocks_data = LLVMBuildCall2(ctx.builder, data_ty, data_fn, [blocks_list], fresh_name(ctx, "bdata"))
+    let count = LLVMBuildCall2(ctx.builder, size_ty, size_fn, [vals_list], fresh_name(ctx, "cnt"))
+
+    let c_args: List<LLVMValueRef> = [phi_val, vals_data, blocks_data, count]
+    LLVMBuildCall2(ctx.builder, info.c_fn_type, info.c_fn_val, c_args, "")
+    LLVMConstPointerNull(ctx.ptr_type)
 }
 
 fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>, dict_vals: List<LLVMValueRef>) -> LLVMValueRef {

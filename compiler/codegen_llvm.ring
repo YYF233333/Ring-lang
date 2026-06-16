@@ -635,7 +635,8 @@ fn forward_declare_extern_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, 
         else { if name == "LLVMTargetMachineEmitToFile" { "LLVMTargetMachineEmitToFile" }
         else { if name == "LLVMVerifyModule" { "LLVMVerifyModule" }
         else { if name == "LLVMRunPasses" { "LLVMRunPasses" }
-        else { "" } } } }
+        else { if name == "LLVMAddIncoming" { "LLVMAddIncoming" }
+        else { "" } } } } }
 
     if is_special == "LLVMGetTargetFromTriple" {
         // C: LLVMBool LLVMGetTargetFromTriple(const char*, LLVMTargetRef*, char**)
@@ -703,6 +704,24 @@ fn forward_declare_extern_fn(mut ctx: LlvmCtx, name: Str, params: List<HParam>, 
             c_fn_type: fn_ty,
             param_marshalls: param_marshalls,
             ret_marshall: ret_marshall,
+            is_special: is_special
+        })
+        return
+    }
+
+    if is_special == "LLVMAddIncoming" {
+        // C: void LLVMAddIncoming(LLVMValueRef Phi, LLVMValueRef* Vals, LLVMBasicBlockRef* Blocks, unsigned Count)
+        // Ring: (phi, vals: List<LLVMValueRef>, blocks: List<LLVMBasicBlockRef>) -> Unit
+        // Two Lists share ONE count — must not emit two separate counts.
+        let real_param_types: List<LLVMTypeRef> = [ptr, ptr, ptr, i32_ty]
+        let real_ret = void_ty
+        let fn_ty = LLVMFunctionType(real_ret, real_param_types, 0)
+        let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
+        ctx.extern_fn_infos.insert(name, ExternFnInfo {
+            c_fn_val: fn_val,
+            c_fn_type: fn_ty,
+            param_marshalls: param_marshalls,
+            ret_marshall: ExternRetMarshall::RetVoid,
             is_special: is_special
         })
         return

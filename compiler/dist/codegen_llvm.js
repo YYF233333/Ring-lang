@@ -1296,7 +1296,7 @@ function forward_declare_extern_fn(ctx, name, params, return_type) {
     ret_marshall = codegen_llvm_ctx$ExternRetMarshall_RetPtr;
     break __ring_match31;
   }
-  const is_special = ((name === "LLVMGetTargetFromTriple") ? "LLVMGetTargetFromTriple" : ((name === "LLVMTargetMachineEmitToFile") ? "LLVMTargetMachineEmitToFile" : ((name === "LLVMVerifyModule") ? "LLVMVerifyModule" : ((name === "LLVMRunPasses") ? "LLVMRunPasses" : ""))));
+  const is_special = ((name === "LLVMGetTargetFromTriple") ? "LLVMGetTargetFromTriple" : ((name === "LLVMTargetMachineEmitToFile") ? "LLVMTargetMachineEmitToFile" : ((name === "LLVMVerifyModule") ? "LLVMVerifyModule" : ((name === "LLVMRunPasses") ? "LLVMRunPasses" : ((name === "LLVMAddIncoming") ? "LLVMAddIncoming" : "")))));
   if ((is_special === "LLVMGetTargetFromTriple")) {
     const real_param_types = [ptr, ptr, ptr];
     const real_ret = i32_ty;
@@ -1327,6 +1327,14 @@ function forward_declare_extern_fn(ctx, name, params, return_type) {
     const fn_ty = LLVMFunctionType(real_ret, real_param_types, 0);
     const fn_val = LLVMAddFunction(ctx.module, name, fn_ty);
     _Map_insert(ctx.extern_fn_infos, name, new codegen_llvm_ctx$ExternFnInfo(fn_val, fn_ty, param_marshalls, ret_marshall, is_special));
+    return;
+  }
+  if ((is_special === "LLVMAddIncoming")) {
+    const real_param_types = [ptr, ptr, ptr, i32_ty];
+    const real_ret = void_ty;
+    const fn_ty = LLVMFunctionType(real_ret, real_param_types, 0);
+    const fn_val = LLVMAddFunction(ctx.module, name, fn_ty);
+    _Map_insert(ctx.extern_fn_infos, name, new codegen_llvm_ctx$ExternFnInfo(fn_val, fn_ty, param_marshalls, codegen_llvm_ctx$ExternRetMarshall_RetVoid, is_special));
     return;
   }
   const fn_ty = LLVMFunctionType(c_ret_type, c_param_types, 0);
