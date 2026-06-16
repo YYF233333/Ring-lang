@@ -9,7 +9,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     get_or_assign_typeid}
-use codegen_llvm_expr::{gen_llvm_expr}
+use codegen_llvm_expr::{gen_llvm_expr, build_default_evidence_all}
 use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info}
 use codegen_ctx::{extract_effect_names}
 use codegen::{collect_fn_callees}
@@ -1287,6 +1287,11 @@ fn emit_c_main(mut ctx: LlvmCtx) {
     // Register per-type drop functions with RC runtime
     emit_drop_registrations(ctx)
 
+    // B-097: build default evidence structs (needs a function context for gen_lambda)
+    ctx.current_fn = some(main_fn)
+    ctx.current_fn_name = "main"
+    build_default_evidence_all(ctx)
+
     // Call ring_main() — find it in our functions map
     let ring_main_name = llvm_mangle_fn("main")
     match ctx.functions.get(ring_main_name) {
@@ -1295,10 +1300,15 @@ fn emit_c_main(mut ctx: LlvmCtx) {
             let mut call_args: List<LLVMValueRef> = []
             match ctx.fn_evidence_params.get(ring_main_name) {
                 some(ev_params) => {
-                    // Pass null for each evidence param — top-level default evidence
-                    // io/mut/fail all use null at top level (runtime handles IO directly)
+                    // B-097: pass default evidence for effects that have it,
+                    // null for io/fail/unknown effects (runtime handles those)
                     for ep in ev_params {
-                        call_args.push(LLVMConstPointerNull(ptr))
+                        // ep is like "__ring_ev_Logger" — extract effect name
+                        let effect_name = ep.slice(10, ep.len())
+                        match ctx.default_evidence.get(effect_name) {
+                            some(def_ev) => call_args.push(def_ev),
+                            none => call_args.push(LLVMConstPointerNull(ptr)),
+                        }
                     }
                 },
                 none => {},
@@ -1313,6 +1323,9 @@ fn emit_c_main(mut ctx: LlvmCtx) {
             // No main function — that's OK for library modules
         },
     }
+
+    ctx.current_fn = none
+    ctx.current_fn_name = ""
 
     // return 0
     let zero = LLVMConstInt(i32_ty, 0, 0)
@@ -1393,6 +1406,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         boxed_vars: set_new(),
         fn_mut_params: map_new(),
         effect_ops: map_new(),
+        default_evidence: map_new(),
         extern_types: set_new(),
         extern_fn_infos: map_new()
     }
@@ -1544,6 +1558,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         boxed_vars: set_new(),
         fn_mut_params: map_new(),
         effect_ops: map_new(),
+        default_evidence: map_new(),
         extern_types: set_new(),
         extern_fn_infos: map_new()
     }
@@ -1683,6 +1698,11 @@ fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
     // Register per-type drop functions with RC runtime
     emit_drop_registrations(ctx)
 
+    // B-097: build default evidence structs (needs a function context for gen_lambda)
+    ctx.current_fn = some(main_fn)
+    ctx.current_fn_name = "main"
+    build_default_evidence_all(ctx)
+
     // Look for ring_<prefix>$_main
     let ring_main_name = llvm_mangle_fn_with_prefix(entry_prefix, "main")
     match ctx.functions.get(ring_main_name) {
@@ -1690,8 +1710,13 @@ fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
             let mut call_args: List<LLVMValueRef> = []
             match ctx.fn_evidence_params.get(ring_main_name) {
                 some(ev_params) => {
+                    // B-097: pass default evidence for effects that have it
                     for ep in ev_params {
-                        call_args.push(LLVMConstPointerNull(ptr))
+                        let effect_name = ep.slice(10, ep.len())
+                        match ctx.default_evidence.get(effect_name) {
+                            some(def_ev) => call_args.push(def_ev),
+                            none => call_args.push(LLVMConstPointerNull(ptr)),
+                        }
                     }
                 },
                 none => {},
@@ -1706,6 +1731,9 @@ fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
             eprintln("Warning: no main function found in entry module")
         },
     }
+
+    ctx.current_fn = none
+    ctx.current_fn_name = ""
 
     let zero = LLVMConstInt(i32_ty, 0, 0)
     discard(LLVMBuildRet(ctx.builder, zero))
