@@ -4117,8 +4117,10 @@ fn collect_captures_stmt(ctx: LlvmCtx, stmt: HStmt, params: List<HParam>, mut ca
 // ============================================================
 
 // Declare platform _setjmp with returns_twice attribute.
-// _setjmp(jmp_buf*) -> i32. Must be called directly from the LLVM-generated
-// function so that longjmp returns into a live frame.
+// Windows x64 ABI: _setjmp(jmp_buf*, frame_ptr*) -> i32.
+// The second argument is the caller's frame pointer obtained via
+// @llvm.frameaddress.p0(i32 0). Without it longjmp corrupts the stack
+// (STATUS_BAD_STACK at self-compile scale).
 fn get_or_declare_setjmp(mut ctx: LlvmCtx) -> (LLVMValueRef, LLVMTypeRef) {
     let name = "_setjmp"
     match ctx.rt_fns.get(name) {
@@ -4129,13 +4131,34 @@ fn get_or_declare_setjmp(mut ctx: LlvmCtx) -> (LLVMValueRef, LLVMTypeRef) {
             }
         },
         none => {
-            let fn_ty = LLVMFunctionType(ctx.i32_type, [ctx.ptr_type], 0)
+            let fn_ty = LLVMFunctionType(ctx.i32_type, [ctx.ptr_type, ctx.ptr_type], 0)
             let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
             let rt_kind = LLVMGetEnumAttributeKindForName("returns_twice", 13)
             if rt_kind > 0 {
                 let rt_attr = LLVMCreateEnumAttribute(ctx.context, rt_kind, 0)
                 LLVMAddAttributeAtIndex(fn_val, 0 - 1, rt_attr)
             }
+            ctx.rt_fns.insert(name, fn_val)
+            ctx.rt_fn_types.insert(name, fn_ty)
+            (fn_val, fn_ty)
+        },
+    }
+}
+
+// Declare @llvm.frameaddress.p0 intrinsic: (i32) -> ptr.
+// Returns the frame pointer of the current function (level 0).
+fn get_or_declare_frameaddress(mut ctx: LlvmCtx) -> (LLVMValueRef, LLVMTypeRef) {
+    let name = "llvm.frameaddress.p0"
+    match ctx.rt_fns.get(name) {
+        some(f) => {
+            match ctx.rt_fn_types.get(name) {
+                some(t) => (f, t),
+                none => panic("LLVM codegen: llvm.frameaddress.p0 type not found"),
+            }
+        },
+        none => {
+            let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.i32_type], 0)
+            let fn_val = LLVMAddFunction(ctx.module, name, fn_ty)
             ctx.rt_fns.insert(name, fn_val)
             ctx.rt_fn_types.insert(name, fn_ty)
             (fn_val, fn_ty)
@@ -4171,7 +4194,10 @@ fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMVa
     let buf_ptr = LLVMBuildCall2(ctx.builder, getbuf_ty, getbuf_fn, [frame], fresh_name(ctx, "buf"))
 
     // Call _setjmp directly from THIS function's frame (returns_twice)
-    let sjresult = LLVMBuildCall2(ctx.builder, sj.1, sj.0, [buf_ptr], fresh_name(ctx, "sj"))
+    // Windows x64: pass frame pointer as second argument
+    let fa = get_or_declare_frameaddress(ctx)
+    let fp = LLVMBuildCall2(ctx.builder, fa.1, fa.0, [LLVMConstInt(ctx.i32_type, 0, 0)], fresh_name(ctx, "fp"))
+    let sjresult = LLVMBuildCall2(ctx.builder, sj.1, sj.0, [buf_ptr, fp], fresh_name(ctx, "sj"))
 
     // cond = (sjresult == 0)
     let zero = LLVMConstInt(ctx.i32_type, 0, 0)
@@ -4317,7 +4343,10 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         let getbuf_ty = get_rt_fn_type(ctx, "ring_catch_get_buf")
         let buf_ptr = LLVMBuildCall2(ctx.builder, getbuf_ty, getbuf_fn, [frame], fresh_name(ctx, "buf"))
 
-        let sjresult = LLVMBuildCall2(ctx.builder, sj.1, sj.0, [buf_ptr], fresh_name(ctx, "sj"))
+        // Windows x64: pass frame pointer as second argument to _setjmp
+        let fa = get_or_declare_frameaddress(ctx)
+        let fp = LLVMBuildCall2(ctx.builder, fa.1, fa.0, [LLVMConstInt(ctx.i32_type, 0, 0)], fresh_name(ctx, "sj.fp"))
+        let sjresult = LLVMBuildCall2(ctx.builder, sj.1, sj.0, [buf_ptr, fp], fresh_name(ctx, "sj"))
 
         let zero = LLVMConstInt(ctx.i32_type, 0, 0)
         let cond = LLVMBuildICmp(ctx.builder, 32, sjresult, zero, fresh_name(ctx, "sjcmp"))
