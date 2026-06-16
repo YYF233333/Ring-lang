@@ -305,7 +305,7 @@ function rc_fatal_count(findings) {
 }
 
 function rc_verify_boundary_note() {
-  return "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), string interpolation SB + intermediate strings (gen_string_interp drops), handler evidence/catch closures (B-096), abort paths (longjmp skips scope drops — B-002).";
+  return "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), string interpolation SB + intermediate strings (gen_string_interp drops), handler evidence (B-096 codegen emit_evidence_drops) / catch closures, abort paths (longjmp skips scope drops — B-002).";
 }
 
 function format_rc_findings(findings, strict) {

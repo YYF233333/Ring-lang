@@ -109,6 +109,7 @@
 // exactly as before (nothing dispatches on this typeid except dup/drop +
 // diagnostics; the immortal Type-scalar consts have no payload to free anyway).
 #define RING_TYPEID_CONST_HEAP_STATIC 20
+#define RING_TYPEID_EVIDENCE 21   // B-096: evidence struct { i64 count, ptr slot0, ... } — each slot is a closure
 #define RING_TYPEID_USER_BASE 64  // user-defined types start here
 
 // ============================================================================
@@ -192,6 +193,7 @@ static const char* ring_tid_name(uint32_t tid) {
         case 0:  return "INT";    case 2:  return "BOOL";   case 3:  return "STR";
         case 7:  return "CLOSURE"; case 8: return "OPTION"; case 10: return "TUPLE";
         case 13: return "SB";     // B-104 D8: StringBuilder
+        case 21: return "EVIDENCE"; // B-096: evidence struct
         default: return (tid >= RING_TYPEID_USER_BASE) ? "USER" : "?"; // D8: user types (Type≈tid103)
     }
 }
@@ -526,6 +528,7 @@ static void drop_option(void* data);
 static void drop_tuple(void* data);
 static void drop_sb(void* data);
 static void drop_dict(void* data);
+static void drop_evidence(void* data);
 
 // ============================================================================
 // RingClosure — closure representation for higher-order functions
@@ -582,6 +585,8 @@ extern "C" void ring_runtime_init(int argc, char** argv) {
     drop_table[RING_TYPEID_SB]      = drop_sb;
     drop_table[RING_TYPEID_CELL]    = drop_cell;
     drop_table[RING_TYPEID_CLOSURE_ENV] = drop_closure_env;
+    // B-096: evidence struct { count, closure0, closure1, ... }.
+    drop_table[RING_TYPEID_EVIDENCE] = drop_evidence;
     // B-104 D4 (#151): first-class trait dicts.  Static singletons never drop
     // (immortal, bounded); dynamic wrapped dicts release their method closures.
     never_drop_table[RING_TYPEID_DICT_STATIC] = true;
@@ -2806,6 +2811,19 @@ static void drop_dict(void* data) {
     // drops the env, which releases the inners (no-op for DICT_STATIC inners,
     // real release for dict-param-backed dynamic inners).  Same walk as
     // drop_closure_env.
+    int64_t count = *(int64_t*)data;
+    void** slots = (void**)((char*)data + 8);
+    for (int64_t i = 0; i < count; i++) {
+        if (slots[i]) ring_drop(slots[i]);
+    }
+}
+
+static void drop_evidence(void* data) {
+    // B-096: evidence struct { int64 count, ptr slot0, ptr slot1, ... }.
+    // Each non-null slot is a ring_alloc'd RingClosure {fn_ptr, env_ptr} with
+    // typeid RING_TYPEID_CLOSURE.  ring_drop on the closure drops its env
+    // (CLOSURE_ENV), releasing captured variables.  Same walk as drop_dict /
+    // drop_closure_env — count-prefixed, drop each non-null slot.
     int64_t count = *(int64_t*)data;
     void** slots = (void**)((char*)data + 8);
     for (int64_t i = 0; i < count; i++) {

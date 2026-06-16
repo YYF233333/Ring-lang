@@ -81,9 +81,9 @@
 //    module singletons (borrows, outside the account by construction) and
 //    dynamic wrapped dicts are HIR-visible DictConstruct locals in the normal
 //    LEAK/UAF/BALANCE account above.  No exemption class replaces it.)
-//   * handler evidence structs / catch closures (intentionally leaked at
-//     L0/L1 — B-096 scope) and closure env capture dups (balanced by
-//     drop_closure_env).
+//   * handler evidence structs (B-096: dropped at codegen level by
+//     emit_evidence_drops, invisible to this HIR check) / catch closures
+//     and closure env capture dups (balanced by drop_closure_env).
 //   * abort paths: fail.raise / handler-abort longjmp skips the in-flight
 //     scope-end drops at runtime — a DYNAMIC effect invisible to (and out of
 //     scope for) this static check; design-accepted leak, B-002.
@@ -171,7 +171,7 @@ pub fn rc_fatal_count(findings: List<RcFinding>) -> Int {
 }
 
 pub fn rc_verify_boundary_note() -> Str {
-    "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), string interpolation SB + intermediate strings (gen_string_interp drops), handler evidence/catch closures (B-096), abort paths (longjmp skips scope drops — B-002)."
+    "note: HIR-level proof. Codegen-level drops are outside this check (documented boundary): while-cond/guard box (codegen post-unbox drop), Set-iteration list + range-loop bounds (codegen drops), string interpolation SB + intermediate strings (gen_string_interp drops), handler evidence (B-096 codegen emit_evidence_drops) / catch closures, abort paths (longjmp skips scope drops — B-002)."
 }
 
 // Format findings: fatal lines always one-per-finding; exempt (documented)

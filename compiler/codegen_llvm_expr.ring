@@ -4575,16 +4575,24 @@ pub fn build_default_evidence_all(mut ctx: LlvmCtx) {
         match ctx.effect_ops.get(ename) {
             some(ops) => {
                 let n_slots = ops.len()
-                let mut slot_types: List<LLVMTypeRef> = []
+                // B-096: evidence layout = { i64 count, ptr slot0, ... }.
+                let mut slot_types: List<LLVMTypeRef> = [ctx.i64_type]  // field 0 = count
                 for i in 0..n_slots { slot_types.push(ctx.ptr_type) }
                 let ev_ty = LLVMStructTypeInContext(ctx.context, slot_types, 0)
                 let ev_size = LLVMSizeOf(ev_ty)
 
-                // Allocate via ring_alloc (typeid 7 = CLOSURE, never dropped — B-096)
+                // B-096: typeid 21 (RING_TYPEID_EVIDENCE). Default evidence is
+                // process-lifetime — never explicitly dropped (the initial RC = 1
+                // from ring_alloc is never decremented). Closures that capture
+                // this pointer dup/drop around the initial ref; it never reaches 0.
                 let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
                 let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
-                let ev_typeid = LLVMConstInt(ctx.i64_type, 7, 0)
+                let ev_typeid = LLVMConstInt(ctx.i64_type, 21, 0)  // RING_TYPEID_EVIDENCE
                 let ev_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [ev_size, ev_typeid], fresh_name(ctx, "defev"))
+
+                // Store count in field 0.
+                let count_ptr = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, 0, fresh_name(ctx, "defevcnt"))
+                discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, n_slots, 0), count_ptr))
 
                 // Store in default_evidence BEFORE generating closures so that
                 // sibling op calls (e.g. increment's default body calling
@@ -4602,7 +4610,8 @@ pub fn build_default_evidence_all(mut ctx: LlvmCtx) {
                 discard(LLVMBuildStore(ctx.builder, ev_ptr, ev_alloca))
                 ctx.named_values.insert(ev_name, ev_alloca)
 
-                // Initialize each slot with the default body's closure
+                // Initialize each slot with the default body's closure.
+                // Slots start at field index 1 (field 0 = count).
                 for op in ops {
                     let slot_idx = effect_op_slot(ctx.effect_ops, ename, op.name)
                     let idx = if slot_idx >= 0 { slot_idx } else { 0 }
@@ -4610,12 +4619,12 @@ pub fn build_default_evidence_all(mut ctx: LlvmCtx) {
                         some(dbody) => {
                             let arm_ret_ty = op.return_type
                             let arm_closure = gen_lambda(ctx, op.params, arm_ret_ty, dbody, arm_ret_ty)
-                            let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx, fresh_name(ctx, "defevs"))
+                            let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx + 1, fresh_name(ctx, "defevs"))
                             discard(LLVMBuildStore(ctx.builder, arm_closure, slot))
                         },
                         none => {
                             // Should not happen (all_have_defaults), but defensively null-fill
-                            let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx, fresh_name(ctx, "defevs"))
+                            let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx + 1, fresh_name(ctx, "defevs"))
                             discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot))
                         },
                     }
@@ -4644,6 +4653,12 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
     }
 
     let mut has_fail_abort = false
+    // B-096: track evidence allocas that need dropping (non-abort effects only).
+    // We store the alloca LLVMValueRef directly rather than looking up by name
+    // at drop time — nested handles for the same effect overwrite ctx.named_values,
+    // so a name-based lookup would double-free the inner evidence instead of
+    // dropping the outer.
+    let mut ev_drop_allocas: List<LLVMValueRef> = []
 
     // For each effect, create an evidence object
     let mut sorted_by_effect = by_effect.entries()
@@ -4677,6 +4692,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
             let alloca = build_entry_alloca(ctx, ctx.ptr_type, ev_name)
             discard(LLVMBuildStore(ctx.builder, ev_struct, alloca))
             ctx.named_values.insert(ev_name, alloca)
+            ev_drop_allocas.push(alloca)
         }
     }
 
@@ -4719,6 +4735,8 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
         let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
         discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
+        // B-096: drop non-abort evidence structs on the normal path.
+        emit_evidence_drops(ctx, ev_drop_allocas)
         let normal_end_bb = LLVMGetInsertBlock(ctx.builder)
         discard(LLVMBuildBr(ctx.builder, merge_bb))
 
@@ -4728,6 +4746,8 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         let get_err_ty = get_rt_fn_type(ctx, "ring_catch_get_error")
         let error_val = LLVMBuildCall2(ctx.builder, get_err_ty, get_err_fn, [frame], fresh_name(ctx, "err"))
         discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
+        // B-096: drop non-abort evidence structs on the catch path too.
+        emit_evidence_drops(ctx, ev_drop_allocas)
         let catch_end_bb = LLVMGetInsertBlock(ctx.builder)
         discard(LLVMBuildBr(ctx.builder, merge_bb))
 
@@ -4738,13 +4758,32 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         phi
     } else {
         // Non-abort handlers: just execute body with evidence set up
-        gen_llvm_expr(ctx, body)
+        let result = gen_llvm_expr(ctx, body)
+        // B-096: drop evidence structs after the body completes.
+        emit_evidence_drops(ctx, ev_drop_allocas)
+        result
     }
 }
 
-// B-090 (D1): construct the N-slot evidence struct for one handled effect.
+// B-096: emit ring_drop for each non-abort evidence struct at handle scope end.
+// Takes the actual allocas (not names) to avoid double-free when nested handles
+// for the same effect overwrite ctx.named_values.
+fn emit_evidence_drops(mut ctx: LlvmCtx, ev_allocas: List<LLVMValueRef>) {
+    if ev_allocas.len() > 0 {
+        let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+        let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+        for alloca in ev_allocas {
+            let ev_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "ev_drop"))
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [ev_ptr], ""))
+        }
+    }
+}
+
+// B-090 (D1): construct the evidence struct for one handled effect.
 //
-//   { ptr slot0, ptr slot1, ... }   // N = #ops declared on the effect
+// B-096 layout: { i64 count, ptr slot0, ptr slot1, ... }
+//   count = N = #ops declared on the effect
+//   field 0 = count; field k+1 = closure for op k
 //
 // Slot k = the {fn_ptr, env} closure for op k (op order = declaration order,
 // via effect_op_slot). Each handler arm becomes a closure built by gen_lambda
@@ -4757,8 +4796,10 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
 // (default-body injection #72 is B-097). Well-typed in-scope code only performs
 // handled ops, so the null slot is never GEP'd/loaded for those programs.
 //
-// D2: the evidence struct + handler closures are intentionally leaked —
-// proper drop is B-096. Pure leak, not UAF.
+// B-096: typeid 21 (RING_TYPEID_EVIDENCE). drop_evidence reads the leading
+// count and ring_drop's each non-null closure slot. Handler evidence is dropped
+// at handle scope end (emit_evidence_drops). Default evidence (B-097) is
+// process-lifetime, never explicitly dropped.
 fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHandler>) -> LLVMValueRef {
     // Slot count = number of ops declared on the effect. Fall back to the
     // handler count only if the effect is unregistered (shouldn't happen for
@@ -4768,24 +4809,29 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
         none => hs.len(),
     }
 
-    let mut slot_types: List<LLVMTypeRef> = []
+    // B-096: evidence layout = { i64 count, ptr slot0, ptr slot1, ... }.
+    // Leading count enables drop_evidence (runtime) to iterate and drop each
+    // closure slot.  All GEP indices are +1 vs the old layout (field 0 = count).
+    let mut slot_types: List<LLVMTypeRef> = [ctx.i64_type]  // field 0 = count
     for i in 0..n_slots { slot_types.push(ctx.ptr_type) }
     let ev_ty = LLVMStructTypeInContext(ctx.context, slot_types, 0)
     let ev_size = LLVMSizeOf(ev_ty)
 
-    // typeid 7 (RING_TYPEID_CLOSURE). Per D2 the evidence struct is never
-    // ring_drop'd (proper drop is B-096), so the typeid only matters as a tag;
-    // 7 is a safe choice that the drop path never reaches for evidence. We do
-    // NOT use the closure-env typeid (15) because drop_closure_env expects a
-    // leading i64 count header this struct does not have.
+    // B-096: typeid 21 (RING_TYPEID_EVIDENCE). drop_evidence reads the leading
+    // count and ring_drop's each non-null closure slot.
     let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
     let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
-    let ev_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE (no drop emitted for evidence)
+    let ev_typeid = LLVMConstInt(ctx.i64_type, 21, 0)  // RING_TYPEID_EVIDENCE
     let ev_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [ev_size, ev_typeid], fresh_name(ctx, "ev_st"))
 
-    // Initialize every slot to null first (unhandled ops stay null).
+    // Store count in field 0.
+    let count_ptr = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, 0, fresh_name(ctx, "evcnt"))
+    discard(LLVMBuildStore(ctx.builder, LLVMConstInt(ctx.i64_type, n_slots, 0), count_ptr))
+
+    // Initialize every closure slot to null first (unhandled ops stay null).
+    // Slots start at field index 1.
     for i in 0..n_slots {
-        let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, i, fresh_name(ctx, "evs"))
+        let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, i + 1, fresh_name(ctx, "evs"))
         discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot))
     }
 
@@ -4802,7 +4848,7 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
         // the closure simply returns gen_expr(body). Lambda params = arm params.
         let arm_ret_ty = hexpr_type(h.body)
         let arm_closure = gen_lambda(ctx, h.params, arm_ret_ty, h.body, arm_ret_ty)
-        let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx, fresh_name(ctx, "evset"))
+        let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx + 1, fresh_name(ctx, "evset"))
         discard(LLVMBuildStore(ctx.builder, arm_closure, slot))
     }
 
@@ -4819,7 +4865,7 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
                             let slot_i = if didx >= 0 { didx } else { 0 }
                             let dret_ty = op.return_type
                             let dclosure = gen_lambda(ctx, op.params, dret_ty, dbody, dret_ty)
-                            let dslot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, slot_i, fresh_name(ctx, "evdef"))
+                            let dslot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, slot_i + 1, fresh_name(ctx, "evdef"))
                             discard(LLVMBuildStore(ctx.builder, dclosure, dslot))
                         },
                         none => {},
@@ -4859,10 +4905,9 @@ fn gen_effect_op(mut ctx: LlvmCtx, effect_name: Str, op_name: Str, args: List<HE
         LLVMConstPointerNull(ctx.ptr_type)
     } else {
         // B-090 (D1): non-abort effect op — dispatch through the evidence struct.
-        // Evidence (built by build_handler_evidence) is an N-slot { ptr, ... }
-        // struct; slot effect_op_slot(effect, op) holds this op's {fn_ptr, env}
-        // closure. Load it and call via gen_closure_call (tail-resumptive: the
-        // closure's return value is the resume value, returned directly).
+        // B-096: evidence layout = { i64 count, ptr slot0, ptr slot1, ... }.
+        // Slot effect_op_slot(effect, op) holds this op's {fn_ptr, env} closure.
+        // GEP index = slot_idx + 1 (field 0 = count).
         let ev_name = evidence_param_name(effect_name)
         let mut arg_vals: List<LLVMValueRef> = []
         for a in args { arg_vals.push(gen_llvm_expr(ctx, a)) }
@@ -4872,19 +4917,19 @@ fn gen_effect_op(mut ctx: LlvmCtx, effect_name: Str, op_name: Str, args: List<HE
         let ev_val = lookup_evidence(ctx, ev_name)
 
         // Slot index = op's declaration order. The struct type used for the GEP
-        // must have at least slot_idx+1 elements; size it to the effect's full op
-        // count (same layout build_handler_evidence allocated).
+        // must have count + n_slots elements (same layout build_handler_evidence
+        // allocated).
         let slot_idx = effect_op_slot(ctx.effect_ops, effect_name, op_name)
         let n_slots = match ctx.effect_ops.get(effect_name) {
             some(ops) => ops.len(),
             none => slot_idx + 1,
         }
         let idx = if slot_idx >= 0 { slot_idx } else { 0 }
-        let mut slot_types: List<LLVMTypeRef> = []
+        let mut slot_types: List<LLVMTypeRef> = [ctx.i64_type]  // field 0 = count
         for i in 0..n_slots { slot_types.push(ctx.ptr_type) }
         let ev_ty = LLVMStructTypeInContext(ctx.context, slot_types, 0)
 
-        let slot_ptr = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_val, idx, fresh_name(ctx, "evslot"))
+        let slot_ptr = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_val, idx + 1, fresh_name(ctx, "evslot"))
         let closure_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "evcl"))
         gen_closure_call(ctx, closure_ptr, arg_vals)
     }

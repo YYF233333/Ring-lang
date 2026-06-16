@@ -663,30 +663,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 <!-- B-097 done: LLVM default effect body injection + delegate/nesting verified. 883 E2E, 90/92 llvm_diff (pre-existing map_set_for_each). Custom-abort 非 parity gap（两后端均只支持 fail.raise abort），不在本项实现。2026-06-16 -->
 
-### B-096 Perceus 闭包 RC 完整收口（A 波）[bugfix] [P3] [L] [judgment] [queued]
-
-> 2026-06-03 从 B-084 拆出。B-084 的 #130 C 增量落地后的完整收口。**本机可做**（native 实跑即可观测 double-free / 内存峰值，放心动 `ring_try` 闭包 drop）。纯泄漏方向，差分测试比输出非内存，抓不到对错——做了之后差分全绿。见 design.md §7.10 闭包 capture 所有权。
-
-B-084 C 增量只修普通闭包 owned-capture drop，catch/handle 闭包仍整体泄漏。A 波收口剩余四块：
-
-1. **borrowed capture 正式建模**：perceus 区分 owned vs borrowed capture（#131 给 catch env 塞的 borrow-for-drop），borrowed 不进 env 或标记 no-drop。
-2. **ring_try 闭包 drop**：`ring_try`（`ring_runtime.cpp:1517`）调完 body/catch 闭包后 drop 两者（连 env），消除整体泄漏。**必须与 borrowed capture 建模配套**，否则 double-drop catch arm 的 `f`。
-3. **#4 guard-false 边泄漏**（B-083 残留）：带 guard 的 arm，pattern 绑定被 body dup 但 guard 假 fall-through → 该 dup 无人 drop（泄漏）。B-083 为消除 UAF 选保守策略（match 消费变量跨 guard fork 全程 dup 不 move），代价即此。修：perceus 产出 guard-false 边 drop 列表 + codegen 在 guard cond-false 目标前插 cleanup block 绑定并 drop。纯泄漏无 UAF。
-4. **#3 残留 drop_T**：Range struct（start/end）+ Eq/Ord-dict struct（2 closures）当前共用 no-op TUPLE typeid，process-lifetime 极小泄漏。给各自专属 drop_T（与 env typeid 方案一并设计）。
-5. **B-090 evidence struct + handler 闭包 drop**（2026-06-03 D2 吸收）：B-090 的 tail-resumptive handler 在 `gen_handle_expr` 分配 evidence struct（N slot 闭包）后暂泄漏（同 #2 的 `ring_try` 闭包策略）。本波给 evidence struct 专属 typeid + `drop_T`（drop 时递归 drop 各 slot 的 handler 闭包及其 env），perceus 在 handle scope 末尾发 drop。与 #1 borrowed capture 建模配套（handler op body 捕获外层的 owned vs borrowed 区分）。
-
-**涉及修改**：
-1. `compiler/perceus.ring`：owned/borrowed capture 区分；guard-false 边 drop 列表；handle scope 末尾发 evidence struct drop
-2. `ring_runtime.cpp`：`ring_try` 后 drop body/catch 闭包；Range/dict struct 专属 drop_T；evidence struct 专属 typeid + drop_T
-3. `compiler/codegen_llvm_expr.ring`：borrowed capture env 处理；guard cond-false cleanup block
-
-**验收标准**：
-- catch/handle 闭包 env 无泄漏；`ring_try` 后两闭包释放，无 double-drop（catch arm `f` 仅释放一次）
-- guard-false 边 pattern 绑定 dup 正确 drop
-- Range/dict struct 有注册的专属 drop_T
-- B-090 evidence struct + handler 闭包在 handle scope 末尾正确 drop，无泄漏无 double-free
-- 大内存机实测无 double-free；带 RC 自编译内存峰值进一步下降
-- 全部 E2E + llvm_diff 通过；自举一致
+<!-- B-096 done: evidence struct RC drop (typeid 21 + drop_evidence + emit_evidence_drops on all paths + nested handle fix). Sub-items 1/2 obsolete (ring_try is dead code, inline setjmp). Sub-item 3 N/A (pattern binds are borrow projections, no dup). Sub-item 4 N/A (Range fields are tagged pointers, freed correctly). 883 E2E, 90/92 llvm_diff ×3. 2026-06-17 -->
 
 ### B-099 native 自托管 LLVM 后端（Node 消除 / JS 归档最后一公里）[feature] [P2] [XL] [judgment] [queued]
 

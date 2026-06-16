@@ -2288,8 +2288,9 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
             // (gen_handle_expr → build_handler_evidence).  B-098 closure model:
             // captures are owned and DUP'd at construction by gen_lambda (not in
             // the body), so perceus only needs to transform the body in its own
-            // scope.  The evidence struct + arm closures are intentionally leaked at
-            // L0/L1 (B-096 收口), so the construction dup simply leaks with the env.
+            // scope.  B-096: evidence structs are dropped at handle scope end by
+            // codegen (emit_evidence_drops); perceus doesn't see them (codegen-only
+            // construct).
             let new_body = rc_block_root(body, escape, owned, boxed, externs, gensym, loop_base)
             let mut new_handlers: List<HEffectHandler> = []
             for h in handlers {
