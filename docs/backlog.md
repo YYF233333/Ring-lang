@@ -590,27 +590,6 @@ source-map 支持 + 断点调试。
 ## 已知 Bug / 技术债
 
 
-### B-142 清理 ring_catch_setjmp dead code [refactor] [P3] [S] [mechanical] [queued]
-
-> 2026-06-16 立项（Discussion，B-089 G-b worker feedback）。inline setjmp 落地后 `ring_catch_setjmp` 不再被 LLVM codegen 调用（已换为 `ring_catch_get_buf`），成为 dead code。
-
-**涉及修改**：
-1. `ring_runtime.cpp`：删除 `ring_catch_setjmp` 函数（grep 全项目确认无其他调用点）
-
-**验收标准**：
-- `ring_catch_setjmp` 从 runtime 中删除
-- 全部 E2E + llvm_diff 通过；自举一致
-
-### B-129 Map/Set for_each llvm_diff 覆盖 [bugfix] [P3] [S] [mechanical] [queued] [deferred: B-089]
-
-> 2026-06-15 立项（Discussion，#152 worker 通知 #3）。#152 HOF 内存泄漏修复中 Map/Set for_each drop 修复未入 llvm_diff 回归——两后端迭代顺序不同导致 diff 必然失败。B-089 G-b 排序确定化完成后迭代序一致，可补覆盖。
-
-**涉及修改**：
-1. `tests/cases/llvm/`：新增 Map for_each / Set for_each 差分用例，验证 HOF 内 drop 正确性（排序确定化后两后端输出应一致）
-
-**验收标准**：
-- Map for_each + Set for_each llvm_diff 用例两后端输出一致
-- 全部 E2E + llvm_diff 通过
 
 
 
