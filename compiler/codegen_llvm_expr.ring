@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, effect_kind_name, type_to_builtin_name, type_to_string}
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
-    HStringInterpPart, HEffectHandler, DictRef, DictDispatchInfo, TraitDispatch,
+    HStringInterpPart, HEffectHandler, HEffectOp, DictRef, DictDispatchInfo, TraitDispatch,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
@@ -2158,9 +2158,16 @@ fn lookup_evidence(mut ctx: LlvmCtx, ev_param_name: Str) -> LLVMValueRef {
     match ctx.named_values.get(ev_param_name) {
         some(alloca) => LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "ev")),
         none => {
-            // Not in scope — use default evidence (null ptr)
-            // This happens for top-level calls where no handler has been installed
-            LLVMConstPointerNull(ctx.ptr_type)
+            // B-097: not in scope — try default evidence before falling back to null.
+            // Extract effect name from "__ring_ev_<name>" (prefix is 10 chars).
+            let effect_name = ev_param_name.slice(10, ev_param_name.len())
+            match ctx.default_evidence.get(effect_name) {
+                some(def_ev) => def_ev,
+                none => {
+                    // No default evidence — use null ptr (io/fail/non-default effects)
+                    LLVMConstPointerNull(ctx.ptr_type)
+                },
+            }
         },
     }
 }
@@ -4539,6 +4546,87 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
 }
 
 // ============================================================
+// B-097: build default evidence structs for effects with all-default ops
+// ============================================================
+
+// Build default evidence structs for every effect whose ops all have default
+// bodies. Called from emit_c_main's entry block (we need a function context for
+// gen_lambda). Each struct mirrors build_handler_evidence layout (N-slot
+// { ptr, ... }) with every slot populated by the default body's closure.
+//
+// Stores the resulting evidence pointer in ctx.default_evidence so that:
+//   - lookup_evidence can fall back to it (no-handler case)
+//   - emit_c_main can pass it to ring_main instead of null
+pub fn build_default_evidence_all(mut ctx: LlvmCtx) {
+    let mut effect_names: List<Str> = []
+    for entry in ctx.effect_ops.entries() {
+        let (ename, ops) = entry
+        let mut all_have_defaults = true
+        for op in ops {
+            if !op.has_default { all_have_defaults = false }
+        }
+        if all_have_defaults && ops.len() > 0 {
+            effect_names.push(ename)
+        }
+    }
+    effect_names.sort()
+
+    for ename in effect_names {
+        match ctx.effect_ops.get(ename) {
+            some(ops) => {
+                let n_slots = ops.len()
+                let mut slot_types: List<LLVMTypeRef> = []
+                for i in 0..n_slots { slot_types.push(ctx.ptr_type) }
+                let ev_ty = LLVMStructTypeInContext(ctx.context, slot_types, 0)
+                let ev_size = LLVMSizeOf(ev_ty)
+
+                // Allocate via ring_alloc (typeid 7 = CLOSURE, never dropped — B-096)
+                let alloc_fn = get_or_declare_runtime_fn(ctx, "ring_alloc", [ctx.i64_type, ctx.i64_type], ctx.ptr_type)
+                let alloc_ty = get_rt_fn_type(ctx, "ring_alloc")
+                let ev_typeid = LLVMConstInt(ctx.i64_type, 7, 0)
+                let ev_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [ev_size, ev_typeid], fresh_name(ctx, "defev"))
+
+                // Store in default_evidence BEFORE generating closures so that
+                // sibling op calls (e.g. increment's default body calling
+                // Counter.get()) can find the evidence via lookup_evidence's
+                // fallback. The struct is heap-allocated; slots are filled
+                // below before any runtime call can happen.
+                ctx.default_evidence.insert(ename, ev_ptr)
+
+                // Also put an alloca in named_values so gen_lambda's
+                // collect_captures can find and capture the evidence pointer.
+                // This is needed for default bodies that call sibling ops —
+                // the closure must capture the evidence ptr in its env.
+                let ev_name = evidence_param_name(ename)
+                let ev_alloca = build_entry_alloca(ctx, ctx.ptr_type, ev_name)
+                discard(LLVMBuildStore(ctx.builder, ev_ptr, ev_alloca))
+                ctx.named_values.insert(ev_name, ev_alloca)
+
+                // Initialize each slot with the default body's closure
+                for op in ops {
+                    let slot_idx = effect_op_slot(ctx.effect_ops, ename, op.name)
+                    let idx = if slot_idx >= 0 { slot_idx } else { 0 }
+                    match op.default_body {
+                        some(dbody) => {
+                            let arm_ret_ty = op.return_type
+                            let arm_closure = gen_lambda(ctx, op.params, arm_ret_ty, dbody, arm_ret_ty)
+                            let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx, fresh_name(ctx, "defevs"))
+                            discard(LLVMBuildStore(ctx.builder, arm_closure, slot))
+                        },
+                        none => {
+                            // Should not happen (all_have_defaults), but defensively null-fill
+                            let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx, fresh_name(ctx, "defevs"))
+                            discard(LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot))
+                        },
+                    }
+                }
+            },
+            none => {},
+        }
+    }
+}
+
+// ============================================================
 // Handle expression — construct evidence structs
 // ============================================================
 
@@ -4702,7 +4790,9 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
     }
 
     // Build a closure per handler arm and store it at its declared op slot.
+    let mut handled_ops: Set<Str> = set_new()
     for h in hs {
+        handled_ops.insert(h.op_name)
         let slot_idx = effect_op_slot(ctx.effect_ops, effect_name, h.op_name)
         // slot_idx == -1 only when the effect/op is unregistered (e.g. the
         // unregistered-effect fallback above used hs order). Map to the handler's
@@ -4714,6 +4804,30 @@ fn build_handler_evidence(mut ctx: LlvmCtx, effect_name: Str, hs: List<HEffectHa
         let arm_closure = gen_lambda(ctx, h.params, arm_ret_ty, h.body, arm_ret_ty)
         let slot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, idx, fresh_name(ctx, "evset"))
         discard(LLVMBuildStore(ctx.builder, arm_closure, slot))
+    }
+
+    // B-097: merge default bodies for unhandled ops (mirrors JS gen_handle #72).
+    // If the effect declares ops with default bodies that weren't explicitly
+    // handled, inject their default body closures into the evidence struct.
+    match ctx.effect_ops.get(effect_name) {
+        some(all_ops) => {
+            for op in all_ops {
+                if op.has_default && !handled_ops.contains(op.name) {
+                    match op.default_body {
+                        some(dbody) => {
+                            let didx = effect_op_slot(ctx.effect_ops, effect_name, op.name)
+                            let slot_i = if didx >= 0 { didx } else { 0 }
+                            let dret_ty = op.return_type
+                            let dclosure = gen_lambda(ctx, op.params, dret_ty, dbody, dret_ty)
+                            let dslot = LLVMBuildStructGEP2(ctx.builder, ev_ty, ev_ptr, slot_i, fresh_name(ctx, "evdef"))
+                            discard(LLVMBuildStore(ctx.builder, dclosure, dslot))
+                        },
+                        none => {},
+                    }
+                }
+            }
+        },
+        none => {},
     }
 
     ev_ptr

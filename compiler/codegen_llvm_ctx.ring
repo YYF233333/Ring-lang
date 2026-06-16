@@ -187,6 +187,13 @@ pub struct LlvmCtx {
     // same registry. Mirrors the JS backend's CodegenCtx.effect_ops.
     pub effect_ops: Map<Str, List<HEffectOp>>,
 
+    // B-097: pre-built default evidence structs for effects whose ops all have
+    // default bodies. Keyed by effect name → LLVMValueRef (LLVM global or
+    // function-level alloca holding the evidence struct pointer). lookup_evidence
+    // falls back here when no handler is in scope. Mirrors JS backend's
+    // default_evidence_effects + emit_effect_decl.
+    pub default_evidence: Map<Str, LLVMValueRef>,
+
     // B-104 D1 rule ① (audit #139): extern type names declared by the program
     // (union over all modules in project mode — names are consistent across the
     // codegen_llvm_* local re-declarations).  register_struct_info /

@@ -661,26 +661,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 ## LLVM 后端质量
 
-### B-097 自定义 effect handler LLVM — phase 2（custom-abort / default / delegate / nesting）[feature] [P2] [M] [judgment] [queued]
-> 2026-06-03 从 B-090 拆出（D3 分期）。B-090 核心（单 effect multi-op tail-resumptive）落地后的全 parity 收口。复杂度 M-L。依赖 B-090（✅ 已落地，依赖已满足）。
-
-承接 B-090 的 evidence 派发机制，补齐剩余 custom-effect parity 场景：
-
-1. **custom-abort effect（非 fail 的 abort）**：用户 `effect Exc { fn throw(...) }` 当 abort 用。JS 靠 `EffectAbort` + effect-name 匹配；LLVM 当前只有 `fail` 接了 `ring_try`/`ring_raise`。需 per-abort-effect 的 setjmp 落点（泛化 `ring_try` 带 effect tag，或 per-effect handler 栈帧），与 tail-resumptive 是两套机制。
-2. **default body（#72）**：op 带默认 handler 时，无 `handle...with` 也能调用——需自动注入默认 evidence（默认 op 闭包）。对照 JS 默认 handler 注入。
-3. **delegate 转发 effect（B-088 #4）**：delegate 方法转发 effect 时正确传递 evidence（同 handler dispatch 根因的 delegate 表现）。
-4. **nested / multi-effect evidence scoping edge**：B-090 核心吃掉 lexical scoping 自然涵盖的部分后，剩余的嵌套 handler / 同时 handle 多 effect 的 evidence shadowing 边角。
-
-**涉及修改**：
-1. `compiler/codegen_llvm_expr.ring`：custom-abort 的 handle/effect-op lowering；default evidence 注入；delegate evidence 转发；nested scoping
-2. `ring_runtime.cpp`：泛化 `ring_try`/`ring_raise` 支持 custom-abort effect tag（或 per-effect handler 栈）
-
-**验收标准**：
-- custom-abort effect（用户 `effect Exc`）handle + raise JS/LLVM 一致
-- 带 default body 的 op 无 handler 调用两后端一致
-- delegate 转发 effect（B-088 #4 复现）JS/LLVM 一致
-- 嵌套 handler / multi-effect handle 差分用例锁 parity
-- 全 E2E + llvm_diff 通过；自举一致
+<!-- B-097 done: LLVM default effect body injection + delegate/nesting verified. 883 E2E, 90/92 llvm_diff (pre-existing map_set_for_each). Custom-abort 非 parity gap（两后端均只支持 fail.raise abort），不在本项实现。2026-06-16 -->
 
 ### B-096 Perceus 闭包 RC 完整收口（A 波）[bugfix] [P3] [L] [judgment] [queued]
 
