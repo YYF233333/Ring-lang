@@ -146,7 +146,7 @@ impl Point {
 }
 ```
 
-为类型定义方法，不依赖任何 trait。通过 UFCS 调用：`point.distance()`。
+为类型定义方法，不依赖任何 trait。通过 `.method()` 调用：`point.distance()`。
 
 ### Trait 实现
 

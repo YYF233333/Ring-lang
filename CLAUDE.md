@@ -56,7 +56,7 @@ Ring-lang/
 - 编译器各阶段共享约定放 `hir.ring`（如 `variant_js_name`），不允许跨阶段硬编码字符串契约
 - **修改编译器后必须重新编译 dist/**：`node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist`，并提交更新后的 dist/ 文件。**Worktree merge 后的 rebuild 必须 amend 进 merge commit**——不允许 broken intermediate state（dist/ 失配）作为独立 commit 存在。同理，merge 后的 bookkeeping（更新 audit-report/backlog 删除已完成条目）也 amend 进 merge commit。**数据结构级重构**（如 `trait_impls` 从 List 改为 Map）merge 后需要 double bootstrap——旧 dist 编译新源码的产出可能有引用错误，需先用 worktree 的 dist 做中间 bootstrap 再 double bootstrap。
 - **dist-llvm/ rebuild 纪律与 dist/ 同级**：动编译器（含 lexer/parser 等任何前端阶段）或 RC/LLVM 后端后同步重编 `node compiler/dist/main.js build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm` 并提交；worktree merge 后的重建一并 amend 进 merge commit（背景：维护 wave `b19c85b` 改 lexer 后未重建 dist-llvm）。
-- 注释语法 `//`，无 pipe 运算符，UFCS `.method()` 是唯一链式调用方式
+- 注释语法 `//`，无 pipe 运算符，`.method()` 是唯一链式调用方式（`::` 模块路径和 `.method()` 方法调用是两个不互通的范畴，无 UFCS）
 - 生成的 JS 代码应可读——方便调试
 - 复杂算法参考 Koka 的 Haskell 实现翻译，标注来源
 - 新增 AST/HIR 节点后必须处理所有 match 穷尽分支（编译器自动检查）

@@ -1165,45 +1165,36 @@ materialize_as = "comment"      # comment | annotation | none
 
 ## 4. 方法调用与 impl 块
 
-### 4.1 UFCS + impl 命名空间
+### 4.1 方法调用与 `::` 模块路径——两个独立范畴
 
-`.method()` 是语法糖，第一个参数即 self。impl 块创建类型关联的命名空间，用于方法解析：
+Ring 没有 UFCS（Uniform Function Call Syntax）。`::` 和 `.method()` 是两个不互通的世界：
 
-```
+- **`::`（模块路径）**：解析模块内的函数/常量/类型。`std::fs::read_file(path)` 调用 `std/fs` 模块的自由函数。
+- **`.method()`（方法调用）**：解析 receiver 的方法。解析链：impl 方法 > trait 方法 > builtin 方法。**不**回退到自由函数。
+
+```ring
 impl List<T> {
     fn map<U>(self, f: fn(T) -> U) -> List<U> { ... }
-    fn filter(self, pred: fn(T) -> Bool) -> List<T> { ... }
 }
 
-impl Tree<T> {
-    fn map<U>(self, f: fn(T) -> U) -> Tree<U> { ... }
-}
-
-my_list.map(fn(x) { x + 1 })   // 解析到 List.map
-my_tree.map(fn(x) { x + 1 })   // 解析到 Tree.map
+my_list.map(fn(x) { x + 1 })   // 解析到 List.map（impl 方法）
 ```
 
-解析优先级：impl 块 > trait 实现 > 作用域内自由函数（UFCS 兜底）。
+**自由函数不能通过 `.method()` 调用**：
 
-歧义时显式限定：
-
-```
-List.map(my_list, f)
-Functor.map(my_tree, f)
-```
-
-自由函数仍可用 `.` 调用：
-
-```
-fn double(x: Int) -> Int { x * 2 }
-42.double()                      // 无 Int.double impl，退到 UFCS
+```ring
+fn double(x: I64) -> I64 { x * 2 }
+42.double()   // ❌ 编译错误——double 是自由函数，不在方法解析链中
+double(42)    // ✅ 唯一正确写法
 ```
 
-链式调用是唯一的方法调用风格——一种事只有一种写法：
+**方法不能通过 `::` 调用**：
 
+```ring
+List::map(my_list, f)   // ❌ 不存在——:: 是模块路径，不是类型限定符
 ```
-users.filter(pred).map(f).sort()
-```
+
+公理⑧在此被编译器结构天然保障——`::` 和 `.` 是两个互不重叠的语法域。LLM 训练数据里对数学函数用自由函数、对容器操作用方法的惯例足以区分，不需要编译器允许两种写法。
 
 ### 4.2 impl 的定位
 

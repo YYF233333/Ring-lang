@@ -707,8 +707,8 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 { ... }
 - [ ] `lang.toml` formatter preset 配置格式
 - [ ] 方法名冲突的 qualified call 语法设计
 - [ ] 命名参数是否引入（实现默认参数时评估）
-- [ ] comptime 求值器实现策略（JS 后端执行 vs 内置解释器）
-- [ ] `io` 效果粒度：是否分裂为 io.read/io.write/net 等子效果（2026-06-12 公理② D-8 审视提出——粗粒度 io 对 agent「该函数能否安全调用」信号弱，Koka 同病；分裂的代价 = 效果 row 变长、签名噪音）
+（comptime 设计已定，见 §12.4）
+（`io` 效果拆分已设计，见 §12.1；本条 TODO 替换为指向该节。）
 
 ---
 
@@ -819,3 +819,314 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 { ... }
 | 6 | Impredicative 多态 | 推断不可判定 | struct/trait 包装 | — |
 | 7 | GADT 完整推断 | 不可判定 | scrutinee 需已知类型 | — |
 | 8 | FunDep | solver 复杂度 | 关联类型 | — |
+
+---
+
+## 12. 待实施设计（暂定，实现前重新审视）
+
+> 以下设计方向已确定但未排入 backlog。实现前需以当前上下文重审，确认前提仍然成立。
+
+### 12.1 效果分类：`io` 效果杀死并拆分为原子效果
+
+**状态：暂定（2026-06-23 Discussion 设计定案）。实现前与 B-007（async）、B-125（unsafe）效果表统一审视。**
+
+#### 动机
+
+旧 `io` 效果是一个语义不诚实的杂项——文件读写、网络通信、标准输出、环境变量、时钟、随机数、进程管理共用同一个效果标签。agent 从签名 `with {io}` 无法判断该函数是否跨信任边界（如联网发送数据）。
+
+真正安全关键的维度只有一个：**联网**。其余 OS 交互（读文件、打印、读环境变量）是程序运行的正常上下文，不值得独立追踪。
+
+#### 最终效果表
+
+| 效果 | 操作 | 说明 |
+|------|------|------|
+| `net` | `net.dial`, `net.listen`, `net.resolve` | 网络通信——唯一跨信任边界的 OS 效应 |
+| `os` | 其余全部 OS 效应：fs/stdin/stdout/stderr/env/clock/random/spawn… | 平台杂项——函数"运行在真实 OS 上"的标志 |
+| `fail<E>` | `fail.raise` | 不变 |
+| `mut<S>` | marker only（调用点注入） | 不变 |
+| `async` | `async.await`, `async.spawn` | B-007 待实现 |
+| `unsafe` | 原语操作（alloc/dealloc/read/write/cast…） | B-125 待实现 |
+
+**`io` 效果从语言中彻底移除。** 不保留为简写、不做 sub-effect 层次、不做 bundle 展开。每个效果是独立存在、独立追踪的原子。
+
+**不建 sub-effect 层次**：`net` 不是 `os` 的子效果，两者无层次关系。当前效果系统（tail-resumptive + abort）不需要子类型；handler 按具体操作匹配，不需"处理某个效果分类"。保持效果平级最大化简单。
+
+#### 签名示例
+
+```ring
+fn fetch(url: Str) -> Data with {net}              // 只联网
+fn load_config() -> Config with {os}                // 读文件 + 读 env
+fn fetch_and_save() -> Unit with {net, os}          // 下载 + 写文件
+fn report() -> Unit with {os}                       // 只打印
+fn main() -> Unit with {}                           // 纯函数——零 OS 交互
+```
+
+#### 实施要点（实现时核定）
+
+- `os` 的操作集合：重新审视全部标准库 extern fn，按实际语义归类
+- `net` 是否需拆出 `net.dns` 子操作（DNS 解析有时独立于 TCP 连接）
+- `spawn` / `random` 是否从 `os` 独立（创建子进程/使用熵源是否特殊到需要独立可见）
+- formatter 策略：两项以内展开（`{fs, env}`），≥三项合并为 `{os}` 或始终展开——实现时按实证签名噪音决定
+- 迁移路径：旧 `io` 在 parser 层映射为 `{os}`（不 breaking），`net` 需标准库逐个标注
+
+### 12.2 `alloc` 效果：堆分配可见化
+
+**状态：暂定（2026-06-23 Discussion）。实现前审视。**
+
+#### 动机
+
+当前 Ring 的堆分配对效果系统是不可见的——`List.push()`、`Map.insert()`、`Str` 拼接在效果上是纯函数。这意味着：
+
+- 无法从签名区分"零分配"函数和"可能分配"函数
+- 嵌入式/no-std/实时场景无法**静态禁止**堆分配——只能靠约定
+- OOM 是不可恢复的 panic，而非可处理的 fail effect
+- 与公理⑦（场景不可堵死）存在张力：嵌入式/WASM 场景下 OOM 是常态
+
+**先例**：Zig 将分配器作为显式参数传递，所有可能分配的函数签名携带分配器信息，编译期即可审计"哪些代码路径需要分配"。Ring 的选择是用效果系统承载同一信息——推断 + 自动冒泡，零语法负担。
+
+#### 设计
+
+`alloc` 是一个内建效果，操作集合：
+
+| 操作 | 说明 |
+|------|------|
+| `alloc.heap(size: USize, align: USize) -> Ptr<U8>` | 堆分配原始字节 |
+| `alloc.free(ptr: Ptr<U8>, size: USize, align: USize)` | 释放 |
+
+高层操作（`List.push`、`Map.insert`、`Str` 拼接、`.clone()` 等）内部调用 `alloc.heap`，其所在函数需要 `with {alloc}`。
+
+`alloc.free` 不被视为需要 `alloc` 效果的调用——它不失败、不阻塞、不增复杂度。只有**分配**方向携带效果。
+
+#### 什么不产生 alloc 效果
+
+- 值类型操作：I64/F64/Bool/Char 的 copy、`@value struct` 的 memcpy
+- RC 计数操作：`ring_dup`（写对象头 rc 字段）、`ring_drop`（读/写对象头）——对象已存在，计数值变化不分配
+- 栈分配：`let x = some_struct(a, b)`（alloca）
+- dealloc：`ring_drop` 最终释放（已有 RC 语义，不另标）
+
+#### 签名语义
+
+```ring
+fn pure_fn(xs: List<I64>) -> I64 with {}           // 零堆分配——纯计算
+fn process(xs: List<I64>) -> List<I64> with {alloc} // 可能分配（push / clone）
+fn main() -> Unit with {os, alloc}                  // 正常程序
+```
+
+**Perceus RC 区分**：`ring_dup` 不产生 `alloc` effect——dup 操作的是已存在的堆对象头。只有首次分配（malloc）产生 `alloc` effect。这是与 C++ `new` / Rust `Box::new` / Zig `allocator.alloc` 一致的语义——分配和引用计数是两个不同层。
+
+#### 编译器自身的影响
+
+Ring 编译器是一个重度分配的工作负载（自编译 ~10.42B allocs）。引入 `alloc` 效果后，编译器源码中几乎所有函数都将携带 `with {alloc}`——这验证了 `alloc` 作为独立效果的必要性（若它总是和 `os` 连体出现，就不值得独立）。
+
+但 `alloc` 和 `os` 不绑定——分配可以在无 OS 的场景（嵌入式、WASM、裸机）通过自定义 allocator 满足。这正是 Zig 模型的核心：分配器独立于 OS。
+
+#### OOM 处理（实现时核定）
+
+`alloc` 效果可带 OOM fail 语义——分配失败 raise `fail<Oom>` 而非 panic。这对嵌入式场景是必须的。对桌面/服务端，OOM 通常是 fatal（OS overcommit 让 OOM 语义本身不可靠），两种策略可能不同：
+
+- 桌面 profile：`alloc` 不产生 fail effect，OOM 直接 panic（当前行为）
+- 嵌入式 profile：`alloc.heap` 可 raise `fail<Oom>`，由调用栈处理
+
+#### 与 unsafe 的关系
+
+`alloc` 和 `unsafe` 是正交的：
+- `alloc`：告知"此函数需要堆内存"，签名级可见
+- `unsafe`：告知"此函数执行了绕过类型安全的内存操作"
+
+两者可共存（`with {alloc, unsafe}` = 手动管理内存）、独立存在（`with {alloc}` = List.push，安全分配）、或都不存在（纯计算）。
+
+#### 实施要点（实现时核定）
+
+- `alloc` 的粒度：是否需要 `alloc.heap` / `alloc.arena` / `alloc.bump` 子效果，还是只一个顶层 `alloc`
+- Perceus RC 层：`ring_malloc` / `ring_free` 的调用点是否在 HIR 层显式化（当前是 codegen/runtime 层）
+- 值类型定义：`@value struct` 的判定规则——不含任何堆分配字段
+- 与 B-002（Drop/RAII）的交互：Drop 执行期间不应该分配（或应显式标注 `with {alloc}`）
+- 迁移：标准库逐个函数审视——哪些无分配（如 `List.len`）、哪些有分配（如 `List.push`）
+
+### 12.3 `unsafe` 效果：两级 discharge + FFI 默认 unsafe
+
+**状态：暂定（2026-06-23 Discussion 更新原 B-125 spec）。实现前审视。**
+
+#### unsafe 的两个根
+
+`unsafe` effect 只有两个产生源，均为语言边界：
+
+**源 1：编译器内建原语（闭集）**
+
+```
+ptr_alloc      ptr_free       ptr_read       ptr_write
+ptr_offset     ptr_cast       ptr_copy       ptr_from_addr   ptr_addr
+```
+
+~10 条，编译器硬编码。每个签名自动带 `with {unsafe}`。闭集之外不存在 unsafe 产生路径。
+
+**源 2：`extern fn` 声明（默认 unsafe）**
+
+所有 `extern fn` 声明**隐式携带 `with {unsafe}`**——与 Rust 一致，编译器无法验证 FFI 声明的正确性。
+
+```ring
+// 标准库中的 extern fn 声明——自动 with {unsafe}
+extern fn printf(format: *U8, ...) -> I64    // unsafe，未写但有
+```
+
+调用任何 `extern fn` 产生 `unsafe` effect。
+
+**源 1 + 源 2 是 unsafe 的完整边界。** `ring audit unsafe` 逐项对号，不依赖约定。
+
+#### Deny-by-default：`requires {unsafe}`
+
+Ring 默认**禁止** unsafe 操作——与 Rust（默认允许 unsafe，靠 `#![forbid(unsafe_code)]` 主动禁止）相反。需要在模块内写 unsafe 操作的模块必须显式声明：
+
+| 层级 | 机制 | 作用 |
+|------|------|------|
+| 模块许可 | `mod requires {unsafe}` | 开启本模块的 unsafe 操作能力。不带这个声明的模块**不可**写 `unsafe {}` 块、**不可**直接调用 unsafe 原语 |
+| 表达式级 | `unsafe { expr }` | 吸收块内代码的 unsafe effect，对外签名纯净 |
+
+`requires {unsafe}` 控制两类操作：
+1. **discharge**：写 `unsafe { ... }` 块把 unsafe 收口成安全
+2. **直接调用原语**：`ptr_write(...)`、`ptr_read(...)` 等——即使不包裹在 `unsafe {}` 里，调用原语也必须模块声明
+
+以下**不需要**模块声明：
+- 调用其他带 `with {unsafe}` 签名的函数（非原语）——unsafe 沿签名自动冒泡，这是信息传播不是安全违规
+
+**语法注**：`mod requires {unsafe}` 是占位语法。macro 系统成熟后可能收编为 attribute macro（`#[allow(unsafe)]`），语义不变。`ring audit unsafe` 直接读编译器注册表，输出全量 discharge 点 + 原语调用点 + 模块许可清单。
+
+#### 栈上规则
+
+```
+底层：mod requires {unsafe}  ← 调了 ptr_write（原语）或写了 unsafe {} 块
+      fn raw_op() with {unsafe} { ptr_write(...) }
+
+中层：无需 requires          ← 只调 raw_op，不调原语，不写 unsafe 块
+      fn process() with {unsafe} { raw_op() }
+
+上层：mod requires {unsafe}  ← 写 unsafe {} 块 discharge
+      fn safe_api() {
+          unsafe { process() }
+      }
+```
+
+中层穿越 `with {unsafe}` 和穿越 `with {os}`、`with {fail}` 行为一致——效果系统的标准传播。
+
+#### 示例
+
+```ring
+// === 底层：runtime 绑定模块 ===
+mod sys_bindings {
+    requires {unsafe}    // ← 要写 unsafe {} 块 discharge
+
+    extern fn malloc(size: USize) -> *U8       // 自动 unsafe（源 2）
+
+    pub fn raw_alloc(size: USize) -> *U8 {
+        unsafe { malloc(size) }    // discharge malloc 的 unsafe
+    }
+}
+
+// === 中层：纯传递 ===
+mod allocator {
+    // 无 requires——不调原语、不做 discharge
+
+    pub fn alloc_buf(size: USize) -> *U8 with {unsafe} {
+        // 调 sys_bindings.raw_alloc——但 raw_alloc 签名已经干净
+        // 调 ptr_alloc（源 1 原语）→ 签名自然冒泡
+        ptr_alloc(size)
+    }
+}
+
+// === 上层：安全封装 ===
+mod safe_container {
+    requires {unsafe}    // ← 要写 unsafe {} 块 discharge
+
+    pub fn make_list<T>() -> List<T> {
+        unsafe {
+            allocator.alloc_buf(4096)    // discharge alloc_buf 的 unsafe
+        }
+        // ... 给用户返回安全的 List<T>
+    }
+}
+```
+
+#### 与 Rust 的差异
+
+| | Rust | Ring |
+|---|---|---|
+| unsafe 检查单位 | 词法块（`unsafe {}`） | effect 栈（追溯到源头） |
+| unsafe 可穿越中层 | 不适用（块内封闭） | 和其他 effect 一样自动冒泡 |
+| 谁可以 discharge | 任何有 `unsafe` 块的地方 | 仅 `requires {unsafe}` 模块 |
+| extern fn | 默认 unsafe，调用需 unsafe 块 | 同——默认 unsafe |
+| 审计 | 依赖人工/grep/clippy | `ring audit unsafe`——列所有 discharge 点 |
+
+#### 实施要点（实现时核定）
+
+- 原语闭集是否扩展到任意宽度的 read/write（`ptr_read_u32` 等），还是靠 `ptr_read<T>` 泛型化 + comptime 特化
+- `extern fn` 的 unsafe 是否允许显式覆盖（如已知纯计算的 libm 函数 `extern fn sin(x: F64) -> F64` 不需要 unsafe——有 `extern const fn` 或属性标记的空间待定）
+- `ring audit unsafe` 输出格式：按模块 → 按 discharge 点 → 按源头原语归类
+
+### 12.4 Comptime：解释器路线（B1）
+
+**状态：暂定（2026-06-23 Discussion 设计定案）。实现前审视。**
+
+#### 决策
+
+选择 **comptime 模型（Zig 路线 B1：编译期解释器）**，不采用 macro 模型（Rust 路线 A：token 流变换）。理由：
+
+1. **Ring 是类型推断优先的语言。** macro 在类型检查之前运行，拿不到推断结果，退化为字符串处理——与 Ring 的设计根基冲突。
+2. **内置 derive 已覆盖 90%+ metaprogramming 需求**（`Eq`/`Clone`/`Ord`/`Debug`/`Hash`/`Serialize`/`Deserialize`）。用户只写属性名，不写生成代码。
+3. **自定义 derive 的生产者是库作者（<1% 用户），不是普通用户。** 库作者可以接受读文档学习 TypeInfo API，LLM 训练数据不足的代价落在可控群体上。
+4. **macro 系统是一套完整的第二语言**（token 流 → AST → 类型信息不可用 → 输出 token 流），为 <10% 的场景引入两套语言违反公理⑧。
+
+**LLM 兼容评估**：内置 derive 形态 `@derive(Debug)` 在 Rust 训练数据中大量存在，LLM 可直接使用。自定义 comptime 函数 `comptime fn(info: TypeInfo) -> List<Decl>` 目前训练数据极少——库作者靠 primer 文档覆盖，后续使用量上升后训练数据自然形成。
+
+#### 模型
+
+```ring
+// 内置 derive（编译器实现，用户零代码）
+@derive(Debug, Clone, Eq, Hash)
+struct User { name: Str, age: I64 }
+
+// 自定义 derive（库作者写 comptime 函数）
+comptime fn builder(info: TypeInfo) -> List<Decl> {
+    let methods = info.fields.map(fn(f) {
+        method_decl("with_${f.name}", [param("self"), param("val", f.type_name)],
+            f.type_name, body: [set_field("self", f.name, "val")])
+    })
+    [impl_decl(info.name, methods)]
+}
+
+@builder
+struct Config { host: Str, port: I64 }
+```
+
+#### 实现策略（B1：编译期解释器）
+
+| 阶段 | 方案 |
+|------|------|
+| 当前（JS bootstrap） | comptime 代码由 JS 后端在编译期执行，结果序列化回编译器 |
+| LLVM native 后 | 编译器内建 Ring 解释器，或复用 JIT 基础设施（编译 + 动态加载） |
+
+#### Comptime 做什么 / 不做什么
+
+| 做什么 | 不做什么 |
+|--------|---------|
+| 内置 derive（用户只写 `@derive`） | 外部代码生成（protobuf/OpenAPI/C 头 → .ring）——这是构建系统任务，不应进编译器 |
+| 自定义 derive（库作者用 TypeInfo） | 运行时反射——comptime 在编译期求值后彻底擦除 |
+| 编译期常量计算（纯函数求值） | |
+| 条件编译（`comptime if`） | |
+
+#### 外部代码生成的定位
+
+protobuf / OpenAPI / C header → Ring 代码的生成是**构建系统任务**，由独立的 CLI 工具产出 `.ring` 文件后交给编译器。不嵌入编译器——编译器不需要嵌 protobuf 解析器、不需要发网络请求取 schema。这些是 file → file 的转换，不是类型级元编程。
+
+#### 判定性约束
+
+comptime 代码必须终止（公理⑤）：
+- 递归深度限制（默认 256）
+- 循环次数限制（默认 10000）
+- 超出 → 编译错误 "comptime evaluation exceeded limit"
+
+#### 实施要点（实现时核定）
+
+- comptime 求值器的实现路径：JS 后端执行 → native 解释器？JIT 编译 + 动态加载？
+- TypeInfo API 的完整度：字段/变体/方法/泛型参数/约束/effect 签名具体提供多少
+- `emit(decls)` 的类型检查：生成的声明需要再过 checker 验证（和 typed staging 的区别，lang-design.md §11.5）
+- comptime 的 effect 约束：comptime 代码是否允许 `with {os}`（读文件？）——纯函数约束足够（公理②）
