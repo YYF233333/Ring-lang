@@ -339,6 +339,15 @@ fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?, dic
                     if boxed { build_cell_load(ctx, cur, name) } else { cur }
                 },
                 none => {
+                    // B-100 Fix 4: a bare function used as a first-class value
+                    // must be wrapped in a closure {fn_ptr, env_ptr} for the
+                    // uniform closure call ABI (gen_closure_call).
+                    match ty {
+                        Type::FnType { .. } => {
+                            return gen_dict_closure_wrapper(ctx, lookup_name, name, [], ty)
+                        },
+                        _ => {},
+                    }
                     // Try module-aware resolution: imports_map → module_prefix → bare
                     let mangled_resolved = llvm_resolve_fn(ctx, lookup_name)
                     match ctx.functions.get(mangled_resolved) {
