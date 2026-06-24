@@ -53,6 +53,8 @@ extern fn LLVMBuildOr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValue
 extern fn LLVMBuildIntToPtr(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildAShr(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildTrunc(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildSwitch(builder: LLVMBuilderRef, val: LLVMValueRef, default_dest: LLVMBasicBlockRef, num_cases: Int) -> LLVMValueRef
+extern fn LLVMAddCase(switch_val: LLVMValueRef, on_val: LLVMValueRef, dest: LLVMBasicBlockRef) -> Unit
 
 // ============================================================
 // Top-level declaration dispatch
@@ -641,8 +643,9 @@ pub fn emit_derived_impls_llvm(mut ctx: LlvmCtx, derived_impls: List<DerivedImpl
     for di in derived_impls {
         match di.trait_name {
             "Eq" => emit_derived_eq_llvm(ctx, di),
-            // Clone, Ord, Debug: future work (not needed for current parity tests).
-            // The runtime's ring_get_builtin_dict fallback handles them for now.
+            "Clone" => emit_derived_clone_llvm(ctx, di),
+            "Debug" => emit_derived_debug_llvm(ctx, di),
+            // Ord: future work.
             _ => {},
         }
     }
@@ -1226,6 +1229,470 @@ fn gen_str_lit_simple(mut ctx: LlvmCtx, s: Str) -> LLVMValueRef {
     // Build a global constant string
     let c_str = LLVMBuildGlobalStringPtr(ctx.builder, s, fresh_name(ctx, "str"))
     LLVMBuildCall2(ctx.builder, str_ty, str_fn, [c_str], fresh_name(ctx, "sl"))
+}
+
+// ── Clone ────────────────────────────────────────────────────
+//
+// Ring's Clone semantics under Perceus RC: clone = ring_dup (RC increment).
+// This is correct because Ring values are immutable (copy-on-write via RC),
+// so a shallow RC dup gives the same observable semantics as a deep copy.
+// For struct/enum, we emit a `clone(self) -> ptr` that calls ring_dup(self).
+
+fn emit_derived_clone_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
+    let type_name = di.type_name
+    emit_clone_fn(ctx, type_name)
+    emit_derived_trait_dict(ctx, type_name, "Clone")
+}
+
+fn emit_clone_fn(mut ctx: LlvmCtx, type_name: Str) {
+    let mangled = llvm_mangle_method(type_name, "clone")
+    match ctx.functions.get(mangled) {
+        some(_) => { return },
+        none => {},
+    }
+
+    // clone(self) -> ptr
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type], 0)
+    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
+    ctx.functions.insert(mangled, fn_val)
+    ctx.fn_types.insert(mangled, fn_ty)
+
+    let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(fn_val)
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    let self_val = LLVMGetParam(fn_val, 0)
+    // ring_dup increments the refcount; return self (same pointer, now shared)
+    let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
+    let dup_ty = get_rt_fn_type(ctx, "ring_dup")
+    discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [self_val], ""))
+    LLVMBuildRet(ctx.builder, self_val)
+
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+}
+
+// ── Debug ────────────────────────────────────────────────────
+//
+// Debug generates a string representation:
+//   struct Point { x: 1, y: 2 }  →  "Point { x: 1, y: 2 }"
+//   enum Color::Red              →  "Red"
+//   enum Shape::Circle(7)        →  "Circle(7)"
+//
+// Uses ring_sb_new / ring_sb_add / ring_sb_to_str for string building.
+
+fn emit_derived_debug_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
+    let type_name = di.type_name
+    match di.type_kind {
+        TypeKind::StructKind => match di.struct_fields {
+            some(fields) => emit_struct_debug_fn(ctx, type_name, fields),
+            none => {},
+        },
+        TypeKind::EnumKind => match di.enum_variants {
+            some(variants) => emit_enum_debug_fn(ctx, type_name, variants),
+            none => {},
+        },
+    }
+    emit_derived_trait_dict(ctx, type_name, "Debug")
+}
+
+fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>) {
+    let mangled = llvm_mangle_method(type_name, "debug")
+    match ctx.functions.get(mangled) {
+        some(_) => { return },
+        none => {},
+    }
+
+    // debug(self) -> ptr (Str)
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type], 0)
+    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
+    ctx.functions.insert(mangled, fn_val)
+    ctx.fn_types.insert(mangled, fn_ty)
+
+    let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(fn_val)
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    let self_val = LLVMGetParam(fn_val, 0)
+
+    if fields.len() == 0 {
+        // Zero fields: return "TypeName"
+        let result = gen_str_lit_simple(ctx, type_name)
+        LLVMBuildRet(ctx.builder, result)
+        ctx.current_fn = saved_fn
+        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        return
+    }
+
+    // Build string: "TypeName { field1: val1, field2: val2, ... }"
+    let sb_new_fn = get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ctx.ptr_type)
+    let sb_new_ty = get_rt_fn_type(ctx, "ring_sb_new")
+    let sb = LLVMBuildCall2(ctx.builder, sb_new_ty, sb_new_fn, [], fresh_name(ctx, "sb"))
+
+    let sb_add_fn = get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
+
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+
+    // Add "TypeName { "
+    let prefix = gen_str_lit_simple(ctx, "${type_name} { ")
+    discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, prefix], fresh_name(ctx, "sba")))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [prefix], ""))
+
+    // Look up struct field info for GEP
+    if ctx.struct_types.get(type_name).is_none() {
+        // Fallback: just return type_name
+        let result = gen_str_lit_simple(ctx, type_name)
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
+        LLVMBuildRet(ctx.builder, result)
+        ctx.current_fn = saved_fn
+        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        return
+    }
+    let struct_info = match ctx.struct_types.get(type_name) {
+        some(info) => info,
+        none => panic("unreachable"),
+    }
+
+    for fi in 0..fields.len() {
+        let field = fields[fi]
+
+        // Add ", " separator after first field
+        if fi > 0 {
+            let sep = gen_str_lit_simple(ctx, ", ")
+            discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, sep], fresh_name(ctx, "sba")))
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sep], ""))
+        }
+
+        // Add "field_name: "
+        let label = gen_str_lit_simple(ctx, "${field.name}: ")
+        discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, label], fresh_name(ctx, "sba")))
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [label], ""))
+
+        // Load field value
+        let field_idx = find_field_index(struct_info.field_names, field.name)
+        let field_ptr = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, self_val, field_idx, fresh_name(ctx, "fp"))
+        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
+
+        // Convert to debug string and add
+        let str_val = emit_debug_field_to_str(ctx, field_val, field.action)
+        discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, str_val], fresh_name(ctx, "sba")))
+        // Drop the temporary string if it was freshly allocated
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [str_val], ""))
+    }
+
+    // Add " }"
+    let suffix = gen_str_lit_simple(ctx, " }")
+    discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, suffix], fresh_name(ctx, "sba")))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [suffix], ""))
+
+    // Convert sb to string
+    let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+    let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
+    let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "dbg"))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
+    LLVMBuildRet(ctx.builder, result)
+
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+}
+
+fn emit_enum_debug_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>) {
+    let mangled = llvm_mangle_method(type_name, "debug")
+    match ctx.functions.get(mangled) {
+        some(_) => { return },
+        none => {},
+    }
+
+    // debug(self) -> ptr (Str)
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type], 0)
+    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
+    ctx.functions.insert(mangled, fn_val)
+    ctx.fn_types.insert(mangled, fn_ty)
+
+    let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(fn_val)
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    let self_val = LLVMGetParam(fn_val, 0)
+
+    // Read tag from enum: layout = { i64 tag, ptr field0, ... }
+    if ctx.enum_types.get(type_name).is_none() {
+        // Fallback: return "UnknownEnum"
+        let result = gen_str_lit_simple(ctx, type_name)
+        LLVMBuildRet(ctx.builder, result)
+        ctx.current_fn = saved_fn
+        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        return
+    }
+    let enum_info = match ctx.enum_types.get(type_name) {
+        some(info) => info,
+        none => panic("unreachable"),
+    }
+
+    let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
+    let tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "tp"))
+    let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tv"))
+
+    // Default block for switch
+    let default_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "dbg.default")
+    let switch_val = LLVMBuildSwitch(ctx.builder, tag_val, default_bb, variants.len())
+
+    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "dbg.merge")
+    let mut incoming_vals: List<LLVMValueRef> = []
+    let mut incoming_bbs: List<LLVMBasicBlockRef> = []
+
+    for vi in 0..variants.len() {
+        let variant = variants[vi]
+        // Find the variant info to get its tag value
+        let var_tag = match enum_info.variants.get(variant.name) {
+            some(vinfo) => vinfo.tag,
+            none => vi,  // fallback to index
+        }
+
+        let case_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "dbg.${variant.name}")
+        LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, var_tag, 0), case_bb)
+        LLVMPositionBuilderAtEnd(ctx.builder, case_bb)
+
+        let case_result = if variant.fields.len() == 0 {
+            // Unit variant: just return the variant name
+            gen_str_lit_simple(ctx, variant.name)
+        } else {
+            // Variant with fields: "Name(field0, field1)" or "Name { f: v }"
+            emit_enum_variant_debug_str(ctx, self_val, type_name, variant, enum_info)
+        }
+
+        incoming_vals.push(case_result)
+        let end_bb = LLVMGetInsertBlock(ctx.builder)
+        incoming_bbs.push(end_bb)
+        discard(LLVMBuildBr(ctx.builder, merge_bb))
+    }
+
+    // Default: return type_name
+    LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+    let default_result = gen_str_lit_simple(ctx, type_name)
+    incoming_vals.push(default_result)
+    incoming_bbs.push(default_bb)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    // Merge: phi of all variant results
+    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "dbgr"))
+    LLVMAddIncoming(phi, incoming_vals, incoming_bbs)
+    LLVMBuildRet(ctx.builder, phi)
+
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+}
+
+fn emit_enum_variant_debug_str(mut ctx: LlvmCtx, self_val: LLVMValueRef, type_name: Str, variant: DerivedVariant, enum_info: EnumTypeInfo) -> LLVMValueRef {
+    let sb_new_fn = get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ctx.ptr_type)
+    let sb_new_ty = get_rt_fn_type(ctx, "ring_sb_new")
+    let sb = LLVMBuildCall2(ctx.builder, sb_new_ty, sb_new_fn, [], fresh_name(ctx, "sb"))
+
+    let sb_add_fn = get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
+
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+
+    if variant.has_named_fields {
+        // Named fields: "Name { f1: v1, f2: v2 }"
+        let prefix = gen_str_lit_simple(ctx, "${variant.name} { ")
+        discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, prefix], fresh_name(ctx, "sba")))
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [prefix], ""))
+    } else {
+        // Positional fields: "Name(v0, v1)"
+        let prefix = gen_str_lit_simple(ctx, "${variant.name}(")
+        discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, prefix], fresh_name(ctx, "sba")))
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [prefix], ""))
+    }
+
+    // Get variant layout from enum_info (for field access we use enum_info.llvm_type)
+    if enum_info.variants.get(variant.name).is_none() {
+        let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+        let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
+        let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "dbg"))
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
+        return result
+    }
+
+    for fi in 0..variant.fields.len() {
+        let field = variant.fields[fi]
+
+        if fi > 0 {
+            let sep = gen_str_lit_simple(ctx, ", ")
+            discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, sep], fresh_name(ctx, "sba")))
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sep], ""))
+        }
+
+        if variant.has_named_fields {
+            let label = gen_str_lit_simple(ctx, "${field.name}: ")
+            discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, label], fresh_name(ctx, "sba")))
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [label], ""))
+        }
+
+        // Load field value: enum layout = { i64 tag, ptr field0, ptr field1, ... }
+        // Field index in struct = fi + 1 (tag at index 0)
+        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, self_val, fi + 1, fresh_name(ctx, "efp"))
+        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "efv"))
+
+        let str_val = emit_debug_field_to_str(ctx, field_val, field.action)
+        discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, str_val], fresh_name(ctx, "sba")))
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [str_val], ""))
+    }
+
+    // Close bracket
+    let suffix = if variant.has_named_fields {
+        gen_str_lit_simple(ctx, " }")
+    } else {
+        gen_str_lit_simple(ctx, ")")
+    }
+    discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, suffix], fresh_name(ctx, "sba")))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [suffix], ""))
+
+    let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+    let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
+    let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "dbg"))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
+    result
+}
+
+// Convert a field value to its debug string representation.
+// Identity: tagged (Int/Bool) → int_to_str, heap (Str) → pass through
+// Call: invoke the field's Debug dict
+// FnLiteral: "<fn>"
+fn emit_debug_field_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, action: FieldAction) -> LLVMValueRef {
+    match action {
+        FieldAction::Identity => emit_identity_to_debug_str(ctx, val),
+        FieldAction::Call { dict_name, extra_dicts } => {
+            emit_dict_debug_call(ctx, val, dict_name)
+        },
+        FieldAction::Tuple { element_actions } => {
+            // Tuple: "(v0, v1, ...)"
+            emit_tuple_debug_str(ctx, val, element_actions)
+        },
+        FieldAction::FnLiteral => gen_str_lit_simple(ctx, "<fn>"),
+    }
+}
+
+// Convert a primitive identity value to debug string.
+// Tagged (bit 0 == 1) → Int or Bool → ring_int_to_str
+// Non-tagged → Str → pass through (ring_dup to own it so caller can drop)
+fn emit_identity_to_debug_str(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef {
+    let current_fn = match ctx.current_fn {
+        some(f) => f,
+        none => panic("LLVM codegen: emit_identity_to_debug_str outside function"),
+    }
+
+    let val_int = llvm_ptrtoint(ctx, val)
+    let one = LLVMConstInt(ctx.i64_type, 1, 0)
+    let tag_bit = llvm_and(ctx, val_int, one)
+    let is_tagged = LLVMBuildICmp(ctx.builder, 32, tag_bit, one, fresh_name(ctx, "tag"))
+
+    let tagged_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "dbg.tagged")
+    let heap_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "dbg.heap")
+    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "dbg.merge")
+
+    discard(LLVMBuildCondBr(ctx.builder, is_tagged, tagged_bb, heap_bb))
+
+    // Tagged path: unbox and convert to string via ring_int_to_str
+    LLVMPositionBuilderAtEnd(ctx.builder, tagged_bb)
+    let raw = unbox_int(ctx, val)
+    let to_str_fn = get_or_declare_runtime_fn(ctx, "ring_int_to_str", [ctx.i64_type], ctx.ptr_type)
+    let to_str_ty = get_rt_fn_type(ctx, "ring_int_to_str")
+    let tagged_result = LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "its"))
+    let tagged_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    // Heap path: it's a Str — ring_dup so caller can drop uniformly
+    LLVMPositionBuilderAtEnd(ctx.builder, heap_bb)
+    let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
+    let dup_ty = get_rt_fn_type(ctx, "ring_dup")
+    discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [val], ""))
+    let heap_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "dstr"))
+    LLVMAddIncoming(phi, [tagged_result, val], [tagged_end, heap_end])
+    phi
+}
+
+// Call a type's Debug dict to get its debug string.
+fn emit_dict_debug_call(mut ctx: LlvmCtx, val: LLVMValueRef, dict_name: Str) -> LLVMValueRef {
+    let dict_ptr = resolve_dict_for_derived(ctx, dict_name)
+
+    // Debug dict layout: { i64 count, ptr debug_closure }.
+    // debug is at slot index 0 → struct index 1.
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type, ctx.ptr_type], 0)
+    let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, 1, fresh_name(ctx, "dbs"))
+    let debug_closure = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "dbc"))
+
+    // Call closure: fn(env, self) -> ptr (Str)
+    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, debug_closure, 0, fresh_name(ctx, "fps"))
+    let fn_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fn_ptr_slot, fresh_name(ctx, "fp"))
+    let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, debug_closure, 1, fresh_name(ctx, "eps"))
+    let env_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, env_slot, fresh_name(ctx, "ep"))
+
+    let call_fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, [env_ptr, val], fresh_name(ctx, "dbr"))
+}
+
+// Build "(v0, v1, ...)" debug string for tuple fields.
+fn emit_tuple_debug_str(mut ctx: LlvmCtx, val: LLVMValueRef, element_actions: List<FieldAction>) -> LLVMValueRef {
+    if element_actions.len() == 0 {
+        return gen_str_lit_simple(ctx, "()")
+    }
+
+    let sb_new_fn = get_or_declare_runtime_fn(ctx, "ring_sb_new", [], ctx.ptr_type)
+    let sb_new_ty = get_rt_fn_type(ctx, "ring_sb_new")
+    let sb = LLVMBuildCall2(ctx.builder, sb_new_ty, sb_new_fn, [], fresh_name(ctx, "sb"))
+
+    let sb_add_fn = get_or_declare_runtime_fn(ctx, "ring_sb_add", [ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let sb_add_ty = get_rt_fn_type(ctx, "ring_sb_add")
+    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+    let get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
+    let get_ty = get_rt_fn_type(ctx, "ring_list_get")
+
+    let open_paren = gen_str_lit_simple(ctx, "(")
+    discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, open_paren], fresh_name(ctx, "sba")))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [open_paren], ""))
+
+    for i in 0..element_actions.len() {
+        if i > 0 {
+            let sep = gen_str_lit_simple(ctx, ", ")
+            discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, sep], fresh_name(ctx, "sba")))
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sep], ""))
+        }
+        let idx_val = LLVMConstInt(ctx.i64_type, i, 0)
+        let elem = LLVMBuildCall2(ctx.builder, get_ty, get_fn, [val, idx_val], fresh_name(ctx, "te"))
+        let elem_str = emit_debug_field_to_str(ctx, elem, element_actions[i])
+        discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, elem_str], fresh_name(ctx, "sba")))
+        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [elem_str], ""))
+    }
+
+    let close_paren = gen_str_lit_simple(ctx, ")")
+    discard(LLVMBuildCall2(ctx.builder, sb_add_ty, sb_add_fn, [sb, close_paren], fresh_name(ctx, "sba")))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [close_paren], ""))
+
+    let sb_to_str_fn = get_or_declare_runtime_fn(ctx, "ring_sb_to_str", [ctx.ptr_type], ctx.ptr_type)
+    let sb_to_str_ty = get_rt_fn_type(ctx, "ring_sb_to_str")
+    let result = LLVMBuildCall2(ctx.builder, sb_to_str_ty, sb_to_str_fn, [sb], fresh_name(ctx, "dbg"))
+    discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
+    result
 }
 
 // Helper: find field index by name
