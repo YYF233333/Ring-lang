@@ -75,30 +75,47 @@ fn divide(a: Float, b: Float where b != 0.0) -> Float { a / b }
 - **可判定片段条款（2026-06-12 D-5 拍板，公理⑤做实）**：SMT 查询限于**具名可判定片段**（QF_LIA + enum/bool 等式类，Liquid-style；具体片段定义 = lang-design §10 TODO「Refinement types 的可判定片段定义」，实现前必须完成）；超出片段 = 编译错误，要求显式 runtime check 兜底。**禁止 timeout 语义**——SMT timeout 即「耗时不可预期」，违反公理⑤
 - **含 const generic 参数谓词**（2026-05-25，原 B-003 吸收）：refinement predicates 作用于 const generic 参数（如 `where N > 0`）归入本 item 的 SSA 约束传播。详见 design.md 1.3
 
-### B-002 Ownership + Drop（Rust 风格 RAII，无 borrow checker）[feature] [P2] [XL] [judgment] [queued]
-Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪值的所有权，确保 Drop 恰好执行一次。
+### B-002 Drop / RAII [feature] [P2] [XL] [judgment] [queued]
 
-> **Perceus 分层角色 = L2**（见 §7.10 / B-012）：在 L0 RC 核心（B-012）之上实现用户 `impl Drop` + 正常/abort/cancel 全路径 RAII。**两个并入项**：(1) fail/catch 从 setjmp/longjmp 切换到 **drop-aware unwind**（longjmp 会跳过 drop → 改成栈展开时逐帧 drop）；(2) `Weak<T>` 库类型实现（`Rc.downgrade()` + `.upgrade() -> T?`，循环引用解法，设计见 §7.9）。
->
-> **#2 TryCatch / handler abort 的 abort-unwind drop 泄漏并入本项（2026-06-03 决策）**：try body 中途 `fail.raise`（经 `ring_try` longjmp）绕过正常 drop 序列，已分配局部值 + 未调用的 resume 闭包 + handler param 捕获全泄漏（方向安全）。perceus 静态 pass 插不进 longjmp 边——必须靠上面的 drop-aware unwind 在栈展开时逐帧 drop。涉及 `perceus.ring`（TryCatch/HandleExpr 分支）+ `ring_runtime.cpp`（ring_try/raise unwind）+ codegen_llvm。影响 G-a 内存 + G-c 正确性。原 B-083 #2 退回后归此。
+> 2026-06-24 重新设计（Discussion，资源管理模型重构）。**真值源 = design.md §7.6（2026-06-24 版）**。Perceus 分层 L2——在 L0/L1 RC 核心之上实现用户 `impl Drop` + 全路径 RAII。
 
-**模型**：
-- 所有值 scope 结束自动 drop（RAII，正常路径 + abort 路径均自动）——**scope-end 即语义**（2026-06-12 D-1 拍板，公理⑥/design.md §7.11 as-if 条款）：带 Drop impl 或被 `Weak<T>` 指向的类型禁止引擎提前 drop，纯数据类型引擎可在不可观测前提下提前
-- Move 语义：赋值/传参 = move，move 后原变量不可用
-- `impl Drop` 的类型禁止 `impl Clone`（编译器拒绝，资源不可复制）
-- `drop(x)` 提前释放，`leak(x)` 显式逃逸（不触发 Drop）
-- `mut self` 方法 = 隐式借用（不消耗所有权）
-- 共享访问 → `Rc<T>`（Ring 等价物），Rc 可 Clone，内部资源 Drop 在 Rc 归零时触发
-- 无 `linear` 关键字——`impl Drop` 是唯一的 ownership 入口
-- 容器持有 Drop 类型值 → 容器 Drop 自动 drop 所有元素，容器自身不因此获得 Drop 约束
-- **析构顺序（2026-06-13 拍板 = 对齐 Rust）**：同 scope 逆序 / struct 字段声明序 / 容器元素序，对齐 Rust。两后端一致并入差分回归
+**Drop trait**：
 
-**LLM 友好性**：本质是 Rust move/drop/RAII 语义，LLM 从 Rust 训练数据天然理解。自动浮现路径：LLM 正常写代码 → move 后使用原变量 → 编译器报 "value moved" → LLM 修。无新概念。
+```ring
+trait Drop {
+    fn drop(self) with {io}   // 允许 io（flush/log/close），禁止 fail（2026-06-24 确认）
+}
+```
 
-- **前置依赖**：B-110（别名追踪 + Drop auto-move）
-- **复杂度**：大（ownership checker + Perceus RC 的前置条件）
-- **优先级**：Phase C 与 refinement 穿插
-- **交互规则（B-043 决策）**：RAII 模型——Drop 值在 abort/cancel 路径自动释放；Drop::drop 禁止 fail effect（允许 io）；spawn 为 move 语义，不可跨任务共享 Drop 值；`mut self` 调用 = 隐式借用（不消耗）。详见 design.md 1.5
+**模型（2026-06-24 更新）**：
+- Drop 类型赋值 auto-move（B-110 checker 强制），rc 恒 1，scope-end drop = rc 归零 = Rust 析构时机
+- `impl Drop` 禁止 `impl Clone`（资源不可复制）
+- Drop 顺序对齐 Rust：同 scope 逆序 / struct 字段声明序 / 容器元素序
+- `drop(x)` 提前释放，`leak(x)` 显式逃逸
+- 复合类型自动 derive Drop：struct 含 Drop 字段 → 编译器自动生成 Drop（逐字段 drop）。用户 `impl Drop` 覆盖
+- 共享 Drop 类型 → `Rc<T>`（非 Drop 包装，§7.7），内部 T 的 Drop 在 Rc rc=0 时触发
+- 容器持有 Drop 值 → 容器 drop 时自动 drop 所有元素
+- 非 Drop 类型的 RC 环泄漏：接受（同 Koka），编译器对可能自引用的类型定义发 warning 并建议 arena+index 或 Weak
+
+**涉及修改**：
+1. **checker**：`impl Drop` 注册 + `impl Drop` 禁 `impl Clone` 检查 + Drop 方法 effect 约束（禁 fail）
+2. **codegen_llvm**：Drop glue 生成——per-type `drop_T` 函数（用户 `impl Drop` body + 字段递归 drop）；复合类型自动 derive
+3. **abort-unwind（重头）**：fail.raise 从 setjmp/longjmp 改为 **LLVM invoke/landingpad**（和 Rust 同一机制）。TryCatch/HandleExpr codegen 改用 invoke + landing pad；landing pad 执行 Drop glue 后 resume unwind。`ring_runtime.cpp` 的 `ring_try`/`ring_raise` 改用 unwind API
+4. **perceus**：Drop 类型的 RC 行为——auto-move 不 dup（已由 B-110 的 checker 保证），scope-end drop 恒释放
+5. **`Weak<T>`（子项，后续）**：runtime 对象头扩展 weak_count；`Rc.downgrade()` / `Weak.upgrade()`；rc=0 时执行 Drop 但 weak_count>0 时不 free 内存
+
+**验收标准**：
+- `impl Drop for T` 可编译，scope-end 触发 Drop
+- Drop 内 `fail.raise` → 编译错误
+- abort 路径（fail.raise 穿越含 Drop 局部的函数）→ 所有 Drop 正确执行（invoke/landingpad）
+- struct 含 Drop 字段 → 自动 Drop 按字段声明序
+- Drop 类型 auto-move：赋值后原绑定不可用（B-110 前置）
+- `Rc<T>` 共享 Drop 类型 → 最后一个 Rc 消亡时 Drop 触发
+- 全部 E2E + llvm_diff 通过；自举一致
+
+- **前置依赖**：B-110（别名追踪 + Drop auto-move checker）
+- **复杂度**：XL（abort-unwind 改 LLVM invoke/landingpad 是最重的部分）
+- **优先级**：P2，层 3 前完成
 
 
 

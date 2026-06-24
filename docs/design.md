@@ -341,16 +341,14 @@ trait Drop {
 }
 ```
 
-**所有权规则**：
-- 所有值 scope 结束自动 drop（正常路径 + abort 路径 + cancel 路径均自动 RAII）
-- Move 语义：赋值/传参 = move，move 后原变量不可用
-- `impl Drop` 的类型禁止 `impl Clone`（资源不可复制）
-- `drop(x)` 提前释放，`leak(x)` 显式逃逸（不触发 Drop）
-- `mut self` 方法 = 隐式借用（不消耗所有权）
-- 共享访问 → `Rc<T>`，Rc 可 Clone，内部资源 Drop 在 Rc 归零时触发
-- 无 `linear` 关键字——`impl Drop` 是唯一的所有权约束入口
-- 容器持有 Drop 类型值 → 容器 Drop 自动 drop 所有元素，容器自身不因此获得 Drop 约束
-- 无 borrow checker——Ring 用 Perceus RC 代替借用保证内存安全
+**所有权规则（2026-06-24 更新，见 §7）**：
+- Drop 类型赋值 auto-move（§7.2），rc 恒 1，scope-end drop = Rust 析构时机
+- 非 Drop 类型赋值 = rc+1 共享（§7.2），别名追踪保证 mutation 安全（§7.4）
+- `impl Drop` 禁止 `impl Clone`（资源不可复制）
+- `drop(x)` 提前释放，`leak(x)` 显式逃逸
+- 共享 Drop 类型 → `Rc<T>`（非 Drop 包装，§7.7）
+- 复合类型含 Drop 字段 → 自动 derive Drop
+- abort-unwind：LLVM invoke/landingpad（同 Rust），全路径 RAII
 
 **不引入 `defer` 关键字**——RAII 覆盖了资源清理的所有场景。`Drop::drop` 禁止 `fail` effect，避免"清理时抛异常"问题。
 
