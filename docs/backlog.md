@@ -681,21 +681,45 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 <!-- B-096 done: evidence struct RC drop (typeid 21 + drop_evidence + emit_evidence_drops on all paths + nested handle fix). Sub-items 1/2 obsolete (ring_try is dead code, inline setjmp). Sub-item 3 N/A (pattern binds are borrow projections, no dup). Sub-item 4 N/A (Range fields are tagged pointers, freed correctly). 883 E2E, 90/92 llvm_diff ×3. 2026-06-17 -->
 
-### B-099 native 自托管 LLVM 后端（Node 消除 / JS 归档最后一公里）[feature] [P2] [XL] [judgment] [queued]
+### B-099 native 自托管 LLVM 后端（Node 消除 / JS 归档最后一公里）[feature] [P2] [M] [judgment] [planning]
 
 > **= Level 1→Level 2 分界（2026-06-08 native on-par 统一规划）**：Level 1（B-104+B-089）做到 native 前端+JS 后端与 node 版对等；本 item 是「native 自产 native 代码 / Node 彻底消除 / JS 后端归档」的 Level 2。**2026-06-13 升 P2**——Node 消除是确定目标，B-089 完成后立即启动。
 
-> 2026-06-04 立项（Discussion，从 #134 架构 gap 转入）。**B-089 ✅（2026-06-16），前置已满足，可启动。** native ring.exe 跑 `--target=js` 已自托管前端，本项补最后一公里：native 自产 native 代码、Node 从工具链彻底消除。
+> 2026-06-04 立项（Discussion，从 #134 架构 gap 转入）。**B-089 ✅（2026-06-16），前置已满足。**
 
-**gap 精确形态**：native codegen 对 extern fn 分两类——ring_runtime C ABI fn 走 allow-list（`get_or_declare_runtime_fn`）emit `declare` + 链接 `ring_runtime.o`，原生可用；LLVM-C extern fn（`LLVMBuildRet`/`LLVMConstInt`…）不在 allow-list 且 `HDecl::ExternFn` 在 forward-declare 被跳过（`codegen_llvm.ring:347`）→ 调用塞 panic stub。JS 后端由 N-API addon（`compiler/llvm-addon/`）在 Node runtime 满足。故 native `ring.exe build x --target=llvm` panic。
+**调查结论（2026-06-24）**：原 spec 描述的 gap（「LLVM-C extern fn → panic stub」）**已过时**——`forward_declare_extern_fn`（`codegen_llvm.ring:526-749`）+ `gen_extern_fn_call`（`codegen_llvm_expr.ring:1734-1983`）已完整实现全部 99 个 LLVM-C extern fn 的 C-ABI declare + marshalling（8 类参数转换 + 4 类返回转换 + 5 个 output-param 特殊处理器）。`build_native.ps1` 已链接 `-lLLVM-C`。**复杂度从 XL 降为 M**——核心架构工作已完成，剩余是集成验证 + 2 个 point fix。
 
-**真实 scope（非仅 link libLLVM）**：N-API addon 现在在 JS 里做 C-ABI marshalling——`List<T>`→`T*+count`（count 省略、addon 重建）、`Str`→`const char*`、opaque ref 透传、output 参数折进返回值（`llvm_ffi.ring:9-15`）。native 路径需把这套 marshalling 从 JS 搬成 codegen 内联 native glue（uniform-boxed Ring 值 ↔ C ABI）+ 链接 LLVM-C 22。
+**真实 gap（2026-06-24 调查核定）**：
+1. **`LLVMIsNullPtr`**：addon 自定义函数（`p == nullptr ? 1 : 0`），非 LLVM-C 标准——native link 无此符号。唯一调用点：`codegen_llvm_ctx.ring:375`（`build_entry_alloca`）。修法：`ring_runtime.cpp` 加 `LLVMIsNullPtr`（一行），或 codegen 识别后内联 null 比较。
+2. **`LLVMDisposeMessage`**：声明但零调用，无需处理。
+3. **端到端验证**：从未跑过 `ring.exe build x.ring --target=llvm`，需验证全部 88 个实际调用的 LLVM-C 符号链接正确 + marshalling 行为正确。
+4. **~970 `unknown function 'LLVM*'` warning**：JS-host 编译路径的预期现象，native 自跑后应消失，作回归观察点。
+5. **audit latent items (#140/#146/#147)**：extern-handle RC 排除在 native 自跑 `--target=llvm` 时首次激活，需复核。
+
+**实施 plan（2026-06-24）**：
+
+**Step 1 — `LLVMIsNullPtr` point fix [S]**
+- `ring_runtime.cpp`：新增 `extern "C" void* LLVMIsNullPtr(void* val) { return ring_box_int(val == nullptr ? 1 : 0); }`（遵循 Ring uniform-boxing ABI——返回 boxed Int）
+- 或者：codegen `forward_declare_extern_fn` 对 `LLVMIsNullPtr` 特殊处理——不 emit external declare，改为 codegen 内联 `icmp eq ptr %val, null` → `zext i1 to i64` → `box_int`（更干净，省 runtime 依赖）
+- 验证：`build_entry_alloca` 正确分支
+
+**Step 2 — 端到端 spike [M]**
+- 构建 ring.exe（`build_native.ps1`，路径已修复）
+- 跑 `ring.exe build examples/hello.ring --target=llvm`——验证 LLVM-C 符号解析 + marshalling + 产出 .o + clang 链接 + 运行正确
+- 失败时逐个修 marshalling bug（预期少量——类型宽度 i32/i64 错误、List data 提取偏移等）
+- 跑 `ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm-native`——验证自编译
+- 对比 `dist-llvm/` vs `dist-llvm-native/` 字节一致性
+
+**Step 3 — 验收 + latent audit 复核 [S]**
+- `ring.exe build compiler/main.ring --target=llvm` 全程无 handle dup/drop 损坏（#140/#146/#147）
+- 全 E2E + llvm_diff 通过
+- 双 bootstrap 一致（node 产 dist-llvm vs native 产 dist-llvm）
+- ~970 warning 消失确认
 
 **涉及修改**：
-1. `compiler/codegen_llvm.ring` / `codegen_llvm_decl.ring`：LLVM-C extern fn 改 emit 真实 `declare`（external 符号）而非跳过/panic；扩展 extern fn 处理覆盖 LLVM-C 全集。
-2. codegen：emit C-ABI marshalling glue（List↔array+count、Str↔char*、output-param 折叠），对照 addon 当前 JS marshalling。
-3. 构建/链接：native ring.exe 链接 libLLVM-C（22）。
-4. addon 退役路径：marshalling 移入 codegen 后，N-API addon 仅剩 bootstrap 用途。
+1. `ring_runtime.cpp` 或 `codegen_llvm.ring`：`LLVMIsNullPtr` 一处 fix
+2. `compiler/scripts/build_native.ps1`：LLVM 路径自动检测（✅ 已修复 2026-06-24）
+3. 可能：marshalling 微调（Step 2 spike 中发现的 bug）
 
 **验收标准**：
 - native `ring.exe build x.ring --target=llvm` 产出可链接运行的 .o（不 panic）
@@ -704,9 +728,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 - 全 E2E + llvm_diff 通过；自举一致
 - **extern-handle RC 排除 runtime 级终验**（原 audit #139 修复的真实 runtime 验证，git `bfd4fe6`..`b62423b`：native 自跑 `--target=llvm` 全程无 handle dup/drop 损坏；audit #140/#146/#147 latent 路径届时一并复核）
 
-**既有现象备忘（2026-06-12，worker [观察] 归档）**：dist-llvm 自编译现有 ~970→~1020 条 `unknown function 'LLVM*'` warning（base 即有、非回归——llvm_ffi extern fn 在 JS-host 编译路径下的输出形态；D4 后自然增长 = 新增 lazy getter/global 调用点）。本项落地（LLVM-C extern 真实 declare）后应消失，作回归观察点。
-
-**依赖**：B-098（native 能跑，✅）+ B-089（native 自举三门验收通过）。B-089 完成前不启动。
+**依赖**：B-098 ✅ + B-089 ✅。可立即启动。
 
 ### B-100 JS 后端归档（parity 认证门 + golden 快照 + 删除）[feature] [P3] [L] [judgment] [queued] [deferred: B-099]
 

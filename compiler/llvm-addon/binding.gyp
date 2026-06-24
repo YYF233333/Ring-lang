@@ -4,12 +4,12 @@
       "target_name": "llvm_addon",
       "sources": ["llvm_addon.cpp"],
       "include_dirs": [
-        "D:/software/Scoop/apps/llvm/current/include"
+        "C:/software/Scoop/apps/llvm/current/include"
       ],
       "conditions": [
         ["OS=='win'", {
           "library_dirs": [
-            "D:/software/Scoop/apps/llvm/current/lib"
+            "C:/software/Scoop/apps/llvm/current/lib"
           ],
           "libraries": [
             "LLVM-C.lib"
