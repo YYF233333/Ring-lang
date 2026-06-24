@@ -7454,4 +7454,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { gen_llvm_expr, is_boxed_def, build_cell_alloc, build_cell_store, get_or_create_dict_global, emit_memoised_dict_getter, emit_memoised_const_body, box_int, box_float, box_bool, unbox_to_i1, unbox_int, build_default_evidence_all };
+export { gen_llvm_expr, is_boxed_def, build_cell_alloc, build_cell_store, resolve_static_dict_by_name, get_or_create_dict_global, emit_memoised_dict_getter, emit_memoised_const_body, box_int, box_float, box_bool, unbox_to_i1, unbox_int, build_default_evidence_all };

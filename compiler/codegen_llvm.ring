@@ -388,7 +388,36 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                     ctx.fn_evidence_params.insert(const_fn_name, empty_ev)
                 }
             },
-            HDecl::Trait { .. } => {},
+            HDecl::Trait { name: trait_name, methods: trait_methods, .. } => {
+                // B-141: forward-declare LLVM functions for default trait method bodies.
+                // Each default body becomes __<Trait>_<method>(self_dict, ...params, ...evidence).
+                for tm in trait_methods {
+                    if tm.has_default {
+                        match tm.body {
+                            some(_) => {
+                                let default_fn_name = "__${trait_name}_${tm.name}"
+                                if ctx.functions.get(default_fn_name).is_none() {
+                                    let ptr = ctx.ptr_type
+                                    let mut param_types: List<LLVMTypeRef> = []
+                                    // First param: self_dict (the trait dict for dispatch)
+                                    param_types.push(ptr)
+                                    // Regular params (includes self)
+                                    for p in tm.params { param_types.push(ptr) }
+                                    // Evidence params from method effects
+                                    let ev_params = compute_evidence_params(tm.effects)
+                                    for ep in ev_params { param_types.push(ptr) }
+                                    let fn_ty = LLVMFunctionType(ptr, param_types, 0)
+                                    let fn_val = LLVMAddFunction(ctx.module, default_fn_name, fn_ty)
+                                    ctx.functions.insert(default_fn_name, fn_val)
+                                    ctx.fn_types.insert(default_fn_name, fn_ty)
+                                    ctx.fn_evidence_params.insert(default_fn_name, ev_params)
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                }
+            },
             HDecl::Test { .. } => {},
             HDecl::Sig { .. } => {},
         }

@@ -4,13 +4,14 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp,
     DerivedImpl, DerivedField, DerivedVariant, FieldAction, TypeKind,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
+    default_method_self_name,
     hexpr_type, hexpr_effects, type_contains_extern_handle}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     get_or_assign_typeid, RING_TYPEID_DICT_STATIC}
 use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter, emit_memoised_const_body,
-    box_bool, unbox_int, box_int, get_or_create_dict_global}
+    box_bool, unbox_int, box_int, get_or_create_dict_global, resolve_static_dict_by_name}
 use codegen_ctx::{extract_effect_names}
 
 // Re-declare LLVM types and functions to avoid ESM cross-module import issues
@@ -82,9 +83,18 @@ pub fn emit_llvm_decl(mut ctx: LlvmCtx, decl: HDecl) {
                     _ => {},
                 }
             }
-            // Generate trait dictionary if this is a trait impl
+            // B-141: generate forwarding stubs for default trait methods that the
+            // impl doesn't override. This makes direct calls like cat.greet() work
+            // (the compiler may emit these as direct method calls, not dict dispatch).
+            // Generate trait dictionary if this is a trait impl, then emit
+            // forwarding stubs for default methods (stubs must come AFTER dict
+            // so resolve_static_dict_by_name finds the proper memoised getter,
+            // not the ring_get_builtin_dict fallback).
             match trait_name {
-                some(tn) => emit_trait_dict(ctx, target_type, tn, methods),
+                some(tn) => {
+                    emit_trait_dict(ctx, target_type, tn, methods)
+                    emit_default_method_stubs(ctx, target_type, tn, methods)
+                },
                 none => {},
             }
         },
@@ -94,8 +104,9 @@ pub fn emit_llvm_decl(mut ctx: LlvmCtx, decl: HDecl) {
         HDecl::Test { .. } => {
             // Tests not compiled in LLVM mode
         },
-        HDecl::Trait { .. } => {
-            // Trait declarations don't generate code directly (dict handled elsewhere)
+        HDecl::Trait { name: trait_name, methods: trait_methods, .. } => {
+            // B-141: emit LLVM function bodies for default trait methods.
+            emit_trait_default_methods(ctx, trait_name, trait_methods)
         },
         HDecl::ExternFn { .. } => {
             // Extern functions are already handled as runtime declarations
@@ -194,6 +205,180 @@ fn emit_fn_body(mut ctx: LlvmCtx, name: Str, params: List<HParam>, effects: Effe
     ctx.named_values = saved_named
     ctx.current_fn = saved_fn
     ctx.current_fn_name = saved_fn_name
+}
+
+// ============================================================
+// B-141: Default trait method body emission
+// ============================================================
+//
+// For each trait method with a default body, emit an LLVM function
+// __<Trait>_<method>(self_dict, self, ...params, ...evidence) that compiles
+// the default body. Inside the body, self.method() calls dispatch through
+// self_dict (the HIR already annotates these with DictDispatchInfo pointing
+// to __ring_self_<Trait>), so we register self_dict under that name in
+// named_values.
+
+fn emit_trait_default_methods(mut ctx: LlvmCtx, trait_name: Str, methods: List<HTraitMethod>) {
+    for method in methods {
+        if !method.has_default { continue }
+        match method.body {
+            some(body) => {
+                let default_fn_name = "__${trait_name}_${method.name}"
+                match ctx.functions.get(default_fn_name) {
+                    some(fn_val) => {
+                        emit_one_default_method(ctx, fn_val, default_fn_name, trait_name, method, body)
+                    },
+                    none => {},  // not forward-declared, skip
+                }
+            },
+            none => {},
+        }
+    }
+}
+
+fn emit_one_default_method(mut ctx: LlvmCtx, fn_val: LLVMValueRef, default_fn_name: Str, trait_name: Str, method: HTraitMethod, body: HExpr) {
+    // Save and set current function
+    let saved_fn = ctx.current_fn
+    ctx.current_fn = some(fn_val)
+    let saved_fn_name = ctx.current_fn_name
+    ctx.current_fn_name = default_fn_name
+    let saved_named = ctx.named_values
+    ctx.named_values = map_new()
+
+    // Create entry basic block
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Parameter layout: (self_dict, ...method_params, ...evidence_params)
+    let mut param_idx = 0
+
+    // Param 0: self_dict — register under __ring_self_<Trait> so that
+    // DictDispatchInfo references in the body find it in named_values.
+    let self_dict_name = default_method_self_name(trait_name)
+    let dict_alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, self_dict_name)
+    LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), dict_alloca)
+    ctx.named_values.insert(self_dict_name, dict_alloca)
+    param_idx = param_idx + 1
+
+    // Regular params (including self)
+    for p in method.params {
+        let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, p.name)
+        LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), alloca)
+        ctx.named_values.insert(p.name, alloca)
+        param_idx = param_idx + 1
+    }
+
+    // Evidence params from method effects
+    let ev_names = extract_effect_names(method.effects)
+    for en in ev_names {
+        let ep_name = evidence_param_name(en)
+        let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, ep_name)
+        LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), alloca)
+        ctx.named_values.insert(ep_name, alloca)
+        param_idx = param_idx + 1
+    }
+
+    // Generate body
+    let body_val = gen_llvm_expr(ctx, body)
+    LLVMBuildRet(ctx.builder, body_val)
+
+    // Restore state
+    ctx.named_values = saved_named
+    ctx.current_fn = saved_fn
+    ctx.current_fn_name = saved_fn_name
+}
+
+// ============================================================
+// B-141: Default method stub generation for impl
+// ============================================================
+//
+// When an impl doesn't override a trait's default method, the compiler may
+// still emit direct calls like cat.greet() as ring_Cat_greet(self). We need
+// a forwarding function ring_Cat_greet(self, ...evidence) that calls the
+// default body __Greet_greet(dict, self, ...evidence) with the impl's dict.
+
+fn emit_default_method_stubs(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, impl_methods: List<HDecl>) {
+    // Collect explicitly-implemented method names
+    let mut impl_method_names: Set<Str> = set_new()
+    for m in impl_methods {
+        match m {
+            HDecl::Fn { name, .. } => { impl_method_names.insert(name) },
+            _ => {},
+        }
+    }
+
+    // Get the trait's method order
+    if ctx.trait_method_order.get(trait_name).is_none() { return }
+    let method_order = match ctx.trait_method_order.get(trait_name) {
+        some(order) => order,
+        none => [],
+    }
+
+    // For each trait method not in the impl, check for default function
+    for method_name in method_order {
+        if impl_method_names.contains(method_name) { continue }
+
+        let default_fn_name = "__${trait_name}_${method_name}"
+        match ctx.functions.get(default_fn_name) {
+            some(default_fn) => {
+                // This method has a default. Generate ring_<Type>_<method> stub.
+                let mangled = llvm_mangle_method(target_type, method_name)
+
+                // Skip if already declared (e.g. from another pass)
+                if ctx.functions.get(mangled).is_some() { continue }
+
+                // The default fn has params: (self_dict, ...method_params, ...evidence)
+                // The stub has params: (...method_params, ...evidence) — same minus self_dict.
+                let default_arity = LLVMCountParams(default_fn)
+                let stub_arity = default_arity - 1  // minus self_dict
+
+                let mut stub_param_types: List<LLVMTypeRef> = []
+                for i in 0..stub_arity {
+                    stub_param_types.push(ctx.ptr_type)
+                }
+                let stub_fn_ty = LLVMFunctionType(ctx.ptr_type, stub_param_types, 0)
+                let stub_fn = LLVMAddFunction(ctx.module, mangled, stub_fn_ty)
+                ctx.functions.insert(mangled, stub_fn)
+                ctx.fn_types.insert(mangled, stub_fn_ty)
+
+                // Copy evidence param info from the default fn
+                match ctx.fn_evidence_params.get(default_fn_name) {
+                    some(ev_params) => {
+                        ctx.fn_evidence_params.insert(mangled, ev_params)
+                    },
+                    none => {},
+                }
+
+                // Emit stub body: call __Greet_greet(dict, params...)
+                let saved_block = LLVMGetInsertBlock(ctx.builder)
+                let entry = LLVMAppendBasicBlockInContext(ctx.context, stub_fn, "entry")
+                LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+                // Get the dict via resolve_static_dict_by_name
+                let dict_name = trait_dict_name(target_type, trait_name)
+                let dict_ptr = resolve_static_dict_by_name(ctx, dict_name)
+
+                // Build call args: dict_ptr + all stub params
+                let default_fn_ty = match ctx.fn_types.get(default_fn_name) {
+                    some(t) => t,
+                    none => {
+                        let mut pts: List<LLVMTypeRef> = []
+                        for i in 0..default_arity { pts.push(ctx.ptr_type) }
+                        LLVMFunctionType(ctx.ptr_type, pts, 0)
+                    },
+                }
+                let mut call_args: List<LLVMValueRef> = [dict_ptr]
+                for i in 0..stub_arity {
+                    call_args.push(LLVMGetParam(stub_fn, i))
+                }
+                let result = LLVMBuildCall2(ctx.builder, default_fn_ty, default_fn, call_args, fresh_name(ctx, "dflt"))
+                LLVMBuildRet(ctx.builder, result)
+
+                LLVMPositionBuilderAtEnd(ctx.builder, saved_block)
+            },
+            none => {},
+        }
+    }
 }
 
 // ============================================================
@@ -521,7 +706,7 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     for i in 0..method_count {
         match method_order.get(i) {
             some(method_name) => {
-                let _ = emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, alloc_fn, alloc_ty, i)
+                let _ = emit_dict_method_slot(ctx, target_type, trait_name, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, alloc_fn, alloc_ty, i)
             },
             none => {},
         }
@@ -537,7 +722,7 @@ fn emit_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, methods:
     ctx.dict_globals.insert(dict_name, getter)
 }
 
-fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, dict_struct_ty: LLVMTypeRef, dict_ptr: LLVMValueRef, closure_ty: LLVMTypeRef, closure_size: LLVMValueRef, alloc_fn: LLVMValueRef, alloc_ty: LLVMTypeRef, slot_idx: Int) {
+fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, method_name: Str, dict_struct_ty: LLVMTypeRef, dict_ptr: LLVMValueRef, closure_ty: LLVMTypeRef, closure_size: LLVMValueRef, alloc_fn: LLVMValueRef, alloc_ty: LLVMTypeRef, slot_idx: Int) {
     let mangled = llvm_mangle_method(target_type, method_name)
     let closure_typeid = LLVMConstInt(ctx.i64_type, 7, 0)  // RING_TYPEID_CLOSURE
     match ctx.functions.get(mangled) {
@@ -564,9 +749,37 @@ fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, method_name: Str, d
             LLVMBuildStore(ctx.builder, closure_ptr, slot_ptr)
         },
         none => {
-            // Method not found — store null closure
-            let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx + 1, fresh_name(ctx, "ds"))
-            LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot_ptr)
+            // B-141: try default trait method function __<Trait>_<method>
+            let default_fn_name = "__${trait_name}_${method_name}"
+            match ctx.functions.get(default_fn_name) {
+                some(default_fn) => {
+                    // The default function has signature:
+                    //   __<Trait>_<method>(self_dict, self, ...args, ...evidence)
+                    // The closure ABI calls:  thunk(env, self, ...args)
+                    // We use env = dict_ptr (the impl's own dict) so the default
+                    // body can dispatch self.other_method() through it.
+                    //
+                    // The thunk simply forwards ALL params (env included) to the
+                    // default function — env becomes self_dict.
+                    let thunk_fn = emit_default_method_thunk(ctx, default_fn_name, default_fn)
+
+                    let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], fresh_name(ctx, "cls"))
+                    let fn_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
+                    LLVMBuildStore(ctx.builder, thunk_fn, fn_slot)
+                    // env = dict_ptr: the impl's own dict, so default body's
+                    // self.method() dispatch finds the concrete methods.
+                    let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 1, fresh_name(ctx, "eps"))
+                    LLVMBuildStore(ctx.builder, dict_ptr, env_slot)
+
+                    let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx + 1, fresh_name(ctx, "ds"))
+                    LLVMBuildStore(ctx.builder, closure_ptr, slot_ptr)
+                },
+                none => {
+                    // Method not found and no default — store null closure
+                    let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot_idx + 1, fresh_name(ctx, "ds"))
+                    LLVMBuildStore(ctx.builder, LLVMConstPointerNull(ctx.ptr_type), slot_ptr)
+                },
+            }
         },
     }
 }
@@ -619,6 +832,56 @@ fn emit_dict_method_thunk(mut ctx: LlvmCtx, mangled: Str, method_fn: LLVMValueRe
         fwd_args.push(LLVMGetParam(thunk_fn, i + 1))
     }
     let call_res = LLVMBuildCall2(ctx.builder, method_ty, method_fn, fwd_args, fresh_name(ctx, "tk"))
+    LLVMBuildRet(ctx.builder, call_res)
+
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_block)
+    thunk_fn
+}
+
+// B-141: emit a thunk for a default trait method that FORWARDS env (= dict ptr)
+// as the first argument to the default body function, unlike emit_dict_method_thunk
+// which drops env. Signature: (env, p0, ..., p_{n-1}) where the default fn expects
+// (self_dict, p0, ..., p_{n-1}) and self_dict = env.
+fn emit_default_method_thunk(mut ctx: LlvmCtx, default_fn_name: Str, default_fn: LLVMValueRef) -> LLVMValueRef {
+    let thunk_name = "${default_fn_name}__defaultthunk"
+    // Reuse if already emitted
+    match ctx.functions.get(thunk_name) {
+        some(existing) => { return existing },
+        none => {},
+    }
+
+    let default_arity = LLVMCountParams(default_fn)
+    // The default fn takes (self_dict, params..., evidence...) = default_arity params.
+    // The thunk takes (env, params..., evidence...) = same count (env replaces self_dict).
+    // So thunk arity = default_arity.
+    let mut thunk_param_types: List<LLVMTypeRef> = []
+    for i in 0..default_arity {
+        thunk_param_types.push(ctx.ptr_type)
+    }
+    let thunk_ty = LLVMFunctionType(ctx.ptr_type, thunk_param_types, 0)
+    let thunk_fn = LLVMAddFunction(ctx.module, thunk_name, thunk_ty)
+    ctx.functions.insert(thunk_name, thunk_fn)
+    ctx.fn_types.insert(thunk_name, thunk_ty)
+
+    let default_ty = match ctx.fn_types.get(default_fn_name) {
+        some(t) => t,
+        none => {
+            let mut pts: List<LLVMTypeRef> = []
+            for i in 0..default_arity { pts.push(ctx.ptr_type) }
+            LLVMFunctionType(ctx.ptr_type, pts, 0)
+        },
+    }
+
+    let saved_block = LLVMGetInsertBlock(ctx.builder)
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, thunk_fn, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Forward ALL params (including env=param 0) to the default function.
+    let mut fwd_args: List<LLVMValueRef> = []
+    for i in 0..default_arity {
+        fwd_args.push(LLVMGetParam(thunk_fn, i))
+    }
+    let call_res = LLVMBuildCall2(ctx.builder, default_ty, default_fn, fwd_args, fresh_name(ctx, "dtk"))
     LLVMBuildRet(ctx.builder, call_res)
 
     LLVMPositionBuilderAtEnd(ctx.builder, saved_block)
@@ -727,7 +990,7 @@ fn emit_derived_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str) 
     for i in 0..method_count {
         match method_order.get(i) {
             some(method_name) => {
-                let _ = emit_dict_method_slot(ctx, target_type, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, alloc_fn, alloc_ty, i)
+                let _ = emit_dict_method_slot(ctx, target_type, trait_name, method_name, dict_struct_ty, dict_ptr, closure_ty, closure_size, alloc_fn, alloc_ty, i)
             },
             none => {},
         }
