@@ -3273,7 +3273,30 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
                         }
                     }
                 },
-                none => {},
+                none => {
+                    // Not an enum — try struct types (e.g. catch arm on a plain struct error)
+                    match ctx.struct_types.get(name) {
+                        some(si) => {
+                            for i in 0..fields.len() {
+                                match fields.get(i) {
+                                    some(nf) => {
+                                        let mut field_idx = i
+                                        for fi in 0..si.field_names.len() {
+                                            if si.field_names[fi] == nf.name {
+                                                field_idx = fi
+                                            }
+                                        }
+                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, si.llvm_type, val, field_idx, fresh_name(ctx, "sf"))
+                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "sv"))
+                                        bind_nested_pattern(ctx, field_val, nf.pattern)
+                                    },
+                                    none => {},
+                                }
+                            }
+                        },
+                        none => {},
+                    }
+                },
             }
         },
         _ => {},
@@ -4531,6 +4554,12 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
             Pattern::Constructor { name, fields, .. } => {
                 // Try to match error to constructor (e.g. specific error variant)
                 // For now, just bind fields if it matches
+                bind_nested_pattern(ctx, error_val, arm.pattern)
+                return gen_llvm_expr(ctx, arm.body)
+            },
+            Pattern::NamedConstructor { name, fields, .. } => {
+                // Named constructor pattern (e.g. AppError::NotFound { key })
+                // bind_nested_pattern already handles NamedConstructor
                 bind_nested_pattern(ctx, error_val, arm.pattern)
                 return gen_llvm_expr(ctx, arm.body)
             },

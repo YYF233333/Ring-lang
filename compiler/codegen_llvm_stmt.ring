@@ -1,5 +1,5 @@
 use types::{Type, BUILTIN_RANGE}
-use ast::{Pattern, LiteralValue}
+use ast::{Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type,
     is_fresh_owned_bool_value}
 use codegen_llvm_ctx::{LlvmCtx, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca}
@@ -716,6 +716,86 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
                                         match fp {
                                             Pattern::Binding { name: bname, .. } => {
                                                 let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
+                                                let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
+                                                let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
+                                                discard(LLVMBuildStore(ctx.builder, field_val, alloca))
+                                                ctx.named_values.insert(bname, alloca)
+                                            },
+                                            _ => {},
+                                        }
+                                    },
+                                    none => {},
+                                }
+                            }
+                            discard(gen_llvm_expr(ctx, then_block))
+                            discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+                            // Else
+                            LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
+                            match else_block {
+                                some(eb) => { discard(gen_llvm_expr(ctx, eb)) },
+                                none => {},
+                            }
+                            discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+                            LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+                        },
+                        none => {
+                            // Variant not found — just execute then block
+                            discard(LLVMBuildBr(ctx.builder, then_bb))
+                            LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
+                            discard(gen_llvm_expr(ctx, then_block))
+                            discard(LLVMBuildBr(ctx.builder, merge_bb))
+                            LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
+                            discard(LLVMBuildBr(ctx.builder, merge_bb))
+                            LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+                        },
+                    }
+                },
+                none => {
+                    // Enum not registered
+                    discard(LLVMBuildBr(ctx.builder, then_bb))
+                    LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
+                    discard(gen_llvm_expr(ctx, then_block))
+                    discard(LLVMBuildBr(ctx.builder, merge_bb))
+                    LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
+                    discard(LLVMBuildBr(ctx.builder, merge_bb))
+                    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+                },
+            }
+        },
+        Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
+            // Named constructor pattern (e.g. AppError::NotFound { key })
+            // Get enum name from scrutinee type, same approach as Constructor arm
+            let nc_enum_name = match scrut_ty {
+                Type::EnumType { name: ename, .. } => ename,
+                _ => "Option",
+            }
+            match ctx.enum_types.get(nc_enum_name) {
+                some(enum_info) => {
+                    match enum_info.variants.get(cname) {
+                        some(vi) => {
+                            let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, 0, fresh_name(ctx, "tp"))
+                            let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tag"))
+                            let expected_tag = LLVMConstInt(ctx.i64_type, vi.tag, 0)
+                            let cond = LLVMBuildICmp(ctx.builder, 32, tag_val, expected_tag, fresh_name(ctx, "eq"))
+                            discard(LLVMBuildCondBr(ctx.builder, cond, then_bb, else_bb))
+
+                            // Then: bind named fields by name
+                            LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
+                            for i in 0..nfields.len() {
+                                match nfields.get(i) {
+                                    some(nf) => {
+                                        // Find positional index for this named field
+                                        let mut field_idx = i
+                                        for fi in 0..vi.field_names.len() {
+                                            if vi.field_names[fi] == nf.name {
+                                                field_idx = fi
+                                            }
+                                        }
+                                        match nf.pattern {
+                                            Pattern::Binding { name: bname, .. } => {
+                                                let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
                                                 let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
                                                 let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
                                                 discard(LLVMBuildStore(ctx.builder, field_val, alloca))
