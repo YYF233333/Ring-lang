@@ -112,7 +112,7 @@ Ring-lang/
 
 **当前**：**Native 自举 Level 1 完成（2026-06-16）**——B-089 三门全绿（G-a 内存 ✅ / G-b 双 bootstrap 44/44 字节一致 ✅ / G-c llvm_diff 86/86 + native E2E 3/3 ✅）。B-104 完整 Perceus RC ✅。B-080 tagged pointer ✅。B-122 SCC 拓扑序 ✅。B-138 impl SCC 排序 ✅。
 
-**后续**：B-099 native LLVM-C 链接（Node 消除，Level 2）→ B-100 JS 退役 → L1 用户面（B-068）/ L2 Drop/RAII（B-002）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
+**后续**：B-099 native LLVM-C 链接（Node 消除，Level 2）→ B-100 JS 退役 → L1 用户面（B-068）/ L2 Drop/RAII（B-002，含简单 move checker）→ L1.5 别名追踪（B-110，非 Drop 类型 mutation 安全）→ async effect + 结构化并发 → Refinement types（Z3 集成）→ GADTs
 
 **遗留**：impl effect 传播修复（B-138，impl 内 SCC 排序）、LSP 移植、技术债清理（见 `docs/audit-report.md`）
 

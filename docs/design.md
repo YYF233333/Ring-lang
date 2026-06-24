@@ -1443,11 +1443,19 @@ let zs = xs.clone()    // 递归深拷贝，完全独立
 | 可变借用 | callee 修改，caller 可见 | `fn f(x: T)` | `fn f(x: mut T)` |
 | 移动 | callee 取得所有权，caller 失去 | `fn f(x: T)` | `fn f(x: move T)` |
 
-**所有标注由编译器从函数体推断**：
+**用户定义函数的标注由编译器从函数体推断**：
 - 函数体只读参数 → borrow
 - 函数体修改参数（调用 mutating 方法、赋值字段） → mut（lv2 显示 `x: mut T`）
 - 函数体将参数返回/存入字段/跨 spawn → move（lv2 显示 `x: move T`）
 - Drop 类型参数被消耗 → auto-move
+
+**extern fn 必须显式标注 `mut`**：编译器无法分析 FFI 函数体，mutation 必须由声明者标注。未标注 = 只读借用。
+
+```ring
+// extern fn 的 mut 标注
+extern fn sort_in_place(arr: mut List<Int>)          // mutates arr
+extern fn read_all(path: Str) -> Str / io             // path is readonly
+```
 
 调用点 lv2 同步显示：`f(mut list)` / `f(move file)`。lv0 一律写 `f(x)`。
 
@@ -1475,8 +1483,19 @@ print(ys)               // ❌ 编译错误：ys 在 xs mutation 后失效
 2. 对 x 的 mutation（调用 mutating 方法、赋值字段）使所有 x 的别名失效
 3. 对别名 y 的 mutation 同样使 x 和 x 的其他别名失效
 4. 失效后使用 = 编译错误
-5. 别名在其最后使用点后自然结束——之后原名恢复独占，可自由 mutate
-6. **纯词法分析**，不需要跨函数追踪，不需要 lifetime 标注
+5. 别名的生存期到其所在**大括号作用域**结束——不是函数末尾
+6. 编译器可**隐式缩小别名生存期**至最后使用点（NLL 风格），使本来受限的代码通过检查——精度待定（见下文设计探针）
+7. **不跨函数追踪**，不需要 lifetime 标注
+
+**mutation 判定（自底向上，完备要求）**：
+- **赋值** = mutation：字段赋值（`x.field = val`）、index 赋值（`x[i] = val`）
+- **用户函数**：编译器分析函数体——若函数体 mutates 参数，该参数推断为 `mut T`，该调用即 mutation
+- **extern fn**：必须在声明时显式标注 `mut`（§7.3）——未标注 = 只读
+- **完备性要求**：别名追踪系统上线时 mutation 判定必须覆盖所有路径（赋值 + 推断 + FFI 标注），不接受渐进白名单。否则会出现漏报导致运行时 UAF——与 Rust 对 `&mut` 的要求同等严格
+
+**别名在循环中的行为**：参考 Rust 的循环别名规则——循环体内的 mutation 使循环外定义的别名在**整个循环体**内失效（保守假设循环体执行多次）。
+
+**NLL 设计探针（待完成）**：Rust 从词法作用域（1.0）演进到 Non-Lexical Lifetimes（1.31，2018 edition），使用 CFG-based liveness 精确计算引用生存期。Ring 需要研究：(1) Rust NLL 的实现复杂度（CFG 构建 + dataflow）；(2) 简化版（块级 liveness，不做完整 CFG）是否够用；(3) 对用户体验的影响（哪些 pattern 在哪种精度下会被拒绝）。决策后更新本节。
 
 **修复方式**：
 ```ring
@@ -1484,10 +1503,17 @@ print(ys)               // ❌ 编译错误：ys 在 xs mutation 后失效
 let ys = xs.clone()     // 递归深拷贝，完全独立
 xs.push(4)              // ✅
 
-// 方式 2：别名用完再 mutate
+// 方式 2：别名用完再 mutate（NLL 可能自动通过）
 let ys = xs
 print(ys)               // ys 最后使用
-xs.push(4)              // ✅ ys 最后使用点之后，xs 恢复独占
+xs.push(4)              // ✅ NLL 检测到 ys 此后无使用，别名已结束
+
+// 方式 3：显式作用域限制别名
+{
+    let ys = xs
+    print(ys)
+}                       // ys 作用域结束
+xs.push(4)              // ✅
 ```
 
 **参数的别名安全**：callee 推断为 `x: mut T` 时，caller 在调用期间不能有其他别名指向同一值。编译器在调用点检查。
@@ -1597,8 +1623,8 @@ let inc = fn() [mut counter: Int, name: Str] { ... }
 | **L1 借用引擎** | clone-all-escape，参数 borrow 不 dup | ✅ | B-098 |
 | **L0/L1 完整化** | total drop pass + 静态 leak verifier（verify_rc.ring） | ✅ | B-104 |
 | **L4 标记指针** | 标量低位 tag，不进堆 | ✅ | B-080 |
-| **L2 Drop/RAII** | 用户 impl Drop，abort unwind，Weak\<T\> | 待做 | B-002 |
-| **L1.5 别名追踪** | §7.4 的 mutation 后别名失效检查（checker 层） | 待做 | 新项 |
+| **L2 Drop/RAII** | 用户 impl Drop，abort unwind，Weak\<T\>，**含简单 move checker**（consumed-flag） | 待做 | B-002 |
+| **L1.5 别名追踪** | §7.4 非 Drop 类型 mutation 安全 + mutation 推断 + NLL（deferred: L2） | 待做 | B-110 |
 | **L3 Reuse (FBIP)** | rc==1 原地改写，drop-reuse 配对 | 待做 | B-079 |
 | **L5 RC 消除** | 编译器证明 rc 恒 1 → 跳过 dup/drop | 未排期 | — |
 

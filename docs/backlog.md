@@ -88,7 +88,7 @@ trait Drop {
 ```
 
 **模型（2026-06-24 更新）**：
-- Drop 类型赋值 auto-move（B-110 checker 强制），rc 恒 1，scope-end drop = rc 归零 = Rust 析构时机
+- Drop 类型赋值 auto-move（本项自带简单 consumed-flag checker），rc 恒 1，scope-end drop = rc 归零 = Rust 析构时机
 - `impl Drop` 禁止 `impl Clone`（资源不可复制）
 - Drop 顺序对齐 Rust：同 scope 逆序 / struct 字段声明序 / 容器元素序
 - `drop(x)` 提前释放，`leak(x)` 显式逃逸
@@ -99,45 +99,51 @@ trait Drop {
 
 **涉及修改**：
 1. **checker**：`impl Drop` 注册 + `impl Drop` 禁 `impl Clone` 检查 + Drop 方法 effect 约束（禁 fail）
-2. **codegen_llvm**：Drop glue 生成——per-type `drop_T` 函数（用户 `impl Drop` body + 字段递归 drop）；复合类型自动 derive
-3. **abort-unwind（重头）**：fail.raise 从 setjmp/longjmp 改为 **LLVM invoke/landingpad**（和 Rust 同一机制）。TryCatch/HandleExpr codegen 改用 invoke + landing pad；landing pad 执行 Drop glue 后 resume unwind。`ring_runtime.cpp` 的 `ring_try`/`ring_raise` 改用 unwind API
-4. **perceus**：Drop 类型的 RC 行为——auto-move 不 dup（已由 B-110 的 checker 保证），scope-end drop 恒释放
-5. **`Weak<T>`（子项，后续）**：runtime 对象头扩展 weak_count；`Rc.downgrade()` / `Weak.upgrade()`；rc=0 时执行 Drop 但 weak_count>0 时不 free 内存
+2. **checker：简单 move checker（consumed-flag）**——Drop 类型 `let y = x` 标记 x 为 consumed，后续使用 x 报编译错误（E07xx）。纯变量级线性扫描，不需要别名追踪/mutation 推断/NLL。`--error-format=llm` 提示 "x was moved to y"
+3. **codegen_llvm**：Drop glue 生成——per-type `drop_T` 函数（用户 `impl Drop` body + 字段递归 drop）；复合类型自动 derive
+4. **abort-unwind（重头）**：fail.raise 从 setjmp/longjmp 改为 **LLVM invoke/landingpad**（和 Rust 同一机制）。TryCatch/HandleExpr codegen 改用 invoke + landing pad；landing pad 执行 Drop glue 后 resume unwind。`ring_runtime.cpp` 的 `ring_try`/`ring_raise` 改用 unwind API
+5. **perceus**：Drop 类型的 RC 行为——auto-move 不 dup（由 sub-item 2 的 checker 保证），scope-end drop 恒释放
+6. **`Weak<T>`（子项，后续）**：runtime 对象头扩展 weak_count；`Rc.downgrade()` / `Weak.upgrade()`；rc=0 时执行 Drop 但 weak_count>0 时不 free 内存
 
 **验收标准**：
 - `impl Drop for T` 可编译，scope-end 触发 Drop
 - Drop 内 `fail.raise` → 编译错误
 - abort 路径（fail.raise 穿越含 Drop 局部的函数）→ 所有 Drop 正确执行（invoke/landingpad）
 - struct 含 Drop 字段 → 自动 Drop 按字段声明序
-- Drop 类型 auto-move：赋值后原绑定不可用（B-110 前置）
+- Drop 类型 auto-move：`let g = f`（Drop）→ 后续使用 f 编译错误
 - `Rc<T>` 共享 Drop 类型 → 最后一个 Rc 消亡时 Drop 触发
 - 全部 E2E + llvm_diff 通过；自举一致
 
-- **前置依赖**：B-110（别名追踪 + Drop auto-move checker）
+- **后续**：B-110（非 Drop 类型别名追踪）在 B-002 之后落地。两者都完成后再做整体优化
 - **复杂度**：XL（abort-unwind 改 LLVM invoke/landingpad 是最重的部分）
 - **优先级**：P2，层 3 前完成
 
 
 
-### B-110 别名追踪 + Drop auto-move（资源管理 checker）[feature] [P1] [L] [judgment] [queued]
+### B-110 非 Drop 类型别名追踪（资源管理 checker）[feature] [P1] [L] [judgment] [queued] [deferred: B-002]
 
-> 2026-06-11 立项，2026-06-24 重新设计（Discussion，资源管理模型重构）。**真值源 = design.md §7（2026-06-24 版）**。原 spec（use-after-move + 全类型 move 语义）已废弃——新模型：非 Drop 类型赋值 = rc+1 共享（不 move），别名追踪保证 mutation 安全；Drop 类型赋值 = auto-move。
+> 2026-06-11 立项，2026-06-24 重新设计+拆分（Discussion）。**真值源 = design.md §7.4（2026-06-24 版）**。Drop auto-move 已移入 B-002（简单 consumed-flag checker）。本项专注非 Drop 类型的别名追踪 + mutation 推断。B-002 和 B-110 都完成后再做整体优化。
+
+**设计决策（2026-06-24 Discussion）**：
+- **mutation 判定完备性**：上线即全覆盖——赋值 = mutation；用户函数从函数体自底向上推断（mut 传播到签名）；extern fn 必须显式标注 `mut`（§7.3）。不接受渐进白名单
+- **别名作用域**：默认到大括号结束。编译器可隐式缩小别名生存期至最后使用点（NLL 风格），精度取决于 NLL 设计探针结果
+- **循环别名**：参考 Rust 规则，循环体内 mutation 使循环外别名在整个循环体内失效
+
+**前置**：B-002（Drop/RAII，提供 Drop 类型信息用于 share vs move 分叉判定）+ NLL 设计探针
 
 **涉及修改**：
-1. **checker：别名追踪 pass（§7.4）**——`let y = x`（非 Drop 复合类型）建立别名关系；对 x 的 mutation 使 y 失效；失效后使用 y = 编译错误（E07xx，`--error-format=llm` 含 `.clone()` 修复建议）。反向同理（y mutation 使 x 失效）。别名在最后使用点后自然结束。纯词法分析。
-2. **checker：Drop 类型 auto-move**——`let y = x` 其中 x 是 Drop 类型 → x 失效（use-after-move 编译错误）。泛型通过单态化解决（调用点具体类型已知）。lv2 formatter 展示 `let y = move x`。
-3. **checker：mutation 推断**——函数体修改参数 → 参数推断为 `x: mut T`（lv2）。调用点检查：实参不能有其他活跃别名。
-4. **测试**：别名失效 E2E（mutation 后使用别名 → 编译错误）+ Drop auto-move E2E + `.clone()` 独立性 + 编译器自身零错误。
-5. **嵌套赋值 codegen bug（承继旧 B-110 #5）**：`grid[0][1] = v` 两后端崩（JS 产非法 JS / LLVM panic），修复或显式报错。
+1. **checker：mutation 推断（自底向上）**——分析函数体：赋值字段/index = mutation；调用 mutating 方法 = mutation（递归：callee 的参数已推断 mut → caller 该调用是 mutation）。推断结果标记参数为 `mut T`。extern fn 从声明读取 `mut` 标注
+2. **checker：别名追踪 pass（§7.4）**——`let y = x`（非 Drop 复合类型）建立别名关系；对 x 的 mutation 使 y 失效；失效后使用 y = 编译错误（E07xx，`--error-format=llm` 含 `.clone()` 修复建议）。别名生存期到大括号结束，编译器可隐式缩小到最后使用点（NLL）
+3. **调用点检查**——callee 参数推断为 `mut T` 时，caller 实参不能有其他活跃别名
+4. **测试**：别名失效 E2E + mutation 推断 + `.clone()` 独立性 + 编译器自身零错误
+5. **嵌套赋值 codegen bug（承继旧 B-110 #5）**：`grid[0][1] = v` 两后端崩（JS 产非法 JS / LLVM panic），修复或显式报错
 
-**范围边界**：本项是 checker 层。不改 Perceus RC 行为。B-002（Drop/RAII）是本项的下游——Drop trait 实现后 auto-move 才有实际 Drop 类型可作用。但别名追踪（sub-item 1）不依赖 B-002，可独立落地。
-
-**编译器自身迁移**：新模型下非 Drop 类型不 move，编译器现有的 `let y = x` 共享模式**天然合规**——无需大规模迁移。可能需要修复的只有 mutation-after-alias 站点（预期少量）。首步跑 checker 统计错误数。
+**编译器自身迁移**：新模型下非 Drop 类型不 move，编译器现有的 `let y = x` 共享模式天然合规——无需大规模迁移。可能需要修复的只有 mutation-after-alias 站点（预期少量）。首步跑 checker 统计错误数。
 
 **验收标准**：
 - 别名失效：`let ys = xs; xs.push(1); print(ys)` → 编译错误
-- Drop auto-move：`let g = f`（f 为 Drop 类型）→ f 后续使用编译错误
-- mutation 推断：调用点传 aliased 值给 mut 参数 → 编译错误
+- mutation 推断：用户函数体 mutate 参数 → 签名推断 `mut T`；extern fn 声明 `mut` → 调用点检查别名
+- 调用点别名安全：`let ys = xs; sort_in_place(xs)` → 编译错误（xs 有活跃别名 ys）
 - `.clone()` 路径：`let ys = xs.clone(); xs.push(1); print(ys)` → ✅
 - 编译器自身（31+ 文件）在新 checker 下零错误 + double bootstrap 一致
 - 全部 E2E + llvm_diff 通过
