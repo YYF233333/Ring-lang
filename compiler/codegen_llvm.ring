@@ -1483,17 +1483,14 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // 8. First pass: forward declare all Ring functions
     forward_declare_functions(ctx, program.decls)
 
+    // 8b. B-100: emit auto-derived trait impls (Eq, Clone, Debug) BEFORE body pass.
+    // Method calls in function bodies need ring_<Type>_clone etc. in ctx.functions.
+    emit_derived_impls_llvm(ctx, program.derived_impls)
+
     // 9. Second pass: generate all function bodies
     for decl in program.decls {
         emit_llvm_decl(ctx, decl)
     }
-
-    // 9a. B-100 Fix 2: emit auto-derived trait impls (Eq, etc.)
-    // The JS backend handles these via codegen_derive.ring; this is the LLVM mirror.
-    // Runs after the main decl pass so struct types and user impls are stable.
-    // emit_trait_dict uses force_replace=true to replace any fallback dict getter
-    // that was lazily created during the decl pass (get_or_create_static_dict_getter).
-    emit_derived_impls_llvm(ctx, program.derived_impls)
 
     // 9b. Generate per-type drop functions and register them
     emit_drop_functions(ctx)
@@ -1658,25 +1655,22 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         forward_declare_functions_with_prefix(ctx, program.decls, some(prefix))
     }
 
+    // 8b. Emit derived impls for all modules (before body pass)
+    for m in modules {
+        let (prefix, program, _uses) = m
+        emit_derived_impls_llvm(ctx, program.derived_impls)
+    }
+
     // 9. Second pass: generate all function bodies for all modules
     for m in modules {
         let (prefix, program, uses) = m
-        // Set the current module context
         ctx.module_prefix = some(prefix)
-        // #134: scope boxed_vars to THIS module's def_id space.  def_ids are
-        // module-local (next_def_id restarts per module), so each module's
-        // auto-boxed mut-cell set must only apply while emitting that module's
-        // own bodies — a global union collides across modules' id-spaces.
         ctx.boxed_vars = program.boxed_vars
-        // Collect local names for this module
         ctx.local_names = collect_local_names(program.decls)
-        // Build imports map from use declarations
         ctx.imports_map = build_imports_map(uses)
         for decl in program.decls {
             emit_llvm_decl(ctx, decl)
         }
-        // B-100 Fix 2: emit auto-derived trait impls after decls
-        emit_derived_impls_llvm(ctx, program.derived_impls)
     }
 
     // Clear module prefix

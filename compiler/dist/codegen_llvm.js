@@ -1933,6 +1933,7 @@ function generate_llvm(program, output_path, __ring_ev_io) {
   compute_transitive_effect_closure(program.decls, ctx.local_fn_effects);
   declare_runtime_fns(ctx);
   forward_declare_functions(ctx, program.decls);
+  codegen_llvm_decl$emit_derived_impls_llvm(ctx, program.derived_impls);
   const __ring_iter_47 = __List_Iterable.iter(program.decls);
   while (true) {
     const __ring_next_47 = __ListIterator_Iterator.next(__ring_iter_47);
@@ -1940,7 +1941,6 @@ function generate_llvm(program, output_path, __ring_ev_io) {
     const decl = __ring_next_47._0;
     codegen_llvm_decl$emit_llvm_decl(ctx, decl);
   }
-  codegen_llvm_decl$emit_derived_impls_llvm(ctx, program.derived_impls);
   emit_drop_functions(ctx);
   emit_c_main(ctx);
   const ir = LLVMPrintModuleToString(module);
@@ -2051,19 +2051,29 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
     const __ring_dt6 = m;
     const prefix = __ring_dt6[0];
     const program = __ring_dt6[1];
-    const uses = __ring_dt6[2];
+    const _uses = __ring_dt6[2];
+    codegen_llvm_decl$emit_derived_impls_llvm(ctx, program.derived_impls);
+  }
+  const __ring_iter_55 = __List_Iterable.iter(modules);
+  while (true) {
+    const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
+    if (__ring_next_55._tag === "none") break;
+    const m = __ring_next_55._0;
+    const __ring_dt7 = m;
+    const prefix = __ring_dt7[0];
+    const program = __ring_dt7[1];
+    const uses = __ring_dt7[2];
     ctx.module_prefix = Option_some(prefix);
     ctx.boxed_vars = program.boxed_vars;
     ctx.local_names = collect_local_names(program.decls);
     ctx.imports_map = build_imports_map(uses);
-    const __ring_iter_55 = __List_Iterable.iter(program.decls);
+    const __ring_iter_56 = __List_Iterable.iter(program.decls);
     while (true) {
-      const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
-      if (__ring_next_55._tag === "none") break;
-      const decl = __ring_next_55._0;
+      const __ring_next_56 = __ListIterator_Iterator.next(__ring_iter_56);
+      if (__ring_next_56._tag === "none") break;
+      const decl = __ring_next_56._0;
       codegen_llvm_decl$emit_llvm_decl(ctx, decl);
     }
-    codegen_llvm_decl$emit_derived_impls_llvm(ctx, program.derived_impls);
   }
   ctx.module_prefix = Option_none;
   emit_drop_functions(ctx);
