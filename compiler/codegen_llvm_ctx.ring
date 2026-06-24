@@ -194,6 +194,12 @@ pub struct LlvmCtx {
     // default_evidence_effects + emit_effect_decl.
     pub default_evidence: Map<Str, LLVMValueRef>,
 
+    // B-100 Fix 2: derived dict build functions to call at startup.
+    // Each entry is (dict_global_ptr, build_fn, build_fn_ty). emit_c_main calls
+    // build_fn and stores the result in dict_global before Ring code runs, so
+    // the lazy getters (which check if @g == null) find the proper dict.
+    pub derived_dict_builds: List<(LLVMValueRef, LLVMValueRef, LLVMTypeRef)>,
+
     // B-104 D1 rule ① (audit #139): extern type names declared by the program
     // (union over all modules in project mode — names are consistent across the
     // codegen_llvm_* local re-declarations).  register_struct_info /
