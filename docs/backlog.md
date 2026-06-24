@@ -15,7 +15,7 @@
 
 **现状 / 未完成项**：
 - **当前目标：native 自举 + E2E + 双后端行为对比全过**（见下「Native 自举路线图」与「⭐ native on-par 统一规划」）
-- B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（✅）**；B-068 缩减为用户面（`fn(move T)` 语法 / lv2 标注 / fmt 策略 / pub 规则），仍 deferred、不阻塞 native（**无独立条目**——模型见 design.md §7.2-7.8，B-110 落地后再立项）
+- B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（✅）**；B-068 缩减为用户面（lv2 标注：`x: mut T` / `x: move T` / `[mut capture]` 闭包捕获列表 / pub 签名规则），仍 deferred、不阻塞 native（**无独立条目**——模型见 design.md §7.2-7.8（2026-06-24 版），B-110 落地后再立项）
 - **订正（2026-06-04，#134 证伪）**：「L0 owned-everywhere 即可自举」的原假设错误——L0 对「循环内条件 move」是 double-free（崩溃，非泄漏）。借用推断引擎（B-098）被提前到 native-working 之前并已落地
 - B-033 GADTs 推迟至 native 自举之后（无下游依赖）
 - 层 3 在 native 自举 + 归档后启动。**排序（2026-06-05 Discussion 定）**：B-002 Drop/RAII(L2) → **async(B-007) 先**（设计已锁、自包含、风险低、宣发价值大）→ Refinement(B-001) 随后（需 Z3 + 先做 B-070 const generics）；M 项（B-072 Union / B-069 默认参数 / B-070 固定数组）当 XL 间换气穿插；P3 研究（GADTs/dyn/GATs）最后。B-002 的 abort-unwind 子集可能因 G-a 内存提前（B-104 ✅，G-a 终态已达；abort 路径泄漏已入 D2 豁免类，design-accepted）
@@ -102,28 +102,28 @@ Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪
 
 
 
-### B-110 Move 语义补完：use-after-move checker + 可变别名收口 [feature] [P2] [L] [judgment] [queued]
+### B-110 别名追踪 + Drop auto-move（资源管理 checker）[feature] [P1] [L] [judgment] [queued]
 
-> 2026-06-11 立项（Discussion，Fable 全面审视）。**Mutable aliasing 语义拍板 = move 补完**，详见 design.md §7.5「强制状态」+ 决策表。背景：三真值源分裂——实现 = 引用语义（两后端，`let ys = xs; xs.push(3)` 后 ys 可见 3 元素，已核实 checker 无任何 use-after-move 检查、runtime 无 COW）、设计文档 = move（§7.5）、Koka 血统 = 值语义+COW——且无任何测试锁定任一。已否决引用语义追认（`mut<T>` 系统性失真、aliasing bug 类对无人回路永久开放）与值语义+COW（编译器自迁移是静默行为变化、JS oracle 无 RC 表达不了 COW）。
+> 2026-06-11 立项，2026-06-24 重新设计（Discussion，资源管理模型重构）。**真值源 = design.md §7（2026-06-24 版）**。原 spec（use-after-move + 全类型 move 语义）已废弃——新模型：非 Drop 类型赋值 = rc+1 共享（不 move），别名追踪保证 mutation 安全；Drop 类型赋值 = auto-move。
 
 **涉及修改**：
-1. checker：新增 use-after-move pass——复合类型绑定在「赋值给新绑定 / 存入 struct 字段 / 容器 insert / return 局部 / 跨 spawn 闭包捕获」后标记 moved，后续使用报编译错误（E07xx，`--error-format=llm` 含 `let ys = xs.clone()` 修复建议）。值类型（标量）auto copy 不受影响；Str 是否豁免（不可变值语义）实现时核定。
-2. checker：句法禁止同一调用中同 lvalue 同时作 borrow 与 `mut` 实参（`f(xs, mut xs)`）——无 borrow checker 下唯一的别名洞。
-3. 测试：aliasing 语义 E2E——判定程序 + 字段存储 + 容器 insert + spawn 捕获各一例断言编译错误；`.clone()` 后独立性正常路径（趁 JS oracle 在世双后端跑）。
-4. 编译器自身迁移：use-after-move 错误即迁移清单——不可变共享改 `.clone()`（运行时=免费 dup），共享可变站点改 mut 参数线程化。**首步先跑 checker 统计错误数再定波次**，量大则回报拆分。
-5. **投影绑定堵缝（2026-06-11 增补，COW 不可观测原则，见 design.md 决策表）**：`let item = xs[i]`（IndexExpr/FieldAccess 源的绑定）后对 item 写入，在 dup+COW 下会静默 detach（写副本不写原件）——use-after-move checker 不触发、行为静默变化，**原则已拍：不得静默分叉，必须响**。堵法 = (a) 写从投影绑定出的复合值 = 编译错误（与 use-after-move 同级）+ (b) 嵌套 lvalue path 官方化承接 + 测试锁定。**实测（2026-06-11 Discussion，两后端核实完毕）**：
-   - **FieldAccess 为根的嵌套左值已全链工作且两后端一致**：`pts[0].x = v`、`w.p.x = v` 原地改——(b) 的主体已存在，缺测试锁定（补 E2E + llvm_diff）。
-   - **IndexExpr 为根、receiver 非 Ident 的赋值两后端双崩**：`grid[0][1] = v`、`bag.items[1] = v`——JS codegen 产**非法 JS**（运行时 ReferenceError，产物级 bug），LLVM codegen 编译期 panic `unsupported assignment target`。修复归本条：按堵缝方案要么 emit set 路径递归化支持、要么 checker 显式报错，**不允许维持产非法 JS 现状**。
-   - **投影绑定写穿透实锤**：`let mut item = pts2[0]; item.x = 99` → 原件同变（IndexExpr/FieldAccess 源、两后端一致）——B-110 落地时该模式必须按 (a) 报错，否则 COW 下语义静默反转。
+1. **checker：别名追踪 pass（§7.4）**——`let y = x`（非 Drop 复合类型）建立别名关系；对 x 的 mutation 使 y 失效；失效后使用 y = 编译错误（E07xx，`--error-format=llm` 含 `.clone()` 修复建议）。反向同理（y mutation 使 x 失效）。别名在最后使用点后自然结束。纯词法分析。
+2. **checker：Drop 类型 auto-move**——`let y = x` 其中 x 是 Drop 类型 → x 失效（use-after-move 编译错误）。泛型通过单态化解决（调用点具体类型已知）。lv2 formatter 展示 `let y = move x`。
+3. **checker：mutation 推断**——函数体修改参数 → 参数推断为 `x: mut T`（lv2）。调用点检查：实参不能有其他活跃别名。
+4. **测试**：别名失效 E2E（mutation 后使用别名 → 编译错误）+ Drop auto-move E2E + `.clone()` 独立性 + 编译器自身零错误。
+5. **嵌套赋值 codegen bug（承继旧 B-110 #5）**：`grid[0][1] = v` 两后端崩（JS 产非法 JS / LLVM panic），修复或显式报错。
 
-**范围边界**：参数 move 推断（§7.3，callee 消耗实参 → caller use-after-move 传播）**不在本项**——参数维持 borrow-default，调用永不消耗实参（spawn 闭包捕获除外）；归 B-068/后续。本项纯 checker 层，不改 RC 行为——Perceus escape-clone 在 move 强制后成为可优化冗余（last-use move），留 L3。
+**范围边界**：本项是 checker 层。不改 Perceus RC 行为。B-002（Drop/RAII）是本项的下游——Drop trait 实现后 auto-move 才有实际 Drop 类型可作用。但别名追踪（sub-item 1）不依赖 B-002，可独立落地。
 
-**与现有项关系**：B-068（move 标注/lv2/fmt 文档化）的语义前置；B-002（Drop/RAII）依赖本项 move 基础设施。
+**编译器自身迁移**：新模型下非 Drop 类型不 move，编译器现有的 `let y = x` 共享模式**天然合规**——无需大规模迁移。可能需要修复的只有 mutation-after-alias 站点（预期少量）。首步跑 checker 统计错误数。
 
 **验收标准**：
-- 判定程序与四类逃逸位置 use-after-move 全报编译错误，含 clone 修复建议；`f(xs, mut xs)` 编译错误
-- 编译器自身（31 文件）在新 checker 下编译通过（迁移完成）+ double bootstrap 一致
-- JS 全量 + llvm_diff 全绿
+- 别名失效：`let ys = xs; xs.push(1); print(ys)` → 编译错误
+- Drop auto-move：`let g = f`（f 为 Drop 类型）→ f 后续使用编译错误
+- mutation 推断：调用点传 aliased 值给 mut 参数 → 编译错误
+- `.clone()` 路径：`let ys = xs.clone(); xs.push(1); print(ys)` → ✅
+- 编译器自身（31+ 文件）在新 checker 下零错误 + double bootstrap 一致
+- 全部 E2E + llvm_diff 通过
 
 ### B-072 Union Type（匿名 enum 语法糖）[feature] [P2] [M] [judgment] [queued]
 `A | B | C` 作为匿名 enum 的语法糖。纯编译期展开，不引入子类型，HM 推断不受影响。详见 design.md 1.1b。

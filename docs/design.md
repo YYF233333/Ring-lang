@@ -1387,173 +1387,260 @@ pub use config
 
 ---
 
-## 7. 内存管理与所有权（2026-05-24 确定）
+## 7. 资源管理模型（2026-06-24 重新设计）
 
-**当前状态**：JS 后端使用 V8 GC，开发者无需关心内存。
+> **2026-06-24 重新设计**：从需求出发重新审视——RAII + 自动内存管理 + borrow 传参 + 可变性 + 性能优化。目标 = Rust 的语义模型（ownership + move + borrow + Drop/RAII），底层用 Perceus RC 代替 borrow checker 兑现。旧设计（§7 pre-2026-06-24）的四通道总账、COW 三支柱、`mut<S>` effect、`&T`/`&mut T` 二等类型等框架已废弃，替代方案见本节。旧设计的实现记录（B-098/B-104 的 clone-all-escape / total drop pass / verify_rc 等）仍为当前 Perceus 实现的真值，见 §7.10。历史全文见 git history。
 
-**目标方向**：Perceus RC（精确引用计数 + 重用分析），不引入 GC。路线：LLVM 后端初期 malloc-only（bootstrap 阶段），之后过渡到 Perceus RC（B-012）。循环引用策略（B-042）为 Perceus 的前置决策。COW（copy-on-write）为 Perceus 内部优化，不是用户可见语义。
+### 7.1 设计目标
 
-> **历史注记**：早期设计文档曾规划"分代并发 GC"，已被 Perceus RC 方向取代。
+用户心智模型和 Rust 一致——值有 owner，赋值有 move 语义，传参是 borrow，Drop 在 scope-end 执行。Ring 不要求 lifetime 标注，没有 borrow checker，没有 `&T`/`&mut T` 一等类型。
 
-### 7.1 所有权模型
+**与 Rust 的核心差异**：
 
-- Ownership + move 语义（move 后不可用、Drop 恰好一次）
-- 小 struct 自动值语义（栈分配，copy-on-assign），编译器按大小和递归性判断
-- 逃逸分析：短命对象不上堆
-- 无 borrow checker——Perceus RC + Ownership + `mut<T>` + Drop 覆盖安全性（见 1.6b 交互矩阵）
-- 无可变别名（2026-06-11 拍板，B-110）：复合类型赋值/存字段/返回 = move（use-after-move 编译错误），杜绝 mutable aliasing；COW 因此是不可观测的内部优化（见 §7.5 强制状态）
+| | Rust | Ring |
+|---|---|---|
+| 内存安全保证 | borrow checker（静态） | Perceus RC（运行时） |
+| 引用类型 | `&T` / `&mut T` 一等类型 | 无——borrow 是调用约定，mutation 是推断 |
+| 赋值（非 Copy/非 Drop） | move（源失效） | rc+1 共享（源仍可用） |
+| 赋值（Drop 类型） | move（源失效） | 同 Rust（auto-move，推断） |
+| 标注负担 | lifetime、`&`/`&mut`、turbofish | 零（lv0），formatter 补全（lv2） |
 
-### 7.2 参数传递：Borrow-by-default
+**设计原则**：
+- 默认 borrow，显式 clone，Drop 自动 move——一条规则贯穿所有位置
+- `mut` 关键字用户只在 `let mut`（rebind）手写；参数位的 mutation 由编译器推断
+- 无 `&T`/`&mut T` 类型，无二等类型，无逃逸规则——用 rc+1 代替零成本引用，概念简洁
+- 性能：rc+1 的代价由后续优化（reuse analysis / RC 消除 / 逃逸分析）收敛至零
 
-Ring 的参数传递模型：默认只读借用，编译器推断 move，无 lifetime 标注。
+### 7.2 赋值语义
 
-| 参数形式 | 语义 | 说明 |
-|----------|------|------|
-| `x: T` | 只读借用（默认） | 调用方保留所有权，被调用方不能逃逸 |
-| `mut x: T` | 可变借用 | 已有语义，不变 |
-| `move x: T`（推断） | 移动所有权 | 编译器从函数体推断（参数被返回/存入字段/跨 spawn） |
-
-**设计选择**：无 `&T` 语法，无 lifetime 标注。与 Rust 的核心区别——Ring 用 Perceus RC 代替 borrow checker 保证内存安全。
-
-### 7.3 Move 推断
-
-Move 由编译器从函数体推断，开发者不需要手动标注：
-
-- 参数被返回 → move
-- 参数被存入 struct 字段 → move
-- 参数跨 `spawn` 闭包边界 → move
-- 其他所有情况 → borrow（默认）
-
-推断结果可通过 lv2 标注显式写出（`fn f(move x: T)`），但标注不改变编译行为——标注是文档，不是语义（见 3.2 节标注等级规范）。
-
-### 7.4 逃逸规则
-
-借用值受以下逃逸约束：
-
-- 不能被返回
-- 不能存入更长生命周期的位置
-- 不能跨 `spawn` 闭包边界
-
-违反逃逸约束 → 编译错误。编译器不需要跨函数逃逸分析——类型系统自动处理传染性（见 7.6 Scoped Struct Borrow）。
-
-### 7.5 赋值语义
-
-| 类型 | 赋值行为 | 说明 |
-|------|----------|------|
-| 值类型（Int/Float/Bool/Char） | auto copy | 零成本 memcpy |
-| 复合类型（List/Map/struct/enum） | move | 保留需显式 `.clone()` |
-
-**强制状态（2026-06-11 拍板，B-110）**：move 是**目标语义**（否决引用语义追认 / Swift 式值语义+COW）——`let ys = xs` 后 `xs` 不可用（use-after-move 编译错误）。当前两后端均未强制（过渡期实际为引用语义，无测试锁定）。落地 = B-110：checker 层 use-after-move pass（两后端共享）+ 句法禁止同 lvalue borrow/mut 借用重叠（`f(xs, mut xs)`，无 borrow checker 下唯一的别名洞）+ aliasing 语义测试趁 JS oracle 在世锁定。`.clone()` 语义 = 独立副本；Perceus 可用 shallow dup + COW 实现——move 杜绝可变别名后 COW 不可观测。不可变数据的共享 clone 退化为免费 dup，编译器自身的 HIR/Type 共享图不受影响；真正报错的只剩「共享 + 可变」站点（改 mut 参数线程化或 L2 `Rc<T>`）。
-
-### 7.6 Scoped Struct Borrow
-
-含借用的类型自动标记为"不可存储"，传参时走 borrow 语义。传染性由类型系统自动处理：
-
-- 含 borrow 字段的 struct → 整个 struct 不可存储（不可返回、不可存入更长 scope）
-- 不需要跨函数逃逸分析——struct 的"可存储性"在类型定义时已确定
-- 典型用例：Iterator/Parser/Slice 等 "struct 持有引用" 模式可正常使用
-
-### 7.7 函数类型中的 Convention
+| 场景 | `let x = y` | y 之后 |
+|------|------------|--------|
+| y 是右值（函数返回、字面量、构造器） | x 拥有 fresh 值 | 无 y |
+| y 是左值，非 Drop 类型 | rc+1，x 与 y 共享同一对象 | y 仍可用 |
+| y 是左值，Drop 类型 | auto-move（编译器推断） | y 失效（use-after-move 编译错误） |
+| y 是标量（Int/Float/Bool/Char） | auto-copy（memcpy） | y 仍可用 |
 
 ```ring
-fn(T) -> U          // T 为 borrow（默认，与参数 borrow-default 一致）
-fn(move T) -> U     // T 为 move（必须手写——唯一不可推断的 move 标注点）
+// 非 Drop：rc+1 共享
+let xs = [1, 2, 3]
+let ys = xs            // rc+1，两者指向同一 List
+print(ys.len())        // ✅
+
+// Drop 类型：auto-move
+let f = File.open("x")
+let g = f              // auto-move，f 失效
+print(f.path())        // ❌ 编译错误：f 已 move
+
+// 显式独立副本
+let zs = xs.clone()    // 递归深拷贝，完全独立
 ```
 
-大多数回调只读，极少需要 `fn(move T)`。函数类型中的 `move` 标注是唯一一个不可推断、必须显式写出的 move 标注点。
+**lv2 formatter**：对 Drop 类型的赋值显式标注 `move`——`let g = move f`。lv0 不写。
 
-### 7.8 闭包捕获
+**无 `&T`/`&mut T` 类型**：非 Drop 赋值用 rc+1 代替零成本引用。rc+1 不是深拷贝（仅一个计数器加一），且可被后续优化（reuse / RC 消除 / 逃逸分析）消除至零成本。不引入二等类型、逃逸规则等复杂度。
 
-- 同步闭包捕获借用 → OK（闭包生命周期不超过创建者 scope）
-- 逃逸闭包（如 spawn、存入字段）→ 需要 move/clone 捕获
-- 具体边界 case 待 B-002 实现阶段验证
+### 7.3 参数传递
 
-### 7.9 Perceus RC + 循环引用策略（2026-05-24 确定）
+参数默认 borrow（调用约定：传指针，不 dup，不转移所有权）。
 
-Ring 采用 Perceus 精确引用计数（B-012），不引入 GC。循环引用通过 `Weak<T>` 库类型解决。
+| 传参约定 | 语义 | lv0（用户写） | lv2（formatter 展示） |
+|----------|------|-------------|---------------------|
+| 只读借用 | callee 不修改，caller 保留 | `fn f(x: T)` | `fn f(x: T)` |
+| 可变借用 | callee 修改，caller 可见 | `fn f(x: T)` | `fn f(x: mut T)` |
+| 移动 | callee 取得所有权，caller 失去 | `fn f(x: T)` | `fn f(x: move T)` |
 
-**Perceus RC 路线**：
-- LLVM 后端初期：malloc-only（bootstrap 阶段，编译器是短命进程）
-- 正式阶段：Perceus RC（精确引用计数 + 重用分析 / reuse analysis）
-- COW（copy-on-write）为 Perceus 内部优化，不是用户可见语义
+**所有标注由编译器从函数体推断**：
+- 函数体只读参数 → borrow
+- 函数体修改参数（调用 mutating 方法、赋值字段） → mut（lv2 显示 `x: mut T`）
+- 函数体将参数返回/存入字段/跨 spawn → move（lv2 显示 `x: move T`）
+- Drop 类型参数被消耗 → auto-move
 
-**循环引用策略：`Weak<T>`**
+调用点 lv2 同步显示：`f(mut list)` / `f(move file)`。lv0 一律写 `f(x)`。
+
+**`mut` 语法位置区分含义**：
+- `mut` 在名称前（`let mut x`）= 关于名称（rebind）
+- `mut` 在类型前（`x: mut T`）= 关于值（mutation）
+
+函数类型中同样标注约定：`fn(T)` = borrow，`fn(mut T)` = mutable，`fn(move T)` = move。
+
+### 7.4 别名追踪与 mutation 安全
+
+非 Drop 类型的 `let x = y` 创建别名（rc+1，同一对象）。编译器在函数内追踪别名关系，**mutation 后旧别名失效**：
 
 ```ring
-// Weak<T> 是标准库类型（非关键字）
-let parent = Rc.new(Parent { ... })
-let child = Child { parent: Rc.downgrade(parent) }
+let xs = [1, 2, 3]
+let ys = xs             // ys 别名 xs
+print(ys.len())         // ✅ mutation 之前，ys 有效
+xs.push(4)              // mutation 点——ys 在此失效
+print(xs)               // ✅ xs 是 mutator
+print(ys)               // ❌ 编译错误：ys 在 xs mutation 后失效
+```
 
-// 使用时升级
-match child.parent.upgrade() {
-    some(p) => p.name,
-    none => "parent already dropped"
+**规则**：
+1. `let y = x` 建立别名关系（编译器记录 y 来自 x）
+2. 对 x 的 mutation（调用 mutating 方法、赋值字段）使所有 x 的别名失效
+3. 对别名 y 的 mutation 同样使 x 和 x 的其他别名失效
+4. 失效后使用 = 编译错误
+5. 别名在其最后使用点后自然结束——之后原名恢复独占，可自由 mutate
+6. **纯词法分析**，不需要跨函数追踪，不需要 lifetime 标注
+
+**修复方式**：
+```ring
+// 方式 1：clone 拿独立副本
+let ys = xs.clone()     // 递归深拷贝，完全独立
+xs.push(4)              // ✅
+
+// 方式 2：别名用完再 mutate
+let ys = xs
+print(ys)               // ys 最后使用
+xs.push(4)              // ✅ ys 最后使用点之后，xs 恢复独占
+```
+
+**参数的别名安全**：callee 推断为 `x: mut T` 时，caller 在调用期间不能有其他别名指向同一值。编译器在调用点检查。
+
+### 7.5 `mut` 关键字
+
+`mut` 在用户代码中**只有一个含义**：rebind（重新绑定）。
+
+```ring
+let x = 5               // 不可 rebind
+let mut x = 5            // 可 rebind
+x = 10                   // ✅
+```
+
+参数位的 `mut`（表示可变借用，`x: mut T`）和 `move`（表示所有权转移，`x: move T`）**由编译器推断**，用户不写（lv0）。lv2 formatter 展示推断结果。
+
+`mut` 不出现在类型系统中——没有 `&mut T` 类型。Mutation 信息通过参数推断 + lv2 标注 + 闭包捕获列表传达可见性。
+
+### 7.6 Drop / RAII
+
+```ring
+impl Drop for FileHandle {
+    fn drop(self) {
+        self.close_internal()
+    }
 }
 ```
 
-**决策内容**：
-- `Weak<T>` 作为标准库类型，配合 `Rc.downgrade()` 和 `.upgrade() -> T?`
-- 确定性析构——最后一个强引用 drop 时立即释放，Weak 引用变为 none
-- 不引入 cycle collector（破坏 RAII 确定性析构承诺——Drop 延迟 = 资源泄漏风险）
-- 不做类型系统禁止循环（GUI/图/观察者模式全部写不了，限制过强）
-- 图结构推荐 arena + index 模式（节点存 `List<Node>`，边用 `USize` index 邻接表）
+**规则**：
+- `impl Drop` 的类型在赋值时 auto-move（编译器推断，lv2 显示 `move`）
+- Drop 类型 rc 恒为 1（auto-move 保证唯一 owner）→ scope-end drop = rc 归零 = **与 Rust 析构时机完全一致**
+- Drop 类型不可 Clone（`impl Drop` 禁止 `impl Clone`——资源不可复制）
+- Drop 顺序对齐 Rust：同 scope 逆序 / struct 字段声明序 / 容器元素序
+- `drop(x)` 提前释放
+- abort 路径（fail/catch）的 drop-aware unwind 保证全路径 RAII
 
-**场景覆盖**：
+### 7.7 `Rc<T>` 与 Clone
 
-| 场景 | 解法 |
-|------|------|
-| GUI 父子组件 | child 持有 `Weak<Parent>` |
-| 观察者模式 | listener 持有 `Weak<Emitter>` |
-| 双向链表 | prev 用 `Weak<Node>` |
-| 图结构 | arena + index（`List<Node>` + `List<USize>` 邻接表） |
-| 事件系统 | emitter 持有 `Weak<Listener>` |
+**`Rc<T>`**：非 Drop 包装器，用于共享 Drop 类型。
 
-**否决方案**：
-- Cycle collector：析构不确定，与 Ring 的 Drop/RAII 承诺冲突
-- 类型系统禁止循环：限制过强
-- 混合方案（Perceus + cycle collector fallback）：两套机制，复杂度高
+```ring
+let f = Rc.new(File.open("data.txt"))
+let g = f              // rc+1（Rc 本身是非 Drop 类型），两边都活
+// 最后一个 Rc 引用消亡时，内部 File 的 Drop 执行
+```
 
-**RC 性能立场：渐近零开销（2026-06-13 拍定）**
+非 Drop 类型天然 rc+1 共享，不需要 Rc。Rc 只在"需要共享一个 Drop 类型"时使用。`Weak<T>` 配合 `Rc<T>` 打破循环引用（`.downgrade()` / `.upgrade() -> T?`）。
 
-RC 计数操作（dup/drop）**当前有运行时代价**——这被承认为优化器成熟度问题，**不是模型税**。立场：
+**`.clone()` = 递归深拷贝**（Rust Clone trait 语义）：
 
-- **树状所有权（静态可证唯一）处的计数操作全部可被优化消除**，手段已在路线上：borrow 推断（L1，实参不逃逸不动计数）、move 语义（B-110，转移不计数）、Perceus reuse/FBIP（drop 原地复用）、单例化（B-104 D4 dict / D6 none+const，整类退出记账）、标记指针（B-080，标量不进堆）、后续 drop specialization。
-- **计数只保留在「真共享」（图状、静态不可证唯一）处**——而该场景 Rust 同样付 `Rc`/`Arc` 的钱：borrow checker 的零开销只覆盖树状所有权，真共享处两个语言成本同构。
-- **结论：相对 Rust 渐近无性能损失**。逐场景对照：树状——Rust 无条件 drop / Ring 计数消除后同样零计数；真共享——双方同付 RC；差距 = 优化器完成度，**可测量**（B-104 系列 re-measure 即此判据的实践），随支柱 3（语义驱动性能）持续收敛。
-- 在 Perceus 框架下 Rust 模式 = 「计数恒为 1 的退化情形」：Ring 在所有能静态证明唯一的地方向该退化情形收敛，换取的是 lv0 零标注 + 无 borrow checker（栏 C）——Rust 把真共享的标注负担交给程序员手写 `Rc`，Ring 把它变成默认且自动。
+```ring
+let a = [[1, 2], [3, 4]]
+let b = a.clone()        // 新外层 List，新内层 List，元素 copy
+b[0].push(5)
+print(a)                 // [[1, 2], [3, 4]]——不受影响
+```
 
-**RC 语义立场：与 Rust 静态 drop 的可观测等价 = 四通道总账（2026-06-13 拍定）**
+- struct/enum：逐字段递归 clone
+- 容器（List/Map/Set）：新容器，元素递归 clone
+- 标量：copy
+- Drop 类型不可 Clone（compile error）
+- 所有非 Drop 类型自动 derive Clone
 
-Ring 语义层模仿 Rust（move/borrow/Drop/RAII），底层用 RC 而非静态唯一所有权 + 无条件 drop。**对无 Drop impl 的纯内存值，「内存何时归还」无语义观测窗口——实现差异不可分辨**（残差只剩 peak RSS = 性能范畴，见上「RC 性能立场」）。全部可观测分叉收敛为四通道，逐条封堵：
+**与 `let x = y` 的区别**：`let x = y` = rc+1（共享同一对象，受别名追踪约束）；`x.clone()` = 完全独立副本（无别名关系）。
 
-| 通道 | 分叉机制 | 封堵 | 状态 |
-|---|---|---|---|
-| ① Drop 副作用次数/位置 | Rust clone = 深拷贝独立资源（N 份 = N 次 Drop）；Ring `.clone()` = dup + COW（一个底层对象 = 1 次 Drop）| **`impl Drop` 禁 `impl Clone`** + B-110 move：Drop 类型 move-only、可达路径恒单一 = 计数恒 1 退化情形，归零点 = 唯一所有权链终点 = **与 Rust 逐点一致且词法可定位**。「资源不可复制」只是该规则的表面理由——它是 COW 不可观测的承重墙 | 已封（本节即承重论证成文）|
-| ② identity（地址等价）| dup 副本与原件同地址、Rust clone 异地址，任何指针等价 API 可分辨共享 vs 拷贝 | 语言层**永不提供 ptr_eq/is 类算子**（负面承诺；Rust 提供 `Rc::ptr_eq`，此处主动分叉），Eq 一律 trait 值比较 | 已封——contains/index_of 已改 Ring impl 走 Eq trait 派发（`impl<T: Eq> List`，audit #156 关闭 2026-06-15）；**Map key `===` 残留归 B-107** |
-| ③ 析构顺序 | Drop 副作用顺序可观测；Rust 有词法承诺（同 scope 逆序、struct 字段声明序）| **对齐 Rust**（2026-06-13 拍板）：同 scope 逆序 / struct 字段声明序 / 容器元素序。两后端一致，并入差分回归 | **已定**|
-| ④ drop 时机 | 提前 drop 使 `Weak.upgrade` some→none、Drop 副作用提前 | D-1 拍板：scope-end 即语义 + as-if 条款（无 Drop impl 且不被 Weak 指向才可提前——提前只发生在无观测窗口的纯内存值上）| 已封已成文（§7.11）|
+### 7.8 闭包捕获
 
-**COW 的角色澄清（同日）**：COW 不是独立优化，是「`.clone()` = O(1) dup」的**语义修复机制**——dup 省拷贝、COW 保语义（写入点 rc>1 先分叉再写；rc=1 原地写 = FBIP/reuse 入口）。真拷贝成本只在「clone 后双方存活且发生写入」时支付——恰是语义上必须拷贝的时刻。该能力为 RC 模型独有：运行时计数使「唯一持有？」成为 O(1) 可答问题——Rust 静态系统与 GC 均不可答（Rust clone 永远实拷）。B-110 move 杜绝可变别名 → COW 分叉永不可观测 → COW 从应用级特性降为纯引擎优化（即决策表「COW 不可观测原则」）。现状：dup 侧已落地（L1 `HExpr::Clone` = ring_dup）；写时分叉检查随 B-110 强制落地（过渡期两后端同为引用语义，差分不炸）。
+闭包捕获由编译器推断。lv2 formatter 展示捕获列表：
 
-**COW 性能可预测性 = 三支柱（2026-06-13 拍定）**：COW 把拷贝成本从 clone 点搬到首个写入点且依赖运行时 rc 状态——归因漂移/非局部性/路径依赖是其经典软肋（Swift「意外 CoW 拷贝」前车之鉴）；且 Swift 的官方解药 `isKnownUniquelyReferenced` 被四通道之②封死（运行时唯一性查询 = identity 观测 API）。Ring 的自有答案：
+```ring
+// lv0
+let mut counter = 0
+let name = "hello"
+let inc = fn() { counter = counter + 1; print(name) }
 
-1. **成本上界定理（预算面）**：`.clone()` 语义成本 = 深拷贝，COW 是惰性兑现——**任何程序 COW 实际成本 ≤ eager 深拷贝成本**。按语义成本做预算，优化只省不加；不存在凭空悬崖，只存在「优化未省成、回落语义基线」（「优化不可观测」在性能面的投影：优化失效下界 = 语义成本）。分叉点对给定输入完全确定可复现（优于 GC 非确定停顿一档）。
-2. **move 锚点（归因面）**：Swift 病根 = 隐式共享（赋值即共享，rc 不可见乱涨），Ring B-110 后结构性不存在——「rc>1 且后续被写」仅源于显式 `.clone()`/`Rc<T>`（词法可见）；引擎隐式 dup 只在只读路径（永不分叉）。推论：**每次 COW 分叉的数据流上游必有用户亲手写的 clone/Rc 词法锚点**——归因从全程序大海捞针收窄为沿 lvalue 数据流回溯，有限可追、可教给 agent。
-3. **工具层（精调面，待 B-110 写时分叉落地后 Discussion 立项）**：① `ring audit cow`——静态枚举「上游有 clone/Rc 的写入点」= 潜在分叉面，与 `ring audit unsafe` 同手法（可枚举审查面）；② debug profile 分叉归因——按站点计数 + 报共享来源（复用 B-104 `RING_BOX_PROFILE` 侧表基建，release 零开销）；③ fbip 式零分叉断言——热路径函数声明不期望分叉，静态证明或 debug 检查（Koka `fbip` 血统，支柱 3 语义驱动性能的一块砖）。
+// lv2（formatter 展示）
+let inc = fn() [mut counter: Int, name: Str] { ... }
+```
 
-### 7.10 Perceus 分层实现路线（2026-06-01 确定）
+**捕获规则**：
+- 只读使用 → borrow 捕获（rc+1 on captured value）
+- mutation 使用 → mut 捕获（共享可变绑定，box 化）
+- spawn 闭包 → move 捕获（强制，防止 data race）
 
-Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 core dup/drop，再 borrowing，再 reuse）。Ring 切成可独立测试、独立 merge 的序列：
+**可变捕获豁免别名规则**：闭包的 mut 捕获创建共享可变绑定（原变量和闭包双方均可修改），不适用 §7.4 的别名失效规则——这是共享可变的 explicit opt-in。lv2 捕获列表 `[mut counter]` 标明。
 
-| 层 | 内容 | 作用 | backlog |
+### 7.9 `mut<S>` effect 移除
+
+**决策（2026-06-24）**：`mut<S>` marker effect 从 effect 系统中移除。
+
+**理由**：
+1. 参数位 mutation 由编译器推断并标注在参数上（`x: mut T`），与 `mut<T>` effect 完全重叠
+2. `mut<Int>` 等类型级 effect 粒度太粗——用户想知道"修改了哪个变量"，不是"修改了某个 Int"
+3. 闭包捕获的 mutation 可见性由 lv2 捕获列表 `[mut counter]` 承载，比 effect 更精确
+
+**effect 行简化**：只追踪 io / fail / async 等计算效果。mutation 的可见性由参数推断（lv2 `mut` 标注）+ 闭包捕获列表承载。
+
+### 7.10 Perceus RC 实现模型
+
+用户面语义（§7.2–§7.8）不变，本节定义 RC 如何兑现这些语义。
+
+**分层**：
+
+| 层 | 内容 | 状态 | backlog |
 |----|------|------|---------|
-| **L0 RC 核心** | dup/drop 插入，owned-everywhere，归零即 free | 释放堆内存 → 打破自举内存墙 → 完成全 native 自举 | B-012 |
-| **L1 借用推断引擎** | borrow-default + 逃逸点推断 owned；读取默认 borrow、escape-clone、scope-end-drop（实现模型见 §7.11）| 消除 owned-everywhere 的 move-analysis double-free + 泄漏；大幅减 RC 流量 | B-098（引擎）|
-| **L1 用户面** | `fn(move T)` 语法、lv2 标注、fmt 策略、pub 规则 | 文档化借用语义（不改编译行为）| B-068（§7.2–7.8，deferred）|
-| **L2 Drop/RAII** | 用户 `impl Drop`、全路径 RAII、fail/catch 改 drop-aware unwind、`Weak<T>` | 资源安全 + 循环引用 | B-002 |
-| **L3 Reuse (FBIP)** | `rc==1` 时就地改写，drop-reuse 配对、reuse specialization、COW | 性能核爆（函数式零拷贝）| B-079 |
-| **L0/L1 完整化** | total return-mode drop pass（drop 所有 fresh-owned 临时）+ 静态 leak verifier；完整 Perceus（Koka POPL'21 garbage-free 定理）| **G-a 内存墙真解**（2026-06-09 数据订正：墙主体 74.5% 是非标量临时，唯完整 RC 可消）+ 编译期证明 0 泄露/0 UAF | B-104 |
-| **L4 标量标记指针** | 标量低位 tag 编码进字，所有位置不进堆（局部/临时/字段/容器/Option/泛型/dict 槽）；RC op `if(w&1)return` 跳过标量 | **降级为 peak/perf 优化**（2026-06-09：只消 ~21% BOOL+INT 装箱 churn，非泄漏驱动；G-a 由 B-104 完整 RC 达成）+ 减 alloc/RC 流量 | B-080 |
+| **L0 RC 核心** | dup/drop 插入，归零即 free | ✅ | B-012 |
+| **L1 借用引擎** | clone-all-escape，参数 borrow 不 dup | ✅ | B-098 |
+| **L0/L1 完整化** | total drop pass + 静态 leak verifier（verify_rc.ring） | ✅ | B-104 |
+| **L4 标记指针** | 标量低位 tag，不进堆 | ✅ | B-080 |
+| **L2 Drop/RAII** | 用户 impl Drop，abort unwind，Weak\<T\> | 待做 | B-002 |
+| **L1.5 别名追踪** | §7.4 的 mutation 后别名失效检查（checker 层） | 待做 | 新项 |
+| **L3 Reuse (FBIP)** | rc==1 原地改写，drop-reuse 配对 | 待做 | B-079 |
+| **L5 RC 消除** | 编译器证明 rc 恒 1 → 跳过 dup/drop | 未排期 | — |
+
+**关键映射**：
+- `let x = y`（非 Drop）→ perceus 发 `ring_dup`（rc+1）
+- `let x = y`（Drop）→ perceus 不 dup（move，指针转移）
+- 参数传递 → 不 dup（borrow 调用约定）
+- 逃逸（return / 存入容器）→ clone（`HExpr::Clone`，rc+1）
+- scope-end → `ring_drop`（rc-1，rc=0 则释放）
+- Drop 类型 rc 恒 1 → scope-end drop 总是释放 = Rust 语义
+
+**循环引用策略**：`Weak<T>` 配合 `Rc<T>`（§7.7）。不引入 cycle collector（破坏 RAII 确定性析构）。图结构推荐 arena + index 模式。
+
+**RC 性能立场**：RC 计数操作当前有运行时代价——是优化器成熟度问题，非模型税。树状所有权（静态可证唯一）处的计数操作全部可被优化消除（L3 reuse / L5 RC 消除 / 逃逸分析）；计数只保留在真共享处——该场景 Rust 同样付 `Rc`/`Arc` 的钱。
+
+> **实现细节记录**：L0–L4 的完整实现过程（clone-all-escape 模型、B-103 return-mode 分类、B-104 D1–D9 nine-pass 演进、verify_rc 静态检查、Type-DAG RC 试错等）见 git history（2026-06-04 至 2026-06-16 的 design.md 版本）。
+
+### 7.11 与旧设计的差异总结（2026-06-24）
+
+| 旧设计（§7 pre-2026-06-24） | 新设计 | 变更理由 |
+|---|---|---|
+| `let x = y` = move（B-110） | 非 Drop = rc+1 共享，Drop = auto-move | 减少标注负担，多数场景不需要 move |
+| `&T` / `&mut T` 二等类型 | 不需要 | rc+1 代替零成本引用，消除二等类型复杂度 |
+| `mut<S>` effect | 移除 | 与参数推断重叠，粒度不足 |
+| COW 三支柱 / 四通道总账 | 不需要 | 不再试图让 RC 表现得像静态所有权 |
+| `mut` = 可变引用 + rebind | `let mut` = rebind only，`x: mut T` = mutation | 位置区分含义，概念分离 |
+| `mut x: T` 参数语法糖 | `x: mut T`（mut 在类型前） | 与 `let mut x`（mut 在名称前）视觉区分 |
+| Drop 手写 move | Drop auto-move（推断） | 推断为王，lv2 展示 |
+
+> 旧设计的四通道总账（RC 与 Rust 静态 drop 的等价论证）、COW 三支柱（性能可预测性）、COW 不可观测原则等框架已不适用——新设计不追求让 RC 表现得像静态所有权，而是直接以 RC 为基座设计语义。旧实现记录（clone-all-escape、B-104 D1–D9）仍为 Perceus 实现真值。历史全文见 git history。
+
+---
+
+> **以下为已归档的旧 §7.10–§7.11 实现记录锚点，供 git history 检索**。
+
+<details><summary>旧 §7.10–§7.11 实现记录（已归档，点击展开）</summary>
 
 **关键性质（2026-06-04 订正，#134 证伪原断言）**：原设计假设「L0 owned-everywhere 单独即可解锁全自举，无硬前置」——**错误**。owned-everywhere 对「循环内条件 move」（如 `register_impl_method` 的 `self_type` 在 for 循环里被条件 `push`）是 **double-free（崩溃，非泄漏）**：branch-balancing 给未消费分支强插 `drop`，单值多次 free；Perceus 三套循环机制（pre-loop single-dup / 闭包 per-iteration seeding / branch-balancing）均不覆盖此缝。逐点 always-own sweep 修了 7 处推进 2400×（chk 144→347K）后仍残留同类崩点，本质 = 每个循环/条件 move 需深层 Perceus 手术、站点未知。**结论**：借用推断引擎（L1 的 B-098）被提前到 native-working **之前**——borrow-default 不要求每路径消费 → 未消费分支不再插 spurious drop，从根上消除整类崩溃。L1 用户面（B-068）+ L2 仍是叠加层。
 
@@ -1675,13 +1762,15 @@ D8 归因（measurement-only，仪表 git `7d0d10f`，diff 仅 ring_runtime.cpp 
 
 D9 两 part 落地后 re-measure @2.382B：leak 88%→1.2%（live 27.96M），SB 12.02M→**0**（−100%），STR 28.16M→21.10M（−25.1%）。门① refined 判据逐条：孤儿类→~0（SB=0 / Type 22.7M→0.3M / interp-STR 由 Part 1 codegen-drop 闭合）✅ + leak% 1.2% 递减有界 ✅ + verifier 全绿（self-verify 0 errors）✅ + 无 per-iteration 无界类 ✅。门② peak 10.6GB << 25.9GB ✅。门③ 自编译跑通 exit 0 ~10.42B ✅。**三门全达，B-104 完整 Perceus RC 里程碑完成**（leak 88%→1.2%@2.382B，D1-D9 九个落地棒）。解锁 B-089 native 终验 + B-122 SCC 拓扑序。Capstone 全强度 ASan 自编译（`quarantine_size_mb=256:malloc_context_size=12`）2026-06-13 启动，验证结果追记。
 
+</details>
+
 ### 7.12 unsafe 区域图景（2026-06-11 确定，细化归 B-106）
 
 **定位：unsafe 区是所有权模型全部张力的最终出处——它定义「语言不在安全区处理什么」。** 三栏总账，每个表达力缺口必居其一、不允许悬空：
 
 | 栏 | 内容 |
 |---|---|
-| **A 安全区**（目标 ≥99% 用户代码）| 共享→Rc/Arc，环→Weak（§7.9），视图→Span/(offset,len)/arena+index，深层可变→mut 参数线程化 + 嵌套 lvalue path（B-110 #5），性能→引擎优化（COW/reuse/unboxing，不可观测原则见决策表）|
+| **A 安全区**（目标 ≥99% 用户代码）| 共享→Rc/Arc，环→Weak（§7.7），视图→Span/(offset,len)/arena+index，深层可变→mut 参数线程化 + 嵌套 lvalue path，性能→引擎优化（reuse/unboxing/RC 消除）|
 | **B unsafe 区**（库作者，少数）| 零拷贝视图（指进 buffer 的 slice）、自引用/侵入式结构、RIIR 容器底层（malloc/指针算术/未初始化内存）、FFI 裸指针 |
 | **C 明确不做** | first-class 借用 / lifetime 标注 / borrow checker；安全区的跨函数零拷贝视图；cycle collector |
 

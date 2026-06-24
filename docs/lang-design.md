@@ -5,74 +5,59 @@
 
 ## 1. 所有权与参数传递模型
 
+> **2026-06-24 重新设计**。真值源 = design.md §7。本节为速查摘要。
+
 ### 1.1 赋值语义
 
 | 类型分类 | `let b = a` | 理由 |
 |---------|-------------|------|
-| 值类型（I64/F64/Bool/Char 等固定宽度数值） | auto copy（零成本 memcpy） | 栈上小数据，和 Rust Copy trait 等价 |
-| 复合类型（List/Map/struct/enum） | move（a 不再有效） | 保留需显式 `.clone()` |
+| 值类型（I64/F64/Bool/Char） | auto copy（memcpy） | 栈上小数据，Rust Copy 等价 |
+| 复合类型，非 Drop | rc+1 共享（a 仍可用） | 零标注负担，rc+1 不是深拷贝 |
+| 复合类型，Drop | auto-move（a 失效） | Drop 类型保证 rc=1，scope-end 析构 |
+
+`let b = a.clone()` = 递归深拷贝（独立副本）。`let b = move a` = 显式 move（lv0 可不写，lv2 展示）。
 
 ### 1.2 参数传递
 
 ```
-默认 = 只读借用（borrow）     ← 大多数参数
-mut x: T = 可变借用            ← 修改调用方的值
-move = 编译器从函数体推断       ← 存入/返回/跨 spawn
+默认 = 只读借用（borrow）             ← 大多数参数
+x: mut T = 可变借用（编译器推断）       ← 修改调用方的值
+x: move T = 移动（编译器推断）          ← 存入/返回/跨 spawn
 ```
 
-**核心规则：编译器从函数体推断每个参数是 borrow 还是 move。**
+**全部由编译器从函数体推断，lv2 formatter 展示。lv0 用户不写 `mut`/`move`。**
 
-推断规则：
-- 函数体只读参数 → borrow
-- 函数体将参数返回 → move
-- 函数体将参数存入字段/容器 → move
-- 函数体将参数传给其他 move 参数 → move
-- 函数体将参数跨 spawn → move
+`mut` 语法位置区分含义：
+- `mut` 在名称前（`let mut x`）= rebind（用户手写）
+- `mut` 在类型前（`x: mut T`）= mutation（编译器推断，lv2 展示）
 
-### 1.3 逃逸分析（替代 borrow checker）
+### 1.3 别名追踪
 
-借用值不能逃逸当前调用：
-- ❌ 不能作为返回值
-- ❌ 不能存入更长生命周期的位置
-- ❌ 不能被逃逸闭包捕获
-- ❌ 不能跨 spawn
-- ✅ 可以在函数体内读取、传给其他 borrow 参数
+非 Drop 类型 `let y = x` 创建别名（rc+1）。**mutation 后旧别名失效**：
+- 对 x mutation → x 的所有别名失效
+- 别名在最后使用点后自然结束，之后原名恢复独占
+- 纯词法分析，不需要跨函数追踪
 
-**无 `&T` 语法，无 lifetime 标注。** 逃逸检查是编译器内部 pass，不暴露给用户。
+详见 design.md §7.4。
 
-### 1.4 Scoped Struct Borrow
-
-含借用的结构体（如 Iterator、Parser、Slice）可以存在，但遵守相同逃逸约束：
-
-```ring
-fn process(list: List<T>) {
-    let iter = list.iter()   // iter 持有对 list 的 borrow — OK
-    bar(iter)                // 传给 bar — OK（iter 走 borrow 语义）
-    // iter 不能被返回/存入/跨 spawn
-}
-```
-
-**实现：含 borrow 的类型自动标记为"不可存储"，传参时走 borrow 语义。类型系统自动处理传染性，无需跨函数分析。**
-
-### 1.5 函数类型中的 Convention
+### 1.4 函数类型中的 Convention
 
 ```ring
 fn(T) -> U           // T 被 borrow（默认）
-fn(move T) -> U      // T 被 move（必须手写——唯一不可推断的 move 标注点）
+fn(move T) -> U      // T 被 move
 fn(mut T) -> U       // T 被 mut borrow
 ```
 
-这是 `move` 唯一必须手写的位置——因为具体闭包在调用时才传入，编译器无法从定义处推断。
+### 1.5 闭包捕获
 
-### 1.6 COW 语义
+编译器推断，lv2 展示捕获列表 `[mut counter: Int, name: Str]`。
+- 只读 → borrow 捕获（rc+1）
+- mutation → mut 捕获（共享可变绑定，豁免别名规则）
+- spawn → move 捕获（强制）
 
-COW（Copy-on-Write）退化为 Perceus RC 的内部 clone 优化，不是用户可见语义。
+### 1.6 `mut<S>` effect 移除
 
-在 ownership + borrow-by-default 下：
-- borrow = 只读 → 不触发 mutation → 无 COW
-- mut borrow = 修改原值 → 独占 → 无 COW
-- move = 唯一 owner → 无 COW
-- 只有 `Rc<T>` 显式共享 + mutation 时 COW 生效（内部优化）
+`mut<S>` marker effect 从 effect 系统移除（2026-06-24）。mutation 可见性由参数推断（`x: mut T`）+ 闭包捕获列表承载。effect 行只追踪 io / fail / async。
 
 ---
 
