@@ -74,13 +74,16 @@ fn cancel_local_mut_effects(
     param_offset: Int,
     s: UnionFind
 ) -> EffectRow {
-    // Collect mut effect state_types that should be cancelled
-    let mut cancel_types: List<Type> = []
+    // Collect string representations of mut effect state_types to cancel.
+    // (Serialise to Str to sidestep a Perceus RC aliasing bug where a
+    // conditionally-pushed Type value in a List captured by a later closure
+    // triggers use-after-free on the native backend.  See worker_feedback
+    // 2026-06-24 for the full ASan trace.)
+    let mut cancel_strs: List<Str> = []
     for eff in callee_effects.effects {
         match eff {
             Effect::MutEffect { state_type } => {
                 let resolved_st = apply_subst(s, state_type)
-                // Find which param index has a matching type
                 let mut pi = param_offset
                 let mut ai = 0
                 while ai < hargs.len() {
@@ -88,12 +91,11 @@ fn cancel_local_mut_effects(
                         some(pt) => {
                             let resolved_pt = apply_subst(s, pt)
                             if types_equal(resolved_pt, resolved_st) {
-                                // Check if the argument is a local variable
                                 match hargs.get(ai) {
                                     some(harg) => match harg {
                                         HExpr::Ident { def_id: some(did), .. } => {
                                             if !ctx.env.scope.mut_param_defs.contains(did) {
-                                                cancel_types.push(resolved_st)
+                                                cancel_strs.push(type_to_string(resolved_st))
                                             }
                                         },
                                         _ => {}
@@ -112,20 +114,30 @@ fn cancel_local_mut_effects(
         }
     }
 
-    if cancel_types.len() == 0 {
+    if cancel_strs.len() == 0 {
         return effects
     }
 
-    // Filter out cancelled mut effects
-    let filtered = effects.effects.filter(fn(e) {
+    // Filter out cancelled mut effects — compare by string to avoid Type RC aliasing
+    let mut filtered: List<Effect> = []
+    for e in effects.effects {
+        let mut keep = true
         match e {
             Effect::MutEffect { state_type } => {
                 let resolved_st = apply_subst(s, state_type)
-                !cancel_types.any(fn(ct) { types_equal(ct, resolved_st) })
+                let st_str = type_to_string(resolved_st)
+                for ct in cancel_strs {
+                    if ct == st_str {
+                        keep = false
+                    }
+                }
             },
-            _ => true
+            _ => {}
         }
-    })
+        if keep {
+            filtered.push(e)
+        }
+    }
     EffectRow { effects: filtered, tail: effects.tail }
 }
 
