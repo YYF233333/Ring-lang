@@ -1586,7 +1586,7 @@ Perceus 天然分层，层次对应依赖链（Koka 自身亦如此演进：先 
 
 4. **scope-end-drop-once**：每个 owned local 绑定在 scope 末 drop **恰好一次**；return 路径在 clone 返回值后 drop 所有 live locals。**无 per-path branch-balancing**。
 
-5. **所有参数 borrow**：callee **永不 drop 参数**（撤销 `transform_fn_body` 无条件 param drop）。参数逃逸时 clone（调用方保留所有权）。§7.3 的 move-参数推断是**纯优化**，B-098 **不做**（留后续）。
+5. **所有参数 borrow**：callee **永不 drop 参数**（撤销 `transform_fn_body` 无条件 param drop）。参数逃逸时 clone（调用方保留所有权）。§7.3 的 move-参数推断是**纯优化**，B-098 **不做**（留后续）。**推论（B-140 实证，2026-06-24）：函数不得直接返回 RC-managed 参数值**——`is_droppable_init(Call)=true` 把 Call 结果当 owned 插 scope-end Drop，返回借用参数会导致 caller 过度释放（UAF）。no-op 路径必须构造新节点（tagged pointer 除外，ring_drop 跳过）。
 
 6. **无 last-use→move 优化**（留 L3 reuse）：连 last-use 的 Ident 逃逸也 clone（再 scope-end drop）。代价是 churn，但**比 always-own 少 dup**（读取 ≫ 逃逸）、**无泄漏**。
 

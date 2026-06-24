@@ -589,16 +589,39 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
-<!-- B-140 done: apply_subst TypeVar 分支返回借用 `t` 导致 scope-end drop 过度释放（UAF）。修复：TypeVar 分支总是构造新节点；移除 cancel_local_mut_effects 的 Str workaround。ASan ×5 clean + 885 E2E + 92/93 llvm_diff。2026-06-24 -->
+<!-- B-140 done: apply_subst TypeVar 返回借用 `t` → scope-end drop UAF。修复：TypeVar 总构造新节点 + 移除 Str workaround。ASan ×5 clean。2026-06-24 -->
+<!-- B-139 done: HTraitMethod 加 effects 字段 + codegen_decl evidence 转发。885 E2E, double bootstrap。2026-06-24 -->
+
+### B-141 LLVM 后端 default trait method 支持 [feature] [P3] [M] [judgment] [queued]
+
+> 2026-06-24 立项（Discussion，B-139 worker feedback #2 转入）。
+
+**现象**：LLVM 后端完全不支持 default trait methods——codegen 生成 `unknown method` warning + null closure in dict，调用时 access violation。JS 后端已正常支持（B-139 修复后含 custom effect evidence）。
+
+**涉及修改**：
+1. `compiler/codegen_llvm_decl.ring`：`emit_trait_decl` LLVM 版——为 default method 生成独立函数（含 dict 参数 + supertrait dicts + evidence 参数），与 JS 后端 `codegen_decl.ring` 对齐
+2. `compiler/codegen_llvm_decl.ring`：`emit_trait_dictionary` LLVM 版——dict closure 对 default method 生成转发闭包（非 null）
+3. 测试：`tests/cases/llvm/delegate_custom_effect_direct.ring` 扩展覆盖 default method 路径
 
 **验收标准**：
-- `ring_asan.exe check compiler/scc.ring` ×10 零 UAF（当前 workaround 下已零崩溃，根因修后移除 workaround 仍零 UAF）
-- `ring_asan.exe build compiler/main.ring --out-dir=...` 零 UAF（44 文件自编译）
-- `cancel_local_mut_effects` 恢复 Type 版本（移除 Str workaround），ASan-clean
-- 全 E2E 883 + llvm_diff ×3 + triple bootstrap 44/44 一致
-- 编译器代码库同类模式扫描报告（零残留或已修）
+- default trait method（含 custom effect）在 LLVM 后端可正常调用
+- `delegate_custom_effect_direct.ring` 的 default method 测试路径通过 llvm_diff
+- 全 E2E + llvm_diff 通过；自举一致
 
-<!-- B-139 done: default trait methods now receive custom effect evidence params (HTraitMethod gained effects field + codegen_decl emit evidence params/forward in dict closure). 885 E2E, double bootstrap consistent. 2026-06-24 -->
+### B-142 apply_subst 类函数借用返回审计 [bugfix] [P2] [S] [mechanical] [queued]
+
+> 2026-06-24 立项（Discussion，B-140 worker feedback #4 转入）。B-140 根因 = `apply_subst` TypeVar 分支返回函数参数 `t`（借用），Perceus `is_droppable_init(Call)=true` 误 drop。同类模式可能存在于其他函数。
+
+**风险模式**：函数参数为 RC-managed 类型（非 tagged pointer），函数在某分支直接返回该参数值（`=> t` / `=> param_name`），而非构造新值。Perceus 会对 Call 结果插 scope-end Drop → 过度释放借用值 → UAF。
+
+**涉及修改**：
+1. `grep` 编译器全代码库，搜索 `match` 分支中 `=> <参数名>` 模式，排除 tagged pointer 类型（Int/Bool/Str 等）
+2. 对每个命中：检查该参数是否为 RC-managed 类型，函数是否被其他代码调用后作为 let 绑定（触发 scope-end drop）
+3. 修复发现的任何同类 bug（构造新值代替返回参数）
+
+**验收标准**：
+- 编译器代码库零「返回 RC-managed 参数」的函数
+- 全 E2E + llvm_diff 通过；自举一致
 
 
 
