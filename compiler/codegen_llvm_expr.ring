@@ -339,6 +339,20 @@ fn gen_ident(mut ctx: LlvmCtx, name: Str, resolved_name: Str?, def_id: Int?, dic
                     if boxed { build_cell_load(ctx, cur, name) } else { cur }
                 },
                 none => {
+                    // B-100 Fix 6: When a function is used as a first-class value
+                    // (its type is FnType), it MUST be wrapped in a closure pair
+                    // {fn_ptr=thunk, env_ptr} so the uniform closure ABI works.
+                    // The thunk captures any evidence/dicts the function needs.
+                    // Without this, gen_closure_call tries to GEP into a raw fn
+                    // pointer → crash. Uses gen_dict_closure_wrapper with empty
+                    // dicts, which still captures evidence params.
+                    let is_fn_value = match ty {
+                        Type::FnType { .. } => true,
+                        _ => false,
+                    }
+                    if is_fn_value {
+                        return gen_dict_closure_wrapper(ctx, lookup_name, name, [], ty)
+                    }
                     // Try module-aware resolution: imports_map → module_prefix → bare
                     let mangled_resolved = llvm_resolve_fn(ctx, lookup_name)
                     match ctx.functions.get(mangled_resolved) {
