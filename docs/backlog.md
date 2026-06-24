@@ -706,7 +706,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 
 <!-- B-099 done: native ring.exe 自编译 bootstrap 44/44 一致 + E2E 885/885 + llvm_diff ×3（唯一失败=#138 pre-existing）+ ~970 LLVM warning 全消（剩 13 条 W0001 已知）。2026-06-24 验收。ASan capstone 终验留 milestone。 -->
 
-### B-100 JS 后端归档（parity 认证门 + golden 快照 + 删除）[feature] [P3] [L] [judgment] [queued]
+### B-100 JS 后端归档（parity 认证门 + golden 快照 + 删除）[feature] [P3] [L] [judgment] [doing]
 
 > 2026-06-04 立项（Discussion）。**deferred——排在 B-099 之后**，删 JS 前提是 native 工具链已自立。**归档策略 = (Z) 证明 parity → 快照 golden → 删除**。核心论点：差分 oracle 价值 = 抓两后端发散；一旦两后端被**证明** feature 完全一致且零 bug，oracle 对当前 feature 集已用尽，删除不损失测试价值。**删除点选「层 3 之前」**：golden 快照保存量回归网，层 3 新 codegen（async generator / Drop unwind / refinement 运行时检查）靠手写 E2E 期望值（无活 oracle——可接受，JS 后端实现层 3 也可能有 bug，oracle 非真值，且为层 3 维护两遍 codegen 成本过高）。
 
