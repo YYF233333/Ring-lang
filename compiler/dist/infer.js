@@ -2636,6 +2636,7 @@ function infer_method_call(ctx, receiver, method, args, span, subst, __ring_ev_f
     }
     __match_fail(__ring_m145);
   }
+  result_type = env$apply_subst(s, result_type);
   let __ring_blk15;
   __ring_match147: {
     const __ring_m147 = method_type;
@@ -3596,7 +3597,6 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
     }
     break __ring_match194;
   }
-  const result_type = env$apply_subst(s, ret_var);
   let resolved_dicts = [];
   __ring_match195: {
     const __ring_m195 = callee;
@@ -3620,6 +3620,7 @@ function infer_call(ctx, callee, args, span, subst, __ring_ev_fail) {
     }
     break __ring_match195;
   }
+  const result_type = env$apply_subst(s, ret_var);
   __ring_match197: {
     const __ring_m197 = callee;
     if (__ring_m197._tag === "Ident") {

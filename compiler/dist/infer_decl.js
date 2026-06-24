@@ -3281,6 +3281,7 @@ function rebind_fn_type(ctx, name, params, return_type, effects) {
             }
             pi = (pi + 1);
           }
+          build_var_mapping(return_type, reg_ret, var_mapping);
           const mapped_ret = apply_var_mapping(return_type, var_mapping);
           const mapped_effects = map_effect_row(effects, var_mapping);
           const new_type = types$Type_FnType(reg_params, mapped_ret, mapped_effects);
