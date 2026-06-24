@@ -1,9 +1,6 @@
-// B-100 P1.1: trait default method parity — default method without override,
+// B-141: trait default method parity — default method without override,
 // override of default method, and default method calling another trait method.
-//
-// KNOWN LIMITATION: LLVM backend does not support default trait methods
-// (pre-existing, noted in CLAUDE.md). This test is expected to diverge on LLVM
-// until that limitation is lifted. It serves as a parity certification gate.
+// LLVM backend support implemented in B-141.
 
 trait Greet {
     fn name(self) -> Str

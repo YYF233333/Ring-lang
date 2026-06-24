@@ -1193,7 +1193,7 @@ fn resolve_dict_ref(mut ctx: LlvmCtx, dr: DictRef) -> LLVMValueRef {
 //   * wrapped instances / builtin primitive dicts: a synthesised memoised
 //     getter of the same name (get_or_create_static_dict_getter).
 // This kills the per-call-site fresh TUPLE+closures+name-STR synthesis (#151).
-fn resolve_static_dict_by_name(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
+pub fn resolve_static_dict_by_name(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
     let init_fn_name = "ring_dict_init_${name}"
     match ctx.functions.get(init_fn_name) {
         some(init_fn) => {
