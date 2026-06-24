@@ -207,6 +207,7 @@ pub struct HTraitMethod {
     pub name: Str,
     pub params: List<HParam>,
     pub return_type: Type,
+    pub effects: EffectRow,
     pub has_default: Bool,
     pub body: HExpr?
 }

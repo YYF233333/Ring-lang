@@ -83,7 +83,7 @@ fn al_decl(d: HDecl) -> HDecl {
                     none => none,
                 }
                 new_methods.push(HTraitMethod { name: tm.name, params: tm.params,
-                    return_type: tm.return_type, has_default: tm.has_default, body: new_body })
+                    return_type: tm.return_type, effects: tm.effects, has_default: tm.has_default, body: new_body })
             }
             HDecl::Trait { name: name, type_params: type_params, methods: new_methods,
                 supertraits: supertraits, assoc_types: assoc_types, is_pub: is_pub, span: span }

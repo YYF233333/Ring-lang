@@ -238,7 +238,13 @@ fn emit_trait_dictionary(mut ctx: CodegenCtx, target_type: Str, trait_name: Str,
                         let default_fn = "__${stn}_${smn}"
                         let mut param_names: List<Str> = []
                         for p in tm.params { param_names.push(safe_ident(p.name)) }
-                        let params_str = param_names.join(", ")
+                        // B-139: Include evidence params in the closure so they can
+                        // be forwarded to the default method function
+                        let ev_params = get_evidence_params(tm.effects)
+                        let mut all_params: List<Str> = []
+                        all_params.extend(param_names)
+                        all_params.extend(ev_params)
+                        let params_str = all_params.join(", ")
                         let mut call_args: List<Str> = []
                         call_args.push(dict_name)
                         // Pass supertrait dicts for the concrete type
@@ -246,6 +252,8 @@ fn emit_trait_dictionary(mut ctx: CodegenCtx, target_type: Str, trait_name: Str,
                             call_args.push(trait_dict_name(qt, safe_ident(st)))
                         }
                         call_args.extend(param_names)
+                        // B-139: Forward evidence params to the default method
+                        call_args.extend(ev_params)
                         let call_str = call_args.join(", ")
                         entries.push("${smn}: function(${params_str}) { return ${default_fn}(${call_str}); }")
                     }
@@ -313,10 +321,17 @@ fn emit_trait_decl(mut ctx: CodegenCtx, name: Str, methods: List<HTraitMethod>, 
                         all.push(default_method_self_name(safe_ident(st)))
                     }
                     all.extend(param_names)
+                    // B-139: Add evidence params for custom effects so default method
+                    // body can reference them (e.g. __ring_ev_Config)
+                    let ev_params = get_evidence_params(method.effects)
+                    all.extend(ev_params)
                     let all_str = all.join(", ")
                     emit(ctx, "function ${fn_name}(${all_str}) {")
                     push_indent(ctx)
+                    let saved_fn_effects = ctx.current_fn_effects
+                    ctx.current_fn_effects = some(method.effects)
                     emit_block_body(ctx, body)
+                    ctx.current_fn_effects = saved_fn_effects
                     pop_indent(ctx)
                     emit(ctx, "}")
                 }

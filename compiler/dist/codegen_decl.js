@@ -615,7 +615,11 @@ function emit_trait_dictionary(ctx, target_type, trait_name, methods) {
               const p = __ring_next_19._0;
               List_push(param_names, codegen_ctx$safe_ident(p.name));
             }
-            const params_str = List_join(param_names, ", ");
+            const ev_params = codegen_ctx$get_evidence_params(tm.effects);
+            let all_params = [];
+            List_extend(all_params, param_names);
+            List_extend(all_params, ev_params);
+            const params_str = List_join(all_params, ", ");
             let call_args = [];
             List_push(call_args, dict_name);
             const __ring_iter_20 = __List_Iterable.iter(all_supers);
@@ -626,6 +630,7 @@ function emit_trait_dictionary(ctx, target_type, trait_name, methods) {
               List_push(call_args, hir$trait_dict_name(qt, codegen_ctx$safe_ident(st)));
             }
             List_extend(call_args, param_names);
+            List_extend(call_args, ev_params);
             const call_str = List_join(call_args, ", ");
             List_push(entries, `${smn}: function(${params_str}) { return ${default_fn}(${call_str}); }`);
           }
@@ -768,10 +773,15 @@ function emit_trait_decl(ctx, name, methods, supertraits) {
             List_push(all, hir$default_method_self_name(codegen_ctx$safe_ident(st)));
           }
           List_extend(all, param_names);
+          const ev_params = codegen_ctx$get_evidence_params(method.effects);
+          List_extend(all, ev_params);
           const all_str = List_join(all, ", ");
           codegen_ctx$emit(ctx, `function ${fn_name}(${all_str}) {`);
           codegen_ctx$push_indent(ctx);
+          const saved_fn_effects = ctx.current_fn_effects;
+          ctx.current_fn_effects = Option_some(method.effects);
           codegen_stmt$emit_block_body(ctx, body);
+          ctx.current_fn_effects = saved_fn_effects;
           codegen_ctx$pop_indent(ctx);
           codegen_ctx$emit(ctx, "}");
         }

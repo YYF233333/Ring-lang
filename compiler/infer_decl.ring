@@ -1078,6 +1078,10 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
             Type::FnType { return_type, .. } => return_type,
             _ => UNIT
         }
+        let fn_effects = match m.ty {
+            Type::FnType { effects, .. } => effects,
+            _ => EMPTY_ROW
+        }
         let ast_params = match ast_method {
             some(am) => match am { Decl::Fn { params, .. } => some(params), _ => none },
             none => none
@@ -1117,7 +1121,7 @@ fn check_trait_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, 
             }
         }
 
-        hmethods.push(HTraitMethod { name: m.name, params: hparams, return_type: fn_ret, has_default: m.has_default, body: method_body })
+        hmethods.push(HTraitMethod { name: m.name, params: hparams, return_type: fn_ret, effects: fn_effects, has_default: m.has_default, body: method_body })
     }
 
     // Build HAssocType list from trait def

@@ -501,10 +501,11 @@ class HEffectOp {
 }
 
 class HTraitMethod {
-  constructor(name, params, return_type, has_default, body) {
+  constructor(name, params, return_type, effects, has_default, body) {
     this.name = name;
     this.params = params;
     this.return_type = return_type;
+    this.effects = effects;
     this.has_default = has_default;
     this.body = body;
   }

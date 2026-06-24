@@ -890,7 +890,7 @@ function dl_decl(d, defs, seen, counter) {
           __match_fail(__ring_m24);
         }
         const new_body = __ring_blk7;
-        List_push(new_methods, new hir$HTraitMethod(tm.name, tm.params, tm.return_type, tm.has_default, new_body));
+        List_push(new_methods, new hir$HTraitMethod(tm.name, tm.params, tm.return_type, tm.effects, tm.has_default, new_body));
       }
       return hir$HDecl_Trait(name, type_params, new_methods, supertraits, assoc_types, is_pub, span);
       break __ring_match23;
