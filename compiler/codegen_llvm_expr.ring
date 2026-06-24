@@ -4659,6 +4659,11 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
     // so a name-based lookup would double-free the inner evidence instead of
     // dropping the outer.
     let mut ev_drop_allocas: List<LLVMValueRef> = []
+    // Save outer evidence allocas so we can restore them after the handle scope
+    // ends — otherwise code after the handle block (which may use the same effect
+    // via default evidence) finds a stale alloca whose stored pointer was freed
+    // by emit_evidence_drops (UAF crash — B-100 Fix 7).
+    let mut saved_ev_entries: List<(Str, LLVMValueRef)> = []
 
     // For each effect, create an evidence object
     let mut sorted_by_effect = by_effect.entries()
@@ -4674,6 +4679,13 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
                 has_fail_abort = true
                 is_fail_abort = true
             }
+        }
+
+        // Save outer evidence alloca (if any) before overwriting, so we can
+        // restore it after the handle scope — prevents UAF on default evidence.
+        match ctx.named_values.get(ev_name) {
+            some(outer_alloca) => saved_ev_entries.push((ev_name, outer_alloca)),
+            none => {},
         }
 
         if is_fail_abort {
@@ -4755,12 +4767,24 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
         let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "hdlv"))
         LLVMAddIncoming(phi, [body_val, error_val], [normal_end_bb, catch_end_bb])
+        // B-100 Fix 7: restore outer evidence allocas so post-handle code that
+        // uses the same effect (e.g. via default evidence) doesn't hit a freed ptr.
+        for saved in saved_ev_entries {
+            let (sname, salloca) = saved
+            ctx.named_values.insert(sname, salloca)
+        }
         phi
     } else {
         // Non-abort handlers: just execute body with evidence set up
         let result = gen_llvm_expr(ctx, body)
         // B-096: drop evidence structs after the body completes.
         emit_evidence_drops(ctx, ev_drop_allocas)
+        // B-100 Fix 7: restore outer evidence allocas so post-handle code that
+        // uses the same effect (e.g. via default evidence) doesn't hit a freed ptr.
+        for saved in saved_ev_entries {
+            let (sname, salloca) = saved
+            ctx.named_values.insert(sname, salloca)
+        }
         result
     }
 }

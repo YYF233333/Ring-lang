@@ -1,7 +1,7 @@
 use types::{Type, Effect, EffectRow, effect_kind_name, is_option_type}
 use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
-    HTraitMethod, TraitBound, HEffectOp,
+    HTraitMethod, TraitBound, HEffectOp, DerivedImpl,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
     hexpr_type, hexpr_effects, collect_extern_type_names}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
@@ -10,7 +10,7 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     get_or_assign_typeid}
 use codegen_llvm_expr::{gen_llvm_expr, build_default_evidence_all}
-use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info}
+use codegen_llvm_decl::{emit_llvm_decl, register_struct_info, register_enum_info, emit_derived_impls_llvm}
 use codegen_ctx::{extract_effect_names}
 use codegen::{collect_fn_callees}
 
@@ -1287,6 +1287,16 @@ fn emit_c_main(mut ctx: LlvmCtx) {
     // Register per-type drop functions with RC runtime
     emit_drop_registrations(ctx)
 
+    // B-100 Fix 2: pre-populate derived dict globals before Ring code runs.
+    // Lazy getters (ring_dict_init___<name>) check `if @g == null { ... }`;
+    // by storing the proper dict now, we prevent them from falling through
+    // to ring_get_builtin_dict (tag-only comparison).
+    for ddb in ctx.derived_dict_builds {
+        let (dict_global, dfn, dfn_ty) = ddb
+        let built = LLVMBuildCall2(ctx.builder, dfn_ty, dfn, [], "ddb")
+        discard(LLVMBuildStore(ctx.builder, built, dict_global))
+    }
+
     // B-097: build default evidence structs (needs a function context for gen_lambda)
     ctx.current_fn = some(main_fn)
     ctx.current_fn_name = "main"
@@ -1407,6 +1417,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         fn_mut_params: map_new(),
         effect_ops: map_new(),
         default_evidence: map_new(),
+        derived_dict_builds: [],
         extern_types: set_new(),
         extern_fn_infos: map_new()
     }
@@ -1447,6 +1458,13 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     for decl in program.decls {
         emit_llvm_decl(ctx, decl)
     }
+
+    // 9a. B-100 Fix 2: emit auto-derived trait impls (Eq, etc.)
+    // The JS backend handles these via codegen_derive.ring; this is the LLVM mirror.
+    // Runs after the main decl pass so struct types and user impls are stable.
+    // emit_trait_dict uses force_replace=true to replace any fallback dict getter
+    // that was lazily created during the decl pass (get_or_create_static_dict_getter).
+    emit_derived_impls_llvm(ctx, program.derived_impls)
 
     // 9b. Generate per-type drop functions and register them
     emit_drop_functions(ctx)
@@ -1559,6 +1577,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         fn_mut_params: map_new(),
         effect_ops: map_new(),
         default_evidence: map_new(),
+        derived_dict_builds: [],
         extern_types: set_new(),
         extern_fn_infos: map_new()
     }
@@ -1627,6 +1646,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         for decl in program.decls {
             emit_llvm_decl(ctx, decl)
         }
+        // B-100 Fix 2: emit auto-derived trait impls after decls
+        emit_derived_impls_llvm(ctx, program.derived_impls)
     }
 
     // Clear module prefix
@@ -1697,6 +1718,13 @@ fn emit_c_main_project(mut ctx: LlvmCtx, entry_prefix: Str) {
 
     // Register per-type drop functions with RC runtime
     emit_drop_registrations(ctx)
+
+    // B-100 Fix 2: pre-populate derived dict globals (project mode)
+    for ddb in ctx.derived_dict_builds {
+        let (dict_global, dfn, dfn_ty) = ddb
+        let built = LLVMBuildCall2(ctx.builder, dfn_ty, dfn, [], "ddb")
+        discard(LLVMBuildStore(ctx.builder, built, dict_global))
+    }
 
     // B-097: build default evidence structs (needs a function context for gen_lambda)
     ctx.current_fn = some(main_fn)

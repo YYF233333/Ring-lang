@@ -404,6 +404,7 @@ BINOP(LLVMBuildSRem)
 BINOP(LLVMBuildShl)
 BINOP(LLVMBuildAShr)
 BINOP(LLVMBuildOr)
+BINOP(LLVMBuildAnd)
 
 BINOP(LLVMBuildFAdd)
 BINOP(LLVMBuildFSub)
@@ -799,6 +800,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         REG(LLVMBuildShl),
         REG(LLVMBuildAShr),
         REG(LLVMBuildOr),
+        REG(LLVMBuildAnd),
         REG(LLVMBuildFAdd),
         REG(LLVMBuildFSub),
         REG(LLVMBuildFMul),
