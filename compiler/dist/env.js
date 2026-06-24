@@ -639,8 +639,11 @@ function apply_subst_effect(subst, e) {
       return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst(subst, a); })));
       break __ring_match14;
     }
-    return e;
-    break __ring_match14;
+    if (__ring_m14._tag === "IoEffect") {
+      return types$Effect_IoEffect;
+      break __ring_match14;
+    }
+    __match_fail(__ring_m14);
   }
 }
 
@@ -702,31 +705,31 @@ function apply_subst(subst, t) {
   __ring_match18: {
     const __ring_m18 = t;
     if (__ring_m18._tag === "IntType") {
-      return t;
+      return types$Type_IntType;
       break __ring_match18;
     }
     if (__ring_m18._tag === "FloatType") {
-      return t;
+      return types$Type_FloatType;
       break __ring_match18;
     }
     if (__ring_m18._tag === "StrType") {
-      return t;
+      return types$Type_StrType;
       break __ring_match18;
     }
     if (__ring_m18._tag === "BoolType") {
-      return t;
+      return types$Type_BoolType;
       break __ring_match18;
     }
     if (__ring_m18._tag === "UnitType") {
-      return t;
+      return types$Type_UnitType;
       break __ring_match18;
     }
     if (__ring_m18._tag === "NeverType") {
-      return t;
+      return types$Type_NeverType;
       break __ring_match18;
     }
     if (__ring_m18._tag === "AnyType") {
-      return t;
+      return types$Type_AnyType;
       break __ring_match18;
     }
     if (__ring_m18._tag === "TypeVar") {
@@ -834,7 +837,7 @@ function apply_subst(subst, t) {
       break __ring_match18;
     }
     if (__ring_m18._tag === "ErrorType") {
-      return t;
+      return types$Type_ErrorType;
       break __ring_match18;
     }
     __match_fail(__ring_m18);
@@ -925,31 +928,31 @@ function apply_subst_map(subst, t) {
   __ring_match28: {
     const __ring_m28 = t;
     if (__ring_m28._tag === "IntType") {
-      return t;
+      return types$Type_IntType;
       break __ring_match28;
     }
     if (__ring_m28._tag === "FloatType") {
-      return t;
+      return types$Type_FloatType;
       break __ring_match28;
     }
     if (__ring_m28._tag === "StrType") {
-      return t;
+      return types$Type_StrType;
       break __ring_match28;
     }
     if (__ring_m28._tag === "BoolType") {
-      return t;
+      return types$Type_BoolType;
       break __ring_match28;
     }
     if (__ring_m28._tag === "UnitType") {
-      return t;
+      return types$Type_UnitType;
       break __ring_match28;
     }
     if (__ring_m28._tag === "NeverType") {
-      return t;
+      return types$Type_NeverType;
       break __ring_match28;
     }
     if (__ring_m28._tag === "AnyType") {
-      return t;
+      return types$Type_AnyType;
       break __ring_match28;
     }
     if (__ring_m28._tag === "TypeVar") {
@@ -1042,7 +1045,7 @@ function apply_subst_map(subst, t) {
       break __ring_match28;
     }
     if (__ring_m28._tag === "ErrorType") {
-      return t;
+      return types$Type_ErrorType;
       break __ring_match28;
     }
     __match_fail(__ring_m28);
@@ -1067,8 +1070,11 @@ function apply_subst_effect_map(subst, e) {
       return types$Effect_CustomEffect(name, type_args.map((function(a) { return apply_subst_map(subst, a); })));
       break __ring_match32;
     }
-    return e;
-    break __ring_match32;
+    if (__ring_m32._tag === "IoEffect") {
+      return types$Effect_IoEffect;
+      break __ring_match32;
+    }
+    __match_fail(__ring_m32);
   }
 }
 

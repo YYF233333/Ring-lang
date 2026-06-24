@@ -393,13 +393,13 @@ fn chase_type_var_map(subst: Map<Int, Type>, id: Int, depth: Int) -> Type {
 
 pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
     match t {
-        Type::IntType => t,
-        Type::FloatType => t,
-        Type::StrType => t,
-        Type::BoolType => t,
-        Type::UnitType => t,
-        Type::NeverType => t,
-        Type::AnyType => t,
+        Type::IntType => Type::IntType,
+        Type::FloatType => Type::FloatType,
+        Type::StrType => Type::StrType,
+        Type::BoolType => Type::BoolType,
+        Type::UnitType => Type::UnitType,
+        Type::NeverType => Type::NeverType,
+        Type::AnyType => Type::AnyType,
         Type::TypeVar { id, .. } => chase_type_var_map(subst, id, 0),
         Type::FnType { params, return_type, effects } =>
             Type::FnType {
@@ -456,7 +456,7 @@ pub fn apply_subst_map(subst: Map<Int, Type>, t: Type) -> Type {
         },
         Type::TupleType { elements } =>
             Type::TupleType { elements: elements.map(fn(e) { apply_subst_map(subst, e) }) },
-        Type::ErrorType => t
+        Type::ErrorType => Type::ErrorType
     }
 }
 
@@ -468,7 +468,7 @@ pub fn apply_subst_effect_map(subst: Map<Int, Type>, e: Effect) -> Effect {
             Effect::MutEffect { state_type: apply_subst_map(subst, state_type) },
         Effect::CustomEffect { name, type_args } =>
             Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { apply_subst_map(subst, a) }) },
-        _ => e
+        Effect::IoEffect => Effect::IoEffect
     }
 }
 
@@ -505,13 +505,13 @@ pub fn apply_subst_row_map(subst: Map<Int, Type>, row: EffectRow) -> EffectRow {
 
 pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
     match t {
-        Type::IntType => t,
-        Type::FloatType => t,
-        Type::StrType => t,
-        Type::BoolType => t,
-        Type::UnitType => t,
-        Type::NeverType => t,
-        Type::AnyType => t,
+        Type::IntType => Type::IntType,
+        Type::FloatType => Type::FloatType,
+        Type::StrType => Type::StrType,
+        Type::BoolType => Type::BoolType,
+        Type::UnitType => Type::UnitType,
+        Type::NeverType => Type::NeverType,
+        Type::AnyType => Type::AnyType,
         Type::TypeVar { id, name } => match uf_lookup(subst, id) {
             some(resolved) => apply_subst(subst, resolved),
             none => {
@@ -584,7 +584,7 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
         },
         Type::TupleType { elements } =>
             Type::TupleType { elements: elements.map(fn(e) { apply_subst(subst, e) }) },
-        Type::ErrorType => t
+        Type::ErrorType => Type::ErrorType
     }
 }
 
@@ -596,7 +596,7 @@ fn apply_subst_effect(subst: UnionFind, e: Effect) -> Effect {
             Effect::MutEffect { state_type: apply_subst(subst, state_type) },
         Effect::CustomEffect { name, type_args } =>
             Effect::CustomEffect { name: name, type_args: type_args.map(fn(a) { apply_subst(subst, a) }) },
-        _ => e
+        Effect::IoEffect => Effect::IoEffect
     }
 }
 

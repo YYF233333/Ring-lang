@@ -695,6 +695,9 @@ fn anf_lvalue(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut count
                 ty: ty, effects: effects, span: span }
         },
         // Ident lvalue (plain variable) — nothing to normalise.
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } =>
+            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: ty, effects: effects, span: span },
+        // Other HExpr variants are unreachable as lvalues.
         _ => expr,
     }
 }
@@ -708,15 +711,21 @@ fn anf_lvalue(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut count
 fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter: List<Int>) -> HExpr {
     match expr {
         // Leaves — nothing to normalise.
-        HExpr::IntLit { .. } => expr,
-        HExpr::FloatLit { .. } => expr,
-        HExpr::StrLit { .. } => expr,
-        HExpr::BoolLit { .. } => expr,
-        HExpr::Ident { .. } => expr,
+        HExpr::IntLit { value, ty, effects, span } =>
+            HExpr::IntLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::FloatLit { value, ty, effects, span } =>
+            HExpr::FloatLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::StrLit { value, ty, effects, span } =>
+            HExpr::StrLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::BoolLit { value, ty, effects, span } =>
+            HExpr::BoolLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } =>
+            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: ty, effects: effects, span: span },
         // B-104 D4: a dict construction is a leaf (its inners are DictRefs, not
         // sub-expressions) and is ALWAYS the init of a dict_lower-synthesised
         // `let __ring_dictlocal_N` — already bound, nothing to materialise.
-        HExpr::DictConstruct { .. } => expr,
+        HExpr::DictConstruct { base_dict, trait_name, inner, ty, effects, span } =>
+            HExpr::DictConstruct { base_dict: base_dict, trait_name: trait_name, inner: inner, ty: ty, effects: effects, span: span },
 
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
             // B-104 D7: `&&`/`||` never reach this pass — andor_lower (checker
@@ -989,7 +998,8 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
         },
 
         // Clone is inserted by perceus (after ANF); never present in input.
-        HExpr::Clone { .. } => expr,
+        HExpr::Clone { inner, ty, effects, span } =>
+            HExpr::Clone { inner: inner, ty: ty, effects: effects, span: span },
 
         // B-113: return in expression position (match arm).
         // Normalise the return value as a tail value (same as HStmt::Return in anf_stmt).
@@ -998,7 +1008,7 @@ fn anf_expr(expr: HExpr, mut hoists: List<HStmt>, externs: Set<Str>, mut counter
                 let new_v = anf_tail_value(v, hoists, externs, counter)
                 HExpr::ReturnExpr { value: some(new_v), ty: ty, effects: effects, span: span }
             },
-            none => expr,
+            none => HExpr::ReturnExpr { value: none, ty: ty, effects: effects, span: span },
         },
     }
 }
@@ -2112,16 +2122,22 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
     match expr {
         // Leaves: nothing to transform.  Owner-bearing leaves (Ident) are cloned
         // by rc_escape at the escape site, never here (here = value position).
-        HExpr::Ident { .. } => expr,
-        HExpr::IntLit { .. } => expr,
-        HExpr::FloatLit { .. } => expr,
-        HExpr::StrLit { .. } => expr,
-        HExpr::BoolLit { .. } => expr,
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } =>
+            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: ty, effects: effects, span: span },
+        HExpr::IntLit { value, ty, effects, span } =>
+            HExpr::IntLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::FloatLit { value, ty, effects, span } =>
+            HExpr::FloatLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::StrLit { value, ty, effects, span } =>
+            HExpr::StrLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::BoolLit { value, ty, effects, span } =>
+            HExpr::BoolLit { value: value, ty: ty, effects: effects, span: span },
         // B-104 D4: a dict construction is a FRESH value (leaf — its inners are
         // DictRef borrows of params/locals/singletons, not sub-expressions).
         // It only occurs as a dict_lower-synthesised Let init: the binding is
         // owned (is_droppable_init → true) and scope-end-dropped.
-        HExpr::DictConstruct { .. } => expr,
+        HExpr::DictConstruct { base_dict, trait_name, inner, ty, effects, span } =>
+            HExpr::DictConstruct { base_dict: base_dict, trait_name: trait_name, inner: inner, ty: ty, effects: effects, span: span },
 
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
             // Operands are borrows (read for the operation; comparison/arith does
@@ -2360,7 +2376,8 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
 
         // Clone should not appear in the input HIR (this pass inserts it); pass
         // through idempotently if seen.
-        HExpr::Clone { .. } => expr,
+        HExpr::Clone { inner, ty, effects, span } =>
+            HExpr::Clone { inner: inner, ty: ty, effects: effects, span: span },
 
         // B-113: return in expression position (match arm).
         // Same drop semantics as HStmt::Return in rc_stmt: escape the return value,

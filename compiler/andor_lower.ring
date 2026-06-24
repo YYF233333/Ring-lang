@@ -88,7 +88,20 @@ fn al_decl(d: HDecl) -> HDecl {
             HDecl::Trait { name: name, type_params: type_params, methods: new_methods,
                 supertraits: supertraits, assoc_types: assoc_types, is_pub: is_pub, span: span }
         },
-        _ => d,
+        HDecl::Struct { name, type_params, fields, is_pub, span } =>
+            HDecl::Struct { name: name, type_params: type_params, fields: fields, is_pub: is_pub, span: span },
+        HDecl::Enum { name, type_params, variants, is_pub, span } =>
+            HDecl::Enum { name: name, type_params: type_params, variants: variants, is_pub: is_pub, span: span },
+        HDecl::Effect { name, type_params, ops, is_pub, span } =>
+            HDecl::Effect { name: name, type_params: type_params, ops: ops, is_pub: is_pub, span: span },
+        HDecl::ExternFn { name, def_id, type_params, params, return_type, effects, is_pub, span } =>
+            HDecl::ExternFn { name: name, def_id: def_id, type_params: type_params, params: params, return_type: return_type, effects: effects, is_pub: is_pub, span: span },
+        HDecl::ExternType { name, type_params, is_pub, span } =>
+            HDecl::ExternType { name: name, type_params: type_params, is_pub: is_pub, span: span },
+        HDecl::TypeAlias { name, ty, is_pub, span } =>
+            HDecl::TypeAlias { name: name, ty: ty, is_pub: is_pub, span: span },
+        HDecl::Sig { name, members, is_pub, span } =>
+            HDecl::Sig { name: name, members: members, is_pub: is_pub, span: span },
     }
 }
 
@@ -98,11 +111,16 @@ fn al_decl(d: HDecl) -> HDecl {
 
 fn al_expr(e: HExpr) -> HExpr {
     match e {
-        HExpr::IntLit { .. } => e,
-        HExpr::FloatLit { .. } => e,
-        HExpr::StrLit { .. } => e,
-        HExpr::BoolLit { .. } => e,
-        HExpr::Ident { .. } => e,
+        HExpr::IntLit { value, ty, effects, span } =>
+            HExpr::IntLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::FloatLit { value, ty, effects, span } =>
+            HExpr::FloatLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::StrLit { value, ty, effects, span } =>
+            HExpr::StrLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::BoolLit { value, ty, effects, span } =>
+            HExpr::BoolLit { value: value, ty: ty, effects: effects, span: span },
+        HExpr::Ident { name, resolved_name, def_id, dict_closure_dicts, ty, effects, span } =>
+            HExpr::Ident { name: name, resolved_name: resolved_name, def_id: def_id, dict_closure_dicts: dict_closure_dicts, ty: ty, effects: effects, span: span },
         HExpr::BinOp { op, left, right, eq_dispatch, ord_dispatch, ty, effects, span } => {
             let new_left = al_expr(left)
             let new_right = al_expr(right)
@@ -231,14 +249,15 @@ fn al_expr(e: HExpr) -> HExpr {
             HExpr::IndexExpr { receiver: al_expr(receiver),
                 index: al_expr(index), ty: ty, effects: effects, span: span },
         // Created by dict_lower, which runs AFTER this pass — never present.
-        HExpr::DictConstruct { .. } => e,
+        HExpr::DictConstruct { base_dict, trait_name, inner, ty, effects, span } =>
+            HExpr::DictConstruct { base_dict: base_dict, trait_name: trait_name, inner: inner, ty: ty, effects: effects, span: span },
         // Clone is inserted by perceus (runs after this pass) — never present.
         HExpr::Clone { inner, ty, effects, span } =>
             HExpr::Clone { inner: al_expr(inner), ty: ty, effects: effects, span: span },
         // B-113: return in expression position (match arm)
         HExpr::ReturnExpr { value, ty, effects, span } => match value {
             some(v) => HExpr::ReturnExpr { value: some(al_expr(v)), ty: ty, effects: effects, span: span },
-            none => e,
+            none => HExpr::ReturnExpr { value: none, ty: ty, effects: effects, span: span },
         },
     }
 }
@@ -285,8 +304,8 @@ fn al_stmt(s: HStmt) -> HStmt {
                 iterable: al_expr(iterable),
                 body: al_expr(body),
                 iterable_type_name: iterable_type_name, iter_type_name: iter_type_name, span: span },
-        HStmt::Break { .. } => s,
-        HStmt::Continue { .. } => s,
+        HStmt::Break { span } => HStmt::Break { span: span },
+        HStmt::Continue { span } => HStmt::Continue { span: span },
         HStmt::LetDestructure { pattern, bindings, init, span } =>
             HStmt::LetDestructure { pattern: pattern, bindings: bindings,
                 init: al_expr(init), span: span },
@@ -299,7 +318,7 @@ fn al_stmt(s: HStmt) -> HStmt {
                 then_block: al_expr(then_block), else_block: new_else, span: span }
         },
         // RC ops are inserted by perceus (after this pass) — never present.
-        HStmt::Drop { .. } => s,
-        HStmt::Dup { .. } => s,
+        HStmt::Drop { name, ty, span } => HStmt::Drop { name: name, ty: ty, span: span },
+        HStmt::Dup { name, ty, span } => HStmt::Dup { name: name, ty: ty, span: span },
     }
 }

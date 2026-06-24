@@ -608,23 +608,7 @@ source-map 支持 + 断点调试。
 - `delegate_custom_effect_direct.ring` 的 default method 测试路径通过 llvm_diff
 - 全 E2E + llvm_diff 通过；自举一致
 
-### B-142 apply_subst 类函数借用返回审计 [bugfix] [P2] [S] [mechanical] [queued]
-
-> 2026-06-24 立项（Discussion，B-140 worker feedback #4 转入）。B-140 根因 = `apply_subst` TypeVar 分支返回函数参数 `t`（借用），Perceus `is_droppable_init(Call)=true` 误 drop。同类模式可能存在于其他函数。
-
-**风险模式**：函数参数为 RC-managed 类型（非 tagged pointer），函数在某分支直接返回该参数值（`=> t` / `=> param_name`），而非构造新值。Perceus 会对 Call 结果插 scope-end Drop → 过度释放借用值 → UAF。
-
-**涉及修改**：
-1. `grep` 编译器全代码库，搜索 `match` 分支中 `=> <参数名>` 模式，排除 tagged pointer 类型（Int/Bool/Str 等）
-2. 对每个命中：检查该参数是否为 RC-managed 类型，函数是否被其他代码调用后作为 let 绑定（触发 scope-end drop）
-3. 修复发现的任何同类 bug（构造新值代替返回参数）
-
-**验收标准**：
-- 编译器代码库零「返回 RC-managed 参数」的函数
-- 全 E2E + llvm_diff 通过；自举一致
-
-
-
+<!-- B-142 done: 13 个函数/5 个文件的 borrow-return-parameter 模式全部消除（env.ring apply_subst*/effect*，andor_lower al_*/dict_lower dl_*，perceus anf_*/rc_*）。885 E2E 通过。2026-06-24 -->
 
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]

@@ -294,11 +294,13 @@ function al_stmt(s) {
       break __ring_match6;
     }
     if (__ring_m6._tag === "Break") {
-      return s;
+      const span = __ring_m6.span;
+      return hir$HStmt_Break(span);
       break __ring_match6;
     }
     if (__ring_m6._tag === "Continue") {
-      return s;
+      const span = __ring_m6.span;
+      return hir$HStmt_Continue(span);
       break __ring_match6;
     }
     if (__ring_m6._tag === "LetDestructure") {
@@ -327,11 +329,13 @@ function al_stmt(s) {
       break __ring_match6;
     }
     if (__ring_m6._tag === "Drop") {
-      return s;
+      const name = __ring_m6.name; const ty = __ring_m6.ty; const span = __ring_m6.span;
+      return hir$HStmt_Drop(name, ty, span);
       break __ring_match6;
     }
     if (__ring_m6._tag === "Dup") {
-      return s;
+      const name = __ring_m6.name; const ty = __ring_m6.ty; const span = __ring_m6.span;
+      return hir$HStmt_Dup(name, ty, span);
       break __ring_match6;
     }
     __match_fail(__ring_m6);
@@ -342,23 +346,28 @@ function al_expr(e) {
   __ring_match9: {
     const __ring_m9 = e;
     if (__ring_m9._tag === "IntLit") {
-      return e;
+      const value = __ring_m9.value; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
+      return hir$HExpr_IntLit(value, ty, effects, span);
       break __ring_match9;
     }
     if (__ring_m9._tag === "FloatLit") {
-      return e;
+      const value = __ring_m9.value; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
+      return hir$HExpr_FloatLit(value, ty, effects, span);
       break __ring_match9;
     }
     if (__ring_m9._tag === "StrLit") {
-      return e;
+      const value = __ring_m9.value; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
+      return hir$HExpr_StrLit(value, ty, effects, span);
       break __ring_match9;
     }
     if (__ring_m9._tag === "BoolLit") {
-      return e;
+      const value = __ring_m9.value; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
+      return hir$HExpr_BoolLit(value, ty, effects, span);
       break __ring_match9;
     }
     if (__ring_m9._tag === "Ident") {
-      return e;
+      const name = __ring_m9.name; const resolved_name = __ring_m9.resolved_name; const def_id = __ring_m9.def_id; const dict_closure_dicts = __ring_m9.dict_closure_dicts; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
+      return hir$HExpr_Ident(name, resolved_name, def_id, dict_closure_dicts, ty, effects, span);
       break __ring_match9;
     }
     if (__ring_m9._tag === "BinOp") {
@@ -612,7 +621,8 @@ function al_expr(e) {
       break __ring_match9;
     }
     if (__ring_m9._tag === "DictConstruct") {
-      return e;
+      const base_dict = __ring_m9.base_dict; const trait_name = __ring_m9.trait_name; const inner = __ring_m9.inner; const ty = __ring_m9.ty; const effects = __ring_m9.effects; const span = __ring_m9.span;
+      return hir$HExpr_DictConstruct(base_dict, trait_name, inner, ty, effects, span);
       break __ring_match9;
     }
     if (__ring_m9._tag === "Clone") {
@@ -630,7 +640,7 @@ function al_expr(e) {
           break __ring_match16;
         }
         if (__ring_m16._tag === "none") {
-          return e;
+          return hir$HExpr_ReturnExpr(Option_none, ty, effects, span);
           break __ring_match16;
         }
         __match_fail(__ring_m16);
@@ -740,8 +750,42 @@ function al_decl(d) {
       return hir$HDecl_Trait(name, type_params, new_methods, supertraits, assoc_types, is_pub, span);
       break __ring_match18;
     }
-    return d;
-    break __ring_match18;
+    if (__ring_m18._tag === "Struct") {
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const fields = __ring_m18.fields; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      return hir$HDecl_Struct(name, type_params, fields, is_pub, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Enum") {
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const variants = __ring_m18.variants; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      return hir$HDecl_Enum(name, type_params, variants, is_pub, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Effect") {
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const ops = __ring_m18.ops; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      return hir$HDecl_Effect(name, type_params, ops, is_pub, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "ExternFn") {
+      const name = __ring_m18.name; const def_id = __ring_m18.def_id; const type_params = __ring_m18.type_params; const params = __ring_m18.params; const return_type = __ring_m18.return_type; const effects = __ring_m18.effects; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      return hir$HDecl_ExternFn(name, def_id, type_params, params, return_type, effects, is_pub, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "ExternType") {
+      const name = __ring_m18.name; const type_params = __ring_m18.type_params; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      return hir$HDecl_ExternType(name, type_params, is_pub, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "TypeAlias") {
+      const name = __ring_m18.name; const ty = __ring_m18.ty; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      return hir$HDecl_TypeAlias(name, ty, is_pub, span);
+      break __ring_match18;
+    }
+    if (__ring_m18._tag === "Sig") {
+      const name = __ring_m18.name; const members = __ring_m18.members; const is_pub = __ring_m18.is_pub; const span = __ring_m18.span;
+      return hir$HDecl_Sig(name, members, is_pub, span);
+      break __ring_match18;
+    }
+    __match_fail(__ring_m18);
   }
 }
 
