@@ -615,21 +615,7 @@ source-map 支持 + 断点调试。
 <!-- B-140 done: apply_subst TypeVar 返回借用 `t` → scope-end drop UAF。修复：TypeVar 总构造新节点 + 移除 Str workaround。ASan ×5 clean。2026-06-24 -->
 <!-- B-139 done: HTraitMethod 加 effects 字段 + codegen_decl evidence 转发。885 E2E, double bootstrap。2026-06-24 -->
 
-### B-141 LLVM 后端 default trait method 支持 [feature] [P3] [M] [judgment] [queued]
-
-> 2026-06-24 立项（Discussion，B-139 worker feedback #2 转入）。
-
-**现象**：LLVM 后端完全不支持 default trait methods——codegen 生成 `unknown method` warning + null closure in dict，调用时 access violation。JS 后端已正常支持（B-139 修复后含 custom effect evidence）。
-
-**涉及修改**：
-1. `compiler/codegen_llvm_decl.ring`：`emit_trait_decl` LLVM 版——为 default method 生成独立函数（含 dict 参数 + supertrait dicts + evidence 参数），与 JS 后端 `codegen_decl.ring` 对齐
-2. `compiler/codegen_llvm_decl.ring`：`emit_trait_dictionary` LLVM 版——dict closure 对 default method 生成转发闭包（非 null）
-3. 测试：`tests/cases/llvm/delegate_custom_effect_direct.ring` 扩展覆盖 default method 路径
-
-**验收标准**：
-- default trait method（含 custom effect）在 LLVM 后端可正常调用
-- `delegate_custom_effect_direct.ring` 的 default method 测试路径通过 llvm_diff
-- 全 E2E + llvm_diff 通过；自举一致
+<!-- B-141 done: LLVM 后端 default trait method 支持。emit_trait_default_methods + emit_default_method_thunk + emit_default_method_stubs，~285 行。self.method() 走 dict dispatch。trait_default_method.ring parity 通过。2026-06-24 -->
 
 <!-- B-142 done: 13 个函数/5 个文件的 borrow-return-parameter 模式全部消除（env.ring apply_subst*/effect*，andor_lower al_*/dict_lower dl_*，perceus anf_*/rc_*）。885 E2E 通过。2026-06-24 -->
 
