@@ -95,7 +95,7 @@ Rust 的所有权模型减去 borrow checker。编译器做数据流分析追踪
 
 **LLM 友好性**：本质是 Rust move/drop/RAII 语义，LLM 从 Rust 训练数据天然理解。自动浮现路径：LLM 正常写代码 → move 后使用原变量 → 编译器报 "value moved" → LLM 修。无新概念。
 
-- **前置依赖**：`mut<S>` 稳定
+- **前置依赖**：B-110（别名追踪 + Drop auto-move）
 - **复杂度**：大（ownership checker + Perceus RC 的前置条件）
 - **优先级**：Phase C 与 refinement 穿插
 - **交互规则（B-043 决策）**：RAII 模型——Drop 值在 abort/cancel 路径自动释放；Drop::drop 禁止 fail effect（允许 io）；spawn 为 move 语义，不可跨任务共享 Drop 值；`mut self` 调用 = 隐式借用（不消耗）。详见 design.md 1.5
@@ -325,7 +325,7 @@ fn test_fetch() {
 - ❌ Rust：runtime 碎片化（tokio vs async-std）
 - ✅ Ring：一种标准 handler/runtime
 
-**前置依赖**：B-037（mut<T> marker effect）+ B-008（Default Effect Handler）
+**前置依赖**：B-008（Default Effect Handler）。（原前置 B-037 `mut<T>` marker effect 已移除，见 design.md §7.9。）
 **复杂度**：极大（generator codegen + scope 管理 + 取消传播 + 标准库 async 原语）
 **优先级**：层 3（Phase C 层 1+2 完成后启动）
 **宣发价值**：直接解决 function coloring + cancellation safety——带 async effect 的函数可在同步 handler 下测试，取消可补偿。设计已确定，实现前可作为已解决的设计卖点讲

@@ -299,16 +299,16 @@ get()  // 3
 
 编译器检测到 `counter` 被闭包捕获且为 `let mut`，自动 box 为 `{ value: 0 }`。闭包和外层作用域共享同一个 box。用户写的是直觉代码，编译器干脏活。
 
-**Effect 追踪规则：**
+**Mutation 追踪（2026-06-24 更新）**：`mut<S>` marker effect 已移除（见 §7.9）。Mutation 可见性由参数推断（lv2 `x: mut T`）+ 闭包捕获列表（lv2 `[mut counter]`）承载。Effect 行只追踪 io / fail / async。
 
-| 场景 | 是否 box | `mut<T>` effect | 理由 |
-|------|---------|-----------------|------|
-| `let mut x` 纯局部使用 | 不 box（JS `let`） | 不出现 | 局部 mutation 不是 side effect |
-| `let mut x` 被闭包捕获 | 自动 box | 出现在闭包签名 | 共享 mutation 是 side effect |
-| `mut` 参数传递 | 调用方 box | 出现在函数签名 | 修改外部状态是 side effect |
-| struct 字段修改（`let mut s; s.f = v`） | 不 box | 不出现 | 局部持有的 struct 修改是局部行为 |
+**自动 box 规则**（不变）：
 
-**`mut<T>` 追踪粒度：参数级，非 field 级。** `self.field.push()` 不额外注入 `mut<FieldType>` effect——`push()` 要求 `mut self`，即函数已有 `mut<Self>` effect，field mutation 是其子集。递归追踪 field chain 会产生大量冗余 effect（任何深层字段修改都传播到顶层），信噪比极低。
+| 场景 | 是否 box | 理由 |
+|------|---------|------|
+| `let mut x` 纯局部使用 | 不 box（JS `let`） | 局部 mutation 不是 side effect |
+| `let mut x` 被闭包捕获 | 自动 box | 共享 mutation 需要间接 |
+| `mut` 参数传递 | 调用方 box | 修改外部状态需要间接 |
+| struct 字段修改（`let mut s; s.f = v`） | 不 box | 局部持有的 struct 修改是局部行为 |
 
 **不再需要 `Cell<T>` / `Ref<T>` 等包装类型。** 所有可变性通过 `let mut` + `mut` 参数 + 编译器自动 box 处理。词汇量：一个关键字 `mut`。
 
@@ -710,12 +710,8 @@ effect async {
     fn await<T>(f: Future<T>) -> T
 }
 
-// 当前实现：mut 无类型参数（Cell<T> 泛型保证类型安全）
-// Phase 3 目标：mut<S> 参数化 effect
-effect mut<S> {
-    fn get() -> S
-    fn set(new_state: S) -> Unit
-}
+// mut<S> effect 已移除（2026-06-24，见 §7.9）
+// mutation 可见性改由参数推断（x: mut T）+ 闭包捕获列表承载
 ```
 
 ### 2.2 Default Handler（默认处理器）
@@ -2171,7 +2167,7 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | `or`/`try`/`?` 运算符 | 已移除，使用 `unwrap`/`to_fail`/`to_result()`/`catch` | 简化语法面，减少歧义 |
 | catch 语义 | 总是消除 fail effect；部分处理用 catch 内部 match + re-raise（显式） | 消除隐式行为（原设计中有/无 catch-all arm 决定不同类型行为），降低概念数 |
 | 错误模型 | 生命周期模型：fail effect 为主（诞生/流动），to_result 物化为数据（落地） | effect 是运动形态，Result 是静止形态；双模型各有地盘而非竞争 |
-| 可变性统一模型 | `var` → `let mut`，`Cell<T>` 消除，`mut` 为唯一可变关键字 | 局部 mutation 不 box 不追踪（非 side effect）；闭包捕获/mut 参数自动 box + `mut<T>` effect |
+| 可变性统一模型 | `var` → `let mut`，`Cell<T>` 消除，`mut` 为唯一可变关键字 | 局部 mutation 不 box 不追踪（非 side effect）；闭包捕获/mut 参数自动 box。~~`mut<T>` effect~~ 已移除（2026-06-24 §7.9），改为参数推断 `x: mut T` + 闭包捕获列表 |
 | `++` 拼接运算符 | 不实现，使用字符串插值 | "一种事一种写法"原则 |
 | Lambda 双向类型传播 | receiver 统一提前 + lambda 接受 expected param types | 支持 `==` 在嵌套 closure 中正确推断 |
 | fn 类型 effect 标注 | `fn(T) -> U with {io}` 语法，无标注时 open row | 支持 HOF callback 的 effect 多态 |
@@ -2184,8 +2180,8 @@ LLVM IR（附带 Ring 生成的属性和 metadata）
 | Refinement × Ownership × Effects 交互 | 详见 1.6b 交互矩阵 | 三系统正交 + RAII（Drop trait）处理 Drop 值在所有路径的释放 |
 | Ownership 模型 | Rust 风格 RAII，无 borrow checker；`impl Drop` = 所有权约束入口；Drop 与 Clone 互斥；所有路径自动 drop | LLM 从 Rust 训练数据天然理解 move/drop/RAII；无 `linear` 关键字——少一个概念 |
 | 下标赋值语义 | 支持 `xs[i] = val` + bounds-check（方案 C） | 读写语义一致（越界都 panic）；JS 后端临时方案，LLVM 原生支持；Refinement Types 可消除已证明安全的 bounds-check |
-| `mut<T>` 追踪粒度 | 参数级，不递归 field chain | `mut self` 已含"可修改 self 任何部分"语义，field-level 追踪是冗余子集信息 |
-| 扩展交互矩阵 | 详见 1.6b 扩展部分 | GADTs×Or-Pattern 禁不兼容约束合并；Refinement×mut 赋值点重新验证；Auto-Boxing×Ownership 透明；delegate 创建完整 trait impl 含关联类型；无 borrow checker（RC+Ownership+mut\<T\>+Drop 覆盖安全性） |
+| ~~`mut<T>` 追踪粒度~~ | ~~参数级，不递归 field chain~~ | 已移除（2026-06-24 §7.9）——mutation 可见性改为参数推断 `x: mut T`（lv2）+ 闭包捕获列表 |
+| 扩展交互矩阵 | 详见 1.6b 扩展部分 | GADTs×Or-Pattern 禁不兼容约束合并；Refinement×mut 赋值点重新验证；Auto-Boxing×Ownership 透明；delegate 创建完整 trait impl 含关联类型；无 borrow checker（RC+Ownership+别名追踪+Drop 覆盖安全性，§7 2026-06-24 版） |
 | LLM 友好性三原则 | 详见设计公理后章节 | 借来的语法行为像原主；错误信息对 LLM 友好；高级特性分自动浮现/用户触发两条路径 |
 | GADTs 降优先级 | P3，LLVM 之后 | 编译器不需要；无下游依赖；用户侧高级特性 |
 | Iterator/Iterable 协议 | 双 trait：`Iterator { type Item; fn next(mut self) -> Item? }` + `Iterable { type Item; type Iter: Iterator; fn iter(self) -> Iter }` | `for..in` 脱糖为 `iter()` + `next()` 循环；Range 保留 C-style for 快速路径（builtin EnumType，无法 impl trait）；Iterator struct 使用 `mut self` 引用语义修改游标 |

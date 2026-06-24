@@ -548,7 +548,7 @@ let d: U8 = 256.to_u8()      // 编译期范围检查 → 编译错误
 | Rust | Ring 等价 | 机制 |
 |------|----------|------|
 | `Fn` | `f: fn(T) -> U` | 默认 borrow 捕获，多次调用 |
-| `FnMut` | `f: fn(T) -> U with {mut<S>}` | `mut<T>` effect 自动追踪 |
+| `FnMut` | `f: fn(mut T) -> U` | mutation 由参数推断（`mut<S>` effect 已移除，§7.9） |
 | `FnOnce` | `f: fn once(T) -> U` | `once` 在函数类型上，非参数前缀 |
 
 - `once` 是函数类型的一部分：`fn once() -> Unit` = 最多调用一次（消耗性闭包）
@@ -828,7 +828,7 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 { ... }
 | `net` | `net.dial`, `net.listen`, `net.resolve` | 网络通信——唯一跨信任边界的 OS 效应 |
 | `os` | 其余全部 OS 效应：fs/stdin/stdout/stderr/env/clock/random/spawn… | 平台杂项——函数"运行在真实 OS 上"的标志 |
 | `fail<E>` | `fail.raise` | 不变 |
-| `mut<S>` | marker only（调用点注入） | 不变 |
+| ~~`mut<S>`~~ | ~~marker only（调用点注入）~~ | **已移除**（2026-06-24 §7.9）——mutation 由参数推断 `x: mut T` + 闭包捕获列表承载 |
 | `async` | `async.await`, `async.spawn` | B-007 待实现 |
 | `unsafe` | 原语操作（alloc/dealloc/read/write/cast…） | B-125 待实现 |
 

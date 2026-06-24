@@ -230,7 +230,7 @@ mod io_layer requires {io} {
 
 - 检查覆盖模块内所有顶层函数和 impl 方法（包括 delegate 生成的实现）
 - 纯函数（无 effect）在任何 `requires` 集合中都合法——开放的 effect row 尾部不会被误判
-- `mut<T>` marker effect 也受 capability 限制——`mod requires {}` 中不允许 `mut self` 方法
+- ~~`mut<T>` marker effect 也受 capability 限制~~——`mut<T>` 已移除（design.md §7.9）。`mod requires {}` 仍可限制其他 effect；mutation 控制改由参数推断 + 别名追踪（§7.4）承载
 
 ### 命名空间化
 

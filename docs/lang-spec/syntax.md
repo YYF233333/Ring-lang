@@ -224,7 +224,7 @@ TypeArgs     ::= '<' TypeExpr (',' TypeExpr)* '>'
 EffectExpr   ::= Ident ('::' Ident)* TypeArgs?
 ```
 
-Effect 表达式用于 effect 标注、effect alias 和 `requires` 子句中。支持限定路径（如 `mod::effect`）和类型参数（如 `fail<Str>`、`mut<T>`）。
+Effect 表达式用于 effect 标注、effect alias 和 `requires` 子句中。支持限定路径（如 `mod::effect`）和类型参数（如 `fail<Str>`）。（`mut<T>` 已移除——design.md §7.9。）
 
 ## 语句
 

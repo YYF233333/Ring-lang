@@ -8,12 +8,12 @@ Ring 的 effect 系统基于 effect row（来自 Koka），通过 evidence passi
 |--------|------|------|
 | `io` | I/O 副作用 | `read(path: Str) -> Str`、`write(path: Str, data: Str) -> Unit` |
 | `fail<E>` | 可恢复错误 | `raise(error: E) -> Never` |
-| `mut<T>` | 可变性追踪 | `mut self` 方法调用、`mut` 函数参数自动注入；Cell 操作 |
+| ~~`mut<T>`~~ | ~~可变性追踪~~ | **已移除**（2026-06-24 design.md §7.9）——mutation 由参数推断 `x: mut T` + 闭包捕获列表承载 |
 | 自定义 | 用户定义 effect | 用户定义的操作 |
 
 ### 内置 Effect
 
-`io` 和 `fail` 是内置的——编译器直接理解它们的语义。`mut<T>` 是编译期 marker effect，用于追踪可变性（详见下方 `mut<T>` Marker Effect 章节）。自定义 effect 通过 `effect` 声明引入。
+`io` 和 `fail` 是内置的——编译器直接理解它们的语义。自定义 effect 通过 `effect` 声明引入。（`mut<T>` marker effect 已移除——见 design.md §7.9。）
 
 ### 自定义 Effect 声明
 
@@ -76,32 +76,11 @@ effect alias Fallible<E> = {fail<E>}
 - 支持 `pub` 导出，跨模块使用
 - 展开发生在类型检查阶段，对 codegen 透明
 
-### `mut<T>` Marker Effect
+### ~~`mut<T>` Marker Effect~~（已移除）
 
-`mut<T>` 是编译期 marker effect，用于追踪可变操作。零运行时成本。
-
-自动注入时机：
-- 调用 `mut self` 方法时，自动注入 `mut<T>`（T 为 receiver 类型）
-- 调用带 `mut` 参数的函数时，自动注入对应的 `mut<T>`
-
-```ring
-struct Counter { value: Int }
-
-impl Counter {
-    fn increment(mut self) {
-        self.value = self.value + 1
-    }
-}
-
-fn main() {
-    let mut c = Counter { value: 0 }
-    c.increment()  // 自动注入 mut<Counter> effect
-}
-```
-
-局部变量 mutation 自动消除：当 `mut` 参数为局部变量时，`mut` effect 不会向上传播。例如调用 `push_item(local)` 时若 `local` 是局部绑定的变量，则不产生 `mut` effect。
-
-可通过 `mod requires {}` 限制模块允许的 effect，从而禁止特定类型的 mutation。
+> **2026-06-24 移除**（design.md §7.9）。`mut<T>` marker effect 从 effect 系统移除。Mutation 可见性改由参数推断（lv2 `x: mut T`）+ 闭包捕获列表（lv2 `[mut counter]`）承载。Effect 行只追踪 io / fail / async 等计算效果。
+>
+> 移除理由：(1) 参数位 mutation 与 `mut<T>` effect 信息完全重叠；(2) `mut<Int>` 类型级粒度太粗，用户想知道"修改了哪个变量"；(3) 闭包捕获列表比 effect 更精确。
 
 ## Effect Row
 

@@ -86,7 +86,7 @@ Bidirectional + constraint solving + effect inference。写代码的体验接近
 **Drop 时机消歧 + as-if 条款（2026-06-12 D-1 拍板，实现细则见 design.md §7.11）**：原文「scope 退出/最后使用处」的「/」违反本条自身——两个不同程序点必须择一。裁决：**语义统一 scope-end**；引擎在**可证不可观测**时允许提前 drop（as-if），充分条件 = 该类型无用户 `Drop` impl **且**不被任何 `Weak<T>` 指向（两者均类型级可判定，Type-DAG）。`Weak.upgrade()` 使 drop 时机可观测（提前 drop 把 `some` 变 `none`），故 Weak 目标类型与带 Drop 类型钉死 scope-end；热路径纯数据（List/Str/Option…）满足条件，L3 last-use drop / FBIP 重用（B-079）的优化空间由此保留且不违反「优化不可观测」（④ 推论）。诚实记账：级联 drop（释放大结构）是确定性的单点停顿——确定性 ≠ 有界延迟，可由不可观测的惰性 drop 队列缓解（同吃 as-if 条款）。
 
 **GC 取舍记录（2026-06-12 分析定案——放弃 GC 的真实理由，旧理由"GC 停顿"不成立）**：
-- **语义层费用 GC 省不掉**：公理 2/4 独立强迫 move 语义——引用语义使 `mut<S>` 系统性失真、aliasing bug 类对无人回路永久开放（B-110 否决理由与引擎无关）；Drop/RAII 强迫 move-only 类型存在。即便换 GC 引擎，所有权的用户面（5 个浮现点）几乎原样保留，省下的只有引擎层。
+- **语义层费用 GC 省不掉**：公理 2/4 独立强迫 ownership 语义——无别名追踪的引用语义使 aliasing bug 类对无人回路永久开放；Drop/RAII 强迫 move-only 类型存在。即便换 GC 引擎，所有权的用户面几乎原样保留，省下的只有引擎层。（2026-06-24 更新：`mut<S>` effect 已移除，mutation 安全改由别名追踪 + 参数推断承载，见 design.md §7。）
 - **引擎层四收益**：① 无 runtime——C ABI FFI 零摩擦、二进制小、WASM/嵌入式/GPU（远期场景，正典清单见上 ④）路径不堵死（2026-06-12 升格为公理⑦）；② 内存占用 = live set（GC 需 2-3× heap headroom，agent 并行 ×N 进程放大）；③ Perceus 特有——FBIP 原地复用、garbage-free 定理、D2 静态 verifier（"编译期证明 0 泄露"GC 给不了）；④ 竞争位——AI-native 同辈（Mojo/MoonBit/Zero）全选 ownership/no-GC；GC 化 = 进 Go/TS"够用就行"修罗场（效果推断差异化最弱处），no-GC 打的是"Rust 人体工学"这个公认无解痛点。
 - **不可逆性不对称（最硬一条）**：GC→确定性 retrofit 史上无成功案例（D 的 @nogc 残废、finalizer ≠ destructor）；RC→GC 级人体工学 = 当前设计纲领且已基本兑现（所有权仅 5 浮现点、全部 fail-safe）。要错就错在 no-GC 这边。
 - **可证伪锚点**：B-089 re-measure = Ring 首个 RC vs GC footprint 实测（native RC plateau vs V8 自编译基线）；若完整 RC 不优于 V8，此账重算。
