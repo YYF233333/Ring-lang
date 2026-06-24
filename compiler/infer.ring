@@ -74,12 +74,7 @@ fn cancel_local_mut_effects(
     param_offset: Int,
     s: UnionFind
 ) -> EffectRow {
-    // Collect string representations of mut effect state_types to cancel.
-    // (Serialise to Str to sidestep a Perceus RC aliasing bug where a
-    // conditionally-pushed Type value in a List captured by a later closure
-    // triggers use-after-free on the native backend.  See worker_feedback
-    // 2026-06-24 for the full ASan trace.)
-    let mut cancel_strs: List<Str> = []
+    let mut cancel_types: List<Type> = []
     for eff in callee_effects.effects {
         match eff {
             Effect::MutEffect { state_type } => {
@@ -95,7 +90,7 @@ fn cancel_local_mut_effects(
                                     some(harg) => match harg {
                                         HExpr::Ident { def_id: some(did), .. } => {
                                             if !ctx.env.scope.mut_param_defs.contains(did) {
-                                                cancel_strs.push(type_to_string(resolved_st))
+                                                cancel_types.push(resolved_st)
                                             }
                                         },
                                         _ => {}
@@ -114,20 +109,18 @@ fn cancel_local_mut_effects(
         }
     }
 
-    if cancel_strs.len() == 0 {
+    if cancel_types.len() == 0 {
         return effects
     }
 
-    // Filter out cancelled mut effects — compare by string to avoid Type RC aliasing
     let mut filtered: List<Effect> = []
     for e in effects.effects {
         let mut keep = true
         match e {
             Effect::MutEffect { state_type } => {
                 let resolved_st = apply_subst(s, state_type)
-                let st_str = type_to_string(resolved_st)
-                for ct in cancel_strs {
-                    if ct == st_str {
+                for ct in cancel_types {
+                    if types_equal(ct, resolved_st) {
                         keep = false
                     }
                 }

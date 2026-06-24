@@ -730,7 +730,7 @@ function apply_subst(subst, t) {
       break __ring_match18;
     }
     if (__ring_m18._tag === "TypeVar") {
-      const id = __ring_m18.id;
+      const id = __ring_m18.id; const name = __ring_m18.name;
       __ring_match19: {
         const __ring_m19 = union_find$uf_lookup(subst, id);
         if (__ring_m19._tag === "some") {
@@ -740,11 +740,7 @@ function apply_subst(subst, t) {
         }
         if (__ring_m19._tag === "none") {
           const root = union_find$uf_find(subst, id);
-          if ((root === id)) {
-            return t;
-          } else {
-            return types$Type_TypeVar(root, Option_none);
-          }
+          return types$Type_TypeVar(root, name);
           break __ring_match19;
         }
         __match_fail(__ring_m19);

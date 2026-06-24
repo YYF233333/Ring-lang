@@ -263,7 +263,7 @@ class StmtResult {
 }
 
 function cancel_local_mut_effects(ctx, effects, callee_params, callee_effects, hargs, param_offset, s) {
-  let cancel_strs = [];
+  let cancel_types = [];
   const __ring_iter_2 = __List_Iterable.iter(callee_effects.effects);
   while (true) {
     const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
@@ -292,7 +292,7 @@ function cancel_local_mut_effects(ctx, effects, callee_params, callee_effects, h
                       if (__ring_m9._tag === "Ident" && __ring_m9.def_id._tag === "some") {
                         const did = __ring_m9.def_id._0;
                         if ((!_Set_contains(ctx.env.scope.mut_param_defs, did, __Int_Eq))) {
-                          List_push(cancel_strs, types$type_to_string(resolved_st));
+                          List_push(cancel_types, resolved_st);
                         }
                         break __ring_match9;
                       }
@@ -321,7 +321,7 @@ function cancel_local_mut_effects(ctx, effects, callee_params, callee_effects, h
       break __ring_match6;
     }
   }
-  if ((List_len(cancel_strs) === 0)) {
+  if ((List_len(cancel_types) === 0)) {
     return effects;
   }
   let filtered = [];
@@ -336,13 +336,12 @@ function cancel_local_mut_effects(ctx, effects, callee_params, callee_effects, h
       if (__ring_m10._tag === "MutEffect") {
         const state_type = __ring_m10.state_type;
         const resolved_st = env$apply_subst(s, state_type);
-        const st_str = types$type_to_string(resolved_st);
-        const __ring_iter_4 = __List_Iterable.iter(cancel_strs);
+        const __ring_iter_4 = __List_Iterable.iter(cancel_types);
         while (true) {
           const __ring_next_4 = __ListIterator_Iterator.next(__ring_iter_4);
           if (__ring_next_4._tag === "none") break;
           const ct = __ring_next_4._0;
-          if ((ct === st_str)) {
+          if (types$types_equal(ct, resolved_st)) {
             keep = false;
           }
         }

@@ -512,12 +512,15 @@ pub fn apply_subst(subst: UnionFind, t: Type) -> Type {
         Type::UnitType => t,
         Type::NeverType => t,
         Type::AnyType => t,
-        Type::TypeVar { id, .. } => match uf_lookup(subst, id) {
+        Type::TypeVar { id, name } => match uf_lookup(subst, id) {
             some(resolved) => apply_subst(subst, resolved),
             none => {
-                // Even without a type binding, path compression may have changed the root
+                // Always construct a new TypeVar to avoid returning borrowed `t`.
+                // Perceus treats Call results as owned and inserts scope-end Drop;
+                // returning the borrowed parameter `t` would cause UAF on the
+                // original holder (UF table / effect list).
                 let root = uf_find(subst, id)
-                if root == id { t } else { Type::TypeVar { id: root, name: none } }
+                Type::TypeVar { id: root, name: name }
             }
         },
         Type::FnType { params, return_type, effects } =>
