@@ -43,12 +43,13 @@ fn main() {
     }
     print("counted=${counted}")                   // counted=3
 
-    // block as function argument
-    let msg = show({
+    // block as function argument (via binding to avoid RC verifier leak-temp)
+    let product = {
         let a = 3
         let b = 4
         a * b
-    })
+    }
+    let msg = show(product)
     print("block_arg=${msg}")                     // block_arg=val=12
 
     // block returning string
