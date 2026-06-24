@@ -589,6 +589,71 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
+### B-140 Perceus clone-all-escape UAF：条件 push + scope-end drop 交互 [bugfix] [P1] [M] [judgment] [queued]
+
+> 2026-06-24 立项（Discussion，B-099 worker feedback 转入）。ASan 确认 `heap-use-after-free in ring_dup`。**workaround 已落地**（commit `f8302d8`，`cancel_local_mut_effects` 改用 Str 序列化避免 Type RC 别名），本项做 Perceus 根因修复。
+
+**Bug 描述**：native ring.exe 编译多模块项目时间歇性 heap corruption（STATUS_HEAP_CORRUPTION / 0xC0000374）。ASan 下 100% 复现。
+
+**ASan 报告摘要**：
+- `ring_dup` 读取已 free 对象的 typeid → heap-use-after-free
+- **Free 来源**：`ring_infer$$_cancel_local_mut_effects`
+- **Alloc 来源**：`ring_env$$_apply_subst`
+- 对象：40 字节 Type enum variant（8B RC header + 32B payload）
+
+**触发模式**（从 `cancel_local_mut_effects` 提取的最小结构）：
+```ring
+let mut list: List<Type> = []
+for item in source {
+    let val = call_that_returns_fresh_value()   // apply_subst
+    // ... 深层条件分支 ...
+    if condition {
+        list.push(val)    // sink 位置，Perceus Clone-wrap（dup）
+    }
+}
+// val 的 scope-end drop 释放了对象
+// 但 list 内仍持有引用 → 悬挂指针
+
+// 后续访问 list 内容 → UAF
+let result = other_list.filter(fn(e) {
+    list.any(fn(ct) { types_equal(ct, e) })
+})
+```
+
+**间歇性原因**：`ring_dup` 有 guard `if (rc == 0u || rc > 100000u) return`——freed memory 如果碰巧 RC 字段为 0 或被覆盖，静默跳过不崩溃。ASan 的 poisoned shadow memory 让每次读取都触发。
+
+**非 regression**：Level 1 验收点 `a665017`（2026-06-16）同样存在，31GB 机器上被 allocation 布局掩盖。
+
+**复现方法**：
+```bash
+# 构建 ASan 版 ring.exe（ring_runtime 带 ASan，main.o 不带）
+clang -c ring_runtime.cpp -o ring_runtime_asan.o -O1 -std=c++17 \
+  -fsanitize=address -fno-omit-frame-pointer
+clang compiler/dist-llvm/main.o ring_runtime_asan.o -o ring_asan.exe \
+  -fsanitize=address -lmsvcrt -Wl,/STACK:536870912 \
+  -LC:/software/Scoop/apps/llvm/current/lib -lLLVM-C
+# 需要 clang_rt.asan_dynamic-x86_64.dll 在同目录或 PATH
+
+# 100% 复现（任一含 use infer_register 的模块）：
+ring_asan.exe check compiler/scc.ring
+# 最小复现文件（放 compiler/ 目录内）：
+# use infer_register::{prefix_decl_name}
+# fn main() { print("x") }
+```
+
+**涉及修改（probe + fix）**：
+1. **Probe（先行）**：定位 Perceus 对触发模式的精确 RC 行为——`is_droppable_init` 对 `apply_subst` Call 返回什么？如果 false 则 `resolved_st` 不在 owned set，谁在 drop 它？如果 true，scope-end drop 在 push Clone 之前还是之后？用 LLVM IR dump 或 codegen 插桩确认。排查编译器全代码库是否有同类模式。
+2. **Fix**：修正 `perceus.ring` 的 drop 插入或 Clone-wrap 逻辑——确保条件 push 到容器后，原始绑定的 scope-end drop 与容器内引用的 dup 正确平衡。
+3. **验证**：ASan 全量验证——`ring_asan.exe` 编译 44 文件编译器零 UAF + 全 E2E + llvm_diff ×3 + 移除 `cancel_local_mut_effects` 的 Str workaround 恢复 Type 版本后仍然 ASan-clean。
+4. **扫描**：grep 编译器全代码库同类模式（for 循环内条件 push + 后续 closure 捕获 list），确认无其他潜伏站点。
+
+**验收标准**：
+- `ring_asan.exe check compiler/scc.ring` ×10 零 UAF（当前 workaround 下已零崩溃，根因修后移除 workaround 仍零 UAF）
+- `ring_asan.exe build compiler/main.ring --out-dir=...` 零 UAF（44 文件自编译）
+- `cancel_local_mut_effects` 恢复 Type 版本（移除 Str workaround），ASan-clean
+- 全 E2E 883 + llvm_diff ×3 + triple bootstrap 44/44 一致
+- 编译器代码库同类模式扫描报告（零残留或已修）
+
 ### B-139 Delegate stub 不转发 custom effect evidence [bugfix] [P2] [M] [judgment] [queued]
 
 > 2026-06-17 立项（Discussion，B-097 worker feedback #2 转入）。与 audit #93（delegate expansion 绕过推断）同族。
@@ -696,30 +761,25 @@ fn dot<N>(a: [F64; N], b: [F64; N]) -> F64 {
 4. **~970 `unknown function 'LLVM*'` warning**：JS-host 编译路径的预期现象，native 自跑后应消失，作回归观察点。
 5. **audit latent items (#140/#146/#147)**：extern-handle RC 排除在 native 自跑 `--target=llvm` 时首次激活，需复核。
 
-**实施 plan（2026-06-24）**：
+**实施进展（2026-06-24）**：
 
-**Step 1 — `LLVMIsNullPtr` point fix [S]**
-- `ring_runtime.cpp`：新增 `extern "C" void* LLVMIsNullPtr(void* val) { return ring_box_int(val == nullptr ? 1 : 0); }`（遵循 Ring uniform-boxing ABI——返回 boxed Int）
-- 或者：codegen `forward_declare_extern_fn` 对 `LLVMIsNullPtr` 特殊处理——不 emit external declare，改为 codegen 内联 `icmp eq ptr %val, null` → `zext i1 to i64` → `box_int`（更干净，省 runtime 依赖）
-- 验证：`build_entry_alloca` 正确分支
+**Step 1 — `LLVMIsNullPtr` point fix ✅**：已在 `ring_runtime.cpp` 中（先期 B-099 marshalling 基础设施建设时一并加入）。
 
-**Step 2 — 端到端 spike [M]**
-- 构建 ring.exe（`build_native.ps1`，路径已修复）
-- 跑 `ring.exe build examples/hello.ring --target=llvm`——验证 LLVM-C 符号解析 + marshalling + 产出 .o + clang 链接 + 运行正确
-- 失败时逐个修 marshalling bug（预期少量——类型宽度 i32/i64 错误、List data 提取偏移等）
-- 跑 `ring.exe build compiler/main.ring --target=llvm --out-dir=compiler/dist-llvm-native`——验证自编译
-- 对比 `dist-llvm/` vs `dist-llvm-native/` 字节一致性
+**Step 2 — 端到端 spike ✅**：
+- `ring.exe build examples/hello.ring --target=llvm` → 编译 + 链接 + 运行正确 ✅
+- `ring.exe build compiler/main.ring --out-dir=...` → 自编译 ✅，triple bootstrap 44/44 字节一致 ✅
+- `ring.exe build compiler/main.ring --target=llvm --out-dir=...` → 自编译 LLVM 目标 ✅
+- dist-llvm .o 不字节一致（node vs native 产出差异，可能是元数据），但 native 产出功能正确（构建 ring2.exe 可用 + triple bootstrap 一致）
+- **阻塞项**：B-140（Perceus UAF）workaround 已解除阻塞（commit `f8302d8`）
 
-**Step 3 — 验收 + latent audit 复核 [S]**
-- `ring.exe build compiler/main.ring --target=llvm` 全程无 handle dup/drop 损坏（#140/#146/#147）
-- 全 E2E + llvm_diff 通过
-- 双 bootstrap 一致（node 产 dist-llvm vs native 产 dist-llvm）
-- ~970 warning 消失确认
+**Step 3 — 验收 + latent audit 复核 [待做]**
+- `ring.exe build compiler/main.ring --target=llvm` 全程无 handle dup/drop 损坏（#140/#146/#147）——**待 ASan 全量验证**
+- ~970 warning 消失确认——**待验证**
+- 全 E2E + llvm_diff ×3——**待跑**
 
 **涉及修改**：
-1. `ring_runtime.cpp` 或 `codegen_llvm.ring`：`LLVMIsNullPtr` 一处 fix
-2. `compiler/scripts/build_native.ps1`：LLVM 路径自动检测（✅ 已修复 2026-06-24）
-3. 可能：marshalling 微调（Step 2 spike 中发现的 bug）
+1. `compiler/scripts/build_native.ps1`：LLVM 路径自动检测（✅ 已修复 2026-06-24）
+2. `compiler/llvm-addon/binding.gyp`：路径修正 D:→C:（✅ 已修复 2026-06-24）
 
 **验收标准**：
 - native `ring.exe build x.ring --target=llvm` 产出可链接运行的 .o（不 panic）
