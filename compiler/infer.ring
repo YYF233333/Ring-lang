@@ -1620,8 +1620,6 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
         _ => {}
     }
 
-    let result_type = apply_subst(s, ret_var)
-
     let mut resolved_dicts: List<DictRef> = []
     match callee {
         Expr::Ident { name: callee_name, .. } => {
@@ -1636,6 +1634,11 @@ fn infer_call(mut ctx: InferCtx, callee: Expr, args: List<Expr>, span: Span, sub
         },
         _ => {}
     }
+
+    // B-100 Fix 3: compute result_type AFTER dict resolution so that
+    // associated type vars unified during check_assoc_constraints are
+    // reflected in the result.
+    let result_type = apply_subst(s, ret_var)
 
     // Call-site pre-boxing: if callee has mut value-type params, mark mutable var args as boxed
     match callee {
@@ -2098,6 +2101,10 @@ fn infer_method_call(mut ctx: InferCtx, receiver: Expr, method: Str, args: List<
         },
         none => {}
     }
+
+    // B-100 Fix 3: recompute result_type after dict resolution so
+    // associated type unifications are visible.
+    result_type = apply_subst(s, result_type)
 
     let callee_type = match method_type { some(mt) => mt, none => ctx.env.fresh_var() }
     InferResult {

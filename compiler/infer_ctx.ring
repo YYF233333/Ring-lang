@@ -694,7 +694,7 @@ pub fn resolve_dicts_from_scheme(
                             }
                             found = true
                             // Validate associated type constraints
-                            check_assoc_constraints(sink, env, bound, name, s, span)
+                            check_assoc_constraints(sink, env, bound, name, var_map, s, span)
                         }
                     },
                     Type::EnumType { name, type_params, .. } => {
@@ -711,7 +711,7 @@ pub fn resolve_dicts_from_scheme(
                             }
                             found = true
                             // Validate associated type constraints
-                            check_assoc_constraints(sink, env, bound, name, s, span)
+                            check_assoc_constraints(sink, env, bound, name, var_map, s, span)
                         }
                     },
                     Type::TypeVar { id, .. } => {
@@ -737,7 +737,7 @@ pub fn resolve_dicts_from_scheme(
                                 resolved_dicts.push(DictRef::Static(trait_dict_name(prim_name, bound.trait_name)))
                                 found = true
                                 // Validate associated type constraints
-                                check_assoc_constraints(sink, env, bound, prim_name, s, span)
+                                check_assoc_constraints(sink, env, bound, prim_name, var_map, s, span)
                             }
                         },
                         none => {}
@@ -755,26 +755,45 @@ pub fn resolve_dicts_from_scheme(
     resolved_dicts
 }
 
-// Check associated type constraints on a bound against an impl entry's actual assoc types.
+// Check associated type constraints on a bound against an impl entry's actual
+// assoc types.  var_map maps scheme TypeVar ids to instantiation-fresh TypeVars
+// so that ac.ty (a scheme-level TypeVar) can be resolved to the call-site var.
 fn check_assoc_constraints(
     sink: CollectingSink, env: TypeEnv,
     bound: SchemeBound, target_type_name: Str,
-    s: UnionFind, span: Span
+    var_map: Map<Int, Type>, s: UnionFind, span: Span
 ) {
     if bound.assoc_constraints.len() == 0 { return }
-    // Find the impl entry for this type + trait
     let impl_entry = find_impl(env.trait_reg, target_type_name, bound.trait_name)
     match impl_entry {
         some(entry) => {
             for ac in bound.assoc_constraints {
                 match entry.assoc_types.get(ac.name) {
                     some(actual_ty) => {
-                        let expected_ty = apply_subst(s, ac.ty)
+                        // B-100 Fix 3: map scheme-level ac.ty through var_map to
+                        // get the instantiation-fresh TypeVar, then resolve via s.
+                        let mapped_ty = match ac.ty {
+                            Type::TypeVar { id, .. } => match var_map.get(id) {
+                                some(fresh) => fresh,
+                                none => ac.ty,
+                            },
+                            _ => ac.ty,
+                        }
+                        let expected_ty = apply_subst(s, mapped_ty)
                         let actual_resolved = apply_subst(s, actual_ty)
-                        if !types_equal(expected_ty, actual_resolved) {
-                            let _ = type_error(sink, E0513,
-                                "Associated type '${ac.name}' mismatch: expected '${type_to_string(expected_ty)}' but impl provides '${type_to_string(actual_resolved)}'",
-                                span, DiagnosticContext::TraitError { detail: "associated type constraint mismatch" })
+                        match expected_ty {
+                            Type::TypeVar { .. } => {
+                                // Implicit assoc type var — unify with the impl's
+                                // concrete type so the caller sees the resolved type.
+                                let _ = unify(expected_ty, actual_resolved, s, env) catch { _ => s }
+                            },
+                            _ => {
+                                if !types_equal(expected_ty, actual_resolved) {
+                                    let _ = type_error(sink, E0513,
+                                        "Associated type '${ac.name}' mismatch: expected '${type_to_string(expected_ty)}' but impl provides '${type_to_string(actual_resolved)}'",
+                                        span, DiagnosticContext::TraitError { detail: "associated type constraint mismatch" })
+                                }
+                            },
                         }
                     },
                     none => {}

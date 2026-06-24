@@ -1759,6 +1759,14 @@ fn rebind_fn_type(mut ctx: InferCtx, name: Str, params: List<HParam>, return_typ
                     pi = pi + 1
                 }
 
+                // B-100 Fix 3: also map check-time associated type vars to their
+                // registration-time counterparts via the return type position.
+                // Without this, associated type vars (e.g. T::Item) that only
+                // appear in the return type remain un-mapped, causing the rebound
+                // scheme to carry check-time vars that the instantiation/var_map
+                // machinery cannot resolve at call sites.
+                build_var_mapping(return_type, reg_ret, var_mapping)
+
                 // Map the resolved return type back to registration-time vars
                 let mapped_ret = apply_var_mapping(return_type, var_mapping)
 

@@ -1438,6 +1438,26 @@ fn register_fn_common(
                 let concrete_ty = resolve_type_expr(ctx, ac.ty)
                 assoc_entries.push(AssocConstraintEntry { name: ac.name, ty: concrete_ty })
             }
+            // B-100 Fix 3: also record IMPLICIT associated type vars from the
+            // trait definition.  When the scheme is instantiated at a call site,
+            // check_assoc_constraints unifies these TypeVars with the concrete
+            // associated types from the impl, so that return types depending on
+            // associated types (e.g. T::Item) resolve to concrete types.
+            match ctx.env.trait_reg.traits.get(b.trait_name) {
+                some(tdef) => {
+                    for atdef in tdef.assoc_types {
+                        let already = assoc_entries.any(fn(e) { e.name == atdef.name })
+                        if !already {
+                            let qk = "${tp.name}::${atdef.name}"
+                            match ctx.qualified_assoc_scope.get(qk) {
+                                some(at_var) => assoc_entries.push(AssocConstraintEntry { name: atdef.name, ty: at_var }),
+                                none => {},
+                            }
+                        }
+                    }
+                },
+                none => {},
+            }
             match tv {
                 some(t) => match t { Type::TypeVar { id, .. } => {
                     scheme_bounds.push(SchemeBound { type_var: id, trait_name: b.trait_name, assoc_constraints: assoc_entries })
