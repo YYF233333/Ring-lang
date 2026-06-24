@@ -247,8 +247,8 @@ Koka（Daan Leijen，Microsoft Research）是 Ring effect system 的直接理论
 | Phase B（mut\<S\> + 模块完善） | ✅ 完成 | 2 天 |
 | Phase C 层 1+2（effect alias / supertrait / mut\<T\> / default handler / delegate / 关联类型 / Iterator） | ✅ 完成 | — |
 | LLVM 基础后端（前端自举打通、自编译字节级一致） | ✅ 完成 | 2026-06-01 |
-| Perceus RC（L1 引擎 + total drop pass + 静态 leak verifier） | 核心落地 | B-104 收口中（G-a 内存门待 D4） |
-| Native 自举三门（B-089） | 排队 | 依赖 B-104 |
+| Perceus RC（L1 引擎 + total drop pass + 静态 leak verifier） | ✅ 完成 | B-104 全交付（2026-06-13） |
+| Native 自举三门（B-089） | ✅ 完成 | Level 1 三门全绿（2026-06-16） |
 | Refinement types | 实验赌注 | Z3 集成路径未验证（B-001） |
 
 ### "死亡螺旋"风险

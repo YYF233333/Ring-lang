@@ -1,12 +1,12 @@
 # Ring
 
-写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。
+不信任程序员的 native 编程语言——编译器是最终权威，不是程序员。写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。
 
 Ring 把代数 effect system、HM 类型推断和 trait-based 多态塞进一门语法尽量少的语言里。你几乎不写类型标注，但编译器知道每个函数会做 IO、会不会失败、会不会改状态——然后用这些信息帮你优化和检查。
 
 编译器自举完成，用 Ring 自己写的。当前先编译到 JS 跑着，正在做 LLVM native backend。
 
-设计的根依据是六条公理（类型即模型 / 效果即可见性 / 推断为王 / 无人回路 / 编译器必须终止 / 确定性资源语义），全文见 [docs/philosophy.md](docs/philosophy.md)。
+设计的根依据是九条公理三层结构（层 0：不信任程序员 · 编译器是最终权威 / 层 1：编译器必须终止 · 确定性资源语义 · 场景不可堵死 / 层 2：类型即模型 · 效果即可见性 · 推断为王 · 一种写法 · 语法借用），全文见 [docs/philosophy.md](docs/philosophy.md)。
 
 ## Quick Start
 
@@ -153,7 +153,7 @@ fn main() {
 
 1. **类型是工具，不是谜题** — 表达力天花板很高（refinement types、dependent types lite），但日常写代码零标注。
 2. **副作用可见** — IO、失败、状态修改、异步全在 effect system 里追踪。编译器推断，你不用写。
-3. **给 AI 用的** — 函数签名就是完整的行为契约，LLM 看签名就能正确调 API，不用翻文档。
+3. **不信任程序员** — 编译器自己追踪一切，在程序员（人类或 LLM）犯错时拦截。函数签名是完整的行为契约，看签名就能正确调 API，不用翻文档。
 
 ## 编译器
 
@@ -186,9 +186,9 @@ fn main() {
 
 ## 接下来
 
-正在做 LLVM native backend——编译器已能编译为 native 二进制，ownership + Perceus RC（内存管理）正在收口。
+LLVM native backend Level 1 完成——编译器已能自编译为 native 二进制（双 bootstrap 字节一致），Perceus RC 内存管理已落地。
 
-再往后：async effect + 结构化并发、refinement types（实验性）、LSP。
+接下来：B-099 消除 Node 依赖（Level 2）→ JS 后端退役 → async effect + 结构化并发 → refinement types → LSP。
 
 ## 项目结构
 

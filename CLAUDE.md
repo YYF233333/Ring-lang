@@ -2,13 +2,13 @@
 
 ## 项目概述
 
-Ring-lang：写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。代数 effect system + HM 类型推断 + trait 多态，编译器全推断，零标注负担。当前编译到 JS/V8（bootstrap 后端），目标后端为 LLVM native。
+Ring-lang：不信任程序员的 native 编程语言——编译器是最终权威，不是程序员。写起来像 Python，编译器看到 Rust 级别的类型和副作用信息。代数 effect system + HM 类型推断 + trait 多态，编译器全推断，零标注负担。当前编译到 JS/V8（bootstrap 后端），目标后端为 LLVM native。
 
 编译器已自举（Ring 写 Ring），完整设计文档见 `docs/design.md`。
 
 ## 设计公理（速查，全文唯一真值源 = `docs/philosophy.md`，2026-06-12 重构为九条三层）
 
-**层 0 目标**：④ 无人回路 × 全场景（失真必须响 / 优化不可观测 / 人类审查面可枚举 = unsafe discharge 清单；全场景 = 量词，场景集具名）。**层 1 硬约束**：⑤ 编译器必须终止（可判定片段 + fuel，B-119）⑥ 确定性资源语义（Drop = scope-end 语义 + as-if 条款；RC 无 GC；环用 Weak）⑦ 场景不可堵死（native / 零强制 runtime / C ABI）。**层 2 策略**：① 类型即模型（可判定标准：lv0 零标注 + 错误单轮可修）② 效果即可见性（主载体 = formatter 标注 + 模块签名 + llm 错误格式）③ 推断为王（标注是文档不是语义；agent profile 下 warnings=errors）⑧ 一种事一种写法 ⑨ 语法借用。仲裁：策略让位约束；约束修订走修宪程序（dossier + 可证伪锚点）；记录入 design.md「公理仲裁决策表」。
+**层 0 目标**：④ 不信任程序员 · 编译器是最终权威（渐近表达 = 无人回路 × 全场景；推论：失真必须响 / 优化不可观测 / 人类审查面可枚举 = unsafe discharge 清单）。**层 1 硬约束**：⑤ 编译器必须终止（可判定片段 + fuel，B-119）⑥ 确定性资源语义（Drop = scope-end 语义 + as-if 条款；RC 无 GC；环用 Weak）⑦ 场景不可堵死（native / 零强制 runtime / C ABI）。**层 2 策略**：① 类型即模型（可判定标准：lv0 零标注 + 错误单轮可修）② 效果即可见性（主载体 = formatter 标注 + 模块签名 + llm 错误格式）③ 推断为王（标注是文档不是语义；agent profile 下 warnings=errors）⑧ 一种事一种写法 ⑨ 语法借用。仲裁：策略让位约束；约束修订走修宪程序（dossier + 可证伪锚点）；记录入 design.md「公理仲裁决策表」。
 
 ## 技术栈
 
