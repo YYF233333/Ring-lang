@@ -641,11 +641,24 @@ ring_asan.exe check compiler/scc.ring
 # fn main() { print("x") }
 ```
 
-**涉及修改（probe + fix）**：
-1. **Probe（先行）**：定位 Perceus 对触发模式的精确 RC 行为——`is_droppable_init` 对 `apply_subst` Call 返回什么？如果 false 则 `resolved_st` 不在 owned set，谁在 drop 它？如果 true，scope-end drop 在 push Clone 之前还是之后？用 LLVM IR dump 或 codegen 插桩确认。排查编译器全代码库是否有同类模式。
-2. **Fix**：修正 `perceus.ring` 的 drop 插入或 Clone-wrap 逻辑——确保条件 push 到容器后，原始绑定的 scope-end drop 与容器内引用的 dup 正确平衡。
-3. **验证**：ASan 全量验证——`ring_asan.exe` 编译 44 文件编译器零 UAF + 全 E2E + llvm_diff ×3 + 移除 `cancel_local_mut_effects` 的 Str workaround 恢复 Type 版本后仍然 ASan-clean。
-4. **扫描**：grep 编译器全代码库同类模式（for 循环内条件 push + 后续 closure 捕获 list），确认无其他潜伏站点。
+**Probe 结论（2026-06-24 Worker）**：
+- Perceus HIR 层的 Clone/Drop 插入**正确平衡**——`is_droppable_init(Call)=true`，`rc_escape` 在 `.push()` sink 位置正确 Clone-wrap，scope-end Drop 在 Clone 之后
+- RC verifier 对触发模式报 0 errors，静态检查确认 HIR 级 RC 平衡
+- 代码库扫描：仅 1 处部分匹配（`types.ring:219`，低风险——list 未被 closure 捕获）
+- **根因不在 Perceus HIR 变换层**，可能在：(a) LLVM codegen 的 Clone/Drop IR 发射顺序（auto-boxed Cell 交互）；(b) runtime 层 `ring_list_filter`/`ring_list_any` 与闭包生命周期交互；(c) `apply_subst` 返回值与 UF Option temp 的时序
+- 回归测试 `tests/cases/llvm/perceus_conditional_push.ring` 已加入
+
+**下一步（需 ASan native 调试）**：
+1. 构建 ASan 版 ring.exe，revert workaround，跑 `ring_asan.exe check compiler/scc.ring`，用 `malloc_context_size=12` 拿完整 alloc/free/dup 栈
+2. 对比触发模式的 LLVM IR（Clone/Drop 发射位置 vs HIR 预期）
+3. 根据 ASan 全栈定位真实 free 路径
+
+**验收标准**（不变）：
+- `ring_asan.exe check compiler/scc.ring` ×10 零 UAF（当前 workaround 下已零崩溃，根因修后移除 workaround 仍零 UAF）
+- `ring_asan.exe build compiler/main.ring --out-dir=...` 零 UAF（44 文件自编译）
+- `cancel_local_mut_effects` 恢复 Type 版本（移除 Str workaround），ASan-clean
+- 全 E2E 885 + llvm_diff ×3 + triple bootstrap 44/44 一致
+- 编译器代码库同类模式扫描报告（零残留或已修）
 
 **验收标准**：
 - `ring_asan.exe check compiler/scc.ring` ×10 零 UAF（当前 workaround 下已零崩溃，根因修后移除 workaround 仍零 UAF）
@@ -654,23 +667,7 @@ ring_asan.exe check compiler/scc.ring
 - 全 E2E 883 + llvm_diff ×3 + triple bootstrap 44/44 一致
 - 编译器代码库同类模式扫描报告（零残留或已修）
 
-### B-139 Delegate stub 不转发 custom effect evidence [bugfix] [P2] [M] [judgment] [queued]
-
-> 2026-06-17 立项（Discussion，B-097 worker feedback #2 转入）。与 audit #93（delegate expansion 绕过推断）同族。
-
-**现象**：当 trait 方法签名带 `with {CustomEffect}` 时，delegate stub（`__Wrapper_Trait_method`）正确接收 `__ring_ev_X` evidence 参数，但调用内层 `__Inner_Trait.method(self.inner)` 时漏传 evidence。两后端行为一致（JS 后端已有此问题）。
-
-**变通方案**（B-097 已验证）：在 trait 方法 body 内调用 free function（evidence 通过正常参数传递），不在 delegate 签名上直接标 custom effect。`delegate_custom_effect.ring` 测试使用此模式。
-
-**涉及修改**：
-1. `compiler/infer_decl.ring`（`expand_delegate_impls`）：合成 forwarding call 时，从 trait method 的 FnType 提取 effect row，为每个 effect 生成 evidence 参数并传递给内层调用
-2. `compiler/codegen_expr.ring` / `codegen_llvm_expr.ring`：确认 delegate dispatch 路径正确传递 evidence（两后端）
-
-**验收标准**：
-- `delegate` trait 方法带 `with {CustomEffect}` 时 evidence 正确转发，无需变通
-- 现有 delegate 测试（Eq/Clone/Ord/Debug）不回归
-- llvm_diff 用例覆盖 delegate + custom effect 场景
-- 全部 E2E + llvm_diff 通过；自举一致
+<!-- B-139 done: default trait methods now receive custom effect evidence params (HTraitMethod gained effects field + codegen_decl emit evidence params/forward in dict closure). 885 E2E, double bootstrap consistent. 2026-06-24 -->
 
 
 
