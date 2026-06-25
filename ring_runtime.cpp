@@ -2025,16 +2025,25 @@ extern "C" int64_t ring_sb_len(void* sb) {
 
 extern "C" void* ring_Cell_new(void* value) {
     void* data = ring_alloc(sizeof(void*), RING_TYPEID_CELL);
+    // Dup the value: Perceus treats Cell() constructor arguments as borrows
+    // (Cell(x) lowers to HExpr::Call, not StructLit, so the arg is not an
+    // escape/sink position — the ANF temp gets a scope-end drop).  The cell
+    // must own its own reference so drop_cell's ring_drop(value) is balanced.
+    // Same owned-container-constructor pattern as ring_list_get_opt / first /
+    // last (B-103): dup on co-own, balanced by drop_cell.
+    ring_dup(value);
     *(void**)data = value;
-    // Perceus handles ownership: if value is live after this call, the
-    // caller inserts ring_dup before passing it. No dup here.
     return data;
 }
 
 extern "C" void* ring_Cell_get(void* cell) {
     void* value = *(void**)cell;
-    // Borrow: return the value without dup. Perceus inserts dup at
-    // the call site when the result escapes into an owned position.
+    // Dup the value: Perceus classifies .get() as an owned-returning call
+    // (not in is_borrow_returning_call), so the result binding is scope-end-
+    // dropped.  Without dup, that drop frees the cell's interior reference
+    // (double-free when drop_cell runs).  Same owned-container-constructor
+    // pattern as ring_list_get_opt / first / last (B-103).
+    ring_dup(value);
     return value;
 }
 
