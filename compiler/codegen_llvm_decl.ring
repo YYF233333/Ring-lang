@@ -983,6 +983,94 @@ pub fn emit_derived_impls_llvm(mut ctx: LlvmCtx, derived_impls: List<DerivedImpl
     }
 }
 
+// ── Scaffold helpers for derived method codegen ─────────────────
+//
+// All derived methods (eq, ne, cmp, debug, clone) share the same boilerplate:
+//   1. Check if function already exists (skip if so)
+//   2. Collect dict params for the relevant trait bound
+//   3. Build parameter type list (self [+ other] + dict params)
+//   4. Create LLVM function + register in ctx.functions/fn_types
+//   5. Save current_fn / insert block, create entry BB
+//   6. Store dict params in named_values
+//   7. Extract self_val [+ other_val]
+//
+// begin_derived_fn encapsulates all of the above; end_derived_fn restores state.
+
+struct DerivedFnScaffold {
+    fn_val: LLVMValueRef,
+    self_val: LLVMValueRef,
+    saved_fn: LLVMValueRef?,
+    saved_bb: LLVMBasicBlockRef,
+}
+
+// Begin a derived method function.
+// `is_binary` = true for eq/cmp (self + other), false for debug/clone (self only).
+// Returns none if the function was already emitted.
+fn begin_derived_fn(mut ctx: LlvmCtx, type_name: Str, method_name: Str, trait_name: Str, is_binary: Bool, bounds: List<TraitBound>) -> (DerivedFnScaffold, List<Str>)? {
+    let mangled = llvm_mangle_method(type_name, method_name)
+    match ctx.functions.get(mangled) {
+        some(_) => { return none },
+        none => {},
+    }
+
+    // Collect dict params for this trait's bounds
+    let dict_params = collect_trait_dict_params(bounds, trait_name)
+
+    // Build parameter types: self [+ other] + dict params
+    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type]
+    if is_binary { param_types.push(ctx.ptr_type) }
+    for dp in dict_params { param_types.push(ctx.ptr_type) }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
+    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
+    ctx.functions.insert(mangled, fn_val)
+    ctx.fn_types.insert(mangled, fn_ty)
+
+    let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(fn_val)
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Map dict params to named_values (offset = 2 for binary, 1 for unary)
+    let dict_offset = if is_binary { 2 } else { 1 }
+    setup_derived_dict_params(ctx, fn_val, dict_params, dict_offset)
+
+    let self_val = LLVMGetParam(fn_val, 0)
+
+    let scaffold = DerivedFnScaffold {
+        fn_val: fn_val,
+        self_val: self_val,
+        saved_fn: saved_fn,
+        saved_bb: saved_bb,
+    }
+    some((scaffold, dict_params))
+}
+
+// Restore ctx state after emitting a derived method body.
+fn end_derived_fn(mut ctx: LlvmCtx, scaffold: DerivedFnScaffold) {
+    ctx.current_fn = scaffold.saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, scaffold.saved_bb)
+}
+
+// Load the tag values from both self and other for an enum binary operation (eq/cmp).
+// Returns (self_tag: i64, other_tag: i64).
+fn load_enum_tags(mut ctx: LlvmCtx, self_val: LLVMValueRef, other_val: LLVMValueRef) -> (LLVMValueRef, LLVMValueRef) {
+    let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
+    let self_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "stp"))
+    let self_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, self_tag_ptr, fresh_name(ctx, "stv"))
+    let other_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, other_val, 0, fresh_name(ctx, "otp"))
+    let other_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, other_tag_ptr, fresh_name(ctx, "otv"))
+    (self_tag, other_tag)
+}
+
+// Load the tag value from self for an enum unary operation (debug).
+fn load_enum_tag(mut ctx: LlvmCtx, self_val: LLVMValueRef) -> LLVMValueRef {
+    let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
+    let tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "tp"))
+    LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tv"))
+}
+
 // ── Eq ────────────────────────────────────────────────────────
 
 fn emit_derived_eq_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
@@ -1087,42 +1175,17 @@ fn emit_derived_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str) 
 // Short-circuits: returns false as soon as any field differs.
 // For generic structs, trailing dict params carry the Eq dicts for type parameters.
 fn emit_struct_eq_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
-    let mangled = llvm_mangle_method(type_name, "eq")
-    // Skip if already generated (e.g. user-written impl)
-    match ctx.functions.get(mangled) {
-        some(_) => { return },
-        none => {},
-    }
-
-    // Collect dict params for Eq bounds (e.g. A: Eq → "__ring_A_Eq")
-    let dict_params = collect_trait_dict_params(bounds, "Eq")
-
-    // Function type: (self: ptr, other: ptr, dict0: ptr, ...) -> ptr
-    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
-    for dp in dict_params { param_types.push(ctx.ptr_type) }
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
-    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
-    ctx.functions.insert(mangled, fn_val)
-    ctx.fn_types.insert(mangled, fn_ty)
-
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(fn_val)
-
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-
-    // Map dict params to named_values so resolve_dict_for_derived can find them
-    setup_derived_dict_params(ctx, fn_val, dict_params, 2)
-
-    let self_val = LLVMGetParam(fn_val, 0)
+    let scaffold_result = begin_derived_fn(ctx, type_name, "eq", "Eq", true, bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    let fn_val = scaffold.fn_val
+    let self_val = scaffold.self_val
     let other_val = LLVMGetParam(fn_val, 1)
 
     // Zero fields → always equal
     if fields.len() == 0 {
         LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 1, 0)))
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
 
@@ -1130,8 +1193,7 @@ fn emit_struct_eq_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField
     if ctx.struct_types.get(type_name).is_none() {
         // Struct not registered — fall back to trivially true (shouldn't happen)
         LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 1, 0)))
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
     let struct_info = match ctx.struct_types.get(type_name) {
@@ -1172,66 +1234,37 @@ fn emit_struct_eq_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField
     }
 
     // ret_true block (we're already positioned here after the last field)
-    // If fields.len() > 0, the last branch went to ret_true_bb and we're there.
     LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 1, 0)))
 
     // ret_false block
     LLVMPositionBuilderAtEnd(ctx.builder, ret_false_bb)
     LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
 
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    end_derived_fn(ctx, scaffold)
 }
 
 // Emit ring_<Type>_eq for enums.
 // Compares tag first, then fields per variant.
 fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
-    let mangled = llvm_mangle_method(type_name, "eq")
-    match ctx.functions.get(mangled) {
-        some(_) => { return },
-        none => {},
-    }
-
-    // Collect dict params for Eq bounds
-    let dict_params = collect_trait_dict_params(bounds, "Eq")
-
-    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
-    for dp in dict_params { param_types.push(ctx.ptr_type) }
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
-    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
-    ctx.functions.insert(mangled, fn_val)
-    ctx.fn_types.insert(mangled, fn_ty)
-
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(fn_val)
-
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-
-    // Map dict params to named_values
-    setup_derived_dict_params(ctx, fn_val, dict_params, 2)
-
-    let self_val = LLVMGetParam(fn_val, 0)
+    let scaffold_result = begin_derived_fn(ctx, type_name, "eq", "Eq", true, bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    let fn_val = scaffold.fn_val
+    let self_val = scaffold.self_val
     let other_val = LLVMGetParam(fn_val, 1)
 
     // Compare tags: read i64 at offset 0 (enum layout = { i64 tag, ptr field0, ... })
     if ctx.enum_types.get(type_name).is_none() {
         // Fallback: trivially true (shouldn't happen for registered enums)
         LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 1, 0)))
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
     let enum_info = match ctx.enum_types.get(type_name) {
         some(info) => info,
         none => panic("unreachable"),
     }
-    let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
-    let self_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "stp"))
-    let self_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, self_tag_ptr, fresh_name(ctx, "stv"))
-    let other_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, other_val, 0, fresh_name(ctx, "otp"))
-    let other_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, other_tag_ptr, fresh_name(ctx, "otv"))
+    let (self_tag, other_tag) = load_enum_tags(ctx, self_val, other_val)
 
     let tags_eq = LLVMBuildICmp(ctx.builder, 32, self_tag, other_tag, fresh_name(ctx, "teq"))
 
@@ -1342,8 +1375,7 @@ fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVaria
         LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
     }
 
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    end_derived_fn(ctx, scaffold)
 }
 
 // Emit ring_<Type>_ne(self, other, ...dicts) -> Bool — always defined as !eq(self, other, ...dicts).
@@ -1376,8 +1408,14 @@ fn emit_struct_ne_fn(mut ctx: LlvmCtx, type_name: Str) {
     ctx.functions.insert(mangled_ne, fn_val)
     ctx.fn_types.insert(mangled_ne, fn_ty)
 
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    // ne is special: it derives its signature from eq rather than from bounds,
+    // so we do manual save/restore instead of begin_derived_fn.
+    let scaffold = DerivedFnScaffold {
+        fn_val: fn_val,
+        self_val: LLVMGetParam(fn_val, 0),
+        saved_fn: ctx.current_fn,
+        saved_bb: LLVMGetInsertBlock(ctx.builder),
+    }
     ctx.current_fn = some(fn_val)
 
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
@@ -1398,8 +1436,7 @@ fn emit_struct_ne_fn(mut ctx: LlvmCtx, type_name: Str) {
     let result = box_bool(ctx, neg)
     LLVMBuildRet(ctx.builder, result)
 
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    end_derived_fn(ctx, scaffold)
 }
 
 // Compare two field values and return an i1 result.
@@ -1687,47 +1724,23 @@ fn emit_derived_ord_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
 // Emit ring_<Type>_cmp(self, other, ...dict_params) -> Int for a struct.
 // Compares fields lexicographically: returns the first non-zero comparison.
 fn emit_struct_cmp_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
-    let mangled = llvm_mangle_method(type_name, "cmp")
-    match ctx.functions.get(mangled) {
-        some(_) => { return },
-        none => {},
-    }
-
-    // Collect dict params for Ord bounds
-    let dict_params = collect_trait_dict_params(bounds, "Ord")
-
-    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
-    for dp in dict_params { param_types.push(ctx.ptr_type) }
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
-    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
-    ctx.functions.insert(mangled, fn_val)
-    ctx.fn_types.insert(mangled, fn_ty)
-
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(fn_val)
-
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-
-    // Map dict params to named_values
-    setup_derived_dict_params(ctx, fn_val, dict_params, 2)
-
-    let self_val = LLVMGetParam(fn_val, 0)
+    let scaffold_result = begin_derived_fn(ctx, type_name, "cmp", "Ord", true, bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    let fn_val = scaffold.fn_val
+    let self_val = scaffold.self_val
     let other_val = LLVMGetParam(fn_val, 1)
 
     // Zero fields -> always equal
     if fields.len() == 0 {
         LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
 
     if ctx.struct_types.get(type_name).is_none() {
         LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
     let struct_info = match ctx.struct_types.get(type_name) {
@@ -1770,48 +1783,24 @@ fn emit_struct_cmp_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFiel
         }
     }
 
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    end_derived_fn(ctx, scaffold)
 }
 
 // Emit ring_<Type>_cmp for enums.
 // Compares tag first, then fields per variant if tags are equal.
 fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
-    let mangled = llvm_mangle_method(type_name, "cmp")
-    match ctx.functions.get(mangled) {
-        some(_) => { return },
-        none => {},
-    }
-
-    // Collect dict params for Ord bounds
-    let dict_params = collect_trait_dict_params(bounds, "Ord")
-
-    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
-    for dp in dict_params { param_types.push(ctx.ptr_type) }
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
-    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
-    ctx.functions.insert(mangled, fn_val)
-    ctx.fn_types.insert(mangled, fn_ty)
-
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(fn_val)
-
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-
-    // Map dict params to named_values
-    setup_derived_dict_params(ctx, fn_val, dict_params, 2)
-
-    let self_val = LLVMGetParam(fn_val, 0)
+    let scaffold_result = begin_derived_fn(ctx, type_name, "cmp", "Ord", true, bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    let fn_val = scaffold.fn_val
+    let self_val = scaffold.self_val
     let other_val = LLVMGetParam(fn_val, 1)
 
     // Load enum type info for field GEP
     if ctx.enum_types.get(type_name).is_none() {
         // Fallback: return 0 (shouldn't happen for registered enums)
         LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
     let enum_info = match ctx.enum_types.get(type_name) {
@@ -1820,11 +1809,7 @@ fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVari
     }
 
     // Load tags
-    let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
-    let self_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "stp"))
-    let self_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, self_tag_ptr, fresh_name(ctx, "stv"))
-    let other_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, other_val, 0, fresh_name(ctx, "otp"))
-    let other_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, other_tag_ptr, fresh_name(ctx, "otv"))
+    let (self_tag, other_tag) = load_enum_tags(ctx, self_val, other_val)
 
     // Compare tags
     let tags_eq = LLVMBuildICmp(ctx.builder, 32, self_tag, other_tag, fresh_name(ctx, "teq"))
@@ -1918,8 +1903,7 @@ fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVari
     LLVMPositionBuilderAtEnd(ctx.builder, cmp_default_bb)
     LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
 
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    end_derived_fn(ctx, scaffold)
 }
 
 // Compare two field values for Ord and return a boxed Int (-1/0/1).
@@ -2176,34 +2160,19 @@ fn emit_derived_clone_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
 }
 
 fn emit_clone_fn(mut ctx: LlvmCtx, type_name: Str) {
-    let mangled = llvm_mangle_method(type_name, "clone")
-    match ctx.functions.get(mangled) {
-        some(_) => { return },
-        none => {},
-    }
+    let empty_bounds: List<TraitBound> = []
+    let scaffold_result = begin_derived_fn(ctx, type_name, "clone", "Clone", false, empty_bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    let self_val = scaffold.self_val
 
-    // clone(self) -> ptr
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type], 0)
-    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
-    ctx.functions.insert(mangled, fn_val)
-    ctx.fn_types.insert(mangled, fn_ty)
-
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(fn_val)
-
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-
-    let self_val = LLVMGetParam(fn_val, 0)
     // ring_dup increments the refcount; return self (same pointer, now shared)
     let dup_fn = get_or_declare_runtime_fn(ctx, "ring_dup", [ctx.ptr_type], ctx.void_type)
     let dup_ty = get_rt_fn_type(ctx, "ring_dup")
     discard(LLVMBuildCall2(ctx.builder, dup_ty, dup_fn, [self_val], ""))
     LLVMBuildRet(ctx.builder, self_val)
 
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    end_derived_fn(ctx, scaffold)
 }
 
 // ── Debug ────────────────────────────────────────────────────
@@ -2241,41 +2210,16 @@ fn emit_derived_debug_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
 }
 
 fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
-    let mangled = llvm_mangle_method(type_name, "debug")
-    match ctx.functions.get(mangled) {
-        some(_) => { return },
-        none => {},
-    }
-
-    // Collect dict params for Debug bounds
-    let dict_params = collect_trait_dict_params(bounds, "Debug")
-
-    // debug(self, ...dict_params) -> ptr (Str)
-    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type]
-    for dp in dict_params { param_types.push(ctx.ptr_type) }
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
-    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
-    ctx.functions.insert(mangled, fn_val)
-    ctx.fn_types.insert(mangled, fn_ty)
-
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(fn_val)
-
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-
-    // Map dict params to named_values
-    setup_derived_dict_params(ctx, fn_val, dict_params, 1)
-
-    let self_val = LLVMGetParam(fn_val, 0)
+    let scaffold_result = begin_derived_fn(ctx, type_name, "debug", "Debug", false, bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    let self_val = scaffold.self_val
 
     if fields.len() == 0 {
         // Zero fields: return "TypeName"
         let result = gen_str_lit_simple(ctx, type_name)
         LLVMBuildRet(ctx.builder, result)
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
 
@@ -2301,8 +2245,7 @@ fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFi
         let result = gen_str_lit_simple(ctx, type_name)
         discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
         LLVMBuildRet(ctx.builder, result)
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
     let struct_info = match ctx.struct_types.get(type_name) {
@@ -2350,47 +2293,22 @@ fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFi
     discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [sb], ""))
     LLVMBuildRet(ctx.builder, result)
 
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    end_derived_fn(ctx, scaffold)
 }
 
 fn emit_enum_debug_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
-    let mangled = llvm_mangle_method(type_name, "debug")
-    match ctx.functions.get(mangled) {
-        some(_) => { return },
-        none => {},
-    }
-
-    // Collect dict params for Debug bounds
-    let dict_params = collect_trait_dict_params(bounds, "Debug")
-
-    // debug(self, ...dict_params) -> ptr (Str)
-    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type]
-    for dp in dict_params { param_types.push(ctx.ptr_type) }
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
-    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
-    ctx.functions.insert(mangled, fn_val)
-    ctx.fn_types.insert(mangled, fn_ty)
-
-    let saved_fn = ctx.current_fn
-    let saved_bb = LLVMGetInsertBlock(ctx.builder)
-    ctx.current_fn = some(fn_val)
-
-    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
-    LLVMPositionBuilderAtEnd(ctx.builder, entry)
-
-    // Map dict params to named_values
-    setup_derived_dict_params(ctx, fn_val, dict_params, 1)
-
-    let self_val = LLVMGetParam(fn_val, 0)
+    let scaffold_result = begin_derived_fn(ctx, type_name, "debug", "Debug", false, bounds)
+    if scaffold_result.is_none() { return }
+    let (scaffold, _dict_params) = scaffold_result.unwrap()
+    let fn_val = scaffold.fn_val
+    let self_val = scaffold.self_val
 
     // Read tag from enum: layout = { i64 tag, ptr field0, ... }
     if ctx.enum_types.get(type_name).is_none() {
         // Fallback: return "UnknownEnum"
         let result = gen_str_lit_simple(ctx, type_name)
         LLVMBuildRet(ctx.builder, result)
-        ctx.current_fn = saved_fn
-        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        end_derived_fn(ctx, scaffold)
         return
     }
     let enum_info = match ctx.enum_types.get(type_name) {
@@ -2398,9 +2316,7 @@ fn emit_enum_debug_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVa
         none => panic("unreachable"),
     }
 
-    let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
-    let tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "tp"))
-    let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tv"))
+    let tag_val = load_enum_tag(ctx, self_val)
 
     // Default block for switch
     let default_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "dbg.default")
@@ -2449,8 +2365,7 @@ fn emit_enum_debug_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVa
     LLVMAddIncoming(phi, incoming_vals, incoming_bbs)
     LLVMBuildRet(ctx.builder, phi)
 
-    ctx.current_fn = saved_fn
-    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+    end_derived_fn(ctx, scaffold)
 }
 
 fn emit_enum_variant_debug_str(mut ctx: LlvmCtx, self_val: LLVMValueRef, type_name: Str, variant: DerivedVariant, enum_info: EnumTypeInfo) -> LLVMValueRef {
