@@ -15,6 +15,7 @@ use infer_ctx::{InferCtx, InferResult, FnBoundsEntry, CompileError,
     unify_at, unify_at_noted, update_fn_effects,
     resolve_type_expr, resolve_self_type,
     generalize, resolve_relative_qualifier}
+use infer_helpers::{is_value_type}
 use infer_register::{register_decls_two_phase, resolve_declared_effects, prefix_decl_name, insert_mod_aliases, collect_all_supertraits, inject_assoc_types_from_bounds}
 use infer::{infer_block, infer_expr}
 use zonk::{ZonkCtx, zonk_type, zonk_row, zonk_param, zonk_block, zonk_expr}
@@ -1337,16 +1338,6 @@ fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<
     let eff = zonk_row(zctx, body_result.effects)
     let final_body = zonk_block(zctx, body_result.hexpr)
     FnBodyResult { params: final_params, ret: final_ret, eff: eff, body: final_body }
-}
-
-fn is_value_type(t: Type) -> Bool {
-    match t {
-        Type::IntType => true,
-        Type::FloatType => true,
-        Type::BoolType => true,
-        Type::StrType => true,
-        _ => false
-    }
 }
 
 fn check_fn_decl(mut ctx: InferCtx, name: Str, type_params: List<TypeParam>, params: List<Param>, return_type: TypeExpr?, declared_effects: List<EffectExpr>?, body: Expr, is_pub: Bool, span: Span, self_type: Type?) -> HDecl {

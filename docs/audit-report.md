@@ -11,13 +11,6 @@
 ## 前端
 
 
-### #197 resolve_fn_type_effect 与 resolve_effect_expr 逻辑分叉风险 [low] [mechanical] [doing]
-
-`infer_ctx.ring:1076-1103` 的 `resolve_fn_type_effect` 与 `infer_register.ring:1160-1202` 的 `resolve_effect_expr` 实现相同的 effect 解析逻辑（io/mut/fail/自定义 effect）。两份代码独立维护，`resolve_fn_type_effect` 缺少对未知自定义 effect 的错误诊断。修一个忘改另一个会导致 FnType 注解与运行时 effect 匹配出现不一致。
-
-**修复**：让 `resolve_fn_type_effect` 调用已 pub 的 `resolve_effect_expr`，或提取共享逻辑。
-
-发现者：Opus（前端审计）
 
 ### #198 Parser 不支持负数字面量 pattern [low] [judgment] [open]
 
@@ -31,26 +24,8 @@
 
 ## LLVM Codegen
 
-### #173 handle/try 内 return 跳过 evidence cleanup 和 catch stack pop [medium] [judgment] [doing]
-
-`gen_handle_expr`（`codegen_llvm_expr.ring:5577`）中如果 body 包含 `return` 语句，`emit_return` 发射 `LLVMBuildRet` 并创建死 `after.ret` block。后续的 `ring_catch_pop()`、`emit_evidence_drops()`、`LLVMBuildBr(merge_bb)` 全部落入不可达代码——函数返回时 catch 帧未 pop（破坏调用者后续 try/catch 栈）且 evidence 结构体泄漏。同样影响 `gen_try_catch`（line 5129-5132）。
-
-**影响**：当前 latent——编译器自身和测试中无 handle/try body 内使用 return。但 checker 不禁止此语法，用户代码可触发。
-
-**设计决策（2026-06-25）**：return 的自然语义 = "effect 没有触发，正常退出 handle 结构"。类比 Python try/finally：return 时 finally 保证执行。
-
-**修复**：`emit_return` 检测当前是否在 handle/try 上下文内（维护 cleanup 栈），若是则先 emit cleanup（`ring_catch_pop` + `emit_evidence_drops`）再 `LLVMBuildRet`。需追踪嵌套 handle/try 深度。
-
-发现者：DS（独立发现）+ Opus（cross-validation confirmed）
 
 
-### #180 泛型函数 catch 路径返回 Str 时输出 garbage pointer [medium] [judgment] [doing]
-
-`fn extract<T: Eq>(input: Input<T>, fallback: T) -> T` 中 `T=Str` + catch arm 返回 Str 时，LLVM 输出 raw pointer 数字而非字符串。`T=Int` 正常。可能是 Round 2 的 Never 类型 fix 的残留边角，或 catch path 的返回值 boxing 问题。
-
-**复现**：`tests/cases/llvm/adversarial_regress_never_match_arms.ring`（T11/T12 输出 garbage）
-
-发现者：Phase 1.3 Round 3 对抗回归测试
 
 ### #182 LLVMSetDataLayout 未调用 [medium] [mechanical] [doing]
 
@@ -170,22 +145,15 @@
 
 ## 跨模块代码健康
 
-### #192 andor_lower / dict_lower HIR walker 结构性重复 [medium] [judgment] [doing]
+### #192 andor_lower / dict_lower HIR walker 结构性重复 [medium] [judgment] [deferred]
 
-`andor_lower.ring:55-318` 和 `dict_lower.ring:65-431` 包含近乎相同的 HIR 结构遍历器（`al_decl`/`dl_decl`、`al_expr`/`dl_expr`、`al_stmt`/`dl_stmt`），每增加新 HExpr/HStmt variant 两个文件必须同步更新。唯一差异是变换逻辑（And/Or 降低 vs dict ref 改写）。
+`andor_lower.ring:55-318` 和 `dict_lower.ring:65-431` 包含近乎相同的 HIR 结构遍历器。
 
-**重构方向**：提取通用 HIR map/fold visitor，两个 pass 成为 thin wrapper 传入各自的变换回调。
+**推迟理由**（2026-06-25 Worker 评估）：andor_lower 无状态，dict_lower 穿线 3 个可变参数；24 个 expr arm 只有 2 个有差异；通用 visitor 需 ~150 行 trait 基础设施换 ~250 行节省，且编译器穷尽 match 已能 catch 新 variant 遗漏。投入/产出比不合算。
 
 发现者：Opus（前端审计）
 
 
-### #199 is_value_type 三处相同实现 [low] [mechanical] [doing]
-
-`infer_helpers.ring:35-43`（pub）、`infer_decl.ring:1342-1350`（private）、`infer_register.ring:1307-1315`（private，名为 `is_register_value_type`）三处相同函数体：`IntType | FloatType | BoolType | StrType => true`。
-
-**修复**：删除 `infer_decl.ring` 和 `infer_register.ring` 中的私有副本，import `infer_helpers.is_value_type`。
-
-发现者：Opus（前端审计）+ DS（独立发现）
 
 ### #200 sort_by 比较器 lambda 55+ 处重复 [low] [mechanical] [open]
 

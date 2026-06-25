@@ -2273,7 +2273,7 @@ function resolve_type_expr(ctx, texpr) {
     const __ring_next_42 = __ListIterator_Iterator.next(__ring_iter_42);
     if (__ring_next_42._tag === "none") break;
     const e = __ring_next_42._0;
-    List_push(resolved_effects, resolve_fn_type_effect(ctx, e));
+    List_push(resolved_effects, resolve_effect_expr(ctx, e));
   }
   return new types$EffectRow(resolved_effects, Option_none);
 })() : (function() {
@@ -2341,7 +2341,7 @@ function resolve_type_expr(ctx, texpr) {
   }
 }
 
-function resolve_fn_type_effect(ctx, eff) {
+function resolve_effect_expr(ctx, eff) {
   if ((eff.name === "io")) {
     return types$Effect_IoEffect;
   }
@@ -2381,6 +2381,22 @@ function resolve_fn_type_effect(ctx, eff) {
     const err_type = ((List_len(eff.type_args) > 0) ? __ring_blk6 : env$TypeEnv_fresh_var(ctx.env));
     return types$Effect_FailEffect(err_type);
   }
+  let __ring_blk7;
+  __ring_match105: {
+    const __ring_m105 = _Map_get(ctx.env.types.effects, eff.name);
+    if (__ring_m105._tag === "some") {
+      const edef = __ring_m105._0;
+      __ring_blk7 = edef.name;
+      break __ring_match105;
+    }
+    if (__ring_m105._tag === "none") {
+      const _ = type_error(ctx.sink, codes$E0407, `Unknown effect '${eff.name}'`, eff.span, diagnostics$DiagnosticContext_OtherContext(Option_some("unknown effect")));
+      __ring_blk7 = eff.name;
+      break __ring_match105;
+    }
+    __match_fail(__ring_m105);
+  }
+  const canonical_name = __ring_blk7;
   let resolved_args = [];
   const __ring_iter_45 = __List_Iterable.iter(eff.type_args);
   while (true) {
@@ -2389,7 +2405,7 @@ function resolve_fn_type_effect(ctx, eff) {
     const ta = __ring_next_45._0;
     List_push(resolved_args, resolve_type_expr(ctx, ta));
   }
-  return types$Effect_CustomEffect(eff.name, resolved_args);
+  return types$Effect_CustomEffect(canonical_name, resolved_args);
 }
 
 function resolve_self_type(ctx, name) {
@@ -2423,26 +2439,26 @@ function unify_at_noted(sink, env, t1, t2, s, span, notes) {
 }
 
 function update_fn_effects(env, name, effects) {
-  __ring_match105: {
-    const __ring_m105 = env$TypeEnv_lookup(env, name);
-    if (__ring_m105._tag === "some") {
-      const scheme = __ring_m105._0;
-      __ring_match106: {
-        const __ring_m106 = scheme.ty;
-        if (__ring_m106._tag === "FnType") {
-          const params = __ring_m106.params; const return_type = __ring_m106.return_type;
+  __ring_match106: {
+    const __ring_m106 = env$TypeEnv_lookup(env, name);
+    if (__ring_m106._tag === "some") {
+      const scheme = __ring_m106._0;
+      __ring_match107: {
+        const __ring_m107 = scheme.ty;
+        if (__ring_m107._tag === "FnType") {
+          const params = __ring_m107.params; const return_type = __ring_m107.return_type;
           const new_type = types$Type_FnType(params, return_type, effects);
           return env$TypeEnv_rebind(env, name, new env$TypeScheme(new_type, scheme.type_vars, scheme.bounds, scheme.def_id));
-          break __ring_match106;
+          break __ring_match107;
         }
-        break __ring_match106;
+        break __ring_match107;
       }
-      break __ring_match105;
+      break __ring_match106;
     }
-    if (__ring_m105._tag === "none") {
-      break __ring_match105;
+    if (__ring_m106._tag === "none") {
+      break __ring_match106;
     }
-    __match_fail(__ring_m105);
+    __match_fail(__ring_m106);
   }
 }
 
@@ -2553,4 +2569,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { InferResult, FnBoundsEntry, CompileError, InferCtx, new_infer_ctx, type_error, type_error_with_notes, merge_effects, unify_at, unify_at_noted, free_type_vars, collect_free_vars, free_type_vars_in_env, generalize, update_fn_effects, build_scheme_var_map, resolve_dicts_from_scheme, resolve_type_expr, resolve_self_type, resolve_named_type, bind_pattern, remove_fail_effect, resolve_relative_qualifier, __CompileError_Eq, __FnBoundsEntry_Eq, __CompileError_Clone, __FnBoundsEntry_Clone, __CompileError_Ord, __FnBoundsEntry_Ord, __CompileError_Debug, __FnBoundsEntry_Debug };
+export { InferResult, FnBoundsEntry, CompileError, InferCtx, new_infer_ctx, type_error, type_error_with_notes, merge_effects, unify_at, unify_at_noted, free_type_vars, collect_free_vars, free_type_vars_in_env, generalize, update_fn_effects, build_scheme_var_map, resolve_dicts_from_scheme, resolve_type_expr, resolve_effect_expr, resolve_self_type, resolve_named_type, bind_pattern, remove_fail_effect, resolve_relative_qualifier, __CompileError_Eq, __FnBoundsEntry_Eq, __CompileError_Clone, __FnBoundsEntry_Clone, __CompileError_Ord, __FnBoundsEntry_Ord, __CompileError_Debug, __FnBoundsEntry_Debug };
