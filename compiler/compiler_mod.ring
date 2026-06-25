@@ -55,6 +55,9 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
 
             // Check all modules in topological order
             let mut check_ok = true
+            // B-145: store each module's type env so the extern-type union below
+            // can filter by StructDef.is_extern, avoiding bare-name collisions.
+            let mut module_envs: Map<Str, TypeEnv> = map_new()
             for key in graph.topo_order {
                 if check_ok {
                     match module_asts.get(key) {
@@ -93,6 +96,7 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                                     }
                                 }
                                 module_hirs.insert(key, result.program)
+                                module_envs.insert(key, result.env)
                                 match graph.modules.get(key) {
                                     some(mod_) => {
                                         let prefix = module_prefix(mod_.path_segments)
@@ -109,9 +113,9 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
             }
             if check_ok == false { return none }
 
-            // B-144: compute the global union of all modules' extern type names
-            // so that perceus / codegen / verify_rc see extern types from every
-            // module (not just the local re-declarations).
+            // B-144 + B-145: compute per-module extern type names.
+            // Step 1: collect the global union of all modules' extern type names
+            // (same as B-144 — covers use-imported extern types).
             let mut global_externs: Set<Str> = set_new()
             for key in graph.topo_order {
                 match module_hirs.get(key) {
@@ -121,19 +125,39 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
                     none => {},
                 }
             }
-            // Stamp the global set onto every module's HProgram.
+            // Step 2: for each module, intersect global_externs with the module's
+            // own type env — only include names where StructDef.is_extern is true.
+            // This prevents bare-name collisions: if module B has `struct Foo`
+            // (is_extern=false), "Foo" from the global set is excluded even if
+            // module A declared `extern type Foo`.
             for key in graph.topo_order {
-                match module_hirs.get(key) {
-                    some(hir) => {
+                match (module_hirs.get(key), module_envs.get(key)) {
+                    (some(hir), some(env)) => {
+                        let mut filtered: Set<Str> = set_new()
+                        for en in global_externs {
+                            match env.types.structs.get(en) {
+                                some(sdef) => {
+                                    if sdef.is_extern {
+                                        filtered.insert(en)
+                                    }
+                                },
+                                none => {
+                                    // Name not in this module's type env at all —
+                                    // the module never sees this type, safe to
+                                    // include (won't match any StructType.name).
+                                    filtered.insert(en)
+                                },
+                            }
+                        }
                         module_hirs.insert(key, HProgram {
                             decls: hir.decls,
                             derived_impls: hir.derived_impls,
                             boxed_vars: hir.boxed_vars,
                             static_dicts: hir.static_dicts,
-                            extern_type_names: global_externs
+                            extern_type_names: filtered
                         })
                     },
-                    none => {},
+                    _ => {},
                 }
             }
 
