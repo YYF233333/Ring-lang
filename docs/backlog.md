@@ -626,6 +626,40 @@ source-map 支持 + 断点调试。
 - 同名 user struct 不被误排除（负面测试：module A 有 `extern type Foo`，module B 有 `struct Foo`）
 - 现有 E2E + llvm_diff 全绿；自举一致
 
+### B-146 gen_match_arm_enum switch 路径嵌套 constructor tag 缺检查 [bugfix] [P3] [S] [judgment] [queued]
+
+> 2026-06-25 立项。if-else 路径已修（ce0e887），switch 路径（无 duplicate-tag 时触发）同样缺内层 tag 检查。风险低但应对齐。
+
+**涉及修改**：
+1. `compiler/codegen_llvm_expr.ring`：`gen_match_arm_enum` switch 路径对嵌套 constructor 模式添加内层 tag 检查（对齐 if-else 路径修复）
+
+**验收标准**：
+- 嵌套 constructor 模式在 switch 路径正确匹配
+- 全部 E2E + llvm_diff 通过；自举一致
+
+### B-147 checker infer_method_call 参数下溢检查 [bugfix] [P2] [S] [judgment] [queued]
+
+> 2026-06-25 立项。`sb.line()` 无参调用通过类型检查但 runtime 崩溃（方法期望参数）。`infer_method_call` 缺参数数量下溢检查。
+
+**涉及修改**：
+1. `compiler/infer.ring`：`infer_method_call` 匹配方法签名后检查实参数量 ≥ 形参数量（排除 self），不足时报 arity error
+
+**验收标准**：
+- 方法调用参数不足 → 编译错误（E 码 + 提示期望参数数）
+- 现有 E2E 全绿（无误报）；自举一致
+
+### B-148 整数除零 codegen guard [bugfix] [P3] [S] [judgment] [queued]
+
+> 2026-06-25 立项。LLVM `sdiv x, 0` = undefined behavior（exit 0 + garbage 而非 panic）。需 codegen 在 `sdiv`/`srem` 前插零检查。
+
+**涉及修改**：
+1. `compiler/codegen_llvm_expr.ring`：`sdiv`/`srem` 前插 `icmp eq divisor, 0` → 真则调用 `ring_panic("division by zero")`
+
+**验收标准**：
+- 整数除零 → panic（而非 UB/静默）
+- `tests/cases/native_only/int_divzero.ring` 从 todo 转 pass
+- 全部 E2E + llvm_diff 通过；自举一致
+
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。
 
