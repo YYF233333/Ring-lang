@@ -2,7 +2,7 @@ use types::{Type, Effect, EffectRow, effect_kind_name, type_to_builtin_name, typ
 use ast::{BinOp, UnaryOp, Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     HStringInterpPart, HEffectHandler, HEffectOp, DictRef, DictDispatchInfo, TraitDispatch,
-    evidence_param_name, trait_dict_name, trait_bound_param_name,
+    evidence_param_name, trait_dict_name, trait_bound_param_name, compare_by_first,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     BUILTIN_RANGE,
@@ -2255,7 +2255,7 @@ fn find_fn_precise(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
 fn find_fn_by_prefix_enumeration(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
     let mut seen_prefixes: Set<Str> = set_new()
     let mut sorted_imports = ctx.imports_map.entries()
-    sorted_imports.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_imports.sort_by(compare_by_first)
     for entry in sorted_imports {
         let (_, qualified) = entry
         // Extract prefix: everything before "$$_"
@@ -2283,7 +2283,7 @@ fn find_fn_by_prefix_enumeration(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
 fn find_fn_by_suffix(ctx: LlvmCtx, name: Str) -> FnLookupResult? {
     let suffix = "$$_${name}"
     let mut sorted_fns = ctx.functions.entries()
-    sorted_fns.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_fns.sort_by(compare_by_first)
     for entry in sorted_fns {
         let (fn_name, fn_val) = entry
         if fn_name.ends_with(suffix) {
@@ -2362,36 +2362,36 @@ fn is_void_runtime_fn(name: Str) -> Bool {
 
 // Map Ring extern fn names to C runtime names
 fn extern_fn_to_runtime(name: Str) -> Str? {
-    if name == "print" { some("ring_print") }
-    else { if name == "panic" { some("ring_panic") }
-    else { if name == "eprintln" { some("ring_eprintln") }
-    else { if name == "exit" || name == "exit_process" { some("ring_exit") }
-    else { if name == "argv" { some("ring_args") }
-    else { if name == "string_builder" { some("ring_sb_new") }
-    else { if name == "map_new" { some("ring_map_new") }
-    else { if name == "set_new" { some("ring_set_new") }
-    else { if name == "read_file" { some("ring_read_file") }
-    else { if name == "write_file" { some("ring_write_file") }
-    else { if name == "file_exists" { some("ring_file_exists") }
-    else { if name == "delete_file" { some("ring_delete_file") }
-    else { if name == "path_join" { some("ring_path_join") }
-    else { if name == "path_resolve" { some("ring_path_resolve") }
-    else { if name == "path_dirname" { some("ring_path_dirname") }
-    else { if name == "path_basename" { some("ring_path_basename") }
-    else { if name == "path_extname" { some("ring_path_extname") }
-    else { if name == "cwd" { some("ring_cwd") }
-    else { if name == "parse_int" { some("ring_parse_int") }
-    else { if name == "parse_float" { some("ring_parse_float") }
-    else { if name == "set_from" { some("ring_set_from_list") }
-    else { if name == "list_new" { some("ring_list_new") }
-    else { if name == "map_from" { some("ring_map_from") }
-    else { if name == "__ring_raise_fail" { some("__ring_raise_fail") }
-    else { if name == "map_int_new" { some("ring_map_int_new") }
-    else { if name == "set_int_new" { some("ring_set_int_new") }
-    else { if name == "map_int_from" { some("ring_map_int_from") }
-    else { if name == "set_int_from" { some("ring_set_int_from_list") }
-    else { if name == "Cell" { some("ring_Cell_new") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    if name == "print" { return some("ring_print") }
+    if name == "panic" { return some("ring_panic") }
+    if name == "eprintln" { return some("ring_eprintln") }
+    if name == "exit" || name == "exit_process" { return some("ring_exit") }
+    if name == "argv" { return some("ring_args") }
+    if name == "string_builder" { return some("ring_sb_new") }
+    if name == "map_new" { return some("ring_map_new") }
+    if name == "set_new" { return some("ring_set_new") }
+    if name == "read_file" { return some("ring_read_file") }
+    if name == "write_file" { return some("ring_write_file") }
+    if name == "file_exists" { return some("ring_file_exists") }
+    if name == "delete_file" { return some("ring_delete_file") }
+    if name == "path_join" { return some("ring_path_join") }
+    if name == "path_resolve" { return some("ring_path_resolve") }
+    if name == "path_dirname" { return some("ring_path_dirname") }
+    if name == "path_basename" { return some("ring_path_basename") }
+    if name == "path_extname" { return some("ring_path_extname") }
+    if name == "cwd" { return some("ring_cwd") }
+    if name == "parse_int" { return some("ring_parse_int") }
+    if name == "parse_float" { return some("ring_parse_float") }
+    if name == "set_from" { return some("ring_set_from_list") }
+    if name == "list_new" { return some("ring_list_new") }
+    if name == "map_from" { return some("ring_map_from") }
+    if name == "__ring_raise_fail" { return some("__ring_raise_fail") }
+    if name == "map_int_new" { return some("ring_map_int_new") }
+    if name == "set_int_new" { return some("ring_set_int_new") }
+    if name == "map_int_from" { return some("ring_map_int_from") }
+    if name == "set_int_from" { return some("ring_set_int_from_list") }
+    if name == "Cell" { return some("ring_Cell_new") }
+    none
 }
 
 // ============================================================
@@ -2400,60 +2400,60 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
 
 // Check if a runtime method returns i64 (needs boxing to Int)
 fn rt_method_returns_i64(name: Str) -> Bool {
-    if name == "ring_str_len" { true }
-    else { if name == "ring_str_contains" { true }
-    else { if name == "ring_str_starts_with" { true }
-    else { if name == "ring_str_ends_with" { true }
-    else { if name == "ring_str_eq" { true }
-    else { if name == "ring_str_lt" { true }
-    else { if name == "ring_list_len" { true }
-    else { if name == "ring_list_is_empty" { true }
-    else { if name == "ring_map_has" { true }
-    else { if name == "ring_map_len" { true }
-    else { if name == "ring_set_has" { true }
-    else { if name == "ring_set_len" { true }
-    else { if name == "ring_sb_len" { true }
-    else { if name == "ring_map_int_has" { true }
-    else { if name == "ring_map_int_len" { true }
-    else { if name == "ring_set_int_has" { true }
-    else { if name == "ring_set_int_len" { true }
-    else { if name == "ring_map_is_empty" { true }
-    else { if name == "ring_set_is_empty" { true }
-    else { if name == "ring_map_int_is_empty" { true }
-    else { if name == "ring_set_int_is_empty" { true }
-    else { if name == "ring_map_any" { true }
-    else { if name == "ring_set_any" { true }
-    else { if name == "ring_set_all" { true }
-    else { if name == "ring_set_int_any" { true }
-    else { if name == "ring_set_int_all" { true }
-    else { false } } } } } } } } } } } } } } } } } } } } } } } } } }
+    if name == "ring_str_len" { return true }
+    if name == "ring_str_contains" { return true }
+    if name == "ring_str_starts_with" { return true }
+    if name == "ring_str_ends_with" { return true }
+    if name == "ring_str_eq" { return true }
+    if name == "ring_str_lt" { return true }
+    if name == "ring_list_len" { return true }
+    if name == "ring_list_is_empty" { return true }
+    if name == "ring_map_has" { return true }
+    if name == "ring_map_len" { return true }
+    if name == "ring_set_has" { return true }
+    if name == "ring_set_len" { return true }
+    if name == "ring_sb_len" { return true }
+    if name == "ring_map_int_has" { return true }
+    if name == "ring_map_int_len" { return true }
+    if name == "ring_set_int_has" { return true }
+    if name == "ring_set_int_len" { return true }
+    if name == "ring_map_is_empty" { return true }
+    if name == "ring_set_is_empty" { return true }
+    if name == "ring_map_int_is_empty" { return true }
+    if name == "ring_set_int_is_empty" { return true }
+    if name == "ring_map_any" { return true }
+    if name == "ring_set_any" { return true }
+    if name == "ring_set_all" { return true }
+    if name == "ring_set_int_any" { return true }
+    if name == "ring_set_int_all" { return true }
+    false
 }
 
 // Check if a runtime method returns bool (i64 that needs boxing to Bool)
 fn rt_method_returns_bool(name: Str) -> Bool {
-    if name == "ring_str_contains" { true }
-    else { if name == "ring_str_starts_with" { true }
-    else { if name == "ring_str_ends_with" { true }
-    else { if name == "ring_list_is_empty" { true }
-    else { if name == "ring_map_has" { true }
-    else { if name == "ring_set_has" { true }
-    else { if name == "ring_list_any" { true }
-    else { if name == "ring_list_all" { true }
-    else { if name == "ring_Option_is_some" { true }
-    else { if name == "ring_Option_is_none" { true }
-    else { if name == "ring_map_int_has" { true }
-    else { if name == "ring_set_int_has" { true }
-    else { if name == "ring_map_is_empty" { true }
-    else { if name == "ring_set_is_empty" { true }
-    else { if name == "ring_map_int_is_empty" { true }
-    else { if name == "ring_set_int_is_empty" { true }
-    else { if name == "ring_str_is_empty" { true }
-    else { if name == "ring_map_any" { true }
-    else { if name == "ring_set_any" { true }
-    else { if name == "ring_set_all" { true }
-    else { if name == "ring_set_int_any" { true }
-    else { if name == "ring_set_int_all" { true }
-    else { false } } } } } } } } } } } } } } } } } } } } } }
+    if name == "ring_str_contains" { return true }
+    if name == "ring_str_starts_with" { return true }
+    if name == "ring_str_ends_with" { return true }
+    if name == "ring_list_is_empty" { return true }
+    if name == "ring_map_has" { return true }
+    if name == "ring_set_has" { return true }
+    if name == "ring_list_any" { return true }
+    if name == "ring_list_all" { return true }
+    if name == "ring_Option_is_some" { return true }
+    if name == "ring_Option_is_none" { return true }
+    if name == "ring_map_int_has" { return true }
+    if name == "ring_set_int_has" { return true }
+    if name == "ring_map_is_empty" { return true }
+    if name == "ring_set_is_empty" { return true }
+    if name == "ring_map_int_is_empty" { return true }
+    if name == "ring_set_int_is_empty" { return true }
+    if name == "ring_str_is_empty" { return true }
+    if name == "ring_map_any" { return true }
+    if name == "ring_set_any" { return true }
+    if name == "ring_set_all" { return true }
+    if name == "ring_set_int_any" { return true }
+    if name == "ring_set_int_all" { return true }
+    false
 }
 
 // Number of LEADING (post-receiver) args that must be unboxed from ptr to i64.
@@ -2461,19 +2461,19 @@ fn rt_method_returns_bool(name: Str) -> Bool {
 // boxed (ptr). E.g. pad_start(length: Int, fill: Str) -> (ptr, i64, ptr): only the
 // first arg is unboxed, the fill string is passed as a ptr.
 fn rt_method_int_arg_count(name: Str) -> Int {
-    if name == "ring_list_get" { 1 }
-    else { if name == "ring_list_get_opt" { 1 }
-    else { if name == "ring_str_get" { 1 }
-    else { if name == "ring_str_slice" { 2 }
-    else { if name == "ring_list_slice" { 2 }
-    else { if name == "ring_list_set" { 1 }
-    else { if name == "ring_str_char_at" { 1 }
-    else { if name == "ring_str_char_code_at" { 1 }
-    else { if name == "ring_str_pad_start" { 1 }
-    else { if name == "ring_str_pad_end" { 1 }
-    else { if name == "ring_str_repeat" { 1 }
-    else { if name == "ring_sb_add_int" { 1 }
-    else { 0 } } } } } } } } } } } }
+    if name == "ring_list_get" { return 1 }
+    if name == "ring_list_get_opt" { return 1 }
+    if name == "ring_str_get" { return 1 }
+    if name == "ring_str_slice" { return 2 }
+    if name == "ring_list_slice" { return 2 }
+    if name == "ring_list_set" { return 1 }
+    if name == "ring_str_char_at" { return 1 }
+    if name == "ring_str_char_code_at" { return 1 }
+    if name == "ring_str_pad_start" { return 1 }
+    if name == "ring_str_pad_end" { return 1 }
+    if name == "ring_str_repeat" { return 1 }
+    if name == "ring_sb_add_int" { return 1 }
+    0
 }
 
 // Method needs receiver unboxed to i64 (Int.to_str)
@@ -2676,119 +2676,119 @@ fn gen_method_call(mut ctx: LlvmCtx, recv: LLVMValueRef, recv_type: Type, method
 
 fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     // Str methods
-    if type_name == "Str" && method == "len" { some("ring_str_len") }
-    else { if type_name == "Str" && method == "contains" { some("ring_str_contains") }
-    else { if type_name == "Str" && method == "starts_with" { some("ring_str_starts_with") }
-    else { if type_name == "Str" && method == "ends_with" { some("ring_str_ends_with") }
-    else { if type_name == "Str" && method == "slice" { some("ring_str_slice") }
-    else { if type_name == "Str" && method == "split" { some("ring_str_split") }
-    else { if type_name == "Str" && method == "replace" { some("ring_str_replace") }
-    else { if type_name == "Str" && method == "get" { some("ring_str_get") }
-    else { if type_name == "Str" && method == "trim" { some("ring_str_trim") }
-    else { if type_name == "Str" && method == "trim_start" { some("ring_str_trim_start") }
-    else { if type_name == "Str" && method == "trim_end" { some("ring_str_trim_end") }
-    else { if type_name == "Str" && method == "to_upper" { some("ring_str_to_upper") }
-    else { if type_name == "Str" && method == "to_lower" { some("ring_str_to_lower") }
-    else { if type_name == "Str" && method == "char_at" { some("ring_str_char_at") }
-    else { if type_name == "Str" && method == "char_code_at" { some("ring_str_char_code_at") }
-    else { if type_name == "Str" && method == "index_of" { some("ring_str_index_of") }
-    else { if type_name == "Str" && method == "pad_start" { some("ring_str_pad_start") }
-    else { if type_name == "Str" && method == "pad_end" { some("ring_str_pad_end") }
-    else { if type_name == "Str" && method == "repeat" { some("ring_str_repeat") }
-    else { if type_name == "Str" && method == "is_empty" { some("ring_str_is_empty") }
-    else { if type_name == "Str" && method == "last_index_of" { some("ring_str_last_index_of") }
+    if type_name == "Str" && method == "len" { return some("ring_str_len") }
+    if type_name == "Str" && method == "contains" { return some("ring_str_contains") }
+    if type_name == "Str" && method == "starts_with" { return some("ring_str_starts_with") }
+    if type_name == "Str" && method == "ends_with" { return some("ring_str_ends_with") }
+    if type_name == "Str" && method == "slice" { return some("ring_str_slice") }
+    if type_name == "Str" && method == "split" { return some("ring_str_split") }
+    if type_name == "Str" && method == "replace" { return some("ring_str_replace") }
+    if type_name == "Str" && method == "get" { return some("ring_str_get") }
+    if type_name == "Str" && method == "trim" { return some("ring_str_trim") }
+    if type_name == "Str" && method == "trim_start" { return some("ring_str_trim_start") }
+    if type_name == "Str" && method == "trim_end" { return some("ring_str_trim_end") }
+    if type_name == "Str" && method == "to_upper" { return some("ring_str_to_upper") }
+    if type_name == "Str" && method == "to_lower" { return some("ring_str_to_lower") }
+    if type_name == "Str" && method == "char_at" { return some("ring_str_char_at") }
+    if type_name == "Str" && method == "char_code_at" { return some("ring_str_char_code_at") }
+    if type_name == "Str" && method == "index_of" { return some("ring_str_index_of") }
+    if type_name == "Str" && method == "pad_start" { return some("ring_str_pad_start") }
+    if type_name == "Str" && method == "pad_end" { return some("ring_str_pad_end") }
+    if type_name == "Str" && method == "repeat" { return some("ring_str_repeat") }
+    if type_name == "Str" && method == "is_empty" { return some("ring_str_is_empty") }
+    if type_name == "Str" && method == "last_index_of" { return some("ring_str_last_index_of") }
     // Int methods
-    else { if type_name == "Int" && method == "to_str" { some("ring_int_to_str") }
+    if type_name == "Int" && method == "to_str" { return some("ring_int_to_str") }
     // Float methods
-    else { if type_name == "Float" && method == "to_str" { some("ring_float_to_str") }
+    if type_name == "Float" && method == "to_str" { return some("ring_float_to_str") }
     // Bool methods
-    else { if type_name == "Bool" && method == "to_str" { some("ring_bool_to_str") }
+    if type_name == "Bool" && method == "to_str" { return some("ring_bool_to_str") }
     // StringBuilder methods
-    else { if type_name == "StringBuilder" && method == "add" { some("ring_sb_add") }
-    else { if type_name == "StringBuilder" && method == "to_str" { some("ring_sb_to_str") }
-    else { if type_name == "StringBuilder" && method == "len" { some("ring_sb_len") }
-    else { if type_name == "StringBuilder" && method == "line" { some("ring_sb_line") }
-    else { if type_name == "StringBuilder" && method == "add_int" { some("ring_sb_add_int") }
+    if type_name == "StringBuilder" && method == "add" { return some("ring_sb_add") }
+    if type_name == "StringBuilder" && method == "to_str" { return some("ring_sb_to_str") }
+    if type_name == "StringBuilder" && method == "len" { return some("ring_sb_len") }
+    if type_name == "StringBuilder" && method == "line" { return some("ring_sb_line") }
+    if type_name == "StringBuilder" && method == "add_int" { return some("ring_sb_add_int") }
     // List methods
-    else { if type_name == "List" && method == "push" { some("ring_list_push") }
-    else { if type_name == "List" && method == "len" { some("ring_list_len") }
-    else { if type_name == "List" && method == "get" { some("ring_list_get_opt") }
-    else { if type_name == "List" && method == "join" { some("ring_list_join") }
-    else { if type_name == "List" && method == "concat" { some("ring_list_concat") }
-    else { if type_name == "List" && method == "slice" { some("ring_list_slice") }
-    else { if type_name == "List" && method == "reverse" { some("ring_list_reverse") }
-    else { if type_name == "List" && method == "sort_by" { some("ring_list_sort") }
-    else { if type_name == "List" && method == "is_empty" { some("ring_list_is_empty") }
-    else { if type_name == "List" && method == "first" { some("ring_list_first") }
-    else { if type_name == "List" && method == "last" { some("ring_list_last") }
-    else { if type_name == "List" && method == "pop" { some("ring_list_pop") }
-    else { if type_name == "List" && method == "set" { some("ring_list_set") }
+    if type_name == "List" && method == "push" { return some("ring_list_push") }
+    if type_name == "List" && method == "len" { return some("ring_list_len") }
+    if type_name == "List" && method == "get" { return some("ring_list_get_opt") }
+    if type_name == "List" && method == "join" { return some("ring_list_join") }
+    if type_name == "List" && method == "concat" { return some("ring_list_concat") }
+    if type_name == "List" && method == "slice" { return some("ring_list_slice") }
+    if type_name == "List" && method == "reverse" { return some("ring_list_reverse") }
+    if type_name == "List" && method == "sort_by" { return some("ring_list_sort") }
+    if type_name == "List" && method == "is_empty" { return some("ring_list_is_empty") }
+    if type_name == "List" && method == "first" { return some("ring_list_first") }
+    if type_name == "List" && method == "last" { return some("ring_list_last") }
+    if type_name == "List" && method == "pop" { return some("ring_list_pop") }
+    if type_name == "List" && method == "set" { return some("ring_list_set") }
     // NOTE: contains / index_of / sort are intentionally NOT mapped to runtime
     // functions. They live in bounded impl blocks (impl<T: Eq/Ord> List) and must
     // dispatch through trait dicts. Falling through routes to the generated Ring impls.
-    else { if type_name == "List" && method == "map" { some("ring_list_map") }
-    else { if type_name == "List" && method == "filter" { some("ring_list_filter") }
-    else { if type_name == "List" && method == "for_each" { some("ring_list_for_each") }
-    else { if type_name == "List" && method == "any" { some("ring_list_any") }
-    else { if type_name == "List" && method == "all" { some("ring_list_all") }
-    else { if type_name == "List" && method == "find" { some("ring_list_find") }
-    else { if type_name == "List" && method == "find_index" { some("ring_list_find_index") }
-    else { if type_name == "List" && method == "fold" { some("ring_list_fold") }
-    else { if type_name == "List" && method == "flat_map" { some("ring_list_flat_map") }
-    else { if type_name == "List" && method == "clear" { some("ring_list_clear") }
-    else { if type_name == "List" && method == "shift" { some("ring_list_shift") }
-    else { if type_name == "List" && method == "extend" { some("ring_list_extend") }
+    if type_name == "List" && method == "map" { return some("ring_list_map") }
+    if type_name == "List" && method == "filter" { return some("ring_list_filter") }
+    if type_name == "List" && method == "for_each" { return some("ring_list_for_each") }
+    if type_name == "List" && method == "any" { return some("ring_list_any") }
+    if type_name == "List" && method == "all" { return some("ring_list_all") }
+    if type_name == "List" && method == "find" { return some("ring_list_find") }
+    if type_name == "List" && method == "find_index" { return some("ring_list_find_index") }
+    if type_name == "List" && method == "fold" { return some("ring_list_fold") }
+    if type_name == "List" && method == "flat_map" { return some("ring_list_flat_map") }
+    if type_name == "List" && method == "clear" { return some("ring_list_clear") }
+    if type_name == "List" && method == "shift" { return some("ring_list_shift") }
+    if type_name == "List" && method == "extend" { return some("ring_list_extend") }
     // Map methods
-    else { if type_name == "Map" && method == "get" { some("ring_map_get_opt") }
-    else { if type_name == "Map" && method == "insert" { some("ring_map_set") }
-    else { if type_name == "Map" && method == "contains_key" { some("ring_map_has") }
-    else { if type_name == "Map" && method == "keys" { some("ring_map_keys") }
-    else { if type_name == "Map" && method == "values" { some("ring_map_values") }
-    else { if type_name == "Map" && method == "entries" { some("ring_map_entries") }
-    else { if type_name == "Map" && method == "len" { some("ring_map_len") }
-    else { if type_name == "Map" && method == "remove" { some("ring_map_delete") }
-    else { if type_name == "Map" && method == "is_empty" { some("ring_map_is_empty") }
-    else { if type_name == "Map" && method == "for_each" { some("ring_map_for_each") }
-    else { if type_name == "Map" && method == "clear" { some("ring_map_clear") }
-    else { if type_name == "Map" && method == "fold" { some("ring_map_fold") }
-    else { if type_name == "Map" && method == "filter" { some("ring_map_filter") }
-    else { if type_name == "Map" && method == "any" { some("ring_map_any") }
-    else { if type_name == "Map" && method == "map_values" { some("ring_map_map_values") }
+    if type_name == "Map" && method == "get" { return some("ring_map_get_opt") }
+    if type_name == "Map" && method == "insert" { return some("ring_map_set") }
+    if type_name == "Map" && method == "contains_key" { return some("ring_map_has") }
+    if type_name == "Map" && method == "keys" { return some("ring_map_keys") }
+    if type_name == "Map" && method == "values" { return some("ring_map_values") }
+    if type_name == "Map" && method == "entries" { return some("ring_map_entries") }
+    if type_name == "Map" && method == "len" { return some("ring_map_len") }
+    if type_name == "Map" && method == "remove" { return some("ring_map_delete") }
+    if type_name == "Map" && method == "is_empty" { return some("ring_map_is_empty") }
+    if type_name == "Map" && method == "for_each" { return some("ring_map_for_each") }
+    if type_name == "Map" && method == "clear" { return some("ring_map_clear") }
+    if type_name == "Map" && method == "fold" { return some("ring_map_fold") }
+    if type_name == "Map" && method == "filter" { return some("ring_map_filter") }
+    if type_name == "Map" && method == "any" { return some("ring_map_any") }
+    if type_name == "Map" && method == "map_values" { return some("ring_map_map_values") }
     // NOTE: Map.clone / List.clone / Set.clone are compiler-internal (HExpr::Clone
     // from Perceus RC), not user-callable methods — they are NOT in this table.
     // Set methods
-    else { if type_name == "Set" && method == "add" { some("ring_set_add") }
-    else { if type_name == "Set" && method == "insert" { some("ring_set_add") }
-    else { if type_name == "Set" && method == "has" { some("ring_set_has") }
-    else { if type_name == "Set" && method == "contains" { some("ring_set_has") }
-    else { if type_name == "Set" && method == "to_list" { some("ring_set_to_list") }
-    else { if type_name == "Set" && method == "len" { some("ring_set_len") }
-    else { if type_name == "Set" && method == "is_empty" { some("ring_set_is_empty") }
-    else { if type_name == "Set" && method == "from_list" { some("ring_set_from_list") }
-    else { if type_name == "Set" && method == "for_each" { some("ring_set_for_each") }
-    else { if type_name == "Set" && method == "remove" { some("ring_set_delete") }
-    else { if type_name == "Set" && method == "clear" { some("ring_set_clear") }
-    else { if type_name == "Set" && method == "union" { some("ring_set_union") }
-    else { if type_name == "Set" && method == "intersect" { some("ring_set_intersect") }
-    else { if type_name == "Set" && method == "difference" { some("ring_set_difference") }
-    else { if type_name == "Set" && method == "fold" { some("ring_set_fold") }
-    else { if type_name == "Set" && method == "filter" { some("ring_set_filter") }
-    else { if type_name == "Set" && method == "any" { some("ring_set_any") }
-    else { if type_name == "Set" && method == "all" { some("ring_set_all") }
+    if type_name == "Set" && method == "add" { return some("ring_set_add") }
+    if type_name == "Set" && method == "insert" { return some("ring_set_add") }
+    if type_name == "Set" && method == "has" { return some("ring_set_has") }
+    if type_name == "Set" && method == "contains" { return some("ring_set_has") }
+    if type_name == "Set" && method == "to_list" { return some("ring_set_to_list") }
+    if type_name == "Set" && method == "len" { return some("ring_set_len") }
+    if type_name == "Set" && method == "is_empty" { return some("ring_set_is_empty") }
+    if type_name == "Set" && method == "from_list" { return some("ring_set_from_list") }
+    if type_name == "Set" && method == "for_each" { return some("ring_set_for_each") }
+    if type_name == "Set" && method == "remove" { return some("ring_set_delete") }
+    if type_name == "Set" && method == "clear" { return some("ring_set_clear") }
+    if type_name == "Set" && method == "union" { return some("ring_set_union") }
+    if type_name == "Set" && method == "intersect" { return some("ring_set_intersect") }
+    if type_name == "Set" && method == "difference" { return some("ring_set_difference") }
+    if type_name == "Set" && method == "fold" { return some("ring_set_fold") }
+    if type_name == "Set" && method == "filter" { return some("ring_set_filter") }
+    if type_name == "Set" && method == "any" { return some("ring_set_any") }
+    if type_name == "Set" && method == "all" { return some("ring_set_all") }
     // Option methods
-    else { if type_name == "Option" && method == "unwrap_or" { some("ring_Option_unwrap_or") }
-    else { if type_name == "Option" && method == "unwrap" { some("ring_Option_unwrap") }
-    else { if type_name == "Option" && method == "is_some" { some("ring_Option_is_some") }
-    else { if type_name == "Option" && method == "is_none" { some("ring_Option_is_none") }
-    else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
-    else { if type_name == "Option" && method == "and_then" { some("ring_Option_and_then") }
-    else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
-    else { if type_name == "Option" && method == "to_fail" { some("ring_Option_to_fail") }
+    if type_name == "Option" && method == "unwrap_or" { return some("ring_Option_unwrap_or") }
+    if type_name == "Option" && method == "unwrap" { return some("ring_Option_unwrap") }
+    if type_name == "Option" && method == "is_some" { return some("ring_Option_is_some") }
+    if type_name == "Option" && method == "is_none" { return some("ring_Option_is_none") }
+    if type_name == "Option" && method == "map" { return some("ring_Option_map") }
+    if type_name == "Option" && method == "and_then" { return some("ring_Option_and_then") }
+    if type_name == "Option" && method == "unwrap_or_else" { return some("ring_Option_unwrap_or_else") }
+    if type_name == "Option" && method == "to_fail" { return some("ring_Option_to_fail") }
     // Cell methods
-    else { if type_name == "Cell" && method == "get" { some("ring_Cell_get") }
-    else { if type_name == "Cell" && method == "set" { some("ring_Cell_set") }
-    else { if type_name == "Cell" && method == "update" { some("ring_Cell_update") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    if type_name == "Cell" && method == "get" { return some("ring_Cell_get") }
+    if type_name == "Cell" && method == "set" { return some("ring_Cell_set") }
+    if type_name == "Cell" && method == "update" { return some("ring_Cell_update") }
+    none
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {
@@ -4244,7 +4244,7 @@ fn resolve_struct_type(ctx: LlvmCtx, name: Str) -> StructFieldInfo? {
         none => {
             let suffix = "::${name}"
             let mut sorted = ctx.struct_types.entries()
-            sorted.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            sorted.sort_by(compare_by_first)
             let mut result: StructFieldInfo? = none
             for entry in sorted {
                 let (k, v) = entry
@@ -4276,7 +4276,7 @@ fn find_enum_by_variant(ctx: LlvmCtx, variant_name: Str, qualifier: Str?) -> Enu
     }
     // Search all registered enums for this variant
     let mut sorted_enums = ctx.enum_types.entries()
-    sorted_enums.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_enums.sort_by(compare_by_first)
     for entry in sorted_enums {
         let (ename, einfo) = entry
         match einfo.variants.get(variant_name) {
@@ -5586,7 +5586,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
 
     // For each effect, create an evidence object
     let mut sorted_by_effect = by_effect.entries()
-    sorted_by_effect.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_by_effect.sort_by(compare_by_first)
     for entry in sorted_by_effect {
         let (effect_name, hs) = entry
         let ev_name = evidence_param_name(effect_name)

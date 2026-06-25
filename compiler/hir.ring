@@ -727,6 +727,12 @@ pub fn is_fresh_owned_bool_value(expr: HExpr) -> Bool {
     }
 }
 
+// Comparator for sort_by on (Str, _) tuples — compares by first element.
+// Used across 55+ call sites to deterministically sort Map.entries() etc.
+pub fn compare_by_first<T>(a: (Str, T), b: (Str, T)) -> Int {
+    if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 }
+}
+
 // The initialiser of the LAST direct `let`/`var` statement binding `name` in a
 // statement list (helper for is_fresh_owned_bool_value's post-RC Block arm).
 fn block_local_init(stmts: List<HStmt>, name: Str) -> HExpr? {

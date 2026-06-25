@@ -1,7 +1,7 @@
 import { __EffectAbort, __ring_raise_fail, Cell, Cell_get, Cell_set, Cell_update, __match_fail, __ring_deep_eq, __ring_tuple_eq, __ring_set_has, __ring_index, __ring_map_index, __ring_str_index, print, assert, panic, exit, json_stringify, __ring_ev_io, Option_some, Option_none, Option_is_some, Option_is_none, Option_unwrap_or, Option_unwrap, Str_len, Str_contains, Str_starts_with, Str_ends_with, Str_slice, Str_trim, Str_to_upper, Str_to_lower, Str_replace, Str_split, Str_char_at, Str_index_of, Str_pad_start, Str_pad_end, Str_repeat, Str_char_code_at, Str_trim_start, Str_trim_end, Str_is_empty, Str_last_index_of, Int_to_str, Float_to_str, parse_int, parse_float, List_len, List_get, List_push, List_concat, List_extend, List_slice, List_reverse, List_join, List_sort_by, List_set, List_pop, List_shift, List_clear, List_find_index, list_clone, map_new, map_from, map_clone, _Map_len, _Map_get, _Map_contains_key, _Map_keys, _Map_values, _Map_entries, _Map_insert, _Map_remove, _Map_clear, set_new, set_from, set_clone, _Set_len, _Set_to_list, _Set_insert, _Set_remove, _Set_union, _Set_intersect, _Set_difference, _Set_clear, string_builder, StringBuilder_add, StringBuilder_line, StringBuilder_add_int, StringBuilder_to_str, StringBuilder_len, read_file, write_file, file_exists, delete_file, path_join, path_resolve, path_dirname, path_basename, path_extname, argv, exit_process, eprintln, cwd, exec_sync, __Int_Eq, __Float_Eq, __Str_Eq, __Bool_Eq, __Option_Eq, __Int_Clone, __Float_Clone, __Str_Clone, __Bool_Clone, __List_Clone, __Map_Clone, __Set_Clone, __Option_Clone, __Int_Ord, __Float_Ord, __Str_Ord, __Bool_Ord, __Int_Debug, __Float_Debug, __Str_Debug, __Bool_Debug, __Option_Debug, __List_Debug, __Map_Debug, __Set_Debug } from "./__ring_runtime.js";
 import { ANY as types$ANY, BOOL as types$BOOL, BUILTIN_BOOL as types$BUILTIN_BOOL, BUILTIN_CELL as types$BUILTIN_CELL, BUILTIN_FLOAT as types$BUILTIN_FLOAT, BUILTIN_INT as types$BUILTIN_INT, BUILTIN_LIST as types$BUILTIN_LIST, BUILTIN_MAP as types$BUILTIN_MAP, BUILTIN_OPTION as types$BUILTIN_OPTION, BUILTIN_RANGE as types$BUILTIN_RANGE, BUILTIN_SET as types$BUILTIN_SET, BUILTIN_STR as types$BUILTIN_STR, BUILTIN_STRING_BUILDER as types$BUILTIN_STRING_BUILDER, EMPTY_ROW as types$EMPTY_ROW, FLOAT as types$FLOAT, INT as types$INT, NEVER as types$NEVER, STR as types$STR, UNIT as types$UNIT, effect_kind_name as types$effect_kind_name, effect_row as types$effect_row, effect_row_to_string as types$effect_row_to_string, effect_to_string as types$effect_to_string, effects_equal as types$effects_equal, effects_match_kind as types$effects_match_kind, effects_same_kind as types$effects_same_kind, is_list_type as types$is_list_type, is_map_type as types$is_map_type, is_option_type as types$is_option_type, is_set_type as types$is_set_type, list_element as types$list_element, make_list_type as types$make_list_type, make_map_type as types$make_map_type, make_option_type as types$make_option_type, make_set_type as types$make_set_type, open_effect_row as types$open_effect_row, option_inner as types$option_inner, row_contains as types$row_contains, row_merge as types$row_merge, type_to_builtin_name as types$type_to_builtin_name, type_to_string as types$type_to_string, types_equal as types$types_equal, Effect_IoEffect as types$Effect_IoEffect, Effect_FailEffect as types$Effect_FailEffect, Effect_MutEffect as types$Effect_MutEffect, Effect_CustomEffect as types$Effect_CustomEffect, EffectRow as types$EffectRow, EnumVariant as types$EnumVariant, RecordField as types$RecordField, RowMergeResult as types$RowMergeResult, StructField as types$StructField, Type_IntType as types$Type_IntType, Type_FloatType as types$Type_FloatType, Type_StrType as types$Type_StrType, Type_BoolType as types$Type_BoolType, Type_UnitType as types$Type_UnitType, Type_NeverType as types$Type_NeverType, Type_AnyType as types$Type_AnyType, Type_TypeVar as types$Type_TypeVar, Type_FnType as types$Type_FnType, Type_StructType as types$Type_StructType, Type_EnumType as types$Type_EnumType, Type_GenericType as types$Type_GenericType, Type_RecordType as types$Type_RecordType, Type_EffectRowType as types$Type_EffectRowType, Type_TupleType as types$Type_TupleType, Type_ErrorType as types$Type_ErrorType } from "./types.js";
 import { span_zero as ast$span_zero, AssocConstraint as ast$AssocConstraint, BinOp_Add as ast$BinOp_Add, BinOp_Sub as ast$BinOp_Sub, BinOp_Mul as ast$BinOp_Mul, BinOp_Div as ast$BinOp_Div, BinOp_Mod as ast$BinOp_Mod, BinOp_Eq as ast$BinOp_Eq, BinOp_Neq as ast$BinOp_Neq, BinOp_Lt as ast$BinOp_Lt, BinOp_Lte as ast$BinOp_Lte, BinOp_Gt as ast$BinOp_Gt, BinOp_Gte as ast$BinOp_Gte, BinOp_And as ast$BinOp_And, BinOp_Or as ast$BinOp_Or, Decl_Fn as ast$Decl_Fn, Decl_Struct as ast$Decl_Struct, Decl_Enum as ast$Decl_Enum, Decl_Impl as ast$Decl_Impl, Decl_Effect as ast$Decl_Effect, Decl_Test as ast$Decl_Test, Decl_Trait as ast$Decl_Trait, Decl_ExternFn as ast$Decl_ExternFn, Decl_ExternType as ast$Decl_ExternType, Decl_TypeAlias as ast$Decl_TypeAlias, Decl_Const as ast$Decl_Const, Decl_ModBlock as ast$Decl_ModBlock, Decl_Sig as ast$Decl_Sig, Decl_EffectAlias as ast$Decl_EffectAlias, Decl_Delegate as ast$Decl_Delegate, Decl_AssocType as ast$Decl_AssocType, DestructureBinding as ast$DestructureBinding, EffectExpr as ast$EffectExpr, EffectHandler as ast$EffectHandler, EffectOpDecl as ast$EffectOpDecl, EnumVariantDecl as ast$EnumVariantDecl, Expr_IntLit as ast$Expr_IntLit, Expr_FloatLit as ast$Expr_FloatLit, Expr_StrLit as ast$Expr_StrLit, Expr_BoolLit as ast$Expr_BoolLit, Expr_Ident as ast$Expr_Ident, Expr_BinOp as ast$Expr_BinOp, Expr_UnaryOp as ast$Expr_UnaryOp, Expr_Call as ast$Expr_Call, Expr_MethodCall as ast$Expr_MethodCall, Expr_FieldAccess as ast$Expr_FieldAccess, Expr_StructLit as ast$Expr_StructLit, Expr_MatchExpr as ast$Expr_MatchExpr, Expr_Block as ast$Expr_Block, Expr_IfExpr as ast$Expr_IfExpr, Expr_StringInterp as ast$Expr_StringInterp, Expr_CatchExpr as ast$Expr_CatchExpr, Expr_HandleExpr as ast$Expr_HandleExpr, Expr_Lambda as ast$Expr_Lambda, Expr_Range as ast$Expr_Range, Expr_ListLit as ast$Expr_ListLit, Expr_TupleLit as ast$Expr_TupleLit, Expr_IndexExpr as ast$Expr_IndexExpr, Expr_ReturnExpr as ast$Expr_ReturnExpr, LiteralValue_IntVal as ast$LiteralValue_IntVal, LiteralValue_FloatVal as ast$LiteralValue_FloatVal, LiteralValue_StrVal as ast$LiteralValue_StrVal, LiteralValue_BoolVal as ast$LiteralValue_BoolVal, MatchArm as ast$MatchArm, NamedEnumField as ast$NamedEnumField, NamedImport as ast$NamedImport, NamedPatternField as ast$NamedPatternField, Param as ast$Param, Pattern_Wildcard as ast$Pattern_Wildcard, Pattern_Binding as ast$Pattern_Binding, Pattern_Constructor as ast$Pattern_Constructor, Pattern_NamedConstructor as ast$Pattern_NamedConstructor, Pattern_Literal as ast$Pattern_Literal, Pattern_TuplePattern as ast$Pattern_TuplePattern, Pattern_OrPattern as ast$Pattern_OrPattern, Position as ast$Position, Program as ast$Program, RecordTypeField as ast$RecordTypeField, SigMember as ast$SigMember, Span as ast$Span, Stmt_Let as ast$Stmt_Let, Stmt_Var as ast$Stmt_Var, Stmt_Assign as ast$Stmt_Assign, Stmt_ExprStmt as ast$Stmt_ExprStmt, Stmt_Return as ast$Stmt_Return, Stmt_While as ast$Stmt_While, Stmt_ForIn as ast$Stmt_ForIn, Stmt_Break as ast$Stmt_Break, Stmt_Continue as ast$Stmt_Continue, Stmt_LetDestructure as ast$Stmt_LetDestructure, Stmt_IfLet as ast$Stmt_IfLet, StringInterpPart_LitPart as ast$StringInterpPart_LitPart, StringInterpPart_ExprPart as ast$StringInterpPart_ExprPart, StructFieldDecl as ast$StructFieldDecl, StructFieldInit as ast$StructFieldInit, TypeBound as ast$TypeBound, TypeExpr_Named as ast$TypeExpr_Named, TypeExpr_FnType as ast$TypeExpr_FnType, TypeExpr_OptionType as ast$TypeExpr_OptionType, TypeExpr_RecordType as ast$TypeExpr_RecordType, TypeExpr_TupleType as ast$TypeExpr_TupleType, TypeParam as ast$TypeParam, UnaryOp_Neg as ast$UnaryOp_Neg, UnaryOp_Not as ast$UnaryOp_Not, UseDecl as ast$UseDecl, UseImport_NamedItems as ast$UseImport_NamedItems, UseImport_Module as ast$UseImport_Module, UsePath as ast$UsePath, __BinOp_Eq as ast$__BinOp_Eq, __BinOp_Clone as ast$__BinOp_Clone, __BinOp_Ord as ast$__BinOp_Ord, __BinOp_Debug as ast$__BinOp_Debug, __DestructureBinding_Clone as ast$__DestructureBinding_Clone, __DestructureBinding_Debug as ast$__DestructureBinding_Debug, __LiteralValue_Eq as ast$__LiteralValue_Eq, __LiteralValue_Clone as ast$__LiteralValue_Clone, __LiteralValue_Ord as ast$__LiteralValue_Ord, __LiteralValue_Debug as ast$__LiteralValue_Debug, __NamedImport_Eq as ast$__NamedImport_Eq, __NamedImport_Clone as ast$__NamedImport_Clone, __NamedImport_Debug as ast$__NamedImport_Debug, __Position_Eq as ast$__Position_Eq, __Position_Clone as ast$__Position_Clone, __Position_Ord as ast$__Position_Ord, __Position_Debug as ast$__Position_Debug, __Span_Eq as ast$__Span_Eq, __Span_Clone as ast$__Span_Clone, __Span_Ord as ast$__Span_Ord, __Span_Debug as ast$__Span_Debug, __UnaryOp_Eq as ast$__UnaryOp_Eq, __UnaryOp_Clone as ast$__UnaryOp_Clone, __UnaryOp_Ord as ast$__UnaryOp_Ord, __UnaryOp_Debug as ast$__UnaryOp_Debug, __UseDecl_Clone as ast$__UseDecl_Clone, __UseDecl_Debug as ast$__UseDecl_Debug, __UseImport_Clone as ast$__UseImport_Clone, __UseImport_Debug as ast$__UseImport_Debug, __UsePath_Clone as ast$__UsePath_Clone, __UsePath_Debug as ast$__UsePath_Debug } from "./ast.js";
-import { BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, FLOAT_METHODS as hir$FLOAT_METHODS, INT_METHODS as hir$INT_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, SET_HOF_METHODS as hir$SET_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, STR_METHODS as hir$STR_METHODS, collect_extern_type_names as hir$collect_extern_type_names, default_evidence_name as hir$default_evidence_name, default_method_self_name as hir$default_method_self_name, dict_instance_name as hir$dict_instance_name, effect_op_slot as hir$effect_op_slot, evidence_param_name as hir$evidence_param_name, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, hexpr_type as hir$hexpr_type, is_borrow_returning_call as hir$is_borrow_returning_call, is_extern_handle_type as hir$is_extern_handle_type, is_fresh_owned_bool_value as hir$is_fresh_owned_bool_value, is_rc_excluded_type as hir$is_rc_excluded_type, trait_bound_param_name as hir$trait_bound_param_name, trait_dict_name as hir$trait_dict_name, type_contains_extern_handle as hir$type_contains_extern_handle, variant_js_name as hir$variant_js_name, DerivedField as hir$DerivedField, DerivedImpl as hir$DerivedImpl, DerivedVariant as hir$DerivedVariant, DictDispatchInfo as hir$DictDispatchInfo, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, DictRef_Static as hir$DictRef_Static, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_FloatIdentity as hir$FieldAction_FloatIdentity, FieldAction_BoolIdentity as hir$FieldAction_BoolIdentity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, HAssocType as hir$HAssocType, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, HDictDef as hir$HDictDef, HEffectHandler as hir$HEffectHandler, HEffectOp as hir$HEffectOp, HEnumVariant as hir$HEnumVariant, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HExpr_DictConstruct as hir$HExpr_DictConstruct, HExpr_Clone as hir$HExpr_Clone, HExpr_ReturnExpr as hir$HExpr_ReturnExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HMatchArm as hir$HMatchArm, HParam as hir$HParam, HProgram as hir$HProgram, HSigMember as hir$HSigMember, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HStructField as hir$HStructField, HStructFieldInit as hir$HStructFieldInit, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __HDictDef_Clone as hir$__HDictDef_Clone, __HDictDef_Debug as hir$__HDictDef_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug } from "./hir.js";
+import { BUILTIN_BOOL as hir$BUILTIN_BOOL, BUILTIN_CELL as hir$BUILTIN_CELL, BUILTIN_FLOAT as hir$BUILTIN_FLOAT, BUILTIN_INT as hir$BUILTIN_INT, BUILTIN_LIST as hir$BUILTIN_LIST, BUILTIN_MAP as hir$BUILTIN_MAP, BUILTIN_OPTION as hir$BUILTIN_OPTION, BUILTIN_RANGE as hir$BUILTIN_RANGE, BUILTIN_SET as hir$BUILTIN_SET, BUILTIN_STR as hir$BUILTIN_STR, BUILTIN_STRING_BUILDER as hir$BUILTIN_STRING_BUILDER, CELL_METHODS as hir$CELL_METHODS, ENUM_TAG_FIELD as hir$ENUM_TAG_FIELD, FLOAT_METHODS as hir$FLOAT_METHODS, INT_METHODS as hir$INT_METHODS, LIST_HOF_METHODS as hir$LIST_HOF_METHODS, LIST_NON_HOF_METHODS as hir$LIST_NON_HOF_METHODS, MAP_HOF_METHODS as hir$MAP_HOF_METHODS, MAP_NON_HOF_METHODS as hir$MAP_NON_HOF_METHODS, OPTION_HOF_METHODS as hir$OPTION_HOF_METHODS, OPTION_NONE_TAG as hir$OPTION_NONE_TAG, OPTION_NON_HOF_METHODS as hir$OPTION_NON_HOF_METHODS, OPTION_PAYLOAD_FIELD as hir$OPTION_PAYLOAD_FIELD, OPTION_SOME_TAG as hir$OPTION_SOME_TAG, RUNTIME_EFFECT_ABORT as hir$RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL as hir$RUNTIME_MATCH_FAIL, SET_HOF_METHODS as hir$SET_HOF_METHODS, SET_NON_HOF_METHODS as hir$SET_NON_HOF_METHODS, STRINGBUILDER_METHODS as hir$STRINGBUILDER_METHODS, STR_METHODS as hir$STR_METHODS, collect_extern_type_names as hir$collect_extern_type_names, compare_by_first as hir$compare_by_first, default_evidence_name as hir$default_evidence_name, default_method_self_name as hir$default_method_self_name, dict_instance_name as hir$dict_instance_name, effect_op_slot as hir$effect_op_slot, evidence_param_name as hir$evidence_param_name, hexpr_effects as hir$hexpr_effects, hexpr_span as hir$hexpr_span, hexpr_type as hir$hexpr_type, is_borrow_returning_call as hir$is_borrow_returning_call, is_extern_handle_type as hir$is_extern_handle_type, is_fresh_owned_bool_value as hir$is_fresh_owned_bool_value, is_rc_excluded_type as hir$is_rc_excluded_type, trait_bound_param_name as hir$trait_bound_param_name, trait_dict_name as hir$trait_dict_name, type_contains_extern_handle as hir$type_contains_extern_handle, variant_js_name as hir$variant_js_name, DerivedField as hir$DerivedField, DerivedImpl as hir$DerivedImpl, DerivedVariant as hir$DerivedVariant, DictDispatchInfo as hir$DictDispatchInfo, DictRef_Simple as hir$DictRef_Simple, DictRef_Wrapped as hir$DictRef_Wrapped, DictRef_Static as hir$DictRef_Static, FieldAction_Identity as hir$FieldAction_Identity, FieldAction_FloatIdentity as hir$FieldAction_FloatIdentity, FieldAction_BoolIdentity as hir$FieldAction_BoolIdentity, FieldAction_Call as hir$FieldAction_Call, FieldAction_Tuple as hir$FieldAction_Tuple, FieldAction_FnLiteral as hir$FieldAction_FnLiteral, HAssocType as hir$HAssocType, HDecl_Fn as hir$HDecl_Fn, HDecl_Struct as hir$HDecl_Struct, HDecl_Enum as hir$HDecl_Enum, HDecl_Impl as hir$HDecl_Impl, HDecl_Effect as hir$HDecl_Effect, HDecl_Test as hir$HDecl_Test, HDecl_Trait as hir$HDecl_Trait, HDecl_ExternFn as hir$HDecl_ExternFn, HDecl_ExternType as hir$HDecl_ExternType, HDecl_TypeAlias as hir$HDecl_TypeAlias, HDecl_Const as hir$HDecl_Const, HDecl_ModBlock as hir$HDecl_ModBlock, HDecl_Sig as hir$HDecl_Sig, HDictDef as hir$HDictDef, HEffectHandler as hir$HEffectHandler, HEffectOp as hir$HEffectOp, HEnumVariant as hir$HEnumVariant, HExpr_IntLit as hir$HExpr_IntLit, HExpr_FloatLit as hir$HExpr_FloatLit, HExpr_StrLit as hir$HExpr_StrLit, HExpr_BoolLit as hir$HExpr_BoolLit, HExpr_Ident as hir$HExpr_Ident, HExpr_BinOp as hir$HExpr_BinOp, HExpr_UnaryOp as hir$HExpr_UnaryOp, HExpr_Call as hir$HExpr_Call, HExpr_FieldAccess as hir$HExpr_FieldAccess, HExpr_StructLit as hir$HExpr_StructLit, HExpr_NamedVariantConstruct as hir$HExpr_NamedVariantConstruct, HExpr_MatchExpr as hir$HExpr_MatchExpr, HExpr_Block as hir$HExpr_Block, HExpr_IfExpr as hir$HExpr_IfExpr, HExpr_StringInterp as hir$HExpr_StringInterp, HExpr_TryCatch as hir$HExpr_TryCatch, HExpr_HandleExpr as hir$HExpr_HandleExpr, HExpr_Lambda as hir$HExpr_Lambda, HExpr_EffectOp as hir$HExpr_EffectOp, HExpr_RangeExpr as hir$HExpr_RangeExpr, HExpr_ListLit as hir$HExpr_ListLit, HExpr_TupleLit as hir$HExpr_TupleLit, HExpr_IndexExpr as hir$HExpr_IndexExpr, HExpr_DictConstruct as hir$HExpr_DictConstruct, HExpr_Clone as hir$HExpr_Clone, HExpr_ReturnExpr as hir$HExpr_ReturnExpr, HForInDestructure as hir$HForInDestructure, HLetDestructureBinding as hir$HLetDestructureBinding, HMatchArm as hir$HMatchArm, HParam as hir$HParam, HProgram as hir$HProgram, HSigMember as hir$HSigMember, HStmt_Let as hir$HStmt_Let, HStmt_Var as hir$HStmt_Var, HStmt_Assign as hir$HStmt_Assign, HStmt_ExprStmt as hir$HStmt_ExprStmt, HStmt_Return as hir$HStmt_Return, HStmt_While as hir$HStmt_While, HStmt_ForIn as hir$HStmt_ForIn, HStmt_Break as hir$HStmt_Break, HStmt_Continue as hir$HStmt_Continue, HStmt_LetDestructure as hir$HStmt_LetDestructure, HStmt_IfLet as hir$HStmt_IfLet, HStmt_Drop as hir$HStmt_Drop, HStmt_Dup as hir$HStmt_Dup, HStringInterpPart_Literal as hir$HStringInterpPart_Literal, HStringInterpPart_Expression as hir$HStringInterpPart_Expression, HStructField as hir$HStructField, HStructFieldInit as hir$HStructFieldInit, HTraitMethod as hir$HTraitMethod, TraitBound as hir$TraitBound, TraitDispatch_Builtin as hir$TraitDispatch_Builtin, TraitDispatch_Direct as hir$TraitDispatch_Direct, TraitDispatch_Dict as hir$TraitDispatch_Dict, TypeKind_StructKind as hir$TypeKind_StructKind, TypeKind_EnumKind as hir$TypeKind_EnumKind, __DerivedField_Clone as hir$__DerivedField_Clone, __DerivedField_Debug as hir$__DerivedField_Debug, __DerivedImpl_Clone as hir$__DerivedImpl_Clone, __DerivedImpl_Debug as hir$__DerivedImpl_Debug, __DerivedVariant_Clone as hir$__DerivedVariant_Clone, __DerivedVariant_Debug as hir$__DerivedVariant_Debug, __DictDispatchInfo_Eq as hir$__DictDispatchInfo_Eq, __DictDispatchInfo_Clone as hir$__DictDispatchInfo_Clone, __DictDispatchInfo_Ord as hir$__DictDispatchInfo_Ord, __DictDispatchInfo_Debug as hir$__DictDispatchInfo_Debug, __DictRef_Clone as hir$__DictRef_Clone, __DictRef_Debug as hir$__DictRef_Debug, __FieldAction_Clone as hir$__FieldAction_Clone, __FieldAction_Debug as hir$__FieldAction_Debug, __HDictDef_Clone as hir$__HDictDef_Clone, __HDictDef_Debug as hir$__HDictDef_Debug, __HForInDestructure_Eq as hir$__HForInDestructure_Eq, __HForInDestructure_Clone as hir$__HForInDestructure_Clone, __HForInDestructure_Debug as hir$__HForInDestructure_Debug, __TraitBound_Eq as hir$__TraitBound_Eq, __TraitBound_Clone as hir$__TraitBound_Clone, __TraitBound_Ord as hir$__TraitBound_Ord, __TraitBound_Debug as hir$__TraitBound_Debug, __TraitDispatch_Clone as hir$__TraitDispatch_Clone, __TraitDispatch_Debug as hir$__TraitDispatch_Debug, __TypeKind_Eq as hir$__TypeKind_Eq, __TypeKind_Clone as hir$__TypeKind_Clone, __TypeKind_Ord as hir$__TypeKind_Ord, __TypeKind_Debug as hir$__TypeKind_Debug } from "./hir.js";
 import { RING_TYPEID_CELL as codegen_llvm_ctx$RING_TYPEID_CELL, RING_TYPEID_CLOSURE as codegen_llvm_ctx$RING_TYPEID_CLOSURE, RING_TYPEID_CLOSURE_ENV as codegen_llvm_ctx$RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_DYN as codegen_llvm_ctx$RING_TYPEID_DICT_DYN, RING_TYPEID_DICT_STATIC as codegen_llvm_ctx$RING_TYPEID_DICT_STATIC, RING_TYPEID_EVIDENCE as codegen_llvm_ctx$RING_TYPEID_EVIDENCE, RING_TYPEID_TUPLE as codegen_llvm_ctx$RING_TYPEID_TUPLE, build_entry_alloca as codegen_llvm_ctx$build_entry_alloca, fresh_name as codegen_llvm_ctx$fresh_name, get_or_assign_typeid as codegen_llvm_ctx$get_or_assign_typeid, get_or_declare_runtime_fn as codegen_llvm_ctx$get_or_declare_runtime_fn, get_rt_fn_type as codegen_llvm_ctx$get_rt_fn_type, llvm_mangle_fn as codegen_llvm_ctx$llvm_mangle_fn, llvm_mangle_fn_with_prefix as codegen_llvm_ctx$llvm_mangle_fn_with_prefix, llvm_mangle_method as codegen_llvm_ctx$llvm_mangle_method, llvm_resolve_fn as codegen_llvm_ctx$llvm_resolve_fn, llvm_resolve_method as codegen_llvm_ctx$llvm_resolve_method, EnumTypeInfo as codegen_llvm_ctx$EnumTypeInfo, EnumVariantInfo as codegen_llvm_ctx$EnumVariantInfo, ExternFnInfo as codegen_llvm_ctx$ExternFnInfo, ExternParamMarshall_PassthroughPtr as codegen_llvm_ctx$ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr as codegen_llvm_ctx$ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen as codegen_llvm_ctx$ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32 as codegen_llvm_ctx$ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64 as codegen_llvm_ctx$ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble as codegen_llvm_ctx$ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount as codegen_llvm_ctx$ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64 as codegen_llvm_ctx$ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr as codegen_llvm_ctx$ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid as codegen_llvm_ctx$ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed as codegen_llvm_ctx$ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr as codegen_llvm_ctx$ExternRetMarshall_RetStrFromCstr, HandleCleanup as codegen_llvm_ctx$HandleCleanup, LlvmCtx as codegen_llvm_ctx$LlvmCtx, StructFieldInfo as codegen_llvm_ctx$StructFieldInfo, __EnumVariantInfo_Clone as codegen_llvm_ctx$__EnumVariantInfo_Clone, __EnumVariantInfo_Debug as codegen_llvm_ctx$__EnumVariantInfo_Debug, __ExternParamMarshall_Eq as codegen_llvm_ctx$__ExternParamMarshall_Eq, __ExternParamMarshall_Clone as codegen_llvm_ctx$__ExternParamMarshall_Clone, __ExternParamMarshall_Ord as codegen_llvm_ctx$__ExternParamMarshall_Ord, __ExternParamMarshall_Debug as codegen_llvm_ctx$__ExternParamMarshall_Debug, __ExternRetMarshall_Eq as codegen_llvm_ctx$__ExternRetMarshall_Eq, __ExternRetMarshall_Clone as codegen_llvm_ctx$__ExternRetMarshall_Clone, __ExternRetMarshall_Ord as codegen_llvm_ctx$__ExternRetMarshall_Ord, __ExternRetMarshall_Debug as codegen_llvm_ctx$__ExternRetMarshall_Debug } from "./codegen_llvm_ctx.js";
 import { emit_llvm_stmt as codegen_llvm_stmt$emit_llvm_stmt } from "./codegen_llvm_stmt.js";
 import { LIST_HOF_JS_METHOD as codegen_ctx$LIST_HOF_JS_METHOD, emit as codegen_ctx$emit, emit_raw as codegen_ctx$emit_raw, extract_effect_names as codegen_ctx$extract_effect_names, get_evidence_params as codegen_ctx$get_evidence_params, is_imported_name as codegen_ctx$is_imported_name, new_codegen_ctx as codegen_ctx$new_codegen_ctx, pop_indent as codegen_ctx$pop_indent, push_indent as codegen_ctx$push_indent, qualify as codegen_ctx$qualify, safe_ident as codegen_ctx$safe_ident, CodegenCtx as codegen_ctx$CodegenCtx, HTraitDeclInfo as codegen_ctx$HTraitDeclInfo } from "./codegen_ctx.js";
@@ -352,7 +352,7 @@ function find_enum_by_variant(ctx, variant_name, qualifier) {
     __match_fail(__ring_m8);
   }
   let sorted_enums = _Map_entries(ctx.enum_types);
-  sorted_enums.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+  sorted_enums.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
   const __ring_iter_2 = __List_Iterable.iter(sorted_enums);
   while (true) {
     const __ring_next_2 = __ListIterator_Iterator.next(__ring_iter_2);
@@ -387,7 +387,7 @@ function resolve_struct_type(ctx, name) {
     if (__ring_m10._tag === "none") {
       const suffix = `::${name}`;
       let sorted = _Map_entries(ctx.struct_types);
-      sorted.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+      sorted.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
       let result = Option_none;
       const __ring_iter_3 = __List_Iterable.iter(sorted);
       while (true) {
@@ -2809,127 +2809,98 @@ function get_trait_method_index(ctx, dict_param, method) {
 function extern_fn_to_runtime(name) {
   if ((name === "print")) {
     return Option_some("ring_print");
-  } else {
-    if ((name === "panic")) {
-      return Option_some("ring_panic");
-    } else {
-      if ((name === "eprintln")) {
-        return Option_some("ring_eprintln");
-      } else {
-        if (((name === "exit") ? true : (name === "exit_process"))) {
-          return Option_some("ring_exit");
-        } else {
-          if ((name === "argv")) {
-            return Option_some("ring_args");
-          } else {
-            if ((name === "string_builder")) {
-              return Option_some("ring_sb_new");
-            } else {
-              if ((name === "map_new")) {
-                return Option_some("ring_map_new");
-              } else {
-                if ((name === "set_new")) {
-                  return Option_some("ring_set_new");
-                } else {
-                  if ((name === "read_file")) {
-                    return Option_some("ring_read_file");
-                  } else {
-                    if ((name === "write_file")) {
-                      return Option_some("ring_write_file");
-                    } else {
-                      if ((name === "file_exists")) {
-                        return Option_some("ring_file_exists");
-                      } else {
-                        if ((name === "delete_file")) {
-                          return Option_some("ring_delete_file");
-                        } else {
-                          if ((name === "path_join")) {
-                            return Option_some("ring_path_join");
-                          } else {
-                            if ((name === "path_resolve")) {
-                              return Option_some("ring_path_resolve");
-                            } else {
-                              if ((name === "path_dirname")) {
-                                return Option_some("ring_path_dirname");
-                              } else {
-                                if ((name === "path_basename")) {
-                                  return Option_some("ring_path_basename");
-                                } else {
-                                  if ((name === "path_extname")) {
-                                    return Option_some("ring_path_extname");
-                                  } else {
-                                    if ((name === "cwd")) {
-                                      return Option_some("ring_cwd");
-                                    } else {
-                                      if ((name === "parse_int")) {
-                                        return Option_some("ring_parse_int");
-                                      } else {
-                                        if ((name === "parse_float")) {
-                                          return Option_some("ring_parse_float");
-                                        } else {
-                                          if ((name === "set_from")) {
-                                            return Option_some("ring_set_from_list");
-                                          } else {
-                                            if ((name === "list_new")) {
-                                              return Option_some("ring_list_new");
-                                            } else {
-                                              if ((name === "map_from")) {
-                                                return Option_some("ring_map_from");
-                                              } else {
-                                                if ((name === "__ring_raise_fail")) {
-                                                  return Option_some("__ring_raise_fail");
-                                                } else {
-                                                  if ((name === "map_int_new")) {
-                                                    return Option_some("ring_map_int_new");
-                                                  } else {
-                                                    if ((name === "set_int_new")) {
-                                                      return Option_some("ring_set_int_new");
-                                                    } else {
-                                                      if ((name === "map_int_from")) {
-                                                        return Option_some("ring_map_int_from");
-                                                      } else {
-                                                        if ((name === "set_int_from")) {
-                                                          return Option_some("ring_set_int_from_list");
-                                                        } else {
-                                                          if ((name === "Cell")) {
-                                                            return Option_some("ring_Cell_new");
-                                                          } else {
-                                                            return Option_none;
-                                                          }
-                                                        }
-                                                      }
-                                                    }
-                                                  }
-                                                }
-                                              }
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
   }
+  if ((name === "panic")) {
+    return Option_some("ring_panic");
+  }
+  if ((name === "eprintln")) {
+    return Option_some("ring_eprintln");
+  }
+  if (((name === "exit") ? true : (name === "exit_process"))) {
+    return Option_some("ring_exit");
+  }
+  if ((name === "argv")) {
+    return Option_some("ring_args");
+  }
+  if ((name === "string_builder")) {
+    return Option_some("ring_sb_new");
+  }
+  if ((name === "map_new")) {
+    return Option_some("ring_map_new");
+  }
+  if ((name === "set_new")) {
+    return Option_some("ring_set_new");
+  }
+  if ((name === "read_file")) {
+    return Option_some("ring_read_file");
+  }
+  if ((name === "write_file")) {
+    return Option_some("ring_write_file");
+  }
+  if ((name === "file_exists")) {
+    return Option_some("ring_file_exists");
+  }
+  if ((name === "delete_file")) {
+    return Option_some("ring_delete_file");
+  }
+  if ((name === "path_join")) {
+    return Option_some("ring_path_join");
+  }
+  if ((name === "path_resolve")) {
+    return Option_some("ring_path_resolve");
+  }
+  if ((name === "path_dirname")) {
+    return Option_some("ring_path_dirname");
+  }
+  if ((name === "path_basename")) {
+    return Option_some("ring_path_basename");
+  }
+  if ((name === "path_extname")) {
+    return Option_some("ring_path_extname");
+  }
+  if ((name === "cwd")) {
+    return Option_some("ring_cwd");
+  }
+  if ((name === "parse_int")) {
+    return Option_some("ring_parse_int");
+  }
+  if ((name === "parse_float")) {
+    return Option_some("ring_parse_float");
+  }
+  if ((name === "set_from")) {
+    return Option_some("ring_set_from_list");
+  }
+  if ((name === "list_new")) {
+    return Option_some("ring_list_new");
+  }
+  if ((name === "map_from")) {
+    return Option_some("ring_map_from");
+  }
+  if ((name === "__ring_raise_fail")) {
+    return Option_some("__ring_raise_fail");
+  }
+  if ((name === "map_int_new")) {
+    return Option_some("ring_map_int_new");
+  }
+  if ((name === "set_int_new")) {
+    return Option_some("ring_set_int_new");
+  }
+  if ((name === "map_int_from")) {
+    return Option_some("ring_map_int_from");
+  }
+  if ((name === "set_int_from")) {
+    return Option_some("ring_set_int_from_list");
+  }
+  if ((name === "Cell")) {
+    return Option_some("ring_Cell_new");
+  }
+  return Option_none;
 }
 
 function find_fn_by_prefix_enumeration(ctx, name) {
   let seen_prefixes = set_new();
   let sorted_imports = _Map_entries(ctx.imports_map);
-  sorted_imports.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+  sorted_imports.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
   const __ring_iter_63 = __List_Iterable.iter(sorted_imports);
   while (true) {
     const __ring_next_63 = __ListIterator_Iterator.next(__ring_iter_63);
@@ -2974,7 +2945,7 @@ function find_fn_by_prefix_enumeration(ctx, name) {
 function find_fn_by_suffix(ctx, name) {
   const suffix = `$$_${name}`;
   let sorted_fns = _Map_entries(ctx.functions);
-  sorted_fns.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+  sorted_fns.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
   const __ring_iter_64 = __List_Iterable.iter(sorted_fns);
   while (true) {
     const __ring_next_64 = __ListIterator_Iterator.next(__ring_iter_64);
@@ -3658,53 +3629,41 @@ function gen_direct_call(ctx, name, arg_vals, dict_vals) {
 function rt_method_int_arg_count(name) {
   if ((name === "ring_list_get")) {
     return 1;
-  } else {
-    if ((name === "ring_list_get_opt")) {
-      return 1;
-    } else {
-      if ((name === "ring_str_get")) {
-        return 1;
-      } else {
-        if ((name === "ring_str_slice")) {
-          return 2;
-        } else {
-          if ((name === "ring_list_slice")) {
-            return 2;
-          } else {
-            if ((name === "ring_list_set")) {
-              return 1;
-            } else {
-              if ((name === "ring_str_char_at")) {
-                return 1;
-              } else {
-                if ((name === "ring_str_char_code_at")) {
-                  return 1;
-                } else {
-                  if ((name === "ring_str_pad_start")) {
-                    return 1;
-                  } else {
-                    if ((name === "ring_str_pad_end")) {
-                      return 1;
-                    } else {
-                      if ((name === "ring_str_repeat")) {
-                        return 1;
-                      } else {
-                        if ((name === "ring_sb_add_int")) {
-                          return 1;
-                        } else {
-                          return 0;
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
   }
+  if ((name === "ring_list_get_opt")) {
+    return 1;
+  }
+  if ((name === "ring_str_get")) {
+    return 1;
+  }
+  if ((name === "ring_str_slice")) {
+    return 2;
+  }
+  if ((name === "ring_list_slice")) {
+    return 2;
+  }
+  if ((name === "ring_list_set")) {
+    return 1;
+  }
+  if ((name === "ring_str_char_at")) {
+    return 1;
+  }
+  if ((name === "ring_str_char_code_at")) {
+    return 1;
+  }
+  if ((name === "ring_str_pad_start")) {
+    return 1;
+  }
+  if ((name === "ring_str_pad_end")) {
+    return 1;
+  }
+  if ((name === "ring_str_repeat")) {
+    return 1;
+  }
+  if ((name === "ring_sb_add_int")) {
+    return 1;
+  }
+  return 0;
 }
 
 function ensure_runtime_method(ctx, name, arg_count) {
@@ -3816,397 +3775,299 @@ function is_int_set(ty) {
 function method_to_runtime(type_name, method) {
   if (((type_name === "Str") ? (method === "len") : false)) {
     return Option_some("ring_str_len");
-  } else {
-    if (((type_name === "Str") ? (method === "contains") : false)) {
-      return Option_some("ring_str_contains");
-    } else {
-      if (((type_name === "Str") ? (method === "starts_with") : false)) {
-        return Option_some("ring_str_starts_with");
-      } else {
-        if (((type_name === "Str") ? (method === "ends_with") : false)) {
-          return Option_some("ring_str_ends_with");
-        } else {
-          if (((type_name === "Str") ? (method === "slice") : false)) {
-            return Option_some("ring_str_slice");
-          } else {
-            if (((type_name === "Str") ? (method === "split") : false)) {
-              return Option_some("ring_str_split");
-            } else {
-              if (((type_name === "Str") ? (method === "replace") : false)) {
-                return Option_some("ring_str_replace");
-              } else {
-                if (((type_name === "Str") ? (method === "get") : false)) {
-                  return Option_some("ring_str_get");
-                } else {
-                  if (((type_name === "Str") ? (method === "trim") : false)) {
-                    return Option_some("ring_str_trim");
-                  } else {
-                    if (((type_name === "Str") ? (method === "trim_start") : false)) {
-                      return Option_some("ring_str_trim_start");
-                    } else {
-                      if (((type_name === "Str") ? (method === "trim_end") : false)) {
-                        return Option_some("ring_str_trim_end");
-                      } else {
-                        if (((type_name === "Str") ? (method === "to_upper") : false)) {
-                          return Option_some("ring_str_to_upper");
-                        } else {
-                          if (((type_name === "Str") ? (method === "to_lower") : false)) {
-                            return Option_some("ring_str_to_lower");
-                          } else {
-                            if (((type_name === "Str") ? (method === "char_at") : false)) {
-                              return Option_some("ring_str_char_at");
-                            } else {
-                              if (((type_name === "Str") ? (method === "char_code_at") : false)) {
-                                return Option_some("ring_str_char_code_at");
-                              } else {
-                                if (((type_name === "Str") ? (method === "index_of") : false)) {
-                                  return Option_some("ring_str_index_of");
-                                } else {
-                                  if (((type_name === "Str") ? (method === "pad_start") : false)) {
-                                    return Option_some("ring_str_pad_start");
-                                  } else {
-                                    if (((type_name === "Str") ? (method === "pad_end") : false)) {
-                                      return Option_some("ring_str_pad_end");
-                                    } else {
-                                      if (((type_name === "Str") ? (method === "repeat") : false)) {
-                                        return Option_some("ring_str_repeat");
-                                      } else {
-                                        if (((type_name === "Str") ? (method === "is_empty") : false)) {
-                                          return Option_some("ring_str_is_empty");
-                                        } else {
-                                          if (((type_name === "Str") ? (method === "last_index_of") : false)) {
-                                            return Option_some("ring_str_last_index_of");
-                                          } else {
-                                            if (((type_name === "Int") ? (method === "to_str") : false)) {
-                                              return Option_some("ring_int_to_str");
-                                            } else {
-                                              if (((type_name === "Float") ? (method === "to_str") : false)) {
-                                                return Option_some("ring_float_to_str");
-                                              } else {
-                                                if (((type_name === "Bool") ? (method === "to_str") : false)) {
-                                                  return Option_some("ring_bool_to_str");
-                                                } else {
-                                                  if (((type_name === "StringBuilder") ? (method === "add") : false)) {
-                                                    return Option_some("ring_sb_add");
-                                                  } else {
-                                                    if (((type_name === "StringBuilder") ? (method === "to_str") : false)) {
-                                                      return Option_some("ring_sb_to_str");
-                                                    } else {
-                                                      if (((type_name === "StringBuilder") ? (method === "len") : false)) {
-                                                        return Option_some("ring_sb_len");
-                                                      } else {
-                                                        if (((type_name === "StringBuilder") ? (method === "line") : false)) {
-                                                          return Option_some("ring_sb_line");
-                                                        } else {
-                                                          if (((type_name === "StringBuilder") ? (method === "add_int") : false)) {
-                                                            return Option_some("ring_sb_add_int");
-                                                          } else {
-                                                            if (((type_name === "List") ? (method === "push") : false)) {
-                                                              return Option_some("ring_list_push");
-                                                            } else {
-                                                              if (((type_name === "List") ? (method === "len") : false)) {
-                                                                return Option_some("ring_list_len");
-                                                              } else {
-                                                                if (((type_name === "List") ? (method === "get") : false)) {
-                                                                  return Option_some("ring_list_get_opt");
-                                                                } else {
-                                                                  if (((type_name === "List") ? (method === "join") : false)) {
-                                                                    return Option_some("ring_list_join");
-                                                                  } else {
-                                                                    if (((type_name === "List") ? (method === "concat") : false)) {
-                                                                      return Option_some("ring_list_concat");
-                                                                    } else {
-                                                                      if (((type_name === "List") ? (method === "slice") : false)) {
-                                                                        return Option_some("ring_list_slice");
-                                                                      } else {
-                                                                        if (((type_name === "List") ? (method === "reverse") : false)) {
-                                                                          return Option_some("ring_list_reverse");
-                                                                        } else {
-                                                                          if (((type_name === "List") ? (method === "sort_by") : false)) {
-                                                                            return Option_some("ring_list_sort");
-                                                                          } else {
-                                                                            if (((type_name === "List") ? (method === "is_empty") : false)) {
-                                                                              return Option_some("ring_list_is_empty");
-                                                                            } else {
-                                                                              if (((type_name === "List") ? (method === "first") : false)) {
-                                                                                return Option_some("ring_list_first");
-                                                                              } else {
-                                                                                if (((type_name === "List") ? (method === "last") : false)) {
-                                                                                  return Option_some("ring_list_last");
-                                                                                } else {
-                                                                                  if (((type_name === "List") ? (method === "pop") : false)) {
-                                                                                    return Option_some("ring_list_pop");
-                                                                                  } else {
-                                                                                    if (((type_name === "List") ? (method === "set") : false)) {
-                                                                                      return Option_some("ring_list_set");
-                                                                                    } else {
-                                                                                      if (((type_name === "List") ? (method === "map") : false)) {
-                                                                                        return Option_some("ring_list_map");
-                                                                                      } else {
-                                                                                        if (((type_name === "List") ? (method === "filter") : false)) {
-                                                                                          return Option_some("ring_list_filter");
-                                                                                        } else {
-                                                                                          if (((type_name === "List") ? (method === "for_each") : false)) {
-                                                                                            return Option_some("ring_list_for_each");
-                                                                                          } else {
-                                                                                            if (((type_name === "List") ? (method === "any") : false)) {
-                                                                                              return Option_some("ring_list_any");
-                                                                                            } else {
-                                                                                              if (((type_name === "List") ? (method === "all") : false)) {
-                                                                                                return Option_some("ring_list_all");
-                                                                                              } else {
-                                                                                                if (((type_name === "List") ? (method === "find") : false)) {
-                                                                                                  return Option_some("ring_list_find");
-                                                                                                } else {
-                                                                                                  if (((type_name === "List") ? (method === "find_index") : false)) {
-                                                                                                    return Option_some("ring_list_find_index");
-                                                                                                  } else {
-                                                                                                    if (((type_name === "List") ? (method === "fold") : false)) {
-                                                                                                      return Option_some("ring_list_fold");
-                                                                                                    } else {
-                                                                                                      if (((type_name === "List") ? (method === "flat_map") : false)) {
-                                                                                                        return Option_some("ring_list_flat_map");
-                                                                                                      } else {
-                                                                                                        if (((type_name === "List") ? (method === "clear") : false)) {
-                                                                                                          return Option_some("ring_list_clear");
-                                                                                                        } else {
-                                                                                                          if (((type_name === "List") ? (method === "shift") : false)) {
-                                                                                                            return Option_some("ring_list_shift");
-                                                                                                          } else {
-                                                                                                            if (((type_name === "List") ? (method === "extend") : false)) {
-                                                                                                              return Option_some("ring_list_extend");
-                                                                                                            } else {
-                                                                                                              if (((type_name === "Map") ? (method === "get") : false)) {
-                                                                                                                return Option_some("ring_map_get_opt");
-                                                                                                              } else {
-                                                                                                                if (((type_name === "Map") ? (method === "insert") : false)) {
-                                                                                                                  return Option_some("ring_map_set");
-                                                                                                                } else {
-                                                                                                                  if (((type_name === "Map") ? (method === "contains_key") : false)) {
-                                                                                                                    return Option_some("ring_map_has");
-                                                                                                                  } else {
-                                                                                                                    if (((type_name === "Map") ? (method === "keys") : false)) {
-                                                                                                                      return Option_some("ring_map_keys");
-                                                                                                                    } else {
-                                                                                                                      if (((type_name === "Map") ? (method === "values") : false)) {
-                                                                                                                        return Option_some("ring_map_values");
-                                                                                                                      } else {
-                                                                                                                        if (((type_name === "Map") ? (method === "entries") : false)) {
-                                                                                                                          return Option_some("ring_map_entries");
-                                                                                                                        } else {
-                                                                                                                          if (((type_name === "Map") ? (method === "len") : false)) {
-                                                                                                                            return Option_some("ring_map_len");
-                                                                                                                          } else {
-                                                                                                                            if (((type_name === "Map") ? (method === "remove") : false)) {
-                                                                                                                              return Option_some("ring_map_delete");
-                                                                                                                            } else {
-                                                                                                                              if (((type_name === "Map") ? (method === "is_empty") : false)) {
-                                                                                                                                return Option_some("ring_map_is_empty");
-                                                                                                                              } else {
-                                                                                                                                if (((type_name === "Map") ? (method === "for_each") : false)) {
-                                                                                                                                  return Option_some("ring_map_for_each");
-                                                                                                                                } else {
-                                                                                                                                  if (((type_name === "Map") ? (method === "clear") : false)) {
-                                                                                                                                    return Option_some("ring_map_clear");
-                                                                                                                                  } else {
-                                                                                                                                    if (((type_name === "Map") ? (method === "fold") : false)) {
-                                                                                                                                      return Option_some("ring_map_fold");
-                                                                                                                                    } else {
-                                                                                                                                      if (((type_name === "Map") ? (method === "filter") : false)) {
-                                                                                                                                        return Option_some("ring_map_filter");
-                                                                                                                                      } else {
-                                                                                                                                        if (((type_name === "Map") ? (method === "any") : false)) {
-                                                                                                                                          return Option_some("ring_map_any");
-                                                                                                                                        } else {
-                                                                                                                                          if (((type_name === "Map") ? (method === "map_values") : false)) {
-                                                                                                                                            return Option_some("ring_map_map_values");
-                                                                                                                                          } else {
-                                                                                                                                            if (((type_name === "Set") ? (method === "add") : false)) {
-                                                                                                                                              return Option_some("ring_set_add");
-                                                                                                                                            } else {
-                                                                                                                                              if (((type_name === "Set") ? (method === "insert") : false)) {
-                                                                                                                                                return Option_some("ring_set_add");
-                                                                                                                                              } else {
-                                                                                                                                                if (((type_name === "Set") ? (method === "has") : false)) {
-                                                                                                                                                  return Option_some("ring_set_has");
-                                                                                                                                                } else {
-                                                                                                                                                  if (((type_name === "Set") ? (method === "contains") : false)) {
-                                                                                                                                                    return Option_some("ring_set_has");
-                                                                                                                                                  } else {
-                                                                                                                                                    if (((type_name === "Set") ? (method === "to_list") : false)) {
-                                                                                                                                                      return Option_some("ring_set_to_list");
-                                                                                                                                                    } else {
-                                                                                                                                                      if (((type_name === "Set") ? (method === "len") : false)) {
-                                                                                                                                                        return Option_some("ring_set_len");
-                                                                                                                                                      } else {
-                                                                                                                                                        if (((type_name === "Set") ? (method === "is_empty") : false)) {
-                                                                                                                                                          return Option_some("ring_set_is_empty");
-                                                                                                                                                        } else {
-                                                                                                                                                          if (((type_name === "Set") ? (method === "from_list") : false)) {
-                                                                                                                                                            return Option_some("ring_set_from_list");
-                                                                                                                                                          } else {
-                                                                                                                                                            if (((type_name === "Set") ? (method === "for_each") : false)) {
-                                                                                                                                                              return Option_some("ring_set_for_each");
-                                                                                                                                                            } else {
-                                                                                                                                                              if (((type_name === "Set") ? (method === "remove") : false)) {
-                                                                                                                                                                return Option_some("ring_set_delete");
-                                                                                                                                                              } else {
-                                                                                                                                                                if (((type_name === "Set") ? (method === "clear") : false)) {
-                                                                                                                                                                  return Option_some("ring_set_clear");
-                                                                                                                                                                } else {
-                                                                                                                                                                  if (((type_name === "Set") ? (method === "union") : false)) {
-                                                                                                                                                                    return Option_some("ring_set_union");
-                                                                                                                                                                  } else {
-                                                                                                                                                                    if (((type_name === "Set") ? (method === "intersect") : false)) {
-                                                                                                                                                                      return Option_some("ring_set_intersect");
-                                                                                                                                                                    } else {
-                                                                                                                                                                      if (((type_name === "Set") ? (method === "difference") : false)) {
-                                                                                                                                                                        return Option_some("ring_set_difference");
-                                                                                                                                                                      } else {
-                                                                                                                                                                        if (((type_name === "Set") ? (method === "fold") : false)) {
-                                                                                                                                                                          return Option_some("ring_set_fold");
-                                                                                                                                                                        } else {
-                                                                                                                                                                          if (((type_name === "Set") ? (method === "filter") : false)) {
-                                                                                                                                                                            return Option_some("ring_set_filter");
-                                                                                                                                                                          } else {
-                                                                                                                                                                            if (((type_name === "Set") ? (method === "any") : false)) {
-                                                                                                                                                                              return Option_some("ring_set_any");
-                                                                                                                                                                            } else {
-                                                                                                                                                                              if (((type_name === "Set") ? (method === "all") : false)) {
-                                                                                                                                                                                return Option_some("ring_set_all");
-                                                                                                                                                                              } else {
-                                                                                                                                                                                if (((type_name === "Option") ? (method === "unwrap_or") : false)) {
-                                                                                                                                                                                  return Option_some("ring_Option_unwrap_or");
-                                                                                                                                                                                } else {
-                                                                                                                                                                                  if (((type_name === "Option") ? (method === "unwrap") : false)) {
-                                                                                                                                                                                    return Option_some("ring_Option_unwrap");
-                                                                                                                                                                                  } else {
-                                                                                                                                                                                    if (((type_name === "Option") ? (method === "is_some") : false)) {
-                                                                                                                                                                                      return Option_some("ring_Option_is_some");
-                                                                                                                                                                                    } else {
-                                                                                                                                                                                      if (((type_name === "Option") ? (method === "is_none") : false)) {
-                                                                                                                                                                                        return Option_some("ring_Option_is_none");
-                                                                                                                                                                                      } else {
-                                                                                                                                                                                        if (((type_name === "Option") ? (method === "map") : false)) {
-                                                                                                                                                                                          return Option_some("ring_Option_map");
-                                                                                                                                                                                        } else {
-                                                                                                                                                                                          if (((type_name === "Option") ? (method === "and_then") : false)) {
-                                                                                                                                                                                            return Option_some("ring_Option_and_then");
-                                                                                                                                                                                          } else {
-                                                                                                                                                                                            if (((type_name === "Option") ? (method === "unwrap_or_else") : false)) {
-                                                                                                                                                                                              return Option_some("ring_Option_unwrap_or_else");
-                                                                                                                                                                                            } else {
-                                                                                                                                                                                              if (((type_name === "Option") ? (method === "to_fail") : false)) {
-                                                                                                                                                                                                return Option_some("ring_Option_to_fail");
-                                                                                                                                                                                              } else {
-                                                                                                                                                                                                if (((type_name === "Cell") ? (method === "get") : false)) {
-                                                                                                                                                                                                  return Option_some("ring_Cell_get");
-                                                                                                                                                                                                } else {
-                                                                                                                                                                                                  if (((type_name === "Cell") ? (method === "set") : false)) {
-                                                                                                                                                                                                    return Option_some("ring_Cell_set");
-                                                                                                                                                                                                  } else {
-                                                                                                                                                                                                    if (((type_name === "Cell") ? (method === "update") : false)) {
-                                                                                                                                                                                                      return Option_some("ring_Cell_update");
-                                                                                                                                                                                                    } else {
-                                                                                                                                                                                                      return Option_none;
-                                                                                                                                                                                                    }
-                                                                                                                                                                                                  }
-                                                                                                                                                                                                }
-                                                                                                                                                                                              }
-                                                                                                                                                                                            }
-                                                                                                                                                                                          }
-                                                                                                                                                                                        }
-                                                                                                                                                                                      }
-                                                                                                                                                                                    }
-                                                                                                                                                                                  }
-                                                                                                                                                                                }
-                                                                                                                                                                              }
-                                                                                                                                                                            }
-                                                                                                                                                                          }
-                                                                                                                                                                        }
-                                                                                                                                                                      }
-                                                                                                                                                                    }
-                                                                                                                                                                  }
-                                                                                                                                                                }
-                                                                                                                                                              }
-                                                                                                                                                            }
-                                                                                                                                                          }
-                                                                                                                                                        }
-                                                                                                                                                      }
-                                                                                                                                                    }
-                                                                                                                                                  }
-                                                                                                                                                }
-                                                                                                                                              }
-                                                                                                                                            }
-                                                                                                                                          }
-                                                                                                                                        }
-                                                                                                                                      }
-                                                                                                                                    }
-                                                                                                                                  }
-                                                                                                                                }
-                                                                                                                              }
-                                                                                                                            }
-                                                                                                                          }
-                                                                                                                        }
-                                                                                                                      }
-                                                                                                                    }
-                                                                                                                  }
-                                                                                                                }
-                                                                                                              }
-                                                                                                            }
-                                                                                                          }
-                                                                                                        }
-                                                                                                      }
-                                                                                                    }
-                                                                                                  }
-                                                                                                }
-                                                                                              }
-                                                                                            }
-                                                                                          }
-                                                                                        }
-                                                                                      }
-                                                                                    }
-                                                                                  }
-                                                                                }
-                                                                              }
-                                                                            }
-                                                                          }
-                                                                        }
-                                                                      }
-                                                                    }
-                                                                  }
-                                                                }
-                                                              }
-                                                            }
-                                                          }
-                                                        }
-                                                      }
-                                                    }
-                                                  }
-                                                }
-                                              }
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
   }
+  if (((type_name === "Str") ? (method === "contains") : false)) {
+    return Option_some("ring_str_contains");
+  }
+  if (((type_name === "Str") ? (method === "starts_with") : false)) {
+    return Option_some("ring_str_starts_with");
+  }
+  if (((type_name === "Str") ? (method === "ends_with") : false)) {
+    return Option_some("ring_str_ends_with");
+  }
+  if (((type_name === "Str") ? (method === "slice") : false)) {
+    return Option_some("ring_str_slice");
+  }
+  if (((type_name === "Str") ? (method === "split") : false)) {
+    return Option_some("ring_str_split");
+  }
+  if (((type_name === "Str") ? (method === "replace") : false)) {
+    return Option_some("ring_str_replace");
+  }
+  if (((type_name === "Str") ? (method === "get") : false)) {
+    return Option_some("ring_str_get");
+  }
+  if (((type_name === "Str") ? (method === "trim") : false)) {
+    return Option_some("ring_str_trim");
+  }
+  if (((type_name === "Str") ? (method === "trim_start") : false)) {
+    return Option_some("ring_str_trim_start");
+  }
+  if (((type_name === "Str") ? (method === "trim_end") : false)) {
+    return Option_some("ring_str_trim_end");
+  }
+  if (((type_name === "Str") ? (method === "to_upper") : false)) {
+    return Option_some("ring_str_to_upper");
+  }
+  if (((type_name === "Str") ? (method === "to_lower") : false)) {
+    return Option_some("ring_str_to_lower");
+  }
+  if (((type_name === "Str") ? (method === "char_at") : false)) {
+    return Option_some("ring_str_char_at");
+  }
+  if (((type_name === "Str") ? (method === "char_code_at") : false)) {
+    return Option_some("ring_str_char_code_at");
+  }
+  if (((type_name === "Str") ? (method === "index_of") : false)) {
+    return Option_some("ring_str_index_of");
+  }
+  if (((type_name === "Str") ? (method === "pad_start") : false)) {
+    return Option_some("ring_str_pad_start");
+  }
+  if (((type_name === "Str") ? (method === "pad_end") : false)) {
+    return Option_some("ring_str_pad_end");
+  }
+  if (((type_name === "Str") ? (method === "repeat") : false)) {
+    return Option_some("ring_str_repeat");
+  }
+  if (((type_name === "Str") ? (method === "is_empty") : false)) {
+    return Option_some("ring_str_is_empty");
+  }
+  if (((type_name === "Str") ? (method === "last_index_of") : false)) {
+    return Option_some("ring_str_last_index_of");
+  }
+  if (((type_name === "Int") ? (method === "to_str") : false)) {
+    return Option_some("ring_int_to_str");
+  }
+  if (((type_name === "Float") ? (method === "to_str") : false)) {
+    return Option_some("ring_float_to_str");
+  }
+  if (((type_name === "Bool") ? (method === "to_str") : false)) {
+    return Option_some("ring_bool_to_str");
+  }
+  if (((type_name === "StringBuilder") ? (method === "add") : false)) {
+    return Option_some("ring_sb_add");
+  }
+  if (((type_name === "StringBuilder") ? (method === "to_str") : false)) {
+    return Option_some("ring_sb_to_str");
+  }
+  if (((type_name === "StringBuilder") ? (method === "len") : false)) {
+    return Option_some("ring_sb_len");
+  }
+  if (((type_name === "StringBuilder") ? (method === "line") : false)) {
+    return Option_some("ring_sb_line");
+  }
+  if (((type_name === "StringBuilder") ? (method === "add_int") : false)) {
+    return Option_some("ring_sb_add_int");
+  }
+  if (((type_name === "List") ? (method === "push") : false)) {
+    return Option_some("ring_list_push");
+  }
+  if (((type_name === "List") ? (method === "len") : false)) {
+    return Option_some("ring_list_len");
+  }
+  if (((type_name === "List") ? (method === "get") : false)) {
+    return Option_some("ring_list_get_opt");
+  }
+  if (((type_name === "List") ? (method === "join") : false)) {
+    return Option_some("ring_list_join");
+  }
+  if (((type_name === "List") ? (method === "concat") : false)) {
+    return Option_some("ring_list_concat");
+  }
+  if (((type_name === "List") ? (method === "slice") : false)) {
+    return Option_some("ring_list_slice");
+  }
+  if (((type_name === "List") ? (method === "reverse") : false)) {
+    return Option_some("ring_list_reverse");
+  }
+  if (((type_name === "List") ? (method === "sort_by") : false)) {
+    return Option_some("ring_list_sort");
+  }
+  if (((type_name === "List") ? (method === "is_empty") : false)) {
+    return Option_some("ring_list_is_empty");
+  }
+  if (((type_name === "List") ? (method === "first") : false)) {
+    return Option_some("ring_list_first");
+  }
+  if (((type_name === "List") ? (method === "last") : false)) {
+    return Option_some("ring_list_last");
+  }
+  if (((type_name === "List") ? (method === "pop") : false)) {
+    return Option_some("ring_list_pop");
+  }
+  if (((type_name === "List") ? (method === "set") : false)) {
+    return Option_some("ring_list_set");
+  }
+  if (((type_name === "List") ? (method === "map") : false)) {
+    return Option_some("ring_list_map");
+  }
+  if (((type_name === "List") ? (method === "filter") : false)) {
+    return Option_some("ring_list_filter");
+  }
+  if (((type_name === "List") ? (method === "for_each") : false)) {
+    return Option_some("ring_list_for_each");
+  }
+  if (((type_name === "List") ? (method === "any") : false)) {
+    return Option_some("ring_list_any");
+  }
+  if (((type_name === "List") ? (method === "all") : false)) {
+    return Option_some("ring_list_all");
+  }
+  if (((type_name === "List") ? (method === "find") : false)) {
+    return Option_some("ring_list_find");
+  }
+  if (((type_name === "List") ? (method === "find_index") : false)) {
+    return Option_some("ring_list_find_index");
+  }
+  if (((type_name === "List") ? (method === "fold") : false)) {
+    return Option_some("ring_list_fold");
+  }
+  if (((type_name === "List") ? (method === "flat_map") : false)) {
+    return Option_some("ring_list_flat_map");
+  }
+  if (((type_name === "List") ? (method === "clear") : false)) {
+    return Option_some("ring_list_clear");
+  }
+  if (((type_name === "List") ? (method === "shift") : false)) {
+    return Option_some("ring_list_shift");
+  }
+  if (((type_name === "List") ? (method === "extend") : false)) {
+    return Option_some("ring_list_extend");
+  }
+  if (((type_name === "Map") ? (method === "get") : false)) {
+    return Option_some("ring_map_get_opt");
+  }
+  if (((type_name === "Map") ? (method === "insert") : false)) {
+    return Option_some("ring_map_set");
+  }
+  if (((type_name === "Map") ? (method === "contains_key") : false)) {
+    return Option_some("ring_map_has");
+  }
+  if (((type_name === "Map") ? (method === "keys") : false)) {
+    return Option_some("ring_map_keys");
+  }
+  if (((type_name === "Map") ? (method === "values") : false)) {
+    return Option_some("ring_map_values");
+  }
+  if (((type_name === "Map") ? (method === "entries") : false)) {
+    return Option_some("ring_map_entries");
+  }
+  if (((type_name === "Map") ? (method === "len") : false)) {
+    return Option_some("ring_map_len");
+  }
+  if (((type_name === "Map") ? (method === "remove") : false)) {
+    return Option_some("ring_map_delete");
+  }
+  if (((type_name === "Map") ? (method === "is_empty") : false)) {
+    return Option_some("ring_map_is_empty");
+  }
+  if (((type_name === "Map") ? (method === "for_each") : false)) {
+    return Option_some("ring_map_for_each");
+  }
+  if (((type_name === "Map") ? (method === "clear") : false)) {
+    return Option_some("ring_map_clear");
+  }
+  if (((type_name === "Map") ? (method === "fold") : false)) {
+    return Option_some("ring_map_fold");
+  }
+  if (((type_name === "Map") ? (method === "filter") : false)) {
+    return Option_some("ring_map_filter");
+  }
+  if (((type_name === "Map") ? (method === "any") : false)) {
+    return Option_some("ring_map_any");
+  }
+  if (((type_name === "Map") ? (method === "map_values") : false)) {
+    return Option_some("ring_map_map_values");
+  }
+  if (((type_name === "Set") ? (method === "add") : false)) {
+    return Option_some("ring_set_add");
+  }
+  if (((type_name === "Set") ? (method === "insert") : false)) {
+    return Option_some("ring_set_add");
+  }
+  if (((type_name === "Set") ? (method === "has") : false)) {
+    return Option_some("ring_set_has");
+  }
+  if (((type_name === "Set") ? (method === "contains") : false)) {
+    return Option_some("ring_set_has");
+  }
+  if (((type_name === "Set") ? (method === "to_list") : false)) {
+    return Option_some("ring_set_to_list");
+  }
+  if (((type_name === "Set") ? (method === "len") : false)) {
+    return Option_some("ring_set_len");
+  }
+  if (((type_name === "Set") ? (method === "is_empty") : false)) {
+    return Option_some("ring_set_is_empty");
+  }
+  if (((type_name === "Set") ? (method === "from_list") : false)) {
+    return Option_some("ring_set_from_list");
+  }
+  if (((type_name === "Set") ? (method === "for_each") : false)) {
+    return Option_some("ring_set_for_each");
+  }
+  if (((type_name === "Set") ? (method === "remove") : false)) {
+    return Option_some("ring_set_delete");
+  }
+  if (((type_name === "Set") ? (method === "clear") : false)) {
+    return Option_some("ring_set_clear");
+  }
+  if (((type_name === "Set") ? (method === "union") : false)) {
+    return Option_some("ring_set_union");
+  }
+  if (((type_name === "Set") ? (method === "intersect") : false)) {
+    return Option_some("ring_set_intersect");
+  }
+  if (((type_name === "Set") ? (method === "difference") : false)) {
+    return Option_some("ring_set_difference");
+  }
+  if (((type_name === "Set") ? (method === "fold") : false)) {
+    return Option_some("ring_set_fold");
+  }
+  if (((type_name === "Set") ? (method === "filter") : false)) {
+    return Option_some("ring_set_filter");
+  }
+  if (((type_name === "Set") ? (method === "any") : false)) {
+    return Option_some("ring_set_any");
+  }
+  if (((type_name === "Set") ? (method === "all") : false)) {
+    return Option_some("ring_set_all");
+  }
+  if (((type_name === "Option") ? (method === "unwrap_or") : false)) {
+    return Option_some("ring_Option_unwrap_or");
+  }
+  if (((type_name === "Option") ? (method === "unwrap") : false)) {
+    return Option_some("ring_Option_unwrap");
+  }
+  if (((type_name === "Option") ? (method === "is_some") : false)) {
+    return Option_some("ring_Option_is_some");
+  }
+  if (((type_name === "Option") ? (method === "is_none") : false)) {
+    return Option_some("ring_Option_is_none");
+  }
+  if (((type_name === "Option") ? (method === "map") : false)) {
+    return Option_some("ring_Option_map");
+  }
+  if (((type_name === "Option") ? (method === "and_then") : false)) {
+    return Option_some("ring_Option_and_then");
+  }
+  if (((type_name === "Option") ? (method === "unwrap_or_else") : false)) {
+    return Option_some("ring_Option_unwrap_or_else");
+  }
+  if (((type_name === "Option") ? (method === "to_fail") : false)) {
+    return Option_some("ring_Option_to_fail");
+  }
+  if (((type_name === "Cell") ? (method === "get") : false)) {
+    return Option_some("ring_Cell_get");
+  }
+  if (((type_name === "Cell") ? (method === "set") : false)) {
+    return Option_some("ring_Cell_set");
+  }
+  if (((type_name === "Cell") ? (method === "update") : false)) {
+    return Option_some("ring_Cell_update");
+  }
+  return Option_none;
 }
 
 function rt_method_needs_recv_unbox_bool(name) {
@@ -4236,201 +4097,153 @@ function rt_method_needs_recv_unbox_int(name) {
 function rt_method_returns_bool(name) {
   if ((name === "ring_str_contains")) {
     return true;
-  } else {
-    if ((name === "ring_str_starts_with")) {
-      return true;
-    } else {
-      if ((name === "ring_str_ends_with")) {
-        return true;
-      } else {
-        if ((name === "ring_list_is_empty")) {
-          return true;
-        } else {
-          if ((name === "ring_map_has")) {
-            return true;
-          } else {
-            if ((name === "ring_set_has")) {
-              return true;
-            } else {
-              if ((name === "ring_list_any")) {
-                return true;
-              } else {
-                if ((name === "ring_list_all")) {
-                  return true;
-                } else {
-                  if ((name === "ring_Option_is_some")) {
-                    return true;
-                  } else {
-                    if ((name === "ring_Option_is_none")) {
-                      return true;
-                    } else {
-                      if ((name === "ring_map_int_has")) {
-                        return true;
-                      } else {
-                        if ((name === "ring_set_int_has")) {
-                          return true;
-                        } else {
-                          if ((name === "ring_map_is_empty")) {
-                            return true;
-                          } else {
-                            if ((name === "ring_set_is_empty")) {
-                              return true;
-                            } else {
-                              if ((name === "ring_map_int_is_empty")) {
-                                return true;
-                              } else {
-                                if ((name === "ring_set_int_is_empty")) {
-                                  return true;
-                                } else {
-                                  if ((name === "ring_str_is_empty")) {
-                                    return true;
-                                  } else {
-                                    if ((name === "ring_map_any")) {
-                                      return true;
-                                    } else {
-                                      if ((name === "ring_set_any")) {
-                                        return true;
-                                      } else {
-                                        if ((name === "ring_set_all")) {
-                                          return true;
-                                        } else {
-                                          if ((name === "ring_set_int_any")) {
-                                            return true;
-                                          } else {
-                                            if ((name === "ring_set_int_all")) {
-                                              return true;
-                                            } else {
-                                              return false;
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
   }
+  if ((name === "ring_str_starts_with")) {
+    return true;
+  }
+  if ((name === "ring_str_ends_with")) {
+    return true;
+  }
+  if ((name === "ring_list_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_map_has")) {
+    return true;
+  }
+  if ((name === "ring_set_has")) {
+    return true;
+  }
+  if ((name === "ring_list_any")) {
+    return true;
+  }
+  if ((name === "ring_list_all")) {
+    return true;
+  }
+  if ((name === "ring_Option_is_some")) {
+    return true;
+  }
+  if ((name === "ring_Option_is_none")) {
+    return true;
+  }
+  if ((name === "ring_map_int_has")) {
+    return true;
+  }
+  if ((name === "ring_set_int_has")) {
+    return true;
+  }
+  if ((name === "ring_map_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_set_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_map_int_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_set_int_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_str_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_map_any")) {
+    return true;
+  }
+  if ((name === "ring_set_any")) {
+    return true;
+  }
+  if ((name === "ring_set_all")) {
+    return true;
+  }
+  if ((name === "ring_set_int_any")) {
+    return true;
+  }
+  if ((name === "ring_set_int_all")) {
+    return true;
+  }
+  return false;
 }
 
 function rt_method_returns_i64(name) {
   if ((name === "ring_str_len")) {
     return true;
-  } else {
-    if ((name === "ring_str_contains")) {
-      return true;
-    } else {
-      if ((name === "ring_str_starts_with")) {
-        return true;
-      } else {
-        if ((name === "ring_str_ends_with")) {
-          return true;
-        } else {
-          if ((name === "ring_str_eq")) {
-            return true;
-          } else {
-            if ((name === "ring_str_lt")) {
-              return true;
-            } else {
-              if ((name === "ring_list_len")) {
-                return true;
-              } else {
-                if ((name === "ring_list_is_empty")) {
-                  return true;
-                } else {
-                  if ((name === "ring_map_has")) {
-                    return true;
-                  } else {
-                    if ((name === "ring_map_len")) {
-                      return true;
-                    } else {
-                      if ((name === "ring_set_has")) {
-                        return true;
-                      } else {
-                        if ((name === "ring_set_len")) {
-                          return true;
-                        } else {
-                          if ((name === "ring_sb_len")) {
-                            return true;
-                          } else {
-                            if ((name === "ring_map_int_has")) {
-                              return true;
-                            } else {
-                              if ((name === "ring_map_int_len")) {
-                                return true;
-                              } else {
-                                if ((name === "ring_set_int_has")) {
-                                  return true;
-                                } else {
-                                  if ((name === "ring_set_int_len")) {
-                                    return true;
-                                  } else {
-                                    if ((name === "ring_map_is_empty")) {
-                                      return true;
-                                    } else {
-                                      if ((name === "ring_set_is_empty")) {
-                                        return true;
-                                      } else {
-                                        if ((name === "ring_map_int_is_empty")) {
-                                          return true;
-                                        } else {
-                                          if ((name === "ring_set_int_is_empty")) {
-                                            return true;
-                                          } else {
-                                            if ((name === "ring_map_any")) {
-                                              return true;
-                                            } else {
-                                              if ((name === "ring_set_any")) {
-                                                return true;
-                                              } else {
-                                                if ((name === "ring_set_all")) {
-                                                  return true;
-                                                } else {
-                                                  if ((name === "ring_set_int_any")) {
-                                                    return true;
-                                                  } else {
-                                                    if ((name === "ring_set_int_all")) {
-                                                      return true;
-                                                    } else {
-                                                      return false;
-                                                    }
-                                                  }
-                                                }
-                                              }
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
   }
+  if ((name === "ring_str_contains")) {
+    return true;
+  }
+  if ((name === "ring_str_starts_with")) {
+    return true;
+  }
+  if ((name === "ring_str_ends_with")) {
+    return true;
+  }
+  if ((name === "ring_str_eq")) {
+    return true;
+  }
+  if ((name === "ring_str_lt")) {
+    return true;
+  }
+  if ((name === "ring_list_len")) {
+    return true;
+  }
+  if ((name === "ring_list_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_map_has")) {
+    return true;
+  }
+  if ((name === "ring_map_len")) {
+    return true;
+  }
+  if ((name === "ring_set_has")) {
+    return true;
+  }
+  if ((name === "ring_set_len")) {
+    return true;
+  }
+  if ((name === "ring_sb_len")) {
+    return true;
+  }
+  if ((name === "ring_map_int_has")) {
+    return true;
+  }
+  if ((name === "ring_map_int_len")) {
+    return true;
+  }
+  if ((name === "ring_set_int_has")) {
+    return true;
+  }
+  if ((name === "ring_set_int_len")) {
+    return true;
+  }
+  if ((name === "ring_map_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_set_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_map_int_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_set_int_is_empty")) {
+    return true;
+  }
+  if ((name === "ring_map_any")) {
+    return true;
+  }
+  if ((name === "ring_set_any")) {
+    return true;
+  }
+  if ((name === "ring_set_all")) {
+    return true;
+  }
+  if ((name === "ring_set_int_any")) {
+    return true;
+  }
+  if ((name === "ring_set_int_all")) {
+    return true;
+  }
+  return false;
 }
 
 function gen_method_call(ctx, recv, recv_type, method, args, dict_vals) {
@@ -7313,7 +7126,7 @@ function gen_handle_expr(ctx, body, handlers) {
   let ev_drop_allocas = [];
   let saved_ev_entries = [];
   let sorted_by_effect = _Map_entries(by_effect);
-  sorted_by_effect.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+  sorted_by_effect.sort((function(__ring_a0, __ring_a1) { return hir$compare_by_first(__ring_a0, __ring_a1); }));
   const __ring_iter_125 = __List_Iterable.iter(sorted_by_effect);
   while (true) {
     const __ring_next_125 = __ListIterator_Iterator.next(__ring_iter_125);

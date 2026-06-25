@@ -4,7 +4,7 @@ use types::{Type, Effect, EffectRow, RecordField, StructField,
     row_merge, effects_match_kind}
 use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero, EffectExpr}
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
-    BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
+    BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION, compare_by_first}
 use diagnostics::{DiagnosticContext, DiagnosticNote, Diagnostic, CollectingSink, Severity, Suggestion, make_diag, make_diagnostic}
 use codes::{E0201, E0204, E0301, E0302, E0407, E0503, E0511, E0512, E0513, E0705}
 use union_find::{UnionFind, new_union_find, uf_find}
@@ -483,7 +483,7 @@ pub fn free_type_vars_in_env(env: TypeEnv, subst: UnionFind) -> Set<Int> {
     let mut result: Set<Int> = set_new()
     for scope in env.scope.scopes {
         let mut sorted_vars = scope.variables.entries()
-        sorted_vars.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_vars.sort_by(compare_by_first)
         for entry in sorted_vars {
             let (_, scheme) = entry
             let ftv = free_type_vars(scheme.ty, subst)

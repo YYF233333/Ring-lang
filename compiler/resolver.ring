@@ -3,6 +3,7 @@ use parser::{parse}
 use diagnostics::{CollectingSink, Diagnostic, Severity, DiagnosticContext,
     new_collecting_sink, make_diag}
 use formatter::{format_human, format_llm}
+use hir::{compare_by_first}
 use codes::{E0702, E0704}
 
 // ============================================================
@@ -163,7 +164,7 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
     // Topological sort (Kahn's algorithm)
     let mut dep_count: Map<Str, Int> = map_new()
     let mut sorted_dependencies = dependencies.entries()
-    sorted_dependencies.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_dependencies.sort_by(compare_by_first)
     for entry in sorted_dependencies {
         let (key, deps) = entry
         dep_count.insert(key, deps.len())
@@ -173,7 +174,7 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
     let mut ready: List<Str> = []
 
     let mut sorted_dep_count = dep_count.entries()
-    sorted_dep_count.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_dep_count.sort_by(compare_by_first)
     for entry in sorted_dep_count {
         let (key, count) = entry
         if count == 0 { ready.push(key) }
@@ -205,7 +206,7 @@ pub fn build_module_graph(entry_file: Str, error_format: Str) -> ModuleGraph? {
         // Cycle detected — find and report the cycle path
         let mut cycle_nodes: List<Str> = []
         let mut sorted_modules = modules.entries()
-        sorted_modules.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_modules.sort_by(compare_by_first)
         for entry in sorted_modules {
             let (key, _) = entry
             if !topo_order.contains(key) {

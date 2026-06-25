@@ -3,7 +3,7 @@ use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
     HEffectOp, HTraitMethod, TraitBound,
     trait_dict_name, evidence_param_name, default_evidence_name,
-    trait_bound_param_name,
+    trait_bound_param_name, compare_by_first,
     default_method_self_name, ENUM_TAG_FIELD,
     hexpr_effects}
 use codegen_ctx::{CodegenCtx, HTraitDeclInfo, emit, emit_raw, push_indent, pop_indent,
@@ -566,7 +566,7 @@ fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
         rev_deps.insert(name, { let mut l: List<Str> = []; l })
     }
     let mut sorted_deps = deps.entries()
-    sorted_deps.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_deps.sort_by(compare_by_first)
     for entry in sorted_deps {
         let (name, dep_list) = entry
         in_deg.insert(name, dep_list.len())
@@ -585,7 +585,7 @@ fn topo_sort_defaults(ctx: CodegenCtx, defaults: List<Str>) -> List<Str> {
     // Start with effects that have no dependencies (in_deg == 0)
     let mut queue: List<Str> = []
     let mut sorted_in_deg = in_deg.entries()
-    sorted_in_deg.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_in_deg.sort_by(compare_by_first)
     for entry in sorted_in_deg {
         let (name, deg) = entry
         if deg == 0 { queue.push(name) }
