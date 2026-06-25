@@ -609,6 +609,20 @@ source-map 支持 + 断点调试。
 
 ## 语法增强
 
+### B-143 复合赋值运算符 `*=` / `/=` / `%=` [feature] [P3] [S] [mechanical] [queued]
+
+> 2026-06-25 立项（Discussion，B-100 Phase 1.1 worker feedback #5）。Ring 目前只支持 `+=` 和 `-=`，缺 `*=`/`/=`/`%=`。
+
+**涉及修改**：
+1. `compiler/lexer.ring`：新增 `StarEqual`/`SlashEqual`/`PercentEqual` token
+2. `compiler/parser.ring`：`parse_assignment` 识别新 token，生成对应 AST 节点（复用现有 `AugAssign` 结构，扩展 `op` 字段）
+3. `compiler/codegen.ring`：JS 后端生成 `*=`/`/=`/`%=`
+4. `compiler/codegen_llvm_stmt.ring`：LLVM 后端生成对应 IR（mul/sdiv/srem + store）
+5. `tests/cases/`：E2E 测试 + llvm_diff 用例
+
+**验收标准**：
+- `x *= 2` / `x /= 3` / `x %= 4` 两后端可编译且行为一致
+- 全部 E2E + llvm_diff 通过；自举一致
 
 ## 已知 Bug / 技术债
 
