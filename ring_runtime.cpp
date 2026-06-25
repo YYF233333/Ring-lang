@@ -541,6 +541,7 @@ struct RingClosure {
 
 typedef void* (*ring_fn_1)(void* env, void* arg);
 typedef void* (*ring_fn_2)(void* env, void* a, void* b);
+typedef void* (*ring_fn_3)(void* env, void* a, void* b, void* c);
 
 // ============================================================================
 // Forward declarations
@@ -1511,6 +1512,86 @@ extern "C" void* ring_map_for_each(void* map, void* closure) {
     return nullptr;
 }
 
+// fold: left fold over Map entries. Closure is ternary: fn(env, acc, key, value) -> acc.
+// Key is a synthesized Str (alloc + drop per iteration, see ring_map_for_each).
+extern "C" void* ring_map_fold(void* map, void* init, void* closure) {
+    RingMap* m = (RingMap*)map;
+    if (m->empty()) {
+        ring_dup(init);
+        return init;
+    }
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_3 fn = (ring_fn_3)(cls->fn_ptr);
+    void* acc = init;
+    size_t i = 0;
+    for (auto& kv : *m) {
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(kv.first);
+        void* old_acc = acc;
+        acc = fn(cls->env_ptr, old_acc, sd, kv.second);
+        ring_drop(sd);  // #152 ③: drop synthesized key after closure returns
+        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
+        i++;
+    }
+    return acc;
+}
+
+// filter: returns a new Map containing only entries where predicate returns true.
+// Closure is binary: fn(env, key, value) -> Bool.
+extern "C" void* ring_map_filter(void* map, void* closure) {
+    RingMap* m = (RingMap*)map;
+    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
+    auto* result = new (data) RingMap();
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    for (auto& kv : *m) {
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(kv.first);
+        void* r = fn(cls->env_ptr, sd, kv.second);
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);   // #152 ①: drop predicate Bool box
+        ring_drop(sd);  // #152 ③: drop synthesized key
+        if (match) {
+            ring_dup(kv.second);  // B-103: fresh map co-owns the value
+            result->emplace(kv.first, kv.second);
+        }
+    }
+    return data;
+}
+
+// any: returns true if any entry satisfies the predicate.
+// Closure is binary: fn(env, key, value) -> Bool.
+extern "C" int64_t ring_map_any(void* map, void* closure) {
+    RingMap* m = (RingMap*)map;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    for (auto& kv : *m) {
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(kv.first);
+        void* r = fn(cls->env_ptr, sd, kv.second);
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);   // #152 ①: drop predicate Bool box
+        ring_drop(sd);  // #152 ③: drop synthesized key
+        if (match) return 1;
+    }
+    return 0;
+}
+
+// map_values: returns a new Map with the same keys but values transformed by the closure.
+// Closure is unary: fn(env, value) -> new_value.
+extern "C" void* ring_map_map_values(void* map, void* closure) {
+    RingMap* m = (RingMap*)map;
+    void* data = ring_alloc(sizeof(RingMap), RING_TYPEID_MAP);
+    auto* result = new (data) RingMap();
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& kv : *m) {
+        void* new_val = fn(cls->env_ptr, kv.second);
+        result->emplace(kv.first, new_val);
+    }
+    return data;
+}
+
 // ============================================================================
 // Map<Int> — int64_t-keyed map
 // ============================================================================
@@ -1643,6 +1724,29 @@ extern "C" void* ring_map_int_for_each(void* map, void* closure) {
     return nullptr;
 }
 
+// fold: left fold over Map<Int> entries. Closure is ternary: fn(env, acc, key, value) -> acc.
+// Key is boxed as Int (alloc + drop per iteration, see ring_map_int_for_each).
+extern "C" void* ring_map_int_fold(void* map, void* init, void* closure) {
+    RingMapInt* m = (RingMapInt*)map;
+    if (m->empty()) {
+        ring_dup(init);
+        return init;
+    }
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_3 fn = (ring_fn_3)(cls->fn_ptr);
+    void* acc = init;
+    size_t i = 0;
+    for (auto& kv : *m) {
+        void* kb = ring_box_int(kv.first);
+        void* old_acc = acc;
+        acc = fn(cls->env_ptr, old_acc, kb, kv.second);
+        ring_drop(kb);  // #152 ③: drop synthesized INT key box
+        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
+        i++;
+    }
+    return acc;
+}
+
 extern "C" void* ring_map_int_clone(void* map) {
     RingMapInt* m = (RingMapInt*)map;
     void* data = ring_alloc(sizeof(RingMapInt), RING_TYPEID_MAP_INT);
@@ -1759,6 +1863,88 @@ extern "C" void* ring_set_for_each(void* set, void* closure) {
     return nullptr;
 }
 
+// fold: left fold over Set entries. Closure is binary: fn(env, acc, elem) -> acc.
+// Elem is a synthesized Str (alloc + drop per iteration, see ring_set_for_each).
+extern "C" void* ring_set_fold(void* set, void* init, void* closure) {
+    RingSet* s = (RingSet*)set;
+    if (s->empty()) {
+        ring_dup(init);
+        return init;
+    }
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    void* acc = init;
+    size_t i = 0;
+    for (auto& elem : *s) {
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(elem);
+        void* old_acc = acc;
+        acc = fn(cls->env_ptr, old_acc, sd);
+        ring_drop(sd);  // #152 ③: drop synthesized STR elem
+        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
+        i++;
+    }
+    return acc;
+}
+
+// filter: returns a new Set containing only elements where predicate returns true.
+// Closure is unary: fn(env, elem) -> Bool.
+extern "C" void* ring_set_filter(void* set, void* closure) {
+    RingSet* s = (RingSet*)set;
+    void* data = ring_alloc(sizeof(RingSet), RING_TYPEID_SET);
+    auto* result = new (data) RingSet();
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& elem : *s) {
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(elem);
+        void* r = fn(cls->env_ptr, sd);
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);   // #152 ①: drop predicate Bool box
+        ring_drop(sd);  // #152 ③: drop synthesized STR elem
+        if (match) {
+            result->insert(elem);
+        }
+    }
+    return data;
+}
+
+// any: returns true if any element satisfies the predicate.
+// Closure is unary: fn(env, elem) -> Bool.
+extern "C" int64_t ring_set_any(void* set, void* closure) {
+    RingSet* s = (RingSet*)set;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& elem : *s) {
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(elem);
+        void* r = fn(cls->env_ptr, sd);
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);   // #152 ①: drop predicate Bool box
+        ring_drop(sd);  // #152 ③: drop synthesized STR elem
+        if (match) return 1;
+    }
+    return 0;
+}
+
+// all: returns true if all elements satisfy the predicate.
+// Closure is unary: fn(env, elem) -> Bool.
+extern "C" int64_t ring_set_all(void* set, void* closure) {
+    RingSet* s = (RingSet*)set;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& elem : *s) {
+        void* sd = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+        new (sd) std::string(elem);
+        void* r = fn(cls->env_ptr, sd);
+        int match = ring_unbox_int(r) == 0;
+        ring_drop(r);   // #152 ①: drop predicate Bool box
+        ring_drop(sd);  // #152 ③: drop synthesized STR elem
+        if (match) return 0;
+    }
+    return 1;
+}
+
 // ============================================================================
 // Set<Int> — int64_t-element set
 // ============================================================================
@@ -1826,6 +2012,84 @@ extern "C" void* ring_set_int_for_each(void* set, void* closure) {
         ring_drop(eb);  // #152 ③: drop synthesized INT elem box
     }
     return nullptr;
+}
+
+// fold: left fold over Set<Int> entries. Closure is binary: fn(env, acc, elem) -> acc.
+// Elem is boxed as Int (alloc + drop per iteration, see ring_set_int_for_each).
+extern "C" void* ring_set_int_fold(void* set, void* init, void* closure) {
+    RingSetInt* s = (RingSetInt*)set;
+    if (s->empty()) {
+        ring_dup(init);
+        return init;
+    }
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_2 fn = (ring_fn_2)(cls->fn_ptr);
+    void* acc = init;
+    size_t i = 0;
+    for (auto& elem : *s) {
+        void* eb = ring_box_int(elem);
+        void* old_acc = acc;
+        acc = fn(cls->env_ptr, old_acc, eb);
+        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
+        if (i > 0) ring_drop(old_acc);  // #152 ②: i>=1 old_acc is closure's owned result
+        i++;
+    }
+    return acc;
+}
+
+// filter: returns a new Set<Int> containing only elements where predicate returns true.
+// Closure is unary: fn(env, elem) -> Bool.
+extern "C" void* ring_set_int_filter(void* set, void* closure) {
+    RingSetInt* s = (RingSetInt*)set;
+    void* data = ring_alloc(sizeof(RingSetInt), RING_TYPEID_SET_INT);
+    auto* result = new (data) RingSetInt();
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& elem : *s) {
+        void* eb = ring_box_int(elem);
+        void* r = fn(cls->env_ptr, eb);
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);   // #152 ①: drop predicate Bool box
+        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
+        if (match) {
+            result->insert(elem);
+        }
+    }
+    return data;
+}
+
+// any: returns true if any element satisfies the predicate.
+// Closure is unary: fn(env, elem) -> Bool.
+extern "C" int64_t ring_set_int_any(void* set, void* closure) {
+    RingSetInt* s = (RingSetInt*)set;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& elem : *s) {
+        void* eb = ring_box_int(elem);
+        void* r = fn(cls->env_ptr, eb);
+        int match = ring_unbox_int(r) != 0;
+        ring_drop(r);   // #152 ①: drop predicate Bool box
+        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
+        if (match) return 1;
+    }
+    return 0;
+}
+
+// all: returns true if all elements satisfy the predicate.
+// Closure is unary: fn(env, elem) -> Bool.
+extern "C" int64_t ring_set_int_all(void* set, void* closure) {
+    RingSetInt* s = (RingSetInt*)set;
+    RingClosure* cls = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)(cls->fn_ptr);
+    for (auto& elem : *s) {
+        void* eb = ring_box_int(elem);
+        void* r = fn(cls->env_ptr, eb);
+        int match = ring_unbox_int(r) == 0;
+        ring_drop(r);   // #152 ①: drop predicate Bool box
+        ring_drop(eb);  // #152 ③: drop synthesized INT elem box
+        if (match) return 0;
+    }
+    return 1;
 }
 
 extern "C" void* ring_set_int_clone(void* set) {
