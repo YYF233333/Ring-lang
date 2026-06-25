@@ -627,6 +627,11 @@ extern "C" void* ring_box_float(double val) {
 }
 
 extern "C" double ring_unbox_float(void* p) {
+    if (!p) {
+        fprintf(stderr, "ring panic: unbox_float(null)\n");
+        fflush(stderr);
+        exit(1);
+    }
     return *(double*)p;
 }
 
@@ -3209,32 +3214,50 @@ static void drop_evidence(void* data) {
 extern "C" void* ring_get_builtin_dict(void* name_ptr) {
     if (!name_ptr) return nullptr;
     std::string& n = *(std::string*)name_ptr;
+
+    // #194: Use suffix matching for trait names and segment matching for type
+    // names to avoid false positives from user types (e.g. "OrdinaryThing",
+    // "StringHelper").  Dict names follow the pattern __TypeName_TraitName,
+    // so the trait is always the suffix and the type is a _-delimited segment.
+    auto has_trait_suffix = [&](const char* trait) -> bool {
+        size_t tlen = strlen(trait);
+        // Matches "_Ord", "_Eq", "_Debug" at end of string.
+        if (n.size() < tlen + 1) return false;
+        return n[n.size() - tlen - 1] == '_' &&
+               n.compare(n.size() - tlen, tlen, trait) == 0;
+    };
+    auto has_type_segment = [&](const char* type) -> bool {
+        // Matches "_Int_", "_Str_", etc. as a _-delimited segment.
+        std::string pat = std::string("_") + type + "_";
+        return n.find(pat) != std::string::npos;
+    };
+
     // Ord dicts (single `cmp` method). Check before Eq: an Ord dict name never
     // contains "Eq", but keeping it first keeps the intent explicit.
-    if (n.find("Ord") != std::string::npos) {
-        if (n.find("Str") != std::string::npos)   return ring_make_ord_dict((void*)ring_cl_cmp_str);
-        if (n.find("Float") != std::string::npos) return ring_make_ord_dict((void*)ring_cl_cmp_float);
-        if (n.find("Int") != std::string::npos)   return ring_make_ord_dict((void*)ring_cl_cmp_int);
-        if (n.find("Bool") != std::string::npos)  return ring_make_ord_dict((void*)ring_cl_cmp_bool);
+    if (has_trait_suffix("Ord")) {
+        if (has_type_segment("Str"))   return ring_make_ord_dict((void*)ring_cl_cmp_str);
+        if (has_type_segment("Float")) return ring_make_ord_dict((void*)ring_cl_cmp_float);
+        if (has_type_segment("Int"))   return ring_make_ord_dict((void*)ring_cl_cmp_int);
+        if (has_type_segment("Bool"))  return ring_make_ord_dict((void*)ring_cl_cmp_bool);
         fprintf(stderr, "ring: no builtin Ord dict for '%s'\n", n.c_str());
         fflush(stderr);
         return nullptr;
     }
     // Eq dicts (eq/ne).
-    if (n.find("Eq") != std::string::npos) {
-        if (n.find("Str") != std::string::npos)   return ring_make_eq_dict((void*)ring_cl_eq_str,   (void*)ring_cl_ne_str);
-        if (n.find("Float") != std::string::npos) return ring_make_eq_dict((void*)ring_cl_eq_float, (void*)ring_cl_ne_float);
-        if (n.find("Int") != std::string::npos)   return ring_make_eq_dict((void*)ring_cl_eq_int,   (void*)ring_cl_ne_int);
-        if (n.find("Bool") != std::string::npos)  return ring_make_eq_dict((void*)ring_cl_eq_bool,  (void*)ring_cl_ne_bool);
+    if (has_trait_suffix("Eq")) {
+        if (has_type_segment("Str"))   return ring_make_eq_dict((void*)ring_cl_eq_str,   (void*)ring_cl_ne_str);
+        if (has_type_segment("Float")) return ring_make_eq_dict((void*)ring_cl_eq_float, (void*)ring_cl_ne_float);
+        if (has_type_segment("Int"))   return ring_make_eq_dict((void*)ring_cl_eq_int,   (void*)ring_cl_ne_int);
+        if (has_type_segment("Bool"))  return ring_make_eq_dict((void*)ring_cl_eq_bool,  (void*)ring_cl_ne_bool);
         // Any other Eq dict (user enums) → tag comparison.
         return ring_make_eq_dict((void*)ring_cl_eq_tag, (void*)ring_cl_ne_tag);
     }
     // #179: Debug dicts (single `debug` method).
-    if (n.find("Debug") != std::string::npos) {
-        if (n.find("Int") != std::string::npos)   return ring_make_debug_dict((void*)ring_Int_debug);
-        if (n.find("Str") != std::string::npos)   return ring_make_debug_dict((void*)ring_Str_debug);
-        if (n.find("Bool") != std::string::npos)  return ring_make_debug_dict((void*)ring_Bool_debug);
-        if (n.find("Float") != std::string::npos) return ring_make_debug_dict((void*)ring_Float_debug);
+    if (has_trait_suffix("Debug")) {
+        if (has_type_segment("Int"))   return ring_make_debug_dict((void*)ring_Int_debug);
+        if (has_type_segment("Str"))   return ring_make_debug_dict((void*)ring_Str_debug);
+        if (has_type_segment("Bool"))  return ring_make_debug_dict((void*)ring_Bool_debug);
+        if (has_type_segment("Float")) return ring_make_debug_dict((void*)ring_Float_debug);
         fprintf(stderr, "ring: no builtin Debug dict for '%s'\n", n.c_str());
         fflush(stderr);
         return nullptr;
