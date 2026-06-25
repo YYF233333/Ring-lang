@@ -474,12 +474,13 @@ pub fn hexpr_span(e: HExpr) -> Span {
 // for inline-mod decls — check_mod_decl prefixes the decl BEFORE check_decl, so
 // HIR decl name and StructType name agree in both forms).
 //
-// B-144: HProgram.extern_type_names now carries the GLOBAL set (union across
-// all modules in project mode), populated at checker time and unioned in
-// compiler_mod::compile_phases.  perceus / codegen_llvm / verify_rc read this
-// field instead of re-collecting per-module, which previously missed
-// use-imported extern types (#146).  collect_extern_type_names below is still
-// used to seed each module's set in infer_decl::check.
+// B-144: HProgram.extern_type_names carries the set of extern type names
+// visible to this module.  In single-file mode, collect_extern_type_names
+// (below) scans the HIR decls.  In multi-file mode, compiler_mod::compile_phases
+// computes a per-module set that covers use-imported extern types without
+// bare-name collisions (B-145: the old blind global union stamped module A's
+// `extern type Foo` onto module B which had its own `struct Foo`, falsely
+// RC-excluding B's Foo).
 
 // Collect the extern type names declared by this module's HIR (recursing into
 // inline mod blocks, whose decl names are already module-prefixed).

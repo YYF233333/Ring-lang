@@ -611,20 +611,6 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
-### B-145 extern type 裸名碰撞修复（#147）[bugfix] [P3] [S] [judgment] [doing]
-
-> 2026-06-25 立项。B-144 全局化了 `extern_type_names` 但 `is_extern_handle_type`（hir.ring:504）仍按裸名匹配。跨文件 file-level extern type 用裸名（inline-mod 的已带 `${mod}::${name}` 前缀）。当前风险≈0（`LLVM*Ref` 独占），但应修。
-
-**修复方案**：
-1. `collect_extern_type_names` 收集时对 file-level 声明加模块前缀（`${module_name}::${name}`）
-2. `infer_register.ring` 注册 extern type 为 StructDef 时，name 也带模块前缀（或确认已带）
-3. `is_extern_handle_type` 匹配逻辑不变——前缀一致即可
-
-**前提确认**：`StructType.name` 对跨模块 file-level extern type 是否已带模块前缀？如果已带，只需改收集端；如果是裸名，需要两端对齐。
-
-**验收标准**：
-- 同名 user struct 不被误排除（负面测试：module A 有 `extern type Foo`，module B 有 `struct Foo`）
-- 现有 E2E + llvm_diff 全绿；自举一致
 
 ### B-073 Row poly 降级为语法糖 + 单态化 [refactor] [P3] [M] [judgment] [queued]
 Row poly 从类型系统一等概念降级为语法糖（design.md 1.4，2026-05-25 决策）。编译期通过单态化消除 `RecordType`，pub fn 禁止 row poly 参数。
