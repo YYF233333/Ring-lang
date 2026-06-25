@@ -669,6 +669,30 @@ static napi_value w_LLVMDisposeTargetMachine(napi_env env, napi_callback_info in
     ARGS(1); LLVMDisposeTargetMachine((LLVMTargetMachineRef)get_ext(env, _argv[0])); return make_undef(env);
 }
 
+// #182: LLVMCreateTargetDataLayout — get data layout from target machine
+static napi_value w_LLVMCreateTargetDataLayout(napi_env env, napi_callback_info info) {
+    ARGS(1);
+    auto tm = (LLVMTargetMachineRef)get_ext(env, _argv[0]);
+    return make_ext(env, LLVMCreateTargetDataLayout(tm));
+}
+
+// #182: LLVMCopyStringRepOfTargetData — get data layout string from target data
+static napi_value w_LLVMCopyStringRepOfTargetData(napi_env env, napi_callback_info info) {
+    ARGS(1);
+    auto td = (LLVMTargetDataRef)get_ext(env, _argv[0]);
+    char* s = LLVMCopyStringRepOfTargetData(td);
+    napi_value r = make_str(env, s);
+    LLVMDisposeMessage(s);
+    return r;
+}
+
+// #182: LLVMDisposeTargetData — dispose target data layout
+static napi_value w_LLVMDisposeTargetData(napi_env env, napi_callback_info info) {
+    ARGS(1);
+    LLVMDisposeTargetData((LLVMTargetDataRef)get_ext(env, _argv[0]));
+    return make_undef(env);
+}
+
 // Extra helpers not in LLVM-C but needed by Ring codegen
 static napi_value w_LLVMGetFirstInstruction(napi_env env, napi_callback_info info) {
     ARGS(1);
@@ -849,6 +873,9 @@ static napi_value Init(napi_env env, napi_value exports) {
         REG(LLVMGetTargetFromTriple),
         REG(LLVMCreateTargetMachine),
         REG(LLVMDisposeTargetMachine),
+        REG(LLVMCreateTargetDataLayout),
+        REG(LLVMCopyStringRepOfTargetData),
+        REG(LLVMDisposeTargetData),
         REG(LLVMTargetMachineEmitToFile),
         // Pass Pipeline (B-126)
         REG(LLVMCreatePassBuilderOptions),

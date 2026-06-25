@@ -23,6 +23,7 @@ extern type LLVMValueRef
 extern type LLVMBasicBlockRef
 extern type LLVMTargetRef
 extern type LLVMTargetMachineRef
+extern type LLVMTargetDataRef
 extern type LLVMPassBuilderOptionsRef
 
 extern fn LLVMContextCreate() -> LLVMContextRef
@@ -64,6 +65,9 @@ extern fn LLVMGetDefaultTargetTriple() -> Str
 extern fn LLVMGetTargetFromTriple(triple: Str) -> LLVMTargetRef
 extern fn LLVMCreateTargetMachine(target: LLVMTargetRef, triple: Str, cpu: Str, features: Str, codegen: Int, reloc: Int, code_model: Int) -> LLVMTargetMachineRef
 extern fn LLVMDisposeTargetMachine(tm: LLVMTargetMachineRef) -> Unit
+extern fn LLVMCreateTargetDataLayout(tm: LLVMTargetMachineRef) -> LLVMTargetDataRef
+extern fn LLVMCopyStringRepOfTargetData(td: LLVMTargetDataRef) -> Str
+extern fn LLVMDisposeTargetData(td: LLVMTargetDataRef) -> Unit
 extern fn LLVMTargetMachineEmitToFile(tm: LLVMTargetMachineRef, m: LLVMModuleRef, filename: Str, file_type: Int) -> Int
 extern fn LLVMCreatePassBuilderOptions() -> LLVMPassBuilderOptionsRef
 extern fn LLVMDisposePassBuilderOptions(opts: LLVMPassBuilderOptionsRef) -> Unit
@@ -1423,10 +1427,11 @@ fn emit_c_main(mut ctx: LlvmCtx) {
 }
 
 // ============================================================
-// generate_llvm — main entry point
+// init_llvm_context — shared LLVM initialization for both
+// single-file and multi-module entry points (#191)
 // ============================================================
 
-pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
+fn init_llvm_context(module_name: Str) -> LlvmCtx {
     // 1. Initialize LLVM target
     LLVMInitializeX86TargetInfo()
     LLVMInitializeX86Target()
@@ -1435,7 +1440,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
 
     // 2. Create context, module, builder
     let context = LLVMContextCreate()
-    let module = LLVMModuleCreateWithNameInContext("ring_module", context)
+    let module = LLVMModuleCreateWithNameInContext(module_name, context)
     let builder = LLVMCreateBuilderInContext(context)
 
     // 3. Set target triple and data layout
@@ -1445,6 +1450,13 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     let target = LLVMGetTargetFromTriple(triple)
     // opt=2 (Default), reloc=0 (Default), code_model=0 (Default)
     let tm = LLVMCreateTargetMachine(target, triple, "generic", "", 2, 0, 0)
+
+    // #182: Set data layout from target machine so LLVMSizeOf etc. return
+    // correct values for the host target.
+    let td = LLVMCreateTargetDataLayout(tm)
+    let layout_str = LLVMCopyStringRepOfTargetData(td)
+    LLVMSetDataLayout(module, layout_str)
+    LLVMDisposeTargetData(td)
 
     // 4. Cache basic types
     let ptr_type = LLVMPointerTypeInContext(context, 0)
@@ -1456,7 +1468,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     let double_type = LLVMDoubleTypeInContext(context)
 
     // 5. Build LlvmCtx
-    let mut ctx = LlvmCtx {
+    LlvmCtx {
         context: context,
         module: module,
         builder: builder,
@@ -1502,6 +1514,56 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         extern_types: set_new(),
         extern_fn_infos: map_new()
     }
+}
+
+// ============================================================
+// finalize_llvm_module — shared finalization pipeline: dump IR,
+// verify, optimize, emit object file, cleanup (#191)
+// ============================================================
+
+fn finalize_llvm_module(ctx: LlvmCtx, output_path: Str) -> Unit {
+    let module = ctx.module
+    let tm = ctx.target_machine
+
+    // 1. Dump IR for debugging
+    let ir = LLVMPrintModuleToString(module)
+    write_file("ring_output.ll", ir)
+
+    // 2. Verify module (action=2: ReturnStatusAction, prints to stderr)
+    let verify_result = LLVMVerifyModule(module, 2)
+    if verify_result != 0 {
+        eprintln("LLVM module verification failed (${verify_result} errors) — attempting emit anyway")
+    }
+
+    // 3. Run LLVM optimization passes (B-126)
+    let pass_opts = LLVMCreatePassBuilderOptions()
+    let pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts)
+    if pass_result != 0 {
+        eprintln("LLVM optimization pass pipeline failed")
+    }
+    LLVMDisposePassBuilderOptions(pass_opts)
+
+    // 4. Emit object file (file_type: 1 = Object file)
+    let emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1)
+    if emit_result != 0 {
+        eprintln("Failed to emit object file: ${output_path}")
+    } else {
+        print("Compiled: ${output_path}")
+    }
+
+    // 5. Cleanup
+    LLVMDisposeBuilder(ctx.builder)
+    LLVMDisposeTargetMachine(tm)
+    LLVMDisposeModule(module)
+    LLVMContextDispose(ctx.context)
+}
+
+// ============================================================
+// generate_llvm — main entry point (single-file)
+// ============================================================
+
+pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
+    let mut ctx = init_llvm_context("ring_module")
 
     // B-091: thread the auto-boxed mut-cell def_ids through so Var/read/write
     // codegen routes them through a shared heap cell (write-through capture).
@@ -1514,10 +1576,10 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // builds wrapped instances from these).
     for sd in program.static_dicts { ctx.static_dict_defs.insert(sd.name, sd) }
 
-    // 6. Register built-in types (Option, Result — not in HDecl, handled by runtime)
+    // Register built-in types (Option, Result — not in HDecl, handled by runtime)
     register_builtin_enums(ctx)
 
-    // 7. Scan function effects and trait declarations
+    // Scan function effects and trait declarations
     scan_fn_effects(program.decls, ctx.local_fn_effects)
     scan_trait_decls(program.decls, ctx.trait_method_order, ctx.trait_supertraits)
     scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
@@ -1525,62 +1587,32 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // gen_effect_op share the evidence-struct slot layout via effect_op_slot.
     register_effect_ops_llvm(program.decls, ctx.effect_ops)
 
-    // 7a. Compute transitive effect closure (B-089 G-b: mirrors codegen.ring:108-151)
+    // Compute transitive effect closure (B-089 G-b: mirrors codegen.ring:108-151)
     compute_transitive_effect_closure(program.decls, ctx.local_fn_effects)
 
-    // 7b. Declare runtime functions
+    // Declare runtime functions
     declare_runtime_fns(ctx)
 
-    // 8. First pass: forward declare all Ring functions
+    // First pass: forward declare all Ring functions
     forward_declare_functions(ctx, program.decls)
 
-    // 8b. B-100: emit auto-derived trait impls (Eq, Clone, Debug) BEFORE body pass.
+    // B-100: emit auto-derived trait impls (Eq, Clone, Debug) BEFORE body pass.
     // Method calls in function bodies need ring_<Type>_clone etc. in ctx.functions.
     emit_derived_impls_llvm(ctx, program.derived_impls)
 
-    // 9. Second pass: generate all function bodies
+    // Second pass: generate all function bodies
     for decl in program.decls {
         emit_llvm_decl(ctx, decl)
     }
 
-    // 9b. Generate per-type drop functions and register them
+    // Generate per-type drop functions and register them
     emit_drop_functions(ctx)
 
-    // 10. Generate C main() wrapper
+    // Generate C main() wrapper
     emit_c_main(ctx)
 
-    // 11. Dump IR for debugging
-    let ir = LLVMPrintModuleToString(module)
-    write_file("ring_output.ll", ir)
-
-    // 11b. Verify module (action=2: ReturnStatusAction, prints to stderr)
-    let verify_result = LLVMVerifyModule(module, 2)
-    if verify_result != 0 {
-        eprintln("LLVM module verification failed (${verify_result} errors) — attempting emit anyway")
-    }
-
-    // 12. Run LLVM optimization passes (B-126)
-    let pass_opts = LLVMCreatePassBuilderOptions()
-    let pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts)
-    if pass_result != 0 {
-        eprintln("LLVM optimization pass pipeline failed")
-    }
-    LLVMDisposePassBuilderOptions(pass_opts)
-
-    // 13. Emit object file
-    // file_type: 1 = Object file
-    let emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1)
-    if emit_result != 0 {
-        eprintln("Failed to emit object file: ${output_path}")
-    } else {
-        print("Compiled: ${output_path}")
-    }
-
-    // 14. Cleanup
-    LLVMDisposeBuilder(builder)
-    LLVMDisposeTargetMachine(tm)
-    LLVMDisposeModule(module)
-    LLVMContextDispose(context)
+    // Finalize: verify, optimize, emit, cleanup
+    finalize_llvm_module(ctx, output_path)
 }
 
 // ============================================================
@@ -1591,85 +1623,12 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
 // ============================================================
 
 pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entry_prefix: Str, output_path: Str) -> Unit {
-    // 1. Initialize LLVM target
-    LLVMInitializeX86TargetInfo()
-    LLVMInitializeX86Target()
-    LLVMInitializeX86TargetMC()
-    LLVMInitializeX86AsmPrinter()
+    let mut ctx = init_llvm_context("ring_project")
 
-    // 2. Create context, module, builder
-    let context = LLVMContextCreate()
-    let module = LLVMModuleCreateWithNameInContext("ring_project", context)
-    let builder = LLVMCreateBuilderInContext(context)
-
-    // 3. Set target triple and data layout
-    let triple = LLVMGetDefaultTargetTriple()
-    LLVMSetTarget(module, triple)
-
-    let target = LLVMGetTargetFromTriple(triple)
-    let tm = LLVMCreateTargetMachine(target, triple, "generic", "", 2, 0, 0)
-
-    // 4. Cache basic types
-    let ptr_type = LLVMPointerTypeInContext(context, 0)
-    let i64_type = LLVMInt64TypeInContext(context)
-    let i32_type = LLVMInt32TypeInContext(context)
-    let i8_type = LLVMInt8TypeInContext(context)
-    let i1_type = LLVMInt1TypeInContext(context)
-    let void_type = LLVMVoidTypeInContext(context)
-    let double_type = LLVMDoubleTypeInContext(context)
-
-    // 5. Build LlvmCtx
-    let mut ctx = LlvmCtx {
-        context: context,
-        module: module,
-        builder: builder,
-        target_machine: tm,
-        ptr_type: ptr_type,
-        i64_type: i64_type,
-        i32_type: i32_type,
-        i8_type: i8_type,
-        i1_type: i1_type,
-        void_type: void_type,
-        double_type: double_type,
-        named_values: map_new(),
-        functions: map_new(),
-        fn_types: map_new(),
-        struct_types: map_new(),
-        enum_types: map_new(),
-        rt_fns: map_new(),
-        rt_fn_types: map_new(),
-        local_fn_effects: map_new(),
-        fn_evidence_params: map_new(),
-        dict_globals: map_new(),
-        static_dict_defs: map_new(),
-        dict_singletons: map_new(),
-        trait_method_order: map_new(),
-        trait_supertraits: map_new(),
-        module_prefix: none,
-        imports_map: map_new(),
-        local_names: set_new(),
-        tmp_counter: 0,
-        lambda_counter: 0,
-        match_counter: 0,
-        current_fn: none,
-        current_fn_name: "",
-        loop_break_bb: none,
-        loop_continue_bb: none,
-        next_user_typeid: 64,
-        type_to_typeid: map_new(),
-        boxed_vars: set_new(),
-        fn_mut_params: map_new(),
-        effect_ops: map_new(),
-        default_evidence: map_new(),
-        derived_dict_builds: [],
-        extern_types: set_new(),
-        extern_fn_infos: map_new()
-    }
-
-    // 6. Register built-in types
+    // Register built-in types
     register_builtin_enums(ctx)
 
-    // 7. Scan all modules for function effects and trait declarations
+    // Scan all modules for function effects and trait declarations
     for m in modules {
         let (prefix, program, _uses) = m
         scan_fn_effects(program.decls, ctx.local_fn_effects)
@@ -1693,7 +1652,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         // the body-generation pass below instead.
     }
 
-    // 7a. Compute transitive effect closure across all modules (B-089 G-b)
+    // Compute transitive effect closure across all modules (B-089 G-b)
     let mut all_decls: List<HDecl> = []
     for m in modules {
         let (_prefix, program, _uses) = m
@@ -1701,22 +1660,22 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
     }
     compute_transitive_effect_closure(all_decls, ctx.local_fn_effects)
 
-    // 7b. Declare runtime functions
+    // Declare runtime functions
     declare_runtime_fns(ctx)
 
-    // 8. First pass: forward declare all Ring functions in all modules
+    // First pass: forward declare all Ring functions in all modules
     for m in modules {
         let (prefix, program, _uses) = m
         forward_declare_functions_with_prefix(ctx, program.decls, some(prefix))
     }
 
-    // 8b. Emit derived impls for all modules (before body pass)
+    // Emit derived impls for all modules (before body pass)
     for m in modules {
         let (prefix, program, _uses) = m
         emit_derived_impls_llvm(ctx, program.derived_impls)
     }
 
-    // 9. Second pass: generate all function bodies for all modules
+    // Second pass: generate all function bodies for all modules
     for m in modules {
         let (prefix, program, uses) = m
         ctx.module_prefix = some(prefix)
@@ -1731,43 +1690,14 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
     // Clear module prefix
     ctx.module_prefix = none
 
-    // 9b. Generate per-type drop functions and register them
+    // Generate per-type drop functions and register them
     emit_drop_functions(ctx)
 
-    // 10. Generate C main() wrapper — look for main in the entry module
+    // Generate C main() wrapper — look for main in the entry module
     emit_c_main_project(ctx, entry_prefix)
 
-    // 11. Dump IR for debugging
-    let ir = LLVMPrintModuleToString(module)
-    write_file("ring_output.ll", ir)
-
-    // 11b. Verify module (action=2: ReturnStatusAction, prints to stderr)
-    let verify_result = LLVMVerifyModule(module, 2)
-    if verify_result != 0 {
-        eprintln("LLVM module verification failed (${verify_result} errors) — attempting emit anyway")
-    }
-
-    // 12. Run LLVM optimization passes (B-126)
-    let pass_opts = LLVMCreatePassBuilderOptions()
-    let pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts)
-    if pass_result != 0 {
-        eprintln("LLVM optimization pass pipeline failed")
-    }
-    LLVMDisposePassBuilderOptions(pass_opts)
-
-    // 13. Emit object file
-    let emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1)
-    if emit_result != 0 {
-        eprintln("Failed to emit object file: ${output_path}")
-    } else {
-        print("Compiled: ${output_path}")
-    }
-
-    // 13. Cleanup
-    LLVMDisposeBuilder(builder)
-    LLVMDisposeTargetMachine(tm)
-    LLVMDisposeModule(module)
-    LLVMContextDispose(context)
+    // Finalize: verify, optimize, emit, cleanup
+    finalize_llvm_module(ctx, output_path)
 }
 
 // ============================================================

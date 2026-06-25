@@ -306,6 +306,10 @@ function to_result(f) {
 
 
 
+
+
+
+
 function has_fail_effect(effects) {
   const __ring_iter_2 = __List_Iterable.iter(effects.effects);
   while (true) {
@@ -1269,6 +1273,33 @@ function emit_drop_functions(ctx) {
   }
 }
 
+function finalize_llvm_module(ctx, output_path, __ring_ev_io) {
+  const module = ctx.module;
+  const tm = ctx.target_machine;
+  const ir = LLVMPrintModuleToString(module);
+  write_file("ring_output.ll", ir);
+  const verify_result = LLVMVerifyModule(module, 2);
+  if ((verify_result !== 0)) {
+    eprintln(`LLVM module verification failed (${verify_result} errors) — attempting emit anyway`);
+  }
+  const pass_opts = LLVMCreatePassBuilderOptions();
+  const pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts);
+  if ((pass_result !== 0)) {
+    eprintln("LLVM optimization pass pipeline failed");
+  }
+  LLVMDisposePassBuilderOptions(pass_opts);
+  const emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1);
+  if ((emit_result !== 0)) {
+    eprintln(`Failed to emit object file: ${output_path}`);
+  } else {
+    print(`Compiled: ${output_path}`, __ring_ev_io);
+  }
+  LLVMDisposeBuilder(ctx.builder);
+  LLVMDisposeTargetMachine(tm);
+  LLVMDisposeModule(module);
+  return LLVMContextDispose(ctx.context);
+}
+
 function forward_declare_enum_ctors(ctx, name, variants) {
   const ptr = ctx.ptr_type;
   const __ring_iter_27 = __List_Iterable.iter(variants);
@@ -1701,6 +1732,32 @@ function forward_declare_functions(ctx, decls) {
   return forward_declare_functions_with_prefix(ctx, decls, Option_none);
 }
 
+function init_llvm_context(module_name) {
+  LLVMInitializeX86TargetInfo();
+  LLVMInitializeX86Target();
+  LLVMInitializeX86TargetMC();
+  LLVMInitializeX86AsmPrinter();
+  const context = LLVMContextCreate();
+  const module = LLVMModuleCreateWithNameInContext(module_name, context);
+  const builder = LLVMCreateBuilderInContext(context);
+  const triple = LLVMGetDefaultTargetTriple();
+  LLVMSetTarget(module, triple);
+  const target = LLVMGetTargetFromTriple(triple);
+  const tm = LLVMCreateTargetMachine(target, triple, "generic", "", 2, 0, 0);
+  const td = LLVMCreateTargetDataLayout(tm);
+  const layout_str = LLVMCopyStringRepOfTargetData(td);
+  LLVMSetDataLayout(module, layout_str);
+  LLVMDisposeTargetData(td);
+  const ptr_type = LLVMPointerTypeInContext(context, 0);
+  const i64_type = LLVMInt64TypeInContext(context);
+  const i32_type = LLVMInt32TypeInContext(context);
+  const i8_type = LLVMInt8TypeInContext(context);
+  const i1_type = LLVMInt1TypeInContext(context);
+  const void_type = LLVMVoidTypeInContext(context);
+  const double_type = LLVMDoubleTypeInContext(context);
+  return new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), Option_none, map_new(), set_new(), 0, 0, 0, Option_none, "", Option_none, Option_none, 64, map_new(), set_new(), map_new(), map_new(), map_new(), [], set_new(), map_new());
+}
+
 function register_builtin_enums(ctx) {
   const ptr = ctx.ptr_type;
   const i64 = ctx.i64_type;
@@ -1960,25 +2017,7 @@ function scan_trait_decls(decls, trait_method_order, trait_supertraits) {
 }
 
 function generate_llvm(program, output_path, __ring_ev_io) {
-  LLVMInitializeX86TargetInfo();
-  LLVMInitializeX86Target();
-  LLVMInitializeX86TargetMC();
-  LLVMInitializeX86AsmPrinter();
-  const context = LLVMContextCreate();
-  const module = LLVMModuleCreateWithNameInContext("ring_module", context);
-  const builder = LLVMCreateBuilderInContext(context);
-  const triple = LLVMGetDefaultTargetTriple();
-  LLVMSetTarget(module, triple);
-  const target = LLVMGetTargetFromTriple(triple);
-  const tm = LLVMCreateTargetMachine(target, triple, "generic", "", 2, 0, 0);
-  const ptr_type = LLVMPointerTypeInContext(context, 0);
-  const i64_type = LLVMInt64TypeInContext(context);
-  const i32_type = LLVMInt32TypeInContext(context);
-  const i8_type = LLVMInt8TypeInContext(context);
-  const i1_type = LLVMInt1TypeInContext(context);
-  const void_type = LLVMVoidTypeInContext(context);
-  const double_type = LLVMDoubleTypeInContext(context);
-  let ctx = new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), Option_none, map_new(), set_new(), 0, 0, 0, Option_none, "", Option_none, Option_none, 64, map_new(), set_new(), map_new(), map_new(), map_new(), [], set_new(), map_new());
+  let ctx = init_llvm_context("ring_module");
   const __ring_iter_47 = ___Set_Iterable.iter(program.boxed_vars);
   while (true) {
     const __ring_next_47 = __SetIterator_Iterator.next(__ring_iter_47);
@@ -2018,50 +2057,11 @@ function generate_llvm(program, output_path, __ring_ev_io) {
   }
   emit_drop_functions(ctx);
   emit_c_main(ctx);
-  const ir = LLVMPrintModuleToString(module);
-  write_file("ring_output.ll", ir);
-  const verify_result = LLVMVerifyModule(module, 2);
-  if ((verify_result !== 0)) {
-    eprintln(`LLVM module verification failed (${verify_result} errors) — attempting emit anyway`);
-  }
-  const pass_opts = LLVMCreatePassBuilderOptions();
-  const pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts);
-  if ((pass_result !== 0)) {
-    eprintln("LLVM optimization pass pipeline failed");
-  }
-  LLVMDisposePassBuilderOptions(pass_opts);
-  const emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1);
-  if ((emit_result !== 0)) {
-    eprintln(`Failed to emit object file: ${output_path}`);
-  } else {
-    print(`Compiled: ${output_path}`, __ring_ev_io);
-  }
-  LLVMDisposeBuilder(builder);
-  LLVMDisposeTargetMachine(tm);
-  LLVMDisposeModule(module);
-  return LLVMContextDispose(context);
+  return finalize_llvm_module(ctx, output_path, __ring_ev_io);
 }
 
 function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io) {
-  LLVMInitializeX86TargetInfo();
-  LLVMInitializeX86Target();
-  LLVMInitializeX86TargetMC();
-  LLVMInitializeX86AsmPrinter();
-  const context = LLVMContextCreate();
-  const module = LLVMModuleCreateWithNameInContext("ring_project", context);
-  const builder = LLVMCreateBuilderInContext(context);
-  const triple = LLVMGetDefaultTargetTriple();
-  LLVMSetTarget(module, triple);
-  const target = LLVMGetTargetFromTriple(triple);
-  const tm = LLVMCreateTargetMachine(target, triple, "generic", "", 2, 0, 0);
-  const ptr_type = LLVMPointerTypeInContext(context, 0);
-  const i64_type = LLVMInt64TypeInContext(context);
-  const i32_type = LLVMInt32TypeInContext(context);
-  const i8_type = LLVMInt8TypeInContext(context);
-  const i1_type = LLVMInt1TypeInContext(context);
-  const void_type = LLVMVoidTypeInContext(context);
-  const double_type = LLVMDoubleTypeInContext(context);
-  let ctx = new codegen_llvm_ctx$LlvmCtx(context, module, builder, tm, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), map_new(), Option_none, map_new(), set_new(), 0, 0, 0, Option_none, "", Option_none, Option_none, 64, map_new(), set_new(), map_new(), map_new(), map_new(), [], set_new(), map_new());
+  let ctx = init_llvm_context("ring_project");
   register_builtin_enums(ctx);
   const __ring_iter_51 = __List_Iterable.iter(modules);
   while (true) {
@@ -2157,28 +2157,7 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
   ctx.module_prefix = Option_none;
   emit_drop_functions(ctx);
   emit_c_main_project(ctx, entry_prefix);
-  const ir = LLVMPrintModuleToString(module);
-  write_file("ring_output.ll", ir);
-  const verify_result = LLVMVerifyModule(module, 2);
-  if ((verify_result !== 0)) {
-    eprintln(`LLVM module verification failed (${verify_result} errors) — attempting emit anyway`);
-  }
-  const pass_opts = LLVMCreatePassBuilderOptions();
-  const pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts);
-  if ((pass_result !== 0)) {
-    eprintln("LLVM optimization pass pipeline failed");
-  }
-  LLVMDisposePassBuilderOptions(pass_opts);
-  const emit_result = LLVMTargetMachineEmitToFile(tm, module, output_path, 1);
-  if ((emit_result !== 0)) {
-    eprintln(`Failed to emit object file: ${output_path}`);
-  } else {
-    print(`Compiled: ${output_path}`, __ring_ev_io);
-  }
-  LLVMDisposeBuilder(builder);
-  LLVMDisposeTargetMachine(tm);
-  LLVMDisposeModule(module);
-  return LLVMContextDispose(context);
+  return finalize_llvm_module(ctx, output_path, __ring_ev_io);
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {
