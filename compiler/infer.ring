@@ -16,7 +16,7 @@ use hir::{HExpr, HStmt, HDecl, HParam, HMatchArm, HEffectHandler,
     hexpr_type, hexpr_effects, hexpr_span}
 use diagnostics::{DiagnosticContext, DiagnosticNote, CollectingSink, Severity, make_diag}
 use codes::{E0201, E0203, E0206, E0301, E0303, E0304, E0305, E0306,
-    E0307, E0308, E0402, E0601, E0705, W0001}
+    E0307, E0308, E0309, E0402, E0601, E0705, W0001}
 use union_find::{UnionFind}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef,
     EffectOpDef, TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef,
@@ -2033,6 +2033,20 @@ fn infer_if(mut ctx: InferCtx, condition: Expr, then_branch: Expr, else_branch: 
 // infer_string_interp
 // ============================================================
 
+fn is_interpolatable_type(t: Type) -> Bool {
+    match t {
+        Type::IntType => true,
+        Type::FloatType => true,
+        Type::StrType => true,
+        Type::BoolType => true,
+        // TypeVar means the type is not yet resolved — allow it (may resolve later)
+        Type::TypeVar { .. } => true,
+        // ErrorType — already has an error, don't cascade
+        Type::ErrorType => true,
+        _ => false,
+    }
+}
+
 fn infer_string_interp(mut ctx: InferCtx, parts: List<StringInterpPart>, span: Span, subst: UnionFind) -> InferResult {
     let mut s = subst
     let mut effects: EffectRow = EMPTY_ROW
@@ -2047,6 +2061,18 @@ fn infer_string_interp(mut ctx: InferCtx, parts: List<StringInterpPart>, span: S
                 let me = merge_effects(ctx.env, effects, r.effects, s)
                 effects = me.0
                 s = me.1
+                // #184: check that interpolated expression type is Str/Int/Float/Bool
+                let resolved = apply_subst(s, hexpr_type(r.hexpr))
+                if is_interpolatable_type(resolved) == false {
+                    let _ = type_error(ctx.sink, E0309,
+                        "string interpolation requires Str, Int, Float, or Bool, got ${type_to_string(resolved)}",
+                        hexpr_span(r.hexpr),
+                        DiagnosticContext::TypeMismatch {
+                            expected: "Str | Int | Float | Bool",
+                            actual: type_to_string(resolved),
+                            expression: none
+                        })
+                }
                 hparts.push(HStringInterpPart::Expression(r.hexpr))
             }
         }

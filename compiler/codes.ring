@@ -30,6 +30,7 @@ pub const E0305: Str = "E0305"
 pub const E0306: Str = "E0306"
 pub const E0307: Str = "E0307"
 pub const E0308: Str = "E0308"
+pub const E0309: Str = "E0309"
 pub const E0402: Str = "E0402"
 pub const E0403: Str = "E0403"
 pub const E0404: Str = "E0404"
@@ -89,6 +90,7 @@ pub fn error_description(code: Str) -> Str {
     if code == "E0306" { return "Type does not support indexing" }
     if code == "E0307" { return "Type does not implement Eq" }
     if code == "E0308" { return "Type does not implement Ord" }
+    if code == "E0309" { return "Type not interpolatable" }
     if code == "E0402" { return "Unknown effect operation" }
     if code == "E0403" { return "Unhandled effect" }
     if code == "E0404" { return "Effect annotation violation" }

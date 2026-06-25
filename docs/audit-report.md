@@ -12,13 +12,6 @@
 
 
 
-### #198 Parser 不支持负数字面量 pattern [low] [judgment] [doing]
-
-`parser.ring:1792-1928` 的 `parse_pattern` 处理 `TkIntLit` 和 `TkFloatLit`，但不处理前导 `TkMinus` + 数字字面量组合。`match x { -1 => ... }` 会产生 parse error。用户可通过 guard 或变量绑定 workaround，但这是常见的预期语法。
-
-**修复**：在 `parse_pattern` 开头检查 `TkMinus` + `TkIntLit`/`TkFloatLit`，消费两个 token 生成 negated `Pattern::Literal`。需讨论是否作为当前优先级的特性实现。
-
-发现者：Opus（前端审计）
 
 ---
 
@@ -29,49 +22,17 @@
 
 
 
-### #184 字符串插值 fallback 将非基本类型当 Int 处理 [medium] [mechanical] [doing]
-
-`codegen_llvm_expr.ring:3157-3164` 的 `convert_to_str` 对 Str/Int/Float/Bool 之外的类型，fallback 调用 `unbox_int(val)`（`ptrtoint >> 1`）再 `ring_int_to_str`。对 struct/enum/list/option 值做字符串插值 `"${my_struct}"` 时会输出无意义的整数而非有意义的表示。
-
-**即时修复（2026-06-25 Discussion 拍板）**：checker 阶段对非 Str/Int/Float/Bool 类型的字符串插值报编译错误。后续 B-149 Display trait 实现后放宽为"要求 Display impl"。
-
-发现者：Opus（LLVM 审计）
-
-
-
-
-
-### #189 codegen_llvm_decl derive 四实现 ~1700 行结构性重复 [medium] [judgment] [doing]
-
-`codegen_llvm_decl.ring:988-2665` 中 Eq/Clone/Debug/Ord 四个 derive 实现共享极为相似的结构：函数创建（检查已有 → 构建参数类型 → LLVMAddFunction → 保存/恢复状态）重复 ~12 次，enum tag 加载、字段 GEP 遍历、StringBuilder 样板、closure dispatch 均为 copy-paste。
-
-**重构方向**：
-1. 提取 `emit_derived_fn_scaffold(ctx, mangled_name, param_count) -> (fn_val, entry_bb, saved_fn)` 统一前导/尾随
-2. 提取 `load_enum_tag_and_switch(ctx, val, enum_info) -> (tag_val, switch_inst, merge_bb)` 统一 enum 分支
-3. 复用 `codegen_llvm_expr.ring` 中的 `load_dict_method` + `gen_closure_call` 而非内联重实现
-
-发现者：Opus（LLVM 审计）+ DS（独立发现 derive prologue 重复）
-
-### #190 method_to_runtime 97 级嵌套 if-else 链 [medium] [mechanical] [open]
-
-`codegen_llvm_expr.ring:2663-2778` 的 `method_to_runtime` 用 97 级嵌套 `if-else` 映射方法名到 runtime 函数名。同类模式：`extern_fn_to_runtime`（29 级）、`rt_method_returns_i64`（15 级）、`rt_method_returns_bool`（15 级）。每增加一个方法需在正确深度插入，括号错位极易出错。
-
-**修复**：转换为 `Map<Str, Str>` 查表（单次初始化），或改为平坦 `if ... { return ... }` 链（无嵌套）。
-
-发现者：Opus（LLVM 审计）+ DS（独立发现）
 
 
 
 
 
 
-### #205 Perceus is_droppable_init / anf_should_materialize 必须手动同步 [low] [judgment] [doing]
 
-`perceus.ring:248-367` 的 `is_droppable_init` 和 `1658-1817` 的 `anf_should_materialize` 独立分类哪些表达式产生 fresh-owned 值。两者维护独立，新增表达式类型时一个改了另一个忘改会导致：materialize 而不 drop（leak）或 drop 而不 materialize（UAF）。无编程手段强制同步。
 
-**修复方向**：合并为单一分类函数返回 `(droppable: Bool, materialize: Bool)` 或在注释中交叉引用。
 
-发现者：Opus（LLVM 审计）
+
+
 
 ### #206 LLVM comparison predicate 魔法数字未命名 [low] [mechanical] [open]
 
@@ -106,21 +67,6 @@
 
 
 
-### #200 sort_by 比较器 lambda 55+ 处重复 [low] [mechanical] [open]
-
-`fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } }` 在 16 个文件中出现 55+ 次，用于 map entries 的确定性迭代排序。
-
-**修复**：在共享工具模块中提取 `compare_by_key` helper。
-
-发现者：Opus（前端审计）
-
-### #201 exports.ring mod block 导出 3 级手动展开 [low] [judgment] [doing]
-
-`exports.ring:56-420` 的 `extract_exports` 对 mod block 内联展开导出提取逻辑至 3 层嵌套，每层是上层的 copy-paste（~300 行重复），且不支持更深嵌套。
-
-**修复**：重构为递归 `extract_decl_exports(decl, env, ...)` 函数。
-
-发现者：Opus（前端审计）
 
 ### #202 codegen_llvm_expr pattern binding 代码 8 处重复 [low] [judgment] [open]
 

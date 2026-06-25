@@ -525,6 +525,7 @@ const cases: TestCase[] = [
   { file: "where_clause_warning.ring", expected: "5\n" },
   { file: "default_params.ring", expected: "15\n25\nHello, World!\nHi, World!\nHey, World.\nlocalhost:8080 (timeout=30)\nlocalhost:3000 (timeout=30)\nlocalhost:3000 (timeout=60)\n" },
   { file: "return_call_effect.ring", expected: "return_call_effect: all tests passed\n" },
+  { file: "match_negative_literal.ring", expected: "minus one\nzero\none\nother\nminus one point five\nzero\none point five\nother\n" },
 ];
 
 describe("e2e: ring run", { concurrency: true }, () => {
@@ -626,6 +627,7 @@ describe("e2e: ring check (negative — should reject)", { concurrency: true }, 
     { file: "error_effect_suggestion.ring", error_pattern: "E0403" },
     { file: "error_method_extra_args.ring", error_pattern: "E0301" },
     { file: "error_method_arity_underflow.ring", error_pattern: "E0301" },
+    { file: "error_interp_non_basic.ring", error_pattern: "E0309" },
   ];
 
   for (const tc of negative_cases) {
