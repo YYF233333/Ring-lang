@@ -2,7 +2,7 @@ use types::{Type, EffectRow, StructField, EnumVariant,
     INT, STR, BOOL, EMPTY_ROW}
 use env::{TypeEnv, TypeScheme, SchemeBound, StructDef, EnumDef, ImplEntry, add_impl, has_impl}
 use hir::{DerivedImpl, DerivedField, DerivedVariant, FieldAction,
-    TraitBound, TypeKind, trait_dict_name, trait_bound_param_name}
+    TraitBound, TypeKind, trait_dict_name, trait_bound_param_name, compare_by_first}
 
 fn str_at(list: List<Str>, i: Int) -> Str {
     match list.get(i) { some(v) => v, none => panic("unreachable: str_at out of bounds") }
@@ -51,7 +51,7 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
     let builtins = BUILTIN_TYPES
     let mut result: List<UserType> = []
     let mut sorted_structs = env.types.structs.entries()
-    sorted_structs.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_structs.sort_by(compare_by_first)
     for entry in sorted_structs {
         let (name, def) = entry
         // Skip mod aliases (e.g. "Point" aliasing "geo::Point") to avoid duplicate derives
@@ -64,7 +64,7 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
         }
     }
     let mut sorted_enums = env.types.enums.entries()
-    sorted_enums.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_enums.sort_by(compare_by_first)
     for entry in sorted_enums {
         let (name, def) = entry
         // Skip mod aliases to avoid duplicate derives
@@ -83,7 +83,7 @@ fn collect_user_types(env: TypeEnv) -> List<UserType> {
 fn derive_trait(mut env: TypeEnv, all_types: List<UserType>, trait_name: Str, mut derived_impls: List<DerivedImpl>) {
     let mut known = set_new()
     let mut sorted_impls = env.trait_reg.trait_impls.entries()
-    sorted_impls.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_impls.sort_by(compare_by_first)
     for entry in sorted_impls {
         let (tname, impls) = entry
         for imp in impls {

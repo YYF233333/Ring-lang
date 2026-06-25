@@ -1,6 +1,6 @@
 use types::{Type}
 use ast::{Program, Decl, UseImport, NamedImport}
-use hir::{HProgram, HDecl}
+use hir::{HProgram, HDecl, compare_by_first}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, EffectAliasDef}
 use infer_register::{prefix_decl_name}
 
@@ -423,7 +423,7 @@ pub fn extract_exports(
     // Filter trait impls
     let mut trait_impls: List<ImplEntry> = []
     let mut sorted_trait_impls = env.trait_reg.trait_impls.entries()
-    sorted_trait_impls.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_trait_impls.sort_by(compare_by_first)
     for map_entry in sorted_trait_impls {
         let (_, impl_list) = map_entry
         for impl_ in impl_list {

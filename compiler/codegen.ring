@@ -2,7 +2,7 @@ use types::{Type, Effect, EffectRow, effect_kind_name}
 use ast::{TypeParam}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, DerivedImpl, HStringInterpPart, HMatchArm,
-    HEffectHandler, HStructFieldInit,
+    HEffectHandler, HStructFieldInit, compare_by_first,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_STR, BUILTIN_INT,
     BUILTIN_FLOAT, BUILTIN_BOOL, BUILTIN_CELL, BUILTIN_OPTION,
     BUILTIN_STRING_BUILDER}
@@ -41,7 +41,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     match external_fn_mut_params {
         some(efmp) => {
             let mut sorted_entries = efmp.entries()
-            sorted_entries.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            sorted_entries.sort_by(compare_by_first)
             for entry in sorted_entries {
                 let (k, v) = entry
                 ctx.fn_mut_params.insert(k, v)
@@ -54,7 +54,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     match external_struct_fields {
         some(esf) => {
             let mut sorted_entries = esf.entries()
-            sorted_entries.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            sorted_entries.sort_by(compare_by_first)
             for entry in sorted_entries {
                 let (k, v) = entry
                 ctx.struct_field_order.insert(k, v)
@@ -67,7 +67,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
     match external_impl_methods {
         some(eim) => {
             let mut sorted_entries = eim.entries()
-            sorted_entries.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            sorted_entries.sort_by(compare_by_first)
             for entry in sorted_entries {
                 let (k, v) = entry
                 ctx.impl_methods.insert(k, v)
@@ -113,7 +113,7 @@ pub fn generate(program: HProgram, skip_preamble: Bool, skip_main_call: Bool,
         while changed {
             changed = false
             let mut sorted_callees = fn_callees.entries()
-            sorted_callees.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            sorted_callees.sort_by(compare_by_first)
             for entry in sorted_callees {
                 let (name, callees) = entry
                 let mut sorted_callee_names = callees.to_list()

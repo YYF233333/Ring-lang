@@ -2,7 +2,7 @@ use types::{Type, Effect, EffectRow, type_to_builtin_name, effect_kind_name}
 use ast::{Pattern, BinOp, UnaryOp}
 use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     HStringInterpPart, HEffectHandler, DictRef, TraitDispatch,
-    evidence_param_name, trait_dict_name,
+    evidence_param_name, trait_dict_name, compare_by_first,
     ENUM_TAG_FIELD, OPTION_SOME_TAG, OPTION_NONE_TAG, OPTION_PAYLOAD_FIELD,
     RUNTIME_EFFECT_ABORT, RUNTIME_MATCH_FAIL,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
@@ -1426,7 +1426,7 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
     let q = "\""
 
     let mut sorted_by_effect = by_effect.entries()
-    sorted_by_effect.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_by_effect.sort_by(compare_by_first)
     for entry in sorted_by_effect {
         let (effect_name, hs) = entry
         let ev_name = evidence_param_name(effect_name)
@@ -1517,7 +1517,7 @@ fn gen_handle(mut ctx: CodegenCtx, body: HExpr, handlers: List<HEffectHandler>) 
 
     let mut ev_param_names: List<Str> = []
     let mut sorted_by_eff = by_effect.entries()
-    sorted_by_eff.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_by_eff.sort_by(compare_by_first)
     for entry in sorted_by_eff {
         let (ename, _) = entry
         ev_param_names.push(evidence_param_name(ename))

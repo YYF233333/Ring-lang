@@ -5,7 +5,7 @@ use types::{Type, Effect, EffectRow,
 use ast::{Expr, Pattern, Span, NamedPatternField}
 use hir::{HExpr, HStmt, TraitDispatch, DictRef,
     variant_js_name, trait_dict_name, trait_bound_param_name,
-    hexpr_type}
+    hexpr_type, compare_by_first}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
 use codes::{E0201, E0205, E0208, E0303, E0307, E0308, E0504, E0705}
 use union_find::{UnionFind, uf_find, uf_lookup}
@@ -409,7 +409,7 @@ pub fn infer_numeric_op(ctx: InferCtx, left: HExpr, right: HExpr, s: UnionFind, 
             // Fresh inference variables (e.g. from fold callback) can unify to Int.
             let mut rigid_ids: Set<Int> = set_new()
             let mut sorted_tp_scope = ctx.type_param_scope.entries()
-            sorted_tp_scope.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            sorted_tp_scope.sort_by(compare_by_first)
             for entry in sorted_tp_scope {
                 let tp_type = entry.1
                 match tp_type {

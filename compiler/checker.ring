@@ -1,6 +1,6 @@
 use types::{Type, UNIT}
 use ast::{Program, Decl, UseDecl, UseImport, NamedImport, Span, TypeParam}
-use hir::{HDecl, HProgram}
+use hir::{HDecl, HProgram, compare_by_first}
 use diagnostics::{Severity, DiagnosticContext, CollectingSink, Diagnostic, new_collecting_sink, make_diag}
 use env::{TypeEnv, TypeScheme, StructDef, EnumDef, EffectDef, TraitDef, ImplEntry, new_type_env, add_impl}
 use builtins::{register_builtins, register_hof_intrinsics}
@@ -182,7 +182,7 @@ pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink:
 fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
     for mod_ in exports {
         let mut sorted_types = mod_.types.entries()
-        sorted_types.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_types.sort_by(compare_by_first)
         for entry in sorted_types {
             let (name, def) = entry
             match def {
@@ -198,19 +198,19 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             }
         }
         let mut sorted_effects = mod_.effects.entries()
-        sorted_effects.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_effects.sort_by(compare_by_first)
         for entry in sorted_effects {
             let (name, effdef) = entry
             ctx.env.types.effects.insert(name, effdef)
         }
         let mut sorted_aliases = mod_.effect_aliases.entries()
-        sorted_aliases.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_aliases.sort_by(compare_by_first)
         for entry in sorted_aliases {
             let (name, adef) = entry
             ctx.env.types.effect_aliases.insert(name, adef)
         }
         let mut sorted_traits = mod_.traits.entries()
-        sorted_traits.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_traits.sort_by(compare_by_first)
         for entry in sorted_traits {
             let (name, tdef) = entry
             ctx.env.trait_reg.traits.insert(name, tdef)
@@ -219,13 +219,13 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
             add_impl(ctx.env.trait_reg, impl_)
         }
         let mut sorted_impl_methods = mod_.impl_methods.entries()
-        sorted_impl_methods.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_impl_methods.sort_by(compare_by_first)
         for entry in sorted_impl_methods {
             let (type_name, methods) = entry
             match ctx.env.trait_reg.impl_methods.get(type_name) {
                 some(existing) => {
                     let mut sorted_meths = methods.entries()
-                    sorted_meths.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                    sorted_meths.sort_by(compare_by_first)
                     for mentry in sorted_meths {
                         let (method_name, scheme) = mentry
                         existing.insert(method_name, scheme)
@@ -238,7 +238,7 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
         }
         // Inject mut_methods
         let mut sorted_mut = mod_.mut_methods.entries()
-        sorted_mut.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_mut.sort_by(compare_by_first)
         for entry in sorted_mut {
             let (type_name, method_set) = entry
             match ctx.env.trait_reg.mut_methods.get(type_name) {
@@ -258,7 +258,7 @@ fn inject_module_exports(mut ctx: InferCtx, exports: List<ModuleExports>) {
         }
         // Inject fn_mut_params
         let mut sorted_fmp = mod_.fn_mut_params.entries()
-        sorted_fmp.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_fmp.sort_by(compare_by_first)
         for entry in sorted_fmp {
             let (fn_name, flags) = entry
             ctx.fn_mut_params.insert(fn_name, flags)
@@ -372,7 +372,7 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                     },
                     UseImport::Module => {
                         let mut sorted_mod_values = mod_.values.entries()
-                        sorted_mod_values.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                        sorted_mod_values.sort_by(compare_by_first)
                         for entry in sorted_mod_values {
                             let (name, scheme) = entry
                             // Check for ambiguous wildcard import
@@ -395,7 +395,7 @@ fn resolve_uses(mut ctx: InferCtx, uses: List<UseDecl>, available_modules: List<
                             import_origins.insert(name, mod_key)
                         }
                         let mut sorted_mod_types = mod_.types.entries()
-                        sorted_mod_types.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+                        sorted_mod_types.sort_by(compare_by_first)
                         for entry in sorted_mod_types {
                             let (_, tdef) = entry
                             match tdef {

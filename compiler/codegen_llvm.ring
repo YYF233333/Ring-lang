@@ -3,7 +3,7 @@ use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp, DerivedImpl,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
-    hexpr_type, hexpr_effects}
+    compare_by_first, hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
@@ -928,7 +928,7 @@ fn compute_transitive_effect_closure(decls: List<HDecl>, mut local_fn_effects: M
     while changed {
         changed = false
         let mut sorted_callees = fn_callees.entries()
-        sorted_callees.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+        sorted_callees.sort_by(compare_by_first)
         for entry in sorted_callees {
             let (name, callees) = entry
             let mut sorted_callee_names = callees.to_list()

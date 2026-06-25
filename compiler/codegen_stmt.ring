@@ -1,6 +1,6 @@
 use ast::{Pattern, NamedPatternField, LiteralValue}
 use hir::{HExpr, HStmt, HMatchArm, HLetDestructureBinding,
-    ENUM_TAG_FIELD, RUNTIME_MATCH_FAIL, hexpr_type, trait_dict_name, HForInDestructure}
+    ENUM_TAG_FIELD, RUNTIME_MATCH_FAIL, hexpr_type, trait_dict_name, compare_by_first, HForInDestructure}
 use types::{Type, BUILTIN_RANGE}
 use codegen_ctx::{CodegenCtx, emit, push_indent, pop_indent, safe_ident, qualify}
 
@@ -21,7 +21,7 @@ fn resolve_struct_name(ctx: CodegenCtx, raw_name: Str) -> Str? {
     // Fallback: search for a key ending with "$raw_name" (mod-qualified struct)
     let suffix = "\$${safe}"
     let mut sorted_entries = ctx.struct_field_order.entries()
-    sorted_entries.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_entries.sort_by(compare_by_first)
     for entry in sorted_entries {
         let (k, _v) = entry
         if k.ends_with(suffix) {

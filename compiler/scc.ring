@@ -7,6 +7,7 @@
 // (dependencies before dependents — leaf callees first, top-level callers last).
 
 use ast::{Decl, Expr, Stmt, MatchArm, EffectHandler, StringInterpPart, StructFieldInit}
+use hir::{compare_by_first}
 
 // ============================================================
 // Collect registered fn names from decls (mirrors Pass 1 registration)
@@ -382,7 +383,7 @@ pub fn tarjan_scc(graph: Map<Str, List<Str>>) -> List<List<Str>> {
     // Collect all nodes (some might only appear as targets, not keys)
     let mut all_nodes: Set<Str> = set_new()
     let mut sorted_graph = graph.entries()
-    sorted_graph.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+    sorted_graph.sort_by(compare_by_first)
     for entry in sorted_graph {
         let (node, targets) = entry
         all_nodes.insert(node)
