@@ -83,6 +83,8 @@ extern type LLVMAttributeRef
 extern fn LLVMAddAttributeAtIndex(fn_val: LLVMValueRef, attr_index: Int, attr: LLVMAttributeRef) -> Unit
 extern fn LLVMGetEnumAttributeKindForName(name: Str, s_len: Int) -> Int
 extern fn LLVMCreateEnumAttribute(ctx: LLVMContextRef, kind_id: Int, val: Int) -> LLVMAttributeRef
+// B-148: needed for divzero guard — get the parent function of a basic block
+extern fn LLVMGetBasicBlockParent(bb: LLVMBasicBlockRef) -> LLVMValueRef
 
 // ============================================================
 // Type-aware map/set dispatch helpers
@@ -245,6 +247,27 @@ fn gen_str_lit(mut ctx: LlvmCtx, value: Str) -> LLVMValueRef {
     let from_cstr_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
     let from_cstr_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
     LLVMBuildCall2(ctx.builder, from_cstr_ty, from_cstr_fn, [global_str], fresh_name(ctx, "s"))
+}
+
+// B-148: emit a zero-check on `divisor` (an unboxed i64).
+// If divisor == 0, branches to a panic BB; otherwise falls through to cont BB.
+fn emit_divzero_guard(mut ctx: LlvmCtx, divisor: LLVMValueRef) {
+    let zero = LLVMConstInt(ctx.i64_type, 0, 0)
+    let is_zero = LLVMBuildICmp(ctx.builder, 32, divisor, zero, fresh_name(ctx, "divzero"))
+    let current_fn = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder))
+    let panic_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "divzero.panic")
+    let cont_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "divzero.cont")
+    discard(LLVMBuildCondBr(ctx.builder, is_zero, panic_bb, cont_bb))
+    LLVMPositionBuilderAtEnd(ctx.builder, panic_bb)
+    let panic_fn = get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type)
+    let panic_ty = get_rt_fn_type(ctx, "ring_panic")
+    let msg = LLVMBuildGlobalStringPtr(ctx.builder, "integer division by zero", fresh_name(ctx, "panicmsg"))
+    let str_fn = get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type)
+    let str_ty = get_rt_fn_type(ctx, "ring_str_from_cstr")
+    let str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], fresh_name(ctx, "panicstr"))
+    discard(LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [str_val], ""))
+    discard(LLVMBuildUnreachable(ctx.builder))
+    LLVMPositionBuilderAtEnd(ctx.builder, cont_bb)
 }
 
 fn gen_bool_lit(mut ctx: LlvmCtx, value: Bool) -> LLVMValueRef {
@@ -753,10 +776,14 @@ fn gen_int_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueR
             box_int(ctx, result)
         },
         BinOp::Div => {
+            // B-148: guard against division by zero (sdiv x, 0 = UB)
+            emit_divzero_guard(ctx, rhs_raw)
             let result = LLVMBuildSDiv(ctx.builder, lhs_raw, rhs_raw, fresh_name(ctx, "div"))
             box_int(ctx, result)
         },
         BinOp::Mod => {
+            // B-148: guard against remainder by zero (srem x, 0 = UB)
+            emit_divzero_guard(ctx, rhs_raw)
             let result = LLVMBuildSRem(ctx.builder, lhs_raw, rhs_raw, fresh_name(ctx, "mod"))
             box_int(ctx, result)
         },
