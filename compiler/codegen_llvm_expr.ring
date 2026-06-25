@@ -2235,7 +2235,8 @@ fn extern_fn_to_runtime(name: Str) -> Str? {
     else { if name == "set_int_new" { some("ring_set_int_new") }
     else { if name == "map_int_from" { some("ring_map_int_from") }
     else { if name == "set_int_from" { some("ring_set_int_from_list") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { if name == "Cell" { some("ring_Cell_new") }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 // ============================================================
@@ -2597,7 +2598,11 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
     else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
     else { if type_name == "Option" && method == "to_fail" { some("ring_Option_to_fail") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    // Cell methods
+    else { if type_name == "Cell" && method == "get" { some("ring_Cell_get") }
+    else { if type_name == "Cell" && method == "set" { some("ring_Cell_set") }
+    else { if type_name == "Cell" && method == "update" { some("ring_Cell_update") }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {
@@ -2983,11 +2988,33 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
     // (gen_match_if_else), which emits explicit tag tests and re-tests each arm's
     // pattern+guard on fall-through, exactly matching the JS oracle. The switch is
     // kept purely as an optimization for guard-free enum matches.
+    //
+    // Also incompatible with the switch: duplicate constructor tags. A match like
+    //   match e { Neg(Lit(n)) => ..., Neg(inner) => ... }
+    // has two arms for the Neg tag. LLVMAddCase with the same tag value twice is
+    // undefined behavior (the second case is silently ignored), so the second arm
+    // becomes unreachable. Detect this and fall back to the if-else chain.
     let mut any_guard = false
+    let mut has_dup_tag = false
+    let mut seen_ctors: List<Str> = []
     for arm in arms {
         match arm.guard { some(_) => { any_guard = true }, none => {} }
+        let ctor_name = match arm.pattern {
+            Pattern::Constructor { name, .. } => some(name),
+            Pattern::NamedConstructor { name, .. } => some(name),
+            _ => none,
+        }
+        match ctor_name {
+            some(cn) => {
+                if seen_ctors.contains(cn) {
+                    has_dup_tag = true
+                }
+                seen_ctors.push(cn)
+            },
+            none => {},
+        }
     }
-    if any_guard {
+    if any_guard || has_dup_tag {
         return gen_match_if_else(ctx, scrut_val, scrut_ty, arms, merge_bb, default_bb, current_fn)
     }
 

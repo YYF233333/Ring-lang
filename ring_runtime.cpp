@@ -2016,6 +2016,53 @@ extern "C" int64_t ring_sb_len(void* sb) {
 }
 
 // ============================================================================
+// Cell — user-facing mutable container (~4)
+// ============================================================================
+// Cell<T> wraps a single value. Internally it is a heap-allocated slot
+// (same typeid as the compiler's write-through mut-cell, RING_TYPEID_CELL=14).
+// Semantics mirror the JS runtime: Cell(v) → {value: v}, .get() → value,
+// .set(v) replaces value (drop old, dup new), .update(f) applies callback.
+
+extern "C" void* ring_Cell_new(void* value) {
+    void* data = ring_alloc(sizeof(void*), RING_TYPEID_CELL);
+    *(void**)data = value;
+    // Perceus handles ownership: if value is live after this call, the
+    // caller inserts ring_dup before passing it. No dup here.
+    return data;
+}
+
+extern "C" void* ring_Cell_get(void* cell) {
+    void* value = *(void**)cell;
+    // Borrow: return the value without dup. Perceus inserts dup at
+    // the call site when the result escapes into an owned position.
+    return value;
+}
+
+extern "C" void* ring_Cell_set(void* cell, void* new_val) {
+    // Sink pattern (same as ring_list_set): the val arg is a sink position —
+    // Perceus clones borrows and transfers owned temps. Store first, then drop
+    // old (avoids UAF on self-assign where old == new_val with shared rc).
+    void* old = *(void**)cell;
+    *(void**)cell = new_val;
+    ring_drop(old);
+    return cell;                 // return receiver (Unit-typed call site discards this)
+}
+
+extern "C" void* ring_Cell_update(void* cell, void* closure) {
+    // Read old value, apply callback, store result. The callback consumes the
+    // old value (Perceus handles its internal dup/drop) and produces a fresh
+    // owned result. Store first, then drop old (same store-before-drop order
+    // as ring_Cell_set for consistency).
+    void* old_val = *(void**)cell;
+    RingClosure* cl = (RingClosure*)closure;
+    ring_fn_1 fn = (ring_fn_1)cl->fn_ptr;
+    void* new_val = fn(cl->env_ptr, old_val);
+    *(void**)cell = new_val;
+    ring_drop(old_val);
+    return cell;
+}
+
+// ============================================================================
 // setjmp/longjmp — fail effect handler stack (~5)
 // ============================================================================
 
