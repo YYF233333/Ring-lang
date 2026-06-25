@@ -1263,11 +1263,23 @@ struct FnBodyResult {
 fn check_fn_body(mut ctx: InferCtx, type_params: List<TypeParam>, hparams: List<HParam>, expected_ret: Type, body: Expr, saved_tp_scope: Map<Str, Type>, span: Span) -> FnBodyResult {
     let body_result = infer_block(ctx, body, some(ctx.subst))
     ctx.subst = body_result.subst
-    let fn_body_notes: List<DiagnosticNote> = [
-        DiagnosticNote { message: "function return type is declared as '${type_to_string(apply_subst(ctx.subst, expected_ret))}'", span: some(span) },
-        DiagnosticNote { message: "function body evaluates to '${type_to_string(apply_subst(ctx.subst, hexpr_type(body_result.hexpr)))}'", span: some(hexpr_span(body_result.hexpr)) }
-    ]
-    ctx.subst = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span, fn_body_notes)
+    // Skip body-vs-return unification when the body type is Never (bottom).
+    // Never is compatible with any type, but unify(Never, ?T) would bind ?T = Never,
+    // contaminating the return type.  With B-122 rebind_fn_type this turns the
+    // scheme's return type into Never, so all callers see the function as diverging.
+    // Functions whose body ends with fail.raise / panic still have correct return
+    // types from their `return` statements (which unify with expected_ret directly).
+    let body_type_resolved = apply_subst(ctx.subst, hexpr_type(body_result.hexpr))
+    match body_type_resolved {
+        Type::NeverType => {},
+        _ => {
+            let fn_body_notes: List<DiagnosticNote> = [
+                DiagnosticNote { message: "function return type is declared as '${type_to_string(apply_subst(ctx.subst, expected_ret))}'", span: some(span) },
+                DiagnosticNote { message: "function body evaluates to '${type_to_string(apply_subst(ctx.subst, hexpr_type(body_result.hexpr)))}'", span: some(hexpr_span(body_result.hexpr)) }
+            ]
+            ctx.subst = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_result.hexpr), expected_ret, ctx.subst, span, fn_body_notes)
+        },
+    }
 
     let mut local_names: Map<Int, Str> = map_new()
     for tp in type_params {
