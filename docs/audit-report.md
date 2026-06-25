@@ -11,7 +11,7 @@
 ## 前端
 
 
-### #197 resolve_fn_type_effect 与 resolve_effect_expr 逻辑分叉风险 [low] [mechanical] [open]
+### #197 resolve_fn_type_effect 与 resolve_effect_expr 逻辑分叉风险 [low] [mechanical] [doing]
 
 `infer_ctx.ring:1076-1103` 的 `resolve_fn_type_effect` 与 `infer_register.ring:1160-1202` 的 `resolve_effect_expr` 实现相同的 effect 解析逻辑（io/mut/fail/自定义 effect）。两份代码独立维护，`resolve_fn_type_effect` 缺少对未知自定义 effect 的错误诊断。修一个忘改另一个会导致 FnType 注解与运行时 effect 匹配出现不一致。
 
@@ -199,7 +199,7 @@
 
 ## 跨模块代码健康
 
-### #192 andor_lower / dict_lower HIR walker 结构性重复 [medium] [judgment] [open]
+### #192 andor_lower / dict_lower HIR walker 结构性重复 [medium] [judgment] [doing]
 
 `andor_lower.ring:55-318` 和 `dict_lower.ring:65-431` 包含近乎相同的 HIR 结构遍历器（`al_decl`/`dl_decl`、`al_expr`/`dl_expr`、`al_stmt`/`dl_stmt`），每增加新 HExpr/HStmt variant 两个文件必须同步更新。唯一差异是变换逻辑（And/Or 降低 vs dict ref 改写）。
 
@@ -208,7 +208,7 @@
 发现者：Opus（前端审计）
 
 
-### #199 is_value_type 三处相同实现 [low] [mechanical] [open]
+### #199 is_value_type 三处相同实现 [low] [mechanical] [doing]
 
 `infer_helpers.ring:35-43`（pub）、`infer_decl.ring:1342-1350`（private）、`infer_register.ring:1307-1315`（private，名为 `is_register_value_type`）三处相同函数体：`IntType | FloatType | BoolType | StrType => true`。
 
