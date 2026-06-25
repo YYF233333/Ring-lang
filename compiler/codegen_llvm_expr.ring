@@ -1994,6 +1994,9 @@ fn gen_direct_call(mut ctx: LlvmCtx, name: Str, mut arg_vals: List<LLVMValueRef>
     let rt_name = extern_fn_to_runtime(name)
     match rt_name {
         some(rtn) => {
+            let mut param_types: List<LLVMTypeRef> = []
+            for _ in arg_vals { param_types.push(ctx.ptr_type) }
+            let _ = get_or_declare_runtime_fn(ctx, rtn, param_types, ctx.ptr_type)
             return gen_runtime_call(ctx, rtn, arg_vals)
         },
         none => {},
