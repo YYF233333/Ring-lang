@@ -44,24 +44,17 @@ grep -n "\[open\]" docs/audit-report.md
 - `judgment`：使用 Claude worktree subagent 执行（需要设计判断力）
 - **核查规则**：Worker 在执行时独立判断 dispatch 标记是否合理——Discussion 出任务时的判断可能有误。如果 Worker 认为某个 `mechanical` item 实际需要 judgment（spec 模糊、涉及多种实现方式、需要理解 Ring 编译器约定），应**升级为 `judgment`** 并在 feedback 中说明原因。反之，`judgment` item 如果 plan 生成后发现实际只需机械执行，可**降级为 `mechanical`**。
 
-**分 Wave**：
-- 同一 Wave 的 items 无文件重叠，可安全并行
-- 有依赖的排后面的 Wave
-- 每 Wave 最多 3 个 worktree subagent（含 DS subagent）
+**分组（Rolling Dispatch）**：
+- 按文件冲突分组：同时运行的 agent 不能改同一文件
+- 最多 **4 个** worktree subagent 并发
+- **不等 wave 结束**——任意 agent 完成后立即验证 → merge → 派新 agent 补位，保持并发数 2-4
+- 首批向用户展示分组计划（含 dispatch 分配 + 文件冲突说明），approve 后开始
 
-向用户展示 Wave 计划（含每个 item 的 dispatch 分配），等用户一次性 approve。
+### Step 3: 滚动执行
 
-### Step 3: 执行 Wave
+#### 3a. 首批派发
 
-#### 3a. 状态更新：`queued`/`open` → `planning`
-
-Edit backlog/audit-report 中对应 items 的状态标记。
-
-#### 3b. 生成 Plan
-
-对每个 item 读取 spec（backlog body 或 audit-report 描述），结合仓库现状生成实现 plan。
-
-**使用 superpowers:writing-plans skill 生成 plan。**
+读 spec → 状态 `open`/`queued` → `doing` → 派发首批 4 个 agent。
 
 **Spec 验证（关键）**：如果 spec 描述的代码/API/结构与仓库现状不符：
 - **STOP**
@@ -69,11 +62,7 @@ Edit backlog/audit-report 中对应 items 的状态标记。
 - 向用户报告："B-xxx 的 spec 与仓库不符——spec 说 XXX 但实际是 YYY"
 - 不继续执行，不猜测，等用户处理
 
-#### 3c. 状态更新：`planning` → `doing`
-
-Plan 通过后更新状态。
-
-#### 3d. 派发 Worktree Subagent
+#### 3b. 派发 Worktree Subagent
 
 记录 main HEAD：
 ```bash
@@ -126,65 +115,44 @@ DS prompt 中指定 worktree 绝对路径为工作目录，其余调用细节由
 
 失败处理：(a) 同一 session 追加消息让 DS 修正；(b) 升级为 judgment 由 Claude 接手。
 
-#### 3e. 等待完成 + 验证
+#### 3c. 完成 → 验证 → Merge → 补位（滚动循环）
 
-Agent 完成后：
-1. 验证 base commit（`git log` 确认）
+任意 agent 完成通知到达后**立即处理**，不等其他 agent：
+
+**① 验证**：
+1. `git log --oneline -2` 确认 base commit
 2. Review diff（`git diff HEAD~1 -- ":(exclude)compiler/dist/*"`）
-3. 标记：✅ 通过 / ❌ 失败
+3. judgment 级 item 需更仔细 review：检查复现用例、边界情况
+4. 标记：✅ 通过 / ❌ 失败（失败则标回 open，必要时重派）
 
-#### 3f. 顺序 Merge + Amend（无 broken state）
-
-**原则**：merge commit 必须包含完整可工作的状态——dist/ 已重编译、tracking 已更新。不允许 broken intermediate state 作为独立 commit 存在。
-
-按冲突由少到多 merge：
+**② Merge + Amend**（无 broken state）：
 ```bash
-cd <worktree-path> && git rev-parse HEAD
-cd <main-repo> && git merge <commit-hash> --no-edit
-```
+git merge <commit-hash> --no-edit
+# dist/ 冲突：git checkout --ours compiler/dist/ → rebuild 覆盖
+# 源码冲突（可解决）：手动 Edit
+# 源码冲突（语义冲突）：停下来问用户
 
-dist/ 冲突：`git checkout --ours compiler/dist/` → rebuild 覆盖
-源码冲突（可解决）：手动 Edit 解决
-源码冲突（语义冲突）：停下来问用户
-
-**Merge 后立即执行（全部 amend 进 merge commit）**：
-
-```bash
-# 1. Rebuild dist
+# Rebuild dist
 node compiler/dist/main.js build compiler/main.ring --out-dir=compiler/dist
 git add compiler/dist/
 
-# 2. 更新 tracking（删除已完成 item）
-# Edit audit-report.md / backlog.md 删除对应条目
-
-# 3. 更新 CLAUDE.md（如功能变更影响了描述）
-
-# 4. Amend 全部进 merge commit
-git add docs/audit-report.md docs/backlog.md CLAUDE.md
+# 删除已完成 item + 更新 CLAUDE.md（如需）
+git add docs/audit-report.md docs/backlog.md
 git commit --amend --no-edit
-```
 
-**测试**：
-```bash
+# 测试
 cd compiler && npm test
 ```
 
-测试全绿 → 继续下一个 merge 或下一个 wave
-测试失败 → 二分定位，报告用户
-
-#### 3g. 清理 Worktree
-
+**③ 清理 + 补位**：
 ```bash
-git worktree list    # 检查残留
-git worktree remove -f -f <path>  # 清理每个完成的 worktree
+git worktree remove -f -f <path>
 ```
+从队列中取下一个 item（文件不与仍在跑的 agent 冲突），标 `doing`，立即派发。保持并发 2-4。
 
-### Step 4: Wave 间推进
+**④ 测试失败**：二分定位 → revert 问题 merge → 报告用户。
 
-测试全绿 → **直接启动下一个 Wave**（不等用户确认）
-测试失败 → 定位问题，报告用户，等待决策
-
-### Step 5: 最终报告
+### Step 4: 队列耗尽 → 最终报告
 
 ```markdown
 ## 执行完成
@@ -261,11 +229,13 @@ Worker 在实现过程中可能发现新 bug、设计偏差或需要讨论的决
 
 ## 关键规则
 
-- **不要串行派发**——同一 Wave 的 agent 必须在同一条消息中并行发出
+- **Rolling dispatch**——agent 完成即验证 → merge → 补位，不等 wave 结束。保持并发 2-4
 - **Orchestrator 不实现任务**——你调度和合并，不自己写代码
 - **Spec 是法律**——严格按两个表的 spec 执行，不自由发挥
 - **做完即删**——完成的 item 从表中删除，保持列表精简
-- **状态及时更新**——queued → planning → doing → 删除（正常流）；doing → waiting-feedback（遇设计问题），每步都 commit
+- **状态及时更新**——open/queued → doing → 删除（正常流）；doing → waiting-feedback（遇设计问题）
 - **不碰 waiting-feedback 的 item**——这些在等 Discussion agent 决策，Worker 跳过
 - **Base commit 验证是必须的**——每个 agent prompt 第一件事
-- **每次 Wave 后清理 worktree**——`git worktree remove -f -f`
+- **完成即清理 worktree**——`git worktree remove -f -f`
+- **N-API addon 提示**——worktree 中 `llvm_addon.node` 在 .gitignore 里没有，agent prompt 中加 `Copy-Item` 指令从主仓库复制
+- **文件冲突追踪**——维护 running agents 的文件列表，新派发的 agent 不能改同一文件。同文件的 items 排队等前一个 merge 后再派
