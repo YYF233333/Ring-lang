@@ -12,7 +12,7 @@
 
 
 
-### #198 Parser 不支持负数字面量 pattern [low] [judgment] [open]
+### #198 Parser 不支持负数字面量 pattern [low] [judgment] [doing]
 
 `parser.ring:1792-1928` 的 `parse_pattern` 处理 `TkIntLit` 和 `TkFloatLit`，但不处理前导 `TkMinus` + 数字字面量组合。`match x { -1 => ... }` 会产生 parse error。用户可通过 guard 或变量绑定 workaround，但这是常见的预期语法。
 
@@ -28,7 +28,7 @@
 
 
 
-### #183 RetIntToBoxed 使用 ZExt 而非 SExt [medium] [mechanical] [open]
+### #183 RetIntToBoxed 使用 ZExt 而非 SExt [medium] [mechanical] [doing]
 
 `codegen_llvm_expr.ring:1978-1981` 将 C int (i32) 返回值扩展为 Ring Int (i64) 时使用 `LLVMBuildZExt`（零扩展），注释写的是 "sext to i64"。对返回负值的 C 函数，零扩展会产生错误的大正数。当前 LLVM-C 函数返回 int 只返回 0/1（LLVMBool），所以是 latent。`LLVMBuildSExt` 未在任何 `.ring` 文件中声明。
 
@@ -36,7 +36,7 @@
 
 发现者：Opus（LLVM 审计）
 
-### #184 字符串插值 fallback 将非基本类型当 Int 处理 [medium] [mechanical] [open]
+### #184 字符串插值 fallback 将非基本类型当 Int 处理 [medium] [mechanical] [doing]
 
 `codegen_llvm_expr.ring:3157-3164` 的 `convert_to_str` 对 Str/Int/Float/Bool 之外的类型，fallback 调用 `unbox_int(val)`（`ptrtoint >> 1`）再 `ring_int_to_str`。对 struct/enum/list/option 值做字符串插值 `"${my_struct}"` 时会输出无意义的整数而非有意义的表示。
 
@@ -45,7 +45,7 @@
 发现者：Opus（LLVM 审计）
 
 
-### #186 LLVMGetTargetFromTriple 错误时静默继续 [medium] [judgment] [open]
+### #186 LLVMGetTargetFromTriple 错误时静默继续 [medium] [judgment] [doing]
 
 `codegen_llvm_expr.ring:2019-2027` 中 `gen_extern_LLVMGetTargetFromTriple` 调用后未检查返回值。若 triple 无效，output alloca 保持 null，后续 LLVM API 调用 null target → segfault。注释承认 `// TODO: could emit a conditional panic here`。
 
@@ -54,7 +54,7 @@
 发现者：Opus（LLVM 审计）+ DS（独立发现）
 
 
-### #188 Lambda 捕获变量未找到时静默存入 null [medium] [judgment] [open]
+### #188 Lambda 捕获变量未找到时静默存入 null [medium] [judgment] [doing]
 
 `codegen_llvm_expr.ring:4797-4799` 中 `gen_lambda` 构造闭包环境时，若捕获变量在 `ctx.named_values` 中找不到，fallback 存入 `LLVMConstPointerNull`。Checker 保证捕获变量有效，所以正常情况下不触发。但若发生（codegen 与 checker 的 scope 不一致等边角），运行时使用 null 捕获值会 segfault，且无任何诊断信息。
 
@@ -62,7 +62,7 @@
 
 发现者：DS（独立发现）
 
-### #189 codegen_llvm_decl derive 四实现 ~1700 行结构性重复 [medium] [judgment] [open]
+### #189 codegen_llvm_decl derive 四实现 ~1700 行结构性重复 [medium] [judgment] [doing]
 
 `codegen_llvm_decl.ring:988-2665` 中 Eq/Clone/Debug/Ord 四个 derive 实现共享极为相似的结构：函数创建（检查已有 → 构建参数类型 → LLVMAddFunction → 保存/恢复状态）重复 ~12 次，enum tag 加载、字段 GEP 遍历、StringBuilder 样板、closure dispatch 均为 copy-paste。
 
@@ -85,7 +85,7 @@
 
 
 
-### #204 RING_TYPEID 常量不一致——部分命名、部分裸数字 [low] [mechanical] [open]
+### #204 RING_TYPEID 常量不一致——部分命名、部分裸数字 [low] [mechanical] [doing]
 
 `codegen_llvm_expr.ring` 中部分 typeid 用命名常量（`RING_TYPEID_DICT_STATIC`），另一些用裸整数：`7` (CLOSURE, line 1523)、`10` (TUPLE, line 4511)、`21` (EVIDENCE, line 5493)。`codegen_llvm_ctx.ring` 已定义 CELL/CLOSURE_ENV/DICT_STATIC/DICT_DYN 常量，但 CLOSURE/EVIDENCE/TUPLE 缺失。
 
@@ -93,7 +93,7 @@
 
 发现者：Opus（LLVM 审计）+ DS（独立发现同类问题）
 
-### #205 Perceus is_droppable_init / anf_should_materialize 必须手动同步 [low] [judgment] [open]
+### #205 Perceus is_droppable_init / anf_should_materialize 必须手动同步 [low] [judgment] [doing]
 
 `perceus.ring:248-367` 的 `is_droppable_init` 和 `1658-1817` 的 `anf_should_materialize` 独立分类哪些表达式产生 fresh-owned 值。两者维护独立，新增表达式类型时一个改了另一个忘改会导致：materialize 而不 drop（leak）或 drop 而不 materialize（UAF）。无编程手段强制同步。
 
@@ -109,7 +109,7 @@
 
 发现者：DS（独立发现）
 
-### #207 lambda_counter 递增但未使用 [low] [mechanical] [open]
+### #207 lambda_counter 递增但未使用 [low] [mechanical] [doing]
 
 `codegen_llvm_expr.ring:4682`：`gen_lambda` 中 `ctx.lambda_counter = ctx.lambda_counter + 1` 但该值从未被读取。lambda 名称由 `fresh_name(ctx, "ring_lambda_")` 生成，使用独立的内部计数器。
 
@@ -149,7 +149,7 @@
 
 发现者：Opus（前端审计）
 
-### #201 exports.ring mod block 导出 3 级手动展开 [low] [judgment] [open]
+### #201 exports.ring mod block 导出 3 级手动展开 [low] [judgment] [doing]
 
 `exports.ring:56-420` 的 `extract_exports` 对 mod block 内联展开导出提取逻辑至 3 层嵌套，每层是上层的 copy-paste（~300 行重复），且不支持更深嵌套。
 
