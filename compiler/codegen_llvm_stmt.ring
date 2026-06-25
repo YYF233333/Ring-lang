@@ -499,7 +499,7 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
     // through merge_bb (loop_break_bb).  Residual: a `return` mid-loop bypasses
     // merge and leaks one conversion list — bounded O(loop-entries), the same
     // accepted residual as the B-104b range drops.
-    let mut set_converted = false
+    let mut collection_converted = false
     let list_val = match hexpr_type(iterable) {
         Type::StructType { name, type_params } => {
             if name == "Set" && type_params.len() == 1 {
@@ -510,11 +510,25 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
                 let conv_name = if is_int_elem { "ring_set_int_to_list" } else { "ring_set_to_list" }
                 let conv_fn = get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type)
                 let conv_ty = get_rt_fn_type(ctx, conv_name)
-                set_converted = true
+                collection_converted = true
                 LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "s2l"))
+            } else { if name == "Map" && type_params.len() == 2 {
+                // Map for-in: convert to List of (key, value) entry pairs via
+                // ring_map_entries / ring_map_int_entries, mirroring the JS
+                // backend's iterator protocol.  The fresh entries list is dropped
+                // at loop exit (same pattern as Set conversion above).
+                let is_int_key = match type_params[0] {
+                    Type::IntType => true,
+                    _ => false,
+                }
+                let conv_name = if is_int_key { "ring_map_int_entries" } else { "ring_map_entries" }
+                let conv_fn = get_or_declare_runtime_fn(ctx, conv_name, [ctx.ptr_type], ctx.ptr_type)
+                let conv_ty = get_rt_fn_type(ctx, conv_name)
+                collection_converted = true
+                LLVMBuildCall2(ctx.builder, conv_ty, conv_fn, [list_val_raw], fresh_name(ctx, "m2l"))
             } else {
                 list_val_raw
-            }
+            }}
         },
         _ => list_val_raw,
     }
@@ -600,10 +614,10 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
     ctx.loop_continue_bb = saved_continue
 
     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-    // B-104 D1 Stage 2: release the set→list conversion temporary (see the
-    // conversion comment above).  Deep drop frees the list + its fresh
-    // element copies; sharers hold Clone-wrapped dups.
-    if set_converted {
+    // B-104 D1 Stage 2: release the set→list / map→entries conversion
+    // temporary (see the conversion comment above).  Deep drop frees
+    // the list + its fresh element copies; sharers hold Clone-wrapped dups.
+    if collection_converted {
         emit_drop_value(ctx, list_val)
     }
 }
