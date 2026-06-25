@@ -302,6 +302,7 @@ function to_result(f) {
 
 
 
+
 class FnLookupResult {
   constructor(fn_val, fn_mangled) {
     this.fn_val = fn_val;
@@ -2293,6 +2294,25 @@ function gen_float_binop(ctx, op, lhs, rhs) {
   }
 }
 
+function emit_divzero_guard(ctx, divisor) {
+  const zero = LLVMConstInt(ctx.i64_type, 0, 0);
+  const is_zero = LLVMBuildICmp(ctx.builder, 32, divisor, zero, codegen_llvm_ctx$fresh_name(ctx, "divzero"));
+  const current_fn = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder));
+  const panic_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "divzero.panic");
+  const cont_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "divzero.cont");
+  discard(LLVMBuildCondBr(ctx.builder, is_zero, panic_bb, cont_bb));
+  LLVMPositionBuilderAtEnd(ctx.builder, panic_bb);
+  const panic_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_panic", [ctx.ptr_type], ctx.ptr_type);
+  const panic_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_panic");
+  const msg = LLVMBuildGlobalStringPtr(ctx.builder, "integer division by zero", codegen_llvm_ctx$fresh_name(ctx, "panicmsg"));
+  const str_fn = codegen_llvm_ctx$get_or_declare_runtime_fn(ctx, "ring_str_from_cstr", [ctx.ptr_type], ctx.ptr_type);
+  const str_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, "ring_str_from_cstr");
+  const str_val = LLVMBuildCall2(ctx.builder, str_ty, str_fn, [msg], codegen_llvm_ctx$fresh_name(ctx, "panicstr"));
+  discard(LLVMBuildCall2(ctx.builder, panic_ty, panic_fn, [str_val], ""));
+  discard(LLVMBuildUnreachable(ctx.builder));
+  return LLVMPositionBuilderAtEnd(ctx.builder, cont_bb);
+}
+
 function gen_int_binop(ctx, op, lhs, rhs) {
   const lhs_raw = unbox_int(ctx, lhs);
   const rhs_raw = unbox_int(ctx, rhs);
@@ -2314,11 +2334,13 @@ function gen_int_binop(ctx, op, lhs, rhs) {
       break __ring_match83;
     }
     if (__ring_m83._tag === "Div") {
+      emit_divzero_guard(ctx, rhs_raw);
       const result = LLVMBuildSDiv(ctx.builder, lhs_raw, rhs_raw, codegen_llvm_ctx$fresh_name(ctx, "div"));
       return box_int(ctx, result);
       break __ring_match83;
     }
     if (__ring_m83._tag === "Mod") {
+      emit_divzero_guard(ctx, rhs_raw);
       const result = LLVMBuildSRem(ctx.builder, lhs_raw, rhs_raw, codegen_llvm_ctx$fresh_name(ctx, "mod"));
       return box_int(ctx, result);
       break __ring_match83;

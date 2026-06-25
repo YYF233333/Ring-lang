@@ -106,14 +106,9 @@ describe("native-only semantic tests (oracle-blind)", () => {
     const expectedRaw = hasExpected ? fs.readFileSync(expectedFile, "utf-8") : "";
     const panicTest = hasExpected && isExpectPanic(expectedRaw);
 
-    // Panic tests are registered as `todo` — they document desired semantics
-    // that the backend does not yet enforce (e.g. divzero guard).  When the
-    // backend adds the check these tests will start passing and can be
-    // promoted out of `todo`.
     const skip = !HAVE_CLANG ? "clang not available" : !hasExpected ? "no .expected file" : false;
-    const todo = panicTest ? "backend does not yet emit runtime check (known limitation)" : false;
 
-    test(f, { skip, todo }, () => {
+    test(f, { skip }, () => {
       const { stdout, exitCode } = runLlvm(ringFile);
 
       if (panicTest) {
