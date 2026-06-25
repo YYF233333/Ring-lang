@@ -1226,11 +1226,6 @@ fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVaria
         some(info) => info,
         none => panic("unreachable"),
     }
-    let _ = enum_info  // used for future per-variant field comparison
-
-    // For now, enum eq with field comparison is complex. Use tag-only comparison.
-    // This is correct for field-less enums and a safe approximation for others.
-    // The full per-variant field comparison is left for future work.
     let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
     let self_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "stp"))
     let self_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, self_tag_ptr, fresh_name(ctx, "stv"))
@@ -1277,28 +1272,73 @@ fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVaria
         LLVMAddIncoming(phi, [true_val, false_val], [true_end, false_end])
         LLVMBuildRet(ctx.builder, phi)
     } else {
-        // Enum with fields — for now fall back to tag comparison only.
-        // Full per-variant field eq is complex (switch on tag, then GEP per variant).
-        // This covers the common case; full support can be added later.
-        let true_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.true")
-        let false_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.false")
-        let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.merge")
-        discard(LLVMBuildCondBr(ctx.builder, tags_eq, true_bb, false_bb))
+        // Enum with fields — tags differ → false, tags same → switch per variant
+        let tags_diff_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.diff")
+        let tags_same_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.same")
+        discard(LLVMBuildCondBr(ctx.builder, tags_eq, tags_same_bb, tags_diff_bb))
 
-        LLVMPositionBuilderAtEnd(ctx.builder, true_bb)
-        let true_val = box_bool(ctx, LLVMConstInt(ctx.i64_type, 1, 0))
-        let true_end = LLVMGetInsertBlock(ctx.builder)
-        discard(LLVMBuildBr(ctx.builder, merge_bb))
+        // Tags differ: return false
+        LLVMPositionBuilderAtEnd(ctx.builder, tags_diff_bb)
+        LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
 
-        LLVMPositionBuilderAtEnd(ctx.builder, false_bb)
-        let false_val = box_bool(ctx, LLVMConstInt(ctx.i64_type, 0, 0))
-        let false_end = LLVMGetInsertBlock(ctx.builder)
-        discard(LLVMBuildBr(ctx.builder, merge_bb))
+        // Tags same: switch on tag value, compare fields per variant
+        LLVMPositionBuilderAtEnd(ctx.builder, tags_same_bb)
+        let ret_true_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.ret.true")
+        let ret_false_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.ret.false")
 
-        LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
-        let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "res"))
-        LLVMAddIncoming(phi, [true_val, false_val], [true_end, false_end])
-        LLVMBuildRet(ctx.builder, phi)
+        // Default case for switch (shouldn't be reached) — return true
+        let default_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.default")
+        let switch_val = LLVMBuildSwitch(ctx.builder, self_tag, default_bb, variants.len())
+
+        for vi in 0..variants.len() {
+            let variant = variants[vi]
+            let var_tag = match enum_info.variants.get(variant.name) {
+                some(vinfo) => vinfo.tag,
+                none => vi,
+            }
+
+            let case_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.v.${variant.name}")
+            LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, var_tag, 0), case_bb)
+            LLVMPositionBuilderAtEnd(ctx.builder, case_bb)
+
+            if variant.fields.len() == 0 {
+                // No fields — tags match so they are equal
+                discard(LLVMBuildBr(ctx.builder, ret_true_bb))
+            } else {
+                // Compare each field with short-circuit
+                for fi in 0..variant.fields.len() {
+                    let field = variant.fields[fi]
+                    // Enum layout: { i64 tag, ptr field0, ptr field1, ... }
+                    // Field GEP index = fi + 1 (tag is at index 0)
+                    let self_fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, self_val, fi + 1, fresh_name(ctx, "sf"))
+                    let self_fv = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, self_fp, fresh_name(ctx, "sv"))
+                    let other_fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, other_val, fi + 1, fresh_name(ctx, "of"))
+                    let other_fv = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, other_fp, fresh_name(ctx, "ov"))
+
+                    let eq_i1 = emit_field_eq_cmp(ctx, self_fv, other_fv, field.action)
+
+                    let next_bb = if fi + 1 < variant.fields.len() {
+                        LLVMAppendBasicBlockInContext(ctx.context, fn_val, "eq.v.${variant.name}.f${fi + 1}")
+                    } else {
+                        ret_true_bb
+                    }
+                    discard(LLVMBuildCondBr(ctx.builder, eq_i1, next_bb, ret_false_bb))
+                    LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                }
+            }
+        }
+
+        // Default: return true (shouldn't be reached for well-formed enums)
+        LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+        discard(LLVMBuildBr(ctx.builder, ret_true_bb))
+
+        // ret_true block
+        LLVMPositionBuilderAtEnd(ctx.builder, ret_true_bb)
+        LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 1, 0)))
+
+        // ret_false block
+        LLVMPositionBuilderAtEnd(ctx.builder, ret_false_bb)
+        LLVMBuildRet(ctx.builder, box_bool(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
     }
 
     ctx.current_fn = saved_fn
@@ -1765,6 +1805,19 @@ fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVari
     let self_val = LLVMGetParam(fn_val, 0)
     let other_val = LLVMGetParam(fn_val, 1)
 
+    // Load enum type info for field GEP
+    if ctx.enum_types.get(type_name).is_none() {
+        // Fallback: return 0 (shouldn't happen for registered enums)
+        LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
+        ctx.current_fn = saved_fn
+        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        return
+    }
+    let enum_info = match ctx.enum_types.get(type_name) {
+        some(info) => info,
+        none => panic("unreachable"),
+    }
+
     // Load tags
     let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
     let self_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "stp"))
@@ -1807,9 +1860,61 @@ fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVari
     LLVMAddIncoming(tag_phi, [lt_val, gt_val], [lt_end, gt_end])
     LLVMBuildRet(ctx.builder, tag_phi)
 
-    // Tags same: return 0 (field comparison is left for future work, matching
-    // current enum Eq which is also tag-only for variants with fields)
+    // Tags same: switch on tag value, compare fields per variant
     LLVMPositionBuilderAtEnd(ctx.builder, tags_same_bb)
+
+    // Default case for switch — return 0 (equal)
+    let cmp_default_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "cmp.default")
+    let cmp_switch = LLVMBuildSwitch(ctx.builder, self_tag, cmp_default_bb, variants.len())
+
+    for vi in 0..variants.len() {
+        let variant = variants[vi]
+        let var_tag = match enum_info.variants.get(variant.name) {
+            some(vinfo) => vinfo.tag,
+            none => vi,
+        }
+
+        let case_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "cmp.v.${variant.name}")
+        LLVMAddCase(cmp_switch, LLVMConstInt(ctx.i64_type, var_tag, 0), case_bb)
+        LLVMPositionBuilderAtEnd(ctx.builder, case_bb)
+
+        if variant.fields.len() == 0 {
+            // No fields — tags match so equal → return 0
+            discard(LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0))))
+        } else {
+            // Compare each field with short-circuit (non-zero → return immediately)
+            for fi in 0..variant.fields.len() {
+                let field = variant.fields[fi]
+                // Enum layout: { i64 tag, ptr field0, ptr field1, ... }
+                let self_fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, self_val, fi + 1, fresh_name(ctx, "sf"))
+                let self_fv = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, self_fp, fresh_name(ctx, "sv"))
+                let other_fp = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, other_val, fi + 1, fresh_name(ctx, "of"))
+                let other_fv = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, other_fp, fresh_name(ctx, "ov"))
+
+                let cmp_val = emit_field_cmp(ctx, self_fv, other_fv, field.action)
+
+                if fi < variant.fields.len() - 1 {
+                    // Not the last field: if non-zero, return it
+                    let raw = unbox_int(ctx, cmp_val)
+                    let is_zero = LLVMBuildICmp(ctx.builder, 32, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
+                    let ret_nz_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "cmp.v.${variant.name}.ret.${fi}")
+                    let next_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "cmp.v.${variant.name}.f${fi + 1}")
+                    discard(LLVMBuildCondBr(ctx.builder, is_zero, next_bb, ret_nz_bb))
+
+                    LLVMPositionBuilderAtEnd(ctx.builder, ret_nz_bb)
+                    discard(LLVMBuildRet(ctx.builder, cmp_val))
+
+                    LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+                } else {
+                    // Last field: return its result directly
+                    discard(LLVMBuildRet(ctx.builder, cmp_val))
+                }
+            }
+        }
+    }
+
+    // Default: return 0 (shouldn't be reached for well-formed enums)
+    LLVMPositionBuilderAtEnd(ctx.builder, cmp_default_bb)
     LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
 
     ctx.current_fn = saved_fn
