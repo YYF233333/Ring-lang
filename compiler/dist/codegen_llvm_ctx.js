@@ -305,8 +305,15 @@ class ExternFnInfo {
   }
 }
 
+class HandleCleanup {
+  constructor(needs_catch_pop, ev_drop_allocas) {
+    this.needs_catch_pop = needs_catch_pop;
+    this.ev_drop_allocas = ev_drop_allocas;
+  }
+}
+
 class LlvmCtx {
-  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, static_dict_defs, dict_singletons, trait_method_order, trait_supertraits, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params, effect_ops, default_evidence, derived_dict_builds, extern_types, extern_fn_infos) {
+  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, static_dict_defs, dict_singletons, trait_method_order, trait_supertraits, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params, effect_ops, default_evidence, derived_dict_builds, extern_types, extern_fn_infos, handle_cleanup_stack) {
     this.context = context;
     this.module = module;
     this.builder = builder;
@@ -351,6 +358,7 @@ class LlvmCtx {
     this.derived_dict_builds = derived_dict_builds;
     this.extern_types = extern_types;
     this.extern_fn_infos = extern_fn_infos;
+    this.handle_cleanup_stack = handle_cleanup_stack;
   }
 }
 
@@ -640,4 +648,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr, ExternFnInfo, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, build_entry_alloca, __ExternParamMarshall_Eq, __ExternRetMarshall_Eq, __EnumVariantInfo_Clone, __ExternParamMarshall_Clone, __ExternRetMarshall_Clone, __ExternParamMarshall_Ord, __ExternRetMarshall_Ord, __EnumVariantInfo_Debug, __ExternParamMarshall_Debug, __ExternRetMarshall_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr, ExternFnInfo, HandleCleanup, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, build_entry_alloca, __ExternParamMarshall_Eq, __ExternRetMarshall_Eq, __EnumVariantInfo_Clone, __ExternParamMarshall_Clone, __ExternRetMarshall_Clone, __ExternParamMarshall_Ord, __ExternRetMarshall_Ord, __EnumVariantInfo_Debug, __ExternParamMarshall_Debug, __ExternRetMarshall_Debug };

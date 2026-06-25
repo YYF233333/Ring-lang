@@ -10,7 +10,7 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     hexpr_type, hexpr_effects, is_fresh_owned_bool_value,
     is_extern_handle_type}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
-    ExternFnInfo, ExternParamMarshall, ExternRetMarshall,
+    ExternFnInfo, ExternParamMarshall, ExternRetMarshall, HandleCleanup,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
     llvm_resolve_fn, build_entry_alloca,
@@ -5198,7 +5198,10 @@ fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMVa
 
     // --- normal path: execute body inline, then pop frame ---
     LLVMPositionBuilderAtEnd(ctx.builder, normal_bb)
+    // #173: push cleanup so a `return` inside the body pops the catch frame
+    ctx.handle_cleanup_stack.push(HandleCleanup { needs_catch_pop: true, ev_drop_allocas: [] })
     let body_val = gen_llvm_expr(ctx, body)
+    let _ = ctx.handle_cleanup_stack.pop()
     let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
     let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
     discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
@@ -5646,7 +5649,10 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
 
         // --- normal path ---
         LLVMPositionBuilderAtEnd(ctx.builder, normal_bb)
+        // #173: push cleanup so a `return` inside the body pops catch + drops evidence
+        ctx.handle_cleanup_stack.push(HandleCleanup { needs_catch_pop: true, ev_drop_allocas: ev_drop_allocas })
         let body_val = gen_llvm_expr(ctx, body)
+        let _ = ctx.handle_cleanup_stack.pop()
         let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
         let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
         discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
@@ -5679,7 +5685,10 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         phi
     } else {
         // Non-abort handlers: just execute body with evidence set up
+        // #173: push cleanup so a `return` inside the body drops evidence
+        ctx.handle_cleanup_stack.push(HandleCleanup { needs_catch_pop: false, ev_drop_allocas: ev_drop_allocas })
         let result = gen_llvm_expr(ctx, body)
+        let _ = ctx.handle_cleanup_stack.pop()
         // B-096: drop evidence structs after the body completes.
         emit_evidence_drops(ctx, ev_drop_allocas)
         // B-100 Fix 7: restore outer evidence allocas so post-handle code that

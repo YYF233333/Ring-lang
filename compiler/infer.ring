@@ -1877,6 +1877,10 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
     let mut effects = scrut_r.effects
     let result_type = ctx.env.fresh_var()
     let mut harms: List<HMatchArm> = []
+    // #180: track whether a non-Never arm has contributed to result_type.
+    // When true, subsequent Never arms skip unification to avoid poisoning
+    // the result type variable (which may chain to a polymorphic type param T).
+    let mut has_non_never_arm = false
 
     for arm in arms {
         ctx.env.push_scope()
@@ -1903,11 +1907,28 @@ fn infer_match(mut ctx: InferCtx, scrutinee: Expr, arms: List<MatchArm>, span: S
             let me = merge_effects(ctx.env, effects, body_r.effects, s)
             effects = me.0
             s = me.1
-            let match_notes: List<DiagnosticNote> = [
-                DiagnosticNote { message: "match arms must all have the same type", span: some(arm.span) },
-                DiagnosticNote { message: "this arm has type '${type_to_string(apply_subst(s, hexpr_type(body_r.hexpr)))}'", span: some(hexpr_span(body_r.hexpr)) }
-            ]
-            s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span, match_notes)
+            // #180: skip arm-vs-result unification when the arm body is Never
+            // AND a non-Never arm has already been unified.  Never is the bottom
+            // type — compatible with any result type, but unifying it with a
+            // result_type that chains to a polymorphic type param T would bind
+            // T = Never, causing all callers to see the function as diverging.
+            // When no non-Never arm has run yet (all arms so far are Never), we
+            // allow the binding so all-diverging matches correctly have type Never.
+            let arm_body_resolved = apply_subst(s, hexpr_type(body_r.hexpr))
+            let arm_is_never = match arm_body_resolved { Type::NeverType => true, _ => false }
+            if arm_is_never && has_non_never_arm {
+                // A non-Never arm already determined the result type;
+                // skip to avoid poisoning the type chain.
+            } else {
+                let match_notes: List<DiagnosticNote> = [
+                    DiagnosticNote { message: "match arms must all have the same type", span: some(arm.span) },
+                    DiagnosticNote { message: "this arm has type '${type_to_string(apply_subst(s, hexpr_type(body_r.hexpr)))}'", span: some(hexpr_span(body_r.hexpr)) }
+                ]
+                s = unify_at_noted(ctx.sink, ctx.env, hexpr_type(body_r.hexpr), result_type, s, arm.span, match_notes)
+                if !arm_is_never {
+                    has_non_never_arm = true
+                }
+            }
 
             harms.push(HMatchArm { pattern: match_pattern, guard: guard_hexpr, body: body_r.hexpr, span: arm.span })
             true

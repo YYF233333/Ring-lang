@@ -96,6 +96,17 @@ pub struct ExternFnInfo {
     pub is_special: Str               // "" for normal, function name for output-param specials
 }
 
+// #173: cleanup action for early return from handle/try-catch scopes.
+// emit_return walks the cleanup stack (innermost-first) before LLVMBuildRet,
+// ensuring catch frames are popped and evidence structs are dropped even when
+// the body exits via `return`.
+pub struct HandleCleanup {
+    // true → emit ring_catch_pop() (handle-abort and try-catch both push a catch frame)
+    pub needs_catch_pop: Bool,
+    // non-abort evidence allocas that need ring_drop (handle-expr only; empty for try-catch)
+    pub ev_drop_allocas: List<LLVMValueRef>
+}
+
 pub struct LlvmCtx {
     pub context: LLVMContextRef,
     pub module: LLVMModuleRef,
@@ -214,7 +225,12 @@ pub struct LlvmCtx {
     // C-ABI declaration + marshalling descriptor.  Populated by
     // forward_declare_extern_fn in codegen_llvm.ring; consulted by gen_direct_call
     // in codegen_llvm_expr.ring before the panic-stub fallback.
-    pub extern_fn_infos: Map<Str, ExternFnInfo>
+    pub extern_fn_infos: Map<Str, ExternFnInfo>,
+
+    // #173: cleanup stack for handle/try-catch scopes.  Pushed on entry to
+    // gen_handle_expr (abort path) / gen_try_catch, popped on exit.
+    // emit_return walks this stack innermost-first before LLVMBuildRet.
+    pub handle_cleanup_stack: List<HandleCleanup>
 }
 
 // B-091: the boxed mut-cell typeid (must match RING_TYPEID_CELL in ring_runtime.cpp).

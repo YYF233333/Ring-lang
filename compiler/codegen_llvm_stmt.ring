@@ -2,7 +2,7 @@ use types::{Type, BUILTIN_RANGE}
 use ast::{Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type,
     is_fresh_owned_bool_value}
-use codegen_llvm_ctx::{LlvmCtx, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca}
+use codegen_llvm_ctx::{LlvmCtx, HandleCleanup, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca}
 
 // Re-declare LLVM types and functions to avoid ESM import issues
 extern type LLVMTypeRef
@@ -200,6 +200,34 @@ fn emit_assign(mut ctx: LlvmCtx, target: HExpr, value: HExpr) {
 }
 
 fn emit_return(mut ctx: LlvmCtx, value: HExpr?) {
+    // #173: before emitting LLVMBuildRet, walk the handle/try cleanup stack
+    // innermost-first.  Each entry corresponds to an enclosing handle-expr or
+    // try-catch whose catch frame must be popped and whose evidence must be
+    // dropped — otherwise a `return` inside the body skips the normal-path
+    // cleanup epilogue (ring_catch_pop + emit_evidence_drops).
+    let mut ci = ctx.handle_cleanup_stack.len() - 1
+    while ci >= 0 {
+        match ctx.handle_cleanup_stack.get(ci) {
+            some(cleanup) => {
+                if cleanup.needs_catch_pop {
+                    let pop_fn = get_or_declare_runtime_fn(ctx, "ring_catch_pop", [], ctx.void_type)
+                    let pop_ty = get_rt_fn_type(ctx, "ring_catch_pop")
+                    discard(LLVMBuildCall2(ctx.builder, pop_ty, pop_fn, [], ""))
+                }
+                if cleanup.ev_drop_allocas.len() > 0 {
+                    let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+                    let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+                    for alloca in cleanup.ev_drop_allocas {
+                        let ev_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "ev_ret_drop"))
+                        discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [ev_ptr], ""))
+                    }
+                }
+            },
+            none => {},
+        }
+        ci = ci - 1
+    }
+
     match value {
         some(v) => {
             let val = gen_llvm_expr(ctx, v)
