@@ -6481,7 +6481,7 @@ function gen_match_arm_wildcard(ctx, arm, scrut_val, default_bb, merge_bb, phi_v
   return List_push(phi_bbs, arm_end_bb);
 }
 
-function gen_match_arm_enum(ctx, arm, scrut_val, enum_name, enum_info, switch_val, merge_bb, current_fn, phi_vals, phi_bbs) {
+function gen_match_arm_enum(ctx, arm, scrut_val, enum_name, enum_info, switch_val, merge_bb, default_bb, current_fn, phi_vals, phi_bbs) {
   __ring_match230: {
     const __ring_m230 = arm.pattern;
     if (__ring_m230._tag === "Constructor") {
@@ -6515,6 +6515,7 @@ function gen_match_arm_enum(ctx, arm, scrut_val, enum_name, enum_info, switch_va
                   }
                   const field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, (i + 1), codegen_llvm_ctx$fresh_name(ctx, "ef"));
                   const field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, codegen_llvm_ctx$fresh_name(ctx, "fv"));
+                  check_nested_ctor_tags(ctx, field_val, field_pat, default_bb, current_fn);
                   bind_nested_pattern(ctx, field_val, field_pat);
                   break __ring_match233;
                 }
@@ -6578,6 +6579,7 @@ function gen_match_arm_enum(ctx, arm, scrut_val, enum_name, enum_info, switch_va
                   }
                   const field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, (field_idx + 1), codegen_llvm_ctx$fresh_name(ctx, "ef"));
                   const field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, codegen_llvm_ctx$fresh_name(ctx, "fv"));
+                  check_nested_ctor_tags(ctx, field_val, nf.pattern, default_bb, current_fn);
                   bind_nested_pattern(ctx, field_val, nf.pattern);
                   break __ring_match236;
                 }
@@ -6797,7 +6799,7 @@ function gen_match_expr(ctx, scrutinee, arms, result_ty) {
               has_wildcard = true;
               gen_match_arm_wildcard(ctx, arm, scrut_val, default_bb, merge_bb, phi_vals, phi_bbs);
             } else {
-              gen_match_arm_enum(ctx, arm, scrut_val, ename, enum_info, switch_val, merge_bb, current_fn, phi_vals, phi_bbs);
+              gen_match_arm_enum(ctx, arm, scrut_val, ename, enum_info, switch_val, merge_bb, default_bb, current_fn, phi_vals, phi_bbs);
             }
           }
           if ((!has_wildcard)) {
