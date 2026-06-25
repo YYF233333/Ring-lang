@@ -613,7 +613,7 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
-### B-144 extern type RC 排除全覆盖（#140 + #146 + #147）[bugfix] [P2] [M] [judgment] [queued]
+### B-144 extern type RC 排除全覆盖（#140 + #146 + #147）[bugfix] [P2] [M] [judgment] [doing]
 
 > 2026-06-25 立项（Discussion）。三个 latent audit 项共享同一根因——extern type 的 RC 排除机制有三处缺口。今天零实存触发站点（编译器 codegen_llvm 模块不使用闭包捕获 extern handle），但随着代码演进可能暴露。一次修完。
 
