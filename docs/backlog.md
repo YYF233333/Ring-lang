@@ -613,6 +613,40 @@ source-map 支持 + 断点调试。
 
 ## 已知 Bug / 技术债
 
+### B-144 extern type RC 排除全覆盖（#140 + #146 + #147）[bugfix] [P2] [M] [judgment] [queued]
+
+> 2026-06-25 立项（Discussion）。三个 latent audit 项共享同一根因——extern type 的 RC 排除机制有三处缺口。今天零实存触发站点（编译器 codegen_llvm 模块不使用闭包捕获 extern handle），但随着代码演进可能暴露。一次修完。
+
+**三个缺口**：
+1. **#140 闭包捕获 dup**：`gen_lambda`（codegen_llvm_expr.ring:4132）对每个捕获一律 `gen_dup_value`，不检查 extern type → 外来指针 dup/drop = crash。`collect_captures` 只返回名字，无类型信息。
+2. **#146 use 导入漏出**：`collect_extern_type_names`（hir.ring:482-496）按模块收集 `HDecl::ExternType`，通过 `use` 导入的 extern type 不产生 HDecl → perceus 收集不到 → RC 排除漏洞。
+3. **#147 裸名碰撞**：`is_extern_handle_type`（hir.ring:500-509）按裸名匹配——同名用户 struct 会被误排除。当前命名空间独占（`LLVM*Ref`），风险 ≈ 0。
+
+**修复方案（共享修复路径）**：
+
+| 步骤 | 内容 | 修的缺口 |
+|------|------|---------|
+| 1 | `HProgram` 新增 `extern_type_names: Set<Str>`，checker/registration 阶段全局收集（跨模块） | #146 |
+| 2 | perceus.ring / codegen_llvm.ring / verify_rc.ring 改用 `program.extern_type_names` 替代 `collect_extern_type_names(decls)` | #146 |
+| 3 | `collect_captures` 改返回 `List<(Str, Type)>`（名字 + HIR 类型）；`gen_lambda` 对 extern handle 类型跳过 `gen_dup_value` | #140 |
+| 4 | 闭包 env 增加 per-slot RC skip 标志（同 `StructFieldInfo.field_rc_skip` 模式），`drop_closure_env` 据此跳过 extern slots | #140 |
+| 5 | （可选后续）extern 名集合带模块限定，消除裸名碰撞风险 | #147 |
+
+**涉及修改**：
+1. `compiler/hir.ring`：`HProgram` 加 `extern_type_names` 字段
+2. `compiler/infer_register.ring` 或 `compiler/checker.ring`：全局收集 extern type names 到 HProgram
+3. `compiler/perceus.ring`：改用 program-level extern set
+4. `compiler/verify_rc.ring`：同上
+5. `compiler/codegen_llvm.ring`：同上（init `LlvmCtx.extern_types` 从 program 取）
+6. `compiler/codegen_llvm_expr.ring`：`collect_captures` 返回类型；`gen_lambda` 检查 extern type 跳过 dup
+7. `ring_runtime.cpp`：`drop_closure_env` 支持 per-slot skip（或 closure env 布局调整）
+
+**验收标准**：
+- 构造捕获 extern handle 的闭包不触发 dup/drop（负面测试）
+- `use` 导入的 extern type 被 perceus 正确排除（负面测试）
+- 现有 E2E + llvm_diff 全绿；自举一致
+- verify_rc 自检 + llvm 用例 sweep 零新增 error
+
 <!-- B-140 done: apply_subst TypeVar 返回借用 `t` → scope-end drop UAF。修复：TypeVar 总构造新节点 + 移除 Str workaround。ASan ×5 clean。2026-06-24 -->
 <!-- B-139 done: HTraitMethod 加 effects 字段 + codegen_decl evidence 转发。885 E2E, double bootstrap。2026-06-24 -->
 
