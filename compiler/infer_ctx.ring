@@ -6,7 +6,7 @@ use ast::{Span, Pattern, TypeExpr, RecordTypeField, NamedPatternField, span_zero
 use hir::{HExpr, HStmt, HParam, DictRef, trait_dict_name, trait_bound_param_name,
     BUILTIN_INT, BUILTIN_FLOAT, BUILTIN_STR, BUILTIN_BOOL, BUILTIN_OPTION}
 use diagnostics::{DiagnosticContext, DiagnosticNote, Diagnostic, CollectingSink, Severity, Suggestion, make_diag, make_diagnostic}
-use codes::{E0201, E0204, E0301, E0302, E0503, E0511, E0512, E0513, E0705}
+use codes::{E0201, E0204, E0301, E0302, E0407, E0503, E0511, E0512, E0513, E0705}
 use union_find::{UnionFind, new_union_find, uf_find}
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, new_type_env, mono, apply_subst, apply_subst_row, apply_subst_map, has_impl, find_impl, lookup_variant}
 use unify::{UnificationError, empty_subst, unify, occurs_in, unify_effect_params}
@@ -941,7 +941,7 @@ pub fn resolve_type_expr(mut ctx: InferCtx, texpr: TypeExpr) -> Type {
             let eff_row = if effects.len() > 0 {
                 let mut resolved_effects: List<Effect> = []
                 for e in effects {
-                    resolved_effects.push(resolve_fn_type_effect(ctx, e))
+                    resolved_effects.push(resolve_effect_expr(ctx, e))
                 }
                 EffectRow { effects: resolved_effects, tail: none }
             } else {
@@ -1073,7 +1073,7 @@ fn resolve_assoc_type(mut ctx: InferCtx, type_param_name: Str, assoc_name: Str, 
     found_types.get(0).unwrap_or(ctx.env.fresh_var())
 }
 
-fn resolve_fn_type_effect(mut ctx: InferCtx, eff: EffectExpr) -> Effect {
+pub fn resolve_effect_expr(mut ctx: InferCtx, eff: EffectExpr) -> Effect {
     if eff.name == "io" { return Effect::IoEffect }
     if eff.name == "mut" {
         let mut_state = if eff.type_args.len() > 0 {
@@ -1097,9 +1097,21 @@ fn resolve_fn_type_effect(mut ctx: InferCtx, eff: EffectExpr) -> Effect {
         }
         return Effect::FailEffect { error_type: err_type }
     }
+    // Custom effects: resolve to canonical name from EffectDef
+    let canonical_name = match ctx.env.types.effects.get(eff.name) {
+        some(edef) => edef.name,
+        none => {
+            let _ = type_error(ctx.sink, E0407,
+                "Unknown effect '${eff.name}'", eff.span,
+                DiagnosticContext::OtherContext { detail: some("unknown effect") })
+            eff.name
+        }
+    }
     let mut resolved_args: List<Type> = []
-    for ta in eff.type_args { resolved_args.push(resolve_type_expr(ctx, ta)) }
-    Effect::CustomEffect { name: eff.name, type_args: resolved_args }
+    for ta in eff.type_args {
+        resolved_args.push(resolve_type_expr(ctx, ta))
+    }
+    Effect::CustomEffect { name: canonical_name, type_args: resolved_args }
 }
 
 pub fn resolve_self_type(mut ctx: InferCtx, name: Str) -> Type {

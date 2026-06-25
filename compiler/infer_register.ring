@@ -5,8 +5,9 @@ use ast::{Decl, Span, TypeParam, Param, TypeExpr, EffectOpDecl, StructFieldDecl,
 use env::{TypeEnv, TypeScheme, SchemeBound, AssocConstraintEntry, StructDef, EnumDef, EffectDef, EffectOpDef,
     TraitDef, TraitMethodDef, ImplEntry, TypeAliasDef, FnBound, SigDef, EffectAliasDef, AssocTypeDef, mono, apply_subst, apply_subst_effect_map, add_impl, has_impl, find_impl}
 use diagnostics::{DiagnosticContext}
-use codes::{E0207, E0406, E0407, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
-use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type}
+use codes::{E0207, E0406, E0501, E0502, E0505, E0506, E0507, E0508, E0509, E0510, E0511, E0513, E0514}
+use infer_ctx::{InferCtx, CompileError, type_error, resolve_type_expr, resolve_self_type, resolve_effect_expr}
+use infer_helpers::{is_value_type}
 
 // ============================================================
 // Public entry points
@@ -1153,54 +1154,6 @@ fn register_delegate_traits(
     }
 }
 
-// ============================================================
-// Effect annotation resolution
-// ============================================================
-
-pub fn resolve_effect_expr(mut ctx: InferCtx, eff: EffectExpr) -> Effect {
-    if eff.name == "io" { return Effect::IoEffect }
-    if eff.name == "mut" {
-        let mut_state = if eff.type_args.len() > 0 {
-            match eff.type_args.first() {
-                some(t) => resolve_type_expr(ctx, t),
-                none => ctx.env.fresh_var()
-            }
-        } else {
-            ctx.env.fresh_var()
-        }
-        return Effect::MutEffect { state_type: mut_state }
-    }
-    if eff.name == "fail" {
-        let err_type = if eff.type_args.len() > 0 {
-            match eff.type_args.first() {
-                some(t) => resolve_type_expr(ctx, t),
-                none => ctx.env.fresh_var()
-            }
-        } else {
-            ctx.env.fresh_var()
-        }
-        return Effect::FailEffect { error_type: err_type }
-    }
-    // Custom effects
-    // Check custom effect exists; use the canonical (qualified) name from EffectDef
-    // so that mod-internal unqualified references (e.g. "Greeter") resolve to the
-    // same name as the declaration (e.g. "fx::Greeter") for evidence matching.
-    let canonical_name = match ctx.env.types.effects.get(eff.name) {
-        some(edef) => edef.name,
-        none => {
-            let _ = type_error(ctx.sink, E0407,
-                "Unknown effect '${eff.name}'", eff.span,
-                DiagnosticContext::OtherContext { detail: some("unknown effect") })
-            eff.name
-        }
-    }
-    let mut resolved_args: List<Type> = []
-    for ta in eff.type_args {
-        resolved_args.push(resolve_type_expr(ctx, ta))
-    }
-    Effect::CustomEffect { name: canonical_name, type_args: resolved_args }
-}
-
 fn expand_effect_exprs(mut ctx: InferCtx, decl_effects: List<EffectExpr>, mut expanding: Set<Str>) -> List<Effect> {
     let mut effects: List<Effect> = []
     for eff in decl_effects {
@@ -1304,16 +1257,6 @@ fn check_duplicate_def(ctx: InferCtx, name: Str, span: Span) {
     }
 }
 
-fn is_register_value_type(t: Type) -> Bool {
-    match t {
-        Type::IntType => true,
-        Type::FloatType => true,
-        Type::BoolType => true,
-        Type::StrType => true,
-        _ => false
-    }
-}
-
 // Inject associated type variables into type_param_scope for type params with bounds.
 // This makes T::Item references resolve during registration (Pass 1).
 // Also resolves assoc_constraints (e.g., T: Trait<Item = Int>) by directly binding the
@@ -1388,7 +1331,7 @@ fn register_fn_common(
             if p.name == "self" || !p.is_mutable {
                 mut_flags.push(false)
             } else {
-                mut_flags.push(is_register_value_type(pt))
+                mut_flags.push(is_value_type(pt))
             }
         }
         ctx.fn_mut_params.insert(name, mut_flags)
