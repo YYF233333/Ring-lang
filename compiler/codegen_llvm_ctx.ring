@@ -141,6 +141,9 @@ pub struct LlvmCtx {
     // Trait method order: maps trait_name → [method_name, ...]
     pub trait_method_order: Map<Str, List<Str>>,
 
+    // Trait supertrait hierarchy: maps trait_name → [direct_supertrait_name, ...]
+    pub trait_supertraits: Map<Str, List<Str>>,
+
     // Module prefix for multi-file compilation (e.g. "lexer" → functions prefixed "ring_lexer$_")
     pub module_prefix: Str?,
 

@@ -14,6 +14,33 @@ use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter, emit_memoised_
     box_bool, unbox_int, box_int, get_or_create_dict_global, resolve_static_dict_by_name}
 use codegen_ctx::{extract_effect_names}
 
+// Collect all transitive supertraits for a given trait. Local copy to avoid
+// circular dependency with codegen_llvm.ring.
+fn collect_all_supertraits_llvm(ctx: LlvmCtx, trait_name: Str) -> List<Str> {
+    let mut result: List<Str> = []
+    let mut visited: Set<Str> = set_new()
+    let mut stack: List<Str> = []
+    match ctx.trait_supertraits.get(trait_name) {
+        some(supers) => {
+            for st in supers { stack.push(st) }
+        },
+        none => {},
+    }
+    while stack.len() > 0 {
+        let current = stack.pop().unwrap()
+        if visited.contains(current) { continue }
+        visited.insert(current)
+        result.push(current)
+        match ctx.trait_supertraits.get(current) {
+            some(parent_supers) => {
+                for ps in parent_supers { stack.push(ps) }
+            },
+            none => {},
+        }
+    }
+    result
+}
+
 // Re-declare LLVM types and functions to avoid ESM cross-module import issues
 extern type LLVMContextRef
 extern type LLVMModuleRef
@@ -251,7 +278,7 @@ fn emit_one_default_method(mut ctx: LlvmCtx, fn_val: LLVMValueRef, default_fn_na
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
-    // Parameter layout: (self_dict, ...method_params, ...evidence_params)
+    // Parameter layout: (self_dict, ...supertrait_dicts, ...method_params, ...evidence_params)
     let mut param_idx = 0
 
     // Param 0: self_dict — register under __ring_self_<Trait> so that
@@ -261,6 +288,18 @@ fn emit_one_default_method(mut ctx: LlvmCtx, fn_val: LLVMValueRef, default_fn_na
     LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), dict_alloca)
     ctx.named_values.insert(self_dict_name, dict_alloca)
     param_idx = param_idx + 1
+
+    // Supertrait dict params — register each under __ring_self_<SuperTrait>
+    // so the body can dispatch supertrait methods (e.g. self.get_name() from
+    // a Nameable supertrait inside a Greetable default method).
+    let all_supers = collect_all_supertraits_llvm(ctx, trait_name)
+    for st in all_supers {
+        let st_dict_name = default_method_self_name(st)
+        let st_alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, st_dict_name)
+        LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), st_alloca)
+        ctx.named_values.insert(st_dict_name, st_alloca)
+        param_idx = param_idx + 1
+    }
 
     // Regular params (including self)
     for p in method.params {
@@ -316,6 +355,10 @@ fn emit_default_method_stubs(mut ctx: LlvmCtx, target_type: Str, trait_name: Str
         none => [],
     }
 
+    // Collect transitive supertraits for this trait
+    let all_supers = collect_all_supertraits_llvm(ctx, trait_name)
+    let super_count = all_supers.len()
+
     // For each trait method not in the impl, check for default function
     for method_name in method_order {
         if impl_method_names.contains(method_name) { continue }
@@ -329,10 +372,10 @@ fn emit_default_method_stubs(mut ctx: LlvmCtx, target_type: Str, trait_name: Str
                 // Skip if already declared (e.g. from another pass)
                 if ctx.functions.get(mangled).is_some() { continue }
 
-                // The default fn has params: (self_dict, ...method_params, ...evidence)
-                // The stub has params: (...method_params, ...evidence) — same minus self_dict.
+                // The default fn has params: (self_dict, ...supertrait_dicts, ...method_params, ...evidence)
+                // The stub has params: (...method_params, ...evidence) — same minus self_dict and supertrait dicts.
                 let default_arity = LLVMCountParams(default_fn)
-                let stub_arity = default_arity - 1  // minus self_dict
+                let stub_arity = default_arity - 1 - super_count  // minus self_dict and supertrait dicts
 
                 let mut stub_param_types: List<LLVMTypeRef> = []
                 for i in 0..stub_arity {
@@ -351,16 +394,16 @@ fn emit_default_method_stubs(mut ctx: LlvmCtx, target_type: Str, trait_name: Str
                     none => {},
                 }
 
-                // Emit stub body: call __Greet_greet(dict, params...)
+                // Emit stub body: call __Greet_greet(dict, supertrait_dicts..., params...)
                 let saved_block = LLVMGetInsertBlock(ctx.builder)
                 let entry = LLVMAppendBasicBlockInContext(ctx.context, stub_fn, "entry")
                 LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
-                // Get the dict via resolve_static_dict_by_name
+                // Get the trait dict via resolve_static_dict_by_name
                 let dict_name = trait_dict_name(target_type, trait_name)
                 let dict_ptr = resolve_static_dict_by_name(ctx, dict_name)
 
-                // Build call args: dict_ptr + all stub params
+                // Build call args: dict_ptr + supertrait dicts + all stub params
                 let default_fn_ty = match ctx.fn_types.get(default_fn_name) {
                     some(t) => t,
                     none => {
@@ -370,6 +413,12 @@ fn emit_default_method_stubs(mut ctx: LlvmCtx, target_type: Str, trait_name: Str
                     },
                 }
                 let mut call_args: List<LLVMValueRef> = [dict_ptr]
+                // Resolve supertrait dicts for the concrete target type
+                for st in all_supers {
+                    let st_dict_name = trait_dict_name(target_type, st)
+                    let st_dict_ptr = resolve_static_dict_by_name(ctx, st_dict_name)
+                    call_args.push(st_dict_ptr)
+                }
                 for i in 0..stub_arity {
                     call_args.push(LLVMGetParam(stub_fn, i))
                 }
@@ -756,14 +805,15 @@ fn emit_dict_method_slot(mut ctx: LlvmCtx, target_type: Str, trait_name: Str, me
             match ctx.functions.get(default_fn_name) {
                 some(default_fn) => {
                     // The default function has signature:
-                    //   __<Trait>_<method>(self_dict, self, ...args, ...evidence)
+                    //   __<Trait>_<method>(self_dict, ...supertrait_dicts, self, ...args, ...evidence)
                     // The closure ABI calls:  thunk(env, self, ...args)
                     // We use env = dict_ptr (the impl's own dict) so the default
                     // body can dispatch self.other_method() through it.
                     //
-                    // The thunk simply forwards ALL params (env included) to the
-                    // default function — env becomes self_dict.
-                    let thunk_fn = emit_default_method_thunk(ctx, default_fn_name, default_fn)
+                    // The thunk forwards env as self_dict, resolves supertrait
+                    // dicts statically for the concrete target_type, and passes
+                    // remaining params.
+                    let thunk_fn = emit_default_method_thunk(ctx, default_fn_name, default_fn, target_type, trait_name)
 
                     let closure_ptr = LLVMBuildCall2(ctx.builder, alloc_ty, alloc_fn, [closure_size, closure_typeid], fresh_name(ctx, "cls"))
                     let fn_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, closure_ptr, 0, fresh_name(ctx, "fps"))
@@ -842,22 +892,30 @@ fn emit_dict_method_thunk(mut ctx: LlvmCtx, mangled: Str, method_fn: LLVMValueRe
 
 // B-141: emit a thunk for a default trait method that FORWARDS env (= dict ptr)
 // as the first argument to the default body function, unlike emit_dict_method_thunk
-// which drops env. Signature: (env, p0, ..., p_{n-1}) where the default fn expects
-// (self_dict, p0, ..., p_{n-1}) and self_dict = env.
-fn emit_default_method_thunk(mut ctx: LlvmCtx, default_fn_name: Str, default_fn: LLVMValueRef) -> LLVMValueRef {
-    let thunk_name = "${default_fn_name}__defaultthunk"
+// which drops env. The default fn expects
+// (self_dict, ...supertrait_dicts, params..., evidence...). The thunk is called from
+// a closure as (env, params..., evidence...) where env = self_dict. For supertrait
+// dicts, the thunk resolves them statically (it knows the target_type at creation time).
+// The thunk name is per target_type to avoid collisions across different concrete types.
+fn emit_default_method_thunk(mut ctx: LlvmCtx, default_fn_name: Str, default_fn: LLVMValueRef, target_type: Str, trait_name: Str) -> LLVMValueRef {
+    let thunk_name = "${default_fn_name}__defaultthunk_${target_type}"
     // Reuse if already emitted
     match ctx.functions.get(thunk_name) {
         some(existing) => { return existing },
         none => {},
     }
 
+    let all_supers = collect_all_supertraits_llvm(ctx, trait_name)
+    let super_count = all_supers.len()
+
     let default_arity = LLVMCountParams(default_fn)
-    // The default fn takes (self_dict, params..., evidence...) = default_arity params.
-    // The thunk takes (env, params..., evidence...) = same count (env replaces self_dict).
-    // So thunk arity = default_arity.
+    // The default fn takes (self_dict, supertrait_dicts..., params..., evidence...) = default_arity params.
+    // The thunk takes (env, params..., evidence...) — env replaces self_dict,
+    // supertrait dicts are resolved statically inside the thunk.
+    // So thunk arity = default_arity - super_count.
+    let thunk_arity = default_arity - super_count
     let mut thunk_param_types: List<LLVMTypeRef> = []
-    for i in 0..default_arity {
+    for i in 0..thunk_arity {
         thunk_param_types.push(ctx.ptr_type)
     }
     let thunk_ty = LLVMFunctionType(ctx.ptr_type, thunk_param_types, 0)
@@ -878,9 +936,18 @@ fn emit_default_method_thunk(mut ctx: LlvmCtx, default_fn_name: Str, default_fn:
     let entry = LLVMAppendBasicBlockInContext(ctx.context, thunk_fn, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
-    // Forward ALL params (including env=param 0) to the default function.
+    // Build call args: env (=self_dict) + resolved supertrait dicts + remaining params
     let mut fwd_args: List<LLVMValueRef> = []
-    for i in 0..default_arity {
+    // param 0 = env = self_dict
+    fwd_args.push(LLVMGetParam(thunk_fn, 0))
+    // Resolve supertrait dicts statically for the concrete target_type
+    for st in all_supers {
+        let st_dict_name = trait_dict_name(target_type, st)
+        let st_dict_ptr = resolve_static_dict_by_name(ctx, st_dict_name)
+        fwd_args.push(st_dict_ptr)
+    }
+    // Remaining params (self, args..., evidence...)
+    for i in 1..thunk_arity {
         fwd_args.push(LLVMGetParam(thunk_fn, i))
     }
     let call_res = LLVMBuildCall2(ctx.builder, default_ty, default_fn, fwd_args, fresh_name(ctx, "dtk"))
@@ -908,7 +975,7 @@ pub fn emit_derived_impls_llvm(mut ctx: LlvmCtx, derived_impls: List<DerivedImpl
             "Eq" => emit_derived_eq_llvm(ctx, di),
             "Clone" => emit_derived_clone_llvm(ctx, di),
             "Debug" => emit_derived_debug_llvm(ctx, di),
-            // Ord: future work.
+            "Ord" => emit_derived_ord_llvm(ctx, di),
             _ => {},
         }
     }
@@ -1496,6 +1563,360 @@ fn gen_str_lit_simple(mut ctx: LlvmCtx, s: Str) -> LLVMValueRef {
 
 // ── Clone ────────────────────────────────────────────────────
 //
+// ── Ord ──────────────────────────────────────────────────────
+
+fn emit_derived_ord_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
+    let type_name = di.type_name
+    match di.type_kind {
+        TypeKind::StructKind => match di.struct_fields {
+            some(fields) => {
+                emit_struct_cmp_fn(ctx, type_name, fields)
+                emit_derived_trait_dict(ctx, type_name, "Ord")
+            },
+            none => {},
+        },
+        TypeKind::EnumKind => match di.enum_variants {
+            some(variants) => {
+                emit_enum_cmp_fn(ctx, type_name, variants)
+                emit_derived_trait_dict(ctx, type_name, "Ord")
+            },
+            none => {},
+        },
+    }
+}
+
+// Emit ring_<Type>_cmp(self, other) -> Int for a struct.
+// Compares fields lexicographically: returns the first non-zero comparison.
+fn emit_struct_cmp_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>) {
+    let mangled = llvm_mangle_method(type_name, "cmp")
+    match ctx.functions.get(mangled) {
+        some(_) => { return },
+        none => {},
+    }
+
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
+    ctx.functions.insert(mangled, fn_val)
+    ctx.fn_types.insert(mangled, fn_ty)
+
+    let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(fn_val)
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    let self_val = LLVMGetParam(fn_val, 0)
+    let other_val = LLVMGetParam(fn_val, 1)
+
+    // Zero fields -> always equal
+    if fields.len() == 0 {
+        LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
+        ctx.current_fn = saved_fn
+        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        return
+    }
+
+    if ctx.struct_types.get(type_name).is_none() {
+        LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
+        ctx.current_fn = saved_fn
+        LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+        return
+    }
+    let struct_info = match ctx.struct_types.get(type_name) {
+        some(info) => info,
+        none => panic("unreachable"),
+    }
+
+    // For each field, compute cmp result. If non-zero, return it immediately.
+    // Chain: entry -> cmp0 -> check0 -> cmp1 -> check1 -> ... -> ret_last
+    //                           \         \
+    //                          ret_nz    ret_nz
+    for fi in 0..fields.len() {
+        let field = fields[fi]
+        let field_idx = find_field_index(struct_info.field_names, field.name)
+        if field_idx < 0 { continue }
+
+        let self_fp = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, self_val, field_idx, fresh_name(ctx, "sf"))
+        let self_fv = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, self_fp, fresh_name(ctx, "sv"))
+        let other_fp = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, other_val, field_idx, fresh_name(ctx, "of"))
+        let other_fv = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, other_fp, fresh_name(ctx, "ov"))
+
+        // Get cmp result as boxed Int (-1/0/1)
+        let cmp_val = emit_field_cmp(ctx, self_fv, other_fv, field.action)
+
+        if fi < fields.len() - 1 {
+            // Not the last field: check if result is non-zero, if so return it
+            let raw = unbox_int(ctx, cmp_val)
+            let is_zero = LLVMBuildICmp(ctx.builder, 32, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
+            let ret_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "ret.nz.${fi}")
+            let next_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "cmp.${fi + 1}")
+            discard(LLVMBuildCondBr(ctx.builder, is_zero, next_bb, ret_bb))
+
+            LLVMPositionBuilderAtEnd(ctx.builder, ret_bb)
+            discard(LLVMBuildRet(ctx.builder, cmp_val))
+
+            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+        } else {
+            // Last field: return its result directly
+            discard(LLVMBuildRet(ctx.builder, cmp_val))
+        }
+    }
+
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+}
+
+// Emit ring_<Type>_cmp for enums.
+// Compares tag first, then fields per variant if tags are equal.
+fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>) {
+    let mangled = llvm_mangle_method(type_name, "cmp")
+    match ctx.functions.get(mangled) {
+        some(_) => { return },
+        none => {},
+    }
+
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
+    ctx.functions.insert(mangled, fn_val)
+    ctx.fn_types.insert(mangled, fn_ty)
+
+    let saved_fn = ctx.current_fn
+    let saved_bb = LLVMGetInsertBlock(ctx.builder)
+    ctx.current_fn = some(fn_val)
+
+    let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
+    LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    let self_val = LLVMGetParam(fn_val, 0)
+    let other_val = LLVMGetParam(fn_val, 1)
+
+    // Load tags
+    let tag_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type], 0)
+    let self_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, self_val, 0, fresh_name(ctx, "stp"))
+    let self_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, self_tag_ptr, fresh_name(ctx, "stv"))
+    let other_tag_ptr = LLVMBuildStructGEP2(ctx.builder, tag_ty, other_val, 0, fresh_name(ctx, "otp"))
+    let other_tag = LLVMBuildLoad2(ctx.builder, ctx.i64_type, other_tag_ptr, fresh_name(ctx, "otv"))
+
+    // Compare tags
+    let tags_eq = LLVMBuildICmp(ctx.builder, 32, self_tag, other_tag, fresh_name(ctx, "teq"))
+
+    let tags_diff_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tags.diff")
+    let tags_same_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tags.same")
+
+    discard(LLVMBuildCondBr(ctx.builder, tags_eq, tags_same_bb, tags_diff_bb))
+
+    // Tags differ: return tag comparison result (-1 or 1)
+    LLVMPositionBuilderAtEnd(ctx.builder, tags_diff_bb)
+    // 40 = LLVMIntSLT (signed less-than)
+    let self_lt = LLVMBuildICmp(ctx.builder, 40, self_tag, other_tag, fresh_name(ctx, "slt"))
+    let lt_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tag.lt")
+    let gt_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tag.gt")
+    let tag_merge = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tag.merge")
+    discard(LLVMBuildCondBr(ctx.builder, self_lt, lt_bb, gt_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, lt_bb)
+    // Use two's complement for -1: on 64-bit, -1 = 0xFFFFFFFFFFFFFFFF
+    // LLVMConstInt with sign_extend=1 sign-extends from the given bit width
+    let neg_one = LLVMConstInt(ctx.i64_type, 0 - 1, 1)
+    let lt_val = box_int(ctx, neg_one)
+    let lt_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, tag_merge))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, gt_bb)
+    let gt_val = box_int(ctx, LLVMConstInt(ctx.i64_type, 1, 0))
+    let gt_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, tag_merge))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, tag_merge)
+    let tag_phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "tcmp"))
+    LLVMAddIncoming(tag_phi, [lt_val, gt_val], [lt_end, gt_end])
+    LLVMBuildRet(ctx.builder, tag_phi)
+
+    // Tags same: return 0 (field comparison is left for future work, matching
+    // current enum Eq which is also tag-only for variants with fields)
+    LLVMPositionBuilderAtEnd(ctx.builder, tags_same_bb)
+    LLVMBuildRet(ctx.builder, box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0)))
+
+    ctx.current_fn = saved_fn
+    LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
+}
+
+// Compare two field values for Ord and return a boxed Int (-1/0/1).
+fn emit_field_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, action: FieldAction) -> LLVMValueRef {
+    match action {
+        FieldAction::Identity => {
+            emit_identity_cmp(ctx, lhs, rhs)
+        },
+        FieldAction::Call { dict_name, extra_dicts } => {
+            emit_dict_cmp_call(ctx, lhs, rhs, dict_name, extra_dicts)
+        },
+        FieldAction::Tuple { element_actions } => {
+            // Tuple cmp: compare elements sequentially
+            emit_tuple_cmp(ctx, lhs, rhs, element_actions)
+        },
+        FieldAction::FnLiteral => {
+            // Functions can't be compared — return 0 (shouldn't happen for Ord)
+            box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0))
+        },
+    }
+}
+
+// Identity compare for Ord: handles tagged pointers (Int/Bool) and heap objects (Str).
+// Tagged: unbox, signed compare, produce -1/0/1.
+// Heap: call ring_cl_cmp_str (as a direct runtime helper).
+fn emit_identity_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    let current_fn = match ctx.current_fn {
+        some(f) => f,
+        none => panic("LLVM codegen: emit_identity_cmp outside function"),
+    }
+
+    // Check if tagged (low bit set)
+    let lhs_int = llvm_ptrtoint(ctx, lhs)
+    let rhs_int = llvm_ptrtoint(ctx, rhs)
+    let one = LLVMConstInt(ctx.i64_type, 1, 0)
+    let lhs_tag = llvm_and(ctx, lhs_int, one)
+    let is_tagged = LLVMBuildICmp(ctx.builder, 32, lhs_tag, one, fresh_name(ctx, "tag"))
+
+    let tagged_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "cmp.tagged")
+    let heap_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "cmp.heap")
+    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "cmp.merge")
+
+    discard(LLVMBuildCondBr(ctx.builder, is_tagged, tagged_bb, heap_bb))
+
+    // Tagged path: unbox both, signed compare, produce -1/0/1
+    LLVMPositionBuilderAtEnd(ctx.builder, tagged_bb)
+    let lhs_unboxed = LLVMBuildAShr(ctx.builder, lhs_int, one, fresh_name(ctx, "lu"))
+    let rhs_unboxed = LLVMBuildAShr(ctx.builder, rhs_int, one, fresh_name(ctx, "ru"))
+    // lt = lhs < rhs (signed)
+    let is_lt = LLVMBuildICmp(ctx.builder, 40, lhs_unboxed, rhs_unboxed, fresh_name(ctx, "lt"))
+    let is_gt = LLVMBuildICmp(ctx.builder, 38, lhs_unboxed, rhs_unboxed, fresh_name(ctx, "gt"))
+    // Branch: lt -> -1, gt -> 1, else -> 0
+    let t_lt_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "t.lt")
+    let t_gt_check_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "t.gtchk")
+    let t_gt_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "t.gt")
+    let t_eq_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "t.eq")
+    let t_merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "t.merge")
+
+    discard(LLVMBuildCondBr(ctx.builder, is_lt, t_lt_bb, t_gt_check_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, t_lt_bb)
+    let neg_one = LLVMConstInt(ctx.i64_type, 0 - 1, 1)
+    let t_lt_val = box_int(ctx, neg_one)
+    let t_lt_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, t_merge_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, t_gt_check_bb)
+    discard(LLVMBuildCondBr(ctx.builder, is_gt, t_gt_bb, t_eq_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, t_gt_bb)
+    let t_gt_val = box_int(ctx, LLVMConstInt(ctx.i64_type, 1, 0))
+    let t_gt_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, t_merge_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, t_eq_bb)
+    let t_eq_val = box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0))
+    let t_eq_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, t_merge_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, t_merge_bb)
+    let tagged_result = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "tres"))
+    LLVMAddIncoming(tagged_result, [t_lt_val, t_gt_val, t_eq_val], [t_lt_end, t_gt_end, t_eq_end])
+    let tagged_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    // Heap path: call ring_cl_cmp_str(null_env, lhs, rhs) -> boxed Int
+    LLVMPositionBuilderAtEnd(ctx.builder, heap_bb)
+    let cmp_fn = get_or_declare_runtime_fn(ctx, "ring_cl_cmp_str", [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], ctx.ptr_type)
+    let cmp_ty = get_rt_fn_type(ctx, "ring_cl_cmp_str")
+    let null_env = LLVMConstPointerNull(ctx.ptr_type)
+    let heap_result = LLVMBuildCall2(ctx.builder, cmp_ty, cmp_fn, [null_env, lhs, rhs], fresh_name(ctx, "hcmp"))
+    let heap_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    // Merge
+    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "fcmp"))
+    LLVMAddIncoming(phi, [tagged_result, heap_result], [tagged_end, heap_end])
+    phi
+}
+
+// Dict-dispatched cmp: resolve the dict, call its cmp closure.
+fn emit_dict_cmp_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, dict_name: Str, extra_dicts: List<Str>) -> LLVMValueRef {
+    let dict_ptr = resolve_dict_for_derived(ctx, dict_name)
+
+    // Load cmp closure from dict slot 0 (Ord dict has only one method: cmp).
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type, ctx.ptr_type], 0)
+    let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, 1, fresh_name(ctx, "cmps"))
+    let cmp_closure = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "cmpc"))
+
+    // Call the closure: fn(env, lhs, rhs) -> ptr (boxed Int)
+    let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
+    let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, cmp_closure, 0, fresh_name(ctx, "fps"))
+    let fn_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fn_ptr_slot, fresh_name(ctx, "fp"))
+    let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, cmp_closure, 1, fresh_name(ctx, "eps"))
+    let env_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, env_slot, fresh_name(ctx, "ep"))
+
+    let call_fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+    LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, [env_ptr, lhs, rhs], fresh_name(ctx, "dcmp"))
+}
+
+// Tuple cmp: compare each element using ring_list_get, short-circuit on non-zero.
+fn emit_tuple_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, element_actions: List<FieldAction>) -> LLVMValueRef {
+    if element_actions.len() == 0 {
+        return box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0))
+    }
+
+    let current_fn = match ctx.current_fn {
+        some(f) => f,
+        none => panic("LLVM codegen: emit_tuple_cmp outside function"),
+    }
+
+    let list_get_fn = get_or_declare_runtime_fn(ctx, "ring_list_get", [ctx.ptr_type, ctx.i64_type], ctx.ptr_type)
+    let list_get_ty = get_rt_fn_type(ctx, "ring_list_get")
+
+    // For a single element, just compare directly
+    if element_actions.len() == 1 {
+        let idx = LLVMConstInt(ctx.i64_type, 0, 0)
+        let l_elem = LLVMBuildCall2(ctx.builder, list_get_ty, list_get_fn, [lhs, idx], fresh_name(ctx, "le"))
+        let r_elem = LLVMBuildCall2(ctx.builder, list_get_ty, list_get_fn, [rhs, idx], fresh_name(ctx, "re"))
+        return emit_field_cmp(ctx, l_elem, r_elem, element_actions[0])
+    }
+
+    // Multiple elements: use alloca + branch for short-circuiting.
+    // Store result in alloca, branch to exit on first non-zero.
+    let result_alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, fresh_name(ctx, "tcr"))
+    let zero_boxed = box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0))
+    LLVMBuildStore(ctx.builder, zero_boxed, result_alloca)
+
+    let exit_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tc.exit")
+
+    for i in 0..element_actions.len() {
+        let idx = LLVMConstInt(ctx.i64_type, i, 0)
+        let l_elem = LLVMBuildCall2(ctx.builder, list_get_ty, list_get_fn, [lhs, idx], fresh_name(ctx, "le"))
+        let r_elem = LLVMBuildCall2(ctx.builder, list_get_ty, list_get_fn, [rhs, idx], fresh_name(ctx, "re"))
+        let cmp_val = emit_field_cmp(ctx, l_elem, r_elem, element_actions[i])
+        LLVMBuildStore(ctx.builder, cmp_val, result_alloca)
+
+        if i < element_actions.len() - 1 {
+            let raw = unbox_int(ctx, cmp_val)
+            let is_zero = LLVMBuildICmp(ctx.builder, 32, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
+            let next_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tc.next.${i}")
+            // Non-zero → exit early; zero → continue to next element
+            discard(LLVMBuildCondBr(ctx.builder, is_zero, next_bb, exit_bb))
+            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
+        } else {
+            // Last element: fall through to exit
+            discard(LLVMBuildBr(ctx.builder, exit_bb))
+        }
+    }
+
+    LLVMPositionBuilderAtEnd(ctx.builder, exit_bb)
+    LLVMBuildLoad2(ctx.builder, ctx.ptr_type, result_alloca, fresh_name(ctx, "tcres"))
+}
+
+// ── Clone ────────────────────────────────────────────────────
+
 // Ring's Clone semantics under Perceus RC: clone = ring_dup (RC increment).
 // This is correct because Ring values are immutable (copy-on-write via RC),
 // so a shallow RC dup gives the same observable semantics as a deep copy.

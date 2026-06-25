@@ -390,7 +390,11 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
             },
             HDecl::Trait { name: trait_name, methods: trait_methods, .. } => {
                 // B-141: forward-declare LLVM functions for default trait method bodies.
-                // Each default body becomes __<Trait>_<method>(self_dict, ...params, ...evidence).
+                // Each default body becomes __<Trait>_<method>(self_dict, ...supertrait_dicts, ...params, ...evidence).
+                // Supertrait dict params mirror the JS backend's emit_trait_decl: the
+                // body may call supertrait methods via __ring_self_<Supertrait>, so we
+                // pass those dicts as extra parameters after self_dict.
+                let all_supers = collect_all_supertraits_llvm(ctx, trait_name)
                 for tm in trait_methods {
                     if tm.has_default {
                         match tm.body {
@@ -401,6 +405,8 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                                     let mut param_types: List<LLVMTypeRef> = []
                                     // First param: self_dict (the trait dict for dispatch)
                                     param_types.push(ptr)
+                                    // Supertrait dict params
+                                    for st in all_supers { param_types.push(ptr) }
                                     // Regular params (includes self)
                                     for p in tm.params { param_types.push(ptr) }
                                     // Evidence params from method effects
@@ -976,18 +982,19 @@ fn scan_fn_effects(decls: List<HDecl>, mut local_fn_effects: Map<Str, EffectRow>
 // scan_trait_decls — collect trait method ordering for dict generation
 // ============================================================
 
-fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<Str>>) {
+fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<Str>>, mut trait_supertraits: Map<Str, List<Str>>) {
     for decl in decls {
         match decl {
-            HDecl::Trait { name, methods, .. } => {
+            HDecl::Trait { name, methods, supertraits, .. } => {
                 let mut method_names: List<Str> = []
                 for m in methods {
                     method_names.push(m.name)
                 }
                 trait_method_order.insert(name, method_names)
+                trait_supertraits.insert(name, supertraits)
             },
             HDecl::ModBlock { decls: md, .. } => {
-                scan_trait_decls(md, trait_method_order)
+                scan_trait_decls(md, trait_method_order, trait_supertraits)
             },
             _ => {},
         }
@@ -1000,11 +1007,39 @@ fn scan_trait_decls(decls: List<HDecl>, mut trait_method_order: Map<Str, List<St
         trait_method_order.insert("Clone", ["clone"])
     }
     if trait_method_order.get("Ord").is_none() {
-        trait_method_order.insert("Ord", ["compare"])
+        trait_method_order.insert("Ord", ["cmp"])
     }
     if trait_method_order.get("Debug").is_none() {
         trait_method_order.insert("Debug", ["debug"])
     }
+}
+
+// Collect all transitive supertraits for a given trait. Mirrors the JS
+// backend's collect_all_supertraits_codegen: if Top: Mid and Mid: Base,
+// returns ["Mid", "Base"] for "Top".
+pub fn collect_all_supertraits_llvm(ctx: LlvmCtx, trait_name: Str) -> List<Str> {
+    let mut result: List<Str> = []
+    let mut visited: Set<Str> = set_new()
+    let mut stack: List<Str> = []
+    match ctx.trait_supertraits.get(trait_name) {
+        some(supers) => {
+            for st in supers { stack.push(st) }
+        },
+        none => {},
+    }
+    while stack.len() > 0 {
+        let current = stack.pop().unwrap()
+        if visited.contains(current) { continue }
+        visited.insert(current)
+        result.push(current)
+        match ctx.trait_supertraits.get(current) {
+            some(parent_supers) => {
+                for ps in parent_supers { stack.push(ps) }
+            },
+            none => {},
+        }
+    }
+    result
 }
 
 // B-090: collect each effect's ops in declaration order into the registry so
@@ -1428,6 +1463,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         static_dict_defs: map_new(),
         dict_singletons: map_new(),
         trait_method_order: map_new(),
+        trait_supertraits: map_new(),
         module_prefix: none,
         imports_map: map_new(),
         local_names: set_new(),
@@ -1465,7 +1501,7 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
 
     // 7. Scan function effects and trait declarations
     scan_fn_effects(program.decls, ctx.local_fn_effects)
-    scan_trait_decls(program.decls, ctx.trait_method_order)
+    scan_trait_decls(program.decls, ctx.trait_method_order, ctx.trait_supertraits)
     scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
     // B-090: register effect-op declaration order so gen_handle_expr /
     // gen_effect_op share the evidence-struct slot layout via effect_op_slot.
@@ -1584,6 +1620,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         static_dict_defs: map_new(),
         dict_singletons: map_new(),
         trait_method_order: map_new(),
+        trait_supertraits: map_new(),
         module_prefix: none,
         imports_map: map_new(),
         local_names: set_new(),
@@ -1612,7 +1649,7 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
     for m in modules {
         let (prefix, program, _uses) = m
         scan_fn_effects(program.decls, ctx.local_fn_effects)
-        scan_trait_decls(program.decls, ctx.trait_method_order)
+        scan_trait_decls(program.decls, ctx.trait_method_order, ctx.trait_supertraits)
         scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
         // B-090: register effect-op declaration order (shared by all modules).
         register_effect_ops_llvm(program.decls, ctx.effect_ops)
