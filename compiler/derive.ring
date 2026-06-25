@@ -253,9 +253,9 @@ fn resolve_field_action(
 ) -> FieldAction? {
     match field_type {
         Type::IntType => some(FieldAction::Identity),
-        Type::FloatType => some(FieldAction::Identity),
+        Type::FloatType => some(FieldAction::FloatIdentity),
         Type::StrType => some(FieldAction::Identity),
-        Type::BoolType => some(FieldAction::Identity),
+        Type::BoolType => some(FieldAction::BoolIdentity),
         Type::UnitType => some(FieldAction::Identity),
         Type::TypeVar { id, .. } => {
             let param_idx = index_of_int(type_param_vars, id)

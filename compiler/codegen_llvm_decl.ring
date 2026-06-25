@@ -72,6 +72,8 @@ extern fn LLVMBuildCondBr(builder: LLVMBuilderRef, cond: LLVMValueRef, then_bb: 
 extern fn LLVMBuildPhi(builder: LLVMBuilderRef, ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMAddIncoming(phi: LLVMValueRef, vals: List<LLVMValueRef>, blocks: List<LLVMBasicBlockRef>) -> Unit
 extern fn LLVMBuildICmp(builder: LLVMBuilderRef, op: Int, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildFCmp(builder: LLVMBuilderRef, predicate: Int, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
+extern fn LLVMBuildZExt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildSub(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildPtrToInt(builder: LLVMBuilderRef, val: LLVMValueRef, dest_ty: LLVMTypeRef, name: Str) -> LLVMValueRef
 extern fn LLVMBuildAnd(builder: LLVMBuilderRef, lhs: LLVMValueRef, rhs: LLVMValueRef, name: Str) -> LLVMValueRef
@@ -1405,37 +1407,18 @@ fn emit_struct_ne_fn(mut ctx: LlvmCtx, type_name: Str) {
 fn emit_field_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, action: FieldAction) -> LLVMValueRef {
     match action {
         FieldAction::Identity => {
-            // Primitive or simple type — compare inline.
-            // Both Int and Bool are tagged pointers: compare as raw i64.
-            // Str needs ring_str_eq (heap-allocated content).
-            // Since we don't have the Ring Type here, we use a two-step approach:
-            //   1. Check if both values are tagged pointers (bit 0 set) → int compare
-            //   2. Otherwise call ring_str_eq (safe for any heap object)
-            // This is correct because Identity only applies to Int, Float, Str, Bool, Unit.
-            //
-            // Simplified approach: try tagged-pointer comparison first. If both are
-            // tagged (low bit set), raw ptrtoint compare is correct for Int and Bool.
-            // For Str (heap-allocated), the tagged check fails and we fall through to
-            // ring_str_eq.  Float is also heap-allocated.
-            //
-            // Actually, for derived Eq the Identity action means the field IS a primitive.
-            // We can just call ring_str_eq for Str and icmp for Int/Bool. But we don't
-            // have the type information here.
-            //
-            // Best approach: call a runtime helper that does the right thing.
-            // ring_generic_eq(a, b) -> i64 (1 if equal, 0 if not).
-            // But that doesn't exist.
-            //
-            // Practical approach: since tagged pointers are used for Int and Bool,
-            // and Str/Float are heap objects, we can distinguish at runtime:
-            //   - If (ptr & 1) for both → tagged compare (icmp eq)
-            //   - Otherwise → ring_str_eq (works for strings; for floats we'd need
-            //     ring_float_eq but float fields in Eq are uncommon)
-            //
-            // Simplest correct approach for now: emit a call to a generic eq helper
-            // that handles all primitive types. Since we don't have one in the runtime,
-            // let's emit inline branching.
+            // Identity covers Int, Str, Unit (tagged or heap Str).
             emit_identity_eq_cmp(ctx, lhs, rhs)
+        },
+        FieldAction::FloatIdentity => {
+            // Float is heap-allocated (ring_box_float). Unbox both and FCmp OEQ.
+            emit_float_identity_eq_cmp(ctx, lhs, rhs)
+        },
+        FieldAction::BoolIdentity => {
+            // Bool is tagged (like Int). Raw ptrtoint compare is correct.
+            let lhs_int = llvm_ptrtoint(ctx, lhs)
+            let rhs_int = llvm_ptrtoint(ctx, rhs)
+            LLVMBuildICmp(ctx.builder, 32, lhs_int, rhs_int, fresh_name(ctx, "beq"))
         },
         FieldAction::Call { dict_name, extra_dicts } => {
             // Call the dict's eq method on the two values.
@@ -1457,10 +1440,10 @@ fn emit_field_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, act
     }
 }
 
-// Identity compare: handles tagged pointers (Int/Bool) and heap objects (Str/Float).
+// Identity compare: handles tagged pointers (Int) and heap objects (Str).
 // Uses the tag bit (bit 0) to distinguish: tagged → raw ptrtoint compare,
-// heap → ring_str_eq (correct for Str, the only Identity heap type in Eq derive;
-// Float uses a dedicated path in resolve_field_action and won't reach here).
+// heap → ring_str_eq.  Float and Bool have dedicated FieldAction variants
+// (FloatIdentity, BoolIdentity) and no longer reach here.
 fn emit_identity_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
     let current_fn = match ctx.current_fn {
         some(f) => f,
@@ -1504,6 +1487,16 @@ fn emit_identity_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) 
     let phi = LLVMBuildPhi(ctx.builder, ctx.i1_type, fresh_name(ctx, "feq"))
     LLVMAddIncoming(phi, [tagged_eq, heap_eq], [tagged_end, heap_end])
     phi
+}
+
+// Float identity eq: unbox both via ring_unbox_float, compare with FCmp OEQ.
+fn emit_float_identity_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_float", [ctx.ptr_type], ctx.double_type)
+    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_float")
+    let lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], fresh_name(ctx, "lf"))
+    let rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], fresh_name(ctx, "rf"))
+    // 1 = LLVMRealOEQ (ordered and equal)
+    LLVMBuildFCmp(ctx.builder, 1, lhs_raw, rhs_raw, fresh_name(ctx, "feq"))
 }
 
 // Dict-dispatched eq: resolve the dict, call its eq closure.
@@ -1927,6 +1920,14 @@ fn emit_field_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, action
         FieldAction::Identity => {
             emit_identity_cmp(ctx, lhs, rhs)
         },
+        FieldAction::FloatIdentity => {
+            // Float Ord: unbox both, FCmp to produce -1/0/1.
+            emit_float_identity_cmp(ctx, lhs, rhs)
+        },
+        FieldAction::BoolIdentity => {
+            // Bool Ord: tagged pointers, same as Int — unbox and signed compare.
+            emit_identity_cmp(ctx, lhs, rhs)
+        },
         FieldAction::Call { dict_name, extra_dicts } => {
             emit_dict_cmp_call(ctx, lhs, rhs, dict_name, extra_dicts)
         },
@@ -1939,6 +1940,56 @@ fn emit_field_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, action
             box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0))
         },
     }
+}
+
+// Float identity cmp for Ord: unbox both via ring_unbox_float, compare to produce -1/0/1.
+fn emit_float_identity_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    let current_fn = match ctx.current_fn {
+        some(f) => f,
+        none => panic("LLVM codegen: emit_float_identity_cmp outside function"),
+    }
+
+    let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_float", [ctx.ptr_type], ctx.double_type)
+    let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_float")
+    let lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], fresh_name(ctx, "lf"))
+    let rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], fresh_name(ctx, "rf"))
+
+    // 4 = LLVMRealOLT (ordered less-than)
+    let is_lt = LLVMBuildFCmp(ctx.builder, 4, lhs_raw, rhs_raw, fresh_name(ctx, "flt"))
+    // 2 = LLVMRealOGT (ordered greater-than)
+    let is_gt = LLVMBuildFCmp(ctx.builder, 2, lhs_raw, rhs_raw, fresh_name(ctx, "fgt"))
+
+    let lt_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.lt")
+    let gt_check_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.gtchk")
+    let gt_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.gt")
+    let eq_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.eq")
+    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.merge")
+
+    discard(LLVMBuildCondBr(ctx.builder, is_lt, lt_bb, gt_check_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, lt_bb)
+    let neg_one = LLVMConstInt(ctx.i64_type, 0 - 1, 1)
+    let lt_val = box_int(ctx, neg_one)
+    let lt_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, gt_check_bb)
+    discard(LLVMBuildCondBr(ctx.builder, is_gt, gt_bb, eq_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, gt_bb)
+    let gt_val = box_int(ctx, LLVMConstInt(ctx.i64_type, 1, 0))
+    let gt_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, eq_bb)
+    let eq_val = box_int(ctx, LLVMConstInt(ctx.i64_type, 0, 0))
+    let eq_end = LLVMGetInsertBlock(ctx.builder)
+    discard(LLVMBuildBr(ctx.builder, merge_bb))
+
+    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "fcmp"))
+    LLVMAddIncoming(phi, [lt_val, gt_val, eq_val], [lt_end, gt_end, eq_end])
+    phi
 }
 
 // Identity compare for Ord: handles tagged pointers (Int/Bool) and heap objects (Str).
@@ -2448,12 +2499,30 @@ fn emit_enum_variant_debug_str(mut ctx: LlvmCtx, self_val: LLVMValueRef, type_na
 }
 
 // Convert a field value to its debug string representation.
-// Identity: tagged (Int/Bool) → int_to_str, heap (Str) → pass through
+// Identity: tagged (Int) → int_to_str, heap (Str) → pass through
+// FloatIdentity: unbox float → ring_float_to_str
+// BoolIdentity: unbox tagged → ring_bool_to_str
 // Call: invoke the field's Debug dict
 // FnLiteral: "<fn>"
 fn emit_debug_field_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, action: FieldAction) -> LLVMValueRef {
     match action {
         FieldAction::Identity => emit_identity_to_debug_str(ctx, val),
+        FieldAction::FloatIdentity => {
+            // Float: unbox via ring_unbox_float, then ring_float_to_str.
+            let unbox_fn = get_or_declare_runtime_fn(ctx, "ring_unbox_float", [ctx.ptr_type], ctx.double_type)
+            let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_float")
+            let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [val], fresh_name(ctx, "uf"))
+            let to_str_fn = get_or_declare_runtime_fn(ctx, "ring_float_to_str", [ctx.double_type], ctx.ptr_type)
+            let to_str_ty = get_rt_fn_type(ctx, "ring_float_to_str")
+            LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "fts"))
+        },
+        FieldAction::BoolIdentity => {
+            // Bool: unbox tagged int, then ring_bool_to_str.
+            let raw = unbox_int(ctx, val)
+            let to_str_fn = get_or_declare_runtime_fn(ctx, "ring_bool_to_str", [ctx.i64_type], ctx.ptr_type)
+            let to_str_ty = get_rt_fn_type(ctx, "ring_bool_to_str")
+            LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "bts"))
+        },
         FieldAction::Call { dict_name, extra_dicts } => {
             emit_dict_debug_call(ctx, val, dict_name)
         },
@@ -2466,7 +2535,7 @@ fn emit_debug_field_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, action: FieldAct
 }
 
 // Convert a primitive identity value to debug string.
-// Tagged (bit 0 == 1) → Int or Bool → ring_int_to_str
+// Tagged (bit 0 == 1) → Int → ring_int_to_str
 // Non-tagged → Str → pass through (ring_dup to own it so caller can drop)
 fn emit_identity_to_debug_str(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef {
     let current_fn = match ctx.current_fn {
