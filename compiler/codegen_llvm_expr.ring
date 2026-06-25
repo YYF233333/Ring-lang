@@ -2652,6 +2652,78 @@ fn gen_dup_value(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueRef {
     val
 }
 
+// Row-type (RecordType) field access: the static type is e.g. {name: Str} but the
+// runtime value is a concrete struct (User, Simple, ...).  We read the typeid from
+// the heap header at ptr-4 and switch over all registered structs that contain the
+// requested field, GEP-ing into the correct layout for each.
+fn gen_record_field_access(mut ctx: LlvmCtx, recv_val: LLVMValueRef, field: Str) -> LLVMValueRef {
+    let current_fn = match ctx.current_fn {
+        some(f) => f,
+        none => panic("LLVM codegen: gen_record_field_access outside function"),
+    }
+
+    // Collect all structs that have this field
+    let mut candidates: List<(Str, StructFieldInfo, Int)> = []  // (name, info, field_idx)
+    for entry in ctx.struct_types.entries() {
+        let (sname, sinfo) = entry
+        for i in 0..sinfo.field_names.len() {
+            if sinfo.field_names[i] == field {
+                candidates.push((sname, sinfo, i))
+            }
+        }
+    }
+
+    if candidates.len() == 0 {
+        panic("LLVM codegen: no registered struct has field '${field}' for row-type access")
+    }
+
+    // If only one candidate, skip the switch — just GEP directly
+    if candidates.len() == 1 {
+        let (cname, cinfo, cidx) = candidates[0]
+        let field_ptr = LLVMBuildStructGEP2(ctx.builder, cinfo.llvm_type, recv_val, cidx, fresh_name(ctx, "rfp"))
+        return LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, field))
+    }
+
+    // Read typeid from heap header: ptr - 4 as u32
+    let ptr_int = LLVMBuildPtrToInt(ctx.builder, recv_val, ctx.i64_type, fresh_name(ctx, "rpi"))
+    let offset4 = LLVMConstInt(ctx.i64_type, 4, 0)
+    let hdr_int = LLVMBuildSub(ctx.builder, ptr_int, offset4, fresh_name(ctx, "rhi"))
+    let hdr_ptr = LLVMBuildIntToPtr(ctx.builder, hdr_int, ctx.ptr_type, fresh_name(ctx, "rhp"))
+    let tid_val = LLVMBuildLoad2(ctx.builder, ctx.i32_type, hdr_ptr, fresh_name(ctx, "rtid"))
+
+    // Build switch over typeid
+    let merge_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "row.merge")
+    let default_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "row.default")
+    let switch_val = LLVMBuildSwitch(ctx.builder, tid_val, default_bb, candidates.len())
+
+    let mut phi_vals: List<LLVMValueRef> = []
+    let mut phi_bbs: List<LLVMBasicBlockRef> = []
+
+    for entry in candidates {
+        let (sname, sinfo, fidx) = entry
+        let tid = get_or_assign_typeid(ctx, sname)
+        let case_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "row.${sname}")
+        LLVMAddCase(switch_val, LLVMConstInt(ctx.i32_type, tid, 0), case_bb)
+
+        LLVMPositionBuilderAtEnd(ctx.builder, case_bb)
+        let fp = LLVMBuildStructGEP2(ctx.builder, sinfo.llvm_type, recv_val, fidx, fresh_name(ctx, "rfp"))
+        let fv = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fp, fresh_name(ctx, field))
+        discard(LLVMBuildBr(ctx.builder, merge_bb))
+        phi_vals.push(fv)
+        phi_bbs.push(case_bb)
+    }
+
+    // Default: unreachable (type checker guarantees a valid struct)
+    LLVMPositionBuilderAtEnd(ctx.builder, default_bb)
+    discard(LLVMBuildUnreachable(ctx.builder))
+
+    // Merge with phi
+    LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+    let phi = LLVMBuildPhi(ctx.builder, ctx.ptr_type, fresh_name(ctx, "rfv"))
+    LLVMAddIncoming(phi, phi_vals, phi_bbs)
+    phi
+}
+
 fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> LLVMValueRef {
     let recv_val = gen_llvm_expr(ctx, receiver)
     let recv_type = hexpr_type(receiver)
@@ -2670,6 +2742,17 @@ fn gen_field_access(mut ctx: LlvmCtx, receiver: HExpr, field: Str, ty: Type) -> 
             // B-098: tuple field read is a BORROW (ring_list_get no longer dups);
             // the borrow-inference pass clones it if it escapes.
             return LLVMBuildCall2(ctx.builder, get_ty, get_fn, [recv_val, idx_val], fresh_name(ctx, "t"))
+        },
+        _ => {},
+    }
+
+    // RecordType (row type): the receiver is a concrete struct at runtime, but
+    // the static type is a row type like {name: Str}.  We read the heap-header
+    // typeid at ptr-4, then switch over all registered structs that contain the
+    // requested field, doing the correct GEP for each layout.
+    match recv_type {
+        Type::RecordType { .. } => {
+            return gen_record_field_access(ctx, recv_val, field)
         },
         _ => {},
     }
@@ -3736,12 +3819,44 @@ fn bind_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str
                 }
             }
         },
-        none => {},
+        none => {
+            // Struct pattern fallback: cname is a struct, not an enum variant.
+            // Struct fields use 0-based GEP indices (no tag field).
+            match ctx.struct_types.get(cname) {
+                some(struct_info) => {
+                    for i in 0..fields.len() {
+                        match fields.get(i) {
+                            some(field_pat) => {
+                                match field_pat {
+                                    Pattern::Binding { name: bname, .. } => {
+                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, scrut_val, i, fresh_name(ctx, "sf"))
+                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
+                                        let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
+                                        discard(LLVMBuildStore(ctx.builder, field_val, alloca))
+                                        ctx.named_values.insert(bname, alloca)
+                                    },
+                                    Pattern::Wildcard { .. } => {},
+                                    _ => {
+                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, scrut_val, i, fresh_name(ctx, "sf"))
+                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
+                                        bind_nested_pattern(ctx, field_val, field_pat)
+                                    },
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                },
+                none => {},
+            }
+        },
     }
 }
 
 // Helper: bind a named-constructor pattern's fields by field name (after its
 // tag was verified). Mirrors gen_match_arm_enum's named-constructor path.
+// Also handles struct patterns (not just enum variants): when
+// find_enum_by_variant returns none, we fall back to ctx.struct_types.
 fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qualifier: Str?, named_fields: List<NamedPatternField>) {
     let ei = find_enum_by_variant(ctx, cname, qualifier)
     match ei {
@@ -3778,7 +3893,43 @@ fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cnam
             },
             none => {},
         },
-        none => {},
+        none => {
+            // Struct pattern fallback: cname is a struct name, not an enum variant.
+            // Struct fields use 0-based GEP indices (no tag field at index 0).
+            match ctx.struct_types.get(cname) {
+                some(struct_info) => {
+                    for i in 0..named_fields.len() {
+                        match named_fields.get(i) {
+                            some(nf) => {
+                                let mut field_idx = i
+                                for fi in 0..struct_info.field_names.len() {
+                                    if struct_info.field_names[fi] == nf.name {
+                                        field_idx = fi
+                                    }
+                                }
+                                match nf.pattern {
+                                    Pattern::Binding { name: bname, .. } => {
+                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, scrut_val, field_idx, fresh_name(ctx, "sf"))
+                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
+                                        let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
+                                        discard(LLVMBuildStore(ctx.builder, field_val, alloca))
+                                        ctx.named_values.insert(bname, alloca)
+                                    },
+                                    Pattern::Wildcard { .. } => {},
+                                    _ => {
+                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, scrut_val, field_idx, fresh_name(ctx, "sf"))
+                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
+                                        bind_nested_pattern(ctx, field_val, nf.pattern)
+                                    },
+                                }
+                            },
+                            none => {},
+                        }
+                    }
+                },
+                none => {},
+            }
+        },
     }
 }
 
