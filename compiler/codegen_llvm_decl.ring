@@ -1071,14 +1071,13 @@ fn emit_derived_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str) 
     LLVMBuildRet(ctx.builder, dict_ptr)
     ctx.current_fn = saved_fn
 
-    // The lazy getter for this dict (ring_dict_init___<name>) may already exist
-    // with a builtin fallback from get_or_create_static_dict_getter. That getter
-    // caches via the dict global @__ring_dictg_<name>: if @g == null → build →
-    // store @g. We pre-populate @g in emit_c_main (before Ring code runs) by
-    // calling our build_fn, so the lazy getter finds a non-null value and skips
-    // the ring_get_builtin_dict fallback.
-    let g = get_or_create_dict_global(ctx, dict_name)
-    ctx.derived_dict_builds.push((g, build_fn, build_fn_ty))
+    // B-104 D4: wrap the build fn in the memoised getter (registered as
+    // ring_dict_init_<dictname>) and expose it via dict_globals so
+    // resolve_dict_for_derived finds the SINGLETON, not a fresh build.
+    // This mirrors emit_trait_dict — without it, nested generic structs'
+    // derived eq/cmp/debug fall through to ring_get_builtin_dict (#178).
+    let getter = emit_memoised_dict_getter(ctx, dict_name, build_fn, build_fn_ty)
+    ctx.dict_globals.insert(dict_name, getter)
 
     ctx.current_fn = saved_fn
     LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
@@ -1510,15 +1509,24 @@ fn emit_dict_eq_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, dic
     let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, 1, fresh_name(ctx, "eqs"))
     let eq_closure = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "eqc"))
 
-    // Call the closure: fn(env, lhs, rhs) -> ptr (boxed Bool)
+    // Call the closure: fn(env, lhs, rhs, ...extra_dicts) -> ptr (boxed Bool)
+    // For nested generic structs, extra_dicts carries type-param dicts that the
+    // callee's derived eq method needs (e.g. B_mid<T>.eq needs __ring_T_Eq).
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, eq_closure, 0, fresh_name(ctx, "fps"))
     let fn_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fn_ptr_slot, fresh_name(ctx, "fp"))
     let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, eq_closure, 1, fresh_name(ctx, "eps"))
     let env_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, env_slot, fresh_name(ctx, "ep"))
 
-    let call_fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
-    let result = LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, [env_ptr, lhs, rhs], fresh_name(ctx, "deq"))
+    // Build argument list: env, lhs, rhs, then resolved extra dicts
+    let mut call_args: List<LLVMValueRef> = [env_ptr, lhs, rhs]
+    let mut call_param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type]
+    for ed in extra_dicts {
+        call_args.push(resolve_dict_for_derived(ctx, ed))
+        call_param_types.push(ctx.ptr_type)
+    }
+    let call_fn_ty = LLVMFunctionType(ctx.ptr_type, call_param_types, 0)
+    let result = LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, call_args, fresh_name(ctx, "deq"))
 
     // Unbox the Bool result to i1
     let raw = unbox_int(ctx, result)
@@ -2080,15 +2088,24 @@ fn emit_dict_cmp_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, di
     let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, 1, fresh_name(ctx, "cmps"))
     let cmp_closure = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "cmpc"))
 
-    // Call the closure: fn(env, lhs, rhs) -> ptr (boxed Int)
+    // Call the closure: fn(env, lhs, rhs, ...extra_dicts) -> ptr (boxed Int)
+    // For nested generic structs, extra_dicts carries type-param dicts that the
+    // callee's derived cmp method needs.
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, cmp_closure, 0, fresh_name(ctx, "fps"))
     let fn_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fn_ptr_slot, fresh_name(ctx, "fp"))
     let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, cmp_closure, 1, fresh_name(ctx, "eps"))
     let env_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, env_slot, fresh_name(ctx, "ep"))
 
-    let call_fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
-    LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, [env_ptr, lhs, rhs], fresh_name(ctx, "dcmp"))
+    // Build argument list: env, lhs, rhs, then resolved extra dicts
+    let mut call_args: List<LLVMValueRef> = [env_ptr, lhs, rhs]
+    let mut call_param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type, ctx.ptr_type]
+    for ed in extra_dicts {
+        call_args.push(resolve_dict_for_derived(ctx, ed))
+        call_param_types.push(ctx.ptr_type)
+    }
+    let call_fn_ty = LLVMFunctionType(ctx.ptr_type, call_param_types, 0)
+    LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, call_args, fresh_name(ctx, "dcmp"))
 }
 
 // Tuple cmp: compare each element using ring_list_get, short-circuit on non-zero.
@@ -2524,7 +2541,7 @@ fn emit_debug_field_to_str(mut ctx: LlvmCtx, val: LLVMValueRef, action: FieldAct
             LLVMBuildCall2(ctx.builder, to_str_ty, to_str_fn, [raw], fresh_name(ctx, "bts"))
         },
         FieldAction::Call { dict_name, extra_dicts } => {
-            emit_dict_debug_call(ctx, val, dict_name)
+            emit_dict_debug_call(ctx, val, dict_name, extra_dicts)
         },
         FieldAction::Tuple { element_actions } => {
             // Tuple: "(v0, v1, ...)"
@@ -2578,7 +2595,7 @@ fn emit_identity_to_debug_str(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueR
 }
 
 // Call a type's Debug dict to get its debug string.
-fn emit_dict_debug_call(mut ctx: LlvmCtx, val: LLVMValueRef, dict_name: Str) -> LLVMValueRef {
+fn emit_dict_debug_call(mut ctx: LlvmCtx, val: LLVMValueRef, dict_name: Str, extra_dicts: List<Str>) -> LLVMValueRef {
     let dict_ptr = resolve_dict_for_derived(ctx, dict_name)
 
     // Debug dict layout: { i64 count, ptr debug_closure }.
@@ -2587,15 +2604,24 @@ fn emit_dict_debug_call(mut ctx: LlvmCtx, val: LLVMValueRef, dict_name: Str) -> 
     let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, 1, fresh_name(ctx, "dbs"))
     let debug_closure = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "dbc"))
 
-    // Call closure: fn(env, self) -> ptr (Str)
+    // Call closure: fn(env, self, ...extra_dicts) -> ptr (Str)
+    // For nested generic structs, extra_dicts carries type-param dicts that the
+    // callee's derived debug method needs.
     let closure_ty = LLVMStructTypeInContext(ctx.context, [ctx.ptr_type, ctx.ptr_type], 0)
     let fn_ptr_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, debug_closure, 0, fresh_name(ctx, "fps"))
     let fn_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fn_ptr_slot, fresh_name(ctx, "fp"))
     let env_slot = LLVMBuildStructGEP2(ctx.builder, closure_ty, debug_closure, 1, fresh_name(ctx, "eps"))
     let env_ptr = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, env_slot, fresh_name(ctx, "ep"))
 
-    let call_fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
-    LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, [env_ptr, val], fresh_name(ctx, "dbr"))
+    // Build argument list: env, val, then resolved extra dicts
+    let mut call_args: List<LLVMValueRef> = [env_ptr, val]
+    let mut call_param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
+    for ed in extra_dicts {
+        call_args.push(resolve_dict_for_derived(ctx, ed))
+        call_param_types.push(ctx.ptr_type)
+    }
+    let call_fn_ty = LLVMFunctionType(ctx.ptr_type, call_param_types, 0)
+    LLVMBuildCall2(ctx.builder, call_fn_ty, fn_ptr, call_args, fresh_name(ctx, "dbr"))
 }
 
 // Build "(v0, v1, ...)" debug string for tuple fields.
