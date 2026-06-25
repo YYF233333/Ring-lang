@@ -150,34 +150,61 @@ fn prefix_mod_decl(mod_name: Str, decl: Decl) -> Decl {
 }
 
 // ============================================================
-// AST expression traversal — collect callee names
+// AST expression/statement traversal — collect callee names
 // ============================================================
+// Unified walker for two modes (#193):
+//   TopLevel:    collect Ident callees from Call exprs matching registered_fns
+//   SelfMethod:  collect self.method() callees matching impl method_names
+//
+// The mode enum selects which Call/MethodCall logic fires; all other AST
+// traversal is shared.
 
-fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, mut callees: Set<Str>) {
+enum CalleeMode {
+    TopLevel { registered_fns: Set<Str> },
+    SelfMethod { method_names: Set<Str> }
+}
+
+fn walk_expr_callees(expr: Expr, mode: CalleeMode, mut callees: Set<Str>) {
     match expr {
         Expr::Call { callee, args, .. } => {
-            // Check if callee is a direct Ident referencing a registered fn
-            match callee {
-                Expr::Ident { name, .. } => {
-                    if registered_fns.contains(name) {
-                        callees.insert(name)
+            // TopLevel: check if callee is a direct Ident referencing a registered fn
+            match mode {
+                CalleeMode::TopLevel { registered_fns } => {
+                    match callee {
+                        Expr::Ident { name, .. } => {
+                            if registered_fns.contains(name) {
+                                callees.insert(name)
+                            }
+                        },
+                        _ => {}
                     }
                 },
-                _ => {}
+                CalleeMode::SelfMethod { .. } => {}
             }
             // Recurse into callee expr and args
-            collect_expr_callees(callee, registered_fns, callees)
+            walk_expr_callees(callee, mode, callees)
             for arg in args {
-                collect_expr_callees(arg, registered_fns, callees)
+                walk_expr_callees(arg, mode, callees)
             }
         },
-        Expr::MethodCall { receiver, args, .. } => {
-            // x.method() where x is not self — don't connect edge (can't resolve callee pre-inference)
-            // self.method() — same impl block, no external edge needed
-            // In both cases, just recurse into receiver and args
-            collect_expr_callees(receiver, registered_fns, callees)
+        Expr::MethodCall { receiver, method, args, .. } => {
+            // SelfMethod: check if this is self.method() where method is in the impl
+            match mode {
+                CalleeMode::SelfMethod { method_names } => {
+                    match receiver {
+                        Expr::Ident { name, .. } => {
+                            if name == "self" && method_names.contains(method) {
+                                callees.insert(method)
+                            }
+                        },
+                        _ => {}
+                    }
+                },
+                CalleeMode::TopLevel { .. } => {}
+            }
+            walk_expr_callees(receiver, mode, callees)
             for arg in args {
-                collect_expr_callees(arg, registered_fns, callees)
+                walk_expr_callees(arg, mode, callees)
             }
         },
         Expr::Ident { .. } => {
@@ -185,93 +212,93 @@ fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, mut callees: Set<S
         },
         Expr::Block { stmts, tail, .. } => {
             for stmt in stmts {
-                collect_stmt_callees(stmt, registered_fns, callees)
+                walk_stmt_callees(stmt, mode, callees)
             }
             match tail {
-                some(t) => collect_expr_callees(t, registered_fns, callees),
+                some(t) => walk_expr_callees(t, mode, callees),
                 none => {}
             }
         },
         Expr::IfExpr { condition, then_branch, else_branch, .. } => {
-            collect_expr_callees(condition, registered_fns, callees)
-            collect_expr_callees(then_branch, registered_fns, callees)
+            walk_expr_callees(condition, mode, callees)
+            walk_expr_callees(then_branch, mode, callees)
             match else_branch {
-                some(eb) => collect_expr_callees(eb, registered_fns, callees),
+                some(eb) => walk_expr_callees(eb, mode, callees),
                 none => {}
             }
         },
         Expr::MatchExpr { scrutinee, arms, .. } => {
-            collect_expr_callees(scrutinee, registered_fns, callees)
+            walk_expr_callees(scrutinee, mode, callees)
             for arm in arms {
                 match arm.guard {
-                    some(g) => collect_expr_callees(g, registered_fns, callees),
+                    some(g) => walk_expr_callees(g, mode, callees),
                     none => {}
                 }
-                collect_expr_callees(arm.body, registered_fns, callees)
+                walk_expr_callees(arm.body, mode, callees)
             }
         },
         Expr::Lambda { body, .. } => {
-            collect_expr_callees(body, registered_fns, callees)
+            walk_expr_callees(body, mode, callees)
         },
         Expr::BinOp { left, right, .. } => {
-            collect_expr_callees(left, registered_fns, callees)
-            collect_expr_callees(right, registered_fns, callees)
+            walk_expr_callees(left, mode, callees)
+            walk_expr_callees(right, mode, callees)
         },
         Expr::UnaryOp { operand, .. } => {
-            collect_expr_callees(operand, registered_fns, callees)
+            walk_expr_callees(operand, mode, callees)
         },
         Expr::FieldAccess { receiver, .. } => {
-            collect_expr_callees(receiver, registered_fns, callees)
+            walk_expr_callees(receiver, mode, callees)
         },
         Expr::IndexExpr { receiver, index, .. } => {
-            collect_expr_callees(receiver, registered_fns, callees)
-            collect_expr_callees(index, registered_fns, callees)
+            walk_expr_callees(receiver, mode, callees)
+            walk_expr_callees(index, mode, callees)
         },
         Expr::StructLit { fields, spread, .. } => {
             for f in fields {
-                collect_expr_callees(f.value, registered_fns, callees)
+                walk_expr_callees(f.value, mode, callees)
             }
             match spread {
-                some(s) => collect_expr_callees(s, registered_fns, callees),
+                some(s) => walk_expr_callees(s, mode, callees),
                 none => {}
             }
         },
         Expr::CatchExpr { expr: inner, arms, .. } => {
-            collect_expr_callees(inner, registered_fns, callees)
+            walk_expr_callees(inner, mode, callees)
             for arm in arms {
                 match arm.guard {
-                    some(g) => collect_expr_callees(g, registered_fns, callees),
+                    some(g) => walk_expr_callees(g, mode, callees),
                     none => {}
                 }
-                collect_expr_callees(arm.body, registered_fns, callees)
+                walk_expr_callees(arm.body, mode, callees)
             }
         },
         Expr::HandleExpr { body, handlers, .. } => {
-            collect_expr_callees(body, registered_fns, callees)
+            walk_expr_callees(body, mode, callees)
             for handler in handlers {
-                collect_expr_callees(handler.body, registered_fns, callees)
+                walk_expr_callees(handler.body, mode, callees)
             }
         },
         Expr::StringInterp { parts, .. } => {
             for part in parts {
                 match part {
-                    StringInterpPart::ExprPart(e) => collect_expr_callees(e, registered_fns, callees),
+                    StringInterpPart::ExprPart(e) => walk_expr_callees(e, mode, callees),
                     StringInterpPart::LitPart(_) => {}
                 }
             }
         },
         Expr::Range { start, end, .. } => {
-            collect_expr_callees(start, registered_fns, callees)
-            collect_expr_callees(end, registered_fns, callees)
+            walk_expr_callees(start, mode, callees)
+            walk_expr_callees(end, mode, callees)
         },
         Expr::ListLit { elements, .. } => {
             for el in elements {
-                collect_expr_callees(el, registered_fns, callees)
+                walk_expr_callees(el, mode, callees)
             }
         },
         Expr::TupleLit { elements, .. } => {
             for el in elements {
-                collect_expr_callees(el, registered_fns, callees)
+                walk_expr_callees(el, mode, callees)
             }
         },
         // Leaf expressions — no sub-expressions to traverse
@@ -281,39 +308,39 @@ fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, mut callees: Set<S
         Expr::BoolLit { .. } => {},
         // B-113: return in expression position (match arm)
         Expr::ReturnExpr { value, .. } => match value {
-            some(v) => collect_expr_callees(v, registered_fns, callees),
+            some(v) => walk_expr_callees(v, mode, callees),
             none => {}
         }
     }
 }
 
-fn collect_stmt_callees(stmt: Stmt, registered_fns: Set<Str>, mut callees: Set<Str>) {
+fn walk_stmt_callees(stmt: Stmt, mode: CalleeMode, mut callees: Set<Str>) {
     match stmt {
-        Stmt::Let { init, .. } => collect_expr_callees(init, registered_fns, callees),
-        Stmt::Var { init, .. } => collect_expr_callees(init, registered_fns, callees),
+        Stmt::Let { init, .. } => walk_expr_callees(init, mode, callees),
+        Stmt::Var { init, .. } => walk_expr_callees(init, mode, callees),
         Stmt::Assign { target, value, .. } => {
-            collect_expr_callees(target, registered_fns, callees)
-            collect_expr_callees(value, registered_fns, callees)
+            walk_expr_callees(target, mode, callees)
+            walk_expr_callees(value, mode, callees)
         },
-        Stmt::ExprStmt { expr, .. } => collect_expr_callees(expr, registered_fns, callees),
+        Stmt::ExprStmt { expr, .. } => walk_expr_callees(expr, mode, callees),
         Stmt::Return { value, .. } => match value {
-            some(v) => collect_expr_callees(v, registered_fns, callees),
+            some(v) => walk_expr_callees(v, mode, callees),
             none => {}
         },
         Stmt::While { condition, body, .. } => {
-            collect_expr_callees(condition, registered_fns, callees)
-            collect_expr_callees(body, registered_fns, callees)
+            walk_expr_callees(condition, mode, callees)
+            walk_expr_callees(body, mode, callees)
         },
         Stmt::ForIn { iterable, body, .. } => {
-            collect_expr_callees(iterable, registered_fns, callees)
-            collect_expr_callees(body, registered_fns, callees)
+            walk_expr_callees(iterable, mode, callees)
+            walk_expr_callees(body, mode, callees)
         },
-        Stmt::LetDestructure { init, .. } => collect_expr_callees(init, registered_fns, callees),
+        Stmt::LetDestructure { init, .. } => walk_expr_callees(init, mode, callees),
         Stmt::IfLet { expr, then_block, else_block, .. } => {
-            collect_expr_callees(expr, registered_fns, callees)
-            collect_expr_callees(then_block, registered_fns, callees)
+            walk_expr_callees(expr, mode, callees)
+            walk_expr_callees(then_block, mode, callees)
             match else_block {
-                some(eb) => collect_expr_callees(eb, registered_fns, callees),
+                some(eb) => walk_expr_callees(eb, mode, callees),
                 none => {}
             }
         },
@@ -322,172 +349,16 @@ fn collect_stmt_callees(stmt: Stmt, registered_fns: Set<Str>, mut callees: Set<S
     }
 }
 
-// ============================================================
-// Impl-internal method call collection (B-138)
-// ============================================================
+// Thin wrappers preserving original call-site signatures.
+fn collect_expr_callees(expr: Expr, registered_fns: Set<Str>, mut callees: Set<Str>) {
+    walk_expr_callees(expr, CalleeMode::TopLevel { registered_fns: registered_fns }, callees)
+}
 
-// Collect self.method() callees within an AST expression body.
+// Collect self.method() callees within an AST expression body (B-138).
 // Only captures MethodCall where receiver is Ident("self") and method name
 // is in the provided method_names set. Used for impl-internal SCC ordering.
 pub fn collect_self_method_callees(expr: Expr, method_names: Set<Str>, mut callees: Set<Str>) {
-    match expr {
-        Expr::Call { callee, args, .. } => {
-            collect_self_method_callees(callee, method_names, callees)
-            for arg in args {
-                collect_self_method_callees(arg, method_names, callees)
-            }
-        },
-        Expr::MethodCall { receiver, method, args, .. } => {
-            // Check if this is self.method() where method is in the impl
-            match receiver {
-                Expr::Ident { name, .. } => {
-                    if name == "self" && method_names.contains(method) {
-                        callees.insert(method)
-                    }
-                },
-                _ => {}
-            }
-            collect_self_method_callees(receiver, method_names, callees)
-            for arg in args {
-                collect_self_method_callees(arg, method_names, callees)
-            }
-        },
-        Expr::Ident { .. } => {},
-        Expr::Block { stmts, tail, .. } => {
-            for stmt in stmts {
-                collect_self_method_stmt_callees(stmt, method_names, callees)
-            }
-            match tail {
-                some(t) => collect_self_method_callees(t, method_names, callees),
-                none => {}
-            }
-        },
-        Expr::IfExpr { condition, then_branch, else_branch, .. } => {
-            collect_self_method_callees(condition, method_names, callees)
-            collect_self_method_callees(then_branch, method_names, callees)
-            match else_branch {
-                some(eb) => collect_self_method_callees(eb, method_names, callees),
-                none => {}
-            }
-        },
-        Expr::MatchExpr { scrutinee, arms, .. } => {
-            collect_self_method_callees(scrutinee, method_names, callees)
-            for arm in arms {
-                match arm.guard {
-                    some(g) => collect_self_method_callees(g, method_names, callees),
-                    none => {}
-                }
-                collect_self_method_callees(arm.body, method_names, callees)
-            }
-        },
-        Expr::Lambda { body, .. } => {
-            collect_self_method_callees(body, method_names, callees)
-        },
-        Expr::BinOp { left, right, .. } => {
-            collect_self_method_callees(left, method_names, callees)
-            collect_self_method_callees(right, method_names, callees)
-        },
-        Expr::UnaryOp { operand, .. } => {
-            collect_self_method_callees(operand, method_names, callees)
-        },
-        Expr::FieldAccess { receiver, .. } => {
-            collect_self_method_callees(receiver, method_names, callees)
-        },
-        Expr::IndexExpr { receiver, index, .. } => {
-            collect_self_method_callees(receiver, method_names, callees)
-            collect_self_method_callees(index, method_names, callees)
-        },
-        Expr::StructLit { fields, spread, .. } => {
-            for f in fields {
-                collect_self_method_callees(f.value, method_names, callees)
-            }
-            match spread {
-                some(s) => collect_self_method_callees(s, method_names, callees),
-                none => {}
-            }
-        },
-        Expr::CatchExpr { expr: inner, arms, .. } => {
-            collect_self_method_callees(inner, method_names, callees)
-            for arm in arms {
-                match arm.guard {
-                    some(g) => collect_self_method_callees(g, method_names, callees),
-                    none => {}
-                }
-                collect_self_method_callees(arm.body, method_names, callees)
-            }
-        },
-        Expr::HandleExpr { body, handlers, .. } => {
-            collect_self_method_callees(body, method_names, callees)
-            for handler in handlers {
-                collect_self_method_callees(handler.body, method_names, callees)
-            }
-        },
-        Expr::StringInterp { parts, .. } => {
-            for part in parts {
-                match part {
-                    StringInterpPart::ExprPart(e) => collect_self_method_callees(e, method_names, callees),
-                    StringInterpPart::LitPart(_) => {}
-                }
-            }
-        },
-        Expr::Range { start, end, .. } => {
-            collect_self_method_callees(start, method_names, callees)
-            collect_self_method_callees(end, method_names, callees)
-        },
-        Expr::ListLit { elements, .. } => {
-            for el in elements {
-                collect_self_method_callees(el, method_names, callees)
-            }
-        },
-        Expr::TupleLit { elements, .. } => {
-            for el in elements {
-                collect_self_method_callees(el, method_names, callees)
-            }
-        },
-        Expr::IntLit { .. } => {},
-        Expr::FloatLit { .. } => {},
-        Expr::StrLit { .. } => {},
-        Expr::BoolLit { .. } => {},
-        Expr::ReturnExpr { value, .. } => match value {
-            some(v) => collect_self_method_callees(v, method_names, callees),
-            none => {}
-        }
-    }
-}
-
-fn collect_self_method_stmt_callees(stmt: Stmt, method_names: Set<Str>, mut callees: Set<Str>) {
-    match stmt {
-        Stmt::Let { init, .. } => collect_self_method_callees(init, method_names, callees),
-        Stmt::Var { init, .. } => collect_self_method_callees(init, method_names, callees),
-        Stmt::Assign { target, value, .. } => {
-            collect_self_method_callees(target, method_names, callees)
-            collect_self_method_callees(value, method_names, callees)
-        },
-        Stmt::ExprStmt { expr, .. } => collect_self_method_callees(expr, method_names, callees),
-        Stmt::Return { value, .. } => match value {
-            some(v) => collect_self_method_callees(v, method_names, callees),
-            none => {}
-        },
-        Stmt::While { condition, body, .. } => {
-            collect_self_method_callees(condition, method_names, callees)
-            collect_self_method_callees(body, method_names, callees)
-        },
-        Stmt::ForIn { iterable, body, .. } => {
-            collect_self_method_callees(iterable, method_names, callees)
-            collect_self_method_callees(body, method_names, callees)
-        },
-        Stmt::LetDestructure { init, .. } => collect_self_method_callees(init, method_names, callees),
-        Stmt::IfLet { expr, then_block, else_block, .. } => {
-            collect_self_method_callees(expr, method_names, callees)
-            collect_self_method_callees(then_block, method_names, callees)
-            match else_block {
-                some(eb) => collect_self_method_callees(eb, method_names, callees),
-                none => {}
-            }
-        },
-        Stmt::Break { .. } => {},
-        Stmt::Continue { .. } => {}
-    }
+    walk_expr_callees(expr, CalleeMode::SelfMethod { method_names: method_names }, callees)
 }
 
 // ============================================================
@@ -498,7 +369,10 @@ fn collect_self_method_stmt_callees(stmt: Stmt, method_names: Set<Str>, mut call
 // Returns SCCs in reverse topological order: leaf dependencies come first,
 // root callers come last.
 pub fn tarjan_scc(graph: Map<Str, List<Str>>) -> List<List<Str>> {
-    let mut index_counter = 0
+    // index_counter is wrapped in a List<Int> (length-1) so that recursive calls
+    // share the same mutable counter — Int is a value type in Ring, so `mut Int`
+    // increments would not propagate back to the caller (#181).
+    let mut index_counter: List<Int> = [0]
     let mut stack: List<Str> = []
     let mut on_stack: Set<Str> = set_new()
     let mut indices: Map<Str, Int> = map_new()
@@ -531,15 +405,15 @@ pub fn tarjan_scc(graph: Map<Str, List<Str>>) -> List<List<Str>> {
 fn tarjan_strongconnect(
     v: Str,
     graph: Map<Str, List<Str>>,
-    mut index_counter: Int,
+    mut index_counter: List<Int>,
     mut stack: List<Str>,
     mut on_stack: Set<Str>,
     mut indices: Map<Str, Int>,
     mut lowlinks: Map<Str, Int>,
     mut result: List<List<Str>>
 ) {
-    let v_index = index_counter
-    index_counter = index_counter + 1
+    let v_index = index_counter[0]
+    index_counter.set(0, index_counter[0] + 1)
     indices.insert(v, v_index)
     lowlinks.insert(v, v_index)
     stack.push(v)
