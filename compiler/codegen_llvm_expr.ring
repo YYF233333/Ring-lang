@@ -4837,7 +4837,7 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
         HExpr::UnaryOp { operand, .. } => {
             collect_captures(ctx, operand, params, captures)
         },
-        HExpr::Call { callee, args, resolved_dicts, dict_dispatch, .. } => {
+        HExpr::Call { callee, args, resolved_dicts, dict_dispatch, effects, .. } => {
             collect_captures(ctx, callee, params, captures)
             for a in args { collect_captures(ctx, a, params, captures) }
             // #B-087 gap 3: a generic call inside a closure forwards dict params
@@ -4846,6 +4846,16 @@ fn collect_captures(ctx: LlvmCtx, expr: HExpr, params: List<HParam>, mut capture
             match dict_dispatch {
                 some(dd) => consider_capture_name(ctx, dd.dict_param, none, params, captures),
                 none => {},
+            }
+            // B-145: a call inside a closure body may invoke a function that requires
+            // evidence params (e.g. lookup_var calls Env.get_var).  gen_direct_call
+            // will forward evidence from named_values, so the evidence must be in the
+            // closure's env.  consider_capture_name filters: only params actually in
+            // named_values (function-parameter evidence) are captured; default_evidence
+            // (io etc.) is not in named_values and is safely skipped.
+            let call_ev_names = extract_effect_names(effects)
+            for en in call_ev_names {
+                consider_capture_name(ctx, evidence_param_name(en), none, params, captures)
             }
         },
         // B-104 D4: a dict construction inside a closure body references dict
