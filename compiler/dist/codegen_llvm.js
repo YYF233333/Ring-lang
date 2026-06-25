@@ -495,7 +495,7 @@ function collect_local_names_rec(decls, names) {
         break __ring_match11;
       }
       if (__ring_m11._tag === "Impl") {
-        const methods = __ring_m11.methods;
+        const target_type = __ring_m11.target_type; const methods = __ring_m11.methods;
         const __ring_iter_9 = __List_Iterable.iter(methods);
         while (true) {
           const __ring_next_9 = __ListIterator_Iterator.next(__ring_iter_9);
@@ -505,7 +505,7 @@ function collect_local_names_rec(decls, names) {
             const __ring_m12 = m;
             if (__ring_m12._tag === "Fn") {
               const mn = __ring_m12.name;
-              _Set_insert(names, mn);
+              _Set_insert(names, `${target_type}_${mn}`);
               break __ring_match12;
             }
             break __ring_match12;
@@ -1564,7 +1564,8 @@ function forward_declare_functions_with_prefix(ctx, decls, prefix) {
             if (__ring_m39._tag === "Fn") {
               const mn = __ring_m39.name; const mp = __ring_m39.params; const me = __ring_m39.effects; const mtb = __ring_m39.trait_bounds;
               const mangled = codegen_llvm_ctx$llvm_mangle_method(target_type, mn);
-              forward_declare_fn_with_name(ctx, mangled, mn, mp, me, mtb);
+              const qualified = `${target_type}_${mn}`;
+              forward_declare_fn_with_name(ctx, mangled, qualified, mp, me, mtb);
               break __ring_match39;
             }
             break __ring_match39;
@@ -1800,7 +1801,7 @@ function scan_fn_effects(decls, local_fn_effects) {
         break __ring_match43;
       }
       if (__ring_m43._tag === "Impl") {
-        const methods = __ring_m43.methods;
+        const target_type = __ring_m43.target_type; const methods = __ring_m43.methods;
         const __ring_iter_41 = __List_Iterable.iter(methods);
         while (true) {
           const __ring_next_41 = __ListIterator_Iterator.next(__ring_iter_41);
@@ -1811,7 +1812,8 @@ function scan_fn_effects(decls, local_fn_effects) {
             if (__ring_m44._tag === "Fn") {
               const mn = __ring_m44.name; const me = __ring_m44.effects;
               if ((List_len(me.effects) > 0)) {
-                _Map_insert(local_fn_effects, mn, me);
+                const key = `${target_type}_${mn}`;
+                _Map_insert(local_fn_effects, key, me);
               }
               break __ring_match44;
             }
@@ -2018,6 +2020,10 @@ function generate_llvm(program, output_path, __ring_ev_io) {
   emit_c_main(ctx);
   const ir = LLVMPrintModuleToString(module);
   write_file("ring_output.ll", ir);
+  const verify_result = LLVMVerifyModule(module, 2);
+  if ((verify_result !== 0)) {
+    eprintln(`LLVM module verification failed (${verify_result} errors) — attempting emit anyway`);
+  }
   const pass_opts = LLVMCreatePassBuilderOptions();
   const pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts);
   if ((pass_result !== 0)) {

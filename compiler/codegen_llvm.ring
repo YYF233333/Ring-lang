@@ -363,7 +363,9 @@ fn forward_declare_functions_with_prefix(mut ctx: LlvmCtx, decls: List<HDecl>, p
                     match method {
                         HDecl::Fn { name: mn, params: mp, effects: me, trait_bounds: mtb, .. } => {
                             let mangled = llvm_mangle_method(target_type, mn)
-                            forward_declare_fn_with_name(ctx, mangled, mn, mp, me, mtb)
+                            // #177: use qualified key matching scan_fn_effects
+                            let qualified = "${target_type}_${mn}"
+                            forward_declare_fn_with_name(ctx, mangled, qualified, mp, me, mtb)
                         },
                         _ => {},
                     }
@@ -971,12 +973,15 @@ fn scan_fn_effects(decls: List<HDecl>, mut local_fn_effects: Map<Str, EffectRow>
                     local_fn_effects.insert(name, effects)
                 }
             },
-            HDecl::Impl { methods, .. } => {
+            HDecl::Impl { target_type, methods, .. } => {
                 for m in methods {
                     match m {
                         HDecl::Fn { name: mn, effects: me, .. } => {
                             if me.effects.len() > 0 {
-                                local_fn_effects.insert(mn, me)
+                                // #177: use qualified key to avoid collision between
+                                // same-named methods in different impl blocks.
+                                let key = "${target_type}_${mn}"
+                                local_fn_effects.insert(key, me)
                             }
                         },
                         _ => {},
@@ -1548,6 +1553,12 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     let ir = LLVMPrintModuleToString(module)
     write_file("ring_output.ll", ir)
 
+    // 11b. Verify module (action=2: ReturnStatusAction, prints to stderr)
+    let verify_result = LLVMVerifyModule(module, 2)
+    if verify_result != 0 {
+        eprintln("LLVM module verification failed (${verify_result} errors) — attempting emit anyway")
+    }
+
     // 12. Run LLVM optimization passes (B-126)
     let pass_opts = LLVMCreatePassBuilderOptions()
     let pass_result = LLVMRunPasses(module, "default<O2>", tm, pass_opts)
@@ -1882,10 +1893,13 @@ fn collect_local_names_rec(decls: List<HDecl>, mut names: Set<Str>) {
             HDecl::ExternFn { name, .. } => { names.insert(name) },
             HDecl::ExternType { name, .. } => { names.insert(name) },
             HDecl::TypeAlias { name, .. } => { names.insert(name) },
-            HDecl::Impl { methods, .. } => {
+            HDecl::Impl { target_type, methods, .. } => {
                 for m in methods {
                     match m {
-                        HDecl::Fn { name: mn, .. } => { names.insert(mn) },
+                        HDecl::Fn { name: mn, .. } => {
+                            // #177: qualified key matching scan_fn_effects
+                            names.insert("${target_type}_${mn}")
+                        },
                         _ => {},
                     }
                 }
