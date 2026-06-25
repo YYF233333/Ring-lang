@@ -10,7 +10,7 @@
 
 ## Codegen
 
-### #158 字符串操作系统性字节 vs 字符索引分歧：native UTF-8 字节偏移 vs JS UTF-16 码元偏移 [medium] [judgment] [open]
+### #158 ~~字符串操作系统性字节 vs 字符索引分歧~~ [medium] [judgment] [closed — B-133 跟踪]
 
 ring_runtime.cpp 的所有字符串操作使用 `std::string` 的字节级 API，JS 后端使用 JS 原生 UTF-16 码元级 API。对 ASCII 两者一致；对非 ASCII（CJK、emoji 等）**系统性发散**：
 
