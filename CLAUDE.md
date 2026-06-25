@@ -13,7 +13,7 @@ Ring-lang：不信任程序员的 native 编程语言——编译器是最终权
 ## 技术栈
 
 - **编译器**：Ring 自举，编译为 JS 运行（bootstrap 后端）；LLVM native 后端开发中
-- **LLVM 后端**：codegen_llvm*.ring（5 个模块，~6400 行 Ring），通过 N-API addon 桥接 LLVM-C 22 API。native ring.exe 已能自编译（peak ~10.6GB）
+- **LLVM 后端**：codegen_llvm*.ring（5 个模块，~6400 行 Ring），通过 N-API addon 桥接 LLVM-C 22 API。native ring.exe 已能自编译
 - **测试**：node:test，零外部依赖
 - **参考实现**：Koka 编译器（MIT），用于 effect 推断、evidence passing 等算法翻译
 - **历史**：TS 原始实现归档于 git tag `ts-compiler-final`
