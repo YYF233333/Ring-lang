@@ -3170,7 +3170,7 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
                             // Wildcard/binding: emit body into the default block
                             gen_match_arm_wildcard(ctx, arm, scrut_val, default_bb, merge_bb, phi_vals, phi_bbs)
                         } else {
-                            gen_match_arm_enum(ctx, arm, scrut_val, ename, enum_info, switch_val, merge_bb, current_fn, phi_vals, phi_bbs)
+                            gen_match_arm_enum(ctx, arm, scrut_val, ename, enum_info, switch_val, merge_bb, default_bb, current_fn, phi_vals, phi_bbs)
                         }
                     }
 
@@ -3209,7 +3209,7 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
     }
 }
 
-fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef, enum_name: Str, enum_info: EnumTypeInfo, switch_val: LLVMValueRef, merge_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef, mut phi_vals: List<LLVMValueRef>, mut phi_bbs: List<LLVMBasicBlockRef>) {
+fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef, enum_name: Str, enum_info: EnumTypeInfo, switch_val: LLVMValueRef, merge_bb: LLVMBasicBlockRef, default_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef, mut phi_vals: List<LLVMValueRef>, mut phi_bbs: List<LLVMBasicBlockRef>) {
     match arm.pattern {
         Pattern::Constructor { name, fields, .. } => {
             match enum_info.variants.get(name) {
@@ -3232,10 +3232,11 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
                                     },
                                     Pattern::Wildcard { .. } => {},
                                     _ => {
-                                        // For nested patterns, extract field and bind as unnamed for now
+                                        // For nested patterns, extract field, check nested ctor tags, then bind
                                         let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
                                         let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
-                                        // Recursively bind nested patterns
+                                        // Check nested constructor tags before binding (mirrors if-else path)
+                                        check_nested_ctor_tags(ctx, field_val, field_pat, default_bb, current_fn)
                                         bind_nested_pattern(ctx, field_val, field_pat)
                                     },
                                 }
@@ -3283,6 +3284,8 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
                                     _ => {
                                         let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
                                         let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
+                                        // Check nested constructor tags before binding (mirrors if-else path)
+                                        check_nested_ctor_tags(ctx, field_val, nf.pattern, default_bb, current_fn)
                                         bind_nested_pattern(ctx, field_val, nf.pattern)
                                     },
                                 }
