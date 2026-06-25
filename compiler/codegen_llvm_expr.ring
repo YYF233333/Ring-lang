@@ -3425,8 +3425,9 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
                     }
                 },
                 none => {
-                    // Not an enum — try struct types (e.g. catch arm on a plain struct error)
-                    match ctx.struct_types.get(name) {
+                    // Not an enum — try struct types (e.g. catch arm on a plain struct error).
+                    // Use resolve_struct_type for module-qualified fallback.
+                    match resolve_struct_type(ctx, name) {
                         some(si) => {
                             for i in 0..fields.len() {
                                 match fields.get(i) {
@@ -3853,7 +3854,8 @@ fn bind_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str
         none => {
             // Struct pattern fallback: cname is a struct, not an enum variant.
             // Struct fields use 0-based GEP indices (no tag field).
-            match ctx.struct_types.get(cname) {
+            // Use resolve_struct_type for module-qualified fallback.
+            match resolve_struct_type(ctx, cname) {
                 some(struct_info) => {
                     for i in 0..fields.len() {
                         match fields.get(i) {
@@ -3927,7 +3929,8 @@ fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cnam
         none => {
             // Struct pattern fallback: cname is a struct name, not an enum variant.
             // Struct fields use 0-based GEP indices (no tag field at index 0).
-            match ctx.struct_types.get(cname) {
+            // Use resolve_struct_type for module-qualified fallback.
+            match resolve_struct_type(ctx, cname) {
                 some(struct_info) => {
                     for i in 0..named_fields.len() {
                         match named_fields.get(i) {
@@ -3960,6 +3963,30 @@ fn bind_named_constructor_fields(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cnam
                 },
                 none => {},
             }
+        },
+    }
+}
+
+// Helper: resolve a struct type by name, falling back to module-qualified
+// lookup. AST patterns carry bare struct names (e.g. "Pair") while the LLVM
+// struct_types map stores them under their checker-qualified key
+// (e.g. "inner::Pair"). Try the bare key first, then scan for a key ending
+// with "::<name>".
+fn resolve_struct_type(ctx: LlvmCtx, name: Str) -> StructFieldInfo? {
+    match ctx.struct_types.get(name) {
+        some(si) => some(si),
+        none => {
+            let suffix = "::${name}"
+            let mut sorted = ctx.struct_types.entries()
+            sorted.sort_by(fn(a, b) { if a.0 < b.0 { -1 } else if a.0 > b.0 { 1 } else { 0 } })
+            let mut result: StructFieldInfo? = none
+            for entry in sorted {
+                let (k, v) = entry
+                if k.ends_with(suffix) {
+                    result = some(v)
+                }
+            }
+            result
         },
     }
 }
