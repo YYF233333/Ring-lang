@@ -15,7 +15,7 @@ use ast::{Span, Position, Pattern, BinOp}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm,
     HStructFieldInit, HStringInterpPart, HEffectHandler,
     hexpr_type, hexpr_span, hexpr_effects,
-    collect_extern_type_names, is_rc_excluded_type, type_contains_extern_handle,
+    is_rc_excluded_type, type_contains_extern_handle,
     is_borrow_returning_call}
 use types::{Type}
 
@@ -71,15 +71,9 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
     // Int/Bool/Option/Str call-arg) have no binding and no one drops them — the
     // diagnosed 88% never-freed leak (live ≈ allocs 1:1).  Run BEFORE the RC pass.
     //
-    // B-104 D1 rule ① (audit #139): collect this module's extern type names ONCE
-    // and thread them through both passes.  A value whose HIR type is an extern
-    // type is a raw foreign pointer (no ring_alloc RC header) — it is excluded
-    // from RC entirely (never Clone / never Drop / never owned / never
-    // materialised), and a value whose type transitively CONTAINS an extern
-    // handle (List<LLVMTypeRef>, LLVMValueRef?, LlvmCtx, …) is excluded from
-    // Drop/materialise (its deep drop would reach the foreign pointer).  See
-    // hir.ring's collect_extern_type_names / type_contains_extern_handle.
-    let externs = collect_extern_type_names(program.decls)
+    // B-144: use the program-level extern type names (global set collected at
+    // checker phase, covers use-imported extern types across modules).
+    let externs = program.extern_type_names
     let anf_program = if mutate == "skip-anf" { program } else { anf_normalize(program, externs) }
     // B-091: `boxed_vars` (def_ids of `let mut` vars auto-boxed for write-through
     // closure capture) is threaded through the RC pass so the Assign old-value
@@ -91,7 +85,8 @@ pub fn perceus_transform_mutated(program: HProgram, mutate: Str) -> HProgram {
         decls: mutated_decls,
         derived_impls: anf_program.derived_impls,
         boxed_vars: anf_program.boxed_vars,
-        static_dicts: anf_program.static_dicts
+        static_dicts: anf_program.static_dicts,
+        extern_type_names: anf_program.extern_type_names
     }
 }
 
@@ -186,7 +181,8 @@ fn anf_normalize(program: HProgram, externs: Set<Str>) -> HProgram {
         decls: new_decls,
         derived_impls: program.derived_impls,
         boxed_vars: program.boxed_vars,
-        static_dicts: program.static_dicts
+        static_dicts: program.static_dicts,
+        extern_type_names: program.extern_type_names
     }
 }
 

@@ -1911,7 +1911,7 @@ function generate_llvm(program, output_path, __ring_ev_io) {
     const did = __ring_next_44._0;
     _Set_insert(ctx.boxed_vars, did);
   }
-  const __ring_iter_45 = ___Set_Iterable.iter(hir$collect_extern_type_names(program.decls));
+  const __ring_iter_45 = ___Set_Iterable.iter(program.extern_type_names);
   while (true) {
     const __ring_next_45 = __SetIterator_Iterator.next(__ring_iter_45);
     if (__ring_next_45._tag === "none") break;
@@ -1997,7 +1997,7 @@ function generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io)
     scan_trait_decls(program.decls, ctx.trait_method_order);
     scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params);
     register_effect_ops_llvm(program.decls, ctx.effect_ops);
-    const __ring_iter_49 = ___Set_Iterable.iter(hir$collect_extern_type_names(program.decls));
+    const __ring_iter_49 = ___Set_Iterable.iter(program.extern_type_names);
     while (true) {
       const __ring_next_49 = __SetIterator_Iterator.next(__ring_iter_49);
       if (__ring_next_49._tag === "none") break;

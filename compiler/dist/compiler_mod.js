@@ -1238,6 +1238,49 @@ function compile_phases(entry_file, error_format, __ring_ev_fail) {
       if ((check_ok === false)) {
         return Option_none;
       }
+      let global_externs = set_new();
+      const __ring_iter_43 = __List_Iterable.iter(graph.topo_order);
+      while (true) {
+        const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
+        if (__ring_next_43._tag === "none") break;
+        const key = __ring_next_43._0;
+        __ring_match40: {
+          const __ring_m40 = _Map_get(module_hirs, key);
+          if (__ring_m40._tag === "some") {
+            const hir = __ring_m40._0;
+            const __ring_iter_44 = ___Set_Iterable.iter(hir.extern_type_names);
+            while (true) {
+              const __ring_next_44 = __SetIterator_Iterator.next(__ring_iter_44);
+              if (__ring_next_44._tag === "none") break;
+              const en = __ring_next_44._0;
+              _Set_insert(global_externs, en);
+            }
+            break __ring_match40;
+          }
+          if (__ring_m40._tag === "none") {
+            break __ring_match40;
+          }
+          __match_fail(__ring_m40);
+        }
+      }
+      const __ring_iter_45 = __List_Iterable.iter(graph.topo_order);
+      while (true) {
+        const __ring_next_45 = __ListIterator_Iterator.next(__ring_iter_45);
+        if (__ring_next_45._tag === "none") break;
+        const key = __ring_next_45._0;
+        __ring_match41: {
+          const __ring_m41 = _Map_get(module_hirs, key);
+          if (__ring_m41._tag === "some") {
+            const hir = __ring_m41._0;
+            _Map_insert(module_hirs, key, new hir$HProgram(hir.decls, hir.derived_impls, hir.boxed_vars, hir.static_dicts, global_externs));
+            break __ring_match41;
+          }
+          if (__ring_m41._tag === "none") {
+            break __ring_match41;
+          }
+          __match_fail(__ring_m41);
+        }
+      }
       return Option_some(new CompilePhaseResult(graph, module_asts, module_hirs, module_exports_map));
       break __ring_match32;
     }
@@ -1246,26 +1289,26 @@ function compile_phases(entry_file, error_format, __ring_ev_fail) {
 }
 
 function compile_project(entry_file, error_format, __ring_ev_fail) {
-  __ring_match40: {
-    const __ring_m40 = compile_phases(entry_file, error_format, __ring_ev_fail);
-    if (__ring_m40._tag === "none") {
+  __ring_match42: {
+    const __ring_m42 = compile_phases(entry_file, error_format, __ring_ev_fail);
+    if (__ring_m42._tag === "none") {
       return new CompileProjectResult("", false);
-      break __ring_match40;
+      break __ring_match42;
     }
-    if (__ring_m40._tag === "some") {
-      const phases = __ring_m40._0;
+    if (__ring_m42._tag === "some") {
+      const phases = __ring_m42._0;
       const entry_key = resolver$module_key(phases.graph.entry.path_segments);
       let js_parts = [];
       let is_first = true;
-      const __ring_iter_43 = __List_Iterable.iter(phases.graph.topo_order);
+      const __ring_iter_46 = __List_Iterable.iter(phases.graph.topo_order);
       while (true) {
-        const __ring_next_43 = __ListIterator_Iterator.next(__ring_iter_43);
-        if (__ring_next_43._tag === "none") break;
-        const key = __ring_next_43._0;
-        __ring_match41: {
-          const __ring_m41 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key)];
-          if (Array.isArray(__ring_m41) && __ring_m41.length === 2 && __ring_m41[0]._tag === "some" && __ring_m41[1]._tag === "some") {
-            const mod_ = __ring_m41[0]._0; const hir = __ring_m41[1]._0;
+        const __ring_next_46 = __ListIterator_Iterator.next(__ring_iter_46);
+        if (__ring_next_46._tag === "none") break;
+        const key = __ring_next_46._0;
+        __ring_match43: {
+          const __ring_m43 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key)];
+          if (Array.isArray(__ring_m43) && __ring_m43.length === 2 && __ring_m43[0]._tag === "some" && __ring_m43[1]._tag === "some") {
+            const mod_ = __ring_m43[0]._0; const hir = __ring_m43[1]._0;
             const prefix = resolver$module_prefix(mod_.path_segments);
             let imports_map = build_imports_map(phases.graph, phases.module_exports_map, key);
             const esf = build_external_struct_fields(phases.graph, phases.module_exports_map, key);
@@ -1278,96 +1321,42 @@ function compile_project(entry_file, error_format, __ring_ev_fail) {
             List_push(js_parts, module_js);
             List_push(js_parts, "");
             is_first = false;
-            break __ring_match41;
+            break __ring_match43;
           }
-          break __ring_match41;
+          break __ring_match43;
         }
       }
       return new CompileProjectResult(List_join(js_parts, "\n"), true);
-      break __ring_match40;
+      break __ring_match42;
     }
-    __match_fail(__ring_m40);
+    __match_fail(__ring_m42);
   }
 }
 
 function register_use_aliases(ast, imports_map) {
-  const __ring_iter_44 = __List_Iterable.iter(ast.uses);
+  const __ring_iter_47 = __List_Iterable.iter(ast.uses);
   while (true) {
-    const __ring_next_44 = __ListIterator_Iterator.next(__ring_iter_44);
-    if (__ring_next_44._tag === "none") break;
-    const use_decl = __ring_next_44._0;
-    __ring_match42: {
-      const __ring_m42 = use_decl.imports;
-      if (__ring_m42._tag === "NamedItems") {
-        const names = __ring_m42.names;
-        const __ring_iter_45 = __List_Iterable.iter(names);
+    const __ring_next_47 = __ListIterator_Iterator.next(__ring_iter_47);
+    if (__ring_next_47._tag === "none") break;
+    const use_decl = __ring_next_47._0;
+    __ring_match44: {
+      const __ring_m44 = use_decl.imports;
+      if (__ring_m44._tag === "NamedItems") {
+        const names = __ring_m44.names;
+        const __ring_iter_48 = __List_Iterable.iter(names);
         while (true) {
-          const __ring_next_45 = __ListIterator_Iterator.next(__ring_iter_45);
-          if (__ring_next_45._tag === "none") break;
-          const item = __ring_next_45._0;
-          __ring_match43: {
-            const __ring_m43 = item.alias;
-            if (__ring_m43._tag === "some") {
-              const alias = __ring_m43._0;
-              __ring_match44: {
-                const __ring_m44 = _Map_get(imports_map, item.name);
-                if (__ring_m44._tag === "some") {
-                  const existing = __ring_m44._0;
-                  _Map_insert(imports_map, alias, existing);
-                  break __ring_match44;
-                }
-                if (__ring_m44._tag === "none") {
-                  break __ring_match44;
-                }
-                __match_fail(__ring_m44);
-              }
-              break __ring_match43;
-            }
-            if (__ring_m43._tag === "none") {
-              break __ring_match43;
-            }
-            __match_fail(__ring_m43);
-          }
-        }
-        break __ring_match42;
-      }
-      break __ring_match42;
-    }
-  }
-}
-
-function resolve_extern_fn_imports(ast, key, graph, exports_map, imports_map, import_lines) {
-  const __ring_iter_46 = __List_Iterable.iter(ast.decls);
-  while (true) {
-    const __ring_next_46 = __ListIterator_Iterator.next(__ring_iter_46);
-    if (__ring_next_46._tag === "none") break;
-    const decl = __ring_next_46._0;
-    __ring_match45: {
-      const __ring_m45 = decl;
-      if (__ring_m45._tag === "ExternFn") {
-        const name = __ring_m45.name;
-        if ((!_Map_contains_key(imports_map, name))) {
-          let sorted_exports = _Map_entries(exports_map);
-          sorted_exports.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
-          const __ring_iter_47 = __List_Iterable.iter(sorted_exports);
-          while (true) {
-            const __ring_next_47 = __ListIterator_Iterator.next(__ring_iter_47);
-            if (__ring_next_47._tag === "none") break;
-            const eentry = __ring_next_47._0;
-            const __ring_dt13 = eentry;
-            const other_key = __ring_dt13[0];
-            const other_exports = __ring_dt13[1];
-            if ((((other_key !== key) ? _Map_contains_key(other_exports.values, name) : false) ? (!_Set_contains(other_exports.extern_values, name, __Str_Eq)) : false)) {
+          const __ring_next_48 = __ListIterator_Iterator.next(__ring_iter_48);
+          if (__ring_next_48._tag === "none") break;
+          const item = __ring_next_48._0;
+          __ring_match45: {
+            const __ring_m45 = item.alias;
+            if (__ring_m45._tag === "some") {
+              const alias = __ring_m45._0;
               __ring_match46: {
-                const __ring_m46 = _Map_get(graph.modules, other_key);
+                const __ring_m46 = _Map_get(imports_map, item.name);
                 if (__ring_m46._tag === "some") {
-                  const other_mod = __ring_m46._0;
-                  const other_js = path_basename(Str_replace(other_mod.file_path, ".ring", ".js"));
-                  const other_prefix = other_exports.module_prefix;
-                  const si = codegen_ctx$safe_ident(name);
-                  const alias = `${other_prefix}$${si}`;
-                  _Map_insert(imports_map, name, alias);
-                  List_push(import_lines, `import { ${si} as ${alias} } from "./${other_js}";`);
+                  const existing = __ring_m46._0;
+                  _Map_insert(imports_map, alias, existing);
                   break __ring_match46;
                 }
                 if (__ring_m46._tag === "none") {
@@ -1375,38 +1364,92 @@ function resolve_extern_fn_imports(ast, key, graph, exports_map, imports_map, im
                 }
                 __match_fail(__ring_m46);
               }
+              break __ring_match45;
+            }
+            if (__ring_m45._tag === "none") {
+              break __ring_match45;
+            }
+            __match_fail(__ring_m45);
+          }
+        }
+        break __ring_match44;
+      }
+      break __ring_match44;
+    }
+  }
+}
+
+function resolve_extern_fn_imports(ast, key, graph, exports_map, imports_map, import_lines) {
+  const __ring_iter_49 = __List_Iterable.iter(ast.decls);
+  while (true) {
+    const __ring_next_49 = __ListIterator_Iterator.next(__ring_iter_49);
+    if (__ring_next_49._tag === "none") break;
+    const decl = __ring_next_49._0;
+    __ring_match47: {
+      const __ring_m47 = decl;
+      if (__ring_m47._tag === "ExternFn") {
+        const name = __ring_m47.name;
+        if ((!_Map_contains_key(imports_map, name))) {
+          let sorted_exports = _Map_entries(exports_map);
+          sorted_exports.sort((function(a, b) { return ((a[0] < b[0]) ? (-1) : ((a[0] > b[0]) ? 1 : 0)); }));
+          const __ring_iter_50 = __List_Iterable.iter(sorted_exports);
+          while (true) {
+            const __ring_next_50 = __ListIterator_Iterator.next(__ring_iter_50);
+            if (__ring_next_50._tag === "none") break;
+            const eentry = __ring_next_50._0;
+            const __ring_dt13 = eentry;
+            const other_key = __ring_dt13[0];
+            const other_exports = __ring_dt13[1];
+            if ((((other_key !== key) ? _Map_contains_key(other_exports.values, name) : false) ? (!_Set_contains(other_exports.extern_values, name, __Str_Eq)) : false)) {
+              __ring_match48: {
+                const __ring_m48 = _Map_get(graph.modules, other_key);
+                if (__ring_m48._tag === "some") {
+                  const other_mod = __ring_m48._0;
+                  const other_js = path_basename(Str_replace(other_mod.file_path, ".ring", ".js"));
+                  const other_prefix = other_exports.module_prefix;
+                  const si = codegen_ctx$safe_ident(name);
+                  const alias = `${other_prefix}$${si}`;
+                  _Map_insert(imports_map, name, alias);
+                  List_push(import_lines, `import { ${si} as ${alias} } from "./${other_js}";`);
+                  break __ring_match48;
+                }
+                if (__ring_m48._tag === "none") {
+                  break __ring_match48;
+                }
+                __match_fail(__ring_m48);
+              }
             }
           }
         }
-        break __ring_match45;
+        break __ring_match47;
       }
-      break __ring_match45;
+      break __ring_match47;
     }
   }
 }
 
 function compile_project_esm(entry_file, out_dir, error_format, __ring_ev_fail) {
-  __ring_match47: {
-    const __ring_m47 = compile_phases(entry_file, error_format, __ring_ev_fail);
-    if (__ring_m47._tag === "none") {
+  __ring_match49: {
+    const __ring_m49 = compile_phases(entry_file, error_format, __ring_ev_fail);
+    if (__ring_m49._tag === "none") {
       return new EsmCompileResult(false, "");
-      break __ring_match47;
+      break __ring_match49;
     }
-    if (__ring_m47._tag === "some") {
-      const phases = __ring_m47._0;
+    if (__ring_m49._tag === "some") {
+      const phases = __ring_m49._0;
       const entry_key = resolver$module_key(phases.graph.entry.path_segments);
       const runtime_path = path_join(out_dir, "__ring_runtime.js");
       write_file(runtime_path, runtime$runtime_esm_code());
       let entry_js_path = "";
-      const __ring_iter_48 = __List_Iterable.iter(phases.graph.topo_order);
+      const __ring_iter_51 = __List_Iterable.iter(phases.graph.topo_order);
       while (true) {
-        const __ring_next_48 = __ListIterator_Iterator.next(__ring_iter_48);
-        if (__ring_next_48._tag === "none") break;
-        const key = __ring_next_48._0;
-        __ring_match48: {
-          const __ring_m48 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key), _Map_get(phases.module_asts, key)];
-          if (Array.isArray(__ring_m48) && __ring_m48.length === 3 && __ring_m48[0]._tag === "some" && __ring_m48[1]._tag === "some" && __ring_m48[2]._tag === "some") {
-            const mod_ = __ring_m48[0]._0; const hir = __ring_m48[1]._0; const ast = __ring_m48[2]._0;
+        const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
+        if (__ring_next_51._tag === "none") break;
+        const key = __ring_next_51._0;
+        __ring_match50: {
+          const __ring_m50 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key), _Map_get(phases.module_asts, key)];
+          if (Array.isArray(__ring_m50) && __ring_m50.length === 3 && __ring_m50[0]._tag === "some" && __ring_m50[1]._tag === "some" && __ring_m50[2]._tag === "some") {
+            const mod_ = __ring_m50[0]._0; const hir = __ring_m50[1]._0; const ast = __ring_m50[2]._0;
             const mod_relative = Str_replace(mod_.file_path, ".ring", ".js");
             const mod_out_path = path_join(out_dir, path_basename(mod_relative));
             let imports_map = build_imports_map(phases.graph, phases.module_exports_map, key);
@@ -1418,11 +1461,11 @@ function compile_project_esm(entry_file, out_dir, error_format, __ring_ev_fail) 
             resolve_extern_fn_imports(ast, key, phases.graph, phases.module_exports_map, imports_map, import_lines);
             let export_names = build_esm_export_names(ast, hir);
             const reexport_aliases = build_pub_use_reexports(ast, phases.module_exports_map, export_names);
-            const __ring_iter_49 = __List_Iterable.iter(reexport_aliases);
+            const __ring_iter_52 = __List_Iterable.iter(reexport_aliases);
             while (true) {
-              const __ring_next_49 = __ListIterator_Iterator.next(__ring_iter_49);
-              if (__ring_next_49._tag === "none") break;
-              const ra = __ring_next_49._0;
+              const __ring_next_52 = __ListIterator_Iterator.next(__ring_iter_52);
+              if (__ring_next_52._tag === "none") break;
+              const ra = __ring_next_52._0;
               List_push(import_lines, ra);
             }
             const skip_main = (key !== entry_key);
@@ -1431,108 +1474,108 @@ function compile_project_esm(entry_file, out_dir, error_format, __ring_ev_fail) 
             if ((key === entry_key)) {
               entry_js_path = mod_out_path;
             }
-            break __ring_match48;
-          }
-          break __ring_match48;
-        }
-      }
-      return new EsmCompileResult(true, entry_js_path);
-      break __ring_match47;
-    }
-    __match_fail(__ring_m47);
-  }
-}
-
-function compile_project_llvm(entry_file, output_path, error_format, __ring_ev_fail, __ring_ev_io) {
-  __ring_match49: {
-    const __ring_m49 = compile_phases(entry_file, error_format, __ring_ev_fail);
-    if (__ring_m49._tag === "none") {
-      return new LlvmCompileResult(false);
-      break __ring_match49;
-    }
-    if (__ring_m49._tag === "some") {
-      const phases = __ring_m49._0;
-      const entry_key = resolver$module_key(phases.graph.entry.path_segments);
-      let modules = [];
-      let entry_prefix = "";
-      const __ring_iter_50 = __List_Iterable.iter(phases.graph.topo_order);
-      while (true) {
-        const __ring_next_50 = __ListIterator_Iterator.next(__ring_iter_50);
-        if (__ring_next_50._tag === "none") break;
-        const key = __ring_next_50._0;
-        __ring_match50: {
-          const __ring_m50 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key), _Map_get(phases.module_asts, key)];
-          if (Array.isArray(__ring_m50) && __ring_m50.length === 3 && __ring_m50[0]._tag === "some" && __ring_m50[1]._tag === "some" && __ring_m50[2]._tag === "some") {
-            const mod_ = __ring_m50[0]._0; const hir = __ring_m50[1]._0; const ast = __ring_m50[2]._0;
-            const prefix = resolver$module_prefix(mod_.path_segments);
-            const rc_hir = perceus$perceus_transform(hir);
-            List_push(modules, [prefix, rc_hir, ast.uses]);
-            if ((key === entry_key)) {
-              entry_prefix = prefix;
-            }
-            break __ring_match50;
-          }
-          if (Array.isArray(__ring_m50) && __ring_m50.length === 3 && __ring_m50[0]._tag === "some" && __ring_m50[1]._tag === "some" && __ring_m50[2]._tag === "none") {
-            const mod_ = __ring_m50[0]._0; const hir = __ring_m50[1]._0;
-            const prefix = resolver$module_prefix(mod_.path_segments);
-            const rc_hir = perceus$perceus_transform(hir);
-            List_push(modules, [prefix, rc_hir, []]);
-            if ((key === entry_key)) {
-              entry_prefix = prefix;
-            }
             break __ring_match50;
           }
           break __ring_match50;
         }
       }
-      codegen_llvm$generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io);
-      return new LlvmCompileResult(true);
+      return new EsmCompileResult(true, entry_js_path);
       break __ring_match49;
     }
     __match_fail(__ring_m49);
   }
 }
 
-function verify_project_rc(entry_file, mutate, strict, error_format, __ring_ev_fail) {
+function compile_project_llvm(entry_file, output_path, error_format, __ring_ev_fail, __ring_ev_io) {
   __ring_match51: {
     const __ring_m51 = compile_phases(entry_file, error_format, __ring_ev_fail);
     if (__ring_m51._tag === "none") {
-      return new RcProjectVerifyResult(false, 0, 0, "");
+      return new LlvmCompileResult(false);
       break __ring_match51;
     }
     if (__ring_m51._tag === "some") {
       const phases = __ring_m51._0;
-      let all = [];
-      const __ring_iter_51 = __List_Iterable.iter(phases.graph.topo_order);
+      const entry_key = resolver$module_key(phases.graph.entry.path_segments);
+      let modules = [];
+      let entry_prefix = "";
+      const __ring_iter_53 = __List_Iterable.iter(phases.graph.topo_order);
       while (true) {
-        const __ring_next_51 = __ListIterator_Iterator.next(__ring_iter_51);
-        if (__ring_next_51._tag === "none") break;
-        const key = __ring_next_51._0;
+        const __ring_next_53 = __ListIterator_Iterator.next(__ring_iter_53);
+        if (__ring_next_53._tag === "none") break;
+        const key = __ring_next_53._0;
         __ring_match52: {
-          const __ring_m52 = _Map_get(phases.module_hirs, key);
-          if (__ring_m52._tag === "some") {
-            const hir = __ring_m52._0;
-            const rc_hir = perceus$perceus_transform_mutated(hir, mutate);
-            const __ring_iter_52 = __List_Iterable.iter(verify_rc$verify_rc_program(rc_hir));
-            while (true) {
-              const __ring_next_52 = __ListIterator_Iterator.next(__ring_iter_52);
-              if (__ring_next_52._tag === "none") break;
-              const f = __ring_next_52._0;
-              List_push(all, f);
+          const __ring_m52 = [_Map_get(phases.graph.modules, key), _Map_get(phases.module_hirs, key), _Map_get(phases.module_asts, key)];
+          if (Array.isArray(__ring_m52) && __ring_m52.length === 3 && __ring_m52[0]._tag === "some" && __ring_m52[1]._tag === "some" && __ring_m52[2]._tag === "some") {
+            const mod_ = __ring_m52[0]._0; const hir = __ring_m52[1]._0; const ast = __ring_m52[2]._0;
+            const prefix = resolver$module_prefix(mod_.path_segments);
+            const rc_hir = perceus$perceus_transform(hir);
+            List_push(modules, [prefix, rc_hir, ast.uses]);
+            if ((key === entry_key)) {
+              entry_prefix = prefix;
             }
             break __ring_match52;
           }
-          if (__ring_m52._tag === "none") {
+          if (Array.isArray(__ring_m52) && __ring_m52.length === 3 && __ring_m52[0]._tag === "some" && __ring_m52[1]._tag === "some" && __ring_m52[2]._tag === "none") {
+            const mod_ = __ring_m52[0]._0; const hir = __ring_m52[1]._0;
+            const prefix = resolver$module_prefix(mod_.path_segments);
+            const rc_hir = perceus$perceus_transform(hir);
+            List_push(modules, [prefix, rc_hir, []]);
+            if ((key === entry_key)) {
+              entry_prefix = prefix;
+            }
             break __ring_match52;
           }
-          __match_fail(__ring_m52);
+          break __ring_match52;
+        }
+      }
+      codegen_llvm$generate_llvm_project(modules, entry_prefix, output_path, __ring_ev_io);
+      return new LlvmCompileResult(true);
+      break __ring_match51;
+    }
+    __match_fail(__ring_m51);
+  }
+}
+
+function verify_project_rc(entry_file, mutate, strict, error_format, __ring_ev_fail) {
+  __ring_match53: {
+    const __ring_m53 = compile_phases(entry_file, error_format, __ring_ev_fail);
+    if (__ring_m53._tag === "none") {
+      return new RcProjectVerifyResult(false, 0, 0, "");
+      break __ring_match53;
+    }
+    if (__ring_m53._tag === "some") {
+      const phases = __ring_m53._0;
+      let all = [];
+      const __ring_iter_54 = __List_Iterable.iter(phases.graph.topo_order);
+      while (true) {
+        const __ring_next_54 = __ListIterator_Iterator.next(__ring_iter_54);
+        if (__ring_next_54._tag === "none") break;
+        const key = __ring_next_54._0;
+        __ring_match54: {
+          const __ring_m54 = _Map_get(phases.module_hirs, key);
+          if (__ring_m54._tag === "some") {
+            const hir = __ring_m54._0;
+            const rc_hir = perceus$perceus_transform_mutated(hir, mutate);
+            const __ring_iter_55 = __List_Iterable.iter(verify_rc$verify_rc_program(rc_hir));
+            while (true) {
+              const __ring_next_55 = __ListIterator_Iterator.next(__ring_iter_55);
+              if (__ring_next_55._tag === "none") break;
+              const f = __ring_next_55._0;
+              List_push(all, f);
+            }
+            break __ring_match54;
+          }
+          if (__ring_m54._tag === "none") {
+            break __ring_match54;
+          }
+          __match_fail(__ring_m54);
         }
       }
       const fatal = verify_rc$rc_fatal_count(all);
       return new RcProjectVerifyResult(true, fatal, (List_len(all) - fatal), verify_rc$format_rc_findings(all, strict));
-      break __ring_match51;
+      break __ring_match53;
     }
-    __match_fail(__ring_m51);
+    __match_fail(__ring_m53);
   }
 }
 

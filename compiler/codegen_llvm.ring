@@ -3,7 +3,7 @@ use ast::{TypeParam, UseDecl, UseImport, NamedImport}
 use hir::{HExpr, HStmt, HDecl, HParam, HProgram, HStructField, HEnumVariant,
     HTraitMethod, TraitBound, HEffectOp, DerivedImpl,
     evidence_param_name, trait_dict_name, trait_bound_param_name,
-    hexpr_type, hexpr_effects, collect_extern_type_names}
+    hexpr_type, hexpr_effects}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
@@ -1453,9 +1453,8 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
     // codegen routes them through a shared heap cell (write-through capture).
     for did in program.boxed_vars { ctx.boxed_vars.insert(did) }
 
-    // B-104 D1 rule ① (audit #139): extern type names, consulted by
-    // register_struct_info / register_enum_info for drop_T field skipping.
-    for en in collect_extern_type_names(program.decls) { ctx.extern_types.insert(en) }
+    // B-144: use program-level extern type names (global set, covers use-imports).
+    for en in program.extern_type_names { ctx.extern_types.insert(en) }
 
     // B-104 D4: static dict singleton definitions (resolve_static_dict_by_name
     // builds wrapped instances from these).
@@ -1617,11 +1616,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         scan_fn_mut_params_llvm(program.decls, ctx.fn_mut_params)
         // B-090: register effect-op declaration order (shared by all modules).
         register_effect_ops_llvm(program.decls, ctx.effect_ops)
-        // B-104 D1 rule ① (audit #139): union of all modules' extern type names
-        // (the codegen_llvm_* modules re-declare the same bare names, so the
-        // union is consistent); used for drop_T field skipping in the
-        // forward-declare pass below.
-        for en in collect_extern_type_names(program.decls) { ctx.extern_types.insert(en) }
+        // B-144: use program-level extern type names (global set, covers use-imports).
+        for en in program.extern_type_names { ctx.extern_types.insert(en) }
         // B-104 D4: union of all modules' static dict singleton definitions.
         // Instance names deterministically encode their structure
         // (dict_instance_name), so same-name entries from different modules are

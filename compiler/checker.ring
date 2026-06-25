@@ -153,7 +153,7 @@ pub fn check(program: Program, sink: CollectingSink) -> CheckResult {
     // B-104 D7: lower `&&`/`||` to if-else (andor_lower), then B-104 D4:
     // first-class the dict evidence (static singleton set + local
     // constructions for dynamic wrapped dicts) — both before perceus/codegen.
-    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [] }
+    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names }
     CheckResult {
         program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,
@@ -171,7 +171,7 @@ pub fn check_module(program: Program, module_exports: List<ModuleExports>, sink:
     let mut all_decls = list_clone(prelude_hdecls)
     for d in hprogram.decls { all_decls.push(d) }
     // B-104 D7 + D4: see check() above.
-    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [] }
+    let assembled = HProgram { decls: all_decls, derived_impls: hprogram.derived_impls, boxed_vars: hprogram.boxed_vars, static_dicts: [], extern_type_names: hprogram.extern_type_names }
     CheckResult {
         program: lower_dicts(lower_andor(assembled)),
         env: ctx.env,

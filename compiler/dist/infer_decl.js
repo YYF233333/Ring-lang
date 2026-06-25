@@ -3527,7 +3527,8 @@ function check(ctx, program, __ring_ev_fail) {
     ri = (ri + 1);
   }
   check_default_effect_cycles(ctx, program.decls);
-  return new hir$HProgram(hdecls, derived_impls, ctx.boxed_vars, []);
+  const extern_names = hir$collect_extern_type_names(hdecls);
+  return new hir$HProgram(hdecls, derived_impls, ctx.boxed_vars, [], extern_names);
 }
 
 function check_one_decl(ctx, decl, hdecls, __ring_ev_fail) {

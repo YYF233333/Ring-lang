@@ -109,6 +109,34 @@ fn compile_phases(entry_file: Str, error_format: Str) -> CompilePhaseResult? {
             }
             if check_ok == false { return none }
 
+            // B-144: compute the global union of all modules' extern type names
+            // so that perceus / codegen / verify_rc see extern types from every
+            // module (not just the local re-declarations).
+            let mut global_externs: Set<Str> = set_new()
+            for key in graph.topo_order {
+                match module_hirs.get(key) {
+                    some(hir) => {
+                        for en in hir.extern_type_names { global_externs.insert(en) }
+                    },
+                    none => {},
+                }
+            }
+            // Stamp the global set onto every module's HProgram.
+            for key in graph.topo_order {
+                match module_hirs.get(key) {
+                    some(hir) => {
+                        module_hirs.insert(key, HProgram {
+                            decls: hir.decls,
+                            derived_impls: hir.derived_impls,
+                            boxed_vars: hir.boxed_vars,
+                            static_dicts: hir.static_dicts,
+                            extern_type_names: global_externs
+                        })
+                    },
+                    none => {},
+                }
+            }
+
             some(CompilePhaseResult {
                 graph: graph,
                 module_asts: module_asts,

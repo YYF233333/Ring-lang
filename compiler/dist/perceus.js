@@ -1215,7 +1215,7 @@ function anf_normalize(program, externs) {
     const d = __ring_next_19._0;
     List_push(new_decls, anf_decl(d, externs, counter));
   }
-  return new hir$HProgram(new_decls, program.derived_impls, program.boxed_vars, program.static_dicts);
+  return new hir$HProgram(new_decls, program.derived_impls, program.boxed_vars, program.static_dicts, program.extern_type_names);
 }
 
 function block_diverges(stmts, tail) {
@@ -2459,11 +2459,11 @@ function transform_decls(decls, boxed, externs) {
 }
 
 function perceus_transform_mutated(program, mutate) {
-  const externs = hir$collect_extern_type_names(program.decls);
+  const externs = program.extern_type_names;
   const anf_program = ((mutate === "skip-anf") ? program : anf_normalize(program, externs));
   const new_decls = transform_decls(anf_program.decls, anf_program.boxed_vars, externs);
   const mutated_decls = ((mutate === "drop-params") ? mutate_drop_params(new_decls) : new_decls);
-  return new hir$HProgram(mutated_decls, anf_program.derived_impls, anf_program.boxed_vars, anf_program.static_dicts);
+  return new hir$HProgram(mutated_decls, anf_program.derived_impls, anf_program.boxed_vars, anf_program.static_dicts, anf_program.extern_type_names);
 }
 
 function perceus_transform(program) {

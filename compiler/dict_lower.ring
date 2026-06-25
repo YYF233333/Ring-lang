@@ -57,7 +57,8 @@ pub fn lower_dicts(program: HProgram) -> HProgram {
         decls: new_decls,
         derived_impls: program.derived_impls,
         boxed_vars: program.boxed_vars,
-        static_dicts: defs
+        static_dicts: defs,
+        extern_type_names: program.extern_type_names
     }
 }
 

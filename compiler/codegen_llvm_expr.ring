@@ -7,7 +7,8 @@ use hir::{HExpr, HStmt, HMatchArm, HParam, HStructFieldInit,
     BUILTIN_LIST, BUILTIN_MAP, BUILTIN_SET, BUILTIN_OPTION,
     BUILTIN_RANGE,
     effect_op_slot,
-    hexpr_type, hexpr_effects, is_fresh_owned_bool_value}
+    hexpr_type, hexpr_effects, is_fresh_owned_bool_value,
+    is_extern_handle_type}
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     ExternFnInfo, ExternParamMarshall, ExternRetMarshall,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
@@ -4011,6 +4012,148 @@ fn gen_range_expr(mut ctx: LlvmCtx, start: HExpr, end: HExpr, inclusive: Bool) -
 // Lambda (closure)
 // ============================================================
 
+// B-144: build the set of capture names whose HIR type is an extern handle.
+// These must NOT be dup'd/drop'd — they're raw foreign pointers outside Ring RC.
+// Walks the body expression collecting Ident types for names in the capture list.
+fn collect_extern_capture_names(expr: HExpr, captures: List<Str>, externs: Set<Str>, mut out: Set<Str>) {
+    match expr {
+        HExpr::Ident { name, resolved_name, ty, .. } => {
+            let lookup = match resolved_name { some(rn) => rn, none => name }
+            let mut found = false
+            for c in captures {
+                if c == lookup || c == name { found = true }
+            }
+            if found && is_extern_handle_type(ty, externs) {
+                out.insert(lookup)
+            }
+        },
+        HExpr::BinOp { left, right, .. } => {
+            collect_extern_capture_names(left, captures, externs, out)
+            collect_extern_capture_names(right, captures, externs, out)
+        },
+        HExpr::UnaryOp { operand, .. } => {
+            collect_extern_capture_names(operand, captures, externs, out)
+        },
+        HExpr::Call { callee, args, .. } => {
+            collect_extern_capture_names(callee, captures, externs, out)
+            for a in args { collect_extern_capture_names(a, captures, externs, out) }
+        },
+        HExpr::FieldAccess { receiver, .. } => {
+            collect_extern_capture_names(receiver, captures, externs, out)
+        },
+        HExpr::Block { stmts, tail, .. } => {
+            for s in stmts { collect_extern_capture_names_stmt(s, captures, externs, out) }
+            match tail {
+                some(t) => collect_extern_capture_names(t, captures, externs, out),
+                none => {},
+            }
+        },
+        HExpr::IfExpr { condition, then_branch, else_branch, .. } => {
+            collect_extern_capture_names(condition, captures, externs, out)
+            collect_extern_capture_names(then_branch, captures, externs, out)
+            match else_branch {
+                some(eb) => collect_extern_capture_names(eb, captures, externs, out),
+                none => {},
+            }
+        },
+        HExpr::MatchExpr { scrutinee, arms, .. } => {
+            collect_extern_capture_names(scrutinee, captures, externs, out)
+            for arm in arms { collect_extern_capture_names(arm.body, captures, externs, out) }
+        },
+        HExpr::StringInterp { parts, .. } => {
+            for part in parts {
+                match part {
+                    HStringInterpPart::Expression(e) => collect_extern_capture_names(e, captures, externs, out),
+                    _ => {},
+                }
+            }
+        },
+        HExpr::StructLit { fields, spread, .. } => {
+            for f in fields { collect_extern_capture_names(f.value, captures, externs, out) }
+            match spread {
+                some(sp) => collect_extern_capture_names(sp, captures, externs, out),
+                none => {},
+            }
+        },
+        HExpr::ListLit { elements, .. } => {
+            for e in elements { collect_extern_capture_names(e, captures, externs, out) }
+        },
+        HExpr::TupleLit { elements, .. } => {
+            for e in elements { collect_extern_capture_names(e, captures, externs, out) }
+        },
+        HExpr::IndexExpr { receiver, index, .. } => {
+            collect_extern_capture_names(receiver, captures, externs, out)
+            collect_extern_capture_names(index, captures, externs, out)
+        },
+        HExpr::Lambda { body: lb, .. } => {
+            collect_extern_capture_names(lb, captures, externs, out)
+        },
+        HExpr::NamedVariantConstruct { fields: nvc_fields, spread: nvc_spread, .. } => {
+            for f in nvc_fields { collect_extern_capture_names(f.value, captures, externs, out) }
+            match nvc_spread {
+                some(sp) => collect_extern_capture_names(sp, captures, externs, out),
+                none => {},
+            }
+        },
+        HExpr::TryCatch { body: tc_body, arms: tc_arms, .. } => {
+            collect_extern_capture_names(tc_body, captures, externs, out)
+            for arm in tc_arms { collect_extern_capture_names(arm.body, captures, externs, out) }
+        },
+        HExpr::HandleExpr { body: he_body, .. } => {
+            collect_extern_capture_names(he_body, captures, externs, out)
+        },
+        HExpr::EffectOp { args: eo_args, .. } => {
+            for a in eo_args { collect_extern_capture_names(a, captures, externs, out) }
+        },
+        HExpr::RangeExpr { start: rs, end: re, .. } => {
+            collect_extern_capture_names(rs, captures, externs, out)
+            collect_extern_capture_names(re, captures, externs, out)
+        },
+        HExpr::Clone { inner, .. } => collect_extern_capture_names(inner, captures, externs, out),
+        HExpr::ReturnExpr { value, .. } => match value {
+            some(v) => collect_extern_capture_names(v, captures, externs, out),
+            none => {},
+        },
+        _ => {},
+    }
+}
+
+fn collect_extern_capture_names_stmt(stmt: HStmt, captures: List<Str>, externs: Set<Str>, mut out: Set<Str>) {
+    match stmt {
+        HStmt::Let { init, .. } => collect_extern_capture_names(init, captures, externs, out),
+        HStmt::Var { init, .. } => collect_extern_capture_names(init, captures, externs, out),
+        HStmt::Assign { target, value, .. } => {
+            collect_extern_capture_names(target, captures, externs, out)
+            collect_extern_capture_names(value, captures, externs, out)
+        },
+        HStmt::ExprStmt { expr, .. } => collect_extern_capture_names(expr, captures, externs, out),
+        HStmt::Return { value, .. } => match value {
+            some(v) => collect_extern_capture_names(v, captures, externs, out),
+            none => {},
+        },
+        HStmt::While { condition, body, .. } => {
+            collect_extern_capture_names(condition, captures, externs, out)
+            collect_extern_capture_names(body, captures, externs, out)
+        },
+        HStmt::ForIn { iterable, body, .. } => {
+            collect_extern_capture_names(iterable, captures, externs, out)
+            collect_extern_capture_names(body, captures, externs, out)
+        },
+        HStmt::LetDestructure { init, .. } => {
+            collect_extern_capture_names(init, captures, externs, out)
+        },
+        HStmt::IfLet { expr, then_block, else_block, .. } => {
+            collect_extern_capture_names(expr, captures, externs, out)
+            collect_extern_capture_names(then_block, captures, externs, out)
+            match else_block {
+                some(eb) => collect_extern_capture_names(eb, captures, externs, out),
+                none => {},
+            }
+        },
+        _ => {},
+    }
+}
+
 fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: HExpr, ty: Type) -> LLVMValueRef {
     let current_fn = match ctx.current_fn {
         some(f) => f,
@@ -4024,6 +4167,13 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     // Collect captures: variables referenced in body that are not params and not global functions
     let mut captures: List<Str> = []
     collect_captures(ctx, body, params, captures)
+
+    // B-144: identify captures whose HIR type is an extern handle — these must
+    // NOT be dup'd at construction time (they are raw foreign pointers outside
+    // Ring RC).  ring_drop on them is a no-op (B-099 foreign-pointer guard), so
+    // drop_closure_env safely skips them at destruction time too.
+    let mut extern_caps: Set<Str> = set_new()
+    collect_extern_capture_names(body, captures, ctx.extern_types, extern_caps)
 
     // B-084: closure env layout is { i64 count, ptr cap0, ptr cap1, ... }.  The
     // leading count lets the runtime's generic drop_closure_env (typeid 15) iterate
@@ -4120,6 +4270,9 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
     // drops its local `payload`), so without the construction dup the env would
     // hold a freed pointer.  rc balance: binding rc=1 → capture dup → 2 → env
     // drop → 1 → binding scope-end drop → 0.
+    // B-144: extern handle captures skip dup — they are raw foreign pointers
+    // outside Ring RC.  ring_drop on them is a no-op (B-099 guard), so
+    // drop_closure_env harmlessly calls ring_drop on the stored value.
     for i in 0..captures.len() {
         match captures.get(i) {
             some(cap_name) => {
@@ -4129,7 +4282,10 @@ fn gen_lambda(mut ctx: LlvmCtx, params: List<HParam>, return_type: Type, body: H
                     none => LLVMConstPointerNull(ctx.ptr_type),
                 }
                 // Own the capture: bump its refcount for the env's reference.
-                discard(gen_dup_value(ctx, cap_val))
+                // B-144: skip dup for extern handle captures (no RC header).
+                if extern_caps.contains(cap_name) == false {
+                    discard(gen_dup_value(ctx, cap_val))
+                }
                 let cap_ptr = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, i + 1, fresh_name(ctx, "ep"))
                 discard(LLVMBuildStore(ctx.builder, cap_val, cap_ptr))
             },

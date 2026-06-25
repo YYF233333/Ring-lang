@@ -283,7 +283,11 @@ pub struct HProgram {
     // B-104 D4: the module's static dict singleton set (see HDictDef), collected
     // by dict_lower (checker pipeline) in registration order (inners before the
     // wrapped instances that reference them).
-    pub static_dicts: List<HDictDef>
+    pub static_dicts: List<HDictDef>,
+    // B-144: global set of extern type names, collected at checker phase across
+    // all modules.  perceus / codegen_llvm / verify_rc read this instead of
+    // re-collecting per-module (which misses use-imported extern types).
+    pub extern_type_names: Set<Str>
 }
 
 // B-102 R-clean (2026-06-07) — the A1 Type-DAG never-drop special case
@@ -468,14 +472,14 @@ pub fn hexpr_span(e: HExpr) -> Span {
 // use site resolves to `Type::StructType { name: X, .. }` carrying the SAME name
 // as the `HDecl::ExternType` decl (bare for file-level decls; `${mod}::${name}`
 // for inline-mod decls — check_mod_decl prefixes the decl BEFORE check_decl, so
-// HIR decl name and StructType name agree in both forms).  Perceus runs PER
-// MODULE (compiler_mod.ring), and every module that handles LLVM values
-// re-declares the extern types locally (codegen_llvm_* convention), so
-// collecting this module's HDecl::ExternType names covers all its use sites.
-// KNOWN LIMIT (crash direction, documented in worker_feedback): a module that
-// imports an extern type via `use` WITHOUT a local re-declaration would not be
-// covered — no such module exists today, and the codegen_llvm convention is to
-// re-declare.
+// HIR decl name and StructType name agree in both forms).
+//
+// B-144: HProgram.extern_type_names now carries the GLOBAL set (union across
+// all modules in project mode), populated at checker time and unioned in
+// compiler_mod::compile_phases.  perceus / codegen_llvm / verify_rc read this
+// field instead of re-collecting per-module, which previously missed
+// use-imported extern types (#146).  collect_extern_type_names below is still
+// used to seed each module's set in infer_decl::check.
 
 // Collect the extern type names declared by this module's HIR (recursing into
 // inline mod blocks, whose decl names are already module-prefixed).

@@ -798,7 +798,7 @@ function lower_andor(program) {
     const d = __ring_next_15._0;
     List_push(new_decls, al_decl(d));
   }
-  return new hir$HProgram(new_decls, program.derived_impls, program.boxed_vars, program.static_dicts);
+  return new hir$HProgram(new_decls, program.derived_impls, program.boxed_vars, program.static_dicts, program.extern_type_names);
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

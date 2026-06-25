@@ -956,7 +956,7 @@ function lower_dicts(program) {
     const d = __ring_next_21._0;
     List_push(new_decls, dl_decl(d, defs, seen, counter));
   }
-  return new hir$HProgram(new_decls, program.derived_impls, program.boxed_vars, defs);
+  return new hir$HProgram(new_decls, program.derived_impls, program.boxed_vars, defs, program.extern_type_names);
 }
 
 function __Result_Eq_eq(self, other, __ring_T_Eq, __ring_E_Eq) {

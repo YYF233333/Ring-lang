@@ -615,11 +615,12 @@ class DerivedImpl {
 }
 
 class HProgram {
-  constructor(decls, derived_impls, boxed_vars, static_dicts) {
+  constructor(decls, derived_impls, boxed_vars, static_dicts, extern_type_names) {
     this.decls = decls;
     this.derived_impls = derived_impls;
     this.boxed_vars = boxed_vars;
     this.static_dicts = static_dicts;
+    this.extern_type_names = extern_type_names;
   }
 }
 

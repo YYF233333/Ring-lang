@@ -1916,7 +1916,7 @@ function verify_decls(decls, boxed, externs, findings) {
 }
 
 function verify_rc_program(program) {
-  const externs = hir$collect_extern_type_names(program.decls);
+  const externs = program.extern_type_names;
   let findings = [];
   verify_decls(program.decls, program.boxed_vars, externs, findings);
   return findings;

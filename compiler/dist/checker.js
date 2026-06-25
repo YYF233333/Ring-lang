@@ -442,7 +442,7 @@ function check(program, sink, __ring_ev_fail) {
     const d = __ring_next_7._0;
     List_push(all_decls, d);
   }
-  const assembled = new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars, []);
+  const assembled = new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars, [], hprogram.extern_type_names);
   return new CheckResult(dict_lower$lower_dicts(andor_lower$lower_andor(assembled)), ctx.env, ctx.fn_mut_params);
 }
 
@@ -847,7 +847,7 @@ function check_module(program, module_exports, sink, __ring_ev_fail) {
     const d = __ring_next_28._0;
     List_push(all_decls, d);
   }
-  const assembled = new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars, []);
+  const assembled = new hir$HProgram(all_decls, hprogram.derived_impls, hprogram.boxed_vars, [], hprogram.extern_type_names);
   return new CheckResult(dict_lower$lower_dicts(andor_lower$lower_andor(assembled)), ctx.env, ctx.fn_mut_params);
 }
 

@@ -4,7 +4,8 @@ use ast::{Program, Decl, Expr, Param, TypeExpr, TypeParam, Span, Position, Effec
 use hir::{HDecl, HParam, HExpr, HProgram, DerivedImpl, TraitBound, HAssocType,
     HStructField, HEnumVariant, HEffectOp, HTraitMethod, HSigMember,
     DictDispatchInfo, trait_dict_name,
-    hexpr_type, hexpr_effects, hexpr_span}
+    hexpr_type, hexpr_effects, hexpr_span,
+    collect_extern_type_names}
 use env::{TypeScheme, apply_subst, find_impl}
 use unify::{empty_subst}
 use diagnostics::{DiagnosticContext, DiagnosticNote}
@@ -2103,7 +2104,9 @@ pub fn check(mut ctx: InferCtx, program: Program) -> HProgram {
     check_default_effect_cycles(ctx, program.decls)
 
     // static_dicts is populated by dict_lower (checker pipeline) — empty here.
-    HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars, static_dicts: [] }
+    // B-144: collect extern type names from this module's HIR decls.
+    let extern_names = collect_extern_type_names(hdecls)
+    HProgram { decls: hdecls, derived_impls: derived_impls, boxed_vars: ctx.boxed_vars, static_dicts: [], extern_type_names: extern_names }
 }
 
 pub fn resolve_type_expr_public(mut ctx: InferCtx, texpr: TypeExpr) -> Type {

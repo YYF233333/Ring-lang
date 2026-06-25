@@ -105,7 +105,7 @@ use ast::{Span, Position, Pattern}
 use types::{Type}
 use hir::{HDecl, HStmt, HExpr, HParam, HProgram, HMatchArm, HStructFieldInit,
     HStringInterpPart, HEffectHandler, hexpr_type, hexpr_span,
-    collect_extern_type_names, is_rc_excluded_type, type_contains_extern_handle,
+    is_rc_excluded_type, type_contains_extern_handle,
     is_borrow_returning_call, is_fresh_owned_bool_value}
 use perceus::{rc_name_skippable, is_str_index, is_unresolved_var_type,
     sink_arg_indices, is_variant_constructor_call, expr_diverges, stmt_diverges,
@@ -158,7 +158,8 @@ struct VCtx {
 // ============================================================
 
 pub fn verify_rc_program(program: HProgram) -> List<RcFinding> {
-    let externs = collect_extern_type_names(program.decls)
+    // B-144: use program-level extern type names (global set, covers use-imports).
+    let externs = program.extern_type_names
     let mut findings: List<RcFinding> = []
     verify_decls(program.decls, program.boxed_vars, externs, findings)
     findings
