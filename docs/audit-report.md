@@ -85,13 +85,6 @@
 
 发现者：Opus（LLVM 审计）+ DS（独立发现）
 
-### #187 verify_rc ReturnExpr 未检查 enclosing owned bindings 的 drop [medium] [mechanical] [doing]
-
-`verify_rc.ring:808-817` 中 `HExpr::ReturnExpr` arm 只消费返回值，不检查所有 enclosing owned bindings 是否已 drop。对比 `HStmt::Return`（line 1063-1078）有完整的 live-owned-binding 遍历检查。如果 Perceus pass 对 expression position 的 return 遗漏了 drop 插入，verifier 不会报告泄漏。
-
-**修复**：将 `HStmt::Return` 的 live-owned-binding 检查逻辑复制到 `HExpr::ReturnExpr` arm。
-
-发现者：Opus（LLVM 审计）
 
 ### #188 Lambda 捕获变量未找到时静默存入 null [medium] [judgment] [open]
 
@@ -129,29 +122,7 @@
 发现者：Opus（LLVM 审计）
 
 
-### #195 emit_struct_debug_fn 缺少 field_idx < 0 guard [low] [mechanical] [doing]
 
-`codegen_llvm_decl.ring:2302-2303`：`find_field_index` 找不到字段时返回 -1，直接用作 `LLVMBuildStructGEP2` 索引产生无效 IR。`emit_struct_eq_fn`（line 1154）和 `emit_struct_cmp_fn`（line 1736）正确检查了 `if field_idx < 0 { continue }`，debug fn 遗漏。
-
-**修复**：添加 `if field_idx < 0 { continue }`，与 eq/cmp 一致。
-
-发现者：Opus（LLVM 审计）+ DS（独立发现）
-
-### #196 emit_derived_debug_llvm 无条件创建 trait dict [low] [mechanical] [doing]
-
-`codegen_llvm_decl.ring:2201-2213`：`emit_derived_debug_llvm` 在 `di.struct_fields` 或 `di.enum_variants` 为 `none` 时不 emit debug 方法，但 line 2213 的 `emit_derived_trait_dict(ctx, type_name, "Debug")` 无条件执行。dict 会引用不存在的方法 → null closure slot → 运行时调用 crash。
-
-**修复**：将 `emit_derived_trait_dict` 移入 `some(fields)`/`some(variants)` 分支内。
-
-发现者：Opus（LLVM 审计）
-
-### #203 get_builtin_typeid 死代码 [low] [mechanical] [doing]
-
-`codegen_llvm_ctx.ring:355-377`：`pub fn get_builtin_typeid` 定义但从未被调用（全 `.ring` 文件 grep 确认）。且内部的 `Map<Int>` (11) 和 `Set<Int>` (12) typeid 映射与实际不一致。
-
-**修复**：删除。
-
-发现者：Opus（LLVM 审计）
 
 ### #204 RING_TYPEID 常量不一致——部分命名、部分裸数字 [low] [mechanical] [open]
 

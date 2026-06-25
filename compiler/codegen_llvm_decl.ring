@@ -2217,17 +2217,27 @@ fn emit_clone_fn(mut ctx: LlvmCtx, type_name: Str) {
 
 fn emit_derived_debug_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
     let type_name = di.type_name
+    // #196: only emit trait dict when a debug method was actually generated.
+    let mut emitted = false
     match di.type_kind {
         TypeKind::StructKind => match di.struct_fields {
-            some(fields) => emit_struct_debug_fn(ctx, type_name, fields, di.bounds),
+            some(fields) => {
+                emit_struct_debug_fn(ctx, type_name, fields, di.bounds)
+                emitted = true
+            },
             none => {},
         },
         TypeKind::EnumKind => match di.enum_variants {
-            some(variants) => emit_enum_debug_fn(ctx, type_name, variants, di.bounds),
+            some(variants) => {
+                emit_enum_debug_fn(ctx, type_name, variants, di.bounds)
+                emitted = true
+            },
             none => {},
         },
     }
-    emit_derived_trait_dict(ctx, type_name, "Debug")
+    if emitted {
+        emit_derived_trait_dict(ctx, type_name, "Debug")
+    }
 }
 
 fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
@@ -2317,6 +2327,7 @@ fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFi
 
         // Load field value
         let field_idx = find_field_index(struct_info.field_names, field.name)
+        if field_idx < 0 { continue }  // #195: guard against missing field
         let field_ptr = LLVMBuildStructGEP2(ctx.builder, struct_info.llvm_type, self_val, field_idx, fresh_name(ctx, "fp"))
         let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
 

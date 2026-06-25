@@ -805,13 +805,21 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
         // B-113: return in expression position (match arm).
         // The return value is consumed (escaped to the caller), and the path
         // diverges — same accounting as HStmt::Return in v_stmt.
-        HExpr::ReturnExpr { value, .. } => {
+        HExpr::ReturnExpr { value, span, .. } => {
             match value {
                 some(v) => { let _ = v_consume(v, ctx) },
                 none => {},
             }
-            // Mark as diverging (all owned drops already handled by the
-            // Perceus-inserted block wrapping).
+            // #187: check enclosing owned bindings are dropped before return
+            // (mirrors HStmt::Return logic in v_stmt).
+            let mut i = 0
+            while i < ctx.names.len() {
+                if ctx.kinds[i] == K_OWNED && ctx.states[i] == S_LIVE {
+                    v_report(ctx, "leak-return", true,
+                        "owned binding '${ctx.names[i]}' is live (not dropped) at this return", span)
+                }
+                i = i + 1
+            }
             CLS_EXCLUDED
         },
     }
