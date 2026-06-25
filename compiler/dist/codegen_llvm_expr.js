@@ -4381,6 +4381,10 @@ function gen_method_call(ctx, recv, recv_type, method, args, dict_vals) {
       }
       const fn_val = ensure_runtime_method(ctx, rt_name, List_len(call_args));
       const fn_ty = codegen_llvm_ctx$get_rt_fn_type(ctx, rt_name);
+      const expected_params = LLVMCountParams(fn_val);
+      while ((List_len(call_args) < expected_params)) {
+        List_push(call_args, LLVMConstPointerNull(ctx.ptr_type));
+      }
       if (is_void_runtime_fn(rt_name)) {
         LLVMBuildCall2(ctx.builder, fn_ty, fn_val, call_args, "");
         return LLVMConstPointerNull(ctx.ptr_type);
