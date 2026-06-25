@@ -1040,7 +1040,9 @@ extern "C" void* ring_list_sort(void* list, void* closure) {
     ring_fn_2 fn = (ring_fn_2)(cmp->fn_ptr);
     std::sort(vec->begin(), vec->end(), [fn, cmp](void* a, void* b) -> bool {
         void* r = fn(cmp->env_ptr, a, b);
-        return ring_unbox_int(r) < 0;
+        int64_t result = ring_unbox_int(r);
+        ring_drop(r);              // #170: drop comparator's boxed return value
+        return result < 0;
     });
     return list;
 }
@@ -2195,7 +2197,17 @@ extern "C" void* ring_read_file(void* path) {
         exit(1);
     }
     fseek(f, 0, SEEK_END);
+#ifdef _WIN32
+    // #171: ftell returns 32-bit long on MSVC; _ftelli64 handles >2GB files.
+    int64_t size = _ftelli64(f);
+#else
     long size = ftell(f);
+#endif
+    if (size < 0) {
+        fprintf(stderr, "ring panic: cannot determine file size: %s\n", p->c_str());
+        fclose(f);
+        exit(1);
+    }
     fseek(f, 0, SEEK_SET);
     void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
     auto* result = new (data) std::string((size_t)size, '\0');
@@ -2333,16 +2345,19 @@ extern "C" void* ring_Cell_set(void* cell, void* new_val) {
 }
 
 extern "C" void* ring_Cell_update(void* cell, void* closure) {
-    // Read old value, apply callback, store result. The callback consumes the
-    // old value (Perceus handles its internal dup/drop) and produces a fresh
-    // owned result. Store first, then drop old (same store-before-drop order
-    // as ring_Cell_set for consistency).
+    // #165: Reentrant-safe Cell.update. If the callback captures the same Cell
+    // and calls .set(new_value), ring_Cell_set would drop old_val (the value we
+    // passed to the callback). Setting the cell to nullptr before the call
+    // prevents set's drop from hitting our old_val. We dup old_val so the
+    // callback consumes one ref and we drop the other after the call.
     void* old_val = *(void**)cell;
+    *(void**)cell = nullptr;       // prevent callback's .set() from dropping old_val
+    ring_dup(old_val);             // callback consumes one ref, we drop the other
     RingClosure* cl = (RingClosure*)closure;
     ring_fn_1 fn = (ring_fn_1)cl->fn_ptr;
     void* new_val = fn(cl->env_ptr, old_val);
+    ring_drop(old_val);            // drop our held reference
     *(void**)cell = new_val;
-    ring_drop(old_val);
     return cell;
 }
 
@@ -3043,6 +3058,35 @@ static void* ring_make_ord_dict(void* cmpfn) {
     return data;
 }
 
+// #179: Debug trait closure functions — Debug has a single method `debug(val) -> Str`.
+// Each closure takes (env, val) where val is a boxed Ring value, returns a boxed Str.
+static void* ring_Int_debug(void* /*env*/, void* val) {
+    return ring_int_to_str(ring_unbox_int(val));
+}
+static void* ring_Bool_debug(void* /*env*/, void* val) {
+    return ring_bool_to_str(ring_unbox_bool(val));
+}
+static void* ring_Float_debug(void* /*env*/, void* val) {
+    return ring_float_to_str(*(double*)val);
+}
+static void* ring_Str_debug(void* /*env*/, void* val) {
+    // Debug for Str: wrap in quotes (e.g. "hello" -> "\"hello\"")
+    std::string* s = (std::string*)val;
+    void* data = ring_alloc(sizeof(std::string), RING_TYPEID_STR);
+    new (data) std::string("\"" + *s + "\"");
+    return data;
+}
+static void* ring_make_debug_dict(void* debugfn) {
+    // Debug dict: single `debug` closure at slot 0.
+    // Same count-prefixed DICT_STATIC layout as Eq/Ord dicts.
+    void* data = ring_alloc(sizeof(int64_t) + 4 * sizeof(void*), RING_TYPEID_DICT_STATIC);
+    *(int64_t*)data = 4;
+    void** d = (void**)((char*)data + 8);
+    d[0] = ring_make_closure(debugfn);
+    d[1] = nullptr; d[2] = nullptr; d[3] = nullptr;
+    return data;
+}
+
 // ============================================================================
 // Perceus RC L0 — container drop functions
 // ============================================================================
@@ -3184,6 +3228,16 @@ extern "C" void* ring_get_builtin_dict(void* name_ptr) {
         if (n.find("Bool") != std::string::npos)  return ring_make_eq_dict((void*)ring_cl_eq_bool,  (void*)ring_cl_ne_bool);
         // Any other Eq dict (user enums) → tag comparison.
         return ring_make_eq_dict((void*)ring_cl_eq_tag, (void*)ring_cl_ne_tag);
+    }
+    // #179: Debug dicts (single `debug` method).
+    if (n.find("Debug") != std::string::npos) {
+        if (n.find("Int") != std::string::npos)   return ring_make_debug_dict((void*)ring_Int_debug);
+        if (n.find("Str") != std::string::npos)   return ring_make_debug_dict((void*)ring_Str_debug);
+        if (n.find("Bool") != std::string::npos)  return ring_make_debug_dict((void*)ring_Bool_debug);
+        if (n.find("Float") != std::string::npos) return ring_make_debug_dict((void*)ring_Float_debug);
+        fprintf(stderr, "ring: no builtin Debug dict for '%s'\n", n.c_str());
+        fflush(stderr);
+        return nullptr;
     }
     fprintf(stderr, "ring: no builtin dict for '%s'\n", n.c_str());
     fflush(stderr);
