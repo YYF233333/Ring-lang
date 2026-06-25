@@ -15,6 +15,7 @@ tests/cases/**/*.js
 
 compiler/llvm-addon/node_modules/
 compiler/llvm-addon/build/
+compiler/llvm-addon/*.node
 
 # LLVM native backend build artifacts (rebuilt from source; main.o is committed)
 /ring_runtime.o

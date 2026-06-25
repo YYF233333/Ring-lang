@@ -27,13 +27,6 @@
 
 
 
-### #182 LLVMSetDataLayout 未调用 [medium] [mechanical] [doing]
-
-`codegen_llvm.ring:1443` 和 `1607` 调用 `LLVMSetTarget` 设置 target triple，但从未调用 `LLVMSetDataLayout`。`LLVMSetDataLayout` 在 `llvm_ffi.ring:46` 和 `codegen_llvm.ring:33` 都有声明但从未被调用。缺少 data layout 时 `LLVMSizeOf`（25+ 处调用）返回基于默认布局的值，可能与实际 ABI 不一致。当前 native 自编译正常工作（默认布局对 x86_64 + 全指针类型碰巧正确），但跨平台或优化器推理可能出错。
-
-**修复**：在 `LLVMSetTarget` 后从 `LLVMCreateTargetMachine` 结果提取 data layout 并设置到 module。需在 FFI 中补充 `LLVMCreateTargetDataLayout` 和 `LLVMCopyStringRepOfTargetData`。
-
-发现者：Opus（LLVM 审计）
 
 ### #183 RetIntToBoxed 使用 ZExt 而非 SExt [medium] [mechanical] [open]
 
@@ -88,13 +81,6 @@
 
 发现者：Opus（LLVM 审计）+ DS（独立发现）
 
-### #191 generate_llvm / generate_llvm_project ~95% 重复 [medium] [mechanical] [doing]
-
-`codegen_llvm.ring:1429-1584` vs `1593-1771`：两个入口点重复了整个 LLVM 初始化、context 创建、类型缓存、pass pipeline、验证、emit、cleanup 序列（~180 行相同代码）。
-
-**修复**：提取共享基础设施为 helper 函数（`init_llvm_ctx`、`finalize_llvm_module` 等），两个入口点调用。
-
-发现者：Opus（LLVM 审计）
 
 
 

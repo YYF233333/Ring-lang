@@ -273,6 +273,11 @@ pub extern fn LLVMGetTargetFromTriple(triple: Str) -> LLVMTargetRef
 pub extern fn LLVMCreateTargetMachine(target: LLVMTargetRef, triple: Str, cpu: Str, features: Str, codegen: Int, reloc: Int, code_model: Int) -> LLVMTargetMachineRef
 pub extern fn LLVMDisposeTargetMachine(tm: LLVMTargetMachineRef) -> Unit
 
+// #182: Target data layout — extract data layout string from target machine
+pub extern fn LLVMCreateTargetDataLayout(tm: LLVMTargetMachineRef) -> LLVMTargetDataRef
+pub extern fn LLVMCopyStringRepOfTargetData(td: LLVMTargetDataRef) -> Str
+pub extern fn LLVMDisposeTargetData(td: LLVMTargetDataRef) -> Unit
+
 // file_type: Int encoding of LLVMCodeGenFileType (0=Assembly, 1=Object)
 // N-API addon folds error output param; panics on error.
 pub extern fn LLVMTargetMachineEmitToFile(tm: LLVMTargetMachineRef, m: LLVMModuleRef, filename: Str, file_type: Int) -> Int
