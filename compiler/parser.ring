@@ -462,7 +462,7 @@ impl Parser {
 
         let expr = self.parse_expr()
 
-        if self.check(TokenKind::TkEq) || self.check(TokenKind::TkPlusEq) || self.check(TokenKind::TkMinusEq) {
+        if self.check(TokenKind::TkEq) || self.check(TokenKind::TkPlusEq) || self.check(TokenKind::TkMinusEq) || self.check(TokenKind::TkStarEq) || self.check(TokenKind::TkSlashEq) || self.check(TokenKind::TkPercentEq) {
             let op_tok = self.advance()
             let value_expr = self.parse_expr()
             self.try_consume(TokenKind::TkSemi)
@@ -473,6 +473,12 @@ impl Parser {
                 value = Expr::BinOp { op: BinOp::Add, left: expr, right: value_expr, span: expr_span(value_expr) }
             } else if op_tok.kind == TokenKind::TkMinusEq {
                 value = Expr::BinOp { op: BinOp::Sub, left: expr, right: value_expr, span: expr_span(value_expr) }
+            } else if op_tok.kind == TokenKind::TkStarEq {
+                value = Expr::BinOp { op: BinOp::Mul, left: expr, right: value_expr, span: expr_span(value_expr) }
+            } else if op_tok.kind == TokenKind::TkSlashEq {
+                value = Expr::BinOp { op: BinOp::Div, left: expr, right: value_expr, span: expr_span(value_expr) }
+            } else if op_tok.kind == TokenKind::TkPercentEq {
+                value = Expr::BinOp { op: BinOp::Mod, left: expr, right: value_expr, span: expr_span(value_expr) }
             }
 
             return Stmt::Assign { target: expr, value: value, span: self.make_span(start, end) }

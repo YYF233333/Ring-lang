@@ -15,10 +15,13 @@ fn main() {
     print("add_assign=${x}")                      // add_assign=13
     x -= 5
     print("sub_assign=${x}")                      // sub_assign=8
-    x = x * 4
+    x *= 4
     print("mul_assign=${x}")                      // mul_assign=32
-    x = x / 8
+    x /= 8
     print("div_assign=${x}")                      // div_assign=4
+
+    x %= 3
+    print("mod_assign=${x}")                      // mod_assign=1
 
     // unary minus
     let neg = -42

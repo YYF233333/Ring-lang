@@ -28,7 +28,7 @@ pub enum TokenKind {
     TkPlus, TkMinus, TkStar, TkSlash, TkPercent,
     TkEqEq, TkBangEq, TkLt, TkGt, TkLtEq, TkGtEq,
     TkAmpAmp, TkPipePipe, TkPipe, TkBang,
-    TkEq, TkPlusEq, TkMinusEq,
+    TkEq, TkPlusEq, TkMinusEq, TkStarEq, TkSlashEq, TkPercentEq,
 
     // Delimiters
     TkLParen, TkRParen, TkLBrace, TkRBrace, TkLBracket, TkRBracket,
@@ -64,7 +64,7 @@ pub fn token_kind_value(k: TokenKind) -> Str {
         TkEqEq => "==", TkBangEq => "!=", TkLt => "<", TkGt => ">",
         TkLtEq => "<=", TkGtEq => ">=",
         TkAmpAmp => "&&", TkPipePipe => "||", TkPipe => "|", TkBang => "!",
-        TkEq => "=", TkPlusEq => "+=", TkMinusEq => "-=",
+        TkEq => "=", TkPlusEq => "+=", TkMinusEq => "-=", TkStarEq => "*=", TkSlashEq => "/=", TkPercentEq => "%=",
         TkLParen => "(", TkRParen => ")", TkLBrace => "{", TkRBrace => "}",
         TkLBracket => "[", TkRBracket => "]",
         TkComma => ",", TkColon => ":", TkColonColon => "::",
@@ -471,9 +471,18 @@ impl Lexer {
             if self.peek() == "=" { self.advance(); return self.make_token(TokenKind::TkMinusEq, "-=", start, self.current_position()) }
             return self.make_token(TokenKind::TkMinus, "-", start, self.current_position())
         }
-        if ch == "*" { return self.make_token(TokenKind::TkStar, "*", start, self.current_position()) }
-        if ch == "/" { return self.make_token(TokenKind::TkSlash, "/", start, self.current_position()) }
-        if ch == "%" { return self.make_token(TokenKind::TkPercent, "%", start, self.current_position()) }
+        if ch == "*" {
+            if self.peek() == "=" { self.advance(); return self.make_token(TokenKind::TkStarEq, "*=", start, self.current_position()) }
+            return self.make_token(TokenKind::TkStar, "*", start, self.current_position())
+        }
+        if ch == "/" {
+            if self.peek() == "=" { self.advance(); return self.make_token(TokenKind::TkSlashEq, "/=", start, self.current_position()) }
+            return self.make_token(TokenKind::TkSlash, "/", start, self.current_position())
+        }
+        if ch == "%" {
+            if self.peek() == "=" { self.advance(); return self.make_token(TokenKind::TkPercentEq, "%=", start, self.current_position()) }
+            return self.make_token(TokenKind::TkPercent, "%", start, self.current_position())
+        }
         if ch == "=" {
             if self.peek() == "=" { self.advance(); return self.make_token(TokenKind::TkEqEq, "==", start, self.current_position()) }
             if self.peek() == ">" { self.advance(); return self.make_token(TokenKind::TkFatArrow, "=>", start, self.current_position()) }

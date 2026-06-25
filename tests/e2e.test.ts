@@ -257,7 +257,7 @@ const cases: TestCase[] = [
   { file: "string_interp_nested.ring", expected: "sum: 3\nab1cd\n" },
   { file: "string_interp_fn_call.ring", expected: "string_interp_fn_call: all tests passed\n" },
   { file: "string_interp_nested_quotes.ring", expected: "string_interp_nested_quotes: all tests passed\n" },
-  { file: "assign_compound.ring", expected: "12\n" },
+  { file: "assign_compound.ring", expected: "12\n48\n8\n2\n" },
   { file: "match_guard.ring", expected: "positive\nnegative\nzero\n" },
   { file: "else_if.ring", expected: "A\nB\nC\n" },
   { file: "trait_default.ring", expected: "Whiskers\n" },
