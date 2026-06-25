@@ -15,7 +15,7 @@
 
 **现状 / 未完成项**：
 - **当前目标：native 自举 + E2E + 双后端行为对比全过**（见下「Native 自举路线图」与「⭐ native on-par 统一规划」）
-- B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（✅）**；B-068 缩减为用户面（lv2 标注：`x: mut T` / `x: move T` / `[mut capture]` 闭包捕获列表 / pub 签名规则），仍 deferred、不阻塞 native（**无独立条目**——模型见 design.md §7.2-7.8（2026-06-24 版），B-110 落地后再立项）
+- B-068 Borrow-by-default 参数传递模型 [L]——**引擎部分已拆出为 B-098（✅）**；B-068 缩减为用户面（lv2 标注：`x: mut T` / `x: move T` / `[mut capture]` 闭包捕获列表 / pub 签名规则），仍 deferred、不阻塞 native（**无独立条目**——模型见 design.md §7.2-7.8（2026-06-24 版），B-110 落地后再立项）。**值类型 auto-box 待讨论（2026-06-25）**：`x: mut Int` 需要 auto-box 语义（传 Cell 间接引用）才能让 callee 修改回传——B-068 立项时需覆盖此设计（#181 审计发现触发）
 - **订正（2026-06-04，#134 证伪）**：「L0 owned-everywhere 即可自举」的原假设错误——L0 对「循环内条件 move」是 double-free（崩溃，非泄漏）。借用推断引擎（B-098）被提前到 native-working 之前并已落地
 - B-033 GADTs 推迟至 native 自举之后（无下游依赖）
 - 层 3 在 native 自举 + 归档后启动。**排序（2026-06-05 Discussion 定）**：B-002 Drop/RAII(L2) → **async(B-007) 先**（设计已锁、自包含、风险低、宣发价值大）→ Refinement(B-001) 随后（需 Z3 + 先做 B-070 const generics）；M 项（B-072 Union / B-069 默认参数 / B-070 固定数组）当 XL 间换气穿插；P3 研究（GADTs/dyn/GATs）最后。B-002 的 abort-unwind 子集可能因 G-a 内存提前（B-104 ✅，G-a 终态已达；abort 路径泄漏已入 D2 豁免类，design-accepted）
@@ -275,6 +275,35 @@ trait Functor {
 - **前置依赖**：B-004（关联类型）
 - **复杂度**：大（关联类型的泛型化 + kind 检查）
 - **优先级**：Phase D（研究向）。Ring 的 effect system 覆盖了 Monad 主要用例，GATs 紧迫度低
+
+### B-149 Display trait + 字符串插值类型约束 [feature] [P2] [M] [judgment] [queued]
+
+> 2026-06-25 立项（Discussion，#184 审计发现触发）。
+
+字符串插值 `"${x}"` 当前对非 Str/Int/Float/Bool 类型在 LLVM 后端输出 garbage 整数。需要设计 Display trait 并约束插值语义。
+
+**设计方向（2026-06-25 Discussion 拍板）**：
+
+1. **新增 `trait Display { fn display(self) -> Str }`**
+2. **内置 impl**：Str（identity）、Int/Float/Bool（to_str）
+3. **`"${x}"` 要求 Display 约束**——无 Display 的类型插值 = 编译错误
+4. **`derive(Display)` 可选**：default impl 委托给 `debug()`，用户一行 derive 即可用于插值
+5. **Debug vs Display 分工**：Debug 给开发者（`dbg(x)` 等结构化输出），Display 给用户（插值、print）
+
+**即时修复**（#184 audit-report 条目）：checker 阶段对非基本类型插值报编译错误，不依赖 Display trait 存在。Display trait 实现后放宽为"要求 Display impl"。
+
+**涉及修改**：
+1. `compiler/infer.ring` / `infer_helpers.ring`：插值表达式的类型检查，要求 Display trait bound
+2. `compiler/derive.ring`：新增 Display derive 支持（委托给 debug）
+3. `compiler/codegen_llvm_expr.ring`：`convert_to_str` 改为通过 Display dict dispatch
+4. `compiler/codegen_expr.ring`：JS 后端同步（如仍存在）
+5. `std/` 或 `compiler/builtins.ring`：内置 Display trait 定义 + 基本类型 impl
+
+**验收标准**：
+- `"${my_struct}"` 对有 Display 的类型正确输出
+- 无 Display 的类型编译错误，错误消息提示 `derive(Display)` 或手动实现
+- 所有现有 E2E 测试通过（基本类型插值不变）
+- 新增 E2E 测试覆盖 struct/enum 插值
 
 ## Effect 系统
 
