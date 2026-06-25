@@ -383,124 +383,58 @@ function fresh_name(ctx, prefix) {
   return `${prefix}${n}`;
 }
 
-function get_builtin_typeid(ty) {
-  __ring_match6: {
-    const __ring_m6 = ty;
-    if (__ring_m6._tag === "IntType") {
-      return 0;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "FloatType") {
-      return 1;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "BoolType") {
-      return 2;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "StrType") {
-      return 3;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "UnitType") {
-      return 9;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "TupleType") {
-      return 10;
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "StructType") {
-      const name = __ring_m6.name; const type_params = __ring_m6.type_params;
-      if (((name === "List") ? (List_len(type_params) === 1) : false)) {
-        return 4;
-      } else {
-        if (((name === "Map") ? (List_len(type_params) === 2) : false)) {
-          return 5;
-        } else {
-          if (((name === "Set") ? (List_len(type_params) === 1) : false)) {
-            return 6;
-          } else {
-            if ((name === "StringBuilder")) {
-              return 13;
-            } else {
-              return (-1);
-            }
-          }
-        }
-      }
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "EnumType") {
-      const name = __ring_m6.name;
-      if ((name === "Option")) {
-        return 8;
-      } else {
-        return (-1);
-      }
-      break __ring_match6;
-    }
-    if (__ring_m6._tag === "FnType") {
-      return 7;
-      break __ring_match6;
-    }
-    return (-1);
-    break __ring_match6;
-  }
-}
-
 function get_or_assign_typeid(ctx, type_name) {
-  __ring_match7: {
-    const __ring_m7 = _Map_get(ctx.type_to_typeid, type_name);
-    if (__ring_m7._tag === "some") {
-      const id = __ring_m7._0;
+  __ring_match6: {
+    const __ring_m6 = _Map_get(ctx.type_to_typeid, type_name);
+    if (__ring_m6._tag === "some") {
+      const id = __ring_m6._0;
       return id;
-      break __ring_match7;
+      break __ring_match6;
     }
-    if (__ring_m7._tag === "none") {
+    if (__ring_m6._tag === "none") {
       const id = ctx.next_user_typeid;
       ctx.next_user_typeid = (id + 1);
       _Map_insert(ctx.type_to_typeid, type_name, id);
       return id;
+      break __ring_match6;
+    }
+    __match_fail(__ring_m6);
+  }
+}
+
+function get_or_declare_runtime_fn(ctx, name, param_types, ret_type) {
+  __ring_match7: {
+    const __ring_m7 = _Map_get(ctx.rt_fns, name);
+    if (__ring_m7._tag === "some") {
+      const f = __ring_m7._0;
+      return f;
+      break __ring_match7;
+    }
+    if (__ring_m7._tag === "none") {
+      const fn_ty = LLVMFunctionType(ret_type, param_types, 0);
+      const fn_val = LLVMAddFunction(ctx.module, name, fn_ty);
+      _Map_insert(ctx.rt_fns, name, fn_val);
+      _Map_insert(ctx.rt_fn_types, name, fn_ty);
+      return fn_val;
       break __ring_match7;
     }
     __match_fail(__ring_m7);
   }
 }
 
-function get_or_declare_runtime_fn(ctx, name, param_types, ret_type) {
+function get_rt_fn_type(ctx, name) {
   __ring_match8: {
-    const __ring_m8 = _Map_get(ctx.rt_fns, name);
+    const __ring_m8 = _Map_get(ctx.rt_fn_types, name);
     if (__ring_m8._tag === "some") {
-      const f = __ring_m8._0;
-      return f;
+      const t = __ring_m8._0;
+      return t;
       break __ring_match8;
     }
     if (__ring_m8._tag === "none") {
-      const fn_ty = LLVMFunctionType(ret_type, param_types, 0);
-      const fn_val = LLVMAddFunction(ctx.module, name, fn_ty);
-      _Map_insert(ctx.rt_fns, name, fn_val);
-      _Map_insert(ctx.rt_fn_types, name, fn_ty);
-      return fn_val;
+      return panic(`LLVM codegen: runtime function type not found: ${name}`);
       break __ring_match8;
     }
     __match_fail(__ring_m8);
-  }
-}
-
-function get_rt_fn_type(ctx, name) {
-  __ring_match9: {
-    const __ring_m9 = _Map_get(ctx.rt_fn_types, name);
-    if (__ring_m9._tag === "some") {
-      const t = __ring_m9._0;
-      return t;
-      break __ring_match9;
-    }
-    if (__ring_m9._tag === "none") {
-      return panic(`LLVM codegen: runtime function type not found: ${name}`);
-      break __ring_match9;
-    }
-    __match_fail(__ring_m9);
   }
 }
 
@@ -517,34 +451,34 @@ function llvm_mangle_method(type_name, method_name) {
 }
 
 function llvm_resolve_fn(ctx, name) {
-  __ring_match10: {
-    const __ring_m10 = _Map_get(ctx.imports_map, name);
-    if (__ring_m10._tag === "some") {
-      const qualified = __ring_m10._0;
+  __ring_match9: {
+    const __ring_m9 = _Map_get(ctx.imports_map, name);
+    if (__ring_m9._tag === "some") {
+      const qualified = __ring_m9._0;
       return qualified;
-      break __ring_match10;
+      break __ring_match9;
     }
-    if (__ring_m10._tag === "none") {
-      __ring_match11: {
-        const __ring_m11 = ctx.module_prefix;
-        if (__ring_m11._tag === "some") {
-          const prefix = __ring_m11._0;
+    if (__ring_m9._tag === "none") {
+      __ring_match10: {
+        const __ring_m10 = ctx.module_prefix;
+        if (__ring_m10._tag === "some") {
+          const prefix = __ring_m10._0;
           if (_Set_contains(ctx.local_names, name, __Str_Eq)) {
             return llvm_mangle_fn_with_prefix(prefix, name);
           } else {
             return llvm_mangle_fn(name);
           }
-          break __ring_match11;
+          break __ring_match10;
         }
-        if (__ring_m11._tag === "none") {
+        if (__ring_m10._tag === "none") {
           return llvm_mangle_fn(name);
-          break __ring_match11;
+          break __ring_match10;
         }
-        __match_fail(__ring_m11);
+        __match_fail(__ring_m10);
       }
-      break __ring_match10;
+      break __ring_match9;
     }
-    __match_fail(__ring_m10);
+    __match_fail(__ring_m9);
   }
 }
 
@@ -706,4 +640,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr, ExternFnInfo, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, get_builtin_typeid, build_entry_alloca, __ExternParamMarshall_Eq, __ExternRetMarshall_Eq, __EnumVariantInfo_Clone, __ExternParamMarshall_Clone, __ExternRetMarshall_Clone, __ExternParamMarshall_Ord, __ExternRetMarshall_Ord, __EnumVariantInfo_Debug, __ExternParamMarshall_Debug, __ExternRetMarshall_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr, ExternFnInfo, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, build_entry_alloca, __ExternParamMarshall_Eq, __ExternRetMarshall_Eq, __EnumVariantInfo_Clone, __ExternParamMarshall_Clone, __ExternRetMarshall_Clone, __ExternParamMarshall_Ord, __ExternRetMarshall_Ord, __EnumVariantInfo_Debug, __ExternParamMarshall_Debug, __ExternRetMarshall_Debug };

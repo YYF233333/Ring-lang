@@ -1760,7 +1760,7 @@ function v_expr(expr, mode, ctx) {
       break __ring_match30;
     }
     if (__ring_m30._tag === "ReturnExpr") {
-      const value = __ring_m30.value;
+      const value = __ring_m30.value; const span = __ring_m30.span;
       __ring_match37: {
         const __ring_m37 = value;
         if (__ring_m37._tag === "some") {
@@ -1772,6 +1772,13 @@ function v_expr(expr, mode, ctx) {
           break __ring_match37;
         }
         __match_fail(__ring_m37);
+      }
+      let i = 0;
+      while ((i < List_len(ctx.names))) {
+        if (((__ring_index(ctx.kinds, i) === K_OWNED) ? (__ring_index(ctx.states, i) === S_LIVE) : false)) {
+          v_report(ctx, "leak-return", true, `owned binding '${__ring_index(ctx.names, i)}' is live (not dropped) at this return`, span);
+        }
+        i = (i + 1);
       }
       return CLS_EXCLUDED;
       break __ring_match30;

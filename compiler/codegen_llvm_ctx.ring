@@ -350,32 +350,6 @@ pub fn get_or_assign_typeid(mut ctx: LlvmCtx, type_name: Str) -> Int {
     }
 }
 
-// Return the built-in typeid constant for primitive / well-known types.
-// Returns -1 for types that should use get_or_assign_typeid instead.
-pub fn get_builtin_typeid(ty: Type) -> Int {
-    match ty {
-        Type::IntType => 0,        // RING_TYPEID_INT
-        Type::FloatType => 1,      // RING_TYPEID_FLOAT
-        Type::BoolType => 2,       // RING_TYPEID_BOOL
-        Type::StrType => 3,        // RING_TYPEID_STR
-        Type::UnitType => 9,       // RING_TYPEID_UNIT
-        Type::TupleType { .. } => 10,  // RING_TYPEID_TUPLE
-        Type::StructType { name, type_params } => {
-            if name == "List" && type_params.len() == 1 { 4 }        // RING_TYPEID_LIST
-            else if name == "Map" && type_params.len() == 2 { 5 }    // RING_TYPEID_MAP
-            else if name == "Set" && type_params.len() == 1 { 6 }    // RING_TYPEID_SET
-            else if name == "StringBuilder" { 13 }  // RING_TYPEID_SB
-            else { -1 }  // user struct — use get_or_assign_typeid
-        },
-        Type::EnumType { name, .. } => {
-            if name == "Option" { 8 }  // RING_TYPEID_OPTION
-            else { -1 }  // user enum — use get_or_assign_typeid
-        },
-        Type::FnType { .. } => 7,  // RING_TYPEID_CLOSURE
-        _ => -1,
-    }
-}
-
 pub fn build_entry_alloca(mut ctx: LlvmCtx, ty: LLVMTypeRef, name: Str) -> LLVMValueRef {
     let current_bb = LLVMGetInsertBlock(ctx.builder)
     let fn_val = LLVMGetBasicBlockParent(current_bb)
