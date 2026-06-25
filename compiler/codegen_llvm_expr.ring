@@ -3454,6 +3454,83 @@ fn bind_nested_pattern(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern) {
     }
 }
 
+// Recursively check nested constructor tags within a pattern.  When a
+// sub-pattern is Pattern::Constructor or Pattern::NamedConstructor the
+// corresponding runtime value's tag must equal the expected variant tag —
+// otherwise the arm does not match and control branches to fail_bb.  This
+// mirrors TuplePattern's Phase-1 tag-checking approach (see the tuple case in
+// gen_match_if_else) and fixes the bug where bind_nested_pattern blindly
+// destructured an inner enum variant without verifying its tag.
+fn check_nested_ctor_tags(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern, fail_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) {
+    match pat {
+        Pattern::Constructor { name: cname, qualifier, fields, .. } => {
+            let ei = find_enum_by_variant(ctx, cname, qualifier)
+            match ei {
+                some(enum_info) => match enum_info.variants.get(cname) {
+                    some(vi) => {
+                        let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, val, 0, fresh_name(ctx, "ntp"))
+                        let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "ntag"))
+                        let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
+                        let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "ntc"))
+                        let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "nested.tag.pass")
+                        discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, fail_bb))
+                        LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
+                        // Recurse into positional fields
+                        for i in 0..fields.len() {
+                            match fields.get(i) {
+                                some(fp) => {
+                                    let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, val, i + 1, fresh_name(ctx, "nfp"))
+                                    let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "nfv"))
+                                    check_nested_ctor_tags(ctx, field_val, fp, fail_bb, current_fn)
+                                },
+                                none => {},
+                            }
+                        }
+                    },
+                    none => {},
+                },
+                none => {},
+            }
+        },
+        Pattern::NamedConstructor { name: cname, qualifier, fields: nfields, .. } => {
+            let ei = find_enum_by_variant(ctx, cname, qualifier)
+            match ei {
+                some(enum_info) => match enum_info.variants.get(cname) {
+                    some(vi) => {
+                        let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, val, 0, fresh_name(ctx, "ntp"))
+                        let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "ntag"))
+                        let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
+                        let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "ntc"))
+                        let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "nested.tag.pass")
+                        discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, fail_bb))
+                        LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
+                        // Recurse into named fields
+                        for i in 0..nfields.len() {
+                            match nfields.get(i) {
+                                some(nf) => {
+                                    let mut field_idx = i
+                                    for fi in 0..vi.field_names.len() {
+                                        if vi.field_names[fi] == nf.name {
+                                            field_idx = fi
+                                        }
+                                    }
+                                    let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, val, field_idx + 1, fresh_name(ctx, "nfp"))
+                                    let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "nfv"))
+                                    check_nested_ctor_tags(ctx, field_val, nf.pattern, fail_bb, current_fn)
+                                },
+                                none => {},
+                            }
+                        }
+                    },
+                    none => {},
+                },
+                none => {},
+            }
+        },
+        _ => {},
+    }
+}
+
 // Emit the guard check (if any) and the arm body, branching to merge_bb on
 // success. The builder must already be positioned at the block where the
 // pattern matched and its variables are bound. When the arm has a guard, the
@@ -3576,11 +3653,30 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                     },
                     Pattern::Constructor { name: cname, qualifier, fields, .. } => {
                         // Enum constructor in if-else chain (taken for guarded enum
-                        // matches). Test the runtime tag, then bind fields.
+                        // matches). Test the runtime tag, then check nested ctor tags,
+                        // then bind fields.
                         let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.ctor.${cname}")
                         gen_ctor_tag_test(ctx, scrut_val, cname, qualifier, arm_bb, next_bb, current_fn)
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                        // Phase 1: check nested constructor tags before binding
+                        let ei_check = find_enum_by_variant(ctx, cname, qualifier)
+                        match ei_check {
+                            some(enum_info_c) => {
+                                for j in 0..fields.len() {
+                                    match fields.get(j) {
+                                        some(fp) => {
+                                            let fptr = LLVMBuildStructGEP2(ctx.builder, enum_info_c.llvm_type, scrut_val, j + 1, fresh_name(ctx, "ncf"))
+                                            let fval = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fptr, fresh_name(ctx, "ncv"))
+                                            check_nested_ctor_tags(ctx, fval, fp, next_bb, current_fn)
+                                        },
+                                        none => {},
+                                    }
+                                }
+                            },
+                            none => {},
+                        }
+                        // Phase 2: all nested tags verified — bind fields
                         bind_constructor_fields(ctx, scrut_val, cname, qualifier, fields)
                         emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
                         if is_last == false {
@@ -3595,6 +3691,33 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.ctor.${cname}")
                         gen_ctor_tag_test(ctx, scrut_val, cname, qualifier, arm_bb, next_bb, current_fn)
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
+                        // Phase 1: check nested constructor tags before binding
+                        let ei_check = find_enum_by_variant(ctx, cname, qualifier)
+                        match ei_check {
+                            some(enum_info_c) => match enum_info_c.variants.get(cname) {
+                                some(vi_c) => {
+                                    for j in 0..nfields.len() {
+                                        match nfields.get(j) {
+                                            some(nf) => {
+                                                let mut fidx = j
+                                                for fi in 0..vi_c.field_names.len() {
+                                                    if vi_c.field_names[fi] == nf.name {
+                                                        fidx = fi
+                                                    }
+                                                }
+                                                let fptr = LLVMBuildStructGEP2(ctx.builder, enum_info_c.llvm_type, scrut_val, fidx + 1, fresh_name(ctx, "ncf"))
+                                                let fval = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fptr, fresh_name(ctx, "ncv"))
+                                                check_nested_ctor_tags(ctx, fval, nf.pattern, next_bb, current_fn)
+                                            },
+                                            none => {},
+                                        }
+                                    }
+                                },
+                                none => {},
+                            },
+                            none => {},
+                        }
+                        // Phase 2: all nested tags verified — bind fields
                         bind_named_constructor_fields(ctx, scrut_val, cname, qualifier, nfields)
                         emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
                         if is_last == false {
