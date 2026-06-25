@@ -988,7 +988,7 @@ fn emit_derived_eq_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
     match di.type_kind {
         TypeKind::StructKind => match di.struct_fields {
             some(fields) => {
-                emit_struct_eq_fn(ctx, type_name, fields)
+                emit_struct_eq_fn(ctx, type_name, fields, di.bounds)
                 emit_struct_ne_fn(ctx, type_name)
                 emit_derived_trait_dict(ctx, type_name, "Eq")
             },
@@ -996,7 +996,7 @@ fn emit_derived_eq_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
         },
         TypeKind::EnumKind => match di.enum_variants {
             some(variants) => {
-                emit_enum_eq_fn(ctx, type_name, variants)
+                emit_enum_eq_fn(ctx, type_name, variants, di.bounds)
                 emit_struct_ne_fn(ctx, type_name)
                 emit_derived_trait_dict(ctx, type_name, "Eq")
             },
@@ -1082,9 +1082,10 @@ fn emit_derived_trait_dict(mut ctx: LlvmCtx, target_type: Str, trait_name: Str) 
     LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
 }
 
-// Emit ring_<Type>_eq(self, other) -> Bool for a struct.
+// Emit ring_<Type>_eq(self, other, ...dict_params) -> Bool for a struct.
 // Short-circuits: returns false as soon as any field differs.
-fn emit_struct_eq_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>) {
+// For generic structs, trailing dict params carry the Eq dicts for type parameters.
+fn emit_struct_eq_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
     let mangled = llvm_mangle_method(type_name, "eq")
     // Skip if already generated (e.g. user-written impl)
     match ctx.functions.get(mangled) {
@@ -1092,8 +1093,13 @@ fn emit_struct_eq_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField
         none => {},
     }
 
-    // Function type: (self: ptr, other: ptr) -> ptr
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    // Collect dict params for Eq bounds (e.g. A: Eq → "__ring_A_Eq")
+    let dict_params = collect_trait_dict_params(bounds, "Eq")
+
+    // Function type: (self: ptr, other: ptr, dict0: ptr, ...) -> ptr
+    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
+    for dp in dict_params { param_types.push(ctx.ptr_type) }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
     let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)
@@ -1104,6 +1110,9 @@ fn emit_struct_eq_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField
 
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Map dict params to named_values so resolve_dict_for_derived can find them
+    setup_derived_dict_params(ctx, fn_val, dict_params, 2)
 
     let self_val = LLVMGetParam(fn_val, 0)
     let other_val = LLVMGetParam(fn_val, 1)
@@ -1175,14 +1184,19 @@ fn emit_struct_eq_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField
 
 // Emit ring_<Type>_eq for enums.
 // Compares tag first, then fields per variant.
-fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>) {
+fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
     let mangled = llvm_mangle_method(type_name, "eq")
     match ctx.functions.get(mangled) {
         some(_) => { return },
         none => {},
     }
 
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    // Collect dict params for Eq bounds
+    let dict_params = collect_trait_dict_params(bounds, "Eq")
+
+    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
+    for dp in dict_params { param_types.push(ctx.ptr_type) }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
     let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)
@@ -1193,6 +1207,9 @@ fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVaria
 
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Map dict params to named_values
+    setup_derived_dict_params(ctx, fn_val, dict_params, 2)
 
     let self_val = LLVMGetParam(fn_val, 0)
     let other_val = LLVMGetParam(fn_val, 1)
@@ -1288,7 +1305,9 @@ fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVaria
     LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
 }
 
-// Emit ring_<Type>_ne(self, other) -> Bool — always defined as !eq(self, other).
+// Emit ring_<Type>_ne(self, other, ...dicts) -> Bool — always defined as !eq(self, other, ...dicts).
+// The ne function mirrors eq's signature (including trailing dict params for generic types)
+// and forwards all params to eq.
 fn emit_struct_ne_fn(mut ctx: LlvmCtx, type_name: Str) {
     let mangled_ne = llvm_mangle_method(type_name, "ne")
     match ctx.functions.get(mangled_ne) {
@@ -1307,7 +1326,11 @@ fn emit_struct_ne_fn(mut ctx: LlvmCtx, type_name: Str) {
         none => LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0),
     }
 
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    // ne must have the same signature as eq (including trailing dict params)
+    let eq_arity = LLVMCountParams(eq_fn)
+    let mut ne_param_types: List<LLVMTypeRef> = []
+    for i in 0..eq_arity { ne_param_types.push(ctx.ptr_type) }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, ne_param_types, 0)
     let fn_val = LLVMAddFunction(ctx.module, mangled_ne, fn_ty)
     ctx.functions.insert(mangled_ne, fn_val)
     ctx.fn_types.insert(mangled_ne, fn_ty)
@@ -1319,11 +1342,14 @@ fn emit_struct_ne_fn(mut ctx: LlvmCtx, type_name: Str) {
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
 
-    let self_val = LLVMGetParam(fn_val, 0)
-    let other_val = LLVMGetParam(fn_val, 1)
+    // Forward all params (self, other, ...dicts) to eq
+    let mut eq_args: List<LLVMValueRef> = []
+    for i in 0..eq_arity {
+        eq_args.push(LLVMGetParam(fn_val, i))
+    }
 
-    // Call eq(self, other) and negate
-    let eq_result = LLVMBuildCall2(ctx.builder, eq_fn_ty, eq_fn, [self_val, other_val], fresh_name(ctx, "eqr"))
+    // Call eq(self, other, ...dicts) and negate
+    let eq_result = LLVMBuildCall2(ctx.builder, eq_fn_ty, eq_fn, eq_args, fresh_name(ctx, "eqr"))
     // Unbox bool, negate (1 - val), rebox
     let raw = unbox_int(ctx, eq_result)
     let one = LLVMConstInt(ctx.i64_type, 1, 0)
@@ -1523,8 +1549,40 @@ fn emit_tuple_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, ele
     phi
 }
 
+// Collect dict parameter names for a derived impl filtered by trait name.
+// Returns names like "__ring_A_Eq" for each bound `A: Eq`.
+fn collect_trait_dict_params(bounds: List<TraitBound>, trait_name: Str) -> List<Str> {
+    let mut params: List<Str> = []
+    for b in bounds {
+        if b.trait_name == trait_name {
+            params.push(trait_bound_param_name(b.type_param, b.trait_name))
+        }
+    }
+    params
+}
+
+// Set up dict parameters for a derived method function.
+// Adds trailing dict params to the function, creates allocas, stores params in named_values.
+// Returns the next param index after all dict params.
+fn setup_derived_dict_params(mut ctx: LlvmCtx, fn_val: LLVMValueRef, dict_params: List<Str>, start_idx: Int) {
+    let mut param_idx = start_idx
+    for dp in dict_params {
+        let alloca = LLVMBuildAlloca(ctx.builder, ctx.ptr_type, dp)
+        LLVMBuildStore(ctx.builder, LLVMGetParam(fn_val, param_idx), alloca)
+        ctx.named_values.insert(dp, alloca)
+        param_idx = param_idx + 1
+    }
+}
+
 // Resolve a dict by name for derived impls.
 fn resolve_dict_for_derived(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef {
+    // Check if this is a type-param dict passed as a function parameter
+    // (e.g. "__ring_A_Eq" for a generic struct's derived Eq).
+    match ctx.named_values.get(name) {
+        some(alloca) => { return LLVMBuildLoad2(ctx.builder, ctx.ptr_type, alloca, fresh_name(ctx, "dp")) },
+        none => {},
+    }
+
     let init_fn_name = "ring_dict_init_${name}"
     match ctx.functions.get(init_fn_name) {
         some(init_fn) => {
@@ -1570,14 +1628,14 @@ fn emit_derived_ord_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
     match di.type_kind {
         TypeKind::StructKind => match di.struct_fields {
             some(fields) => {
-                emit_struct_cmp_fn(ctx, type_name, fields)
+                emit_struct_cmp_fn(ctx, type_name, fields, di.bounds)
                 emit_derived_trait_dict(ctx, type_name, "Ord")
             },
             none => {},
         },
         TypeKind::EnumKind => match di.enum_variants {
             some(variants) => {
-                emit_enum_cmp_fn(ctx, type_name, variants)
+                emit_enum_cmp_fn(ctx, type_name, variants, di.bounds)
                 emit_derived_trait_dict(ctx, type_name, "Ord")
             },
             none => {},
@@ -1585,16 +1643,21 @@ fn emit_derived_ord_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
     }
 }
 
-// Emit ring_<Type>_cmp(self, other) -> Int for a struct.
+// Emit ring_<Type>_cmp(self, other, ...dict_params) -> Int for a struct.
 // Compares fields lexicographically: returns the first non-zero comparison.
-fn emit_struct_cmp_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>) {
+fn emit_struct_cmp_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
     let mangled = llvm_mangle_method(type_name, "cmp")
     match ctx.functions.get(mangled) {
         some(_) => { return },
         none => {},
     }
 
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    // Collect dict params for Ord bounds
+    let dict_params = collect_trait_dict_params(bounds, "Ord")
+
+    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
+    for dp in dict_params { param_types.push(ctx.ptr_type) }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
     let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)
@@ -1605,6 +1668,9 @@ fn emit_struct_cmp_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFiel
 
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Map dict params to named_values
+    setup_derived_dict_params(ctx, fn_val, dict_params, 2)
 
     let self_val = LLVMGetParam(fn_val, 0)
     let other_val = LLVMGetParam(fn_val, 1)
@@ -1669,14 +1735,19 @@ fn emit_struct_cmp_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFiel
 
 // Emit ring_<Type>_cmp for enums.
 // Compares tag first, then fields per variant if tags are equal.
-fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>) {
+fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
     let mangled = llvm_mangle_method(type_name, "cmp")
     match ctx.functions.get(mangled) {
         some(_) => { return },
         none => {},
     }
 
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type, ctx.ptr_type], 0)
+    // Collect dict params for Ord bounds
+    let dict_params = collect_trait_dict_params(bounds, "Ord")
+
+    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type, ctx.ptr_type]
+    for dp in dict_params { param_types.push(ctx.ptr_type) }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
     let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)
@@ -1687,6 +1758,9 @@ fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVari
 
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Map dict params to named_values
+    setup_derived_dict_params(ctx, fn_val, dict_params, 2)
 
     let self_val = LLVMGetParam(fn_val, 0)
     let other_val = LLVMGetParam(fn_val, 1)
@@ -1972,26 +2046,31 @@ fn emit_derived_debug_llvm(mut ctx: LlvmCtx, di: DerivedImpl) {
     let type_name = di.type_name
     match di.type_kind {
         TypeKind::StructKind => match di.struct_fields {
-            some(fields) => emit_struct_debug_fn(ctx, type_name, fields),
+            some(fields) => emit_struct_debug_fn(ctx, type_name, fields, di.bounds),
             none => {},
         },
         TypeKind::EnumKind => match di.enum_variants {
-            some(variants) => emit_enum_debug_fn(ctx, type_name, variants),
+            some(variants) => emit_enum_debug_fn(ctx, type_name, variants, di.bounds),
             none => {},
         },
     }
     emit_derived_trait_dict(ctx, type_name, "Debug")
 }
 
-fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>) {
+fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedField>, bounds: List<TraitBound>) {
     let mangled = llvm_mangle_method(type_name, "debug")
     match ctx.functions.get(mangled) {
         some(_) => { return },
         none => {},
     }
 
-    // debug(self) -> ptr (Str)
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type], 0)
+    // Collect dict params for Debug bounds
+    let dict_params = collect_trait_dict_params(bounds, "Debug")
+
+    // debug(self, ...dict_params) -> ptr (Str)
+    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type]
+    for dp in dict_params { param_types.push(ctx.ptr_type) }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
     let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)
@@ -2002,6 +2081,9 @@ fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFi
 
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Map dict params to named_values
+    setup_derived_dict_params(ctx, fn_val, dict_params, 1)
 
     let self_val = LLVMGetParam(fn_val, 0)
 
@@ -2088,15 +2170,20 @@ fn emit_struct_debug_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFi
     LLVMPositionBuilderAtEnd(ctx.builder, saved_bb)
 }
 
-fn emit_enum_debug_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>) {
+fn emit_enum_debug_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVariant>, bounds: List<TraitBound>) {
     let mangled = llvm_mangle_method(type_name, "debug")
     match ctx.functions.get(mangled) {
         some(_) => { return },
         none => {},
     }
 
-    // debug(self) -> ptr (Str)
-    let fn_ty = LLVMFunctionType(ctx.ptr_type, [ctx.ptr_type], 0)
+    // Collect dict params for Debug bounds
+    let dict_params = collect_trait_dict_params(bounds, "Debug")
+
+    // debug(self, ...dict_params) -> ptr (Str)
+    let mut param_types: List<LLVMTypeRef> = [ctx.ptr_type]
+    for dp in dict_params { param_types.push(ctx.ptr_type) }
+    let fn_ty = LLVMFunctionType(ctx.ptr_type, param_types, 0)
     let fn_val = LLVMAddFunction(ctx.module, mangled, fn_ty)
     ctx.functions.insert(mangled, fn_val)
     ctx.fn_types.insert(mangled, fn_ty)
@@ -2107,6 +2194,9 @@ fn emit_enum_debug_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVa
 
     let entry = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "entry")
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
+
+    // Map dict params to named_values
+    setup_derived_dict_params(ctx, fn_val, dict_params, 1)
 
     let self_val = LLVMGetParam(fn_val, 0)
 
