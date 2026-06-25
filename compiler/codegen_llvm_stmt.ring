@@ -858,10 +858,18 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
                 },
             }
         },
-        _ => {
-            // Non-constructor pattern in if-let: just evaluate then
+        Pattern::Binding { .. } | Pattern::Wildcard { .. } => {
+            // Irrefutable patterns: always match, bind scrutinee if Binding.
             discard(LLVMBuildBr(ctx.builder, then_bb))
             LLVMPositionBuilderAtEnd(ctx.builder, then_bb)
+            match pattern {
+                Pattern::Binding { name: bname, .. } => {
+                    let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
+                    discard(LLVMBuildStore(ctx.builder, scrut_val, alloca))
+                    ctx.named_values.insert(bname, alloca)
+                },
+                _ => {},
+            }
             discard(gen_llvm_expr(ctx, then_block))
             discard(LLVMBuildBr(ctx.builder, merge_bb))
             LLVMPositionBuilderAtEnd(ctx.builder, else_bb)
@@ -871,6 +879,11 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
             }
             discard(LLVMBuildBr(ctx.builder, merge_bb))
             LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
+        },
+        _ => {
+            // #176: Unrecognized pattern type in if-let — panic at compile time
+            // rather than silently treating as irrefutable.
+            panic("LLVM codegen: unsupported pattern type in if-let")
         },
     }
 }

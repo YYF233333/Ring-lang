@@ -697,7 +697,13 @@ fn resolve_dispatch_dict(mut ctx: LlvmCtx, dispatch: TraitDispatch, trait_name_h
 // lives at struct index i+1 (must match emit_trait_dict / build_wrapped_dict /
 // ring_make_eq_dict / ring_make_ord_dict).
 fn load_dict_method(mut ctx: LlvmCtx, dict_ptr: LLVMValueRef, slot: Int) -> LLVMValueRef {
-    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+    // #164: Build a struct type with at least (slot+1) method slots to avoid
+    // GEP out-of-bounds. The actual struct may be larger, but GEP only needs
+    // the type to compute the offset up to the accessed field.
+    let min_slots = slot + 1
+    let mut dict_fields: List<LLVMTypeRef> = [ctx.i64_type]
+    for i in 0..min_slots { dict_fields.push(ctx.ptr_type) }
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, dict_fields, 0)
     let slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, slot + 1, fresh_name(ctx, "ms"))
     LLVMBuildLoad2(ctx.builder, ctx.ptr_type, slot_ptr, fresh_name(ctx, "mc"))
 }
@@ -1524,19 +1530,37 @@ fn build_wrapped_dict_typed(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, i
                 let mangled = llvm_mangle_method(target_type, method_name)
                 match ctx.functions.get(mangled) {
                     some(method_fn) => {
-                        // Base method arity includes the trailing inner dicts; the
-                        // dispatch passes (arity - inner_count) leading args.
+                        // Base method arity includes trailing evidence params and
+                        // inner dicts; the dispatch passes only the user-visible
+                        // leading args. #174: subtract evidence count too so thunk
+                        // parameters align with the closure caller's arguments.
                         let base_arity = LLVMCountParams(method_fn)
-                        let dispatch_arity = base_arity - inner_count
-                        let thunk_fn = emit_wrapped_method_thunk(ctx, mangled, method_fn, method_name, dispatch_arity, inner_count)
+                        let evidence_count = match ctx.fn_evidence_params.get(mangled) {
+                            some(ev) => ev.len(),
+                            none => 0,
+                        }
+                        let dispatch_arity = base_arity - inner_count - evidence_count
+                        let thunk_fn = emit_wrapped_method_thunk(ctx, mangled, method_fn, method_name, dispatch_arity, inner_count, evidence_count)
 
-                        // env: { i64 count(=inner_count), inner0, inner1, ... }.
+                        // env: { i64 count(=inner_count), inner0, .., ev0, .. }.
                         // B-104 D4 RC honesty: count covers the inner-dict slots
                         // and each stored inner is ring_dup'd — drop_closure_env
                         // releases them when the (dynamic) dict dies.  Static
                         // singleton inners: dup/drop are never-drop no-ops.
+                        // #174: evidence slots are stored AFTER inner dicts in the
+                        // env but OUTSIDE the counted window (same posture as
+                        // regular closures — evidence is handler-scoped, not
+                        // closure-owned).
+                        let mut ev_vals: List<LLVMValueRef> = []
+                        match ctx.fn_evidence_params.get(mangled) {
+                            some(ev_params) => {
+                                for ep in ev_params { ev_vals.push(lookup_evidence(ctx, ep)) }
+                            },
+                            none => {},
+                        }
+                        let env_total = inner_count + evidence_count
                         let mut env_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
-                        for j in 0..inner_count { env_elem_types.push(ctx.ptr_type) }
+                        for j in 0..env_total { env_elem_types.push(ctx.ptr_type) }
                         let env_ty = LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
                         let env_size = LLVMSizeOf(env_ty)
                         let env_typeid = LLVMConstInt(ctx.i64_type, RING_TYPEID_CLOSURE_ENV, 0)
@@ -1548,6 +1572,12 @@ fn build_wrapped_dict_typed(mut ctx: LlvmCtx, dict_name: Str, trait_name: Str, i
                             discard(gen_dup_value(ctx, iv))
                             let s = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, sj + 1, fresh_name(ctx, "wmi"))
                             discard(LLVMBuildStore(ctx.builder, iv, s))
+                            sj = sj + 1
+                        }
+                        // Store evidence values after inner dicts (not dup'd — handler-scoped).
+                        for ev in ev_vals {
+                            let s = LLVMBuildStructGEP2(ctx.builder, env_ty, env_alloc, sj + 1, fresh_name(ctx, "wmev"))
+                            discard(LLVMBuildStore(ctx.builder, ev, s))
                             sj = sj + 1
                         }
 
@@ -1593,7 +1623,7 @@ fn wrapped_dict_target_type(dict_name: Str, trait_name: Str) -> Str {
 // → at most one thunk per distinct wrapped-dict construction site is fine; we include
 // the inner_count to disambiguate, but the method mangling + suffix already differs
 // from the plain dict thunk).
-fn emit_wrapped_method_thunk(mut ctx: LlvmCtx, mangled: Str, method_fn: LLVMValueRef, method_name: Str, dispatch_arity: Int, inner_count: Int) -> LLVMValueRef {
+fn emit_wrapped_method_thunk(mut ctx: LlvmCtx, mangled: Str, method_fn: LLVMValueRef, method_name: Str, dispatch_arity: Int, inner_count: Int, evidence_count: Int) -> LLVMValueRef {
     let thunk_name = "${mangled}__wrapthunk"
     match ctx.functions.get(thunk_name) {
         some(existing) => { return existing },
@@ -1609,16 +1639,18 @@ fn emit_wrapped_method_thunk(mut ctx: LlvmCtx, mangled: Str, method_fn: LLVMValu
     ctx.fn_types.insert(thunk_name, thunk_ty)
 
     // env struct type (must match build_wrapped_dict's env layout).
+    // #174: env now holds inner_count dicts + evidence_count evidence slots.
+    let env_total = inner_count + evidence_count
     let mut env_elem_types: List<LLVMTypeRef> = [ctx.i64_type]
-    for j in 0..inner_count { env_elem_types.push(ctx.ptr_type) }
+    for j in 0..env_total { env_elem_types.push(ctx.ptr_type) }
     let env_ty = LLVMStructTypeInContext(ctx.context, env_elem_types, 0)
 
-    // Real method fn type (a0.., inner0..) -> ptr.
+    // Real method fn type (a0.., ev0.., inner0..) -> ptr.
     let method_ty = match ctx.fn_types.get(mangled) {
         some(t) => t,
         none => {
             let mut mp: List<LLVMTypeRef> = []
-            for i in 0..(dispatch_arity + inner_count) { mp.push(ctx.ptr_type) }
+            for i in 0..(dispatch_arity + evidence_count + inner_count) { mp.push(ctx.ptr_type) }
             LLVMFunctionType(ctx.ptr_type, mp, 0)
         },
     }
@@ -1631,6 +1663,11 @@ fn emit_wrapped_method_thunk(mut ctx: LlvmCtx, mangled: Str, method_fn: LLVMValu
     let mut fwd_args: List<LLVMValueRef> = []
     // Leading dispatch args (skip param 0 = env).
     for i in 0..dispatch_arity { fwd_args.push(LLVMGetParam(thunk_fn, i + 1)) }
+    // #174: Evidence values loaded from env (slots inner_count+1..env_total).
+    for j in 0..evidence_count {
+        let s = LLVMBuildStructGEP2(ctx.builder, env_ty, env_param, inner_count + j + 1, fresh_name(ctx, "wte"))
+        fwd_args.push(LLVMBuildLoad2(ctx.builder, ctx.ptr_type, s, fresh_name(ctx, "wtev")))
+    }
     // Inner dicts loaded from env (slots 1..inner_count).
     for j in 0..inner_count {
         let s = LLVMBuildStructGEP2(ctx.builder, env_ty, env_param, j + 1, fresh_name(ctx, "wti"))
@@ -1693,10 +1730,13 @@ fn gen_dict_dispatch_call(mut ctx: LlvmCtx, callee: HExpr, args: List<HExpr>, dd
     let method_idx = get_trait_method_index(ctx, dd.dict_param, dd.method)
 
     // Build dict struct type (B-104 D4 count-prefixed layout: { i64
-    // method_count, ptr m0, ... }).  We don't know the exact slot count,
-    // but a conservative 4-slot type suffices for the GEP — method slot
-    // i lives at struct index i+1.
-    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, [ctx.i64_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type, ctx.ptr_type], 0)
+    // method_count, ptr m0, ... }).  #164: dynamically size the struct
+    // based on actual trait method count to avoid GEP out-of-bounds for
+    // traits with 5+ methods.
+    let dict_method_count = get_dict_method_count(ctx, dd.dict_param)
+    let mut dict_fields: List<LLVMTypeRef> = [ctx.i64_type]
+    for i in 0..dict_method_count { dict_fields.push(ctx.ptr_type) }
+    let dict_struct_ty = LLVMStructTypeInContext(ctx.context, dict_fields, 0)
 
     // GEP to the method slot
     let method_slot_ptr = LLVMBuildStructGEP2(ctx.builder, dict_struct_ty, dict_ptr, method_idx + 1, fresh_name(ctx, "ms"))
@@ -1786,6 +1826,23 @@ fn get_builtin_method_index(method: Str) -> Int {
     else { if method == "compare" { 0 }
     else { if method == "debug" { 0 }
     else { 0 } } } } } // fallback to 0
+}
+
+// #164: Get the method count for a dict parameter's trait. Used to build a
+// correctly-sized LLVM struct type for GEP into the dict. Falls back to 4
+// (Eq/Clone/Ord/Debug max) when the trait is not found.
+fn get_dict_method_count(mut ctx: LlvmCtx, dict_param: Str) -> Int {
+    let trait_name_opt = match trait_name_from_dict_param(dict_param) {
+        some(tn) => some(tn),
+        none => trait_name_from_static_dict(ctx, dict_param),
+    }
+    match trait_name_opt {
+        some(trait_name) => match ctx.trait_method_order.get(trait_name) {
+            some(order) => order.len(),
+            none => 4,
+        },
+        none => 4,
+    }
 }
 
 fn gen_closure_call(mut ctx: LlvmCtx, closure_ptr: LLVMValueRef, arg_vals: List<LLVMValueRef>) -> LLVMValueRef {
@@ -3813,11 +3870,11 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         }
                     },
                     Pattern::OrPattern { patterns, .. } => {
-                        // OR pattern over enum variants in the if-else chain:
-                        // match if ANY alternative's tag matches. Chain the tag
-                        // tests so the first match jumps to arm_bb; all-miss goes
-                        // to next_bb. Field-less alternatives only (same constraint
-                        // as the switch path).
+                        // OR pattern: match if ANY alternative matches. Chain tests
+                        // so the first match jumps to arm_bb; all-miss goes to
+                        // next_bb. Supports both Constructor/NamedConstructor
+                        // sub-patterns (enum tag tests) and Literal sub-patterns
+                        // (#181: `0 | 1 => ...`).
                         let next_bb = if is_last { default_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") }
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.or")
                         let palts = patterns
@@ -3825,21 +3882,23 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         for k in 0..nalts {
                             match palts.get(k) {
                                 some(alt) => {
-                                    let alt_ref = match alt {
-                                        Pattern::Constructor { name: an, qualifier: aq, .. } => some((an, aq)),
-                                        Pattern::NamedConstructor { name: an, qualifier: aq, .. } => some((an, aq)),
-                                        _ => none,
-                                    }
-                                    match alt_ref {
-                                        some(ar) => {
-                                            let (an, aq) = ar
-                                            // On the last alternative, a miss goes to next_bb;
-                                            // earlier misses go to a fresh test block.
-                                            let miss_bb = if k == nalts - 1 { next_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.or.alt") }
+                                    let miss_bb = if k == nalts - 1 { next_bb } else { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.or.alt") }
+                                    match alt {
+                                        Pattern::Constructor { name: an, qualifier: aq, .. } => {
                                             gen_ctor_tag_test(ctx, scrut_val, an, aq, arm_bb, miss_bb, current_fn)
                                             LLVMPositionBuilderAtEnd(ctx.builder, miss_bb)
                                         },
-                                        none => {},
+                                        Pattern::NamedConstructor { name: an, qualifier: aq, .. } => {
+                                            gen_ctor_tag_test(ctx, scrut_val, an, aq, arm_bb, miss_bb, current_fn)
+                                            LLVMPositionBuilderAtEnd(ctx.builder, miss_bb)
+                                        },
+                                        Pattern::Literal { value, .. } => {
+                                            // #181: literal sub-pattern in or-pattern
+                                            let cond_i1 = gen_literal_pattern_cond(ctx, scrut_val, scrut_ty, value)
+                                            discard(LLVMBuildCondBr(ctx.builder, cond_i1, arm_bb, miss_bb))
+                                            LLVMPositionBuilderAtEnd(ctx.builder, miss_bb)
+                                        },
+                                        _ => {},
                                     }
                                 },
                                 none => {},
@@ -3952,24 +4011,10 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         }
                     },
                     _ => {
-                        // For other patterns in non-enum context, bind any pattern
-                        // variables and treat the pattern as irrefutable. Without a
-                        // guard it matches unconditionally; only a false guard falls
-                        // through to the next arm. A fresh fall-through block is
-                        // allocated only when this arm can actually fall through
-                        // (guarded non-last); otherwise default_bb is the (unused or
-                        // exhaustion) placeholder.
-                        open_block = false
-                        let next_bb = if has_guard && is_last == false { LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.next") } else { default_bb }
-                        let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.other")
-                        discard(LLVMBuildBr(ctx.builder, arm_bb))
-                        LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-                        bind_nested_pattern(ctx, scrut_val, arm.pattern)
-                        emit_match_arm_body(ctx, arm, merge_bb, next_bb, current_fn, phi_vals, phi_bbs)
-                        if has_guard && is_last == false {
-                            LLVMPositionBuilderAtEnd(ctx.builder, next_bb)
-                            open_block = true
-                        }
+                        // #176: Unrecognized pattern type — panic at compile time
+                        // rather than silently treating as irrefutable. If HIR adds
+                        // new pattern kinds, this forces them to be handled explicitly.
+                        panic("LLVM codegen: unsupported pattern type in match if-else chain")
                     },
                 }
             },
@@ -4269,6 +4314,10 @@ fn gen_literal_pattern_cond(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty:
             let eq_fn = get_or_declare_runtime_fn(ctx, "ring_str_eq", [ctx.ptr_type, ctx.ptr_type], ctx.i64_type)
             let eq_ty = get_rt_fn_type(ctx, "ring_str_eq")
             let result = LLVMBuildCall2(ctx.builder, eq_ty, eq_fn, [scrut_val, lit_str], fresh_name(ctx, "seq"))
+            // #162: gen_str_lit allocates a heap string (RC=1); drop after comparison.
+            let drop_fn = get_or_declare_runtime_fn(ctx, "ring_drop", [ctx.ptr_type], ctx.void_type)
+            let drop_ty = get_rt_fn_type(ctx, "ring_drop")
+            discard(LLVMBuildCall2(ctx.builder, drop_ty, drop_fn, [lit_str], ""))
             LLVMBuildTrunc(ctx.builder, result, ctx.i1_type, fresh_name(ctx, "i1"))
         },
         LiteralValue::FloatVal(f) => {
