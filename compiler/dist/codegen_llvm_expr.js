@@ -3861,82 +3861,114 @@ function method_to_runtime(type_name, method) {
                                                                                                                                   if (((type_name === "Map") ? (method === "clear") : false)) {
                                                                                                                                     return Option_some("ring_map_clear");
                                                                                                                                   } else {
-                                                                                                                                    if (((type_name === "Set") ? (method === "add") : false)) {
-                                                                                                                                      return Option_some("ring_set_add");
+                                                                                                                                    if (((type_name === "Map") ? (method === "fold") : false)) {
+                                                                                                                                      return Option_some("ring_map_fold");
                                                                                                                                     } else {
-                                                                                                                                      if (((type_name === "Set") ? (method === "insert") : false)) {
-                                                                                                                                        return Option_some("ring_set_add");
+                                                                                                                                      if (((type_name === "Map") ? (method === "filter") : false)) {
+                                                                                                                                        return Option_some("ring_map_filter");
                                                                                                                                       } else {
-                                                                                                                                        if (((type_name === "Set") ? (method === "has") : false)) {
-                                                                                                                                          return Option_some("ring_set_has");
+                                                                                                                                        if (((type_name === "Map") ? (method === "any") : false)) {
+                                                                                                                                          return Option_some("ring_map_any");
                                                                                                                                         } else {
-                                                                                                                                          if (((type_name === "Set") ? (method === "contains") : false)) {
-                                                                                                                                            return Option_some("ring_set_has");
+                                                                                                                                          if (((type_name === "Map") ? (method === "map_values") : false)) {
+                                                                                                                                            return Option_some("ring_map_map_values");
                                                                                                                                           } else {
-                                                                                                                                            if (((type_name === "Set") ? (method === "to_list") : false)) {
-                                                                                                                                              return Option_some("ring_set_to_list");
+                                                                                                                                            if (((type_name === "Set") ? (method === "add") : false)) {
+                                                                                                                                              return Option_some("ring_set_add");
                                                                                                                                             } else {
-                                                                                                                                              if (((type_name === "Set") ? (method === "len") : false)) {
-                                                                                                                                                return Option_some("ring_set_len");
+                                                                                                                                              if (((type_name === "Set") ? (method === "insert") : false)) {
+                                                                                                                                                return Option_some("ring_set_add");
                                                                                                                                               } else {
-                                                                                                                                                if (((type_name === "Set") ? (method === "is_empty") : false)) {
-                                                                                                                                                  return Option_some("ring_set_is_empty");
+                                                                                                                                                if (((type_name === "Set") ? (method === "has") : false)) {
+                                                                                                                                                  return Option_some("ring_set_has");
                                                                                                                                                 } else {
-                                                                                                                                                  if (((type_name === "Set") ? (method === "from_list") : false)) {
-                                                                                                                                                    return Option_some("ring_set_from_list");
+                                                                                                                                                  if (((type_name === "Set") ? (method === "contains") : false)) {
+                                                                                                                                                    return Option_some("ring_set_has");
                                                                                                                                                   } else {
-                                                                                                                                                    if (((type_name === "Set") ? (method === "for_each") : false)) {
-                                                                                                                                                      return Option_some("ring_set_for_each");
+                                                                                                                                                    if (((type_name === "Set") ? (method === "to_list") : false)) {
+                                                                                                                                                      return Option_some("ring_set_to_list");
                                                                                                                                                     } else {
-                                                                                                                                                      if (((type_name === "Set") ? (method === "remove") : false)) {
-                                                                                                                                                        return Option_some("ring_set_delete");
+                                                                                                                                                      if (((type_name === "Set") ? (method === "len") : false)) {
+                                                                                                                                                        return Option_some("ring_set_len");
                                                                                                                                                       } else {
-                                                                                                                                                        if (((type_name === "Set") ? (method === "clear") : false)) {
-                                                                                                                                                          return Option_some("ring_set_clear");
+                                                                                                                                                        if (((type_name === "Set") ? (method === "is_empty") : false)) {
+                                                                                                                                                          return Option_some("ring_set_is_empty");
                                                                                                                                                         } else {
-                                                                                                                                                          if (((type_name === "Set") ? (method === "union") : false)) {
-                                                                                                                                                            return Option_some("ring_set_union");
+                                                                                                                                                          if (((type_name === "Set") ? (method === "from_list") : false)) {
+                                                                                                                                                            return Option_some("ring_set_from_list");
                                                                                                                                                           } else {
-                                                                                                                                                            if (((type_name === "Set") ? (method === "intersect") : false)) {
-                                                                                                                                                              return Option_some("ring_set_intersect");
+                                                                                                                                                            if (((type_name === "Set") ? (method === "for_each") : false)) {
+                                                                                                                                                              return Option_some("ring_set_for_each");
                                                                                                                                                             } else {
-                                                                                                                                                              if (((type_name === "Set") ? (method === "difference") : false)) {
-                                                                                                                                                                return Option_some("ring_set_difference");
+                                                                                                                                                              if (((type_name === "Set") ? (method === "remove") : false)) {
+                                                                                                                                                                return Option_some("ring_set_delete");
                                                                                                                                                               } else {
-                                                                                                                                                                if (((type_name === "Option") ? (method === "unwrap_or") : false)) {
-                                                                                                                                                                  return Option_some("ring_Option_unwrap_or");
+                                                                                                                                                                if (((type_name === "Set") ? (method === "clear") : false)) {
+                                                                                                                                                                  return Option_some("ring_set_clear");
                                                                                                                                                                 } else {
-                                                                                                                                                                  if (((type_name === "Option") ? (method === "unwrap") : false)) {
-                                                                                                                                                                    return Option_some("ring_Option_unwrap");
+                                                                                                                                                                  if (((type_name === "Set") ? (method === "union") : false)) {
+                                                                                                                                                                    return Option_some("ring_set_union");
                                                                                                                                                                   } else {
-                                                                                                                                                                    if (((type_name === "Option") ? (method === "is_some") : false)) {
-                                                                                                                                                                      return Option_some("ring_Option_is_some");
+                                                                                                                                                                    if (((type_name === "Set") ? (method === "intersect") : false)) {
+                                                                                                                                                                      return Option_some("ring_set_intersect");
                                                                                                                                                                     } else {
-                                                                                                                                                                      if (((type_name === "Option") ? (method === "is_none") : false)) {
-                                                                                                                                                                        return Option_some("ring_Option_is_none");
+                                                                                                                                                                      if (((type_name === "Set") ? (method === "difference") : false)) {
+                                                                                                                                                                        return Option_some("ring_set_difference");
                                                                                                                                                                       } else {
-                                                                                                                                                                        if (((type_name === "Option") ? (method === "map") : false)) {
-                                                                                                                                                                          return Option_some("ring_Option_map");
+                                                                                                                                                                        if (((type_name === "Set") ? (method === "fold") : false)) {
+                                                                                                                                                                          return Option_some("ring_set_fold");
                                                                                                                                                                         } else {
-                                                                                                                                                                          if (((type_name === "Option") ? (method === "and_then") : false)) {
-                                                                                                                                                                            return Option_some("ring_Option_and_then");
+                                                                                                                                                                          if (((type_name === "Set") ? (method === "filter") : false)) {
+                                                                                                                                                                            return Option_some("ring_set_filter");
                                                                                                                                                                           } else {
-                                                                                                                                                                            if (((type_name === "Option") ? (method === "unwrap_or_else") : false)) {
-                                                                                                                                                                              return Option_some("ring_Option_unwrap_or_else");
+                                                                                                                                                                            if (((type_name === "Set") ? (method === "any") : false)) {
+                                                                                                                                                                              return Option_some("ring_set_any");
                                                                                                                                                                             } else {
-                                                                                                                                                                              if (((type_name === "Option") ? (method === "to_fail") : false)) {
-                                                                                                                                                                                return Option_some("ring_Option_to_fail");
+                                                                                                                                                                              if (((type_name === "Set") ? (method === "all") : false)) {
+                                                                                                                                                                                return Option_some("ring_set_all");
                                                                                                                                                                               } else {
-                                                                                                                                                                                if (((type_name === "Cell") ? (method === "get") : false)) {
-                                                                                                                                                                                  return Option_some("ring_Cell_get");
+                                                                                                                                                                                if (((type_name === "Option") ? (method === "unwrap_or") : false)) {
+                                                                                                                                                                                  return Option_some("ring_Option_unwrap_or");
                                                                                                                                                                                 } else {
-                                                                                                                                                                                  if (((type_name === "Cell") ? (method === "set") : false)) {
-                                                                                                                                                                                    return Option_some("ring_Cell_set");
+                                                                                                                                                                                  if (((type_name === "Option") ? (method === "unwrap") : false)) {
+                                                                                                                                                                                    return Option_some("ring_Option_unwrap");
                                                                                                                                                                                   } else {
-                                                                                                                                                                                    if (((type_name === "Cell") ? (method === "update") : false)) {
-                                                                                                                                                                                      return Option_some("ring_Cell_update");
+                                                                                                                                                                                    if (((type_name === "Option") ? (method === "is_some") : false)) {
+                                                                                                                                                                                      return Option_some("ring_Option_is_some");
                                                                                                                                                                                     } else {
-                                                                                                                                                                                      return Option_none;
+                                                                                                                                                                                      if (((type_name === "Option") ? (method === "is_none") : false)) {
+                                                                                                                                                                                        return Option_some("ring_Option_is_none");
+                                                                                                                                                                                      } else {
+                                                                                                                                                                                        if (((type_name === "Option") ? (method === "map") : false)) {
+                                                                                                                                                                                          return Option_some("ring_Option_map");
+                                                                                                                                                                                        } else {
+                                                                                                                                                                                          if (((type_name === "Option") ? (method === "and_then") : false)) {
+                                                                                                                                                                                            return Option_some("ring_Option_and_then");
+                                                                                                                                                                                          } else {
+                                                                                                                                                                                            if (((type_name === "Option") ? (method === "unwrap_or_else") : false)) {
+                                                                                                                                                                                              return Option_some("ring_Option_unwrap_or_else");
+                                                                                                                                                                                            } else {
+                                                                                                                                                                                              if (((type_name === "Option") ? (method === "to_fail") : false)) {
+                                                                                                                                                                                                return Option_some("ring_Option_to_fail");
+                                                                                                                                                                                              } else {
+                                                                                                                                                                                                if (((type_name === "Cell") ? (method === "get") : false)) {
+                                                                                                                                                                                                  return Option_some("ring_Cell_get");
+                                                                                                                                                                                                } else {
+                                                                                                                                                                                                  if (((type_name === "Cell") ? (method === "set") : false)) {
+                                                                                                                                                                                                    return Option_some("ring_Cell_set");
+                                                                                                                                                                                                  } else {
+                                                                                                                                                                                                    if (((type_name === "Cell") ? (method === "update") : false)) {
+                                                                                                                                                                                                      return Option_some("ring_Cell_update");
+                                                                                                                                                                                                    } else {
+                                                                                                                                                                                                      return Option_none;
+                                                                                                                                                                                                    }
+                                                                                                                                                                                                  }
+                                                                                                                                                                                                }
+                                                                                                                                                                                              }
+                                                                                                                                                                                            }
+                                                                                                                                                                                          }
+                                                                                                                                                                                        }
+                                                                                                                                                                                      }
                                                                                                                                                                                     }
                                                                                                                                                                                   }
                                                                                                                                                                                 }
@@ -4105,7 +4137,27 @@ function rt_method_returns_bool(name) {
                                   if ((name === "ring_str_is_empty")) {
                                     return true;
                                   } else {
-                                    return false;
+                                    if ((name === "ring_map_any")) {
+                                      return true;
+                                    } else {
+                                      if ((name === "ring_set_any")) {
+                                        return true;
+                                      } else {
+                                        if ((name === "ring_set_all")) {
+                                          return true;
+                                        } else {
+                                          if ((name === "ring_set_int_any")) {
+                                            return true;
+                                          } else {
+                                            if ((name === "ring_set_int_all")) {
+                                              return true;
+                                            } else {
+                                              return false;
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
                                   }
                                 }
                               }
@@ -4189,7 +4241,27 @@ function rt_method_returns_i64(name) {
                                           if ((name === "ring_set_int_is_empty")) {
                                             return true;
                                           } else {
-                                            return false;
+                                            if ((name === "ring_map_any")) {
+                                              return true;
+                                            } else {
+                                              if ((name === "ring_set_any")) {
+                                                return true;
+                                              } else {
+                                                if ((name === "ring_set_all")) {
+                                                  return true;
+                                                } else {
+                                                  if ((name === "ring_set_int_any")) {
+                                                    return true;
+                                                  } else {
+                                                    if ((name === "ring_set_int_all")) {
+                                                      return true;
+                                                    } else {
+                                                      return false;
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
                                           }
                                         }
                                       }
@@ -4301,6 +4373,10 @@ function gen_method_call(ctx, recv, recv_type, method, args, dict_vals) {
           __ring_blk33 = "ring_map_int_is_empty";
           break __ring_match137;
         }
+        if (__ring_m137 === "fold") {
+          __ring_blk33 = "ring_map_int_fold";
+          break __ring_match137;
+        }
         __ring_blk33 = base_rt_name;
         break __ring_match137;
       }
@@ -4365,6 +4441,22 @@ function gen_method_call(ctx, recv, recv_type, method, args, dict_vals) {
         }
         if (__ring_m138 === "difference") {
           __ring_blk34 = "ring_set_int_difference";
+          break __ring_match138;
+        }
+        if (__ring_m138 === "fold") {
+          __ring_blk34 = "ring_set_int_fold";
+          break __ring_match138;
+        }
+        if (__ring_m138 === "filter") {
+          __ring_blk34 = "ring_set_int_filter";
+          break __ring_match138;
+        }
+        if (__ring_m138 === "any") {
+          __ring_blk34 = "ring_set_int_any";
+          break __ring_match138;
+        }
+        if (__ring_m138 === "all") {
+          __ring_blk34 = "ring_set_int_all";
           break __ring_match138;
         }
         __ring_blk34 = base_rt_name;
