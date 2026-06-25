@@ -2666,13 +2666,14 @@ fn method_to_runtime(type_name: Str, method: Str) -> Str? {
     else { if type_name == "Option" && method == "is_some" { some("ring_Option_is_some") }
     else { if type_name == "Option" && method == "is_none" { some("ring_Option_is_none") }
     else { if type_name == "Option" && method == "map" { some("ring_Option_map") }
+    else { if type_name == "Option" && method == "and_then" { some("ring_Option_and_then") }
     else { if type_name == "Option" && method == "unwrap_or_else" { some("ring_Option_unwrap_or_else") }
     else { if type_name == "Option" && method == "to_fail" { some("ring_Option_to_fail") }
     // Cell methods
     else { if type_name == "Cell" && method == "get" { some("ring_Cell_get") }
     else { if type_name == "Cell" && method == "set" { some("ring_Cell_set") }
     else { if type_name == "Cell" && method == "update" { some("ring_Cell_update") }
-    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
+    else { none } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } }
 }
 
 fn ensure_runtime_method(mut ctx: LlvmCtx, name: Str, arg_count: Int) -> LLVMValueRef {

@@ -1121,6 +1121,17 @@ extern "C" void* ring_Option_map(void* opt, void* closure) {
     return ring_enum_none();
 }
 
+extern "C" void* ring_Option_and_then(void* opt, void* closure) {
+    int64_t tag = *(int64_t*)opt;
+    if (tag == 0) {
+        void* val = *((void**)((int64_t*)opt + 1));
+        RingClosure* cl = (RingClosure*)closure;
+        ring_fn_1 fn = (ring_fn_1)cl->fn_ptr;
+        return fn(cl->env_ptr, val);  // closure returns Option<U> directly
+    }
+    return ring_enum_none();
+}
+
 // to_fail: Some(v) -> v; None -> raise the fail effect with `err` as the error
 // value. The LLVM backend lowers `fail.raise` to a direct ring_raise (longjmp
 // into the enclosing ring_try set up by `catch`), so to_fail can raise here
