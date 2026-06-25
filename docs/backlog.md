@@ -609,7 +609,7 @@ source-map 支持 + 断点调试。
 
 ## 语法增强
 
-### B-143 复合赋值运算符 `*=` / `/=` / `%=` [feature] [P3] [S] [mechanical] [queued]
+### B-143 复合赋值运算符 `*=` / `/=` / `%=` [feature] [P3] [S] [mechanical] [doing]
 
 > 2026-06-25 立项（Discussion，B-100 Phase 1.1 worker feedback #5）。Ring 目前只支持 `+=` 和 `-=`，缺 `*=`/`/=`/`%=`。
 
