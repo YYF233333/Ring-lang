@@ -648,7 +648,7 @@ source-map 支持 + 断点调试。
 - 方法调用参数不足 → 编译错误（E 码 + 提示期望参数数）
 - 现有 E2E 全绿（无误报）；自举一致
 
-### B-148 整数除零 codegen guard [bugfix] [P3] [S] [judgment] [queued]
+### B-148 整数除零 codegen guard [bugfix] [P3] [S] [judgment] [doing]
 
 > 2026-06-25 立项。LLVM `sdiv x, 0` = undefined behavior（exit 0 + garbage 而非 panic）。需 codegen 在 `sdiv`/`srem` 前插零检查。
 
