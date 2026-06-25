@@ -1683,7 +1683,7 @@ function v_expr(expr, mode, ctx) {
       break __ring_match30;
     }
     if (__ring_m30._tag === "TryCatch") {
-      const body = __ring_m30.body; const arms = __ring_m30.arms; const ty = __ring_m30.ty;
+      const body = __ring_m30.body; const arms = __ring_m30.arms; const ty = __ring_m30.ty; const span = __ring_m30.span;
       const snap0 = v_snapshot(ctx);
       v_cf_branch(body, mode, ctx);
       const snap_body = v_snapshot(ctx);
@@ -1705,6 +1705,14 @@ function v_expr(expr, mode, ctx) {
         }
         v_cf_branch(arm.body, mode, ctx);
         v_pop_frame(ctx);
+        const snap_arm = v_snapshot(ctx);
+        let ci = 0;
+        while (((ci < List_len(snap0)) ? (ci < List_len(snap_arm)) : false)) {
+          if (((__ring_index(snap0, ci) === S_LIVE) ? (__ring_index(snap_arm, ci) !== S_LIVE) : false)) {
+            v_report(ctx, "rc-imbalance", true, `catch arm drops/moves enclosing owned binding '${__ring_index(ctx.names, ci)}' — scope-end will double-free (#167 class)`, arm.span);
+          }
+          ci = (ci + 1);
+        }
       }
       v_restore(ctx, snap_body);
       if (v_type_excluded(ty, ctx.externs)) {

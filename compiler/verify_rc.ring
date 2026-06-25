@@ -749,11 +749,14 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
             v_cf_class(ty, results, mode, ctx)
         },
 
-        HExpr::TryCatch { body, arms, ty, .. } => {
+        HExpr::TryCatch { body, arms, ty, span, .. } => {
             // The try/catch value is never owned by its consumer (abort-path
             // aliasing — B-002; is_droppable_init excludes TryCatch).  Arms run
             // from an aborted mid-body state: approximate with the entry state
             // and discard their state effects.
+            // #167: after each arm, check that enclosing owned bindings were not
+            // dropped/moved — a catch arm that consumes an outer binding causes
+            // double-free (scope-end will drop it again).
             let snap0 = v_snapshot(ctx)
             v_cf_branch(body, mode, ctx)
             let snap_body = v_snapshot(ctx)
@@ -765,6 +768,16 @@ fn v_expr(expr: HExpr, mode: Int, mut ctx: VCtx) -> Int {
                 for bn in bnames { v_bind(ctx, bn, K_BORROW, arm.span) }
                 v_cf_branch(arm.body, mode, ctx)
                 v_pop_frame(ctx)
+                // #167: detect catch arm altering enclosing binding state
+                let snap_arm = v_snapshot(ctx)
+                let mut ci = 0
+                while ci < snap0.len() && ci < snap_arm.len() {
+                    if snap0[ci] == S_LIVE && snap_arm[ci] != S_LIVE {
+                        v_report(ctx, "rc-imbalance", true,
+                            "catch arm drops/moves enclosing owned binding '${ctx.names[ci]}' — scope-end will double-free (#167 class)", arm.span)
+                    }
+                    ci = ci + 1
+                }
             }
             v_restore(ctx, snap_body)
             if v_type_excluded(ty, ctx.externs) { CLS_EXCLUDED } else { CLS_OPAQUE }

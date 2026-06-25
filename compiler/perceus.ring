@@ -2419,14 +2419,26 @@ fn rc_expr(expr: HExpr, escape: Bool, owned: List<Str>, boxed: Set<Int>, externs
 // are ownership sinks, or it would mis-report escapes/leaks.)
 pub fn sink_arg_indices(callee: HExpr, arg_count: Int) -> List<Int> {
     match callee {
-        HExpr::FieldAccess { field, .. } => {
-            if field == "push" || field == "add" || field == "append" || field == "push_back" {
+        HExpr::FieldAccess { receiver, field, .. } => {
+            // #175: Set.insert/add and StringBuilder.add/append copy content
+            // rather than storing the RC pointer — their args are NOT ownership
+            // sinks.  Marking them as sinks causes the Clone-elevated RC to
+            // never be balanced → unbounded RC leak.
+            let recv_ty = hexpr_type(receiver)
+            let is_copy_receiver = match recv_ty {
+                Type::StructType { name, .. } =>
+                    name == "Set" || name == "StringBuilder",
+                _ => false,
+            }
+            if is_copy_receiver {
+                []
+            } else if field == "push" || field == "add" || field == "append" || field == "push_back" {
                 // single value argument at index 0
                 if arg_count >= 1 { [0] } else { [] }
             } else if field == "insert" {
-                // List.insert(idx, val) → value at 1; Set.insert(val) → value at 0;
-                // Map has set/insert(key,val) → value at 1.  Conservatively mark
-                // the LAST argument (the value) as the sink.
+                // List.insert(idx, val) → value at 1; Map has set/insert(key,val)
+                // → value at 1.  Conservatively mark the LAST argument (the value)
+                // as the sink.
                 if arg_count >= 1 { [arg_count - 1] } else { [] }
             } else if field == "set" {
                 // List.set(idx, val) / Map.set(key, val) → value is last arg.
