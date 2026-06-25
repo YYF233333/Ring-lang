@@ -306,7 +306,7 @@ class ExternFnInfo {
 }
 
 class LlvmCtx {
-  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, static_dict_defs, dict_singletons, trait_method_order, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params, effect_ops, default_evidence, derived_dict_builds, extern_types, extern_fn_infos) {
+  constructor(context, module, builder, target_machine, ptr_type, i64_type, i32_type, i8_type, i1_type, void_type, double_type, named_values, functions, fn_types, struct_types, enum_types, rt_fns, rt_fn_types, local_fn_effects, fn_evidence_params, dict_globals, static_dict_defs, dict_singletons, trait_method_order, trait_supertraits, module_prefix, imports_map, local_names, tmp_counter, lambda_counter, match_counter, current_fn, current_fn_name, loop_break_bb, loop_continue_bb, next_user_typeid, type_to_typeid, boxed_vars, fn_mut_params, effect_ops, default_evidence, derived_dict_builds, extern_types, extern_fn_infos) {
     this.context = context;
     this.module = module;
     this.builder = builder;
@@ -331,6 +331,7 @@ class LlvmCtx {
     this.static_dict_defs = static_dict_defs;
     this.dict_singletons = dict_singletons;
     this.trait_method_order = trait_method_order;
+    this.trait_supertraits = trait_supertraits;
     this.module_prefix = module_prefix;
     this.imports_map = imports_map;
     this.local_names = local_names;
