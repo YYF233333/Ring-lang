@@ -273,6 +273,26 @@ pub const RING_TYPEID_DICT_DYN: Int = 17
 //                     (emit_memoised_const_body).
 
 // ============================================================
+// LLVM comparison predicates
+// ============================================================
+
+// LLVMIntPredicate — integer comparison predicates for LLVMBuildICmp
+pub const LLVM_INT_EQ: Int  = 32  // LLVMIntEQ
+pub const LLVM_INT_NE: Int  = 33  // LLVMIntNE
+pub const LLVM_INT_SGT: Int = 38  // LLVMIntSGT (signed greater than)
+pub const LLVM_INT_SGE: Int = 39  // LLVMIntSGE (signed greater or equal)
+pub const LLVM_INT_SLT: Int = 40  // LLVMIntSLT (signed less than)
+pub const LLVM_INT_SLE: Int = 41  // LLVMIntSLE (signed less or equal)
+
+// LLVMRealPredicate — floating-point comparison predicates for LLVMBuildFCmp
+pub const LLVM_REAL_OEQ: Int = 1  // LLVMRealOEQ (ordered and equal)
+pub const LLVM_REAL_OGT: Int = 2  // LLVMRealOGT (ordered and greater than)
+pub const LLVM_REAL_OGE: Int = 3  // LLVMRealOGE (ordered and greater or equal)
+pub const LLVM_REAL_OLT: Int = 4  // LLVMRealOLT (ordered and less than)
+pub const LLVM_REAL_OLE: Int = 5  // LLVMRealOLE (ordered and less or equal)
+pub const LLVM_REAL_ONE: Int = 6  // LLVMRealONE (ordered and not equal)
+
+// ============================================================
 // LLVM name mangling
 // ============================================================
 

@@ -16,7 +16,9 @@ use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     llvm_resolve_fn, build_entry_alloca,
     get_or_assign_typeid, RING_TYPEID_CELL, RING_TYPEID_CLOSURE_ENV,
     RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN,
-    RING_TYPEID_CLOSURE, RING_TYPEID_TUPLE, RING_TYPEID_EVIDENCE}
+    RING_TYPEID_CLOSURE, RING_TYPEID_TUPLE, RING_TYPEID_EVIDENCE,
+    LLVM_INT_EQ, LLVM_INT_NE, LLVM_INT_SGT, LLVM_INT_SGE, LLVM_INT_SLT, LLVM_INT_SLE,
+    LLVM_REAL_OEQ, LLVM_REAL_OGT, LLVM_REAL_OGE, LLVM_REAL_OLT, LLVM_REAL_OLE, LLVM_REAL_ONE}
 use codegen_llvm_stmt::{emit_llvm_stmt}
 use codegen_ctx::{extract_effect_names}
 
@@ -256,7 +258,7 @@ fn gen_str_lit(mut ctx: LlvmCtx, value: Str) -> LLVMValueRef {
 // If divisor == 0, branches to a panic BB; otherwise falls through to cont BB.
 fn emit_divzero_guard(mut ctx: LlvmCtx, divisor: LLVMValueRef) {
     let zero = LLVMConstInt(ctx.i64_type, 0, 0)
-    let is_zero = LLVMBuildICmp(ctx.builder, 32, divisor, zero, fresh_name(ctx, "divzero"))
+    let is_zero = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, divisor, zero, fresh_name(ctx, "divzero"))
     let current_fn = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder))
     let panic_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "divzero.panic")
     let cont_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "divzero.cont")
@@ -755,11 +757,11 @@ fn gen_ord_dispatch_llvm(mut ctx: LlvmCtx, op: BinOp, left: HExpr, right: HExpr,
     discard(LLVMBuildCall2(ctx.builder, cmp_drop_ty, cmp_drop_fn, [cmp_result], ""))
     let zero = LLVMConstInt(ctx.i64_type, 0, 0)
     let pred = match op {
-        BinOp::Lt => 40,
-        BinOp::Lte => 41,
-        BinOp::Gt => 38,
-        BinOp::Gte => 39,
-        _ => 32,
+        BinOp::Lt => LLVM_INT_SLT,
+        BinOp::Lte => LLVM_INT_SLE,
+        BinOp::Gt => LLVM_INT_SGT,
+        BinOp::Gte => LLVM_INT_SGE,
+        _ => LLVM_INT_EQ,
     }
     let cmp = LLVMBuildICmp(ctx.builder, pred, raw, zero, fresh_name(ctx, "ocmp"))
     let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
@@ -796,34 +798,33 @@ fn gen_int_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValueR
             let result = LLVMBuildSRem(ctx.builder, lhs_raw, rhs_raw, fresh_name(ctx, "mod"))
             box_int(ctx, result)
         },
-        // Int comparisons: LLVMIntPredicate: 32=eq, 33=ne, 38=sgt, 39=sge, 40=slt, 41=sle
         BinOp::Eq => {
-            let cmp = LLVMBuildICmp(ctx.builder, 32, lhs_raw, rhs_raw, fresh_name(ctx, "eq"))
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, lhs_raw, rhs_raw, fresh_name(ctx, "eq"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Neq => {
-            let cmp = LLVMBuildICmp(ctx.builder, 33, lhs_raw, rhs_raw, fresh_name(ctx, "ne"))
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_NE, lhs_raw, rhs_raw, fresh_name(ctx, "ne"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Lt => {
-            let cmp = LLVMBuildICmp(ctx.builder, 40, lhs_raw, rhs_raw, fresh_name(ctx, "lt"))
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_SLT, lhs_raw, rhs_raw, fresh_name(ctx, "lt"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Lte => {
-            let cmp = LLVMBuildICmp(ctx.builder, 41, lhs_raw, rhs_raw, fresh_name(ctx, "le"))
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_SLE, lhs_raw, rhs_raw, fresh_name(ctx, "le"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Gt => {
-            let cmp = LLVMBuildICmp(ctx.builder, 38, lhs_raw, rhs_raw, fresh_name(ctx, "gt"))
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_SGT, lhs_raw, rhs_raw, fresh_name(ctx, "gt"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Gte => {
-            let cmp = LLVMBuildICmp(ctx.builder, 39, lhs_raw, rhs_raw, fresh_name(ctx, "ge"))
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_SGE, lhs_raw, rhs_raw, fresh_name(ctx, "ge"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
@@ -855,34 +856,33 @@ fn gen_float_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValu
             let result = LLVMBuildFDiv(ctx.builder, lhs_raw, rhs_raw, fresh_name(ctx, "fdiv"))
             box_float(ctx, result)
         },
-        // Float comparisons: LLVMRealPredicate: 1=oeq, 6=one, 2=ogt, 3=oge, 4=olt, 5=ole
         BinOp::Eq => {
-            let cmp = LLVMBuildFCmp(ctx.builder, 1, lhs_raw, rhs_raw, fresh_name(ctx, "feq"))
+            let cmp = LLVMBuildFCmp(ctx.builder, LLVM_REAL_OEQ, lhs_raw, rhs_raw, fresh_name(ctx, "feq"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Neq => {
-            let cmp = LLVMBuildFCmp(ctx.builder, 6, lhs_raw, rhs_raw, fresh_name(ctx, "fne"))
+            let cmp = LLVMBuildFCmp(ctx.builder, LLVM_REAL_ONE, lhs_raw, rhs_raw, fresh_name(ctx, "fne"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Lt => {
-            let cmp = LLVMBuildFCmp(ctx.builder, 4, lhs_raw, rhs_raw, fresh_name(ctx, "flt"))
+            let cmp = LLVMBuildFCmp(ctx.builder, LLVM_REAL_OLT, lhs_raw, rhs_raw, fresh_name(ctx, "flt"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Lte => {
-            let cmp = LLVMBuildFCmp(ctx.builder, 5, lhs_raw, rhs_raw, fresh_name(ctx, "fle"))
+            let cmp = LLVMBuildFCmp(ctx.builder, LLVM_REAL_OLE, lhs_raw, rhs_raw, fresh_name(ctx, "fle"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Gt => {
-            let cmp = LLVMBuildFCmp(ctx.builder, 2, lhs_raw, rhs_raw, fresh_name(ctx, "fgt"))
+            let cmp = LLVMBuildFCmp(ctx.builder, LLVM_REAL_OGT, lhs_raw, rhs_raw, fresh_name(ctx, "fgt"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Gte => {
-            let cmp = LLVMBuildFCmp(ctx.builder, 3, lhs_raw, rhs_raw, fresh_name(ctx, "fge"))
+            let cmp = LLVMBuildFCmp(ctx.builder, LLVM_REAL_OGE, lhs_raw, rhs_raw, fresh_name(ctx, "fge"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
@@ -952,12 +952,12 @@ fn gen_bool_binop(mut ctx: LlvmCtx, op: BinOp, lhs: LLVMValueRef, rhs: LLVMValue
 
     match op {
         BinOp::Eq => {
-            let cmp = LLVMBuildICmp(ctx.builder, 32, lhs_raw, rhs_raw, fresh_name(ctx, "beq"))
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, lhs_raw, rhs_raw, fresh_name(ctx, "beq"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
         BinOp::Neq => {
-            let cmp = LLVMBuildICmp(ctx.builder, 33, lhs_raw, rhs_raw, fresh_name(ctx, "bne"))
+            let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_NE, lhs_raw, rhs_raw, fresh_name(ctx, "bne"))
             let ext = LLVMBuildZExt(ctx.builder, cmp, ctx.i64_type, fresh_name(ctx, "ext"))
             box_bool(ctx, ext)
         },
@@ -1324,7 +1324,7 @@ pub fn emit_memoised_dict_getter(mut ctx: LlvmCtx, name: Str, build_fn: LLVMValu
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
     let cached = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "dc"))
     // 32 = LLVMIntEQ
-    let isnull = LLVMBuildICmp(ctx.builder, 32, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "dn"))
+    let isnull = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "dn"))
     discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb))
 
     LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
@@ -1372,7 +1372,7 @@ pub fn emit_memoised_const_body(mut ctx: LlvmCtx, fn_val: LLVMValueRef, mangled:
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
     let cached = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "cc"))
     // 32 = LLVMIntEQ
-    let isnull = LLVMBuildICmp(ctx.builder, 32, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "cn"))
+    let isnull = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "cn"))
     discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb))
 
     LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
@@ -1432,7 +1432,7 @@ fn get_or_create_static_dict_getter(mut ctx: LlvmCtx, name: Str) -> LLVMValueRef
     LLVMPositionBuilderAtEnd(ctx.builder, entry)
     let cached = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, g, fresh_name(ctx, "dc"))
     // 32 = LLVMIntEQ
-    let isnull = LLVMBuildICmp(ctx.builder, 32, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "dn"))
+    let isnull = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, cached, LLVMConstPointerNull(ctx.ptr_type), fresh_name(ctx, "dn"))
     discard(LLVMBuildCondBr(ctx.builder, isnull, build_bb, done_bb))
 
     LLVMPositionBuilderAtEnd(ctx.builder, build_bb)
@@ -2020,7 +2020,7 @@ fn gen_extern_LLVMGetTargetFromTriple(mut ctx: LlvmCtx, arg_vals: List<LLVMValue
 
     // Check result — if non-zero, panic with error message (mirrors addon which throws on error).
     let zero_i32 = LLVMConstInt(ctx.i32_type, 0, 0)
-    let is_err = LLVMBuildICmp(ctx.builder, 33, result, zero_i32, fresh_name(ctx, "gtt_err"))  // 33 = LLVMIntNE
+    let is_err = LLVMBuildICmp(ctx.builder, LLVM_INT_NE, result, zero_i32, fresh_name(ctx, "gtt_err"))
     let current_fn = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder))
     let panic_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "gtt.panic")
     let cont_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "gtt.cont")
@@ -2114,7 +2114,7 @@ fn gen_extern_LLVMRunPasses(mut ctx: LlvmCtx, arg_vals: List<LLVMValueRef>, info
     // Compare err_ptr != null
     let null_ptr = LLVMConstPointerNull(ctx.ptr_type)
     // 33 = LLVMIntNE
-    let is_err = LLVMBuildICmp(ctx.builder, 33, err_ptr, null_ptr, fresh_name(ctx, "iserr"))
+    let is_err = LLVMBuildICmp(ctx.builder, LLVM_INT_NE, err_ptr, null_ptr, fresh_name(ctx, "iserr"))
     let result = LLVMBuildZExt(ctx.builder, is_err, ctx.i64_type, fresh_name(ctx, "rperr"))
     box_int(ctx, result)
 }
@@ -3627,7 +3627,7 @@ fn check_nested_ctor_tags(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern, fai
                         let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, val, 0, fresh_name(ctx, "ntp"))
                         let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "ntag"))
                         let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                        let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "ntc"))
+                        let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected, fresh_name(ctx, "ntc"))
                         let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "nested.tag.pass")
                         discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, fail_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
@@ -3656,7 +3656,7 @@ fn check_nested_ctor_tags(mut ctx: LlvmCtx, val: LLVMValueRef, pat: Pattern, fai
                         let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, val, 0, fresh_name(ctx, "ntp"))
                         let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "ntag"))
                         let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                        let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "ntc"))
+                        let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected, fresh_name(ctx, "ntc"))
                         let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "nested.tag.pass")
                         discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, fail_bb))
                         LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
@@ -3963,7 +3963,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                                                         let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, elem_val, 0, fresh_name(ctx, "tp"))
                                                         let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tv"))
                                                         let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                                                        let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "tc"))
+                                                        let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected, fresh_name(ctx, "tc"))
                                                         let pass_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tuple.check")
                                                         discard(LLVMBuildCondBr(ctx.builder, cmp, pass_bb, next_bb))
                                                         LLVMPositionBuilderAtEnd(ctx.builder, pass_bb)
@@ -4078,7 +4078,7 @@ fn gen_ctor_tag_test(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qual
                 let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, 0, fresh_name(ctx, "tp"))
                 let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tag"))
                 let expected = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                let cmp = LLVMBuildICmp(ctx.builder, 32, tag_val, expected, fresh_name(ctx, "tc"))
+                let cmp = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected, fresh_name(ctx, "tc"))
                 discard(LLVMBuildCondBr(ctx.builder, cmp, match_bb, miss_bb))
             },
             none => { discard(LLVMBuildBr(ctx.builder, match_bb)) },
@@ -4315,13 +4315,13 @@ fn gen_literal_pattern_cond(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty:
             // B-080: inline untag
             let raw = unbox_int(ctx, scrut_val)
             let lit = LLVMConstInt(ctx.i64_type, n, 1)
-            LLVMBuildICmp(ctx.builder, 32, raw, lit, fresh_name(ctx, "eq"))
+            LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, raw, lit, fresh_name(ctx, "eq"))
         },
         LiteralValue::BoolVal(b) => {
             // B-080: inline untag
             let raw = unbox_int(ctx, scrut_val)
             let lit = if b { LLVMConstInt(ctx.i64_type, 1, 0) } else { LLVMConstInt(ctx.i64_type, 0, 0) }
-            LLVMBuildICmp(ctx.builder, 32, raw, lit, fresh_name(ctx, "eq"))
+            LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, raw, lit, fresh_name(ctx, "eq"))
         },
         LiteralValue::StrVal(s) => {
             let lit_str = gen_str_lit(ctx, s)
@@ -4339,7 +4339,7 @@ fn gen_literal_pattern_cond(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty:
             let unbox_ty = get_rt_fn_type(ctx, "ring_unbox_float")
             let raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [scrut_val], fresh_name(ctx, "uf"))
             let lit = LLVMConstReal(ctx.double_type, f)
-            LLVMBuildFCmp(ctx.builder, 1, raw, lit, fresh_name(ctx, "feq"))
+            LLVMBuildFCmp(ctx.builder, LLVM_REAL_OEQ, raw, lit, fresh_name(ctx, "feq"))
         },
     }
 }
@@ -5201,7 +5201,7 @@ fn gen_try_catch(mut ctx: LlvmCtx, body: HExpr, arms: List<HMatchArm>) -> LLVMVa
 
     // cond = (sjresult == 0)
     let zero = LLVMConstInt(ctx.i32_type, 0, 0)
-    let cond = LLVMBuildICmp(ctx.builder, 32, sjresult, zero, fresh_name(ctx, "sjcmp"))
+    let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, sjresult, zero, fresh_name(ctx, "sjcmp"))
 
     let normal_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.normal")
     let catch_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "try.catch")
@@ -5652,7 +5652,7 @@ fn gen_handle_expr(mut ctx: LlvmCtx, body: HExpr, handlers: List<HEffectHandler>
         let sjresult = LLVMBuildCall2(ctx.builder, sj.1, sj.0, [buf_ptr, fp], fresh_name(ctx, "sj"))
 
         let zero = LLVMConstInt(ctx.i32_type, 0, 0)
-        let cond = LLVMBuildICmp(ctx.builder, 32, sjresult, zero, fresh_name(ctx, "sjcmp"))
+        let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, sjresult, zero, fresh_name(ctx, "sjcmp"))
 
         let normal_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "hdl.normal")
         let catch_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "hdl.catch")

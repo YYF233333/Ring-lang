@@ -2,7 +2,8 @@ use types::{Type, BUILTIN_RANGE}
 use ast::{Pattern, LiteralValue, NamedPatternField}
 use hir::{HExpr, HStmt, HLetDestructureBinding, HForInDestructure, hexpr_type,
     is_fresh_owned_bool_value}
-use codegen_llvm_ctx::{LlvmCtx, HandleCleanup, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca}
+use codegen_llvm_ctx::{LlvmCtx, HandleCleanup, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, build_entry_alloca,
+    LLVM_INT_EQ, LLVM_INT_SLT, LLVM_INT_SLE}
 
 // Re-declare LLVM types and functions to avoid ESM import issues
 extern type LLVMTypeRef
@@ -391,8 +392,7 @@ fn emit_for_in_range_direct(mut ctx: LlvmCtx, binding: Str, start: HExpr, end: H
     // Condition: i < end (or i <= end if inclusive)
     LLVMPositionBuilderAtEnd(ctx.builder, cond_bb)
     let current_i = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
-    // 40 = slt, 41 = sle
-    let predicate = if inclusive { 41 } else { 40 }
+    let predicate = if inclusive { LLVM_INT_SLE } else { LLVM_INT_SLT }
     let cond = LLVMBuildICmp(ctx.builder, predicate, current_i, end_raw, fresh_name(ctx, "cmp"))
     discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb))
 
@@ -477,7 +477,7 @@ fn emit_for_in_range_var(mut ctx: LlvmCtx, binding: Str, iterable: HExpr, body: 
     LLVMPositionBuilderAtEnd(ctx.builder, cond_bb)
     let current_i = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
     // 41 = sle
-    let cond = LLVMBuildICmp(ctx.builder, 41, current_i, end_bound, fresh_name(ctx, "cmp"))
+    let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_SLE, current_i, end_bound, fresh_name(ctx, "cmp"))
     discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb))
 
     let saved_break = ctx.loop_break_bb
@@ -581,7 +581,7 @@ fn emit_for_in_list(mut ctx: LlvmCtx, binding: Str, destructure: List<HForInDest
     // Condition: idx < len
     LLVMPositionBuilderAtEnd(ctx.builder, cond_bb)
     let current_idx = LLVMBuildLoad2(ctx.builder, ctx.i64_type, counter_alloca, fresh_name(ctx, "ci"))
-    let cond = LLVMBuildICmp(ctx.builder, 40, current_idx, list_len, fresh_name(ctx, "cmp"))
+    let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_SLT, current_idx, list_len, fresh_name(ctx, "cmp"))
     discard(LLVMBuildCondBr(ctx.builder, cond, body_bb, merge_bb))
 
     // Save and set loop context
@@ -747,7 +747,7 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
                             let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, 0, fresh_name(ctx, "tp"))
                             let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tag"))
                             let expected_tag = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                            let cond = LLVMBuildICmp(ctx.builder, 32, tag_val, expected_tag, fresh_name(ctx, "eq"))
+                            let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected_tag, fresh_name(ctx, "eq"))
                             discard(LLVMBuildCondBr(ctx.builder, cond, then_bb, else_bb))
 
                             // Then: bind fields
@@ -820,7 +820,7 @@ fn emit_if_let(mut ctx: LlvmCtx, pattern: Pattern, expr: HExpr, then_block: HExp
                             let tag_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, 0, fresh_name(ctx, "tp"))
                             let tag_val = LLVMBuildLoad2(ctx.builder, ctx.i64_type, tag_ptr, fresh_name(ctx, "tag"))
                             let expected_tag = LLVMConstInt(ctx.i64_type, vi.tag, 0)
-                            let cond = LLVMBuildICmp(ctx.builder, 32, tag_val, expected_tag, fresh_name(ctx, "eq"))
+                            let cond = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_val, expected_tag, fresh_name(ctx, "eq"))
                             discard(LLVMBuildCondBr(ctx.builder, cond, then_bb, else_bb))
 
                             // Then: bind named fields by name

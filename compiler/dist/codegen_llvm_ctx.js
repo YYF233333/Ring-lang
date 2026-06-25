@@ -376,6 +376,30 @@ const RING_TYPEID_DICT_STATIC = 16;
 
 const RING_TYPEID_DICT_DYN = 17;
 
+const LLVM_INT_EQ = 32;
+
+const LLVM_INT_NE = 33;
+
+const LLVM_INT_SGT = 38;
+
+const LLVM_INT_SGE = 39;
+
+const LLVM_INT_SLT = 40;
+
+const LLVM_INT_SLE = 41;
+
+const LLVM_REAL_OEQ = 1;
+
+const LLVM_REAL_OGT = 2;
+
+const LLVM_REAL_OGE = 3;
+
+const LLVM_REAL_OLT = 4;
+
+const LLVM_REAL_OLE = 5;
+
+const LLVM_REAL_ONE = 6;
+
 function build_entry_alloca(ctx, ty, name) {
   const current_bb = LLVMGetInsertBlock(ctx.builder);
   const fn_val = LLVMGetBasicBlockParent(current_bb);
@@ -654,4 +678,4 @@ function __Result_Debug_debug(self, __ring_T_Debug, __ring_E_Debug) {
 const __Result_Debug = { debug: __Result_Debug_debug };
 
 
-export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr, ExternFnInfo, HandleCleanup, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE, RING_TYPEID_TUPLE, RING_TYPEID_EVIDENCE, RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, build_entry_alloca, __ExternParamMarshall_Eq, __ExternRetMarshall_Eq, __EnumVariantInfo_Clone, __ExternParamMarshall_Clone, __ExternRetMarshall_Clone, __ExternParamMarshall_Ord, __ExternRetMarshall_Ord, __EnumVariantInfo_Debug, __ExternParamMarshall_Debug, __ExternRetMarshall_Debug };
+export { StructFieldInfo, EnumVariantInfo, EnumTypeInfo, ExternParamMarshall_PassthroughPtr, ExternParamMarshall_StrToCstr, ExternParamMarshall_StrToCstrAndLen, ExternParamMarshall_IntToI32, ExternParamMarshall_IntToI64, ExternParamMarshall_FloatToDouble, ExternParamMarshall_ListToDataAndCount, ExternParamMarshall_ListToDataAndCountI64, ExternRetMarshall_RetPtr, ExternRetMarshall_RetVoid, ExternRetMarshall_RetIntToBoxed, ExternRetMarshall_RetStrFromCstr, ExternFnInfo, HandleCleanup, LlvmCtx, RING_TYPEID_CELL, RING_TYPEID_CLOSURE, RING_TYPEID_TUPLE, RING_TYPEID_EVIDENCE, RING_TYPEID_CLOSURE_ENV, RING_TYPEID_DICT_STATIC, RING_TYPEID_DICT_DYN, LLVM_INT_EQ, LLVM_INT_NE, LLVM_INT_SGT, LLVM_INT_SGE, LLVM_INT_SLT, LLVM_INT_SLE, LLVM_REAL_OEQ, LLVM_REAL_OGT, LLVM_REAL_OGE, LLVM_REAL_OLT, LLVM_REAL_OLE, LLVM_REAL_ONE, llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method, llvm_resolve_fn, llvm_resolve_method, fresh_name, get_or_declare_runtime_fn, get_rt_fn_type, get_or_assign_typeid, build_entry_alloca, __ExternParamMarshall_Eq, __ExternRetMarshall_Eq, __EnumVariantInfo_Clone, __ExternParamMarshall_Clone, __ExternRetMarshall_Clone, __ExternParamMarshall_Ord, __ExternRetMarshall_Ord, __EnumVariantInfo_Debug, __ExternParamMarshall_Debug, __ExternRetMarshall_Debug };

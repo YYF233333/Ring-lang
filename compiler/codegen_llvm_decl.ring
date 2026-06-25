@@ -9,7 +9,9 @@ use hir::{HExpr, HStmt, HDecl, HParam, HStructField, HEnumVariant,
 use codegen_llvm_ctx::{LlvmCtx, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
     fresh_name, get_or_declare_runtime_fn, get_rt_fn_type,
     llvm_mangle_fn, llvm_mangle_fn_with_prefix, llvm_mangle_method,
-    get_or_assign_typeid, RING_TYPEID_DICT_STATIC, RING_TYPEID_CLOSURE}
+    get_or_assign_typeid, RING_TYPEID_DICT_STATIC, RING_TYPEID_CLOSURE,
+    LLVM_INT_EQ, LLVM_INT_NE, LLVM_INT_SGT, LLVM_INT_SGE, LLVM_INT_SLT, LLVM_INT_SLE,
+    LLVM_REAL_OEQ, LLVM_REAL_OGT, LLVM_REAL_OLT}
 use codegen_llvm_expr::{gen_llvm_expr, emit_memoised_dict_getter, emit_memoised_const_body,
     box_bool, unbox_int, box_int, get_or_create_dict_global, resolve_static_dict_by_name}
 use codegen_ctx::{extract_effect_names}
@@ -1266,7 +1268,7 @@ fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVaria
     }
     let (self_tag, other_tag) = load_enum_tags(ctx, self_val, other_val)
 
-    let tags_eq = LLVMBuildICmp(ctx.builder, 32, self_tag, other_tag, fresh_name(ctx, "teq"))
+    let tags_eq = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, self_tag, other_tag, fresh_name(ctx, "teq"))
 
     // Check if any variant has fields that need comparing
     let mut any_fields = false
@@ -1276,12 +1278,12 @@ fn emit_enum_eq_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVaria
 
     if !any_fields {
         // All variants are field-less — tag comparison is sufficient
-        let result = LLVMBuildICmp(ctx.builder, 32, self_tag, other_tag, fresh_name(ctx, "eq"))
+        let result = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, self_tag, other_tag, fresh_name(ctx, "eq"))
         // Convert i1 to i64 for box_bool
         let ext = LLVMBuildSub(ctx.builder, LLVMConstInt(ctx.i64_type, 0, 0), LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "z"))
         let _ = ext  // unused
         // Tags are i64, box the comparison result
-        let tags_equal = LLVMBuildICmp(ctx.builder, 32, self_tag, other_tag, fresh_name(ctx, "te"))
+        let tags_equal = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, self_tag, other_tag, fresh_name(ctx, "te"))
         // Convert i1 to i64: zext
         let as_i64 = LLVMBuildSub(ctx.builder, LLVMConstInt(ctx.i64_type, 1, 0), LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "one"))
         // We need to select: if tags_equal then 1 else 0
@@ -1454,7 +1456,7 @@ fn emit_field_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, act
             // Bool is tagged (like Int). Raw ptrtoint compare is correct.
             let lhs_int = llvm_ptrtoint(ctx, lhs)
             let rhs_int = llvm_ptrtoint(ctx, rhs)
-            LLVMBuildICmp(ctx.builder, 32, lhs_int, rhs_int, fresh_name(ctx, "beq"))
+            LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, lhs_int, rhs_int, fresh_name(ctx, "beq"))
         },
         FieldAction::Call { dict_name, extra_dicts } => {
             // Call the dict's eq method on the two values.
@@ -1468,7 +1470,7 @@ fn emit_field_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, act
         },
         FieldAction::FnLiteral => {
             // Functions can't be compared — always true (shouldn't happen for Eq)
-            LLVMBuildICmp(ctx.builder, 32,
+            LLVMBuildICmp(ctx.builder, LLVM_INT_EQ,
                 LLVMConstInt(ctx.i64_type, 0, 0),
                 LLVMConstInt(ctx.i64_type, 0, 0),
                 fresh_name(ctx, "ftrue"))
@@ -1493,7 +1495,7 @@ fn emit_identity_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) 
     let lhs_tag = llvm_and(ctx, lhs_int, one)
 
     // 32 = LLVMIntEQ
-    let is_tagged = LLVMBuildICmp(ctx.builder, 32, lhs_tag, one, fresh_name(ctx, "tag"))
+    let is_tagged = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, lhs_tag, one, fresh_name(ctx, "tag"))
 
     let tagged_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "eq.tagged")
     let heap_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "eq.heap")
@@ -1503,7 +1505,7 @@ fn emit_identity_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) 
 
     // Tagged path: raw ptrtoint compare (correct for Int and Bool)
     LLVMPositionBuilderAtEnd(ctx.builder, tagged_bb)
-    let tagged_eq = LLVMBuildICmp(ctx.builder, 32, lhs_int, rhs_int, fresh_name(ctx, "teq"))
+    let tagged_eq = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, lhs_int, rhs_int, fresh_name(ctx, "teq"))
     let tagged_end = LLVMGetInsertBlock(ctx.builder)
     discard(LLVMBuildBr(ctx.builder, merge_bb))
 
@@ -1514,7 +1516,7 @@ fn emit_identity_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) 
     let eq_ty = get_rt_fn_type(ctx, "ring_str_eq")
     let heap_result = LLVMBuildCall2(ctx.builder, eq_ty, eq_fn, [lhs, rhs], fresh_name(ctx, "heq"))
     // ring_str_eq returns i64 (1 or 0), convert to i1: result != 0
-    let heap_eq = LLVMBuildICmp(ctx.builder, 33, heap_result, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "hne"))
+    let heap_eq = LLVMBuildICmp(ctx.builder, LLVM_INT_NE, heap_result, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "hne"))
     let heap_end = LLVMGetInsertBlock(ctx.builder)
     discard(LLVMBuildBr(ctx.builder, merge_bb))
 
@@ -1532,7 +1534,7 @@ fn emit_float_identity_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValu
     let lhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [lhs], fresh_name(ctx, "lf"))
     let rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], fresh_name(ctx, "rf"))
     // 1 = LLVMRealOEQ (ordered and equal)
-    LLVMBuildFCmp(ctx.builder, 1, lhs_raw, rhs_raw, fresh_name(ctx, "feq"))
+    LLVMBuildFCmp(ctx.builder, LLVM_REAL_OEQ, lhs_raw, rhs_raw, fresh_name(ctx, "feq"))
 }
 
 // Dict-dispatched eq: resolve the dict, call its eq closure.
@@ -1568,14 +1570,14 @@ fn emit_dict_eq_call(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, dic
     // Unbox the Bool result to i1
     let raw = unbox_int(ctx, result)
     // 33 = LLVMIntNE — raw != 0
-    LLVMBuildICmp(ctx.builder, 33, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "di1"))
+    LLVMBuildICmp(ctx.builder, LLVM_INT_NE, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "di1"))
 }
 
 // Tuple eq: compare each element using ring_list_get.
 fn emit_tuple_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, element_actions: List<FieldAction>) -> LLVMValueRef {
     if element_actions.len() == 0 {
         // Empty tuple — always equal
-        return LLVMBuildICmp(ctx.builder, 32,
+        return LLVMBuildICmp(ctx.builder, LLVM_INT_EQ,
             LLVMConstInt(ctx.i64_type, 0, 0),
             LLVMConstInt(ctx.i64_type, 0, 0),
             fresh_name(ctx, "ttrue"))
@@ -1621,8 +1623,8 @@ fn emit_tuple_eq_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, ele
 
     LLVMPositionBuilderAtEnd(ctx.builder, merge_bb)
     let phi = LLVMBuildPhi(ctx.builder, ctx.i1_type, fresh_name(ctx, "teq"))
-    let true_i1 = LLVMBuildICmp(ctx.builder, 32, LLVMConstInt(ctx.i64_type, 0, 0), LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "t"))
-    let false_i1 = LLVMBuildICmp(ctx.builder, 33, LLVMConstInt(ctx.i64_type, 0, 0), LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "f"))
+    let true_i1 = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, LLVMConstInt(ctx.i64_type, 0, 0), LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "t"))
+    let false_i1 = LLVMBuildICmp(ctx.builder, LLVM_INT_NE, LLVMConstInt(ctx.i64_type, 0, 0), LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "f"))
     LLVMAddIncoming(phi, [true_i1, false_i1], [true_end, false_end])
     phi
 }
@@ -1768,7 +1770,7 @@ fn emit_struct_cmp_fn(mut ctx: LlvmCtx, type_name: Str, fields: List<DerivedFiel
         if fi < fields.len() - 1 {
             // Not the last field: check if result is non-zero, if so return it
             let raw = unbox_int(ctx, cmp_val)
-            let is_zero = LLVMBuildICmp(ctx.builder, 32, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
+            let is_zero = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
             let ret_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "ret.nz.${fi}")
             let next_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "cmp.${fi + 1}")
             discard(LLVMBuildCondBr(ctx.builder, is_zero, next_bb, ret_bb))
@@ -1812,7 +1814,7 @@ fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVari
     let (self_tag, other_tag) = load_enum_tags(ctx, self_val, other_val)
 
     // Compare tags
-    let tags_eq = LLVMBuildICmp(ctx.builder, 32, self_tag, other_tag, fresh_name(ctx, "teq"))
+    let tags_eq = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, self_tag, other_tag, fresh_name(ctx, "teq"))
 
     let tags_diff_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tags.diff")
     let tags_same_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tags.same")
@@ -1822,7 +1824,7 @@ fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVari
     // Tags differ: return tag comparison result (-1 or 1)
     LLVMPositionBuilderAtEnd(ctx.builder, tags_diff_bb)
     // 40 = LLVMIntSLT (signed less-than)
-    let self_lt = LLVMBuildICmp(ctx.builder, 40, self_tag, other_tag, fresh_name(ctx, "slt"))
+    let self_lt = LLVMBuildICmp(ctx.builder, LLVM_INT_SLT, self_tag, other_tag, fresh_name(ctx, "slt"))
     let lt_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tag.lt")
     let gt_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tag.gt")
     let tag_merge = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "tag.merge")
@@ -1882,7 +1884,7 @@ fn emit_enum_cmp_fn(mut ctx: LlvmCtx, type_name: Str, variants: List<DerivedVari
                 if fi < variant.fields.len() - 1 {
                     // Not the last field: if non-zero, return it
                     let raw = unbox_int(ctx, cmp_val)
-                    let is_zero = LLVMBuildICmp(ctx.builder, 32, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
+                    let is_zero = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
                     let ret_nz_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "cmp.v.${variant.name}.ret.${fi}")
                     let next_bb = LLVMAppendBasicBlockInContext(ctx.context, fn_val, "cmp.v.${variant.name}.f${fi + 1}")
                     discard(LLVMBuildCondBr(ctx.builder, is_zero, next_bb, ret_nz_bb))
@@ -1947,9 +1949,9 @@ fn emit_float_identity_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRe
     let rhs_raw = LLVMBuildCall2(ctx.builder, unbox_ty, unbox_fn, [rhs], fresh_name(ctx, "rf"))
 
     // 4 = LLVMRealOLT (ordered less-than)
-    let is_lt = LLVMBuildFCmp(ctx.builder, 4, lhs_raw, rhs_raw, fresh_name(ctx, "flt"))
+    let is_lt = LLVMBuildFCmp(ctx.builder, LLVM_REAL_OLT, lhs_raw, rhs_raw, fresh_name(ctx, "flt"))
     // 2 = LLVMRealOGT (ordered greater-than)
-    let is_gt = LLVMBuildFCmp(ctx.builder, 2, lhs_raw, rhs_raw, fresh_name(ctx, "fgt"))
+    let is_gt = LLVMBuildFCmp(ctx.builder, LLVM_REAL_OGT, lhs_raw, rhs_raw, fresh_name(ctx, "fgt"))
 
     let lt_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.lt")
     let gt_check_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "fcmp.gtchk")
@@ -1998,7 +2000,7 @@ fn emit_identity_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> 
     let rhs_int = llvm_ptrtoint(ctx, rhs)
     let one = LLVMConstInt(ctx.i64_type, 1, 0)
     let lhs_tag = llvm_and(ctx, lhs_int, one)
-    let is_tagged = LLVMBuildICmp(ctx.builder, 32, lhs_tag, one, fresh_name(ctx, "tag"))
+    let is_tagged = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, lhs_tag, one, fresh_name(ctx, "tag"))
 
     let tagged_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "cmp.tagged")
     let heap_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "cmp.heap")
@@ -2011,8 +2013,8 @@ fn emit_identity_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef) -> 
     let lhs_unboxed = LLVMBuildAShr(ctx.builder, lhs_int, one, fresh_name(ctx, "lu"))
     let rhs_unboxed = LLVMBuildAShr(ctx.builder, rhs_int, one, fresh_name(ctx, "ru"))
     // lt = lhs < rhs (signed)
-    let is_lt = LLVMBuildICmp(ctx.builder, 40, lhs_unboxed, rhs_unboxed, fresh_name(ctx, "lt"))
-    let is_gt = LLVMBuildICmp(ctx.builder, 38, lhs_unboxed, rhs_unboxed, fresh_name(ctx, "gt"))
+    let is_lt = LLVMBuildICmp(ctx.builder, LLVM_INT_SLT, lhs_unboxed, rhs_unboxed, fresh_name(ctx, "lt"))
+    let is_gt = LLVMBuildICmp(ctx.builder, LLVM_INT_SGT, lhs_unboxed, rhs_unboxed, fresh_name(ctx, "gt"))
     // Branch: lt -> -1, gt -> 1, else -> 0
     let t_lt_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "t.lt")
     let t_gt_check_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "t.gtchk")
@@ -2131,7 +2133,7 @@ fn emit_tuple_cmp(mut ctx: LlvmCtx, lhs: LLVMValueRef, rhs: LLVMValueRef, elemen
 
         if i < element_actions.len() - 1 {
             let raw = unbox_int(ctx, cmp_val)
-            let is_zero = LLVMBuildICmp(ctx.builder, 32, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
+            let is_zero = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, raw, LLVMConstInt(ctx.i64_type, 0, 0), fresh_name(ctx, "iz"))
             let next_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "tc.next.${i}")
             // Non-zero → exit early; zero → continue to next element
             discard(LLVMBuildCondBr(ctx.builder, is_zero, next_bb, exit_bb))
@@ -2489,7 +2491,7 @@ fn emit_identity_to_debug_str(mut ctx: LlvmCtx, val: LLVMValueRef) -> LLVMValueR
     let val_int = llvm_ptrtoint(ctx, val)
     let one = LLVMConstInt(ctx.i64_type, 1, 0)
     let tag_bit = llvm_and(ctx, val_int, one)
-    let is_tagged = LLVMBuildICmp(ctx.builder, 32, tag_bit, one, fresh_name(ctx, "tag"))
+    let is_tagged = LLVMBuildICmp(ctx.builder, LLVM_INT_EQ, tag_bit, one, fresh_name(ctx, "tag"))
 
     let tagged_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "dbg.tagged")
     let heap_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "dbg.heap")
