@@ -18,31 +18,6 @@
 ## LLVM Codegen
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-### #206 LLVM comparison predicate 魔法数字未命名 [low] [mechanical] [doing]
-
-`codegen_llvm_expr.ring` 和 `codegen_llvm_decl.ring` 中 LLVM 整数比较谓词 `32`(LLVMIntEQ)、`33`(LLVMIntNE) 等作为裸数字出现 15+ 处。浮点比较谓词 `1`(LLVMRealOEQ)、`4`(LLVMRealOLT) 等同理。
-
-**修复**：定义命名常量 `LLVM_INT_EQ = 32`、`LLVM_INT_NE = 33`、`LLVM_REAL_OEQ = 1` 等。
-
-发现者：DS（独立发现）
-
-
 ### #29 Runtime 耦合 Node.js ESM（createRequire）[low] [judgment] [open]
 
 可移植性问题。
@@ -68,13 +43,6 @@
 
 
 
-### #202 codegen_llvm_expr pattern binding 代码 8 处重复 [low] [judgment] [doing]
-
-`codegen_llvm_expr.ring` 中 "GEP into enum struct, load field, store to alloca, insert into named_values" 模式在 match（3342-3474）、if-let（3796-3870）、try-catch（4079-4220, 5344-5429）间 copy-paste ~8 次，每次独立处理 Constructor、NamedConstructor、嵌套 pattern。
-
-**修复**：提取 `bind_pattern_to_enum_fields(ctx, enum_info, data_ptr, pattern)` helper。
-
-发现者：Opus（LLVM 审计）
 
 ---
 

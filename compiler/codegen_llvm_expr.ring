@@ -3354,39 +3354,17 @@ fn gen_match_expr(mut ctx: LlvmCtx, scrutinee: HExpr, arms: List<HMatchArm>, res
 
 fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef, enum_name: Str, enum_info: EnumTypeInfo, switch_val: LLVMValueRef, merge_bb: LLVMBasicBlockRef, default_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef, mut phi_vals: List<LLVMValueRef>, mut phi_bbs: List<LLVMBasicBlockRef>) {
     match arm.pattern {
-        Pattern::Constructor { name, fields, .. } => {
+        Pattern::Constructor { name, qualifier, fields, .. } => {
             match enum_info.variants.get(name) {
                 some(vi) => {
                     let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.arm.${name}")
                     LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, vi.tag, 0), arm_bb)
 
                     LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-                    // Bind pattern variables: fields at index 1, 2, ... in enum struct
-                    for i in 0..fields.len() {
-                        match fields.get(i) {
-                            some(field_pat) => {
-                                match field_pat {
-                                    Pattern::Binding { name: bname, .. } => {
-                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
-                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
-                                        let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
-                                        discard(LLVMBuildStore(ctx.builder, field_val, alloca))
-                                        ctx.named_values.insert(bname, alloca)
-                                    },
-                                    Pattern::Wildcard { .. } => {},
-                                    _ => {
-                                        // For nested patterns, extract field, check nested ctor tags, then bind
-                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, i + 1, fresh_name(ctx, "ef"))
-                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
-                                        // Check nested constructor tags before binding (mirrors if-else path)
-                                        check_nested_ctor_tags(ctx, field_val, field_pat, default_bb, current_fn)
-                                        bind_nested_pattern(ctx, field_val, field_pat)
-                                    },
-                                }
-                            },
-                            none => {},
-                        }
-                    }
+                    // Phase 1: check nested constructor tags before binding
+                    check_positional_fields_nested_tags(ctx, scrut_val, enum_info, fields, default_bb, current_fn)
+                    // Phase 2: bind pattern variables (reuse if-else path helper)
+                    bind_constructor_fields(ctx, scrut_val, name, qualifier, fields)
 
                     let body_val = gen_llvm_expr(ctx, arm.body)
                     let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
@@ -3397,45 +3375,17 @@ fn gen_match_arm_enum(mut ctx: LlvmCtx, arm: HMatchArm, scrut_val: LLVMValueRef,
                 none => {},
             }
         },
-        Pattern::NamedConstructor { name, fields: named_fields, .. } => {
+        Pattern::NamedConstructor { name, qualifier, fields: named_fields, .. } => {
             match enum_info.variants.get(name) {
                 some(vi) => {
                     let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "match.arm.${name}")
                     LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, vi.tag, 0), arm_bb)
 
                     LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-                    // Named constructor fields: bind by field name
-                    // Look up each pattern field's position in the variant's declared field list
-                    for i in 0..named_fields.len() {
-                        match named_fields.get(i) {
-                            some(nf) => {
-                                let mut field_idx = i
-                                for fi in 0..vi.field_names.len() {
-                                    if vi.field_names[fi] == nf.name {
-                                        field_idx = fi
-                                    }
-                                }
-                                match nf.pattern {
-                                    Pattern::Binding { name: bname, .. } => {
-                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
-                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
-                                        let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
-                                        discard(LLVMBuildStore(ctx.builder, field_val, alloca))
-                                        ctx.named_values.insert(bname, alloca)
-                                    },
-                                    Pattern::Wildcard { .. } => {},
-                                    _ => {
-                                        let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, field_idx + 1, fresh_name(ctx, "ef"))
-                                        let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
-                                        // Check nested constructor tags before binding (mirrors if-else path)
-                                        check_nested_ctor_tags(ctx, field_val, nf.pattern, default_bb, current_fn)
-                                        bind_nested_pattern(ctx, field_val, nf.pattern)
-                                    },
-                                }
-                            },
-                            none => {},
-                        }
-                    }
+                    // Phase 1: check nested constructor tags before binding
+                    check_named_fields_nested_tags(ctx, scrut_val, enum_info, vi.field_names, named_fields, default_bb, current_fn)
+                    // Phase 2: bind pattern variables (reuse if-else path helper)
+                    bind_named_constructor_fields(ctx, scrut_val, name, qualifier, named_fields)
 
                     let body_val = gen_llvm_expr(ctx, arm.body)
                     let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
@@ -3819,16 +3769,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         let ei_check = find_enum_by_variant(ctx, cname, qualifier)
                         match ei_check {
                             some(enum_info_c) => {
-                                for j in 0..fields.len() {
-                                    match fields.get(j) {
-                                        some(fp) => {
-                                            let fptr = LLVMBuildStructGEP2(ctx.builder, enum_info_c.llvm_type, scrut_val, j + 1, fresh_name(ctx, "ncf"))
-                                            let fval = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fptr, fresh_name(ctx, "ncv"))
-                                            check_nested_ctor_tags(ctx, fval, fp, next_bb, current_fn)
-                                        },
-                                        none => {},
-                                    }
-                                }
+                                check_positional_fields_nested_tags(ctx, scrut_val, enum_info_c, fields, next_bb, current_fn)
                             },
                             none => {},
                         }
@@ -3852,22 +3793,7 @@ fn gen_match_if_else(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, scrut_ty: Type, 
                         match ei_check {
                             some(enum_info_c) => match enum_info_c.variants.get(cname) {
                                 some(vi_c) => {
-                                    for j in 0..nfields.len() {
-                                        match nfields.get(j) {
-                                            some(nf) => {
-                                                let mut fidx = j
-                                                for fi in 0..vi_c.field_names.len() {
-                                                    if vi_c.field_names[fi] == nf.name {
-                                                        fidx = fi
-                                                    }
-                                                }
-                                                let fptr = LLVMBuildStructGEP2(ctx.builder, enum_info_c.llvm_type, scrut_val, fidx + 1, fresh_name(ctx, "ncf"))
-                                                let fval = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fptr, fresh_name(ctx, "ncv"))
-                                                check_nested_ctor_tags(ctx, fval, nf.pattern, next_bb, current_fn)
-                                            },
-                                            none => {},
-                                        }
-                                    }
+                                    check_named_fields_nested_tags(ctx, scrut_val, enum_info_c, vi_c.field_names, nfields, next_bb, current_fn)
                                 },
                                 none => {},
                             },
@@ -4084,6 +4010,58 @@ fn gen_ctor_tag_test(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, cname: Str, qual
             none => { discard(LLVMBuildBr(ctx.builder, match_bb)) },
         },
         none => { discard(LLVMBuildBr(ctx.builder, match_bb)) },
+    }
+}
+
+// Helper: Phase-1 nested-tag checking for positional constructor fields.
+// For each non-Binding/non-Wildcard field, GEP + load the field value and
+// call check_nested_ctor_tags.  On mismatch, control branches to fail_bb.
+// Factored out of the switch path (gen_match_arm_enum) and the if-else path
+// (gen_match_if_else) to avoid duplicating the GEP + tag-check loop.
+fn check_positional_fields_nested_tags(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, enum_info: EnumTypeInfo, fields: List<Pattern>, fail_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) {
+    for j in 0..fields.len() {
+        match fields.get(j) {
+            some(fp) => {
+                match fp {
+                    Pattern::Binding { .. } => {},
+                    Pattern::Wildcard { .. } => {},
+                    _ => {
+                        let fptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, j + 1, fresh_name(ctx, "ncf"))
+                        let fval = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fptr, fresh_name(ctx, "ncv"))
+                        check_nested_ctor_tags(ctx, fval, fp, fail_bb, current_fn)
+                    },
+                }
+            },
+            none => {},
+        }
+    }
+}
+
+// Helper: Phase-1 nested-tag checking for named constructor fields.
+// Like check_positional_fields_nested_tags but resolves each named field's
+// position in the variant's declared field list before GEP.
+fn check_named_fields_nested_tags(mut ctx: LlvmCtx, scrut_val: LLVMValueRef, enum_info: EnumTypeInfo, field_names: List<Str>, named_fields: List<NamedPatternField>, fail_bb: LLVMBasicBlockRef, current_fn: LLVMValueRef) {
+    for j in 0..named_fields.len() {
+        match named_fields.get(j) {
+            some(nf) => {
+                match nf.pattern {
+                    Pattern::Binding { .. } => {},
+                    Pattern::Wildcard { .. } => {},
+                    _ => {
+                        let mut fidx = j
+                        for fi in 0..field_names.len() {
+                            if field_names[fi] == nf.name {
+                                fidx = fi
+                            }
+                        }
+                        let fptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, scrut_val, fidx + 1, fresh_name(ctx, "ncf"))
+                        let fval = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, fptr, fresh_name(ctx, "ncv"))
+                        check_nested_ctor_tags(ctx, fval, nf.pattern, fail_bb, current_fn)
+                    },
+                }
+            },
+            none => {},
+        }
     }
 }
 
@@ -5357,36 +5335,14 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
                 phi_vals.push(body_val)
                 phi_bbs.push(end_bb)
             },
-            Pattern::Constructor { name, fields, .. } => {
+            Pattern::Constructor { name, qualifier, fields, .. } => {
                 match enum_info.variants.get(name) {
                     some(vi) => {
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.arm.${name}")
                         LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, vi.tag, 0), arm_bb)
 
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-                        // Bind positional fields at GEP index 1, 2, ... (index 0 is tag)
-                        for i in 0..fields.len() {
-                            match fields.get(i) {
-                                some(field_pat) => {
-                                    match field_pat {
-                                        Pattern::Binding { name: bname, .. } => {
-                                            let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, error_val, i + 1, fresh_name(ctx, "cf"))
-                                            let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
-                                            let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
-                                            discard(LLVMBuildStore(ctx.builder, field_val, alloca))
-                                            ctx.named_values.insert(bname, alloca)
-                                        },
-                                        Pattern::Wildcard { .. } => {},
-                                        _ => {
-                                            let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, error_val, i + 1, fresh_name(ctx, "cf"))
-                                            let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
-                                            bind_nested_pattern(ctx, field_val, field_pat)
-                                        },
-                                    }
-                                },
-                                none => {},
-                            }
-                        }
+                        bind_constructor_fields(ctx, error_val, name, qualifier, fields)
 
                         let body_val = gen_llvm_expr(ctx, arm.body)
                         let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
@@ -5397,42 +5353,14 @@ fn gen_catch_arms(mut ctx: LlvmCtx, error_val: LLVMValueRef, arms: List<HMatchAr
                     none => {},
                 }
             },
-            Pattern::NamedConstructor { name, fields: named_fields, .. } => {
+            Pattern::NamedConstructor { name, qualifier, fields: named_fields, .. } => {
                 match enum_info.variants.get(name) {
                     some(vi) => {
                         let arm_bb = LLVMAppendBasicBlockInContext(ctx.context, current_fn, "catch.arm.${name}")
                         LLVMAddCase(switch_val, LLVMConstInt(ctx.i64_type, vi.tag, 0), arm_bb)
 
                         LLVMPositionBuilderAtEnd(ctx.builder, arm_bb)
-                        // Bind named fields by looking up position in variant's field list
-                        for i in 0..named_fields.len() {
-                            match named_fields.get(i) {
-                                some(nf) => {
-                                    let mut field_idx = i
-                                    for fi in 0..vi.field_names.len() {
-                                        if vi.field_names[fi] == nf.name {
-                                            field_idx = fi
-                                        }
-                                    }
-                                    match nf.pattern {
-                                        Pattern::Binding { name: bname, .. } => {
-                                            let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, error_val, field_idx + 1, fresh_name(ctx, "cf"))
-                                            let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, bname))
-                                            let alloca = build_entry_alloca(ctx, ctx.ptr_type, bname)
-                                            discard(LLVMBuildStore(ctx.builder, field_val, alloca))
-                                            ctx.named_values.insert(bname, alloca)
-                                        },
-                                        Pattern::Wildcard { .. } => {},
-                                        _ => {
-                                            let field_ptr = LLVMBuildStructGEP2(ctx.builder, enum_info.llvm_type, error_val, field_idx + 1, fresh_name(ctx, "cf"))
-                                            let field_val = LLVMBuildLoad2(ctx.builder, ctx.ptr_type, field_ptr, fresh_name(ctx, "fv"))
-                                            bind_nested_pattern(ctx, field_val, nf.pattern)
-                                        },
-                                    }
-                                },
-                                none => {},
-                            }
-                        }
+                        bind_named_constructor_fields(ctx, error_val, name, qualifier, named_fields)
 
                         let body_val = gen_llvm_expr(ctx, arm.body)
                         let arm_end_bb = LLVMGetInsertBlock(ctx.builder)
