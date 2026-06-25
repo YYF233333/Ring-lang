@@ -1500,7 +1500,8 @@ pub fn generate_llvm(program: HProgram, output_path: Str) -> Unit {
         default_evidence: map_new(),
         derived_dict_builds: [],
         extern_types: set_new(),
-        extern_fn_infos: map_new()
+        extern_fn_infos: map_new(),
+        handle_cleanup_stack: []
     }
 
     // B-091: thread the auto-boxed mut-cell def_ids through so Var/read/write
@@ -1663,7 +1664,8 @@ pub fn generate_llvm_project(modules: List<(Str, HProgram, List<UseDecl>)>, entr
         default_evidence: map_new(),
         derived_dict_builds: [],
         extern_types: set_new(),
-        extern_fn_infos: map_new()
+        extern_fn_infos: map_new(),
+        handle_cleanup_stack: []
     }
 
     // 6. Register built-in types
