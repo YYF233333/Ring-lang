@@ -11,8 +11,9 @@
     "test:e2e": "node --test ../tests/e2e.test.ts",
     "test:llvm": "node --test ../tests/llvm_diff.test.mjs",
     "test:native": "node --test ../tests/native_selfcompile.test.mjs",
+    "test:native-only": "node --test ../tests/native_only.test.mjs",
     "test:verify-rc": "node --test ../tests/verify_rc.test.mjs",
-    "test:all": "npm run test:e2e && npm run test:llvm && npm run test:native",
+    "test:all": "npm run test:e2e && npm run test:llvm && npm run test:native-only && npm run test:native",
     "test": "node --test ../tests/e2e.test.ts ../tests/verify_rc.test.mjs"
   }
 }
